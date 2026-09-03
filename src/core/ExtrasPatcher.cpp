@@ -167,7 +167,7 @@ Result applyRemovals(const QString &exePath, const QStringList &enabledNames)
                 idx = data.indexOf(pattern, idx);
                 if (idx < 0)
                     break;
-                replacements << ThemeEngine::Replacement { idx, pattern.size(),
+                replacements << ThemeEngine::Replacement { idx, int(pattern.size()),
                                                            QByteArray(pattern.size(), '\0') };
                 idx += pattern.size();
             }
@@ -187,7 +187,7 @@ Result applyRemovals(const QString &exePath, const QStringList &enabledNames)
             const QByteArray rep = (cr.replaceWith == QLatin1String("spaces"))
                                        ? QByteArray(targetBytes.size(), ' ')
                                        : QByteArray(targetBytes.size(), '\0');
-            replacements << ThemeEngine::Replacement { tpos, targetBytes.size(), rep };
+            replacements << ThemeEngine::Replacement { tpos, int(targetBytes.size()), rep };
         }
     }
 

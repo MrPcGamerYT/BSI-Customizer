@@ -913,7 +913,7 @@ void collectOccurrences(const QByteArray &data, const QByteArray &ov, const QStr
             rep += QByteArray(ov.size() - rep.size(), '\0');
         else if (rep.size() > ov.size())
             rep = rep.left(ov.size());
-        out << ThemeEngine::Replacement { idx, ov.size(), rep };
+        out << ThemeEngine::Replacement { idx, int(ov.size()), rep };
         idx += ov.size();
     }
 }
@@ -1073,7 +1073,7 @@ QList<ThemeEngine::Replacement> ThemeEngine::collectThemeReplacements(
                         rep += QByteArray(oldPat.size() - rep.size(), '\0');
                     else if (rep.size() > oldPat.size())
                         rep = rep.left(oldPat.size());
-                    repls << Replacement { sidePos, oldPat.size(), rep };
+                    repls << Replacement { sidePos, int(oldPat.size()), rep };
                     done = true;
                     break;
                 }
