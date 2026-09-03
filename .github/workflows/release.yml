@@ -1,0 +1,60 @@
+name: Release
+
+# Push a tag like v1.0.0 (or run manually) -> builds the Windows .exe,
+# runs the self-test, packages it with windeployqt and publishes a GitHub Release.
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    name: Build & release (Windows x64)
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Qt 6
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: "6.8.3"
+          host: windows
+          target: desktop
+          arch: win64_msvc2022_64
+          cache: true
+
+      - name: Configure
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        run: cmake --build build --config Release --parallel
+
+      - name: Self-test (theme changer + config engine)
+        shell: bash
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: ./build/Release/BSI-Customizer.exe --selftest
+
+      - name: Package with windeployqt
+        shell: pwsh
+        run: |
+          $stage = "BSI-Customizer-$('${{ github.ref_name }}')-win64"
+          New-Item -ItemType Directory -Path $stage | Out-Null
+          Copy-Item "build/Release/BSI-Customizer.exe" $stage/
+          windeployqt --release --no-translations --compiler-runtime `
+                      --qmldir src/qml "$stage/BSI-Customizer.exe"
+          Copy-Item README.md $stage/ -ErrorAction SilentlyContinue
+          Copy-Item LICENSE   $stage/ -ErrorAction SilentlyContinue
+          Compress-Archive -Path $stage -DestinationPath "$stage.zip"
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: BSI-Customizer-${{ github.ref_name }}-win64.zip
+          generate_release_notes: true
