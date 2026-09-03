@@ -1,0 +1,14 @@
+# Build artifacts
+build/
+build-*/
+cmake-build-*/
+
+# Qt Creator / IDE
+CMakeLists.txt.user
+*.autosave
+.qtc_clangd/
+.cache/
+
+# OS noise
+.DS_Store
+Thumbs.db
