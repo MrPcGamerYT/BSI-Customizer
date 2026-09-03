@@ -1,0 +1,5 @@
+#include <windows.h>
+
+// Embed the requireAdministrator manifest so the exe always gets UAC
+// elevation (patch targets live in Program Files / ProgramData).
+1 24 "app.manifest"
