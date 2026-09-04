@@ -101,7 +101,7 @@ Item {
                     Layout.fillWidth: true
                     visible: page.fileChanged && backend.themeFound
                     text: qsTr("HD-Player.exe changed on disk - the colors below are stale. "
-                               "Press Reload to read the theme BlueStacks actually has.")
+                               + "Press Reload to read the theme BlueStacks actually has.")
                     color: Theme.logOrange
                     font.pixelSize: 12
                     wrapMode: Text.WordWrap
@@ -170,7 +170,7 @@ Item {
                                 elide: Text.ElideRight
                                 text: !backend.themeFound
                                       ? qsTr("Load the theme from HD-Player.exe first - "
-                                             "then pick a palette.")
+                                             + "then pick a palette.")
                                       : (page.presetId === ""
                                          ? qsTr("Pick a palette, tweak any color, then Patch.")
                                          : qsTr("Preset staged - press Patch Theme to write it."))
@@ -492,8 +492,8 @@ Item {
                         Layout.fillWidth: true
                         elide: Text.ElideRight
                         text: qsTr("Legacy palette - replaces color constants directly in the "
-                                   "binary. Use it only on builds where the QML method finds "
-                                   "nothing.")
+                                   + "binary. Use it only on builds where the QML method finds "
+                                   + "nothing.")
                         color: Theme.textDim
                         font.pixelSize: 12
                     }
