@@ -9,6 +9,10 @@ on:
       - "v*"
   workflow_dispatch:
     inputs:
+      publish_release:
+        description: "Also publish a GitHub Release (creates tag v<version> from CMakeLists.txt)"
+        type: boolean
+        default: false
       prerelease:
         description: "Publish as a pre-release"
         type: boolean
@@ -50,18 +54,40 @@ jobs:
       - name: Build
         run: cmake --build build --config Release --parallel
 
-      - name: Resolve artifact name
+      - name: Resolve version / artifact name
         id: meta
         shell: pwsh
         env:
+          REF: ${{ github.ref }}
           REF_NAME: ${{ github.ref_name }}
         run: |
-          # For a tag this is "v2.0.0"; for a manual run it is the *branch*
-          # name, which may contain '/'.  A slash would make New-Item,
-          # Compress-Archive and the release upload all fail, so normalise it.
+          # Tag run    -> the version comes from the tag itself (v2.0.0 -> 2.0.0).
+          # Manual run -> the version comes from project(... VERSION x.y.z) in
+          #               CMakeLists.txt, so the release/zip are still named
+          #               after the real app version.
+          if ($env:REF -like 'refs/tags/*') {
+            $version = $env:REF_NAME -replace '^v', ''
+          } else {
+            $txt = Get-Content CMakeLists.txt -Raw
+            # Anchored on project(...) on purpose - the first "VERSION" in the
+            # file belongs to cmake_minimum_required().
+            if ($txt -notmatch 'project\s*\([^)]*?VERSION\s+([0-9]+(?:\.[0-9]+)*)') {
+              throw 'Could not read the project VERSION from CMakeLists.txt'
+            }
+            $version = $Matches[1]
+          }
+
+          # A branch name may contain '/', which would break New-Item,
+          # Compress-Archive and the release upload, so normalise it.
           $safe = $env:REF_NAME -replace '[^A-Za-z0-9._-]', '-'
+
           "name=BSI-Customizer-$safe-win64" |
             Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "version=$version" |
+            Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "tag=v$version" |
+            Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          Write-Host "version: $version   tag: v$version   package: BSI-Customizer-$safe-win64"
 
       - name: Locate build output
         shell: pwsh
@@ -170,20 +196,25 @@ jobs:
           if (-not (Test-Path $zip)) { throw "packaging did not produce $zip" }
           "zip=$zip" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
+      # Runs for a tag push, or for a manual run where "publish_release" was
+      # ticked.  For the manual case the tag v<version> is created on the
+      # commit that was built.
       - name: Publish GitHub Release
-        if: startsWith(github.ref, 'refs/tags/')
+        if: startsWith(github.ref, 'refs/tags/') || inputs.publish_release == true
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name }}
+          tag_name: ${{ steps.meta.outputs.tag }}
+          target_commitish: ${{ github.sha }}
+          name: BSI Customizer ${{ steps.meta.outputs.tag }}
           files: ${{ steps.package.outputs.zip }}
           fail_on_unmatched_files: true
           generate_release_notes: true
           prerelease: ${{ inputs.prerelease == true }}
 
-      # Manual runs have no tag to attach a release to - keep the build
-      # downloadable from the run's Artifacts instead.
+      # Build-only runs (manual, publish_release unticked) have no release to
+      # attach to - keep the zip downloadable from the run's Artifacts instead.
       - name: Upload build artifact
-        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
+        if: ${{ !startsWith(github.ref, 'refs/tags/') && inputs.publish_release != true }}
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.meta.outputs.name }}
