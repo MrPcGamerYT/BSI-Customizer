@@ -17,6 +17,7 @@
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QQuickStyle>
+#include <QRegularExpression>
 #include <QSettings>
 #include <QTemporaryDir>
 
@@ -33,6 +34,7 @@
 #include "core/SysInfo.h"
 #include "core/ThemeEngine.h"
 #include "core/ThemeManager.h"
+#include "core/ThemePresets.h"
 #include "core/ZlibUtils.h"
 
 using namespace ByteUtils;
@@ -299,6 +301,376 @@ int runSelfTest()
                 colorsOk = false;
         }
         check(colorsOk, "all edited colors persisted (qrc still valid)");
+    }
+
+    // ------------------------------------------------------------------
+    // 2b) Stale snapshot: the EXE changed between Load and Patch (another
+    //     theme tool patched it while this app was open)
+    // ------------------------------------------------------------------
+    {
+        std::printf("[theme-zlib] patch with a stale ThemeInfo re-detects the live record\n");
+
+        const QString origQml = makeThemeQml(colorList(QStringLiteral("#111111")));
+        const QByteArray rec = qtZlibRecord(origQml.toLatin1());
+
+        QByteArray pe = makeFakePe(0, 0x40000);
+        const qint64 entryOff = 0x2000;
+        pe.replace(int(entryOff), rec.size(), rec);
+        const qint64 nameRec = ((entryOff + rec.size() + 8192) + 3) & ~qint64(3);
+        const qint64 nodeOff = ((nameRec + 6 + 34) + 3) & ~qint64(3);
+        writeQrcNode(pe, entryOff, nameRec, nodeOff);
+
+        const QString exePath = tmp.path() + QStringLiteral("/stale.exe");
+        {
+            QFile f(exePath);
+            f.open(QIODevice::WriteOnly);
+            f.write(pe);
+        }
+
+        // 1) "Load": the UI holds this snapshot from here on.
+        const ThemeInfo snapshot = ThemeEngine::detectTheme(pe, QStringLiteral("qml"));
+        check(snapshot.found && snapshot.mode == QLatin1String("zlib"),
+              "stale test: theme detected on load");
+        const auto snapshotEntries = ThemeEngine::parseQmlEntries(snapshot.qml);
+        check(!snapshotEntries.isEmpty(), "stale test: entries parsed");
+
+        // 2) An external tool repaints every color to #222222 while the UI is open.
+        {
+            QFile f(exePath);
+            f.open(QIODevice::ReadOnly);
+            const QByteArray now = f.readAll();
+            f.close();
+
+            const ThemeInfo fresh = ThemeEngine::detectTheme(now, QStringLiteral("qml"));
+            const auto freshEntries = ThemeEngine::parseQmlEntries(fresh.qml);
+            QMap<QString, QString> externalEdits;
+            for (const auto &e : freshEntries)
+                externalEdits[e.name] = QStringLiteral("#222222");
+            const auto r = ThemeEngine::patchTheme(exePath, fresh, freshEntries, externalEdits);
+            check(r.ok, "stale test: external tool patch succeeded");
+        }
+
+        // 3) Patch through the STALE snapshot, changing just one color.
+        //    The engine must re-read the file and rebuild the QML from the live
+        //    text: our edit lands, the external tool's colors survive, and the
+        //    stale pre-change theme must not be written back.
+        QMap<QString, QString> edits;
+        edits[snapshotEntries.at(0).name] = QStringLiteral("#333333");
+        const auto r = ThemeEngine::patchTheme(exePath, snapshot, snapshotEntries, edits);
+        check(r.ok, "stale test: patch with an out-of-date snapshot succeeded");
+
+        QFile f(exePath);
+        f.open(QIODevice::ReadOnly);
+        const QByteArray patched = f.readAll();
+        f.close();
+
+        const ThemeInfo live = ThemeEngine::detectTheme(patched, QStringLiteral("qml"));
+        check(live.found && live.mode == QLatin1String("zlib"),
+              "stale test: theme still detected after patch");
+        check(live.qml.contains(QStringLiteral("#333333")),
+              "stale test: our edit is live in the EXE");
+        check(live.qml.contains(QStringLiteral("#222222")),
+              "stale test: external tool's colors kept (stale text not used as base)");
+        check(!live.qml.contains(QStringLiteral("#111111")),
+              "stale test: stale pre-change theme was not resurrected");
+    }
+
+    // ------------------------------------------------------------------
+    // 2c) Orphaned copy: an external tool relocated the theme and left the
+    //     old record behind.  Both decompress into a perfect theme, so only
+    //     the qresource tree can say which one BlueStacks loads.
+    // ------------------------------------------------------------------
+    {
+        std::printf("[theme-zlib] orphaned record: detection follows the qrc-linked live copy\n");
+
+        QByteArray pe = makeFakePe(0, 0x20000);
+
+        // Stale copy left behind at a LOW offset (so "first match wins" would
+        // pick it) by an external relocation.
+        const QByteArray orphan =
+            qtZlibRecord(makeThemeQml(colorList(QStringLiteral("#111111"))).toLatin1());
+        const qint64 orphanOff = 0x1100;
+        pe.replace(int(orphanOff), orphan.size(), orphan);
+
+        // qt_resource_data array: the live theme plus other compressed
+        // resources around it, at deliberately irregular spacing so a shifted
+        // data base cannot accidentally land on another valid header.
+        const qint64 dataBase = 0x2000;
+        const QList<qint64> payloadOff = { 0x2000, 0x20A0, 0x2200, 0x2600, 0x3400, 0x3480 };
+        const int themeIdx = 3;
+        for (int i = 0; i < payloadOff.size(); ++i) {
+            const QByteArray rec =
+                (i == themeIdx)
+                    ? qtZlibRecord(makeThemeQml(colorList(QStringLiteral("#444444"))).toLatin1())
+                    : qtZlibRecord(QByteArray("property int filler") + QByteArray(40, char('a' + i)));
+            pe.replace(int(payloadOff.at(i)), rec.size(), rec);
+        }
+
+        // qt_resource_name array.
+        const qint64 nameBase = 0x4000;
+        const QStringList names = { QStringLiteral("a.qml"), QStringLiteral("bb.qml"),
+                                    QStringLiteral("ccc.qml"),
+                                    QStringLiteral("UiThemeObject.qml"),
+                                    QStringLiteral("dddd.qml"), QStringLiteral("eeeee.qml") };
+        QList<qint64> nameRecs;
+        for (int i = 0; i < names.size(); ++i) {
+            const qint64 rec = nameBase + i * 0x80;
+            putBe16(pe, rec, quint16(names.at(i).size()));
+            putBe32(pe, rec + 2, quint32(0xDEAD0000u + quint32(i)));
+            pe.replace(int(rec + 6), utf16be(names.at(i)).size(), utf16be(names.at(i)));
+            nameRecs << rec;
+        }
+
+        // qt_resource_tree: one 14-byte entry per payload.
+        const qint64 nodeBase = 0x6000;
+        for (int i = 0; i < payloadOff.size(); ++i) {
+            const qint64 node = nodeBase + i * 14;
+            putBe32(pe, node, quint32(nameRecs.at(i) - nameBase));         // name offset
+            putBe16(pe, node + 4, 1);                                      // compressed file
+            putBe16(pe, node + 6, 0);
+            putBe16(pe, node + 8, 0);
+            putBe32(pe, node + 10, quint32(payloadOff.at(i) - dataBase));  // data offset
+        }
+
+        const ThemeInfo t = ThemeEngine::detectTheme(pe, QStringLiteral("qml"));
+        check(t.found && t.mode == QLatin1String("zlib"), "orphan test: theme detected");
+        check(t.candidateCount >= 2, "orphan test: both copies seen as candidates");
+        check(t.entryOff == payloadOff.at(themeIdx),
+              "orphan test: live qrc-linked record chosen, not the stale orphan");
+        check(t.hasQrcNode && t.qrcNodeOff == nodeBase + themeIdx * 14,
+              "orphan test: the theme's own tree entry was identified");
+        check(t.qrcSupport > 0,
+              "orphan test: data base corroborated by neighbouring tree entries");
+        check(t.qml.contains(QStringLiteral("#444444")), "orphan test: live colors reported");
+        check(!t.qml.contains(QStringLiteral("#111111")),
+              "orphan test: orphan colors not reported");
+    }
+
+    // ------------------------------------------------------------------
+    // 2d) buildQml: a longer color must be applied to a compressed theme,
+    //     and anything refused must be reported instead of dropped silently
+    // ------------------------------------------------------------------
+    {
+        std::printf("[theme-qml] buildQml grows compressed slots and reports refused edits\n");
+
+        const QString qml = QStringLiteral("QtObject {\n"
+                                          "    property color primary100: \"#111111\"\n"
+                                          "    property color overlayBlack: \"#80222222\"\n"
+                                          "    property color separator: \"#333333\"\n"
+                                          "}\n");
+        const auto entries = ThemeEngine::parseQmlEntries(qml);
+        check(entries.size() == 3, "buildQml test: three color entries parsed");
+
+        // 6-digit slot -> 8-digit value grows the expression by two characters.
+        QMap<QString, QString> grow;
+        grow[QStringLiteral("primary100")] = QStringLiteral("#aabbccdd");
+
+        QStringList skippedGrow;
+        const QString grown = ThemeEngine::buildQml(qml, entries, grow, true, &skippedGrow);
+        check(grown.contains(QStringLiteral("\"#aabbccdd\"")),
+              "buildQml test: longer hex applied when the record is recompressed");
+        check(skippedGrow.isEmpty(), "buildQml test: nothing refused in grow mode");
+        check(grown.contains(QStringLiteral("\"#333333\"")),
+              "buildQml test: untouched entries survive a growing edit");
+
+        QStringList skippedFit;
+        const QString unchanged = ThemeEngine::buildQml(qml, entries, grow, false, &skippedFit);
+        check(unchanged == qml,
+              "buildQml test: in-place text mode still refuses to grow the slot");
+        check(skippedFit.size() == 1 && skippedFit.first().contains(QStringLiteral("primary100")),
+              "buildQml test: the refusal is reported, not silent");
+
+        // An existing 8-digit alpha is kept when a 6-digit color is chosen.
+        QMap<QString, QString> alphaEdit;
+        alphaEdit[QStringLiteral("overlayBlack")] = QStringLiteral("#123456");
+        const QString alpha = ThemeEngine::buildQml(qml, entries, alphaEdit, true, nullptr);
+        check(alpha.contains(QStringLiteral("\"#80123456\"")),
+              "buildQml test: existing alpha preserved");
+        check(!alpha.contains(QStringLiteral("\"#123456\"")),
+              "buildQml test: no alpha-less value written over an ARGB slot");
+
+        // An unquoted expression slot gets a valid quoted literal, not a bare
+        // "#rrggbb" that would make the QML fail to parse.
+        const QString exprQml = QStringLiteral(
+            "QtObject {\n    property color notice: Qt.rgba(0.5, 0.5, 0.5, 1)\n}\n");
+        const auto exprEntries = ThemeEngine::parseQmlEntries(exprQml);
+        check(exprEntries.size() == 1 && !exprEntries.first().quoted,
+              "buildQml test: unquoted expression parsed");
+        QMap<QString, QString> exprEdit;
+        exprEdit[QStringLiteral("notice")] = QStringLiteral("#00ff00");
+        QStringList skippedExpr;
+        const QString exprOut =
+            ThemeEngine::buildQml(exprQml, exprEntries, exprEdit, true, &skippedExpr);
+        check(exprOut.contains(QStringLiteral("\"#00ff00\"")),
+              "buildQml test: expression slot rewritten as a quoted literal");
+        check(skippedExpr.isEmpty(), "buildQml test: expression rewrite not refused");
+    }
+
+    // ------------------------------------------------------------------
+    // 2e) Loose content tier: a build that names the theme object
+    //     differently must still be found instead of "theme not found"
+    // ------------------------------------------------------------------
+    {
+        std::printf("[theme-zlib] loose content tier finds a renamed theme object\n");
+
+        QString qml = QStringLiteral("import QtQuick 2.0\nSkinPalette {\n");
+        for (int i = 0; i < 12; ++i)
+            qml += QStringLiteral("    property color tint%1: \"#1A2B3C\"\n").arg(i);
+        qml += QStringLiteral("}\n");
+
+        const QByteArray rec = qtZlibRecord(qml.toLatin1());
+        QByteArray pe = makeFakePe(0, 0x20000);
+        const qint64 entryOff = 0x2000;
+        pe.replace(int(entryOff), rec.size(), rec);
+
+        const ThemeInfo t = ThemeEngine::detectTheme(pe, QStringLiteral("qml"));
+        check(t.found && t.mode == QLatin1String("zlib"), "loose tier: theme still detected");
+        check(t.contentQuality == 1, "loose tier: reported as a fallback match");
+        check(t.entryCount == 12, "loose tier: all color entries parsed");
+        check(t.entryOff == entryOff, "loose tier: correct record offset");
+    }
+
+    // ------------------------------------------------------------------
+    // 2f) Presets: name variants, 6-digit values, full table coverage
+    // ------------------------------------------------------------------
+    {
+        std::printf("[presets] palettes match every spelling of the theme table\n");
+
+        const QList<ThemePreset> presets = ThemePresets::all();
+        check(presets.size() >= 10, "presets: built-in list present");
+        const ThemePreset *black = ThemePresets::byId(QStringLiteral("pure_black_minimal"));
+        check(black && black->toggleOn == QLatin1String("#1A90FF"),
+              "presets: pure black minimal ported");
+        const ThemePreset *amethyst = ThemePresets::byId(QStringLiteral("amethyst"));
+        check(amethyst && amethyst->toggleOff == QLatin1String("#3D2463"),
+              "presets: Amethyst ported");
+        check(ThemePresets::byId(QStringLiteral("nope")) == nullptr, "presets: unknown id is null");
+
+        check(ThemePresets::normalize(QStringLiteral("seperator")) == QLatin1String("separator"),
+              "presets: seperator -> separator");
+        check(ThemePresets::normalize(QStringLiteral("overLayGrey")) == QLatin1String("overlaygray"),
+              "presets: overLayGrey -> overlaygray");
+        check(ThemePresets::normalize(QStringLiteral("accentClickTransparent"))
+                  == QLatin1String("accentclicktransparent"),
+              "presets: case and punctuation folded");
+
+        static const QRegularExpression hex6(QStringLiteral("^#[0-9A-Fa-f]{6}$"));
+        const auto entries = ThemeEngine::parseQmlEntries(makeThemeQml(colorList("#010203")));
+        for (const ThemePreset &p : presets) {
+            const QMap<QString, QString> m = ThemePresets::matchEntries(p, entries);
+            check(m.size() >= 30, "presets: covers the theme table");
+            bool allHex = true;
+            for (auto it = m.constBegin(); it != m.constEnd(); ++it) {
+                if (!hex6.match(it.value()).hasMatch())
+                    allHex = false;
+            }
+            check(allHex, "presets: every value is a 6-digit hex");
+        }
+
+        // A color the EXE already has is not staged as an edit.
+        const ThemePreset *nord = ThemePresets::byId(QStringLiteral("nord"));
+        QList<QmlEntry> oneEntry;
+        QmlEntry e;
+        e.name = QStringLiteral("primary100");
+        e.value = nord ? nord->colors.value(QStringLiteral("primary100")) : QString();
+        oneEntry << e;
+        check(nord && ThemePresets::matchEntries(*nord, oneEntry).isEmpty(),
+              "presets: an already-applied color is not staged");
+
+        check(ThemePresets::toVariantList().size() == presets.size(),
+              "presets: QML list matches the C++ list");
+    }
+
+    // ------------------------------------------------------------------
+    // 2g) Toggle SVG recolor (PatchToggleSvgs): length-safe, knob preserved
+    // ------------------------------------------------------------------
+    {
+        std::printf("[svg] toggle recolor keeps the blob size and the white knob\n");
+
+        const QByteArray onSvg = QByteArray("<svg id=\"toggle_on\" width=\"24\" height=\"14\">"
+                                            "<rect width=\"24\" height=\"14\" rx=\"7\" "
+                                            "fill=\"#1A90FF\"/>"
+                                            "<circle cx=\"17\" cy=\"7\" r=\"5\" fill=\"#FFFFFF\"/>"
+                                            "</svg>");
+        const QByteArray offSvg = QByteArray("<svg id=\"toggle_off\" width=\"24\" height=\"14\">"
+                                             "<rect width=\"24\" height=\"14\" rx=\"7\" "
+                                             "fill=\"#808080\"/>"
+                                             "<circle cx=\"17\" cy=\"7\" r=\"5\" fill=\"#FFFFFF\"/>"
+                                             "</svg>");
+
+        int n = 0;
+        const QByteArray out = SvgEngine::recolor(onSvg, QStringLiteral("#8B5CF6"), true, &n);
+        check(n == 1, "svg recolor: exactly one color replaced");
+        check(out.size() == onSvg.size(), "svg recolor: blob length unchanged");
+        check(out.contains("#8B5CF6"), "svg recolor: new color written");
+        check(out.contains("#FFFFFF"), "svg recolor: white knob preserved");
+        check(!out.contains("#1A90FF"), "svg recolor: old color gone");
+
+        int none = 99;
+        SvgEngine::recolor(onSvg, QStringLiteral("#8B5CF6"), true, &none);
+        check(none == 1, "svg recolor: repeatable");
+        int already = 99;
+        const QByteArray same = SvgEngine::recolor(out, QStringLiteral("#8B5CF6"), true, &already);
+        check(already == 0 && same == out, "svg recolor: already-colored blob is a no-op");
+
+        // 8-digit keeps its alpha, 3-digit stays 3 digits.
+        const QByteArray argbIn("<svg><stop stop-color=\"#1A90FF80\"/></svg>");
+        int n8 = 0;
+        const QByteArray argb = SvgEngine::recolor(argbIn, QStringLiteral("#00FF41"), true, &n8);
+        check(n8 == 1 && argb.contains("#00FF4180") && argb.size() == argbIn.size(),
+              "svg recolor: 8-digit alpha preserved, length kept");
+        const QByteArray rgb3In("<svg><rect fill=\"#ABC\"/></svg>");
+        int n3 = 0;
+        const QByteArray rgb3 = SvgEngine::recolor(rgb3In, QStringLiteral("#00FF41"), true, &n3);
+        check(n3 == 1 && rgb3.contains("#0F4") && rgb3.size() == rgb3In.size(),
+              "svg recolor: 3-digit stays 3 digits");
+
+        // colorsIn / preview / guessToggles
+        const QStringList cols = SvgEngine::colorsIn(onSvg);
+        check(cols.size() == 2, "svg recolor: colors listed");
+        check(SvgEngine::preview(onSvg).startsWith(QLatin1String("<svg id=\"toggle_on\"")),
+              "svg recolor: preview text");
+
+        QList<SvgBlob> blobs;
+        SvgBlob a;
+        a.index = 0;
+        a.offset = 0x1500;
+        a.data = offSvg;
+        a.size = offSvg.size();
+        SvgBlob b;
+        b.index = 1;
+        b.offset = 0x1800;
+        b.data = onSvg;
+        b.size = onSvg.size();
+        blobs << a << b;
+        const SvgEngine::ToggleGuess guess = SvgEngine::guessToggles(blobs);
+        check(guess.off == 0 && guess.on == 1, "svg recolor: off/on guessed from the content");
+
+        // End to end on a fake EXE.
+        QByteArray pe = makeFakePe(0, 0x4000);
+        pe.replace(int(a.offset), a.data.size(), a.data);
+        pe.replace(int(b.offset), b.data.size(), b.data);
+        const QString exePath = tmp.path() + QStringLiteral("/toggles.exe");
+        {
+            QFile f(exePath);
+            f.open(QIODevice::WriteOnly);
+            f.write(pe);
+        }
+        const SvgEngine::RecolorResult r =
+            SvgEngine::recolorToggles(exePath, 0, 1, QStringLiteral("#111111"),
+                                      QStringLiteral("#222222"));
+        check(r.ok, "svg recolor: patch of both states succeeded");
+
+        QFile f(exePath);
+        f.open(QIODevice::ReadOnly);
+        const QByteArray patched = f.readAll();
+        f.close();
+        const QList<SvgBlob> after = SvgEngine::findSvgs(patched);
+        check(after.size() == 2, "svg recolor: both blobs still present and in place");
+        check(after.at(0).data.contains("#111111"), "svg recolor: off state color written");
+        check(after.at(1).data.contains("#222222"), "svg recolor: on state color written");
+        check(patched.size() == pe.size(), "svg recolor: file size unchanged");
+        check(QFileInfo::exists(exePath + QStringLiteral(".bak")), "svg recolor: backup created");
     }
 
     // ------------------------------------------------------------------
