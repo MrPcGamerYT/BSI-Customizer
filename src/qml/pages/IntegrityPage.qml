@@ -68,6 +68,7 @@ Item {
                 Rectangle {
                     Layout.fillWidth: true
                     height: 40
+                    Layout.preferredHeight: 40
                     radius: 8
                     color: Theme.raised
                     border.color: Theme.border
