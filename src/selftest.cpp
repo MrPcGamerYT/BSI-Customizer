@@ -157,6 +157,23 @@ QString makeThemeQml(const QStringList &colors)
     return q;
 }
 
+// Bare qCompress record: [be32 usize][zlib stream] with NO outer length field.
+// This is the layout the reference tool actually scans for - it reads only the
+// 4-byte uncompressed size and never looks for an outer length.
+QByteArray bareQCompressRecord(const QByteArray &raw)
+{
+    const QByteArray comp = ZlibUtils::compress(raw);
+    QByteArray rec(4, '\0');
+    putBe32(rec, 0, quint32(raw.size()));
+    return rec + comp;
+}
+
+// The ASCII name marker the reference tool anchors its 8192-byte scan on.
+QByteArray themeMarker()
+{
+    return QByteArray("UiThemeObject.qml") + QByteArray(1, '\0');
+}
+
 QStringList colorList(const QString &c, int n = 50)
 {
     QStringList out;
@@ -580,8 +597,7 @@ int runSelfTest()
         check(ThemePresets::toVariantList().size() == presets.size(),
               "presets: QML list matches the C++ list");
     }
-
-    // ------------------------------------------------------------------
+        // ------------------------------------------------------------------
     // 2g) Toggle SVG recolor (PatchToggleSvgs): length-safe, knob preserved
     // ------------------------------------------------------------------
     {
@@ -671,6 +687,326 @@ int runSelfTest()
         check(after.at(1).data.contains("#222222"), "svg recolor: on state color written");
         check(patched.size() == pe.size(), "svg recolor: file size unchanged");
         check(QFileInfo::exists(exePath + QStringLiteral(".bak")), "svg recolor: backup created");
+    }
+
+    // ------------------------------------------------------------------
+    // 2h) Bare qCompress record: [be32 usize][zlib] with no outer length
+    //     field.  The reference tool detects this layout; requiring an outer
+    //     length made us skip it and report "theme not found".
+    // ------------------------------------------------------------------
+    {
+        std::printf("[theme-zlib] bare qCompress record (no outer length field)\n");
+
+        const QString origQml = makeThemeQml(colorList(QStringLiteral("#0A0A0A")));
+        const QByteArray rec = bareQCompressRecord(origQml.toLatin1());
+
+        QByteArray pe = makeFakePe(0, 0x20000);
+        const qint64 markOff = 0x1800;
+        pe.replace(int(markOff), themeMarker().size(), themeMarker());
+        // inside the 8192-byte marker window, with the preceding bytes zero so
+        // there is nothing that could be mistaken for an outer length field
+        const qint64 entryOff = markOff + themeMarker().size() + 16;
+        pe.replace(int(entryOff), rec.size(), rec);
+
+        const QString exePath = tmp.path() + QStringLiteral("/bare.exe");
+        {
+            QFile f(exePath);
+            f.open(QIODevice::WriteOnly);
+            f.write(pe);
+        }
+
+        const ThemeInfo t = ThemeEngine::detectTheme(pe, QStringLiteral("qml"));
+        check(t.found && t.mode == QLatin1String("zlib"), "bare qCompress theme detected");
+        check(t.headerBytes == 4, "bare qCompress: reported as a 4-byte header");
+        check(t.markerAnchored, "bare qCompress: found through the marker window");
+        check(t.entryOff == entryOff, "bare qCompress: entry offset is the usize field");
+        check(t.zoff == entryOff + 4, "bare qCompress: stream offset correct");
+        check(t.compSize == quint32(rec.size() - 4),
+              "bare qCompress: compressed length measured exactly");
+        check(t.qml.contains(QStringLiteral("#0A0A0A")), "bare qCompress: live colors reported");
+
+        const auto entries = ThemeEngine::parseQmlEntries(t.qml);
+        check(entries.size() >= 30, "bare qCompress: color entries parsed");
+
+        const QByteArray before = pe.mid(int(entryOff - 4), 4);
+        QMap<QString, QString> edits;
+        edits[entries.at(0).name] = QStringLiteral("#0B0B0B");
+        const auto r = ThemeEngine::patchTheme(exePath, t, entries, edits);
+        check(r.ok, "bare qCompress: in-place patch succeeded");
+
+        QFile f(exePath);
+        f.open(QIODevice::ReadOnly);
+        const QByteArray patched = f.readAll();
+        f.close();
+        check(patched.size() == pe.size(), "bare qCompress: file size unchanged");
+        check(patched.mid(int(entryOff - 4), 4) == before,
+              "bare qCompress: bytes in front of the record were NOT rewritten");
+        const ThemeInfo again = ThemeEngine::detectTheme(patched, QStringLiteral("qml"));
+        check(again.found && again.qml.contains(QStringLiteral("#0B0B0B")),
+              "bare qCompress: the edit is live after patching");
+        check(again.headerBytes == 4, "bare qCompress: still detected as a 4-byte header");
+    }
+
+    // ------------------------------------------------------------------
+    // 2i) Headerless stream: no size field at all, so neither the outer
+    //     length nor the uncompressed size can be read from the file.
+    // ------------------------------------------------------------------
+    {
+        std::printf("[theme-zlib] headerless compressed stream (no size field)\n");
+
+        const QString origQml = makeThemeQml(colorList(QStringLiteral("#0C0C0C")));
+        const QByteArray comp = ZlibUtils::compress(origQml.toLatin1());
+
+        QByteArray pe = makeFakePe(0, 0x20000);
+        const qint64 markOff = 0x1800;
+        pe.replace(int(markOff), themeMarker().size(), themeMarker());
+        const qint64 zoff = markOff + themeMarker().size() + 16;
+        pe.replace(int(zoff), comp.size(), comp);
+
+        const QString exePath = tmp.path() + QStringLiteral("/headerless.exe");
+        {
+            QFile f(exePath);
+            f.open(QIODevice::WriteOnly);
+            f.write(pe);
+        }
+
+        const ThemeInfo t = ThemeEngine::detectTheme(pe, QStringLiteral("qml"));
+        check(t.found && t.mode == QLatin1String("zlib"), "headerless theme detected");
+        check(t.headerBytes == 0, "headerless: reported as a 0-byte header");
+        check(t.zoff == zoff, "headerless: stream offset correct");
+        check(t.compSize == quint32(comp.size()),
+              "headerless: compressed length measured exactly");
+        check(t.qml.contains(QStringLiteral("#0C0C0C")), "headerless: live colors reported");
+
+        const auto entries = ThemeEngine::parseQmlEntries(t.qml);
+        const QByteArray before = pe.mid(int(zoff - 8), 8);
+        QMap<QString, QString> edits;
+        edits[entries.at(0).name] = QStringLiteral("#0D0D0D");
+        const auto r = ThemeEngine::patchTheme(exePath, t, entries, edits);
+        check(r.ok, "headerless: in-place patch succeeded");
+
+        QFile f(exePath);
+        f.open(QIODevice::ReadOnly);
+        const QByteArray patched = f.readAll();
+        f.close();
+        check(patched.mid(int(zoff - 8), 8) == before,
+              "headerless: the 8 bytes in front of the stream were NOT rewritten");
+        const ThemeInfo again = ThemeEngine::detectTheme(patched, QStringLiteral("qml"));
+        check(again.found && again.qml.contains(QStringLiteral("#0D0D0D")),
+              "headerless: the edit is live after patching");
+    }
+
+    // ------------------------------------------------------------------
+    // 2j) A record with no usable marker: the loose second pass must still
+    //     find it instead of reporting "theme not found in this file"
+    // ------------------------------------------------------------------
+    {
+        std::printf("[theme-zlib] no marker present: loose fallback pass finds the theme\n");
+
+        const QString origQml = makeThemeQml(colorList(QStringLiteral("#0E0E0E")));
+        const QByteArray rec = bareQCompressRecord(origQml.toLatin1());
+
+        QByteArray pe = makeFakePe(0, 0x20000);
+        const qint64 entryOff = 0x3000;
+        pe.replace(int(entryOff), rec.size(), rec);
+
+        check(!pe.contains(QByteArray("UiThemeObject.qml")),
+              "no-marker test: the file really has no marker");
+
+        const ThemeInfo t = ThemeEngine::detectTheme(pe, QStringLiteral("qml"));
+        check(t.found && t.mode == QLatin1String("zlib"),
+              "no-marker test: theme still detected by the loose pass");
+        check(!t.markerAnchored, "no-marker test: correctly reported as not marker-anchored");
+        check(t.headerBytes == 4, "no-marker test: header layout still measured correctly");
+        check(t.qml.contains(QStringLiteral("#0E0E0E")), "no-marker test: live colors reported");
+    }
+
+    // ------------------------------------------------------------------
+    // 2k) Colon-less color declarations: the reference tool's regex does not
+    //     require the ':' a normal QML binding has, so neither may we
+    // ------------------------------------------------------------------
+    {
+        std::printf("[theme-qml] colon-less color declarations still parse\n");
+
+        QString qml = QStringLiteral("QtObject {\n");
+        for (int i = 0; i < 8; ++i)
+            qml += QStringLiteral("    property color tint%1 #1A2B3C\n").arg(i);
+        qml += QStringLiteral("}\n");
+
+        const auto e = ThemeEngine::parseQmlEntries(qml);
+        check(e.size() == 8, "colon-less: all eight entries parsed");
+        if (e.size() == 8) {
+            check(e.at(0).name == QLatin1String("tint0"), "colon-less: name captured");
+            check(e.at(0).value == QLatin1String("#1A2B3C"), "colon-less: value captured");
+            check(!e.at(0).quoted, "colon-less: recorded as unquoted");
+        }
+
+        QMap<QString, QString> edits;
+        edits[QStringLiteral("tint0")] = QStringLiteral("#00FF41");
+        const QString out = ThemeEngine::buildQml(qml, e, edits, true, nullptr);
+        check(out.contains(QStringLiteral("\"#00FF41\"")),
+              "colon-less: edit applied in grow mode");
+        check(out.contains(QStringLiteral("#1A2B3C")),
+              "colon-less: untouched entries survive");
+
+        // Mixed file: the colon spelling must win where both could match.
+        const QString mixed = QStringLiteral("QtObject {\n"
+                                             "    property color a: \"#111111\"\n"
+                                             "    property color b #222222\n"
+                                             "}\n");
+        const auto me = ThemeEngine::parseQmlEntries(mixed);
+        check(me.size() == 2, "colon-less: mixed file yields both entries");
+        bool aQuoted = false, bPlain = false;
+        for (const QmlEntry &x : me) {
+            if (x.name == QLatin1String("a"))
+                aQuoted = x.quoted && x.value == QLatin1String("#111111");
+            if (x.name == QLatin1String("b"))
+                bPlain = !x.quoted && x.value == QLatin1String("#222222");
+        }
+        check(aQuoted, "colon-less: the colon entry kept its quoted spelling");
+        check(bPlain, "colon-less: the colon-less entry parsed alongside it");
+    }
+
+    // ------------------------------------------------------------------
+    // 2l) Stock-palette signature.  BS_THEME_CHANGER carries BlueStacks' own
+    //     default color table and falls back on it when parsing finds nothing.
+    //     Those hex values (#080A1F, #1B1E38, #1A90FF, ...) are distinctive
+    //     enough to identify a theme object that has been reshaped or renamed
+    //     by a build we have never seen - which the name-based tiers reject.
+    // ------------------------------------------------------------------
+    {
+        std::printf("[theme-zlib] stock BlueStacks palette identifies a reshaped theme\n");
+
+        // Colon-less, and deliberately free of the words "property" and "color"
+        // so neither the strict tier nor the loose tier can accept it.  Only the
+        // palette signature can.
+        QString qml = QStringLiteral("import QtQuick 2.0\nItem {\n");
+        const QStringList stock = {
+            QStringLiteral("surfaceDeep #080A1F"), QStringLiteral("surfaceMid #1B1E38"),
+            QStringLiteral("surfaceLite #232642"), QStringLiteral("brandMain #1A90FF"),
+            QStringLiteral("brandHover #2EA4FF"),  QStringLiteral("alertMain #EB2C43"),
+            QStringLiteral("goodMain #7AC143"),
+        };
+        for (const QString &line : stock)
+            qml += QStringLiteral("    %1\n").arg(line);
+        for (int i = 0; i < 6; ++i)
+            qml += QStringLiteral("    // padding padding padding padding %1\n").arg(i);
+        qml += QStringLiteral("}\n");
+
+        check(!qml.contains(QLatin1String("property")),
+              "stock palette: fixture really has no 'property' keyword");
+        check(!qml.contains(QLatin1String("color")),
+              "stock palette: fixture really has no 'color' keyword");
+
+        const QByteArray rec = qtZlibRecord(qml.toLatin1());
+        QByteArray pe = makeFakePe(0, 0x20000);
+        pe.replace(0x2000, rec.size(), rec);
+
+        const ThemeInfo t = ThemeEngine::detectTheme(pe, QStringLiteral("qml"));
+        check(t.found && t.mode == QLatin1String("zlib"),
+              "stock palette: reshaped theme found via the palette signature");
+        check(t.stockHits >= 3, "stock palette: stock color hits recorded");
+        check(t.entryCount >= 7, "stock palette: every entry is editable");
+        check(t.qml.contains(QStringLiteral("#1A90FF")),
+              "stock palette: live colors reported back to the UI");
+
+        // The same colors in a form no parser can read must NOT be claimed.
+        // Reporting "found" with nothing editable would also suppress the
+        // fall-through to the plain and hex methods in detectTheme.
+        const QStringList hexes = {
+            QStringLiteral("#080A1F"), QStringLiteral("#0B0C0E"), QStringLiteral("#1B1E38"),
+            QStringLiteral("#17181C"), QStringLiteral("#232642"), QStringLiteral("#21242C"),
+            QStringLiteral("#2B2E4C"), QStringLiteral("#2E3038"), QStringLiteral("#131621"),
+            QStringLiteral("#555E6B"),
+        };
+        QString opaque = QStringLiteral("TOKENS");
+        for (int i = 0; i < hexes.size(); ++i)
+            opaque += QStringLiteral(" k%1=\"%2\"").arg(i).arg(hexes.at(i));
+        opaque += QStringLiteral(" ") + QString(200, QLatin1Char('z'));
+        check(ThemeEngine::parseQmlEntries(opaque).isEmpty(),
+              "stock palette: the opaque fixture yields no editable entries");
+
+        const QByteArray rec2 = qtZlibRecord(opaque.toLatin1());
+        QByteArray pe2 = makeFakePe(0, 0x20000);
+        pe2.replace(0x2000, rec2.size(), rec2);
+        const ThemeInfo t2 = ThemeEngine::detectTheme(pe2, QStringLiteral("qml"));
+        check(!t2.found,
+              "stock palette: an unparseable blob is not claimed as a theme");
+    }
+
+    // ------------------------------------------------------------------
+    // 2m) GradientStop.  BlueStacks' UiThemeObject.qml carries gradient
+    //     definitions, and a multi-line stop holds a bare "color: #hex"
+    //     line that is NOT a theme slot.  buildQml maps edits by name, so
+    //     an entry called "color" would let one UI row rewrite every stop
+    //     in the file at once.
+    // ------------------------------------------------------------------
+    {
+        std::printf("[theme-qml] GradientStop colors are not theme slots\n");
+
+        const QString qml = QStringLiteral(
+            "import QtQuick\n"
+            "QtObject {\n"
+            "    id: root\n"
+            "    property QtObject colors: QtObject {\n"
+            "        property color primary100: \"#080A1F\"\n"
+            "        property color cloudGradientPrimary: \"#1A90FF\"\n"
+            "        property color cloudGradientSecondary: \"#057CEB\"\n"
+            "    }\n"
+            "    property Gradient cloudGradient: Gradient {\n"
+            "        GradientStop {\n"
+            "            position: 0.0\n"
+            "            color: \"#1A90FF\"\n"
+            "        }\n"
+            "        GradientStop {\n"
+            "            position: 1.0\n"
+            "            color: \"#057CEB\"\n"
+            "        }\n"
+            "    }\n"
+            "}\n");
+
+        const auto e = ThemeEngine::parseQmlEntries(qml);
+        check(e.size() == 3, "gradient: only the three real theme slots parse");
+        bool sawGeneric = false;
+        for (const QmlEntry &x : e) {
+            const QString n = x.name.toLower();
+            if (n == QLatin1String("color") || n == QLatin1String("position"))
+                sawGeneric = true;
+        }
+        check(!sawGeneric, "gradient: no entry is named 'color' or 'position'");
+
+        // Two occurrences of #1A90FF before the edit: the theme slot and the
+        // gradient stop.  Editing the slot must change exactly one of them.
+        check(qml.count(QStringLiteral("#1A90FF")) == 2,
+              "gradient: fixture really has the value in both places");
+        QMap<QString, QString> edits;
+        edits[QStringLiteral("cloudGradientPrimary")] = QStringLiteral("#00FF41");
+        const QString out = ThemeEngine::buildQml(qml, e, edits, true, nullptr);
+        check(out.contains(QStringLiteral("#00FF41")), "gradient: the slot was edited");
+        check(out.count(QStringLiteral("#1A90FF")) == 1,
+              "gradient: the GradientStop literal was left alone");
+
+        // The filter must stay narrow: these are real BlueStacks slot names
+        // recovered from BS_THEME_CHANGER's own table.
+        const QString real = QStringLiteral("QtObject {\n"
+                                            "    background: \"#101010\"\n"
+                                            "    border: \"#202020\"\n"
+                                            "    text: \"#303030\"\n"
+                                            "    accent: \"#404040\"\n"
+                                            "    selection: \"#505050\"\n"
+                                            "}\n");
+        const auto re = ThemeEngine::parseQmlEntries(real);
+        check(re.size() == 5, "gradient filter: real slot names are NOT filtered");
+
+        // SVG presentation attributes belong to SvgEngine, not the QML table.
+        const QString svgish = QStringLiteral("Item {\n"
+                                              "    fill: \"#111111\"\n"
+                                              "    stroke: \"#222222\"\n"
+                                              "    property color accentNormal: \"#333333\"\n"
+                                              "}\n");
+        const auto se = ThemeEngine::parseQmlEntries(svgish);
+        check(se.size() == 1 && se.at(0).name == QLatin1String("accentNormal"),
+              "gradient filter: bare fill/stroke lines are skipped");
     }
 
     // ------------------------------------------------------------------
@@ -861,7 +1197,7 @@ int runSelfTest()
         f.close();
 
         check(uchar(patched[0x1300]) == 0xE9, "jmp written at function start");
-        const qint64 cave = a.caveOff;
+                const qint64 cave = a.caveOff;
         check(patched.mid(int(cave) + 38, 5) == QByteArray::fromHex("48895C2408"),
               "original prologue preserved in slot");
         check(readDoubleLE(patched, cave + 48) == 240.0, "slot max constant = 240.0");
@@ -1002,7 +1338,7 @@ int runSelfTest()
     {
         std::printf("[boot] compressed boot QML rewrite\n");
 
-        QString plr = QStringLiteral("ApplicationWindow{id:iAppwin;Loader{id:iBootLoader}"
+        QString plr = QStringLiteral("ApplicationWindow{id:iAppwin;Loader{id:iBootLoader}}"
                                      "iBootProgressComponent{}");
         QString boot = QStringLiteral("Item {\r\n    Image{id: iBootImage}\r\n"
                                       "    // bootBackgroundImage fSetBootPromotion\r\n");
