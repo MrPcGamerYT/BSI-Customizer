@@ -65,6 +65,8 @@ struct ThemeInfo
 
     // qrc relocation (zlib)
     bool hasQrcNode = false;
+    bool qrcStrict = false;       // node matched the strict qrc geometry test
+    int qrcSupport = 0;           // neighbouring tree entries back qrcDataBaseRaw
     qint64 qrcNodeOff = -1;
     qint64 qrcNameRecordOff = -1;
     qint64 qrcNameBaseRaw = -1;
@@ -73,6 +75,11 @@ struct ThemeInfo
     quint32 qrcDataOffset = 0;
 
     int entryCount = 0;
+    // 2 = looks exactly like UiThemeObject.qml (or the qrc tree proves it),
+    // 1 = a compressed QML blob with several color properties (fallback tier),
+    // 0 = not a theme.
+    int contentQuality = 0;
+    int candidateCount = 0;       // zlib: equally good theme records in the file
     int hexMatchCount = 0;        // hex: how many default targets matched
 };
 
@@ -96,9 +103,14 @@ public:
 
     // ---- QML parse / build ----
     static QList<QmlEntry> parseQmlEntries(const QString &qml);
+    // allowGrow: the zlib record is recompressed/relocated, so a hex color may
+    // be longer than the expression it replaces.  Anything that could not be
+    // applied is appended to *skipped instead of being dropped silently.
     static QString buildQml(const QString &qml,
                             const QList<QmlEntry> &entries,
-                            const QMap<QString, QString> &edits);
+                            const QMap<QString, QString> &edits,
+                            bool allowGrow = false,
+                            QStringList *skipped = nullptr);
 
     // ---- patching ----
     static PatchResult patchTheme(const QString &exePath,
