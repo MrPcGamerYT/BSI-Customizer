@@ -22,6 +22,8 @@ qt_add_executable(BSICustomizer
     src/core/ZlibUtils.cpp
     src/core/ThemeEngine.h
     src/core/ThemeEngine.cpp
+    src/core/ThemePresets.h
+    src/core/ThemePresets.cpp
     src/core/SvgEngine.h
     src/core/SvgEngine.cpp
     src/core/FpsPatcher.h
