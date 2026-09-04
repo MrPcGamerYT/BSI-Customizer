@@ -8,6 +8,7 @@
 #include "core/Backend.h"
 #include "core/SettingsManager.h"
 #include "core/SysInfo.h"
+#include "core/ThemeEngine.h"
 #include "core/ThemeManager.h"
 
 // Last, so none of the windows.h macros (min/max/interface/...) leak into the
@@ -57,9 +58,32 @@ int main(int argc, char *argv[])
 
     // Headless verification of the patcher engines + theme chain.
     // Used locally and by the GitHub Actions release workflow.
-    if (QCoreApplication::arguments().contains(QStringLiteral("--selftest"))) {
+    const QStringList args = QCoreApplication::arguments();
+    if (args.contains(QStringLiteral("--selftest"))) {
         ensureConsoleOutput();
         return runSelfTest();
+    }
+
+    // Diagnostics: dump exactly what theme detection sees in a real
+    // HD-Player.exe.  Use this when the Theme page reports "not found" or shows
+    // no colors - it says which assumption (marker, header layout, content,
+    // parse) does not hold instead of leaving it to guesswork.
+    //   BSI-Customizer.exe --theme-probe "C:\...\HD-Player.exe"
+    const int probeAt = args.indexOf(QStringLiteral("--theme-probe"));
+    if (probeAt >= 0) {
+        ensureConsoleOutput();
+        const QString target = (probeAt + 1 < args.size()) ? args.at(probeAt + 1) : QString();
+        if (target.isEmpty()) {
+            std::printf("usage: BSI-Customizer --theme-probe <path-to-HD-Player.exe>\n");
+            return 2;
+        }
+        const QString report = ThemeEngine::probeReport(target);
+        std::printf("%s", qPrintable(report));
+        std::fflush(stdout);
+        return report.contains(QLatin1String("*** NOT FOUND ***"))
+                   || report.contains(QLatin1String("*** ZERO ENTRIES ***"))
+               ? 1
+               : 0;
     }
 
     QQuickStyle::setStyle(QStringLiteral("Basic"));
