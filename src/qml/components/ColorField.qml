@@ -53,6 +53,8 @@ RowLayout {
     TextField {
         id: hexInput
         Layout.preferredWidth: 92
+        Layout.fillWidth: true
+        Layout.minimumWidth: 62
         text: control.value
         placeholderText: "#RRGGBB"
         color: Theme.text
