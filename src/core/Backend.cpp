@@ -6,10 +6,14 @@
 #include "IntegrityPatcher.h"
 #include "SettingsManager.h"
 #include "ThemeEngine.h"
+#include "ThemePresets.h"
 
+#include <QColor>
+#include <QDateTime>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QStringList>
 
 Backend::Backend(SettingsManager *settings, QObject *parent)
     : QObject(parent)
@@ -41,6 +45,37 @@ QByteArray Backend::readExe()
     if (!f.open(QIODevice::ReadOnly))
         return {};
     return f.readAll();
+}
+
+// Remembers the EXE state the on-screen theme was read from, so the UI can tell
+// when another tool (or BlueStacks itself) changed the file underneath us.
+void Backend::noteThemeFileState()
+{
+    const QFileInfo fi(m_settings->exePath());
+    m_themeFilePath = fi.absoluteFilePath();
+    m_themeFileMsecs = fi.exists() ? fi.lastModified().toMSecsSinceEpoch() : -1;
+    m_themeFileBytes = fi.exists() ? fi.size() : -1;
+}
+
+bool Backend::themeFileChanged() const
+{
+    if (m_themeFilePath.isEmpty())
+        return false;
+    const QFileInfo fi(m_themeFilePath);
+    if (!fi.exists())
+        return true; // deleted, moved, or replaced by a restore
+    return fi.lastModified().toMSecsSinceEpoch() != m_themeFileMsecs
+        || fi.size() != m_themeFileBytes;
+}
+
+bool Backend::themeStale() const
+{
+    return m_themeInfo.found && themeFileChanged();
+}
+
+void Backend::reloadTheme()
+{
+    loadTheme(m_themeMethod);
 }
 
 // ------------------------------------------------------------------ detection
@@ -122,6 +157,10 @@ void Backend::loadTheme(const QString &method)
     m_edits.clear();
     m_hexQmlColors.clear();
     m_themeStatus.clear();
+    m_themeMethod = method;
+    m_themeFilePath.clear();
+    m_themeFileMsecs = -1;
+    m_themeFileBytes = -1;
 
     const QString exe = m_settings->exePath();
     if (!QFileInfo::exists(exe)) {
@@ -138,6 +177,22 @@ void Backend::loadTheme(const QString &method)
         emit themeChanged();
         return;
     }
+    noteThemeFileState();
+    // Say exactly which file the colors come from: reading a backup, a second
+    // install or the wrong profile is the other way this page can show a theme
+    // BlueStacks does not have.
+    doLog(QStringLiteral("Theme source: %1 (%2 bytes, modified %3)")
+              .arg(m_themeFilePath)
+              .arg(m_themeFileBytes)
+              .arg(m_themeFileMsecs > 0
+                       ? QDateTime::fromMSecsSinceEpoch(m_themeFileMsecs).toString(Qt::ISODate)
+                       : QStringLiteral("unknown")),
+          QStringLiteral("gray"));
+    if (BsDetector::isProcessRunning(QStringLiteral("HD-Player.exe")))
+        doLog(QStringLiteral("BlueStacks is RUNNING. Colors shown are read from disk and are "
+                             "correct, but a running BlueStacks keeps the theme it loaded at "
+                             "start - close it before patching, then start it again."),
+              QStringLiteral("orange"));
 
     if (method == QLatin1String("hex")) {
         m_themeInfo = ThemeEngine::findThemeHex(
@@ -167,6 +222,10 @@ void Backend::loadTheme(const QString &method)
     if (!t.found) {
         m_themeStatus = QStringLiteral("No QML theme found in this EXE.");
         doLog(m_themeStatus, QStringLiteral("red"));
+        doLog(QStringLiteral("Could not find the QML theme record in this file. Try the Hex (old) "
+                             "method, or check the EXE path points at your BlueStacks install's "
+                             "HD-Player.exe and not at a backup."),
+              QStringLiteral("orange"));
         emit themeChanged();
         return;
     }
@@ -175,12 +234,51 @@ void Backend::loadTheme(const QString &method)
     m_themeEntries = ThemeEngine::parseQmlEntries(t.qml);
     const QString kind = (t.mode == QLatin1String("plain")) ? QStringLiteral("plain text")
                                                             : QStringLiteral("zlib");
+
+    // Where the record lives, so a wrong/orphaned copy is visible at a glance.
+    QString where;
+    if (t.mode == QLatin1String("zlib")) {
+        where = QStringLiteral(" @0x%1").arg(t.entryOff, 0, 16);
+        if (!t.hasQrcNode)
+            where += QStringLiteral(" [NOT qrc-linked]");
+        else if (t.qrcStrict)
+            where += QStringLiteral(" [qrc-linked]");
+        else
+            where += QStringLiteral(" [qrc-linked, loose match]");
+    }
+
     m_themeStatus = QStringLiteral("QML theme loaded (%1): %2 color entries%3.")
                         .arg(kind)
                         .arg(m_themeEntries.size())
-                        .arg(t.hasQrcNode ? QStringLiteral(", qrc-linked (relocation ready)")
-                                          : QString());
+                        .arg(where);
     doLog(m_themeStatus, QStringLiteral("blue"));
+
+    if (t.candidateCount > 1) {
+        doLog(QStringLiteral("WARNING: %1 theme records exist in this EXE%2. Using the one the "
+                             "Qt resource tree points at; the rest are orphans left behind by an "
+                             "earlier relocation (ours or another tool's). If BlueStacks shows a "
+                             "different theme than the colors listed here, press RESTORE on the "
+                             "Extras page and patch again from a clean file.")
+                  .arg(t.candidateCount)
+                  .arg(where),
+              QStringLiteral("orange"));
+    }
+    if (t.mode == QLatin1String("zlib") && !t.hasQrcNode) {
+        doLog(QStringLiteral("No qrc node found for UiThemeObject.qml - a theme larger than the "
+                             "current slot cannot be relocated in this EXE."),
+              QStringLiteral("orange"));
+    }
+
+    // Anchor values: compare these with what BlueStacks actually shows to tell
+    // a stale read apart from a stale UI.
+    QStringList sample;
+    for (int i = 0; i < m_themeEntries.size() && i < 4; ++i)
+        sample << QStringLiteral("%1=%2").arg(m_themeEntries.at(i).name,
+                                              m_themeEntries.at(i).value);
+    if (!sample.isEmpty())
+        doLog(QStringLiteral("Live values in the EXE: %1").arg(sample.join(QLatin1String(", "))),
+              QStringLiteral("gray"));
+
     doLog(QStringLiteral("Set some colors, then PATCH THEME."), QStringLiteral("gray"));
     emit themeChanged();
 }
@@ -210,15 +308,72 @@ QVariantMap Backend::patchThemeQml()
     if (m_edits.isEmpty())
         return result(false, QStringLiteral("Nothing to patch - set some colors first."),
                       QStringLiteral("orange"));
+    if (themeFileChanged())
+        doLog(QStringLiteral("HD-Player.exe changed since it was loaded - patching the theme "
+                             "that is in the file now, not the one on screen."),
+              QStringLiteral("orange"));
+    if (BsDetector::isProcessRunning(QStringLiteral("HD-Player.exe")))
+        doLog(QStringLiteral("BlueStacks is RUNNING - close it first, otherwise the write can be "
+                             "blocked and the running instance keeps its old theme."),
+              QStringLiteral("orange"));
 
     const auto r = ThemeEngine::patchTheme(m_settings->exePath(), m_themeInfo, m_themeEntries,
                                            m_edits,
                                            [this](const QString &m, const QString &c) { doLog(m, c); });
     if (r.ok) {
         m_edits.clear();
-        loadTheme(QStringLiteral("qml")); // reload fresh state
+        reloadTheme(); // reload fresh state from the file we just wrote
+        doLog(QStringLiteral("Start BlueStacks now to see the new theme."),
+              QStringLiteral("gray"));
     }
     return result(r.ok, r.msg, QStringLiteral("green"));
+}
+
+// ------------------------------------------------------------------- presets
+
+QVariantList Backend::themePresets() const { return ThemePresets::toVariantList(); }
+
+int Backend::applyPreset(const QString &id)
+{
+    const ThemePreset *p = ThemePresets::byId(id);
+    if (!p) {
+        doLog(QStringLiteral("Unknown preset: %1").arg(id), QStringLiteral("red"));
+        return 0;
+    }
+    if (m_themeEntries.isEmpty()) {
+        doLog(QStringLiteral("Load the QML theme first, then pick a preset."),
+              QStringLiteral("orange"));
+        return 0;
+    }
+
+    const QMap<QString, QString> matched = ThemePresets::matchEntries(*p, m_themeEntries);
+    for (auto it = matched.constBegin(); it != matched.constEnd(); ++it)
+        m_edits[it.key()] = it.value();
+    emit themeChanged();
+
+    const int already = m_themeEntries.size() - matched.size();
+    doLog(QStringLiteral("Preset \"%1\": %2 color(s) staged, %3 already match. "
+                         "Press PATCH THEME to write them into HD-Player.exe.")
+              .arg(p->name)
+              .arg(matched.size())
+              .arg(already),
+          QStringLiteral("blue"));
+    if (matched.isEmpty())
+        doLog(QStringLiteral("This preset changes nothing - the EXE already has these colors."),
+              QStringLiteral("orange"));
+    return matched.size();
+}
+
+QString Backend::presetToggleOff(const QString &id) const
+{
+    const ThemePreset *p = ThemePresets::byId(id);
+    return p ? p->toggleOff : QString();
+}
+
+QString Backend::presetToggleOn(const QString &id) const
+{
+    const ThemePreset *p = ThemePresets::byId(id);
+    return p ? p->toggleOn : QString();
 }
 
 void Backend::setHexColor(const QString &name, const QString &hex)
@@ -275,6 +430,11 @@ QVariantMap Backend::applyHex()
         return result(false, QStringLiteral("Load an old (hex) theme first."),
                       QStringLiteral("orange"));
 
+    if (BsDetector::isProcessRunning(QStringLiteral("HD-Player.exe")))
+        doLog(QStringLiteral("BlueStacks is RUNNING - close it first, otherwise the write can be "
+                             "blocked and the running instance keeps its old theme."),
+              QStringLiteral("orange"));
+
     auto r = ThemeEngine::applyHexTheme(m_settings->exePath(), m_themeInfo.profile, {},
                                         m_hexQmlColors,
                                         [this](const QString &m, const QString &c) { doLog(m, c); });
@@ -287,7 +447,9 @@ QVariantMap Backend::applyHex()
                 c.enabled = false;
             }
         }
-        emit themeChanged();
+        reloadTheme(); // re-read the file so the list shows what is really in it
+        doLog(QStringLiteral("Start BlueStacks now to see the new theme."),
+              QStringLiteral("gray"));
     }
     return result(r.ok, r.msg, QStringLiteral("green"));
 }
@@ -296,10 +458,112 @@ QVariantMap Backend::applyHex()
 
 QVariantList Backend::svgInfos() const
 {
+    const SvgEngine::ToggleGuess guess = SvgEngine::guessToggles(m_svgs);
     QVariantList out;
-    for (const SvgBlob &b : m_svgs)
-        out << QVariantMap { { "index", b.index }, { "size", b.size } };
+    for (const SvgBlob &b : m_svgs) {
+        QString hint;
+        if (b.index == guess.on)
+            hint = QStringLiteral("switch ON?");
+        else if (b.index == guess.off)
+            hint = QStringLiteral("switch OFF?");
+        out << QVariantMap { { "index", b.index },
+                             { "size", b.size },
+                             { "offset", b.offset },
+                             { "preview", SvgEngine::preview(b.data) },
+                             { "colors", SvgEngine::colorsIn(b.data) },
+                             { "hint", hint } };
+    }
     return out;
+}
+
+QVariantMap Backend::guessToggleSvgs()
+{
+    if (m_svgs.isEmpty())
+        scanSvgs();
+    const SvgEngine::ToggleGuess g = SvgEngine::guessToggles(m_svgs);
+
+    auto previewAt = [this](int index) {
+        if (index < 0 || index >= m_svgs.size())
+            return QString();
+        return SvgEngine::preview(m_svgs.at(index).data);
+    };
+    // The color worth pre-filling is the track, not the knob: a switch knob is
+    // nearly always pure white or black, and recolor keeps it that way.
+    auto trackColorAt = [this](int index) {
+        if (index < 0 || index >= m_svgs.size())
+            return QString();
+        const QStringList cols = SvgEngine::colorsIn(m_svgs.at(index).data);
+        // The color field only speaks "#RRGGBB"; SVG also allows "#RRGGBBAA"
+        // (alpha last, unlike Qt) and "#RGB".
+        auto toSix = [](const QString &c) {
+            QString h = c;
+            if (h.size() == 9)
+                h = h.left(7);
+            else if (h.size() == 4)
+                h = QStringLiteral("#") + h.mid(1, 1) + h.mid(1, 1) + h.mid(2, 1) + h.mid(2, 1)
+                    + h.mid(3, 1) + h.mid(3, 1);
+            return h.toUpper();
+        };
+        for (const QString &c : cols) {
+            const QString six = toSix(c);
+            const QColor col(six);
+            if (!col.isValid())
+                continue;
+            const bool knob = (col.red() == 255 && col.green() == 255 && col.blue() == 255)
+                              || (col.red() == 0 && col.green() == 0 && col.blue() == 0);
+            if (!knob)
+                return six;
+        }
+        return cols.isEmpty() ? QString() : toSix(cols.first());
+    };
+
+    return { { "off", g.off }, { "on", g.on },
+             { "offColor", trackColorAt(g.off) }, { "onColor", trackColorAt(g.on) },
+             { "offPreview", previewAt(g.off) }, { "onPreview", previewAt(g.on) } };
+}
+
+QVariantMap Backend::recolorToggleSvgs(int offIndex, int onIndex, const QString &offHex,
+                                       const QString &onHex)
+{
+    if (m_svgs.isEmpty())
+        scanSvgs();
+    const auto r = SvgEngine::recolorToggles(
+        m_settings->exePath(), offIndex, onIndex, offHex, onHex,
+        [this](const QString &m, const QString &c) { doLog(m, c); });
+    if (r.ok) {
+        m_svgs.clear();          // colors on screen would be stale
+        noteThemeFileState();    // the theme record itself was not touched
+        doLog(QStringLiteral("The QML theme record was not touched - staged colors stay valid. "
+                             "Start BlueStacks to see the new switch colors."),
+              QStringLiteral("gray"));
+        emit svgsChanged();
+    }
+    return result(r.ok, r.msg, QStringLiteral("green"));
+}
+
+QVariantMap Backend::recolorTogglesFromPreset(const QString &id)
+{
+    const ThemePreset *p = ThemePresets::byId(id);
+    if (!p)
+        return result(false, QStringLiteral("Unknown preset: %1").arg(id), QStringLiteral("red"));
+    if (m_svgs.isEmpty())
+        scanSvgs();
+    const SvgEngine::ToggleGuess g = SvgEngine::guessToggles(m_svgs);
+    if (g.off < 0 && g.on < 0) {
+        return result(false,
+                      QStringLiteral("No switch/toggle SVG found in this EXE. Pick the two blobs "
+                                     "manually on the SVG page and recolor them there."),
+                      QStringLiteral("orange"));
+    }
+    doLog(QStringLiteral("Switch SVGs found - OFF index %1, ON index %2. Recoloring both from "
+                         "preset \"%3\" (off %4, on %5).")
+              .arg(g.off)
+              .arg(g.on)
+              .arg(p->name)
+              .arg(p->toggleOff)
+              .arg(p->toggleOn),
+          QStringLiteral("gray"));
+    return recolorToggleSvgs(g.off, g.on, p->toggleOff, p->toggleOn);
 }
 
 int Backend::scanSvgs()
