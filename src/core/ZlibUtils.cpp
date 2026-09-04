@@ -36,6 +36,45 @@ QByteArray compress(const QByteArray &data)
     return withHeader.mid(4); // strip qCompress' 4-byte BE size header
 }
 
+QByteArray inflateLoose(const QByteArray &rawStream, qint64 sizeHint)
+{
+    if (rawStream.size() < 2)
+        return {};
+
+    // qUncompress wants [be32 uncompressed size][zlib stream].  The size is a
+    // pre-allocation hint: Qt grows the buffer on Z_BUF_ERROR and stops at
+    // Z_STREAM_END, so trailing bytes past the stream end are simply left
+    // unconsumed.  That is what lets the caller over-read the EXE instead of
+    // having to know the exact compressed length up front.
+    auto attempt = [&rawStream](qint64 hint) -> QByteArray {
+        QByteArray prefixed;
+        prefixed.resize(4);
+        ByteUtils::putBe32(prefixed, 0, quint32(hint));
+        prefixed += rawStream;
+        return qUncompress(prefixed);
+    };
+
+    // Exact size first: correct whether or not Qt enforces the hint, and the
+    // cheapest path (no buffer doubling).
+    if (sizeHint > 0) {
+        const QByteArray out = attempt(sizeHint);
+        if (!out.isEmpty())
+            return out;
+    }
+
+    // Unknown or wrong hint: sweep upwards.  Each attempt either inflates the
+    // whole stream or fails outright, so the first non-empty result wins.
+    static const qint64 hints[] = { 1 << 12, 1 << 16, 1 << 20, 1 << 23 };
+    for (const qint64 h : hints) {
+        if (sizeHint > 0 && h <= sizeHint)
+            continue; // already tried something at least this large
+        const QByteArray out = attempt(h);
+        if (!out.isEmpty())
+            return out;
+    }
+    return {};
+}
+
 QList<qint64> findMagicOffsets(const QByteArray &data)
 {
     static const char magics[3][2] = { { '\x78', '\xDA' }, { '\x78', '\x9C' }, { '\x78', '\x01' } };
