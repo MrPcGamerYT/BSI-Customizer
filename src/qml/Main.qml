@@ -134,7 +134,8 @@ ApplicationWindow {
             LogPanel {
                 id: logPanel
                 Layout.fillWidth: true
-                Layout.preferredHeight: 150
+                Layout.preferredHeight: logPanel.collapsed ? 42 : 150
+                Behavior on Layout.preferredHeight { NumberAnimation { duration: 140 } }
             }
         }
     }
