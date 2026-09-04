@@ -750,7 +750,7 @@ ThemeInfo ThemeEngine::findThemeZlib(const QByteArray &data)
         // blob would report "found" with nothing editable AND suppress the
         // fall-through to the plain/hex methods in detectTheme, which is a worse
         // outcome than not finding it here.
-        const int stockHits = stockPaletteHits(qml);
+        const int stockHits = stockPaletteHits(qbytes);
         const bool stockContent = stockHits >= 3 && parsed >= 1;
         if (!strictContent && colorProps < 3 && !looseContent && !stockContent)
             return false;

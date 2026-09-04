@@ -56,6 +56,17 @@ struct ThemeInfo
     quint32 compSize = 0;         // validated compressed length
     quint32 uncompSize = 0;
     bool sizeIncludesUSize = true;
+    // zlib record header layout, mirroring the reference tool's three cases:
+    //   8 = [be32 outerLen][be32 usize][zlib]  (Qt resource record)
+    //   4 = [be32 usize][zlib]                 (bare qCompress blob)
+    //   0 = [zlib]                             (headerless stream)
+    int headerBytes = 8;
+    // Found inside the 8192-byte window around a "UiThemeObject.qml" marker
+    // (the reference tool's primary detection strategy).
+    bool markerAnchored = false;
+    // How many of BlueStacks' own stock palette colors the decompressed blob
+    // carries (the reference tool's fallback signature).
+    int stockHits = 0;
 
     // plain
     QString enc;                  // "utf-16-le" | "utf-8"
@@ -148,4 +159,12 @@ public:
 
     // ---- backup ----
     static bool backup(const QString &path, Logger logger = {});
+
+    // ---- diagnostics ----
+    // Full dump of what theme detection sees in a real HD-Player.exe: marker
+    // hits, zlib stream candidates and their header layouts, what detectTheme
+    // picks, the parsed color entries and the patch feasibility.  Used by the
+    // `--theme-probe <exe>` command line switch when the Theme page reports
+    // "not found" or shows no colors.
+    static QString probeReport(const QString &exePath);
 };
