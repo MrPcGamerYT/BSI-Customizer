@@ -47,14 +47,26 @@ cmake -S . -B build -GNinja -DCMAKE_BUILD_TYPE=Release
 cmake --build build
 ```
 
-Requires Qt 6.5+ (Core, Gui, Quick, QuickControls2, Svg) and CMake 3.16+.
-On Windows the `.rc` manifest makes the exe request elevation.
+Requires Qt 6.5+ (Core, Gui, Quick, QuickControls2, Svg) and CMake 3.21+.
+Any generator works (Ninja, Visual Studio, NMake).
+
+On Windows `src/app.rc` embeds `src/app.manifest`, which makes the exe request
+administrator rights, and the target is built as a GUI-subsystem app
+(`WIN32_EXECUTABLE`) so no console window flashes behind the UI. The MSVC
+toolchain is told not to generate a second manifest (`/MANIFEST:NO` +
+`GenerateManifest=false`) — otherwise the linker ends up with two
+`RT_MANIFEST` id 1 resources and dies with
+`CVTRES CVT1100: duplicate resource` / `LINK LNK1123`.
 
 ## Self-test
 
 ```
 BSI-Customizer --selftest
 ```
+
+On Windows the exe is a GUI app, so when it is started from a terminal it
+re-attaches to the parent console to print its report; when stdout is
+redirected to a file or pipe (what CI does) it writes there instead.
 
 Runs 10 sections on synthetic PE/zlib fixtures (theme in-place + relocation,
 plain UTF-16LE, hex palette, FPS detour + restore, integrity NOP, SVG
@@ -64,5 +76,12 @@ exits non-zero on any failure. The release pipeline runs it on every build.
 ## Releases
 
 Push a tag like `v2.0.0` — GitHub Actions (`.github/workflows/release.yml`)
-builds with MSVC + Qt 6.8.3, runs the self-test, packages with `windeployqt`,
-and publishes a zip on the GitHub Release page.
+builds with MSVC + Qt 6.8.3, verifies the embedded `requireAdministrator`
+manifest with `mt.exe`, runs the self-test, packages with `windeployqt` (and
+checks the Qt runtime actually landed in the package) and publishes a zip on
+the GitHub Release page. A manual run (`Run workflow`) uploads the same zip as
+a job artifact instead of creating a release.
+
+`.github/workflows/ci.yml` runs the same build + manifest check + self-test on
+every push to `main` and on pull requests, so a broken build is caught before a
+tag is ever pushed.
