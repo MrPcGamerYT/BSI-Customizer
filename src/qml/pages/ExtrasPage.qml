@@ -184,6 +184,8 @@ Item {
                                 Rectangle {
                                     width: 16
                                     height: 16
+                                    Layout.preferredWidth: 16
+                                    Layout.preferredHeight: 16
                                     radius: 4
                                     color: rowRect.checked ? Theme.accent : "transparent"
                                     border.width: 1
