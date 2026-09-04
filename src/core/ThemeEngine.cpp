@@ -172,6 +172,168 @@ bool decompressExactAt(const QByteArray &data, qint64 zoff, qint64 compLen,
     return true;
 }
 
+// Over-read decompression: inflate the stream at zoff without knowing its
+// exact compressed length.  A generous slice is handed to zlib, which stops at
+// the stream end and leaves the trailing bytes unconsumed.  This is the
+// strategy the reference tool uses (its trySize sweep from 1 KB to 200 KB), and
+// it is what finds a theme whose outer length field is missing, padded or
+// otherwise not exactly compLen / compLen+4.
+//
+// The slice grows in steps rather than starting at the maximum: embedded QML
+// records are a few KB compressed, so the first step normally succeeds and the
+// caller never pays for a 256 KB copy.  That matters because a multi-megabyte
+// executable contains tens of thousands of coincidental 78 9C / 78 DA pairs.
+bool inflateOverread(const QByteArray &data, qint64 zoff, quint32 usize,
+                     qint64 maxLen, QByteArray *out)
+{
+    if (zoff < 0 || zoff + 2 > data.size())
+        return false;
+    const qint64 avail = data.size() - zoff;
+    const qint64 cap = (maxLen > 0) ? qMin<qint64>(avail, maxLen) : avail;
+    if (cap < 2)
+        return false;
+
+    static const qint64 steps[] = { 2048, 8192, 32768, 131072, 524288 };
+    qint64 tried = 0;
+    for (const qint64 step : steps) {
+        const qint64 len = qMin<qint64>(step, cap);
+        if (len <= tried)
+            continue;
+        tried = len;
+        const QByteArray res = ZlibUtils::inflateLoose(data.mid(zoff, int(len)),
+                                                       usize ? qint64(usize) : -1);
+        if (!res.isEmpty() && (!usize || quint32(res.size()) == usize)) {
+            if (out)
+                *out = res;
+            return true;
+        }
+        if (len >= cap)
+            break;
+    }
+    return false;
+}
+
+// Exact compressed length of the stream at zoff, recovered by binary search.
+//
+// Detection can succeed without knowing the length (see inflateOverread), but
+// patching cannot: the slot size decides whether the recompressed theme fits in
+// place or has to be relocated.  "The first L bytes inflate to the full output"
+// is monotonic in L, so ~17 probes pin the length exactly - far tighter than the
+// reference tool's 1024-byte granularity, which would misreport the slot size
+// and break the in-place/relocate decision.
+//
+// Returns 0 if the length could not be determined.
+quint32 measureCompLen(const QByteArray &data, qint64 zoff, quint32 usize, qint64 maxLen)
+{
+    if (zoff < 0 || zoff + 2 > data.size())
+        return 0;
+    const qint64 avail = data.size() - zoff;
+    qint64 hi = (maxLen > 0) ? qMin<qint64>(avail, maxLen) : avail;
+    QByteArray probe;
+    if (!inflateOverread(data, zoff, usize, hi, &probe))
+        return 0;
+
+    qint64 lo = 2;
+    // Narrow to the smallest length that still yields the complete stream.
+    while (lo < hi) {
+        const qint64 mid = lo + (hi - lo) / 2;
+        QByteArray tmp;
+        if (inflateOverread(data, zoff, usize, mid, &tmp) && tmp == probe)
+            hi = mid;
+        else
+            lo = mid + 1;
+    }
+    // Sanity: the recovered length must reproduce the payload exactly.
+    QByteArray check;
+    if (!inflateOverread(data, zoff, usize, hi, &check) || check != probe)
+        return 0;
+    return quint32(hi);
+}
+
+// BlueStacks' stock theme colors, recovered from BS_THEME_CHANGER's own data
+// table (the DEFAULT_COLORS list it falls back on when parsing finds nothing).
+// These are the values a never-modified HD-Player.exe actually contains, and
+// they are distinctive enough - #080A1F, #1B1E38, #1A90FF - that a handful of
+// them in one decompressed blob is strong evidence the blob is the theme.
+//
+// The generic end of the stock table (#000000, #FFFFFF, mid grays) is left out
+// on purpose: those occur in unrelated SVG and QML payloads and would only add
+// noise to the count.
+static const char *const kStockPalette[] = {
+    "#080a1f", "#0b0c0e", "#1b1e38", "#17181c", "#232642", "#21242c",
+    "#2b2e4c", "#2e3038", "#131621", "#555e6b", "#454954", "#373a58",
+    "#5c6170", "#434664", "#8f94a3", "#565977", "#abafba", "#7f82a0",
+    "#c7c9d1", "#b6b8cd", "#f0f1f4", "#e3e4e8", "#f7faff",
+    "#1a90ff", "#2ea4ff", "#057ceb",
+    "#eb2c43", "#ed1c24", "#ff333b", "#c61017", "#eb553e", "#ff6952", "#d7412a",
+    "#7ac143", "#89d94c", "#67bd24",
+};
+
+// Number of stock colors present in a decompressed blob.  Hex digits are
+// case-insensitive in QML, so both sides are folded to lower case.
+int stockPaletteHits(const QByteArray &qml)
+{
+    const QByteArray lower = qml.toLower();
+    int hits = 0;
+    for (const char *hex : kStockPalette) {
+        if (lower.contains(QLatin1String(hex)))
+            ++hits;
+    }
+    return hits;
+}
+
+// Offsets of the zlib streams that sit within 8192 bytes of a
+// "UiThemeObject.qml" marker - the reference tool's primary detection strategy.
+//
+// The marker is searched in every encoding it can appear in: ASCII (a plain
+// string constant or a QML source reference), UTF-16BE (how a Qt resource name
+// record stores it) and UTF-16LE (a Qt QString literal in .rdata).  Anchoring on
+// the name is what keeps the scan out of the tens of thousands of coincidental
+// 78 9C / 78 DA byte pairs in a 2 MB executable.
+//
+// Both directions are scanned.  The reference tool only looks forward, but rcc
+// normally emits qt_resource_name AFTER qt_resource_data, so in the common
+// layout the payload sits BEFORE its own name record and a forward-only window
+// misses it.  Covering both sides also happens to separate a live record from an
+// orphan: only the one near the name array gets the anchoring bonus.
+QList<qint64> markerAnchoredMagics(const QByteArray &data,
+                                   const QString &name = QStringLiteral("UiThemeObject.qml"))
+{
+    const QList<QByteArray> needles = { name.toLatin1(), utf16be(name), utf16le(name) };
+
+    QList<qint64> out;
+    QSet<qint64> seen;
+    auto collect = [&data, &out, &seen](qint64 from, qint64 to) {
+        from = qMax<qint64>(0, from);
+        to = qMin<qint64>(data.size() - 2, to);
+        for (qint64 p = from; p < to; ++p) {
+            if (seen.contains(p))
+                continue;
+            if (data[int(p)] != '\x78')
+                continue;
+            const char c = data[int(p) + 1];
+            if (c == '\xDA' || c == char('\x9C') || c == '\x01') {
+                seen.insert(p);
+                out << p;
+            }
+        }
+    };
+
+    for (const QByteArray &needle : needles) {
+        qsizetype at = 0;
+        while (true) {
+            at = data.indexOf(needle, at);
+            if (at < 0)
+                break;
+            collect(at + needle.size(), at + needle.size() + 8192); // after
+            collect(at - 8192, at);                                 // before
+            at += 1;
+        }
+    }
+    std::sort(out.begin(), out.end());
+    return out;
+}
+
 struct QrcNode
 {
     bool found = false;
@@ -461,63 +623,170 @@ QString ThemeEngine::detectProfileFromPath(const QString &exePath)
 ThemeInfo ThemeEngine::findThemeZlib(const QByteArray &data)
 {
     QList<ThemeInfo> candidates;
-    QSet<qint64> seen;
 
-    const QList<qint64> magics = ZlibUtils::findMagicOffsets(data);
-    for (const qint64 pos : magics) {
-        if (pos < 8 || seen.contains(pos))
-            continue;
-        seen.insert(pos);
+    // Marker-anchored hits first: the reference tool's primary strategy, and by
+    // far the strongest signal in a multi-megabyte executable.  The global magic
+    // scan follows so a build whose name record was stripped or renamed is still
+    // found.
+    QList<qint64> magics = markerAnchoredMagics(data);
+    const int anchoredCount = magics.size();
+    {
+        QSet<qint64> have(magics.begin(), magics.end());
+        for (const qint64 pos : ZlibUtils::findMagicOffsets(data)) {
+            if (!have.contains(pos))
+                magics << pos;
+        }
+    }
+    const QSet<qint64> anchoredSet(magics.begin(), magics.begin() + anchoredCount);
 
-        if (!inRange(data, pos - 8, 8))
-            continue;
-        const quint32 storedSize = be32(data, pos - 8);
-        const quint32 usize = be32(data, pos - 4);
-        if (usize < 16 || usize > 50000000u)
-            continue;
+    // Analyse the zlib stream that starts at `pos`; fills `info` and returns true
+    // when it decompresses into something theme-like.
+    //
+    // Three header layouts are tried, most specific first:
+    //   A: [be32 outerLen][be32 usize][zlib]   Qt resource record (8 bytes)
+    //   B: [be32 usize][zlib]                  bare qCompress blob (4 bytes)
+    //   C: [zlib]                              no header at all
+    // Only A carries an outer length field that a patch may rewrite.  B and C
+    // cannot validate a length up front, so they are used on marker-anchored
+    // hits, or anywhere at all when `loose` is set - the second pass, which runs
+    // only if the first one found nothing.
+    auto analyse = [&data](qint64 pos, bool anchored, bool loose, ThemeInfo &info) -> bool {
+        if (pos < 2)
+            return false;
 
-        // Qt qrc normally stores size = compressed_len + 4; try both.
-        quint32 compLen = 0;
+        const quint32 outer = (pos >= 8) ? be32(data, pos - 8) : 0;
+        const quint32 u4 = (pos >= 4) ? be32(data, pos - 4) : 0;
+
+        quint32 usize = 0, compLen = 0, storedSize = 0;
+        int headerBytes = 0;
         bool includesUSize = true;
         QByteArray qbytes;
-        if (decompressExactAt(data, pos, qint64(storedSize) - 4, usize, &qbytes)) {
-            compLen = storedSize - 4;
-            includesUSize = true;
-        } else if (decompressExactAt(data, pos, storedSize, usize, &qbytes)) {
-            compLen = storedSize;
-            includesUSize = false;
-        } else {
-            continue;
+        bool ok = false;
+
+        // ---- Layout A ----
+        if (pos >= 8 && inRange(data, pos - 8, 8) && u4 >= 16 && u4 <= 50000000u) {
+            // Qt qrc normally stores outerLen = compressed_len + 4; try both.
+            if (decompressExactAt(data, pos, qint64(outer) - 4, u4, &qbytes)) {
+                compLen = outer - 4;
+                includesUSize = true;
+                ok = true;
+            } else if (decompressExactAt(data, pos, outer, u4, &qbytes)) {
+                compLen = outer;
+                includesUSize = false;
+                ok = true;
+            }
+            if (ok) {
+                usize = u4;
+                storedSize = outer;
+                headerBytes = 8;
+            }
         }
 
-        if (qbytes.size() < 100)
-            continue;
+        // Layout B is cheap to try anywhere: the 100..500000 window on the size
+        // field rejects essentially every coincidental 78 xx pair before a single
+        // byte is inflated.  Layout C has no such pre-filter - without a size
+        // field there is nothing to validate against - so it is only tried where
+        // the marker already says the theme lives.  Letting C run across every
+        // magic offset in a multi-megabyte EXE would mean tens of thousands of
+        // speculative inflates for a blob that is indistinguishable from noise.
+        const bool tryBare = anchored || loose;
+
+        // ---- Layout B: bare qCompress, no outer length field ----
+        // The reference tool reads only this 4-byte size and never looks for an
+        // outer length, which is why it finds records this scan used to skip.
+        if (!ok && tryBare && pos >= 4 && u4 >= 100 && u4 <= 500000u
+            && inflateOverread(data, pos, u4, 262144, &qbytes)) {
+            const quint32 measured = measureCompLen(data, pos, u4, 262144);
+            if (measured > 0) {
+                usize = u4;
+                compLen = measured;
+                storedSize = measured + 4;
+                includesUSize = true;
+                headerBytes = 4;
+                ok = true;
+            }
+        }
+
+        // ---- Layout C: stream stands alone, size unknown ----
+        if (!ok && anchored && inflateOverread(data, pos, 0, 262144, &qbytes)) {
+            const quint32 measured = measureCompLen(data, pos, quint32(qbytes.size()), 262144);
+            if (measured > 0) {
+                usize = quint32(qbytes.size());
+                compLen = measured;
+                storedSize = 0;
+                includesUSize = true;
+                headerBytes = 0;
+                ok = true;
+            }
+        }
+
+        if (!ok || qbytes.size() < 100)
+            return false;
         const QString qml = QString::fromLatin1(qbytes);
 
-        // Two content tiers.  The strict one is what UiThemeObject.qml looks
-        // like; the loose one (a compressed QML blob with several color
-        // properties) is the fallback BS_THEME_CHANGER uses, so a build that
-        // renames the object still gets found instead of reporting "theme was
-        // not found in this file".
+        // Three content tiers.  The strict one is what UiThemeObject.qml looks
+        // like; the middle one is a compressed QML blob with several color
+        // properties; the loosest accepts any blob that still yields at least
+        // one parseable color entry, which is where the reference tool lands
+        // when a build renames or reshapes the theme object.  Rejecting here is
+        // what turns a working EXE into "Theme was not found in this file."
         const bool strictContent = qml.contains(QLatin1String("property QtObject colors"))
                                    && qml.contains(QLatin1String("primary100"));
         int colorProps = 0;
         for (qsizetype at = 0; (at = qml.indexOf(QLatin1String("property color"), at)) >= 0;)
             at += 14, ++colorProps;
-        if (!strictContent && colorProps < 3)
-            continue;
+        const int parsed = parseQmlEntries(qml).size();
+        const bool looseContent = qml.contains(QLatin1String("property"))
+                                  && qml.contains(QLatin1String("color"))
+                                  && (colorProps >= 1 || parsed >= 1);
+        // A blob carrying several of BlueStacks' own stock colors is the theme
+        // even if its property names or object shape are unfamiliar - which is
+        // exactly the case the name-based tiers above would otherwise reject.
+        // Note looseContent insists on the literal words "property" AND "color",
+        // so a reshaped table like  surfaceDeep: "#080A1F"  parses fine yet
+        // fails that tier; the palette is what rescues it.
+        //
+        // Requiring at least one parsed entry matters: accepting an unparseable
+        // blob would report "found" with nothing editable AND suppress the
+        // fall-through to the plain/hex methods in detectTheme, which is a worse
+        // outcome than not finding it here.
+        const int stockHits = stockPaletteHits(qml);
+        const bool stockContent = stockHits >= 3 && parsed >= 1;
+        if (!strictContent && colorProps < 3 && !looseContent && !stockContent)
+            return false;
 
-        ThemeInfo info;
+        // Layout A took its length from the file, so trust it only as far as it
+        // agrees with the stream it describes.  When those 4 bytes are padding or
+        // unrelated data instead of a length field, demote the record - patching
+        // must never rewrite bytes it does not own.
+        if (headerBytes == 8) {
+            const quint32 measured = measureCompLen(data, pos, usize, 262144);
+            if (measured > 0 && measured != compLen) {
+                if (storedSize == measured + 4 || storedSize == measured) {
+                    includesUSize = (storedSize == measured + 4);
+                } else {
+                    headerBytes = (u4 >= 100 && u4 <= 500000u) ? 4 : 0;
+                    storedSize = (headerBytes == 4) ? measured + 4 : 0;
+                    includesUSize = true;
+                }
+                compLen = measured;
+            }
+        }
+
+        info = ThemeInfo();
         info.found = true;
         info.mode = QStringLiteral("zlib");
         info.qml = qml;
-        info.entryOff = pos - 8;
+        info.entryOff = pos - headerBytes;
         info.zoff = pos;
         info.storedSize = storedSize;
         info.compSize = compLen;
         info.uncompSize = usize;
         info.sizeIncludesUSize = includesUSize;
-        info.entryCount = parseQmlEntries(qml).size();
+        info.headerBytes = headerBytes;
+        info.markerAnchored = anchored;
+        info.stockHits = stockHits;
+        info.entryCount = parsed;
         info.contentQuality = strictContent ? 2 : 1;
 
         const QrcNode node = findQrcNodeForEntry(data, info.entryOff);
@@ -536,7 +805,33 @@ ThemeInfo ThemeEngine::findThemeZlib(const QByteArray &data)
             info.qrcDataBaseRva = node.dataBaseRva;
             info.qrcDataOffset = node.dataOffset;
         }
-        candidates << info;
+        return true;
+    };
+
+    QSet<qint64> seen;
+    for (const qint64 pos : magics) {
+        if (seen.contains(pos))
+            continue;
+        seen.insert(pos);
+        ThemeInfo info;
+        if (analyse(pos, anchoredSet.contains(pos), false, info))
+            candidates << info;
+    }
+
+    // Nothing yet: retry with the bare-qCompress layout allowed everywhere.  This
+    // mirrors the reference tool's own fallback chain (marker first, then a raw
+    // 78 9C scan over the whole file) for a build whose name marker is missing or
+    // unusable.  It only runs when the first pass came up empty.
+    if (candidates.isEmpty()) {
+        seen.clear();
+        for (const qint64 pos : magics) {
+            if (seen.contains(pos))
+                continue;
+            seen.insert(pos);
+            ThemeInfo info;
+            if (analyse(pos, anchoredSet.contains(pos), true, info))
+                candidates << info;
+        }
     }
 
     if (candidates.isEmpty())
@@ -557,6 +852,18 @@ ThemeInfo ThemeEngine::findThemeZlib(const QByteArray &data)
                              return qint64(t.contentQuality) * 1000000000
                                     + qint64(t.qrcSupport) * 10000000
                                     + (t.qrcStrict ? 200000 : (t.hasQrcNode ? 100000 : 0))
+                                    // A hit inside the marker window is the same
+                                    // evidence the reference tool relies on.
+                                    + (t.markerAnchored ? 50000 : 0)
+                                    // Stock colors are the reference tool's own
+                                    // fallback signature; worth more than a
+                                    // slightly longer entry list, less than the
+                                    // marker window.
+                                    + qint64(qMin(t.stockHits, 36)) * 500
+                                    // A record with a real outer length field is
+                                    // a genuine qrc payload; a measured headerless
+                                    // blob is a fallback, so rank it lower.
+                                    + (t.headerBytes == 8 ? 20000 : 0)
                                     + t.entryCount;
                          };
                          return rank(a) > rank(b);
@@ -694,6 +1001,39 @@ ThemeInfo ThemeEngine::detectTheme(const QByteArray &data, const QString &method
 // QML parse / build
 // ---------------------------------------------------------------------------
 
+// Property names that are QML/graphics keywords rather than BlueStacks theme
+// slots.  Only the bare "name: #hex" and "name #hex" forms need this filter -
+// rx1 and rx3 require an explicit "property color|var" prefix, so they can never
+// produce one.
+//
+// Without it, a multi-line gradient stop
+//     GradientStop {
+//         position: 0.0
+//         color: "#1A90FF"
+//     }
+// yields an entry literally named "color".  Because buildQml maps edits by name,
+// editing that one row would rewrite EVERY GradientStop in the file at once, and
+// the UI would offer a slot that is not part of the theme.  BlueStacks' own
+// UiThemeObject.qml carries gradient definitions (the reference tool has
+// "GradientStop" and "root" in its string table), so this is not hypothetical.
+//
+// Deliberately minimal.  "background", "border", "text", "accent", "primary",
+// "title", "selection" and friends are real BlueStacks slot names - recovered
+// from BS_THEME_CHANGER's own table - and must NOT be filtered out.
+bool isGenericSlotName(const QString &name)
+{
+    static const QSet<QString> generic = {
+        QStringLiteral("color"),    QStringLiteral("position"), QStringLiteral("opacity"),
+        QStringLiteral("id"),       QStringLiteral("stopcolor"),QStringLiteral("gradient"),
+        QStringLiteral("fill"),     QStringLiteral("stroke"),   QStringLiteral("source"),
+        QStringLiteral("null"),     QStringLiteral("width"),    QStringLiteral("height"),
+        QStringLiteral("x"),        QStringLiteral("y"),        QStringLiteral("z"),
+        QStringLiteral("visible"),  QStringLiteral("enabled"),
+        QStringLiteral("minimum"),  QStringLiteral("maximum"),
+    };
+    return generic.contains(name.toLower());
+}
+
 QList<QmlEntry> ThemeEngine::parseQmlEntries(const QString &q)
 {
     QList<QmlEntry> entries;
@@ -706,6 +1046,21 @@ QList<QmlEntry> ThemeEngine::parseQmlEntries(const QString &q)
     static const QRegularExpression rx2(
         QStringLiteral("^[ \t]*([A-Za-z_][A-Za-z0-9_]*)[ \t]*:[ \t]*"
                        "(\"(?:#[0-9A-Fa-f]{6,8})\"|#[0-9A-Fa-f]{6,8})"),
+        QRegularExpression::MultilineOption);
+
+    // Colon-less spellings.  The reference tool's own regex is
+    //   property\s+color\s+(\w+)\s+([#A-Fa-f0-9]+)
+    // i.e. it does NOT require the ':' a normal QML binding has.  Accepting that
+    // form too is what keeps a build which stores the table without colons from
+    // parsing to zero entries (which shows up as "No colors loaded/matched").
+    static const QRegularExpression rx3(
+        QStringLiteral("^[ \\t]*(?:readonly[ \\t]+)?property[ \\t]+(?:color|var)[ \\t]+"
+                       "([A-Za-z_][A-Za-z0-9_]*)[ \\t]+"
+                       "(\"#[0-9A-Fa-f]{6,8}\"|#[0-9A-Fa-f]{6,8})"),
+        QRegularExpression::MultilineOption);
+    static const QRegularExpression rx4(
+        QStringLiteral("^[ \\t]*([A-Za-z_][A-Za-z0-9_]*)[ \\t]+"
+                       "(\"#[0-9A-Fa-f]{6,8}\"|#[0-9A-Fa-f]{6,8})"),
         QRegularExpression::MultilineOption);
 
     auto it1 = rx1.globalMatch(q);
@@ -732,7 +1087,7 @@ QList<QmlEntry> ThemeEngine::parseQmlEntries(const QString &q)
     while (it2.hasNext()) {
         const auto m = it2.next();
         const QString name = m.captured(1);
-        if (name.isEmpty())
+        if (name.isEmpty() || isGenericSlotName(name))
             continue;
         const QString tokstr = m.captured(2);
         const int start = int(m.capturedStart(2));
@@ -749,6 +1104,37 @@ QList<QmlEntry> ThemeEngine::parseQmlEntries(const QString &q)
         e.exprStart = start;
         e.exprLen = tokstr.size();
         entries << e;
+    }
+
+    // Colon-less passes.  The captured token is already a bare hex literal, so
+    // the splice range is exactly the match.  Run after the colon passes and
+    // guarded by `used`, so the more specific spelling always wins.
+    const QRegularExpression colonless[2] = { rx3, rx4 };
+    for (const QRegularExpression &rx : colonless) {
+        auto it = rx.globalMatch(q);
+        while (it.hasNext()) {
+            const auto m = it.next();
+            const QString name = m.captured(1);
+            // rx3 still requires "property color|var", so the filter only ever
+            // bites on rx4 - but applying it to both keeps the two consistent.
+            if (name.isEmpty() || isGenericSlotName(name))
+                continue;
+            const QString tokstr = m.captured(2);
+            const int start = int(m.capturedStart(2));
+            if (used.contains(start))
+                continue;
+            used.insert(start);
+            QmlEntry e;
+            e.name = name;
+            e.quoted = tokstr.startsWith(QLatin1Char('"'));
+            QString val = tokstr;
+            val.remove(QLatin1Char('"'));
+            e.value = val;
+            e.original = val;
+            e.exprStart = start;
+            e.exprLen = tokstr.size();
+            entries << e;
+        }
     }
     return entries;
 }
@@ -942,14 +1328,20 @@ ThemeEngine::PatchResult ThemeEngine::patchTheme(const QString &exePath, const T
         return { false, QStringLiteral("Theme compression failed.") };
 
     const qint64 zoff = live.zoff;
+    const int headerBytes = live.headerBytes;
     quint32 oldCompLen = live.compSize;
     if (oldCompLen == 0) {
         QByteArray tmp;
         if (decompressExactAt(data, zoff, qint64(live.storedSize) - 4, live.uncompSize, &tmp))
             oldCompLen = live.storedSize - 4;
-        else
+        else if (decompressExactAt(data, zoff, live.storedSize, live.uncompSize, &tmp))
             oldCompLen = live.storedSize;
+        else
+            oldCompLen = measureCompLen(data, zoff, live.uncompSize, 262144);
     }
+    if (oldCompLen == 0)
+        return { false, QStringLiteral("The compressed theme length could not be determined - "
+                                        "the record is not safe to rewrite.") };
 
     const qint64 oldEnd = zoff + oldCompLen;
     qint64 zeroSlack = 0;
@@ -962,10 +1354,17 @@ ThemeEngine::PatchResult ThemeEngine::patchTheme(const QString &exePath, const T
 
     if (comp.size() <= compCapacity) {
         // ---- in place ----
-        const quint32 storedNew = live.sizeIncludesUSize ? quint32(comp.size()) + 4
-                                                         : quint32(comp.size());
-        putBe32(data, live.entryOff, storedNew);
-        putBe32(data, live.entryOff + 4, quint32(qbytes.size()));
+        // Only an 8-byte record has an outer length field.  A bare qCompress
+        // blob (4-byte) or a headerless stream (0-byte) must not have the bytes
+        // in front of it rewritten - they belong to whatever precedes the theme.
+        if (headerBytes >= 8) {
+            const quint32 storedNew = live.sizeIncludesUSize ? quint32(comp.size()) + 4
+                                                             : quint32(comp.size());
+            putBe32(data, live.entryOff, storedNew);
+            putBe32(data, live.entryOff + 4, quint32(qbytes.size()));
+        } else if (headerBytes == 4) {
+            putBe32(data, live.entryOff, quint32(qbytes.size()));
+        }
         data.replace(int(zoff), comp.size(), comp);
         const qint64 padStart = zoff + comp.size();
         const qint64 padEnd = zoff + compCapacity;
@@ -987,6 +1386,21 @@ ThemeEngine::PatchResult ThemeEngine::patchTheme(const QString &exePath, const T
             QStringLiteral("orange"));
 
         QrcNode node;
+        if (headerBytes != 8) {
+            // Relocation re-points a qresource tree entry at a freshly built
+            // [outerLen][usize][zlib] record.  Without an outer length field the
+            // blob is not a qrc payload, so there is no pointer to update and
+            // moving it would leave the app reading the old bytes.  The
+            // reference tool blind-scans the whole file for 4-byte LE/BE copies
+            // of the old offset and rewrites every hit; that corrupts unrelated
+            // data whenever an address or constant happens to equal the offset,
+            // so it is deliberately not done here.
+            return { false, QStringLiteral("No room for this custom theme in this EXE. "
+                                           "The theme is stored as a bare compressed blob "
+                                           "(no resource length field), so it can only be "
+                                           "patched in place. Try a palette whose colors are "
+                                           "the same length as the originals.") };
+        }
         if (live.hasQrcNode) {
             node.found = true;
             node.nodeOff = live.qrcNodeOff;
@@ -1399,4 +1813,270 @@ bool ThemeEngine::backup(const QString &path, Logger logger)
     }
     log(logger, QStringLiteral("Backup failed: %1").arg(bak), QStringLiteral("red"));
     return false;
+}
+
+// ---------------------------------------------------------------------------
+// Diagnostics
+// ---------------------------------------------------------------------------
+
+QString ThemeEngine::probeReport(const QString &exePath)
+{
+    QString out;
+    auto line = [&out](const QString &s = QString()) { out += s + QLatin1Char('\n'); };
+
+    line(QStringLiteral("BSI Customizer theme probe"));
+    line(QStringLiteral("=========================="));
+    line(QStringLiteral("file: %1").arg(exePath));
+
+    QFile f(exePath);
+    if (!f.open(QIODevice::ReadOnly)) {
+        line(QStringLiteral("CANNOT READ: %1").arg(f.errorString()));
+        line(QStringLiteral("  -> close BlueStacks (HD-Player.exe) and run as administrator."));
+        return out;
+    }
+    const QByteArray data = f.readAll();
+    f.close();
+    line(QStringLiteral("size: %1 bytes").arg(data.size()));
+    if (data.size() < 64) {
+        line(QStringLiteral("Too small to be HD-Player.exe."));
+        return out;
+    }
+    line();
+
+    auto offsToStr = [](const QList<qint64> &v, int maxN) {
+        QStringList parts;
+        for (int i = 0; i < v.size() && i < maxN; ++i)
+            parts << QStringLiteral("0x%1").arg(v.at(i), 0, 16);
+        if (v.size() > maxN)
+            parts << QStringLiteral("... (+%1 more)").arg(v.size() - maxN);
+        return parts.join(QLatin1String(", "));
+    };
+    auto hexDump = [&data](qint64 off, int n) {
+        const qint64 start = qMax<qint64>(0, off);
+        return QString::fromLatin1(data.mid(int(start), n).toHex(' ')).toUpper();
+    };
+    auto looksLikeTheme = [](const QString &q) {
+        const bool strict = q.contains(QLatin1String("property QtObject colors"))
+                            && q.contains(QLatin1String("primary100"));
+        int colorProps = 0;
+        for (qsizetype at = 0; (at = q.indexOf(QLatin1String("property color"), at)) >= 0;)
+            at += 14, ++colorProps;
+        return QStringLiteral("strict=%1  'property color' x%2  parsed=%3")
+            .arg(strict ? QLatin1String("yes") : QLatin1String("no"))
+            .arg(colorProps)
+            .arg(ThemeEngine::parseQmlEntries(q).size());
+    };
+
+    // ---------------- 1. markers ----------------
+    line(QStringLiteral("[1] 'UiThemeObject.qml' markers"));
+    const QString name = QStringLiteral("UiThemeObject.qml");
+    const QList<QPair<QString, QByteArray>> encs = {
+        { QStringLiteral("ascii"), name.toLatin1() },
+        { QStringLiteral("utf-16be"), utf16be(name) },
+        { QStringLiteral("utf-16le"), utf16le(name) },
+    };
+    int markerHits = 0;
+    for (const auto &e : encs) {
+        QList<qint64> offs;
+        qsizetype at = 0;
+        while (true) {
+            at = data.indexOf(e.second, at);
+            if (at < 0)
+                break;
+            offs << at;
+            ++at;
+        }
+        markerHits += offs.size();
+        line(QStringLiteral("  %1: %2 hit(s)%3")
+                 .arg(e.first, -10)
+                 .arg(offs.size())
+                 .arg(offs.isEmpty() ? QString()
+                                     : QStringLiteral("  at ") + offsToStr(offs, 8)));
+    }
+    if (markerHits == 0)
+        line(QStringLiteral("  -> NO marker anywhere: detection has to fall back to the"));
+    if (markerHits == 0)
+        line(QStringLiteral("     global zlib scan, which is much weaker evidence."));
+    line();
+
+    // ---------------- 2. zlib streams ----------------
+    line(QStringLiteral("[2] zlib stream starts"));
+    const QList<qint64> allMagics = ZlibUtils::findMagicOffsets(data);
+    const QList<qint64> anchored = markerAnchoredMagics(data);
+    line(QStringLiteral("  total 78 DA/9C/01 pairs in file: %1").arg(allMagics.size()));
+    line(QStringLiteral("  within 8192 bytes of a marker (either side): %1").arg(anchored.size()));
+    if (!anchored.isEmpty())
+        line(QStringLiteral("    %1").arg(offsToStr(anchored, 16)));
+    line();
+
+    // ---------------- 3. per-stream layout analysis ----------------
+    // With no marker there is nothing to anchor on, so fall back to the handful
+    // of global magic offsets whose preceding 4 bytes could plausibly be a
+    // qCompress size field - otherwise the probe would print nothing to analyse
+    // in exactly the case where the user most needs it.
+    QList<qint64> toAnalyse = anchored;
+    line(QStringLiteral("[3] header layout of each candidate stream"));
+    if (toAnalyse.isEmpty()) {
+        line(QStringLiteral("  no marker-anchored stream; falling back to the global scan"));
+        for (const qint64 pos : allMagics) {
+            if (toAnalyse.size() >= 8)
+                break;
+            if (pos < 4)
+                continue;
+            const quint32 u4 = be32(data, pos - 4);
+            if (u4 >= 100 && u4 <= 500000u)
+                toAnalyse << pos;
+        }
+    }
+    if (toAnalyse.isEmpty())
+        line(QStringLiteral("  (no plausible stream found anywhere in the file)"));
+    for (const qint64 pos : toAnalyse) {
+        line(QStringLiteral("  stream at 0x%1  magic=%2")
+                 .arg(pos, 0, 16)
+                 .arg(hexDump(pos, 2)));
+        line(QStringLiteral("    bytes at -8: %1").arg(hexDump(pos - 8, 8)));
+        const quint32 outer = (pos >= 8) ? be32(data, pos - 8) : 0;
+        const quint32 u4 = (pos >= 4) ? be32(data, pos - 4) : 0;
+        line(QStringLiteral("    as [outerLen][usize]: outerLen=%1 usize=%2")
+                 .arg(outer).arg(u4));
+
+        // Layout A
+        QByteArray qb;
+        QString verdictA = QStringLiteral("no");
+        if (pos >= 8 && u4 >= 16 && u4 <= 50000000u) {
+            if (decompressExactAt(data, pos, qint64(outer) - 4, u4, &qb))
+                verdictA = QStringLiteral("YES, outerLen = compLen+4, %1 bytes out").arg(qb.size());
+            else if (decompressExactAt(data, pos, outer, u4, &qb))
+                verdictA = QStringLiteral("YES, outerLen = compLen, %1 bytes out").arg(qb.size());
+        }
+        line(QStringLiteral("    layout A [be32 outerLen][be32 usize][zlib]: %1").arg(verdictA));
+        if (verdictA.startsWith(QLatin1String("YES")))
+            line(QStringLiteral("      content: %1").arg(looksLikeTheme(QString::fromLatin1(qb))));
+
+        // Layout B
+        qb.clear();
+        QString verdictB = QStringLiteral("no");
+        if (pos >= 4 && u4 >= 100 && u4 <= 500000u) {
+            if (inflateOverread(data, pos, u4, 262144, &qb)) {
+                const quint32 m = measureCompLen(data, pos, u4, 262144);
+                verdictB = QStringLiteral("YES, usize=%1 -> %2 bytes out, compLen measured = %3")
+                               .arg(u4).arg(qb.size()).arg(m);
+            } else {
+                verdictB = QStringLiteral("no (usize=%1 is plausible but the stream did not inflate)")
+                               .arg(u4);
+            }
+        } else {
+            verdictB = QStringLiteral("skipped (usize=%1 outside 100..500000)").arg(u4);
+        }
+        line(QStringLiteral("    layout B [be32 usize][zlib] (bare qCompress): %1").arg(verdictB));
+        if (!qb.isEmpty())
+            line(QStringLiteral("      content: %1").arg(looksLikeTheme(QString::fromLatin1(qb))));
+
+        // Layout C
+        qb.clear();
+        QString verdictC = QStringLiteral("no");
+        if (inflateOverread(data, pos, 0, 262144, &qb)) {
+            const quint32 m = measureCompLen(data, pos, quint32(qb.size()), 262144);
+            verdictC = QStringLiteral("YES -> %1 bytes out, compLen measured = %2")
+                           .arg(qb.size()).arg(m);
+        }
+        line(QStringLiteral("    layout C [zlib] (no header, size unknown): %1").arg(verdictC));
+        if (!qb.isEmpty()) {
+            line(QStringLiteral("      content: %1").arg(looksLikeTheme(QString::fromLatin1(qb))));
+            const QString preview = QString::fromLatin1(qb).left(160).replace(QLatin1Char('\n'),
+                                                                              QLatin1Char(' '));
+            line(QStringLiteral("      preview: %1").arg(preview));
+        }
+        line();
+    }
+
+    // ---------------- 4. what detection picks ----------------
+    line(QStringLiteral("[4] ThemeEngine::detectTheme(data, \"qml\") result"));
+    const ThemeInfo t = detectTheme(data, QStringLiteral("qml"));
+    if (!t.found) {
+        line(QStringLiteral("  *** NOT FOUND ***  - this is the failure."));
+        line(QStringLiteral("  Sections 1-3 above show which assumption does not hold."));
+        line();
+        return out;
+    }
+    line(QStringLiteral("  found            : yes"));
+    line(QStringLiteral("  mode             : %1").arg(t.mode));
+    line(QStringLiteral("  entryOff         : 0x%1").arg(t.entryOff, 0, 16));
+    line(QStringLiteral("  zoff             : 0x%1").arg(t.zoff, 0, 16));
+    line(QStringLiteral("  headerBytes      : %1%2")
+             .arg(t.headerBytes)
+             .arg(t.headerBytes == 8 ? QStringLiteral("  (Qt resource record)")
+                  : t.headerBytes == 4 ? QStringLiteral("  (bare qCompress blob)")
+                                       : QStringLiteral("  (no header)")));
+    line(QStringLiteral("  storedSize       : %1").arg(t.storedSize));
+    line(QStringLiteral("  compSize         : %1").arg(t.compSize));
+    line(QStringLiteral("  uncompSize       : %1").arg(t.uncompSize));
+    line(QStringLiteral("  sizeInclUSize    : %1").arg(t.sizeIncludesUSize ? "yes" : "no"));
+    line(QStringLiteral("  markerAnchored   : %1").arg(t.markerAnchored ? "yes" : "no"));
+    line(QStringLiteral("  contentQuality   : %1").arg(t.contentQuality));
+    line(QStringLiteral("  stock palette    : %1 of %2 BlueStacks default colors present")
+             .arg(t.stockHits)
+             .arg(int(sizeof(kStockPalette) / sizeof(kStockPalette[0]))));
+    line(QStringLiteral("  entryCount       : %1").arg(t.entryCount));
+    line(QStringLiteral("  candidateCount   : %1").arg(t.candidateCount));
+    line(QStringLiteral("  hasQrcNode       : %1").arg(t.hasQrcNode ? "yes" : "no"));
+    line(QStringLiteral("  qrcStrict        : %1").arg(t.qrcStrict ? "yes" : "no"));
+    line(QStringLiteral("  qrcSupport       : %1").arg(t.qrcSupport));
+    line();
+
+    // ---------------- 5. parsed colors ----------------
+    line(QStringLiteral("[5] color entries parsed from the decompressed QML"));
+    const QList<QmlEntry> ents = parseQmlEntries(t.qml);
+    line(QStringLiteral("  decompressed length: %1 chars").arg(t.qml.size()));
+    line(QStringLiteral("  contains 'property QtObject colors': %1")
+             .arg(t.qml.contains(QLatin1String("property QtObject colors")) ? "yes" : "no"));
+    line(QStringLiteral("  contains 'primary100'            : %1")
+             .arg(t.qml.contains(QLatin1String("primary100")) ? "yes" : "no"));
+    line(QStringLiteral("  entries parsed                   : %1").arg(ents.size()));
+    if (ents.isEmpty()) {
+        line(QStringLiteral("  *** ZERO ENTRIES *** - the UI would show 'No colors loaded/matched'."));
+        line(QStringLiteral("  First 400 chars of the decompressed text:"));
+        line(QStringLiteral("  ----"));
+        const QStringList ls = t.qml.left(400).split(QLatin1Char('\n'));
+        for (const QString &l : ls)
+            line(QStringLiteral("  | %1").arg(l));
+        line(QStringLiteral("  ----"));
+    } else {
+        for (int i = 0; i < ents.size() && i < 25; ++i)
+            line(QStringLiteral("    %1%2 = %3")
+                     .arg(ents.at(i).name, -34)
+                     .arg(ents.at(i).quoted ? QStringLiteral("(quoted)  ")
+                                            : QStringLiteral("(unquoted)"))
+                     .arg(ents.at(i).value));
+        if (ents.size() > 25)
+            line(QStringLiteral("    ... (+%1 more)").arg(ents.size() - 25));
+    }
+    line();
+
+    // ---------------- 6. patch feasibility ----------------
+    line(QStringLiteral("[6] patch feasibility"));
+    if (t.mode != QLatin1String("zlib")) {
+        line(QStringLiteral("  mode is '%1', not zlib - in-place text rewrite only.").arg(t.mode));
+        return out;
+    }
+    qint64 zeroSlack = 0;
+    const qint64 oldEnd = t.zoff + t.compSize;
+    while (oldEnd + zeroSlack < data.size() && data[int(oldEnd + zeroSlack)] == '\0'
+           && zeroSlack < 1024 * 1024)
+        ++zeroSlack;
+    line(QStringLiteral("  current compressed size : %1 bytes").arg(t.compSize));
+    line(QStringLiteral("  zero slack after record : %1 bytes").arg(zeroSlack));
+    line(QStringLiteral("  in-place capacity       : %1 bytes").arg(t.compSize + zeroSlack));
+    line(QStringLiteral("  relocation possible     : %1")
+             .arg(t.headerBytes == 8
+                      ? (t.hasQrcNode ? QStringLiteral("yes (qrc node found)")
+                                      : QStringLiteral("NO - qrc node not found"))
+                      : QStringLiteral("NO - record has no outer length field")));
+    if (t.headerBytes != 8)
+        line(QStringLiteral("  -> a bigger theme can only be applied if it recompresses to"));
+    if (t.headerBytes != 8)
+        line(QStringLiteral("     at most the in-place capacity above."));
+    line();
+    line(QStringLiteral("Probe complete."));
+    return out;
 }
