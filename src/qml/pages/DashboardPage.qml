@@ -63,6 +63,7 @@ Item {
                         required property int index
                         Layout.fillWidth: true
                         height: 40
+                        Layout.preferredHeight: 40
                         radius: 8
                         color: Theme.raised
                         border.color: Theme.border
@@ -75,6 +76,8 @@ Item {
                             Rectangle {
                                 width: 62
                                 height: 20
+                                Layout.preferredWidth: 62
+                                Layout.preferredHeight: 20
                                 radius: 5
                                 color: Theme.accentSoft
                                 Text {
