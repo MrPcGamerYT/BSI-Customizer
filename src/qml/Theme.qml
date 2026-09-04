@@ -39,4 +39,15 @@ QtObject {
         if (name === "blue") return logBlue;
         return logGray;
     }
+
+    // "#RRGGBB", upper-case. Qt prints a color as "#AARRGGBB" whenever alpha < 255;
+    // BlueStacks' own records use plain 6-digit hex, so the alpha pair is dropped.
+    function hexFromColor(c) {
+        const s = String(c);
+        if (/^#[0-9a-fA-F]{8}$/.test(s))
+            return ("#" + s.substring(3)).toUpperCase();
+        if (/^#[0-9a-fA-F]{6}$/.test(s))
+            return s.toUpperCase();
+        return "#7C5CFF";
+    }
 }
