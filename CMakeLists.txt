@@ -48,11 +48,42 @@ qt_add_executable(BSICustomizer
 # Python tool's PyInstaller uac_admin=True).
 if(WIN32)
     target_sources(BSICustomizer PRIVATE src/app.rc)
+
+    # Re-run rc.exe whenever the manifest XML itself changes (Makefile/Ninja
+    # generators; Visual Studio tracks resource dependencies on its own).
+    set_source_files_properties(src/app.rc PROPERTIES
+        OBJECT_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/app.manifest")
+
+    if(MSVC)
+        # src/app.rc provides the RT_MANIFEST resource with id 1 itself. MSVC
+        # *also* generates a default application manifest and hands it to the
+        # linker, which asks cvtres to merge the two -> the build dies with
+        #
+        #   CVTRES : fatal error CVT1100: duplicate resource.
+        #            type:MANIFEST, name:1, language:0x0409
+        #   LINK   : fatal error LNK1123: failure during conversion to COFF
+        #
+        # src/app.manifest is the only manifest we want, so stop the toolchain
+        # from producing a second one. /MANIFEST:NO covers every MSVC generator
+        # (Visual Studio, Ninja, NMake); the VS global additionally skips
+        # MSBuild's manifest-tool step so nothing else touches the image.
+        target_link_options(BSICustomizer PRIVATE "/MANIFEST:NO")
+        set_property(TARGET BSICustomizer APPEND PROPERTY VS_GLOBALS
+            "GenerateManifest=false")
+    endif()
 endif()
 
 # The QML module generates a "BSICustomizer" folder in the build dir, so the
 # executable gets a distinct output name to avoid the collision.
-set_target_properties(BSICustomizer PROPERTIES OUTPUT_NAME "BSI-Customizer")
+#
+# WIN32_EXECUTABLE -> GUI subsystem, i.e. no console window flashes behind the
+# UI when the released exe is launched from Explorer. Qt supplies the WinMain
+# entry point that calls our plain main(). (Same as the official Qt Quick
+# application template.)
+set_target_properties(BSICustomizer PROPERTIES
+    OUTPUT_NAME "BSI-Customizer"
+    WIN32_EXECUTABLE TRUE
+)
 
 target_compile_definitions(BSICustomizer PRIVATE
     BSI_VERSION="${PROJECT_VERSION}"
