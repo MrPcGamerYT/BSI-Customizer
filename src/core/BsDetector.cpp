@@ -6,6 +6,14 @@
 #include <QSettings>
 #include <QVariantMap>
 
+#ifdef Q_OS_WIN
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#include <tlhelp32.h>
+#endif
+
 namespace BsDetector {
 
 namespace {
@@ -97,6 +105,34 @@ QVariantList findBlueStacks()
         };
     }
     return result;
+}
+
+bool isProcessRunning(const QString &exeName)
+{
+#ifdef Q_OS_WIN
+    if (exeName.isEmpty())
+        return false;
+    const HANDLE snap = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snap == INVALID_HANDLE_VALUE)
+        return false;
+
+    PROCESSENTRY32W pe;
+    pe.dwSize = sizeof(pe);
+    bool found = false;
+    if (Process32FirstW(snap, &pe)) {
+        do {
+            if (exeName.compare(QString::fromWCharArray(pe.szExeFile), Qt::CaseInsensitive) == 0) {
+                found = true;
+                break;
+            }
+        } while (Process32NextW(snap, &pe));
+    }
+    CloseHandle(snap);
+    return found;
+#else
+    Q_UNUSED(exeName)
+    return false;
+#endif
 }
 
 } // namespace BsDetector
