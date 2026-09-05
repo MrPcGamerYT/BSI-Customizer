@@ -2,6 +2,17 @@
 
 Qt Quick desktop customizer for BlueStacks / MSI App Player on Windows.
 
+## Single portable EXE
+
+Release output is **`BSI-Customizer-<version>-win64.exe`**, not an installer.
+The app, Qt/QML plugins, SVG support, and VC runtime DLLs are included inside it.
+A native launcher unpacks into a private temporary directory, runs the app, and
+cleans up on normal exit. No runtime download or installation is performed.
+See [the full portable workflow/build guide](docs/PORTABLE.md) for Actions,
+local builds, clean-environment tests, temporary-file behavior, and license/DLL
+extraction. GitHub Releases provide the EXE directly; Actions wraps its single
+EXE artifact in a transport ZIP.
+
 ## Theme patching
 
 1. Select the **HD-Player.exe from the installation you actually launch**.

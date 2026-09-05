@@ -2,8 +2,22 @@
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QQuickStyle>
+#include <QBuffer>
+#include <QDir>
+#include <QImageReader>
+#include <QImage>
+#include <QColor>
+#include <QQmlError>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QLibraryInfo>
+#include <QSettings>
+#include <QStandardPaths>
+#include <QTemporaryDir>
+#include <QTimer>
 
 #include <cstdio>
+#include <memory>
 
 #include "core/Backend.h"
 #include "core/SettingsManager.h"
@@ -91,6 +105,22 @@ int main(int argc, char *argv[])
                : 0;
     }
 
+    // Packaging-only smoke mode: instantiate the real UI without changing
+    // the user's preferences or requiring a Qt SDK/development tools.
+    const bool deploymentTest = args.contains(QStringLiteral("--deployment-test"));
+    std::unique_ptr<QTemporaryDir> deploymentSettings;
+    if (deploymentTest) {
+        ensureConsoleOutput();
+        deploymentSettings = std::make_unique<QTemporaryDir>();
+        if (!deploymentSettings->isValid())
+            return 2;
+        QCoreApplication::setOrganizationName(QStringLiteral("BSI Deployment Test"));
+        QCoreApplication::setApplicationName(QStringLiteral("BSI Deployment Test"));
+        QSettings::setDefaultFormat(QSettings::IniFormat);
+        QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, deploymentSettings->path());
+        QSettings::setPath(QSettings::IniFormat, QSettings::SystemScope, deploymentSettings->path());
+        QStandardPaths::setTestModeEnabled(true);
+    }
     QQuickStyle::setStyle(QStringLiteral("Basic"));
 
     ThemeManager themes;
@@ -99,6 +129,14 @@ int main(int argc, char *argv[])
     SysInfo sysinfo;
 
     QQmlApplicationEngine engine;
+    QStringList deploymentErrors;
+    if (deploymentTest) {
+        engine.setInitialProperties({ { QStringLiteral("visible"), false } });
+        QObject::connect(&engine, &QQmlEngine::warnings, &app, [&deploymentErrors](const QList<QQmlError> &warnings) {
+            for (const auto &warning : warnings)
+                deploymentErrors << warning.toString();
+        });
+    }
 
     // IMPORTANT: context properties MUST be registered BEFORE engine.load().
     engine.rootContext()->setContextProperty(QStringLiteral("themes"), &themes);
@@ -112,5 +150,46 @@ int main(int argc, char *argv[])
         return -1;
     }
 
+    if (deploymentTest) {
+        QTimer::singleShot(400, &app, [&] {
+            const QString root = QDir::cleanPath(QCoreApplication::applicationDirPath());
+            const QString prefix = QDir::cleanPath(QLibraryInfo::path(QLibraryInfo::PrefixPath));
+            bool ok = root.compare(prefix, Qt::CaseInsensitive) == 0;
+            if (!ok)
+                std::fprintf(stderr, "Qt prefix escaped the bundle: %s\n", qPrintable(prefix));
+            for (const auto &path : engine.importPathList()) {
+                if (path.startsWith(QLatin1String("qrc:")))
+                    continue;
+                const auto clean = QDir::cleanPath(path);
+                if (clean.compare(root, Qt::CaseInsensitive) != 0
+                    && !clean.startsWith(root + QLatin1Char('/'), Qt::CaseInsensitive)) {
+                    std::fprintf(stderr, "QML import path escaped the bundle: %s\n", qPrintable(path));
+                    ok = false;
+                }
+            }
+            QByteArray svg("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"2\" height=\"2\"><rect width=\"2\" height=\"2\" fill=\"#123456\"/></svg>");
+            QBuffer source(&svg);
+            source.open(QIODevice::ReadOnly);
+            QImageReader reader(&source, "svg");
+            const auto image = reader.read();
+            if (image.isNull() || image.pixelColor(0, 0) != QColor(QStringLiteral("#123456"))) {
+                std::fprintf(stderr, "Bundled SVG image plugin failed: %s\n", qPrintable(reader.errorString()));
+                ok = false;
+            }
+            for (const auto &error : deploymentErrors) {
+                std::fprintf(stderr, "%s\n", qPrintable(error));
+                if (error.contains(QLatin1String("ReferenceError")) || error.contains(QLatin1String("TypeError"))
+                    || error.contains(QLatin1String("not installed")) || error.contains(QLatin1String("is not a type")))
+                    ok = false;
+            }
+            std::printf("DEPLOYMENT_ROOT=%s\n", root.toUtf8().constData());
+            std::printf("DEPLOYMENT_PORTABLE=%s\n", qEnvironmentVariable("BSI_PORTABLE", QStringLiteral("0")).toUtf8().constData());
+            std::printf("DEPLOYMENT_ARGS=%s\n", QJsonDocument(QJsonArray::fromStringList(args)).toJson(QJsonDocument::Compact).constData());
+            if (ok)
+                std::printf("DEPLOYMENT TEST PASSED\n");
+            std::fflush(stdout);
+            app.exit(ok ? 0 : 3);
+        });
+    }
     return app.exec();
 }

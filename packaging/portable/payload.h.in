@@ -1,0 +1,3 @@
+#pragma once
+inline constexpr char kPayloadSha256[] = "@BSI_PAYLOAD_SHA256@";
+inline constexpr wchar_t kAppVersion[] = L"@BSI_APP_VERSION@";

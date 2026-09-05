@@ -12,3 +12,9 @@ CMakeLists.txt.user
 # OS noise
 .DS_Store
 Thumbs.db
+
+# Portable release artifacts
+artifacts/
+
+# Python packaging-helper caches
+__pycache__/
