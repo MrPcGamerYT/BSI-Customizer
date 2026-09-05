@@ -727,8 +727,15 @@ ThemeInfo ThemeEngine::findThemeZlib(const QByteArray &data)
                 if (storedSize == measured + 4 || storedSize == measured) {
                     includesUSize = (storedSize == measured + 4);
                 } else {
-                    headerBytes = (u4 >= 100 && u4 <= 500000u) ? 4 : 0;
-                    storedSize = (headerBytes == 4) ? measured + 4 : 0;
+                    // Other changers often retain the original outer length
+                    // and pad a shorter stream. That is still a valid rcc
+                    // payload. Do not misclassify it as a bare blob and lose
+                    // its resource timestamp/cache invalidation on repatching.
+                    const auto padded = findQrcNodeForEntry(data, pos - 8);
+                    if (!padded.found || padded.ambiguous) {
+                        headerBytes = (u4 >= 100 && u4 <= 500000u) ? 4 : 0;
+                        storedSize = (headerBytes == 4) ? measured + 4 : 0;
+                    }
                     includesUSize = true;
                 }
                 compLen = measured;

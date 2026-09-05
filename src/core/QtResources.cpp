@@ -203,6 +203,14 @@ Link findLink(const QByteArray &data, qint64 entryOff, const QString &name)
                                 valid = false;
                                 break;
                             }
+                            if (raw == entryOff) {
+                                const quint32 usize = be32(data, raw + 4);
+                                if (usize > 50000000u
+                                    || qUncompress(data.mid(raw + 4, size)).size() != usize) {
+                                    valid = false;
+                                    break;
+                                }
+                            }
                         } else if (node.flags == 4) {
                             if (size < 4 || be32(data, raw + 4) != 0x28B52FFD) {
                                 valid = false;

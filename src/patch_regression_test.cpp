@@ -286,6 +286,37 @@ int runPatchRegressionTests()
               "real Qt rejects the old embedded unit and renders the selected source color");
     }
 
+    std::printf("[theme] repatch a padded resource left by another changer\n");
+    {
+        auto f = fixture(2, QStringLiteral("#112233"));
+        const int padding = 256;
+        const auto neighbor = f.bytes.mid(f.neighbor, 4 + be32(f.bytes, f.neighbor));
+        f.bytes.replace(f.neighbor + padding, neighbor.size(), neighbor);
+        f.bytes.replace(f.neighbor, padding, QByteArray(padding, '\0'));
+        putBe32(f.bytes, f.payloads, be32(f.bytes, f.payloads) + padding);
+        for (int i = 1; i <= 2; ++i) {
+            const qint64 node = f.tree + i * 22;
+            if (node != f.themeNode)
+                putBe32(f.bytes, node + 10, be32(f.bytes, node + 10) + padding);
+        }
+        f.neighbor += padding;
+        const QString path = temp.filePath(QStringLiteral("padded.exe"));
+        const QString cache = temp.filePath(QStringLiteral("padded-cache"));
+        write(path, f.bytes);
+        const auto info = ThemeEngine::detectTheme(f.bytes, QStringLiteral("qml"));
+        check(info.hasQrcNode && info.headerBytes == 8 && info.storedSize > info.compSize + 4,
+              "a padded Qt resource remains linked, not mistaken for a bare qCompress stream");
+        check(loadInQt(path, f, cache, QStringLiteral("#112233")), "Qt loads and caches the other changer's padded theme");
+        const auto r = ThemeEngine::patchTheme(path, info, ThemeEngine::parseQmlEntries(info.qml),
+                                              { { QStringLiteral("primary100"), QStringLiteral("#ab43de") } });
+        check(r.ok && loadInQt(path, f, cache, QStringLiteral("#ab43de")),
+              "repatching after that launch invalidates its cache and changes the rendered color");
+        const auto after = read(path);
+        check(after.mid(f.neighbor, neighbor.size()) == neighbor
+                  && be64(after, f.themeNode + 14) > be64(f.bytes, f.themeNode + 14),
+              "padded repatch preserves neighbors and advances the real resource timestamp");
+    }
+
     std::printf("[theme] mapped relocation across PE sections and orphan selection\n");
     for (const int version : { 1, 2, 3 }) {
         auto f = fixture(version, QStringLiteral("#112233"));
