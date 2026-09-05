@@ -8,6 +8,7 @@
 #include "core/ZlibUtils.h"
 
 #include <QCoreApplication>
+#include <QColor>
 #include <QDir>
 #include <QFile>
 #include <QProcess>
@@ -257,8 +258,7 @@ int runPatchRegressionTests()
         }
         check(read(path + QStringLiteral(".bak")) == f.bytes, "first backup is preserved across theme repatches");
         const auto current = ThemeEngine::detectTheme(read(path), QStringLiteral("qml"));
-        const auto repair = ThemeEngine::patchTheme(path, current, ThemeEngine::parseQmlEntries(current.qml),
-            { { QStringLiteral("primary100"), QStringLiteral("#4cbbed") } });
+        const auto repair = ThemeEngine::patchTheme(path, current, ThemeEngine::parseQmlEntries(current.qml), {});
         check(repair.ok && repair.msg.contains(QLatin1String("already")),
               "reapplying existing colors refreshes stale caches instead of claiming nothing to do");
     }
@@ -364,6 +364,18 @@ int runPatchRegressionTests()
         component.setData(updated.toUtf8(), QUrl());
         std::unique_ptr<QObject> object(component.create());
         check(object != nullptr && skipped.isEmpty(), "edited QML compiles in Qt, not just a byte-pattern test");
+        const QString expression = QStringLiteral(
+            "import QtQuick\nQtObject { property color notice: true ? // choose foreground\n"
+            " '#abcdef'\n :\n '#123456'; property color other: '#987654' }\n");
+        const auto exprEntries = ThemeEngine::parseQmlEntries(expression);
+        const QString exprOut = ThemeEngine::buildQml(expression, exprEntries,
+            { { QStringLiteral("notice"), QStringLiteral("#a1b2c3") } }, true);
+        QQmlComponent exprComponent(&engine);
+        exprComponent.setData(exprOut.toUtf8(), QUrl());
+        std::unique_ptr<QObject> exprObject(exprComponent.create());
+        check(exprEntries.size() == 2 && exprObject
+                  && exprObject->property("notice").value<QColor>() == QColor(QStringLiteral("#a1b2c3")),
+              "multi-line ternary and its internal comment are replaced as one valid expression");
         ThemeEngine::buildQml(qml, entries, { { QStringLiteral("missingColor"), QStringLiteral("#abcdef") } },
                               true, &skipped);
         check(!skipped.isEmpty(), "missing staged properties are reported, not silently discarded");

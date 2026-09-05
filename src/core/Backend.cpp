@@ -320,7 +320,7 @@ QVariantMap Backend::patchThemeQml()
                       QStringLiteral("PATCH THEME is for the QML method; use Apply Selected for hex."),
                       QStringLiteral("orange"));
     }
-    if (m_edits.isEmpty())
+    if (m_edits.isEmpty() && !m_themeInfo.hasQrcNode)
         return result(false, QStringLiteral("Nothing to patch - set some colors first."),
                       QStringLiteral("orange"));
     if (themeFileChanged())
@@ -374,7 +374,7 @@ int Backend::applyPreset(const QString &id)
               .arg(already),
           QStringLiteral("blue"));
     if (matched.isEmpty())
-        doLog(QStringLiteral("This preset changes nothing - the EXE already has these colors."),
+        doLog(QStringLiteral("The EXE already has this palette. Press PATCH THEME to refresh its cache."),
               QStringLiteral("orange"));
     return matched.size();
 }

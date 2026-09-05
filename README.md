@@ -11,13 +11,13 @@ Qt Quick desktop customizer for BlueStacks / MSI App Player on Windows.
 
 The QML patcher validates Qt resource trees (14-byte v1 and 22-byte v2/v3 nodes), preserves neighboring resource headers, and uses memory-relative offsets when relocating a resource across PE sections. It refreshes the resource timestamp so a previous run's disk cache is rejected, and invalidates the theme's embedded compiled QML where identified. It does not globally disable Qt caching or delete application data.
 
-If an older patch already wrote the desired colors but BlueStacks still shows an old palette, stage those colors and patch again to refresh the cache. Ambiguous resource layouts and edits that cannot fit are reported instead of silently claiming success. Use the **Hex (old)** method for legacy builds without a QML theme.
+If an older patch already wrote the desired colors but BlueStacks still shows an old palette, click **Patch Theme** again (even without new edits) to refresh the cache. Ambiguous resource layouts and edits that cannot fit are reported instead of silently claiming success. Use the **Hex (old)** method for legacy builds without a QML theme.
 
 The original `.bak` is preserved. Theme edits are made against the current EXE, not a stale backup. Writes are checked and atomically replaced where supported; close BlueStacks and run the tool as administrator if Windows refuses access.
 
 ## FPS slider
 
-Supported targets:
+Supported targets (64-bit x86 Windows DLLs):
 
 - **Qt5QuickTemplates2.dll**
 - **Qt6QuickTemplates2.dll**

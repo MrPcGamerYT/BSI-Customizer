@@ -141,12 +141,9 @@ ColorToken splitColorToken(const QString &raw, int start)
             return tk;
         }
     }
-    int cut = t.indexOf(QStringLiteral("//"));
-    if (cut < 0)
-        cut = t.size();
-    QString tok = t.left(cut);
-    while (tok.endsWith(QLatin1Char(' ')) || tok.endsWith(QLatin1Char('\t')))
-        tok.chop(1);
+    // qmlExpressionEnd already excludes trailing comments. Internal comments
+    // in a multi-line expression are part of the splice and must not truncate it.
+    const QString tok = t.trimmed();
     if (tok.isEmpty())
         return {};
     tk.val = tok;
@@ -205,7 +202,8 @@ int qmlExpressionEnd(const QString &qml, int start)
 {
     QChar quote;
     bool escape = false;
-    int depth = 0;
+    int depth = 0, ternaries = 0;
+    QChar previous;
     for (int i = start; i < qml.size(); ++i) {
         const QChar c = qml.at(i);
         if (!quote.isNull()) {
@@ -225,12 +223,43 @@ int qmlExpressionEnd(const QString &qml, int start)
             if (depth == 0)
                 return i;
             --depth;
-        } else if (depth == 0 && (c == QLatin1Char(';') || c == QLatin1Char('\r')
-                                 || c == QLatin1Char('\n')
-                                 || (c == QLatin1Char('/') && i + 1 < qml.size()
-                                     && qml.at(i + 1) == QLatin1Char('/')))) {
+        } else if (c == QLatin1Char('/') && i + 1 < qml.size()
+                   && qml.at(i + 1) == QLatin1Char('*')) {
+            const int end = qml.indexOf(QStringLiteral("*/"), i + 2);
+            if (end < 0)
+                return qml.size();
+            i = end + 1;
+            continue;
+        } else if (c == QLatin1Char('/') && i + 1 < qml.size()
+                   && qml.at(i + 1) == QLatin1Char('/')) {
+            if (depth == 0 && ternaries == 0)
+                return i;
+            const int end = qml.indexOf(QLatin1Char('\n'), i + 2);
+            if (end < 0)
+                return qml.size();
+            i = end - 1;
+            continue;
+        } else if (depth == 0 && c == QLatin1Char('?')
+                   && (i + 1 >= qml.size() || (qml.at(i + 1) != QLatin1Char('?')
+                                              && qml.at(i + 1) != QLatin1Char('.')))
+                   && previous != QLatin1Char('?')) {
+            ++ternaries;
+        } else if (depth == 0 && c == QLatin1Char(':') && ternaries > 0) {
+            --ternaries;
+        } else if (depth == 0 && c == QLatin1Char(';')) {
             return i;
+        } else if (depth == 0 && (c == QLatin1Char('\r') || c == QLatin1Char('\n'))) {
+            int next = i + 1;
+            while (next < qml.size() && qml.at(next).isSpace())
+                ++next;
+            const bool continued = ternaries > 0
+                || QStringLiteral("?:,+-*/&|=.").contains(previous)
+                || (next < qml.size() && QStringLiteral("?:.&|").contains(qml.at(next)));
+            if (!continued)
+                return i;
         }
+        if (!c.isSpace())
+            previous = c;
     }
     return qml.size();
 }
@@ -1235,8 +1264,7 @@ ThemeEngine::PatchResult ThemeEngine::patchTheme(const QString &exePath, const T
 
     // Reapplying a palette also repairs old patches whose source colors are
     // correct but whose embedded/disk cache still contains the original theme.
-    const bool refreshOnly = q == live.qml && !edits.isEmpty()
-                             && live.mode == QLatin1String("zlib") && live.hasQrcNode;
+    const bool refreshOnly = q == live.qml && live.mode == QLatin1String("zlib") && live.hasQrcNode;
     if (q == live.qml && !refreshOnly) {
         return { false, skipped.isEmpty()
                             ? QStringLiteral("Nothing to patch - the EXE already contains these "
@@ -1425,7 +1453,7 @@ ThemeEngine::PatchResult ThemeEngine::patchTheme(const QString &exePath, const T
     const bool refreshed = QtResources::refreshTimestamp(data, live.resource);
     const int units = QtResources::invalidateThemeUnits(data);
     QString cacheError;
-    if (!QtResources::invalidateCompressedThemeCaches(data, live.resource, &cacheError))
+    if (!QtResources::invalidateThemeCacheResources(data, live.resource, &cacheError))
         return { false, cacheError };
     if (refreshed)
         log(logger, QStringLiteral("Refreshed the QML resource timestamp: old disk-cached "

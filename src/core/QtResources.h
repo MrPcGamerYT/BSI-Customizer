@@ -44,6 +44,6 @@ bool refreshTimestamp(QByteArray &data, const Link &link);
 // to UiThemeObject.qml. They otherwise take precedence over edited QML source,
 // even with the disk cache empty. Never disable the entire Qt cache globally.
 int invalidateThemeUnits(QByteArray &data);
-bool invalidateCompressedThemeCaches(QByteArray &data, const Link &link, QString *error);
+bool invalidateThemeCacheResources(QByteArray &data, const Link &link, QString *error);
 
 } // namespace QtResources

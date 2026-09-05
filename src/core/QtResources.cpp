@@ -67,13 +67,17 @@ QString readName(const QByteArray &data, qint64 off)
     if (len == 0 || len > 1024 || !inRange(data, off + 6, qint64(len) * 2))
         return {};
     QString name;
+    quint32 hash = 0;
     for (int i = 0; i < len; ++i) {
         const QChar c(be16(data, off + 6 + i * 2));
         if (c.isNull() || c == QLatin1Char('/') || c == QLatin1Char('\\') || c.unicode() < 32)
             return {};
         name += c;
+        hash = (hash << 4) + c.unicode();
+        hash ^= (hash & 0xf0000000) >> 23;
+        hash &= 0x0fffffff;
     }
-    return name;
+    return hash == be32(data, off + 2) ? name : QString();
 }
 
 QByteArray nameBytes(const QString &name)
@@ -291,7 +295,7 @@ int invalidateThemeUnits(QByteArray &data)
     return changed;
 }
 
-bool invalidateCompressedThemeCaches(QByteArray &data, const Link &link, QString *error)
+bool invalidateThemeCacheResources(QByteArray &data, const Link &link, QString *error)
 {
     for (const auto &cache : link.themeCaches) {
         if (cache.second != 0 && cache.second != 1) {
