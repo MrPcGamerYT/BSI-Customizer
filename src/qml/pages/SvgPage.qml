@@ -202,7 +202,7 @@ Item {
 
             ListView {
                 id: svgList
-                Layout.preferredWidth: 230
+                Layout.preferredWidth: 270
                 Layout.fillHeight: true
                 clip: true
                 model: backend.svgInfos
@@ -217,58 +217,89 @@ Item {
                     // hex colors inside this blob, document order, no duplicates
                     readonly property var cols: modelData.colors
                     width: svgList.width
-                    height: 46
+                    height: 52
                     radius: 8
                     color: page.selectedIndex === index ? Theme.accentSoft : Theme.card
                     border.width: 1
                     border.color: page.selectedIndex === index ? Theme.accent : Theme.border
 
-                    ColumnLayout {
+                    RowLayout {
                         anchors.fill: parent
-                        anchors.leftMargin: 10
+                        anchors.leftMargin: 8
                         anchors.rightMargin: 10
-                        spacing: 3
+                        spacing: 8
 
-                        RowLayout {
-                            Layout.fillWidth: true
-                            spacing: 6
+                        // live thumbnail of the icon itself
+                        Rectangle {
+                            Layout.preferredWidth: 38
+                            Layout.preferredHeight: 38
+                            Layout.alignment: Qt.AlignVCenter
+                            radius: 6
+                            color: "#80808080"     // neutral behind light AND dark icons
+                            border.width: 1
+                            border.color: Theme.border
 
-                            Text {
-                                text: "SVG #" + String(index).padStart(3, "0")
-                                color: Theme.text
-                                font.pixelSize: 12
-                                font.family: "Consolas"
-                            }
-                            Repeater {
-                                model: Math.min(svgRow.cols.length, 3)
-                                delegate: Rectangle {
-                                    required property int index
-                                    Layout.preferredWidth: 9
-                                    Layout.preferredHeight: 9
-                                    radius: 4
-                                    color: svgRow.cols[index]
-                                    border.width: 1
-                                    border.color: Theme.border
-                                }
-                            }
-                            Item { Layout.fillWidth: true }
-                            Text {
-                                visible: modelData.hint !== ""
-                                text: modelData.hint
-                                color: Theme.accentText
-                                font.pixelSize: 9
-                                font.weight: Font.DemiBold
+                            Image {
+                                anchors.fill: parent
+                                anchors.margins: 4
+                                fillMode: Image.PreserveAspectFit
+                                smooth: true
+                                asynchronous: true
+                                sourceSize: Qt.size(64, 64)
+                                source: svgRow.modelData.svg !== undefined
+                                        && svgRow.modelData.svg !== ""
+                                        ? "data:image/svg+xml;utf8,"
+                                          + encodeURIComponent(svgRow.modelData.svg)
+                                        : ""
                             }
                         }
 
-                        Text {
+                        ColumnLayout {
                             Layout.fillWidth: true
-                            text: modelData.size + " bytes"
-                                  + (svgRow.cols.length > 0
-                                     ? "  ·  " + svgRow.cols.length + " colors" : "")
-                            color: Theme.textDim
-                            font.pixelSize: 10
-                            elide: Text.ElideRight
+                            Layout.alignment: Qt.AlignVCenter
+                            spacing: 3
+
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: 6
+
+                                Text {
+                                    text: "SVG #" + String(svgRow.index).padStart(3, "0")
+                                    color: Theme.text
+                                    font.pixelSize: 12
+                                    font.family: "Consolas"
+                                }
+                                Repeater {
+                                    model: Math.min(svgRow.cols.length, 3)
+                                    delegate: Rectangle {
+                                        required property int index
+                                        Layout.preferredWidth: 9
+                                        Layout.preferredHeight: 9
+                                        radius: 4
+                                        color: svgRow.cols[index]
+                                        border.width: 1
+                                        border.color: Theme.border
+                                    }
+                                }
+                                Item { Layout.fillWidth: true }
+                                Text {
+                                    visible: svgRow.modelData.hint !== ""
+                                    text: svgRow.modelData.hint
+                                    color: Theme.accentText
+                                    font.pixelSize: 9
+                                    font.weight: Font.DemiBold
+                                }
+                            }
+
+                            Text {
+                                Layout.fillWidth: true
+                                text: svgRow.modelData.size + " bytes"
+                                      + (svgRow.cols.length > 0
+                                         ? "  ·  " + svgRow.cols.length + " colors" : "")
+                                color: Theme.textDim
+                                font.pixelSize: 10
+                                elide: Text.ElideRight
+                            }
                         }
                     }
 
