@@ -679,7 +679,7 @@ int runPatchRegressionTests()
         QByteArray relocated;
         check(!X64Prologue::relocate(QByteArray::fromHex("488b0510000000"), 0x1000, 0xf0000000u, &relocated),
               "out-of-range RIP-relative relocation is refused");
-        check(!FpsPatcher::analyze(sliderDll(false).left(0x1303)).ok(), "truncated setter bytes do not escape executable/file bounds");
+        check(!FpsPatcher::analyze(sliderDll(false).left(0x1303)).ok, "truncated setter bytes do not escape executable/file bounds");
         auto nonExecutable = sliderDll(false);
         putLe32(nonExecutable, 0x1ac, 0x40000040);
         check(!FpsPatcher::analyze(nonExecutable).ok, "export bytes in a non-executable section are not patched");
