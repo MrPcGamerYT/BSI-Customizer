@@ -470,6 +470,9 @@ QVariantList Backend::svgInfos() const
                              { "size", b.size },
                              { "offset", b.offset },
                              { "preview", SvgEngine::preview(b.data) },
+                             // Full text so the QML list can render a live
+                             // thumbnail of each icon (data: URI Image source).
+                             { "svg", QString::fromLatin1(b.data) },
                              { "colors", SvgEngine::colorsIn(b.data) },
                              { "hint", hint } };
     }
