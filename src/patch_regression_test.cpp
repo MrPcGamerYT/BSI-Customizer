@@ -602,96 +602,125 @@ int runPatchRegressionTests()
 
 #if defined(Q_OS_WIN) && defined(Q_PROCESSOR_X86_64)
     {
-        const QString sdkDll = QDir(QLibraryInfo::path(QLibraryInfo::BinariesPath))
-                                   .filePath(QStringLiteral("Qt6QuickTemplates2.dll"));
-        if (QFileInfo::exists(sdkDll)) {
-            std::printf("[fps-sdk] real Qt6QuickTemplates2.dll (read-only source, temporary patch copy)\n");
-            const auto original = read(sdkDll);
+#ifdef BSI_QT5_REFERENCE_DLL
+        const QString overrideQt5 = qEnvironmentVariable("BSI_FPS_QT5_DLL");
+        const QString qt5Dll = overrideQt5.isEmpty() ? QString::fromUtf8(BSI_QT5_REFERENCE_DLL) : overrideQt5;
+        // CI cannot skip this check. A distributed executable need not retain
+        // its build machine's fixture path; an explicit local override is required.
+        const bool requireQt5 = qEnvironmentVariable("GITHUB_ACTIONS") == QLatin1String("true")
+                                || !overrideQt5.isEmpty() || QFileInfo::exists(qt5Dll);
+#else
+        const QString qt5Dll = qEnvironmentVariable("BSI_FPS_QT5_DLL");
+        const bool requireQt5 = !qt5Dll.isEmpty(); // explicitly supplied local reference
+#endif
+        struct Reference { QString name, path; QByteArray core; bool required; };
+        const QList<Reference> references {
+            { QStringLiteral("Qt5QuickTemplates2.dll"), qt5Dll, "qt5core.dll", requireQt5 },
+            { QStringLiteral("Qt6QuickTemplates2.dll"),
+              QDir(QLibraryInfo::path(QLibraryInfo::BinariesPath)).filePath(QStringLiteral("Qt6QuickTemplates2.dll")),
+              "qt6core.dll", qEnvironmentVariable("GITHUB_ACTIONS") == QLatin1String("true") }
+        };
+        for (const auto &reference : references) {
+            std::printf("[fps-sdk] real %s (read-only source, temporary patch copy)\n", qPrintable(reference.name));
+            const bool exists = !reference.path.isEmpty() && QFileInfo::exists(reference.path);
+            if (reference.required)
+                check(exists, "required Qt reference DLL is present (not a skipped test)");
+            if (!exists) {
+                std::printf("  SKIP  optional %s reference is not present\n", qPrintable(reference.name));
+                continue;
+            }
+            const auto original = read(reference.path);
+            check(QFileInfo(reference.path).fileName().compare(reference.name, Qt::CaseInsensitive) == 0
+                      && original.toLower().contains(reference.core),
+                  "reference is from the expected Qt major, not merely a renamed DLL");
             const auto a = FpsPatcher::analyze(original);
-            const bool cleanSetters = a.targets.size() == 2
+            const bool cleanSetters = a.ok && a.state == QLatin1String("clean") && a.targets.size() == 2
                 && std::all_of(a.targets.cbegin(), a.targets.cend(), [](const auto &target) {
                        return target.state == QLatin1String("clean");
                    });
             if (!cleanSetters)
                 std::printf("    %s\n", qPrintable(a.msg));
-            check(cleanSetters, "both real Qt SDK setter prologues are decoded correctly");
-            if (a.ok && cleanSetters) {
-                const QString directory = temp.filePath(QStringLiteral("sdk-copy"));
-                check(QDir().mkpath(directory), "create isolated Qt SDK copy directory");
-                const QString path = QDir(directory).filePath(QStringLiteral("Qt6QuickTemplates2.dll"));
-                check(write(path, original), "copy SDK DLL without touching the installed or loaded library");
-                const auto patched = FpsPatcher::patch(path, 720);
-                if (!patched.ok)
-                    std::printf("    %s\n", qPrintable(patched.msg));
-                check(patched.ok && hasOnlyMaxSlots(read(path)), "patch a real Qt DLL copy and verify both detours");
-                check(FpsPatcher::patch(path, 480).ok, "repatch the real Qt DLL copy from its matching backup");
-                check(FpsPatcher::restore(path).ok && read(path) == original, "restore the real Qt DLL copy byte-for-byte");
-                check(read(sdkDll) == original, "installed Qt library remains untouched");
-            }
-        } else {
-            std::printf("  SKIP  optional Qt SDK DLL is not present\n");
+            check(cleanSetters, "both real Qt setter prologues and executable padding are supported");
+            if (!cleanSetters)
+                continue;
+            const QString directory = temp.filePath(QStringLiteral("sdk-") + reference.name.left(3).toLower());
+            check(QDir().mkpath(directory), "create isolated Qt DLL copy directory");
+            const QString path = QDir(directory).filePath(reference.name);
+            check(write(path, original), "copy Qt DLL without touching the installed or loaded library");
+            const auto patched = FpsPatcher::patch(path, 720);
+            if (!patched.ok)
+                std::printf("    %s\n", qPrintable(patched.msg));
+            check(patched.ok && hasOnlyMaxSlots(read(path)), "patch real Qt DLL copy and verify both high-FPS-only detours");
+            check(FpsPatcher::patch(path, 480).ok, "repatch real Qt DLL copy from its matching backup");
+            check(FpsPatcher::restore(path).ok && read(path) == original, "restore real Qt DLL copy byte-for-byte");
+            check(read(reference.path) == original, "original Qt reference library remains untouched");
         }
     }
 #endif
 
     std::printf("[fps-prologues] compiler variants, RIP-relative instructions, thunks and partial recovery\n");
     for (const bool mingw : { false, true }) {
-        const QString path = temp.filePath(mingw ? QStringLiteral("Qt5QuickTemplates2.dll") : QStringLiteral("Qt6QuickTemplates2.dll"));
-        for (int variant = 0; variant < 9; ++variant) {
-            QFile::remove(path + QStringLiteral(".bak"));
-            const auto clean = differentPrologueDll(mingw, variant);
-            write(path, clean);
-            const auto analysis = FpsPatcher::analyze(clean);
-            check(analysis.ok && analysis.state == QLatin1String("clean") && analysis.targets.size() == 2,
-                  "alternate MSVC/MinGW entry sequences are supported without a fixed five-byte signature");
-            const auto result = FpsPatcher::patch(path, 720);
-            if (!result.ok)
-                std::printf("    %s\n", qPrintable(result.msg));
-            check(result.ok && hasOnlyMaxSlots(read(path)), "complete instructions are replayed by a verified max-only detour");
-            checkNativeMaxOnly(read(path), 720);
-            if (variant == 7)
-                check(read(path).mid(0x1300, 4) == clean.mid(0x1300, 4), "CET landing instruction remains at the exported entry");
-            check(FpsPatcher::patch(path, 480).ok, "variable-length/RIP-relative prologues can be repatched");
-            checkNativeMaxOnly(read(path), 480);
-            const auto partial = makePartialFpsPatch(read(path));
-            const auto partialAnalysis = FpsPatcher::analyze(partial);
-            check(partialAnalysis.ok && partialAnalysis.state == QLatin1String("partial"),
-                  "mixed clean and known-patched setters are recoverable, not unsupported");
-            write(path, partial);
-            check(FpsPatcher::patch(path, 360).ok && hasOnlyMaxSlots(read(path)),
-                  "a partial patch is safely rebuilt from the matching original backup");
-            checkNativeMaxOnly(read(path), 360);
-            check(FpsPatcher::restore(path).ok && read(path) == clean, "all variable-length bytes are restored exactly");
+        for (const QString &name : { QStringLiteral("Qt5QuickTemplates2.dll"), QStringLiteral("Qt6QuickTemplates2.dll") }) {
+            const QString path = temp.filePath(name);
+            std::printf("[fps-matrix] %s / %s exports\n", qPrintable(name), mingw ? "MinGW" : "MSVC");
+            for (int variant = 0; variant < 9; ++variant) {
+                QFile::remove(path + QStringLiteral(".bak"));
+                const auto clean = differentPrologueDll(mingw, variant);
+                write(path, clean);
+                const auto analysis = FpsPatcher::analyze(clean);
+                check(analysis.ok && analysis.state == QLatin1String("clean") && analysis.targets.size() == 2,
+                      "alternate MSVC/MinGW entry sequences are supported without a fixed five-byte signature");
+                const auto result = FpsPatcher::patch(path, 720);
+                if (!result.ok)
+                    std::printf("    %s\n", qPrintable(result.msg));
+                check(result.ok && hasOnlyMaxSlots(read(path)), "complete instructions are replayed by a verified max-only detour");
+                checkNativeMaxOnly(read(path), 720);
+                if (variant == 7)
+                    check(read(path).mid(0x1300, 4) == clean.mid(0x1300, 4), "CET landing instruction remains at the exported entry");
+                check(FpsPatcher::patch(path, 480).ok, "variable-length/RIP-relative prologues can be repatched");
+                checkNativeMaxOnly(read(path), 480);
+                const auto partial = makePartialFpsPatch(read(path));
+                const auto partialAnalysis = FpsPatcher::analyze(partial);
+                check(partialAnalysis.ok && partialAnalysis.state == QLatin1String("partial"),
+                      "mixed clean and known-patched setters are recoverable, not unsupported");
+                write(path, partial);
+                check(FpsPatcher::patch(path, 360).ok && hasOnlyMaxSlots(read(path)),
+                      "a partial patch is safely rebuilt from the matching original backup");
+                checkNativeMaxOnly(read(path), 360);
+                check(FpsPatcher::restore(path).ok && read(path) == clean, "all variable-length bytes are restored exactly");
 
-            auto stale = clean;
-            stale[0x1800] = char(0x42);
-            write(path, partial);
-            write(path + QStringLiteral(".bak"), stale);
-            check(!FpsPatcher::patch(path, 480).ok && read(path) == partial,
-                  "partial recovery still refuses a stale backup without changing the DLL");
-            QFile::remove(path + QStringLiteral(".bak"));
-            check(!FpsPatcher::patch(path, 480).ok && read(path) == partial
-                      && !QFile::exists(path + QStringLiteral(".bak")),
-                  "partial recovery never creates a backup from an already-patched DLL");
+                auto stale = clean;
+                stale[0x1800] = char(0x42);
+                write(path, partial);
+                write(path + QStringLiteral(".bak"), stale);
+                check(!FpsPatcher::patch(path, 480).ok && read(path) == partial,
+                      "partial recovery still refuses a stale backup without changing the DLL");
+                QFile::remove(path + QStringLiteral(".bak"));
+                check(!FpsPatcher::patch(path, 480).ok && read(path) == partial
+                          && !QFile::exists(path + QStringLiteral(".bak")),
+                      "partial recovery never creates a backup from an already-patched DLL");
+            }
         }
     }
     for (const bool shortJump : { false, true }) {
-        const QString path = temp.filePath(QStringLiteral("Qt6QuickTemplates2.dll"));
-        QFile::remove(path + QStringLiteral(".bak"));
-        const auto clean = thunkDll(shortJump);
-        const auto analysis = FpsPatcher::analyze(clean);
-        check(analysis.ok && analysis.targets.size() == 2 && analysis.targets[0].rva != analysis.targets[0].entryRva,
-              "validated E9/EB compiler entry thunks resolve to the real setter");
-        write(path, clean);
-        check(FpsPatcher::patch(path, 720).ok, "patch the real body, not the compiler's jump stub");
-        check(read(path).mid(0x1300, 10) == clean.mid(0x1300, 10), "original exported thunk stays intact");
-        checkNativeMaxOnly(read(path), 720);
-        check(FpsPatcher::patch(path, 480).ok, "compiler-thunk patches can be recognized and repatched");
-        checkNativeMaxOnly(read(path), 480);
-        check(FpsPatcher::restore(path).ok && read(path) == clean, "compiler-thunk patches restore the whole DLL exactly");
-        auto unverified = clean;
-        putLe32(unverified, 0x98 + 140, 0);
-        check(!FpsPatcher::analyze(unverified).ok, "an unverified entry jump is not treated as pristine compiler code");
+        for (const QString &name : { QStringLiteral("Qt5QuickTemplates2.dll"), QStringLiteral("Qt6QuickTemplates2.dll") }) {
+            const QString path = temp.filePath(name);
+            QFile::remove(path + QStringLiteral(".bak"));
+            const auto clean = thunkDll(shortJump);
+            const auto analysis = FpsPatcher::analyze(clean);
+            check(analysis.ok && analysis.targets.size() == 2 && analysis.targets[0].rva != analysis.targets[0].entryRva,
+                  "validated E9/EB compiler entry thunks resolve to the real setter");
+            write(path, clean);
+            check(FpsPatcher::patch(path, 720).ok, "patch the real body, not the compiler's jump stub");
+            check(read(path).mid(0x1300, 10) == clean.mid(0x1300, 10), "original exported thunk stays intact");
+            checkNativeMaxOnly(read(path), 720);
+            check(FpsPatcher::patch(path, 480).ok, "compiler-thunk patches can be recognized and repatched");
+            checkNativeMaxOnly(read(path), 480);
+            check(FpsPatcher::restore(path).ok && read(path) == clean, "compiler-thunk patches restore the whole DLL exactly");
+            auto unverified = clean;
+            putLe32(unverified, 0x98 + 140, 0);
+            check(!FpsPatcher::analyze(unverified).ok, "an unverified entry jump is not treated as pristine compiler code");
+        }
     }
     {
         const QString path = temp.filePath(QStringLiteral("Qt5QuickTemplates2.dll"));

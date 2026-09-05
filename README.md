@@ -34,7 +34,7 @@ If Analyze reports a **recognized partial FPS patch**, keep the matching clean `
 
 ## Build and verify
 
-Requires CMake 3.21+, C++17, and Qt 6.5+ with Core, Gui, Qml, Quick, QuickControls2, and Svg.
+Requires CMake 3.21+, C++17, and Qt 6.5+ with Core, Gui, Qml, Quick, QuickControls2, and Svg. **Qt 6 builds the customizer UI; it does not limit FPS patching to Qt 6 installations. Qt 5 and Qt 6 target DLLs use the same patching engine.**
 
 ```sh
 cmake -B build -DCMAKE_BUILD_TYPE=Release
@@ -48,7 +48,9 @@ $env:QT_QPA_PLATFORM = "offscreen"
 Start-Process build/Release/BSI-Customizer.exe -ArgumentList '--selftest' -Wait
 ```
 
-The self-test covers resource detection/relocation, actual Qt QML loading in separate processes with disk caching enabled, repeated patch–launch cycles, embedded cache invalidation, palette parsing, and both FPS DLLs with MSVC/MinGW export names. On Windows x64 it executes controlled setter fixtures to verify that only 240 FPS is replaced while 60 FPS and other values (including NaN) pass unchanged. It also tests multiple compiler prologue styles, instruction boundaries, observable RIP-relative relocation, verified entry thunks, partial-patch recovery, legacy upgrades, repatching and exact restoration. When the Qt SDK DLL is available, the Windows test also checks its real setter prologues and patches/restores an isolated copy without loading the modified DLL. No installed BlueStacks instance is exercised. GitHub CI runs the Windows build and self-test on pull requests.
+The self-test covers resource detection/relocation, actual Qt QML loading in separate processes with disk caching enabled, repeated patch–launch cycles, embedded cache invalidation, palette parsing, and both FPS DLLs with MSVC/MinGW export names. On Windows x64 it executes controlled setter fixtures to verify that only 240 FPS is replaced while 60 FPS and other values (including NaN) pass unchanged. It also tests multiple compiler prologue styles, instruction boundaries, observable RIP-relative relocation, verified entry thunks, partial-patch recovery, legacy upgrades, repatching and exact restoration. Windows CI requires successful patch/repatch/restore checks on real **Qt 5.15.2** and **Qt 6.8.3** DLL copies, as well as the full Qt5/Qt6 × MSVC/MinGW fixture matrix. Neither modified DLL is loaded, and both originals remain untouched. No installed BlueStacks instance is exercised. GitHub CI runs the Windows build and self-test on pull requests.
+
+The Qt 5 test reference is extracted from the official PySide2 5.15.2.1 Windows x64 wheel with pinned SHA-256 checks for both the archive and DLL. It stays in the ignored build directory and is never installed, linked, executed, committed, or bundled with the app. `BSI_TEST_QT5_REFERENCE` defaults ON in Windows GitHub CI and OFF for ordinary/offline builds. To run the same real-Qt5 check locally, configure with `-DBSI_TEST_QT5_REFERENCE=ON`. Alternatively, an ordinary build's `--selftest` accepts `BSI_FPS_QT5_DLL` pointing to a clean `Qt5QuickTemplates2.dll`; only a temporary copy is patched.
 
 For an unsupported real EXE, collect a read-only diagnostic report:
 
