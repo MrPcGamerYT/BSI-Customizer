@@ -13,6 +13,8 @@
 #include <QDir>
 #include <QDataStream>
 #include <QFile>
+#include <QFileInfo>
+#include <QLibraryInfo>
 #include <QProcess>
 #include <QProcessEnvironment>
 #include <QQmlComponent>
@@ -597,6 +599,40 @@ int runPatchRegressionTests()
                               true, &skipped);
         check(!skipped.isEmpty(), "missing staged properties are reported, not silently discarded");
     }
+
+#if defined(Q_OS_WIN) && defined(Q_PROCESSOR_X86_64)
+    {
+        const QString sdkDll = QDir(QLibraryInfo::path(QLibraryInfo::BinariesPath))
+                                   .filePath(QStringLiteral("Qt6QuickTemplates2.dll"));
+        if (QFileInfo::exists(sdkDll)) {
+            std::printf("[fps-sdk] real Qt6QuickTemplates2.dll (read-only source, temporary patch copy)\n");
+            const auto original = read(sdkDll);
+            const auto a = FpsPatcher::analyze(original);
+            const bool cleanSetters = a.targets.size() == 2
+                && std::all_of(a.targets.cbegin(), a.targets.cend(), [](const auto &target) {
+                       return target.state == QLatin1String("clean");
+                   });
+            if (!cleanSetters)
+                std::printf("    %s\n", qPrintable(a.msg));
+            check(cleanSetters, "both real Qt SDK setter prologues are decoded correctly");
+            if (a.ok && cleanSetters) {
+                const QString directory = temp.filePath(QStringLiteral("sdk-copy"));
+                check(QDir().mkpath(directory), "create isolated Qt SDK copy directory");
+                const QString path = QDir(directory).filePath(QStringLiteral("Qt6QuickTemplates2.dll"));
+                check(write(path, original), "copy SDK DLL without touching the installed or loaded library");
+                const auto patched = FpsPatcher::patch(path, 720);
+                if (!patched.ok)
+                    std::printf("    %s\n", qPrintable(patched.msg));
+                check(patched.ok && hasOnlyMaxSlots(read(path)), "patch a real Qt DLL copy and verify both detours");
+                check(FpsPatcher::patch(path, 480).ok, "repatch the real Qt DLL copy from its matching backup");
+                check(FpsPatcher::restore(path).ok && read(path) == original, "restore the real Qt DLL copy byte-for-byte");
+                check(read(sdkDll) == original, "installed Qt library remains untouched");
+            }
+        } else {
+            std::printf("  SKIP  optional Qt SDK DLL is not present\n");
+        }
+    }
+#endif
 
     std::printf("[fps-prologues] compiler variants, RIP-relative instructions, thunks and partial recovery\n");
     for (const bool mingw : { false, true }) {
