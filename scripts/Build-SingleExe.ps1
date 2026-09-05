@@ -35,12 +35,14 @@ $qtBin = Join-Path $QtPrefix 'bin'
 $deploy = Join-Path $qtBin 'windeployqt.exe'
 if (-not (Test-Path -LiteralPath $deploy)) { throw "windeployqt not found in $qtBin" }
 # Do not deploy/run vc_redist.exe. The CRT is copied app-locally below.
+$deployLog = Join-Path $BuildRoot 'windeployqt.log'
 & $deploy --release --no-translations --no-compiler-runtime --qmldir (Join-Path $repo 'src/qml') `
-    --dir $stage (Join-Path $stage 'BSI-Customizer.exe')
+    --dir $stage (Join-Path $stage 'BSI-Customizer.exe') *> $deployLog
 $deployExit = $LASTEXITCODE
 if ($deployExit -ne 0) {
     # Qt can warn about BSICustomizer, which is compiled into the executable.
     # Never use this warning as a substitute for dependency/launch checks.
+    Get-Content -LiteralPath $deployLog -Tail 30 | Write-Host
     Write-Warning "windeployqt exited $deployExit; validating the staged dependency closure and real launch below"
 }
 
@@ -155,8 +157,15 @@ if ($cabDirectory -match '[^\x20-\x7e]') { throw 'Use an ASCII build directory f
 $ddf = Join-Path $BuildRoot 'payload.ddf'
 $lines | Set-Content -LiteralPath $ddf -Encoding ascii
 Push-Location $stage
-try { Invoke-Checked (Join-Path $env:SystemRoot 'System32/makecab.exe') @('/F', $ddf) }
-finally { Pop-Location }
+try {
+    $cabLog = Join-Path $BuildRoot 'makecab.log'
+    & (Join-Path $env:SystemRoot 'System32/makecab.exe') /F $ddf *> $cabLog
+    if ($LASTEXITCODE -ne 0) {
+        Get-Content -LiteralPath $cabLog -Tail 40 | Write-Host
+        throw "makecab failed with exit code $LASTEXITCODE"
+    }
+    Get-Content -LiteralPath $cabLog -Tail 8 | Write-Host
+} finally { Pop-Location }
 $cabinets = @(Get-ChildItem -LiteralPath $cabDirectory -Filter '*.cab' -File)
 if ($cabinets.Count -ne 1 -or $cabinets[0].Name -ne 'payload.cab') { throw 'Packaging must produce one complete cabinet' }
 
@@ -175,6 +184,9 @@ $destination = Join-Path $OutputDirectory "BSI-Customizer-$Version-win64.exe"
 Copy-Item -LiteralPath $launcher -Destination $destination -Force
 & (Join-Path $PSScriptRoot 'Test-Manifest.ps1') -ExecutablePath $destination
 $sha = (Get-FileHash -Algorithm SHA256 -LiteralPath $destination).Hash.ToLowerInvariant()
+# The CAB/EXE now owns the payload. Remove the intermediate deployment tree;
+# older build-output discovery must not mistake its app for the SDK test build.
+Remove-Item -LiteralPath $stage -Recurse -Force
 Write-Host "ONE-FILE EXE: $destination"
 Write-Host "SHA256: $sha"
 Write-Host "Payload files: $($files.Count). The only distributable is the EXE above."

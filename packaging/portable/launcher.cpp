@@ -5,7 +5,6 @@
 #include <bcrypt.h>
 #include <sddl.h>
 #include <shellapi.h>
-#include <fdi.h>
 
 #include <algorithm>
 #include <cstdint>
@@ -18,6 +17,7 @@
 #include <set>
 #include <string>
 #include <vector>
+#include <fdi.h>
 #include "payload.h"
 
 namespace {
