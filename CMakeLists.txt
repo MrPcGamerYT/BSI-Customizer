@@ -21,6 +21,9 @@ qt_add_executable(BSICustomizer
     src/core/PatchFile.cpp
     src/core/QtResources.h
     src/core/QtResources.cpp
+    src/core/QtResourcePatching.cpp
+    src/core/QtResourceRegistration.h
+    src/core/QtResourceRegistration.cpp
     src/core/ByteUtils.h
     src/core/PeUtils.h
     src/core/PeUtils.cpp
@@ -164,3 +167,30 @@ add_custom_command(TARGET BSICustomizer POST_BUILD
         "$<TARGET_FILE_DIR:BSICustomizer>/THIRD-PARTY-NOTICES.txt"
 )
 install(FILES src/third_party/hde64/LICENSE.txt DESTINATION bin RENAME THIRD-PARTY-NOTICES.txt)
+
+# Packaging belongs to the build graph as well as the release workflow. This
+# allows the existing Windows CI build to validate the one-file artifact.
+set(_bsi_portable_default OFF)
+if(WIN32 AND "$ENV{GITHUB_ACTIONS}" STREQUAL "true")
+    set(_bsi_portable_default ON)
+endif()
+option(BSI_BUILD_PORTABLE "Build and smoke-test the single-file portable EXE" ${_bsi_portable_default})
+if(BSI_BUILD_PORTABLE)
+    if(NOT WIN32 OR NOT MSVC OR NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
+        message(FATAL_ERROR "BSI_BUILD_PORTABLE requires Windows x64 and MSVC")
+    endif()
+    find_program(BSI_PWSH pwsh REQUIRED)
+    get_filename_component(_bsi_qt_prefix "${Qt6_DIR}/../../.." ABSOLUTE)
+    set(BSI_PORTABLE_EXE "${CMAKE_CURRENT_BINARY_DIR}/artifacts/BSI-Customizer-${PROJECT_VERSION}-win64.exe")
+    add_custom_target(BSI-Portable ALL
+        COMMAND "${BSI_PWSH}" -NoProfile -File "${CMAKE_CURRENT_SOURCE_DIR}/scripts/Build-SingleExe.ps1"
+            -AppExecutable "$<TARGET_FILE:BSICustomizer>" -QtPrefix "${_bsi_qt_prefix}"
+            -Version "${PROJECT_VERSION}" -BuildRoot "${CMAKE_CURRENT_BINARY_DIR}/portable"
+            -OutputDirectory "${CMAKE_CURRENT_BINARY_DIR}/artifacts"
+        COMMAND "${BSI_PWSH}" -NoProfile -File "${CMAKE_CURRENT_SOURCE_DIR}/scripts/Test-SingleExe.ps1"
+            -ExecutablePath "${BSI_PORTABLE_EXE}"
+        DEPENDS BSICustomizer
+        BYPRODUCTS "${BSI_PORTABLE_EXE}"
+        USES_TERMINAL VERBATIM
+    )
+endif()

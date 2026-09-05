@@ -681,19 +681,25 @@ QVariantMap Backend::integrityCheck()
         color = QStringLiteral("red");
     else if (a.state == QLatin1String("patched") || a.state == QLatin1String("absent"))
         color = QStringLiteral("green");
-    return result(a.ok, a.msg, color);
+    auto reply = result(a.ok, a.msg, color);
+    reply.insert(QStringLiteral("state"), a.state);
+    return reply;
 }
 
 QVariantMap Backend::integrityPatch()
 {
     const auto r = IntegrityPatcher::patch(m_settings->exePath());
-    return result(r.ok, r.msg, QStringLiteral("green"));
+    auto reply = result(r.ok, r.msg, r.ok ? QStringLiteral("green") : QStringLiteral("red"));
+    reply.insert(QStringLiteral("state"), r.ok ? QStringLiteral("patched") : QStringLiteral("error"));
+    return reply;
 }
 
 QVariantMap Backend::integrityRestore()
 {
     const auto r = IntegrityPatcher::restore(m_settings->exePath());
-    return result(r.ok, r.msg, QStringLiteral("green"));
+    auto reply = result(r.ok, r.msg, r.ok ? QStringLiteral("green") : QStringLiteral("red"));
+    reply.insert(QStringLiteral("state"), r.ok ? QStringLiteral("clean") : QStringLiteral("error"));
+    return reply;
 }
 
 // -------------------------------------------------------------- boot video

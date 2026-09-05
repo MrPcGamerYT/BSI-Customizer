@@ -77,7 +77,7 @@ QByteArray inflateLoose(const QByteArray &rawStream, qint64 sizeHint)
 
 QList<qint64> findMagicOffsets(const QByteArray &data)
 {
-    static const char magics[3][2] = { { '\x78', '\xDA' }, { '\x78', '\x9C' }, { '\x78', '\x01' } };
+    static const char magics[4][2] = { { '\x78', '\xDA' }, { '\x78', '\x9C' }, { '\x78', '\x01' }, { '\x78', '\x5E' } };
     QList<qint64> out;
     for (const auto &m : magics) {
         qsizetype pos = 0;

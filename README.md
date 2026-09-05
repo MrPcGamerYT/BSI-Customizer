@@ -2,6 +2,17 @@
 
 Qt Quick desktop customizer for BlueStacks / MSI App Player on Windows.
 
+## Single portable EXE
+
+Release output is **`BSI-Customizer-<version>-win64.exe`**, not an installer.
+The app, Qt/QML plugins, SVG support, and VC runtime DLLs are included inside it.
+A native launcher unpacks into a private temporary directory, runs the app, and
+cleans up on normal exit. No runtime download or installation is performed.
+See [the full portable workflow/build guide](docs/PORTABLE.md) for Actions,
+local builds, clean-environment tests, temporary-file behavior, and license/DLL
+extraction. GitHub Releases provide the EXE directly; Actions wraps its single
+EXE artifact in a transport ZIP.
+
 ## Theme patching
 
 1. Select the **HD-Player.exe from the installation you actually launch**.
@@ -14,6 +25,14 @@ The QML patcher validates Qt resource trees (14-byte v1 and 22-byte v2/v3 nodes)
 If an older patch already wrote the desired colors but BlueStacks still shows an old palette, click **Patch Theme** again (even without new edits) to refresh the cache. Ambiguous resource layouts and edits that cannot fit are reported instead of silently claiming success. Use the **Hex (old)** method for legacy builds without a QML theme.
 
 The original `.bak` is preserved. Theme edits are made against the current EXE, not a stale backup. Writes are checked and atomically replaced where supported; close BlueStacks and run the tool as administrator if Windows refuses access.
+
+## Boot video and integrity
+
+Boot patching uses the selected installation's `Assets/Promo.mp4`, not a drive-root URL. It updates an existing `Video`/`MediaPlayer` resource when available; an inline QtMultimedia fallback is used only when an existing resource already imports that module. A QML `Loader` is never pointed directly at an MP4. Minified/multiline boot objects are handled by bounded object/property parsing. Validated compressed resources can grow into mapped read-only PE storage, and their resource timestamps/compiled caches are refreshed. Unknown players and unverified resource mappings remain non-writing errors.
+
+Integrity patching follows `E8 ???????? 84 C0 74 ??` in `.text`, with bounded RIP-relative references to the verify/fail messages when disambiguation is needed. Natural NOP sequences are not counted as clean candidates. Already-applied patches are verified by a message reference or matching backup evidence. Only the two JZ bytes are NOPed; dry-run is read-only, the first backup is preserved, and writes/restores are verified rather than truncating/deleting the EXE first. Close BlueStacks yourself before patching; the tool does not forcibly terminate your sessions. Full-backup restoration also rolls back theme/boot edits made after that backup.
+
+Theme/boot resource validation also reads supported `qRegisterResourceData` argument sequences and embedded binary-QRC headers. This allows verified noncanonical node ordering/unused nodes without treating arbitrary offsets as resource pointers. Unrelated opaque resource codecs no longer invalidate an otherwise bounded resource tree. The edited resource's bytes, aliases and cache records are still verified. `--theme-probe` includes resource mapping evidence; a screenshot alone cannot identify every unsupported executable layout.
 
 ## FPS slider
 

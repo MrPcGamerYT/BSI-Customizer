@@ -2,6 +2,7 @@
 
 #include "ByteUtils.h"
 #include "PeUtils.h"
+#include "QtResourceRegistration.h"
 
 #include <QDateTime>
 #include <QSet>
@@ -23,7 +24,7 @@ struct Node
 
 // Parse a connected tree from its root, rather than guessing a node from any
 // occurrence of the compressed flag. Child indices give the exact tree size.
-QList<Node> readTree(const QByteArray &data, qint64 root, int stride)
+QList<Node> readTree(const QByteArray &data, qint64 root, int stride, bool explicitBases, qint64 *span)
 {
     QList<Node> nodes;
     QSet<quint32> seen;
@@ -45,17 +46,18 @@ QList<Node> readTree(const QByteArray &data, qint64 root, int stride)
         if (flags == 2) {
             const quint32 count = be32(data, off + 6);
             const quint32 first = be32(data, off + 10);
-            if (count > kMaxNodes || first >= kMaxNodes || quint64(first) + count > kMaxNodes
-                || (count && first <= index))
+            if (count > kMaxNodes || (count && (first >= kMaxNodes || quint64(first) + count > kMaxNodes
+                || (!explicitBases && first <= index))))
                 return {};
-            if (!inRange(data, root, qint64(first + count) * stride))
+            if (count && !inRange(data, root, qint64(first + count) * stride))
                 return {};
             for (quint32 i = 0; i < count; ++i)
                 pending << first + i;
         }
     }
-    if (seen.size() != last + 1)
-        return {}; // gaps are not emitted by rcc
+    if (!explicitBases && seen.size() != last + 1)
+        return {}; // Canonical fallback; explicit registrations can contain unused nodes.
+    *span = qint64(last + 1) * stride;
     return nodes;
 }
 
@@ -103,42 +105,57 @@ Link findLink(const QByteArray &data, qint64 entryOff, const QString &name)
     if (entryRva < 0)
         return best;
 
+    const auto pools = registeredPools(data);
     QList<qint64> names;
-    const QByteArray needle = nameBytes(name);
-    for (qsizetype p = data.indexOf(needle); p >= 0; p = data.indexOf(needle, p + 1)) {
-        if (p >= 6 && be16(data, p - 6) == name.size())
-            names << p - 6;
+    if (!name.isEmpty()) {
+        const QByteArray needle = nameBytes(name);
+        for (qsizetype p = data.indexOf(needle); p >= 0; p = data.indexOf(needle, p + 1)) {
+            if (p >= 6 && be16(data, p - 6) == name.size()) names << p - 6;
+        }
     }
-    if (names.isEmpty())
-        return best;
-
-    // Root: name offset 0, Directory, child count, first child index 1.
+    struct Root { qint64 off; int pool; };
+    QList<Root> roots;
+    for (int i = 0; i < pools.size(); ++i) roots << Root { pools[i].tree, i };
     const QByteArray rootPrefix = QByteArray::fromHex("000000000002");
-    for (qsizetype root = data.indexOf(rootPrefix); root >= 0;
-         root = data.indexOf(rootPrefix, root + 1)) {
-        if (!inRange(data, root, 14) || be32(data, root + 10) != 1
-            || be32(data, root + 6) == 0 || be32(data, root + 6) >= kMaxNodes)
-            continue;
-        for (const int stride : { 22, 14 }) {
-            const auto tree = readTree(data, root, stride);
-            if (tree.isEmpty())
-                continue;
-            const qint64 treeEnd = root + qint64(tree.size()) * stride;
+    if (!names.isEmpty()) {
+        for (qsizetype root = data.indexOf(rootPrefix); root >= 0; root = data.indexOf(rootPrefix, root + 1)) {
+            if (inRange(data, root, 14) && be32(data, root + 10) == 1
+                && be32(data, root + 6) > 0 && be32(data, root + 6) < kMaxNodes)
+                roots << Root { root, -1 };
+        }
+    }
+    for (const auto &candidate : roots) {
+        const qint64 root = candidate.off;
+        const bool explicitBases = candidate.pool >= 0;
+        const auto pool = explicitBases ? pools[candidate.pool] : Pool();
+        const QList<int> strides = explicitBases ? QList<int> { pool.version == 1 ? 14 : 22 } : QList<int> { 22, 14 };
+        for (const int stride : strides) {
+            qint64 span = 0;
+            const auto tree = readTree(data, root, stride, explicitBases, &span);
+            if (tree.isEmpty()) continue;
+            const qint64 treeEnd = root + span;
             const PeSection *treeSection = PeUtils::sectionForRaw(sections, root);
             if (!treeSection || treeEnd > qint64(treeSection->rawPtr) + treeSection->rawSize)
                 continue;
             for (const Node &target : tree) {
                 if (target.flags != 1)
                     continue;
-                for (const qint64 nameRecord : names) {
-                    const qint64 nameBase = nameRecord - target.name;
-                    const qint64 dataBaseRva = entryRva - target.value;
+                if (explicitBases && pool.dataRva + target.value != entryRva) continue;
+                const QList<qint64> targetNames = explicitBases ? QList<qint64> { pool.names + target.name } : names;
+                for (const qint64 nameRecord : targetNames) {
+                    const QString actualName = readName(data, nameRecord);
+                    if (actualName.isEmpty() || (!name.isEmpty() && actualName != name)) continue;
+                    const qint64 nameBase = explicitBases ? pool.names : nameRecord - target.name;
+                    const qint64 dataBaseRva = explicitBases ? pool.dataRva : entryRva - target.value;
                     if (nameBase < 0 || dataBaseRva < 0 || dataBaseRva > 0xFFFFFFFFLL)
                         continue;
                     const qint64 dataBaseRaw = PeUtils::rvaToRaw(sections, quint32(dataBaseRva));
                     if (dataBaseRaw < 0)
                         continue;
                     Link link;
+                    link.explicitBases = explicitBases;
+                    link.registered = pool.registered;
+                    link.sourceName = actualName;
                     link.nodeSize = stride;
                     link.treeOff = root;
                     link.nodeOff = target.off;
@@ -164,7 +181,7 @@ Link findLink(const QByteArray &data, qint64 entryOff, const QString &name)
                         }
                         link.reserved << qMakePair(nr, end);
                     }
-                    if (!valid || readName(data, nameRecord) != name)
+                    if (!valid)
                         continue;
                     const auto metadata = link.reserved;
                     QSet<qint64> otherPayloads;
@@ -195,44 +212,49 @@ Link findLink(const QByteArray &data, qint64 entryOff, const QString &name)
                         }
                         if (!valid)
                             break;
-                        if (node.flags == 1) {
-                            // Qt's compressed data is qCompress: usize + zlib.
-                            if (size < 6 || be32(data, raw + 4) == 0
-                                || uchar(data[int(raw + 8)]) != 0x78
-                                || be16(data, raw + 8) % 31 != 0) {
+                        // Codec validation belongs to the resource being edited.
+                        // An unrelated precompiled/opaque resource must not make
+                        // a structurally valid theme tree appear unlinked.
+                        if (raw == entryOff) {
+                            if (node.flags != 1 || size < 6 || size > 50000004u
+                                || be32(data, raw + 4) == 0 || be32(data, raw + 4) > 50000000u
+                                || qUncompress(data.mid(raw + 4, size)).size() != be32(data, raw + 4)) {
                                 valid = false;
                                 break;
                             }
-                            if (raw == entryOff) {
-                                const quint32 usize = be32(data, raw + 4);
-                                if (usize > 50000000u
-                                    || qUncompress(data.mid(raw + 4, size)).size() != usize) {
-                                    valid = false;
-                                    break;
-                                }
-                            }
-                        } else if (node.flags == 4) {
-                            if (size < 4 || be32(data, raw + 4) != 0x28B52FFD) {
-                                valid = false;
-                                break;
-                            }
-                        }
-                        if (readName(data, nameBase + node.name) == name + QLatin1Char('c'))
-                            link.themeCaches << qMakePair(raw, node.flags);
-                        if (raw == entryOff)
                             link.nodes << node.off;
-                        else
+                            const QString alias = readName(data, nameBase + node.name);
+                            if (!link.sourceNames.contains(alias)) link.sourceNames << alias;
+                        } else {
                             otherPayloads.insert(raw);
+                        }
                         link.reserved << qMakePair(raw, end);
                     }
                     if (!valid || link.nodes.isEmpty())
                         continue;
+                    for (const auto &node : tree) {
+                        if (node.flags == 2) continue;
+                        const auto cacheName = readName(data, nameBase + node.name);
+                        for (const auto &alias : link.sourceNames) {
+                            if (cacheName == alias + QLatin1Char('c')) {
+                                const auto raw = PeUtils::rvaToRaw(sections, quint32(dataBaseRva + node.value));
+                                if (!link.themeCaches.contains(qMakePair(raw, node.flags)))
+                                    link.themeCaches << qMakePair(raw, node.flags);
+                            }
+                        }
+                    }
                     link.found = true;
+                    link.detail = QStringLiteral("%1; %2 connected nodes, %3-byte records")
+                                      .arg(link.registered ? QStringLiteral("qRegisterResourceData mapping")
+                                           : explicitBases ? QStringLiteral("binary QRC mapping") : QStringLiteral("validated resource tree"))
+                                      .arg(tree.size()).arg(stride);
                     link.support = otherPayloads.size();
                     link.strict = dataBaseRaw < nameBase && nameBase < root;
-                    if (!best.found || link.support > best.support) {
+                    const int confidence = int(link.explicitBases) + int(link.registered);
+                    const int bestConfidence = int(best.explicitBases) + int(best.registered);
+                    if (!best.found || confidence > bestConfidence || (confidence == bestConfidence && link.support > best.support)) {
                         best = link;
-                    } else if (link.support == best.support
+                    } else if (confidence == bestConfidence && link.support == best.support
                                && (link.treeOff != best.treeOff || link.nodeOff != best.nodeOff
                                    || link.nodeSize != best.nodeSize)) {
                         // Aliases of the same payload in the same tree are fine.
@@ -244,6 +266,9 @@ Link findLink(const QByteArray &data, qint64 entryOff, const QString &name)
             }
         }
     }
+    if (!best.found)
+        best.detail = QStringLiteral("No verified mapping: %1 filename record(s), %2 possible root(s), %3 explicit resource pool(s).")
+                          .arg(names.size()).arg(roots.size()).arg(pools.size());
     return best;
 }
 
@@ -263,6 +288,11 @@ bool refreshTimestamp(QByteArray &data, const Link &link)
 }
 
 int invalidateThemeUnits(QByteArray &data)
+{
+    return invalidateUnits(data, { QStringLiteral("UiThemeObject.qml") });
+}
+
+int invalidateUnits(QByteArray &data, const QStringList &sourceNames)
 {
     int changed = 0;
     const QByteArray magic("qv4cdata\0", 8);
@@ -291,7 +321,7 @@ int invalidateThemeUnits(QByteArray &data)
         for (quint32 i = 0; i < len; ++i)
             path += QChar(quint16(le16(data, pos + str + header + i * 2)));
         path.replace(QLatin1Char('\\'), QLatin1Char('/'));
-        if (path.section(QLatin1Char('/'), -1) != QLatin1String("UiThemeObject.qml"))
+        if (!sourceNames.contains(path.section(QLatin1Char('/'), -1)))
             continue;
         // The format version is outside the payload checksum. A mismatch
         // makes Qt fall back to the source without touching other cached units.
@@ -327,9 +357,17 @@ bool invalidateThemeCacheResources(QByteArray &data, const Link &link, QString *
         putLe32(unit, 8, 0);
         const QByteArray replacement = cache.second == 1 ? qCompress(unit, 9) : unit;
         if (replacement.size() > size) {
-            *error = QStringLiteral("The embedded theme cache cannot be invalidated in its "
-                                    "current slot. No file was written.");
-            return false;
+            Link cacheLink;
+            for (const auto &name : link.sourceNames) {
+                cacheLink = findLink(data, cache.first, name + QLatin1Char('c'));
+                if (cacheLink.found && !cacheLink.ambiguous) break;
+            }
+            if (cache.second != 1 || !cacheLink.found || cacheLink.ambiguous
+                || !replaceCompressed(data, cache.first, cacheLink, unit, error)) {
+                if (error && error->isEmpty()) *error = QStringLiteral("The compiled resource cache cannot be safely relocated.");
+                return false;
+            }
+            continue;
         }
         putBe32(data, cache.first, replacement.size());
         data.replace(cache.first + 4, size,

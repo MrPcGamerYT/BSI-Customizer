@@ -1,4 +1,6 @@
 #include "core/Backend.h"
+#include "core/BootVideoPatcher.h"
+#include "core/IntegrityPatcher.h"
 #include "core/ByteUtils.h"
 #include "core/FpsPatcher.h"
 #include "core/PatchFile.h"
@@ -186,6 +188,89 @@ bool loadInQt(const QString &path, const Fixture &f, const QString &cache, const
         return false;
     }
     return true;
+}
+
+struct ResourceFixture {
+    Fixture f;
+    QMap<QString, qint64> entries, nodes;
+};
+ResourceFixture resources(const QList<QPair<QString, QString>> &sources, bool dense = false)
+{
+    ResourceFixture r;
+    r.f.bytes = peFile();
+    if (dense) r.f.bytes.replace(0x1000, 0x1f000, QByteArray(0x1f000, char(0xa5)));
+    putLe32(r.f.bytes, 0x98 + 32, 0x1000);
+    putLe32(r.f.bytes, 0x98 + 36, 0x200);
+    putLe32(r.f.bytes, 0x98 + 56, 0x20000);
+    putLe32(r.f.bytes, 0x98 + 60, 0x1000);
+    qint64 cursor = r.f.payloads;
+    for (const auto &source : sources) {
+        const auto bytes = record(source.second.toUtf8());
+        r.entries[source.first] = cursor;
+        r.f.bytes.replace(cursor, bytes.size(), bytes);
+        cursor += bytes.size();
+    }
+    auto ordered = sources;
+    std::sort(ordered.begin(), ordered.end(), [](const auto &a, const auto &b) { return resourceHash(a.first) < resourceHash(b.first); });
+    r.f.bytes.replace(r.f.tree, (ordered.size() + 1) * 22, QByteArray((ordered.size() + 1) * 22, '\0'));
+    putBe16(r.f.bytes, r.f.tree + 4, 2); putBe32(r.f.bytes, r.f.tree + 6, ordered.size()); putBe32(r.f.bytes, r.f.tree + 10, 1);
+    qint64 name = r.f.names;
+    for (int i = 0; i < ordered.size(); ++i) {
+        const auto key = ordered[i].first;
+        putBe16(r.f.bytes, name, key.size()); putBe32(r.f.bytes, name + 2, resourceHash(key));
+        for (int c = 0; c < key.size(); ++c) putBe16(r.f.bytes, name + 6 + 2*c, key[c].unicode());
+        const qint64 node = r.f.tree + (i + 1) * 22;
+        putBe32(r.f.bytes, node, name - r.f.names); putBe16(r.f.bytes, node + 4, 1);
+        putBe16(r.f.bytes, node + 8, 1); putBe32(r.f.bytes, node + 10, r.entries[key] - r.f.payloads);
+        putBe64(r.f.bytes, node + 14, 1600000000000ULL); r.nodes[key] = node;
+        if (key == QLatin1String("UiThemeObject.qml")) r.f.themeNode = node;
+        name += 6 + 2 * key.size();
+    }
+    return r;
+}
+void addRegistration(ResourceFixture &r, bool nonCanonical)
+{
+    auto &b = r.f.bytes;
+    putLe16(b, 0x86, 2); putLe32(b, 0x190, 0x17000); putLe32(b, 0x198, 0x17000);
+    b.replace(0x1b0, 40, QByteArray(40, '\0')); b.replace(0x1b0, 8, QByteArray(".text\0\0\0", 8));
+    putLe32(b, 0x1b8, 0x8000); putLe32(b, 0x1bc, 0x18000); putLe32(b, 0x1c0, 0x8000);
+    putLe32(b, 0x1c4, 0x18000); putLe32(b, 0x1d4, 0x60000020);
+    b.replace(0x18000, 0x8000, QByteArray(0x8000, char(0x90)));
+    b.replace(0x1000, 0x300, QByteArray(0x300, '\0'));
+    putLe32(b, 0x98 + 120, 0x1000); putLe32(b, 0x98 + 124, 40);
+    putLe32(b, 0x1000, 0x1100); putLe32(b, 0x100c, 0x1200); putLe32(b, 0x1010, 0x1120);
+    putLe32(b, 0x1100, 0x1220); putLe32(b, 0x1120, 0x1220);
+    const QByteArray dll = QByteArray("Qt6Core.dll") + '\0';
+    const QByteArray symbol = QByteArray("?qRegisterResourceData@@YA_NHPEBE00@Z") + '\0';
+    b.replace(0x1200, dll.size(), dll); b.replace(0x1222, symbol.size(), symbol);
+    QByteArray code;
+    for (const auto &pair : { qMakePair(QByteArray::fromHex("4c8d0d"), r.f.payloads),
+                              qMakePair(QByteArray::fromHex("4c8d05"), r.f.names),
+                              qMakePair(QByteArray::fromHex("488d15"), r.f.tree) }) {
+        const int begin = code.size(); code += pair.first + QByteArray(4, '\0');
+        putLe32(code, begin + 3, quint32(pair.second - (0x18000 + code.size())));
+    }
+    code += QByteArray::fromHex("b902000000ff1500000000c3");
+    putLe32(code, 28, quint32(0x1120 - (0x18000 + 32)));
+    b.replace(0x18000, code.size(), code);
+    if (nonCanonical) {
+        const int count = r.nodes.size();
+        const auto children = b.mid(r.f.tree + 22, count * 22);
+        b.replace(r.f.tree + 44, children.size(), children);
+        b.replace(r.f.tree + 22, 22, QByteArray(22, char(0xcc))); // unreachable, not a child
+        putBe32(b, r.f.tree, 0x12345678); putBe32(b, r.f.tree + 10, 2);
+        for (auto it = r.nodes.begin(); it != r.nodes.end(); ++it) it.value() += 22;
+        r.f.themeNode += 22;
+    }
+}
+QString resourceText(const QByteArray &bytes, const ResourceFixture &r, const QString &name)
+{
+    const auto node = r.nodes.value(name, -1);
+    if (node < 0) return {};
+    const qint64 rva = r.f.payloads + be32(bytes, node + 10);
+    const qint64 raw = PeUtils::rvaToRaw(PeUtils::sections(bytes), quint32(rva));
+    if (!inRange(bytes, raw, 4) || !inRange(bytes, raw + 4, be32(bytes, raw))) return {};
+    return QString::fromUtf8(qUncompress(bytes.mid(raw + 4, be32(bytes, raw))));
 }
 
 QByteArray sliderDll(bool mingw)
@@ -657,6 +742,115 @@ int runPatchRegressionTests()
         }
     }
 #endif
+
+    std::printf("[exe-fixes] registered resource layouts, growing boot QML and integrity detection\n");
+    check(ZlibUtils::findMagicOffsets(qCompress(theme(QStringLiteral("#abcdef")).toUtf8(), 3)).contains(4),
+          "standard level-2-to-5 zlib streams (78 5E) are included in resource discovery");
+    {
+        auto r = resources({ { QStringLiteral("UiThemeObject.qml"), theme(QStringLiteral("#112233")) },
+                             { QStringLiteral("Other.qml"), QStringLiteral("import QtQuick; QtObject {}") } });
+        addRegistration(r, true);
+        // An unrelated opaque compiled resource must not invalidate the theme's mapping.
+        r.f.bytes[int(r.entries[QStringLiteral("Other.qml")]) + 8] = char(0x42);
+        const auto path = temp.filePath(QStringLiteral("registered-theme.exe"));
+        write(path, r.f.bytes);
+        const auto a = ThemeEngine::findThemeZlib(r.f.bytes);
+        check(a.hasQrcNode && a.resource.registered && a.resource.nodeSize == 22,
+              "registration resolves a nonzero root name, unused node and opaque neighbor");
+        const auto cache = temp.filePath(QStringLiteral("registered-cache"));
+        check(loadInQt(path, r.f, cache, QStringLiteral("#112233")), "actual Qt reads the noncanonical registered theme tree");
+        check(ThemeEngine::patchTheme(path, a, ThemeEngine::parseQmlEntries(a.qml),
+              { { QStringLiteral("primary100"), QStringLiteral("#abcdef") } }).ok,
+              "a validated alternate resource layout can be patched without removing the safety gate");
+        check(loadInQt(path, r.f, cache, QStringLiteral("#abcdef")), "relaunch rejects stale cache after alternate-layout patch");
+        auto broken = r.f.bytes; putLe32(broken, 0x18000 + 28, 0);
+        check(!ThemeEngine::findThemeZlib(broken).hasQrcNode, "unverified registration bytes do not authorize arbitrary tree layouts");
+    }
+    {
+        QString many = QStringLiteral("import QtQuick\nQtObject{property QtObject colors: QtObject{property color primary100: '#111111';\n");
+        QMap<QString, QString> edits;
+        edits[QStringLiteral("primary100")] = QStringLiteral("#abcdef");
+        for (int i = 0; i < 208; ++i) {
+            const auto name = QStringLiteral("tone%1").arg(i);
+            many += QStringLiteral("property color %1: '#111111';\n").arg(name);
+            edits[name] = QStringLiteral("#%1").arg((i * 7919 + 123456) & 0xffffff, 6, 16, QLatin1Char('0'));
+        }
+        many += QStringLiteral("}}\n");
+        const auto r = resources({ { QStringLiteral("UiThemeObject.qml"), many },
+                                  { QStringLiteral("Other.qml"), QStringLiteral("import QtQuick; QtObject {}") } }, true);
+        const auto path = temp.filePath(QStringLiteral("growing-theme.exe")); write(path, r.f.bytes);
+        const auto a = ThemeEngine::findThemeZlib(r.f.bytes);
+        check(ThemeEngine::patchTheme(path, a, ThemeEngine::parseQmlEntries(a.qml), edits).ok,
+              "large palette growth adds mapped read-only storage instead of an unmapped append");
+        check(PeUtils::sections(read(path)).size() == 2, "resource growth adds a proper PE section");
+        check(loadInQt(path, r.f, temp.filePath(QStringLiteral("growth-cache")), QStringLiteral("#abcdef")),
+              "Qt actually loads colors relocated into the appended PE section");
+    }
+    {
+        const QString boot = QStringLiteral("import QtQuick\nItem{width:320;height:200;property bool bootBackgroundImage:true;"
+            "property bool pBootImageButtonVisible:true;property bool pBootGridVisible:true;"
+            "Image{id:iBootImage;objectName:'bootImage';visible:true}"
+            "Text{id:iBootLoadingText;objectName:'loadingText';visible:false}"
+            "Loader{id:pv;source:'BootVideo.qml'}"
+            "function fSetBootPromotion(){iBootImage.visible=true;pBootGridVisible=true;iBootLoadingText.visible=false}}\n");
+        const QString video = QStringLiteral("import QtQuick\nMediaPlayer { source:'x';objectName:'mediaPlayer' }\n");
+        const auto r = resources({ { QStringLiteral("Boot.qml"), boot }, { QStringLiteral("BootVideo.qml"), video },
+                                  { QStringLiteral("Other.qml"), QStringLiteral("import QtQuick; QtObject {}") } }, true);
+        const QString folder = temp.filePath(QStringLiteral("boot test with spaces")); QDir().mkpath(folder);
+        const QString path = QDir(folder).filePath(QStringLiteral("HD-Player.exe")); write(path, r.f.bytes);
+        const auto patch = BootVideoPatcher::patch(path);
+        if (!patch.ok) std::printf("    %s\n", qPrintable(patch.msg));
+        check(patch.ok && PeUtils::sections(read(path)).size() > 1, "boot media URL can grow beyond its original compressed slot");
+        const auto qml = resourceText(read(path), r, QStringLiteral("Boot.qml"));
+        const auto media = resourceText(read(path), r, QStringLiteral("BootVideo.qml"));
+        const auto expected = QUrl::fromLocalFile(QDir(folder).filePath(QStringLiteral("Assets/Promo.mp4")));
+        check(media.contains(expected.toString(QUrl::FullyEncoded)) && !media.contains(QLatin1String("file:///Promo.mp4")),
+              "boot player uses the selected installation's Assets/Promo.mp4 URL");
+        check(qml.contains(QLatin1String("source:'BootVideo.qml'")), "a QML Loader still loads QML, never the MP4 itself");
+        write(QDir(folder).filePath(QStringLiteral("Boot.qml")), qml.toUtf8());
+        write(QDir(folder).filePath(QStringLiteral("BootVideo.qml")), media.toUtf8());
+        write(QDir(folder).filePath(QStringLiteral("MediaPlayer.qml")), "import QtQuick\nItem{property url source}\n");
+        QQmlEngine engine;
+        QQmlComponent component(&engine, QUrl::fromLocalFile(QDir(folder).filePath(QStringLiteral("Boot.qml"))));
+        std::unique_ptr<QObject> object(component.create());
+        if (!object) std::printf("    %s\n", qPrintable(component.errorString()));
+        check(bool(object), "modified boot QML compiles with the stock-player API (no media codec is executed)");
+        if (object) {
+            const auto image = object->findChild<QObject *>(QStringLiteral("bootImage"));
+            const auto player = object->findChild<QObject *>(QStringLiteral("mediaPlayer"));
+            check(image && !image->property("visible").toBool() && player && player->property("source").toUrl() == expected,
+                  "boot image is hidden and the existing player's source is the custom video");
+        }
+        check(BootVideoPatcher::patch(path).ok && read(path + QStringLiteral(".bak")) == r.f.bytes,
+              "boot repatch is idempotent and preserves the first backup");
+    }
+    {
+        auto bytes = peFile(); bytes.replace(0x188, 8, QByteArray(".text\0\0\0", 8)); putLe32(bytes, 0x1ac, 0x60000020);
+        bytes.replace(0x1400, 9, QByteArray::fromHex("e80000000084c07405"));
+        bytes.replace(0x1800, 9, QByteArray::fromHex("e80000000084c09090")); // unrelated natural NOPs
+        const auto path = temp.filePath(QStringLiteral("integrity.exe")); write(path, bytes);
+        const auto a = IntegrityPatcher::analyze(path);
+        check(a.ok && a.state == QLatin1String("clean") && a.site == 0x1405 && a.candidates == 1,
+              "natural NOP sequences do not turn a unique reference-pattern match into ambiguity");
+        check(IntegrityPatcher::patch(path, true).ok && read(path) == bytes && !QFile::exists(path + QStringLiteral(".bak")),
+              "integrity dry-run creates no backup and changes no bytes");
+        check(IntegrityPatcher::patch(path).ok, "integrity patch follows the provided CALL/TEST/JZ pattern");
+        auto expected = bytes; expected.replace(0x1407, 2, QByteArray::fromHex("9090"));
+        check(read(path) == expected && IntegrityPatcher::patch(path).ok && read(path) == expected,
+              "only the two JZ bytes change; applying integrity again succeeds without further edits");
+        check(IntegrityPatcher::restore(path).ok && read(path) == bytes, "integrity restore is verified without deleting the EXE first");
+        auto multiple = bytes; multiple.replace(0x1600, 9, QByteArray::fromHex("e80000000084c07405"));
+        const QByteArray anchor = QByteArray("Verified the disk integrity!") + '\0'; multiple.replace(0x5000, anchor.size(), anchor);
+        multiple.replace(0x1610, 7, QByteArray::fromHex("4c8d0500000000")); putLe32(multiple, 0x1613, 0x5000 - 0x1617);
+        write(path, multiple);
+        check(IntegrityPatcher::analyze(path).site == 0x1605, "RIP-relative verify/fail references disambiguate multiple clean matches");
+        multiple.replace(0x1410, 7, QByteArray::fromHex("488d0d00000000")); putLe32(multiple, 0x1413, 0x5000 - 0x1417);
+        write(path, multiple);
+        check(!IntegrityPatcher::patch(path).ok && read(path) == multiple, "multiple validated sites are not resolved by blindly taking the first");
+        auto shortFile = bytes.left(0x1809); putLe32(shortFile, 0x198, shortFile.size() - 0x1000);
+        write(path, shortFile);
+        check(IntegrityPatcher::analyze(path).ok, "anchor scans near the end of .text stay inside the file");
+    }
 
     std::printf("[fps-prologues] compiler variants, RIP-relative instructions, thunks and partial recovery\n");
     for (const bool mingw : { false, true }) {

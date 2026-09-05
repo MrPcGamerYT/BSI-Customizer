@@ -419,7 +419,7 @@ QList<qint64> markerAnchoredMagics(const QByteArray &data,
             if (data[int(p)] != '\x78')
                 continue;
             const char c = data[int(p) + 1];
-            if (c == '\xDA' || c == char('\x9C') || c == '\x01') {
+            if (c == '\xDA' || c == char('\x9C') || c == '\x01' || c == '\x5E') {
                 seen.insert(p);
                 out << p;
             }
@@ -459,6 +459,8 @@ qint64 zeroSlackAfter(const QByteArray &data, const ThemeInfo &info)
     for (const auto &range : info.resource.reserved) {
         if (range.first >= end)
             limit = qMin(limit, range.first);
+        else if (range.second > end)
+            limit = end;
     }
     qint64 slack = 0;
     while (end + slack < limit && data[int(end + slack)] == '\0')
@@ -758,7 +760,9 @@ ThemeInfo ThemeEngine::findThemeZlib(const QByteArray &data)
         info.entryCount = parsed;
         info.contentQuality = strictContent ? 2 : 1;
 
-        const QrcNode node = findQrcNodeForEntry(data, info.entryOff);
+        QrcNode node = findQrcNodeForEntry(data, info.entryOff);
+        if (!node.found && strictContent)
+            node = QtResources::findLink(data, info.entryOff, QString()); // registered resource alias
         info.resource = node;
         if (node.found && !node.ambiguous && headerBytes == 8) {
             // A record the qresource tree really links to UiThemeObject.qml IS
@@ -818,7 +822,9 @@ ThemeInfo ThemeEngine::findThemeZlib(const QByteArray &data)
     std::stable_sort(candidates.begin(), candidates.end(),
                      [](const ThemeInfo &a, const ThemeInfo &b) {
                          const auto rank = [](const ThemeInfo &t) -> qint64 {
-                             return (t.hasQrcNode ? 1000000000000LL : 0)
+                             return (t.hasQrcNode && t.resource.registered ? 1000000000000000LL : 0)
+                                    + (t.hasQrcNode && t.resource.explicitBases ? 100000000000000LL : 0)
+                                    + (t.hasQrcNode ? 1000000000000LL : 0)
                                     + qint64(t.qrcSupport) * 1000000000LL
                                     + qint64(t.contentQuality) * 10000000
                                     + (t.qrcStrict ? 200000 : (t.hasQrcNode ? 100000 : 0))
@@ -850,7 +856,9 @@ ThemeInfo ThemeEngine::findThemeZlib(const QByteArray &data)
     best.candidateCount = twins;
     int linked = 0;
     for (const auto &candidate : candidates) {
-        if (candidate.hasQrcNode && candidate.qrcSupport == best.qrcSupport)
+        if (candidate.hasQrcNode && candidate.qrcSupport == best.qrcSupport
+            && candidate.resource.explicitBases == best.resource.explicitBases
+            && candidate.resource.registered == best.resource.registered)
             ++linked;
     }
     best.ambiguous = best.resource.ambiguous || linked > 1
@@ -1255,7 +1263,7 @@ ThemeEngine::PatchResult ThemeEngine::patchTheme(const QString &exePath, const T
     if (live.mode == QLatin1String("zlib") && live.headerBytes == 8 && !live.hasQrcNode
         && data.contains(utf16be(QStringLiteral("UiThemeObject.qml"))))
         return { false, QStringLiteral("The Qt resource tree could not be validated. No file "
-                                        "was written; run --theme-probe for this EXE.") };
+                                        "was written. %1 Run --theme-probe for this EXE.").arg(live.resource.detail) };
 
     // The zlib record is recompressed (and relocated if it outgrows its slot),
     // so a longer hex color is fine there; a plain-text theme must fit in place.
@@ -1419,13 +1427,14 @@ ThemeEngine::PatchResult ThemeEngine::patchTheme(const QString &exePath, const T
             dataBaseRva = oldEntryRva - node.dataOffset;
 
         const qint64 newRecordLen = 8 + comp.size();
-        const qint64 cave = findZeroCave(data, secs, live.entryOff, dataBaseRva, newRecordLen,
-                                           live.resource.reserved);
-        if (cave < 0)
-            return { false, QStringLiteral("No room for this custom theme in this EXE "
-                                           "(no mapped zero cave large enough).") };
-
-        const qint64 newEntryRva = PeUtils::rawToRva(secs, cave);
+        qint64 cave = findZeroCave(data, secs, live.entryOff, dataBaseRva, newRecordLen,
+                                   live.resource.reserved);
+        if (cave < 0) {
+            QString growthError;
+            cave = QtResources::appendStorage(data, newRecordLen, &growthError);
+            if (cave < 0) return { false, growthError };
+        }
+        const qint64 newEntryRva = PeUtils::rawToRva(PeUtils::sections(data), cave);
         if (newEntryRva < 0)
             return { false, QStringLiteral("Relocation failed: chosen cave is not mapped.") };
         const qint64 newDataOff = newEntryRva - dataBaseRva;
@@ -1458,7 +1467,9 @@ ThemeEngine::PatchResult ThemeEngine::patchTheme(const QString &exePath, const T
     }
 
     const bool refreshed = QtResources::refreshTimestamp(data, live.resource);
-    const int units = QtResources::invalidateThemeUnits(data);
+    QStringList cacheNames = live.resource.sourceNames;
+    if (!cacheNames.contains(QStringLiteral("UiThemeObject.qml"))) cacheNames << QStringLiteral("UiThemeObject.qml");
+    const int units = QtResources::invalidateUnits(data, cacheNames);
     QString cacheError;
     if (!QtResources::invalidateThemeCacheResources(data, live.resource, &cacheError))
         return { false, cacheError };
@@ -1907,7 +1918,7 @@ QString ThemeEngine::probeReport(const QString &exePath)
     line(QStringLiteral("[2] zlib stream starts"));
     const QList<qint64> allMagics = ZlibUtils::findMagicOffsets(data);
     const QList<qint64> anchored = markerAnchoredMagics(data);
-    line(QStringLiteral("  total 78 DA/9C/01 pairs in file: %1").arg(allMagics.size()));
+    line(QStringLiteral("  total 78 DA/9C/5E/01 pairs in file: %1").arg(allMagics.size()));
     line(QStringLiteral("  within 8192 bytes of a marker (either side): %1").arg(anchored.size()));
     if (!anchored.isEmpty())
         line(QStringLiteral("    %1").arg(offsToStr(anchored, 16)));
@@ -2027,6 +2038,8 @@ QString ThemeEngine::probeReport(const QString &exePath)
     line(QStringLiteral("  qrcStrict        : %1").arg(t.qrcStrict ? "yes" : "no"));
     line(QStringLiteral("  qrcSupport       : %1").arg(t.qrcSupport));
     line(QStringLiteral("  qrc node bytes   : %1").arg(t.resource.nodeSize));
+    line(QStringLiteral("  qrc mapping      : %1").arg(t.resource.detail));
+    line(QStringLiteral("  resource name    : %1").arg(t.resource.sourceName));
     line(QStringLiteral("  ambiguous        : %1").arg(t.ambiguous ? "yes - patch refused" : "no"));
     if (t.resource.nodeSize == 22)
         line(QStringLiteral("  resource mtime   : %1").arg(be64(data, t.qrcNodeOff + 14)));
