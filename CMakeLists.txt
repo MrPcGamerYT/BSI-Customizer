@@ -34,6 +34,11 @@ qt_add_executable(BSICustomizer
     src/core/SvgEngine.cpp
     src/core/FpsPatcher.h
     src/core/FpsPatcher.cpp
+    src/core/X64Prologue.h
+    src/core/X64Prologue.cpp
+    src/third_party/hde64/hde64.cpp
+    src/third_party/hde64/hde64.h
+    src/third_party/hde64/table64.h
     src/core/IntegrityPatcher.h
     src/core/IntegrityPatcher.cpp
     src/core/BootVideoPatcher.h
@@ -97,6 +102,22 @@ target_compile_definitions(BSICustomizer PRIVATE
     BSI_VERSION="${PROJECT_VERSION}"
 )
 
+# Qt 6 is the application's build/runtime dependency, not an FPS target restriction.
+# Require a real Qt 5 reference in Windows CI; ordinary/offline builds stay network-free.
+set(_bsi_qt5_reference_default OFF)
+if(WIN32 AND "$ENV{GITHUB_ACTIONS}" STREQUAL "true")
+    set(_bsi_qt5_reference_default ON)
+endif()
+option(BSI_TEST_QT5_REFERENCE "Acquire and require a real Qt 5 DLL for FPS self-tests" ${_bsi_qt5_reference_default})
+if(BSI_TEST_QT5_REFERENCE)
+    if(NOT WIN32 OR NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
+        message(FATAL_ERROR "BSI_TEST_QT5_REFERENCE requires a 64-bit Windows build")
+    endif()
+    include(cmake/Qt5FpsReference.cmake)
+    bsi_qt5_fps_reference("${CMAKE_CURRENT_BINARY_DIR}/fps-reference/qt5" _bsi_qt5_dll)
+    target_compile_definitions(BSICustomizer PRIVATE BSI_QT5_REFERENCE_DLL="${_bsi_qt5_dll}")
+endif()
+
 qt_add_qml_module(BSICustomizer
     URI BSICustomizer
     VERSION 1.0
@@ -135,3 +156,11 @@ target_link_libraries(BSICustomizer PRIVATE
 )
 
 install(TARGETS BSICustomizer RUNTIME DESTINATION bin)
+
+# Retain the decoder's BSD notices next to built/installed executables.
+add_custom_command(TARGET BSICustomizer POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/third_party/hde64/LICENSE.txt"
+        "$<TARGET_FILE_DIR:BSICustomizer>/THIRD-PARTY-NOTICES.txt"
+)
+install(FILES src/third_party/hde64/LICENSE.txt DESTINATION bin RENAME THIRD-PARTY-NOTICES.txt)

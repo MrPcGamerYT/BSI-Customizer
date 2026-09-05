@@ -4,15 +4,19 @@
 #include "BsDetector.h"
 #include "PatchFile.h"
 #include "PeUtils.h"
+#include "X64Prologue.h"
 
 #include <QDataStream>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QMap>
+#include <QPair>
 #include <QSet>
 
+#include <algorithm>
 #include <cmath>
+#include <limits>
 
 using namespace ByteUtils;
 
@@ -42,9 +46,9 @@ const QByteArray prologue()
     return p;
 }
 
-constexpr int kSlotLen = 48;
+constexpr int kSlotLen = 64;
+constexpr int kV1SlotLen = 48;
 constexpr int kLegacySlotLen = 80;
-constexpr int kCaveMin = 2 * kSlotLen + 16;
 
 QByteArray le32s(qint32 v)
 {
@@ -63,9 +67,8 @@ QByteArray d64(double v)
     return b;
 }
 
-// New patches contain only a 240.0 comparison and a high-FPS replacement.
-// In particular, there is no 60.0 constant or normal-mode write path here.
-QByteArray buildSlot(quint32 funcRva, quint32 caveRva, double hi)
+// Read-only compatibility with the previous 48-byte max-only patch.
+QByteArray v1SlotForVerification(quint32 funcRva, quint32 caveRva, double hi)
 {
     QByteArray s;
     s += QByteArray::fromHex("660F2F0D") + le32s(32 - 8);   // comisd xmm1,[rip->240.0]
@@ -73,10 +76,10 @@ QByteArray buildSlot(quint32 funcRva, quint32 caveRva, double hi)
     s += QByteArray::fromHex("75") + char(20 - 12);        // jne -> original, including 60.0
     s += QByteArray::fromHex("F20F100D") + le32s(40 - 20); // movsd xmm1,[rip->hi]
     s += prologue();                                      // original mov [rsp+8],rbx
-    s += QByteArray::fromHex("E9") + le32s(qint32(funcRva + 5) - qint32(caveRva + 30));
+    s += QByteArray::fromHex("E9") + le32s(qint32(qint64(funcRva) + 5 - (qint64(caveRva) + 30)));
     s += QByteArray::fromHex("9090");                     // padding before constants, never executed
     s += d64(240.0) + d64(hi);
-    Q_ASSERT(s.size() == kSlotLen);
+    Q_ASSERT(s.size() == kV1SlotLen);
     return s;
 }
 
@@ -93,7 +96,7 @@ QByteArray legacySlotForVerification(quint32 funcRva, quint32 caveRva, double hi
     s += QByteArray::fromHex("75") + char(38 - 30);          // jne -> prologue
     s += QByteArray::fromHex("F20F100D") + le32s(72 - 38);  // movsd xmm1,[rip->lo]
     s += QByteArray::fromHex("48895C2408");                  // mov [rsp+8], rbx
-    s += QByteArray::fromHex("E9") + le32s(qint32(funcRva + 5) - qint32(caveRva + 48));
+    s += QByteArray::fromHex("E9") + le32s(qint32(qint64(funcRva) + 5 - (qint64(caveRva) + 48)));
     s += d64(240.0) + d64(60.0) + d64(hi) + d64(lo);
     Q_ASSERT(s.size() == kLegacySlotLen);
     return s;
@@ -109,26 +112,192 @@ double readDouble(const QByteArray &bytes, qint64 offset)
     return value;
 }
 
-int recognizedSlotSize(const QByteArray &bytes, qint64 offset, quint32 funcRva, quint32 slotRva)
+// The new slot replays whole entry instructions. Metadata identifies their
+// length, allowing verified repatching/restoration even for RIP-relative code.
+QByteArray buildSlot(quint32 funcRva, quint32 caveRva, double hi,
+                     const QByteArray &original, QString *error = nullptr)
 {
-    if (inRange(bytes, offset, kSlotLen)) {
-        const double hi = readDouble(bytes, offset + 40);
-        if (std::isfinite(hi) && bytes.mid(offset, kSlotLen) == buildSlot(funcRva, slotRva, hi))
-            return kSlotLen;
+    QByteArray relocated;
+    if (original.size() < 5 || original.size() > X64Prologue::MaxSize
+        || caveRva > std::numeric_limits<quint32>::max() - kSlotLen
+        || !X64Prologue::relocate(original, funcRva, caveRva + 20, &relocated, error))
+        return {};
+    const qint64 back = qint64(funcRva) + original.size()
+                        - (qint64(caveRva) + 20 + original.size() + 5);
+    if (back < std::numeric_limits<qint32>::min() || back > std::numeric_limits<qint32>::max()) {
+        if (error)
+            *error = QStringLiteral("code cave is too far from the setter");
+        return {};
     }
-    if (inRange(bytes, offset, kLegacySlotLen)) {
+    QByteArray s(kSlotLen, char(0x90));
+    const QByteArray dispatch = QByteArray::fromHex("660F2E0D") + le32s(48 - 8)
+                                + QByteArray::fromHex("7A0A7508F20F100D") + le32s(56 - 20);
+    s.replace(0, 20, dispatch); // UCOMISD: only 240 matches; quiet NaNs/other values pass unchanged
+    s.replace(20, relocated.size(), relocated);
+    s.replace(20 + relocated.size(), 5, QByteArray::fromHex("E9") + le32s(qint32(back)));
+    s.replace(44, 3, QByteArray::fromHex("465001")); // FP, format version 1
+    s[47] = char(original.size());
+    s.replace(48, 8, d64(240.0));
+    s.replace(56, 8, d64(hi));
+    return s;
+}
+
+bool recognizeSlot(const QByteArray &bytes, qint64 offset, quint32 slotRva, Target *target)
+{
+    if (inRange(bytes, offset, kSlotLen) && bytes.mid(offset + 44, 3) == QByteArray::fromHex("465001")) {
+        const int length = uchar(bytes[int(offset + 47)]);
+        const double hi = readDouble(bytes, offset + 56);
+        QByteArray original;
+        if (length >= 5 && length <= X64Prologue::MaxSize && std::isfinite(hi)
+            && slotRva <= std::numeric_limits<quint32>::max() - kSlotLen
+            && X64Prologue::relocate(bytes.mid(offset + 20, length), slotRva + 20, target->rva, &original)
+            && bytes.mid(offset, kSlotLen) == buildSlot(target->rva, slotRva, hi, original)
+            && inRange(bytes, target->off, length)
+            && bytes.mid(target->off + 5, length - 5) == QByteArray(length - 5, char(0x90))) {
+            target->slotSize = kSlotLen;
+            target->originalBytes = original;
+        }
+    }
+    if (!target->slotSize && inRange(bytes, offset, kV1SlotLen)) {
+        const double hi = readDouble(bytes, offset + 40);
+        if (std::isfinite(hi) && bytes.mid(offset, kV1SlotLen) == v1SlotForVerification(target->rva, slotRva, hi)) {
+            target->slotSize = kV1SlotLen;
+            target->originalBytes = prologue();
+        }
+    }
+    if (!target->slotSize && inRange(bytes, offset, kLegacySlotLen)) {
         const double hi = readDouble(bytes, offset + 64);
         const double normal = readDouble(bytes, offset + 72);
         if (std::isfinite(hi) && std::isfinite(normal)
-            && bytes.mid(offset, kLegacySlotLen) == legacySlotForVerification(funcRva, slotRva, hi, normal))
-            return kLegacySlotLen;
+            && bytes.mid(offset, kLegacySlotLen) == legacySlotForVerification(target->rva, slotRva, hi, normal)) {
+            target->slotSize = kLegacySlotLen;
+            target->originalBytes = prologue();
+        }
     }
-    return 0;
+    if (!target->slotSize)
+        return false;
+    target->slotOff = offset;
+    target->state = QStringLiteral("patched");
+    return true;
+}
+
+// Unlike the general PE RVA mapper, executable bytes must really be present
+// in the file, in a single executable section (not virtual zero-fill or data).
+qint64 codeOffset(const QByteArray &bytes, const QList<PeSection> &sections, quint32 rva, int size)
+{
+    qint64 found = -1;
+    if (size <= 0 || qint64(rva) + size > 0x100000000LL)
+        return -1;
+    for (const auto &section : sections) {
+        const qint64 relative = qint64(rva) - section.va;
+        if (!(section.chars & 0x20000000) || relative < 0 || relative + size > section.rawSize)
+            continue;
+        const qint64 offset = qint64(section.rawPtr) + relative;
+        if (!inRange(bytes, offset, size))
+            continue;
+        if (found >= 0 && found != offset)
+            return -1;
+        found = offset;
+    }
+    return found;
+}
+
+bool isRuntimeFunctionStart(const QByteArray &bytes, const QList<PeSection> &sections, quint32 rva)
+{
+    // Follow an unrecognized export jump only to a compiler-described function
+    // entry. An arbitrary E9 to a third-party code cave is NOT a clean prologue.
+    const qint64 opt = PeUtils::peHeaderOffset(bytes) + 24;
+    if (PeUtils::optionalHeaderSize(bytes) < 144 || !inRange(bytes, opt + 136, 8))
+        return false;
+    const quint32 tableRva = le32(bytes, opt + 136);
+    const quint32 size = le32(bytes, opt + 140);
+    const qint64 table = PeUtils::rvaToRaw(sections, tableRva);
+    if (!tableRva || !size || size % 12 || size / 12 > 65536 || !inRange(bytes, table, size))
+        return false;
+    for (quint32 i = 0; i < size; i += 12) {
+        if (le32(bytes, table + i) != rva)
+            continue;
+        const quint32 end = le32(bytes, table + i + 4);
+        const quint32 unwindRva = le32(bytes, table + i + 8);
+        const qint64 unwind = PeUtils::rvaToRaw(sections, unwindRva);
+        const qint64 length = qint64(end) - rva;
+        if (length < 5 || length > std::numeric_limits<int>::max()
+            || codeOffset(bytes, sections, rva, int(length)) < 0 || (unwindRva & 3)
+            || !inRange(bytes, unwind, 4))
+            return false;
+        const int version = uchar(bytes[int(unwind)]) & 7;
+        const int flags = uchar(bytes[int(unwind)]) >> 3;
+        const int count = uchar(bytes[int(unwind + 2)]);
+        const int infoSize = ((4 + 2 * count + 3) & ~3) + ((flags & 4) ? 12 : ((flags & 3) ? 4 : 0));
+        return (version == 1 || version == 2) && flags <= 4
+               && uchar(bytes[int(unwind + 1)]) <= length && inRange(bytes, unwind, infoSize);
+    }
+    return false;
+}
+
+void inspectTarget(const QByteArray &bytes, const QList<PeSection> &sections, Target *target)
+{
+    target->state = QStringLiteral("unknown");
+    target->rva = target->entryRva;
+    QSet<quint32> visited;
+    for (int hops = 0; hops < 5; ++hops) {
+        target->off = codeOffset(bytes, sections, target->rva, 5);
+        if (target->off < 0) {
+            target->detail = QStringLiteral("entry is not backed by executable file bytes");
+            return;
+        }
+        // Preserve CET's indirect-branch landing instruction at the real entry.
+        if (bytes.mid(target->off, 4) == QByteArray::fromHex("F30F1EFA")) {
+            if (target->rva > std::numeric_limits<quint32>::max() - 4)
+                break;
+            target->rva += 4;
+            target->off = codeOffset(bytes, sections, target->rva, 5);
+            if (target->off < 0)
+                break;
+        }
+        target->entryBytes = bytes.mid(target->off, X64Prologue::MaxSize);
+        if (visited.contains(target->rva))
+            break;
+        visited.insert(target->rva);
+        const uchar first = uchar(bytes[int(target->off)]);
+        if (first == 0xe9 || first == 0xeb) {
+            const int jumpSize = first == 0xe9 ? 5 : 2;
+            const qint64 jumpRva = qint64(target->rva) + jumpSize
+                                   + (first == 0xe9 ? qint32(le32(bytes, target->off + 1))
+                                                    : qint8(bytes[int(target->off + 1)]));
+            if (jumpRva >= 0 && jumpRva <= std::numeric_limits<quint32>::max()) {
+                const qint64 slotOff = codeOffset(bytes, sections, quint32(jumpRva), kV1SlotLen);
+                if (first == 0xe9 && slotOff >= 0 && recognizeSlot(bytes, slotOff, quint32(jumpRva), target)
+                    && codeOffset(bytes, sections, quint32(jumpRva), target->slotSize) == slotOff
+                    && codeOffset(bytes, sections, target->rva, int(target->originalBytes.size())) == target->off)
+                    return;
+                target->slotSize = 0;
+                target->slotOff = -1;
+                target->originalBytes.clear();
+                target->state = QStringLiteral("unknown");
+                if (isRuntimeFunctionStart(bytes, sections, quint32(jumpRva))) {
+                    target->rva = quint32(jumpRva);
+                    continue;
+                }
+            }
+            target->detail = QStringLiteral("unrecognized jump/detour (not a verified compiler entry)");
+            return;
+        }
+        const auto decoded = X64Prologue::decode(target->entryBytes);
+        if (decoded.ok() && codeOffset(bytes, sections, target->rva, int(decoded.bytes.size())) == target->off) {
+            target->originalBytes = decoded.bytes;
+            target->state = QStringLiteral("clean");
+            return;
+        }
+        target->detail = decoded.error.isEmpty() ? QStringLiteral("entry crosses the executable section") : decoded.error;
+        return;
+    }
+    target->detail = QStringLiteral("cyclic, invalid, or excessive entry thunks");
 }
 
 QByteArray buildJmp(quint32 fromRva, quint32 toRva)
 {
-    return QByteArray::fromHex("E9") + le32s(qint32(toRva) - qint32(fromRva + 5));
+    return QByteArray::fromHex("E9") + le32s(qint32(qint64(toRva) - (qint64(fromRva) + 5)));
 }
 
 QString readAsciiz(const QByteArray &b, qint64 off)
@@ -234,35 +403,15 @@ Analysis analyze(const QByteArray &b)
         if (!inRange(b, funcsOff + ord * 4, 4))
             continue;
         const quint32 frva = le32(b, funcsOff + ord * 4);
-        const qint64 off = PeUtils::rvaToRaw(secs, frva);
-        if (off < 0 || !inRange(b, off, 5))
-            continue;
-
-        if (seenFunctions.contains(off))
-            continue; // two mangled aliases of the same setter need one detour
-        seenFunctions.insert(off);
         Target t;
         t.name = name;
         t.cls = wanted().value(name);
-        t.rva = frva;
-        t.off = off;
-        if (b.mid(int(off), 5) == prologue())
-            t.state = QStringLiteral("clean");
-        else {
-            t.state = QStringLiteral("unknown");
-            if (uchar(b[int(off)]) == 0xE9) {
-                const qint64 slotRva = qint64(frva) + 5 + qint32(le32(b, off + 1));
-                const qint64 slotOff = slotRva >= 0 && slotRva <= 0xFFFFFFFFLL
-                                           ? PeUtils::rvaToRaw(secs, quint32(slotRva)) : -1;
-                if (slotOff >= 0) {
-                    t.slotSize = recognizedSlotSize(b, slotOff, frva, quint32(slotRva));
-                    if (t.slotSize) {
-                        t.slotOff = slotOff;
-                        t.state = QStringLiteral("patched");
-                    }
-                }
-            }
-        }
+        t.entryRva = frva;
+        inspectTarget(b, secs, &t);
+        if (t.off >= 0 && seenFunctions.contains(t.off))
+            continue; // exported aliases/thunks resolving to the same setter need one detour
+        if (t.off >= 0)
+            seenFunctions.insert(t.off);
         out.targets << t;
     }
 
@@ -283,9 +432,25 @@ Analysis analyze(const QByteArray &b)
         anyPatched |= (t.state == QLatin1String("patched"));
         anyUnknown |= (t.state == QLatin1String("unknown"));
     }
-    if (anyUnknown || (anyPatched && anyClean)) {
+    if (anyUnknown) {
         out.state = QStringLiteral("unsupported");
-        out.msg = QStringLiteral("Unknown or mixed setTo prologues; no partial patch will be applied.");
+        QStringList details;
+        for (const auto &target : out.targets) {
+            if (target.state != QLatin1String("unknown"))
+                continue;
+            details << QStringLiteral("%1::setTo at RVA 0x%2: %3\nEntry bytes: %4")
+                           .arg(target.cls, QString::number(target.rva, 16), target.detail,
+                                QString::fromLatin1(target.entryBytes.toHex(' ')));
+        }
+        out.msg = QStringLiteral("Unsupported setter; no DLL bytes changed.\n%1\n"
+                                 "Use an original DLL or copy these details and provide the DLL/.bak for support.")
+                      .arg(details.join(QLatin1Char('\n')));
+        return out;
+    }
+    if (anyPatched && anyClean) {
+        out.ok = true;
+        out.state = QStringLiteral("partial");
+        out.msg = QStringLiteral("Recognized partial FPS patch. Patch FPS will rebuild all setters using the matching clean .bak.");
         return out;
     }
     if (anyPatched && !anyClean) {
@@ -309,7 +474,7 @@ Analysis analyze(const QByteArray &b)
     // Longest zero run in .text
     const PeSection *text = nullptr;
     for (const PeSection &s : secs) {
-        if (s.name == QLatin1String(".text")) {
+        if (s.name == QLatin1String(".text") && (s.chars & 0x20000000)) {
             text = &s;
             break;
         }
@@ -320,25 +485,51 @@ Analysis analyze(const QByteArray &b)
         return out;
     }
 
+    QList<QPair<qint64, qint64>> referenced;
+    for (const auto &target : out.targets) {
+        const auto prefix = X64Prologue::decode(target.originalBytes);
+        for (const auto &instruction : prefix.instructions) {
+            if (instruction.ripDisplacement < 0)
+                continue;
+            const qint64 rva = qint64(target.rva) + instruction.offset + instruction.size
+                               + qint32(le32(target.originalBytes, instruction.offset + instruction.ripDisplacement));
+            if (rva < 0 || rva > std::numeric_limits<quint32>::max())
+                continue;
+            const qint64 raw = PeUtils::rvaToRaw(secs, quint32(rva));
+            if (raw >= 0)
+                referenced << qMakePair(raw, raw + 16); // conservative maximum scalar/SSE operand size
+        }
+    }
+    std::sort(referenced.begin(), referenced.end());
     qint64 best = -1, bestLen = 0, run = 0;
+    const auto consider = [&](qint64 start, qint64 size) {
+        const qint64 end = start + size;
+        const auto gap = [&](qint64 at, qint64 length) {
+            if (length > bestLen) {
+                best = at;
+                bestLen = length;
+            }
+        };
+        for (const auto &range : referenced) {
+            if (range.second <= start || range.first >= end)
+                continue;
+            gap(start, range.first - start);
+            start = qMax(start, qMin(end, range.second));
+        }
+        gap(start, end - start);
+    };
     const qint64 i0 = text->rawPtr;
-    const qint64 i1 = qMin<qint64>(b.size(), text->rawPtr + text->rawSize);
+    const qint64 i1 = qMin<qint64>(b.size(), qint64(text->rawPtr) + text->rawSize);
     for (qint64 i = i0; i < i1; ++i) {
         if (b[int(i)] == '\0') {
             ++run;
         } else {
-            if (run > bestLen) {
-                bestLen = run;
-                best = i - run;
-            }
+            consider(i - run, run);
             run = 0;
         }
     }
-    if (run > bestLen) {
-        bestLen = run;
-        best = i1 - run;
-    }
-    if (bestLen < kCaveMin) {
+    consider(i1 - run, run);
+    if (bestLen < out.targets.size() * kSlotLen) {
         out.state = QStringLiteral("unsupported");
         out.msg = QStringLiteral("no empty padding area found");
         return out;
@@ -396,7 +587,7 @@ Result patch(const QString &dllPath, double hi)
         if (target.state != QLatin1String("patched"))
             continue;
         unpatched.replace(target.slotOff, target.slotSize, QByteArray(target.slotSize, '\0'));
-        unpatched.replace(target.off, 5, prologue());
+        unpatched.replace(target.off, target.originalBytes.size(), target.originalBytes);
     }
     if (unpatched != data)
         return { false, QStringLiteral("The .bak does not match this DLL version. No file was "
@@ -406,8 +597,8 @@ Result patch(const QString &dllPath, double hi)
     if (!t.ok || t.state != QLatin1String("clean"))
         return { false, QStringLiteral("A clean backup is required: %1").arg(t.msg) };
 
-    // Cave must be empty for two slots.
-    for (int i = 0; i < 2 * kSlotLen; ++i) {
+    // Allocate only the number of slots actually needed by the exported setters.
+    for (int i = 0; i < t.targets.size() * kSlotLen; ++i) {
         if (char(data[int(t.caveOff) + i]) != '\0')
             return { false, QStringLiteral("cave area not empty") };
     }
@@ -417,15 +608,24 @@ Result patch(const QString &dllPath, double hi)
         if (tg.state != QLatin1String("clean"))
             continue;
         const quint32 cRva = t.caveRva + quint32(slot * kSlotLen);
-        const QByteArray s = buildSlot(tg.rva, cRva, hi);
-        const QByteArray jmp = buildJmp(tg.rva, cRva);
+        QString slotError;
+        const QByteArray s = buildSlot(tg.rva, cRva, hi, tg.originalBytes, &slotError);
+        const qint64 entryJump = qint64(cRva) - (qint64(tg.rva) + 5);
+        if (s.size() != kSlotLen || entryJump < std::numeric_limits<qint32>::min()
+            || entryJump > std::numeric_limits<qint32>::max())
+            return { false, QStringLiteral("Cannot relocate %1::setTo safely: %2").arg(tg.cls, slotError) };
+        const QByteArray jmp = buildJmp(tg.rva, cRva)
+                               + QByteArray(tg.originalBytes.size() - 5, char(0x90));
         data.replace(int(t.caveOff) + slot * kSlotLen, kSlotLen, s);
-        data.replace(int(tg.off), 5, jmp);
+        data.replace(tg.off, tg.originalBytes.size(), jmp);
         ++slot;
     }
     if (slot == 0)
         return { false, QStringLiteral("nothing to patch (already patched?)") };
 
+    const auto verified = analyze(data);
+    if (!verified.ok || verified.state != QLatin1String("patched") || verified.targets.size() != t.targets.size())
+        return { false, QStringLiteral("The FPS patch failed verification; no DLL bytes were changed.") };
     QString error;
     if (!PatchFile::writeVerified(dllPath, original, data, &error))
         return { false, error };

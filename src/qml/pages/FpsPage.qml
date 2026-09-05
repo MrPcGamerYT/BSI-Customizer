@@ -77,20 +77,28 @@ Item {
                     }
                 }
 
-                Rectangle {
+                ScrollView {
+                    id: statusView
                     Layout.fillWidth: true
-                    height: 40
-                    Layout.preferredHeight: 40
-                    radius: 8
-                    color: Theme.raised
-                    border.color: Theme.border
-                    Text {
-                        anchors.verticalCenter: parent.verticalCenter
-                        anchors.left: parent.left
-                        anchors.leftMargin: 12
+                    contentWidth: availableWidth
+                    Layout.preferredHeight: Math.max(56, Math.min(160, statusText.contentHeight + 24))
+                    clip: true
+                    ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+                    TextArea {
+                        id: statusText
+                        width: statusView.availableWidth
+                        readOnly: true
+                        selectByMouse: true
+                        wrapMode: TextEdit.Wrap
+                        padding: 12
                         text: qsTr("State: ") + page.state
                         color: Theme.logColor(page.stateColorName)
                         font.pixelSize: 13
+                        background: Rectangle {
+                            radius: 8
+                            color: Theme.raised
+                            border.color: Theme.border
+                        }
                     }
                 }
             }
