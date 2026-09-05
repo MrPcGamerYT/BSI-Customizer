@@ -21,6 +21,9 @@ qt_add_executable(BSICustomizer
     src/core/PatchFile.cpp
     src/core/QtResources.h
     src/core/QtResources.cpp
+    src/core/QtResourcePatching.cpp
+    src/core/QtResourceRegistration.h
+    src/core/QtResourceRegistration.cpp
     src/core/ByteUtils.h
     src/core/PeUtils.h
     src/core/PeUtils.cpp

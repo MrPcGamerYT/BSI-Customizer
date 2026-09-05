@@ -22,6 +22,7 @@ Item {
         }
 
         PathRow {
+            id: bootPath
             Layout.fillWidth: true
             label: qsTr("HD-Player.exe")
             text: backend.exePath
@@ -72,15 +73,19 @@ Item {
                         wrapMode: Text.Wrap
                         color: Theme.textDim
                         font.pixelSize: 12
-                        text: qsTr("The patcher injects a video Loader into the boot QML (zlib-compressed "
-                                   + "inside the EXE). A .bak backup is created before writing.")
+                        text: qsTr("The patcher updates the boot player's media source. Validated QML resources "
+                                   + "can grow into mapped PE storage, and their caches are refreshed. "
+                                   + "Close BlueStacks first. The original .bak is preserved.")
                     }
                 }
 
                 RowLayout {
                     Layout.fillWidth: true
-                    Text {
+                    TextArea {
                         Layout.fillWidth: true
+                        readOnly: true
+                        selectByMouse: true
+                        wrapMode: TextEdit.Wrap
                         text: qsTr("State: ") + page.state
                         color: Theme.logColor(page.stateColorName)
                         font.pixelSize: 13
@@ -89,6 +94,7 @@ Item {
                         accent: true
                         text: qsTr("Patch Boot Video")
                         onClicked: {
+                            backend.exePath = bootPath.text;
                             const r = backend.bootPatch();
                             page.state = r.msg || "?";
                             page.stateColorName = r.ok ? "green" : "red";

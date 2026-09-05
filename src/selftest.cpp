@@ -1413,21 +1413,9 @@ int runSelfTest()
         }
 
         const auto r = BootVideoPatcher::patch(exePath);
-        check(r.ok, "boot video patched");
-
-        QFile f(exePath);
-        f.open(QIODevice::ReadOnly);
-        const QByteArray patched = f.readAll();
-        f.close();
-
-        const quint32 stored = be32(patched, bootEntry);
-        const quint32 usize = be32(patched, bootEntry + 4);
-        const QByteArray newQml =
-            ZlibUtils::tryDecompress(patched.mid(bootEntry + 8, stored - 4), usize);
-        const QString text = QString::fromUtf8(newQml);
-        check(text.contains(QLatin1String("file:///Promo.mp4")), "Promo.mp4 loader injected");
-        check(text.contains(QLatin1String("iBootImage.visible = false")), "boot image hidden");
-        check(!text.contains(QLatin1String("BootVideo.qml")), "stock BootVideo.qml removed");
+        check(!r.ok, "unregistered raw boot blobs are not treated as a verified Qt resource");
+        QFile f(exePath); f.open(QIODevice::ReadOnly);
+        check(f.readAll() == data, "unsupported boot layouts are left unchanged");
     }
 
     g_failures += runPatchRegressionTests();

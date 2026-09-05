@@ -27,6 +27,7 @@ Item {
         }
 
         PathRow {
+            id: integrityPath
             Layout.fillWidth: true
             label: qsTr("HD-Player.exe")
             text: backend.exePath
@@ -45,37 +46,41 @@ Item {
                     Text {
                         Layout.fillWidth: true
                         wrapMode: Text.Wrap
-                        text: qsTr("Prevents BlueStacks from restoring modified files, so your theme, "
-                                   + "SVG and FPS patches survive restarts and updates.")
+                        text: qsTr("Bypasses the supported disk-integrity check in the selected EXE. "
+                                   + "Close BlueStacks before writing. Updates can replace the EXE; "
+                                   + "always analyze the new version again.")
                         color: Theme.textDim
                         font.pixelSize: 13
                     }
                     ActionButton {
                         text: qsTr("Check")
-                        onClicked: page.setState(backend.integrityCheck())
+                        onClicked: { backend.exePath = integrityPath.text; page.setState(backend.integrityCheck()); }
                     }
                     ActionButton {
                         text: qsTr("Restore")
-                        onClicked: page.setState(backend.integrityRestore())
+                        onClicked: { backend.exePath = integrityPath.text; page.setState(backend.integrityRestore()); }
                     }
                     ActionButton {
                         accent: true
                         text: qsTr("Bypass")
-                        onClicked: page.setState(backend.integrityPatch())
+                        onClicked: { backend.exePath = integrityPath.text; page.setState(backend.integrityPatch()); }
                     }
                 }
 
                 Rectangle {
                     Layout.fillWidth: true
-                    height: 40
-                    Layout.preferredHeight: 40
+                    Layout.preferredHeight: Math.max(56, statusText.implicitHeight + 16)
                     radius: 8
                     color: Theme.raised
                     border.color: Theme.border
-                    Text {
+                    TextArea {
+                        id: statusText
+                        width: parent.width
                         anchors.verticalCenter: parent.verticalCenter
-                        anchors.left: parent.left
-                        anchors.leftMargin: 12
+                        readOnly: true
+                        selectByMouse: true
+                        wrapMode: TextEdit.Wrap
+                        padding: 8
                         text: qsTr("State: ") + page.state
                         color: Theme.logColor(page.stateColorName)
                         font.pixelSize: 13

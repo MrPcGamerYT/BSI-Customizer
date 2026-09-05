@@ -4,6 +4,7 @@
 #include <QList>
 #include <QPair>
 #include <QString>
+#include <QStringList>
 
 // rcc v1 has 14-byte nodes; v2/v3 have 22-byte nodes (including a BE64
 // modification time). Offsets in a resource tree are MEMORY offsets, not
@@ -13,6 +14,11 @@ namespace QtResources {
 struct Link
 {
     bool found = false;
+    bool explicitBases = false;
+    bool registered = false;
+    QString sourceName;
+    QStringList sourceNames;
+    QString detail;
     bool strict = false;
     bool ambiguous = false;
     int support = 0;
@@ -44,6 +50,13 @@ bool refreshTimestamp(QByteArray &data, const Link &link);
 // to UiThemeObject.qml. They otherwise take precedence over edited QML source,
 // even with the disk cache empty. Never disable the entire Qt cache globally.
 int invalidateThemeUnits(QByteArray &data);
+int invalidateUnits(QByteArray &data, const QStringList &sourceNames);
+// Grow only a validated PE's mapped, read-only resource storage. Never append
+// an unmapped blob or overwrite an arbitrary copy of an offset.
+qint64 appendStorage(QByteArray &data, qint64 size, QString *error);
+// Atomic-in-memory resource rewrite: on failure the input bytes are unchanged.
+bool replaceCompressed(QByteArray &data, qint64 entry, const Link &link,
+                       const QByteArray &source, QString *error, qint64 *newEntry = nullptr);
 bool invalidateThemeCacheResources(QByteArray &data, const Link &link, QString *error);
 
 } // namespace QtResources

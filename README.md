@@ -26,6 +26,14 @@ If an older patch already wrote the desired colors but BlueStacks still shows an
 
 The original `.bak` is preserved. Theme edits are made against the current EXE, not a stale backup. Writes are checked and atomically replaced where supported; close BlueStacks and run the tool as administrator if Windows refuses access.
 
+## Boot video and integrity
+
+Boot patching uses the selected installation's `Assets/Promo.mp4`, not a drive-root URL. It updates an existing `Video`/`MediaPlayer` resource when available; an inline QtMultimedia fallback is used only when an existing resource already imports that module. A QML `Loader` is never pointed directly at an MP4. Minified/multiline boot objects are handled by bounded object/property parsing. Validated compressed resources can grow into mapped read-only PE storage, and their resource timestamps/compiled caches are refreshed. Unknown players and unverified resource mappings remain non-writing errors.
+
+Integrity patching follows `E8 ???????? 84 C0 74 ??` in `.text`, with bounded RIP-relative references to the verify/fail messages when disambiguation is needed. Natural NOP sequences are not counted as clean candidates. Already-applied patches are verified by a message reference or matching backup evidence. Only the two JZ bytes are NOPed; dry-run is read-only, the first backup is preserved, and writes/restores are verified rather than truncating/deleting the EXE first. Close BlueStacks yourself before patching; the tool does not forcibly terminate your sessions. Full-backup restoration also rolls back theme/boot edits made after that backup.
+
+Theme/boot resource validation also reads supported `qRegisterResourceData` argument sequences and embedded binary-QRC headers. This allows verified noncanonical node ordering/unused nodes without treating arbitrary offsets as resource pointers. Unrelated opaque resource codecs no longer invalidate an otherwise bounded resource tree. The edited resource's bytes, aliases and cache records are still verified. `--theme-probe` includes resource mapping evidence; a screenshot alone cannot identify every unsupported executable layout.
+
 ## FPS slider
 
 Supported targets (64-bit x86 Windows DLLs):

@@ -3,8 +3,9 @@
 #include <QString>
 
 // Boot video patcher — rewrites the compressed boot QML in HD-Player.exe so
-// the boot screen loads a custom video (Assets\Promo.mp4) instead of the
-// stock promotion. Port of boot_kind_of / boot_find_streams / boot_patch_exe.
+// the boot screen uses Assets\Promo.mp4 from the selected installation.
+// Reuses an existing media player where available, preserves QML loaders,
+// grows mapped resources safely and invalidates their compiled caches.
 namespace BootVideoPatcher {
 
 struct Result { bool ok = false; QString msg; };
