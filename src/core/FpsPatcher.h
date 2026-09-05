@@ -7,7 +7,8 @@
 
 // FPS patcher — unlocks the high-FPS slider by detouring
 // QQuickSlider::setTo / QQuickRangeSlider::setTo in Qt5QuickTemplates2.dll or Qt6QuickTemplates2.dll.
-// Exact port of the Python fps_find_targets / fps_patch / fps_restore.
+// Only 240.0 (the high-frame-rate maximum) is replaced. Normal mode
+// (60.0) and all other values pass through the original setter unchanged.
 namespace FpsPatcher {
 
 struct Target
@@ -17,6 +18,8 @@ struct Target
     quint32 rva = 0;
     qint64 off = 0; // file offset
     QString state;  // "clean" | "patched" | "unknown"
+    qint64 slotOff = -1; // verified detour; used when removing an existing patch
+    int slotSize = 0;    // 48 = high-FPS only, 80 = legacy high/normal patch
 };
 
 struct Analysis

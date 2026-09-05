@@ -115,7 +115,8 @@ Item {
                     font.pixelSize: 12
                     text: qsTr("Works on Qt5QuickTemplates2.dll and Qt6QuickTemplates2.dll. "
                                + "Changes the QQuickSlider / QQuickRangeSlider upper limit from "
-                               + "240 to your chosen value; the lower limit stays at 60. This unlocks "
+                               + "240 to your chosen maximum. Normal mode stays at 60 FPS; its "
+                               + "value is not rewritten. Other slider values are untouched. This unlocks "
                                + "the settings slider, not a guarantee of in-game FPS. Close all "
                                + "BlueStacks instances before patching, then restart. A .bak backup "
                                + "is created automatically — use Restore to roll back.")

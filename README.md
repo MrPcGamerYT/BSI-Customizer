@@ -24,7 +24,9 @@ Supported targets (64-bit x86 Windows DLLs):
 
 These contain `QQuickSlider::setTo` / `QQuickRangeSlider::setTo`. **libOpenglRender.dll is not the FPS target.** Installation detection chooses the matching Qt major when possible; an old saved OpenGL path is migrated. You can also select the correct DLL manually.
 
-Choose a maximum from 60–1440, close BlueStacks, and patch. This changes the settings slider's upper limit, not a guarantee of in-game FPS. A per-DLL `.bak` supports restoring the original. Unsupported setter code and backups from a different DLL version are refused.
+Choose a high-FPS maximum from 60–1440, close BlueStacks, and patch. Only the 240 FPS high-frame-rate maximum is replaced. Normal mode stays at its default **60 FPS**, with no normal-mode setting or rewrite. Other slider values are unchanged. This changes the settings slider's upper limit, not a guarantee of in-game FPS.
+
+A per-DLL `.bak` supports restoring the original. Unsupported setter code and backups from a different DLL version are refused. Older high/normal-mode detours (including the `read it.txt` reference) can be upgraded to high-FPS-only using their matching clean backup.
 
 ## Build and verify
 
@@ -42,7 +44,7 @@ $env:QT_QPA_PLATFORM = "offscreen"
 Start-Process build/Release/BSI-Customizer.exe -ArgumentList '--selftest' -Wait
 ```
 
-The self-test covers resource detection/relocation, actual Qt QML loading in separate processes with disk caching enabled, repeated patch–launch cycles, embedded cache invalidation, palette parsing, and both FPS DLLs with MSVC/MinGW export names. These are synthetic fixtures, not an installed BlueStacks instance. GitHub CI runs the Windows build and self-test on pull requests.
+The self-test covers resource detection/relocation, actual Qt QML loading in separate processes with disk caching enabled, repeated patch–launch cycles, embedded cache invalidation, palette parsing, and both FPS DLLs with MSVC/MinGW export names. On Windows x64 it executes controlled setter fixtures to verify that only 240 FPS is replaced while 60 FPS and other values (including NaN) pass unchanged. It also tests upgrading legacy high/normal patches, repatching and exact restoration. These are synthetic fixtures, not an installed BlueStacks instance. GitHub CI runs the Windows build and self-test on pull requests.
 
 For an unsupported real EXE, collect a read-only diagnostic report:
 
