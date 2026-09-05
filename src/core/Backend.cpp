@@ -635,7 +635,9 @@ static QVariantMap analysisToMap(const FpsPatcher::Analysis &a)
 {
     QVariantList targets;
     for (const FpsPatcher::Target &t : a.targets)
-        targets << QVariantMap { { "name", t.name }, { "cls", t.cls }, { "state", t.state } };
+        targets << QVariantMap { { "name", t.name }, { "cls", t.cls }, { "state", t.state },
+                                 { "entryRva", t.entryRva }, { "rva", t.rva }, { "offset", t.off },
+                                 { "bytes", QString::fromLatin1(t.entryBytes.toHex(' ')) }, { "detail", t.detail } };
     return { { "ok", a.ok }, { "state", a.state }, { "msg", a.msg }, { "targets", targets } };
 }
 

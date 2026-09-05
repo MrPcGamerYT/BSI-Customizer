@@ -1223,12 +1223,14 @@ int runSelfTest()
         const qint64 cave = a.caveOff;
         check(patched.mid(int(cave) + 20, 5) == QByteArray::fromHex("48895C2408"),
               "original prologue preserved in slot");
-        check(readDoubleLE(patched, cave + 32) == 240.0, "slot matches only the 240.0 high-FPS maximum");
-        check(readDoubleLE(patched, cave + 40) == 360.0, "slot high FPS = 360.0");
-        check(patched.mid(cave, 48).count(QByteArray::fromHex("F20F100D")) == 1,
+        check(readDoubleLE(patched, cave + 48) == 240.0, "slot matches only the 240.0 high-FPS maximum");
+        check(readDoubleLE(patched, cave + 56) == 360.0, "slot high FPS = 360.0");
+        check(patched.mid(cave, 64).count(QByteArray::fromHex("F20F100D")) == 1,
               "detour has one replacement path, no normal-mode rewrite");
-        check(patched.mid(cave + 48, 32) == QByteArray(32, '\0'),
-              "no legacy 60/normal constants written beyond the 48-byte slot");
+        check(patched.mid(cave + 44, 4) == QByteArray::fromHex("46500105"),
+              "slot records complete original instruction length");
+        check(patched.mid(cave + 64, 16) == QByteArray(16, '\0'),
+              "no legacy normal-mode constants written beyond the 64-byte slot");
 
         const auto rr = FpsPatcher::restore(dllPath);
         QFile f2(dllPath);

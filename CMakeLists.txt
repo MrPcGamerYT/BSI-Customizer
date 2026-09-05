@@ -34,6 +34,11 @@ qt_add_executable(BSICustomizer
     src/core/SvgEngine.cpp
     src/core/FpsPatcher.h
     src/core/FpsPatcher.cpp
+    src/core/X64Prologue.h
+    src/core/X64Prologue.cpp
+    src/third_party/hde64/hde64.cpp
+    src/third_party/hde64/hde64.h
+    src/third_party/hde64/table64.h
     src/core/IntegrityPatcher.h
     src/core/IntegrityPatcher.cpp
     src/core/BootVideoPatcher.h
@@ -135,3 +140,11 @@ target_link_libraries(BSICustomizer PRIVATE
 )
 
 install(TARGETS BSICustomizer RUNTIME DESTINATION bin)
+
+# Retain the decoder's BSD notices next to built/installed executables.
+add_custom_command(TARGET BSICustomizer POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/third_party/hde64/LICENSE.txt"
+        "$<TARGET_FILE_DIR:BSICustomizer>/THIRD-PARTY-NOTICES.txt"
+)
+install(FILES src/third_party/hde64/LICENSE.txt DESTINATION bin RENAME THIRD-PARTY-NOTICES.txt)

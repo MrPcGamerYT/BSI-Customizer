@@ -15,11 +15,15 @@ struct Target
 {
     QString name;   // mangled export name
     QString cls;    // QQuickSlider / QQuickRangeSlider
-    quint32 rva = 0;
+    quint32 entryRva = 0; // exported entry (may be a thunk or ENDBR64 entry)
+    quint32 rva = 0;      // actual detour site
     qint64 off = 0; // file offset
     QString state;  // "clean" | "patched" | "unknown"
     qint64 slotOff = -1; // verified detour; used when removing an existing patch
-    int slotSize = 0;    // 48 = high-FPS only, 80 = legacy high/normal patch
+    int slotSize = 0;    // 64 = current, 48 = previous max-only, 80 = legacy high/normal
+    QByteArray originalBytes; // complete instructions, not an assumed five-byte prologue
+    QByteArray entryBytes;    // read-only diagnostic bytes from the detour site
+    QString detail;
 };
 
 struct Analysis
