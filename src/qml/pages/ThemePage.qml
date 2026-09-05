@@ -326,7 +326,7 @@ Item {
                     ActionButton {
                         accent: true
                         text: qsTr("Patch Theme")
-                        enabled: page.editedCount > 0
+                        enabled: backend.themeFound && backend.themeMode !== "hex"
                         onClicked: {
                             const r = backend.patchThemeQml();
                             if (r.ok)

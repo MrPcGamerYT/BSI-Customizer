@@ -38,6 +38,8 @@ Rectangle {
         enabled: button.enabled
         hoverEnabled: true
         cursorShape: button.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+        // Finish a focused color/path edit BEFORE the action consumes it.
+        onPressed: button.forceActiveFocus(Qt.MouseFocusReason)
         onClicked: button.clicked()
     }
 }

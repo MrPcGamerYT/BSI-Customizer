@@ -19,6 +19,20 @@ Backend::Backend(SettingsManager *settings, QObject *parent)
     : QObject(parent)
     , m_settings(settings)
 {
+    connect(settings, &SettingsManager::dllPathChanged, this, &Backend::dllPathChanged);
+    connect(settings, &SettingsManager::confPathChanged, this, &Backend::confPathChanged);
+    connect(settings, &SettingsManager::exePathChanged, this, [this] {
+        m_themeInfo = {};
+        m_themeEntries.clear();
+        m_hexQmlColors.clear();
+        m_edits.clear();
+        m_themeFilePath.clear();
+        m_themeStatus.clear();
+        m_svgs.clear();
+        emit exePathChanged();
+        emit themeChanged();
+        emit svgsChanged();
+    });
 }
 
 QString Backend::exePath() const { return m_settings->exePath(); }
@@ -102,7 +116,7 @@ void Backend::useInstall(int index)
         return;
     const QVariantMap m = m_installs.at(index).toMap();
     m_settings->setExePath(m.value(QStringLiteral("exe")).toString());
-    m_settings->setDllPath(m.value(QStringLiteral("opengl_dll")).toString());
+    m_settings->setDllPath(m.value(QStringLiteral("fps_dll")).toString());
     m_settings->setConfPath(m.value(QStringLiteral("conf")).toString());
     doLog(QStringLiteral("Using %1 install: %2")
               .arg(m.value(QStringLiteral("profile")).toString(),
@@ -253,14 +267,15 @@ void Backend::loadTheme(const QString &method)
                         .arg(where);
     doLog(m_themeStatus, QStringLiteral("blue"));
 
-    if (t.candidateCount > 1) {
-        doLog(QStringLiteral("WARNING: %1 theme records exist in this EXE%2. Using the one the "
-                             "Qt resource tree points at; the rest are orphans left behind by an "
-                             "earlier relocation (ours or another tool's). If BlueStacks shows a "
-                             "different theme than the colors listed here, press RESTORE on the "
-                             "Extras page and patch again from a clean file.")
-                  .arg(t.candidateCount)
-                  .arg(where),
+    if (t.ambiguous) {
+        doLog(QStringLiteral("Multiple theme resources could be active. Patching is blocked "
+                             "rather than guessing; run --theme-probe on this EXE."),
+              QStringLiteral("orange"));
+    } else if (t.candidateCount > 1 && t.hasQrcNode) {
+        doLog(QStringLiteral("Found %1 theme-like records%2. The selected UiThemeObject.qml "
+                             "is validated against the Qt resource tree; other records were "
+                             "not selected for editing.")
+                  .arg(t.candidateCount).arg(where),
               QStringLiteral("orange"));
     }
     if (t.mode == QLatin1String("zlib") && !t.hasQrcNode) {
@@ -305,7 +320,7 @@ QVariantMap Backend::patchThemeQml()
                       QStringLiteral("PATCH THEME is for the QML method; use Apply Selected for hex."),
                       QStringLiteral("orange"));
     }
-    if (m_edits.isEmpty())
+    if (m_edits.isEmpty() && !m_themeInfo.hasQrcNode)
         return result(false, QStringLiteral("Nothing to patch - set some colors first."),
                       QStringLiteral("orange"));
     if (themeFileChanged())
@@ -359,7 +374,7 @@ int Backend::applyPreset(const QString &id)
               .arg(already),
           QStringLiteral("blue"));
     if (matched.isEmpty())
-        doLog(QStringLiteral("This preset changes nothing - the EXE already has these colors."),
+        doLog(QStringLiteral("The EXE already has this palette. Press PATCH THEME to refresh its cache."),
               QStringLiteral("orange"));
     return matched.size();
 }
@@ -626,6 +641,9 @@ static QVariantMap analysisToMap(const FpsPatcher::Analysis &a)
 
 QVariantMap Backend::fpsAnalyze()
 {
+    if (!FpsPatcher::isSupportedPath(m_settings->dllPath()))
+        return result(false, QStringLiteral("Select Qt5QuickTemplates2.dll or Qt6QuickTemplates2.dll "
+                                            "from your BlueStacks installation."), QStringLiteral("red"));
     QFile f(m_settings->dllPath());
     if (!f.open(QIODevice::ReadOnly))
         return result(false, QStringLiteral("Cannot read %1").arg(m_settings->dllPath()),

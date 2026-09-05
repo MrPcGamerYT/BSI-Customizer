@@ -6,7 +6,7 @@
 #include <QVariantList>
 
 // FPS patcher — unlocks the high-FPS slider by detouring
-// QQuickSlider::setTo / QQuickRangeSlider::setTo in libOpenglRender.dll.
+// QQuickSlider::setTo / QQuickRangeSlider::setTo in Qt5QuickTemplates2.dll or Qt6QuickTemplates2.dll.
 // Exact port of the Python fps_find_targets / fps_patch / fps_restore.
 namespace FpsPatcher {
 
@@ -31,6 +31,10 @@ struct Analysis
 
 struct Result { bool ok = false; QString msg; };
 
+bool isSupportedPath(const QString &dllPath);
+// Pick the Qt major used by HD-Player when both versions are installed.
+// Returns empty when the corresponding QuickTemplates2 DLL is missing.
+QString findDll(const QString &installDir);
 Analysis analyze(const QByteArray &dll);
 Result patch(const QString &dllPath, double hi);
 Result restore(const QString &dllPath);

@@ -39,6 +39,8 @@
 
 using namespace ByteUtils;
 
+int runPatchRegressionTests();
+
 namespace {
 
 int g_failures = 0;
@@ -193,17 +195,34 @@ QStringList randomColors(int n = 50)
     return out;
 }
 
+quint32 qrcNameHash(const QString &name)
+{
+    quint32 hash = 0;
+    for (const auto c : name) {
+        hash = (hash << 4) + c.unicode();
+        hash ^= (hash & 0xf0000000) >> 23;
+        hash &= 0x0fffffff;
+    }
+    return hash;
+}
+
 // Writes a qrc name record + file node that point at a data record, using the
 // identity RVA mapping of makeFakePe (base 0x1000).
 void writeQrcNode(QByteArray &d, qint64 entryOff, qint64 nameRec, qint64 nodeOff)
 {
     const QString name = QStringLiteral("UiThemeObject.qml");
     putBe16(d, nameRec, quint16(name.size()));
-    putBe32(d, nameRec + 2, 0xDEADBEEF);
+    putBe32(d, nameRec + 2, qrcNameHash(name));
     d.replace(int(nameRec + 6), utf16be(name).size(), utf16be(name));
 
-    const qint64 nameBase = 0x1040;
+    const qint64 nameBase = nameRec;
     const qint64 dataBase = 0x1000;
+    // A real root + one file, not an isolated flag pattern.
+    putBe32(d, nodeOff, 0);
+    putBe16(d, nodeOff + 4, 2);
+    putBe32(d, nodeOff + 6, 1);
+    putBe32(d, nodeOff + 10, 1);
+    nodeOff += 14;
     putBe32(d, nodeOff, quint32(nameRec - nameBase));  // name offset
     putBe16(d, nodeOff + 4, 1);                        // flags: file, compressed
     putBe16(d, nodeOff + 6, 0);                        // country
@@ -433,13 +452,17 @@ int runSelfTest()
         for (int i = 0; i < names.size(); ++i) {
             const qint64 rec = nameBase + i * 0x80;
             putBe16(pe, rec, quint16(names.at(i).size()));
-            putBe32(pe, rec + 2, quint32(0xDEAD0000u + quint32(i)));
+            putBe32(pe, rec + 2, qrcNameHash(names.at(i)));
             pe.replace(int(rec + 6), utf16be(names.at(i)).size(), utf16be(names.at(i)));
             nameRecs << rec;
         }
 
         // qt_resource_tree: one 14-byte entry per payload.
         const qint64 nodeBase = 0x6000;
+        putBe32(pe, nodeBase - 14, 0);
+        putBe16(pe, nodeBase - 10, 2);
+        putBe32(pe, nodeBase - 8, quint32(payloadOff.size()));
+        putBe32(pe, nodeBase - 4, 1);
         for (int i = 0; i < payloadOff.size(); ++i) {
             const qint64 node = nodeBase + i * 14;
             putBe32(pe, node, quint32(nameRecs.at(i) - nameBase));         // name offset
@@ -1177,7 +1200,7 @@ int runSelfTest()
         putLe16(d, 0x1208, 0);      // ordinal
         d.replace(0x1300, 6, QByteArray::fromHex("48895C2408C3"));
 
-        const QString dllPath = tmp.path() + QStringLiteral("/libOpenglRender.dll");
+        const QString dllPath = tmp.path() + QStringLiteral("/Qt5QuickTemplates2.dll");
         {
             QFile f(dllPath);
             f.open(QIODevice::WriteOnly);
@@ -1401,6 +1424,8 @@ int runSelfTest()
         check(text.contains(QLatin1String("iBootImage.visible = false")), "boot image hidden");
         check(!text.contains(QLatin1String("BootVideo.qml")), "stock BootVideo.qml removed");
     }
+
+    g_failures += runPatchRegressionTests();
 
     std::printf("========================\n");
     std::printf("%s (%d failure(s))\n",

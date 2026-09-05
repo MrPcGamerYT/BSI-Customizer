@@ -1,6 +1,8 @@
 #include "ThemeEngine.h"
 
 #include "ByteUtils.h"
+#include "BsDetector.h"
+#include "PatchFile.h"
 #include "PeUtils.h"
 #include "ZlibUtils.h"
 
@@ -127,27 +129,21 @@ ColorToken splitColorToken(const QString &raw, int start)
 
     ColorToken tk;
     tk.start = start;
-    if (t.startsWith(QLatin1Char('"'))) {
-        const int q2 = t.indexOf(QLatin1Char('"'), 1);
-        if (q2 >= 0) {
-            tk.val = t.mid(1, q2 - 1);
-            tk.len = q2 + 1;
-            tk.quoted = true;
-        } else {
-            tk.val = t;
-            tk.val.remove(QLatin1Char('"'));
+    if (t.startsWith(QLatin1Char('"')) || t.startsWith(QLatin1Char('\''))) {
+        const QChar quote = t.at(0);
+        // Only a complete literal is quoted. A ternary/expression beginning
+        // with a string must be replaced as a whole, not just its first token.
+        if (t.size() >= 2 && t.endsWith(quote)) {
+            tk.val = t.mid(1, t.size() - 2);
             tk.len = t.size();
             tk.quoted = true;
+            tk.ok = true;
+            return tk;
         }
-        tk.ok = true;
-        return tk;
     }
-    int cut = t.indexOf(QStringLiteral("//"));
-    if (cut < 0)
-        cut = t.size();
-    QString tok = t.left(cut);
-    while (tok.endsWith(QLatin1Char(' ')) || tok.endsWith(QLatin1Char('\t')))
-        tok.chop(1);
+    // qmlExpressionEnd already excludes trailing comments. Internal comments
+    // in a multi-line expression are part of the splice and must not truncate it.
+    const QString tok = t.trimmed();
     if (tok.isEmpty())
         return {};
     tk.val = tok;
@@ -155,6 +151,117 @@ ColorToken splitColorToken(const QString &raw, int start)
     tk.quoted = false;
     tk.ok = true;
     return tk;
+}
+
+// Keep offsets identical while masking comments and strings for declaration
+// matching. A commented-out palette must never become an editable property.
+QString qmlCodeMask(const QString &qml)
+{
+    QString mask = qml;
+    QChar quote;
+    bool lineComment = false, blockComment = false, escape = false;
+    for (int i = 0; i < qml.size(); ++i) {
+        const QChar c = qml.at(i);
+        const QChar next = i + 1 < qml.size() ? qml.at(i + 1) : QChar();
+        if (lineComment) {
+            if (c == QLatin1Char('\n'))
+                lineComment = false;
+            else
+                mask[i] = QLatin1Char(' ');
+        } else if (blockComment) {
+            mask[i] = c == QLatin1Char('\n') ? c : QLatin1Char(' ');
+            if (c == QLatin1Char('*') && next == QLatin1Char('/')) {
+                mask[++i] = QLatin1Char(' ');
+                blockComment = false;
+            }
+        } else if (!quote.isNull()) {
+            mask[i] = c == QLatin1Char('\n') ? c : QLatin1Char(' ');
+            if (escape)
+                escape = false;
+            else if (c == QLatin1Char('\\'))
+                escape = true;
+            else if (c == quote)
+                quote = QChar();
+        } else if (c == QLatin1Char('/') && next == QLatin1Char('/')) {
+            mask[i] = QLatin1Char(' ');
+            mask[++i] = QLatin1Char(' ');
+            lineComment = true;
+        } else if (c == QLatin1Char('/') && next == QLatin1Char('*')) {
+            mask[i] = QLatin1Char(' ');
+            mask[++i] = QLatin1Char(' ');
+            blockComment = true;
+        } else if (c == QLatin1Char('"') || c == QLatin1Char('\'')) {
+            quote = c;
+            mask[i] = QLatin1Char(' ');
+        }
+    }
+    return mask;
+}
+
+int qmlExpressionEnd(const QString &qml, int start)
+{
+    QChar quote;
+    bool escape = false;
+    int depth = 0, ternaries = 0;
+    QChar previous;
+    for (int i = start; i < qml.size(); ++i) {
+        const QChar c = qml.at(i);
+        if (!quote.isNull()) {
+            if (escape)
+                escape = false;
+            else if (c == QLatin1Char('\\'))
+                escape = true;
+            else if (c == quote)
+                quote = QChar();
+            continue;
+        }
+        if (c == QLatin1Char('"') || c == QLatin1Char('\'')) {
+            quote = c;
+        } else if (c == QLatin1Char('(') || c == QLatin1Char('[') || c == QLatin1Char('{')) {
+            ++depth;
+        } else if (c == QLatin1Char(')') || c == QLatin1Char(']') || c == QLatin1Char('}')) {
+            if (depth == 0)
+                return i;
+            --depth;
+        } else if (c == QLatin1Char('/') && i + 1 < qml.size()
+                   && qml.at(i + 1) == QLatin1Char('*')) {
+            const int end = qml.indexOf(QStringLiteral("*/"), i + 2);
+            if (end < 0)
+                return qml.size();
+            i = end + 1;
+            continue;
+        } else if (c == QLatin1Char('/') && i + 1 < qml.size()
+                   && qml.at(i + 1) == QLatin1Char('/')) {
+            if (depth == 0 && ternaries == 0)
+                return i;
+            const int end = qml.indexOf(QLatin1Char('\n'), i + 2);
+            if (end < 0)
+                return qml.size();
+            i = end - 1;
+            continue;
+        } else if (depth == 0 && c == QLatin1Char('?')
+                   && (i + 1 >= qml.size() || (qml.at(i + 1) != QLatin1Char('?')
+                                              && qml.at(i + 1) != QLatin1Char('.')))
+                   && previous != QLatin1Char('?')) {
+            ++ternaries;
+        } else if (depth == 0 && c == QLatin1Char(':') && ternaries > 0) {
+            --ternaries;
+        } else if (depth == 0 && c == QLatin1Char(';')) {
+            return i;
+        } else if (depth == 0 && (c == QLatin1Char('\r') || c == QLatin1Char('\n'))) {
+            int next = i + 1;
+            while (next < qml.size() && qml.at(next).isSpace())
+                ++next;
+            const bool continued = ternaries > 0
+                || QStringLiteral("?:,+-*/&|=.").contains(previous)
+                || (next < qml.size() && QStringLiteral("?:.&|").contains(qml.at(next)));
+            if (!continued)
+                return i;
+        }
+        if (!c.isSpace())
+            previous = c;
+    }
+    return qml.size();
 }
 
 // ---- qrc relocation helpers (port of the "no room" fix block) ----
@@ -334,190 +441,34 @@ QList<qint64> markerAnchoredMagics(const QByteArray &data,
     return out;
 }
 
-struct QrcNode
-{
-    bool found = false;
-    bool strict = false;          // matched the real qrc block ordering
-    int support = 0;              // neighbouring tree entries corroborate dataBaseRaw
-    qint64 nodeOff = -1;
-    qint64 nameRecordOff = -1;
-    qint64 nameBaseRaw = -1;
-    qint64 dataBaseRaw = -1;
-    qint64 dataBaseRva = -1;
-    quint32 dataOffset = 0;
-};
-
-// How strongly the rest of the qresource tree backs a derived data base.
-//
-// Every file node stores its payload position as an offset from the start of
-// the qt_resource_data array, so a node found for the record BlueStacks really
-// loads yields a dataBaseRaw that also makes its NEIGHBOURS' payloads land on
-// genuine Qt resource headers ([be32 length][be32 usize][zlib/zstd stream]).
-// A node matched to an orphaned copy of the theme (left behind when another
-// tool relocated the record) yields a base shifted by the distance between the
-// two copies, and its neighbours resolve to random bytes.
-//
-// This is the one test that tells the live record from a stale orphan when both
-// decompress into a perfectly good theme - i.e. exactly the case where the UI
-// would otherwise show colors BlueStacks no longer has.
-int qrcDataBaseSupport(const QByteArray &data, qint64 dataBaseRaw, qint64 nodeOff)
-{
-    if (dataBaseRaw < 0 || nodeOff < 0)
-        return 0;
-
-    auto payloadOk = [&data](qint64 payload) {
-        if (payload < 0 || payload + 9 > data.size())
-            return false;
-        const quint32 len = be32(data, payload);
-        const quint32 usize = be32(data, payload + 4);
-        if (usize < 16 || usize > 50000000u)
-            return false;
-        if (len < 8 || quint64(len) > quint64(data.size()))
-            return false;
-        if (payload + 12 <= data.size() && be32(data, payload + 8) == 0x28B52FFDu)
-            return true; // zstd frame
-        const uchar cmf = uchar(data[int(payload + 8)]);
-        if (cmf != 0x78)
-            return false;
-        const uchar flg = uchar(data[int(payload + 9)]);
-        return flg == 0x01 || flg == 0x5E || flg == 0x9C || flg == 0xDA; // zlib
-    };
-
-    int support = 0;
-    for (int k = -12; k <= 12; ++k) {
-        if (k == 0)
-            continue;
-        const qint64 node = nodeOff + qint64(k) * 14;
-        if (!inRange(data, node, 14))
-            continue;
-        const quint16 flags = be16(data, node + 4);
-        if ((flags & 0x0001) == 0 || (flags & 0x0002))
-            continue; // only compressed file nodes have a checkable payload
-        const quint32 dataOff = be32(data, node + 10);
-        if (dataOff == 0 || dataOff > 0x0FFFFFFFu)
-            continue;
-        if (payloadOk(dataBaseRaw + qint64(dataOff)))
-            ++support;
-    }
-    return support;
-}
-
-QList<qint64> qrcNameRecords(const QByteArray &data, const QString &name)
-{
-    // Qt qrc name record: [be16 length][be32 hash][UTF-16BE name]
-    QList<qint64> out;
-    const QByteArray pat = utf16be(name);
-    qsizetype pos = 0;
-    while (true) {
-        pos = data.indexOf(pat, pos);
-        if (pos < 0)
-            break;
-        const qint64 rec = pos - 6;
-        if (rec >= 0 && inRange(data, rec, 2) && be16(data, rec) == quint16(name.size()))
-            out << rec;
-        pos += 1;
-    }
-    return out;
-}
+using QrcNode = QtResources::Link;
 
 QrcNode findQrcNodeForEntry(const QByteArray &data, qint64 entryOff,
                             const QString &name = QStringLiteral("UiThemeObject.qml"))
 {
-    QrcNode best;
-    const QList<qint64> nameRecords = qrcNameRecords(data, name);
-    if (nameRecords.isEmpty())
-        return best;
+    return QtResources::findLink(data, entryOff, name);
+}
 
-    const QList<PeSection> secs = PeUtils::sections(data);
-    const qint64 entryRva = secs.isEmpty() ? -1 : PeUtils::rawToRva(secs, entryOff);
-
-    qint64 bestScore = 0;
-
-    // A well-formed tree entry has no flag bits outside Compressed|Directory|
-    // CompressedZstd.  A node embedded in a run of such entries is a real tree
-    // entry; a match in random bytes almost never has a plausible neighbour.
-    auto plausibleEntry = [&data](qint64 node) {
-        if (!inRange(data, node, 14))
-            return false;
-        return (be16(data, node + 4) & ~quint16(0x0007)) == 0;
-    };
-    auto inTreeRun = [&plausibleEntry](qint64 node) {
-        return plausibleEntry(node - 14) || plausibleEntry(node + 14);
-    };
-
-    auto scanRange = [&](qint64 nameRec, qint64 start, qint64 end, bool strict) {
-        start = qMax<qint64>(0, start);
-        end = qMin<qint64>(data.size() - 14, end);
-        if (start >= end)
-            return;
-        for (qint64 node = start; node < end; ++node) {
-            if (!inRange(data, node, 14))
-                continue;
-            const quint16 flags = be16(data, node + 4);
-            if ((flags & 0x0001) == 0 || (flags & 0x0002))
-                continue; // must be a compressed file node, not a directory
-            const quint32 nameOff = be32(data, node);
-            const quint32 dataOff = be32(data, node + 10);
-
-            const qint64 nameBaseRaw = nameRec - nameOff;
-            const qint64 dataBaseRaw = entryOff - dataOff;
-            if (nameBaseRaw < 0 || nameBaseRaw >= data.size())
-                continue;
-            if (dataBaseRaw < 0 || dataBaseRaw >= data.size())
-                continue;
-            if (strict && !(dataBaseRaw < nameBaseRaw && nameBaseRaw < node))
-                continue;
-
-            qint64 dataBaseRva = -1;
-            if (entryRva >= 0)
-                dataBaseRva = entryRva - dataOff;
-
-            qint64 score = std::llabs(node - nameRec);
-            if (dataBaseRaw < nameBaseRaw && nameBaseRaw < node)
-                score -= 0x10000000; // strongly prefer normal qrc array order
-            if (node >= nameRec)
-                score -= 0x1000;
-
-            // Corroboration from the surrounding tree beats geometry: many
-            // nodes fit the arithmetic for a given record, but only the real
-            // one sits in a tree run whose data base also resolves its
-            // neighbours' payloads.  Support is only computed for matches that
-            // are in a run or that already lead on geometry, so a scan over
-            // megabytes of random bytes stays cheap.
-            const bool run = inTreeRun(node);
-            int support = 0;
-            if (run || !best.found || score < bestScore)
-                support = qrcDataBaseSupport(data, dataBaseRaw, node);
-            if (run)
-                score -= 0x40000000;
-            score -= qint64(support) * 0x20000000LL;
-
-            if (!best.found || score < bestScore) {
-                bestScore = score;
-                best.found = true;
-                best.strict = strict;
-                best.support = support;
-                best.nodeOff = node;
-                best.nameRecordOff = nameRec;
-                best.nameBaseRaw = nameBaseRaw;
-                best.dataBaseRaw = dataBaseRaw;
-                best.dataBaseRva = dataBaseRva;
-                best.dataOffset = dataOff;
-            }
-        }
-    };
-
-    for (const qint64 nr : nameRecords)
-        scanRange(nr, nr, nr + 0x200000, true);
-    if (best.found)
-        return best;
-    for (const qint64 nr : nameRecords)
-        scanRange(nr, qMax<qint64>(0, nr - 0x40000), nr + 0x200000, false);
-    return best;
+qint64 zeroSlackAfter(const QByteArray &data, const ThemeInfo &info)
+{
+    const qint64 end = info.zoff + info.compSize;
+    qint64 limit = qMin<qint64>(data.size(), end + 1024 * 1024);
+    const auto secs = PeUtils::sections(data);
+    if (const auto *section = PeUtils::sectionForRaw(secs, info.entryOff))
+        limit = qMin(limit, qint64(section->rawPtr) + section->rawSize);
+    for (const auto &range : info.resource.reserved) {
+        if (range.first >= end)
+            limit = qMin(limit, range.first);
+    }
+    qint64 slack = 0;
+    while (end + slack < limit && data[int(end + slack)] == '\0')
+        ++slack;
+    return slack;
 }
 
 qint64 findZeroCave(const QByteArray &data, const QList<PeSection> &secs,
-                    qint64 oldEntryOff, qint64 dataBaseRva, qint64 needLen)
+                    qint64 oldEntryOff, qint64 dataBaseRva, qint64 needLen,
+                    const QList<QPair<qint64, qint64>> &reserved)
 {
     if (needLen <= 0)
         return -1;
@@ -551,6 +502,17 @@ qint64 findZeroCave(const QByteArray &data, const QList<PeSection> &secs,
             pos = (pos + 3) & ~qsizetype(3); // qrc data alignment
             if (pos + needLen <= end
                 && data.mid(pos, int(needLen)) == QByteArray(int(needLen), '\0')) {
+                bool free = true;
+                for (const auto &range : reserved) {
+                    if (pos < range.second && pos + needLen > range.first) {
+                        pos = qMax<qsizetype>(pos, range.second - 1);
+                        free = false;
+                    }
+                }
+                if (!free) {
+                    pos = data.indexOf(probe, pos + 1);
+                    continue;
+                }
                 const qint64 rva = PeUtils::rawToRva(secs, pos);
                 if (rva >= 0) {
                     if (dataBaseRva >= 0) {
@@ -765,8 +727,15 @@ ThemeInfo ThemeEngine::findThemeZlib(const QByteArray &data)
                 if (storedSize == measured + 4 || storedSize == measured) {
                     includesUSize = (storedSize == measured + 4);
                 } else {
-                    headerBytes = (u4 >= 100 && u4 <= 500000u) ? 4 : 0;
-                    storedSize = (headerBytes == 4) ? measured + 4 : 0;
+                    // Other changers often retain the original outer length
+                    // and pad a shorter stream. That is still a valid rcc
+                    // payload. Do not misclassify it as a bare blob and lose
+                    // its resource timestamp/cache invalidation on repatching.
+                    const auto padded = findQrcNodeForEntry(data, pos - 8);
+                    if (!padded.found || padded.ambiguous) {
+                        headerBytes = (u4 >= 100 && u4 <= 500000u) ? 4 : 0;
+                        storedSize = (headerBytes == 4) ? measured + 4 : 0;
+                    }
                     includesUSize = true;
                 }
                 compLen = measured;
@@ -790,7 +759,8 @@ ThemeInfo ThemeEngine::findThemeZlib(const QByteArray &data)
         info.contentQuality = strictContent ? 2 : 1;
 
         const QrcNode node = findQrcNodeForEntry(data, info.entryOff);
-        if (node.found) {
+        info.resource = node;
+        if (node.found && !node.ambiguous && headerBytes == 8) {
             // A record the qresource tree really links to UiThemeObject.qml IS
             // the theme, however odd its content looks.
             if (node.support > 0)
@@ -842,15 +812,15 @@ ThemeInfo ThemeEngine::findThemeZlib(const QByteArray &data)
     // but only the record the qresource tree points at is what BlueStacks
     // actually loads.
     //
-    // Rank by content first, then by how well the rest of the qrc tree
-    // corroborates the record's data base (see qrcDataBaseSupport) - that is the
-    // only evidence separating the live record from a stale orphan - then by qrc
-    // geometry, then by entry count.  Ties keep scan order (lowest offset first).
+    // A validated resource tree takes priority over palette heuristics. Stock
+    // colors in an orphan must not outrank a custom palette in the live tree.
+    // Unresolved ties are marked ambiguous and are never patched by guessing.
     std::stable_sort(candidates.begin(), candidates.end(),
                      [](const ThemeInfo &a, const ThemeInfo &b) {
                          const auto rank = [](const ThemeInfo &t) -> qint64 {
-                             return qint64(t.contentQuality) * 1000000000
-                                    + qint64(t.qrcSupport) * 10000000
+                             return (t.hasQrcNode ? 1000000000000LL : 0)
+                                    + qint64(t.qrcSupport) * 1000000000LL
+                                    + qint64(t.contentQuality) * 10000000
                                     + (t.qrcStrict ? 200000 : (t.hasQrcNode ? 100000 : 0))
                                     // A hit inside the marker window is the same
                                     // evidence the reference tool relies on.
@@ -878,6 +848,13 @@ ThemeInfo ThemeEngine::findThemeZlib(const QByteArray &data)
             ++twins;
     }
     best.candidateCount = twins;
+    int linked = 0;
+    for (const auto &candidate : candidates) {
+        if (candidate.hasQrcNode && candidate.qrcSupport == best.qrcSupport)
+            ++linked;
+    }
+    best.ambiguous = best.resource.ambiguous || linked > 1
+                     || (!best.hasQrcNode && twins > 1);
     return best;
 }
 
@@ -1039,10 +1016,10 @@ QList<QmlEntry> ThemeEngine::parseQmlEntries(const QString &q)
     QList<QmlEntry> entries;
     QSet<int> used;
 
+    const QString mask = qmlCodeMask(q);
     static const QRegularExpression rx1(
-        QStringLiteral("^[ \t]*(?:readonly[ \t]+)?property[ \t]+(?:color|var)[ \t]+"
-                       "([A-Za-z_][A-Za-z0-9_]*)[ \t]*:[ \t]*([^\r\n]*)"),
-        QRegularExpression::MultilineOption);
+        QStringLiteral("\\b(?:readonly\\s+)?property\\s+(?:color|var)\\s+"
+                       "([A-Za-z_][A-Za-z0-9_]*)[ \\t]*:"));
     static const QRegularExpression rx2(
         QStringLiteral("^[ \t]*([A-Za-z_][A-Za-z0-9_]*)[ \t]*:[ \t]*"
                        "(\"(?:#[0-9A-Fa-f]{6,8})\"|#[0-9A-Fa-f]{6,8})"),
@@ -1063,13 +1040,17 @@ QList<QmlEntry> ThemeEngine::parseQmlEntries(const QString &q)
                        "(\"#[0-9A-Fa-f]{6,8}\"|#[0-9A-Fa-f]{6,8})"),
         QRegularExpression::MultilineOption);
 
-    auto it1 = rx1.globalMatch(q);
+    auto it1 = rx1.globalMatch(mask);
     while (it1.hasNext()) {
         const auto m = it1.next();
         const QString name = m.captured(1);
         if (name.isEmpty())
             continue;
-        const ColorToken tk = splitColorToken(m.captured(2), int(m.capturedStart(2)));
+        int start = int(m.capturedEnd());
+        while (start < q.size() && q.at(start).isSpace())
+            ++start;
+        const int end = qmlExpressionEnd(q, start);
+        const ColorToken tk = splitColorToken(q.mid(start, end - start), start);
         if (!tk.ok || used.contains(tk.start))
             continue;
         used.insert(tk.start);
@@ -1087,7 +1068,8 @@ QList<QmlEntry> ThemeEngine::parseQmlEntries(const QString &q)
     while (it2.hasNext()) {
         const auto m = it2.next();
         const QString name = m.captured(1);
-        if (name.isEmpty() || isGenericSlotName(name))
+        if (name.isEmpty() || isGenericSlotName(name)
+            || mask.mid(m.capturedStart(1), name.size()).trimmed().isEmpty())
             continue;
         const QString tokstr = m.captured(2);
         const int start = int(m.capturedStart(2));
@@ -1117,7 +1099,8 @@ QList<QmlEntry> ThemeEngine::parseQmlEntries(const QString &q)
             const QString name = m.captured(1);
             // rx3 still requires "property color|var", so the filter only ever
             // bites on rx4 - but applying it to both keeps the two consistent.
-            if (name.isEmpty() || isGenericSlotName(name))
+            if (name.isEmpty() || isGenericSlotName(name)
+                || mask.mid(m.capturedStart(1), name.size()).trimmed().isEmpty())
                 continue;
             const QString tokstr = m.captured(2);
             const int start = int(m.capturedStart(2));
@@ -1147,6 +1130,17 @@ QString ThemeEngine::buildQml(const QString &qml, const QList<QmlEntry> &entries
     static const QRegularExpression re8(QStringLiteral("^#[0-9A-Fa-f]{8}$"));
     static const QRegularExpression reAlpha(QStringLiteral("^#([0-9A-Fa-f]{2})[0-9A-Fa-f]{6}$"));
 
+    if (skipped) {
+        QSet<QString> names;
+        for (const auto &entry : entries)
+            names.insert(entry.name);
+        for (auto it = edits.cbegin(); it != edits.cend(); ++it) {
+            if (!names.contains(it.key()))
+                *skipped << QStringLiteral("%1: this property is no longer in the live theme")
+                                .arg(it.key());
+        }
+    }
+
     struct Change { int start; int len; QString val; };
     QList<Change> changes;
 
@@ -1165,20 +1159,8 @@ QString ThemeEngine::buildQml(const QString &qml, const QList<QmlEntry> &entries
             if (m.hasMatch())
                 v = QStringLiteral("#") + m.captured(1) + v.mid(1); // keep 8-digit alpha
         }
-        if (hex6 || hex8) {
-            if (e.quoted || allowGrow) {
-                // A quoted color literal is always valid QML.  Growing an
-                // unquoted slot by the two quotes is only safe when the record
-                // is recompressed anyway.
-                v = QStringLiteral("\"") + v + QStringLiteral("\"");
-            } else {
-                if (skipped)
-                    *skipped << QStringLiteral("%1: the EXE stores this value unquoted, which "
-                                               "cannot be rewritten in place as valid QML")
-                                    .arg(e.name);
-                continue;
-            }
-        }
+        if (hex6 || hex8)
+            v = QStringLiteral("\"") + v + QStringLiteral("\"");
 
         // A plain-text (uncompressed) theme is rewritten byte for byte in place,
         // so the replacement must fit the expression that is already there.  The
@@ -1226,12 +1208,16 @@ ThemeEngine::PatchResult ThemeEngine::patchTheme(const QString &exePath, const T
 {
     if (!info.found)
         return { false, QStringLiteral("Load the theme first.") };
+    if (BsDetector::isProcessRunning(QStringLiteral("HD-Player.exe")))
+        return { false, QStringLiteral("Close all BlueStacks instances (HD-Player.exe) before "
+                                        "patching. Then reopen BlueStacks to load the new colors.") };
 
     QFile file(exePath);
     if (!file.open(QIODevice::ReadOnly))
         return { false, QStringLiteral("Cannot read file: %1 (run as administrator?)").arg(exePath) };
     QByteArray data = file.readAll();
     file.close();
+    const QByteArray original = data;
 
     // ---------------- patch what is on disk RIGHT NOW ----------------
     // The ThemeInfo handed to us is a snapshot taken when the user pressed
@@ -1262,6 +1248,15 @@ ThemeEngine::PatchResult ThemeEngine::patchTheme(const QString &exePath, const T
         liveEntries = parseQmlEntries(fresh.qml);
     }
 
+    if (live.ambiguous)
+        return { false, QStringLiteral("More than one theme resource could be active. No file "
+                                        "was written; use --theme-probe to inspect this EXE.") };
+
+    if (live.mode == QLatin1String("zlib") && live.headerBytes == 8 && !live.hasQrcNode
+        && data.contains(utf16be(QStringLiteral("UiThemeObject.qml"))))
+        return { false, QStringLiteral("The Qt resource tree could not be validated. No file "
+                                        "was written; run --theme-probe for this EXE.") };
+
     // The zlib record is recompressed (and relocated if it outgrows its slot),
     // so a longer hex color is fine there; a plain-text theme must fit in place.
     QStringList skipped;
@@ -1270,7 +1265,14 @@ ThemeEngine::PatchResult ThemeEngine::patchTheme(const QString &exePath, const T
     for (const QString &why : skipped)
         log(logger, QStringLiteral("Not applied - %1").arg(why), QStringLiteral("orange"));
 
-    if (q == live.qml) {
+    if (!skipped.isEmpty())
+        return { false, QStringLiteral("Some colors could not be applied. No file was written; "
+                                        "see the log and correct those edits first.") };
+
+    // Reapplying a palette also repairs old patches whose source colors are
+    // correct but whose embedded/disk cache still contains the original theme.
+    const bool refreshOnly = q == live.qml && live.mode == QLatin1String("zlib") && live.hasQrcNode;
+    if (q == live.qml && !refreshOnly) {
         return { false, skipped.isEmpty()
                             ? QStringLiteral("Nothing to patch - the EXE already contains these "
                                              "colors.")
@@ -1295,7 +1297,7 @@ ThemeEngine::PatchResult ThemeEngine::patchTheme(const QString &exePath, const T
                 continue;
             const qint64 boff = ws + qint64(ci) * mult;
             if (boff < 0 || boff + mult > data.size())
-                continue;
+                return { false, QStringLiteral("Plain theme range is invalid. File was not written.") };
             const char16_t ch = q.at(ci).unicode();
             data[int(boff)] = char(ch & 0xFF);
             if (mult == 2)
@@ -1307,15 +1309,11 @@ ThemeEngine::PatchResult ThemeEngine::patchTheme(const QString &exePath, const T
 
         if (!backup(exePath, logger))
             return { false, QStringLiteral("Could not create backup.") };
-        QFile out(exePath);
-        if (!out.open(QIODevice::WriteOnly | QIODevice::Truncate))
-            return { false,
-                     QStringLiteral("Could not write the EXE. Close BlueStacks (HD-Player.exe) "
-                                    "and run this tool as administrator.") };
-        out.write(data);
-        out.close();
-        return { true, QStringLiteral("Patch complete. Full theme applied. You can repatch again "
-                                       "without another backup.") + skippedNote };
+        QString error;
+        if (!PatchFile::writeVerified(exePath, original, data, &error))
+            return { false, error };
+        return { true, QStringLiteral("Theme colors written and verified. Restart BlueStacks "
+                                       "to load them.") + skippedNote };
     }
 
     if (live.mode != QLatin1String("zlib"))
@@ -1323,7 +1321,8 @@ ThemeEngine::PatchResult ThemeEngine::patchTheme(const QString &exePath, const T
 
     // ---------------- zlib ----------------
     const QByteArray qbytes = q.toLatin1();
-    const QByteArray comp = ZlibUtils::compress(qbytes);
+    const QByteArray comp = refreshOnly ? original.mid(live.zoff, live.compSize)
+                                        : ZlibUtils::compress(qbytes);
     if (comp.isEmpty())
         return { false, QStringLiteral("Theme compression failed.") };
 
@@ -1344,11 +1343,7 @@ ThemeEngine::PatchResult ThemeEngine::patchTheme(const QString &exePath, const T
                                         "the record is not safe to rewrite.") };
 
     const qint64 oldEnd = zoff + oldCompLen;
-    qint64 zeroSlack = 0;
-    while (oldEnd + zeroSlack < data.size() && data[int(oldEnd + zeroSlack)] == '\0'
-           && zeroSlack < 1024 * 1024)
-        ++zeroSlack;
-    const qint64 compCapacity = oldCompLen + zeroSlack;
+    const qint64 compCapacity = oldCompLen + zeroSlackAfter(data, live);
 
     bool relocated = false;
 
@@ -1402,15 +1397,12 @@ ThemeEngine::PatchResult ThemeEngine::patchTheme(const QString &exePath, const T
                                            "the same length as the originals.") };
         }
         if (live.hasQrcNode) {
-            node.found = true;
-            node.nodeOff = live.qrcNodeOff;
-            node.dataBaseRva = live.qrcDataBaseRva;
-            node.dataOffset = live.qrcDataOffset;
+            node = live.resource;
         } else {
             node = findQrcNodeForEntry(data, live.entryOff);
         }
-        if (!node.found)
-            return { false, QStringLiteral("No room, and UiThemeObject.qml qrc node "
+        if (!node.found || node.ambiguous)
+            return { false, QStringLiteral("No room, and a verified UiThemeObject.qml qrc node "
                                            "was not found for relocation.") };
 
         const QList<PeSection> secs = PeUtils::sections(data);
@@ -1427,7 +1419,8 @@ ThemeEngine::PatchResult ThemeEngine::patchTheme(const QString &exePath, const T
             dataBaseRva = oldEntryRva - node.dataOffset;
 
         const qint64 newRecordLen = 8 + comp.size();
-        const qint64 cave = findZeroCave(data, secs, live.entryOff, dataBaseRva, newRecordLen);
+        const qint64 cave = findZeroCave(data, secs, live.entryOff, dataBaseRva, newRecordLen,
+                                           live.resource.reserved);
         if (cave < 0)
             return { false, QStringLiteral("No room for this custom theme in this EXE "
                                            "(no mapped zero cave large enough).") };
@@ -1443,7 +1436,8 @@ ThemeEngine::PatchResult ThemeEngine::patchTheme(const QString &exePath, const T
         putBe32(data, cave, quint32(comp.size()) + 4);
         putBe32(data, cave + 4, quint32(qbytes.size()));
         data.replace(int(cave + 8), comp.size(), comp);
-        putBe32(data, node.nodeOff + 10, quint32(newDataOff));
+        for (const qint64 alias : node.nodes)
+            putBe32(data, alias + 10, quint32(newDataOff));
 
         // Invalidate the orphaned old record (header + zlib stream) so
         // re-detection and future patches follow the qrc link to the cave.
@@ -1463,30 +1457,39 @@ ThemeEngine::PatchResult ThemeEngine::patchTheme(const QString &exePath, const T
         relocated = true;
     }
 
-    // Verify the active qrc-linked UiThemeObject.qml now yields the new theme.
+    const bool refreshed = QtResources::refreshTimestamp(data, live.resource);
+    const int units = QtResources::invalidateThemeUnits(data);
+    QString cacheError;
+    if (!QtResources::invalidateThemeCacheResources(data, live.resource, &cacheError))
+        return { false, cacheError };
+    if (refreshed)
+        log(logger, QStringLiteral("Refreshed the QML resource timestamp: old disk-cached "
+                                   "colors will be rejected on the next launch."), QStringLiteral("blue"));
+    if (units)
+        log(logger, QStringLiteral("Invalidated %1 built-in theme cache unit(s); Qt will "
+                                   "compile the edited source.").arg(units), QStringLiteral("blue"));
+
+    // A successful inflate at an arbitrary offset is not enough. Re-detect
+    // through the validated tree, then verify the complete selected palette.
     const ThemeInfo vt = findThemeZlib(data);
-    if (vt.found && vt.hasQrcNode && vt.qml != q)
-        return { false, QStringLiteral("Patched theme verify failed. File was not written.") };
+    if (!vt.found || vt.ambiguous || vt.qml != q
+        || (live.hasQrcNode && (!vt.hasQrcNode || vt.qrcNodeOff != live.qrcNodeOff)))
+        return { false, QStringLiteral("Active theme verification failed. File was not written.") };
 
     if (!backup(exePath, logger))
         return { false, QStringLiteral("Could not create backup.") };
-    QFile out(exePath);
-    if (!out.open(QIODevice::WriteOnly | QIODevice::Truncate))
-        return { false,
-                 QStringLiteral("Could not write the EXE. Close BlueStacks (HD-Player.exe) "
-                                "and run this tool as administrator.") };
-    out.write(data);
-    out.close();
+    QString error;
+    if (!PatchFile::writeVerified(exePath, original, data, &error))
+        return { false, error };
+    return { true, refreshOnly
+                       ? QStringLiteral("Theme already has these colors. Its cache was refreshed; "
+                                        "restart BlueStacks to load them.")
+                       : (relocated
+                              ? QStringLiteral("Theme relocated, colors verified and cache refreshed. "
+                                               "Restart BlueStacks to load the new theme.")
+                              : QStringLiteral("Theme colors verified and cache refreshed. "
+                                               "Restart BlueStacks to load the new theme.")) };
 
-    return relocated ? PatchResult { true,
-                                     QStringLiteral("Patch complete. Full theme relocated and "
-                                                    "applied. You can repatch again without "
-                                                    "another backup.")
-                                         + skippedNote }
-                     : PatchResult { true,
-                                     QStringLiteral("Patch complete. Full theme applied. You can "
-                                                    "repatch again without another backup.")
-                                         + skippedNote };
 }
 
 // ---------------------------------------------------------------------------
@@ -1768,14 +1771,15 @@ ThemeEngine::PatchResult ThemeEngine::applyHexTheme(const QString &exePath, cons
 {
     if (!QFileInfo::exists(exePath))
         return { false, QStringLiteral("EXE not found") };
-    if (!backup(exePath, logger))
-        return { false, QStringLiteral("Could not create backup") };
+    if (BsDetector::isProcessRunning(QStringLiteral("HD-Player.exe")))
+        return { false, QStringLiteral("Close all BlueStacks instances (HD-Player.exe) before patching.") };
 
     QFile file(exePath);
     if (!file.open(QIODevice::ReadOnly))
         return { false, QStringLiteral("Read error (run as administrator?)") };
     QByteArray data = file.readAll();
     file.close();
+    const QByteArray original = data;
 
     const QList<Replacement> repls = collectThemeReplacements(data, profile, colors, qmlColors);
     if (repls.isEmpty())
@@ -1786,11 +1790,11 @@ ThemeEngine::PatchResult ThemeEngine::applyHexTheme(const QString &exePath, cons
             data.replace(int(r.pos), r.len, r.rep);
     }
 
-    QFile out(exePath);
-    if (!out.open(QIODevice::WriteOnly | QIODevice::Truncate))
-        return { false, QStringLiteral("Write error (run as administrator?)") };
-    out.write(data);
-    out.close();
+    if (!backup(exePath, logger))
+        return { false, QStringLiteral("Could not create backup") };
+    QString error;
+    if (!PatchFile::writeVerified(exePath, original, data, &error))
+        return { false, error };
 
     return { true, QStringLiteral("All selected colors applied (%1 replacements)")
                        .arg(repls.size()) };
@@ -2022,6 +2026,10 @@ QString ThemeEngine::probeReport(const QString &exePath)
     line(QStringLiteral("  hasQrcNode       : %1").arg(t.hasQrcNode ? "yes" : "no"));
     line(QStringLiteral("  qrcStrict        : %1").arg(t.qrcStrict ? "yes" : "no"));
     line(QStringLiteral("  qrcSupport       : %1").arg(t.qrcSupport));
+    line(QStringLiteral("  qrc node bytes   : %1").arg(t.resource.nodeSize));
+    line(QStringLiteral("  ambiguous        : %1").arg(t.ambiguous ? "yes - patch refused" : "no"));
+    if (t.resource.nodeSize == 22)
+        line(QStringLiteral("  resource mtime   : %1").arg(be64(data, t.qrcNodeOff + 14)));
     line();
 
     // ---------------- 5. parsed colors ----------------
@@ -2059,11 +2067,7 @@ QString ThemeEngine::probeReport(const QString &exePath)
         line(QStringLiteral("  mode is '%1', not zlib - in-place text rewrite only.").arg(t.mode));
         return out;
     }
-    qint64 zeroSlack = 0;
-    const qint64 oldEnd = t.zoff + t.compSize;
-    while (oldEnd + zeroSlack < data.size() && data[int(oldEnd + zeroSlack)] == '\0'
-           && zeroSlack < 1024 * 1024)
-        ++zeroSlack;
+    const qint64 zeroSlack = zeroSlackAfter(data, t);
     line(QStringLiteral("  current compressed size : %1 bytes").arg(t.compSize));
     line(QStringLiteral("  zero slack after record : %1 bytes").arg(zeroSlack));
     line(QStringLiteral("  in-place capacity       : %1 bytes").arg(t.compSize + zeroSlack));
