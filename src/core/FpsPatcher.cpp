@@ -7,12 +7,12 @@
 
 #include <QDataStream>
 #include <QDir>
-
-#include <cmath>
 #include <QFile>
 #include <QFileInfo>
 #include <QMap>
 #include <QSet>
+
+#include <cmath>
 
 using namespace ByteUtils;
 
@@ -42,7 +42,8 @@ const QByteArray prologue()
     return p;
 }
 
-constexpr int kSlotLen = 80;
+constexpr int kSlotLen = 48;
+constexpr int kLegacySlotLen = 80;
 constexpr int kCaveMin = 2 * kSlotLen + 16;
 
 QByteArray le32s(qint32 v)
@@ -62,11 +63,30 @@ QByteArray d64(double v)
     return b;
 }
 
-QByteArray buildSlot(quint32 funcRva, quint32 caveRva, double hi, double lo)
+// New patches contain only a 240.0 comparison and a high-FPS replacement.
+// In particular, there is no 60.0 constant or normal-mode write path here.
+QByteArray buildSlot(quint32 funcRva, quint32 caveRva, double hi)
+{
+    QByteArray s;
+    s += QByteArray::fromHex("660F2F0D") + le32s(32 - 8);   // comisd xmm1,[rip->240.0]
+    s += QByteArray::fromHex("7A") + char(20 - 10);        // jp -> original (NaN is not 240)
+    s += QByteArray::fromHex("75") + char(20 - 12);        // jne -> original, including 60.0
+    s += QByteArray::fromHex("F20F100D") + le32s(40 - 20); // movsd xmm1,[rip->hi]
+    s += prologue();                                      // original mov [rsp+8],rbx
+    s += QByteArray::fromHex("E9") + le32s(qint32(funcRva + 5) - qint32(caveRva + 30));
+    s += QByteArray::fromHex("9090");                     // padding before constants, never executed
+    s += d64(240.0) + d64(hi);
+    Q_ASSERT(s.size() == kSlotLen);
+    return s;
+}
+
+// Read/verification compatibility only. This is the 80-byte detour in the
+// user's read it.txt reference and earlier releases. Never emit it in patch().
+QByteArray legacySlotForVerification(quint32 funcRva, quint32 caveRva, double hi, double lo)
 {
     QByteArray s;
     s += QByteArray::fromHex("660F2F0D") + le32s(48 - 8);   // comisd xmm1,[rip->240.0]
-    s += QByteArray::fromHex("75") + char(20 - 10);          // jne -> min check
+    s += QByteArray::fromHex("75") + char(20 - 10);          // jne -> legacy normal-mode check
     s += QByteArray::fromHex("F20F100D") + le32s(64 - 18);  // movsd xmm1,[rip->hi]
     s += QByteArray::fromHex("EB") + char(38 - 20);          // jmp -> prologue
     s += QByteArray::fromHex("660F2F0D") + le32s(56 - 28);  // comisd xmm1,[rip->60.0]
@@ -75,8 +95,35 @@ QByteArray buildSlot(quint32 funcRva, quint32 caveRva, double hi, double lo)
     s += QByteArray::fromHex("48895C2408");                  // mov [rsp+8], rbx
     s += QByteArray::fromHex("E9") + le32s(qint32(funcRva + 5) - qint32(caveRva + 48));
     s += d64(240.0) + d64(60.0) + d64(hi) + d64(lo);
-    Q_ASSERT(s.size() == kSlotLen);
+    Q_ASSERT(s.size() == kLegacySlotLen);
     return s;
+}
+
+double readDouble(const QByteArray &bytes, qint64 offset)
+{
+    QDataStream ds(bytes.mid(offset, 8));
+    ds.setByteOrder(QDataStream::LittleEndian);
+    ds.setFloatingPointPrecision(QDataStream::DoublePrecision);
+    double value = 0;
+    ds >> value;
+    return value;
+}
+
+int recognizedSlotSize(const QByteArray &bytes, qint64 offset, quint32 funcRva, quint32 slotRva)
+{
+    if (inRange(bytes, offset, kSlotLen)) {
+        const double hi = readDouble(bytes, offset + 40);
+        if (std::isfinite(hi) && bytes.mid(offset, kSlotLen) == buildSlot(funcRva, slotRva, hi))
+            return kSlotLen;
+    }
+    if (inRange(bytes, offset, kLegacySlotLen)) {
+        const double hi = readDouble(bytes, offset + 64);
+        const double normal = readDouble(bytes, offset + 72);
+        if (std::isfinite(hi) && std::isfinite(normal)
+            && bytes.mid(offset, kLegacySlotLen) == legacySlotForVerification(funcRva, slotRva, hi, normal))
+            return kLegacySlotLen;
+    }
+    return 0;
 }
 
 QByteArray buildJmp(quint32 fromRva, quint32 toRva)
@@ -207,14 +254,12 @@ Analysis analyze(const QByteArray &b)
                 const qint64 slotRva = qint64(frva) + 5 + qint32(le32(b, off + 1));
                 const qint64 slotOff = slotRva >= 0 && slotRva <= 0xFFFFFFFFLL
                                            ? PeUtils::rvaToRaw(secs, quint32(slotRva)) : -1;
-                if (inRange(b, slotOff, kSlotLen)) {
-                    QDataStream ds(b.mid(slotOff + 64, 16));
-                    ds.setByteOrder(QDataStream::LittleEndian);
-                    double hi = 0, lo = 0;
-                    ds >> hi >> lo;
-                    if (std::isfinite(hi) && lo == 60.0
-                        && b.mid(slotOff, kSlotLen) == buildSlot(frva, quint32(slotRva), hi, lo))
+                if (slotOff >= 0) {
+                    t.slotSize = recognizedSlotSize(b, slotOff, frva, quint32(slotRva));
+                    if (t.slotSize) {
+                        t.slotOff = slotOff;
                         t.state = QStringLiteral("patched");
+                    }
                 }
             }
         }
@@ -246,7 +291,13 @@ Analysis analyze(const QByteArray &b)
     if (anyPatched && !anyClean) {
         out.ok = true;
         out.state = QStringLiteral("patched");
-        out.msg = QStringLiteral("%1 setTo function(s), already patched").arg(out.targets.size());
+        bool legacy = false;
+        for (const auto &target : out.targets)
+            legacy |= target.slotSize == kLegacySlotLen;
+        out.msg = legacy
+                      ? QStringLiteral("Legacy high/normal patch detected. Patch again for max-FPS only.")
+                      : QStringLiteral("%1 setTo function(s) patched: high-FPS maximum only; normal mode unchanged.")
+                            .arg(out.targets.size());
         return out;
     }
     if (!anyClean) {
@@ -320,7 +371,6 @@ Result patch(const QString &dllPath, double hi)
     const auto currentAnalysis = analyze(original);
     if (!currentAnalysis.ok)
         return { false, currentAnalysis.msg };
-    const double lo = 60.0;
     const QString bak = dllPath + QStringLiteral(".bak");
 
     QString src = dllPath;
@@ -342,13 +392,10 @@ Result patch(const QString &dllPath, double hi)
     // A backup from a different BlueStacks/Qt version must never overwrite
     // today's DLL. Strip only our verified detours before comparing it.
     QByteArray unpatched = original;
-    const auto sections = PeUtils::sections(original);
     for (const auto &target : currentAnalysis.targets) {
         if (target.state != QLatin1String("patched"))
             continue;
-        const qint64 rva = qint64(target.rva) + 5 + qint32(le32(original, target.off + 1));
-        const qint64 off = PeUtils::rvaToRaw(sections, quint32(rva));
-        unpatched.replace(off, kSlotLen, QByteArray(kSlotLen, '\0'));
+        unpatched.replace(target.slotOff, target.slotSize, QByteArray(target.slotSize, '\0'));
         unpatched.replace(target.off, 5, prologue());
     }
     if (unpatched != data)
@@ -370,7 +417,7 @@ Result patch(const QString &dllPath, double hi)
         if (tg.state != QLatin1String("clean"))
             continue;
         const quint32 cRva = t.caveRva + quint32(slot * kSlotLen);
-        const QByteArray s = buildSlot(tg.rva, cRva, hi, lo);
+        const QByteArray s = buildSlot(tg.rva, cRva, hi);
         const QByteArray jmp = buildJmp(tg.rva, cRva);
         data.replace(int(t.caveOff) + slot * kSlotLen, kSlotLen, s);
         data.replace(int(tg.off), 5, jmp);
@@ -382,7 +429,7 @@ Result patch(const QString &dllPath, double hi)
     QString error;
     if (!PatchFile::writeVerified(dllPath, original, data, &error))
         return { false, error };
-    return { true, QStringLiteral("Patched %1: high-FPS slider maximum %2. Restart BlueStacks.")
+    return { true, QStringLiteral("Patched %1: high-FPS maximum %2; normal mode stays at 60. Restart BlueStacks.")
                        .arg(QFileInfo(dllPath).fileName()).arg(hi) };
 }
 

@@ -263,8 +263,9 @@ Item {
                             { t: qsTr("FPS unlock"),
                               d: qsTr("The FPS slider's setter inside Qt5QuickTemplates2.dll / Qt6QuickTemplates2.dll is "
                                       + "detoured to a small code cave that holds your custom "
-                                      + "cap (60–1440), and the built-in 60/240/360 constants "
-                                      + "are rewritten.") },
+                                      + "high-FPS maximum (60–1440). Only the 240 FPS maximum "
+                                      + "is replaced; normal mode stays at 60 FPS, with no "
+                                      + "normal-mode rewrite.") },
                             { t: qsTr("Integrity bypass"),
                               d: qsTr("HD-Player.exe self-checks its own bytes on start and "
                                       + "undoes patches. The check's conditional jump is NOP-ed "

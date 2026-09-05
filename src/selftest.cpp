@@ -1220,12 +1220,15 @@ int runSelfTest()
         f.close();
 
         check(uchar(patched[0x1300]) == 0xE9, "jmp written at function start");
-                const qint64 cave = a.caveOff;
-        check(patched.mid(int(cave) + 38, 5) == QByteArray::fromHex("48895C2408"),
+        const qint64 cave = a.caveOff;
+        check(patched.mid(int(cave) + 20, 5) == QByteArray::fromHex("48895C2408"),
               "original prologue preserved in slot");
-        check(readDoubleLE(patched, cave + 48) == 240.0, "slot max constant = 240.0");
-        check(readDoubleLE(patched, cave + 64) == 360.0, "slot high FPS = 360.0");
-        check(readDoubleLE(patched, cave + 72) == 60.0, "slot low FPS = 60.0");
+        check(readDoubleLE(patched, cave + 32) == 240.0, "slot matches only the 240.0 high-FPS maximum");
+        check(readDoubleLE(patched, cave + 40) == 360.0, "slot high FPS = 360.0");
+        check(patched.mid(cave, 48).count(QByteArray::fromHex("F20F100D")) == 1,
+              "detour has one replacement path, no normal-mode rewrite");
+        check(patched.mid(cave + 48, 32) == QByteArray(32, '\0'),
+              "no legacy 60/normal constants written beyond the 48-byte slot");
 
         const auto rr = FpsPatcher::restore(dllPath);
         QFile f2(dllPath);
