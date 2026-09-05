@@ -121,6 +121,21 @@ if(BSI_TEST_QT5_REFERENCE)
     target_compile_definitions(BSICustomizer PRIVATE BSI_QT5_REFERENCE_DLL="${_bsi_qt5_dll}")
 endif()
 
+# Optional user-supplied diagnostic input. It is read as data and only disposable
+# copies are patched by --selftest; its executable code/QML is never run.
+set(BSI_EXE_TEST_FILE "" CACHE FILEPATH "Optional HD-Player.exe for read-only reference regression tests")
+if(NOT BSI_EXE_TEST_FILE AND "$ENV{GITHUB_ACTIONS}" STREQUAL "true"
+   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/HD-Player.exe")
+    set(BSI_EXE_TEST_FILE "${CMAKE_CURRENT_SOURCE_DIR}/HD-Player.exe")
+endif()
+if(BSI_EXE_TEST_FILE)
+    if(NOT EXISTS "${BSI_EXE_TEST_FILE}")
+        message(FATAL_ERROR "BSI_EXE_TEST_FILE does not exist")
+    endif()
+    file(TO_CMAKE_PATH "${BSI_EXE_TEST_FILE}" _bsi_exe_reference)
+    target_compile_definitions(BSICustomizer PRIVATE BSI_EXE_TEST_FILE="${_bsi_exe_reference}")
+endif()
+
 qt_add_qml_module(BSICustomizer
     URI BSICustomizer
     VERSION 1.0

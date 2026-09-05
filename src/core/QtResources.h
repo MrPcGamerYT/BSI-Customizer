@@ -42,6 +42,17 @@ struct Link
 Link findLink(const QByteArray &data, qint64 entryOff,
               const QString &name = QStringLiteral("UiThemeObject.qml"));
 
+struct File
+{
+    QString name;
+    qint64 entryOff = -1;
+    quint16 flags = 0;
+};
+// Enumerate files only in an already-validated pool. This lets consumers find
+// related QML (e.g. a multimedia import) without guessing a small filename list.
+QList<File> filesInPool(const QByteArray &data, const Link &pool);
+QByteArray readFile(const QByteArray &data, const File &file, qint64 limit = 5000000);
+
 // Changes the source timestamp, making Qt reject .qmlc files cached by an
 // earlier HD-Player run. Does nothing to v1 trees (Qt uses the EXE timestamp).
 bool refreshTimestamp(QByteArray &data, const Link &link);

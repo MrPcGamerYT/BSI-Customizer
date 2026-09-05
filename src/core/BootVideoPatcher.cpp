@@ -139,7 +139,7 @@ QList<Stream> streams(const QByteArray &data)
             && !qml.contains(QLatin1String("Video{")) && !qml.contains(QLatin1String("Video {"))) continue;
         QtResources::Link link;
         const QStringList names = qml.contains(QLatin1String("fSetBootPromotion"))
-            ? QStringList { QStringLiteral("boot.qml"), QStringLiteral("Boot.qml"), QStringLiteral("BootScreen.qml") }
+            ? QStringList { QStringLiteral("PlrBootProgressBar.qml"), QStringLiteral("boot.qml"), QStringLiteral("Boot.qml"), QStringLiteral("BootScreen.qml") }
             : QStringList { QStringLiteral("BootVideo.qml"), QStringLiteral("bootvideo.qml") };
         for (const auto &name : names) { link = QtResources::findLink(data, at - 8, name); if (link.found && !link.ambiguous) break; }
         if (!link.found) link = QtResources::findLink(data, at - 8, QString()); // explicit registered aliases
@@ -202,10 +202,22 @@ Result patch(const QString &exePath)
         const QRegularExpression mediaImport(QStringLiteral("(?:^|\\n)\\s*import\\s+QtMultimedia(?:\\s+([0-9]+(?:\\.[0-9]+)?))?(?:\\s+as\\s+[A-Za-z_][A-Za-z0-9_]*)?"));
         auto media = mediaImport.match(boot);
         if (!media.hasMatch()) for (const auto &candidate : candidates) { media = mediaImport.match(candidate.text); if (media.hasMatch()) break; }
+        if (!media.hasMatch()) {
+            // In real MSI/BlueStacks builds the boot screen is PlrBootProgressBar,
+            // while QtMultimedia is imported by another file in the same pool
+            // (e.g. the notification window). Do not require BootVideo.qml to exist.
+            for (const auto &resource : QtResources::filesInPool(original, controller.link)) {
+                if (!resource.name.endsWith(QLatin1String(".qml"))) continue;
+                const auto source = QtResources::readFile(original, resource);
+                if (source.isEmpty()) continue;
+                media = mediaImport.match(QString::fromUtf8(source));
+                if (media.hasMatch()) break;
+            }
+        }
         if (!media.hasMatch()) return { false, QStringLiteral("The boot player type is not supported in this build. A real Video/MediaPlayer resource or an existing QtMultimedia import is required; no file was written.") };
         const QString import = QStringLiteral("import QtMultimedia%1 as BsiMedia\n").arg(media.captured(1).isEmpty() ? QString() : QLatin1Char(' ') + media.captured(1));
         const QString id = loaders.isEmpty() || loaders.first().id.isEmpty() ? QStringLiteral("pv") : loaders.first().id;
-        const QString loader = QStringLiteral("Loader{id:%1;z:0;anchors.fill:parent;sourceComponent:Component{BsiMedia.Video{anchors.fill:parent;source:%2;loops:BsiMedia.MediaPlayer.Infinite;fillMode:BsiMedia.VideoOutput.PreserveAspectCrop;Component.onCompleted:play()}}}")
+        const QString loader = QStringLiteral("Loader{id:%1;z:0;anchors.fill:parent;sourceComponent:Component{BsiMedia.Video{objectName:\"bsiBootVideo\";anchors.fill:parent;source:%2;loops:BsiMedia.MediaPlayer.Infinite;fillMode:BsiMedia.VideoOutput.PreserveAspectCrop;Component.onCompleted:play()}}}")
                                    .arg(id, url);
         if (!loaders.isEmpty()) boot.replace(loaders.first().begin, loaders.first().end - loaders.first().begin, loader);
         else {

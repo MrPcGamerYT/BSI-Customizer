@@ -11,6 +11,7 @@
 #include "core/X64Prologue.h"
 
 #include <QCoreApplication>
+#include <QCryptographicHash>
 #include <QColor>
 #include <QDir>
 #include <QDataStream>
@@ -740,6 +741,88 @@ int runPatchRegressionTests()
             check(FpsPatcher::restore(path).ok && read(path) == original, "restore real Qt DLL copy byte-for-byte");
             check(read(reference.path) == original, "original Qt reference library remains untouched");
         }
+    }
+#endif
+
+    std::printf("[boot-msi] actual component name and multimedia import from a sibling resource\n");
+    {
+        const QString boot = QStringLiteral("import QtQuick\nItem{width:320;height:200;property bool bootBackgroundImage:true;"
+            "property bool pBootImageButtonVisible:true;property bool pBootGridVisible:true;"
+            "Image{id:iBootImage;objectName:'bootImage';visible:true}"
+            "Text{id:iBootLoadingText;objectName:'loadingText';visible:false}"
+            "function fSetBootPromotion(){iBootImage.visible=true;pBootGridVisible=true;iBootLoadingText.visible=false}}\n");
+        const auto r = resources({ { QStringLiteral("PlrBootProgressBar.qml"), boot },
+                                   { QStringLiteral("Notification.qml"), QStringLiteral("import QtQuick\nimport QtMultimedia 5.15\nItem{}\n") },
+                                   { QStringLiteral("Other.qml"), QStringLiteral("import QtQuick; QtObject {}") } }, true);
+        const auto folder = temp.filePath(QStringLiteral("msi boot with spaces")); QDir().mkpath(folder);
+        const auto path = QDir(folder).filePath(QStringLiteral("HD-Player.exe")); write(path, r.f.bytes);
+        const auto outcome = BootVideoPatcher::patch(path);
+        if (!outcome.ok) std::printf("    %s\n", qPrintable(outcome.msg));
+        check(outcome.ok, "PlrBootProgressBar works without a stock BootVideo.qml or an import in the boot file");
+        const auto modified = resourceText(read(path), r, QStringLiteral("PlrBootProgressBar.qml"));
+        check(modified.contains(QLatin1String("import QtMultimedia 5.15 as BsiMedia"))
+                  && modified.contains(QLatin1String("sourceComponent:Component{BsiMedia.Video")),
+              "media support is obtained from another validated file in the same resource pool");
+        // A tiny, explicitly synthetic QtMultimedia API validates the generated
+        // QML/argument flow without playing media or running extracted user QML.
+        const auto imports = QDir(folder).filePath(QStringLiteral("imports/QtMultimedia")); QDir().mkpath(imports);
+        write(QDir(imports).filePath(QStringLiteral("qmldir")), "module QtMultimedia\nVideo 5.15 Video.qml\nMediaPlayer 5.15 MediaPlayer.qml\nVideoOutput 5.15 VideoOutput.qml\n");
+        write(QDir(imports).filePath(QStringLiteral("Video.qml")), "import QtQuick\nItem{property url source;property int loops;property int fillMode;property bool started:false;function play(){started=true}}\n");
+        write(QDir(imports).filePath(QStringLiteral("MediaPlayer.qml")), "import QtQuick\nQtObject{enum Loops{Infinite=1}}\n");
+        write(QDir(imports).filePath(QStringLiteral("VideoOutput.qml")), "import QtQuick\nQtObject{enum FillMode{PreserveAspectCrop=1}}\n");
+        QQmlEngine engine; engine.addImportPath(QDir(folder).filePath(QStringLiteral("imports")));
+        QQmlComponent component(&engine); component.setData(modified.toUtf8(), QUrl::fromLocalFile(QDir(folder).filePath(QStringLiteral("PlrBootProgressBar.qml"))));
+        std::unique_ptr<QObject> object(component.create());
+        if (!object) std::printf("    %s\n", qPrintable(component.errorString()));
+        check(bool(object), "injected boot Video QML compiles against the expected multimedia API");
+        if (object) {
+            const auto video = object->findChild<QObject *>(QStringLiteral("bsiBootVideo"));
+            check(video && video->property("started").toBool()
+                      && video->property("source").toUrl() == QUrl::fromLocalFile(QDir(folder).filePath(QStringLiteral("Assets/Promo.mp4"))),
+                  "the inline video starts and receives the installation-relative media URL");
+        }
+        check(BootVideoPatcher::patch(path).ok && read(path + QStringLiteral(".bak")) == r.f.bytes,
+              "real-name boot repatching keeps one loader and preserves the original backup");
+        const auto twice = resourceText(read(path), r, QStringLiteral("PlrBootProgressBar.qml"));
+        check(twice.count(QLatin1String("objectName:\"bsiBootVideo\"")) == 1,
+              "repatching does not duplicate the custom video component");
+    }
+#ifdef BSI_EXE_TEST_FILE
+    {
+        std::printf("[hdplayer-reference] file parsing and disposable copies only; no uploaded code is executed\n");
+        const auto input = QString::fromUtf8(BSI_EXE_TEST_FILE);
+        const auto original = read(input);
+        std::printf("  Reference bytes: %lld; SHA256: %s\n", static_cast<long long>(original.size()),
+                    QCryptographicHash::hash(original, QCryptographicHash::Sha256).toHex().constData());
+        const auto first = ThemeEngine::findThemeZlib(original);
+        check(first.found && first.hasQrcNode && !first.ambiguous, "the supplied EXE has a unique mapped theme resource");
+        if (!first.hasQrcNode) std::printf("    %s\n", qPrintable(first.resource.detail));
+        const auto folder = temp.filePath(QStringLiteral("real-image-copy")); QDir().mkpath(folder);
+        const auto path = QDir(folder).filePath(QStringLiteral("HD-Player.exe")); write(path, original);
+        if (first.found && first.hasQrcNode && !first.ambiguous) {
+            const auto originalEntries = ThemeEngine::parseQmlEntries(first.qml);
+            for (int round = 0; round < 3; ++round) {
+                QMap<QString, QString> edits;
+                for (int i = 0; i < originalEntries.size(); ++i)
+                    edits[originalEntries[i].name] = QStringLiteral("#%1").arg((i * 7919 + 234567 + round * 12345) & 0xffffff, 6, 16, QLatin1Char('0'));
+                // Deliberately keep the initial UI snapshot to exercise reload-
+                // after-patch handling across growth, boot patching and repatches.
+                const auto result = ThemeEngine::patchTheme(path, first, originalEntries, edits);
+                if (!result.ok) std::printf("    Theme round %d: %s\n", round, qPrintable(result.msg));
+                check(result.ok, "theme patch/repatch succeeds on a copy of the supplied EXE");
+                const auto after = ThemeEngine::findThemeZlib(read(path));
+                check(after.hasQrcNode && !after.ambiguous, "the actual EXE theme remains linked after patching");
+                bool sameColors = after.hasQrcNode;
+                for (const auto &entry : ThemeEngine::parseQmlEntries(after.qml))
+                    if (edits.contains(entry.name) && entry.value.compare(edits[entry.name], Qt::CaseInsensitive)) sameColors = false;
+                check(sameColors, "selected colors are read back from the mapped real-file resource");
+                const auto boot = BootVideoPatcher::patch(path);
+                if (!boot.ok) std::printf("    Boot round %d: %s\n", round, qPrintable(boot.msg));
+                check(boot.ok, "boot patch/repatch succeeds on the supplied EXE copy without breaking theme mapping");
+            }
+            check(read(path + QStringLiteral(".bak")) == original, "the real-file copy retains its first complete backup");
+        }
+        check(read(input) == original, "the supplied EXE remains byte-for-byte untouched");
     }
 #endif
 

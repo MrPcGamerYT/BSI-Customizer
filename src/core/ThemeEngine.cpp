@@ -8,6 +8,7 @@
 
 #include <QDir>
 #include <QFile>
+#include <QCryptographicHash>
 #include <QFileInfo>
 #include <QRegularExpression>
 #include <QSet>
@@ -761,8 +762,12 @@ ThemeInfo ThemeEngine::findThemeZlib(const QByteArray &data)
         info.contentQuality = strictContent ? 2 : 1;
 
         QrcNode node = findQrcNodeForEntry(data, info.entryOff);
-        if (!node.found && strictContent)
+        if (!node.found && strictContent) {
+            const QString namedDiagnostic = node.detail;
             node = QtResources::findLink(data, info.entryOff, QString()); // registered resource alias
+            if (!node.found)
+                node.detail = namedDiagnostic + QStringLiteral(" Alias lookup: ") + node.detail;
+        }
         info.resource = node;
         if (node.found && !node.ambiguous && headerBytes == 8) {
             // A record the qresource tree really links to UiThemeObject.qml IS
@@ -1852,6 +1857,7 @@ QString ThemeEngine::probeReport(const QString &exePath)
     const QByteArray data = f.readAll();
     f.close();
     line(QStringLiteral("size: %1 bytes").arg(data.size()));
+    line(QStringLiteral("sha256: %1").arg(QString::fromLatin1(QCryptographicHash::hash(data, QCryptographicHash::Sha256).toHex())));
     if (data.size() < 64) {
         line(QStringLiteral("Too small to be HD-Player.exe."));
         return out;
