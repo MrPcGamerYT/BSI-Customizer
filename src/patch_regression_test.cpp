@@ -812,10 +812,22 @@ int runPatchRegressionTests()
                 check(result.ok, "theme patch/repatch succeeds on a copy of the supplied EXE");
                 const auto after = ThemeEngine::findThemeZlib(read(path));
                 check(after.hasQrcNode && !after.ambiguous, "the actual EXE theme remains linked after patching");
-                bool sameColors = after.hasQrcNode;
-                for (const auto &entry : ThemeEngine::parseQmlEntries(after.qml))
-                    if (edits.contains(entry.name) && entry.value.compare(edits[entry.name], Qt::CaseInsensitive)) sameColors = false;
-                check(sameColors, "selected colors are read back from the mapped real-file resource");
+                const auto changedEntries = ThemeEngine::parseQmlEntries(after.qml);
+                bool sameColors = after.hasQrcNode && changedEntries.size() == originalEntries.size();
+                for (int i = 0; i < changedEntries.size() && i < originalEntries.size(); ++i) {
+                    const auto &entry = changedEntries[i];
+                    QString expected = edits.value(entry.name);
+                    // The public RGB editor deliberately preserves the original
+                    // alpha of each ARGB slot (including duplicate property names).
+                    const auto oldColor = originalEntries[i].original;
+                    if (expected.size() == 7 && oldColor.size() == 9 && oldColor.startsWith(QLatin1Char('#')))
+                        expected = QStringLiteral("#") + oldColor.mid(1, 2) + expected.mid(1);
+                    if (entry.name != originalEntries[i].name || entry.value.compare(expected, Qt::CaseInsensitive)) {
+                        std::printf("    Color mismatch: %s actual=%s expected=%s\n", qPrintable(entry.name), qPrintable(entry.value), qPrintable(expected));
+                        sameColors = false;
+                    }
+                }
+                check(sameColors, "mapped real-file colors match the requested RGB while preserving original alpha");
                 const auto boot = BootVideoPatcher::patch(path);
                 if (!boot.ok) std::printf("    Boot round %d: %s\n", round, qPrintable(boot.msg));
                 check(boot.ok, "boot patch/repatch succeeds on the supplied EXE copy without breaking theme mapping");
