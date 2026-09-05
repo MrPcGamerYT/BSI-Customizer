@@ -145,7 +145,7 @@ Item {
                 }
                 PathRow {
                     Layout.fillWidth: true
-                    label: qsTr("libOpenglRender")
+                    label: qsTr("FPS slider DLL")
                     text: backend.dllPath
                     onLoad: backend.dllPath = text
                 }

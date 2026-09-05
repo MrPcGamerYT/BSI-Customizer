@@ -4,7 +4,7 @@
 
 /**
  * SettingsManager — persisted app settings (QSettings).
- * Holds the target paths (HD-Player.exe, libOpenglRender.dll, bluestacks.conf).
+ * Holds the target paths (HD-Player.exe, Qt5/Qt6QuickTemplates2.dll, bluestacks.conf).
  */
 class SettingsManager : public QObject
 {

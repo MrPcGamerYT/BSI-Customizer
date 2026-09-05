@@ -19,6 +19,7 @@
 
 // Implemented in selftest.cpp
 int runSelfTest();
+int runThemeRuntimeTest(const QStringList &args);
 
 namespace {
 
@@ -59,6 +60,10 @@ int main(int argc, char *argv[])
     // Headless verification of the patcher engines + theme chain.
     // Used locally and by the GitHub Actions release workflow.
     const QStringList args = QCoreApplication::arguments();
+    if (args.contains(QStringLiteral("--theme-runtime-test"))) {
+        ensureConsoleOutput();
+        return runThemeRuntimeTest(args);
+    }
     if (args.contains(QStringLiteral("--selftest"))) {
         ensureConsoleOutput();
         return runSelfTest();

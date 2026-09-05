@@ -15,6 +15,10 @@ inline quint32 be32(const QByteArray &b, qsizetype o)
 {
     return qFromBigEndian<quint32>(b.constData() + o);
 }
+inline quint64 be64(const QByteArray &b, qsizetype o)
+{
+    return qFromBigEndian<quint64>(b.constData() + o);
+}
 inline quint32 le16(const QByteArray &b, qsizetype o)
 {
     return qFromLittleEndian<quint16>(b.constData() + o);
@@ -30,6 +34,10 @@ inline void putBe16(QByteArray &b, qsizetype o, quint16 v)
 inline void putBe32(QByteArray &b, qsizetype o, quint32 v)
 {
     qToBigEndian<quint32>(v, b.data() + o);
+}
+inline void putBe64(QByteArray &b, qsizetype o, quint64 v)
+{
+    qToBigEndian<quint64>(v, b.data() + o);
 }
 inline void putLe32(QByteArray &b, qsizetype o, quint32 v)
 {

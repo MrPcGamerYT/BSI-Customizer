@@ -1,9 +1,14 @@
 #include "FpsPatcher.h"
 
 #include "ByteUtils.h"
+#include "BsDetector.h"
+#include "PatchFile.h"
 #include "PeUtils.h"
 
 #include <QDataStream>
+#include <QDir>
+
+#include <cmath>
 #include <QFile>
 #include <QFileInfo>
 #include <QMap>
@@ -22,7 +27,8 @@ const QMap<QString, QString> &wanted()
         for (const QString &cls : { QStringLiteral("QQuickSlider"),
                                     QStringLiteral("QQuickRangeSlider") }) {
             w[QStringLiteral("?setTo@%1@@QEAAXN@Z").arg(cls)] = cls;
-            w[QStringLiteral("_ZN%1%25setToEd").arg(cls.size()).arg(cls)] = cls;
+            w[QStringLiteral("_ZN") + QString::number(cls.size()) + cls
+              + QStringLiteral("5setToEd")] = cls;
         }
         return w;
     }();
@@ -87,10 +93,45 @@ QString readAsciiz(const QByteArray &b, qint64 off)
 
 } // namespace
 
+bool isSupportedPath(const QString &dllPath)
+{
+    QString name = dllPath;
+    name.replace(QLatin1Char('\\'), QLatin1Char('/'));
+    name = name.section(QLatin1Char('/'), -1);
+    return name.compare(QLatin1String("Qt5QuickTemplates2.dll"), Qt::CaseInsensitive) == 0
+           || name.compare(QLatin1String("Qt6QuickTemplates2.dll"), Qt::CaseInsensitive) == 0;
+}
+
+QString findDll(const QString &installDir)
+{
+    if (installDir.isEmpty())
+        return {};
+    const QDir dir(installDir);
+    QFile player(dir.filePath(QStringLiteral("HD-Player.exe")));
+    QByteArray imports;
+    if (player.open(QIODevice::ReadOnly))
+        imports = player.readAll().toLower();
+    QStringList names;
+    if (imports.contains("qt6core.dll"))
+        names << QStringLiteral("Qt6QuickTemplates2.dll");
+    else if (imports.contains("qt5core.dll"))
+        names << QStringLiteral("Qt5QuickTemplates2.dll");
+    else
+        names << QStringLiteral("Qt6QuickTemplates2.dll") << QStringLiteral("Qt5QuickTemplates2.dll");
+    const auto files = dir.entryList(QDir::Files);
+    for (const auto &name : names) {
+        for (const auto &file : files) {
+            if (file.compare(name, Qt::CaseInsensitive) == 0)
+                return QDir::toNativeSeparators(dir.filePath(file));
+        }
+    }
+    return {};
+}
+
 Analysis analyze(const QByteArray &b)
 {
     Analysis out;
-    if (!PeUtils::isPe32Plus(b)) {
+    if (!PeUtils::isPe32Plus(b) || PeUtils::machine(b) != 0x8664) {
         out.state = QStringLiteral("unsupported");
         out.msg = (PeUtils::peHeaderOffset(b) < 0)
                       ? QStringLiteral("not a Windows DLL/EXE (no MZ header)")
@@ -132,7 +173,9 @@ Analysis analyze(const QByteArray &b)
         const QString name = readAsciiz(b, nameOff);
         if (!wanted().contains(name))
             continue;
-        const quint16 ord = quint16(le32(b, ordsOff + i * 2) & 0xFFFF);
+        if (!inRange(b, ordsOff + qint64(i) * 2, 2))
+            continue;
+        const quint16 ord = quint16(le16(b, ordsOff + qint64(i) * 2));
         if (!inRange(b, funcsOff + ord * 4, 4))
             continue;
         const quint32 frva = le32(b, funcsOff + ord * 4);
@@ -147,10 +190,23 @@ Analysis analyze(const QByteArray &b)
         t.off = off;
         if (b.mid(int(off), 5) == prologue())
             t.state = QStringLiteral("clean");
-        else if (char(b[int(off)]) == char(0xE9))
-            t.state = QStringLiteral("patched");
-        else
+        else {
             t.state = QStringLiteral("unknown");
+            if (uchar(b[int(off)]) == 0xE9) {
+                const qint64 slotRva = qint64(frva) + 5 + qint32(le32(b, off + 1));
+                const qint64 slotOff = slotRva >= 0 && slotRva <= 0xFFFFFFFFLL
+                                           ? PeUtils::rvaToRaw(secs, quint32(slotRva)) : -1;
+                if (inRange(b, slotOff, kSlotLen)) {
+                    QDataStream ds(b.mid(slotOff + 64, 16));
+                    ds.setByteOrder(QDataStream::LittleEndian);
+                    double hi = 0, lo = 0;
+                    ds >> hi >> lo;
+                    if (std::isfinite(hi) && lo == 60.0
+                        && b.mid(slotOff, kSlotLen) == buildSlot(frva, quint32(slotRva), hi, lo))
+                        t.state = QStringLiteral("patched");
+                }
+            }
+        }
         out.targets << t;
     }
 
@@ -160,12 +216,19 @@ Analysis analyze(const QByteArray &b)
         return out;
     }
 
-    bool anyClean = false, anyPatched = false;
+    bool anyClean = false, anyPatched = false, anyUnknown = false;
     for (const Target &t : out.targets) {
         anyClean |= (t.state == QLatin1String("clean"));
         anyPatched |= (t.state == QLatin1String("patched"));
+        anyUnknown |= (t.state == QLatin1String("unknown"));
+    }
+    if (anyUnknown || (anyPatched && anyClean)) {
+        out.state = QStringLiteral("unsupported");
+        out.msg = QStringLiteral("Unknown or mixed setTo prologues; no partial patch will be applied.");
+        return out;
     }
     if (anyPatched && !anyClean) {
+        out.ok = true;
         out.state = QStringLiteral("patched");
         out.msg = QStringLiteral("%1 setTo function(s), already patched").arg(out.targets.size());
         return out;
@@ -226,6 +289,21 @@ Analysis analyze(const QByteArray &b)
 
 Result patch(const QString &dllPath, double hi)
 {
+    if (!isSupportedPath(dllPath))
+        return { false, QStringLiteral("Select Qt5QuickTemplates2.dll or Qt6QuickTemplates2.dll, "
+                                        "not the OpenGL renderer DLL.") };
+    if (!std::isfinite(hi) || hi < 60.0 || hi > 1440.0)
+        return { false, QStringLiteral("Max FPS must be between 60 and 1440.") };
+    if (BsDetector::isProcessRunning(QStringLiteral("HD-Player.exe")))
+        return { false, QStringLiteral("Close all BlueStacks instances (HD-Player.exe) before patching FPS.") };
+    QFile current(dllPath);
+    if (!current.open(QIODevice::ReadOnly))
+        return { false, QStringLiteral("Cannot read %1").arg(dllPath) };
+    const QByteArray original = current.readAll();
+    current.close();
+    const auto currentAnalysis = analyze(original);
+    if (!currentAnalysis.ok)
+        return { false, currentAnalysis.msg };
     const double lo = 60.0;
     const QString bak = dllPath + QStringLiteral(".bak");
 
@@ -243,8 +321,8 @@ Result patch(const QString &dllPath, double hi)
     f.close();
 
     const Analysis t = analyze(data);
-    if (!t.ok)
-        return { false, t.msg };
+    if (!t.ok || t.state != QLatin1String("clean"))
+        return { false, QStringLiteral("A clean backup is required: %1").arg(t.msg) };
 
     // Cave must be empty for two slots.
     for (int i = 0; i < 2 * kSlotLen; ++i) {
@@ -266,22 +344,32 @@ Result patch(const QString &dllPath, double hi)
     if (slot == 0)
         return { false, QStringLiteral("nothing to patch (already patched?)") };
 
-    QFile out(dllPath);
-    if (!out.open(QIODevice::WriteOnly | QIODevice::Truncate))
-        return { false, QStringLiteral("Write error (run as administrator?).") };
-    out.write(data);
-    out.close();
-    return { true, QStringLiteral("PATCHED! high-FPS slider max: %1").arg(hi) };
+    QString error;
+    if (!PatchFile::writeVerified(dllPath, original, data, &error))
+        return { false, error };
+    return { true, QStringLiteral("Patched %1: high-FPS slider maximum %2. Restart BlueStacks.")
+                       .arg(QFileInfo(dllPath).fileName()).arg(hi) };
 }
 
 Result restore(const QString &dllPath)
 {
+    if (!isSupportedPath(dllPath))
+        return { false, QStringLiteral("Select Qt5QuickTemplates2.dll or Qt6QuickTemplates2.dll.") };
+    if (BsDetector::isProcessRunning(QStringLiteral("HD-Player.exe")))
+        return { false, QStringLiteral("Close all BlueStacks instances before restoring FPS.") };
     const QString bak = dllPath + QStringLiteral(".bak");
     if (!QFileInfo::exists(bak))
         return { false, QStringLiteral("No backup found.") };
-    QFile::remove(dllPath);
-    if (!QFile::copy(bak, dllPath))
-        return { false, QStringLiteral("Restore failed.") };
+    QFile backup(bak), current(dllPath);
+    if (!backup.open(QIODevice::ReadOnly) || !current.open(QIODevice::ReadOnly))
+        return { false, QStringLiteral("Cannot read the DLL or backup.") };
+    const QByteArray original = current.readAll();
+    const QByteArray restored = backup.readAll();
+    current.close();
+    backup.close();
+    QString error;
+    if (!PatchFile::writeVerified(dllPath, original, restored, &error))
+        return { false, error };
     return { true, QStringLiteral("ORIGINAL RESTORED.") };
 }
 

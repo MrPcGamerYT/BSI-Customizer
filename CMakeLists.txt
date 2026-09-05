@@ -15,6 +15,12 @@ set_source_files_properties(src/qml/Theme.qml PROPERTIES QT_QML_SINGLETON_TYPE T
 qt_add_executable(BSICustomizer
     src/main.cpp
     src/selftest.cpp
+    src/theme_runtime_test.cpp
+    src/patch_regression_test.cpp
+    src/core/PatchFile.h
+    src/core/PatchFile.cpp
+    src/core/QtResources.h
+    src/core/QtResources.cpp
     src/core/ByteUtils.h
     src/core/PeUtils.h
     src/core/PeUtils.cpp

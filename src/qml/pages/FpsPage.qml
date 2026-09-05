@@ -22,8 +22,9 @@ Item {
         }
 
         PathRow {
+            id: fpsPath
             Layout.fillWidth: true
-            label: qsTr("libOpenglRender")
+            label: qsTr("FPS slider DLL")
             text: backend.dllPath
             onLoad: backend.dllPath = text
         }
@@ -49,6 +50,7 @@ Item {
                     ActionButton {
                         text: qsTr("Analyze")
                         onClicked: {
+                            backend.dllPath = fpsPath.text;
                             const r = backend.fpsAnalyze();
                             page.state = r.msg || "?";
                             page.stateColorName = r.ok ? (r.state === "patched" ? "green" : "orange") : "red";
@@ -57,6 +59,7 @@ Item {
                     ActionButton {
                         text: qsTr("Restore")
                         onClicked: {
+                            backend.dllPath = fpsPath.text;
                             const r = backend.fpsRestore();
                             page.state = r.msg || "?";
                             page.stateColorName = r.ok ? "green" : "red";
@@ -66,6 +69,7 @@ Item {
                         accent: true
                         text: qsTr("Patch FPS")
                         onClicked: {
+                            backend.dllPath = fpsPath.text;
                             const r = backend.fpsPatch(fpsStepper.value);
                             page.state = r.msg || "?";
                             page.stateColorName = r.ok ? "green" : "red";
@@ -109,10 +113,12 @@ Item {
                     wrapMode: Text.Wrap
                     color: Theme.textDim
                     font.pixelSize: 12
-                    text: qsTr("Rewrites the FPS cap logic inside libOpenglRender.dll and stores your "
-                               + "limit in a free code cave. 240 Hz / 360 Hz modes are written there too, "
-                               + "so every built-in FPS setting in BlueStacks honours your cap. "
-                               + "A .bak backup is created automatically — use Restore to roll back.")
+                    text: qsTr("Works on Qt5QuickTemplates2.dll and Qt6QuickTemplates2.dll. "
+                               + "Changes the QQuickSlider / QQuickRangeSlider upper limit from "
+                               + "240 to your chosen value; the lower limit stays at 60. This unlocks "
+                               + "the settings slider, not a guarantee of in-game FPS. Close all "
+                               + "BlueStacks instances before patching, then restart. A .bak backup "
+                               + "is created automatically — use Restore to roll back.")
                 }
             }
         }

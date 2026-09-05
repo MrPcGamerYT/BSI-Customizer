@@ -83,7 +83,7 @@ Item {
                             wrapMode: Text.Wrap
                             text: qsTr("A native C++ / Qt 6 modding toolkit for BlueStacks 5 and "
                                        + "MSI App Player 5. It patches HD-Player.exe and "
-                                       + "libOpenglRender.dll directly — theme colors, SVG icons, "
+                                       + "Qt5QuickTemplates2.dll / Qt6QuickTemplates2.dll directly — theme colors, SVG icons, "
                                        + "FPS cap, integrity check, boot video and more. Every "
                                        + "patch writes a .bak backup first and verifies before "
                                        + "writing.")
@@ -261,7 +261,7 @@ Item {
                                       + "changes; the toggle-switch recolor rewrites only the "
                                       + "fill colors.") },
                             { t: qsTr("FPS unlock"),
-                              d: qsTr("The FPS slider's setter inside libOpenglRender.dll is "
+                              d: qsTr("The FPS slider's setter inside Qt5QuickTemplates2.dll / Qt6QuickTemplates2.dll is "
                                       + "detoured to a small code cave that holds your custom "
                                       + "cap (60–1440), and the built-in 60/240/360 constants "
                                       + "are rewritten.") },

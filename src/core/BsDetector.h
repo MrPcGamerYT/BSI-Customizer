@@ -7,7 +7,7 @@
 // default paths, Program Files scan and (Windows) registry uninstall keys.
 namespace BsDetector {
 
-// [{profile, root, exe, conf, opengl_dll, native_dll}]
+// [{profile, root, exe, conf, fps_dll, native_dll}]
 QVariantList findBlueStacks();
 
 // True when the given executable (e.g. "HD-Player.exe") is running right now.

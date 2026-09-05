@@ -9,6 +9,8 @@
 #include <QVariantList>
 #include <functional>
 
+#include "QtResources.h"
+
 // ---------------------------------------------------------------------------
 // ThemeEngine — C++ port of the Python tool's theme changer.
 //
@@ -84,6 +86,9 @@ struct ThemeInfo
     qint64 qrcDataBaseRaw = -1;
     qint64 qrcDataBaseRva = -1;
     quint32 qrcDataOffset = 0;
+
+    QtResources::Link resource;   // validated v1/v2/v3 tree and owned ranges
+    bool ambiguous = false;      // more than one live theme: do not guess
 
     int entryCount = 0;
     // 2 = looks exactly like UiThemeObject.qml (or the qrc tree proves it),

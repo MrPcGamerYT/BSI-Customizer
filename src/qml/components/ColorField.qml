@@ -44,7 +44,8 @@ RowLayout {
             cursorShape: Qt.PointingHandCursor
             onClicked: {
                 picker.hexText = /^#[0-9A-Fa-f]{6,8}$/.test(control.shown)
-                                 ? control.shown.substring(0, 7) : "#7c5cff";
+                                 ? (control.shown.length === 9 ? "#" + control.shown.substring(3)
+                                                              : control.shown) : "#7c5cff";
                 picker.open();
             }
         }
@@ -73,7 +74,7 @@ RowLayout {
             const t = text.trim();
             if (t === "") {
                 control.edited("");
-            } else if (/^#?[0-9A-Fa-f]{6}$/.test(t)) {
+            } else if (/^#?(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$/.test(t)) {
                 const v = t.startsWith("#") ? t.toUpperCase() : ("#" + t).toUpperCase();
                 control.edited(v);
             }

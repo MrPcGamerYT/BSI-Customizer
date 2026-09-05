@@ -1,4 +1,5 @@
 #include "BsDetector.h"
+#include "FpsPatcher.h"
 
 #include <QDir>
 #include <QFileInfo>
@@ -98,8 +99,7 @@ QVariantList findBlueStacks()
             { "exe", QDir::toNativeSeparators(r.second + QStringLiteral("/HD-Player.exe")) },
             { "conf", QDir::toNativeSeparators(programData + QLatin1Char('/') + confDir
                                                + QStringLiteral("/bluestacks.conf")) },
-            { "opengl_dll",
-              QDir::toNativeSeparators(r.second + QStringLiteral("/libOpenglRender.dll")) },
+            { "fps_dll", FpsPatcher::findDll(r.second) },
             { "native_dll",
               QDir::toNativeSeparators(r.second + QStringLiteral("/HD-Opengl-Native.dll")) },
         };
