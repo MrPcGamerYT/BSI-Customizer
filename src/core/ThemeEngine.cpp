@@ -1216,6 +1216,11 @@ ThemeEngine::PatchResult ThemeEngine::patchTheme(const QString &exePath, const T
         return { false, QStringLiteral("More than one theme resource could be active. No file "
                                         "was written; use --theme-probe to inspect this EXE.") };
 
+    if (live.mode == QLatin1String("zlib") && live.headerBytes == 8 && !live.hasQrcNode
+        && data.contains(utf16be(QStringLiteral("UiThemeObject.qml"))))
+        return { false, QStringLiteral("The Qt resource tree could not be validated. No file "
+                                        "was written; run --theme-probe for this EXE.") };
+
     // The zlib record is recompressed (and relocated if it outgrows its slot),
     // so a longer hex color is fine there; a plain-text theme must fit in place.
     QStringList skipped;
@@ -1281,7 +1286,8 @@ ThemeEngine::PatchResult ThemeEngine::patchTheme(const QString &exePath, const T
 
     // ---------------- zlib ----------------
     const QByteArray qbytes = q.toLatin1();
-    const QByteArray comp = ZlibUtils::compress(qbytes);
+    const QByteArray comp = refreshOnly ? original.mid(live.zoff, live.compSize)
+                                        : ZlibUtils::compress(qbytes);
     if (comp.isEmpty())
         return { false, QStringLiteral("Theme compression failed.") };
 
@@ -1418,6 +1424,9 @@ ThemeEngine::PatchResult ThemeEngine::patchTheme(const QString &exePath, const T
 
     const bool refreshed = QtResources::refreshTimestamp(data, live.resource);
     const int units = QtResources::invalidateThemeUnits(data);
+    QString cacheError;
+    if (!QtResources::invalidateCompressedThemeCaches(data, live.resource, &cacheError))
+        return { false, cacheError };
     if (refreshed)
         log(logger, QStringLiteral("Refreshed the QML resource timestamp: old disk-cached "
                                    "colors will be rejected on the next launch."), QStringLiteral("blue"));

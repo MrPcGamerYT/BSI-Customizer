@@ -4,6 +4,8 @@
 #include "core/PeUtils.h"
 
 #include <QColor>
+#include <QCryptographicHash>
+#include <QtQml/qqmlprivate.h>
 #include <QFile>
 #include <QQmlComponent>
 #include <QQmlEngine>
@@ -18,6 +20,15 @@ Q_CORE_EXPORT bool qRegisterResourceData(int, const unsigned char *, const unsig
 Q_CORE_EXPORT bool qUnregisterResourceData(int, const unsigned char *, const unsigned char *,
                                            const unsigned char *);
 QT_END_NAMESPACE
+
+namespace {
+QQmlPrivate::CachedQmlUnit cachedUnit {};
+const QQmlPrivate::CachedQmlUnit *lookupUnit(const QUrl &url)
+{
+    return url == QUrl(QStringLiteral("qrc:/UiThemeObject.qml")) && cachedUnit.qmlData
+               ? &cachedUnit : nullptr;
+}
+} // namespace
 
 // args: exe, --theme-runtime-test, fixture, resource-version, tree-RVA,
 //       name-RVA, data-RVA, expected-primary100
@@ -42,11 +53,33 @@ int runThemeRuntimeTest(const QStringList &args)
         image.replace(section.va, section.rawSize, pe.mid(section.rawPtr, section.rawSize));
     }
     const int version = args.at(3).toInt();
+    if (version < 1 || version > 3)
+        return 2;
+    for (int i = 4; i <= 6; ++i) {
+        bool valid = false;
+        const qint64 offset = args.at(i).toLongLong(&valid);
+        if (!valid || offset < 0 || offset + 22 > image.size())
+            return 2;
+    }
     const auto *tree = reinterpret_cast<const uchar *>(image.constData()) + args.at(4).toLongLong();
     const auto *names = reinterpret_cast<const uchar *>(image.constData()) + args.at(5).toLongLong();
     const auto *payloads = reinterpret_cast<const uchar *>(image.constData()) + args.at(6).toLongLong();
     if (!qRegisterResourceData(version, tree, names, payloads))
         return 2;
+    // Register the fixture unit exactly as qmlcachegen's compiled-in loader
+    // does. QFile::map cannot load an embedded .qmlc resource on every Qt/OS,
+    // so a companion resource alone is not a faithful AOT regression test.
+    QByteArray compiled = QResource(QStringLiteral(":/UiThemeObject.qmlc")).uncompressedData();
+    if (compiled.size() >= 248) {
+        const quint32 flags = ByteUtils::le32(compiled, 108);
+        if (!(flags & 2)) {
+            ByteUtils::putLe32(compiled, 108, flags | 2); // StaticData: owned here
+            compiled.replace(76, 16, QCryptographicHash::hash(compiled.mid(92), QCryptographicHash::Md5));
+        }
+        cachedUnit.qmlData = reinterpret_cast<const QV4::CompiledData::Unit *>(compiled.constData());
+        QQmlPrivate::RegisterQmlUnitCacheHook hook { 0, lookupUnit };
+        QQmlPrivate::qmlregister(QQmlPrivate::QmlUnitCacheHookRegistration, &hook);
+    }
     bool ok = false;
     {
         QResource resource(QStringLiteral(":/UiThemeObject.qml"));
@@ -68,5 +101,6 @@ int runThemeRuntimeTest(const QStringList &args)
         }
     }
     qUnregisterResourceData(version, tree, names, payloads);
+    cachedUnit.qmlData = nullptr;
     return ok ? 0 : 1;
 }

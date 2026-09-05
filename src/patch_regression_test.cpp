@@ -150,6 +150,7 @@ bool loadInQt(const QString &path, const Fixture &f, const QString &cache, const
     env.remove(QStringLiteral("QML_DISABLE_DISK_CACHE"));
     env.insert(QStringLiteral("QML_DISK_CACHE_PATH"), cache);
     env.insert(QStringLiteral("QML_FORCE_DISK_CACHE"), QStringLiteral("1"));
+    env.insert(QStringLiteral("QT_LOGGING_RULES"), QStringLiteral("qt.qml.diskcache.debug=true"));
     env.insert(QStringLiteral("QT_QPA_PLATFORM"), QStringLiteral("offscreen"));
     process.setProcessEnvironment(env);
     const auto secs = PeUtils::sections(read(path));
@@ -220,8 +221,22 @@ int runPatchRegressionTests()
         if (version == 2) {
             const auto files = QDir(cache).entryList({ QStringLiteral("*.qmlc") }, QDir::Files);
             check(!files.isEmpty(), "a first HD-Player-like launch really creates a disk cache");
-            if (!files.isEmpty())
-                diskUnit = read(QDir(cache).filePath(files.first()));
+            for (const auto &file : files) {
+                const auto unit = read(QDir(cache).filePath(file));
+                auto probe = unit;
+                if (QtResources::invalidateThemeUnits(probe) == 1) {
+                    diskUnit = unit;
+                    break;
+                }
+            }
+            check(!diskUnit.isEmpty(), "cache unit sourceFileIndex resolves to the theme, not an imported component");
+            // Reproduce the bug independently: editing the source but keeping
+            // rcc's old timestamp must still show the cached palette.
+            const auto stale = fixture(version, QStringLiteral("#aa0033"));
+            write(path, stale.bytes);
+            check(loadInQt(path, stale, cache, QStringLiteral("#112233")),
+                  "reproduce stale colors after a source-only patch following a launch");
+            write(path, f.bytes);
         }
         for (const auto &color : { QStringLiteral("#fa3401"), QStringLiteral("#4cbbed") }) {
             const auto before = read(path);
@@ -263,8 +278,49 @@ int runPatchRegressionTests()
         const auto r = ThemeEngine::patchTheme(path, info, ThemeEngine::parseQmlEntries(info.qml),
                                               { { QStringLiteral("primary100"), QStringLiteral("#cf50ab") } });
         check(r.ok, "patch source and invalidate only its compiled theme unit");
+        const QByteArray after = read(path);
+        const auto unitPos = after.indexOf(QByteArray("qv4cdata\0", 8));
+        check(unitPos >= 0 && le32(after, unitPos + 8) == 0,
+              "embedded theme unit has an invalid format version, not merely changed source text");
         check(loadInQt(path, f, cache, QStringLiteral("#cf50ab")),
               "real Qt rejects the old embedded unit and renders the selected source color");
+    }
+
+    std::printf("[theme] mapped relocation across PE sections and orphan selection\n");
+    for (const int version : { 1, 2, 3 }) {
+        auto f = fixture(version, QStringLiteral("#112233"));
+        const auto payload = f.bytes.mid(f.payloads, f.neighbor + 4 + be32(f.bytes, f.neighbor) - f.payloads);
+        f.bytes.replace(0x1000, 0x4000, QByteArray(0x4000, 'X'));
+        f.bytes.replace(f.payloads, payload.size(), payload);
+        putLe16(f.bytes, 0x86, 2);
+        putLe32(f.bytes, 0x190, 0x4000);
+        putLe32(f.bytes, 0x198, 0x4000);
+        f.bytes.replace(0x1b0, 8, QByteArray(".data\0\0\0", 8));
+        putLe32(f.bytes, 0x1b8, 0x1b000);
+        putLe32(f.bytes, 0x1bc, 0x15000); // RVA differs from raw offset by 64 KiB
+        putLe32(f.bytes, 0x1c0, 0x1b000);
+        putLe32(f.bytes, 0x1c4, 0x5000);
+        putLe32(f.bytes, 0x1d4, 0x40000040);
+        const auto orphan = record(theme(QStringLiteral("#aabbcc")).toUtf8());
+        f.bytes.replace(0x1100, orphan.size(), orphan);
+        const QString path = temp.filePath(QStringLiteral("mapped%1.exe").arg(version));
+        write(path, f.bytes);
+        const auto info = ThemeEngine::detectTheme(f.bytes, QStringLiteral("qml"));
+        check(info.entryOff == f.payloads && info.qrcNodeOff == f.themeNode && !info.ambiguous,
+              "14/22-byte tree selects live colors over an earlier orphan");
+        const auto r = ThemeEngine::patchTheme(path, info, ThemeEngine::parseQmlEntries(info.qml), {
+            { QStringLiteral("primary100"), QStringLiteral("#ff12ab34") },
+            { QStringLiteral("primary90"), QStringLiteral("#803cb789") },
+            { QStringLiteral("accentNormal"), QStringLiteral("#90124ef0") }
+        });
+        if (!r.ok)
+            std::printf("    mapped error: %s\n", qPrintable(r.msg));
+        const auto after = ThemeEngine::detectTheme(read(path), QStringLiteral("qml"));
+        check(r.ok && after.entryOff >= 0x5000 && after.resource.dataBaseRva == 0x2000,
+              "relocation preserves the original memory data base across non-identity PE sections");
+        check(loadInQt(path, f, temp.filePath(QStringLiteral("mapped-cache%1").arg(version)),
+                       QStringLiteral("#ff12ab34")),
+              "Qt's resource loader follows the relocated RVA, not a raw file offset");
     }
 
     std::printf("[theme] invalid metadata/ambiguous copies and failed writes\n");
@@ -274,6 +330,17 @@ int runPatchRegressionTests()
         putBe32(f.bytes, f.tree + 10, 0xfffffff0);
         check(!ThemeEngine::detectTheme(f.bytes, QStringLiteral("qml")).hasQrcNode,
               "out-of-range child indices cannot produce a trusted qrc link");
+        f = fixture(2, QStringLiteral("#112233"));
+        const qint64 payloadEnd = f.neighbor + 4 + be32(f.bytes, f.neighbor);
+        f.bytes.replace(0x9000, payloadEnd - f.payloads, f.bytes.mid(f.payloads, payloadEnd - f.payloads));
+        const QString ambiguousPath = temp.filePath(QStringLiteral("ambiguous.exe"));
+        write(ambiguousPath, f.bytes);
+        const auto uncertain = ThemeEngine::detectTheme(f.bytes, QStringLiteral("qml"));
+        check(uncertain.ambiguous
+                  && !ThemeEngine::patchTheme(ambiguousPath, uncertain, ThemeEngine::parseQmlEntries(uncertain.qml),
+                      { { QStringLiteral("primary100"), QStringLiteral("#abcdef") } }).ok
+                  && read(ambiguousPath) == f.bytes,
+              "equally plausible live resource copies are refused without changing the file");
         const QString path = temp.filePath(QStringLiteral("atomic.exe"));
         write(path, "original");
         QString error;
@@ -316,6 +383,16 @@ int runPatchRegressionTests()
             check(FpsPatcher::restore(path).ok && read(path) == bytes, "FPS restore returns exact original bytes");
             check(!FpsPatcher::patch(path, std::numeric_limits<double>::infinity()).ok,
                   "non-finite FPS is rejected");
+            auto changedVersion = bytes;
+            changedVersion[0x1800] = char(0x42);
+            write(path, changedVersion);
+            check(!FpsPatcher::patch(path, 360).ok && read(path) == changedVersion,
+                  "an old backup cannot roll a newly updated Qt DLL back silently");
+            write(path, bytes);
+            auto unknown = bytes;
+            unknown.replace(0x1400, 5, QByteArray::fromHex("e900000000"));
+            check(!FpsPatcher::analyze(unknown).ok,
+                  "unknown third-party detours cannot be mistaken for our FPS patch");
         }
     }
     {

@@ -12,6 +12,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QMap>
+#include <QSet>
 
 using namespace ByteUtils;
 
@@ -164,6 +165,13 @@ Analysis analyze(const QByteArray &b)
         return out;
     }
 
+    if (!inRange(b, namesOff, qint64(nNames) * 4)
+        || !inRange(b, ordsOff, qint64(nNames) * 2)) {
+        out.state = QStringLiteral("unsupported");
+        out.msg = QStringLiteral("truncated export table");
+        return out;
+    }
+    QSet<qint64> seenFunctions;
     for (quint32 i = 0; i < nNames; ++i) {
         if (!inRange(b, namesOff + i * 4, 4))
             break;
@@ -183,6 +191,9 @@ Analysis analyze(const QByteArray &b)
         if (off < 0 || !inRange(b, off, 5))
             continue;
 
+        if (seenFunctions.contains(off))
+            continue; // two mangled aliases of the same setter need one detour
+        seenFunctions.insert(off);
         Target t;
         t.name = name;
         t.cls = wanted().value(name);
@@ -210,6 +221,11 @@ Analysis analyze(const QByteArray &b)
         out.targets << t;
     }
 
+    if (out.targets.size() > 2) {
+        out.state = QStringLiteral("unsupported");
+        out.msg = QStringLiteral("unexpected duplicate slider setters");
+        return out;
+    }
     if (out.targets.isEmpty()) {
         out.state = QStringLiteral("unsupported");
         out.msg = QStringLiteral("slider functions (setTo) not found in exports");
@@ -310,8 +326,11 @@ Result patch(const QString &dllPath, double hi)
     QString src = dllPath;
     if (QFileInfo::exists(bak)) {
         src = bak; // always patch from the pristine backup
-    } else if (!QFile::copy(dllPath, bak)) {
-        return { false, QStringLiteral("Could not create backup.") };
+    } else {
+        if (currentAnalysis.state != QLatin1String("clean"))
+            return { false, QStringLiteral("The DLL is already patched and its clean .bak is missing.") };
+        if (!QFile::copy(dllPath, bak))
+            return { false, QStringLiteral("Could not create backup.") };
     }
 
     QFile f(src);
@@ -319,6 +338,22 @@ Result patch(const QString &dllPath, double hi)
         return { false, QStringLiteral("Cannot read %1").arg(src) };
     QByteArray data = f.readAll();
     f.close();
+
+    // A backup from a different BlueStacks/Qt version must never overwrite
+    // today's DLL. Strip only our verified detours before comparing it.
+    QByteArray unpatched = original;
+    const auto sections = PeUtils::sections(original);
+    for (const auto &target : currentAnalysis.targets) {
+        if (target.state != QLatin1String("patched"))
+            continue;
+        const qint64 rva = qint64(target.rva) + 5 + qint32(le32(original, target.off + 1));
+        const qint64 off = PeUtils::rvaToRaw(sections, quint32(rva));
+        unpatched.replace(off, kSlotLen, QByteArray(kSlotLen, '\0'));
+        unpatched.replace(target.off, 5, prologue());
+    }
+    if (unpatched != data)
+        return { false, QStringLiteral("The .bak does not match this DLL version. No file was "
+                                        "written; keep the old backup separately and reload a clean DLL.") };
 
     const Analysis t = analyze(data);
     if (!t.ok || t.state != QLatin1String("clean"))

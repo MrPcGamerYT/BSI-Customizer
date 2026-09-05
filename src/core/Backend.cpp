@@ -272,13 +272,10 @@ void Backend::loadTheme(const QString &method)
                              "rather than guessing; run --theme-probe on this EXE."),
               QStringLiteral("orange"));
     } else if (t.candidateCount > 1 && t.hasQrcNode) {
-        doLog(QStringLiteral("WARNING: %1 theme records exist in this EXE%2. Using the one the "
-                             "Qt resource tree points at; the rest are orphans left behind by an "
-                             "earlier relocation (ours or another tool's). If BlueStacks shows a "
-                             "different theme than the colors listed here, press RESTORE on the "
-                             "Extras page and patch again from a clean file.")
-                  .arg(t.candidateCount)
-                  .arg(where),
+        doLog(QStringLiteral("Found %1 theme-like records%2. The selected UiThemeObject.qml "
+                             "is validated against the Qt resource tree; other records were "
+                             "not selected for editing.")
+                  .arg(t.candidateCount).arg(where),
               QStringLiteral("orange"));
     }
     if (t.mode == QLatin1String("zlib") && !t.hasQrcNode) {

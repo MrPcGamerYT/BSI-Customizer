@@ -26,6 +26,8 @@ struct Link
     quint32 dataOffset = 0;
     // All aliases of this payload must be repointed/refreshed together.
     QList<qint64> nodes;
+    // Embedded companion .qmlc resources (entry offset, compression flags).
+    QList<QPair<qint64, quint16>> themeCaches;
     // [file offset, exclusive end): resource payloads, names and tree. Zero
     // bytes inside another resource/header are NOT free space for a patch.
     QList<QPair<qint64, qint64>> reserved;
@@ -42,5 +44,6 @@ bool refreshTimestamp(QByteArray &data, const Link &link);
 // to UiThemeObject.qml. They otherwise take precedence over edited QML source,
 // even with the disk cache empty. Never disable the entire Qt cache globally.
 int invalidateThemeUnits(QByteArray &data);
+bool invalidateCompressedThemeCaches(QByteArray &data, const Link &link, QString *error);
 
 } // namespace QtResources

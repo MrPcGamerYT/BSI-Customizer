@@ -205,6 +205,8 @@ Link findLink(const QByteArray &data, qint64 entryOff, const QString &name)
                                 break;
                             }
                         }
+                        if (readName(data, nameBase + node.name) == name + QLatin1Char('c'))
+                            link.themeCaches << qMakePair(raw, node.flags);
                         if (raw == entryOff)
                             link.nodes << node.off;
                         else
@@ -287,6 +289,41 @@ int invalidateThemeUnits(QByteArray &data)
         }
     }
     return changed;
+}
+
+bool invalidateCompressedThemeCaches(QByteArray &data, const Link &link, QString *error)
+{
+    for (const auto &cache : link.themeCaches) {
+        if (cache.second != 0 && cache.second != 1) {
+            *error = QStringLiteral("Unsupported compression in the embedded theme cache. "
+                                    "No file was written.");
+            return false;
+        }
+        const quint32 size = be32(data, cache.first);
+        QByteArray unit = data.mid(cache.first + 4, size);
+        if (cache.second == 1)
+            unit = qUncompress(unit);
+        if (unit.size() < 28 || !unit.startsWith(QByteArray("qv4cdata\0", 8))
+            || le32(unit, 24) > quint32(unit.size())) {
+            *error = QStringLiteral("Cannot validate the embedded theme cache. No file was written.");
+            return false;
+        }
+        // The tree itself proves this is UiThemeObject.qmlc. This also handles
+        // older Qt Unit layouts without relying on sourceFileIndex offsets.
+        if (le32(unit, 8) == 0)
+            continue;
+        putLe32(unit, 8, 0);
+        const QByteArray replacement = cache.second == 1 ? qCompress(unit, 9) : unit;
+        if (replacement.size() > size) {
+            *error = QStringLiteral("The embedded theme cache cannot be invalidated in its "
+                                    "current slot. No file was written.");
+            return false;
+        }
+        putBe32(data, cache.first, replacement.size());
+        data.replace(cache.first + 4, size,
+                     replacement + QByteArray(size - replacement.size(), '\0'));
+    }
+    return true;
 }
 
 } // namespace QtResources
