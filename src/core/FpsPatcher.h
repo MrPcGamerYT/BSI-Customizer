@@ -45,6 +45,10 @@ QString findDll(const QString &installDir);
 struct DllDetection {
     bool ok = false;
     int qtMajor = 0;
+    // 32 or 64 for the selected HD-Player.exe, 0 when it is not a readable PE.
+    // Detection is bitness-neutral so that older x86 installations are still
+    // recognised; only the slider patch itself requires a 64-bit Qt DLL.
+    int playerBits = 0;
     QString path;
     QString msg;
 };

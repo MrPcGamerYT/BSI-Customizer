@@ -15,6 +15,8 @@
 #include <QFileInfo>
 #include <QStringList>
 
+#include <algorithm>
+
 Backend::Backend(SettingsManager *settings, QObject *parent)
     : QObject(parent)
     , m_settings(settings)
@@ -359,7 +361,8 @@ QVariantList Backend::gradientTargets() const
         result << QVariantMap { { "key", target.key }, { "label", target.label }, { "resource", target.resource },
                                 { "kind", target.kind }, { "enabled", target.current.enabled },
                                 { "first", target.current.first }, { "second", target.current.second },
-                                { "horizontal", target.current.horizontal } };
+                                { "horizontal", target.current.horizontal },
+                                { "supportsOrientation", target.supportsOrientation } };
     return result;
 }
 
@@ -373,8 +376,15 @@ QVariantMap Backend::loadGradientTargets()
     }
     const auto analysis = GradientPatcher::analyze(bytes);
     m_gradientTargets = analysis.targets;
+    QString message = analysis.message;
+    // Older (Qt 5 based) players expose Gradient but not Gradient::orientation, so
+    // the direction cannot be honoured there. Say so instead of silently ignoring it.
+    if (std::any_of(m_gradientTargets.cbegin(), m_gradientTargets.cend(),
+                    [](const GradientPatcher::Target &t) { return !t.supportsOrientation; }))
+        message += QStringLiteral(" Some of these documents come from a QtQuick version older than 2.12:"
+                                  " their gradient is applied top to bottom and the direction stays fixed there.");
     emit gradientTargetsChanged();
-    return result(analysis.ok, analysis.message, QStringLiteral("blue"));
+    return result(analysis.ok, message, QStringLiteral("blue"));
 }
 
 QVariantMap Backend::applyThemeGradient(const QString &key, const QString &first, const QString &second,
@@ -713,6 +723,7 @@ QVariantMap Backend::fpsDetect()
     const auto detection = resolveFpsTarget();
     auto reply = result(detection.ok, detection.msg, detection.ok ? QStringLiteral("blue") : QStringLiteral("orange"));
     reply.insert(QStringLiteral("qtMajor"), detection.qtMajor);
+    reply.insert(QStringLiteral("playerBits"), detection.playerBits);
     reply.insert(QStringLiteral("path"), detection.path);
     return reply;
 }

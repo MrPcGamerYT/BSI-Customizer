@@ -43,8 +43,15 @@ DllDetection detectDll(const QString &playerExe)
 {
     DllDetection out;
     const auto image = readImage(playerExe);
-    if (!PeUtils::isPe32Plus(image) || PeUtils::machine(image) != 0x8664) {
-        out.msg = QStringLiteral("Select a readable Windows x64 HD-Player.exe from the installation you want to patch.");
+    // Older BlueStacks generations ship a 32-bit HD-Player.exe with Qt5QuickTemplates2.dll.
+    // Recognising those installations is useful on its own (theme, gradient, config and
+    // backup features all work there), so the bitness is recorded rather than used to end
+    // the detection; the 64-bit requirement is enforced on the slider DLL further below.
+    const quint16 machine = PeUtils::machine(image);
+    out.playerBits = PeUtils::isPe32Plus(image) && machine == 0x8664 ? 64
+                   : !PeUtils::isPe32Plus(image) && machine == 0x14c && !image.isEmpty() ? 32 : 0;
+    if (!out.playerBits) {
+        out.msg = QStringLiteral("Select a readable Windows HD-Player.exe (x64, or the x86 build of an older installation) from the installation you want to patch.");
         return out;
     }
     const QDir install(QFileInfo(playerExe).absolutePath());
@@ -83,26 +90,27 @@ DllDetection detectDll(const QString &playerExe)
     }
     if (!versions.isEmpty()) out.qtMajor = *versions.cbegin();
 
+    // Every location the Windows loader would consult for a Qt DLL of this generation.
+    // Qt5-era installations keep them beside the player or under Qt/Qt5/Qt6 (with or
+    // without a bin/ subdirectory), so all of those have to be searched.
     const QStringList locations { install.absolutePath(), install.filePath(QStringLiteral("bin")),
                                   install.filePath(QStringLiteral("Qt/bin")), install.filePath(QStringLiteral("Qt5/bin")),
-                                  install.filePath(QStringLiteral("Qt6/bin")) };
+                                  install.filePath(QStringLiteral("Qt6/bin")), install.filePath(QStringLiteral("Qt")),
+                                  install.filePath(QStringLiteral("Qt5")), install.filePath(QStringLiteral("Qt6")) };
     QMap<int, QStringList> candidates;
     for (int major : { 5, 6 }) {
         const auto name = QStringLiteral("Qt%1QuickTemplates2.dll").arg(major);
-        const auto beside = namedFile(install, name);
-        if (!beside.isEmpty()) candidates[major] << beside; // Windows loader's normal first choice
-        else {
-            for (const auto &location : locations.mid(1)) {
-                const auto path = namedFile(QDir(location), name);
-                if (!path.isEmpty() && !candidates[major].contains(path)) candidates[major] << path;
-            }
+        for (const auto &location : locations) {
+            const auto path = namedFile(QDir(location), name);
+            if (!path.isEmpty()) { candidates[major] << path; break; } // the loader's first hit wins
         }
     }
     if (!out.qtMajor) {
         const bool five = !candidates.value(5).isEmpty(), six = !candidates.value(6).isEmpty();
         if (five == six) {
             out.msg = five ? QStringLiteral("Both Qt slider DLL versions are present, but the player's Qt version could not be established. Select the DLL manually.")
-                           : QStringLiteral("No Qt5QuickTemplates2.dll or Qt6QuickTemplates2.dll was found in this installation.");
+                           : QStringLiteral("No Qt5QuickTemplates2.dll or Qt6QuickTemplates2.dll was found in this installation. Searched: %1")
+                                 .arg(QDir::toNativeSeparators(locations.join(QStringLiteral("; "))));
             return out;
         }
         out.qtMajor = five ? 5 : 6;
@@ -111,13 +119,18 @@ DllDetection detectDll(const QString &playerExe)
     const auto matches = candidates.value(out.qtMajor);
     if (matches.size() != 1) {
         out.msg = matches.isEmpty()
-            ? QStringLiteral("Detected Qt %1, but Qt%1QuickTemplates2.dll is missing from %2. A DLL from another installation will not be substituted.").arg(out.qtMajor).arg(install.absolutePath())
+            ? QStringLiteral("Detected Qt %1, but Qt%1QuickTemplates2.dll is missing from this installation. A DLL from another installation will not be substituted. Searched: %2")
+                  .arg(out.qtMajor).arg(QDir::toNativeSeparators(locations.join(QStringLiteral("; "))))
             : QStringLiteral("Detected Qt %1, but multiple matching slider DLLs exist in this installation. Select the correct one manually.").arg(out.qtMajor);
         return out;
     }
     const auto dll = readImage(matches.first());
     if (!PeUtils::isPe32Plus(dll) || PeUtils::machine(dll) != 0x8664) {
-        out.msg = QStringLiteral("The detected slider DLL is not a readable Windows x64 PE: %1").arg(matches.first());
+        // Reached by every 32-bit (x86) BlueStacks installation: the Qt DLL there is
+        // x86, while the slider patch decodes 64-bit code. Naming both the reason and
+        // the features that still work keeps this from looking like a detection bug.
+        out.msg = QStringLiteral("Detected Qt %1 in a %2-bit installation, but its Qt%1QuickTemplates2.dll is not a 64-bit PE, which the FPS slider patch requires: %3. Themes, gradients, config edits and backups still work for this installation.")
+                      .arg(out.qtMajor).arg(out.playerBits ? out.playerBits : 32).arg(matches.first());
         return out;
     }
     out.ok = true;

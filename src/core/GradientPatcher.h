@@ -19,6 +19,9 @@ struct Target {
     QString resource;
     QString kind;
     Spec current;
+    // False for documents whose QtQuick version predates Gradient::orientation:
+    // the gradient is applied, but its direction is fixed top to bottom.
+    bool supportsOrientation = true;
 };
 struct Analysis {
     bool ok = false;

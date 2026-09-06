@@ -7,14 +7,19 @@ import "../Icons.js" as Icons
 Item {
     id: page
 
-    // Official YouTube play-button logo (red rounded rect + white triangle),
-    // rendered as an inline SVG so no external file is needed.
-    readonly property string ytLogo:
-        "data:image/svg+xml," + encodeURIComponent(
-            "<svg xmlns='http://www.w3.org/2000/svg' width='48' height='34' viewBox='0 0 48 34'>"
-            + "<rect width='48' height='34' rx='7' fill='#FF0000'/>"
-            + "<path d='M19 8.5v17L33 17z' fill='#ffffff'/>"
-            + "</svg>")
+    // Small outline YouTube play button, drawn as inline SVG so nothing has to be
+    // shipped or downloaded. The stroke colour is passed in so the logo can follow
+    // the theme (and the accent on hover) without a second asset.
+    function ytLogo(color) {
+        var stroke = String(color);
+        return "data:image/svg+xml," + encodeURIComponent(
+            "<svg xmlns='http://www.w3.org/2000/svg' width='34' height='24' viewBox='0 0 34 24'>"
+            + "<rect x='1.1' y='1.1' width='31.8' height='21.8' rx='6.5' fill='none' stroke='" + stroke
+            + "' stroke-width='2.2'/>"
+            + "<path d='M14.6 7.6L21.2 12L14.6 16.4Z' fill='none' stroke='" + stroke
+            + "' stroke-width='2.2' stroke-linejoin='round' stroke-linecap='round'/>"
+            + "</svg>");
+    }
 
     Flickable {
         anchors.fill: parent
@@ -147,59 +152,45 @@ Item {
                                 border.color: authorArea.containsMouse ? Theme.accent : Theme.border
                                 Behavior on color { ColorAnimation { duration: 120 } }
 
-                                RowLayout {
+                                // Logo first, the channel name underneath it.
+                                ColumnLayout {
                                     anchors.fill: parent
-                                    anchors.leftMargin: 14
-                                    anchors.rightMargin: 14
-                                    spacing: 12
+                                    anchors.topMargin: 10
+                                    anchors.bottomMargin: 10
+                                    anchors.leftMargin: 12
+                                    anchors.rightMargin: 12
+                                    spacing: 3
 
-                                    Rectangle {
-                                        Layout.preferredWidth: 42
-                                        Layout.preferredHeight: 42
-                                        radius: 21
-                                        color: Theme.accentSoft
-                                        border.width: 1
-                                        border.color: Theme.accent
-                                        Text {
-                                            anchors.centerIn: parent
-                                            text: authorCard.modelData.name.charAt(0)
-                                            color: Theme.accentText
-                                            font.pixelSize: 18
-                                            font.weight: Font.Black
-                                        }
-                                    }
-
-                                    ColumnLayout {
-                                        Layout.fillWidth: true
-                                        spacing: 2
-                                        Text {
-                                            text: authorCard.modelData.name
-                                            color: Theme.text
-                                            font.pixelSize: 14
-                                            font.weight: Font.Bold
-                                        }
-                                        Text {
-                                            text: authorCard.modelData.role
-                                            color: Theme.textDim
-                                            font.pixelSize: 11
-                                        }
-                                        Text {
-                                            text: authorCard.modelData.handle
-                                            color: authorArea.containsMouse ? Theme.accentText
-                                                                            : Theme.textDim
-                                            font.pixelSize: 10
-                                            font.family: "Consolas"
-                                        }
-                                    }
-
-                                    // YouTube logo — click target hint
                                     Image {
-                                        Layout.preferredWidth: 40
-                                        Layout.preferredHeight: 28
-                                        source: page.ytLogo
+                                        Layout.alignment: Qt.AlignHCenter
+                                        Layout.preferredWidth: 34
+                                        Layout.preferredHeight: 24
+                                        source: page.ytLogo(authorArea.containsMouse ? Theme.accent
+                                                                                      : Theme.text)
+                                        sourceSize.width: 68
+                                        sourceSize.height: 48
                                         smooth: true
-                                        opacity: authorArea.containsMouse ? 1.0 : 0.85
+                                        fillMode: Image.PreserveAspectFit
+                                        opacity: authorArea.containsMouse ? 1.0 : 0.8
                                         Behavior on opacity { NumberAnimation { duration: 120 } }
+                                    }
+
+                                    Text {
+                                        Layout.alignment: Qt.AlignHCenter
+                                        Layout.maximumWidth: parent.width
+                                        text: authorCard.modelData.name
+                                        color: Theme.text
+                                        font.pixelSize: 13
+                                        font.weight: Font.Bold
+                                        elide: Text.ElideMiddle
+                                    }
+                                    Text {
+                                        Layout.alignment: Qt.AlignHCenter
+                                        text: authorCard.modelData.handle
+                                        color: authorArea.containsMouse ? Theme.accentText
+                                                                        : Theme.textDim
+                                        font.pixelSize: 10
+                                        font.family: "Consolas"
                                     }
                                 }
 

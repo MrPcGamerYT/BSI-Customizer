@@ -27,6 +27,16 @@ Dialog {
     // A full UI can expose dozens of gradient bindings, so the dialog filters the
     // discovered list instead of showing every path in one long drop-down.
     property var view: []
+    readonly property var selectedTarget: {
+        for (let i = 0; i < editor.view.length; ++i)
+            if (editor.view[i].key === editor.selectedKey) return editor.view[i];
+        return null;
+    }
+    // QtQuick before 2.12 (Qt 5.12) has no Gradient::orientation, so such a document
+    // can hold a gradient but always paints it top to bottom. Older players are then
+    // shown with the direction locked instead of quietly ignoring the choice.
+    readonly property bool targetSupportsOrientation:
+        !editor.selectedTarget || editor.selectedTarget.supportsOrientation !== false;
 
     function validColor(value) { return /^#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$/.test(value); }
     function refresh() {
@@ -47,7 +57,7 @@ Dialog {
         selectedKey = target.key;
         firstColor = target.first;
         secondColor = target.second;
-        horizontal = target.horizontal;
+        horizontal = target.horizontal && editor.targetSupportsOrientation;
         // Opening a solid target proposes a gradient; Solid is an explicit choice.
         useGradient = true;
     }
@@ -154,11 +164,20 @@ Dialog {
             }
             ComboBox {
                 Layout.fillWidth: true
-                enabled: editor.useGradient
+                enabled: editor.useGradient && editor.targetSupportsOrientation
                 model: [qsTr("Left → right"), qsTr("Top → bottom")]
                 currentIndex: editor.horizontal ? 0 : 1
                 onActivated: (index) => editor.horizontal = index === 0
             }
+        }
+        Text {
+            Layout.fillWidth: true
+            visible: editor.useGradient && !editor.targetSupportsOrientation
+            text: qsTr("This UI predates QtQuick 2.12: its gradient is drawn top to bottom and the direction cannot be changed there.")
+            color: Theme.textDim
+            font.pixelSize: 10
+            font.italic: true
+            wrapMode: Text.WordWrap
         }
         RowLayout {
             Layout.fillWidth: true

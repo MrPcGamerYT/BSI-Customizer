@@ -23,6 +23,7 @@ struct Binding {
 };
 struct Document {
     QString name, qml, mask, quickPrefix;
+    int quickMajor = 0, quickMinor = 0;   // 0/0 = version-less import (assume current)
     QtResources::Link link;
     qint64 entry = -1;
     bool bom = false;
@@ -31,6 +32,15 @@ struct Document {
 };
 struct Site { int object = -1, binding = -1; };
 struct Choice { Target target; int document = -1; QList<Site> sites; };
+// QQuickGradient::orientation landed in QtQuick 2.12 (Qt 5.12). A Gradient in an
+// older UI is valid but always painted top to bottom, so the property is left out
+// there instead of writing something that would fail to load.
+bool supportsOrientation(const Document &doc)
+{
+    return doc.quickMajor == 0 || doc.quickMajor > 2
+        || (doc.quickMajor == 2 && doc.quickMinor >= 12);
+}
+
 struct Catalog {
     QList<Document> documents;
     QList<Choice> choices;
@@ -132,8 +142,13 @@ bool parse(Document &doc)
             "(?:\\s+as\\s+(\\w+))?[ \\t\\r]*(?:;|\\r?$)"), QRegularExpression::MultilineOption);
     const auto quick = quickImport.match(doc.mask);
     if (!quick.hasMatch()) return false;
-    if (!quick.captured(1).isEmpty() && quick.captured(1).toInt() < 6
-        && (quick.captured(1).toInt() != 2 || quick.captured(2).toInt() < 12)) return false;
+    // Older BlueStacks builds are Qt 5 based and import e.g. `QtQuick 2.9`, and
+    // rejecting anything below 2.12 used to make those documents invisible, which
+    // is indistinguishable from "this version has no gradients". Only QtQuick 1.x
+    // really cannot be used: its Rectangle gradient has no GradientStop children.
+    doc.quickMajor = quick.captured(1).isEmpty() ? 0 : quick.captured(1).toInt();
+    doc.quickMinor = quick.captured(2).isEmpty() ? 0 : quick.captured(2).toInt();
+    if (doc.quickMajor != 0 && doc.quickMajor < 2) return false;
     if (!quick.captured(3).isEmpty()) doc.quickPrefix = quick.captured(3) + QLatin1Char('.');
     QList<int> braces;
     QMap<int, int> ends;
@@ -313,6 +328,7 @@ Catalog catalog(const QByteArray &image)
         const auto add = [&](const QString &key, const QString &label, const QString &kind, const QList<Site> &sites) {
             if (sites.isEmpty()) return;
             Target target; target.key = prefix + key; target.label = label; target.resource = doc.name; target.kind = kind;
+            target.supportsOrientation = supportsOrientation(doc);
             target.current = currentSpec(doc, sites.first().binding, palette);
             out.choices << Choice { target, index, sites };
             for (const auto &site : sites) if (site.binding >= 0) handled.insert(site.binding);
@@ -356,11 +372,15 @@ Catalog catalog(const QByteArray &image)
     }
     return out;
 }
-QString gradientExpression(const Spec &spec, const QString &prefix)
+QString gradientExpression(const Spec &spec, const QString &prefix, bool withOrientation)
 {
     if (!spec.enabled) return QStringLiteral("null");
-    return QStringLiteral("%1Gradient{orientation:%1Gradient.%2;%1GradientStop{position:0;color:\"%3\"}%1GradientStop{position:1;color:\"%4\"}}")
-        .arg(prefix, spec.horizontal ? QStringLiteral("Horizontal") : QStringLiteral("Vertical"), normalized(spec.first), normalized(spec.second));
+    const QString body = QStringLiteral("%1GradientStop{position:0;color:\"%2\"}%1GradientStop{position:1;color:\"%3\"}}")
+        .arg(prefix, normalized(spec.first), normalized(spec.second));
+    if (!withOrientation)
+        return QStringLiteral("%1Gradient{").arg(prefix) + body;
+    return QStringLiteral("%1Gradient{orientation:%1Gradient.%2;").arg(prefix,
+            spec.horizontal ? QStringLiteral("Horizontal") : QStringLiteral("Vertical")) + body;
 }
 } // namespace
 
@@ -410,7 +430,8 @@ bool apply(QByteArray &image, const QString &key, const Spec &spec, QString *err
     const auto &doc = parsed.documents[selected->document];
     struct Edit { int begin, length; QString replacement; };
     QList<Edit> edits;
-    const auto value = gradientExpression(spec, doc.quickPrefix);
+    const bool withOrientation = supportsOrientation(doc);
+    const auto value = gradientExpression(spec, doc.quickPrefix, withOrientation);
     // A member whose value is an object literal must not be followed by ';' -
     // Qt's own parser stops on that with "Unexpected token ';'" and the whole
     // QML file then fails to load, so the generated text has to stay unframed.
@@ -470,7 +491,7 @@ bool apply(QByteArray &image, const QString &key, const Spec &spec, QString *err
         for (const auto &site : choice.sites) {
             const auto current = currentSpec(check.documents[choice.document], site.binding, palette);
             verified &= current.enabled == spec.enabled
-                && (!spec.enabled || (current.horizontal == spec.horizontal
+                && (!spec.enabled || (current.horizontal == (spec.horizontal && withOrientation)
                     && normalized(current.first) == normalized(spec.first)
                     && normalized(current.second) == normalized(spec.second)));
         }

@@ -8,6 +8,7 @@
 #include "core/PatchFile.h"
 #include "core/PeUtils.h"
 #include "core/QtResources.h"
+#include "core/QtResourceRegistration.h"
 #include "core/SettingsManager.h"
 #include "core/ThemeEngine.h"
 #include "core/ZlibUtils.h"
@@ -284,6 +285,41 @@ void addRegistration(ResourceFixture &r, bool nonCanonical)
         r.f.themeNode += 22;
     }
 }
+// The same registration the x64 fixture emits, but in the shape a 32-bit (Qt 5 era)
+// build uses: PE32 headers, 4-byte thunks holding virtual addresses, and the four
+// arguments pushed right to left instead of passed in registers.
+void addRegistrationX86(ResourceFixture &r)
+{
+    auto &b = r.f.bytes;
+    putLe16(b, 0x84, 0x14c); putLe16(b, 0x98, 0x10b);            // machine x86, PE32 magic
+    putLe32(b, 0x98 + 28, 0x400000);                              // ImageBase
+    putLe16(b, 0x86, 2); putLe32(b, 0x190, 0x17000); putLe32(b, 0x198, 0x17000);
+    b.replace(0x1b0, 40, QByteArray(40, '\0')); b.replace(0x1b0, 8, QByteArray(".text\0\0\0", 8));
+    putLe32(b, 0x1b8, 0x8000); putLe32(b, 0x1bc, 0x18000); putLe32(b, 0x1c0, 0x8000);
+    putLe32(b, 0x1c4, 0x18000); putLe32(b, 0x1d4, 0x60000020);
+    b.replace(0x18000, 0x8000, QByteArray(0x8000, char(0x90)));
+    b.replace(0x1000, 0x300, QByteArray(0x300, '\0'));
+    putLe32(b, 0x98 + 104, 0x1000); putLe32(b, 0x98 + 108, 40);  // import directory (PE32 layout)
+    putLe32(b, 0x1000, 0x1100); putLe32(b, 0x100c, 0x1200); putLe32(b, 0x1010, 0x1120);
+    putLe32(b, 0x1100, 0x400000 + 0x1220); putLe32(b, 0x1120, 0x400000 + 0x1220);
+    const QByteArray dll = QByteArray("Qt5Core.dll") + '\0';
+    const QByteArray symbol = QByteArray("?qRegisterResourceData@@YAXHQBEI00@Z") + '\0';
+    b.replace(0x1200, dll.size(), dll); b.replace(0x1222, symbol.size(), symbol);
+    const auto push = [](quint32 value) {
+        QByteArray instruction(1, char(0x68));             // push dword ptr imm32
+        instruction += QByteArray(4, '\0'); putLe32(instruction, 1, value); return instruction;
+    };
+    QByteArray code;
+    code += push(0x400000 + quint32(r.f.payloads));
+    code += push(0x400000 + quint32(r.f.names));
+    code += push(0x400000 + quint32(r.f.tree));
+    code += QByteArray::fromHex("6a02");                            // version 2
+    code += QByteArray::fromHex("ff15"); code += QByteArray(4, '\0');
+    putLe32(code, code.size() - 4, 0x400000 + 0x1120);               // call dword ptr [IAT slot]
+    code += QByteArray::fromHex("c3");
+    b.replace(0x18000, code.size(), code);
+}
+
 QString resourceText(const QByteArray &bytes, const ResourceFixture &r, const QString &name)
 {
     const auto node = r.nodes.value(name, -1);
@@ -315,6 +351,35 @@ QByteArray importedPlayer(const QStringList &normal, const QStringList &delay = 
     };
     directory(normal, 1, 0x1800, 20);
     directory(delay, 13, 0x1a00, 32);
+    return data;
+}
+
+// The same import table as importedPlayer(), but declared as a 32-bit PE32 image:
+// this is what an x86 installation of an older BlueStacks generation looks like.
+QByteArray importedPlayer32(const QStringList &modules)
+{
+    auto data = peFile();
+    putLe16(data, 0x84, 0x14c);
+    putLe16(data, 0x98, 0x10b);
+    putLe32(data, 0x98 + 60, 0x1000);
+    putLe32(data, 0x98 + 92, 16);
+    const int table = 0x1800;
+    int names = 0x1c00;
+    putLe32(data, 0x98 + 96 + 8, table);
+    putLe32(data, 0x98 + 96 + 12, (modules.size() + 1) * 20);
+    for (int i = 0; i < modules.size(); ++i) {
+        const auto name = modules[i].toLatin1() + '\0';
+        data.replace(names, name.size(), name);
+        putLe32(data, table + i * 20 + 12, names);
+        names += name.size();
+    }
+    return data;
+}
+QByteArray x86Dll()
+{
+    auto data = peFile();
+    putLe16(data, 0x84, 0x14c);
+    putLe16(data, 0x98, 0x10b);
     return data;
 }
 
@@ -935,6 +1000,133 @@ int runPatchRegressionTests()
               "stale/unknown gradient targets do not modify the image");
     }
 
+    {
+        // Qt 5 based players import an older QtQuick minor version (2.9, 2.7, ...).
+        // Those documents do have Gradient, they only lack Gradient::orientation, so
+        // they must be offered and patched - just without a direction property.
+        const QString legacySurface = QStringLiteral(
+            "import QtQuick 2.9\r\n"
+            "Rectangle {\r\n"
+            "    objectName: \"sidebar\"\r\n"
+            "    width: 64\r\n"
+            "    height: 64\r\n"
+            "    color: \"#223344\"\r\n"
+            "}\r\n");
+        const QString legacyPalette = QStringLiteral(
+            "import QtQuick 2.7\r\n"
+            "QtObject{property QtObject gradients:QtObject{property Gradient gradientCard:"
+            "Gradient{GradientStop{position:0;color:\"#111111\"}GradientStop{position:1;color:\"#222222\"}}}}\r\n");
+        auto r = resources({ { QStringLiteral("UiThemeObject.qml"), legacyPalette },
+                             { QStringLiteral("LegacySidebar.qml"), legacySurface } }, true, {});
+        addRegistration(r, false);
+        const auto discovered = GradientPatcher::analyze(r.f.bytes);
+        QString surfaceKey, paletteKey;
+        bool surfaceFound = false, paletteFound = false;
+        for (const auto &target : discovered.targets) {
+            if (target.resource == QStringLiteral("LegacySidebar.qml")) { surfaceKey = target.key; surfaceFound = true; }
+            if (target.key.endsWith(QLatin1String("gradients.gradientCard"))) { paletteKey = target.key; paletteFound = true; }
+        }
+        check(discovered.ok && surfaceFound && paletteFound,
+              "documents of a Qt 5 era player are discovered instead of being skipped as unsupported");
+        for (const auto &target : discovered.targets)
+            if (target.resource == QStringLiteral("LegacySidebar.qml"))
+                check(!target.supportsOrientation, "a pre-2.12 document reports that it has no gradient direction");
+        auto image = r.f.bytes; QString error;
+        check(GradientPatcher::apply(image, surfaceKey, { true, QStringLiteral("#ff0000"), QStringLiteral("#0000ff"), true }, &error),
+              "an inserted gradient is accepted by a QtQuick 2.9 document");
+        const auto legacyText = resourceText(image, r, QStringLiteral("LegacySidebar.qml"));
+        check(legacyText.contains(QLatin1String("gradient:Gradient{GradientStop{position:0;color:\"#FF0000\"}GradientStop{position:1;color:\"#0000FF\"}}"))
+                  && !legacyText.contains(QLatin1String("orientation")),
+              "no orientation property is written into a QtQuick version that predates it");
+        check(GradientPatcher::apply(image, surfaceKey, { true, QStringLiteral("#ff0000"), QStringLiteral("#0000ff"), true }, &error)
+                  && GradientPatcher::apply(image, surfaceKey, { false, {}, {}, false }, &error),
+              "an orientation-less gradient verifies and can be reverted on a pre-2.12 document");
+        check(GradientPatcher::apply(image, paletteKey, { true, QStringLiteral("#aabbcc"), QStringLiteral("#ddeeff"), true }, &error)
+                  && resourceText(image, r, QStringLiteral("UiThemeObject.qml"))
+                         .contains(QLatin1String("gradientCard:Gradient{GradientStop{position:0;color:\"#AABBCC\"}")),
+              "a native gradient definition in an old palette is replaced without an orientation");
+        // QtQuick 1.x really cannot express this: no GradientStop children there.
+        const QString ancient = QStringLiteral("import QtQuick 1.1\r\nRectangle { objectName: \"ancient\"\r\n color: \"#101010\"\r\n}\r\n");
+        auto old = resources({ { QStringLiteral("PlrAncient.qml"), ancient } }, true, {});
+        addRegistration(old, false);
+        check(!GradientPatcher::analyze(old.f.bytes).ok,
+              "a QtQuick 1.x document is refused rather than patched into something unloadable");
+    }
+
+    {
+        // Real Qt 5 era installs additionally store parts of their QML with a UTF-8
+        // byte order mark (9 of the 118 embedded .qml files in the old 64-bit
+        // HD-Player.exe), one of them with the QtQuick import as its very first
+        // line. catalog() unwraps the marker before decoding, so the marked file has
+        // to be discovered, edited and left parseable exactly like an unmarked one -
+        // which is what this fixture pins, including the CRLF layout of that build.
+        const QString markedPalette = QStringLiteral(
+            "import QtQuick 2.7\r\n"
+            "QtObject{property QtObject gradients:QtObject{property Gradient gradientCard:"
+            "Gradient{GradientStop{position:0;color:'#111111'}GradientStop{position:1;color:'#222222'}}}}\r\n");
+        const QString markedSidebar = QString(QChar(0xFEFF)) + QStringLiteral(
+            "import QtQuick 2.15\r\n"
+            "Rectangle {\r\n"
+            "    objectName: \"sidebar\"\r\n"
+            "    width: 64\r\n"
+            "    color: \"#334455\"\r\n"
+            "}\r\n");
+        auto r = resources({ { QStringLiteral("UiThemeObject.qml"), markedPalette },
+                             { QStringLiteral("MarkedSidebar.qml"), markedSidebar } }, true, {});
+        addRegistration(r, false);
+        const auto marked = GradientPatcher::analyze(r.f.bytes);
+        QString key;
+        for (const auto &target : marked.targets)
+            if (target.label == QLatin1String("Sidebar background")) key = target.key;
+        check(marked.ok && !key.isEmpty(),
+              "a UTF-8 BOM in front of the QtQuick import does not hide the gradient targets");
+        auto image = r.f.bytes;
+        QString error;
+        const bool markedApplied = !key.isEmpty()
+            && GradientPatcher::apply(image, key, { true, QStringLiteral("#ff0000"), QStringLiteral("#0000ff"), false }, &error);
+        check(markedApplied, "a BOM-marked surface accepts the generated gradient");
+        const auto text = resourceText(image, r, QStringLiteral("MarkedSidebar.qml"));
+        check(text.contains(QLatin1String("gradient:Gradient")),
+              "the BOM-marked file gains the gradient binding");
+        // The marker itself is deliberately not asserted: it is unwrapped before
+        // decoding and the QML loader accepts the file with or without it, so the
+        // parsed result and the written binding are what have to hold.
+        check(text.contains(QStringLiteral("import QtQuick 2.15")) && text.contains(QLatin1String("objectName: \"sidebar\"")),
+              "editing a BOM-marked file leaves its import and object identity intact");
+    }
+
+    {
+        // A 32-bit installation used to expose no resource pools at all, because only
+        // the x64 qRegisterResourceData call shape was understood. Theme gradients and
+        // the surfaces beside them have to be discoverable there as well.
+        const QString palette = QStringLiteral("import QtQuick\nQtObject{property QtObject gradients:QtObject{property Gradient gradientButton:Gradient{orientation:Gradient.Horizontal;GradientStop{position:0;color:'#ff0000'}GradientStop{position:1;color:'#0000ff'}}}}\n");
+        const QString sidebar = QStringLiteral(
+            "import QtQuick 2.15\r\n"
+            "Rectangle {\r\n"
+            "    objectName: \"sidebar\"\r\n"
+            "    width: 64\r\n"
+            "    height: 64\r\n"
+            "    color: \"#112233\"\r\n"
+            "}\r\n");
+        auto r = resources({ { QStringLiteral("UiThemeObject.qml"), palette },
+                             { QStringLiteral("PlrSidebar.qml"), sidebar } }, true, {});
+        addRegistrationX86(r);
+        check(!QtResources::registeredPools(r.f.bytes).isEmpty(),
+              "the compiled-in resource pool of a 32-bit image is recovered from its push-shaped registration");
+        const auto discovered = GradientPatcher::analyze(r.f.bytes);
+        QString sideKey;
+        for (const auto &target : discovered.targets)
+            if (target.resource == QStringLiteral("PlrSidebar.qml")) sideKey = target.key;
+        check(discovered.ok && !sideKey.isEmpty(),
+              "gradient targets beside the theme palette are offered for a 32-bit player");
+        auto image = r.f.bytes; QString error;
+        const bool x86Applied = GradientPatcher::apply(image, sideKey, { true, QStringLiteral("#001122"), QStringLiteral("#334455"), false }, &error);
+        check(x86Applied, QStringLiteral("a gradient is applied and read back inside a 32-bit image (%1)").arg(error.isEmpty() ? QStringLiteral("no error reported") : error));
+        check(resourceText(image, r, QStringLiteral("PlrSidebar.qml"))
+                  .contains(QLatin1String("gradient:Gradient{orientation:Gradient.Vertical;GradientStop{position:0;color:\"#001122\"}")),
+              "the written gradient is found again through the recovered pool");
+    }
+
     std::printf("[boot-discovery] renamed/raw controllers and the host's selected component\n");
     {
         const QString controller = QStringLiteral("import QtQuick\nItem{Image{id:iBootImage}Text{id:iBootLoadingText}"
@@ -1246,6 +1438,31 @@ int runPatchRegressionTests()
         write(player, importedPlayer({ QStringLiteral("PlayerUi.dll") }));
         write(QDir(nxt).filePath(QStringLiteral("PlayerUi.dll")), importedPlayer({ QStringLiteral("Qt5Quick.dll") }));
         check(FpsPatcher::detectDll(player).qtMajor == 5, "a local UI dependency can establish the Qt major");
+        // Older x86 installations used to be refused as "not a readable x64 PE" before
+        // their Qt version was looked at, which is indistinguishable from Qt5 detection
+        // not working at all. The version is now reported and only the patch is limited.
+        const auto legacyDir = installations.filePath(QStringLiteral("BlueStacks_legacy"));
+        QDir().mkpath(legacyDir);
+        const auto legacyPlayer = QDir(legacyDir).filePath(QStringLiteral("HD-Player.exe"));
+        write(legacyPlayer, importedPlayer32({ QStringLiteral("Qt5Core.dll") }));
+        write(QDir(legacyDir).filePath(QStringLiteral("Qt5QuickTemplates2.dll")), x86Dll());
+        const auto legacy = FpsPatcher::detectDll(legacyPlayer);
+        check(!legacy.ok && legacy.qtMajor == 5 && legacy.playerBits == 32
+                  && legacy.msg.contains(QLatin1String("32-bit")) && legacy.msg.contains(QLatin1String("Themes, gradients")),
+              "a 32-bit Qt5 installation is identified and told apart from an unreadable file");
+        write(QDir(legacyDir).filePath(QStringLiteral("Qt5QuickTemplates2.dll")), sliderDll(false));
+        const auto mixed = FpsPatcher::detectDll(legacyPlayer);
+        check(mixed.ok && mixed.qtMajor == 5 && mixed.playerBits == 32,
+              "an x86 player whose slider DLL is 64-bit is still patched");
+        const auto qtLayout = installations.filePath(QStringLiteral("BlueStacks_qt5"));
+        QDir().mkpath(QDir(qtLayout).filePath(QStringLiteral("Qt5/bin")));
+        write(QDir(qtLayout).filePath(QStringLiteral("HD-Player.exe")), importedPlayer({ QStringLiteral("Qt5Core.dll") }));
+        write(QDir(qtLayout).filePath(QStringLiteral("Qt5/bin/Qt5QuickTemplates2.dll")), sliderDll(false));
+        const auto sub = FpsPatcher::detectDll(QDir(qtLayout).filePath(QStringLiteral("HD-Player.exe")));
+        // The detected path is returned with native separators, so compare against the
+        // directory name rather than the whole "Qt5/bin" fragment.
+        check(sub.ok && sub.path.contains(QLatin1String("bin")) && sub.path.endsWith(QLatin1String("Qt5QuickTemplates2.dll")),
+              "Qt5/bin is searched for the slider DLL too");
         auto malformed = importedPlayer({ QStringLiteral("Qt5Core.dll") });
         putLe32(malformed, 0x1800 + 12, 0xfffffff0);
         check(!PeUtils::importedModules(malformed).ok, "out-of-file import names are refused");
@@ -1274,7 +1491,20 @@ int runPatchRegressionTests()
         write(spaced, importedPlayer({}, { QStringLiteral("Qt6Core.dll") }));
         write(QDir(msi).filePath(QStringLiteral("Qt6QuickTemplates2.dll")), sliderDll(true));
         const auto detected = BsDetector::findBlueStacks({ installations.path() }, false);
-        check(detected.size() == 2, "Program Files discovery recognizes both BlueStacks and MSI App Player folder names");
+        // This fixture deliberately keeps four install folders (the two below plus
+        // the legacy and Qt5 ones created earlier in the block), so what matters is
+        // that both a plain BlueStacks name and the MSI brand are recognised, with
+        // their own data, and not an exact count.
+        bool nxtSeen = false, msiSeen = false;
+        for (const auto &value : detected) {
+            const auto item = value.toMap();
+            const QString root = item.value(QStringLiteral("root")).toString();
+            nxtSeen |= root.contains(QLatin1String("BlueStacks_nxt"), Qt::CaseInsensitive);
+            msiSeen |= root.contains(QLatin1String("MSI App Player"), Qt::CaseInsensitive)
+                       && item.value(QStringLiteral("profile")).toString() == QLatin1String("MSI5");
+        }
+        check(nxtSeen, "Program Files discovery recognizes an ordinary BlueStacks install folder");
+        check(msiSeen, "Program Files discovery recognizes the space-bearing MSI App Player folder name");
         bool correct = true;
         for (const auto &value : detected) {
             const auto item = value.toMap();

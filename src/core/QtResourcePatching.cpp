@@ -19,9 +19,17 @@ bool zeros(const QByteArray &b, qint64 from, qint64 to)
 qint64 appendStorage(QByteArray &data, qint64 size, QString *error)
 {
     const auto refuse = [&](const QString &why) { if (error) *error = why; return qint64(-1); };
-    if (size <= 0 || size > 50000008 || !PeUtils::isPe32Plus(data) || PeUtils::machine(data) != 0x8664)
-        return refuse(QStringLiteral("No safe mapped resource space: a supported Windows x64 PE is required."));
     const qint64 pe = PeUtils::peHeaderOffset(data), opt = pe + 24;
+    // Growth has to work for the older 32-bit players too, so the image is
+    // accepted with either machine/header pairing (x64 + PE32+ or i386 + PE32).
+    // Every optional-header field used below sits at the same offset in both
+    // layouts; only the certificate directory moves, because a PE32 header has
+    // one 4-byte BaseOfData field where a PE32+ header has an 8-byte ImageBase.
+    const bool plus = PeUtils::isPe32Plus(data);
+    if (size <= 0 || size > 50000008 || pe < 0
+        || (plus ? PeUtils::machine(data) != 0x8664u : PeUtils::machine(data) != 0x14cu))
+        return refuse(QStringLiteral("No safe mapped resource space: the image is neither a Windows x64 nor a Windows x86 PE."));
+    const qint64 certDir = plus ? 144 : 128;
     if (PeUtils::optionalHeaderSize(data) < 152 || !inRange(data, opt, 152))
         return refuse(QStringLiteral("Truncated PE optional header."));
     const quint32 sectionAlign = le32(data, opt + 32), fileAlign = le32(data, opt + 36);
@@ -43,7 +51,7 @@ qint64 appendStorage(QByteArray &data, qint64 size, QString *error)
     // be located relative to EOF, so only zero padding or a certificate table
     // may precede a new mapped section.
     if (!zeros(data, rawEnd, data.size())) {
-        const qint64 cert = le32(data, opt + 144), certSize = le32(data, opt + 148);
+        const qint64 cert = le32(data, opt + certDir), certSize = le32(data, opt + certDir + 4);
         if (cert < rawEnd || certSize < 8 || !inRange(data, cert, certSize)
             || !zeros(data, rawEnd, cert) || !zeros(data, cert + certSize, data.size())
             || le32(data, cert) < 8 || le32(data, cert) > certSize || le16(data, cert + 6) != 2)
