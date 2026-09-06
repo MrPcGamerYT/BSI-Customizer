@@ -102,8 +102,10 @@ Link findLink(const QByteArray &data, qint64 entryOff, const QString &name)
     Link best;
     const auto sections = PeUtils::sections(data);
     const qint64 entryRva = PeUtils::rawToRva(sections, entryOff);
-    if (entryRva < 0)
+    if (entryRva < 0) {
+        best.detail = QStringLiteral("Resource record at file 0x%1 is not mapped by a PE section; an appended orphan cannot be used as a loaded resource.").arg(entryOff, 0, 16);
         return best;
+    }
 
     const auto pools = registeredPools(data);
     QList<qint64> names;
@@ -138,7 +140,7 @@ Link findLink(const QByteArray &data, qint64 entryOff, const QString &name)
             if (!treeSection || treeEnd > qint64(treeSection->rawPtr) + treeSection->rawSize)
                 continue;
             for (const Node &target : tree) {
-                if (target.flags != 1)
+                if (target.flags != 0 && target.flags != 1)
                     continue;
                 if (explicitBases && pool.dataRva + target.value != entryRva) continue;
                 const QList<qint64> targetNames = explicitBases ? QList<qint64> { pool.names + target.name } : names;
@@ -156,6 +158,7 @@ Link findLink(const QByteArray &data, qint64 entryOff, const QString &name)
                     link.explicitBases = explicitBases;
                     link.registered = pool.registered;
                     link.sourceName = actualName;
+                    link.compression = target.flags;
                     link.nodeSize = stride;
                     link.treeOff = root;
                     link.nodeOff = target.off;
@@ -216,9 +219,10 @@ Link findLink(const QByteArray &data, qint64 entryOff, const QString &name)
                         // An unrelated precompiled/opaque resource must not make
                         // a structurally valid theme tree appear unlinked.
                         if (raw == entryOff) {
-                            if (node.flags != 1 || size < 6 || size > 50000004u
-                                || be32(data, raw + 4) == 0 || be32(data, raw + 4) > 50000000u
-                                || qUncompress(data.mid(raw + 4, size)).size() != be32(data, raw + 4)) {
+                            if (node.flags != target.flags || size > 50000004u
+                                || (node.flags == 1 && (size < 6 || be32(data, raw + 4) == 0
+                                    || be32(data, raw + 4) > 50000000u
+                                    || qUncompress(data.mid(raw + 4, size)).size() != be32(data, raw + 4)))) {
                                 valid = false;
                                 break;
                             }
@@ -270,6 +274,69 @@ Link findLink(const QByteArray &data, qint64 entryOff, const QString &name)
         best.detail = QStringLiteral("No verified mapping: %1 filename record(s), %2 possible root(s), %3 explicit resource pool(s).")
                           .arg(names.size()).arg(roots.size()).arg(pools.size());
     return best;
+}
+
+QList<File> filesInPool(const QByteArray &data, const Link &pool)
+{
+    if (!pool.found || pool.ambiguous || (pool.nodeSize != 14 && pool.nodeSize != 22)
+        || pool.treeOff < 0 || pool.nameBaseRaw < 0 || pool.dataBaseRva < 0)
+        return {};
+    qint64 span = 0;
+    const auto tree = readTree(data, pool.treeOff, pool.nodeSize, pool.explicitBases, &span);
+    const auto sections = PeUtils::sections(data);
+    const auto *treeSection = PeUtils::sectionForRaw(sections, pool.treeOff);
+    if (tree.isEmpty() || !treeSection || pool.treeOff + span > qint64(treeSection->rawPtr) + treeSection->rawSize)
+        return {};
+    QList<File> files;
+    QSet<QString> seen;
+    for (const auto &node : tree) {
+        if (node.flags == 2) continue;
+        const QString name = readName(data, pool.nameBaseRaw + node.name);
+        const qint64 rva = pool.dataBaseRva + node.value;
+        if (name.isEmpty() || rva < 0 || rva > 0xffffffffLL) return {};
+        const qint64 raw = PeUtils::rvaToRaw(sections, quint32(rva));
+        if (!inRange(data, raw, 4)) return {};
+        const quint32 size = be32(data, raw);
+        const auto *section = PeUtils::sectionForRaw(sections, raw);
+        if (!section || !inRange(data, raw + 4, size)
+            || raw + 4 + qint64(size) > qint64(section->rawPtr) + section->rawSize) return {};
+        const QString key = name + QLatin1Char(':') + QString::number(raw);
+        if (seen.contains(key)) continue;
+        seen.insert(key);
+        files << File { name, raw, node.flags };
+    }
+    return files;
+}
+
+QList<File> registeredFiles(const QByteArray &data)
+{
+    QList<File> files;
+    QSet<QString> seen;
+    for (const auto &registration : registeredPools(data)) {
+        Link pool;
+        pool.found = true; pool.explicitBases = true; pool.registered = registration.registered;
+        pool.treeOff = registration.tree; pool.nameBaseRaw = registration.names;
+        pool.dataBaseRva = registration.dataRva; pool.nodeSize = registration.version == 1 ? 14 : 22;
+        for (const auto &file : filesInPool(data, pool)) {
+            const auto key = file.name + QLatin1Char(':') + QString::number(file.entryOff);
+            if (seen.contains(key)) continue;
+            seen.insert(key); files << file;
+        }
+    }
+    return files;
+}
+
+QByteArray readFile(const QByteArray &data, const File &file, qint64 limit)
+{
+    if (limit <= 0 || !inRange(data, file.entryOff, 4)) return {};
+    const quint32 size = be32(data, file.entryOff);
+    if (!inRange(data, file.entryOff + 4, size)) return {};
+    if (file.flags == 0) return size <= limit ? data.mid(file.entryOff + 4, size) : QByteArray();
+    if (file.flags != 1 || size < 6 || size > limit + 65536) return {};
+    const quint32 expected = be32(data, file.entryOff + 4);
+    if (expected > limit) return {};
+    const auto bytes = qUncompress(data.mid(file.entryOff + 4, size));
+    return bytes.size() == expected ? bytes : QByteArray();
 }
 
 bool refreshTimestamp(QByteArray &data, const Link &link)

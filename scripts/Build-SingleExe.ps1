@@ -26,9 +26,17 @@ function Invoke-Checked([string]$Command, [string[]]$Arguments) {
     if ($LASTEXITCODE -ne 0) { throw "$Command failed with exit code $LASTEXITCODE" }
 }
 function Copy-Required([string]$From, [string]$To) {
-    if (-not (Test-Path -LiteralPath $From -PathType Leaf)) { throw "Missing required runtime file: $From" }
+    if (-not (Test-Path -LiteralPath $From -PathType Leaf)) { throw "Missing required package file: $From" }
     New-Item -ItemType Directory -Force -Path (Split-Path $To -Parent) | Out-Null
     Copy-Item -LiteralPath $From -Destination $To
+}
+function Copy-OptionalDocument([string]$From, [string]$To) {
+    if (Test-Path -LiteralPath $From -PathType Leaf) {
+        # Still fail on a real copy/access error; only absence is optional.
+        Copy-Required $From $To
+    } else {
+        Write-Host "Skipping optional documentation: $From"
+    }
 }
 
 $qtBin = Join-Path $QtPrefix 'bin'
@@ -103,8 +111,11 @@ if (Get-ChildItem -LiteralPath $stage -Recurse -File | Where-Object Name -match 
     throw 'An installer must not be included in the portable payload'
 }
 
-Copy-Item -LiteralPath (Join-Path $repo 'README.md'), (Join-Path $repo 'LICENSE') -Destination $stage
-Copy-Required (Join-Path $repo 'docs/PORTABLE.md') (Join-Path $stage 'docs/PORTABLE.md')
+# Guides are useful, but are not needed to start the bundled application.
+Copy-OptionalDocument (Join-Path $repo 'README.md') (Join-Path $stage 'README.md')
+Copy-OptionalDocument (Join-Path $repo 'docs/PORTABLE.md') (Join-Path $stage 'docs/PORTABLE.md')
+# License notices remain mandatory, independently of the optional guides.
+Copy-Required (Join-Path $repo 'LICENSE') (Join-Path $stage 'LICENSE')
 Copy-Required (Join-Path $repo 'src/third_party/hde64/LICENSE.txt') (Join-Path $stage 'licenses/HDE64.txt')
 $qtVersion = (& (Join-Path $qtBin 'qmake.exe') -query QT_VERSION).Trim()
 if ($LASTEXITCODE -ne 0 -or $qtVersion -notmatch '^\d+\.\d+\.\d+$') { throw 'Cannot determine the deployed Qt version' }

@@ -147,7 +147,7 @@ Item {
                     Layout.fillWidth: true
                     label: qsTr("FPS slider DLL")
                     text: backend.dllPath
-                    onLoad: backend.dllPath = text
+                    onLoad: { settings.fpsAutoDetect = false; backend.dllPath = text; }
                 }
                 Row {
                     spacing: 6

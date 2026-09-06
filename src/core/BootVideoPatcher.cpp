@@ -11,6 +11,7 @@
 #include <QFileInfo>
 #include <QRegularExpression>
 #include <QUrl>
+#include <QSet>
 #include <algorithm>
 
 using namespace ByteUtils;
@@ -123,30 +124,63 @@ void assignments(QString &qml)
     }
     for (auto it = edits.crbegin(); it != edits.crend(); ++it) qml.replace(it->first, it->second.first, it->second.second);
 }
+bool bootController(const QString &qml)
+{
+    const auto code = mask(qml);
+    static const QRegularExpression promotion(QStringLiteral("\\bfunction\\s+fSetBootPromotion\\s*\\("));
+    if (!promotion.match(code).hasMatch()) return false;
+    for (const auto &object : objects(qml)) if (object.id == QLatin1String("iBootImage")) return true;
+    return false;
+}
+bool bootHost(const QString &qml)
+{
+    return qml.contains(QLatin1String("iBootProgressComponent")) && qml.contains(QLatin1String("iBootLoader"));
+}
 struct Stream { qint64 entry; QString text; QtResources::Link link; };
 QList<Stream> streams(const QByteArray &data)
 {
     QList<Stream> result;
+    QSet<qint64> seen;
+    const auto append = [&](qint64 entry, const QString &qml, const QtResources::Link &link) {
+        if (!link.found || link.ambiguous || seen.contains(entry)) return;
+        seen.insert(entry); result << Stream { entry, qml, link };
+    };
+    // Discover registered resources by structure/content, not a version-specific
+    // boot filename. Every candidate is fully linked again before any write.
+    for (const auto &file : QtResources::registeredFiles(data)) {
+        if (!file.name.endsWith(QLatin1String(".qml"), Qt::CaseInsensitive)) continue;
+        const auto source = QtResources::readFile(data, file);
+        if (source.isEmpty()) continue;
+        const auto qml = QString::fromUtf8(source);
+        if (!bootController(qml) && !bootHost(qml)
+            && file.name.compare(QLatin1String("BootVideo.qml"), Qt::CaseInsensitive) != 0
+            && !qml.contains(QLatin1String("QtMultimedia"))) continue;
+        append(file.entryOff, qml, QtResources::findLink(data, file.entryOff, file.name));
+    }
+    // Keep the canonical legacy fallback for builds whose registration code is
+    // not recognized. No arbitrary offsets or unlinked compressed blobs qualify.
     for (qint64 at : ZlibUtils::findMagicOffsets(data)) {
-        if (at < 8) continue;
+        if (at < 8 || seen.contains(at - 8)) continue;
         const quint32 stored = be32(data, at - 8), size = be32(data, at - 4);
         if (stored < 6 || stored > 5000004 || !size || size > 5000000 || !inRange(data, at - 4, stored)) continue;
         const auto plain = qUncompress(data.mid(at - 4, stored));
         if (plain.size() != size) continue;
         const QString qml = QString::fromUtf8(plain);
-        if (!qml.contains(QLatin1String("fSetBootPromotion")) && !qml.contains(QLatin1String("BootVideo"))
+        if (!bootController(qml) && !bootHost(qml) && !qml.contains(QLatin1String("BootVideo"))
             && !qml.contains(QLatin1String("QtMultimedia")) && !qml.contains(QLatin1String("MediaPlayer"))
             && !qml.contains(QLatin1String("Video{")) && !qml.contains(QLatin1String("Video {"))) continue;
         QtResources::Link link;
-        const QStringList names = qml.contains(QLatin1String("fSetBootPromotion"))
-            ? QStringList { QStringLiteral("boot.qml"), QStringLiteral("Boot.qml"), QStringLiteral("BootScreen.qml") }
+        const QStringList names = bootController(qml)
+            ? QStringList { QStringLiteral("PlrBootProgressBar.qml"), QStringLiteral("boot.qml"), QStringLiteral("Boot.qml"), QStringLiteral("BootScreen.qml") }
+            : bootHost(qml) ? QStringList { QStringLiteral("plr.qml"), QStringLiteral("Main.qml") }
             : QStringList { QStringLiteral("BootVideo.qml"), QStringLiteral("bootvideo.qml") };
         for (const auto &name : names) { link = QtResources::findLink(data, at - 8, name); if (link.found && !link.ambiguous) break; }
-        if (!link.found) link = QtResources::findLink(data, at - 8, QString()); // explicit registered aliases
-        if (link.found && !link.ambiguous) result << Stream { at - 8, qml, link };
+        if (!link.found) link = QtResources::findLink(data, at - 8, QString());
+        append(at - 8, qml, link);
     }
     return result;
 }
+
 }
 
 Result patch(const QString &exePath)
@@ -159,11 +193,33 @@ Result patch(const QString &exePath)
     const auto candidates = streams(original);
     QList<Stream> controllers, players;
     for (const auto &stream : candidates) {
-        if (stream.text.contains(QLatin1String("fSetBootPromotion")) && stream.text.contains(QLatin1String("iBootImage"))) controllers << stream;
+        if (bootController(stream.text)) controllers << stream;
         if (stream.link.sourceName.compare(QLatin1String("BootVideo.qml"), Qt::CaseInsensitive) == 0) players << stream;
     }
+    if (controllers.size() > 1) {
+        // Several OEM/portrait variants may coexist. Use the type instantiated
+        // by the host's boot Component when it unambiguously identifies one.
+        QSet<qint64> referenced;
+        for (const auto &host : candidates) {
+            if (!bootHost(host.text)) continue;
+            for (const auto &component : objects(host.text)) {
+                if (component.id != QLatin1String("iBootProgressComponent")) continue;
+                const auto body = host.text.mid(component.body, component.end - component.body - 1);
+                const auto code = mask(body);
+                for (const auto &child : objects(body)) {
+                    if (depthAt(code, 0, child.begin) != 0) continue;
+                    for (const auto &controller : controllers)
+                        if (controller.link.sourceName == child.type + QStringLiteral(".qml")) referenced.insert(controller.entry);
+                }
+            }
+        }
+        if (referenced.size() == 1) {
+            const auto chosen = *referenced.cbegin();
+            for (int i = controllers.size() - 1; i >= 0; --i) if (controllers[i].entry != chosen) controllers.removeAt(i);
+        }
+    }
     if (controllers.size() != 1 || players.size() > 1)
-        return { false, QStringLiteral("A unique linked boot QML resource is required. No EXE was written; use --theme-probe to inspect this build.") };
+        return { false, QStringLiteral("Found %1 linked boot controller(s) and %2 stock player(s), but no unique supported boot layout. No EXE was written; an unrecognized version cannot be patched by guessing.").arg(controllers.size()).arg(players.size()) };
     const auto controller = controllers.first();
     QString boot = controller.text;
     const QString movie = QDir(QFileInfo(exePath).absolutePath()).filePath(QStringLiteral("Assets/Promo.mp4"));
@@ -176,7 +232,7 @@ Result patch(const QString &exePath)
             if (object.type == QLatin1String("Video") || object.type == QLatin1String("MediaPlayer")) {
                 property(player.text, object, QStringLiteral("source"), url, true);
                 QString error;
-                if (!QtResources::replaceCompressed(data, player.entry, player.link, player.text.toUtf8(), &error)) return { false, error };
+                if (!QtResources::replaceResource(data, player.entry, player.link, player.text.toUtf8(), &error)) return { false, error };
                 reusedPlayer = true; break;
             }
         }
@@ -200,12 +256,24 @@ Result patch(const QString &exePath)
         // A Loader loads QML, not an MP4. Only add a Video component when an
         // existing resource already proves that QtMultimedia is available.
         const QRegularExpression mediaImport(QStringLiteral("(?:^|\\n)\\s*import\\s+QtMultimedia(?:\\s+([0-9]+(?:\\.[0-9]+)?))?(?:\\s+as\\s+[A-Za-z_][A-Za-z0-9_]*)?"));
-        auto media = mediaImport.match(boot);
-        if (!media.hasMatch()) for (const auto &candidate : candidates) { media = mediaImport.match(candidate.text); if (media.hasMatch()) break; }
+        auto media = mediaImport.match(mask(boot));
+        if (!media.hasMatch()) for (const auto &candidate : candidates) { media = mediaImport.match(mask(candidate.text)); if (media.hasMatch()) break; }
+        if (!media.hasMatch()) {
+            // In real MSI/BlueStacks builds the boot screen is PlrBootProgressBar,
+            // while QtMultimedia is imported by another file in the same pool
+            // (e.g. the notification window). Do not require BootVideo.qml to exist.
+            for (const auto &resource : QtResources::filesInPool(original, controller.link)) {
+                if (!resource.name.endsWith(QLatin1String(".qml"))) continue;
+                const auto source = QtResources::readFile(original, resource);
+                if (source.isEmpty()) continue;
+                media = mediaImport.match(mask(QString::fromUtf8(source)));
+                if (media.hasMatch()) break;
+            }
+        }
         if (!media.hasMatch()) return { false, QStringLiteral("The boot player type is not supported in this build. A real Video/MediaPlayer resource or an existing QtMultimedia import is required; no file was written.") };
         const QString import = QStringLiteral("import QtMultimedia%1 as BsiMedia\n").arg(media.captured(1).isEmpty() ? QString() : QLatin1Char(' ') + media.captured(1));
         const QString id = loaders.isEmpty() || loaders.first().id.isEmpty() ? QStringLiteral("pv") : loaders.first().id;
-        const QString loader = QStringLiteral("Loader{id:%1;z:0;anchors.fill:parent;sourceComponent:Component{BsiMedia.Video{anchors.fill:parent;source:%2;loops:BsiMedia.MediaPlayer.Infinite;fillMode:BsiMedia.VideoOutput.PreserveAspectCrop;Component.onCompleted:play()}}}")
+        const QString loader = QStringLiteral("Loader{id:%1;z:0;anchors.fill:parent;sourceComponent:Component{BsiMedia.Video{objectName:\"bsiBootVideo\";anchors.fill:parent;source:%2;loops:BsiMedia.MediaPlayer.Infinite;fillMode:BsiMedia.VideoOutput.PreserveAspectCrop;Component.onCompleted:play()}}}")
                                    .arg(id, url);
         if (!loaders.isEmpty()) boot.replace(loaders.first().begin, loaders.first().end - loaders.first().begin, loader);
         else {
@@ -219,7 +287,7 @@ Result patch(const QString &exePath)
     visible(boot, QStringLiteral("iBootLoadingText"), true);
     assignments(boot);
     QString error;
-    if (!QtResources::replaceCompressed(data, controller.entry, controller.link, boot.toUtf8(), &error)) return { false, error };
+    if (!QtResources::replaceResource(data, controller.entry, controller.link, boot.toUtf8(), &error)) return { false, error };
     if (!ThemeEngine::backup(exePath)) return { false, QStringLiteral("Could not preserve the original .bak; no EXE was written.") };
     if (!PatchFile::writeVerified(exePath, original, data, &error)) return { false, error };
     return { true, QStringLiteral("Boot video resource written, caches refreshed and bytes verified. Video: %1. Restart BlueStacks.%2")

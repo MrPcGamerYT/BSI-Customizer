@@ -24,17 +24,21 @@ SmartScreen may show a warning. This workflow does not disable security checks.
 
 ## GitHub Actions
 
-Both workflow files are required:
+There is one workflow: **`.github/workflows/release.yml`**. The redundant
+`ci.yml` has been removed; do not keep an older copy alongside it.
 
-- **`.github/workflows/ci.yml`** builds the app, bundles/tests the one-file EXE,
-  runs the full engine tests (including real Qt 5 and Qt 6 DLL-copy tests), and
-  uploads exactly one EXE. It runs on PRs, pushes to `main`, and manual runs; it
-  is also reusable by Release.
-- **`.github/workflows/release.yml`** calls CI and publishes the same tested EXE
-  on a `v<version>` tag or a manual run with **publish_release** enabled. The
-  default manual run is artifact-only and does not create a release/tag.
+- Pushes to `main`, pull requests and manual runs build the app, bundle/test the
+  one-file EXE, run the full engine tests (including Qt 5/Qt 6 checks), and upload
+  exactly one EXE.
+- Matching `v<version>` tag pushes and manual runs with **publish_release** enabled
+  publish that tested EXE to GitHub Releases.
+- Ordinary push/PR builds and the default manual run never create a release/tag.
 
-Use **Actions → Release → Run workflow**. After a successful build:
+Keep `scripts/`, `packaging/portable/`, `cmake/Qt5FpsReference.cmake`, the application
+sources, tests and license files: these are build dependencies, not loose files
+users need alongside the final EXE.
+
+Use **Actions → Single EXE Release → Run workflow**. After a successful build:
 
 - The Actions artifact download is wrapped in a ZIP by GitHub's artifact service;
   it contains **one EXE**, not a folder of dependencies.

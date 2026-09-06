@@ -5,6 +5,7 @@
 #include <QFileInfo>
 #include <QProcessEnvironment>
 #include <QSettings>
+#include <QRegularExpression>
 #include <QVariantMap>
 
 #ifdef Q_OS_WIN
@@ -19,89 +20,111 @@ namespace BsDetector {
 
 namespace {
 
-QString profileKey(const QString &dirName)
+QString profileKey(const QString &name)
 {
-    return dirName.toLower().contains(QLatin1String("nxt")) ? QStringLiteral("NXT")
-                                                            : QStringLiteral("MSI5");
+    return name.contains(QLatin1String("msi"), Qt::CaseInsensitive) ? QStringLiteral("MSI5") : QStringLiteral("NXT");
 }
-
+QString playerIn(const QString &directory)
+{
+    const QDir dir(directory);
+    for (const auto &name : dir.entryList(QDir::Files))
+        if (name.compare(QLatin1String("HD-Player.exe"), Qt::CaseInsensitive) == 0) return dir.absoluteFilePath(name);
+    return {};
+}
+QString cleanLocation(QString value)
+{
+    value = value.trimmed();
+    if (value.size() >= 2 && value.front() == QLatin1Char('"') && value.back() == QLatin1Char('"'))
+        value = value.mid(1, value.size() - 2);
+    return value.isEmpty() ? QString() : QDir::cleanPath(value);
+}
 } // namespace
 
-QVariantList findBlueStacks()
+QVariantList findBlueStacks(const QStringList &programFolders, bool includeRegistry)
 {
-    QList<QPair<QString, QString>> roots; // (profile, install dir)
-
-    auto add = [&roots](const QString &profile, const QString &d) {
-        if (d.isEmpty())
-            return;
-        const QString clean = QDir::cleanPath(d);
-        if (!QFileInfo::exists(clean + QStringLiteral("/HD-Player.exe")))
-            return;
-        for (const auto &r : roots) {
-            if (r.second == clean)
-                return;
-        }
-        roots << qMakePair(profile, clean);
-    };
-
-    // 1. known defaults
-    add(QStringLiteral("MSI5"), QStringLiteral("C:/Program Files/BlueStacks_msi5"));
-    add(QStringLiteral("NXT"), QStringLiteral("C:/Program Files/BlueStacks_nxt"));
-
-    // 2. Program Files scan
+    struct Install { QString profile, root, exe, data; };
+    QList<Install> roots;
     const auto env = QProcessEnvironment::systemEnvironment();
-    for (const QString &key : { QStringLiteral("ProgramFiles"),
-                                QStringLiteral("ProgramFiles(x86)") }) {
-        const QString base = env.value(key);
-        if (base.isEmpty() || !QDir(base).exists())
-            continue;
-        const auto entries = QDir(base).entryList(QDir::Dirs | QDir::NoDotAndDotDot);
-        for (const QString &name : entries) {
-            if (name.toLower().startsWith(QLatin1String("bluestacks")))
-                add(profileKey(name), base + QLatin1Char('/') + name);
+    auto add = [&](const QString &profile, const QString &directory, const QString &dataDirectory = QString()) {
+        const QString clean = cleanLocation(directory);
+        if (clean.isEmpty()) return;
+        const auto exe = playerIn(clean);
+        if (exe.isEmpty()) return;
+        QString canonical = QFileInfo(clean).canonicalFilePath();
+        if (canonical.isEmpty()) canonical = QFileInfo(clean).absoluteFilePath();
+        for (auto &root : roots) {
+            if (root.root.compare(canonical, Qt::CaseInsensitive) != 0) continue;
+            if (!dataDirectory.isEmpty()) root.data = cleanLocation(dataDirectory);
+            return;
         }
-    }
-
-    // 3. registry uninstall keys (Windows)
+        roots << Install { profile, canonical, exe, cleanLocation(dataDirectory) };
+    };
+    QStringList folders = programFolders;
+    if (folders.isEmpty()) {
+        for (const QString &key : { QStringLiteral("ProgramW6432"), QStringLiteral("ProgramFiles"), QStringLiteral("ProgramFiles(x86)") }) {
+            const QString path = cleanLocation(env.value(key));
+            if (!path.isEmpty() && !folders.contains(path, Qt::CaseInsensitive)) folders << path;
+        }
 #ifdef Q_OS_WIN
-    for (const QString &sub : { QStringLiteral("HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft"
-                                               "\\Windows\\CurrentVersion\\Uninstall"),
-                                QStringLiteral("HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node"
-                                               "\\Microsoft\\Windows\\CurrentVersion\\Uninstall") }) {
-        QSettings key(sub, QSettings::NativeFormat);
-        const auto groups = key.childGroups();
-        for (const QString &g : groups) {
-            QSettings k(sub + QLatin1Char('\\') + g, QSettings::NativeFormat);
-            const QString disp = k.value(QStringLiteral("DisplayName")).toString();
-            const QString loc = k.value(QStringLiteral("InstallLocation")).toString();
-            if ((disp + QLatin1Char(' ') + loc).toLower().contains(QLatin1String("bluestacks"))) {
-                QString clean = loc;
-                while (clean.endsWith(QLatin1Char('\\')) || clean.endsWith(QLatin1Char('/')))
-                    clean.chop(1);
-                add(profileKey(QFileInfo(clean).fileName()), clean);
+        if (folders.isEmpty()) folders << QStringLiteral("C:/Program Files") << QStringLiteral("C:/Program Files (x86)");
+#endif
+    }
+    // Bounded search under the real Program Files locations, including MSI's
+    // branded folder names. Never scan every drive or select another install's DLL.
+    for (const auto &folder : folders) {
+        const QDir base(folder);
+        for (const auto &name : base.entryList(QDir::Dirs | QDir::NoDotAndDotDot)) {
+            const QString compact = QString(name).toLower().remove(QLatin1Char(' ')).remove(QLatin1Char('_')).remove(QLatin1Char('-'));
+            if (!compact.contains(QLatin1String("bluestacks")) && !compact.contains(QLatin1String("msiappplayer"))) continue;
+            for (const auto &sub : { QString(), QStringLiteral("Client"), QStringLiteral("bin"), QStringLiteral("Client/bin"), QStringLiteral("Engine") }) {
+                add(profileKey(name), QDir(base.filePath(name)).filePath(sub));
             }
         }
     }
+#ifdef Q_OS_WIN
+    if (includeRegistry) {
+        for (const auto &hive : { QStringLiteral("HKEY_LOCAL_MACHINE\\SOFTWARE\\"),
+                                  QStringLiteral("HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\"),
+                                  QStringLiteral("HKEY_CURRENT_USER\\SOFTWARE\\") }) {
+            for (const auto &product : { QStringLiteral("BlueStacks_nxt"), QStringLiteral("BlueStacks_msi5"), QStringLiteral("BlueStacks") }) {
+                QSettings key(hive + product, QSettings::NativeFormat);
+                for (const auto &value : { QStringLiteral("InstallDir"), QStringLiteral("InstallLocation"), QStringLiteral("InstallPath") })
+                    add(profileKey(product), key.value(value).toString(), key.value(QStringLiteral("DataDir")).toString());
+            }
+        }
+        for (const auto &sub : { QStringLiteral("HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall"),
+                                 QStringLiteral("HKEY_LOCAL_MACHINE\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall"),
+                                 QStringLiteral("HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall") }) {
+            QSettings key(sub, QSettings::NativeFormat);
+            for (const auto &group : key.childGroups()) {
+                QSettings item(sub + QLatin1Char('\\') + group, QSettings::NativeFormat);
+                const QString display = item.value(QStringLiteral("DisplayName")).toString();
+                const QString location = item.value(QStringLiteral("InstallLocation")).toString();
+                const QString identity = (display + QLatin1Char(' ') + location).toLower();
+                if (!identity.contains(QLatin1String("bluestacks")) && !identity.contains(QLatin1String("msi app player"))) continue;
+                add(profileKey(identity), location);
+                QString icon = item.value(QStringLiteral("DisplayIcon")).toString().trimmed();
+                if (icon.startsWith(QLatin1Char('"'))) icon = icon.section(QLatin1Char('"'), 1, 1);
+                else icon = icon.section(QLatin1Char(','), 0, 0).trimmed();
+                if (!icon.isEmpty()) add(profileKey(identity), QFileInfo(icon).absolutePath());
+            }
+        }
+    }
+#else
+    Q_UNUSED(includeRegistry);
 #endif
-
-    QString programData = env.value(QStringLiteral("ProgramData"));
-    if (programData.isEmpty())
-        programData = QStringLiteral("C:/ProgramData");
-
+    QString programData = env.value(QStringLiteral("ProgramData"), QStringLiteral("C:/ProgramData"));
     QVariantList result;
-    for (const auto &r : roots) {
-        const QString confDir =
-            (r.first == QLatin1String("NXT")) ? QStringLiteral("BlueStacks_nxt")
-                                              : QStringLiteral("BlueStacks_msi5");
+    for (const auto &root : roots) {
+        const QString data = root.data.isEmpty() ? QDir(programData).filePath(root.profile == QLatin1String("MSI5")
+                            ? QStringLiteral("BlueStacks_msi5") : QStringLiteral("BlueStacks_nxt")) : root.data;
+        const auto fps = FpsPatcher::detectDll(root.exe);
         result << QVariantMap {
-            { "profile", r.first },
-            { "root", QDir::toNativeSeparators(r.second) },
-            { "exe", QDir::toNativeSeparators(r.second + QStringLiteral("/HD-Player.exe")) },
-            { "conf", QDir::toNativeSeparators(programData + QLatin1Char('/') + confDir
-                                               + QStringLiteral("/bluestacks.conf")) },
-            { "fps_dll", FpsPatcher::findDll(r.second) },
-            { "native_dll",
-              QDir::toNativeSeparators(r.second + QStringLiteral("/HD-Opengl-Native.dll")) },
+            { "profile", root.profile }, { "root", QDir::toNativeSeparators(root.root) },
+            { "exe", QDir::toNativeSeparators(root.exe) },
+            { "conf", QDir::toNativeSeparators(QDir(data).filePath(QStringLiteral("bluestacks.conf"))) },
+            { "fps_dll", fps.path }, { "qt_major", fps.qtMajor }, { "fps_detection", fps.msg },
+            { "native_dll", QDir::toNativeSeparators(QDir(root.root).filePath(QStringLiteral("HD-Opengl-Native.dll"))) }
         };
     }
     return result;

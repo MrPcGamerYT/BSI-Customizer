@@ -1,8 +1,10 @@
 #include "core/Backend.h"
 #include "core/BootVideoPatcher.h"
+#include "core/BsDetector.h"
 #include "core/IntegrityPatcher.h"
 #include "core/ByteUtils.h"
 #include "core/FpsPatcher.h"
+#include "core/GradientPatcher.h"
 #include "core/PatchFile.h"
 #include "core/PeUtils.h"
 #include "core/SettingsManager.h"
@@ -11,6 +13,7 @@
 #include "core/X64Prologue.h"
 
 #include <QCoreApplication>
+#include <QCryptographicHash>
 #include <QColor>
 #include <QDir>
 #include <QDataStream>
@@ -22,6 +25,7 @@
 #include <QQmlComponent>
 #include <QQmlEngine>
 #include <QSettings>
+#include <QSet>
 #include <QTemporaryDir>
 
 #include <algorithm>
@@ -194,7 +198,7 @@ struct ResourceFixture {
     Fixture f;
     QMap<QString, qint64> entries, nodes;
 };
-ResourceFixture resources(const QList<QPair<QString, QString>> &sources, bool dense = false)
+ResourceFixture resources(const QList<QPair<QString, QString>> &sources, bool dense = false, const QSet<QString> &rawNames = {})
 {
     ResourceFixture r;
     r.f.bytes = peFile();
@@ -205,7 +209,7 @@ ResourceFixture resources(const QList<QPair<QString, QString>> &sources, bool de
     putLe32(r.f.bytes, 0x98 + 60, 0x1000);
     qint64 cursor = r.f.payloads;
     for (const auto &source : sources) {
-        const auto bytes = record(source.second.toUtf8());
+        const auto bytes = record(source.second.toUtf8(), !rawNames.contains(source.first));
         r.entries[source.first] = cursor;
         r.f.bytes.replace(cursor, bytes.size(), bytes);
         cursor += bytes.size();
@@ -220,7 +224,7 @@ ResourceFixture resources(const QList<QPair<QString, QString>> &sources, bool de
         putBe16(r.f.bytes, name, key.size()); putBe32(r.f.bytes, name + 2, resourceHash(key));
         for (int c = 0; c < key.size(); ++c) putBe16(r.f.bytes, name + 6 + 2*c, key[c].unicode());
         const qint64 node = r.f.tree + (i + 1) * 22;
-        putBe32(r.f.bytes, node, name - r.f.names); putBe16(r.f.bytes, node + 4, 1);
+        putBe32(r.f.bytes, node, name - r.f.names); putBe16(r.f.bytes, node + 4, rawNames.contains(key) ? 0 : 1);
         putBe16(r.f.bytes, node + 8, 1); putBe32(r.f.bytes, node + 10, r.entries[key] - r.f.payloads);
         putBe64(r.f.bytes, node + 14, 1600000000000ULL); r.nodes[key] = node;
         if (key == QLatin1String("UiThemeObject.qml")) r.f.themeNode = node;
@@ -270,7 +274,51 @@ QString resourceText(const QByteArray &bytes, const ResourceFixture &r, const QS
     const qint64 rva = r.f.payloads + be32(bytes, node + 10);
     const qint64 raw = PeUtils::rvaToRaw(PeUtils::sections(bytes), quint32(rva));
     if (!inRange(bytes, raw, 4) || !inRange(bytes, raw + 4, be32(bytes, raw))) return {};
-    return QString::fromUtf8(qUncompress(bytes.mid(raw + 4, be32(bytes, raw))));
+    const auto payload = bytes.mid(raw + 4, be32(bytes, raw));
+    return QString::fromUtf8(be16(bytes, node + 4) == 1 ? qUncompress(payload) : payload);
+}
+
+QByteArray importedPlayer(const QStringList &normal, const QStringList &delay = {})
+{
+    auto data = peFile();
+    putLe32(data, 0x98 + 60, 0x1000);
+    putLe32(data, 0x98 + 108, 16);
+    int names = 0x1c00;
+    const auto directory = [&](const QStringList &modules, int index, int table, int width) {
+        if (modules.isEmpty()) return;
+        putLe32(data, 0x98 + 112 + index * 8, table);
+        putLe32(data, 0x98 + 116 + index * 8, (modules.size() + 1) * width);
+        for (int i = 0; i < modules.size(); ++i) {
+            const auto name = modules[i].toLatin1() + '\0';
+            data.replace(names, name.size(), name);
+            putLe32(data, table + i * width + (index == 1 ? 12 : 4), names);
+            if (index == 13) putLe32(data, table + i * width, 1);
+            names += name.size();
+        }
+    };
+    directory(normal, 1, 0x1800, 20);
+    directory(delay, 13, 0x1a00, 32);
+    return data;
+}
+
+bool gradientPixels(const QString &path, const QString &first, const QString &second, bool horizontal, bool enabled)
+{
+    QProcess process;
+    auto environment = QProcessEnvironment::systemEnvironment();
+    environment.insert(QStringLiteral("QT_QPA_PLATFORM"), QStringLiteral("offscreen"));
+    environment.insert(QStringLiteral("QT_QUICK_BACKEND"), QStringLiteral("software"));
+    environment.insert(QStringLiteral("QML_DISABLE_DISK_CACHE"), QStringLiteral("1"));
+    process.setProcessEnvironment(environment);
+    process.start(QCoreApplication::applicationFilePath(), { QStringLiteral("--gradient-render-test"), path,
+                  first, second, horizontal ? QStringLiteral("1") : QStringLiteral("0"), enabled ? QStringLiteral("1") : QStringLiteral("0") });
+    if (!process.waitForStarted(10000) || !process.waitForFinished(30000)) {
+        process.kill(); process.waitForFinished(); return false;
+    }
+    if (process.exitStatus() != QProcess::NormalExit || process.exitCode() != 0) {
+        std::printf("    %s\n    %s\n", process.readAllStandardOutput().constData(), process.readAllStandardError().constData());
+        return false;
+    }
+    return true;
 }
 
 QByteArray sliderDll(bool mingw)
@@ -743,6 +791,213 @@ int runPatchRegressionTests()
     }
 #endif
 
+    std::printf("[gradients] compatible visual targets, native gradient properties and rendered output\n");
+    {
+        const QString palette = QStringLiteral("import QtQuick\nQtObject{property QtObject colors:QtObject{property color primary100:'#112233';property color primary90:'#223344';property color accentNormal:'#445566'}"
+            "property QtObject gradients:QtObject{property Gradient gradientButton:Gradient{orientation:Gradient.Horizontal;GradientStop{position:0;color:'#ff0000'}GradientStop{position:1;color:'#0000ff'}} property color unaffected:'#010203'}"
+            "property QtObject button:QtObject{property QtObject secondary:QtObject{property Gradient borderGradient:null}}}\n");
+        const QString sidebar = QStringLiteral("import QtQuick\nRectangle{objectName:'sidebar';width:64;height:64;color:'#112233'}\n");
+        const QString topbar = QStringLiteral("import QtQuick as Quick\nQuick.Rectangle{objectName:'topbar';width:64;height:64;color:'#112233'}\n");
+        const QString button = QStringLiteral("import QtQuick\nItem{id:iControl;property QtObject pColorState:QtObject{property color background:'#112233'}"
+            "Component{id:first;Rectangle{color:iControl.pColorState.background}}"
+            "Component{id:second;Rectangle{color:iControl.pColorState.background}}}\n");
+        auto r = resources({ { QStringLiteral("UiThemeObject.qml"), palette }, { QStringLiteral("PlrSidebar.qml"), sidebar },
+                             { QStringLiteral("PlrTopbar.qml"), topbar }, { QStringLiteral("UiButton.qml"), button },
+                             { QStringLiteral("Other.qml"), QStringLiteral("import QtQuick\nQtObject{}") } }, true,
+                           { QStringLiteral("PlrTopbar.qml") });
+        addRegistration(r, false);
+        const auto original = r.f.bytes;
+        const auto discovered = GradientPatcher::analyze(original);
+        check(discovered.ok && discovered.targets.size() == 5, "discover sidebar/topbar/button backgrounds and both typed native Gradient slots");
+        QMap<QString, QString> keys;
+        for (const auto &target : discovered.targets) keys[target.label] = target.key;
+        const QString sideKey = keys.value(QStringLiteral("Sidebar background"));
+        const QString topKey = keys.value(QStringLiteral("Top bar background"));
+        const QString buttonKey = keys.value(QStringLiteral("Button backgrounds (all states)"));
+        check(!sideKey.isEmpty() && !topKey.isEmpty() && !buttonKey.isEmpty(), "surface targets have stable, distinct identifiers");
+        const auto path = temp.filePath(QStringLiteral("gradient.exe")); write(path, original);
+        const auto applied = GradientPatcher::patch(path, sideKey, { true, QStringLiteral("#ff0000"), QStringLiteral("#0000ff"), true });
+        if (!applied.ok) std::printf("    %s\n", qPrintable(applied.message));
+        check(applied.ok, "solid sidebar background converts to a verified two-stop gradient");
+        const auto sideQml = resourceText(read(path), r, QStringLiteral("PlrSidebar.qml"));
+        check(sideQml.contains(QLatin1String("color:'#112233'")) && sideQml.contains(QLatin1String("gradient:Gradient")),
+              "gradient editing preserves the original solid-color fallback instead of changing its type");
+        const auto render = temp.filePath(QStringLiteral("GradientPixels.qml")); write(render, sideQml.toUtf8());
+        check(gradientPixels(render, QStringLiteral("#ff0000"), QStringLiteral("#0000ff"), true, true),
+              "actual Qt pixels show the requested horizontal gradient");
+        check(GradientPatcher::patch(path, sideKey, { true, QStringLiteral("#00ff00"), QStringLiteral("#0000ff"), false }).ok,
+              "an applied gradient can be recolored and changed to vertical");
+        write(render, resourceText(read(path), r, QStringLiteral("PlrSidebar.qml")).toUtf8());
+        check(gradientPixels(render, QStringLiteral("#00ff00"), QStringLiteral("#0000ff"), false, true),
+              "actual Qt pixels show the requested vertical gradient");
+        check(GradientPatcher::patch(path, sideKey, { false, {}, {}, true }).ok, "gradient mode can return to the existing solid binding");
+        write(render, resourceText(read(path), r, QStringLiteral("PlrSidebar.qml")).toUtf8());
+        check(gradientPixels(render, QStringLiteral("#112233"), QStringLiteral("#112233"), true, false),
+              "solid fallback renders the untouched original color");
+        check(read(path + QStringLiteral(".bak")) == original, "gradient repatches preserve the first complete backup");
+        auto image = read(path); QString error;
+        check(GradientPatcher::apply(image, topKey, { true, QStringLiteral("#80445566"), QStringLiteral("#ff778899"), true }, &error),
+              "raw QML resources and ARGB gradient stops are supported");
+        const auto rawTop = resourceText(image, r, QStringLiteral("PlrTopbar.qml"));
+        check(rawTop.contains(QLatin1String("#80445566")) && rawTop.contains(QLatin1String("Quick.Gradient"))
+                  && be16(image, r.nodes[QStringLiteral("PlrTopbar.qml")] + 4) == 0,
+              "gradient stops preserve alpha, qualified QtQuick imports and raw resource storage flags");
+        check(GradientPatcher::apply(image, buttonKey, { true, QStringLiteral("#112233"), QStringLiteral("#aabbcc"), true }, &error),
+              "both button-background rendering branches receive the gradient");
+        check(resourceText(image, r, QStringLiteral("UiButton.qml")).count(QLatin1String("gradient:Gradient")) == 2,
+              "button target edits every supported background branch, not unrelated colors");
+        QString borderKey;
+        for (const auto &target : discovered.targets) if (target.label.endsWith(QLatin1String("secondary.borderGradient"))) borderKey = target.key;
+        check(!borderKey.isEmpty() && GradientPatcher::apply(image, borderKey,
+                  { true, QStringLiteral("#334455"), QStringLiteral("#667788"), false }, &error),
+              "a native null Gradient property can be converted to a custom border gradient");
+        const auto definitionKey = keys.value(QStringLiteral("Theme · gradients.gradientButton"));
+        check(!definitionKey.isEmpty() && GradientPatcher::apply(image, definitionKey,
+                  { true, QStringLiteral("#123456"), QStringLiteral("#abcdef"), true }, &error),
+              "native gradient definitions have stable named paths in minified QML");
+        check(resourceText(image, r, QStringLiteral("UiThemeObject.qml")).contains(QLatin1String("property color unaffected:'#010203'")),
+              "a Gradient replacement preserves a following same-line property");
+        check(resourceText(image, r, QStringLiteral("UiThemeObject.qml")).contains(QLatin1String("property color primary100:'#112233'")),
+              "palette properties typed color remain colors");
+        const auto beforeFailure = image;
+        check(!GradientPatcher::apply(image, sideKey, { true, QStringLiteral("not a color"), QStringLiteral("#ffffff"), true }, &error)
+                  && image == beforeFailure, "invalid stops never write QML or modify the image");
+        check(!GradientPatcher::apply(image, QStringLiteral("not-a-real-target"), {}, &error) && image == beforeFailure,
+              "stale/unknown gradient targets do not modify the image");
+    }
+
+    std::printf("[boot-discovery] renamed/raw controllers and the host's selected component\n");
+    {
+        const QString controller = QStringLiteral("import QtQuick\nItem{Image{id:iBootImage}Text{id:iBootLoadingText}"
+            "function fSetBootPromotion(){iBootImage.visible=true;}}\n");
+        const QString host = QStringLiteral("import QtQuick\nItem{Component{id:iBootProgressComponent;RenamedStartup{}}Loader{id:iBootLoader}}\n");
+        auto r = resources({ { QStringLiteral("RenamedStartup.qml"), controller },
+                             { QStringLiteral("UnusedPortrait.qml"), controller },
+                             { QStringLiteral("Shell.qml"), host },
+                             { QStringLiteral("MediaSupport.qml"), QStringLiteral("import QtQuick\nimport QtMultimedia 5.15\nItem{}") } },
+                           true, { QStringLiteral("RenamedStartup.qml"), QStringLiteral("MediaSupport.qml") });
+        addRegistration(r, false);
+        const QString path = temp.filePath(QStringLiteral("renamed-boot.exe")); write(path, r.f.bytes);
+        const auto result = BootVideoPatcher::patch(path);
+        if (!result.ok) std::printf("    %s\n", qPrintable(result.msg));
+        check(result.ok, "boot discovery does not depend on a fixed boot filename or zlib storage");
+        check(resourceText(read(path), r, QStringLiteral("RenamedStartup.qml")).contains(QLatin1String("bsiBootVideo"))
+                  && resourceText(read(path), r, QStringLiteral("UnusedPortrait.qml")) == controller,
+              "the host's boot Component selects one of several valid controller variants");
+        check(BootVideoPatcher::patch(path).ok, "raw renamed boot resources support repeated patching");
+        const qint64 node = r.nodes[QStringLiteral("RenamedStartup.qml")];
+        check(be16(read(path), node + 4) == 0, "raw-resource rewrites preserve the node's storage flags");
+    }
+
+    std::printf("[boot-msi] actual component name and multimedia import from a sibling resource\n");
+    {
+        const QString boot = QStringLiteral("import QtQuick\nItem{width:320;height:200;property bool bootBackgroundImage:true;"
+            "property bool pBootImageButtonVisible:true;property bool pBootGridVisible:true;"
+            "Image{id:iBootImage;objectName:'bootImage';visible:true}"
+            "Text{id:iBootLoadingText;objectName:'loadingText';visible:false}"
+            "function fSetBootPromotion(){iBootImage.visible=true;pBootGridVisible=true;iBootLoadingText.visible=false}}\n");
+        const auto r = resources({ { QStringLiteral("PlrBootProgressBar.qml"), boot },
+                                   { QStringLiteral("Notification.qml"), QStringLiteral("import QtQuick\nimport QtMultimedia 5.15\nItem{}\n") },
+                                   { QStringLiteral("Other.qml"), QStringLiteral("import QtQuick; QtObject {}") } }, true);
+        const auto folder = temp.filePath(QStringLiteral("msi boot with spaces")); QDir().mkpath(folder);
+        const auto path = QDir(folder).filePath(QStringLiteral("HD-Player.exe")); write(path, r.f.bytes);
+        const auto outcome = BootVideoPatcher::patch(path);
+        if (!outcome.ok) std::printf("    %s\n", qPrintable(outcome.msg));
+        check(outcome.ok, "PlrBootProgressBar works without a stock BootVideo.qml or an import in the boot file");
+        const auto modified = resourceText(read(path), r, QStringLiteral("PlrBootProgressBar.qml"));
+        check(modified.contains(QLatin1String("import QtMultimedia 5.15 as BsiMedia"))
+                  && modified.contains(QLatin1String("sourceComponent:Component{BsiMedia.Video")),
+              "media support is obtained from another validated file in the same resource pool");
+        // A tiny, explicitly synthetic QtMultimedia API validates the generated
+        // QML/argument flow without playing media or running extracted user QML.
+        const auto imports = QDir(folder).filePath(QStringLiteral("imports/QtMultimedia")); QDir().mkpath(imports);
+        write(QDir(imports).filePath(QStringLiteral("qmldir")), "module QtMultimedia\nVideo 5.15 Video.qml\nMediaPlayer 5.15 MediaPlayer.qml\nVideoOutput 5.15 VideoOutput.qml\n");
+        write(QDir(imports).filePath(QStringLiteral("Video.qml")), "import QtQuick\nItem{property url source;property int loops;property int fillMode;property bool started:false;function play(){started=true}}\n");
+        write(QDir(imports).filePath(QStringLiteral("MediaPlayer.qml")), "import QtQuick\nQtObject{enum Loops{Infinite=1}}\n");
+        write(QDir(imports).filePath(QStringLiteral("VideoOutput.qml")), "import QtQuick\nQtObject{enum FillMode{PreserveAspectCrop=1}}\n");
+        QQmlEngine engine; engine.addImportPath(QDir(folder).filePath(QStringLiteral("imports")));
+        QQmlComponent component(&engine); component.setData(modified.toUtf8(), QUrl::fromLocalFile(QDir(folder).filePath(QStringLiteral("PlrBootProgressBar.qml"))));
+        std::unique_ptr<QObject> object(component.create());
+        if (!object) std::printf("    %s\n", qPrintable(component.errorString()));
+        check(bool(object), "injected boot Video QML compiles against the expected multimedia API");
+        if (object) {
+            const auto video = object->findChild<QObject *>(QStringLiteral("bsiBootVideo"));
+            check(video && video->property("started").toBool()
+                      && video->property("source").toUrl() == QUrl::fromLocalFile(QDir(folder).filePath(QStringLiteral("Assets/Promo.mp4"))),
+                  "the inline video starts and receives the installation-relative media URL");
+        }
+        check(BootVideoPatcher::patch(path).ok && read(path + QStringLiteral(".bak")) == r.f.bytes,
+              "real-name boot repatching keeps one loader and preserves the original backup");
+        const auto twice = resourceText(read(path), r, QStringLiteral("PlrBootProgressBar.qml"));
+        check(twice.count(QLatin1String("objectName:\"bsiBootVideo\"")) == 1,
+              "repatching does not duplicate the custom video component");
+    }
+#ifdef BSI_EXE_TEST_FILE
+    {
+        std::printf("[hdplayer-reference] file parsing and disposable copies only; no uploaded code is executed\n");
+        const auto input = QString::fromUtf8(BSI_EXE_TEST_FILE);
+        const auto original = read(input);
+        std::printf("  Reference bytes: %lld; SHA256: %s\n", static_cast<long long>(original.size()),
+                    QCryptographicHash::hash(original, QCryptographicHash::Sha256).toHex().constData());
+        const auto first = ThemeEngine::findThemeZlib(original);
+        check(first.found && first.hasQrcNode && !first.ambiguous, "the supplied EXE has a unique mapped theme resource");
+        if (!first.hasQrcNode) std::printf("    %s\n", qPrintable(first.resource.detail));
+        const auto folder = temp.filePath(QStringLiteral("real-image-copy")); QDir().mkpath(folder);
+        const auto path = QDir(folder).filePath(QStringLiteral("HD-Player.exe")); write(path, original);
+        if (first.found && first.hasQrcNode && !first.ambiguous) {
+            const auto originalEntries = ThemeEngine::parseQmlEntries(first.qml);
+            for (int round = 0; round < 3; ++round) {
+                QMap<QString, QString> edits;
+                for (int i = 0; i < originalEntries.size(); ++i)
+                    edits[originalEntries[i].name] = QStringLiteral("#%1").arg((i * 7919 + 234567 + round * 12345) & 0xffffff, 6, 16, QLatin1Char('0'));
+                // Deliberately keep the initial UI snapshot to exercise reload-
+                // after-patch handling across growth, boot patching and repatches.
+                const auto result = ThemeEngine::patchTheme(path, first, originalEntries, edits);
+                if (!result.ok) std::printf("    Theme round %d: %s\n", round, qPrintable(result.msg));
+                check(result.ok, "theme patch/repatch succeeds on a copy of the supplied EXE");
+                const auto after = ThemeEngine::findThemeZlib(read(path));
+                check(after.hasQrcNode && !after.ambiguous, "the actual EXE theme remains linked after patching");
+                const auto changedEntries = ThemeEngine::parseQmlEntries(after.qml);
+                bool sameColors = after.hasQrcNode && changedEntries.size() == originalEntries.size();
+                for (int i = 0; i < changedEntries.size() && i < originalEntries.size(); ++i) {
+                    const auto &entry = changedEntries[i];
+                    QString expected = edits.value(entry.name);
+                    // The public RGB editor deliberately preserves the original
+                    // alpha of each ARGB slot (including duplicate property names).
+                    const auto oldColor = originalEntries[i].original;
+                    if (expected.size() == 7 && oldColor.size() == 9 && oldColor.startsWith(QLatin1Char('#')))
+                        expected = QStringLiteral("#") + oldColor.mid(1, 2) + expected.mid(1);
+                    if (entry.name != originalEntries[i].name || entry.value.compare(expected, Qt::CaseInsensitive)) {
+                        std::printf("    Color mismatch: %s actual=%s expected=%s\n", qPrintable(entry.name), qPrintable(entry.value), qPrintable(expected));
+                        sameColors = false;
+                    }
+                }
+                check(sameColors, "mapped real-file colors match the requested RGB while preserving original alpha");
+                const auto boot = BootVideoPatcher::patch(path);
+                if (!boot.ok) std::printf("    Boot round %d: %s\n", round, qPrintable(boot.msg));
+                check(boot.ok, "boot patch/repatch succeeds on the supplied EXE copy without breaking theme mapping");
+            }
+            const auto gradientTargets = GradientPatcher::analyze(read(path));
+            check(gradientTargets.ok, "compatible gradient targets are found in the supplied EXE without executing its QML");
+            for (const auto &label : { QStringLiteral("Sidebar background"), QStringLiteral("Top bar background"),
+                                      QStringLiteral("Button backgrounds (all states)") }) {
+                QString key;
+                for (const auto &target : gradientTargets.targets) if (target.label == label) key = target.key;
+                check(!key.isEmpty(), "supplied EXE exposes a compatible named background target");
+                if (key.isEmpty()) continue;
+                const auto gradient = GradientPatcher::patch(path, key,
+                    { true, QStringLiteral("#112244"), QStringLiteral("#8844cc"), true });
+                if (!gradient.ok) std::printf("    Gradient %s: %s\n", qPrintable(label), qPrintable(gradient.message));
+                check(gradient.ok, "gradient resources are patched and verified on a disposable real-EXE copy");
+                check(GradientPatcher::patch(path, key, { false, {}, {}, true }).ok,
+                      "real-EXE gradient targets can return to their preserved solid binding");
+            }
+            check(read(path + QStringLiteral(".bak")) == original, "the real-file copy retains its first complete backup");
+        }
+        check(read(input) == original, "the supplied EXE remains byte-for-byte untouched");
+    }
+#endif
+
     std::printf("[exe-fixes] registered resource layouts, growing boot QML and integrity detection\n");
     check(ZlibUtils::findMagicOffsets(qCompress(theme(QStringLiteral("#abcdef")).toUtf8(), 3)).contains(4),
           "standard level-2-to-5 zlib streams (78 5E) are included in resource discovery");
@@ -850,6 +1105,79 @@ int runPatchRegressionTests()
         auto shortFile = bytes.left(0x1809); putLe32(shortFile, 0x198, shortFile.size() - 0x1000);
         write(path, shortFile);
         check(IntegrityPatcher::analyze(path).ok, "anchor scans near the end of .text stay inside the file");
+    }
+
+    std::printf("[fps-autodetect] actual imports, selected directory, version changes and path handling\n");
+    {
+        QTemporaryDir installations;
+        const auto nxt = installations.filePath(QStringLiteral("BlueStacks_nxt"));
+        const auto msi = installations.filePath(QStringLiteral("MSI App Player"));
+        QDir().mkpath(nxt); QDir().mkpath(msi);
+        const auto player = QDir(nxt).filePath(QStringLiteral("HD-Player.exe"));
+        const auto qt5 = QDir(nxt).filePath(QStringLiteral("Qt5QuickTemplates2.dll"));
+        const auto qt6 = QDir(nxt).filePath(QStringLiteral("Qt6QuickTemplates2.dll"));
+        write(qt5, sliderDll(false)); write(qt6, sliderDll(false));
+        auto image = importedPlayer({ QStringLiteral("Qt5Core.dll") });
+        image.replace(0x2800, 11, QByteArray("Qt6Core.dll")); // unrelated string must not win
+        write(player, image);
+        auto found = FpsPatcher::detectDll(player);
+        check(found.ok && found.qtMajor == 5 && found.path.endsWith(QLatin1String("Qt5QuickTemplates2.dll")),
+              "real Qt5 imports beat an unrelated Qt6 string when both DLLs exist");
+        write(player, importedPlayer({}, { QStringLiteral("Qt6Core.dll") }));
+        found = FpsPatcher::detectDll(player);
+        check(found.ok && found.qtMajor == 6, "delay-loaded Qt6 imports choose the Qt6 slider DLL");
+        write(player, importedPlayer({ QStringLiteral("Qt5Core.dll"), QStringLiteral("Qt6Core.dll") }));
+        check(!FpsPatcher::detectDll(player).ok, "ambiguous Qt majors are not resolved by guessing");
+        write(player, importedPlayer({}));
+        check(!FpsPatcher::detectDll(player).ok, "two DLL versions without import evidence require manual selection");
+        QFile::remove(qt6);
+        check(FpsPatcher::detectDll(player).qtMajor == 5, "a single local DLL version is an explicit fallback");
+        write(player, importedPlayer({ QStringLiteral("Qt6Core.dll") }));
+        check(!FpsPatcher::detectDll(player).ok, "known Qt6 must not silently fall back to the present Qt5 DLL");
+        const auto bin = QDir(nxt).filePath(QStringLiteral("bin")); QDir().mkpath(bin);
+        write(QDir(bin).filePath(QStringLiteral("Qt6QuickTemplates2.dll")), sliderDll(false));
+        check(FpsPatcher::detectDll(player).path.contains(QLatin1String("bin")), "a supported runtime subdirectory is searched inside the selected install");
+        QFile::remove(QDir(bin).filePath(QStringLiteral("Qt6QuickTemplates2.dll")));
+        write(qt6, sliderDll(false));
+        write(player, importedPlayer({ QStringLiteral("PlayerUi.dll") }));
+        write(QDir(nxt).filePath(QStringLiteral("PlayerUi.dll")), importedPlayer({ QStringLiteral("Qt5Quick.dll") }));
+        check(FpsPatcher::detectDll(player).qtMajor == 5, "a local UI dependency can establish the Qt major");
+        auto malformed = importedPlayer({ QStringLiteral("Qt5Core.dll") });
+        putLe32(malformed, 0x1800 + 12, 0xfffffff0);
+        check(!PeUtils::importedModules(malformed).ok, "out-of-file import names are refused");
+
+        write(player, image);
+        QSettings().setValue(QStringLiteral("paths/exe"), player);
+        QSettings().setValue(QStringLiteral("paths/dll"), qt6); // stale setting from another Qt version
+        QSettings().setValue(QStringLiteral("fps/autoDetect"), true);
+        SettingsManager settings;
+        Backend backend(&settings);
+        check(settings.dllPath().endsWith(QLatin1String("Qt5QuickTemplates2.dll")), "startup corrects a stale saved Qt DLL target");
+        write(player, importedPlayer({ QStringLiteral("Qt6Core.dll") }));
+        settings.setExePath(player);
+        check(settings.dllPath().endsWith(QLatin1String("Qt6QuickTemplates2.dll")), "same-path in-place Qt upgrades refresh the selected DLL");
+        write(player, image);
+        check(backend.fpsPatch(360).value(QStringLiteral("ok")).toBool()
+                  && settings.dllPath().endsWith(QLatin1String("Qt5QuickTemplates2.dll"))
+                  && read(qt6) == sliderDll(false),
+              "FPS actions re-detect and patch only the matching DLL in the selected directory");
+        const auto spaced = QDir(msi).filePath(QStringLiteral("HD-Player.exe"));
+        check(backend.localFilePath(QUrl::fromLocalFile(spaced)) == QDir::toNativeSeparators(spaced),
+              "file-picker URLs preserve Program Files spaces instead of literal percent-20 paths");
+        const auto unicode = QDir(msi).filePath(QStringLiteral("тест % file.dll"));
+        check(backend.localFilePath(QUrl::fromLocalFile(unicode)) == QDir::toNativeSeparators(unicode),
+              "file-picker URLs round-trip Unicode and percent characters");
+        write(spaced, importedPlayer({}, { QStringLiteral("Qt6Core.dll") }));
+        write(QDir(msi).filePath(QStringLiteral("Qt6QuickTemplates2.dll")), sliderDll(true));
+        const auto detected = BsDetector::findBlueStacks({ installations.path() }, false);
+        check(detected.size() == 2, "Program Files discovery recognizes both BlueStacks and MSI App Player folder names");
+        bool correct = true;
+        for (const auto &value : detected) {
+            const auto item = value.toMap();
+            correct &= !item.value(QStringLiteral("fps_dll")).toString().isEmpty()
+                       && item.value(QStringLiteral("fps_dll")).toString().startsWith(item.value(QStringLiteral("root")).toString());
+        }
+        check(correct, "each detected installation keeps its own player, Qt major and slider DLL");
     }
 
     std::printf("[fps-prologues] compiler variants, RIP-relative instructions, thunks and partial recovery\n");
@@ -1024,10 +1352,10 @@ int runPatchRegressionTests()
         check(!FpsPatcher::patch(renderer, 360).ok && !QFile::exists(renderer + QStringLiteral(".bak")),
               "renderer DLL is refused even if it happens to contain matching exports");
         const QString exe = temp.filePath(QStringLiteral("HD-Player.exe"));
-        write(exe, QByteArray("Qt5Core.dll\0", 12));
+        write(exe, importedPlayer({ QStringLiteral("Qt5Core.dll") }));
         check(FpsPatcher::findDll(temp.path()).endsWith(QLatin1String("Qt5QuickTemplates2.dll")),
               "when both DLLs exist, player Qt5 dependency selects Qt5");
-        write(exe, QByteArray("Qt6Core.dll\0", 12));
+        write(exe, importedPlayer({ QStringLiteral("Qt6Core.dll") }));
         check(FpsPatcher::findDll(temp.path()).endsWith(QLatin1String("Qt6QuickTemplates2.dll")),
               "when both DLLs exist, player Qt6 dependency selects Qt6");
         QSettings().setValue(QStringLiteral("paths/exe"), exe);
@@ -1041,6 +1369,7 @@ int runPatchRegressionTests()
         settings.setDllPath(temp.filePath(QStringLiteral("Qt5QuickTemplates2.dll")));
         check(notifications == 1 && backend.dllPath() == settings.dllPath(),
               "settings changes notify the QML-facing path instead of leaving a stale display");
+        settings.setFpsAutoDetect(false);
         settings.setDllPath(renderer);
         check(!backend.fpsAnalyze().value(QStringLiteral("ok")).toBool(), "FPS Analyze rejects the wrong DLL too");
     }

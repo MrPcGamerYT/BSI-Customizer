@@ -26,9 +26,35 @@ If an older patch already wrote the desired colors but BlueStacks still shows an
 
 The original `.bak` is preserved. Theme edits are made against the current EXE, not a stale backup. Writes are checked and atomically replaced where supported; close BlueStacks and run the tool as administrator if Windows refuses access.
 
+## Gradient themes
+
+After loading the QML theme, open **Theme → Gradients**. The editor discovers
+verified compatible targets in the selected EXE: Rectangle-based sidebar/top-bar
+backgrounds, the supported button-background branches, existing gradient
+bindings, and native properties typed `Gradient` (including button borders).
+Choose two `#RRGGBB` or `#AARRGGBB` stops and a horizontal/vertical direction; the
+editor shows a live preview before applying. Clear/apply staged solid-color
+edits first, then close BlueStacks before writing.
+
+A property typed `color` cannot hold a Gradient object. These edits therefore
+modify the compatible rendering/Gradient binding while preserving the original
+solid color. **Solid fallback** sets the selected gradient to `null`; it does not
+restore an old multi-stop gradient definition. Text/icon colors and unsupported
+controls remain solid. Button-background gradients intentionally use the same
+stops in all supported rendering states; native border slots can be edited
+individually. This is not an arbitrary CSS gradient string in a hex-color field.
+
+Writes use validated Qt resource mappings, mapped growth when necessary,
+targeted cache refresh and read-back verification, with the first `.bak`
+preserved. Unknown/ambiguous layouts and incompatible QtQuick imports are not
+modified. The initial editor supports two-stop linear gradients using QtQuick
+2.12+ or Qt 6 APIs, not radial/diagonal gradients or every custom control type.
+The regression suite renders synthetic horizontal/vertical/solid cases in Qt
+and checks actual pixels; it never executes QML extracted from the user's EXE.
+
 ## Boot video and integrity
 
-Boot patching uses the selected installation's `Assets/Promo.mp4`, not a drive-root URL. It updates an existing `Video`/`MediaPlayer` resource when available; an inline QtMultimedia fallback is used only when an existing resource already imports that module. A QML `Loader` is never pointed directly at an MP4. Minified/multiline boot objects are handled by bounded object/property parsing. Validated compressed resources can grow into mapped read-only PE storage, and their resource timestamps/compiled caches are refreshed. Unknown players and unverified resource mappings remain non-writing errors.
+Boot patching uses the selected installation's `Assets/Promo.mp4`, not a drive-root URL. Registered QML resources are discovered by structure and controller content rather than only a fixed filename; raw and zlib source records are supported. When multiple controller variants coexist, a unique reference from the host's boot Component is used where available. MSI/BlueStacks `PlrBootProgressBar.qml` resources are supported; QtMultimedia imports can be discovered in another validated QML file in the same resource pool, so a stock `BootVideo.qml` is not required. It updates an existing `Video`/`MediaPlayer` resource when available; an inline QtMultimedia fallback is used only when an existing resource already imports that module. A QML `Loader` is never pointed directly at an MP4. Minified/multiline boot objects are handled by bounded object/property parsing. Validated compressed resources can grow into mapped read-only PE storage, and their resource timestamps/compiled caches are refreshed. Unknown players and unverified resource mappings remain non-writing errors.
 
 Integrity patching follows `E8 ???????? 84 C0 74 ??` in `.text`, with bounded RIP-relative references to the verify/fail messages when disambiguation is needed. Natural NOP sequences are not counted as clean candidates. Already-applied patches are verified by a message reference or matching backup evidence. Only the two JZ bytes are NOPed; dry-run is read-only, the first backup is preserved, and writes/restores are verified rather than truncating/deleting the EXE first. Close BlueStacks yourself before patching; the tool does not forcibly terminate your sessions. Full-backup restoration also rolls back theme/boot edits made after that backup.
 
@@ -41,7 +67,11 @@ Supported targets (64-bit x86 Windows DLLs):
 - **Qt5QuickTemplates2.dll**
 - **Qt6QuickTemplates2.dll**
 
-These contain `QQuickSlider::setTo` / `QQuickRangeSlider::setTo`. **libOpenglRender.dll is not the FPS target.** Installation detection chooses the matching Qt major when possible; an old saved OpenGL path is migrated. You can also select the correct DLL manually.
+These contain `QQuickSlider::setTo` / `QQuickRangeSlider::setTo`. **libOpenglRender.dll is not the FPS target.**
+
+**FPS auto-detection is enabled by default.** The app finds BlueStacks/MSI installations under the real Program Files locations and Windows registry paths. When several installations exist, choose one with **Use** on the Dashboard; the app never patches a randomly chosen installation. It reads the selected HD-Player.exe's actual normal/delay imports (and bounded local UI dependencies when necessary) to detect Qt 5 or Qt 6, then selects that installation's matching slider DLL. Actions recheck the target after in-place updates, and stale saved DLL paths are refreshed. If no Qt import evidence is available, a single local DLL version can be selected; two versions or conflicting evidence require a manual choice. No fallback to a different installation or wrong Qt major is allowed.
+
+Use **Auto-detect** on the FPS page to refresh the selection. Disable the automatic-selection checkbox only when deliberately selecting a DLL manually. File-dialog paths are decoded through QUrl, so spaces, Unicode and UNC paths are preserved.
 
 Choose a high-FPS maximum from 60–1440, close BlueStacks, and patch. Only the 240 FPS high-frame-rate maximum is replaced. Normal mode stays at its default **60 FPS**, with no normal-mode setting or rewrite. Other slider values are unchanged. This changes the settings slider's upper limit, not a guarantee of in-game FPS.
 
@@ -169,3 +199,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 ```
 
 </details>
+
+A diagnostic EXE can be supplied with `-DBSI_EXE_TEST_FILE=<absolute-path>`. In GitHub CI, a user-supplied `HD-Player.exe` at the repository root is also recognized as optional diagnostic input. Self-tests only read it and patch disposable copies; they do not execute its native code or QML. The probe records its SHA-256 so results from different installations/builds are not confused. Diagnostic input is not a runtime dependency of the portable EXE.
+
+Compatibility is version-adaptive, not a guarantee for every past/future build: FPS detours currently support Windows x64 Qt 5/Qt 6 setters, and boot rewriting requires a recognizable boot-controller/media API with a validated resource mapping. Unknown architectures, ambiguous runtime selection and unrecognized resource layouts are refused instead of reporting a false success. Integrity behavior is not changed by these detection improvements.

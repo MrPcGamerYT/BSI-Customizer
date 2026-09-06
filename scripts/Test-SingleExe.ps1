@@ -51,6 +51,43 @@ function Check-Probe($Result, [bool]$Wrapped) {
     if ($Wrapped -and $Result.Out -notmatch 'DEPLOYMENT_PORTABLE=1') { throw 'The portable launcher was not exercised' }
 }
 try {
+    # Test the actual copy helpers without running the packaging script again.
+    # Neither README.md nor docs/PORTABLE.md may be a build prerequisite, while
+    # absent runtime/license inputs and genuine copy failures must still fail.
+    $tokens = $null
+    $parseErrors = $null
+    $packager = [System.Management.Automation.Language.Parser]::ParseFile(
+        (Join-Path $PSScriptRoot 'Build-SingleExe.ps1'), [ref]$tokens, [ref]$parseErrors)
+    if ($parseErrors.Count) { throw "Packaging script syntax errors: $parseErrors" }
+    foreach ($name in @('Copy-Required', 'Copy-OptionalDocument')) {
+        $definition = $packager.Find({ param($node)
+            $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -eq $name
+        }, $true)
+        if (-not $definition) { throw "Missing packaging helper: $name" }
+        . ([scriptblock]::Create($definition.Extent.Text))
+    }
+    $copyTests = Join-Path $root 'documentation copy tests'
+    New-Item -ItemType Directory -Path $copyTests | Out-Null
+    $missing = Join-Path $copyTests 'missing guide.md'
+    $target = Join-Path $copyTests 'staged/docs/PORTABLE.md'
+    Copy-OptionalDocument $missing $target
+    if (Test-Path -LiteralPath $target) { throw 'A missing optional guide must not be copied' }
+    $guide = Join-Path $copyTests 'guide.md'
+    'optional guide contents' | Set-Content -LiteralPath $guide -Encoding utf8
+    Copy-OptionalDocument $guide $target
+    if ((Get-FileHash -LiteralPath $guide).Hash -ne (Get-FileHash -LiteralPath $target).Hash) {
+        throw 'An available optional guide must be copied unchanged'
+    }
+    $refused = $false
+    try { Copy-Required $missing (Join-Path $copyTests 'LICENSE') } catch { $refused = $true }
+    if (-not $refused) { throw 'A missing required runtime/license file must fail' }
+    $blocked = Join-Path $copyTests 'not-a-directory'
+    'block directory creation' | Set-Content -LiteralPath $blocked
+    $refused = $false
+    try { Copy-OptionalDocument $guide (Join-Path $blocked 'guide.md') } catch { $refused = $true }
+    if (-not $refused) { throw 'Optional documentation must not hide real copy errors' }
+    Write-Host 'PASS optional guides present/missing, required files enforced, copy failures propagated'
+
     $arguments = @('--deployment-test', 'argument with spaces', 'quote"inside', 'trailing\', '')
     foreach ($platform in @('offscreen', 'windows')) {
         $result = Run-Clean $portable $arguments $platform

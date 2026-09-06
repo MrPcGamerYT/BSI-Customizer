@@ -1,14 +1,15 @@
 #pragma once
 
 #include <QString>
+#include <QStringList>
 #include <QVariantList>
 
 // BlueStacks install auto-detection (port of find_bluestacks):
 // default paths, Program Files scan and (Windows) registry uninstall keys.
 namespace BsDetector {
 
-// [{profile, root, exe, conf, fps_dll, native_dll}]
-QVariantList findBlueStacks();
+// [{profile, root, exe, conf, fps_dll, native_dll, qt_major, fps_detection}]
+QVariantList findBlueStacks(const QStringList &programFolders = {}, bool includeRegistry = true);
 
 // True when the given executable (e.g. "HD-Player.exe") is running right now.
 // Patching BlueStacks while it runs does not stick: the process keeps the theme

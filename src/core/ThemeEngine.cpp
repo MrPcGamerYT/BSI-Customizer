@@ -8,6 +8,7 @@
 
 #include <QDir>
 #include <QFile>
+#include <QCryptographicHash>
 #include <QFileInfo>
 #include <QRegularExpression>
 #include <QSet>
@@ -446,7 +447,12 @@ using QrcNode = QtResources::Link;
 QrcNode findQrcNodeForEntry(const QByteArray &data, qint64 entryOff,
                             const QString &name = QStringLiteral("UiThemeObject.qml"))
 {
-    return QtResources::findLink(data, entryOff, name);
+    auto link = QtResources::findLink(data, entryOff, name);
+    if (link.found && link.compression != 1) {
+        link.found = false;
+        link.detail = QStringLiteral("The named resource is raw data, not a compressed QML record.");
+    }
+    return link;
 }
 
 qint64 zeroSlackAfter(const QByteArray &data, const ThemeInfo &info)
@@ -761,10 +767,14 @@ ThemeInfo ThemeEngine::findThemeZlib(const QByteArray &data)
         info.contentQuality = strictContent ? 2 : 1;
 
         QrcNode node = findQrcNodeForEntry(data, info.entryOff);
-        if (!node.found && strictContent)
+        if (!node.found && strictContent) {
+            const QString namedDiagnostic = node.detail;
             node = QtResources::findLink(data, info.entryOff, QString()); // registered resource alias
+            if (!node.found)
+                node.detail = namedDiagnostic + QStringLiteral(" Alias lookup: ") + node.detail;
+        }
         info.resource = node;
-        if (node.found && !node.ambiguous && headerBytes == 8) {
+        if (node.found && !node.ambiguous && node.compression == 1 && headerBytes == 8) {
             // A record the qresource tree really links to UiThemeObject.qml IS
             // the theme, however odd its content looks.
             if (node.support > 0)
@@ -1852,6 +1862,7 @@ QString ThemeEngine::probeReport(const QString &exePath)
     const QByteArray data = f.readAll();
     f.close();
     line(QStringLiteral("size: %1 bytes").arg(data.size()));
+    line(QStringLiteral("sha256: %1").arg(QString::fromLatin1(QCryptographicHash::hash(data, QCryptographicHash::Sha256).toHex())));
     if (data.size() < 64) {
         line(QStringLiteral("Too small to be HD-Player.exe."));
         return out;

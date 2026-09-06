@@ -16,6 +16,7 @@ qt_add_executable(BSICustomizer
     src/main.cpp
     src/selftest.cpp
     src/theme_runtime_test.cpp
+    src/gradient_runtime_test.cpp
     src/patch_regression_test.cpp
     src/core/PatchFile.h
     src/core/PatchFile.cpp
@@ -31,12 +32,15 @@ qt_add_executable(BSICustomizer
     src/core/ZlibUtils.cpp
     src/core/ThemeEngine.h
     src/core/ThemeEngine.cpp
+    src/core/GradientPatcher.h
+    src/core/GradientPatcher.cpp
     src/core/ThemePresets.h
     src/core/ThemePresets.cpp
     src/core/SvgEngine.h
     src/core/SvgEngine.cpp
     src/core/FpsPatcher.h
     src/core/FpsPatcher.cpp
+    src/core/FpsDetection.cpp
     src/core/X64Prologue.h
     src/core/X64Prologue.cpp
     src/third_party/hde64/hde64.cpp
@@ -121,6 +125,21 @@ if(BSI_TEST_QT5_REFERENCE)
     target_compile_definitions(BSICustomizer PRIVATE BSI_QT5_REFERENCE_DLL="${_bsi_qt5_dll}")
 endif()
 
+# Optional user-supplied diagnostic input. It is read as data and only disposable
+# copies are patched by --selftest; its executable code/QML is never run.
+set(BSI_EXE_TEST_FILE "" CACHE FILEPATH "Optional HD-Player.exe for read-only reference regression tests")
+if(NOT BSI_EXE_TEST_FILE AND "$ENV{GITHUB_ACTIONS}" STREQUAL "true"
+   AND EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/HD-Player.exe")
+    set(BSI_EXE_TEST_FILE "${CMAKE_CURRENT_SOURCE_DIR}/HD-Player.exe")
+endif()
+if(BSI_EXE_TEST_FILE)
+    if(NOT EXISTS "${BSI_EXE_TEST_FILE}")
+        message(FATAL_ERROR "BSI_EXE_TEST_FILE does not exist")
+    endif()
+    file(TO_CMAKE_PATH "${BSI_EXE_TEST_FILE}" _bsi_exe_reference)
+    target_compile_definitions(BSICustomizer PRIVATE BSI_EXE_TEST_FILE="${_bsi_exe_reference}")
+endif()
+
 qt_add_qml_module(BSICustomizer
     URI BSICustomizer
     VERSION 1.0
@@ -137,6 +156,7 @@ qt_add_qml_module(BSICustomizer
         src/qml/components/Toast.qml
         src/qml/components/PathRow.qml
         src/qml/components/ColorField.qml
+        src/qml/components/GradientEditor.qml
         src/qml/components/LogPanel.qml
         src/qml/pages/DashboardPage.qml
         src/qml/pages/ThemePage.qml

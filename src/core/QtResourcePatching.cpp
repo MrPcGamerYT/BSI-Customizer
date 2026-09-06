@@ -96,6 +96,16 @@ qint64 appendStorage(QByteArray &data, qint64 size, QString *error)
 bool replaceCompressed(QByteArray &data, qint64 entry, const Link &snapshot,
                        const QByteArray &source, QString *error, qint64 *newEntry)
 {
+    if (snapshot.compression != 1) {
+        if (error) *error = QStringLiteral("The selected resource is not zlib-compressed.");
+        return false;
+    }
+    return replaceResource(data, entry, snapshot, source, error, newEntry);
+}
+
+bool replaceResource(QByteArray &data, qint64 entry, const Link &snapshot,
+                     const QByteArray &source, QString *error, qint64 *newEntry)
+{
     const auto refuse = [&](const QString &message) { if (error) *error = message; return false; };
     if (!snapshot.found || snapshot.ambiguous || source.isEmpty() || source.size() > 50000000)
         return refuse(QStringLiteral("A unique validated resource and bounded replacement are required."));
@@ -104,9 +114,11 @@ bool replaceCompressed(QByteArray &data, qint64 entry, const Link &snapshot,
         return refuse(QStringLiteral("The resource mapping changed while preparing the patch."));
     const quint32 stored = be32(data, entry);
     const auto oldPayload = data.mid(entry + 4, stored);
-    const auto oldSource = qUncompress(oldPayload);
-    const QByteArray payload = oldSource == source ? oldPayload : qCompress(source, 9);
-    if (payload.size() < 6 || qUncompress(payload) != source)
+    if (link.compression != 0 && link.compression != 1) return refuse(QStringLiteral("Unsupported resource compression."));
+    const auto oldSource = link.compression == 1 ? qUncompress(oldPayload) : oldPayload;
+    const QByteArray payload = oldSource == source ? oldPayload : (link.compression == 1 ? qCompress(source, 9) : source);
+    if ((link.compression == 1 && payload.size() < 6)
+        || (link.compression == 1 ? qUncompress(payload) : payload) != source)
         return refuse(QStringLiteral("Resource compression did not verify."));
     QByteArray record(4, '\0');
     putBe32(record, 0, payload.size()); record += payload;
@@ -141,7 +153,8 @@ bool replaceCompressed(QByteArray &data, qint64 entry, const Link &snapshot,
     if (!invalidateThemeCacheResources(changed, link, error)) return false;
     const auto verified = findLink(changed, destination, link.sourceName);
     if (!verified.found || verified.ambiguous || verified.nodes != link.nodes
-        || qUncompress(changed.mid(destination + 4, be32(changed, destination))) != source)
+        || verified.compression != link.compression
+        || readFile(changed, { link.sourceName, destination, link.compression }, 50000000) != source)
         return refuse(QStringLiteral("Rewritten resource did not pass verification; no file was written."));
     data = changed;
     if (newEntry) *newEntry = destination;
