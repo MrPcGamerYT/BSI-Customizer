@@ -33,8 +33,10 @@ verified compatible targets in the selected EXE: Rectangle-based sidebar/top-bar
 backgrounds, the supported button-background branches, existing gradient
 bindings, and native properties typed `Gradient` (including button borders).
 Choose two `#RRGGBB` or `#AARRGGBB` stops and a horizontal/vertical direction; the
-editor shows a live preview before applying. Clear/apply staged solid-color
-edits first, then close BlueStacks before writing.
+editor shows a live preview before applying. Surfaces and theme-level gradient
+definitions are listed first, and the filter box narrows the list by target name,
+QML file or kind. Clear/apply staged solid-color edits first, then close BlueStacks
+before writing.
 
 A property typed `color` cannot hold a Gradient object. These edits therefore
 modify the compatible rendering/Gradient binding while preserving the original

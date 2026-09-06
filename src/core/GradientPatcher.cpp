@@ -31,7 +31,19 @@ struct Document {
 };
 struct Site { int object = -1, binding = -1; };
 struct Choice { Target target; int document = -1; QList<Site> sites; };
-struct Catalog { QList<Document> documents; QList<Choice> choices; };
+struct Catalog {
+    QList<Document> documents;
+    QList<Choice> choices;
+    int candidates = 0, parsed = 0;
+};
+
+// Placeholder for one masked string-literal character. It must not be whitespace
+// (a binding that ends in a literal has to terminate at the newline that follows
+// it), must not be an operator or QML member-list punctuation character, and must
+// not be usable inside an identifier so the masked text cannot invent a property,
+// type or brace. Comments keep their blank masking: only the "is anything else in
+// this member list?" decisions rely on a literal being visible as real content.
+constexpr QChar kLiteralMark = QChar::fromLatin1('@');
 
 QString codeMask(const QString &text)
 {
@@ -48,7 +60,13 @@ QString codeMask(const QString &text)
             if (c == QLatin1Char('*') && next == QLatin1Char('/')) { result[++i] = QLatin1Char(' '); block = false; }
         } else if (!quote.isNull()) {
             // Mask newlines inside literals too, so they cannot terminate a binding.
-            result[i] = QLatin1Char(' ');
+            // Literals are hidden behind kLiteralMark instead of blanks: the
+            // character that ends an expression decides whether a binding
+            // continues on the next line, and a fully blanked `objectName: "x"`
+            // (as BlueStacks writes it, one property per line) leaves the ':'
+            // of the property name as the last visible character, which reads as
+            // an unfinished ternary/label and swallows the following property.
+            result[i] = kLiteralMark;
             if (escaped) escaped = false;
             else if (c == QLatin1Char('\\')) escaped = true;
             else if (c == quote) quote = QChar();
@@ -57,7 +75,7 @@ QString codeMask(const QString &text)
         } else if (c == QLatin1Char('/') && next == QLatin1Char('*')) {
             result[i] = result[i + 1] = QLatin1Char(' '); ++i; block = true;
         } else if (c == QLatin1Char('"') || c == QLatin1Char('\'') || c == QLatin1Char('`')) {
-            result[i] = QLatin1Char(' '); quote = c;
+            result[i] = kLiteralMark; quote = c;
         }
     }
     return result;
@@ -104,7 +122,14 @@ int member(const Document &doc, int owner, const QString &name)
 bool parse(Document &doc)
 {
     doc.mask = codeMask(doc.qml);
-    static const QRegularExpression quickImport(QStringLiteral("(?:^|\\n)\\s*import\\s+QtQuick(?:\\s+(\\d+)\\.(\\d+))?(?:\\s+as\\s+(\\w+))?[ \\t]*(?:;|$)"), QRegularExpression::MultilineOption);
+    // The document must be a real QtQuick file. BlueStacks (and every Windows
+    // build of its UI) writes CRLF line endings, so the import line ends with
+    // "\r\n": the terminator has to be accepted before the carriage return as
+    // well, otherwise no document qualifies and the whole feature silently
+    // discovers zero targets.
+    static const QRegularExpression quickImport(QStringLiteral(
+            "(?:^|\\n)\\s*import\\s+QtQuick(?:\\s+(\\d+)\\.(\\d+))?"
+            "(?:\\s+as\\s+(\\w+))?[ \\t\\r]*(?:;|\\r?$)"), QRegularExpression::MultilineOption);
     const auto quick = quickImport.match(doc.mask);
     if (!quick.hasMatch()) return false;
     if (!quick.captured(1).isEmpty() && quick.captured(1).toInt() < 6
@@ -277,6 +302,7 @@ Catalog catalog(const QByteArray &image)
         if (doc.qml.toUtf8() != source) continue; // do not corrupt a different source encoding
         if (!doc.qml.contains(QLatin1String("Gradient")) && !doc.qml.contains(QLatin1String("sidebar"), Qt::CaseInsensitive)
             && !doc.qml.contains(QLatin1String("topbar"), Qt::CaseInsensitive) && file.name != QLatin1String("UiButton.qml")) continue;
+        ++out.candidates;
         if (!parse(doc)) continue;
         doc.link = QtResources::findLink(image, doc.entry, doc.name);
         if (!doc.link.found || doc.link.ambiguous) continue;
@@ -326,6 +352,7 @@ Catalog catalog(const QByteArray &image)
                 { Site { b.owner, i } });
         }
         out.documents << doc;
+        ++out.parsed;
     }
     return out;
 }
@@ -342,14 +369,29 @@ Analysis analyze(const QByteArray &image)
     const auto parsed = catalog(image);
     Analysis result;
     for (const auto &choice : parsed.choices) result.targets << choice.target;
-    std::stable_sort(result.targets.begin(), result.targets.end(), [](const Target &a, const Target &b) {
+    result.candidates = parsed.candidates;
+    result.parsed = parsed.parsed;
+    // Theme-level and surface targets are what a theme change actually wants; the
+    // per-window Gradient properties a full UI contains stay available, but after
+    // them, so a long list still starts with the useful entries.
+    const auto rank = [](const Target &target) {
+        if (target.kind == QLatin1String("background")) return 0;
+        if (target.label.startsWith(QLatin1String("Theme · "))) return 1;
+        return 2;
+    };
+    std::stable_sort(result.targets.begin(), result.targets.end(), [rank](const Target &a, const Target &b) {
+        if (rank(a) != rank(b)) return rank(a) < rank(b);
         if ((a.kind == QLatin1String("background")) != (b.kind == QLatin1String("background")))
             return a.kind == QLatin1String("background");
         return a.label < b.label;
     });
     result.ok = !result.targets.isEmpty();
-    result.message = result.ok ? QStringLiteral("%1 compatible gradient target(s) found.").arg(result.targets.size())
-                              : QStringLiteral("No verified compatible gradient targets were found in this EXE. Solid color fields are not gradient objects.");
+    if (!result.ok && parsed.candidates > 0 && parsed.parsed == 0)
+        result.message = QStringLiteral("This EXE has %1 QML file(s) with gradient candidates, but none could be parsed, so nothing was edited.").arg(parsed.candidates);
+    else if (result.ok)
+        result.message = QStringLiteral("%1 compatible gradient target(s) found.").arg(result.targets.size());
+    else
+        result.message = QStringLiteral("No verified compatible gradient targets were found in this EXE. Solid color fields are not gradient objects.");
     return result;
 }
 
@@ -369,12 +411,41 @@ bool apply(QByteArray &image, const QString &key, const Spec &spec, QString *err
     struct Edit { int begin, length; QString replacement; };
     QList<Edit> edits;
     const auto value = gradientExpression(spec, doc.quickPrefix);
+    // A member whose value is an object literal must not be followed by ';' -
+    // Qt's own parser stops on that with "Unexpected token ';'" and the whole
+    // QML file then fails to load, so the generated text has to stay unframed.
+    const bool objectLiteral = spec.enabled
+        && value.startsWith(doc.quickPrefix + QLatin1String("Gradient"));
     for (const auto &site : selected->sites) {
         if (site.binding >= 0) {
             const auto &binding = doc.bindings[site.binding];
-            if (expression(doc, binding) != value) edits << Edit { binding.value, binding.end - binding.value, value };
+            if (expression(doc, binding) != value) {
+                auto length = binding.end - binding.value;
+                if (objectLiteral) {
+                    // A ';' that terminated the previous value would end up behind
+                    // the new object literal, and Qt's parser rejects it there.
+                    // Swallow it together with the blanks in front of it (never
+                    // across a line end): themes write `gradient: null;`, and an
+                    // older build of this app wrote the invalid terminator itself.
+                    int terminator = binding.end;
+                    while (terminator < doc.qml.size()) {
+                        const auto c = doc.qml.at(terminator);
+                        if (c != QLatin1Char(' ') && c != QLatin1Char('\t') && c != QLatin1Char('\r'))
+                            break;
+                        ++terminator;
+                    }
+                    if (terminator < doc.qml.size() && doc.qml.at(terminator) == QLatin1Char(';'))
+                        length = terminator + 1 - binding.value;
+                }
+                // Whatever stays behind the new value must not be a terminator.
+                const int behind = binding.value + length;
+                if (objectLiteral && behind < doc.qml.size() && doc.qml.at(behind) == QLatin1Char(';'))
+                    return refuse(QStringLiteral("The gradient binding is followed by a statement terminator that Qt's QML parser rejects after an object literal."));
+                edits << Edit { binding.value, length, value };
+            }
         } else if (spec.enabled) {
-            edits << Edit { doc.objects[site.object].body, 0, QStringLiteral("\ngradient:") + value + QStringLiteral(";\n") };
+            edits << Edit { doc.objects[site.object].body, 0,
+                            QStringLiteral("\ngradient:") + value + QStringLiteral("\n") };
         }
     }
     if (edits.isEmpty()) return true;

@@ -7,6 +7,7 @@
 #include "core/GradientPatcher.h"
 #include "core/PatchFile.h"
 #include "core/PeUtils.h"
+#include "core/QtResources.h"
 #include "core/SettingsManager.h"
 #include "core/ThemeEngine.h"
 #include "core/ZlibUtils.h"
@@ -49,8 +50,24 @@ int failures = 0;
 void check(bool ok, const char *message)
 {
     std::printf("  %s  %s\n", ok ? "PASS" : "FAIL", message);
-    if (!ok)
+    if (!ok) {
         ++failures;
+        // Windows CI runs expose the job log only as annotations, so surface each
+        // failed assertion as one instead of leaving a red step with no detail.
+        if (qEnvironmentVariableIsSet("GITHUB_ACTIONS"))
+            std::printf("::error file=src/patch_regression_test.cpp::self-test failure: %s\n", message);
+    }
+}
+void check(bool ok, const QString &message)
+{
+    check(ok, qPrintable(message));
+}
+// The job log of a *passing* Windows run is not retrievable either, so the few
+// numbers that prove what was really exercised are published as annotations.
+void ciNotice(const QString &message)
+{
+    if (qEnvironmentVariableIsSet("GITHUB_ACTIONS"))
+        std::printf("::notice file=src/patch_regression_test.cpp::%s\n", qPrintable(message));
 }
 QByteArray read(const QString &path)
 {
@@ -793,14 +810,52 @@ int runPatchRegressionTests()
 
     std::printf("[gradients] compatible visual targets, native gradient properties and rendered output\n");
     {
+        // BlueStacks writes its QML with CRLF endings, a leading copyright block
+        // and one member per line, with objectName given as a string literal. That
+        // layout is what decides where a binding ends, so the surfaces follow it
+        // (a blank-masked literal once swallowed the following property and a
+        // "\r" before the line end once rejected the QtQuick import outright),
+        // while the theme palette stays minified the way UiThemeObject.qml is.
+        const auto crlf = [](QString text) {
+            text.replace(QLatin1Char('\n'), QStringLiteral("\r\n"));
+            return text;
+        };
+        const QString copyright = QStringLiteral("/* Copyright (C) 2024 Example, Inc. All rights reserved. */\n");
         const QString palette = QStringLiteral("import QtQuick\nQtObject{property QtObject colors:QtObject{property color primary100:'#112233';property color primary90:'#223344';property color accentNormal:'#445566'}"
             "property QtObject gradients:QtObject{property Gradient gradientButton:Gradient{orientation:Gradient.Horizontal;GradientStop{position:0;color:'#ff0000'}GradientStop{position:1;color:'#0000ff'}} property color unaffected:'#010203'}"
-            "property QtObject button:QtObject{property QtObject secondary:QtObject{property Gradient borderGradient:null}}}\n");
-        const QString sidebar = QStringLiteral("import QtQuick\nRectangle{objectName:'sidebar';width:64;height:64;color:'#112233'}\n");
-        const QString topbar = QStringLiteral("import QtQuick as Quick\nQuick.Rectangle{objectName:'topbar';width:64;height:64;color:'#112233'}\n");
-        const QString button = QStringLiteral("import QtQuick\nItem{id:iControl;property QtObject pColorState:QtObject{property color background:'#112233'}"
-            "Component{id:first;Rectangle{color:iControl.pColorState.background}}"
-            "Component{id:second;Rectangle{color:iControl.pColorState.background}}}\n");
+            "property QtObject button:QtObject{property QtObject secondary:QtObject{property Gradient borderGradient:null;}}}\n");
+        const QString sidebar = crlf(copyright + QStringLiteral(
+            "import QtQuick 2.15\n"
+            "Rectangle {\n"
+            "    objectName: \"sidebar\"\n"
+            "    width: 64\n"
+            "    height: 64\n"
+            "    color: \"#112233\"\n"
+            "}\n"));
+        const QString topbar = crlf(copyright + QStringLiteral(
+            "import QtQuick 2.15 as Quick\n"
+            "Quick.Rectangle {\n"
+            "    objectName: \"topbar\"\n"
+            "    width: 64\n"
+            "    height: 64\n"
+            "    color: \"#112233\"\n"
+            "}\n"));
+        const QString button = crlf(copyright + QStringLiteral(
+            "import QtQuick 2.15\n"
+            "Item {\n"
+            "    id: iControl\n"
+            "    property QtObject pColorState: QtObject {\n"
+            "        property color background: \"#112233\"\n"
+            "    }\n"
+            "    Component {\n"
+            "        id: first\n"
+            "        Rectangle { color: iControl.pColorState.background; gradient: null }\n"
+            "    }\n"
+            "    Component {\n"
+            "        id: second\n"
+            "        Rectangle { color: iControl.pColorState.background }\n"
+            "    }\n"
+            "}\n"));
         auto r = resources({ { QStringLiteral("UiThemeObject.qml"), palette }, { QStringLiteral("PlrSidebar.qml"), sidebar },
                              { QStringLiteral("PlrTopbar.qml"), topbar }, { QStringLiteral("UiButton.qml"), button },
                              { QStringLiteral("Other.qml"), QStringLiteral("import QtQuick\nQtObject{}") } }, true,
@@ -820,8 +875,10 @@ int runPatchRegressionTests()
         if (!applied.ok) std::printf("    %s\n", qPrintable(applied.message));
         check(applied.ok, "solid sidebar background converts to a verified two-stop gradient");
         const auto sideQml = resourceText(read(path), r, QStringLiteral("PlrSidebar.qml"));
-        check(sideQml.contains(QLatin1String("color:'#112233'")) && sideQml.contains(QLatin1String("gradient:Gradient")),
+        check(sideQml.contains(QStringLiteral("color: \"#112233\"")) && sideQml.contains(QLatin1String("gradient:Gradient")),
               "gradient editing preserves the original solid-color fallback instead of changing its type");
+        check(!sideQml.contains(QLatin1String("}};")),
+              "an inserted gradient is not terminated with ';' because Qt's QML parser rejects that after an object literal");
         const auto render = temp.filePath(QStringLiteral("GradientPixels.qml")); write(render, sideQml.toUtf8());
         check(gradientPixels(render, QStringLiteral("#ff0000"), QStringLiteral("#0000ff"), true, true),
               "actual Qt pixels show the requested horizontal gradient");
@@ -842,15 +899,27 @@ int runPatchRegressionTests()
         check(rawTop.contains(QLatin1String("#80445566")) && rawTop.contains(QLatin1String("Quick.Gradient"))
                   && be16(image, r.nodes[QStringLiteral("PlrTopbar.qml")] + 4) == 0,
               "gradient stops preserve alpha, qualified QtQuick imports and raw resource storage flags");
+        auto topImage = original;
+        check(GradientPatcher::apply(topImage, topKey, { true, QStringLiteral("#ff0000"), QStringLiteral("#0000ff"), true }, &error),
+              "a qualified-import surface accepts the same generated gradient");
+        const auto topRender = temp.filePath(QStringLiteral("GradientTopbarPixels.qml"));
+        write(topRender, resourceText(topImage, r, QStringLiteral("PlrTopbar.qml")).toUtf8());
+        check(gradientPixels(topRender, QStringLiteral("#ff0000"), QStringLiteral("#0000ff"), true, true),
+              "the patched qualified surface still loads in Qt and renders the requested gradient");
         check(GradientPatcher::apply(image, buttonKey, { true, QStringLiteral("#112233"), QStringLiteral("#aabbcc"), true }, &error),
               "both button-background rendering branches receive the gradient");
-        check(resourceText(image, r, QStringLiteral("UiButton.qml")).count(QLatin1String("gradient:Gradient")) == 2,
-              "button target edits every supported background branch, not unrelated colors");
+        check(resourceText(image, r, QStringLiteral("UiButton.qml")).count(QStringLiteral("GradientStop{position:0;color:\"#112233\"}")) == 2
+                  && !resourceText(image, r, QStringLiteral("UiButton.qml")).contains(QLatin1String("gradient:null")),
+              "button target edits every supported background branch, replacing and inserting as needed");
         QString borderKey;
         for (const auto &target : discovered.targets) if (target.label.endsWith(QLatin1String("secondary.borderGradient"))) borderKey = target.key;
         check(!borderKey.isEmpty() && GradientPatcher::apply(image, borderKey,
                   { true, QStringLiteral("#334455"), QStringLiteral("#667788"), false }, &error),
               "a native null Gradient property can be converted to a custom border gradient");
+        const auto paletteQml = resourceText(image, r, QStringLiteral("UiThemeObject.qml"));
+        check(paletteQml.contains(QStringLiteral("borderGradient:Gradient{orientation:Gradient.Vertical"))
+                  && !paletteQml.contains(QLatin1String("}};")),
+              "a ';' that terminated the replaced value is absorbed so the gradient stays valid QML");
         const auto definitionKey = keys.value(QStringLiteral("Theme · gradients.gradientButton"));
         check(!definitionKey.isEmpty() && GradientPatcher::apply(image, definitionKey,
                   { true, QStringLiteral("#123456"), QStringLiteral("#abcdef"), true }, &error),
@@ -939,6 +1008,8 @@ int runPatchRegressionTests()
         const auto original = read(input);
         std::printf("  Reference bytes: %lld; SHA256: %s\n", static_cast<long long>(original.size()),
                     QCryptographicHash::hash(original, QCryptographicHash::Sha256).toHex().constData());
+        ciNotice(QStringLiteral("reference EXE %1 (%2 bytes) - solid and gradient paths below run against it")
+                     .arg(QFileInfo(input).fileName()).arg(original.size()));
         const auto first = ThemeEngine::findThemeZlib(original);
         check(first.found && first.hasQrcNode && !first.ambiguous, "the supplied EXE has a unique mapped theme resource");
         if (!first.hasQrcNode) std::printf("    %s\n", qPrintable(first.resource.detail));
@@ -973,24 +1044,57 @@ int runPatchRegressionTests()
                     }
                 }
                 check(sameColors, "mapped real-file colors match the requested RGB while preserving original alpha");
+                if (round == 2)
+                    ciNotice(QStringLiteral("solid theme mode: %1 palette entries re-applied and re-read %2x on a copy")
+                                 .arg(originalEntries.size()).arg(round + 1));
                 const auto boot = BootVideoPatcher::patch(path);
                 if (!boot.ok) std::printf("    Boot round %d: %s\n", round, qPrintable(boot.msg));
                 check(boot.ok, "boot patch/repatch succeeds on the supplied EXE copy without breaking theme mapping");
             }
             const auto gradientTargets = GradientPatcher::analyze(read(path));
+            std::printf("    Gradients: %d target(s), %d of %d QML file(s) parsed: %s\n",
+                        static_cast<int>(gradientTargets.targets.size()), gradientTargets.parsed,
+                        gradientTargets.candidates, qPrintable(gradientTargets.message));
+            ciNotice(QStringLiteral("gradient discovery: %1 target(s) from %2/%3 parsed QML file(s)")
+                         .arg(gradientTargets.targets.size()).arg(gradientTargets.parsed).arg(gradientTargets.candidates));
             check(gradientTargets.ok, "compatible gradient targets are found in the supplied EXE without executing its QML");
+            check(gradientTargets.candidates == 0 || gradientTargets.parsed > 0,
+                  "the QML of the supplied EXE is parsed instead of being silently skipped");
             for (const auto &label : { QStringLiteral("Sidebar background"), QStringLiteral("Top bar background"),
-                                      QStringLiteral("Button backgrounds (all states)") }) {
-                QString key;
-                for (const auto &target : gradientTargets.targets) if (target.label == label) key = target.key;
-                check(!key.isEmpty(), "supplied EXE exposes a compatible named background target");
+                                      QStringLiteral("Button backgrounds (all states)"),
+                                      QStringLiteral("Theme gradients.gradientButton") }) {
+                QString key, resource;
+                for (const auto &target : gradientTargets.targets) {
+                    // The theme-level definition label carries a separator that is
+                    // awkward to spell in a source file, so match on its tail.
+                    if ((label == QStringLiteral("Theme gradients.gradientButton")
+                             ? target.label.endsWith(QLatin1String("gradients.gradientButton"))
+                             : target.label == label)) {
+                        key = target.key; resource = target.resource;
+                    }
+                }
+                check(!key.isEmpty(), QStringLiteral("supplied EXE exposes the %1 gradient target").arg(label));
                 if (key.isEmpty()) continue;
                 const auto gradient = GradientPatcher::patch(path, key,
                     { true, QStringLiteral("#112244"), QStringLiteral("#8844cc"), true });
                 if (!gradient.ok) std::printf("    Gradient %s: %s\n", qPrintable(label), qPrintable(gradient.message));
                 check(gradient.ok, "gradient resources are patched and verified on a disposable real-EXE copy");
-                check(GradientPatcher::patch(path, key, { false, {}, {}, true }).ok,
-                      "real-EXE gradient targets can return to their preserved solid binding");
+                const auto patched = read(path);
+                bool readBack = false;
+                for (const auto &file : QtResources::registeredFiles(patched)) {
+                    if (file.name.compare(resource, Qt::CaseInsensitive) != 0) continue;
+                    readBack = true;
+                    const auto text = QString::fromUtf8(QtResources::readFile(patched, file));
+                    // Stops are written upper-cased by GradientPatcher::normalized().
+                    check(text.contains(QStringLiteral("#112244")) && text.contains(QStringLiteral("#8844CC"))
+                              && !text.contains(QLatin1String("}};")),
+                          QStringLiteral("the gradient written into %1 is QML Qt still accepts").arg(resource));
+                    break;
+                }
+                check(readBack, QStringLiteral("the patched %1 resource can be read back").arg(resource));
+                const auto cleared = GradientPatcher::patch(path, key, { false, {}, {}, true });
+                if (!cleared.ok) std::printf("    Gradient clear %s: %s\n", qPrintable(label), qPrintable(cleared.message));
+                check(cleared.ok, "real-EXE gradient targets can return to their preserved solid binding");
             }
             check(read(path + QStringLiteral(".bak")) == original, "the real-file copy retains its first complete backup");
         }

@@ -23,10 +23,25 @@ Dialog {
     property bool useGradient: true
     property string message: ""
     property bool failed: false
+    property string filter: ""
+    // A full UI can expose dozens of gradient bindings, so the dialog filters the
+    // discovered list instead of showing every path in one long drop-down.
+    property var view: []
 
     function validColor(value) { return /^#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$/.test(value); }
+    function refresh() {
+        const all = backend.gradientTargets;
+        const needle = editor.filter.trim().toLowerCase();
+        const shown = [];
+        for (let i = 0; i < all.length; ++i) {
+            const target = all[i];
+            const haystack = (target.label + " " + target.resource + " " + target.kind).toLowerCase();
+            if (needle === "" || haystack.indexOf(needle) >= 0) shown.push(target);
+        }
+        editor.view = shown;
+    }
     function choose(index) {
-        const targets = backend.gradientTargets;
+        const targets = editor.view;
         if (index < 0 || index >= targets.length) { selectedKey = ""; return; }
         const target = targets[index];
         selectedKey = target.key;
@@ -40,8 +55,13 @@ Dialog {
         const result = backend.loadGradientTargets();
         message = result.msg || "";
         failed = !result.ok;
-        targetBox.currentIndex = backend.gradientTargets.length ? 0 : -1;
+        refresh();
+        targetBox.currentIndex = editor.view.length ? 0 : -1;
         choose(targetBox.currentIndex);
+    }
+    Connections {
+        target: backend
+        function onGradientTargetsChanged() { editor.refresh(); }
     }
 
     background: Rectangle { color: Theme.card; border.color: Theme.border; radius: 12 }
@@ -63,20 +83,66 @@ Dialog {
             text: qsTr("Apply two-stop gradients to compatible backgrounds or existing Gradient properties. "
                        + "Text/icon color properties stay solid. Applying replaces the selected target's existing stops.")
         }
-        ComboBox {
-            id: targetBox
+        RowLayout {
             Layout.fillWidth: true
-            model: backend.gradientTargets
-            textRole: "label"
-            onActivated: (index) => editor.choose(index)
+            spacing: 8
+            ComboBox {
+                id: targetBox
+                Layout.fillWidth: true
+                Layout.preferredHeight: 40
+                model: editor.view
+                textRole: "label"
+                onActivated: (index) => editor.choose(index)
+                // modelData is the target map from Backend::gradientTargets; a second
+                // line explains what each entry is, because the discovered paths are
+                // long and read like QML object names.
+                delegate: ItemDelegate {
+                    width: targetBox.width
+                    height: 44
+                    contentItem: ColumnLayout {
+                        spacing: 1
+                        Text {
+                            Layout.fillWidth: true
+                            elide: Text.ElideMiddle
+                            text: modelData.label
+                            color: Theme.text
+                            font.pixelSize: 13
+                        }
+                        Text {
+                            Layout.fillWidth: true
+                            elide: Text.ElideMiddle
+                            text: modelData.kind + " \u00b7 " + (modelData.enabled ? qsTr("gradient") : qsTr("solid"))
+                                  + " \u00b7 " + modelData.resource
+                            color: Theme.textDim
+                            font.pixelSize: 10
+                        }
+                    }
+                    background: Rectangle { color: parent && parent.highlighted ? Theme.raised : "transparent" }
+                }
+            }
+            TextField {
+                id: filterField
+                Layout.preferredWidth: 150
+                Layout.preferredHeight: 40
+                placeholderText: qsTr("Filter")
+                selectByMouse: true
+                color: Theme.text
+                onTextChanged: {
+                    editor.filter = text;
+                    editor.refresh();
+                    targetBox.currentIndex = editor.view.length ? 0 : -1;
+                    editor.choose(targetBox.currentIndex);
+                }
+            }
         }
         Text {
             Layout.fillWidth: true
             color: Theme.textDim
             font.pixelSize: 11
             elide: Text.ElideMiddle
-            text: targetBox.currentIndex >= 0 && targetBox.currentIndex < backend.gradientTargets.length
-                  ? backend.gradientTargets[targetBox.currentIndex].resource : qsTr("No compatible target")
+            text: targetBox.currentIndex >= 0 && targetBox.currentIndex < editor.view.length
+                  ? editor.view[targetBox.currentIndex].resource
+                  : qsTr("No compatible target")
         }
         RowLayout {
             Layout.fillWidth: true
@@ -176,9 +242,9 @@ Dialog {
                     editor.message = result.msg || "";
                     editor.failed = !result.ok;
                     if (result.ok) {
-                        const targets = backend.gradientTargets;
-                        for (let i = 0; i < targets.length; ++i) {
-                            if (targets[i].key === key) { targetBox.currentIndex = i; break; }
+                        editor.refresh();
+                        for (let i = 0; i < editor.view.length; ++i) {
+                            if (editor.view[i].key === key) { targetBox.currentIndex = i; break; }
                         }
                     }
                 }
