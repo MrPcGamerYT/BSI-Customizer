@@ -24,6 +24,8 @@ Backend::Backend(SettingsManager *settings, QObject *parent)
     connect(settings, &SettingsManager::exePathChanged, this, [this] {
         m_themeInfo = {};
         m_themeEntries.clear();
+        m_gradientTargets.clear();
+        emit gradientTargetsChanged();
         m_hexQmlColors.clear();
         m_edits.clear();
         m_themeFilePath.clear();
@@ -348,6 +350,44 @@ QVariantMap Backend::patchThemeQml()
               QStringLiteral("gray"));
     }
     return result(r.ok, r.msg, QStringLiteral("green"));
+}
+
+QVariantList Backend::gradientTargets() const
+{
+    QVariantList result;
+    for (const auto &target : m_gradientTargets)
+        result << QVariantMap { { "key", target.key }, { "label", target.label }, { "resource", target.resource },
+                                { "kind", target.kind }, { "enabled", target.current.enabled },
+                                { "first", target.current.first }, { "second", target.current.second },
+                                { "horizontal", target.current.horizontal } };
+    return result;
+}
+
+QVariantMap Backend::loadGradientTargets()
+{
+    const auto bytes = readExe();
+    m_gradientTargets.clear();
+    if (bytes.isEmpty()) {
+        emit gradientTargetsChanged();
+        return result(false, QStringLiteral("Select a readable HD-Player.exe first."), QStringLiteral("red"));
+    }
+    const auto analysis = GradientPatcher::analyze(bytes);
+    m_gradientTargets = analysis.targets;
+    emit gradientTargetsChanged();
+    return result(analysis.ok, analysis.message, QStringLiteral("blue"));
+}
+
+QVariantMap Backend::applyThemeGradient(const QString &key, const QString &first, const QString &second,
+                                      bool horizontal, bool enabled)
+{
+    if (!m_edits.isEmpty())
+        return result(false, QStringLiteral("Apply or clear the pending solid-color edits before applying a gradient."), QStringLiteral("orange"));
+    const auto applied = GradientPatcher::patch(m_settings->exePath(), key, { enabled, first, second, horizontal });
+    if (applied.ok) {
+        reloadTheme();
+        loadGradientTargets();
+    }
+    return result(applied.ok, applied.message, QStringLiteral("green"));
 }
 
 // ------------------------------------------------------------------- presets

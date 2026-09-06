@@ -26,6 +26,32 @@ If an older patch already wrote the desired colors but BlueStacks still shows an
 
 The original `.bak` is preserved. Theme edits are made against the current EXE, not a stale backup. Writes are checked and atomically replaced where supported; close BlueStacks and run the tool as administrator if Windows refuses access.
 
+## Gradient themes
+
+After loading the QML theme, open **Theme → Gradients**. The editor discovers
+verified compatible targets in the selected EXE: Rectangle-based sidebar/top-bar
+backgrounds, the supported button-background branches, existing gradient
+bindings, and native properties typed `Gradient` (including button borders).
+Choose two `#RRGGBB` or `#AARRGGBB` stops and a horizontal/vertical direction; the
+editor shows a live preview before applying. Clear/apply staged solid-color
+edits first, then close BlueStacks before writing.
+
+A property typed `color` cannot hold a Gradient object. These edits therefore
+modify the compatible rendering/Gradient binding while preserving the original
+solid color. **Solid fallback** sets the selected gradient to `null`; it does not
+restore an old multi-stop gradient definition. Text/icon colors and unsupported
+controls remain solid. Button-background gradients intentionally use the same
+stops in all supported rendering states; native border slots can be edited
+individually. This is not an arbitrary CSS gradient string in a hex-color field.
+
+Writes use validated Qt resource mappings, mapped growth when necessary,
+targeted cache refresh and read-back verification, with the first `.bak`
+preserved. Unknown/ambiguous layouts and incompatible QtQuick imports are not
+modified. The initial editor supports two-stop linear gradients using QtQuick
+2.12+ or Qt 6 APIs, not radial/diagonal gradients or every custom control type.
+The regression suite renders synthetic horizontal/vertical/solid cases in Qt
+and checks actual pixels; it never executes QML extracted from the user's EXE.
+
 ## Boot video and integrity
 
 Boot patching uses the selected installation's `Assets/Promo.mp4`, not a drive-root URL. Registered QML resources are discovered by structure and controller content rather than only a fixed filename; raw and zlib source records are supported. When multiple controller variants coexist, a unique reference from the host's boot Component is used where available. MSI/BlueStacks `PlrBootProgressBar.qml` resources are supported; QtMultimedia imports can be discovered in another validated QML file in the same resource pool, so a stock `BootVideo.qml` is not required. It updates an existing `Video`/`MediaPlayer` resource when available; an inline QtMultimedia fallback is used only when an existing resource already imports that module. A QML `Loader` is never pointed directly at an MP4. Minified/multiline boot objects are handled by bounded object/property parsing. Validated compressed resources can grow into mapped read-only PE storage, and their resource timestamps/compiled caches are refreshed. Unknown players and unverified resource mappings remain non-writing errors.

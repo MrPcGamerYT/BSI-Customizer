@@ -11,6 +11,11 @@ Item {
     property string filterText: ""
     property string presetId: ""
 
+    GradientEditor {
+        id: gradientEditor
+        pendingSolidEdits: page.editedCount > 0
+    }
+
     // Bound to backend.themeEntries, so the counters update when the theme is
     // re-read or an edit is staged (a plain function call in a binding does not).
     readonly property int editedCount: {
@@ -314,6 +319,11 @@ Item {
                                                              .arg(page.filteredEntries.length))
                         color: Theme.textDim
                         font.pixelSize: 12
+                    }
+                    ActionButton {
+                        text: qsTr("Gradients")
+                        enabled: page.qmlMethod && backend.themeFound
+                        onClicked: gradientEditor.open()
                     }
                     ActionButton {
                         text: qsTr("Clear Edits")

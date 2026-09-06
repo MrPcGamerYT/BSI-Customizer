@@ -16,6 +16,7 @@ qt_add_executable(BSICustomizer
     src/main.cpp
     src/selftest.cpp
     src/theme_runtime_test.cpp
+    src/gradient_runtime_test.cpp
     src/patch_regression_test.cpp
     src/core/PatchFile.h
     src/core/PatchFile.cpp
@@ -31,6 +32,8 @@ qt_add_executable(BSICustomizer
     src/core/ZlibUtils.cpp
     src/core/ThemeEngine.h
     src/core/ThemeEngine.cpp
+    src/core/GradientPatcher.h
+    src/core/GradientPatcher.cpp
     src/core/ThemePresets.h
     src/core/ThemePresets.cpp
     src/core/SvgEngine.h
@@ -153,6 +156,7 @@ qt_add_qml_module(BSICustomizer
         src/qml/components/Toast.qml
         src/qml/components/PathRow.qml
         src/qml/components/ColorField.qml
+        src/qml/components/GradientEditor.qml
         src/qml/components/LogPanel.qml
         src/qml/pages/DashboardPage.qml
         src/qml/pages/ThemePage.qml

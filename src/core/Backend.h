@@ -6,6 +6,7 @@
 #include <QUrl>
 
 #include "FpsPatcher.h"
+#include "GradientPatcher.h"
 #include "SvgEngine.h"
 #include "ThemeEngine.h"
 
@@ -30,6 +31,7 @@ class Backend : public QObject
     Q_PROPERTY(QVariantList themeEntries READ themeEntries NOTIFY themeChanged)
     Q_PROPERTY(QVariantList hexColors READ hexColors NOTIFY themeChanged)
     Q_PROPERTY(QVariantList themePresets READ themePresets CONSTANT)
+    Q_PROPERTY(QVariantList gradientTargets READ gradientTargets NOTIFY gradientTargetsChanged)
 
     Q_PROPERTY(QVariantList svgInfos READ svgInfos NOTIFY svgsChanged)
     Q_PROPERTY(QVariantList installs READ installs NOTIFY installsChanged)
@@ -56,6 +58,7 @@ public:
     QVariantList hexColors() const;
     // [{id, name, desc, light, toggleOff, toggleOn, colorCount, preview}]
     QVariantList themePresets() const;
+    QVariantList gradientTargets() const;
 
     QVariantList svgInfos() const;
     QVariantList installs() const { return m_installs; }
@@ -75,6 +78,9 @@ public:
     Q_INVOKABLE void setThemeEdit(const QString &name, const QString &value);
     Q_INVOKABLE void clearThemeEdits();
     Q_INVOKABLE QVariantMap patchThemeQml();
+    Q_INVOKABLE QVariantMap loadGradientTargets();
+    Q_INVOKABLE QVariantMap applyThemeGradient(const QString &key, const QString &first, const QString &second,
+                                              bool horizontal, bool enabled);
     // Stage a whole palette as edits (still needs PATCH THEME).  Returns how
     // many colors the preset covers in this EXE.
     Q_INVOKABLE int applyPreset(const QString &id);
@@ -127,6 +133,7 @@ signals:
     void dllPathChanged();
     void confPathChanged();
     void themeChanged();
+    void gradientTargetsChanged();
     void svgsChanged();
     void installsChanged();
     void versionsChanged();
@@ -147,6 +154,7 @@ private:
     qint64 m_themeFileMsecs = -1;  // EXE lastModified when the theme was loaded
     qint64 m_themeFileBytes = -1;  // EXE size when the theme was loaded
     QList<QmlEntry> m_themeEntries;
+    QList<GradientPatcher::Target> m_gradientTargets;
     QMap<QString, QString> m_edits;
     QList<HexColorItem> m_hexQmlColors;
 
