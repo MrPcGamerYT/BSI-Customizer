@@ -36,7 +36,7 @@ RowLayout {
             border.color: field.activeFocus ? Theme.accent : Theme.border
             radius: 8
         }
-        onAccepted: row.load()
+        onAccepted: { if (!row.readOnly) row.load(); }
     }
 
     ActionButton {
@@ -56,6 +56,7 @@ RowLayout {
         id: fileDialog
         title: qsTr("Select file")
         onAccepted: {
+            if (row.readOnly) return;
             // Decode file URLs properly (Program Files, Unicode and UNC paths).
             field.text = backend.localFilePath(selectedFile);
             row.load();
