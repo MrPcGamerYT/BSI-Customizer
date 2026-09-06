@@ -94,6 +94,11 @@ void Backend::reloadTheme()
 
 // ------------------------------------------------------------------ detection
 
+QString Backend::localFilePath(const QUrl &url) const
+{
+    return url.isLocalFile() ? QDir::toNativeSeparators(url.toLocalFile()) : QString();
+}
+
 QVariantList Backend::detectInstalls()
 {
     m_installs = BsDetector::findBlueStacks();
@@ -115,6 +120,7 @@ void Backend::useInstall(int index)
     if (index < 0 || index >= m_installs.size())
         return;
     const QVariantMap m = m_installs.at(index).toMap();
+    m_settings->setFpsAutoDetect(true);
     m_settings->setExePath(m.value(QStringLiteral("exe")).toString());
     m_settings->setDllPath(m.value(QStringLiteral("fps_dll")).toString());
     m_settings->setConfPath(m.value(QStringLiteral("conf")).toString());
@@ -641,8 +647,43 @@ static QVariantMap analysisToMap(const FpsPatcher::Analysis &a)
     return { { "ok", a.ok }, { "state", a.state }, { "msg", a.msg }, { "targets", targets } };
 }
 
+FpsPatcher::DllDetection Backend::resolveFpsTarget()
+{
+    if (!QFileInfo(m_settings->exePath()).isFile()) {
+        m_installs = BsDetector::findBlueStacks();
+        emit installsChanged();
+        if (m_installs.size() == 1) useInstall(0);
+        else {
+            m_settings->setDllPath({});
+            FpsPatcher::DllDetection result;
+            result.msg = m_installs.isEmpty()
+                ? QStringLiteral("No BlueStacks/MSI installation was found in Program Files or the registry. Select HD-Player.exe first.")
+                : QStringLiteral("Multiple installations were detected. Choose one with Use on the Dashboard, then auto-detect FPS again.");
+            return result;
+        }
+    }
+    auto detection = FpsPatcher::detectDll(m_settings->exePath());
+    m_settings->setDllPath(detection.ok ? detection.path : QString());
+    return detection;
+}
+
+QVariantMap Backend::fpsDetect()
+{
+    m_settings->setFpsAutoDetect(true);
+    const auto detection = resolveFpsTarget();
+    auto reply = result(detection.ok, detection.msg, detection.ok ? QStringLiteral("blue") : QStringLiteral("orange"));
+    reply.insert(QStringLiteral("qtMajor"), detection.qtMajor);
+    reply.insert(QStringLiteral("path"), detection.path);
+    return reply;
+}
+
 QVariantMap Backend::fpsAnalyze()
 {
+    if (m_settings->fpsAutoDetect()) {
+        const auto detection = resolveFpsTarget();
+        if (!detection.ok) return result(false, detection.msg, QStringLiteral("red"));
+        doLog(detection.msg, QStringLiteral("blue"));
+    }
     if (!FpsPatcher::isSupportedPath(m_settings->dllPath()))
         return result(false, QStringLiteral("Select Qt5QuickTemplates2.dll or Qt6QuickTemplates2.dll "
                                             "from your BlueStacks installation."), QStringLiteral("red"));
@@ -660,12 +701,22 @@ QVariantMap Backend::fpsAnalyze()
 
 QVariantMap Backend::fpsPatch(double hi)
 {
+    if (m_settings->fpsAutoDetect()) {
+        const auto detection = resolveFpsTarget();
+        if (!detection.ok) return result(false, detection.msg, QStringLiteral("red"));
+        doLog(detection.msg, QStringLiteral("blue"));
+    }
     const auto r = FpsPatcher::patch(m_settings->dllPath(), hi);
     return result(r.ok, r.msg, QStringLiteral("green"));
 }
 
 QVariantMap Backend::fpsRestore()
 {
+    if (m_settings->fpsAutoDetect()) {
+        const auto detection = resolveFpsTarget();
+        if (!detection.ok) return result(false, detection.msg, QStringLiteral("red"));
+        doLog(detection.msg, QStringLiteral("blue"));
+    }
     const auto r = FpsPatcher::restore(m_settings->dllPath());
     return result(r.ok, r.msg, QStringLiteral("green"));
 }

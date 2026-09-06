@@ -3,6 +3,7 @@
 #include <QObject>
 #include <QVariantList>
 #include <QVariantMap>
+#include <QUrl>
 
 #include "FpsPatcher.h"
 #include "SvgEngine.h"
@@ -63,6 +64,7 @@ public:
 
     // ---- detection ----
     Q_INVOKABLE QVariantList detectInstalls();
+    Q_INVOKABLE QString localFilePath(const QUrl &url) const;
     Q_INVOKABLE void useInstall(int index);
     Q_INVOKABLE QVariantList detectInstances();
 
@@ -101,6 +103,7 @@ public:
     Q_INVOKABLE QVariantMap recolorTogglesFromPreset(const QString &id);
 
     // ---- fps ----
+    Q_INVOKABLE QVariantMap fpsDetect();
     Q_INVOKABLE QVariantMap fpsAnalyze();
     Q_INVOKABLE QVariantMap fpsPatch(double hi);
     Q_INVOKABLE QVariantMap fpsRestore();
@@ -130,6 +133,7 @@ signals:
     void log(const QString &message, const QString &color);
 
 private:
+    FpsPatcher::DllDetection resolveFpsTarget();
     void doLog(const QString &msg, const QString &color);
     QVariantMap result(bool ok, const QString &msg, const QString &color);
     QByteArray readExe();

@@ -10,6 +10,7 @@ RowLayout {
     property string label: ""
     property alias text: field.text
     property bool showLoad: false
+    property bool readOnly: false
 
     signal load()
 
@@ -24,6 +25,7 @@ RowLayout {
 
     TextField {
         id: field
+        readOnly: row.readOnly
         Layout.fillWidth: true
         color: Theme.text
         font.pixelSize: 12
@@ -39,11 +41,12 @@ RowLayout {
 
     ActionButton {
         text: qsTr("Browse")
+        enabled: !row.readOnly
         onClicked: fileDialog.open()
     }
 
     ActionButton {
-        visible: row.showLoad
+        visible: row.showLoad && !row.readOnly
         accent: true
         text: qsTr("Load")
         onClicked: row.load()
@@ -53,8 +56,8 @@ RowLayout {
         id: fileDialog
         title: qsTr("Select file")
         onAccepted: {
-            // file:///C:/... -> C:/...
-            field.text = selectedFile.toString().replace(/^file:\/{2,3}/, "");
+            // Decode file URLs properly (Program Files, Unicode and UNC paths).
+            field.text = backend.localFilePath(selectedFile);
             row.load();
         }
     }

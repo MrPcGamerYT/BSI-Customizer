@@ -140,7 +140,7 @@ Link findLink(const QByteArray &data, qint64 entryOff, const QString &name)
             if (!treeSection || treeEnd > qint64(treeSection->rawPtr) + treeSection->rawSize)
                 continue;
             for (const Node &target : tree) {
-                if (target.flags != 1)
+                if (target.flags != 0 && target.flags != 1)
                     continue;
                 if (explicitBases && pool.dataRva + target.value != entryRva) continue;
                 const QList<qint64> targetNames = explicitBases ? QList<qint64> { pool.names + target.name } : names;
@@ -158,6 +158,7 @@ Link findLink(const QByteArray &data, qint64 entryOff, const QString &name)
                     link.explicitBases = explicitBases;
                     link.registered = pool.registered;
                     link.sourceName = actualName;
+                    link.compression = target.flags;
                     link.nodeSize = stride;
                     link.treeOff = root;
                     link.nodeOff = target.off;
@@ -218,9 +219,10 @@ Link findLink(const QByteArray &data, qint64 entryOff, const QString &name)
                         // An unrelated precompiled/opaque resource must not make
                         // a structurally valid theme tree appear unlinked.
                         if (raw == entryOff) {
-                            if (node.flags != 1 || size < 6 || size > 50000004u
-                                || be32(data, raw + 4) == 0 || be32(data, raw + 4) > 50000000u
-                                || qUncompress(data.mid(raw + 4, size)).size() != be32(data, raw + 4)) {
+                            if (node.flags != target.flags || size > 50000004u
+                                || (node.flags == 1 && (size < 6 || be32(data, raw + 4) == 0
+                                    || be32(data, raw + 4) > 50000000u
+                                    || qUncompress(data.mid(raw + 4, size)).size() != be32(data, raw + 4)))) {
                                 valid = false;
                                 break;
                             }
@@ -302,6 +304,24 @@ QList<File> filesInPool(const QByteArray &data, const Link &pool)
         if (seen.contains(key)) continue;
         seen.insert(key);
         files << File { name, raw, node.flags };
+    }
+    return files;
+}
+
+QList<File> registeredFiles(const QByteArray &data)
+{
+    QList<File> files;
+    QSet<QString> seen;
+    for (const auto &registration : registeredPools(data)) {
+        Link pool;
+        pool.found = true; pool.explicitBases = true; pool.registered = registration.registered;
+        pool.treeOff = registration.tree; pool.nameBaseRaw = registration.names;
+        pool.dataBaseRva = registration.dataRva; pool.nodeSize = registration.version == 1 ? 14 : 22;
+        for (const auto &file : filesInPool(data, pool)) {
+            const auto key = file.name + QLatin1Char(':') + QString::number(file.entryOff);
+            if (seen.contains(key)) continue;
+            seen.insert(key); files << file;
+        }
     }
     return files;
 }

@@ -16,6 +16,7 @@ struct Link
     bool found = false;
     bool explicitBases = false;
     bool registered = false;
+    quint16 compression = 0; // 0 = raw, 1 = zlib
     QString sourceName;
     QStringList sourceNames;
     QString detail;
@@ -51,6 +52,7 @@ struct File
 // Enumerate files only in an already-validated pool. This lets consumers find
 // related QML (e.g. a multimedia import) without guessing a small filename list.
 QList<File> filesInPool(const QByteArray &data, const Link &pool);
+QList<File> registeredFiles(const QByteArray &data);
 QByteArray readFile(const QByteArray &data, const File &file, qint64 limit = 5000000);
 
 // Changes the source timestamp, making Qt reject .qmlc files cached by an
@@ -66,6 +68,8 @@ int invalidateUnits(QByteArray &data, const QStringList &sourceNames);
 // an unmapped blob or overwrite an arbitrary copy of an offset.
 qint64 appendStorage(QByteArray &data, qint64 size, QString *error);
 // Atomic-in-memory resource rewrite: on failure the input bytes are unchanged.
+bool replaceResource(QByteArray &data, qint64 entry, const Link &link,
+                     const QByteArray &source, QString *error, qint64 *newEntry = nullptr);
 bool replaceCompressed(QByteArray &data, qint64 entry, const Link &link,
                        const QByteArray &source, QString *error, qint64 *newEntry = nullptr);
 bool invalidateThemeCacheResources(QByteArray &data, const Link &link, QString *error);

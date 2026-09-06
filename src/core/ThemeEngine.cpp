@@ -447,7 +447,12 @@ using QrcNode = QtResources::Link;
 QrcNode findQrcNodeForEntry(const QByteArray &data, qint64 entryOff,
                             const QString &name = QStringLiteral("UiThemeObject.qml"))
 {
-    return QtResources::findLink(data, entryOff, name);
+    auto link = QtResources::findLink(data, entryOff, name);
+    if (link.found && link.compression != 1) {
+        link.found = false;
+        link.detail = QStringLiteral("The named resource is raw data, not a compressed QML record.");
+    }
+    return link;
 }
 
 qint64 zeroSlackAfter(const QByteArray &data, const ThemeInfo &info)
@@ -769,7 +774,7 @@ ThemeInfo ThemeEngine::findThemeZlib(const QByteArray &data)
                 node.detail = namedDiagnostic + QStringLiteral(" Alias lookup: ") + node.detail;
         }
         info.resource = node;
-        if (node.found && !node.ambiguous && headerBytes == 8) {
+        if (node.found && !node.ambiguous && node.compression == 1 && headerBytes == 8) {
             // A record the qresource tree really links to UiThemeObject.qml IS
             // the theme, however odd its content looks.
             if (node.support > 0)

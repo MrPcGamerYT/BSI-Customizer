@@ -1,5 +1,6 @@
 #include "core/Backend.h"
 #include "core/BootVideoPatcher.h"
+#include "core/BsDetector.h"
 #include "core/IntegrityPatcher.h"
 #include "core/ByteUtils.h"
 #include "core/FpsPatcher.h"
@@ -23,6 +24,7 @@
 #include <QQmlComponent>
 #include <QQmlEngine>
 #include <QSettings>
+#include <QSet>
 #include <QTemporaryDir>
 
 #include <algorithm>
@@ -195,7 +197,7 @@ struct ResourceFixture {
     Fixture f;
     QMap<QString, qint64> entries, nodes;
 };
-ResourceFixture resources(const QList<QPair<QString, QString>> &sources, bool dense = false)
+ResourceFixture resources(const QList<QPair<QString, QString>> &sources, bool dense = false, const QSet<QString> &rawNames = {})
 {
     ResourceFixture r;
     r.f.bytes = peFile();
@@ -206,7 +208,7 @@ ResourceFixture resources(const QList<QPair<QString, QString>> &sources, bool de
     putLe32(r.f.bytes, 0x98 + 60, 0x1000);
     qint64 cursor = r.f.payloads;
     for (const auto &source : sources) {
-        const auto bytes = record(source.second.toUtf8());
+        const auto bytes = record(source.second.toUtf8(), !rawNames.contains(source.first));
         r.entries[source.first] = cursor;
         r.f.bytes.replace(cursor, bytes.size(), bytes);
         cursor += bytes.size();
@@ -221,7 +223,7 @@ ResourceFixture resources(const QList<QPair<QString, QString>> &sources, bool de
         putBe16(r.f.bytes, name, key.size()); putBe32(r.f.bytes, name + 2, resourceHash(key));
         for (int c = 0; c < key.size(); ++c) putBe16(r.f.bytes, name + 6 + 2*c, key[c].unicode());
         const qint64 node = r.f.tree + (i + 1) * 22;
-        putBe32(r.f.bytes, node, name - r.f.names); putBe16(r.f.bytes, node + 4, 1);
+        putBe32(r.f.bytes, node, name - r.f.names); putBe16(r.f.bytes, node + 4, rawNames.contains(key) ? 0 : 1);
         putBe16(r.f.bytes, node + 8, 1); putBe32(r.f.bytes, node + 10, r.entries[key] - r.f.payloads);
         putBe64(r.f.bytes, node + 14, 1600000000000ULL); r.nodes[key] = node;
         if (key == QLatin1String("UiThemeObject.qml")) r.f.themeNode = node;
@@ -271,7 +273,31 @@ QString resourceText(const QByteArray &bytes, const ResourceFixture &r, const QS
     const qint64 rva = r.f.payloads + be32(bytes, node + 10);
     const qint64 raw = PeUtils::rvaToRaw(PeUtils::sections(bytes), quint32(rva));
     if (!inRange(bytes, raw, 4) || !inRange(bytes, raw + 4, be32(bytes, raw))) return {};
-    return QString::fromUtf8(qUncompress(bytes.mid(raw + 4, be32(bytes, raw))));
+    const auto payload = bytes.mid(raw + 4, be32(bytes, raw));
+    return QString::fromUtf8(be16(bytes, node + 4) == 1 ? qUncompress(payload) : payload);
+}
+
+QByteArray importedPlayer(const QStringList &normal, const QStringList &delay = {})
+{
+    auto data = peFile();
+    putLe32(data, 0x98 + 60, 0x1000);
+    putLe32(data, 0x98 + 108, 16);
+    int names = 0x1c00;
+    const auto directory = [&](const QStringList &modules, int index, int table, int width) {
+        if (modules.isEmpty()) return;
+        putLe32(data, 0x98 + 112 + index * 8, table);
+        putLe32(data, 0x98 + 116 + index * 8, (modules.size() + 1) * width);
+        for (int i = 0; i < modules.size(); ++i) {
+            const auto name = modules[i].toLatin1() + '\0';
+            data.replace(names, name.size(), name);
+            putLe32(data, table + i * width + (index == 1 ? 12 : 4), names);
+            if (index == 13) putLe32(data, table + i * width, 1);
+            names += name.size();
+        }
+    };
+    directory(normal, 1, 0x1800, 20);
+    directory(delay, 13, 0x1a00, 32);
+    return data;
 }
 
 QByteArray sliderDll(bool mingw)
@@ -744,6 +770,29 @@ int runPatchRegressionTests()
     }
 #endif
 
+    std::printf("[boot-discovery] renamed/raw controllers and the host's selected component\n");
+    {
+        const QString controller = QStringLiteral("import QtQuick\nItem{Image{id:iBootImage}Text{id:iBootLoadingText}"
+            "function fSetBootPromotion(){iBootImage.visible=true;}}\n");
+        const QString host = QStringLiteral("import QtQuick\nItem{Component{id:iBootProgressComponent;RenamedStartup{}}Loader{id:iBootLoader}}\n");
+        auto r = resources({ { QStringLiteral("RenamedStartup.qml"), controller },
+                             { QStringLiteral("UnusedPortrait.qml"), controller },
+                             { QStringLiteral("Shell.qml"), host },
+                             { QStringLiteral("MediaSupport.qml"), QStringLiteral("import QtQuick\nimport QtMultimedia 5.15\nItem{}") } },
+                           true, { QStringLiteral("RenamedStartup.qml"), QStringLiteral("MediaSupport.qml") });
+        addRegistration(r, false);
+        const QString path = temp.filePath(QStringLiteral("renamed-boot.exe")); write(path, r.f.bytes);
+        const auto result = BootVideoPatcher::patch(path);
+        if (!result.ok) std::printf("    %s\n", qPrintable(result.msg));
+        check(result.ok, "boot discovery does not depend on a fixed boot filename or zlib storage");
+        check(resourceText(read(path), r, QStringLiteral("RenamedStartup.qml")).contains(QLatin1String("bsiBootVideo"))
+                  && resourceText(read(path), r, QStringLiteral("UnusedPortrait.qml")) == controller,
+              "the host's boot Component selects one of several valid controller variants");
+        check(BootVideoPatcher::patch(path).ok, "raw renamed boot resources support repeated patching");
+        const qint64 node = r.nodes[QStringLiteral("RenamedStartup.qml")];
+        check(be16(read(path), node + 4) == 0, "raw-resource rewrites preserve the node's storage flags");
+    }
+
     std::printf("[boot-msi] actual component name and multimedia import from a sibling resource\n");
     {
         const QString boot = QStringLiteral("import QtQuick\nItem{width:320;height:200;property bool bootBackgroundImage:true;"
@@ -947,6 +996,79 @@ int runPatchRegressionTests()
         check(IntegrityPatcher::analyze(path).ok, "anchor scans near the end of .text stay inside the file");
     }
 
+    std::printf("[fps-autodetect] actual imports, selected directory, version changes and path handling\n");
+    {
+        QTemporaryDir installations;
+        const auto nxt = installations.filePath(QStringLiteral("BlueStacks_nxt"));
+        const auto msi = installations.filePath(QStringLiteral("MSI App Player"));
+        QDir().mkpath(nxt); QDir().mkpath(msi);
+        const auto player = QDir(nxt).filePath(QStringLiteral("HD-Player.exe"));
+        const auto qt5 = QDir(nxt).filePath(QStringLiteral("Qt5QuickTemplates2.dll"));
+        const auto qt6 = QDir(nxt).filePath(QStringLiteral("Qt6QuickTemplates2.dll"));
+        write(qt5, sliderDll(false)); write(qt6, sliderDll(false));
+        auto image = importedPlayer({ QStringLiteral("Qt5Core.dll") });
+        image.replace(0x2800, 11, QByteArray("Qt6Core.dll")); // unrelated string must not win
+        write(player, image);
+        auto found = FpsPatcher::detectDll(player);
+        check(found.ok && found.qtMajor == 5 && found.path.endsWith(QLatin1String("Qt5QuickTemplates2.dll")),
+              "real Qt5 imports beat an unrelated Qt6 string when both DLLs exist");
+        write(player, importedPlayer({}, { QStringLiteral("Qt6Core.dll") }));
+        found = FpsPatcher::detectDll(player);
+        check(found.ok && found.qtMajor == 6, "delay-loaded Qt6 imports choose the Qt6 slider DLL");
+        write(player, importedPlayer({ QStringLiteral("Qt5Core.dll"), QStringLiteral("Qt6Core.dll") }));
+        check(!FpsPatcher::detectDll(player).ok, "ambiguous Qt majors are not resolved by guessing");
+        write(player, importedPlayer({}));
+        check(!FpsPatcher::detectDll(player).ok, "two DLL versions without import evidence require manual selection");
+        QFile::remove(qt6);
+        check(FpsPatcher::detectDll(player).qtMajor == 5, "a single local DLL version is an explicit fallback");
+        write(player, importedPlayer({ QStringLiteral("Qt6Core.dll") }));
+        check(!FpsPatcher::detectDll(player).ok, "known Qt6 must not silently fall back to the present Qt5 DLL");
+        const auto bin = QDir(nxt).filePath(QStringLiteral("bin")); QDir().mkpath(bin);
+        write(QDir(bin).filePath(QStringLiteral("Qt6QuickTemplates2.dll")), sliderDll(false));
+        check(FpsPatcher::detectDll(player).path.contains(QLatin1String("bin")), "a supported runtime subdirectory is searched inside the selected install");
+        QFile::remove(QDir(bin).filePath(QStringLiteral("Qt6QuickTemplates2.dll")));
+        write(qt6, sliderDll(false));
+        write(player, importedPlayer({ QStringLiteral("PlayerUi.dll") }));
+        write(QDir(nxt).filePath(QStringLiteral("PlayerUi.dll")), importedPlayer({ QStringLiteral("Qt5Quick.dll") }));
+        check(FpsPatcher::detectDll(player).qtMajor == 5, "a local UI dependency can establish the Qt major");
+        auto malformed = importedPlayer({ QStringLiteral("Qt5Core.dll") });
+        putLe32(malformed, 0x1800 + 12, 0xfffffff0);
+        check(!PeUtils::importedModules(malformed).ok, "out-of-file import names are refused");
+
+        write(player, image);
+        QSettings().setValue(QStringLiteral("paths/exe"), player);
+        QSettings().setValue(QStringLiteral("paths/dll"), qt6); // stale setting from another Qt version
+        QSettings().setValue(QStringLiteral("fps/autoDetect"), true);
+        SettingsManager settings;
+        Backend backend(&settings);
+        check(settings.dllPath().endsWith(QLatin1String("Qt5QuickTemplates2.dll")), "startup corrects a stale saved Qt DLL target");
+        write(player, importedPlayer({ QStringLiteral("Qt6Core.dll") }));
+        settings.setExePath(player);
+        check(settings.dllPath().endsWith(QLatin1String("Qt6QuickTemplates2.dll")), "same-path in-place Qt upgrades refresh the selected DLL");
+        write(player, image);
+        check(backend.fpsPatch(360).value(QStringLiteral("ok")).toBool()
+                  && settings.dllPath().endsWith(QLatin1String("Qt5QuickTemplates2.dll"))
+                  && read(qt6) == sliderDll(false),
+              "FPS actions re-detect and patch only the matching DLL in the selected directory");
+        const auto spaced = QDir(msi).filePath(QStringLiteral("HD-Player.exe"));
+        check(backend.localFilePath(QUrl::fromLocalFile(spaced)) == QDir::toNativeSeparators(spaced),
+              "file-picker URLs preserve Program Files spaces instead of literal percent-20 paths");
+        const auto unicode = QDir(msi).filePath(QStringLiteral("тест % file.dll"));
+        check(backend.localFilePath(QUrl::fromLocalFile(unicode)) == QDir::toNativeSeparators(unicode),
+              "file-picker URLs round-trip Unicode and percent characters");
+        write(spaced, importedPlayer({}, { QStringLiteral("Qt6Core.dll") }));
+        write(QDir(msi).filePath(QStringLiteral("Qt6QuickTemplates2.dll")), sliderDll(true));
+        const auto detected = BsDetector::findBlueStacks({ installations.path() }, false);
+        check(detected.size() == 2, "Program Files discovery recognizes both BlueStacks and MSI App Player folder names");
+        bool correct = true;
+        for (const auto &value : detected) {
+            const auto item = value.toMap();
+            correct &= !item.value(QStringLiteral("fps_dll")).toString().isEmpty()
+                       && item.value(QStringLiteral("fps_dll")).toString().startsWith(item.value(QStringLiteral("root")).toString());
+        }
+        check(correct, "each detected installation keeps its own player, Qt major and slider DLL");
+    }
+
     std::printf("[fps-prologues] compiler variants, RIP-relative instructions, thunks and partial recovery\n");
     for (const bool mingw : { false, true }) {
         for (const QString &name : { QStringLiteral("Qt5QuickTemplates2.dll"), QStringLiteral("Qt6QuickTemplates2.dll") }) {
@@ -1119,10 +1241,10 @@ int runPatchRegressionTests()
         check(!FpsPatcher::patch(renderer, 360).ok && !QFile::exists(renderer + QStringLiteral(".bak")),
               "renderer DLL is refused even if it happens to contain matching exports");
         const QString exe = temp.filePath(QStringLiteral("HD-Player.exe"));
-        write(exe, QByteArray("Qt5Core.dll\0", 12));
+        write(exe, importedPlayer({ QStringLiteral("Qt5Core.dll") }));
         check(FpsPatcher::findDll(temp.path()).endsWith(QLatin1String("Qt5QuickTemplates2.dll")),
               "when both DLLs exist, player Qt5 dependency selects Qt5");
-        write(exe, QByteArray("Qt6Core.dll\0", 12));
+        write(exe, importedPlayer({ QStringLiteral("Qt6Core.dll") }));
         check(FpsPatcher::findDll(temp.path()).endsWith(QLatin1String("Qt6QuickTemplates2.dll")),
               "when both DLLs exist, player Qt6 dependency selects Qt6");
         QSettings().setValue(QStringLiteral("paths/exe"), exe);
@@ -1136,6 +1258,7 @@ int runPatchRegressionTests()
         settings.setDllPath(temp.filePath(QStringLiteral("Qt5QuickTemplates2.dll")));
         check(notifications == 1 && backend.dllPath() == settings.dllPath(),
               "settings changes notify the QML-facing path instead of leaving a stale display");
+        settings.setFpsAutoDetect(false);
         settings.setDllPath(renderer);
         check(!backend.fpsAnalyze().value(QStringLiteral("ok")).toBool(), "FPS Analyze rejects the wrong DLL too");
     }

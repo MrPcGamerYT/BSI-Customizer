@@ -14,6 +14,7 @@ class SettingsManager : public QObject
     Q_PROPERTY(QString confPath READ confPath WRITE setConfPath NOTIFY confPathChanged)
     Q_PROPERTY(QString exeFolder READ exeFolder NOTIFY exePathChanged)
     Q_PROPERTY(QString version READ version CONSTANT)
+    Q_PROPERTY(bool fpsAutoDetect READ fpsAutoDetect WRITE setFpsAutoDetect NOTIFY fpsAutoDetectChanged)
 
 public:
     explicit SettingsManager(QObject *parent = nullptr);
@@ -27,6 +28,8 @@ public:
     QString confPath() const { return m_confPath; }
     void setConfPath(const QString &path);
 
+    bool fpsAutoDetect() const { return m_fpsAutoDetect; }
+    void setFpsAutoDetect(bool enabled);
     QString exeFolder() const;
 
     static QString version();
@@ -37,9 +40,12 @@ signals:
     void exePathChanged();
     void dllPathChanged();
     void confPathChanged();
+    void fpsAutoDetectChanged();
 
 private:
     QString m_exePath;
     QString m_dllPath;
     QString m_confPath;
+    bool m_fpsAutoDetect = true;
+    void refreshFpsPath();
 };

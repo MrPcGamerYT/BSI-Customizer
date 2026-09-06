@@ -3,6 +3,7 @@
 #include <QByteArray>
 #include <QList>
 #include <QString>
+#include <QStringList>
 
 // PE parsing shared by the FPS patcher, integrity patcher and the QML
 // theme relocation logic (ports of _pe_parse / _qmlfix_pe_sections).
@@ -24,6 +25,9 @@ bool isPe32Plus(const QByteArray &d);                // PE32+ (x64)
 quint16 machine(const QByteArray &d);                // 0 if not a PE
 quint32 exportRva(const QByteArray &d);              // 0 if none / not a PE
 quint32 optionalHeaderSize(const QByteArray &d);
+struct Imports { bool ok = false; QStringList modules; QString error; };
+// Read actual normal/delay import descriptors, not arbitrary DLL-name strings.
+Imports importedModules(const QByteArray &data);
 
 // RVA -> file offset using max(VSz, RawSz) span (FPS patcher semantics).
 qint64 rvaToRaw(const QList<PeSection> &secs, quint32 rva);   // -1 if unmapped

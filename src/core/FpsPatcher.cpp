@@ -319,32 +319,6 @@ bool isSupportedPath(const QString &dllPath)
            || name.compare(QLatin1String("Qt6QuickTemplates2.dll"), Qt::CaseInsensitive) == 0;
 }
 
-QString findDll(const QString &installDir)
-{
-    if (installDir.isEmpty())
-        return {};
-    const QDir dir(installDir);
-    QFile player(dir.filePath(QStringLiteral("HD-Player.exe")));
-    QByteArray imports;
-    if (player.open(QIODevice::ReadOnly))
-        imports = player.readAll().toLower();
-    QStringList names;
-    if (imports.contains("qt6core.dll"))
-        names << QStringLiteral("Qt6QuickTemplates2.dll");
-    else if (imports.contains("qt5core.dll"))
-        names << QStringLiteral("Qt5QuickTemplates2.dll");
-    else
-        names << QStringLiteral("Qt6QuickTemplates2.dll") << QStringLiteral("Qt5QuickTemplates2.dll");
-    const auto files = dir.entryList(QDir::Files);
-    for (const auto &name : names) {
-        for (const auto &file : files) {
-            if (file.compare(name, Qt::CaseInsensitive) == 0)
-                return QDir::toNativeSeparators(dir.filePath(file));
-        }
-    }
-    return {};
-}
-
 Analysis analyze(const QByteArray &b)
 {
     Analysis out;

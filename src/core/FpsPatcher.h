@@ -42,6 +42,13 @@ bool isSupportedPath(const QString &dllPath);
 // Pick the Qt major used by HD-Player when both versions are installed.
 // Returns empty when the corresponding QuickTemplates2 DLL is missing.
 QString findDll(const QString &installDir);
+struct DllDetection {
+    bool ok = false;
+    int qtMajor = 0;
+    QString path;
+    QString msg;
+};
+DllDetection detectDll(const QString &playerExe);
 Analysis analyze(const QByteArray &dll);
 Result patch(const QString &dllPath, double hi);
 Result restore(const QString &dllPath);

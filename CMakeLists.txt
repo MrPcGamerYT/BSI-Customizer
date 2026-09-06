@@ -37,6 +37,7 @@ qt_add_executable(BSICustomizer
     src/core/SvgEngine.cpp
     src/core/FpsPatcher.h
     src/core/FpsPatcher.cpp
+    src/core/FpsDetection.cpp
     src/core/X64Prologue.h
     src/core/X64Prologue.cpp
     src/third_party/hde64/hde64.cpp

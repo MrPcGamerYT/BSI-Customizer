@@ -8,6 +8,10 @@ Item {
 
     property string state: qsTr("Not analyzed yet")
     property string stateColorName: "gray"
+    Connections {
+        target: backend
+        function onDllPathChanged() { fpsPath.text = backend.dllPath; }
+    }
 
     ColumnLayout {
         anchors.fill: parent
@@ -26,7 +30,26 @@ Item {
             Layout.fillWidth: true
             label: qsTr("FPS slider DLL")
             text: backend.dllPath
-            onLoad: backend.dllPath = text
+            readOnly: settings.fpsAutoDetect
+            onLoad: { settings.fpsAutoDetect = false; backend.dllPath = text; }
+        }
+
+        RowLayout {
+            Layout.fillWidth: true
+            CheckBox {
+                text: qsTr("Automatically select the Qt slider DLL for this installation")
+                checked: settings.fpsAutoDetect
+                onToggled: settings.fpsAutoDetect = checked
+            }
+            Item { Layout.fillWidth: true }
+            ActionButton {
+                text: qsTr("Auto-detect")
+                onClicked: {
+                    const r = backend.fpsDetect();
+                    page.state = r.msg || "?";
+                    page.stateColorName = r.ok ? "green" : "red";
+                }
+            }
         }
 
         Card {
@@ -50,7 +73,7 @@ Item {
                     ActionButton {
                         text: qsTr("Analyze")
                         onClicked: {
-                            backend.dllPath = fpsPath.text;
+                            if (!settings.fpsAutoDetect) backend.dllPath = fpsPath.text;
                             const r = backend.fpsAnalyze();
                             page.state = r.msg || "?";
                             page.stateColorName = r.ok ? (r.state === "patched" ? "green" : "orange") : "red";
@@ -59,7 +82,7 @@ Item {
                     ActionButton {
                         text: qsTr("Restore")
                         onClicked: {
-                            backend.dllPath = fpsPath.text;
+                            if (!settings.fpsAutoDetect) backend.dllPath = fpsPath.text;
                             const r = backend.fpsRestore();
                             page.state = r.msg || "?";
                             page.stateColorName = r.ok ? "green" : "red";
@@ -69,7 +92,7 @@ Item {
                         accent: true
                         text: qsTr("Patch FPS")
                         onClicked: {
-                            backend.dllPath = fpsPath.text;
+                            if (!settings.fpsAutoDetect) backend.dllPath = fpsPath.text;
                             const r = backend.fpsPatch(fpsStepper.value);
                             page.state = r.msg || "?";
                             page.stateColorName = r.ok ? "green" : "red";
@@ -121,7 +144,10 @@ Item {
                     wrapMode: Text.Wrap
                     color: Theme.textDim
                     font.pixelSize: 12
-                    text: qsTr("Works on Qt5QuickTemplates2.dll and Qt6QuickTemplates2.dll. "
+                    text: qsTr("Auto-detection reads the selected HD-Player.exe's Qt imports and searches "
+                               + "that installation for Qt5QuickTemplates2.dll or Qt6QuickTemplates2.dll. "
+                               + "Use Auto-detect to search Program Files/registry if no installation is selected. "
+                               + "Disable automatic selection only for a manual DLL override. "
                                + "Changes the QQuickSlider / QQuickRangeSlider upper limit from "
                                + "240 to your chosen maximum. Normal mode stays at 60 FPS; its "
                                + "value is not rewritten. Other slider values are untouched. This unlocks "

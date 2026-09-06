@@ -1,46 +1,81 @@
 #include "SettingsManager.h"
 #include "FpsPatcher.h"
+#include "BsDetector.h"
 
 #include <QDesktopServices>
 #include <QDir>
 #include <QFileInfo>
 #include <QSettings>
+#include <QProcessEnvironment>
 #include <QUrl>
-
-namespace {
-// Same defaults as the Python tool's DEFAULT_PATHS["MSI5"].
-const char *kDefaultExe = R"(C:\Program Files\BlueStacks_msi5\HD-Player.exe)";
-const char *kDefaultConf = R"(C:\ProgramData\BlueStacks_msi5\bluestacks.conf)";
-} // namespace
 
 SettingsManager::SettingsManager(QObject *parent)
     : QObject(parent)
 {
-    QSettings s;
-    m_exePath = s.value(QStringLiteral("paths/exe"), QLatin1String(kDefaultExe)).toString();
-    m_dllPath = s.value(QStringLiteral("paths/dll")).toString();
-    // Migrate the renderer path saved by older versions. Do not leave it
-    // selected just because it exists; it does not export the slider setters.
-    QString oldName = m_dllPath;
-    oldName.replace(QLatin1Char('\\'), QLatin1Char('/'));
-    if (m_dllPath.isEmpty()
-        || oldName.section(QLatin1Char('/'), -1).compare(QLatin1String("libOpenglRender.dll"),
-                                                       Qt::CaseInsensitive) == 0) {
-        m_dllPath = FpsPatcher::findDll(QFileInfo(m_exePath).absolutePath());
-        s.setValue(QStringLiteral("paths/dll"), m_dllPath);
+    QSettings settings;
+    m_exePath = settings.value(QStringLiteral("paths/exe")).toString();
+    m_dllPath = settings.value(QStringLiteral("paths/dll")).toString();
+    m_confPath = settings.value(QStringLiteral("paths/conf")).toString();
+    m_fpsAutoDetect = settings.value(QStringLiteral("fps/autoDetect"), true).toBool();
+    if (!QFileInfo(m_exePath).isFile()) {
+        const auto installs = BsDetector::findBlueStacks();
+        if (installs.size() == 1) {
+            const auto install = installs.first().toMap();
+            m_exePath = install.value(QStringLiteral("exe")).toString();
+            m_confPath = install.value(QStringLiteral("conf")).toString();
+            settings.setValue(QStringLiteral("paths/exe"), m_exePath);
+            settings.setValue(QStringLiteral("paths/conf"), m_confPath);
+        }
+        // Never choose a random installation when several are present.
     }
-    m_confPath = s.value(QStringLiteral("paths/conf"), QLatin1String(kDefaultConf)).toString();
+    if (m_confPath.isEmpty() && QFileInfo(m_exePath).isFile()) {
+        const QString root = QFileInfo(m_exePath).absolutePath();
+        for (const auto &value : BsDetector::findBlueStacks()) {
+            const auto install = value.toMap();
+            if (QDir::cleanPath(install.value(QStringLiteral("root")).toString()).compare(QDir::cleanPath(root), Qt::CaseInsensitive) == 0) {
+                m_confPath = install.value(QStringLiteral("conf")).toString();
+                break;
+            }
+        }
+        if (m_confPath.isEmpty()) {
+            const auto base = QProcessEnvironment::systemEnvironment().value(QStringLiteral("ProgramData"), QStringLiteral("C:/ProgramData"));
+            m_confPath = QDir(base).filePath(root.contains(QLatin1String("msi"), Qt::CaseInsensitive)
+                         ? QStringLiteral("BlueStacks_msi5/bluestacks.conf") : QStringLiteral("BlueStacks_nxt/bluestacks.conf"));
+        }
+    }
+    if (m_fpsAutoDetect) refreshFpsPath();
+    else if (!FpsPatcher::isSupportedPath(m_dllPath) || !QFileInfo(m_dllPath).isFile()) setDllPath({});
+}
+
+void SettingsManager::refreshFpsPath()
+{
+    if (!m_fpsAutoDetect) return;
+    const auto detection = FpsPatcher::detectDll(m_exePath);
+    setDllPath(detection.ok ? detection.path : QString());
+}
+
+void SettingsManager::setFpsAutoDetect(bool enabled)
+{
+    if (enabled != m_fpsAutoDetect) {
+        m_fpsAutoDetect = enabled;
+        QSettings().setValue(QStringLiteral("fps/autoDetect"), enabled);
+        emit fpsAutoDetectChanged();
+    }
+    if (enabled) refreshFpsPath();
 }
 
 void SettingsManager::setExePath(const QString &path)
 {
     const QString clean = path.trimmed().isEmpty() ? QString() : QDir::cleanPath(path.trimmed());
-    if (clean == m_exePath)
+    if (clean == m_exePath) {
+        refreshFpsPath(); // Qt can change during an in-place BlueStacks update.
         return;
+    }
     m_exePath = clean;
     QSettings().setValue(QStringLiteral("paths/exe"), m_exePath);
     emit exePathChanged();
-    setDllPath(FpsPatcher::findDll(QFileInfo(m_exePath).absolutePath()));
+    if (m_fpsAutoDetect) refreshFpsPath();
+    else setDllPath({}); // Do not retain a manual target from a different installation.
 }
 
 void SettingsManager::setDllPath(const QString &path)
