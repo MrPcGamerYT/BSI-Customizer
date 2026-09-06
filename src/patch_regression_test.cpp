@@ -794,7 +794,7 @@ int runPatchRegressionTests()
     std::printf("[gradients] compatible visual targets, native gradient properties and rendered output\n");
     {
         const QString palette = QStringLiteral("import QtQuick\nQtObject{property QtObject colors:QtObject{property color primary100:'#112233';property color primary90:'#223344';property color accentNormal:'#445566'}"
-            "property QtObject gradients:QtObject{property Gradient gradientButton:Gradient{orientation:Gradient.Horizontal;GradientStop{position:0;color:'#ff0000'}GradientStop{position:1;color:'#0000ff'}}}"
+            "property QtObject gradients:QtObject{property Gradient gradientButton:Gradient{orientation:Gradient.Horizontal;GradientStop{position:0;color:'#ff0000'}GradientStop{position:1;color:'#0000ff'}} property color unaffected:'#010203'}"
             "property QtObject button:QtObject{property QtObject secondary:QtObject{property Gradient borderGradient:null}}}\n");
         const QString sidebar = QStringLiteral("import QtQuick\nRectangle{objectName:'sidebar';width:64;height:64;color:'#112233'}\n");
         const QString topbar = QStringLiteral("import QtQuick as Quick\nQuick.Rectangle{objectName:'topbar';width:64;height:64;color:'#112233'}\n");
@@ -851,6 +851,12 @@ int runPatchRegressionTests()
         check(!borderKey.isEmpty() && GradientPatcher::apply(image, borderKey,
                   { true, QStringLiteral("#334455"), QStringLiteral("#667788"), false }, &error),
               "a native null Gradient property can be converted to a custom border gradient");
+        const auto definitionKey = keys.value(QStringLiteral("Theme · gradients.gradientButton"));
+        check(!definitionKey.isEmpty() && GradientPatcher::apply(image, definitionKey,
+                  { true, QStringLiteral("#123456"), QStringLiteral("#abcdef"), true }, &error),
+              "native gradient definitions have stable named paths in minified QML");
+        check(resourceText(image, r, QStringLiteral("UiThemeObject.qml")).contains(QLatin1String("property color unaffected:'#010203'")),
+              "a Gradient replacement preserves a following same-line property");
         check(resourceText(image, r, QStringLiteral("UiThemeObject.qml")).contains(QLatin1String("property color primary100:'#112233'")),
               "palette properties typed color remain colors");
         const auto beforeFailure = image;

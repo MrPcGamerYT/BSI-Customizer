@@ -149,7 +149,17 @@ bool parse(Document &doc)
         }
         if (owner < 0 || m.capturedStart() < previousEnd.value(owner, -1)) continue;
         int start = m.capturedEnd(); while (start < doc.objects[owner].end && doc.qml[start].isSpace()) ++start;
-        const int end = expressionEnd(doc.mask, start, doc.objects[owner].end - 1);
+        int end = expressionEnd(doc.mask, start, doc.objects[owner].end - 1);
+        // A QML object-valued binding ends at its matching brace, even when
+        // another declaration follows on the same line without a semicolon.
+        // Do not let replacing a Gradient swallow its following properties.
+        for (const auto &object : doc.objects) {
+            if (object.parent == owner && object.begin >= start
+                && doc.mask.mid(start, object.begin - start).trimmed().isEmpty()) {
+                end = object.end;
+                break;
+            }
+        }
         if (end <= start) continue;
         Binding b { m.captured(2).isEmpty() ? m.captured(3) : m.captured(2), m.captured(1),
                     int(m.capturedStart()), start, end, owner };
