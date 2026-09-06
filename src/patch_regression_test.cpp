@@ -971,6 +971,21 @@ int runPatchRegressionTests()
                 if (!boot.ok) std::printf("    Boot round %d: %s\n", round, qPrintable(boot.msg));
                 check(boot.ok, "boot patch/repatch succeeds on the supplied EXE copy without breaking theme mapping");
             }
+            const auto gradientTargets = GradientPatcher::analyze(read(path));
+            check(gradientTargets.ok, "compatible gradient targets are found in the supplied EXE without executing its QML");
+            for (const auto &label : { QStringLiteral("Sidebar background"), QStringLiteral("Top bar background"),
+                                      QStringLiteral("Button backgrounds (all states)") }) {
+                QString key;
+                for (const auto &target : gradientTargets.targets) if (target.label == label) key = target.key;
+                check(!key.isEmpty(), "supplied EXE exposes a compatible named background target");
+                if (key.isEmpty()) continue;
+                const auto gradient = GradientPatcher::patch(path, key,
+                    { true, QStringLiteral("#112244"), QStringLiteral("#8844cc"), true });
+                if (!gradient.ok) std::printf("    Gradient %s: %s\n", qPrintable(label), qPrintable(gradient.message));
+                check(gradient.ok, "gradient resources are patched and verified on a disposable real-EXE copy");
+                check(GradientPatcher::patch(path, key, { false, {}, {}, true }).ok,
+                      "real-EXE gradient targets can return to their preserved solid binding");
+            }
             check(read(path + QStringLiteral(".bak")) == original, "the real-file copy retains its first complete backup");
         }
         check(read(input) == original, "the supplied EXE remains byte-for-byte untouched");
