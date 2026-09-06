@@ -5,6 +5,8 @@
 #include "QtResourceRegistration.h"
 
 #include <QDateTime>
+#include <QDir>
+#include <QFileInfo>
 #include <QSet>
 
 using namespace ByteUtils;
@@ -93,6 +95,47 @@ QByteArray nameBytes(const QString &name)
 bool overlaps(qint64 start, qint64 end, const QPair<qint64, qint64> &range)
 {
     return start < range.second && end > range.first;
+}
+
+QString unitString(const QByteArray &data, qsizetype pos, quint32 size, quint32 table,
+                   quint32 index, int header)
+{
+    if (quint64(table) + (quint64(index) + 1) * 4 > size)
+        return {};
+    const quint32 str = le32(data, pos + table + index * 4);
+    if (str < 248 || quint64(str) + header > size)
+        return {};
+    const quint32 len = le32(data, pos + str + (header == 24 ? 4 : 0));
+    if (len == 0 || len > 4096 || quint64(str) + header + quint64(len) * 2 > size)
+        return {};
+    QString path;
+    for (quint32 i = 0; i < len; ++i)
+        path += QChar(quint16(le16(data, pos + str + header + i * 2)));
+    return path;
+}
+
+QStringList unitNeedles(const QStringList &sourceNames)
+{
+    QStringList needles;
+    for (const QString &n : sourceNames) {
+        const QString file = n.section(QLatin1Char('/'), -1).section(QLatin1Char('\\'), -1);
+        if (file.isEmpty())
+            continue;
+        if (!needles.contains(file))
+            needles << file;
+        const QString stem = QFileInfo(file).completeBaseName();
+        // Short stems like "plr" match unrelated identifiers (plrBackend).
+        if (stem.size() >= 6 && !needles.contains(stem))
+            needles << stem;
+        if (file.compare(QLatin1String("plr.qml"), Qt::CaseInsensitive) == 0) {
+            for (const QString &extra : { QStringLiteral("iSidebar"), QStringLiteral("iTopbar"),
+                                          QStringLiteral("PlrSidebar"), QStringLiteral("PlrTopbar") }) {
+                if (!needles.contains(extra))
+                    needles << extra;
+            }
+        }
+    }
+    return needles;
 }
 
 } // namespace
@@ -361,6 +404,7 @@ int invalidateThemeUnits(QByteArray &data)
 
 int invalidateUnits(QByteArray &data, const QStringList &sourceNames)
 {
+    const QStringList needles = unitNeedles(sourceNames);
     int changed = 0;
     const QByteArray magic("qv4cdata\0", 8);
     for (qsizetype pos = data.indexOf(magic); pos >= 0; pos = data.indexOf(magic, pos + 8)) {
@@ -375,20 +419,34 @@ int invalidateUnits(QByteArray &data, const QStringList &sourceNames)
         const quint32 count = le32(data, pos + 112);
         const quint32 table = le32(data, pos + 116);
         const quint32 source = le32(data, pos + 236);
-        if (table < 248 || quint64(table) + quint64(count) * 4 > size || source >= count)
+        if (table < 248 || quint64(table) + quint64(count) * 4 > size)
             continue;
-        const quint32 str = le32(data, pos + table + source * 4);
         const int header = qt >> 16 == 5 ? 24 : 4;
-        if (str < 248 || quint64(str) + header > size)
-            continue;
-        const quint32 len = le32(data, pos + str + (header == 24 ? 4 : 0));
-        if (len == 0 || len > 4096 || quint64(str) + header + quint64(len) * 2 > size)
-            continue;
-        QString path;
-        for (quint32 i = 0; i < len; ++i)
-            path += QChar(quint16(le16(data, pos + str + header + i * 2)));
-        path.replace(QLatin1Char('\\'), QLatin1Char('/'));
-        if (!sourceNames.contains(path.section(QLatin1Char('/'), -1)))
+        bool match = false;
+        if (source < count) {
+            QString path = unitString(data, pos, size, table, source, header);
+            path.replace(QLatin1Char('\\'), QLatin1Char('/'));
+            const QString file = path.section(QLatin1Char('/'), -1);
+            if (!file.isEmpty() && sourceNames.contains(file))
+                match = true;
+        }
+        // Qt 5.15.4 BlueStacks units often leave sourceFileIndex at 0 (empty
+        // string). Scan the unit string table for distinctive identifiers so
+        // compiled PlrSidebar/plr.qml cannot keep painting the old chrome.
+        if (!match && !needles.isEmpty() && count > 0 && count < 4096) {
+            for (quint32 i = 0; i < count && !match; ++i) {
+                const QString s = unitString(data, pos, size, table, i, header);
+                if (s.isEmpty())
+                    continue;
+                for (const QString &needle : needles) {
+                    if (s.contains(needle, Qt::CaseInsensitive)) {
+                        match = true;
+                        break;
+                    }
+                }
+            }
+        }
+        if (!match)
             continue;
         // The format version is outside the payload checksum. A mismatch
         // makes Qt fall back to the source without touching other cached units.
@@ -398,6 +456,34 @@ int invalidateUnits(QByteArray &data, const QStringList &sourceNames)
         }
     }
     return changed;
+}
+
+int clearPlayerQmlCache(const QString &exePath)
+{
+    const QFileInfo fi(exePath);
+    if (!fi.exists())
+        return 0;
+    const QDir dir(fi.absolutePath());
+    int removed = 0;
+    const QStringList rel = {
+        QStringLiteral("cache/qmlcache"),
+        QStringLiteral("qmlcache"),
+        QStringLiteral("cache/qml"),
+        QStringLiteral("../cache/qmlcache"),
+    };
+    for (const QString &r : rel) {
+        const QString path = QDir::cleanPath(dir.filePath(r));
+        QDir cache(path);
+        if (!cache.exists())
+            continue;
+        const QString name = cache.dirName();
+        if (!name.contains(QLatin1String("qml"), Qt::CaseInsensitive)
+            && !path.contains(QLatin1String("qmlcache"), Qt::CaseInsensitive))
+            continue;
+        if (cache.removeRecursively())
+            ++removed;
+    }
+    return removed;
 }
 
 bool invalidateThemeCacheResources(QByteArray &data, const Link &link, QString *error)

@@ -9,6 +9,7 @@
 #include <QMap>
 #include <QRegularExpression>
 #include <QSet>
+#include <QStringList>
 #include <algorithm>
 
 namespace GradientPatcher {
@@ -316,7 +317,9 @@ Catalog catalog(const QByteArray &image)
         doc.qml = QString::fromUtf8(source);
         if (doc.qml.toUtf8() != source) continue; // do not corrupt a different source encoding
         if (!doc.qml.contains(QLatin1String("Gradient")) && !doc.qml.contains(QLatin1String("sidebar"), Qt::CaseInsensitive)
-            && !doc.qml.contains(QLatin1String("topbar"), Qt::CaseInsensitive) && file.name != QLatin1String("UiButton.qml")) continue;
+            && !doc.qml.contains(QLatin1String("topbar"), Qt::CaseInsensitive)
+            && !doc.qml.contains(QLatin1String("PlrSidebar")) && !doc.qml.contains(QLatin1String("PlrTopbar"))
+            && file.name != QLatin1String("UiButton.qml")) continue;
         ++out.candidates;
         if (!parse(doc)) continue;
         doc.link = QtResources::findLink(image, doc.entry, doc.name);
@@ -337,10 +340,30 @@ Catalog catalog(const QByteArray &image)
         if (root.type == QLatin1String("Rectangle")) {
             const bool sidebar = root.objectName.compare(QLatin1String("sidebar"), Qt::CaseInsensitive) == 0
                                  || root.id == QLatin1String("iSidebar");
-            const bool topbar = root.objectName.compare(QLatin1String("topbar"), Qt::CaseInsensitive) == 0;
+            const bool topbar = root.objectName.compare(QLatin1String("topbar"), Qt::CaseInsensitive) == 0
+                                 || root.id == QLatin1String("iTopbar");
             if (sidebar || topbar)
                 add(QStringLiteral("surface.root"), sidebar ? QStringLiteral("Sidebar background") : QStringLiteral("Top bar background"),
                     QStringLiteral("background"), { Site { 0, member(doc, 0, QStringLiteral("gradient")) } });
+        }
+        // The player window (plr.qml) paints sidebar/top bar by setting color
+        // on PlrSidebar/PlrTopbar instances. Type-level gradient on the
+        // Rectangle roots is not what you see; these instance bindings are.
+        for (int i = 0; i < doc.objects.size(); ++i) {
+            const Object &o = doc.objects.at(i);
+            const bool sidebar = o.type == QLatin1String("PlrSidebar")
+                || o.id == QLatin1String("iSidebar");
+            const bool topbar = o.type == QLatin1String("PlrTopbar")
+                || o.id == QLatin1String("iTopbar");
+            if (!sidebar && !topbar)
+                continue;
+            if (i == 0 && o.type == QLatin1String("Rectangle"))
+                continue;
+            add(QStringLiteral("chrome.") + o.type + QLatin1Char('.') + o.id,
+                sidebar ? QStringLiteral("Sidebar (player window)")
+                        : QStringLiteral("Top bar (player window)"),
+                QStringLiteral("chrome"),
+                { Site { i, member(doc, i, QStringLiteral("gradient")) } });
         }
         if (doc.name == QLatin1String("UiButton.qml")) {
             QList<Site> sites;
@@ -395,6 +418,7 @@ Analysis analyze(const QByteArray &image)
     // per-window Gradient properties a full UI contains stay available, but after
     // them, so a long list still starts with the useful entries.
     const auto rank = [](const Target &target) {
+        if (target.kind == QLatin1String("chrome")) return -1;
         if (target.kind == QLatin1String("background")) return 0;
         if (target.label.startsWith(QLatin1String("Theme · "))) return 1;
         return 2;
@@ -513,7 +537,74 @@ Result patch(const QString &exePath, const QString &key, const Spec &spec)
     if (changed == original) return { true, QStringLiteral("This target already has the selected gradient/solid mode.") };
     if (!ThemeEngine::backup(exePath)) return { false, QStringLiteral("Could not preserve the original backup; no EXE was written.") };
     if (!PatchFile::writeVerified(exePath, original, changed, &error)) return { false, error };
-    return { true, spec.enabled ? QStringLiteral("Gradient written and verified; resource caches refreshed. Restart BlueStacks.")
-                                : QStringLiteral("Gradient disabled. The target's existing solid-color binding is preserved. Restart BlueStacks.") };
+    const int caches = QtResources::clearPlayerQmlCache(exePath);
+    QString msg = spec.enabled ? QStringLiteral("Gradient written and verified; resource caches refreshed. Restart BlueStacks.")
+                               : QStringLiteral("Gradient disabled. The target's existing solid-color binding is preserved. Restart BlueStacks.");
+    if (caches > 0)
+        msg += QStringLiteral(" Cleared the player QML disk cache so BlueStacks reloads the source.");
+    return { true, msg };
+}
+
+bool isChromeSurface(const Target &target)
+{
+    return target.kind == QLatin1String("chrome")
+        || target.label == QLatin1String("Sidebar background")
+        || target.label == QLatin1String("Top bar background");
+}
+
+bool applyChrome(QByteArray &image, const Spec &spec, QString *error)
+{
+    QStringList labels;
+    {
+        const auto parsed = catalog(image);
+        for (const auto &choice : parsed.choices) {
+            if (!isChromeSurface(choice.target))
+                continue;
+            if (!labels.contains(choice.target.label))
+                labels << choice.target.label;
+        }
+    }
+    if (labels.isEmpty()) {
+        if (error)
+            *error = QStringLiteral("This player has no window chrome (plr.qml sidebar/top bar) to paint. "
+                                    "Solid Hex colors still work; a gradient needs those QML instances.");
+        return false;
+    }
+    for (const QString &label : labels) {
+        const auto parsed = catalog(image);
+        const Choice *sel = nullptr;
+        for (const auto &choice : parsed.choices) {
+            if (choice.target.label == label && isChromeSurface(choice.target)) {
+                sel = &choice;
+                break;
+            }
+        }
+        if (!sel)
+            continue;
+        if (!apply(image, sel->target.key, spec, error))
+            return false;
+    }
+    return true;
+}
+
+Result patchChrome(const QString &exePath, const Spec &spec)
+{
+    if (BsDetector::isProcessRunning(QStringLiteral("HD-Player.exe")))
+        return { false, QStringLiteral("Close all BlueStacks instances before applying gradients.") };
+    QFile file(exePath);
+    if (!file.open(QIODevice::ReadOnly)) return { false, QStringLiteral("Cannot read the selected EXE.") };
+    const auto original = file.readAll(); file.close();
+    auto changed = original; QString error;
+    if (!applyChrome(changed, spec, &error)) return { false, error };
+    if (changed == original) return { true, QStringLiteral("The player chrome already matches this gradient.") };
+    if (!ThemeEngine::backup(exePath)) return { false, QStringLiteral("Could not preserve the original backup; no EXE was written.") };
+    if (!PatchFile::writeVerified(exePath, original, changed, &error)) return { false, error };
+    const int caches = QtResources::clearPlayerQmlCache(exePath);
+    QString msg = spec.enabled
+        ? QStringLiteral("Wrote a two-stop linear gradient onto the player sidebar and top bar. Restart BlueStacks.")
+        : QStringLiteral("Player chrome gradient disabled. Existing solid colors are preserved. Restart BlueStacks.");
+    if (caches > 0)
+        msg += QStringLiteral(" Cleared the player QML disk cache so BlueStacks reloads the source.");
+    return { true, msg };
 }
 } // namespace GradientPatcher

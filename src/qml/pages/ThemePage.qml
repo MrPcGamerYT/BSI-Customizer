@@ -6,7 +6,7 @@ import BSICustomizer
 Item {
     id: page
 
-    property bool qmlMethod: methodChips.currentIndex === 0
+    property bool qmlMethod: backend.qmlThemeAvailable && methodChips.currentIndex === 0
     property bool fileChanged: backend.themeFileChanged()
     property string filterText: ""
     property string presetId: ""
@@ -40,7 +40,8 @@ Item {
     }
 
     function reload() {
-        backend.loadTheme(page.qmlMethod ? "qml" : "hex");
+        backend.loadTheme("auto");
+        methodChips.currentIndex = backend.qmlThemeAvailable ? 0 : 1;
         page.fileChanged = backend.themeFileChanged();
     }
 
@@ -122,6 +123,7 @@ Item {
             ChoiceChips {
                 id: methodChips
                 Layout.alignment: Qt.AlignTop
+                visible: backend.qmlThemeAvailable
                 model: [qsTr("QML (new)"), qsTr("Hex (old)")]
                 onSelected: (index) => {
                     backend.loadTheme(index === 0 ? "qml" : "hex");
@@ -323,7 +325,10 @@ Item {
                     ActionButton {
                         text: qsTr("Gradients")
                         enabled: page.qmlMethod && backend.themeFound
-                        onClicked: gradientEditor.open()
+                        onClicked: {
+                            gradientEditor.chromeMode = false;
+                            gradientEditor.open();
+                        }
                     }
                     ActionButton {
                         text: qsTr("Clear Edits")
@@ -502,10 +507,18 @@ Item {
                         Layout.fillWidth: true
                         elide: Text.ElideRight
                         text: qsTr("Legacy palette - replaces color constants directly in the "
-                                   + "binary. Use it only on builds where the QML method finds "
-                                   + "nothing.")
+                                   + "binary. Use Gradient theme to paint the real sidebar and "
+                                   + "top bar; solid hex recolors stay available below.")
                         color: Theme.textDim
                         font.pixelSize: 12
+                    }
+                    ActionButton {
+                        text: qsTr("Gradient theme")
+                        enabled: backend.exePath !== ""
+                        onClicked: {
+                            gradientEditor.chromeMode = true;
+                            gradientEditor.open();
+                        }
                     }
                     ActionButton {
                         text: qsTr("Reset All")

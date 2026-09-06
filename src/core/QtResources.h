@@ -64,6 +64,11 @@ bool refreshTimestamp(QByteArray &data, const Link &link);
 // even with the disk cache empty. Never disable the entire Qt cache globally.
 int invalidateThemeUnits(QByteArray &data);
 int invalidateUnits(QByteArray &data, const QStringList &sourceNames);
+// Qt 5.15 units often leave sourceFileIndex empty. Fall back to the unit's
+// string table so a patched PlrSidebar/plr.qml is not shadowed by bytecode.
+// Also drop the on-disk qmlcache next to HD-Player.exe (BlueStacks uses
+// <install>/cache/qmlcache). Only qmlcache-named folders are removed.
+int clearPlayerQmlCache(const QString &exePath);
 // Grow only a validated PE's mapped, read-only resource storage. Never append
 // an unmapped blob or overwrite an arbitrary copy of an offset.
 qint64 appendStorage(QByteArray &data, qint64 size, QString *error);
