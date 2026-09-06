@@ -38,6 +38,15 @@ gradient source, but compiled `qv4cdata` units with an empty source path are
 invalidated first; the on-disk `<install>/cache/qmlcache` is also cleared so
 Qt 6 reloads the edited QML.
 
+Only gradients the UI can actually show are offered: a `property Gradient` inside
+`UiThemeObject.qml` is listed when another resource reads it by name, and skipped
+(otherwise) with the count reported in the status line. Both players supplied during
+development read `UiTheme.colors.` 760 (Qt 5 / MSI 5) and 1123 (Qt 6) times and
+`UiTheme.gradients.` never; the old build reaches one gradient at all - a 1 px ring
+around a button, through `pColorState.borderGradient` in `UiButton.qml`. Patching a
+declaration nobody reads used to report success and change nothing on screen, which is
+why the reference check exists.
+
 After loading the QML theme on a Qt 6 player, open **Theme → Gradients**. The
 editor discovers verified compatible targets: player-window chrome instances
 first, then Rectangle-based sidebar/top-bar backgrounds, the supported

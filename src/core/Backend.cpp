@@ -223,16 +223,27 @@ void Backend::loadTheme(const QString &method)
     // Qt 6 HD-Player uses compiled-in QML resources. Qt 5 / MSI 5 still has a
     // UiThemeObject blob, but the player paints from compiled units + hex
     // constants: the QML (new) editor must stay hidden on those builds.
-    m_qmlThemeAvailable = data.contains("Qt6Core");
+    // A byte search for "Qt6Core" decides the mode for the wrong reason: the string
+    // can sit in any embedded resource, and a launcher that reaches Qt through a
+    // local DLL imports no Qt6 name at all. The import table is what actually binds
+    // this exe to a Qt generation, so the gate reads that (and fails open).
+    int qtMajor = 0;
+    QString gateWhy;
+    m_qmlThemeAvailable = GradientPatcher::qmlMethodSupported(data, &qtMajor, &gateWhy);
     QString resolved = method;
     if (method == QLatin1String("auto"))
         resolved = m_qmlThemeAvailable ? QStringLiteral("qml") : QStringLiteral("hex");
     m_themeMethod = resolved;
 
     if (resolved == QLatin1String("qml") && !m_qmlThemeAvailable) {
-        m_themeStatus = QStringLiteral("This is an older Qt 5 BlueStacks/MSI 5 player. "
-                                       "The QML method is not used here — use Hex (old). "
-                                       "Gradient theme there paints the real sidebar and top bar.");
+        m_themeStatus = gateWhy.isEmpty()
+            ? QStringLiteral("This is an older Qt 5 BlueStacks/MSI 5 player. "
+                              "The QML method is not used here — use Hex (old). "
+                              "Gradient theme there paints the real sidebar and top bar.")
+            : QStringLiteral("This is a Qt %1 player: its UI never reads the palette's gradient properties, so "
+                             "a QML gradient target there changes nothing you can see. Use the Gradient theme "
+                             "control in the Hex (old) method - it writes the gradient over the sidebar and top "
+                             "bar, which is what actually paints the theme.").arg(qtMajor);
         doLog(m_themeStatus, QStringLiteral("orange"));
         emit themeChanged();
         return;

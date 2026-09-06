@@ -3,6 +3,7 @@
 #include "PatchFile.h"
 #include "QtResources.h"
 #include "ThemeEngine.h"
+#include "PeUtils.h"
 
 #include <QFile>
 #include <QColor>
@@ -45,7 +46,7 @@ bool supportsOrientation(const Document &doc)
 struct Catalog {
     QList<Document> documents;
     QList<Choice> choices;
-    int candidates = 0, parsed = 0;
+    int candidates = 0, parsed = 0, skippedUnreferenced = 0;
 };
 
 // Placeholder for one masked string-literal character. It must not be whitespace
@@ -299,6 +300,32 @@ QList<QtResources::File> resourceFiles(const QByteArray &image, const ThemeInfo 
     }
     return files;
 }
+// Which names of the palette's `gradients` object another resource actually reads.
+// BlueStacks writes those reads as `gradients.<name>`, sometimes behind an import
+// alias, so every resource's QML text has to be searched; a palette gradient that
+// nothing reads is decoration - editing it cannot change a single pixel on screen.
+// Both player builds shipped with this project do exactly that for most of their
+// palette (measured: 0 reads of `gradients.` against 760 and 1123 reads of
+// `colors.`), which is why such an entry used to be offered, patched, verified and
+// still showed the same player after a restart.  The palette needs no special
+// handling while scanning: it writes  `property QtObject gradients:QtObject{...}`
+// with a colon, so a declaration can never match the read pattern, and tying the
+// scan to the located theme body only reintroduces a dependency on how the theme
+// happened to be found.
+QSet<QString> paletteGradientReaders(const QByteArray &image, const ThemeInfo &theme)
+{
+    static const QRegularExpression reader(QStringLiteral("gradients\\s*\\.\\s*([A-Za-z_]\\w*)"));
+    QSet<QString> names;
+    for (const auto &file : resourceFiles(image, theme)) {
+        if (!file.name.endsWith(QStringLiteral(".qml"), Qt::CaseInsensitive)) continue;
+        const auto bytes = QtResources::readFile(image, file);
+        if (bytes.isEmpty()) continue;
+        auto matches = reader.globalMatch(QString::fromUtf8(bytes));
+        while (matches.hasNext()) names.insert(matches.next().captured(1));
+    }
+    return names;
+}
+
 Catalog catalog(const QByteArray &image)
 {
     Catalog out;
@@ -306,6 +333,7 @@ Catalog catalog(const QByteArray &image)
     const auto theme = ThemeEngine::findThemeZlib(image);
     for (const auto &entry : ThemeEngine::parseQmlEntries(theme.qml))
         if (!palette.contains(entry.name)) palette[entry.name] = entry.value;
+    const QSet<QString> paletteReaders = paletteGradientReaders(image, theme);
     QSet<qint64> seen;
     for (const auto &file : resourceFiles(image, theme)) {
         if (!file.name.endsWith(QLatin1String(".qml"), Qt::CaseInsensitive) || seen.contains(file.entryOff)) continue;
@@ -385,6 +413,13 @@ Catalog catalog(const QByteArray &image)
             const auto value = expression(doc, b);
             if (!typed && value != QLatin1String("null") && !value.startsWith(doc.quickPrefix + QStringLiteral("Gradient"))) continue;
             const auto path = doc.objects[b.owner].path + QLatin1Char('.') + b.name;
+            // A gradient the palette declares but no resource reads cannot render, so
+            // it is not offered; the chrome surfaces are where a theme gradient belongs.
+            if (typed && doc.name == QLatin1String("UiThemeObject.qml")
+                && path.contains(QLatin1String("gradients.")) && !paletteReaders.contains(b.name)) {
+                ++out.skippedUnreferenced;
+                continue;
+            }
             const QString label = doc.name == QLatin1String("UiThemeObject.qml")
                 ? QStringLiteral("Theme · ") + path.mid(5) : doc.name + QStringLiteral(" · ") + path.mid(5);
             add(QStringLiteral("property.") + path, label, typed ? QStringLiteral("gradient property") : QStringLiteral("existing gradient"),
@@ -429,11 +464,21 @@ Analysis analyze(const QByteArray &image)
             return a.kind == QLatin1String("background");
         return a.label < b.label;
     });
+    result.skippedUnreferenced = parsed.skippedUnreferenced;
     result.ok = !result.targets.isEmpty();
     if (!result.ok && parsed.candidates > 0 && parsed.parsed == 0)
         result.message = QStringLiteral("This EXE has %1 QML file(s) with gradient candidates, but none could be parsed, so nothing was edited.").arg(parsed.candidates);
+    else if (result.ok && parsed.skippedUnreferenced > 0)
+        result.message = QStringLiteral("%1 compatible gradient target(s) found. %2 palette gradient(s) were left out "
+                                        "because no part of this UI reads them, so patching those could never show up.")
+                             .arg(result.targets.size()).arg(parsed.skippedUnreferenced);
     else if (result.ok)
         result.message = QStringLiteral("%1 compatible gradient target(s) found.").arg(result.targets.size());
+    else if (parsed.skippedUnreferenced > 0)
+        result.message = QStringLiteral("This player's palette declares gradients that nothing in its UI reads "
+                                        "(%1 of them), so there is nothing here to change. Use the Gradient theme "
+                                        "control in the Hex (old) method instead: it paints the sidebar and top bar.")
+                             .arg(parsed.skippedUnreferenced);
     else
         result.message = QStringLiteral("No verified compatible gradient targets were found in this EXE. Solid color fields are not gradient objects.");
     return result;
@@ -606,5 +651,40 @@ Result patchChrome(const QString &exePath, const Spec &spec)
     if (caches > 0)
         msg += QStringLiteral(" Cleared the player QML disk cache so BlueStacks reloads the source.");
     return { true, msg };
+}
+bool qmlMethodSupported(const QByteArray &image, int *qtMajor, QString *why)
+{
+    // Same comparison the FPS auto-detection does: `importedModules()` hands back
+    // lowercased DLL names, and matching on them beats a regex anchored at both
+    // ends (padding or a slightly different spelling must not turn into "Qt 6").
+    const auto imports = PeUtils::importedModules(image);
+    int major = 0;
+    if (imports.ok) {
+        for (const auto &raw : imports.modules) {
+            auto module = raw.trimmed();
+            while (module.endsWith(QChar::Null)) module.chop(1);
+            module = module.toLower();
+            for (int candidate : { 5, 6 }) {
+                const QString stem = QStringLiteral("qt%1").arg(candidate);
+                if (!module.startsWith(stem)) continue;
+                const QString tail = module.mid(stem.size());
+                if (tail == QLatin1String("core.dll") || tail == QLatin1String("gui.dll")
+                    || tail == QLatin1String("qml.dll") || tail == QLatin1String("qtcore.dll"))
+                    major = qMax(major, candidate);
+            }
+        }
+    }
+    if (qtMajor) *qtMajor = major;
+    // Unknown imports (a stripped or unusual build) stay supported: refusing to list
+    // targets because the import table could not be read would be worse than offering
+    // the ones that were verified.
+    if (major != 5) return true;
+    if (why) {
+        *why = QStringLiteral("This player is built against Qt 5, and its UI never reads the palette's gradient "
+                              "properties - a QML gradient target there changes nothing you can see. Use the "
+                              "gradient option in the Hex (old) theme method instead: it writes the gradient over "
+                              "the sidebar and top bar, which is what actually paints the theme.");
+    }
+    return false;
 }
 } // namespace GradientPatcher

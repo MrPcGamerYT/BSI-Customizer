@@ -923,12 +923,14 @@ int runPatchRegressionTests()
             "}\n"));
         auto r = resources({ { QStringLiteral("UiThemeObject.qml"), palette }, { QStringLiteral("PlrSidebar.qml"), sidebar },
                              { QStringLiteral("PlrTopbar.qml"), topbar }, { QStringLiteral("UiButton.qml"), button },
-                             { QStringLiteral("Other.qml"), QStringLiteral("import QtQuick\nQtObject{}") } }, true,
+                             { QStringLiteral("Other.qml"), QStringLiteral("import QtQuick\nQtObject{ property var stock: UiTheme.gradients.gradientButton }") } }, true,
                            { QStringLiteral("PlrTopbar.qml") });
         addRegistration(r, false);
         const auto original = r.f.bytes;
         const auto discovered = GradientPatcher::analyze(original);
         check(discovered.ok && discovered.targets.size() == 5, "discover sidebar/topbar/button backgrounds and both typed native Gradient slots");
+        check(discovered.skippedUnreferenced == 0,
+              "a palette gradient is offered because another resource reads it - the read alone is enough");
         QMap<QString, QString> keys;
         for (const auto &target : discovered.targets) keys[target.label] = target.key;
         const QString sideKey = keys.value(QStringLiteral("Sidebar background"));
@@ -1017,7 +1019,13 @@ int runPatchRegressionTests()
             "QtObject{property QtObject gradients:QtObject{property Gradient gradientCard:"
             "Gradient{GradientStop{position:0;color:\"#111111\"}GradientStop{position:1;color:\"#222222\"}}}}\r\n");
         auto r = resources({ { QStringLiteral("UiThemeObject.qml"), legacyPalette },
-                             { QStringLiteral("LegacySidebar.qml"), legacySurface } }, true, {});
+                             { QStringLiteral("LegacySidebar.qml"), legacySurface },
+                             // Keep this file: a palette gradient is only offered when another resource reads it,
+                             // and that read is what makes `gradientCard` a real target here. Drop it and the two
+                             // assertions below fail for the right reason - nothing in the UI could show it.
+                             { QStringLiteral("LegacyOther.qml"), QStringLiteral(
+                                 "import QtQuick 2.9\r\nQtObject{ property var stock: UiTheme.gradients.gradientCard }\r\n") } },
+                           true, {});
         addRegistration(r, false);
         const auto discovered = GradientPatcher::analyze(r.f.bytes);
         QString surfaceKey, paletteKey;
@@ -1125,6 +1133,75 @@ int runPatchRegressionTests()
         check(resourceText(image, r, QStringLiteral("PlrSidebar.qml"))
                   .contains(QLatin1String("gradient:Gradient{orientation:Gradient.Vertical;GradientStop{position:0;color:\"#001122\"}")),
               "the written gradient is found again through the recovered pool");
+    }
+
+    std::printf("[gradient-filter] unread palette gradients, surviving chrome surfaces, Qt generation gate\n");
+    {
+        // Measured on the two players supplied with this work: `colors.` is read 760
+        // (Qt 5 / MSI 5) and 1123 (Qt 6) times while `gradients.` is read by nobody,
+        // and the old build's single used gradient paints the 1 px ring around a
+        // button. So a palette gradient nothing reads is dropped from the list, the
+        // surfaces that actually paint the theme survive it, and a Qt 5 player is
+        // pointed at the hex method's control instead of an unusable QML list.
+        const QString palette = QStringLiteral(
+            "import QtQuick 2.15\r\n"
+            "QtObject{property QtObject colors:QtObject{property color primary70:'#232642' property color primary10:'#101218'}"
+            "property QtObject gradients:QtObject{property Gradient gradientUnused:Gradient{orientation:Gradient.Horizontal;"
+            "GradientStop{position:0;color:'#ff0000'}GradientStop{position:1;color:'#00ff00'}}"
+            "property Gradient borderGradient:Gradient{GradientStop{position:0;color:'#111111'}GradientStop{position:1;color:'#222222'}}}}"
+            "\r\n");
+        const QString sidebar = QStringLiteral(
+            "import QtQuick 2.15\r\nRectangle {\r\n    id: iSidebar\r\n    objectName: \"sidebar\"\r\n"
+            "    color: UiTheme.colors.primary70\r\n}\r\n");
+        const QString topbar = QStringLiteral(
+            "import QtQuick 2.15\r\nRectangle {\r\n    objectName: \"topbar\"\r\n"
+            "    color: UiTheme.colors.primary10\r\n}\r\n");
+        const QString button = QStringLiteral(
+            "import QtQuick 2.15\r\nItem { Rectangle { gradient: UiTheme.gradients.borderGradient } }\r\n");
+        auto r = resources({ { QStringLiteral("UiThemeObject.qml"), palette }, { QStringLiteral("PlrSidebar.qml"), sidebar },
+                             { QStringLiteral("PlrTopbar.qml"), topbar }, { QStringLiteral("UiButton.qml"), button } }, true, {});
+        addRegistration(r, false);
+        const auto analysis = GradientPatcher::analyze(r.f.bytes);
+        bool unusedOffered = false, usedOffered = false, sideOffered = false, topOffered = false;
+        for (const auto &target : analysis.targets) {
+            if (target.key.endsWith(QLatin1String("gradients.gradientUnused"))) unusedOffered = true;
+            if (target.key.endsWith(QLatin1String("gradients.borderGradient"))) usedOffered = true;
+            if (target.label == QLatin1String("Sidebar background")) sideOffered = true;
+            if (target.label == QLatin1String("Top bar background")) topOffered = true;
+        }
+        check(!unusedOffered && usedOffered && analysis.skippedUnreferenced == 1,
+              QStringLiteral("a palette gradient no resource reads is left out while one that is read stays offered "
+                             "(skipped %1)").arg(analysis.skippedUnreferenced));
+        check(sideOffered && topOffered, "the themed surfaces a gradient can paint survive the filter");
+        auto image = r.f.bytes;
+        QString error;
+        GradientPatcher::Spec spec;
+        spec.first = QStringLiteral("#ff0000");
+        spec.second = QStringLiteral("#0000ff");
+        const bool chrome = GradientPatcher::applyChrome(image, spec, &error);
+        check(chrome, QStringLiteral("one chrome call writes every surviving surface (%1)")
+                  .arg(error.isEmpty() ? QStringLiteral("ok") : error));
+        const QString sideText = resourceText(image, r, QStringLiteral("PlrSidebar.qml"));
+        check(sideText.contains(QLatin1String("gradient:Gradient"))
+                  && sideText.contains(QStringLiteral("color: UiTheme.colors.primary70")),
+              "the surface keeps the solid theme color that paints it and gains the gradient");
+        int major = 0;
+        QString why;
+        const auto qt5Image = importedPlayer({ QStringLiteral("Qt5Core.dll") });
+        const auto qt6Image = importedPlayer({ QStringLiteral("Qt6Core.dll") });
+        const auto imports = PeUtils::importedModules(qt5Image);
+        ciNotice(QStringLiteral("gate-diag ok=%1 modules=[%2]").arg(imports.ok ? 1 : 0)
+                     .arg(imports.modules.join(QStringLiteral(", "))));
+        check(imports.ok && imports.modules.contains(QStringLiteral("qt5core.dll")),
+              "the synthetic player fixture really exposes an import table for the Qt generation gate");
+        check(!GradientPatcher::qmlMethodSupported(qt5Image, &major, &why) && major == 5
+                  && why.contains(QLatin1String("Hex")),
+              QStringLiteral("a Qt 5 player is pointed at the hex method instead of an empty QML gradient list (major %1)")
+                  .arg(major));
+        check(GradientPatcher::qmlMethodSupported(qt6Image, &major, nullptr) && major == 6,
+              QStringLiteral("a Qt 6 player keeps the QML gradient method (major %1)").arg(major));
+        check(GradientPatcher::qmlMethodSupported(QByteArray(), nullptr, nullptr),
+              "an unreadable import table never hides the gradient editor");
     }
 
     std::printf("[gradients] player-window chrome instances, Qt5 unit invalidation, QML gate\n");
