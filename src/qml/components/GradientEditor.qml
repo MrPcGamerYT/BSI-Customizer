@@ -16,6 +16,7 @@ Dialog {
     padding: 20
 
     property bool pendingSolidEdits: false
+    property bool chromeMode: false
     property string selectedKey: ""
     property string firstColor: "#7C5CFF"
     property string secondColor: "#00C2FF"
@@ -45,6 +46,11 @@ Dialog {
         const shown = [];
         for (let i = 0; i < all.length; ++i) {
             const target = all[i];
+            if (editor.chromeMode
+                    && target.kind !== "chrome"
+                    && target.label !== "Sidebar background"
+                    && target.label !== "Top bar background")
+                continue;
             const haystack = (target.label + " " + target.resource + " " + target.kind).toLowerCase();
             if (needle === "" || haystack.indexOf(needle) >= 0) shown.push(target);
         }
@@ -90,12 +96,18 @@ Dialog {
             color: Theme.textDim
             font.pixelSize: 12
             wrapMode: Text.WordWrap
-            text: qsTr("Apply two-stop gradients to compatible backgrounds or existing Gradient properties. "
-                       + "Text/icon color properties stay solid. Applying replaces the selected target's existing stops.")
+            text: editor.chromeMode
+                  ? qsTr("Paints the player sidebar and top bar BlueStacks actually shows "
+                         + "(the PlrSidebar/PlrTopbar instances in plr.qml), not only the "
+                         + "type-level Rectangle. Solid hex colors stay as fallback.")
+                  : qsTr("Apply two-stop gradients to compatible backgrounds or existing Gradient properties. "
+                         + "Text/icon color properties stay solid. Applying replaces the selected target's existing stops. "
+                         + "\"Sidebar (player window)\" / \"Top bar (player window)\" are the chrome BlueStacks paints.")
         }
         RowLayout {
             Layout.fillWidth: true
             spacing: 8
+            visible: !editor.chromeMode
             ComboBox {
                 id: targetBox
                 Layout.fillWidth: true
@@ -252,12 +264,16 @@ Dialog {
             ActionButton {
                 accent: true
                 text: editor.useGradient ? qsTr("Apply Gradient") : qsTr("Use Solid")
-                enabled: editor.selectedKey !== "" && !editor.pendingSolidEdits
+                enabled: (editor.chromeMode ? editor.view.length > 0 : editor.selectedKey !== "")
+                         && !editor.pendingSolidEdits
                          && (!editor.useGradient || (editor.validColor(editor.firstColor) && editor.validColor(editor.secondColor)))
                 onClicked: {
                     const key = editor.selectedKey;
-                    const result = backend.applyThemeGradient(key, editor.firstColor, editor.secondColor,
-                                                              editor.horizontal, editor.useGradient);
+                    const result = editor.chromeMode
+                          ? backend.applyChromeGradient(editor.firstColor, editor.secondColor,
+                                                        editor.horizontal, editor.useGradient)
+                          : backend.applyThemeGradient(key, editor.firstColor, editor.secondColor,
+                                                       editor.horizontal, editor.useGradient);
                     editor.message = result.msg || "";
                     editor.failed = !result.ok;
                     if (result.ok) {

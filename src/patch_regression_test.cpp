@@ -1127,6 +1127,121 @@ int runPatchRegressionTests()
               "the written gradient is found again through the recovered pool");
     }
 
+    std::printf("[gradients] player-window chrome instances, Qt5 unit invalidation, QML gate\n");
+    {
+        const QString host = QStringLiteral(
+            "import QtQuick 2.15\r\n"
+            "Item {\r\n"
+            "    PlrTopbar {\r\n"
+            "        id: iTopbar\r\n"
+            "        color: oem === \"msi5\" ? primary70 : primary80\r\n"
+            "    }\r\n"
+            "    PlrSidebar {\r\n"
+            "        id: iSidebar\r\n"
+            "        color: oem === \"msi5\" ? primary70 : primary80\r\n"
+            "    }\r\n"
+            "}\r\n");
+        const QString typeSidebar = QStringLiteral(
+            "import QtQuick 2.15\r\n"
+            "Rectangle {\r\n"
+            "    id: iSidebar\r\n"
+            "    objectName: \"sidebar\"\r\n"
+            "    color: \"#112233\"\r\n"
+            "}\r\n");
+        auto r = resources({ { QStringLiteral("plr.qml"), host },
+                             { QStringLiteral("PlrSidebar.qml"), typeSidebar } }, true, {});
+        addRegistration(r, false);
+        const auto discovered = GradientPatcher::analyze(r.f.bytes);
+        bool chromeSide = false, chromeTop = false, typeSide = false;
+        for (const auto &target : discovered.targets) {
+            chromeSide |= target.label == QLatin1String("Sidebar (player window)") && target.kind == QLatin1String("chrome");
+            chromeTop |= target.label == QLatin1String("Top bar (player window)") && target.kind == QLatin1String("chrome");
+            typeSide |= target.label == QLatin1String("Sidebar background");
+        }
+        check(discovered.ok && chromeSide && chromeTop && typeSide,
+              "player-window PlrSidebar/PlrTopbar instances are chrome targets, ahead of type roots");
+        check(!discovered.targets.isEmpty() && discovered.targets.first().kind == QLatin1String("chrome"),
+              "chrome instance targets are listed before type-level backgrounds");
+        auto image = r.f.bytes; QString error;
+        check(GradientPatcher::applyChrome(image, { true, QStringLiteral("#ff0000"), QStringLiteral("#0000ff"), true }, &error),
+              QStringLiteral("chrome gradient apply writes plr.qml instances (%1)").arg(error.isEmpty() ? QStringLiteral("ok") : error));
+        const auto plr = resourceText(image, r, QStringLiteral("plr.qml"));
+        check(plr.contains(QLatin1String("gradient:Gradient{orientation:Gradient.Horizontal;"))
+                  && plr.contains(QLatin1String("id: iTopbar")) && plr.contains(QLatin1String("id: iSidebar"))
+                  && plr.contains(QLatin1String("color: oem === \"msi5\"")),
+              "chrome gradient is inserted on both player-window instances and keeps the solid color fallback");
+        check(resourceText(image, r, QStringLiteral("PlrSidebar.qml")).contains(QLatin1String("gradient:Gradient")),
+              "chrome apply also paints the type-level sidebar surface");
+        const QString path = temp.filePath(QStringLiteral("chrome-gradient.exe"));
+        write(path, r.f.bytes);
+        const QString cacheDir = QDir(QFileInfo(path).absolutePath()).filePath(QStringLiteral("cache/qmlcache"));
+        QDir().mkpath(cacheDir);
+        write(QDir(cacheDir).filePath(QStringLiteral("stale.qmlc")), QByteArray("stale"));
+        const auto patched = GradientPatcher::patchChrome(path, { true, QStringLiteral("#aabbcc"), QStringLiteral("#ddeeff"), false });
+        if (!patched.ok) std::printf("    %s\n", qPrintable(patched.message));
+        check(patched.ok, "patchChrome writes the EXE and reports success");
+        check(!QDir(cacheDir).exists(), "patchChrome deletes the player qmlcache so Qt 6 reloads source");
+    }
+
+    {
+        QByteArray unit(400, '\0');
+        unit.replace(0, 8, QByteArray("qv4cdata", 8));
+        putLe32(unit, 8, 41);
+        putLe32(unit, 12, 0x50f04);
+        putLe32(unit, 24, 400);
+        putLe32(unit, 112, 2);
+        putLe32(unit, 116, 248);
+        putLe32(unit, 236, 0);
+        putLe32(unit, 248, 256);
+        putLe32(unit, 252, 300);
+        putLe32(unit, 256, 0xffffffff);
+        putLe32(unit, 260, 0);
+        putLe32(unit, 300, 0xffffffff);
+        putLe32(unit, 304, 10);
+        putLe32(unit, 308, 0);
+        putLe32(unit, 312, 0x18);
+        putLe32(unit, 316, 0x18);
+        putLe32(unit, 320, 0);
+        const QString ident = QStringLiteral("PlrSidebar");
+        for (int i = 0; i < ident.size(); ++i)
+            putLe16(unit, 324 + i * 2, ident.at(i).unicode());
+        auto hit = unit;
+        check(QtResources::invalidateUnits(hit, { QStringLiteral("PlrSidebar.qml") }) == 1
+                  && le32(hit, 8) == 0,
+              "Qt 5.15 units with empty sourceFileIndex are invalidated via the string table");
+        auto miss = unit;
+        check(QtResources::invalidateUnits(miss, { QStringLiteral("UiThemeObject.qml") }) == 0
+                  && le32(miss, 8) == 41,
+              "unrelated compiled units are not blanket-invalidated");
+        auto plr = unit;
+        const QString chromeId = QStringLiteral("iSidebar");
+        putLe32(plr, 304, quint32(chromeId.size()));
+        for (int i = 0; i < chromeId.size(); ++i)
+            putLe16(plr, 324 + i * 2, chromeId.at(i).unicode());
+        check(QtResources::invalidateUnits(plr, { QStringLiteral("plr.qml") }) == 1,
+              "plr.qml invalidation matches iSidebar in the compiled unit");
+    }
+
+    {
+        const QString qt5Path = temp.filePath(QStringLiteral("old-player.exe"));
+        write(qt5Path, importedPlayer({ QStringLiteral("Qt5Core.dll") }));
+        QSettings().setValue(QStringLiteral("paths/exe"), qt5Path);
+        SettingsManager settings;
+        Backend backend(&settings);
+        backend.loadTheme(QStringLiteral("qml"));
+        check(!backend.qmlThemeAvailable() && !backend.themeFound(),
+              "forcing QML on a Qt 5 EXE loads nothing");
+        backend.loadTheme(QStringLiteral("auto"));
+        check(!backend.qmlThemeAvailable() && backend.themeMode() == QLatin1String("hex"),
+              "auto-load on a Qt 5 EXE uses Hex (old)");
+        const QString qt6Path = temp.filePath(QStringLiteral("new-player.exe"));
+        write(qt6Path, importedPlayer({ QStringLiteral("Qt6Core.dll") }));
+        settings.setExePath(qt6Path);
+        backend.loadTheme(QStringLiteral("auto"));
+        check(backend.qmlThemeAvailable(),
+              "a Qt 6 player offers the QML method even when no theme blob is present");
+    }
+
     std::printf("[boot-discovery] renamed/raw controllers and the host's selected component\n");
     {
         const QString controller = QStringLiteral("import QtQuick\nItem{Image{id:iBootImage}Text{id:iBootLoadingText}"
@@ -1253,6 +1368,7 @@ int runPatchRegressionTests()
             check(gradientTargets.candidates == 0 || gradientTargets.parsed > 0,
                   "the QML of the supplied EXE is parsed instead of being silently skipped");
             for (const auto &label : { QStringLiteral("Sidebar background"), QStringLiteral("Top bar background"),
+                                      QStringLiteral("Sidebar (player window)"), QStringLiteral("Top bar (player window)"),
                                       QStringLiteral("Button backgrounds (all states)"),
                                       QStringLiteral("Theme gradients.gradientButton") }) {
                 QString key, resource;

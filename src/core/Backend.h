@@ -25,6 +25,7 @@ class Backend : public QObject
     Q_PROPERTY(QString confPath READ confPath WRITE setConfPath NOTIFY confPathChanged)
 
     Q_PROPERTY(bool themeFound READ themeFound NOTIFY themeChanged)
+    Q_PROPERTY(bool qmlThemeAvailable READ qmlThemeAvailable NOTIFY themeChanged)
     Q_PROPERTY(QString themeMode READ themeMode NOTIFY themeChanged)
     Q_PROPERTY(QString themeStatus READ themeStatus NOTIFY themeChanged)
     Q_PROPERTY(bool themeStale READ themeStale NOTIFY themeChanged)
@@ -49,6 +50,9 @@ public:
     void setConfPath(const QString &p);
 
     bool themeFound() const { return m_themeInfo.found; }
+    // Qt 6 players use the QML (new) method. Older Qt 5 / MSI 5 builds hide it
+    // and use Hex (old), which now also has a chrome Gradient theme action.
+    bool qmlThemeAvailable() const { return m_qmlThemeAvailable; }
     QString themeMode() const { return m_themeInfo.mode; }
     QString themeStatus() const { return m_themeStatus; }
     // True when HD-Player.exe changed on disk after the theme was loaded, i.e.
@@ -72,7 +76,7 @@ public:
     Q_INVOKABLE QVariantList detectInstances();
 
     // ---- theme ----
-    Q_INVOKABLE void loadTheme(const QString &method); // "qml" | "hex"
+    Q_INVOKABLE void loadTheme(const QString &method); // "qml" | "hex" | "auto"
     Q_INVOKABLE void reloadTheme();                    // re-load with the last method
     Q_INVOKABLE bool themeFileChanged() const;         // EXE touched since Load?
     Q_INVOKABLE void setThemeEdit(const QString &name, const QString &value);
@@ -81,6 +85,8 @@ public:
     Q_INVOKABLE QVariantMap loadGradientTargets();
     Q_INVOKABLE QVariantMap applyThemeGradient(const QString &key, const QString &first, const QString &second,
                                               bool horizontal, bool enabled);
+    Q_INVOKABLE QVariantMap applyChromeGradient(const QString &first, const QString &second,
+                                               bool horizontal, bool enabled);
     // Stage a whole palette as edits (still needs PATCH THEME).  Returns how
     // many colors the preset covers in this EXE.
     Q_INVOKABLE int applyPreset(const QString &id);
@@ -149,7 +155,8 @@ private:
     SettingsManager *m_settings;
     ThemeInfo m_themeInfo;
     QString m_themeStatus;
-    QString m_themeMethod = QStringLiteral("qml");
+    QString m_themeMethod = QStringLiteral("auto");
+    bool m_qmlThemeAvailable = false;
     QString m_themeFilePath;
     qint64 m_themeFileMsecs = -1;  // EXE lastModified when the theme was loaded
     qint64 m_themeFileBytes = -1;  // EXE size when the theme was loaded

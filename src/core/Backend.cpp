@@ -32,6 +32,7 @@ Backend::Backend(SettingsManager *settings, QObject *parent)
         m_edits.clear();
         m_themeFilePath.clear();
         m_themeStatus.clear();
+        m_qmlThemeAvailable = false;
         m_svgs.clear();
         emit exePathChanged();
         emit themeChanged();
@@ -182,6 +183,7 @@ void Backend::loadTheme(const QString &method)
     m_hexQmlColors.clear();
     m_themeStatus.clear();
     m_themeMethod = method;
+    m_qmlThemeAvailable = false;
     m_themeFilePath.clear();
     m_themeFileMsecs = -1;
     m_themeFileBytes = -1;
@@ -218,7 +220,25 @@ void Backend::loadTheme(const QString &method)
                              "start - close it before patching, then start it again."),
               QStringLiteral("orange"));
 
-    if (method == QLatin1String("hex")) {
+    // Qt 6 HD-Player uses compiled-in QML resources. Qt 5 / MSI 5 still has a
+    // UiThemeObject blob, but the player paints from compiled units + hex
+    // constants: the QML (new) editor must stay hidden on those builds.
+    m_qmlThemeAvailable = data.contains("Qt6Core");
+    QString resolved = method;
+    if (method == QLatin1String("auto"))
+        resolved = m_qmlThemeAvailable ? QStringLiteral("qml") : QStringLiteral("hex");
+    m_themeMethod = resolved;
+
+    if (resolved == QLatin1String("qml") && !m_qmlThemeAvailable) {
+        m_themeStatus = QStringLiteral("This is an older Qt 5 BlueStacks/MSI 5 player. "
+                                       "The QML method is not used here — use Hex (old). "
+                                       "Gradient theme there paints the real sidebar and top bar.");
+        doLog(m_themeStatus, QStringLiteral("orange"));
+        emit themeChanged();
+        return;
+    }
+
+    if (resolved == QLatin1String("hex")) {
         m_themeInfo = ThemeEngine::findThemeHex(
             data, ThemeEngine::detectProfileFromPath(exe));
         for (const QString &name : ThemeEngine::qmlColorNames()) {
@@ -393,6 +413,20 @@ QVariantMap Backend::applyThemeGradient(const QString &key, const QString &first
     if (!m_edits.isEmpty())
         return result(false, QStringLiteral("Apply or clear the pending solid-color edits before applying a gradient."), QStringLiteral("orange"));
     const auto applied = GradientPatcher::patch(m_settings->exePath(), key, { enabled, first, second, horizontal });
+    if (applied.ok) {
+        reloadTheme();
+        loadGradientTargets();
+    }
+    return result(applied.ok, applied.message, QStringLiteral("green"));
+}
+
+QVariantMap Backend::applyChromeGradient(const QString &first, const QString &second,
+                                         bool horizontal, bool enabled)
+{
+    if (!m_edits.isEmpty())
+        return result(false, QStringLiteral("Apply or clear the pending solid-color edits before applying a gradient."), QStringLiteral("orange"));
+    const auto applied = GradientPatcher::patchChrome(m_settings->exePath(),
+                                                      { enabled, first, second, horizontal });
     if (applied.ok) {
         reloadTheme();
         loadGradientTargets();

@@ -39,4 +39,10 @@ Analysis analyze(const QByteArray &image);
 // In-memory planning/verification used by the file patcher and regressions.
 bool apply(QByteArray &image, const QString &targetKey, const Spec &spec, QString *error);
 Result patch(const QString &exePath, const QString &targetKey, const Spec &spec);
+// Paint the real player chrome: plr.qml's PlrSidebar/PlrTopbar instances
+// (the color BlueStacks actually shows) plus the type-level sidebar/topbar
+// surfaces. Used by Hex (old) "Gradient theme"; QML Gradients lists the
+// same chrome targets first so a single apply can hit what is on screen.
+bool applyChrome(QByteArray &image, const Spec &spec, QString *error);
+Result patchChrome(const QString &exePath, const Spec &spec);
 }

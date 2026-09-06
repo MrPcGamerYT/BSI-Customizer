@@ -28,15 +28,27 @@ The original `.bak` is preserved. Theme edits are made against the current EXE, 
 
 ## Gradient themes
 
-After loading the QML theme, open **Theme → Gradients**. The editor discovers
-verified compatible targets in the selected EXE: Rectangle-based sidebar/top-bar
-backgrounds, the supported button-background branches, existing gradient
-bindings, and native properties typed `Gradient` (including button borders).
-Choose two `#RRGGBB` or `#AARRGGBB` stops and a horizontal/vertical direction; the
-editor shows a live preview before applying. Surfaces and theme-level gradient
-definitions are listed first, and the filter box narrows the list by target name,
-QML file or kind. Clear/apply staged solid-color edits first, then close BlueStacks
-before writing.
+BlueStacks paints the sidebar and top bar from `plr.qml`'s `PlrSidebar` /
+`PlrTopbar` instances (`color: oem === "msi5" ? primary70 : primary80`), not
+from the type-level Rectangle roots. **QML (new)** is offered only on Qt 6
+players. Older Qt 5 / MSI 5 builds hide that method: use **Hex (old)** and
+**Gradient theme**, which writes a two-stop linear gradient onto those real
+chrome instances (solid hex recolors remain available). Qt 5.15 can load the
+gradient source, but compiled `qv4cdata` units with an empty source path are
+invalidated first; the on-disk `<install>/cache/qmlcache` is also cleared so
+Qt 6 reloads the edited QML.
+
+After loading the QML theme on a Qt 6 player, open **Theme → Gradients**. The
+editor discovers verified compatible targets: player-window chrome instances
+first, then Rectangle-based sidebar/top-bar backgrounds, the supported
+button-background branches, existing gradient bindings, and native properties
+typed `Gradient` (including button borders). Choose two `#RRGGBB` or
+`#AARRGGBB` stops and a horizontal/vertical direction; the editor shows a live
+preview before applying. Surfaces and theme-level gradient definitions are
+listed first, and the filter box narrows the list by target name, QML file or
+kind. Clear/apply staged solid-color edits first, then close BlueStacks before
+writing. Pick **Sidebar (player window)** / **Top bar (player window)** to
+change what BlueStacks actually shows.
 
 A property typed `color` cannot hold a Gradient object. These edits therefore
 modify the compatible rendering/Gradient binding while preserving the original

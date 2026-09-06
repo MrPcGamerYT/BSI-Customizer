@@ -1330,6 +1330,7 @@ ThemeEngine::PatchResult ThemeEngine::patchTheme(const QString &exePath, const T
         QString error;
         if (!PatchFile::writeVerified(exePath, original, data, &error))
             return { false, error };
+        QtResources::clearPlayerQmlCache(exePath);
         return { true, QStringLiteral("Theme colors written and verified. Restart BlueStacks "
                                        "to load them.") + skippedNote };
     }
@@ -1502,14 +1503,19 @@ ThemeEngine::PatchResult ThemeEngine::patchTheme(const QString &exePath, const T
     QString error;
     if (!PatchFile::writeVerified(exePath, original, data, &error))
         return { false, error };
-    return { true, refreshOnly
+    const int caches = QtResources::clearPlayerQmlCache(exePath);
+    const QString cacheNote = caches > 0
+        ? QStringLiteral(" Cleared the player QML disk cache.")
+        : QString();
+    return { true, (refreshOnly
                        ? QStringLiteral("Theme already has these colors. Its cache was refreshed; "
                                         "restart BlueStacks to load them.")
                        : (relocated
                               ? QStringLiteral("Theme relocated, colors verified and cache refreshed. "
                                                "Restart BlueStacks to load the new theme.")
                               : QStringLiteral("Theme colors verified and cache refreshed. "
-                                               "Restart BlueStacks to load the new theme.")) };
+                                               "Restart BlueStacks to load the new theme.")))
+                   + cacheNote };
 
 }
 
