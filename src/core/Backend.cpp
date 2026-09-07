@@ -261,11 +261,12 @@ void Backend::loadTheme(const QString &method)
         m_themeStatus = gateWhy.isEmpty()
             ? QStringLiteral("This is an older Qt 5 BlueStacks/MSI 5 player. "
                               "The QML method is not used here — use Hex (old). "
-                              "Its Gradient theme paints the player's top bar / title bar.")
+                              "Its Gradient theme paints the same compatible surfaces (top bar, title bar, "
+                              "sidebar, buttons…) as the QML editor.")
             : QStringLiteral("This is a Qt %1 player: its UI never reads the palette's gradient properties, so "
                              "a QML gradient target there changes nothing you can see. Use the Gradient theme "
-                             "control in the Hex (old) method - it writes your custom stops over the player's "
-                             "top bar / title bar, which is the chrome that can hold a gradient there.").arg(qtMajor);
+                             "control in the Hex (old) method - it applies your custom stops to any compatible "
+                             "surface (top bar, title bar, sidebar, buttons…), just like the QML editor.").arg(qtMajor);
         doLog(m_themeStatus, QStringLiteral("orange"));
         emit themeChanged();
         return;
@@ -283,23 +284,23 @@ void Backend::loadTheme(const QString &method)
                 m_hexQmlColors << item;
             }
         }
-        // The Hex gradient editor styles exactly these flagged chrome targets
-        // (top bar / title bar). Count them for the status line so a player
-        // with no gradient-capable chrome is visible at load time.
+        // Count the gradient surfaces the gradient editor offers for this
+        // player into the status line, so a player with no gradient-capable
+        // surface is visible at load time.
         int hexGradientTargets = 0;
         for (const auto &target : GradientPatcher::analyze(data).targets)
             if (target.hexGradient)
                 ++hexGradientTargets;
-        m_themeStatus = QStringLiteral("Hex theme ready (%1 profile, %2 color(s) found, %3 top bar/title bar "
-                                       "gradient target(s)).")
+        m_themeStatus = QStringLiteral("Hex theme ready (%1 profile, %2 color(s) found, %3 gradient "
+                                       "surface(s)).")
                             .arg(m_themeInfo.profile)
                             .arg(m_hexQmlColors.size())
                             .arg(hexGradientTargets);
         doLog(QStringLiteral("Theme loaded (hex): %1 color(s) found.")
                   .arg(m_hexQmlColors.size()),
               QStringLiteral("blue"));
-        doLog(QStringLiteral("Tick the colors you want, then Apply Selected. Gradient theme paints the "
-                             "top bar/title bar with stops you choose."),
+        doLog(QStringLiteral("Tick the colors you want, then Apply Selected. Gradient theme paints any listed "
+                             "surface with stops you choose."),
               QStringLiteral("gray"));
         emit themeChanged();
         return;
@@ -469,7 +470,7 @@ QVariantMap Backend::applyHexGradient(const QString &key, const QString &first, 
 {
     if (!m_edits.isEmpty())
         return result(false, QStringLiteral("Apply or clear the pending solid-color edits before applying a gradient."), QStringLiteral("orange"));
-    const auto applied = GradientPatcher::patchTopbar(m_settings->exePath(), key,
+    const auto applied = GradientPatcher::patchSurfaces(m_settings->exePath(), key,
                                                       { enabled, first, second, horizontal });
     if (applied.ok) {
         reloadTheme();

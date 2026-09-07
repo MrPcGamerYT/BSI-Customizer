@@ -8,7 +8,7 @@ import BSICustomizer
     parent: Overlay.overlay
     modal: true
     focus: true
-    title: editor.hexMode ? qsTr("Gradient theme - top bar / title bar") : qsTr("Gradient theme")
+    title: qsTr("Gradient theme")
     width: Math.min(660, parent ? parent.width - 32 : 660)
     height: Math.min(620, parent ? parent.height - 32 : 620)
     x: parent ? Math.round((parent.width - width) / 2) : 0
@@ -50,9 +50,9 @@ import BSICustomizer
         let orientationEverywhere = true;
         for (let i = 0; i < all.length; ++i) {
             const target = all[i];
-            // Hex gradients only ever paint the top bar / title bar chrome;
-            // the sidebar and every other surface belong to the solid hex
-            // colors or the QML method.
+            // Both methods offer the complete gradient list — top bar/title
+            // bar/sidebar chrome, backgrounds, buttons, palette bindings —
+            // with the same controls.
             if (editor.hexMode && !target.hexGradient)
                 continue;
             const haystack = (target.label + " " + target.resource + " " + target.kind).toLowerCase();
@@ -62,11 +62,11 @@ import BSICustomizer
             }
         }
         if (editor.hexMode && shown.length > 0) {
-            // Synthetic combined entry first: one apply paints every hex chrome
-            // surface. The key matches GradientPatcher::allTopbarsKey().
+            // Synthetic combined entry first: one apply paints every offered
+            // gradient surface. The key matches GradientPatcher::allGradientKey().
             shown.unshift({
-                key: "hex:all-topbars-titlebars",
-                label: qsTr("All top bar / title bar targets (%1)").arg(shown.length),
+                key: "hex:all-gradient-targets",
+                label: qsTr("All gradient targets (%1)").arg(shown.length),
                 resource: shown.map(function (t) { return t.resource; })
                                .filter(function (v, i, a) { return a.indexOf(v) === i; }).join(", "),
                 kind: "chrome",
@@ -121,10 +121,10 @@ import BSICustomizer
             font.pixelSize: 12
             wrapMode: Text.WordWrap
             text: editor.hexMode
-                  ? qsTr("Hex gradients paint the player's top bar / title bar - choose custom start and "
-                         + "end colors and a direction, then apply to one target or all of them. "
-                         + "The sidebar and every other surface keep their solid hex colors from the list; "
-                         + "solid fallback is always kept underneath the gradient.")
+                  ? qsTr("Hex gradients can paint every listed surface - top bar, title bar, sidebar, buttons "
+                         + "and the other compatible targets - with custom start/end colors and a direction, "
+                         + "applied to one target or to all of them at once. A solid fallback color is always "
+                         + "kept underneath the gradient; the solid hex colors from the list stay editable too.")
                   : qsTr("Apply two-stop gradients to compatible backgrounds or existing Gradient properties. "
                          + "Text/icon color properties stay solid. Applying replaces the selected target's existing stops. "
                          + "\"Sidebar (player window)\" / \"Top bar (player window)\" are the chrome BlueStacks paints.")
