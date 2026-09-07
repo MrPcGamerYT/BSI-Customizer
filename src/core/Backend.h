@@ -54,8 +54,8 @@ public:
 
     bool themeFound() const { return m_themeInfo.found; }
     // Qt 6 players use the QML (new) method. Older Qt 5 / MSI 5 builds hide it
-    // and use Hex (old), which has a custom gradient editor for the player's
-    // top bar / title bar chrome.
+    // and use Hex (old); both expose the same per-surface gradient editor for
+    // every gradient-capable surface the catalog finds.
     bool qmlThemeAvailable() const { return m_qmlThemeAvailable; }
     QString themeMode() const { return m_themeInfo.mode; }
     // The method the last loadTheme() ended up with: after an "auto" load this
@@ -98,8 +98,9 @@ public:
     Q_INVOKABLE QVariantMap loadGradientTargets();
     Q_INVOKABLE QVariantMap applyThemeGradient(const QString &key, const QString &first, const QString &second,
                                               bool horizontal, bool enabled);
-    // Hex (old) gradient editor: key is one of the hexGradient-flagged targets
-    // (top bar / title bar chrome) or GradientPatcher::allTopbarsKey() to paint
+    // Hex (old) gradient editor: key is one of the catalog gradient targets —
+    // with the Hex (old) method every listed surface is paintable, not only
+    // the top bar / title bar — or GradientPatcher::allGradientKey() to paint
     // them all in one go.
     Q_INVOKABLE QVariantMap applyHexGradient(const QString &key, const QString &first, const QString &second,
                                             bool horizontal, bool enabled);

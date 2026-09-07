@@ -40,14 +40,14 @@ method simply loads nothing and the status line explains why.
 - **QML (new)** — Theme → Gradients. Gradients can paint every verified
   compatible target: player-window chrome instances (sidebar included), the
   Rectangle backgrounds, and supported button/border slots.
-- **Hex (old)** — **Gradient theme**. Gradients are deliberately scoped to
-  the **top bar** and **title bar** only; the sidebar and every other
-  surface keep their solid hex theme color ("Apply theme"). The editor lists
-  each top bar / title bar surface for individual styling, or **All top bar /
-  title bar targets** to paint them at once, each with its own two stops and
-  a horizontal/vertical direction (a solid color fallback always remains,
+- **Hex (old)** — **Gradient theme**. The same full surface list as the QML
+  editor: top bar / title bar / sidebar chrome, backgrounds, buttons and
+  every other compatible target. Pick a single surface or **All gradient
+  targets** to paint them at once, each with its own two stops and a
+  horizontal/vertical direction (a solid color fallback always remains,
   e.g. `gradient: Gradient { … }; color: …`, so a rejected or partially
-  compiled gradient never leaves the bar blank).
+  compiled gradient never leaves the surface blank; the solid hex colors
+  stay editable through "Apply theme").
 
 Qt 5.15 can load the gradient source, but compiled `qv4cdata` units with an
 empty source path are invalidated first; the on-disk `<install>/cache/qmlcache`
@@ -71,8 +71,8 @@ typed `Gradient` (including button borders). Choose two `#RRGGBB` or
 preview before applying. Surfaces and theme-level gradient definitions are
 listed first, and the filter box narrows the list by target name, QML file or
 kind. Clear/apply staged solid-color edits first, then close BlueStacks before
-writing. On the **Hex (old)** method only the top bar / title bar surfaces are
-gradient-editable, so pick one of them (or the combined entry) there.
+writing. On the **Hex (old)** method the gradient editor offers the same full
+target list — pick any surface (or the combined entry to paint them all).
 
 A property typed `color` cannot hold a Gradient object. These edits therefore
 modify the compatible rendering/Gradient binding while preserving the original

@@ -358,15 +358,15 @@ Catalog catalog(const QByteArray &image)
         const int index = out.documents.size();
         const QString prefix = QString::number(doc.link.nodeOff, 16) + QLatin1Char(':') + doc.name + QLatin1Char(':');
         QSet<int> handled;
-        // hexGradient marks the exact surfaces the Hex (old) method may gradient:
-        // top bar / title bar chrome of the player window. The sidebar stays out
-        // (its legacy recoloring is the solid hex color list's job).
+        // Every catalog target is a gradient surface the Hex (old) editor may
+        // paint too - both gradient editors share the same offer set, so the
+        // flag is always set (kept on the DTO for the QML-facing list).
         const auto add = [&](const QString &key, const QString &label, const QString &kind,
-                             const QList<Site> &sites, bool hexGradient = false) {
+                             const QList<Site> &sites) {
             if (sites.isEmpty()) return;
             Target target; target.key = prefix + key; target.label = label; target.resource = doc.name; target.kind = kind;
             target.supportsOrientation = supportsOrientation(doc);
-            target.hexGradient = hexGradient;
+            target.hexGradient = true;
             target.current = currentSpec(doc, sites.first().binding, palette);
             out.choices << Choice { target, index, sites };
             for (const auto &site : sites) if (site.binding >= 0) handled.insert(site.binding);
@@ -386,7 +386,7 @@ Catalog catalog(const QByteArray &image)
                             : titlebar ? QStringLiteral("Title bar background")
                                        : QStringLiteral("Top bar background"),
                     QStringLiteral("background"),
-                    { Site { 0, member(doc, 0, QStringLiteral("gradient")) } }, topbar || titlebar);
+                    { Site { 0, member(doc, 0, QStringLiteral("gradient")) } });
         }
         // The player window (plr.qml) paints sidebar/top bar by setting color
         // on PlrSidebar/PlrTopbar instances. Type-level gradient on the
@@ -414,7 +414,7 @@ Catalog catalog(const QByteArray &image)
                         : titlebar ? QStringLiteral("Title bar (player window)")
                                    : QStringLiteral("Top bar (player window)"),
                 QStringLiteral("chrome"),
-                { Site { i, member(doc, i, QStringLiteral("gradient")) } }, topbar || titlebar);
+                { Site { i, member(doc, i, QStringLiteral("gradient")) } });
         }
         if (doc.name == QLatin1String("UiButton.qml")) {
             QList<Site> sites;
@@ -614,72 +614,61 @@ Result patch(const QString &exePath, const QString &key, const Spec &spec)
     return { true, msg };
 }
 
-QString allTopbarsKey()
+QString allGradientKey()
 {
     // Synthetic key of the combined Hex-method action. It can never collide
     // with a real target key: those always start with the resource node
     // offset in hex followed by ':'.
-    static const QString key = QStringLiteral("hex:all-topbars-titlebars");
+    static const QString key = QStringLiteral("hex:all-gradient-targets");
     return key;
 }
 
 // Resolve the requested key into the concrete target keys to rewrite. The
-// combined key expands to every hexGradient-flagged target; a specific key is
-// honoured only when it is one of them, so the Hex (old) method can never
-// gradient-edit a surface outside the top bar / title bar.
-static bool topbarKeys(const QByteArray &image, const QString &key, QStringList *keys, QString *error)
+// combined key expands to every catalog target; a specific key is honoured
+// whenever it is in the catalog. Like the QML (new) editor, the Hex (old)
+// method may gradient any listed surface (top bar / title bar / sidebar,
+// buttons, existing bindings...); only unknown keys are refused.
+static bool gradientKeys(const QByteArray &image, const QString &key, QStringList *keys, QString *error)
 {
     const auto refuse = [&](const QString &message) { if (error) *error = message; return false; };
     keys->clear();
     const auto parsed = catalog(image);
-    if (key == allTopbarsKey()) {
+    if (key == allGradientKey()) {
         for (const auto &choice : parsed.choices)
             if (choice.target.hexGradient)
                 *keys << choice.target.key;
         if (keys->isEmpty())
-            return refuse(QStringLiteral("This player has no top bar/title bar chrome (plr.qml PlrTopbar or a "
-                                         "title bar instance) to paint. Solid Hex colors still work; a gradient "
-                                         "needs those QML instances."));
+            return refuse(QStringLiteral("This player has no gradient-compatible QML surface to paint. "
+                                         "Solid hex colors still work. On a modern Qt 6 player the "
+                                         "QML (new) method offers the same gradient list."));
         return true;
     }
-    bool known = false, allowed = false;
+    bool known = false;
     for (const auto &choice : parsed.choices) {
         if (choice.target.key == key) {
             known = true;
-            allowed = choice.target.hexGradient;
+            break;
         }
     }
     if (!known)
         return refuse(QStringLiteral("The gradient target changed or is unsupported. Reload the gradient list."));
-    if (!allowed)
-        return refuse(QStringLiteral("The Hex (old) method can only put a gradient on the player's top bar / "
-                                     "title bar. The sidebar and everything else in this list belong to the "
-                                     "solid hex colors or the QML (new) method."));
     *keys << key;
     return true;
 }
 
-bool applyTopbar(QByteArray &image, const QString &key, const Spec &spec, QString *error)
+bool applySurfaces(QByteArray &image, const QString &key, const Spec &spec, QString *error)
 {
     QStringList keys;
-    if (!topbarKeys(image, key, &keys, error))
+    if (!gradientKeys(image, key, &keys, error))
         return false;
-    const int expected = keys.size();
-    int done = 0;
     for (const QString &single : keys) {
         if (!apply(image, single, spec, error))
             return false;
-        ++done;
-    }
-    if (done != expected) {
-        if (error)
-            *error = QStringLiteral("Not every top bar/title bar target accepted the gradient; no file was written.");
-        return false;
     }
     return true;
 }
 
-Result patchTopbar(const QString &exePath, const QString &key, const Spec &spec)
+Result patchSurfaces(const QString &exePath, const QString &key, const Spec &spec)
 {
     if (BsDetector::isProcessRunning(QStringLiteral("HD-Player.exe")))
         return { false, QStringLiteral("Close all BlueStacks instances before applying gradients.") };
@@ -687,24 +676,24 @@ Result patchTopbar(const QString &exePath, const QString &key, const Spec &spec)
     if (!file.open(QIODevice::ReadOnly)) return { false, QStringLiteral("Cannot read the selected EXE.") };
     const auto original = file.readAll(); file.close();
     auto changed = original; QString error;
-    if (!applyTopbar(changed, key, spec, &error)) return { false, error };
-    if (changed == original) return { true, QStringLiteral("The player top bar/title bar already matches this gradient.") };
+    if (!applySurfaces(changed, key, spec, &error)) return { false, error };
+    if (changed == original) return { true, QStringLiteral("These surfaces already match this gradient.") };
     if (!ThemeEngine::backup(exePath)) return { false, QStringLiteral("Could not preserve the original backup; no EXE was written.") };
     if (!PatchFile::writeVerified(exePath, original, changed, &error)) return { false, error };
     QStringList targets;
     {
         QStringList keys;
-        if (topbarKeys(original, key, &keys, nullptr)) targets = keys;
+        if (gradientKeys(original, key, &keys, nullptr)) targets = keys;
     }
     const int caches = QtResources::clearPlayerQmlCache(exePath);
     QString msg;
     if (spec.enabled)
-        msg = key == allTopbarsKey()
-            ? QStringLiteral("Wrote a two-stop linear gradient onto %1 player top bar/title bar surface(s). Restart BlueStacks.")
+        msg = key == allGradientKey()
+            ? QStringLiteral("Wrote a two-stop linear gradient onto %1 gradient-capable surface(s). Restart BlueStacks.")
                   .arg(targets.size())
-            : QStringLiteral("Wrote a two-stop linear gradient onto the selected top bar/title bar surface. Restart BlueStacks.");
+            : QStringLiteral("Wrote a two-stop linear gradient onto the selected surface. Restart BlueStacks.");
     else
-        msg = QStringLiteral("Top bar/title bar gradient disabled. Existing solid colors are preserved. Restart BlueStacks.");
+        msg = QStringLiteral("Gradient disabled. Existing solid colors are preserved. Restart BlueStacks.");
     if (caches > 0)
         msg += QStringLiteral(" Cleared the player QML disk cache so BlueStacks reloads the source.");
     return { true, msg };
