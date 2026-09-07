@@ -1,6 +1,11 @@
 name: Single EXE Release
 
 # Requires the repository's scripts/ and packaging/portable/ helpers.
+#
+# The Releases page always receives the raw, single portable EXE - never a
+# zip. (The Actions "artifact bundle" zip GitHub shows on run pages is only
+# the internal hand-off between jobs and is skipped entirely on plain runs;
+# the published asset itself is the bare .exe file.)
 on:
   push:
     branches: [main]
@@ -8,8 +13,16 @@ on:
   pull_request:
   workflow_dispatch:
     inputs:
+      version:
+        # Type the version here when running manually: the whole run (built
+        # EXE name, BSI_VERSION inside the binary, tag and release) follows it,
+        # no need to bump CMakeLists or to have any matching tag prepared.
+        description: 'Release version, e.g. 2.0.1 (empty = use CMake project version)'
+        required: false
+        type: string
+        default: ''
       publish_release:
-        description: 'Publish a direct EXE download in Releases (otherwise artifact only)'
+        description: 'Publish a direct EXE download in Releases (otherwise build + self-test only)'
         type: boolean
         default: false
       prerelease:
@@ -54,6 +67,24 @@ jobs:
             throw 'Project version is missing from CMakeLists.txt'
           }
           $version = $match.Groups[1].Value
+
+          # Manual runs may override the release version right from the Run
+          # workflow box. Only digits/dots survive the check below, so baking
+          # it into the build is safe; the checkout is ephemeral (nothing is
+          # committed back to the repo).
+          $typed = '${{ inputs.version }}'.Trim()
+          if ($env:GITHUB_EVENT_NAME -eq 'workflow_dispatch' -and $typed -ne '') {
+            if ($typed -notmatch '^[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?$') {
+              throw "Typed version '$typed' is not a valid version like 2.0.1"
+            }
+            $version = $typed
+            $patched = [regex]::Replace($text,
+              '(project\s*\([^)]*?VERSION\s+)[0-9]+(?:\.[0-9]+){2,3}',
+              "`${1}$version")
+            Set-Content -Path CMakeLists.txt -Value $patched -NoNewline
+            Write-Output "Manual run: using typed version $version (CMakeLists patched for this build)."
+          }
+
           if ($env:GITHUB_REF -like 'refs/tags/*' -and $env:GITHUB_REF_NAME -ne "v$version") {
             throw "Tag $env:GITHUB_REF_NAME does not match project version $version. Update CMakeLists.txt before tagging."
           }
@@ -117,7 +148,12 @@ jobs:
           "File: **$env:EXE_NAME**" >> $env:GITHUB_STEP_SUMMARY
           "SHA-256: ``$sha``" >> $env:GITHUB_STEP_SUMMARY
 
+      # Only stored when a publish can follow (tag push or a manual run with
+      # "publish" ticked). Artifact bundles are zipped by GitHub anyway, so
+      # skipping this on plain runs keeps run pages zip-free; the Releases
+      # page always carries the raw EXE itself.
       - name: Upload only the portable EXE
+        if: (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')) || (github.event_name == 'workflow_dispatch' && inputs.publish_release)
         uses: actions/upload-artifact@v4
         with:
           name: BSI-Customizer-win64
@@ -176,7 +212,8 @@ jobs:
             done
 
             if [[ "$type" != "commit" || "$sha" != "$BUILD_COMMIT" ]]; then
-              echo "Tag $tag belongs to another commit. Bump the project version." >&2
+              echo "Tag $tag already exists and points at a different commit." >&2
+              echo "Re-run the workflow with a fresh version in the 'version' box (e.g. $VERSION → next patch)." >&2
               exit 1
             fi
           elif ! grep -q 'HTTP 404' tag-error.txt; then
@@ -186,6 +223,9 @@ jobs:
 
           asset="release-files/$EXE_NAME"
 
+          # The raw EXE goes into Releases exactly as built - never inside a
+          # zip. An existing release for this exact commit just gets its asset
+          # replaced; otherwise a fresh tag/release is created on it.
           if gh release view "$tag" --repo "$GH_REPO" >/dev/null 2>&1; then
             gh release upload "$tag" "$asset" --repo "$GH_REPO" --clobber
           else
