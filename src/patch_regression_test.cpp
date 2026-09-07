@@ -1173,18 +1173,44 @@ int runPatchRegressionTests()
               QStringLiteral("a palette gradient no resource reads is left out while one that is read stays offered "
                              "(skipped %1)").arg(analysis.skippedUnreferenced));
         check(sideOffered && topOffered, "the themed surfaces a gradient can paint survive the filter");
+        QString sideKey, topKey;
+        for (const auto &target : analysis.targets) {
+            if (target.label == QLatin1String("Sidebar background"))
+                sideKey = target.key;
+            if (target.label == QLatin1String("Top bar background"))
+                topKey = target.key;
+        }
+        // The Hex (old) gradient editor is scoped to top bar / title bar
+        // chrome: only those flags may be set, the sidebar stays out.
+        for (const auto &target : analysis.targets) {
+            const bool expected = target.label == QLatin1String("Top bar background");
+            check(target.hexGradient == expected,
+                  QStringLiteral("only top bar/title bar surfaces carry the hex gradient flag (%1)")
+                      .arg(target.label));
+        }
         auto image = r.f.bytes;
         QString error;
         GradientPatcher::Spec spec;
         spec.first = QStringLiteral("#ff0000");
         spec.second = QStringLiteral("#0000ff");
-        const bool chrome = GradientPatcher::applyChrome(image, spec, &error);
-        check(chrome, QStringLiteral("one chrome call writes every surviving surface (%1)")
+        const bool topbars = GradientPatcher::applyTopbar(image, GradientPatcher::allTopbarsKey(), spec, &error);
+        check(topbars, QStringLiteral("one hex call writes every top bar/title bar surface (%1)")
                   .arg(error.isEmpty() ? QStringLiteral("ok") : error));
         const QString sideText = resourceText(image, r, QStringLiteral("PlrSidebar.qml"));
-        check(sideText.contains(QLatin1String("gradient:Gradient"))
+        check(!sideText.contains(QLatin1String("gradient:Gradient"))
                   && sideText.contains(QStringLiteral("color: UiTheme.colors.primary70")),
-              "the surface keeps the solid theme color that paints it and gains the gradient");
+              "the hex gradient leaves the sidebar's solid theme color untouched");
+        const QString topText = resourceText(image, r, QStringLiteral("PlrTopbar.qml"));
+        check(topText.contains(QLatin1String("gradient:Gradient"))
+                  && topText.contains(QStringLiteral("color: UiTheme.colors.primary10")),
+              "the hex gradient paints the top bar and keeps its solid fallback color");
+        const auto beforeRefusal = image;
+        check(!GradientPatcher::applyTopbar(image, sideKey, spec, &error) && image == beforeRefusal
+                  && error.contains(QLatin1String("top bar")),
+              QStringLiteral("a sidebar key is refused by the hex gradient editor (%1)").arg(error));
+        check(GradientPatcher::applyTopbar(image, topKey, { true, QStringLiteral("#112233"), QStringLiteral("#445566"), false },
+                                           &error),
+              "a single top bar surface accepts its own custom stops and direction");
         int major = 0;
         QString why;
         const auto qt5Image = importedPlayer({ QStringLiteral("Qt5Core.dll") });
@@ -1204,7 +1230,7 @@ int runPatchRegressionTests()
               "an unreadable import table never hides the gradient editor");
     }
 
-    std::printf("[gradients] player-window chrome instances, Qt5 unit invalidation, QML gate\n");
+    std::printf("[gradients] player-window chrome instances, title bar scope, Qt5 unit invalidation, QML gate\n");
     {
         const QString host = QStringLiteral(
             "import QtQuick 2.15\r\n"
@@ -1212,6 +1238,10 @@ int runPatchRegressionTests()
             "    PlrTopbar {\r\n"
             "        id: iTopbar\r\n"
             "        color: oem === \"msi5\" ? primary70 : primary80\r\n"
+            "    }\r\n"
+            "    PlrTitleBar {\r\n"
+            "        id: iTitleBar\r\n"
+            "        color: primary80\r\n"
             "    }\r\n"
             "    PlrSidebar {\r\n"
             "        id: iSidebar\r\n"
@@ -1225,39 +1255,82 @@ int runPatchRegressionTests()
             "    objectName: \"sidebar\"\r\n"
             "    color: \"#112233\"\r\n"
             "}\r\n");
+        const QString typeTopbar = QStringLiteral(
+            "import QtQuick 2.15\r\n"
+            "Rectangle {\r\n"
+            "    objectName: \"topbar\"\r\n"
+            "    color: \"#112233\"\r\n"
+            "}\r\n");
         auto r = resources({ { QStringLiteral("plr.qml"), host },
-                             { QStringLiteral("PlrSidebar.qml"), typeSidebar } }, true, {});
+                             { QStringLiteral("PlrSidebar.qml"), typeSidebar },
+                             { QStringLiteral("PlrTopbar.qml"), typeTopbar } }, true, {});
         addRegistration(r, false);
         const auto discovered = GradientPatcher::analyze(r.f.bytes);
-        bool chromeSide = false, chromeTop = false, typeSide = false;
+        bool chromeSide = false, chromeTop = false, chromeTitle = false, typeSide = false, typeTop = false;
+        QString sideKey, titleKey;
+        int hexCount = 0;
         for (const auto &target : discovered.targets) {
+            if (target.kind != QLatin1String("chrome") && target.kind != QLatin1String("background"))
+                continue;
             chromeSide |= target.label == QLatin1String("Sidebar (player window)") && target.kind == QLatin1String("chrome");
-            chromeTop |= target.label == QLatin1String("Top bar (player window)") && target.kind == QLatin1String("chrome");
+            chromeTop |= target.label == QLatin1String("Top bar (player window)") && target.kind == QLatin1String("chrome")
+                         && target.hexGradient;
+            chromeTitle |= target.label == QLatin1String("Title bar (player window)") && target.kind == QLatin1String("chrome")
+                           && target.hexGradient;
             typeSide |= target.label == QLatin1String("Sidebar background");
+            typeTop |= target.label == QLatin1String("Top bar background") && target.hexGradient;
+            if (target.hexGradient) ++hexCount;
+            if (target.label == QLatin1String("Sidebar (player window)")) sideKey = target.key;
+            if (target.label == QLatin1String("Title bar (player window)")) titleKey = target.key;
         }
-        check(discovered.ok && chromeSide && chromeTop && typeSide,
-              "player-window PlrSidebar/PlrTopbar instances are chrome targets, ahead of type roots");
+        check(discovered.ok && chromeSide && chromeTop && chromeTitle && typeSide && typeTop,
+              "player-window PlrSidebar/PlrTopbar/title-bar instances are chrome targets, title-bar ones flagged for hex");
+        for (const auto &target : discovered.targets) {
+            if (target.label == QLatin1String("Sidebar (player window)") || target.label == QLatin1String("Sidebar background"))
+                check(!target.hexGradient, QStringLiteral("the %1 target stays out of the hex gradient editor").arg(target.label));
+        }
+        check(hexCount == 3, "exactly the top bar instance, the title bar instance and the top bar surface are hex targets");
         check(!discovered.targets.isEmpty() && discovered.targets.first().kind == QLatin1String("chrome"),
               "chrome instance targets are listed before type-level backgrounds");
         auto image = r.f.bytes; QString error;
-        check(GradientPatcher::applyChrome(image, { true, QStringLiteral("#ff0000"), QStringLiteral("#0000ff"), true }, &error),
-              QStringLiteral("chrome gradient apply writes plr.qml instances (%1)").arg(error.isEmpty() ? QStringLiteral("ok") : error));
+        check(GradientPatcher::applyTopbar(image, GradientPatcher::allTopbarsKey(),
+                                           { true, QStringLiteral("#ff0000"), QStringLiteral("#0000ff"), true }, &error),
+              QStringLiteral("hex gradient combined apply writes plr.qml top bar/title bar instances (%1)")
+                  .arg(error.isEmpty() ? QStringLiteral("ok") : error));
         const auto plr = resourceText(image, r, QStringLiteral("plr.qml"));
         check(plr.contains(QLatin1String("gradient:Gradient{orientation:Gradient.Horizontal;"))
                   && plr.contains(QLatin1String("id: iTopbar")) && plr.contains(QLatin1String("id: iSidebar"))
                   && plr.contains(QLatin1String("color: oem === \"msi5\"")),
-              "chrome gradient is inserted on both player-window instances and keeps the solid color fallback");
-        check(resourceText(image, r, QStringLiteral("PlrSidebar.qml")).contains(QLatin1String("gradient:Gradient")),
-              "chrome apply also paints the type-level sidebar surface");
+              "hex gradient keeps the solid color fallback on every player-window instance");
+        {
+            // The gradient is added to the top bar and title bar instances only:
+            // two gradient bindings in plr.qml, and none on the sidebar instance.
+            const int iSidebarPos = plr.indexOf(QLatin1String("id: iSidebar"));
+            const int gradientCount = plr.count(QLatin1String("gradient:Gradient"));
+            const QString sidebarBody = plr.mid(iSidebarPos > 0 ? plr.lastIndexOf(QLatin1String("PlrSidebar"), iSidebarPos) : 0);
+            check(gradientCount == 2 && !sidebarBody.contains(QLatin1String("gradient:Gradient")),
+                  "only the top bar and title bar player-window instances receive the gradient");
+        }
+        check(resourceText(image, r, QStringLiteral("PlrTopbar.qml")).contains(QLatin1String("gradient:Gradient")),
+              "hex apply paints the type-level top bar surface");
+        check(!resourceText(image, r, QStringLiteral("PlrSidebar.qml")).contains(QLatin1String("gradient:Gradient")),
+              "hex apply leaves the type-level sidebar surface alone");
+        check(GradientPatcher::applyTopbar(image, titleKey,
+                                           { true, QStringLiteral("#00ff00"), QStringLiteral("#ffffff"), false }, &error),
+              "a single title bar instance accepts custom stops and its own direction");
+        check(!GradientPatcher::applyTopbar(image, sideKey,
+                                            { true, QStringLiteral("#00ff00"), QStringLiteral("#ffffff"), true }, &error),
+              "the sidebar instance key cannot be gradient-edited through the hex editor");
         const QString path = temp.filePath(QStringLiteral("chrome-gradient.exe"));
         write(path, r.f.bytes);
         const QString cacheDir = QDir(QFileInfo(path).absolutePath()).filePath(QStringLiteral("cache/qmlcache"));
         QDir().mkpath(cacheDir);
         write(QDir(cacheDir).filePath(QStringLiteral("stale.qmlc")), QByteArray("stale"));
-        const auto patched = GradientPatcher::patchChrome(path, { true, QStringLiteral("#aabbcc"), QStringLiteral("#ddeeff"), false });
+        const auto patched = GradientPatcher::patchTopbar(path, GradientPatcher::allTopbarsKey(),
+                                                          { true, QStringLiteral("#aabbcc"), QStringLiteral("#ddeeff"), false });
         if (!patched.ok) std::printf("    %s\n", qPrintable(patched.message));
-        check(patched.ok, "patchChrome writes the EXE and reports success");
-        check(!QDir(cacheDir).exists(), "patchChrome deletes the player qmlcache so Qt 6 reloads source");
+        check(patched.ok, "patchTopbar writes the EXE and reports success");
+        check(!QDir(cacheDir).exists(), "patchTopbar deletes the player qmlcache so Qt 6 reloads source");
     }
 
     {
@@ -1308,15 +1381,34 @@ int runPatchRegressionTests()
         backend.loadTheme(QStringLiteral("qml"));
         check(!backend.qmlThemeAvailable() && !backend.themeFound(),
               "forcing QML on a Qt 5 EXE loads nothing");
+        check(backend.resolvedThemeMethod() == QLatin1String("qml") && backend.detectedQtMajor() == 5
+                  && backend.themeDetection().contains(QLatin1String("Manually")),
+              "a forced QML load on a Qt 5 EXE reports the manual pick and the detected generation");
         backend.loadTheme(QStringLiteral("auto"));
         check(!backend.qmlThemeAvailable() && backend.themeMode() == QLatin1String("hex"),
               "auto-load on a Qt 5 EXE uses Hex (old)");
+        check(backend.resolvedThemeMethod() == QLatin1String("hex") && backend.detectedQtMajor() == 5
+                  && backend.themeDetection().contains(QLatin1String("Auto-detected a Qt 5"))
+                  && backend.themeDetection().contains(QLatin1String("Hex (old)")),
+              QStringLiteral("auto-load resolves and explains the hex method on a Qt 5 EXE (%1)")
+                  .arg(backend.themeDetection()));
         const QString qt6Path = temp.filePath(QStringLiteral("new-player.exe"));
         write(qt6Path, importedPlayer({ QStringLiteral("Qt6Core.dll") }));
         settings.setExePath(qt6Path);
+        // Changing the EXE re-armed the chooser, so the page behaves like a fresh load.
+        check(backend.resolvedThemeMethod() == QLatin1String("hex") || backend.resolvedThemeMethod() == QLatin1String("auto"),
+              "an EXE change leaves the loaded method explictly re-resolvable");
         backend.loadTheme(QStringLiteral("auto"));
         check(backend.qmlThemeAvailable(),
               "a Qt 6 player offers the QML method even when no theme blob is present");
+        check(backend.resolvedThemeMethod() == QLatin1String("qml") && backend.detectedQtMajor() == 6
+                  && backend.themeDetection().contains(QLatin1String("Auto-detected a Qt 6"))
+                  && backend.themeDetection().contains(QLatin1String("QML (new)")),
+              QStringLiteral("auto-load resolves and explains the QML method on a Qt 6 EXE (%1)")
+                  .arg(backend.themeDetection()));
+        backend.loadTheme(QStringLiteral("hex"));
+        check(backend.resolvedThemeMethod() == QLatin1String("hex") && backend.detectedQtMajor() == 6,
+              "Hex (old) stays selectable as an informed override on a Qt 6 player");
     }
 
     std::printf("[boot-discovery] renamed/raw controllers and the host's selected component\n");

@@ -3,12 +3,12 @@ import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import BSICustomizer
 
-Dialog {
+    Dialog {
     id: editor
     parent: Overlay.overlay
     modal: true
     focus: true
-    title: qsTr("Gradient theme")
+    title: editor.hexMode ? qsTr("Gradient theme - top bar / title bar") : qsTr("Gradient theme")
     width: Math.min(660, parent ? parent.width - 32 : 660)
     height: Math.min(620, parent ? parent.height - 32 : 620)
     x: parent ? Math.round((parent.width - width) / 2) : 0
@@ -16,7 +16,10 @@ Dialog {
     padding: 20
 
     property bool pendingSolidEdits: false
-    property bool chromeMode: false
+    // Hex (old) method mode: the target list is restricted to the top bar /
+    // title bar chrome surfaces the hex gradient is allowed to paint, plus a
+    // synthetic "all" entry. QML (new) mode lists every compatible target.
+    property bool hexMode: false
     property string selectedKey: ""
     property string firstColor: "#7C5CFF"
     property string secondColor: "#00C2FF"
@@ -44,15 +47,36 @@ Dialog {
         const all = backend.gradientTargets;
         const needle = editor.filter.trim().toLowerCase();
         const shown = [];
+        let orientationEverywhere = true;
         for (let i = 0; i < all.length; ++i) {
             const target = all[i];
-            if (editor.chromeMode
-                    && target.kind !== "chrome"
-                    && target.label !== "Sidebar background"
-                    && target.label !== "Top bar background")
+            // Hex gradients only ever paint the top bar / title bar chrome;
+            // the sidebar and every other surface belong to the solid hex
+            // colors or the QML method.
+            if (editor.hexMode && !target.hexGradient)
                 continue;
             const haystack = (target.label + " " + target.resource + " " + target.kind).toLowerCase();
-            if (needle === "" || haystack.indexOf(needle) >= 0) shown.push(target);
+            if (needle === "" || haystack.indexOf(needle) >= 0) {
+                shown.push(target);
+                orientationEverywhere = orientationEverywhere && target.supportsOrientation !== false;
+            }
+        }
+        if (editor.hexMode && shown.length > 0) {
+            // Synthetic combined entry first: one apply paints every hex chrome
+            // surface. The key matches GradientPatcher::allTopbarsKey().
+            shown.unshift({
+                key: "hex:all-topbars-titlebars",
+                label: qsTr("All top bar / title bar targets (%1)").arg(shown.length),
+                resource: shown.map(function (t) { return t.resource; })
+                               .filter(function (v, i, a) { return a.indexOf(v) === i; }).join(", "),
+                kind: "chrome",
+                enabled: shown[0].enabled,
+                first: shown[0].first,
+                second: shown[0].second,
+                horizontal: shown[0].horizontal,
+                supportsOrientation: orientationEverywhere,
+                hexGradient: true
+            });
         }
         editor.view = shown;
     }
@@ -96,10 +120,11 @@ Dialog {
             color: Theme.textDim
             font.pixelSize: 12
             wrapMode: Text.WordWrap
-            text: editor.chromeMode
-                  ? qsTr("Paints the player sidebar and top bar BlueStacks actually shows "
-                         + "(the PlrSidebar/PlrTopbar instances in plr.qml), not only the "
-                         + "type-level Rectangle. Solid hex colors stay as fallback.")
+            text: editor.hexMode
+                  ? qsTr("Hex gradients paint the player's top bar / title bar - choose custom start and "
+                         + "end colors and a direction, then apply to one target or all of them. "
+                         + "The sidebar and every other surface keep their solid hex colors from the list; "
+                         + "solid fallback is always kept underneath the gradient.")
                   : qsTr("Apply two-stop gradients to compatible backgrounds or existing Gradient properties. "
                          + "Text/icon color properties stay solid. Applying replaces the selected target's existing stops. "
                          + "\"Sidebar (player window)\" / \"Top bar (player window)\" are the chrome BlueStacks paints.")
@@ -107,7 +132,6 @@ Dialog {
         RowLayout {
             Layout.fillWidth: true
             spacing: 8
-            visible: !editor.chromeMode
             ComboBox {
                 id: targetBox
                 Layout.fillWidth: true
@@ -264,14 +288,14 @@ Dialog {
             ActionButton {
                 accent: true
                 text: editor.useGradient ? qsTr("Apply Gradient") : qsTr("Use Solid")
-                enabled: (editor.chromeMode ? editor.view.length > 0 : editor.selectedKey !== "")
+                enabled: editor.selectedKey !== ""
                          && !editor.pendingSolidEdits
                          && (!editor.useGradient || (editor.validColor(editor.firstColor) && editor.validColor(editor.secondColor)))
                 onClicked: {
                     const key = editor.selectedKey;
-                    const result = editor.chromeMode
-                          ? backend.applyChromeGradient(editor.firstColor, editor.secondColor,
-                                                        editor.horizontal, editor.useGradient)
+                    const result = editor.hexMode
+                          ? backend.applyHexGradient(key, editor.firstColor, editor.secondColor,
+                                                     editor.horizontal, editor.useGradient)
                           : backend.applyThemeGradient(key, editor.firstColor, editor.secondColor,
                                                        editor.horizontal, editor.useGradient);
                     editor.message = result.msg || "";

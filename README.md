@@ -29,14 +29,29 @@ The original `.bak` is preserved. Theme edits are made against the current EXE, 
 ## Gradient themes
 
 BlueStacks paints the sidebar and top bar from `plr.qml`'s `PlrSidebar` /
-`PlrTopbar` instances (`color: oem === "msi5" ? primary70 : primary80`), not
-from the type-level Rectangle roots. **QML (new)** is offered only on Qt 6
-players. Older Qt 5 / MSI 5 builds hide that method: use **Hex (old)** and
-**Gradient theme**, which writes a two-stop linear gradient onto those real
-chrome instances (solid hex recolors remain available). Qt 5.15 can load the
-gradient source, but compiled `qv4cdata` units with an empty source path are
-invalidated first; the on-disk `<install>/cache/qmlcache` is also cleared so
-Qt 6 reloads the edited QML.
+`PlrTopbar` / `PlrTitleBar` instances, not from the type-level Rectangle
+roots. **Auto** — the default — inspects the selected EXE's import table and
+reports what it found ("Auto-detected a Qt 6 player → using QML (new).",
+"Auto-detected a Qt 5 player → using Hex (old).", …): Qt 6 players get
+**QML (new)**, older Qt 5 / MSI 5 players get **Hex (old)**. You can still
+pick **QML (new)** or **Hex (old)** manually; on a mismatched choice the QML
+method simply loads nothing and the status line explains why.
+
+- **QML (new)** — Theme → Gradients. Gradients can paint every verified
+  compatible target: player-window chrome instances (sidebar included), the
+  Rectangle backgrounds, and supported button/border slots.
+- **Hex (old)** — **Gradient theme**. Gradients are deliberately scoped to
+  the **top bar** and **title bar** only; the sidebar and every other
+  surface keep their solid hex theme color ("Apply theme"). The editor lists
+  each top bar / title bar surface for individual styling, or **All top bar /
+  title bar targets** to paint them at once, each with its own two stops and
+  a horizontal/vertical direction (a solid color fallback always remains,
+  e.g. `gradient: Gradient { … }; color: …`, so a rejected or partially
+  compiled gradient never leaves the bar blank).
+
+Qt 5.15 can load the gradient source, but compiled `qv4cdata` units with an
+empty source path are invalidated first; the on-disk `<install>/cache/qmlcache`
+is also cleared so Qt 6 reloads the edited QML.
 
 Only gradients the UI can actually show are offered: a `property Gradient` inside
 `UiThemeObject.qml` is listed when another resource reads it by name, and skipped
@@ -56,8 +71,8 @@ typed `Gradient` (including button borders). Choose two `#RRGGBB` or
 preview before applying. Surfaces and theme-level gradient definitions are
 listed first, and the filter box narrows the list by target name, QML file or
 kind. Clear/apply staged solid-color edits first, then close BlueStacks before
-writing. Pick **Sidebar (player window)** / **Top bar (player window)** to
-change what BlueStacks actually shows.
+writing. On the **Hex (old)** method only the top bar / title bar surfaces are
+gradient-editable, so pick one of them (or the combined entry) there.
 
 A property typed `color` cannot hold a Gradient object. These edits therefore
 modify the compatible rendering/Gradient binding while preserving the original

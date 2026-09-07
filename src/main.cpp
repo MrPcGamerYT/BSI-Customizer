@@ -5,6 +5,7 @@
 #include <QBuffer>
 #include <QDir>
 #include <QImageReader>
+#include <QIcon>
 #include <QImage>
 #include <QColor>
 #include <QQmlError>
@@ -71,6 +72,12 @@ int main(int argc, char *argv[])
     QCoreApplication::setOrganizationName(QStringLiteral("MrPcGamerYT"));
     QCoreApplication::setApplicationName(QStringLiteral("BSI Customizer"));
     QCoreApplication::setApplicationVersion(QStringLiteral(BSI_VERSION));
+
+    // Brand icon for every window/dialog the app raises (taskbar, Alt-Tab,
+    // title bar). The .ico lives at the repo root; CMake maps it into the
+    // Qt resource system as :/app.ico. The exe's embedded icon (src/app.rc)
+    // covers Explorer shortcuts/UAC prompts.
+    app.setWindowIcon(QIcon(QStringLiteral(":/app.ico")));
 
     // Headless verification of the patcher engines + theme chain.
     // Used locally and by the GitHub Actions release workflow.

@@ -71,8 +71,11 @@ if(WIN32)
 
     # Re-run rc.exe whenever the manifest XML itself changes (Makefile/Ninja
     # generators; Visual Studio tracks resource dependencies on its own).
+    # Also rebuild on icon changes and point RC at the repo root, where the
+    # brand icon lives ("BSI CUSTOMIZER.ico").
     set_source_files_properties(src/app.rc PROPERTIES
-        OBJECT_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/app.manifest")
+        OBJECT_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/src/app.manifest;${CMAKE_CURRENT_SOURCE_DIR}/BSI CUSTOMIZER.ico"
+        INCLUDE_DIRECTORIES "${CMAKE_CURRENT_SOURCE_DIR}")
 
     if(MSVC)
         # src/app.rc provides the RT_MANIFEST resource with id 1 itself. MSVC
@@ -167,7 +170,14 @@ qt_add_qml_module(BSICustomizer
         src/qml/pages/ExtrasPage.qml
         src/qml/pages/AppearancePage.qml
         src/qml/pages/AboutPage.qml
+    RESOURCES
+        "BSI CUSTOMIZER.ico"
 )
+
+# Short, space-free qrc path used by main.cpp for the window/taskbar icon:
+#   QIcon(QStringLiteral(":/app.ico"))
+set_source_files_properties("BSI CUSTOMIZER.ico" PROPERTIES
+    QT_RESOURCE_ALIAS "app.ico")
 
 target_link_libraries(BSICustomizer PRIVATE
     Qt6::Core

@@ -27,6 +27,9 @@ class Backend : public QObject
     Q_PROPERTY(bool themeFound READ themeFound NOTIFY themeChanged)
     Q_PROPERTY(bool qmlThemeAvailable READ qmlThemeAvailable NOTIFY themeChanged)
     Q_PROPERTY(QString themeMode READ themeMode NOTIFY themeChanged)
+    Q_PROPERTY(QString resolvedThemeMethod READ resolvedThemeMethod NOTIFY themeChanged)
+    Q_PROPERTY(QString themeDetection READ themeDetection NOTIFY themeChanged)
+    Q_PROPERTY(int detectedQtMajor READ detectedQtMajor NOTIFY themeChanged)
     Q_PROPERTY(QString themeStatus READ themeStatus NOTIFY themeChanged)
     Q_PROPERTY(bool themeStale READ themeStale NOTIFY themeChanged)
     Q_PROPERTY(QVariantList themeEntries READ themeEntries NOTIFY themeChanged)
@@ -51,9 +54,19 @@ public:
 
     bool themeFound() const { return m_themeInfo.found; }
     // Qt 6 players use the QML (new) method. Older Qt 5 / MSI 5 builds hide it
-    // and use Hex (old), which now also has a chrome Gradient theme action.
+    // and use Hex (old), which has a custom gradient editor for the player's
+    // top bar / title bar chrome.
     bool qmlThemeAvailable() const { return m_qmlThemeAvailable; }
     QString themeMode() const { return m_themeInfo.mode; }
+    // The method the last loadTheme() ended up with: after an "auto" load this
+    // is the auto-detected "qml" or "hex"; before any load it is just the last
+    // request ("auto" initially).
+    QString resolvedThemeMethod() const { return m_themeMethod; }
+    // One human-readable line describing how the method above was arrived at,
+    // e.g. "Auto-detected a Qt 5 player → using Hex (old)."
+    QString themeDetection() const { return m_themeDetection.isEmpty() ? QStringLiteral("Pick a method, then load the theme - Auto detects the player automatically.") : m_themeDetection; }
+    // Qt generation the auto-detect found in the EXE's imports: 0 = unknown, 5 or 6.
+    int detectedQtMajor() const { return m_detectedQtMajor; }
     QString themeStatus() const { return m_themeStatus; }
     // True when HD-Player.exe changed on disk after the theme was loaded, i.e.
     // the color list on screen no longer describes the file.
@@ -85,8 +98,11 @@ public:
     Q_INVOKABLE QVariantMap loadGradientTargets();
     Q_INVOKABLE QVariantMap applyThemeGradient(const QString &key, const QString &first, const QString &second,
                                               bool horizontal, bool enabled);
-    Q_INVOKABLE QVariantMap applyChromeGradient(const QString &first, const QString &second,
-                                               bool horizontal, bool enabled);
+    // Hex (old) gradient editor: key is one of the hexGradient-flagged targets
+    // (top bar / title bar chrome) or GradientPatcher::allTopbarsKey() to paint
+    // them all in one go.
+    Q_INVOKABLE QVariantMap applyHexGradient(const QString &key, const QString &first, const QString &second,
+                                            bool horizontal, bool enabled);
     // Stage a whole palette as edits (still needs PATCH THEME).  Returns how
     // many colors the preset covers in this EXE.
     Q_INVOKABLE int applyPreset(const QString &id);
@@ -156,6 +172,8 @@ private:
     ThemeInfo m_themeInfo;
     QString m_themeStatus;
     QString m_themeMethod = QStringLiteral("auto");
+    QString m_themeDetection;
+    int m_detectedQtMajor = 0;
     bool m_qmlThemeAvailable = false;
     QString m_themeFilePath;
     qint64 m_themeFileMsecs = -1;  // EXE lastModified when the theme was loaded

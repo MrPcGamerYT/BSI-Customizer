@@ -32,6 +32,8 @@ Backend::Backend(SettingsManager *settings, QObject *parent)
         m_edits.clear();
         m_themeFilePath.clear();
         m_themeStatus.clear();
+        m_themeDetection.clear();
+        m_detectedQtMajor = 0;
         m_qmlThemeAvailable = false;
         m_svgs.clear();
         emit exePathChanged();
@@ -184,6 +186,8 @@ void Backend::loadTheme(const QString &method)
     m_themeStatus.clear();
     m_themeMethod = method;
     m_qmlThemeAvailable = false;
+    m_themeDetection.clear();
+    m_detectedQtMajor = 0;
     m_themeFilePath.clear();
     m_themeFileMsecs = -1;
     m_themeFileBytes = -1;
@@ -230,20 +234,38 @@ void Backend::loadTheme(const QString &method)
     int qtMajor = 0;
     QString gateWhy;
     m_qmlThemeAvailable = GradientPatcher::qmlMethodSupported(data, &qtMajor, &gateWhy);
+    m_detectedQtMajor = qtMajor;
     QString resolved = method;
     if (method == QLatin1String("auto"))
         resolved = m_qmlThemeAvailable ? QStringLiteral("qml") : QStringLiteral("hex");
     m_themeMethod = resolved;
+    // Say out loud how the method was picked. Auto-detection is the default
+    // for the whole theme changer: the EXE's import table decides QML (new)
+    // vs Hex (old), and the page shows this line so there is no guessing.
+    const QString methodName = resolved == QLatin1String("qml")
+        ? QStringLiteral("QML (new)") : QStringLiteral("Hex (old)");
+    if (method == QLatin1String("auto")) {
+        m_themeDetection = qtMajor >= 5
+            ? QStringLiteral("Auto-detected a Qt %1 player → using %2.").arg(qtMajor).arg(methodName)
+            : QStringLiteral("Auto-detect could not read this EXE's Qt imports → using %1 "
+                             "(a modern QML player is assumed when the table is unreadable).").arg(methodName);
+    } else {
+        m_themeDetection = qtMajor >= 5
+            ? QStringLiteral("Manually selected %1 (this EXE is detected as a Qt %2 player).")
+                  .arg(methodName).arg(qtMajor)
+            : QStringLiteral("Manually selected %1.").arg(methodName);
+    }
+    doLog(m_themeDetection, QStringLiteral("blue"));
 
     if (resolved == QLatin1String("qml") && !m_qmlThemeAvailable) {
         m_themeStatus = gateWhy.isEmpty()
             ? QStringLiteral("This is an older Qt 5 BlueStacks/MSI 5 player. "
                               "The QML method is not used here — use Hex (old). "
-                              "Gradient theme there paints the real sidebar and top bar.")
+                              "Its Gradient theme paints the player's top bar / title bar.")
             : QStringLiteral("This is a Qt %1 player: its UI never reads the palette's gradient properties, so "
                              "a QML gradient target there changes nothing you can see. Use the Gradient theme "
-                             "control in the Hex (old) method - it writes the gradient over the sidebar and top "
-                             "bar, which is what actually paints the theme.").arg(qtMajor);
+                             "control in the Hex (old) method - it writes your custom stops over the player's "
+                             "top bar / title bar, which is the chrome that can hold a gradient there.").arg(qtMajor);
         doLog(m_themeStatus, QStringLiteral("orange"));
         emit themeChanged();
         return;
@@ -261,13 +283,23 @@ void Backend::loadTheme(const QString &method)
                 m_hexQmlColors << item;
             }
         }
-        m_themeStatus = QStringLiteral("Hex theme ready (%1 profile, %2 color(s) found).")
+        // The Hex gradient editor styles exactly these flagged chrome targets
+        // (top bar / title bar). Count them for the status line so a player
+        // with no gradient-capable chrome is visible at load time.
+        int hexGradientTargets = 0;
+        for (const auto &target : GradientPatcher::analyze(data).targets)
+            if (target.hexGradient)
+                ++hexGradientTargets;
+        m_themeStatus = QStringLiteral("Hex theme ready (%1 profile, %2 color(s) found, %3 top bar/title bar "
+                                       "gradient target(s)).")
                             .arg(m_themeInfo.profile)
-                            .arg(m_hexQmlColors.size());
+                            .arg(m_hexQmlColors.size())
+                            .arg(hexGradientTargets);
         doLog(QStringLiteral("Theme loaded (hex): %1 color(s) found.")
                   .arg(m_hexQmlColors.size()),
               QStringLiteral("blue"));
-        doLog(QStringLiteral("Tick the colors you want, then Apply Selected."),
+        doLog(QStringLiteral("Tick the colors you want, then Apply Selected. Gradient theme paints the "
+                             "top bar/title bar with stops you choose."),
               QStringLiteral("gray"));
         emit themeChanged();
         return;
@@ -393,7 +425,8 @@ QVariantList Backend::gradientTargets() const
                                 { "kind", target.kind }, { "enabled", target.current.enabled },
                                 { "first", target.current.first }, { "second", target.current.second },
                                 { "horizontal", target.current.horizontal },
-                                { "supportsOrientation", target.supportsOrientation } };
+                                { "supportsOrientation", target.supportsOrientation },
+                                { "hexGradient", target.hexGradient } };
     return result;
 }
 
@@ -431,12 +464,12 @@ QVariantMap Backend::applyThemeGradient(const QString &key, const QString &first
     return result(applied.ok, applied.message, QStringLiteral("green"));
 }
 
-QVariantMap Backend::applyChromeGradient(const QString &first, const QString &second,
-                                         bool horizontal, bool enabled)
+QVariantMap Backend::applyHexGradient(const QString &key, const QString &first, const QString &second,
+                                      bool horizontal, bool enabled)
 {
     if (!m_edits.isEmpty())
         return result(false, QStringLiteral("Apply or clear the pending solid-color edits before applying a gradient."), QStringLiteral("orange"));
-    const auto applied = GradientPatcher::patchChrome(m_settings->exePath(),
+    const auto applied = GradientPatcher::patchTopbar(m_settings->exePath(), key,
                                                       { enabled, first, second, horizontal });
     if (applied.ok) {
         reloadTheme();

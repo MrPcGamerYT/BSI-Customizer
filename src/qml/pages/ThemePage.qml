@@ -6,7 +6,10 @@ import BSICustomizer
 Item {
     id: page
 
-    property bool qmlMethod: backend.qmlThemeAvailable && methodChips.currentIndex === 0
+    // Which pane is shown comes from the method the backend actually loaded
+    // (after auto-detection resolved it), so "Auto", a manual "QML (new)" pick
+    // and a manual "Hex (old)" pick all display exactly what was loaded.
+    property bool qmlMethod: backend.resolvedThemeMethod === "qml"
     property bool fileChanged: backend.themeFileChanged()
     property string filterText: ""
     property string presetId: ""
@@ -39,9 +42,13 @@ Item {
         });
     }
 
+    // The method chips are [Auto, QML (new), Hex (old)]. Auto (the default)
+    // lets the backend detect from the EXE's Qt imports whether this player
+    // supports the QML method or needs the legacy Hex method, and the page
+    // follows whatever was resolved.
     function reload() {
-        backend.loadTheme("auto");
-        methodChips.currentIndex = backend.qmlThemeAvailable ? 0 : 1;
+        const methods = ["auto", "qml", "hex"];
+        backend.loadTheme(methods[Math.max(0, Math.min(2, methodChips.currentIndex))]);
         page.fileChanged = backend.themeFileChanged();
     }
 
@@ -72,6 +79,9 @@ Item {
     Connections {
         target: backend
         function onThemeChanged() { page.fileChanged = backend.themeFileChanged() }
+        // An EXE picked on the Dashboard (or restored from settings) can need
+        // the other method: re-arm full auto-detection for the next load.
+        function onExePathChanged() { methodChips.currentIndex = 0 }
     }
 
     ColumnLayout {
@@ -105,6 +115,14 @@ Item {
                 }
                 Text {
                     Layout.fillWidth: true
+                    visible: backend.themeDetection.length > 0
+                    text: backend.themeDetection
+                    color: Theme.textDim
+                    font.pixelSize: 11
+                    wrapMode: Text.WordWrap
+                }
+                Text {
+                    Layout.fillWidth: true
                     visible: page.fileChanged && backend.themeFound
                     text: qsTr("HD-Player.exe changed on disk - the colors below are stale. "
                                + "Press Reload to read the theme BlueStacks actually has.")
@@ -123,10 +141,13 @@ Item {
             ChoiceChips {
                 id: methodChips
                 Layout.alignment: Qt.AlignTop
-                visible: backend.qmlThemeAvailable
-                model: [qsTr("QML (new)"), qsTr("Hex (old)")]
+                // Always visible: Auto is the full auto-detect default, and the
+                // two concrete methods stay available as an informed override.
+                // Forcing QML on a Qt 5 player is explained by the status line
+                // instead of hiding the chooser.
+                model: [qsTr("Auto"), qsTr("QML (new)"), qsTr("Hex (old)")]
                 onSelected: (index) => {
-                    backend.loadTheme(index === 0 ? "qml" : "hex");
+                    backend.loadTheme(index === 0 ? "auto" : index === 1 ? "qml" : "hex");
                     page.fileChanged = backend.themeFileChanged();
                 }
             }
@@ -139,6 +160,10 @@ Item {
             text: backend.exePath
             onLoad: {
                 backend.exePath = text;
+                // A different EXE can support a different method: go back to
+                // full auto-detection so the chooser never stays stuck on a
+                // manually picked method that this player cannot use.
+                methodChips.currentIndex = 0;
                 page.reload();
             }
         }
@@ -326,7 +351,7 @@ Item {
                         text: qsTr("Gradients")
                         enabled: page.qmlMethod && backend.themeFound
                         onClicked: {
-                            gradientEditor.chromeMode = false;
+                            gradientEditor.hexMode = false;
                             gradientEditor.open();
                         }
                     }
@@ -507,8 +532,9 @@ Item {
                         Layout.fillWidth: true
                         elide: Text.ElideRight
                         text: qsTr("Legacy palette - replaces color constants directly in the "
-                                   + "binary. Use Gradient theme to paint the real sidebar and "
-                                   + "top bar; solid hex recolors stay available below.")
+                                   + "binary. Gradient theme paints the top bar / title bar "
+                                   + "with custom stops you choose, one surface or all at once; "
+                                   + "the sidebar and everything else uses the solid colors below.")
                         color: Theme.textDim
                         font.pixelSize: 12
                     }
@@ -516,7 +542,7 @@ Item {
                         text: qsTr("Gradient theme")
                         enabled: backend.exePath !== ""
                         onClicked: {
-                            gradientEditor.chromeMode = true;
+                            gradientEditor.hexMode = true;
                             gradientEditor.open();
                         }
                     }
