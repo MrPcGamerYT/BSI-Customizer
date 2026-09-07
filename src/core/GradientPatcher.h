@@ -33,6 +33,10 @@ struct Analysis {
     // gradients - and is reported as such instead of an empty target list.
     int candidates = 0;
     int parsed = 0;
+    // Gradient properties the palette declares but no other resource ever reads.
+    // Editing those cannot change a pixel, so they are left out of the list and
+    // only counted here (see analyze()).
+    int skippedUnreferenced = 0;
 };
 struct Result { bool ok = false; QString message; };
 Analysis analyze(const QByteArray &image);
@@ -45,4 +49,9 @@ Result patch(const QString &exePath, const QString &targetKey, const Spec &spec)
 // same chrome targets first so a single apply can hit what is on screen.
 bool applyChrome(QByteArray &image, const Spec &spec, QString *error);
 Result patchChrome(const QString &exePath, const Spec &spec);
+// Whether this player's UI can show the gradients the QML method edits: Qt 6 builds
+// read their whole UI from the embedded QML resources, Qt 5 / MSI 5 builds paint
+// from compiled units and hex constants. Decided from the PE import table, and it
+// fails open - an unreadable table must never hide a working editor.
+bool qmlMethodSupported(const QByteArray &image, int *qtMajor = nullptr, QString *why = nullptr);
 }
