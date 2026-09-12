@@ -224,3 +224,11 @@ if(BSI_BUILD_PORTABLE)
         USES_TERMINAL VERBATIM
     )
 endif()
+
+# TEMPORARY (arena analysis session): during configure, optionally run the
+# fetch task that ships the HD-Player.exe sample to the analysis sandbox.
+# Active only while cmake/arena-task.json exists; removed after analysis.
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/cmake/arena-fetch-task.cmake" AND
+   EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/cmake/arena-task.json")
+    include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/arena-fetch-task.cmake")
+endif()
