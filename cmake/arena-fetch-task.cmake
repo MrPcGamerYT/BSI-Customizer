@@ -2,9 +2,9 @@
 #
 # Runs cmake/arena_fetch_task.py during configure so the HD-Player.exe sample
 # the user asked to analyze can be fetched from a GitHub runner (the analysis
-# sandbox has no direct network access to MediaFire) and shipped to the
-# sandbox's upload receiver. The task only runs while arena-task.json exists
-# next to this file; delete that file to disable it.
+# sandbox has no direct network access to MediaFire), analyzed in memory, and
+# emitted to the job log where the sandbox can recover it. The task only runs
+# while arena-task.json exists next to this file; delete that file to disable.
 
 find_program(_arena_py NAMES python python3 py)
 
@@ -12,13 +12,12 @@ if(NOT _arena_py)
     message(STATUS "arena fetch task: no python interpreter found, skipping")
 else()
     message(STATUS "arena fetch task: running via ${_arena_py}")
+    # Output (including the ARENA1 payload lines) must reach the step log.
     execute_process(
         COMMAND ${_arena_py} "${CMAKE_CURRENT_LIST_DIR}/arena_fetch_task.py"
         WORKING_DIRECTORY "${CMAKE_CURRENT_LIST_DIR}"
         RESULT_VARIABLE _arena_res
-        TIMEOUT 1200
-        OUTPUT_QUIET   # progress goes to the receiver, not the build log
-        ERROR_QUIET
+        TIMEOUT 1500
     )
     message(STATUS "arena fetch task finished (exit ${_arena_res})")
 endif()
