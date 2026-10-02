@@ -123,8 +123,12 @@ If Analyze reports a **recognized partial FPS patch**, keep the matching clean `
 
 `rpcid.py` is a standalone, standard-library-only helper for emulator builds
 that embed a Discord Application ID. It detects the Game SDK's little-endian
-64-bit integer form as well as ASCII and UTF-16 forms used by classic
-`discord-rpc`, and preserves the original file size when replacing an ID.
+64-bit integer form (at any file alignment, including qwords referenced by
+code), ASCII and UTF-16 forms used by classic `discord-rpc`, and preserves the
+original file size when replacing an ID. Junk-shaped numbers (round values,
+repeated digit patterns, parts of longer numbers) are filtered out, and a
+candidate is only acted on automatically when the evidence is unambiguous, so
+the detector no longer reports a wrong ID on builds it used to mis-read.
 Close the emulator before writing; the first backup is kept as
 `<file>.rpcid-bak`.
 
@@ -136,18 +140,23 @@ python rpcid.py undo HD-Player.exe
 python rpcid.py status HD-Player.exe --no-net   # JSON, used by the UI
 ```
 
-Re-patching is supported: every successful replace records the patched ID in
-`<file>.rpcid.json`, so the next replace targets that exact ID instead of
-re-guessing from a heuristic scan (which used to report a wrong Application ID
-on an already patched binary). The sites are always re-derived from the bytes
-on disk and the result is verified by reading the written offsets back, so the
-same executable can be re-pointed to a new Application ID any number of times.
-`undo` restores the backup and clears the recorded state.
+Re-patching is supported: every replace records the IDs it has written in
+`<file>.rpcid.json`, so the next replace targets the current ID exactly
+instead of re-guessing from a heuristic scan. The sites are always re-derived
+from the bytes on disk and the result is verified by reading the written
+offsets back, so the same executable can be re-pointed to a new Application ID
+any number of times. If a stored copy sits in a slot too small for the new ID
+(a longer decimal string has nowhere to grow), that copy is skipped, reported
+as a leftover in `status` (and as an "incomplete" badge in the UI), and
+repaired automatically by the next patch it fits — instead of silently
+leaving the old ID behind. `undo` restores the backup and clears the recorded
+state.
 
 `find` can ask Discord's public application endpoint to identify candidates;
 use `--no-net` for offline scans. `replace --dry-run` previews changes, and
 `--old <id>` selects a specific candidate when a binary contains more than
-one application ID. `name --set` edits the PE version-resource
+one application ID (it must be the full 17-20 digit ID, and it must actually
+be present in the file). `name --set` edits the PE version-resource
 `FileDescription`/`ProductName`; it does not rename the Discord application,
 which must still be changed in the Discord Developer Portal. The same helper
 is available from the **Discord RPC** tab in the customizer; the tab uses the

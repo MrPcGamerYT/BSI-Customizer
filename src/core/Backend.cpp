@@ -13,6 +13,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QProcess>
@@ -1044,6 +1045,7 @@ QVariantMap Backend::rpcidStatus(const QString &path)
                      {QStringLiteral("originalId"), QString()},
                      {QStringLiteral("name"), QString()},
                      {QStringLiteral("hasBackup"), false},
+                     {QStringLiteral("leftoverCount"), 0},
                      {QStringLiteral("msg"), QStringLiteral("Select an executable.")}};
     if (path.trimmed().isEmpty() || !QFileInfo::exists(path))
         return info;
@@ -1063,6 +1065,7 @@ QVariantMap Backend::rpcidStatus(const QString &path)
     info[QStringLiteral("name")] = o.value(QStringLiteral("name")).toString();
     info[QStringLiteral("known")] = o.value(QStringLiteral("known")).toString();
     info[QStringLiteral("hasBackup")] = o.value(QStringLiteral("backup")).toBool();
+    info[QStringLiteral("leftoverCount")] = o.value(QStringLiteral("leftovers")).toArray().size();
     info[QStringLiteral("msg")] = o.value(QStringLiteral("msg")).toString();
     return info;
 }

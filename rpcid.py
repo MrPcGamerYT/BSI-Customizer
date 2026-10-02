@@ -18,6 +18,7 @@ Examples::
 from __future__ import annotations
 
 import argparse
+import bisect
 import datetime as _dt
 import hashlib
 import json
@@ -34,7 +35,7 @@ try:
 except Exception:                         # pragma: no cover
     NETWORK = False
 
-VERSION = "1.1"
+VERSION = "1.2"
 BACKUP_SUFFIX = ".rpcid-bak"
 STATE_SUFFIX = ".rpcid.json"
 DISCORD_EPOCH = 1420070400000
@@ -89,6 +90,11 @@ class PE:
     def rva_to_offset(self, rva):
         for _n, va, vsz, raw, size, _c in self.sections:
             if va <= rva < va + max(vsz, size): return raw + rva - va
+        return None
+
+    def offset_to_rva(self, off):
+        for _n, va, vsz, raw, size, _c in self.sections:
+            if raw <= off < raw + size: return va + off - raw
         return None
 
     def directory(self, index):
@@ -175,48 +181,205 @@ def compiler_constant(value):
     return value & 0x3fffff == 0
 
 
+def _max_plausible():
+    """Largest value plausible() can accept right now (snowflake clock bound)."""
+    return (int(time.time() * 1000) + 86400000 - DISCORD_EPOCH) << 22
+
+
+RIP_MODRM = b"\x05\x0d\x15\x1d\x25\x2d\x35\x3d"          # mod=00 rm=101 => [rip+disp32]
+
+
 def harvest(data, pe=None):
+    """Collect every Application-ID-shaped value in `data` with scored evidence.
+
+    Forms: mov r64,imm64 immediates, bare little-endian qwords (at ANY file
+    alignment - they used to be read only at 8-byte aligned offsets, which is
+    why some builds were never detected), ASCII and UTF-16 decimal text.
+    Bare qwords are only kept when something vouches for them (a RIP-relative
+    instruction references them, they sit near Discord strings, the value
+    repeats, or the ID is known), because plausible-looking junk qwords
+    (timestamps, hashes) are otherwise everywhere in a large binary.
+    """
     found = {}
+    limit = len(data)
+    if limit < 8:
+        return []
+    added = set()
+
     def add(value, kind, offset, **extra):
-        key = str(value)
-        rec = found.setdefault(key, {"id": key, "sites": []})
+        if (kind, offset) in added: return
+        added.add((kind, offset))
+        rec = found.setdefault(str(value), {"id": str(value), "sites": []})
         site = {"kind": kind, "off": offset}; site.update(extra); rec["sites"].append(site)
-    # x64 mov r64, imm64 (48/49 B8..BF), including non-RAX registers.
-    for i in range(max(0, len(data) - 9)):
-        if data[i] not in (0x48, 0x49) or not 0xB8 <= data[i + 1] <= 0xBF: continue
+
+    # Addresses the code actually references (RIP-relative).  Used both to
+    # admit bare-qword candidates and as ranking evidence.
+    rip = set()
+    if pe is not None and pe.ok:
+        for m in re.finditer(b"[\x48-\x4f][\x8b\x8d][" + RIP_MODRM + b"]", data):      # REX.W mov/lea r64,[rip+d]
+            i = m.start()
+            if i + 7 > limit: continue
+            rva = pe.offset_to_rva(i)
+            if rva is not None: rip.add(rva + 7 + struct.unpack_from("<i", data, i + 3)[0])
+        for m in re.finditer(b"(?<![\x40-\x4f])[\x8b\x8d][" + RIP_MODRM + b"]", data):  # 32-bit operand form
+            i = m.start()
+            if i + 6 > limit: continue
+            rva = pe.offset_to_rva(i)
+            if rva is not None: rip.add(rva + 6 + struct.unpack_from("<i", data, i + 2)[0])
+
+    # x64 mov r64, imm64 (48/49 B8..BF), including non-RAX registers.  Two
+    # opcode bytes of one instruction can never also be the opcode pair of
+    # another, so a non-overlapping regex finds every candidate at C speed.
+    regs = ("rax", "rcx", "rdx", "rbx", "rsp", "rbp", "rsi", "rdi", "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15")
+    for m in re.finditer(rb"[\x48\x49][\xb8-\xbf]", data):
+        i = m.start()
+        if i + 10 > limit: continue
         value = struct.unpack_from("<Q", data, i + 2)[0]
         if plausible(value) and not compiler_constant(value):
-            regs = ("rax", "rcx", "rdx", "rbx", "rsp", "rbp", "rsi", "rdi", "r8", "r9", "r10", "r11", "r12", "r13", "r14", "r15")
             add(value, "imm64", i + 2, reg=regs[(data[i + 1] - 0xB8) + (8 if data[i] == 0x49 else 0)], instr=i)
+
+    # Where Discord-related data lives; bare qwords are only interesting here
+    # (or where code references them, or for a known ID).
+    lowered = data.lower()
+    dpos = [m.start() for m in re.finditer(b"discord", lowered)]
+    windows = []
+    for p in dpos:
+        lo, hi_ = max(0, p - 4096), min(limit, p + 4096)
+        if windows and lo <= windows[-1][1]: windows[-1] = (windows[-1][0], max(windows[-1][1], hi_))
+        else: windows.append((lo, hi_))
+
     claimed = {x for r in found.values() for s in r["sites"] if s["kind"] == "imm64" for x in range(s["off"] - 7, s["off"] + 8)}
-    for off in range(0, max(0, len(data) - 7), 8):
-        if off in claimed: continue
-        value = struct.unpack_from("<Q", data, off)[0]
-        if plausible(value) and not compiler_constant(value) and not all(32 <= b <= 126 for b in data[off:off + 8]): add(value, "u64le", off)
+    hi = min(0x1f, _max_plausible() >> 56)
+    msb_class = b"[" + bytes(range(1, hi + 1)) + b"]" if hi >= 1 else None
+
+    def qword_ok(off):
+        if off < 0 or off + 8 > limit or off in claimed: return False
+        blob = data[off:off + 8]
+        value = struct.unpack_from("<Q", blob)[0]
+        if not plausible(value) or compiler_constant(value): return False
+        if all(32 <= b <= 126 for b in blob): return False
+        add(value, "u64le", off)
+        return True
+
+    budget = [4096]                                    # hard cap on noise
+    if msb_class:
+        for lo, hi_ in windows:                        # near Discord strings
+            for m in re.finditer(msb_class, data[lo:hi_]):
+                if budget[0] <= 0: break
+                if qword_ok(lo + m.start() - 7): budget[0] -= 1
+        for rva in rip:                                # referenced by code
+            off = pe.rva_to_offset(rva)
+            if off is not None and qword_ok(off): budget[0] -= 1
+    for kid in KNOWN:                                  # known IDs, any alignment
+        packed = struct.pack("<Q", int(kid))
+        pos = data.find(packed)
+        while pos >= 0:
+            if pos not in claimed: add(int(kid), "u64le", pos)
+            pos = data.find(packed, pos + len(packed))
+
+    # Decimal text forms.  Junk-shaped numbers (round values, repeated digit
+    # patterns) are rejected here too, not just for integer forms.
     for m in re.finditer(rb"(?<![0-9])([0-9]{17,20})(?![0-9])", data):
         value = int(m.group(1))
-        if plausible(value):
+        if plausible(value) and not compiler_constant(value):
             end, slack = m.end(), 0
-            while end < len(data) and data[end] == 0: end += 1; slack += 1
+            while end < limit and data[end] == 0: end += 1; slack += 1
             add(value, "ascii", m.start(), text=m.group(1).decode(), slack=slack)
-    for m in re.finditer(rb"(?:[0-9]\0){17,20}", data):
-        text = m.group().decode("utf-16-le")
-        if plausible(int(text)):
-            end, slack = m.end(), 0
-            while end + 1 < len(data) and data[end:end + 2] == b"\0\0": end += 2; slack += 1
-            add(int(text), "utf16le", m.start(), text=text, slack=slack)
+    # UTF-16: match the WHOLE digit run, then reject runs longer than 20
+    # digits.  The old {17,20} pattern silently read the first 20 pairs of a
+    # longer number as a (wrong) ID.  A rejected run is retried two bytes
+    # later, and "part of a longer number" needs TWO preceding digit pairs:
+    # a single pair can be a phantom, e.g. the last digit + NUL of an ASCII
+    # string sitting right in front of a UTF-16 one.
+    def _digit_pair(b):
+        return len(b) == 2 and 0x30 <= b[0] <= 0x39 and b[1] == 0
+    pos, run_re = 0, re.compile(rb"(?:[0-9]\x00){17,}")
+    while True:
+        m = run_re.search(data, pos)
+        if not m: break
+        start, end, text = m.start(), m.end(), m.group().decode("utf-16-le")
+        value = int(text)
+        boundary = start >= 4 and _digit_pair(data[start - 2:start]) and _digit_pair(data[start - 4:start - 2])
+        if not boundary and len(text) <= 20 and plausible(value) and not compiler_constant(value):
+            tail, slack = end, 0
+            while tail + 1 < limit and data[tail:tail + 2] == b"\0\0": tail += 2; slack += 1
+            add(value, "utf16le", start, text=text, slack=slack)
+            pos = end
+        else:
+            pos = start + 2
+
+    # Drop obvious pattern noise; a known ID is never noise.
     for key in list(found):
-        if sum(s["kind"] == "imm64" for s in found[key]["sites"]) > 3 and not any(s["kind"] in ("ascii", "utf16le") for s in found[key]["sites"]): del found[key]
-    discordish = b"discord" in data.lower()
+        if key in KNOWN: continue
+        rec = found[key]
+        kinds = {s["kind"] for s in rec["sites"]}
+        imm64_refs = sum(s["kind"] == "imm64" for s in rec["sites"])
+        u64le_refs = sum(s["kind"] == "u64le" for s in rec["sites"])
+        if imm64_refs > 3 and not kinds & {"ascii", "utf16le"}: del found[key]
+        elif u64le_refs > 3 and not kinds & {"ascii", "utf16le", "imm64"}: del found[key]
+
+    def near_discord(off):
+        i = bisect.bisect_left(dpos, off)
+        for j in (i - 1, i):
+            if 0 <= j < len(dpos) and abs(dpos[j] - off) <= 4096:
+                if pe is not None and pe.ok:
+                    return pe.section_of(off)[0] == pe.section_of(dpos[j])[0]
+                return True
+        return False
+
     for rec in found.values():
-        kinds = {s["kind"] for s in rec["sites"]}; score = (4 if kinds & {"ascii", "utf16le"} else 0) + (3 if "imm64" in kinds else 0) + (10 if rec["id"] in KNOWN else 0) + (1 if discordish else 0)
+        kinds = {s["kind"] for s in rec["sites"]}
+        score = (4 if kinds & {"ascii", "utf16le"} else 0) + (3 if "imm64" in kinds else 0) \
+            + (1 if "u64le" in kinds else 0) + (10 if rec["id"] in KNOWN else 0) + (1 if dpos else 0)
+        near = rip_ref = False
         for s in rec["sites"]:
             if pe and pe.ok:
                 s["section"], code = pe.section_of(s["off"])
                 if s["kind"] == "imm64" and code: score += 2
-        if sum(s["kind"] == "imm64" for s in rec["sites"]) == 1: score += 2
-        rec.update(score=score, refs=len(rec["sites"]), date=snowflake_date(rec["id"]))
+                if s["kind"] == "u64le":
+                    rva = pe.offset_to_rva(s["off"])
+                    if rva is not None and rva in rip: s["rip"] = True; rip_ref = True
+            if not near and s["kind"] in ("imm64", "u64le") and near_discord(s["off"]): near = True
+        if near: score += 2
+        if rip_ref: score += 3
+        imm64_refs = sum(s["kind"] == "imm64" for s in rec["sites"])
+        u64le_refs = sum(s["kind"] == "u64le" for s in rec["sites"])
+        if imm64_refs == 1: score += 2
+        if u64le_refs >= 2: score += 2
+        signals = int(bool(kinds & {"ascii", "utf16le"})) + int("imm64" in kinds) + int(rec["id"] in KNOWN) \
+            + int(near) + int(rip_ref) + int(u64le_refs >= 2) + int(imm64_refs >= 2)
+        rec.update(score=score, refs=len(rec["sites"]), date=snowflake_date(rec["id"]),
+                   confident=signals >= 2,
+                   # A bare qword may only be chosen automatically when it sits in
+                   # Discord-related data; a mere code reference is not enough,
+                   # because referenced timestamps and hashes are everywhere.
+                   eligible=bool(kinds & {"ascii", "utf16le", "imm64"}) or rec["id"] in KNOWN
+                   or signals >= 2 or (near and "u64le" in kinds))
+
+    # Two bare-qword candidates whose bytes overlap cannot both be real
+    # constants; one is usually the other shifted by a few bytes.  The one
+    # with less evidence is demoted, and a dead tie demotes both - guessing
+    # here is what used to make the detector show a wrong ID.
+    sites = sorted(((s["off"], rec) for rec in found.values() for s in rec["sites"]
+                    if rec["score"] >= 3 and {x["kind"] for x in rec["sites"]} == {"u64le"}), key=lambda x: x[0])
+    for (off1, rec1), (off2, rec2) in zip(sites, sites[1:]):
+        if off2 - off1 >= 8 or rec1 is rec2: continue
+        if rec1["score"] > rec2["score"]: rec2["score"] = min(rec2["score"], 2)
+        elif rec2["score"] > rec1["score"]: rec1["score"] = min(rec1["score"], 2)
+        else: rec1["score"] = rec2["score"] = 2
+
     return sorted(found.values(), key=lambda r: (-r["score"], r["refs"], r["id"]))
+
+
+def pick_candidate(recs):
+    """The record automatic actions may act on: strong, eligible and un-tied."""
+    strong = [r for r in recs if r["score"] >= 3]
+    if not strong: return None, strong
+    top = strong[0]
+    if not top.get("eligible"): return None, strong
+    if len(strong) > 1 and strong[1]["score"] >= top["score"]:
+        return None, strong                     # two equally good guesses: refuse to guess
+    return top, strong
 
 
 _CACHE = {}
@@ -274,6 +437,8 @@ def sites_for_id(data, app_id):
 
     This is what makes re-patching an already patched file reliable: the sites are
     re-derived from the bytes on disk instead of trusted from an earlier scan.
+    Matches never overlap: an occurrence starting inside an already matched span
+    cannot be written without corrupting the first one.
     """
     app_id = str(app_id)
     sites, seen = [], set()
@@ -292,22 +457,31 @@ def sites_for_id(data, app_id):
         pos = data.find(packed)
         while pos >= 0:
             add("u64le", pos)
-            pos = data.find(packed, pos + 1)
+            pos = data.find(packed, pos + len(packed))
 
     for enc, kind, width in (("ascii", "ascii", 1), ("utf-16-le", "utf16le", 2)):
         needle = app_id.encode(enc)
         pos = data.find(needle)
         while pos >= 0:
-            before = data[pos - width:pos] if pos >= width else b""
+            before = data[pos - 2 * width:pos] if pos >= 2 * width else b""
             after = data[pos + len(needle):pos + len(needle) + width]
-            digit_before = bool(before) and 0x30 <= before[0] <= 0x39 and (width == 1 or before[1] == 0)
-            digit_after = len(after) == width and 0x30 <= after[0] <= 0x39 and (width == 1 or after[1] == 0)
+            # "Embedded in a longer number" needs two full chars of context on
+            # the relevant side: a single digit char can be a phantom, e.g.
+            # the last byte pair of a neighbouring ASCII ID string ("9\0")
+            # sitting directly in front of a UTF-16 copy.
+            if width == 1:
+                digit_before = bool(before) and 0x30 <= before[-1] <= 0x39
+                digit_after = len(after) == 1 and 0x30 <= after[0] <= 0x39
+            else:
+                digit_before = (len(before) == 4 and 0x30 <= before[2] <= 0x39 and before[3] == 0
+                                and 0x30 <= before[0] <= 0x39 and before[1] == 0)
+                digit_after = len(after) == 2 and 0x30 <= after[0] <= 0x39 and after[1] == 0
             if not digit_before and not digit_after:
                 end, slack = pos + len(needle), 0
                 while end + width <= len(data) and data[end:end + width] == b"\0" * width:
                     end += width; slack += 1
                 add(kind, pos, text=app_id, slack=slack)
-            pos = data.find(needle, pos + 1)
+            pos = data.find(needle, pos + len(needle))
     return sites
 
 
@@ -321,13 +495,26 @@ def load_state(path):
     except (OSError, ValueError):
         return {}
 
+def state_history(state):
+    """Every ID this tool has ever seen in this file, oldest first."""
+    out = []
+    for x in (state.get("history") or []) + [state.get("original_id"), state.get("previous_id"), state.get("current_id")]:
+        x = str(x) if x is not None else ""
+        if x and x not in out: out.append(x)
+    return out
+
 def save_state(path, original_id, current_id, count):
     state = load_state(path)
+    history = state_history(state)
+    for x in (original_id, current_id):
+        x = str(x) if x is not None else ""
+        if x and x not in history: history.append(x)
     state.update({"version": 1,
                   "tool": "rpcid " + VERSION,
                   "original_id": state.get("original_id") or original_id,
                   "current_id": current_id,
                   "previous_id": original_id,
+                  "history": history,
                   "occurrences": count,
                   "updated": _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")})
     try:
@@ -345,6 +532,21 @@ def current_id_of(data, path):
     if candidate and sites_for_id(data, candidate):
         return candidate, state
     return None, state
+
+
+def leftover_ids(data, state, *keep):
+    """Remembered IDs that are still in the file although they are not current.
+
+    These are the copies an earlier patch could not overwrite because their slot
+    was too small; reporting them keeps a partially patched file from looking
+    healthy, and re-patching repairs them whenever the new ID fits.
+    """
+    keep = {str(x) for x in keep if x}
+    out = []
+    for old in state_history(state):
+        if old in keep or old in out: continue
+        if sites_for_id(data, old): out.append(old)
+    return out
 
 
 def write_sites(buf, sites, new):
@@ -367,7 +569,8 @@ def cmd_find(a):
     if not paths: fail("nothing to scan at %s" % a.path); return 1
     total = 0
     for path in paths:
-        data, pe, candidates = read(path), PE(read(path)), None
+        data = read(path)
+        pe = PE(data)
         candidates = harvest(data, pe); strong = [r for r in candidates if r["score"] >= 3]
         if not candidates: note("%s: no ID-shaped values" % os.path.basename(path)); continue
         heading(os.path.basename(path))
@@ -377,6 +580,9 @@ def cmd_find(a):
         if patched:
             good("already patched: current ID %s (original %s)" % (patched, state.get("original_id") or "unknown"))
             note("   %d occurrence(s); patching again replaces exactly these" % len(sites_for_id(data, patched)))
+            for old in leftover_ids(data, state, patched):
+                warn("older ID %s still has %d occurrence(s) the last patch could not fit" % (old, len(sites_for_id(data, old))))
+                note("   patching again with a shorter ID replaces those too")
         elif state.get("current_id"):
             warn("the remembered ID %s is no longer in this file" % state["current_id"])
         note("%d candidate(s), %d worth checking" % (len(candidates), len(strong)))
@@ -400,6 +606,10 @@ def select_sites(data, path, a):
         chosen = []
         for old in a.old:
             old = str(old).strip()
+            # A short or malformed "old" value would match unrelated bytes all
+            # over the file, so only a full 17-20 digit ID may be used here.
+            if not re.fullmatch(r"\d{17,20}", old):
+                warn('%s is not a 17-20 digit Application ID' % old); continue
             sites = sites_for_id(data, old)
             if sites: chosen.append({"id": old, "sites": sites, "source": "manual entry"})
             else: warn("%s is not present in the file" % old)
@@ -411,34 +621,46 @@ def select_sites(data, path, a):
     if state.get("current_id"):
         warn("the remembered ID %s is no longer in the file; scanning instead" % state["current_id"])
     recs = harvest(data, PE(data))
-    strong = [r for r in recs if r["score"] >= 3]
-    picked = [r for r in strong if r["id"] in KNOWN] or strong[:1]
-    out = []
-    for r in picked:
-        sites = sites_for_id(data, r["id"]) or r["sites"]
-        out.append({"id": r["id"], "sites": sites, "source": "scan"})
-    return out
+    pick, strong = pick_candidate(recs)
+    if not pick:
+        if strong:
+            warn("%d possible ID(s) found (%s); none is confirmed" % (len(strong), ", ".join(r["id"] for r in strong[:3])))
+            note("enter the current one in the advanced field to patch it")
+        return []
+    return [{"id": pick["id"], "sites": sites_for_id(data, pick["id"]) or pick["sites"], "source": "scan"}]
 
 
 def cmd_replace(a):
     if not os.path.isfile(a.path): fail("no such file: " + a.path); return 1
     new_id = (a.new or "").strip()
     if not re.fullmatch(r"\d{17,20}", new_id): fail("Enter a Discord Application ID of 17 to 20 digits"); return 1
+    if not plausible(int(new_id)) or compiler_constant(int(new_id)):
+        fail("%s is not shaped like a Discord Application ID" % new_id); return 1
     data = read(a.path)
-    selected = select_sites(data, a.path, a)
-    selected = [r for r in selected if r["sites"]]
+    state = load_state(a.path)
+    selected = [r for r in select_sites(data, a.path, a) if r["sites"]]
+
+    # Copies of older IDs that a previous patch could not fit are patched too,
+    # so re-patching repairs a partially patched file instead of leaving the
+    # very first ID behind forever.
+    keep = {new_id} | {r["id"] for r in selected}
+    for old in leftover_ids(data, state, *keep):
+        selected.append({"id": old, "sites": sites_for_id(data, old), "source": "leftover from an earlier patch"})
+        note("older ID %s was left behind by an earlier patch; it will be replaced as well" % old)
 
     # Already on the requested ID: succeed (and re-sync the state file) instead of failing.
-    if not selected or all(r["id"] == new_id for r in selected):
+    everything_is_new = bool(selected) and all(r["id"] == new_id for r in selected)
+    if everything_is_new or (not a.old and not selected):
         existing = sites_for_id(data, new_id)
         if existing:
             good("%s is already the Application ID in this file (%d occurrence(s))" % (new_id, len(existing)))
-            if not a.dry_run: save_state(a.path, load_state(a.path).get("original_id") or new_id, new_id, len(existing))
+            if not a.dry_run: save_state(a.path, state.get("original_id") or new_id, new_id, len(existing))
             return 0
     if not selected:
         fail("could not find an Application ID in that file"); note("if you know the current ID, enter it in the advanced field"); return 1
-    if len(selected) > 1 and not a.all:
-        warn("%d different IDs found; enter the current one in the advanced field" % len(selected)); return 1
+    primary = [r for r in selected if r["source"] != "leftover from an earlier patch"]
+    if len(primary) > 1 and not a.all:
+        warn("%d different IDs found; enter the current one in the advanced field" % len(primary)); return 1
 
     old_id = selected[0]["id"]
     all_sites = [s for r in selected for s in r["sites"]]
@@ -459,15 +681,20 @@ def cmd_replace(a):
     note("a backup of the original file was created")
 
     # Verify straight from the written bytes - a scan can score a valid ID away.
+    # Every ID this file has ever held is checked, not just the selected one,
+    # so a leftover copy can never hide behind a "verified" result again.
     fresh = read(a.path)
     hits = sites_for_id(fresh, new_id)
-    leftover = [s for r in selected for s in sites_for_id(fresh, r["id"]) if r["id"] != new_id]
-    if hits and not leftover:
+    history = set(state_history(state)) | {r["id"] for r in selected} | {new_id}
+    stale = [(old, len(sites_for_id(fresh, old))) for old in sorted(history - {new_id}) if sites_for_id(fresh, old)]
+    if hits and not stale:
         good("verified: %s is in the file (%d occurrence(s))" % (new_id, len(hits)))
         save_state(a.path, old_id, new_id, len(hits))
         return 0
-    if hits and leftover:
-        warn("%s written, but %d occurrence(s) of the old ID remain" % (new_id, len(leftover)))
+    if hits and stale:
+        warn("PARTIAL: %s was written, but older copies remain" % new_id)
+        for old, count in stale:
+            warn("%d occurrence(s) of %s do not fit the new ID; use a shorter ID or Undo to restore the original" % (count, old))
         save_state(a.path, old_id, new_id, len(hits))
         return 0
     fail("could not verify the new ID"); return 1
@@ -476,7 +703,7 @@ def cmd_replace(a):
 def cmd_status(a):
     """Machine-readable state, used by the BSI Customizer UI."""
     out = {"ok": False, "path": a.path, "current_id": None, "original_id": None,
-           "candidates": [], "patched": False, "name": None, "msg": ""}
+           "candidates": [], "patched": False, "name": None, "msg": "", "leftovers": []}
     if not os.path.isfile(a.path):
         out["msg"] = "no such file"
         print(json.dumps(out)); return 1
@@ -487,14 +714,21 @@ def cmd_status(a):
         out.update(ok=True, patched=True, current_id=current,
                    msg="patched to %s" % current)
     else:
-        strong = [r for r in harvest(data, PE(data)) if r["score"] >= 3]
+        recs = harvest(data, PE(data))
+        pick, strong = pick_candidate(recs)
         out["candidates"] = [{"id": r["id"], "score": r["score"], "refs": r["refs"],
                               "known": KNOWN.get(r["id"])} for r in strong[:6]]
-        if strong:
-            out.update(ok=True, current_id=strong[0]["id"],
-                       msg="detected %s" % strong[0]["id"])
+        if pick:
+            out.update(ok=True, current_id=pick["id"],
+                       msg="detected %s" % pick["id"])
+        elif strong:
+            out.update(ok=True, msg="%d possible ID(s) found; none confirmed - use Find to review them" % len(strong))
         else:
             out["msg"] = "no Application ID found"
+    stale = leftover_ids(data, state, current, out["current_id"])
+    if stale:
+        out["leftovers"] = stale
+        out["msg"] += "; %d older ID copy(ies) still present (%s)" % (len(stale), ", ".join(stale))
     if out["current_id"] and not a.no_net:
         app = lookup(out["current_id"])
         if app and app.get("name"):
@@ -547,6 +781,7 @@ def cmd_wizard(a):
 
 
 def cmd_selftest(_a):
+    import tempfile, shutil
     known, other = 821361671729709086, 1234567890123456789
     checks = []
     def check(label, value): checks.append((label, bool(value)))
@@ -568,10 +803,85 @@ def cmd_selftest(_a):
     check("second patch writes every site", done2 and not skipped2)
     check("second patch is readable back", len(sites_for_id(bytes(buf2), again)) == len(sites))
     check("old ID is gone after re-patch", not sites_for_id(bytes(buf2), replacement))
-    short = str(known)[:18]
+    short = str(known)[:17]                      # genuinely shorter than the slot
     buf3 = bytearray(buf2); write_sites(buf3, sites_for_id(bytes(buf2), again), short)
     check("shorter ID then longer ID round-trips",
           bool(sites_for_id(bytes(buf3), short)) and len(bytes(buf3)) == len(blob))
+    longer = str(other)                          # 19 digits fits the 18+3 slot
+    buf4 = bytearray(buf3); write_sites(buf4, sites_for_id(bytes(buf3), short), longer)
+    check("longer ID reuses the spare NULs", bool(sites_for_id(bytes(buf4), longer)) and len(bytes(buf4)) == len(blob))
+
+    # Bare qwords used to be read only at 8-byte aligned offsets.
+    unaligned = b"\x90" * 61 + struct.pack("<Q", known) + b"\x90" * 64
+    check("misaligned qword ID is found", str(known) in {r["id"] for r in harvest(unaligned)})
+    sdkish = b"\x90" * 32 + b"discord" + b"\x00" * 29 + struct.pack("<Q", other) * 2 + b"\x90" * 64
+    pick, strong = pick_candidate(harvest(sdkish))
+    check("bare qword near Discord strings is the pick", pick and pick["id"] == str(other) and len(strong) == 1)
+    # Text forms used to skip the junk-number filter and could out-rank the real ID.
+    decoy = b"\x90" * 16 + struct.pack("<Q", known) + str(1 << 60).encode() + b"\x00" + b"\x90" * 8
+    check("round text numbers are ignored", str(1 << 60) not in {r["id"] for r in harvest(decoy)})
+    longrun = ("1" * 21).encode("utf-16-le") + b"\0\0" + str(other).encode("utf-16-le") + b"\0\0"
+    check("overlong UTF-16 numbers are not misread", "1" * 21 not in {r["id"] for r in harvest(b"\x90" * 8 + longrun)})
+    # Overlapping matches of the same pattern must not be reported as separate sites.
+    padded = struct.pack("<Q", known) * 2
+    check("overlapping byte matches collapse", len(sites_for_id(padded, str(known))) == 2)
+    # A byte-shifted ghost overlapping the real qword must never win the pick.
+    ghost = b"\x00\x00" + struct.pack("<Q", other) + b"\x00" * 6
+    ghost_blob = b"\x90" * 32 + b"discord" + b"\x00" * 24 + ghost + b"\x90" * 64
+    gpick, _gstrong = pick_candidate(harvest(ghost_blob))
+    check("shifted ghost qword never wins", not gpick or gpick["id"] == str(other))
+
+    # A real PE layout: a misaligned .rdata qword referenced by RIP-relative
+    # code next to Discord strings must be detected with reference evidence.
+    head = bytearray(0x200)
+    head[0:2] = b"MZ"
+    struct.pack_into("<I", head, 0x3c, 0x40)
+    head[0x40:0x44] = b"PE\0\0"
+    struct.pack_into("<HH", head, 0x44, 0x8664, 2)
+    struct.pack_into("<H", head, 0x54, 0xf0)
+    struct.pack_into("<H", head, 0x58, 0x20b)
+    for i, (name, va, raw, chars) in enumerate(((".text", 0x1000, 0x200, 0x60000020),
+                                                (".rdata", 0x1200, 0x400, 0x40000040))):
+        off = 0x148 + i * 40
+        head[off:off + 8] = name.encode().ljust(8, b"\x00")
+        struct.pack_into("<IIII", head, off + 8, 0x200, va, 0x200, raw)
+        struct.pack_into("<I", head, off + 36, chars)
+    code = b"\x48\x8b\x05" + struct.pack("<i", 0x1203 - 0x1007) + b"\xcc" * 8     # mov rax,[rip+disp] -> rva 0x1203
+    rdata = b"\xcc\xcc\xcc" + struct.pack("<Q", other) + b"\x00" * 20 + b"discord"
+    image = bytes(head) + code.ljust(0x200, b"\xcc") + rdata.ljust(0x200, b"\x00")
+    image_pe = PE(image)
+    check("synthetic PE parses", image_pe.ok and image_pe.arch == "x64")
+    pe_pick, _pe_strong = pick_candidate(harvest(image, image_pe))
+    check("RIP-referenced misaligned qword is detected",
+          pe_pick and pe_pick["id"] == str(other) and any(s.get("rip") for s in pe_pick["sites"]))
+
+    # End-to-end re-patch: a slot too small for the first new ID must be
+    # reported as leftover and repaired by a later, shorter patch.
+    import io as _io, contextlib as _cl
+    def json_status(path):
+        with _cl.redirect_stdout(_io.StringIO()) as capture:
+            main(["status", path, "--no-net"])
+        return json.loads(capture.getvalue())
+    tmp = tempfile.mkdtemp()
+    try:
+        exe = os.path.join(tmp, "HD-Player.exe")
+        orig = (b"\x48\xb8" + struct.pack("<Q", known) + b"\x90" * 8
+                + str(known).encode() + b"\x00" * 2
+                + str(known).encode("utf-16-le") + b"\x00\x00" + b"\x90" * 16)
+        with open(exe, "wb") as f: f.write(orig)
+        rc = main(["replace", exe, "--new", str(other), "--yes", "--no-net"])
+        check("tight slot patch keeps the size", rc == 0 and os.path.getsize(exe) == len(orig))
+        out = json_status(exe)
+        check("status reports the leftover old ID", out["current_id"] == str(other) and out["leftovers"] == [str(known)])
+        short2 = str(other)[:18]
+        rc = main(["replace", exe, "--new", short2, "--yes", "--no-net"])
+        out2 = json_status(exe)
+        check("re-patch repairs the leftover copies", rc == 0 and out2["leftovers"] == [] and out2["current_id"] == short2)
+        check("nothing of the original ID survives", not sites_for_id(read(exe), str(known)))
+        rc = main(["replace", exe, "--new", short2, "--old", "123", "--yes", "--no-net"])
+        check("malformed manual old ID is rejected", rc == 1)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
     for label, result in checks: (good if result else fail)(label)
     print("\n%d checks - %s" % (len(checks), "ALL PASSED" if all(x[1] for x in checks) else "FAILURES"))
     return 0 if all(x[1] for x in checks) else 1
