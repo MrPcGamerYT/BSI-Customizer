@@ -48,6 +48,10 @@ qt_add_executable(BSICustomizer
     src/third_party/hde64/table64.h
     src/core/IntegrityPatcher.h
     src/core/IntegrityPatcher.cpp
+    src/core/RpcIdScan.h
+    src/core/RpcIdScan.cpp
+    src/core/RpcIdPatcher.h
+    src/core/RpcIdPatcher.cpp
     src/core/BootVideoPatcher.h
     src/core/BootVideoPatcher.cpp
     src/core/ExtrasPatcher.h
@@ -190,8 +194,8 @@ target_link_libraries(BSICustomizer PRIVATE
 )
 
 install(TARGETS BSICustomizer RUNTIME DESTINATION bin)
-# The Discord RPC tab launches this standalone helper for discovery/patching.
-install(FILES rpcid.py DESTINATION bin)
+# Discord Rich Presence discovery/patching is compiled into the application;
+# the standalone rpcid.py file remains a developer/reference CLI only.
 
 # Retain the decoder's BSD notices next to built/installed executables.
 add_custom_command(TARGET BSICustomizer POST_BUILD

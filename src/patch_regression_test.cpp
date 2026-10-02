@@ -9,6 +9,8 @@
 #include "core/PeUtils.h"
 #include "core/QtResources.h"
 #include "core/QtResourceRegistration.h"
+#include "core/RpcIdPatcher.h"
+#include "core/RpcIdScan.h"
 #include "core/SettingsManager.h"
 #include "core/ThemeEngine.h"
 #include "core/ZlibUtils.h"
@@ -1990,6 +1992,46 @@ int runPatchRegressionTests()
         settings.setFpsAutoDetect(false);
         settings.setDllPath(renderer);
         check(!backend.fpsAnalyze().value(QStringLiteral("ok")).toBool(), "FPS Analyze rejects the wrong DLL too");
+    }
+    {
+        // Rich Presence is a native HD-Player patch now: no deployed script or
+        // Python installation is involved. Exercise detection, repeated patch,
+        // remembered state, fixed-size writes and undo through the shipping API.
+        const QString firstId = QStringLiteral("821361671729709086");
+        const QString secondId = QStringLiteral("1234567890123456789");
+        QByteArray image(32, '\x90');
+        image += QByteArray::fromHex("48b8");
+        quint64 numeric = firstId.toULongLong();
+        for (int i = 0; i < 8; ++i) image += char((numeric >> (8 * i)) & 0xff);
+        image += QByteArray("discord\0", 8);
+        image += firstId.toLatin1() + QByteArray(3, '\0');
+        for (const QChar c : firstId) { image += char(c.unicode()); image += '\0'; }
+        image += QByteArray(2, '\0');
+        image += QByteArray(32, '\x90');
+
+        const auto records = RpcIdScan::harvest(
+            std::string_view(image.constData(), static_cast<std::size_t>(image.size())));
+        const auto pick = RpcIdScan::pickCandidate(records);
+        check(pick.index >= 0 && records[std::size_t(pick.index)].id == firstId.toStdString(),
+              "native Rich Presence scanner finds the HD-Player Application ID");
+
+        const QString exe = temp.filePath(QStringLiteral("HD-Rpc.exe"));
+        write(exe, image);
+        const qint64 originalSize = QFileInfo(exe).size();
+        const auto changed = RpcIdPatcher::replace(exe, secondId);
+        const auto changedStatus = RpcIdPatcher::status(exe);
+        check(changed.ok && changedStatus.patched && changedStatus.currentId == secondId,
+              "native Rich Presence patch records and reports the replacement ID");
+        check(QFileInfo(exe).size() == originalSize
+                  && QFileInfo::exists(RpcIdPatcher::backupPath(exe)),
+              "Rich Presence patch preserves file size and creates its backup");
+        const auto repeated = RpcIdPatcher::replace(exe, firstId);
+        check(repeated.ok && RpcIdPatcher::status(exe).currentId == firstId,
+              "Rich Presence ID can be changed repeatedly without rescanning a stale ID");
+        const auto undone = RpcIdPatcher::undo(exe);
+        QFile restored(exe); restored.open(QIODevice::ReadOnly);
+        check(undone.ok && restored.readAll() == image && !QFileInfo::exists(RpcIdPatcher::statePath(exe)),
+              "Rich Presence Undo restores the original bytes and clears patch state");
     }
     return failures;
 }

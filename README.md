@@ -121,11 +121,13 @@ If Analyze reports a **recognized partial FPS patch**, keep the matching clean `
 
 ## Discord Rich Presence ID utility
 
-`rpcid.py` is a standalone, standard-library-only helper for emulator builds
-that embed a Discord Application ID. It detects the Game SDK's little-endian
-64-bit integer form (at any file alignment, including qwords referenced by
-code), ASCII and UTF-16 forms used by classic `discord-rpc`, and preserves the
-original file size when replacing an ID. Junk-shaped numbers (round values,
+The app's **Discord Rich Presence** page contains a native HD-Player patcher;
+it does not launch Python, load a sidecar script, or require a separately
+installed component. `rpcid.py` remains a standalone, standard-library-only
+reference/developer CLI. Both implementations detect the Game SDK's
+little-endian 64-bit integer form (at any file alignment, including qwords
+referenced by code), ASCII and UTF-16 forms used by classic `discord-rpc`, and
+preserve the original file size when replacing an ID. Junk-shaped numbers (round values,
 repeated digit patterns, parts of longer numbers) are filtered out, and a
 candidate is only acted on automatically when the evidence is unambiguous, so
 the detector no longer reports a wrong ID on builds it used to mis-read.
