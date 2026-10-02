@@ -156,6 +156,7 @@ public:
     Q_INVOKABLE QVariantMap rpcidReplace(const QString &path, const QString &newId,
                                          const QString &oldId = QString(),
                                          bool dryRun = false, bool noNetwork = true);
+    Q_INVOKABLE QVariantMap rpcidStatus(const QString &path);
     Q_INVOKABLE QVariantMap rpcidUndo(const QString &path);
 
 signals:

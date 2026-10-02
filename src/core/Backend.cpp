@@ -13,7 +13,10 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QProcess>
+#include <QRegularExpression>
 #include <QCoreApplication>
 #include <QStringList>
 
@@ -947,28 +950,65 @@ QVariantMap Backend::restoreBackup(const QString &path)
 }
 
 namespace {
-QVariantMap runRpcid(const QStringList &arguments)
+// Keep implementation details (file names, interpreters, CLI switches) out of
+// anything the user can read.
+QString cleanOutput(QString text)
+{
+    text.remove(QRegularExpression(QStringLiteral("\\s*\\(?--[A-Za-z0-9-]+\\)?")));
+    text.remove(QRegularExpression(QStringLiteral("[^\\s\"']*\\.(?:py|pyc)\\b"),
+                                   QRegularExpression::CaseInsensitiveOption));
+    text.remove(QRegularExpression(QStringLiteral("[^\\s\"']*\\.rpcid[A-Za-z.-]*\\b"),
+                                   QRegularExpression::CaseInsensitiveOption));
+    text.replace(QRegularExpression(QStringLiteral("\\bpython[0-9.]*\\b"),
+                                    QRegularExpression::CaseInsensitiveOption),
+                 QStringLiteral("runtime"));
+    text.replace(QRegularExpression(QStringLiteral("\\brpcid\\b"),
+                                    QRegularExpression::CaseInsensitiveOption),
+                 QStringLiteral("Rich Presence"));
+    return text.trimmed();
+}
+
+QString rpcidScript()
 {
     QString script = QCoreApplication::applicationDirPath() + QStringLiteral("/rpcid.py");
-    if (!QFileInfo::exists(script))
-        script = QDir::current().filePath(QStringLiteral("rpcid.py"));
-    if (!QFileInfo::exists(script))
-        return {{QStringLiteral("ok"), false}, {QStringLiteral("msg"),
-                QStringLiteral("rpcid.py was not found next to the customizer.")}};
+    if (QFileInfo::exists(script))
+        return script;
+    script = QDir::current().filePath(QStringLiteral("rpcid.py"));
+    return QFileInfo::exists(script) ? script : QString();
+}
 
-    QStringList args;
-    args << script << arguments;
-    QProcess process;
-    process.start(QStringLiteral("python"), args);
-    if (!process.waitForStarted(2500))
+// Windows installs expose Python under several names; try each once.
+QVariantMap runRpcid(const QStringList &arguments, QString *rawOutput = nullptr)
+{
+    const QString script = rpcidScript();
+    if (script.isEmpty())
         return {{QStringLiteral("ok"), false}, {QStringLiteral("msg"),
-                QStringLiteral("Python was not found. Run rpcid.py with Python 3 installed.")}};
-    process.waitForFinished(-1);
-    const QString output = QString::fromLocal8Bit(process.readAllStandardOutput()
-                                                  + process.readAllStandardError()).trimmed();
-    return {{QStringLiteral("ok"), process.exitStatus() == QProcess::NormalExit
-                                  && process.exitCode() == 0},
-            {QStringLiteral("msg"), output.isEmpty() ? QStringLiteral("rpcid finished.") : output}};
+                QStringLiteral("The Discord Rich Presence component is missing from this installation.")}};
+
+    const QStringList interpreters{QStringLiteral("python"), QStringLiteral("python3"),
+                                   QStringLiteral("py")};
+    for (const QString &exe : interpreters) {
+        QStringList args;
+        if (exe == QStringLiteral("py"))
+            args << QStringLiteral("-3");
+        args << script << arguments;
+
+        QProcess process;
+        process.start(exe, args);
+        if (!process.waitForStarted(2500))
+            continue;
+        process.waitForFinished(-1);
+        const QString out = QString::fromLocal8Bit(process.readAllStandardOutput());
+        const QString err = QString::fromLocal8Bit(process.readAllStandardError());
+        if (rawOutput)
+            *rawOutput = out;
+        const QString text = (out + err).trimmed();
+        return {{QStringLiteral("ok"), process.exitStatus() == QProcess::NormalExit
+                                       && process.exitCode() == 0},
+                {QStringLiteral("msg"), text.isEmpty() ? QStringLiteral("Finished.") : cleanOutput(text)}};
+    }
+    return {{QStringLiteral("ok"), false}, {QStringLiteral("msg"),
+            QStringLiteral("A required runtime component is unavailable on this system.")}};
 }
 }
 
@@ -994,6 +1034,37 @@ QVariantMap Backend::rpcidReplace(const QString &path, const QString &newId,
     doLog(r.value(QStringLiteral("msg")).toString(),
           r.value(QStringLiteral("ok")).toBool() ? QStringLiteral("green") : QStringLiteral("red"));
     return r;
+}
+
+QVariantMap Backend::rpcidStatus(const QString &path)
+{
+    QVariantMap info{{QStringLiteral("ok"), false},
+                     {QStringLiteral("patched"), false},
+                     {QStringLiteral("currentId"), QString()},
+                     {QStringLiteral("originalId"), QString()},
+                     {QStringLiteral("name"), QString()},
+                     {QStringLiteral("hasBackup"), false},
+                     {QStringLiteral("msg"), QStringLiteral("Select an executable.")}};
+    if (path.trimmed().isEmpty() || !QFileInfo::exists(path))
+        return info;
+
+    QString raw;
+    const QVariantMap r = runRpcid({QStringLiteral("status"), path, QStringLiteral("--no-net")}, &raw);
+    const QJsonDocument doc = QJsonDocument::fromJson(raw.trimmed().toUtf8());
+    if (!doc.isObject()) {
+        info[QStringLiteral("msg")] = r.value(QStringLiteral("msg")).toString();
+        return info;
+    }
+    const QJsonObject o = doc.object();
+    info[QStringLiteral("ok")] = o.value(QStringLiteral("ok")).toBool();
+    info[QStringLiteral("patched")] = o.value(QStringLiteral("patched")).toBool();
+    info[QStringLiteral("currentId")] = o.value(QStringLiteral("current_id")).toString();
+    info[QStringLiteral("originalId")] = o.value(QStringLiteral("original_id")).toString();
+    info[QStringLiteral("name")] = o.value(QStringLiteral("name")).toString();
+    info[QStringLiteral("known")] = o.value(QStringLiteral("known")).toString();
+    info[QStringLiteral("hasBackup")] = o.value(QStringLiteral("backup")).toBool();
+    info[QStringLiteral("msg")] = o.value(QStringLiteral("msg")).toString();
+    return info;
 }
 
 QVariantMap Backend::rpcidUndo(const QString &path)

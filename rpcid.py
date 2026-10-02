@@ -34,8 +34,9 @@ try:
 except Exception:                         # pragma: no cover
     NETWORK = False
 
-VERSION = "1.0"
+VERSION = "1.1"
 BACKUP_SUFFIX = ".rpcid-bak"
+STATE_SUFFIX = ".rpcid.json"
 DISCORD_EPOCH = 1420070400000
 API = "https://discord.com/api/v9"
 KNOWN = {"821361671729709086": "BlueStacks 5 / MSI App Player"}
@@ -55,6 +56,8 @@ class PE:
     """Small PE reader used only to identify executable sections/resources."""
     def __init__(self, data):
         self.data, self.ok, self.sections = data, False, []
+        self.pe = self.dd = 0
+        self.machine, self.plus = 0, False
         if len(data) < 64 or data[:2] != b"MZ": return
         try:
             self.pe = struct.unpack_from("<I", data, 0x3c)[0]
@@ -89,10 +92,11 @@ class PE:
         return None
 
     def directory(self, index):
+        if not self.dd: return (0, 0)
         try: return struct.unpack_from("<II", self.data, self.dd + index * 8)
         except struct.error: return (0, 0)
 
-    def signed(self): return self.directory(4)[1] != 0
+    def signed(self): return self.ok and self.directory(4)[1] != 0
 
     def version_resource(self):
         rva, size = self.directory(2)
@@ -248,6 +252,101 @@ def fits(site, new):
     if site["kind"] in ("imm64", "u64le"): return True, "8-byte integer, any ID fits"
     growth = len(new) - len(site.get("text", ""))
     return (True, "same length or shorter") if growth <= 0 else ((True, "%d spare NULs" % site.get("slack", 0)) if site.get("slack", 0) >= growth + 1 else (False, "%d longer, %d spare NULs" % (growth, site.get("slack", 0))))
+def site_value(data, site):
+    """Read back the ID currently stored at a site, or None if it no longer holds one."""
+    off, kind = site["off"], site["kind"]
+    if kind in ("imm64", "u64le"):
+        if off + 8 > len(data): return None
+        return str(struct.unpack_from("<Q", data, off)[0])
+    if kind == "ascii":
+        end = off
+        while end < len(data) and 0x30 <= data[end] <= 0x39: end += 1
+        text = data[off:end].decode("ascii", "replace")
+    else:
+        end = off
+        while end + 1 < len(data) and 0x30 <= data[end] <= 0x39 and data[end + 1] == 0: end += 2
+        text = data[off:end].decode("utf-16-le", "replace")
+    return text or None
+
+
+def sites_for_id(data, app_id):
+    """Every place `app_id` is stored right now, with freshly measured spare room.
+
+    This is what makes re-patching an already patched file reliable: the sites are
+    re-derived from the bytes on disk instead of trusted from an earlier scan.
+    """
+    app_id = str(app_id)
+    sites, seen = [], set()
+
+    def add(kind, off, **extra):
+        key = (kind, off)
+        if key in seen: return
+        seen.add(key)
+        site = {"kind": kind, "off": off}
+        site.update(extra)
+        sites.append(site)
+
+    try: packed = struct.pack("<Q", int(app_id))
+    except (ValueError, struct.error): packed = None
+    if packed:
+        pos = data.find(packed)
+        while pos >= 0:
+            add("u64le", pos)
+            pos = data.find(packed, pos + 1)
+
+    for enc, kind, width in (("ascii", "ascii", 1), ("utf-16-le", "utf16le", 2)):
+        needle = app_id.encode(enc)
+        pos = data.find(needle)
+        while pos >= 0:
+            before = data[pos - width:pos] if pos >= width else b""
+            after = data[pos + len(needle):pos + len(needle) + width]
+            digit_before = bool(before) and 0x30 <= before[0] <= 0x39 and (width == 1 or before[1] == 0)
+            digit_after = len(after) == width and 0x30 <= after[0] <= 0x39 and (width == 1 or after[1] == 0)
+            if not digit_before and not digit_after:
+                end, slack = pos + len(needle), 0
+                while end + width <= len(data) and data[end:end + width] == b"\0" * width:
+                    end += width; slack += 1
+                add(kind, pos, text=app_id, slack=slack)
+            pos = data.find(needle, pos + 1)
+    return sites
+
+
+def state_path(path): return path + STATE_SUFFIX
+
+def load_state(path):
+    try:
+        with open(state_path(path), "r", encoding="utf-8") as f:
+            state = json.load(f)
+        return state if isinstance(state, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+def save_state(path, original_id, current_id, count):
+    state = load_state(path)
+    state.update({"version": 1,
+                  "tool": "rpcid " + VERSION,
+                  "original_id": state.get("original_id") or original_id,
+                  "current_id": current_id,
+                  "previous_id": original_id,
+                  "occurrences": count,
+                  "updated": _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")})
+    try:
+        with open(state_path(path), "w", encoding="utf-8") as f:
+            json.dump(state, f, indent=2)
+    except OSError as exc:
+        warn("could not remember the new ID: %s" % exc)
+    return state
+
+
+def current_id_of(data, path):
+    """The ID this file is patched to, if we can prove it is still in the bytes."""
+    state = load_state(path)
+    candidate = str(state.get("current_id") or "")
+    if candidate and sites_for_id(data, candidate):
+        return candidate, state
+    return None, state
+
+
 def write_sites(buf, sites, new):
     done, skipped = [], []
     for s in sites:
@@ -271,7 +370,15 @@ def cmd_find(a):
         data, pe, candidates = read(path), PE(read(path)), None
         candidates = harvest(data, pe); strong = [r for r in candidates if r["score"] >= 3]
         if not candidates: note("%s: no ID-shaped values" % os.path.basename(path)); continue
-        heading(os.path.basename(path)); note("PE %s, %s bytes, %s" % (pe.arch, format(len(data), ","), "signed" if pe.signed() else "unsigned"))
+        heading(os.path.basename(path))
+        note("PE %s, %s bytes, %s" % (pe.arch, format(len(data), ","), "signed" if pe.signed() else "unsigned")
+             if pe.ok else "%s bytes, not a PE image" % format(len(data), ","))
+        patched, state = current_id_of(data, path)
+        if patched:
+            good("already patched: current ID %s (original %s)" % (patched, state.get("original_id") or "unknown"))
+            note("   %d occurrence(s); patching again replaces exactly these" % len(sites_for_id(data, patched)))
+        elif state.get("current_id"):
+            warn("the remembered ID %s is no longer in this file" % state["current_id"])
         note("%d candidate(s), %d worth checking" % (len(candidates), len(strong)))
         hits = []
         if not a.no_net:
@@ -287,36 +394,116 @@ def cmd_find(a):
     return 0
 
 
+def select_sites(data, path, a):
+    """Decide which ID to overwrite. Order: --old, recorded patch state, heuristics."""
+    if a.old:
+        chosen = []
+        for old in a.old:
+            old = str(old).strip()
+            sites = sites_for_id(data, old)
+            if sites: chosen.append({"id": old, "sites": sites, "source": "manual entry"})
+            else: warn("%s is not present in the file" % old)
+        return chosen
+    current, state = current_id_of(data, path)
+    if current:
+        note("this file was patched before; current ID %s" % current)
+        return [{"id": current, "sites": sites_for_id(data, current), "source": "previous patch"}]
+    if state.get("current_id"):
+        warn("the remembered ID %s is no longer in the file; scanning instead" % state["current_id"])
+    recs = harvest(data, PE(data))
+    strong = [r for r in recs if r["score"] >= 3]
+    picked = [r for r in strong if r["id"] in KNOWN] or strong[:1]
+    out = []
+    for r in picked:
+        sites = sites_for_id(data, r["id"]) or r["sites"]
+        out.append({"id": r["id"], "sites": sites, "source": "scan"})
+    return out
+
+
 def cmd_replace(a):
     if not os.path.isfile(a.path): fail("no such file: " + a.path); return 1
-    if not re.fullmatch(r"\d{17,20}", a.new or ""): fail("--new must be a 17-20 digit Discord Application ID"); return 1
-    data, pe = read(a.path), PE(read(a.path)); recs = harvest(data, pe)
-    if a.old:
-        selected = [r for r in recs if r["id"] in a.old]
-        for old in a.old:
-            if not any(r["id"] == old for r in selected):
-                sites = []
-                for kind, enc in (("u64le", None), ("ascii", "ascii"), ("utf16le", "utf-16-le")):
-                    needle = struct.pack("<Q", int(old)) if not enc else old.encode(enc); pos = data.find(needle)
-                    while pos >= 0:
-                        sites.append({"kind": kind, "off": pos, "text": old, "slack": 0}); pos = data.find(needle, pos + 1)
-                if sites: selected.append({"id": old, "sites": sites, "score": 9})
-    else:
-        strong = [r for r in recs if r["score"] >= 3]; selected = [r for r in strong if r["id"] in KNOWN] or strong[:1]
-    if not selected: fail("could not find an Application ID in that file"); note("if you know it, pass --old <id>"); return 1
-    if len(selected) > 1 and not a.all: warn("%d different IDs found; pick one with --old or use --all" % len(selected)); return 1
-    all_sites = [s for r in selected for s in r["sites"]]; heading("Replacing")
-    for r in selected: note("%s -> %s (%d occurrence(s))" % (r["id"], a.new, len(r["sites"])))
-    if a.dry_run: warn("--dry-run: nothing written"); return 0
+    new_id = (a.new or "").strip()
+    if not re.fullmatch(r"\d{17,20}", new_id): fail("Enter a Discord Application ID of 17 to 20 digits"); return 1
+    data = read(a.path)
+    selected = select_sites(data, a.path, a)
+    selected = [r for r in selected if r["sites"]]
+
+    # Already on the requested ID: succeed (and re-sync the state file) instead of failing.
+    if not selected or all(r["id"] == new_id for r in selected):
+        existing = sites_for_id(data, new_id)
+        if existing:
+            good("%s is already the Application ID in this file (%d occurrence(s))" % (new_id, len(existing)))
+            if not a.dry_run: save_state(a.path, load_state(a.path).get("original_id") or new_id, new_id, len(existing))
+            return 0
+    if not selected:
+        fail("could not find an Application ID in that file"); note("if you know the current ID, enter it in the advanced field"); return 1
+    if len(selected) > 1 and not a.all:
+        warn("%d different IDs found; enter the current one in the advanced field" % len(selected)); return 1
+
+    old_id = selected[0]["id"]
+    all_sites = [s for r in selected for s in r["sites"]]
+    heading("Replacing")
+    for r in selected:
+        note("%s -> %s (%d occurrence(s), via %s)" % (r["id"], new_id, len(r["sites"]), r["source"]))
+    if a.dry_run: warn("preview only: nothing written"); return 0
     if not a.yes and input("  write it? [y/N] ").strip().lower()[:1] != "y": note("cancelled"); return 0
-    buf = bytearray(data); done, skipped = write_sites(buf, all_sites, a.new)
+
+    buf = bytearray(data)
+    done, skipped = write_sites(buf, all_sites, new_id)
     if not done: fail("nothing could be written"); return 1
-    try: b = backup(a.path); save(a.path, buf)
-    except PermissionError: fail("cannot write %s; close the emulator and try as Administrator" % a.path); return 2
-    good("wrote %d occurrence(s), %d skipped" % (len(done), len(skipped))); note("backup " + os.path.basename(b))
-    if any(r["id"] == a.new for r in harvest(read(a.path), PE(read(a.path)))): good("verified: %s is in the file" % a.new)
-    else: fail("could not verify the new ID")
-    return 0
+    try:
+        b = backup(a.path); save(a.path, buf)
+    except PermissionError:
+        fail("cannot write %s; close the emulator and try as Administrator" % a.path); return 2
+    good("wrote %d occurrence(s), %d skipped" % (len(done), len(skipped)))
+    note("a backup of the original file was created")
+
+    # Verify straight from the written bytes - a scan can score a valid ID away.
+    fresh = read(a.path)
+    hits = sites_for_id(fresh, new_id)
+    leftover = [s for r in selected for s in sites_for_id(fresh, r["id"]) if r["id"] != new_id]
+    if hits and not leftover:
+        good("verified: %s is in the file (%d occurrence(s))" % (new_id, len(hits)))
+        save_state(a.path, old_id, new_id, len(hits))
+        return 0
+    if hits and leftover:
+        warn("%s written, but %d occurrence(s) of the old ID remain" % (new_id, len(leftover)))
+        save_state(a.path, old_id, new_id, len(hits))
+        return 0
+    fail("could not verify the new ID"); return 1
+
+
+def cmd_status(a):
+    """Machine-readable state, used by the BSI Customizer UI."""
+    out = {"ok": False, "path": a.path, "current_id": None, "original_id": None,
+           "candidates": [], "patched": False, "name": None, "msg": ""}
+    if not os.path.isfile(a.path):
+        out["msg"] = "no such file"
+        print(json.dumps(out)); return 1
+    data = read(a.path)
+    current, state = current_id_of(data, a.path)
+    out["original_id"] = state.get("original_id")
+    if current:
+        out.update(ok=True, patched=True, current_id=current,
+                   msg="patched to %s" % current)
+    else:
+        strong = [r for r in harvest(data, PE(data)) if r["score"] >= 3]
+        out["candidates"] = [{"id": r["id"], "score": r["score"], "refs": r["refs"],
+                              "known": KNOWN.get(r["id"])} for r in strong[:6]]
+        if strong:
+            out.update(ok=True, current_id=strong[0]["id"],
+                       msg="detected %s" % strong[0]["id"])
+        else:
+            out["msg"] = "no Application ID found"
+    if out["current_id"] and not a.no_net:
+        app = lookup(out["current_id"])
+        if app and app.get("name"):
+            out["name"] = app["name"]
+            out["msg"] += ' ("%s")' % app["name"]
+    out["known"] = KNOWN.get(out["current_id"] or "")
+    out["backup"] = os.path.isfile(a.path + BACKUP_SUFFIX)
+    print(json.dumps(out))
+    return 0 if out["ok"] else 1
 
 
 def cmd_name(a):
@@ -334,14 +521,17 @@ def cmd_name(a):
         else: fail(key + ": " + why)
     if not changed or a.dry_run: return 0 if changed else 1
     if not a.yes and input("  write it? [y/N] ").strip().lower()[:1] != "y": note("cancelled"); return 0
-    b = backup(a.path); save(a.path, buf); good("saved, backup " + os.path.basename(b)); return 0
+    b = backup(a.path); save(a.path, buf); good("saved; a backup of the original file was created"); return 0
 
 def cmd_undo(a):
     backup_path = a.path + BACKUP_SUFFIX
-    if not os.path.isfile(backup_path): fail("no backup at " + backup_path); return 1
+    if not os.path.isfile(backup_path): fail("no backup was found for this file"); return 1
     try: shutil.copy2(backup_path, a.path)
     except PermissionError: fail("cannot write " + a.path); return 2
-    good("restored " + os.path.basename(a.path)); return 0
+    try:
+        if os.path.isfile(state_path(a.path)): os.remove(state_path(a.path))
+    except OSError: pass
+    good("restored the original file"); return 0
 
 
 def cmd_wizard(a):
@@ -370,6 +560,18 @@ def cmd_selftest(_a):
     buf = bytearray(blob); done, skipped = write_sites(buf, recs[str(known)]["sites"], replacement)
     check("replacement preserves size", done and not skipped and len(buf) == len(blob))
     check("new value is detectable", replacement in {r["id"] for r in harvest(bytes(buf))})
+    # Re-patching an already patched image must target the current ID, not a stale one.
+    again = str(known + 2)
+    sites = sites_for_id(bytes(buf), replacement)
+    check("patched ID is re-locatable", len(sites) >= 2)
+    buf2 = bytearray(buf); done2, skipped2 = write_sites(buf2, sites, again)
+    check("second patch writes every site", done2 and not skipped2)
+    check("second patch is readable back", len(sites_for_id(bytes(buf2), again)) == len(sites))
+    check("old ID is gone after re-patch", not sites_for_id(bytes(buf2), replacement))
+    short = str(known)[:18]
+    buf3 = bytearray(buf2); write_sites(buf3, sites_for_id(bytes(buf2), again), short)
+    check("shorter ID then longer ID round-trips",
+          bool(sites_for_id(bytes(buf3), short)) and len(bytes(buf3)) == len(blob))
     for label, result in checks: (good if result else fail)(label)
     print("\n%d checks - %s" % (len(checks), "ALL PASSED" if all(x[1] for x in checks) else "FAILURES"))
     return 0 if all(x[1] for x in checks) else 1
@@ -377,10 +579,10 @@ def cmd_selftest(_a):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(prog="rpcid", description="Find and replace Discord Application IDs in emulator binaries.")
-    parser.add_argument("command", nargs="?", default="wizard", choices=("find", "replace", "name", "undo", "selftest", "wizard"))
+    parser.add_argument("command", nargs="?", default="wizard", choices=("find", "replace", "name", "undo", "status", "selftest", "wizard"))
     parser.add_argument("path", nargs="?"); parser.add_argument("--new"); parser.add_argument("--old", action="append"); parser.add_argument("--set"); parser.add_argument("--key"); parser.add_argument("--all", action="store_true"); parser.add_argument("--max-lookups", type=int, default=200); parser.add_argument("--no-net", action="store_true"); parser.add_argument("--no-recurse", action="store_true"); parser.add_argument("--dry-run", action="store_true"); parser.add_argument("--yes", "-y", action="store_true"); parser.add_argument("--version", action="version", version="rpcid " + VERSION)
     a = parser.parse_args(argv)
     if a.command not in ("selftest", "wizard") and not a.path: parser.error(a.command + " needs a file or folder")
-    return {"find": cmd_find, "replace": cmd_replace, "name": cmd_name, "undo": cmd_undo, "selftest": cmd_selftest, "wizard": cmd_wizard}[a.command](a)
+    return {"find": cmd_find, "replace": cmd_replace, "name": cmd_name, "undo": cmd_undo, "status": cmd_status, "selftest": cmd_selftest, "wizard": cmd_wizard}[a.command](a)
 
 if __name__ == "__main__": sys.exit(main())
