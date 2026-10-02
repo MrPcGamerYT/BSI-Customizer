@@ -3,8 +3,8 @@ import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import BSICustomizer
 
-// Swatch + hex field with a popup color picker (port of the Python tool's
-// custom ColorPickerDialog — deterministic, no OS dialog).
+// Swatch + hex field with a popup color picker — deterministic, drawn by the
+// app itself instead of an OS dialog.
 RowLayout {
     id: control
 

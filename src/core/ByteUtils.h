@@ -3,8 +3,7 @@
 #include <QByteArray>
 #include <QtEndian>
 
-// Big/little endian helpers — same semantics as the Python tool's
-// be32/be64/le16/le32/put_be32/put_be64.
+// Big/little endian helpers used by every patcher engine in this project.
 namespace ByteUtils {
 
 inline quint16 be16(const QByteArray &b, qsizetype o)

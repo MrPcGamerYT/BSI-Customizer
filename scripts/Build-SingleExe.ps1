@@ -119,8 +119,12 @@ Copy-Required (Join-Path $repo 'LICENSE') (Join-Path $stage 'LICENSE')
 Copy-Required (Join-Path $repo 'src/third_party/hde64/LICENSE.txt') (Join-Path $stage 'licenses/HDE64.txt')
 $qtVersion = (& (Join-Path $qtBin 'qmake.exe') -query QT_VERSION).Trim()
 if ($LASTEXITCODE -ne 0 -or $qtVersion -notmatch '^\d+\.\d+\.\d+$') { throw 'Cannot determine the deployed Qt version' }
-Invoke-Checked 'python' @((Join-Path $PSScriptRoot 'Collect-QtNotices.py'), '--version', $qtVersion,
-                         '--output', (Join-Path $stage 'licenses/Qt'), '--cache', (Join-Path $BuildRoot 'notices-cache'))
+# Licence/attribution collection is a CMake script, so packaging needs nothing
+# beyond the toolchain that already builds the application - no interpreter.
+Invoke-Checked 'cmake' @("-DQT_VERSION=$qtVersion",
+                         "-DOUTPUT_DIR=$(Join-Path $stage 'licenses/Qt')",
+                         "-DCACHE_DIR=$(Join-Path $BuildRoot 'notices-cache')",
+                         '-P', (Join-Path $repo 'cmake/CollectQtNotices.cmake'))
 @"
 BSI Customizer portable runtime
 

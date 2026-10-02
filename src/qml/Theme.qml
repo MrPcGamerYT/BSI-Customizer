@@ -4,8 +4,7 @@ import QtQuick
 // ---------------------------------------------------------------------------
 // Theme singleton — every color in the app is a BINDING to these properties.
 // 'themes' is the C++ ThemeManager context property; when its NOTIFY fires,
-// all bindings below update live. Default palette matches the Python tool
-// (#0d0f14 / #151821 / #7c5cff).
+// all bindings below update live. Default palette: #0d0f14 / #151821 / #7c5cff.
 // ---------------------------------------------------------------------------
 QtObject {
     id: theme
@@ -25,7 +24,7 @@ QtObject {
     readonly property color danger:  dark ? "#ff6b6b" : "#d63a5f"
     readonly property color ok:      dark ? "#38d996" : "#2e9e5b"
 
-    // Log colors (same names as the Python tool's logger)
+    // Log colors used by the log panel
     readonly property color logGreen:  dark ? "#38d996" : "#1d9e63"
     readonly property color logRed:    dark ? "#ff6b6b" : "#d63a5f"
     readonly property color logOrange: dark ? "#ffb454" : "#c77b1f"

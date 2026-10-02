@@ -86,9 +86,8 @@ Result replaceSvg(const QString &exePath, int index, const QString &newSvgPath)
         data.replace(int(sv.offset), sv.size, payload);
     } else {
         // Larger SVGs grow the blob; safe here because these live in the
-        // Qt resource data region which tolerates trailing shifts only if
-        // nothing references later offsets by absolute position. The Python
-        // tool does exactly this, so we keep the behavior.
+        // Qt resource data region, which tolerates trailing shifts as long as
+        // nothing references later offsets by absolute position.
         data.replace(int(sv.offset), sv.size, payload);
     }
 

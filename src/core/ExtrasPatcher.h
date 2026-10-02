@@ -8,7 +8,6 @@
 #include <QVariantMap>
 
 // Version spoof, ad/string removal and instance detection.
-// Port of find_versions / apply_version / apply_removals / detect_instances.
 namespace ExtrasPatcher {
 
 struct Result { bool ok = false; QString msg; };

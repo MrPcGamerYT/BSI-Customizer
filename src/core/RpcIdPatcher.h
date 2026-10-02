@@ -11,10 +11,10 @@
  * application, with no helper script, interpreter or other external component
  * to deploy — the same reason every other patcher in this project is native.
  *
- * On-disk compatibility with the standalone reference script (rpcid.py) is
- * kept on purpose: the first backup is `<file>.rpcid-bak` and the remembered
- * patch state is `<file>.rpcid.json`, so a file patched by either one can be
- * re-patched or undone by the other. RpcIdScan holds the detection heuristics.
+ * The UI and the `--rpcid` command line share one on-disk contract: the first
+ * backup is `<file>.rpcid-bak` and the remembered patch state is
+ * `<file>.rpcid.json`, so a file patched from either side can be re-patched or
+ * undone from the other. RpcIdScan holds the detection heuristics.
  */
 namespace RpcIdPatcher {
 

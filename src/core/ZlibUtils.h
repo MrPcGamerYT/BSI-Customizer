@@ -10,8 +10,8 @@
 namespace ZlibUtils {
 
 // Decompress a raw zlib stream. If expectedSize >= 0 the result must match
-// exactly, otherwise an empty array is returned (mirrors the Python
-// decompressobj().eof / unused_data / length checks).
+// exactly, otherwise an empty array is returned: a stream that ends early,
+// carries trailing data or has the wrong length is not accepted.
 QByteArray tryDecompress(const QByteArray &rawStream, qint64 expectedSize = -1);
 
 // Compress to a raw zlib stream at level 9.

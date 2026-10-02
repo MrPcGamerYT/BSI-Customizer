@@ -36,6 +36,8 @@
 int runSelfTest();
 int runThemeRuntimeTest(const QStringList &args);
 int runGradientRuntimeTest(const QStringList &args);
+// Implemented in cli.cpp
+int runRpcIdCli(const QStringList &args);
 
 namespace {
 
@@ -93,6 +95,18 @@ int main(int argc, char *argv[])
     if (args.contains(QStringLiteral("--selftest"))) {
         ensureConsoleOutput();
         return runSelfTest();
+    }
+
+    // Scriptable Discord Rich Presence commands, served by the very engines
+    // the UI uses. The application is the whole tool: there is no helper
+    // script, interpreter or extra download behind this feature.
+    //   BSI-Customizer.exe --rpcid status "C:\...\HD-Player.exe" --json
+    const int rpcidAt = args.indexOf(QStringLiteral("--rpcid"));
+    if (rpcidAt >= 0) {
+        ensureConsoleOutput();
+        const int code = runRpcIdCli(args.mid(rpcidAt + 1));
+        std::fflush(stdout);
+        return code;
     }
 
     // Diagnostics: dump exactly what theme detection sees in a real
