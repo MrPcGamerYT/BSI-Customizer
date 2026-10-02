@@ -24,7 +24,7 @@ Item {
     }
 
     function showResult(result) {
-        page.status = result.msg || qsTr("rpcid finished.")
+        page.status = result.msg || qsTr("Finished.")
         page.statusColor = result.ok ? Theme.logColor("green") : Theme.danger
         page.refresh()
     }
@@ -348,9 +348,9 @@ Item {
                         wrapMode: Text.Wrap
                         font.pixelSize: 11
                         color: Theme.textDim
-                        text: qsTr("Game SDK int64, ASCII and UTF-16 forms are patched in place, so the file size never "
-                                   + "changes. The first run keeps a .rpcid-bak backup and records the patched ID in a "
-                                   + ".rpcid.json file, which is how re-patching finds the right value every time. "
+                        text: qsTr("Every stored form of the ID is replaced in place, so the file size never changes. "
+                                   + "The original file is backed up the first time and the current ID is remembered, "
+                                   + "so you can change it again later as often as you like. "
                                    + "Close the emulator before replacing an ID.")
                     }
                 }

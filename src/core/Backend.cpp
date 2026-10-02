@@ -16,6 +16,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QProcess>
+#include <QRegularExpression>
 #include <QCoreApplication>
 #include <QStringList>
 
@@ -949,6 +950,24 @@ QVariantMap Backend::restoreBackup(const QString &path)
 }
 
 namespace {
+// Keep implementation details (file names, interpreters, CLI switches) out of
+// anything the user can read.
+QString cleanOutput(QString text)
+{
+    text.remove(QRegularExpression(QStringLiteral("\\s*\\(?--[A-Za-z0-9-]+\\)?")));
+    text.remove(QRegularExpression(QStringLiteral("[^\\s\"']*\\.(?:py|pyc)\\b"),
+                                   QRegularExpression::CaseInsensitiveOption));
+    text.remove(QRegularExpression(QStringLiteral("[^\\s\"']*\\.rpcid[A-Za-z.-]*\\b"),
+                                   QRegularExpression::CaseInsensitiveOption));
+    text.replace(QRegularExpression(QStringLiteral("\\bpython[0-9.]*\\b"),
+                                    QRegularExpression::CaseInsensitiveOption),
+                 QStringLiteral("runtime"));
+    text.replace(QRegularExpression(QStringLiteral("\\brpcid\\b"),
+                                    QRegularExpression::CaseInsensitiveOption),
+                 QStringLiteral("Rich Presence"));
+    return text.trimmed();
+}
+
 QString rpcidScript()
 {
     QString script = QCoreApplication::applicationDirPath() + QStringLiteral("/rpcid.py");
@@ -964,7 +983,7 @@ QVariantMap runRpcid(const QStringList &arguments, QString *rawOutput = nullptr)
     const QString script = rpcidScript();
     if (script.isEmpty())
         return {{QStringLiteral("ok"), false}, {QStringLiteral("msg"),
-                QStringLiteral("rpcid.py was not found next to the customizer.")}};
+                QStringLiteral("The Discord Rich Presence component is missing from this installation.")}};
 
     const QStringList interpreters{QStringLiteral("python"), QStringLiteral("python3"),
                                    QStringLiteral("py")};
@@ -986,10 +1005,10 @@ QVariantMap runRpcid(const QStringList &arguments, QString *rawOutput = nullptr)
         const QString text = (out + err).trimmed();
         return {{QStringLiteral("ok"), process.exitStatus() == QProcess::NormalExit
                                        && process.exitCode() == 0},
-                {QStringLiteral("msg"), text.isEmpty() ? QStringLiteral("rpcid finished.") : text}};
+                {QStringLiteral("msg"), text.isEmpty() ? QStringLiteral("Finished.") : cleanOutput(text)}};
     }
     return {{QStringLiteral("ok"), false}, {QStringLiteral("msg"),
-            QStringLiteral("Python 3 was not found. Install it from python.org and retry.")}};
+            QStringLiteral("A required runtime component is unavailable on this system.")}};
 }
 }
 

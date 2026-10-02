@@ -334,7 +334,7 @@ def save_state(path, original_id, current_id, count):
         with open(state_path(path), "w", encoding="utf-8") as f:
             json.dump(state, f, indent=2)
     except OSError as exc:
-        warn("could not record patch state: %s" % exc)
+        warn("could not remember the new ID: %s" % exc)
     return state
 
 
@@ -376,9 +376,9 @@ def cmd_find(a):
         patched, state = current_id_of(data, path)
         if patched:
             good("already patched: current ID %s (original %s)" % (patched, state.get("original_id") or "unknown"))
-            note("   %d occurrence(s) in the file; patching again will replace exactly these" % len(sites_for_id(data, patched)))
+            note("   %d occurrence(s); patching again replaces exactly these" % len(sites_for_id(data, patched)))
         elif state.get("current_id"):
-            warn("state file mentions %s but it is no longer in the binary" % state["current_id"])
+            warn("the remembered ID %s is no longer in this file" % state["current_id"])
         note("%d candidate(s), %d worth checking" % (len(candidates), len(strong)))
         hits = []
         if not a.no_net:
@@ -401,15 +401,15 @@ def select_sites(data, path, a):
         for old in a.old:
             old = str(old).strip()
             sites = sites_for_id(data, old)
-            if sites: chosen.append({"id": old, "sites": sites, "source": "--old"})
+            if sites: chosen.append({"id": old, "sites": sites, "source": "manual entry"})
             else: warn("%s is not present in the file" % old)
         return chosen
     current, state = current_id_of(data, path)
     if current:
-        note("file was patched before (state file says %s)" % current)
+        note("this file was patched before; current ID %s" % current)
         return [{"id": current, "sites": sites_for_id(data, current), "source": "previous patch"}]
     if state.get("current_id"):
-        warn("recorded ID %s is no longer in the file; falling back to a scan" % state["current_id"])
+        warn("the remembered ID %s is no longer in the file; scanning instead" % state["current_id"])
     recs = harvest(data, PE(data))
     strong = [r for r in recs if r["score"] >= 3]
     picked = [r for r in strong if r["id"] in KNOWN] or strong[:1]
@@ -423,7 +423,7 @@ def select_sites(data, path, a):
 def cmd_replace(a):
     if not os.path.isfile(a.path): fail("no such file: " + a.path); return 1
     new_id = (a.new or "").strip()
-    if not re.fullmatch(r"\d{17,20}", new_id): fail("--new must be a 17-20 digit Discord Application ID"); return 1
+    if not re.fullmatch(r"\d{17,20}", new_id): fail("Enter a Discord Application ID of 17 to 20 digits"); return 1
     data = read(a.path)
     selected = select_sites(data, a.path, a)
     selected = [r for r in selected if r["sites"]]
@@ -436,16 +436,16 @@ def cmd_replace(a):
             if not a.dry_run: save_state(a.path, load_state(a.path).get("original_id") or new_id, new_id, len(existing))
             return 0
     if not selected:
-        fail("could not find an Application ID in that file"); note("if you know it, pass --old <id>"); return 1
+        fail("could not find an Application ID in that file"); note("if you know the current ID, enter it in the advanced field"); return 1
     if len(selected) > 1 and not a.all:
-        warn("%d different IDs found; pick one with --old or use --all" % len(selected)); return 1
+        warn("%d different IDs found; enter the current one in the advanced field" % len(selected)); return 1
 
     old_id = selected[0]["id"]
     all_sites = [s for r in selected for s in r["sites"]]
     heading("Replacing")
     for r in selected:
         note("%s -> %s (%d occurrence(s), via %s)" % (r["id"], new_id, len(r["sites"]), r["source"]))
-    if a.dry_run: warn("--dry-run: nothing written"); return 0
+    if a.dry_run: warn("preview only: nothing written"); return 0
     if not a.yes and input("  write it? [y/N] ").strip().lower()[:1] != "y": note("cancelled"); return 0
 
     buf = bytearray(data)
@@ -456,7 +456,7 @@ def cmd_replace(a):
     except PermissionError:
         fail("cannot write %s; close the emulator and try as Administrator" % a.path); return 2
     good("wrote %d occurrence(s), %d skipped" % (len(done), len(skipped)))
-    note("backup " + os.path.basename(b))
+    note("a backup of the original file was created")
 
     # Verify straight from the written bytes - a scan can score a valid ID away.
     fresh = read(a.path)
@@ -521,17 +521,17 @@ def cmd_name(a):
         else: fail(key + ": " + why)
     if not changed or a.dry_run: return 0 if changed else 1
     if not a.yes and input("  write it? [y/N] ").strip().lower()[:1] != "y": note("cancelled"); return 0
-    b = backup(a.path); save(a.path, buf); good("saved, backup " + os.path.basename(b)); return 0
+    b = backup(a.path); save(a.path, buf); good("saved; a backup of the original file was created"); return 0
 
 def cmd_undo(a):
     backup_path = a.path + BACKUP_SUFFIX
-    if not os.path.isfile(backup_path): fail("no backup at " + backup_path); return 1
+    if not os.path.isfile(backup_path): fail("no backup was found for this file"); return 1
     try: shutil.copy2(backup_path, a.path)
     except PermissionError: fail("cannot write " + a.path); return 2
     try:
         if os.path.isfile(state_path(a.path)): os.remove(state_path(a.path))
     except OSError: pass
-    good("restored " + os.path.basename(a.path)); return 0
+    good("restored the original file"); return 0
 
 
 def cmd_wizard(a):
