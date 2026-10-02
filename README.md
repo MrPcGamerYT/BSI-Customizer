@@ -140,7 +140,9 @@ use `--no-net` for offline scans. `replace --dry-run` previews changes, and
 `--old <id>` selects a specific candidate when a binary contains more than
 one application ID. `name --set` edits the PE version-resource
 `FileDescription`/`ProductName`; it does not rename the Discord application,
-which must still be changed in the Discord Developer Portal.
+which must still be changed in the Discord Developer Portal. The same helper
+is available from the **Discord RPC** tab in the customizer; the tab uses the
+selected emulator path and keeps the scan offline by default.
 
 ## Build and verify
 

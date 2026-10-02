@@ -13,6 +13,8 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QProcess>
+#include <QCoreApplication>
 #include <QStringList>
 
 #include <algorithm>
@@ -942,6 +944,64 @@ QVariantMap Backend::restoreBackup(const QString &path)
     if (!QFile::copy(bak, path))
         return result(false, QStringLiteral("Restore failed."), QStringLiteral("red"));
     return result(true, QStringLiteral("Restored from backup."), QStringLiteral("green"));
+}
+
+namespace {
+QVariantMap runRpcid(const QStringList &arguments)
+{
+    QString script = QCoreApplication::applicationDirPath() + QStringLiteral("/rpcid.py");
+    if (!QFileInfo::exists(script))
+        script = QDir::current().filePath(QStringLiteral("rpcid.py"));
+    if (!QFileInfo::exists(script))
+        return {{QStringLiteral("ok"), false}, {QStringLiteral("msg"),
+                QStringLiteral("rpcid.py was not found next to the customizer.")}};
+
+    QStringList args;
+    args << script << arguments;
+    QProcess process;
+    process.start(QStringLiteral("python"), args);
+    if (!process.waitForStarted(2500))
+        return {{QStringLiteral("ok"), false}, {QStringLiteral("msg"),
+                QStringLiteral("Python was not found. Run rpcid.py with Python 3 installed.")}};
+    process.waitForFinished(-1);
+    const QString output = QString::fromLocal8Bit(process.readAllStandardOutput()
+                                                  + process.readAllStandardError()).trimmed();
+    return {{QStringLiteral("ok"), process.exitStatus() == QProcess::NormalExit
+                                  && process.exitCode() == 0},
+            {QStringLiteral("msg"), output.isEmpty() ? QStringLiteral("rpcid finished.") : output}};
+}
+}
+
+QVariantMap Backend::rpcidFind(const QString &path, bool noNetwork)
+{
+    QStringList args{QStringLiteral("find"), path};
+    if (noNetwork) args << QStringLiteral("--no-net");
+    const QVariantMap r = runRpcid(args);
+    doLog(r.value(QStringLiteral("msg")).toString(),
+          r.value(QStringLiteral("ok")).toBool() ? QStringLiteral("blue") : QStringLiteral("red"));
+    return r;
+}
+
+QVariantMap Backend::rpcidReplace(const QString &path, const QString &newId,
+                                  const QString &oldId, bool dryRun, bool noNetwork)
+{
+    QStringList args{QStringLiteral("replace"), path, QStringLiteral("--new"), newId,
+                     QStringLiteral("--yes")};
+    if (!oldId.trimmed().isEmpty()) args << QStringLiteral("--old") << oldId.trimmed();
+    if (dryRun) args << QStringLiteral("--dry-run");
+    if (noNetwork) args << QStringLiteral("--no-net");
+    const QVariantMap r = runRpcid(args);
+    doLog(r.value(QStringLiteral("msg")).toString(),
+          r.value(QStringLiteral("ok")).toBool() ? QStringLiteral("green") : QStringLiteral("red"));
+    return r;
+}
+
+QVariantMap Backend::rpcidUndo(const QString &path)
+{
+    const QVariantMap r = runRpcid({QStringLiteral("undo"), path});
+    doLog(r.value(QStringLiteral("msg")).toString(),
+          r.value(QStringLiteral("ok")).toBool() ? QStringLiteral("green") : QStringLiteral("red"));
+    return r;
 }
 
 QVariantList Backend::removalNames() const
