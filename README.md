@@ -119,6 +119,29 @@ The patcher decodes complete supported x64 entry instructions instead of requiri
 
 If Analyze reports a **recognized partial FPS patch**, keep the matching clean `.bak` and click **Patch FPS**. Both setters are rebuilt together; no unknown setter is silently skipped. If a build is still unsupported, the selectable State message includes the exact setter, RVA and entry bytes. Copy that message and provide the affected DLL and `.bak` for diagnosis—do not delete the backup to bypass the safety check.
 
+## Discord Rich Presence ID utility
+
+`rpcid.py` is a standalone, standard-library-only helper for emulator builds
+that embed a Discord Application ID. It detects the Game SDK's little-endian
+64-bit integer form as well as ASCII and UTF-16 forms used by classic
+`discord-rpc`, and preserves the original file size when replacing an ID.
+Close the emulator before writing; the first backup is kept as
+`<file>.rpcid-bak`.
+
+```powershell
+python rpcid.py selftest
+python rpcid.py find "C:\Program Files\BlueStacks_nxt\HD-Player.exe"
+python rpcid.py replace HD-Player.exe --new 1234567890123456789 --yes
+python rpcid.py undo HD-Player.exe
+```
+
+`find` can ask Discord's public application endpoint to identify candidates;
+use `--no-net` for offline scans. `replace --dry-run` previews changes, and
+`--old <id>` selects a specific candidate when a binary contains more than
+one application ID. `name --set` edits the PE version-resource
+`FileDescription`/`ProductName`; it does not rename the Discord application,
+which must still be changed in the Discord Developer Portal.
+
 ## Build and verify
 
 Requires CMake 3.21+, C++17, and Qt 6.5+ with Core, Gui, Qml, Quick, QuickControls2, and Svg. **Qt 6 builds the customizer UI; it does not limit FPS patching to Qt 6 installations. Qt 5 and Qt 6 target DLLs use the same patching engine.**
