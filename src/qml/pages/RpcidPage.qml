@@ -5,24 +5,52 @@ import BSICustomizer
 
 Item {
     id: page
-    property string status: qsTr("Ready")
+
+    property string status: qsTr("Pick the emulator executable to begin.")
     property color statusColor: Theme.textDim
+    property var info: ({})
+    property bool busy: false
+
+    readonly property string currentId: info && info.currentId ? info.currentId : ""
+    readonly property bool patched: info ? info.patched === true : false
+    readonly property bool hasBackup: info ? info.hasBackup === true : false
+    readonly property string appName: info && info.name ? info.name : (info && info.known ? info.known : "")
+    readonly property bool validNew: /^[0-9]{17,20}$/.test(newId.text.trim())
+    readonly property bool sameAsCurrent: page.validNew && newId.text.trim() === page.currentId
+
+    function refresh() {
+        if (!exePath.text) { page.info = ({}); return; }
+        page.info = backend.rpcidStatus(exePath.text)
+    }
 
     function showResult(result) {
         page.status = result.msg || qsTr("rpcid finished.")
         page.statusColor = result.ok ? Theme.logColor("green") : Theme.danger
+        page.refresh()
     }
 
-    ColumnLayout {
-        anchors.fill: parent
-        anchors.margins: 24
-        spacing: 16
+    function run(fn) {
+        page.busy = true
+        backend.exePath = exePath.text
+        page.showResult(fn())
+        page.busy = false
+    }
 
-        RowLayout {
-            Layout.fillWidth: true
-            spacing: 12
+    Component.onCompleted: page.refresh()
+
+    ScrollView {
+        anchors.fill: parent
+        contentWidth: availableWidth
+        clip: true
+
+        ColumnLayout {
+            width: parent.width
+            spacing: 16
+
             ColumnLayout {
                 Layout.fillWidth: true
+                Layout.margins: 24
+                Layout.bottomMargin: 0
                 spacing: 3
                 Text {
                     text: qsTr("Discord Rich Presence")
@@ -32,114 +60,300 @@ Item {
                 }
                 Text {
                     Layout.fillWidth: true
-                    text: qsTr("Find and replace the Discord Application ID embedded in an emulator executable.")
-                    color: Theme.textDim
-                    font.pixelSize: 12
-                    elide: Text.ElideRight
-                }
-            }
-            ActionButton {
-                text: qsTr("Undo Last Change")
-                onClicked: page.showResult(backend.rpcidUndo(exePath.text))
-            }
-        }
-
-        PathRow {
-            id: exePath
-            Layout.fillWidth: true
-            label: qsTr("Emulator executable")
-            text: backend.exePath
-            onLoad: backend.exePath = text
-        }
-
-        RowLayout {
-            Layout.fillWidth: true
-            spacing: 12
-            CheckBox {
-                id: offline
-                text: qsTr("Offline scan (do not query Discord)")
-                checked: true
-                palette.text: Theme.text
-            }
-            Item { Layout.fillWidth: true }
-            ActionButton {
-                text: qsTr("Find Application ID")
-                onClicked: {
-                    backend.exePath = exePath.text
-                    page.showResult(backend.rpcidFind(exePath.text, offline.checked))
-                }
-            }
-        }
-
-        RowLayout {
-            Layout.fillWidth: true
-            spacing: 10
-            Text { text: qsTr("New Application ID") ; color: Theme.textDim; font.pixelSize: 12 }
-            TextField {
-                id: newId
-                Layout.fillWidth: true
-                placeholderText: qsTr("17–20 digit Discord Application ID")
-                color: Theme.text
-                placeholderTextColor: Theme.textDim
-                background: Rectangle { color: Theme.raised; radius: 7; border.color: Theme.border }
-            }
-            TextField {
-                id: oldId
-                Layout.preferredWidth: 210
-                placeholderText: qsTr("Old ID (optional)")
-                color: Theme.text
-                placeholderTextColor: Theme.textDim
-                background: Rectangle { color: Theme.raised; radius: 7; border.color: Theme.border }
-            }
-            ActionButton {
-                accent: true
-                text: qsTr("Replace ID")
-                enabled: newId.text.length >= 17
-                onClicked: {
-                    backend.exePath = exePath.text
-                    page.showResult(backend.rpcidReplace(exePath.text, newId.text, oldId.text, false, offline.checked))
-                }
-            }
-        }
-
-        Card {
-            Layout.fillWidth: true
-            Layout.fillHeight: true
-            ColumnLayout {
-                anchors.fill: parent
-                spacing: 12
-                Text {
-                    text: qsTr("How it works")
-                    color: Theme.text
-                    font.pixelSize: 15
-                    font.weight: Font.Bold
-                }
-                Text {
-                    Layout.fillWidth: true
                     wrapMode: Text.Wrap
-                    text: qsTr("The tool detects Game SDK int64 values, ASCII IDs and UTF-16 IDs. "
-                               + "It keeps the executable size unchanged and creates a first backup "
-                               + "with the .rpcid-bak suffix. Close the emulator before replacing an ID.")
+                    text: qsTr("Replace the Discord Application ID embedded in the emulator executable. "
+                               + "Already patched files are remembered, so you can change the ID as often as you like.")
                     color: Theme.textDim
                     font.pixelSize: 12
                 }
-                Rectangle {
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: Math.max(70, statusLabel.implicitHeight + 20)
-                    color: Theme.raised
-                    radius: 8
-                    border.color: Theme.border
+            }
+
+            // ---- 1. file ----------------------------------------------------
+            Card {
+                Layout.fillWidth: true
+                Layout.leftMargin: 24
+                Layout.rightMargin: 24
+                ColumnLayout {
+                    anchors.fill: parent
+                    spacing: 12
+
                     Text {
-                        id: statusLabel
-                        anchors.fill: parent
-                        anchors.margins: 10
-                        text: page.status
-                        color: page.statusColor
-                        wrapMode: Text.Wrap
-                        font.pixelSize: 12
+                        text: qsTr("1 · Executable")
+                        color: Theme.text
+                        font.pixelSize: 15
+                        font.weight: Font.Bold
+                    }
+
+                    PathRow {
+                        id: exePath
+                        Layout.fillWidth: true
+                        label: qsTr("Emulator executable")
+                        text: backend.exePath
+                        onLoad: {
+                            backend.exePath = text
+                            page.refresh()
+                        }
+                    }
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 12
+                        CheckBox {
+                            id: offline
+                            text: qsTr("Offline scan (do not query Discord)")
+                            checked: true
+                            palette.text: Theme.text
+                        }
+                        Item { Layout.fillWidth: true }
+                        ActionButton {
+                            text: qsTr("Rescan")
+                            enabled: !page.busy && exePath.text.length > 0
+                            onClicked: page.refresh()
+                        }
+                        ActionButton {
+                            text: qsTr("Find Application ID")
+                            enabled: !page.busy && exePath.text.length > 0
+                            onClicked: page.run(function () {
+                                return backend.rpcidFind(exePath.text, offline.checked)
+                            })
+                        }
                     }
                 }
-                Item { Layout.fillHeight: true }
+            }
+
+            // ---- 2. current state -------------------------------------------
+            Card {
+                Layout.fillWidth: true
+                Layout.leftMargin: 24
+                Layout.rightMargin: 24
+                ColumnLayout {
+                    anchors.fill: parent
+                    spacing: 10
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 10
+                        Text {
+                            text: qsTr("2 · Current Application ID")
+                            color: Theme.text
+                            font.pixelSize: 15
+                            font.weight: Font.Bold
+                        }
+                        Item { Layout.fillWidth: true }
+                        Rectangle {
+                            visible: exePath.text.length > 0
+                            radius: 11
+                            implicitHeight: 22
+                            implicitWidth: badge.implicitWidth + 20
+                            color: page.patched ? Qt.rgba(0.2, 0.75, 0.4, 0.18)
+                                                : Qt.rgba(1, 1, 1, 0.06)
+                            border.color: page.patched ? Theme.logColor("green") : Theme.border
+                            Text {
+                                id: badge
+                                anchors.centerIn: parent
+                                text: page.patched ? qsTr("Patched") : qsTr("Stock / unknown")
+                                color: page.patched ? Theme.logColor("green") : Theme.textDim
+                                font.pixelSize: 11
+                                font.weight: Font.Medium
+                            }
+                        }
+                    }
+
+                    TextInput {
+                        Layout.fillWidth: true
+                        readOnly: true
+                        selectByMouse: true
+                        text: page.currentId ? page.currentId : qsTr("—")
+                        color: page.currentId ? Theme.text : Theme.textDim
+                        font.pixelSize: 20
+                        font.family: "Consolas"
+                    }
+
+                    Text {
+                        Layout.fillWidth: true
+                        visible: text.length > 0
+                        wrapMode: Text.Wrap
+                        font.pixelSize: 12
+                        color: Theme.textDim
+                        text: {
+                            var parts = []
+                            if (page.appName) parts.push(qsTr("Application: ") + page.appName)
+                            if (page.info && page.info.originalId)
+                                parts.push(qsTr("Original ID: ") + page.info.originalId)
+                            if (page.hasBackup) parts.push(qsTr("Backup available"))
+                            return parts.join("   ·   ")
+                        }
+                    }
+                }
+            }
+
+            // ---- 3. replace ---------------------------------------------------
+            Card {
+                Layout.fillWidth: true
+                Layout.leftMargin: 24
+                Layout.rightMargin: 24
+                ColumnLayout {
+                    anchors.fill: parent
+                    spacing: 12
+
+                    Text {
+                        text: qsTr("3 · New Application ID")
+                        color: Theme.text
+                        font.pixelSize: 15
+                        font.weight: Font.Bold
+                    }
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 10
+                        TextField {
+                            id: newId
+                            Layout.fillWidth: true
+                            placeholderText: qsTr("17–20 digit Discord Application ID")
+                            color: Theme.text
+                            font.family: "Consolas"
+                            font.pixelSize: 13
+                            selectByMouse: true
+                            placeholderTextColor: Theme.textDim
+                            validator: RegularExpressionValidator { regularExpression: /[0-9]{0,20}/ }
+                            background: Rectangle {
+                                color: Theme.raised
+                                radius: 7
+                                border.color: newId.text.length === 0
+                                              ? (newId.activeFocus ? Theme.accent : Theme.border)
+                                              : (page.validNew ? Theme.logColor("green") : Theme.danger)
+                            }
+                        }
+                        ActionButton {
+                            accent: true
+                            text: page.busy ? qsTr("Working…") : qsTr("Replace ID")
+                            enabled: !page.busy && page.validNew && exePath.text.length > 0
+                            onClicked: page.run(function () {
+                                return backend.rpcidReplace(exePath.text, newId.text.trim(),
+                                                            oldId.text.trim(), false, offline.checked)
+                            })
+                        }
+                    }
+
+                    Text {
+                        Layout.fillWidth: true
+                        wrapMode: Text.Wrap
+                        font.pixelSize: 11
+                        visible: newId.text.length > 0 || page.currentId.length > 0
+                        color: (newId.text.length > 0 && !page.validNew) ? Theme.danger : Theme.textDim
+                        text: newId.text.length > 0 && !page.validNew
+                              ? qsTr("An Application ID is 17 to 20 digits.")
+                              : (page.sameAsCurrent
+                                 ? qsTr("That is already the ID in this file — patching again just re-confirms it.")
+                                 : (page.patched
+                                    ? qsTr("This file is already patched; the current ID above will be replaced.")
+                                    : qsTr("The detected ID above will be replaced.")))
+                    }
+
+                    // Advanced -------------------------------------------------
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 8
+                        CheckBox {
+                            id: advanced
+                            text: qsTr("Advanced: override the ID to search for")
+                            palette.text: Theme.textDim
+                        }
+                        Item { Layout.fillWidth: true }
+                    }
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        visible: advanced.checked
+                        spacing: 10
+                        Text {
+                            text: qsTr("Old ID")
+                            color: Theme.textDim
+                            font.pixelSize: 12
+                            Layout.preferredWidth: 60
+                        }
+                        TextField {
+                            id: oldId
+                            Layout.fillWidth: true
+                            placeholderText: qsTr("Leave empty to use the detected / previously patched ID")
+                            color: Theme.text
+                            font.family: "Consolas"
+                            selectByMouse: true
+                            placeholderTextColor: Theme.textDim
+                            validator: RegularExpressionValidator { regularExpression: /[0-9]{0,20}/ }
+                            background: Rectangle { color: Theme.raised; radius: 7; border.color: Theme.border }
+                        }
+                        ActionButton {
+                            text: qsTr("Use current")
+                            enabled: page.currentId.length > 0
+                            onClicked: oldId.text = page.currentId
+                        }
+                    }
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 10
+                        Item { Layout.fillWidth: true }
+                        ActionButton {
+                            text: qsTr("Undo Last Change")
+                            enabled: !page.busy && page.hasBackup
+                            onClicked: page.run(function () {
+                                return backend.rpcidUndo(exePath.text)
+                            })
+                        }
+                    }
+                }
+            }
+
+            // ---- output ---------------------------------------------------
+            Card {
+                Layout.fillWidth: true
+                Layout.leftMargin: 24
+                Layout.rightMargin: 24
+                Layout.bottomMargin: 24
+                Layout.preferredHeight: 230
+                ColumnLayout {
+                    anchors.fill: parent
+                    spacing: 10
+                    Text {
+                        text: qsTr("Output")
+                        color: Theme.text
+                        font.pixelSize: 15
+                        font.weight: Font.Bold
+                    }
+                    Rectangle {
+                        Layout.fillWidth: true
+                        Layout.fillHeight: true
+                        color: Theme.raised
+                        radius: 8
+                        border.color: Theme.border
+                        ScrollView {
+                            anchors.fill: parent
+                            anchors.margins: 10
+                            clip: true
+                            TextArea {
+                                readOnly: true
+                                selectByMouse: true
+                                wrapMode: TextArea.Wrap
+                                text: page.status
+                                color: page.statusColor
+                                font.pixelSize: 12
+                                font.family: "Consolas"
+                                background: null
+                            }
+                        }
+                    }
+                    Text {
+                        Layout.fillWidth: true
+                        wrapMode: Text.Wrap
+                        font.pixelSize: 11
+                        color: Theme.textDim
+                        text: qsTr("Game SDK int64, ASCII and UTF-16 forms are patched in place, so the file size never "
+                                   + "changes. The first run keeps a .rpcid-bak backup and records the patched ID in a "
+                                   + ".rpcid.json file, which is how re-patching finds the right value every time. "
+                                   + "Close the emulator before replacing an ID.")
+                    }
+                }
             }
         }
     }

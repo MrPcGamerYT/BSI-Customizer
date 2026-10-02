@@ -13,6 +13,8 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QProcess>
 #include <QCoreApplication>
 #include <QStringList>
@@ -947,28 +949,47 @@ QVariantMap Backend::restoreBackup(const QString &path)
 }
 
 namespace {
-QVariantMap runRpcid(const QStringList &arguments)
+QString rpcidScript()
 {
     QString script = QCoreApplication::applicationDirPath() + QStringLiteral("/rpcid.py");
-    if (!QFileInfo::exists(script))
-        script = QDir::current().filePath(QStringLiteral("rpcid.py"));
-    if (!QFileInfo::exists(script))
+    if (QFileInfo::exists(script))
+        return script;
+    script = QDir::current().filePath(QStringLiteral("rpcid.py"));
+    return QFileInfo::exists(script) ? script : QString();
+}
+
+// Windows installs expose Python under several names; try each once.
+QVariantMap runRpcid(const QStringList &arguments, QString *rawOutput = nullptr)
+{
+    const QString script = rpcidScript();
+    if (script.isEmpty())
         return {{QStringLiteral("ok"), false}, {QStringLiteral("msg"),
                 QStringLiteral("rpcid.py was not found next to the customizer.")}};
 
-    QStringList args;
-    args << script << arguments;
-    QProcess process;
-    process.start(QStringLiteral("python"), args);
-    if (!process.waitForStarted(2500))
-        return {{QStringLiteral("ok"), false}, {QStringLiteral("msg"),
-                QStringLiteral("Python was not found. Run rpcid.py with Python 3 installed.")}};
-    process.waitForFinished(-1);
-    const QString output = QString::fromLocal8Bit(process.readAllStandardOutput()
-                                                  + process.readAllStandardError()).trimmed();
-    return {{QStringLiteral("ok"), process.exitStatus() == QProcess::NormalExit
-                                  && process.exitCode() == 0},
-            {QStringLiteral("msg"), output.isEmpty() ? QStringLiteral("rpcid finished.") : output}};
+    const QStringList interpreters{QStringLiteral("python"), QStringLiteral("python3"),
+                                   QStringLiteral("py")};
+    for (const QString &exe : interpreters) {
+        QStringList args;
+        if (exe == QStringLiteral("py"))
+            args << QStringLiteral("-3");
+        args << script << arguments;
+
+        QProcess process;
+        process.start(exe, args);
+        if (!process.waitForStarted(2500))
+            continue;
+        process.waitForFinished(-1);
+        const QString out = QString::fromLocal8Bit(process.readAllStandardOutput());
+        const QString err = QString::fromLocal8Bit(process.readAllStandardError());
+        if (rawOutput)
+            *rawOutput = out;
+        const QString text = (out + err).trimmed();
+        return {{QStringLiteral("ok"), process.exitStatus() == QProcess::NormalExit
+                                       && process.exitCode() == 0},
+                {QStringLiteral("msg"), text.isEmpty() ? QStringLiteral("rpcid finished.") : text}};
+    }
+    return {{QStringLiteral("ok"), false}, {QStringLiteral("msg"),
+            QStringLiteral("Python 3 was not found. Install it from python.org and retry.")}};
 }
 }
 
@@ -994,6 +1015,37 @@ QVariantMap Backend::rpcidReplace(const QString &path, const QString &newId,
     doLog(r.value(QStringLiteral("msg")).toString(),
           r.value(QStringLiteral("ok")).toBool() ? QStringLiteral("green") : QStringLiteral("red"));
     return r;
+}
+
+QVariantMap Backend::rpcidStatus(const QString &path)
+{
+    QVariantMap info{{QStringLiteral("ok"), false},
+                     {QStringLiteral("patched"), false},
+                     {QStringLiteral("currentId"), QString()},
+                     {QStringLiteral("originalId"), QString()},
+                     {QStringLiteral("name"), QString()},
+                     {QStringLiteral("hasBackup"), false},
+                     {QStringLiteral("msg"), QStringLiteral("Select an executable.")}};
+    if (path.trimmed().isEmpty() || !QFileInfo::exists(path))
+        return info;
+
+    QString raw;
+    const QVariantMap r = runRpcid({QStringLiteral("status"), path, QStringLiteral("--no-net")}, &raw);
+    const QJsonDocument doc = QJsonDocument::fromJson(raw.trimmed().toUtf8());
+    if (!doc.isObject()) {
+        info[QStringLiteral("msg")] = r.value(QStringLiteral("msg")).toString();
+        return info;
+    }
+    const QJsonObject o = doc.object();
+    info[QStringLiteral("ok")] = o.value(QStringLiteral("ok")).toBool();
+    info[QStringLiteral("patched")] = o.value(QStringLiteral("patched")).toBool();
+    info[QStringLiteral("currentId")] = o.value(QStringLiteral("current_id")).toString();
+    info[QStringLiteral("originalId")] = o.value(QStringLiteral("original_id")).toString();
+    info[QStringLiteral("name")] = o.value(QStringLiteral("name")).toString();
+    info[QStringLiteral("known")] = o.value(QStringLiteral("known")).toString();
+    info[QStringLiteral("hasBackup")] = o.value(QStringLiteral("backup")).toBool();
+    info[QStringLiteral("msg")] = o.value(QStringLiteral("msg")).toString();
+    return info;
 }
 
 QVariantMap Backend::rpcidUndo(const QString &path)

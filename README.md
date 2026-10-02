@@ -133,7 +133,16 @@ python rpcid.py selftest
 python rpcid.py find "C:\Program Files\BlueStacks_nxt\HD-Player.exe"
 python rpcid.py replace HD-Player.exe --new 1234567890123456789 --yes
 python rpcid.py undo HD-Player.exe
+python rpcid.py status HD-Player.exe --no-net   # JSON, used by the UI
 ```
+
+Re-patching is supported: every successful replace records the patched ID in
+`<file>.rpcid.json`, so the next replace targets that exact ID instead of
+re-guessing from a heuristic scan (which used to report a wrong Application ID
+on an already patched binary). The sites are always re-derived from the bytes
+on disk and the result is verified by reading the written offsets back, so the
+same executable can be re-pointed to a new Application ID any number of times.
+`undo` restores the backup and clears the recorded state.
 
 `find` can ask Discord's public application endpoint to identify candidates;
 use `--no-net` for offline scans. `replace --dry-run` previews changes, and
