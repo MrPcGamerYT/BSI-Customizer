@@ -1,0 +1,346 @@
+#include "RpcIdPatcher.h"
+
+#include "PatchFile.h"
+#include "RpcIdScan.h"
+
+#include <QDateTime>
+#include <QDir>
+#include <QFile>
+#include <QFileInfo>
+#include <QJsonArray>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QSaveFile>
+
+#include <algorithm>
+#include <string_view>
+
+namespace RpcIdPatcher {
+namespace {
+
+using namespace RpcIdScan;
+
+struct State
+{
+    QString original;
+    QString previous;
+    QString current;
+    QStringList history;
+};
+
+std::string_view view(const QByteArray &data)
+{
+    return {data.constData(), static_cast<std::size_t>(data.size())};
+}
+
+bool readFile(const QString &path, QByteArray *data, QString *error)
+{
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) {
+        *error = QStringLiteral("Could not read %1: %2").arg(QFileInfo(path).fileName(), file.errorString());
+        return false;
+    }
+    *data = file.readAll();
+    return true;
+}
+
+State loadState(const QString &path)
+{
+    State state;
+    QFile file(statePath(path));
+    if (!file.open(QIODevice::ReadOnly))
+        return state;
+    const QJsonObject object = QJsonDocument::fromJson(file.readAll()).object();
+    state.original = object.value(QStringLiteral("original_id")).toString();
+    state.previous = object.value(QStringLiteral("previous_id")).toString();
+    state.current = object.value(QStringLiteral("current_id")).toString();
+    for (const QJsonValue &value : object.value(QStringLiteral("history")).toArray()) {
+        const QString id = value.toString();
+        if (!id.isEmpty() && !state.history.contains(id))
+            state.history << id;
+    }
+    for (const QString &id : {state.original, state.previous, state.current})
+        if (!id.isEmpty() && !state.history.contains(id)) state.history << id;
+    return state;
+}
+
+bool saveState(const QString &path, const QString &original, const QString &current,
+               int occurrences, QString *warning)
+{
+    State old = loadState(path);
+    QStringList history = old.history;
+    for (const QString &id : {original, current})
+        if (!id.isEmpty() && !history.contains(id)) history << id;
+    QJsonArray array;
+    for (const QString &id : history) array.append(id);
+    QJsonObject object{
+        {QStringLiteral("version"), 1},
+        {QStringLiteral("tool"), QStringLiteral("BSI Customizer native Rich Presence patcher")},
+        {QStringLiteral("original_id"), old.original.isEmpty() ? original : old.original},
+        {QStringLiteral("current_id"), current},
+        {QStringLiteral("previous_id"), original},
+        {QStringLiteral("history"), array},
+        {QStringLiteral("occurrences"), occurrences},
+        {QStringLiteral("updated"), QDateTime::currentDateTimeUtc().toString(Qt::ISODate)}
+    };
+    const QByteArray json = QJsonDocument(object).toJson(QJsonDocument::Indented);
+    QSaveFile file(statePath(path));
+    if (!file.open(QIODevice::WriteOnly) || file.write(json) != json.size() || !file.commit()) {
+        if (warning) *warning = QStringLiteral("The ID was changed, but its patch state could not be saved.");
+        return false;
+    }
+    return true;
+}
+
+QString currentId(const QByteArray &data, const State &state)
+{
+    if (!state.current.isEmpty()
+        && !sitesForId(view(data), state.current.toStdString()).empty())
+        return state.current;
+    return {};
+}
+
+QStringList leftovers(const QByteArray &data, const State &state, const QStringList &keep)
+{
+    QStringList result;
+    for (const QString &id : state.history) {
+        if (id.isEmpty() || keep.contains(id) || result.contains(id)) continue;
+        if (!sitesForId(view(data), id.toStdString()).empty()) result << id;
+    }
+    return result;
+}
+
+QString siteSummary(const Candidate &candidate)
+{
+    QStringList forms;
+    for (const Site &site : candidate.sites) {
+        const QString form = QString::fromLatin1(kindLabel(site.kind));
+        if (!forms.contains(form)) forms << form;
+    }
+    return QStringLiteral("%1 — %2 occurrence(s): %3; created %4")
+        .arg(QString::fromStdString(candidate.id)).arg(candidate.refs)
+        .arg(forms.join(QStringLiteral(", "))).arg(QString::fromStdString(candidate.date));
+}
+
+struct Selection { QString id; std::vector<Site> sites; QString source; };
+
+std::vector<Selection> select(const QByteArray &data, const QString &path,
+                              const QStringList &oldIds, QStringList *notes)
+{
+    std::vector<Selection> selected;
+    if (!oldIds.isEmpty()) {
+        for (const QString &raw : oldIds) {
+            const QString id = raw.trimmed();
+            if (!isAppIdText(id.toStdString())) {
+                notes->append(QStringLiteral("%1 is not a valid Discord Application ID.").arg(id));
+                continue;
+            }
+            auto sites = sitesForId(view(data), id.toStdString());
+            if (sites.empty()) notes->append(QStringLiteral("%1 is not present in the file.").arg(id));
+            else selected.push_back({id, std::move(sites), QStringLiteral("manual entry")});
+        }
+        return selected;
+    }
+    const State state = loadState(path);
+    const QString remembered = currentId(data, state);
+    if (!remembered.isEmpty()) {
+        selected.push_back({remembered, sitesForId(view(data), remembered.toStdString()),
+                            QStringLiteral("previous patch")});
+        return selected;
+    }
+    Pe pe(view(data));
+    const auto records = harvest(view(data), &pe);
+    const Pick pick = pickCandidate(records);
+    if (pick.index >= 0) {
+        const Candidate &record = records[static_cast<std::size_t>(pick.index)];
+        auto sites = sitesForId(view(data), record.id);
+        if (sites.empty()) sites = record.sites;
+        selected.push_back({QString::fromStdString(record.id), std::move(sites), QStringLiteral("scan")});
+    } else if (!pick.strong.empty()) {
+        QStringList ids;
+        for (int i : pick.strong) {
+            ids << QString::fromStdString(records[static_cast<std::size_t>(i)].id);
+            if (ids.size() == 3) break;
+        }
+        notes->append(QStringLiteral("Possible IDs were found (%1), but none is confirmed. Enter the current ID in the advanced field.").arg(ids.join(QStringLiteral(", "))));
+    }
+    return selected;
+}
+
+} // namespace
+
+QString backupPath(const QString &exePath) { return exePath + QStringLiteral(".rpcid-bak"); }
+QString statePath(const QString &exePath) { return exePath + QStringLiteral(".rpcid.json"); }
+
+Status status(const QString &path)
+{
+    Status out;
+    out.hasBackup = QFileInfo::exists(backupPath(path));
+    if (!QFileInfo(path).isFile()) {
+        out.msg = QStringLiteral("Select an executable.");
+        return out;
+    }
+    QByteArray data;
+    QString error;
+    if (!readFile(path, &data, &error)) { out.msg = error; return out; }
+    const State state = loadState(path);
+    out.originalId = state.original;
+    const QString remembered = currentId(data, state);
+    if (!remembered.isEmpty()) {
+        out.ok = true;
+        out.patched = true;
+        out.currentId = remembered;
+        out.msg = QStringLiteral("Patched to %1.").arg(remembered);
+    } else {
+        Pe pe(view(data));
+        const auto records = harvest(view(data), &pe);
+        const Pick pick = pickCandidate(records);
+        for (int index : pick.strong) {
+            const Candidate &record = records[static_cast<std::size_t>(index)];
+            out.candidates.append({QString::fromStdString(record.id), QString::fromStdString(record.known),
+                                   QString::fromStdString(record.date), record.score, record.refs, record.confident});
+            if (out.candidates.size() == 6) break;
+        }
+        if (pick.index >= 0) {
+            out.ok = true;
+            out.currentId = QString::fromStdString(records[static_cast<std::size_t>(pick.index)].id);
+            out.msg = QStringLiteral("Detected %1.").arg(out.currentId);
+        } else if (!pick.strong.empty()) {
+            out.ok = true;
+            out.msg = QStringLiteral("%1 possible ID(s) found; none confirmed. Use Find to review them.").arg(pick.strong.size());
+        } else out.msg = QStringLiteral("No Discord Application ID found in this file.");
+    }
+    out.known = QString::fromStdString(knownName(out.currentId.toStdString()));
+    out.leftovers = leftovers(data, state, {remembered, out.currentId});
+    if (!out.leftovers.isEmpty())
+        out.msg += QStringLiteral(" %1 older ID copy/copies remain.").arg(out.leftovers.size());
+    return out;
+}
+
+Result find(const QString &path)
+{
+    Result result;
+    QFileInfo info(path);
+    QStringList paths;
+    if (info.isFile()) paths << info.absoluteFilePath();
+    else if (info.isDir()) {
+        QDir dir(info.absoluteFilePath());
+        const QFileInfoList files = dir.entryInfoList({QStringLiteral("*.exe"), QStringLiteral("*.dll")}, QDir::Files, QDir::Name);
+        for (const QFileInfo &file : files)
+            if (file.size() <= (512LL << 20)) paths << file.absoluteFilePath();
+    }
+    if (paths.isEmpty()) return {false, QStringLiteral("Nothing to scan at the selected path."), {}};
+
+    QStringList lines;
+    int findings = 0;
+    for (const QString &filePath : paths) {
+        QByteArray data; QString error;
+        if (!readFile(filePath, &data, &error)) { lines << error; continue; }
+        Pe pe(view(data));
+        const auto records = harvest(view(data), &pe);
+        const Pick pick = pickCandidate(records);
+        lines << QStringLiteral("%1 — %2, %3 bytes%4")
+                     .arg(QFileInfo(filePath).fileName(), pe.ok() ? QString::fromLatin1(pe.arch()) : QStringLiteral("not a PE image"))
+                     .arg(data.size()).arg(pe.ok() && pe.isSigned() ? QStringLiteral(", signed") : QString());
+        const State state = loadState(filePath);
+        const QString remembered = currentId(data, state);
+        if (!remembered.isEmpty())
+            lines << QStringLiteral("Already patched: current ID %1 (original %2).")
+                         .arg(remembered, state.original.isEmpty() ? QStringLiteral("unknown") : state.original);
+        if (pick.strong.empty()) {
+            lines << QStringLiteral("No Application ID found.");
+            continue;
+        }
+        for (int index : pick.strong) {
+            const Candidate &record = records[static_cast<std::size_t>(index)];
+            lines << siteSummary(record);
+            if (!record.known.empty()) lines << QStringLiteral("Known: %1").arg(QString::fromStdString(record.known));
+            result.ids << QString::fromStdString(record.id);
+            ++findings;
+            if (findings >= 20) break;
+        }
+    }
+    result.ok = true;
+    result.msg = lines.join(QLatin1Char('\n'));
+    return result;
+}
+
+Result replace(const QString &path, const QString &newIdRaw, const QStringList &oldIds,
+               bool dryRun, bool all)
+{
+    const QString newId = newIdRaw.trimmed();
+    if (!isAppIdText(newId.toStdString()))
+        return {false, QStringLiteral("Enter a valid Discord Application ID of 17 to 20 digits."), {}};
+    if (!QFileInfo(path).isFile()) return {false, QStringLiteral("Select an executable."), {}};
+    QByteArray data; QString error;
+    if (!readFile(path, &data, &error)) return {false, error, {}};
+    const State state = loadState(path);
+    QStringList notes;
+    auto selected = select(data, path, oldIds, &notes);
+
+    QStringList keep{newId};
+    for (const Selection &item : selected) keep << item.id;
+    for (const QString &id : leftovers(data, state, keep))
+        selected.push_back({id, sitesForId(view(data), id.toStdString()), QStringLiteral("leftover from an earlier patch")});
+
+    if (selected.empty()) {
+        const auto existing = sitesForId(view(data), newId.toStdString());
+        if (!oldIds.size() && !existing.empty()) {
+            QString warning; if (!dryRun) saveState(path, state.original.isEmpty() ? newId : state.original, newId, int(existing.size()), &warning);
+            return {true, QStringLiteral("%1 is already the Application ID in this file (%2 occurrence(s)).").arg(newId).arg(existing.size()), {newId}};
+        }
+        notes << QStringLiteral("Could not find an Application ID in that file. If you know it, enter it in the advanced field.");
+        return {false, notes.join(QLatin1Char('\n')), {}};
+    }
+    int primary = 0;
+    for (const Selection &item : selected) if (item.source != QStringLiteral("leftover from an earlier patch")) ++primary;
+    if (primary > 1 && !all)
+        return {false, QStringLiteral("Several different IDs were found. Enter the current one in the advanced field."), {}};
+
+    QStringList report = notes;
+    std::vector<Site> allSites;
+    for (const Selection &item : selected) {
+        report << QStringLiteral("%1 → %2 (%3 occurrence(s), via %4)").arg(item.id, newId).arg(item.sites.size()).arg(item.source);
+        allSites.insert(allSites.end(), item.sites.begin(), item.sites.end());
+    }
+    if (dryRun) { report << QStringLiteral("Preview only: nothing was written."); return {true, report.join(QLatin1Char('\n')), {newId}}; }
+
+    QByteArray patched = data;
+    const WriteReport writes = writeSites(patched.data(), static_cast<std::size_t>(patched.size()), allSites, newId.toStdString());
+    if (writes.done.empty()) return {false, QStringLiteral("Nothing could be written without changing the file size."), {}};
+    if (!QFileInfo::exists(backupPath(path)) && !QFile::copy(path, backupPath(path)))
+        return {false, QStringLiteral("Could not create the original-file backup. No changes were made."), {}};
+    if (!PatchFile::writeVerified(path, data, patched, &error)) return {false, error, {}};
+
+    QByteArray fresh;
+    if (!readFile(path, &fresh, &error)) return {false, QStringLiteral("The file was written but could not be verified: %1").arg(error), {}};
+    const auto hits = sitesForId(view(fresh), newId.toStdString());
+    QStringList history = state.history;
+    for (const Selection &item : selected) if (!history.contains(item.id)) history << item.id;
+    QStringList stale;
+    for (const QString &id : history)
+        if (id != newId && !sitesForId(view(fresh), id.toStdString()).empty()) stale << id;
+    if (hits.empty()) return {false, QStringLiteral("Could not verify the new ID after writing."), {}};
+
+    QString warning;
+    const QString original = state.original.isEmpty() ? selected.front().id : state.original;
+    saveState(path, original, newId, int(hits.size()), &warning);
+    report << QStringLiteral("Wrote and verified %1 occurrence(s); %2 skipped.").arg(writes.done.size()).arg(writes.skipped.size());
+    report << QStringLiteral("The original file is backed up at %1.").arg(QFileInfo(backupPath(path)).fileName());
+    if (!stale.isEmpty()) report << QStringLiteral("Incomplete: older ID copies remain (%1). Use a shorter ID or Undo.").arg(stale.join(QStringLiteral(", ")));
+    if (!warning.isEmpty()) report << warning;
+    return {true, report.join(QLatin1Char('\n')), {newId}};
+}
+
+Result undo(const QString &path)
+{
+    const QString backup = backupPath(path);
+    if (!QFileInfo::exists(backup)) return {false, QStringLiteral("No Rich Presence backup was found for this file."), {}};
+    QByteArray current, original; QString error;
+    if (!readFile(path, &current, &error) || !readFile(backup, &original, &error)) return {false, error, {}};
+    if (!PatchFile::writeVerified(path, current, original, &error)) return {false, error, {}};
+    QFile::remove(statePath(path));
+    return {true, QStringLiteral("Restored the original file from its Rich Presence backup."), {}};
+}
+
+} // namespace RpcIdPatcher
