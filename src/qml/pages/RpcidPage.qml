@@ -14,6 +14,7 @@ Item {
     readonly property string currentId: info && info.currentId ? info.currentId : ""
     readonly property bool patched: info ? info.patched === true : false
     readonly property bool hasBackup: info ? info.hasBackup === true : false
+    readonly property int leftoverCount: info && info.leftoverCount ? info.leftoverCount : 0
     readonly property string appName: info && info.name ? info.name : (info && info.known ? info.known : "")
     readonly property bool validNew: /^[0-9]{17,20}$/.test(newId.text.trim())
     readonly property bool sameAsCurrent: page.validNew && newId.text.trim() === page.currentId
@@ -145,14 +146,21 @@ Item {
                             radius: 11
                             implicitHeight: 22
                             implicitWidth: badge.implicitWidth + 20
-                            color: page.patched ? Qt.rgba(0.2, 0.75, 0.4, 0.18)
+                            color: page.patched ? (page.leftoverCount > 0 ? Qt.rgba(0.85, 0.6, 0.1, 0.18)
+                                                                          : Qt.rgba(0.2, 0.75, 0.4, 0.18))
                                                 : Qt.rgba(1, 1, 1, 0.06)
-                            border.color: page.patched ? Theme.logColor("green") : Theme.border
+                            border.color: page.patched ? (page.leftoverCount > 0 ? Theme.logColor("orange")
+                                                                                  : Theme.logColor("green"))
+                                                       : Theme.border
                             Text {
                                 id: badge
                                 anchors.centerIn: parent
-                                text: page.patched ? qsTr("Patched") : qsTr("Stock / unknown")
-                                color: page.patched ? Theme.logColor("green") : Theme.textDim
+                                text: page.patched ? (page.leftoverCount > 0 ? qsTr("Patched (incomplete)")
+                                                                             : qsTr("Patched"))
+                                                   : qsTr("Stock / unknown")
+                                color: page.patched ? (page.leftoverCount > 0 ? Theme.logColor("orange")
+                                                                              : Theme.logColor("green"))
+                                                    : Theme.textDim
                                 font.pixelSize: 11
                                 font.weight: Font.Medium
                             }
@@ -183,6 +191,16 @@ Item {
                             if (page.hasBackup) parts.push(qsTr("Backup available"))
                             return parts.join("   ·   ")
                         }
+                    }
+
+                    Text {
+                        Layout.fillWidth: true
+                        visible: page.leftoverCount > 0
+                        wrapMode: Text.Wrap
+                        font.pixelSize: 12
+                        color: Theme.logColor("orange")
+                        text: qsTr("Leftover copies of an older ID remain (their slot was too small for the last patch). "
+                                   + "Patching again with a shorter ID repairs them, or use Undo to restore the original file.")
                     }
                 }
             }
@@ -246,7 +264,9 @@ Item {
                               : (page.sameAsCurrent
                                  ? qsTr("That is already the ID in this file — patching again just re-confirms it.")
                                  : (page.patched
-                                    ? qsTr("This file is already patched; the current ID above will be replaced.")
+                                    ? (page.leftoverCount > 0
+                                       ? qsTr("This file is already patched; the current ID above will be replaced and any leftover copies the new ID fits are repaired.")
+                                       : qsTr("This file is already patched; the current ID above will be replaced."))
                                     : qsTr("The detected ID above will be replaced.")))
                     }
 
