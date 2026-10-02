@@ -88,7 +88,7 @@ ApplicationWindow {
                         { label: qsTr("Integrity"),   icon: Icons.integrity },
                         { label: qsTr("Boot Video"),  icon: Icons.boot },
                         { label: qsTr("Extras"),      icon: Icons.extras },
-                        { label: qsTr("Discord RPC"),  icon: Icons.about },
+                        { label: qsTr("Discord RPC"),  icon: Icons.discord },
                         { label: qsTr("Appearance"),  icon: Icons.appearance },
                         { label: qsTr("About"),       icon: Icons.about }
                     ]

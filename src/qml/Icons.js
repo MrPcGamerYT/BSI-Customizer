@@ -3,9 +3,16 @@
 // Minimal inline SVG icon set (lucide-style paths, no external files).
 
 function icon(inner, color) {
+    // Stroke icons (default): lucide-style outlines tinted via stroke color.
+    // Brand marks (Discord): solid-fill shapes; their markup carries a $C
+    // placeholder that is replaced with the tint color, and no stroke is used.
+    var filled = inner.indexOf("$C") >= 0;
     var svg = "<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'"
-            + " fill='none' stroke='" + color + "' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'>"
-            + inner + "</svg>";
+            + (filled
+               ? " fill='none' stroke='none'>"
+               : " fill='none' stroke='" + color + "' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'>")
+            + (filled ? inner.split("$C").join(color) : inner)
+            + "</svg>";
     return "data:image/svg+xml," + encodeURIComponent(svg);
 }
 
@@ -58,3 +65,9 @@ var refresh = "<path d='M21 12a9 9 0 1 1-2.64-6.36'/>"
 // YouTube logo (lucide 'youtube'): rounded TV shape + play triangle.
 var youtube = "<path d='M2.5 17a24.12 24.12 0 0 1 0-10 2 2 0 0 1 1.4-1.4 49.56 49.56 0 0 1 16.2 0A2 2 0 0 1 21.5 7a24.12 24.12 0 0 1 0 10 2 2 0 0 1-1.4 1.4 49.55 49.55 0 0 1-16.2 0A2 2 0 0 1 2.5 17'/>"
             + "<path d='m10 15 5-3-5-3z'/>";
+
+// Discord logo (official brand mark). Solid fill, so it uses the $C tint
+// placeholder instead of the stroke style used by the UI icons above.
+// Native viewBox is 127.14 x 96.36; scaled to 21 units wide and centered.
+var discord = "<path fill='$C' fill-rule='evenodd' transform='translate(1.5 4.04) scale(0.1652)'"
+            + " d='M107.7,8.07A105.15,105.15,0,0,0,81.47,0a72.06,72.06,0,0,0-3.36,6.83A97.68,97.68,0,0,0,49,6.83,72.37,72.37,0,0,0,45.64,0,105.89,105.89,0,0,0,19.39,8.09C2.79,32.65-1.71,56.6.54,80.21h0A105.73,105.73,0,0,0,32.71,96.36,77.7,77.7,0,0,0,39.6,85.25a68.42,68.42,0,0,1-10.85-5.18c.91-.66,1.8-1.34,2.66-2a75.57,75.57,0,0,0,64.32,0c.87.71,1.76,1.39,2.66,2a68.68,68.68,0,0,1-10.87,5.19,77,77,0,0,0,6.89,11.1A105.25,105.25,0,0,0,126.6,80.22h0C129.24,52.84,122.09,29.11,107.7,8.07ZM42.45,65.69C36.18,65.69,31,60,31,53s5-12.85,11.43-12.85S54,46,53.89,53,48.84,65.69,42.45,65.69Zm42.24,0C78.41,65.69,73.25,60,73.25,53s5-12.85,11.44-12.85S96.23,46,96.12,53,91.08,65.69,84.75,65.69Z'/>";
