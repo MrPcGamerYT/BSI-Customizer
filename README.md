@@ -128,15 +128,18 @@ component: the single EXE is the whole tool. They detect the Game SDK's
 little-endian 64-bit integer form (at any file alignment, including qwords
 referenced by code), and the ASCII and UTF-16 forms used by classic
 `discord-rpc`, and preserve the original file size when replacing an ID.
-Detection is fully value-agnostic: no specific Application ID is baked into
-the scanner or favoured by it, so every build - not only the stock BlueStacks
-one - is found by the same evidence rules. Junk-shaped numbers (round values,
-repeated digit patterns, parts of longer numbers) are filtered out, and a
-candidate is only acted on automatically when the evidence is unambiguous,
-so the detector does not report a wrong ID on builds that used to be
-mis-read; an ambiguous scan asks for the current ID instead of touching the
-file. Close the emulator before writing; the first
-backup is kept as `<file>.rpcid-bak`.
+Detection does not require a specific Application ID: every build - not only
+the stock BlueStacks one - is found by the same evidence rules (code
+immediates, text, repeated stored constants). The stock BlueStacks ID
+(`821361671729709086`) is additionally recognized outright whenever it turns
+up, the same way the reference scanner always finds it, so it is never held
+back by a coin-flip tie against unrelated noise elsewhere in a large
+executable. Junk-shaped numbers (round values, repeated digit patterns, parts
+of longer numbers) are filtered out, and an undocumented candidate is only
+acted on automatically when the evidence is unambiguous, so the detector does
+not report a wrong ID on builds that used to be mis-read; an ambiguous scan
+asks for the current ID instead of touching the file. Close the emulator
+before writing; the first backup is kept as `<file>.rpcid-bak`.
 
 ```powershell
 BSI-Customizer.exe --rpcid selftest

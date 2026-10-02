@@ -12,10 +12,13 @@
 namespace RpcIdScan {
 namespace {
 
-// Documented IDs, shown as a friendly label in the UI. Detection is fully
-// value-agnostic: this table changes no score, no admission and no filter, so
-// every ID - not just the stock BlueStacks one - is scanned and ranked by the
-// same rules.
+// Documented IDs, shown as a friendly label in the UI. Detection itself stays
+// value-agnostic - an ID that is not in this table is still found by the same
+// generic evidence (code immediates, text, repeated stored constants) - but a
+// documented ID IS a confirmed match the moment it is seen, the same way the
+// reference scanner treats it, so it carries a decisive scoring bonus and is
+// always preferred over an unconfirmed guess instead of risking a refusal or
+// a coin-flip tie against unrelated noise in the file.
 struct KnownId
 {
     const char *id;
@@ -679,6 +682,7 @@ std::vector<Candidate> harvest(std::string_view data, const Pe *pe)
                 near = true;
         }
         record.known = knownName(record.id);
+        const bool isKnown = !record.known.empty();
         // An immediate only counts strongly when it really sits in code;
         // outside an executable section the "instruction" is misread data.
         const bool immStrong = immediate && (immExec || !usePe);
@@ -690,22 +694,27 @@ std::vector<Candidate> harvest(std::string_view data, const Pe *pe)
         const bool arrayStrong = qwords >= 3 || (array && (near || ripRef));
         // Neighbourhood is supporting evidence, never a verdict: a digit
         // string on its own must still outrank a well-placed junk constant,
-        // because a wrong pick is exactly what bricks executables.
+        // because a wrong pick is exactly what bricks executables. A
+        // documented Application ID (e.g. the stock BlueStacks one) is a
+        // confirmed match on its own - exactly like the reference tool,
+        // which always recognizes it - so it gets a decisive bonus instead
+        // of competing on generic heuristics alone and losing a coin-flip
+        // tie against unrelated noise.
         const int score = (text ? 7 : 0) + (immStrong ? 5 : immediate ? 1 : 0)
                         + (multiKind ? 4 : 0) + (array ? 3 : 0)
-                        + (near ? 2 : 0) + (ripRef ? 2 : 0);
+                        + (near ? 2 : 0) + (ripRef ? 2 : 0) + (isKnown ? 10 : 0);
         const int signals = int(text) + int(immStrong) + int(multiKind) + int(arrayStrong)
-                          + int(near) + int(ripRef);
+                          + int(near) + int(ripRef) + int(isKnown);
         record.score = score;
         record.refs = static_cast<int>(record.sites.size());
         record.date = snowflakeDate(record.id);
-        record.confident = signals >= 2;
+        record.confident = signals >= 2 || isKnown;
         // A bare qword may only be chosen automatically when it sits in
         // Discord-related data or is a repeated stored constant; a mere code
         // reference is not enough on its own, because referenced timestamps
-        // and hashes are everywhere.
+        // and hashes are everywhere. A documented ID is always eligible.
         record.eligible = text || immStrong || multiKind || arrayStrong || signals >= 2
-                       || (near && (immediate || qword));
+                       || (near && (immediate || qword)) || isKnown;
     }
 
     // Two bare-qword candidates whose bytes overlap cannot both be real
@@ -716,7 +725,7 @@ std::vector<Candidate> harvest(std::string_view data, const Pe *pe)
         std::vector<std::pair<std::int64_t, std::size_t>> bare;
         for (std::size_t r = 0; r < records.size(); ++r) {
             const Candidate &record = records[r];
-            if (record.score < 3 || record.sites.empty())
+            if (record.score < 3 || record.sites.empty() || !record.known.empty())
                 continue;
             bool onlyQwords = true;
             for (const Site &site : record.sites)
@@ -761,6 +770,17 @@ Pick pickCandidate(const std::vector<Candidate> &records)
     }
     if (pick.strong.empty())
         return pick;
+    // A documented Application ID (e.g. the stock "821361671729709086" used
+    // by BlueStacks 5 / MSI App Player) is a confirmed match by definition,
+    // exactly as in the reference tool: whenever one shows up among the
+    // strong candidates it is used outright, instead of being held back by a
+    // tie against an undocumented guess the way an unconfirmed candidate is.
+    for (const int index : pick.strong) {
+        if (!records[std::size_t(index)].known.empty()) {
+            pick.index = index;
+            return pick;
+        }
+    }
     const Candidate &top = records[std::size_t(pick.strong.front())];
     if (!top.eligible)
         return pick;
