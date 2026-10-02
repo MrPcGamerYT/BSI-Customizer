@@ -78,6 +78,17 @@ public:
     std::int64_t rvaToOffset(std::int64_t rva) const;   // -1 when unmapped
     std::int64_t offsetToRva(std::int64_t off) const;   // -1 when unmapped
 
+    struct Span
+    {
+        std::int64_t off = 0;      // first file offset of the section data
+        std::int64_t size = 0;     // bytes of raw data
+        std::int64_t rva = 0;      // virtual address the raw data maps to
+        bool exec = false;         // executable code section
+    };
+
+    // File spans of every section, in header order.
+    std::vector<Span> spans() const;
+
 private:
     struct Section
     {

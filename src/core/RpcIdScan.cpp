@@ -12,8 +12,10 @@
 namespace RpcIdScan {
 namespace {
 
-// Documented IDs. A match here is strong evidence on its own: nothing else in
-// a binary looks exactly like the stock BlueStacks application ID.
+// Documented IDs, shown as a friendly label in the UI. Detection is fully
+// value-agnostic: this table changes no score, no admission and no filter, so
+// every ID - not just the stock BlueStacks one - is scanned and ranked by the
+// same rules.
 struct KnownId
 {
     const char *id;
@@ -209,6 +211,16 @@ std::int64_t Pe::offsetToRva(std::int64_t off) const
     return -1;
 }
 
+std::vector<Pe::Span> Pe::spans() const
+{
+    std::vector<Span> spans;
+    spans.reserve(m_sections.size());
+    for (const Section &s : m_sections)
+        spans.push_back({ std::int64_t(s.raw), std::int64_t(s.rawSize),
+                          std::int64_t(s.va), (s.chars & 0x20000000u) != 0 });
+    return spans;
+}
+
 // ------------------------------------------------------------------ shape tests
 
 bool plausible(std::uint64_t value)
@@ -370,8 +382,9 @@ std::vector<Candidate> harvest(std::string_view data, const Pe *pe)
         }
     }
 
-    // Where Discord-related data lives; bare qwords are only interesting here
-    // (or where code references them, or for a known ID).
+    // Where Discord-related data lives; bare qwords are only interesting here,
+    // where code references them, or when a value already proved itself as a
+    // deliberate stored constant (handled further below).
     std::vector<std::int64_t> discord;
     for (std::int64_t i = 0; i + 7 <= limit;) {
         bool hit = true;
@@ -447,20 +460,6 @@ std::vector<Candidate> harvest(std::string_view data, const Pe *pe)
             }
         }
     }
-    for (const KnownId &entry : kKnown) {                        // known IDs, any alignment
-        std::uint64_t value = 0;
-        if (!parseId(std::string(entry.id), &value))
-            continue;
-        char packed[8];
-        putLe64(packed, value);
-        const std::string_view needle(packed, 8);
-        for (std::size_t pos = data.find(needle); pos != std::string_view::npos;
-             pos = data.find(needle, pos + needle.size())) {
-            if (claimed.count(static_cast<std::int64_t>(pos)) == 0)
-                add(value, Kind::U64le, static_cast<std::int64_t>(pos));
-        }
-    }
-
     // Decimal text forms. Junk-shaped numbers (round values, repeated digit
     // patterns) are rejected here too, not just for the integer forms. Only a
     // complete 17-20 digit run counts: part of a longer number is not an ID.
@@ -538,29 +537,94 @@ std::vector<Candidate> harvest(std::string_view data, const Pe *pe)
             pos = start + 2;
     }
 
-    // Drop obvious pattern noise; a known ID is never noise.
+    // Deliberate forms: any ID already seen as a digit string or a repeated
+    // code immediate is corroborated by EVERY byte-level copy of its 64-bit
+    // form, wherever that copy sits. This used to be done for one hardcoded
+    // ID only, which is why other IDs looked "undetectable": now every value
+    // gets the same whole-file search, based on evidence instead of a table.
+    // Lone one-shot constants stay un-corroborated, so a file full of junk
+    // immediates cannot turn the whole-file search into a scan per constant.
+    // A hard budget protects scan time against adversarial junk either way.
+    std::size_t corroborated = 0;
+    constexpr std::size_t kCorroborationBudget = 64;
+    const auto findEverywhere = [&](std::uint64_t value) {
+        if (corroborated >= kCorroborationBudget)
+            return;
+        ++corroborated;
+        char packed[8];
+        putLe64(packed, value);
+        const std::string_view needle(packed, 8);
+        for (std::size_t pos = data.find(needle); pos != std::string_view::npos;
+             pos = data.find(needle, pos + 1)) {
+            if (claimed.count(static_cast<std::int64_t>(pos)) == 0)
+                add(value, Kind::U64le, static_cast<std::int64_t>(pos));
+        }
+    };
     {
-        std::vector<Candidate> kept;
-        kept.reserve(records.size());
-        for (Candidate &record : records) {
-            bool text = false, immediate = false;
-            int immediates = 0, qwords = 0;
+        std::set<std::uint64_t> seeded;
+        for (const Candidate &record : records) {
+            if (record.sites.size() < 2)
+                continue;
             for (const Site &site : record.sites) {
-                switch (site.kind) {
-                case Kind::Ascii:
-                case Kind::Utf16le: text = true; break;
-                case Kind::Imm64:   immediate = true; ++immediates; break;
-                case Kind::U64le:   ++qwords; break;
+                if (site.kind == Kind::Ascii || site.kind == Kind::Utf16le
+                    || site.kind == Kind::Imm64) {
+                    std::uint64_t value = 0;
+                    if (parseId(record.id, &value))
+                        seeded.insert(value);
+                    break;
                 }
             }
-            const bool documented = !knownName(record.id).empty();
-            if (!documented && immediates > 3 && !text)
-                continue;
-            if (!documented && immediates <= 3 && qwords > 3 && !text && !immediate)
-                continue;
-            kept.push_back(std::move(record));
         }
-        records = std::move(kept);
+        for (const std::uint64_t value : seeded)
+            findEverywhere(value);
+    }
+
+    // Stored constants: an application ID that only exists as data (Discord
+    // Game SDK structs, configuration blobs) cannot rely on nearby "discord"
+    // strings or code references, so naturally aligned qwords in data are
+    // admitted when the same value repeats - a single snowflake-shaped qword
+    // can be anything, but two identical copies in stored data are deliberate.
+    {
+        std::unordered_map<std::uint64_t, int> stored;
+        const auto probe = [&](std::int64_t off) {
+            if (off < 0 || off + 8 > limit || claimed.count(off) != 0)
+                return;
+            const std::uint64_t value = le64(data, off);
+            if (!plausible(value) || compilerConstant(value))
+                return;
+            bool printable = true;
+            for (int k = 0; k < 8 && printable; ++k) {
+                const unsigned char c = byteAt(data, off + k);
+                printable = c >= 32 && c <= 126;
+            }
+            if (printable)
+                return;
+            // Only the first two sightings matter: one copy is ambient, the
+            // second proves a stored constant.
+            auto &count = stored[value];
+            if (count < 2)
+                ++count;
+        };
+        const std::vector<Pe::Span> spans = usePe ? pe->spans() : std::vector<Pe::Span>();
+        if (spans.empty()) {
+            for (std::int64_t off = 0; off + 8 <= limit; off += 8)
+                probe(off);
+        } else {
+            for (const Pe::Span &span : spans) {
+                if (span.exec)
+                    continue;
+                const std::int64_t last = std::min<std::int64_t>(span.off + span.size, limit);
+                // Keep addresses naturally aligned: compilers store u64
+                // fields at 8-byte boundaries, junk straddlers do not.
+                std::int64_t off = span.off + ((8 - (span.rva & 7)) & 7);
+                for (; off + 8 <= last; off += 8)
+                    probe(off);
+            }
+        }
+        for (const auto &entry : stored) {
+            if (entry.second >= 2)
+                findEverywhere(entry.first);
+        }
     }
 
     const auto nearDiscord = [&](std::int64_t off) {
@@ -578,27 +642,29 @@ std::vector<Candidate> harvest(std::string_view data, const Pe *pe)
         return false;
     };
 
+    // Ranking. Deliberate storage forms - a standalone digit string, an
+    // immediate load in executable code - outweigh ambient integers, and no
+    // weight ever names a specific ID, so an unknown-but-real ID can beat a
+    // documented-looking junk constant instead of being buried under it.
+    // Corroboration (the same value stored in several ways) ranks highest.
     for (Candidate &record : records) {
-        bool text = false, immediate = false, qword = false;
-        int immediates = 0, qwords = 0;
-        for (const Site &site : record.sites) {
+        bool text = false, immediate = false, immExec = false, qword = false;
+        int qwords = 0;
+        bool near = false, ripRef = false;
+        std::set<int> kinds;
+        for (Site &site : record.sites) {
+            kinds.insert(int(site.kind));
             switch (site.kind) {
             case Kind::Ascii:
             case Kind::Utf16le: text = true; break;
-            case Kind::Imm64:   immediate = true; ++immediates; break;
+            case Kind::Imm64:   immediate = true; break;
             case Kind::U64le:   qword = true; ++qwords; break;
             }
-        }
-        record.known = knownName(record.id);
-        int score = (text ? 4 : 0) + (immediate ? 3 : 0) + (qword ? 1 : 0)
-                  + (record.known.empty() ? 0 : 10) + (discord.empty() ? 0 : 1);
-        bool near = false, ripRef = false;
-        for (Site &site : record.sites) {
             if (usePe) {
                 const auto section = pe->sectionOf(site.off);
                 site.section = section.first;
                 if (site.kind == Kind::Imm64 && section.second)
-                    score += 2;
+                    immExec = true;
                 if (site.kind == Kind::U64le) {
                     const std::int64_t rva = pe->offsetToRva(site.off);
                     if (rva >= 0 && referenced(rva)) {
@@ -607,29 +673,39 @@ std::vector<Candidate> harvest(std::string_view data, const Pe *pe)
                     }
                 }
             }
-            if (!near && (site.kind == Kind::Imm64 || site.kind == Kind::U64le)
-                && nearDiscord(site.off))
+            // A digit string right next to a Discord mention is just as
+            // telling as an integer near one.
+            if (!near && nearDiscord(site.off))
                 near = true;
         }
-        if (near)
-            score += 2;
-        if (ripRef)
-            score += 3;
-        if (immediates == 1)
-            score += 2;
-        if (qwords >= 2)
-            score += 2;
-        const int signals = int(text) + int(immediate) + int(!record.known.empty()) + int(near)
-                          + int(ripRef) + int(qwords >= 2) + int(immediates >= 2);
+        record.known = knownName(record.id);
+        // An immediate only counts strongly when it really sits in code;
+        // outside an executable section the "instruction" is misread data.
+        const bool immStrong = immediate && (immExec || !usePe);
+        const bool multiKind = kinds.size() >= 2;
+        // A repeated stored constant is deliberate; it still needs one more
+        // hint (a third copy, Discord-related neighbourhood or a code
+        // reference) before it may be acted on automatically.
+        const bool array = qwords >= 2;
+        const bool arrayStrong = qwords >= 3 || (array && (near || ripRef));
+        // Neighbourhood is supporting evidence, never a verdict: a digit
+        // string on its own must still outrank a well-placed junk constant,
+        // because a wrong pick is exactly what bricks executables.
+        const int score = (text ? 7 : 0) + (immStrong ? 5 : immediate ? 1 : 0)
+                        + (multiKind ? 4 : 0) + (array ? 3 : 0)
+                        + (near ? 2 : 0) + (ripRef ? 2 : 0);
+        const int signals = int(text) + int(immStrong) + int(multiKind) + int(arrayStrong)
+                          + int(near) + int(ripRef);
         record.score = score;
         record.refs = static_cast<int>(record.sites.size());
         record.date = snowflakeDate(record.id);
         record.confident = signals >= 2;
         // A bare qword may only be chosen automatically when it sits in
-        // Discord-related data; a mere code reference is not enough, because
-        // referenced timestamps and hashes are everywhere.
-        record.eligible = text || immediate || !record.known.empty() || signals >= 2
-                       || (near && qword);
+        // Discord-related data or is a repeated stored constant; a mere code
+        // reference is not enough on its own, because referenced timestamps
+        // and hashes are everywhere.
+        record.eligible = text || immStrong || multiKind || arrayStrong || signals >= 2
+                       || (near && (immediate || qword));
     }
 
     // Two bare-qword candidates whose bytes overlap cannot both be real

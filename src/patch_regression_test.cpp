@@ -2140,6 +2140,90 @@ int runPatchRegressionTests()
               "Rich Presence Undo restores the original bytes and clears patch state");
     }
     {
+        // Detection is value-agnostic: an Application ID the tool has never
+        // seen is found by the evidence it leaves (immediate loads, digit
+        // strings, repeated stored constants), never by matching a hardcoded
+        // value. The layouts below mirror the stock fixture with an unknown
+        // ID, and noise must never outrank it - acting on a wrong "detection"
+        // is what corrupted executables before.
+        const QString otherId = QStringLiteral("1284004339950120960");
+        const auto imageOf = [](const QString &id) {
+            QByteArray image(32, '\x90');
+            image += QByteArray::fromHex("48b8");
+            quint64 numeric = id.toULongLong();
+            for (int i = 0; i < 8; ++i) image += char((numeric >> (8 * i)) & 0xff);
+            image += QByteArray("discord\0", 8);
+            image += id.toLatin1() + QByteArray(3, '\0');
+            for (const QChar c : id) { image += char(c.unicode()); image += '\0'; }
+            image += QByteArray(2, '\0');
+            image += QByteArray(32, '\x90');
+            return image;
+        };
+        const auto picked = [](const QByteArray &image) {
+            const auto records = RpcIdScan::harvest(
+                std::string_view(image.constData(), static_cast<std::size_t>(image.size())));
+            const auto pick = RpcIdScan::pickCandidate(records);
+            return pick.index >= 0 ? QString::fromStdString(records[std::size_t(pick.index)].id) : QString();
+        };
+
+        const QByteArray image = imageOf(otherId);
+        check(picked(image) == otherId,
+              "an unknown Application ID is detected in every stored form, not just the hardcoded one");
+
+        const QString exe = temp.filePath(QStringLiteral("HD-Rpc-Other.exe"));
+        write(exe, image);
+        const auto changed = RpcIdPatcher::replace(exe, QStringLiteral("1234567890123456789"));
+        check(changed.ok && RpcIdPatcher::status(exe).currentId == QStringLiteral("1234567890123456789"),
+              "an unknown Application ID can be replaced just like the documented one");
+        const auto undone = RpcIdPatcher::undo(exe);
+        QFile restored(exe); restored.open(QIODevice::ReadOnly);
+        check(undone.ok && restored.readAll() == image,
+              "unknown-ID patches restore the original bytes exactly");
+
+        // The real ID as a bare text string must beat a snowflake-shaped
+        // junk constant; the old ranking picked the junk one and patching
+        // then clobbered it, breaking the executable.
+        QByteArray noisy(64, '\x90');
+        const quint64 junk = 0x0123456789ABCDEFULL;
+        for (const int at : { 4, 32 }) {
+            noisy[at] = '\x48'; noisy[at + 1] = char(0xB8);
+            for (int i = 0; i < 8; ++i) noisy[at + 2 + i] = char((junk >> (8 * i)) & 0xff);
+        }
+        noisy += QByteArray("discord rpc\0", 12);
+        noisy += otherId.toLatin1() + QByteArray(2, '\0');
+        check(picked(noisy) == otherId,
+              "a junk code constant cannot outrank the real text ID");
+
+        // An ID that only exists as repeated stored constants (Discord Game
+        // SDK structs) is found too, exactly like the stock ID used to be.
+        QByteArray stored(256, '\0');
+        const quint64 value = otherId.toULongLong();
+        for (const int at : { 0, 64, 128 })
+            for (int i = 0; i < 8; ++i) stored[at + i] = char((value >> (8 * i)) & 0xff);
+        stored += QByteArray("discord\0", 8);
+        check(picked(stored) == otherId,
+              "repeated stored constants are detected for any ID, not only the documented one");
+
+        // Two unrelated constants must never be guessed: safety is refusing
+        // to pick, which keeps replace from touching the file at all.
+        QByteArray ambiguous(64, '\x90');
+        for (const int at : { 4, 32 }) {
+            const quint64 other = at == 4 ? 0x0B0123456789ABCDULL : 0x0C0123456789ABCDULL;
+            ambiguous[at] = '\x48'; ambiguous[at + 1] = char(0xB8);
+            for (int i = 0; i < 8; ++i) ambiguous[at + 2 + i] = char((other >> (8 * i)) & 0xff);
+        }
+        ambiguous += QByteArray("discord\0", 8);
+        const auto records = RpcIdScan::harvest(
+            std::string_view(ambiguous.constData(), static_cast<std::size_t>(ambiguous.size())));
+        check(RpcIdScan::pickCandidate(records).index < 0,
+              "ambiguous constants refuse to be guessed instead of reporting a random ID");
+        const QString safe = temp.filePath(QStringLiteral("HD-Rpc-Ambiguous.exe"));
+        write(safe, ambiguous);
+        check(!RpcIdPatcher::replace(safe, QStringLiteral("1234567890123456789")).ok
+                  && read(safe) == ambiguous && !QFileInfo::exists(RpcIdPatcher::backupPath(safe)),
+              "an unconfirmed scan can never patch the wrong bytes");
+    }
+    {
         // The Windows version-resource editor ("name") and the scriptable
         // command line are part of the application itself now. Nothing here
         // starts another process, and no interpreter is required.
