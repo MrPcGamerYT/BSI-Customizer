@@ -162,8 +162,10 @@ QByteArray vrNode(const QString &key, quint16 type, const QByteArray &value,
 QByteArray versionResourceBlob(const QString &description, int descriptionCap,
                                const QString &product)
 {
+    // The slot the compiler reserved, NUL-padded explicitly: QByteArray::resize()
+    // leaves the new bytes uninitialized.
     QByteArray value = vrText(description);
-    value.resize(descriptionCap * 2);   // the slot the compiler reserved
+    value += QByteArray(descriptionCap * 2 - value.size(), '\0');
     const QByteArray describe = vrNode(QStringLiteral("FileDescription"), 1, value,
                                        quint16(descriptionCap));
     const QByteArray name = vrNode(QStringLiteral("ProductName"), 1,
@@ -222,9 +224,9 @@ QByteArray peWithVersionResource(const QByteArray &resource)
     putLe32(leaf, 0, rsrcVa + blobAt);
     putLe32(leaf, 4, quint32(resource.size()));
     body += leaf;
-    body.resize(blobAt);
+    body += QByteArray(blobAt - body.size(), '\0');
     body += resource;
-    body.resize(0x1000);
+    body += QByteArray(0x1000 - body.size(), '\0');
     return data + body;
 }
 
