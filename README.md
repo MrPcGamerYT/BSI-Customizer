@@ -141,6 +141,28 @@ not report a wrong ID on builds that used to be mis-read; an ambiguous scan
 asks for the current ID instead of touching the file. Close the emulator
 before writing; the first backup is kept as `<file>.rpcid-bak`.
 
+32-bit builds are supported too: a 64-bit ID that a 32-bit compiler cannot
+load as one immediate is pushed or moved as two separate 32-bit halves, and
+that pair is harvested back into a single Application ID and patched exactly
+like a 64-bit one.
+
+Relocating an already-patched slot does not depend only on remembering what
+value was last written there. Right after a successful patch, the unchanging
+bytes immediately around that exact slot are captured as a small signature
+and saved next to the usual patch state. A later run tries, in order: the
+remembered current ID; that remembered signature (so the slot is found again
+even if its value was since changed by something else, as long as the
+surrounding code did not); a small table of signatures for specific
+documented builds, usable even on a file that has never been patched before;
+and, as a last resort, whatever short run of bytes differs between the file
+and its own `.rpcid-bak`. Only if none of those apply does it fall back to
+the full evidence-based scan described above. A `find` scan additionally
+looks for an Application ID stored inside a zlib-compressed blob embedded in
+the file (a packed resource, for instance); that is reported for information
+only; it is never selected automatically or written to, since patching
+compressed bytes in place would just corrupt the stream. All of this runs
+fully offline — no network request is ever made to look an ID up.
+
 ```powershell
 BSI-Customizer.exe --rpcid selftest
 BSI-Customizer.exe --rpcid find "C:\Program Files\BlueStacks_nxt\HD-Player.exe"
