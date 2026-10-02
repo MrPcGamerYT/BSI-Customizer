@@ -159,6 +159,11 @@ public:
                                          bool dryRun = false, bool noNetwork = true);
     Q_INVOKABLE QVariantMap rpcidStatus(const QString &path);
     Q_INVOKABLE QVariantMap rpcidUndo(const QString &path);
+    // Windows version-resource names (what Explorer/Task Manager show).
+    Q_INVOKABLE QVariantMap rpcidNames(const QString &path);
+    Q_INVOKABLE QVariantMap rpcidSetName(const QString &path, const QString &text,
+                                         const QString &key = QString(),
+                                         bool dryRun = false);
 
 signals:
     void exePathChanged();

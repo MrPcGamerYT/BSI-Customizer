@@ -2,7 +2,7 @@
 // Discord Rich Presence command line (BSI-Customizer --rpcid ...)
 //
 // The same native engines the UI uses (RpcIdScan / RpcIdPatcher /
-// VersionResource), exposed as a scriptable command line. It replaces the old
+// VersionResource) exposed as a scriptable command line. It replaces the old
 // standalone reference script: the shipped EXE is the only thing required, so
 // no interpreter, sidecar file or extra download is involved, and both the UI
 // and the CLI read and write exactly the same `<file>.rpcid-bak` backup and
@@ -11,12 +11,8 @@
 // Exit codes: 0 success, 1 the operation failed, 2 the command line is wrong.
 // ---------------------------------------------------------------------------
 
-#include "core/PatchFile.h"
 #include "core/RpcIdPatcher.h"
-#include "core/VersionResource.h"
 
-#include <QByteArray>
-#include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -26,8 +22,6 @@
 #include <QStringList>
 
 #include <cstdio>
-#include <string>
-#include <string_view>
 
 // Implemented in selftest.cpp: the whole engine suite, the same one CI runs.
 int runSelfTest();
@@ -151,87 +145,30 @@ int commandStatus(const Options &options)
 
 int commandName(const Options &options)
 {
-    QFile file(options.path);
-    if (!QFileInfo(options.path).isFile() || !file.open(QIODevice::ReadOnly)) {
-        line(QStringLiteral("Could not read %1.").arg(options.path));
+    const RpcIdPatcher::Names names = RpcIdPatcher::names(options.path);
+    if (!names.ok) {
+        line(names.msg);
         return 1;
     }
-    const QByteArray data = file.readAll();
-    file.close();
-
-    const std::string_view view(data.constData(), static_cast<std::size_t>(data.size()));
-    const VersionResource::Info info = VersionResource::read(view);
-    if (!info.ok) {
-        line(QStringLiteral("%1: %2.").arg(QFileInfo(options.path).fileName(),
-                                           QString::fromStdString(info.error)));
-        return 1;
-    }
-
     line(QStringLiteral("Names inside %1").arg(QFileInfo(options.path).fileName()));
-    for (const VersionResource::StringEntry &entry : info.strings) {
+    for (const RpcIdPatcher::NameEntry &entry : names.entries) {
         line(QStringLiteral("  %1 = \"%2\" (max %3 characters)")
-                 .arg(QString::fromStdString(entry.key), QString::fromStdString(entry.value))
-                 .arg(entry.cap - 1));
+                 .arg(entry.key, entry.value).arg(entry.max));
     }
     if (!options.hasSet) {
         line(QStringLiteral("The name Discord itself shows comes from the Discord application, "
                             "not from this Windows version resource."));
         return 0;
     }
-
-    const QStringList keys = options.key.isEmpty()
-        ? QStringList{ QStringLiteral("FileDescription"), QStringLiteral("ProductName") }
-        : QStringList{ options.key };
-
-    QByteArray patched = data;
-    QStringList written;
-    QStringList refused;
-    for (const QString &key : keys) {
-        const auto matches = VersionResource::withKey(info, key.toStdString());
-        if (matches.empty()) {
-            refused << QStringLiteral("%1 is not in this file").arg(key);
-            continue;
-        }
-        for (const VersionResource::StringEntry *entry : matches) {
-            std::string why;
-            if (VersionResource::setString(patched.data(), static_cast<std::size_t>(patched.size()),
-                                           *entry, options.set.toStdString(), &why)) {
-                written << key;
-            } else {
-                refused << QStringLiteral("%1: %2").arg(key, QString::fromStdString(why));
-            }
-        }
+    if (!options.dryRun && !options.yes) {
+        const RpcIdPatcher::Result preview =
+            RpcIdPatcher::setName(options.path, options.set, options.key, true);
+        const int code = report(preview);
+        if (code == 0)
+            line(QStringLiteral("Add --yes to write this change."));
+        return code == 0 ? 1 : code;
     }
-    for (const QString &problem : refused)
-        line(problem);
-    if (written.isEmpty()) {
-        line(QStringLiteral("Nothing was changed."));
-        return 1;
-    }
-    if (options.dryRun) {
-        line(QStringLiteral("Preview only: %1 would become \"%2\". Nothing was written.")
-                 .arg(written.join(QStringLiteral(", ")), options.set));
-        return 0;
-    }
-    if (!options.yes) {
-        line(QStringLiteral("Add --yes to write \"%1\" into %2.")
-                 .arg(options.set, written.join(QStringLiteral(", "))));
-        return 1;
-    }
-
-    const QString backup = RpcIdPatcher::backupPath(options.path);
-    if (!QFileInfo::exists(backup) && !QFile::copy(options.path, backup)) {
-        line(QStringLiteral("Could not create the original-file backup. No changes were made."));
-        return 1;
-    }
-    QString error;
-    if (!PatchFile::writeVerified(options.path, data, patched, &error)) {
-        line(error);
-        return 1;
-    }
-    line(QStringLiteral("Set %1 to \"%2\"; the file size is unchanged and the original is backed up at %3.")
-             .arg(written.join(QStringLiteral(", ")), options.set, QFileInfo(backup).fileName()));
-    return 0;
+    return report(RpcIdPatcher::setName(options.path, options.set, options.key, options.dryRun));
 }
 
 } // namespace

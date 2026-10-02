@@ -985,6 +985,28 @@ QVariantMap Backend::rpcidUndo(const QString &path)
     return {{QStringLiteral("ok"), r.ok}, {QStringLiteral("msg"), r.msg}};
 }
 
+QVariantMap Backend::rpcidNames(const QString &path)
+{
+    const auto n = RpcIdPatcher::names(path);
+    QVariantList entries;
+    for (const RpcIdPatcher::NameEntry &entry : n.entries) {
+        entries << QVariantMap{{QStringLiteral("key"), entry.key},
+                               {QStringLiteral("value"), entry.value},
+                               {QStringLiteral("max"), entry.max}};
+    }
+    return {{QStringLiteral("ok"), n.ok},
+            {QStringLiteral("msg"), n.msg},
+            {QStringLiteral("entries"), entries}};
+}
+
+QVariantMap Backend::rpcidSetName(const QString &path, const QString &text,
+                                  const QString &key, bool dryRun)
+{
+    const auto r = RpcIdPatcher::setName(path, text, key, dryRun);
+    doLog(r.msg, r.ok ? QStringLiteral("green") : QStringLiteral("red"));
+    return {{QStringLiteral("ok"), r.ok}, {QStringLiteral("msg"), r.msg}};
+}
+
 QVariantList Backend::removalNames() const
 {
     QVariantList out;

@@ -2190,6 +2190,37 @@ int runPatchRegressionTests()
         check(QFileInfo::exists(RpcIdPatcher::backupPath(exe)),
               "the first name change keeps a backup of the original file");
 
+        // The UI drives the very same engine, so the feature is not
+        // command-line only: Backend is what QML calls.
+        SettingsManager nameSettings;
+        Backend nameBackend(&nameSettings);
+        const QVariantMap listed = nameBackend.rpcidNames(exe);
+        check(listed.value(QStringLiteral("ok")).toBool()
+                  && listed.value(QStringLiteral("entries")).toList().size() == 4,
+              "the QML-facing API lists every editable name with its limit");
+        const QVariantMap previewed = nameBackend.rpcidSetName(exe, QStringLiteral("Preview"),
+                                                               QString(), true);
+        check(previewed.value(QStringLiteral("ok")).toBool() && read(exe) == renamed,
+              "a previewed rename writes nothing");
+        const QVariantMap applied = nameBackend.rpcidSetName(exe, QStringLiteral("Player X"),
+                                                             QStringLiteral("ProductName"), false);
+        const QByteArray uiBytes = read(exe);
+        const VersionResource::Info uiNamed = VersionResource::read(viewOf(uiBytes));
+        check(applied.value(QStringLiteral("ok")).toBool()
+                  && VersionResource::withKey(uiNamed, "ProductName").front()->value
+                         == std::string("Player X")
+                  && VersionResource::withKey(uiNamed, "FileDescription").front()->value
+                         == std::string("My Player"),
+              "the UI can rename a single key without touching the others");
+        const QVariantMap refused = nameBackend.rpcidSetName(
+            exe, QStringLiteral("A name far beyond the reserved slot"), QStringLiteral("ProductName"), false);
+        check(!refused.value(QStringLiteral("ok")).toBool()
+                  && refused.value(QStringLiteral("msg")).toString().contains(QLatin1String("slot holds")),
+              "an oversized name is refused with the exact limit instead of being truncated");
+        check(!nameBackend.rpcidSetName(exe, QString(), QString(), false)
+                   .value(QStringLiteral("ok")).toBool(),
+              "an empty name is refused");
+
         // Argument handling: a wrong command line must be reported, never
         // guessed at, and must not write anything.
         check(runRpcIdCli({ QStringLiteral("replace"), exe }) == 2,

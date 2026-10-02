@@ -2,6 +2,7 @@
 
 #include "PatchFile.h"
 #include "RpcIdScan.h"
+#include "VersionResource.h"
 
 #include <QDateTime>
 #include <QDir>
@@ -341,6 +342,105 @@ Result undo(const QString &path)
     if (!PatchFile::writeVerified(path, current, original, &error)) return {false, error, {}};
     QFile::remove(statePath(path));
     return {true, QStringLiteral("Restored the original file from its Rich Presence backup."), {}};
+}
+
+// ------------------------------------------------------- version-resource name
+
+Names names(const QString &path)
+{
+    Names out;
+    QByteArray data;
+    QString error;
+    if (!QFileInfo(path).isFile()) {
+        out.msg = QStringLiteral("Select an executable.");
+        return out;
+    }
+    if (!readFile(path, &data, &error)) { out.msg = error; return out; }
+    const VersionResource::Info info = VersionResource::read(view(data));
+    if (!info.ok) {
+        out.msg = QStringLiteral("%1: %2.").arg(QFileInfo(path).fileName(),
+                                                QString::fromStdString(info.error));
+        return out;
+    }
+    for (const VersionResource::StringEntry &entry : info.strings) {
+        out.entries.append({ QString::fromStdString(entry.key),
+                             QString::fromStdString(entry.value),
+                             entry.cap - 1 });
+    }
+    out.ok = true;
+    out.msg = QStringLiteral("%1 editable name(s) in %2.")
+                  .arg(out.entries.size()).arg(QFileInfo(path).fileName());
+    return out;
+}
+
+Result setName(const QString &path, const QString &textRaw, const QString &key, bool dryRun)
+{
+    const QString text = textRaw.trimmed();
+    if (text.isEmpty()) return { false, QStringLiteral("Enter the name to write."), {} };
+    if (!QFileInfo(path).isFile()) return { false, QStringLiteral("Select an executable."), {} };
+
+    QByteArray data;
+    QString error;
+    if (!readFile(path, &data, &error)) return { false, error, {} };
+    const VersionResource::Info info = VersionResource::read(view(data));
+    if (!info.ok)
+        return { false, QStringLiteral("%1: %2.").arg(QFileInfo(path).fileName(),
+                                                      QString::fromStdString(info.error)), {} };
+
+    const QStringList keys = key.trimmed().isEmpty()
+        ? QStringList{ QStringLiteral("FileDescription"), QStringLiteral("ProductName") }
+        : QStringList{ key.trimmed() };
+
+    QByteArray patched = data;
+    QStringList written;
+    QStringList refused;
+    for (const QString &name : keys) {
+        const auto matches = VersionResource::withKey(info, name.toStdString());
+        if (matches.empty()) {
+            refused << QStringLiteral("%1 is not in this file.").arg(name);
+            continue;
+        }
+        for (const VersionResource::StringEntry *entry : matches) {
+            std::string why;
+            if (VersionResource::setString(patched.data(), static_cast<std::size_t>(patched.size()),
+                                           *entry, text.toStdString(), &why)) {
+                if (!written.contains(name)) written << name;
+            } else {
+                refused << QStringLiteral("%1: %2.").arg(name, QString::fromStdString(why));
+            }
+        }
+    }
+    if (written.isEmpty()) {
+        refused << QStringLiteral("Nothing was changed.");
+        return { false, refused.join(QLatin1Char('\n')), {} };
+    }
+
+    QStringList report = refused;
+    if (dryRun) {
+        report << QStringLiteral("Preview only: %1 would become \"%2\". Nothing was written.")
+                      .arg(written.join(QStringLiteral(", ")), text);
+        return { true, report.join(QLatin1Char('\n')), {} };
+    }
+    if (!QFileInfo::exists(backupPath(path)) && !QFile::copy(path, backupPath(path)))
+        return { false, QStringLiteral("Could not create the original-file backup. No changes were made."), {} };
+    if (!PatchFile::writeVerified(path, data, patched, &error))
+        return { false, error, {} };
+
+    QByteArray fresh;
+    if (!readFile(path, &fresh, &error))
+        return { false, QStringLiteral("The file was written but could not be verified: %1").arg(error), {} };
+    const VersionResource::Info after = VersionResource::read(view(fresh));
+    bool verified = after.ok && fresh.size() == data.size();
+    for (const QString &name : written) {
+        for (const VersionResource::StringEntry *entry : VersionResource::withKey(after, name.toStdString()))
+            verified = verified && QString::fromStdString(entry->value) == text;
+    }
+    if (!verified)
+        return { false, QStringLiteral("The new name could not be verified after writing."), {} };
+
+    report << QStringLiteral("%1 is now \"%2\" (file size unchanged); the original is backed up at %3.")
+                  .arg(written.join(QStringLiteral(", ")), text, QFileInfo(backupPath(path)).fileName());
+    return { true, report.join(QLatin1Char('\n')), {} };
 }
 
 } // namespace RpcIdPatcher

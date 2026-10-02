@@ -166,14 +166,18 @@ state.
 `replace --dry-run` previews changes, and `--old <id>` selects a specific
 candidate when a binary contains more than one application ID (it must be the
 full 17-20 digit ID, and it must actually be present in the file).
-`name --set` edits the Windows version resource (`FileDescription` and
-`ProductName` by default, or a single `--key`): every translation in the file
-is updated inside the slot the compiler reserved, so the resource tree and the
-file size stay valid, and a text that does not fit is refused with the exact
-limit instead of corrupting the resource. It does not rename the Discord
-application itself, which must still be changed in the Discord Developer
-Portal. `--rpcid selftest` runs the complete engine self-test, the same one CI
-runs.
+The **Windows name** card on the same page, and `name --set` on the command
+line, edit the Windows version resource (`FileDescription` and `ProductName`
+by default, or a single `--key`) — the text Explorer, Task Manager and most
+overlays show for the executable. Every translation in the file is updated
+inside the slot the compiler reserved, so the resource tree and the file size
+stay valid, and a text that does not fit is refused with the exact limit
+instead of corrupting the resource; the card lists each name with its limit
+and will not let you type past the shortest one. The original is kept as the
+same `.rpcid-bak` backup, so **Undo** restores it. It does not rename the
+Discord application itself, which must still be changed in the Discord
+Developer Portal. `--rpcid selftest` runs the complete engine self-test, the
+same one CI runs.
 
 ## Build and verify
 
