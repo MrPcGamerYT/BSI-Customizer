@@ -3,9 +3,8 @@ name: Single EXE Release
 # Requires the repository's scripts/ and packaging/portable/ helpers.
 #
 # The Releases page always receives the raw, single portable EXE - never a
-# zip. (The Actions "artifact bundle" zip GitHub shows on run pages is only
-# the internal hand-off between jobs and is skipped entirely on plain runs;
-# the published asset itself is the bare .exe file.)
+# zip. The EXE is published from the tested Windows job itself, so releases do
+# not consume the repository's Actions artifact-storage quota.
 on:
   push:
     branches: [main]
@@ -45,6 +44,8 @@ jobs:
     name: Build & self-test (Windows x64)
     runs-on: windows-latest
     timeout-minutes: 60
+    permissions:
+      contents: write
     defaults:
       run:
         shell: pwsh
@@ -148,43 +149,19 @@ jobs:
           "File: **$env:EXE_NAME**" >> $env:GITHUB_STEP_SUMMARY
           "SHA-256: ``$sha``" >> $env:GITHUB_STEP_SUMMARY
 
-      # Only stored when a publish can follow (tag push or a manual run with
-      # "publish" ticked). Artifact bundles are zipped by GitHub anyway, so
-      # skipping this on plain runs keeps run pages zip-free; the Releases
-      # page always carries the raw EXE itself.
-      - name: Upload only the portable EXE
+      # Publish directly from the same Windows job that built and tested the
+      # executable. A cross-job upload/download through Actions artifacts can
+      # fail before publishing when the repository artifact quota is full.
+      - name: Validate and publish the tested portable EXE
         if: (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')) || (github.event_name == 'workflow_dispatch' && inputs.publish_release)
-        uses: actions/upload-artifact@v4
-        with:
-          name: BSI-Customizer-win64
-          path: build/artifacts/${{ steps.meta.outputs.exe_name }}
-          if-no-files-found: error
-          compression-level: 0
-          retention-days: 14
-
-  publish:
-    name: Publish single EXE
-    needs: build-windows
-    if: (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')) || (github.event_name == 'workflow_dispatch' && inputs.publish_release)
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - name: Download the tested EXE
-        uses: actions/download-artifact@v4
-        with:
-          name: BSI-Customizer-win64
-          path: release-files
-
-      - name: Validate artifact and tag, then publish
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          VERSION: ${{ needs.build-windows.outputs.version }}
-          BUILD_COMMIT: ${{ needs.build-windows.outputs.commit }}
-          EXE_NAME: ${{ needs.build-windows.outputs.exe_name }}
-          EXPECTED_SHA256: ${{ needs.build-windows.outputs.sha256 }}
+          VERSION: ${{ steps.meta.outputs.version }}
+          BUILD_COMMIT: ${{ steps.meta.outputs.commit }}
+          EXE_NAME: ${{ steps.meta.outputs.exe_name }}
+          EXPECTED_SHA256: ${{ steps.artifact.outputs.sha256 }}
           PRERELEASE: ${{ inputs.prerelease }}
         run: |
           set -euo pipefail
@@ -192,23 +169,22 @@ jobs:
           [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]
           [[ "$BUILD_COMMIT" =~ ^[0-9a-f]{40}$ ]]
           [[ "$EXE_NAME" == "BSI-Customizer-$VERSION-win64.exe" ]]
-          [[ "$(find release-files -maxdepth 1 -type f | wc -l)" -eq 1 ]]
+          [[ "$(find build/artifacts -maxdepth 1 -type f | wc -l)" -eq 1 ]]
 
-          echo "$EXPECTED_SHA256  release-files/$EXE_NAME" |
-            sha256sum --check --strict
+          asset="build/artifacts/$EXE_NAME"
+          echo "$EXPECTED_SHA256  $asset" | sha256sum --check --strict
 
           tag="v$VERSION"
 
           # Never attach a different build to an old source tag.
           if gh api "repos/$GH_REPO/git/ref/tags/$tag" > tag.json 2> tag-error.txt; then
-            type=$(jq -r .object.type tag.json)
-            sha=$(jq -r .object.sha tag.json)
+            type=$(gh api "repos/$GH_REPO/git/ref/tags/$tag" --jq '.object.type')
+            sha=$(gh api "repos/$GH_REPO/git/ref/tags/$tag" --jq '.object.sha')
 
             for attempt in {1..8}; do
               [[ "$type" == "tag" ]] || break
-              gh api "repos/$GH_REPO/git/tags/$sha" > tag.json
-              type=$(jq -r .object.type tag.json)
-              sha=$(jq -r .object.sha tag.json)
+              type=$(gh api "repos/$GH_REPO/git/tags/$sha" --jq '.object.type')
+              sha=$(gh api "repos/$GH_REPO/git/tags/$sha" --jq '.object.sha')
             done
 
             if [[ "$type" != "commit" || "$sha" != "$BUILD_COMMIT" ]]; then
@@ -220,8 +196,6 @@ jobs:
             cat tag-error.txt >&2
             exit 1
           fi
-
-          asset="release-files/$EXE_NAME"
 
           # The raw EXE goes into Releases exactly as built - never inside a
           # zip. An existing release for this exact commit just gets its asset
