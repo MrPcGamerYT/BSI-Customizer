@@ -11,10 +11,10 @@
  * application, with no helper script, interpreter or other external component
  * to deploy — the same reason every other patcher in this project is native.
  *
- * On-disk compatibility with the standalone reference script (rpcid.py) is
- * kept on purpose: the first backup is `<file>.rpcid-bak` and the remembered
- * patch state is `<file>.rpcid.json`, so a file patched by either one can be
- * re-patched or undone by the other. RpcIdScan holds the detection heuristics.
+ * The UI and the `--rpcid` command line share one on-disk contract: the first
+ * backup is `<file>.rpcid-bak` and the remembered patch state is
+ * `<file>.rpcid.json`, so a file patched from either side can be re-patched or
+ * undone from the other. RpcIdScan holds the detection heuristics.
  */
 namespace RpcIdPatcher {
 
@@ -48,6 +48,21 @@ struct Status
     QList<CandidateInfo> candidates;
 };
 
+/** One editable Windows version-resource string. */
+struct NameEntry
+{
+    QString key;      // "FileDescription", "ProductName", ...
+    QString value;    // what the file shows today
+    int max = 0;      // how many characters the reserved slot holds
+};
+
+struct Names
+{
+    bool ok = false;
+    QString msg;
+    QList<NameEntry> entries;   // one per key and translation, in file order
+};
+
 QString backupPath(const QString &exePath);
 QString statePath(const QString &exePath);
 
@@ -67,5 +82,18 @@ Result replace(const QString &path, const QString &newId,
 
 /** Restore `<file>.rpcid-bak` over the file and forget the patch state. */
 Result undo(const QString &path);
+
+/** The Windows version-resource strings Explorer and Task Manager show. */
+Names names(const QString &path);
+
+/**
+ * Rename the executable in place: `key` (empty = FileDescription and
+ * ProductName) is set in every translation, inside the slot the compiler
+ * reserved, so the resource tree stays valid and the file size never changes.
+ * Text that does not fit is refused with the exact limit. This does not
+ * rename the Discord application itself.
+ */
+Result setName(const QString &path, const QString &text, const QString &key = {},
+               bool dryRun = false);
 
 } // namespace RpcIdPatcher

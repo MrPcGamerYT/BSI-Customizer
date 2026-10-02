@@ -20,7 +20,7 @@ using namespace ByteUtils;
 
 namespace {
 
-// ---- tables (exact values from the Python tool) ----
+// ---- tables ----
 
 const QMap<QString, QString> &themePurpose()
 {
@@ -964,7 +964,7 @@ ThemeInfo ThemeEngine::findThemeHex(const QByteArray &data, const QString &profi
     }
 
     ThemeInfo info;
-    info.found = true; // like the Python tool, hex always "finds" a profile
+    info.found = true; // the hex method always "finds" a profile
     info.mode = QStringLiteral("hex");
     info.profile = prof;
     info.hexMatchCount = count;

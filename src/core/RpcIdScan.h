@@ -18,9 +18,9 @@
  *
  * It is deliberately free of Qt (plain C++17, byte views in / plain structs
  * out). The detection heuristics are the delicate part of the feature, so they
- * stay compilable and diff-testable against the standalone reference script
- * (rpcid.py) with nothing but a compiler. RpcIdPatcher is the Qt facade that
- * adds file I/O, backups and the remembered patch state on top.
+ * stay compilable and testable with nothing but a compiler. RpcIdPatcher is
+ * the Qt facade that adds file I/O, backups and the remembered patch state on
+ * top, and cli.cpp exposes both to scripts.
  */
 namespace RpcIdScan {
 
@@ -69,6 +69,9 @@ public:
     const char *arch() const;           // "x64" | "x86" | "arm64" | "?"
     bool isSigned() const;
     bool hasSections() const { return !m_sections.empty(); }
+
+    // Data directory entry (RVA, size); 2 = resources, 4 = signature.
+    std::pair<std::uint32_t, std::uint32_t> dataDirectory(int index) const { return directory(index); }
 
     // Section name for a file offset plus whether it is executable code.
     std::pair<std::string, bool> sectionOf(std::int64_t off) const;

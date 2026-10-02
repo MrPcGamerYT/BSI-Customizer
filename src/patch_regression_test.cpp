@@ -12,6 +12,7 @@
 #include "core/RpcIdPatcher.h"
 #include "core/RpcIdScan.h"
 #include "core/SettingsManager.h"
+#include "core/VersionResource.h"
 #include "core/ThemeEngine.h"
 #include "core/ZlibUtils.h"
 #include "core/X64Prologue.h"
@@ -37,6 +38,7 @@
 #include <cstdio>
 #include <cstring>
 #include <limits>
+#include <string_view>
 #include <memory>
 
 #if defined(Q_OS_WIN) && defined(Q_PROCESSOR_X86_64)
@@ -47,6 +49,9 @@
 #endif
 
 using namespace ByteUtils;
+
+// Implemented in cli.cpp: the scriptable Rich Presence/name command line.
+int runRpcIdCli(const QStringList &arguments);
 
 namespace {
 int failures = 0;
@@ -122,6 +127,107 @@ QByteArray record(const QByteArray &source, bool compressed = true)
     QByteArray result(4, '\0');
     putBe32(result, 0, payload.size());
     return result + payload;
+}
+
+// ---------------------------------------------------------------------------
+// Windows version-resource fixture (VS_VERSION_INFO), used to exercise the
+// native name editor that replaced the old reference script's "name" command.
+// ---------------------------------------------------------------------------
+QByteArray vrText(const QString &text)
+{
+    QByteArray out;
+    for (const QChar c : text) {
+        out += char(c.unicode() & 0xff);
+        out += char((c.unicode() >> 8) & 0xff);
+    }
+    return out;
+}
+QByteArray vrNode(const QString &key, quint16 type, const QByteArray &value,
+                  quint16 valueUnits, const QList<QByteArray> &children = {})
+{
+    QByteArray out(6, '\0');
+    putLe16(out, 2, valueUnits);
+    putLe16(out, 4, type);
+    out += vrText(key) + QByteArray(2, '\0');
+    while (out.size() % 4) out += '\0';
+    out += value;
+    for (const QByteArray &child : children) {
+        while (out.size() % 4) out += '\0';
+        out += child;
+    }
+    putLe16(out, 0, quint16(out.size()));
+    return out;
+}
+// One RT_VERSION resource holding two translations of the same two strings.
+QByteArray versionResourceBlob(const QString &description, int descriptionCap,
+                               const QString &product)
+{
+    // The slot the compiler reserved, NUL-padded explicitly: QByteArray::resize()
+    // leaves the new bytes uninitialized.
+    QByteArray value = vrText(description);
+    value += QByteArray(descriptionCap * 2 - value.size(), '\0');
+    const QByteArray describe = vrNode(QStringLiteral("FileDescription"), 1, value,
+                                       quint16(descriptionCap));
+    const QByteArray name = vrNode(QStringLiteral("ProductName"), 1,
+                                   vrText(product) + QByteArray(2, '\0'),
+                                   quint16(product.size() + 1));
+    const QByteArray english = vrNode(QStringLiteral("040904b0"), 1, {}, 0, { describe, name });
+    const QByteArray german = vrNode(QStringLiteral("040704b0"), 1, {}, 0, { describe, name });
+    const QByteArray strings = vrNode(QStringLiteral("StringFileInfo"), 1, {}, 0, { english, german });
+    QByteArray translation(4, '\0');
+    putLe16(translation, 0, 0x0409);
+    putLe16(translation, 2, 0x04b0);
+    const QByteArray var = vrNode(QStringLiteral("VarFileInfo"), 1, {}, 0,
+                                  { vrNode(QStringLiteral("Translation"), 0, translation, 4) });
+    QByteArray fixed(52, '\0');
+    putLe32(fixed, 0, 0xfeef04bd);
+    return vrNode(QStringLiteral("VS_VERSION_INFO"), 0, fixed, 52, { strings, var });
+}
+// A PE whose .rsrc section carries that resource, like a real HD-Player.exe.
+QByteArray peWithVersionResource(const QByteArray &resource)
+{
+    const quint32 headers = 0x200;
+    const quint32 rsrcVa = 0x1000;
+    const quint32 blobAt = 0x60;    // after the three directory levels
+    QByteArray data(headers, '\0');
+    data.replace(0, 2, "MZ");
+    putLe32(data, 0x3c, 0x40);
+    data.replace(0x40, 4, QByteArray("PE\0\0", 4));
+    putLe16(data, 0x44, 0x8664);
+    putLe16(data, 0x46, 1);
+    putLe16(data, 0x54, 0xf0);
+    putLe16(data, 0x58, 0x20b);
+    const qsizetype dd = 0x40 + 24 + 112;          // data directories (PE32+)
+    putLe32(data, dd + 2 * 8, rsrcVa);             // [2] = resources
+    putLe32(data, dd + 2 * 8 + 4, 0x1000);
+    const qsizetype section = 0x40 + 24 + 0xf0;
+    data.replace(section, 8, QByteArray(".rsrc\0\0\0", 8));
+    putLe32(data, section + 8, 0x1000);
+    putLe32(data, section + 12, rsrcVa);
+    putLe32(data, section + 16, 0x1000);
+    putLe32(data, section + 20, headers);
+    putLe32(data, section + 36, 0x40000040);
+
+    QByteArray body;
+    const auto directory = [&body](quint32 id, quint32 child) {
+        QByteArray node(24, '\0');
+        putLe16(node, 12, 0);      // named entries
+        putLe16(node, 14, 1);      // id entries
+        putLe32(node, 16, id);
+        putLe32(node, 20, child);
+        body += node;
+    };
+    directory(16, 0x18 | 0x80000000u);     // RT_VERSION -> name level
+    directory(1, 0x30 | 0x80000000u);      // name 1 -> language level
+    directory(0x409, 0x48);                // language -> data entry
+    QByteArray leaf(16, '\0');
+    putLe32(leaf, 0, rsrcVa + blobAt);
+    putLe32(leaf, 4, quint32(resource.size()));
+    body += leaf;
+    body += QByteArray(blobAt - body.size(), '\0');
+    body += resource;
+    body += QByteArray(0x1000 - body.size(), '\0');
+    return data + body;
 }
 
 struct Fixture
@@ -1994,8 +2100,8 @@ int runPatchRegressionTests()
         check(!backend.fpsAnalyze().value(QStringLiteral("ok")).toBool(), "FPS Analyze rejects the wrong DLL too");
     }
     {
-        // Rich Presence is a native HD-Player patch now: no deployed script or
-        // Python installation is involved. Exercise detection, repeated patch,
+        // Rich Presence is a native HD-Player patch: no deployed script and
+        // no interpreter is involved. Exercise detection, repeated patch,
         // remembered state, fixed-size writes and undo through the shipping API.
         const QString firstId = QStringLiteral("821361671729709086");
         const QString secondId = QStringLiteral("1234567890123456789");
@@ -2032,6 +2138,126 @@ int runPatchRegressionTests()
         QFile restored(exe); restored.open(QIODevice::ReadOnly);
         check(undone.ok && restored.readAll() == image && !QFileInfo::exists(RpcIdPatcher::statePath(exe)),
               "Rich Presence Undo restores the original bytes and clears patch state");
+    }
+    {
+        // The Windows version-resource editor ("name") and the scriptable
+        // command line are part of the application itself now. Nothing here
+        // starts another process, and no interpreter is required.
+        const QString exe = temp.filePath(QStringLiteral("HD-Version.exe"));
+        const QByteArray image = peWithVersionResource(
+            versionResourceBlob(QStringLiteral("BlueStacks Player"), 40, QStringLiteral("BlueStacks")));
+        write(exe, image);
+
+        const auto viewOf = [](const QByteArray &bytes) {
+            return std::string_view(bytes.constData(), static_cast<std::size_t>(bytes.size()));
+        };
+        const VersionResource::Info info = VersionResource::read(viewOf(image));
+        const auto described = VersionResource::withKey(info, "FileDescription");
+        check(info.ok && described.size() == 2
+                  && described.front()->value == std::string("BlueStacks Player"),
+              "version resource strings are read from every translation");
+        check(VersionResource::withKey(info, "Translation").empty(),
+              "binary VarFileInfo values are not offered as editable text");
+
+        QByteArray tooLong = image;
+        std::string why;
+        check(!VersionResource::setString(tooLong.data(), std::size_t(tooLong.size()),
+                                          *VersionResource::withKey(info, "ProductName").front(),
+                                          std::string("A name far beyond the reserved slot"), &why)
+                  && tooLong == image,
+              "a name longer than the reserved slot is refused without touching the file");
+
+        check(runRpcIdCli({ QStringLiteral("name"), exe }) == 0,
+              "the command line lists the names stored in a file");
+        check(runRpcIdCli({ QStringLiteral("name"), exe, QStringLiteral("--set"),
+                            QStringLiteral("My Player") }) == 1
+                  && read(exe) == image,
+              "a name change without --yes previews instead of writing");
+        check(runRpcIdCli({ QStringLiteral("name"), exe, QStringLiteral("--set"),
+                            QStringLiteral("My Player"), QStringLiteral("--yes") }) == 0,
+              "the command line writes a confirmed name change");
+
+        const QByteArray renamed = read(exe);
+        const VersionResource::Info after = VersionResource::read(viewOf(renamed));
+        const auto names = VersionResource::withKey(after, "FileDescription");
+        check(renamed.size() == image.size() && names.size() == 2
+                  && names.front()->value == std::string("My Player")
+                  && names.back()->value == std::string("My Player"),
+              "every translation is renamed and the file size never changes");
+        check(VersionResource::withKey(after, "ProductName").front()->value
+                  == std::string("My Player"),
+              "the default keys cover ProductName as well");
+        check(QFileInfo::exists(RpcIdPatcher::backupPath(exe)),
+              "the first name change keeps a backup of the original file");
+
+        // The UI drives the very same engine, so the feature is not
+        // command-line only: Backend is what QML calls.
+        SettingsManager nameSettings;
+        Backend nameBackend(&nameSettings);
+        const QVariantMap listed = nameBackend.rpcidNames(exe);
+        check(listed.value(QStringLiteral("ok")).toBool()
+                  && listed.value(QStringLiteral("entries")).toList().size() == 4,
+              "the QML-facing API lists every editable name with its limit");
+        const QVariantMap previewed = nameBackend.rpcidSetName(exe, QStringLiteral("Preview"),
+                                                               QString(), true);
+        check(previewed.value(QStringLiteral("ok")).toBool() && read(exe) == renamed,
+              "a previewed rename writes nothing");
+        const QVariantMap applied = nameBackend.rpcidSetName(exe, QStringLiteral("Player X"),
+                                                             QStringLiteral("ProductName"), false);
+        const QByteArray uiBytes = read(exe);
+        const VersionResource::Info uiNamed = VersionResource::read(viewOf(uiBytes));
+        check(applied.value(QStringLiteral("ok")).toBool()
+                  && VersionResource::withKey(uiNamed, "ProductName").front()->value
+                         == std::string("Player X")
+                  && VersionResource::withKey(uiNamed, "FileDescription").front()->value
+                         == std::string("My Player"),
+              "the UI can rename a single key without touching the others");
+        const QVariantMap refused = nameBackend.rpcidSetName(
+            exe, QStringLiteral("A name far beyond the reserved slot"), QStringLiteral("ProductName"), false);
+        check(!refused.value(QStringLiteral("ok")).toBool()
+                  && refused.value(QStringLiteral("msg")).toString().contains(QLatin1String("slot holds")),
+              "an oversized name is refused with the exact limit instead of being truncated");
+        check(!nameBackend.rpcidSetName(exe, QString(), QString(), false)
+                   .value(QStringLiteral("ok")).toBool(),
+              "an empty name is refused");
+
+        // Argument handling: a wrong command line must be reported, never
+        // guessed at, and must not write anything.
+        check(runRpcIdCli({ QStringLiteral("replace"), exe }) == 2,
+              "replace without --new is a usage error");
+        check(runRpcIdCli({ QStringLiteral("nonsense"), exe }) == 2,
+              "an unknown command is a usage error");
+        check(runRpcIdCli({ QStringLiteral("--frobnicate") }) == 2,
+              "an unknown option is a usage error");
+        check(runRpcIdCli({ QStringLiteral("help") }) == 0, "help is not an error");
+
+        const QString rpc = temp.filePath(QStringLiteral("HD-Cli.exe"));
+        QByteArray player(32, '\x90');
+        player += QByteArray::fromHex("48b8");
+        const quint64 numeric = QStringLiteral("821361671729709086").toULongLong();
+        for (int i = 0; i < 8; ++i) player += char((numeric >> (8 * i)) & 0xff);
+        player += QByteArray("discord\0", 8);
+        player += QByteArray("821361671729709086") + QByteArray(3, '\0');
+        for (const QChar c : QStringLiteral("821361671729709086")) {
+            player += char(c.unicode());
+            player += '\0';
+        }
+        player += QByteArray(2, '\0');
+        player += QByteArray(32, '\x90');
+        write(rpc, player);
+        check(runRpcIdCli({ QStringLiteral("status"), rpc, QStringLiteral("--json") }) == 0,
+              "status reports a detected ID as machine-readable JSON");
+        check(runRpcIdCli({ QStringLiteral("replace"), rpc, QStringLiteral("--new"),
+                            QStringLiteral("1234567890123456789") }) == 1
+                  && read(rpc) == player,
+              "replace without --yes previews instead of writing");
+        check(runRpcIdCli({ QStringLiteral("replace"), rpc, QStringLiteral("--new"),
+                            QStringLiteral("1234567890123456789"), QStringLiteral("--yes") }) == 0
+                  && read(rpc).size() == player.size()
+                  && RpcIdPatcher::status(rpc).currentId == QStringLiteral("1234567890123456789"),
+              "replace --yes writes through the same engine the UI uses");
+        check(runRpcIdCli({ QStringLiteral("undo"), rpc }) == 0 && read(rpc) == player,
+              "undo restores the original bytes from the command line too");
     }
     return failures;
 }

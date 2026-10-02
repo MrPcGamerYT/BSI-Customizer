@@ -9,6 +9,7 @@ Item {
     property string status: qsTr("Pick the emulator executable to begin.")
     property color statusColor: Theme.textDim
     property var info: ({})
+    property var nameInfo: ({})
     property bool busy: false
 
     readonly property string currentId: info && info.currentId ? info.currentId : ""
@@ -16,12 +17,23 @@ Item {
     readonly property bool hasBackup: info ? info.hasBackup === true : false
     readonly property int leftoverCount: info && info.leftoverCount ? info.leftoverCount : 0
     readonly property string appName: info && info.name ? info.name : (info && info.known ? info.known : "")
+    readonly property var nameEntries: nameInfo && nameInfo.entries ? nameInfo.entries : []
+    readonly property int nameLimit: {
+        var limit = 0
+        for (var i = 0; i < page.nameEntries.length; ++i) {
+            var max = page.nameEntries[i].max
+            if (limit === 0 || max < limit)
+                limit = max
+        }
+        return limit
+    }
     readonly property bool validNew: /^[0-9]{17,20}$/.test(newId.text.trim())
     readonly property bool sameAsCurrent: page.validNew && newId.text.trim() === page.currentId
 
     function refresh() {
-        if (!exePath.text) { page.info = ({}); return; }
+        if (!exePath.text) { page.info = ({}); page.nameInfo = ({}); return; }
         page.info = backend.rpcidStatus(exePath.text)
+        page.nameInfo = backend.rpcidNames(exePath.text)
     }
 
     function showResult(result) {
@@ -321,6 +333,115 @@ Item {
                                 return backend.rpcidUndo(exePath.text)
                             })
                         }
+                    }
+                }
+            }
+
+            // ---- 4. window / Explorer name ----------------------------------
+            Card {
+                Layout.fillWidth: true
+                Layout.leftMargin: 24
+                Layout.rightMargin: 24
+                ColumnLayout {
+                    anchors.fill: parent
+                    spacing: 10
+
+                    Text {
+                        text: qsTr("4 · Windows name (optional)")
+                        color: Theme.text
+                        font.pixelSize: 15
+                        font.weight: Font.Bold
+                    }
+
+                    Text {
+                        Layout.fillWidth: true
+                        wrapMode: Text.Wrap
+                        font.pixelSize: 12
+                        color: Theme.textDim
+                        text: qsTr("The name Windows shows for this executable in Explorer, Task Manager "
+                                   + "and most overlays. It is stored in a fixed-size slot, so a new name "
+                                   + "must be no longer than the limit below. This does not rename the "
+                                   + "Discord application itself.")
+                    }
+
+                    Text {
+                        Layout.fillWidth: true
+                        wrapMode: Text.Wrap
+                        visible: exePath.text.length > 0 && page.nameEntries.length === 0
+                        font.pixelSize: 12
+                        color: Theme.textDim
+                        text: page.nameInfo && page.nameInfo.msg ? page.nameInfo.msg
+                                                                 : qsTr("No editable name was found in this file.")
+                    }
+
+                    Repeater {
+                        model: page.nameEntries
+                        delegate: RowLayout {
+                            required property var modelData
+                            Layout.fillWidth: true
+                            spacing: 10
+                            Text {
+                                Layout.preferredWidth: 130
+                                text: modelData.key
+                                color: Theme.textDim
+                                font.pixelSize: 12
+                                elide: Text.ElideRight
+                            }
+                            Text {
+                                Layout.fillWidth: true
+                                text: modelData.value
+                                color: Theme.text
+                                font.pixelSize: 12
+                                font.family: "Consolas"
+                                elide: Text.ElideRight
+                            }
+                            Text {
+                                text: qsTr("max %1").arg(modelData.max)
+                                color: Theme.textDim
+                                font.pixelSize: 11
+                            }
+                        }
+                    }
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 10
+                        TextField {
+                            id: newName
+                            Layout.fillWidth: true
+                            enabled: page.nameEntries.length > 0
+                            placeholderText: qsTr("New name, e.g. My Player")
+                            color: Theme.text
+                            font.pixelSize: 13
+                            selectByMouse: true
+                            placeholderTextColor: Theme.textDim
+                            maximumLength: page.nameLimit > 0 ? page.nameLimit : 32767
+                            background: Rectangle {
+                                color: Theme.raised
+                                radius: 7
+                                border.color: newName.activeFocus ? Theme.accent : Theme.border
+                            }
+                        }
+                        ActionButton {
+                            text: qsTr("Apply Name")
+                            enabled: !page.busy && newName.text.trim().length > 0
+                                     && page.nameEntries.length > 0
+                            onClicked: page.run(function () {
+                                return backend.rpcidSetName(exePath.text, newName.text.trim(), "", false)
+                            })
+                        }
+                    }
+
+                    Text {
+                        Layout.fillWidth: true
+                        wrapMode: Text.Wrap
+                        font.pixelSize: 11
+                        color: Theme.textDim
+                        visible: page.nameLimit > 0
+                        text: qsTr("FileDescription and ProductName are written in every translation the file "
+                                   + "carries; the shortest slot holds %1 characters. The file size never "
+                                   + "changes and the original is kept as the same .rpcid-bak backup, which "
+                                   + "Undo restores.").arg(page.nameLimit)
                     }
                 }
             }

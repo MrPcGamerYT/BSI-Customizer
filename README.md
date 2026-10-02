@@ -121,30 +121,39 @@ If Analyze reports a **recognized partial FPS patch**, keep the matching clean `
 
 ## Discord Rich Presence ID utility
 
-The app's **Discord Rich Presence** page contains a native HD-Player patcher;
-it does not launch Python, load a sidecar script, or require a separately
-installed component. `rpcid.py` remains a standalone, standard-library-only
-reference/developer CLI. Both implementations detect the Game SDK's
+The **Discord Rich Presence** page and the `--rpcid` command line are both
+served by the engines compiled into `BSI-Customizer.exe`. Nothing launches an
+interpreter, loads a sidecar script, or needs a separately installed
+component: the single EXE is the whole tool. They detect the Game SDK's
 little-endian 64-bit integer form (at any file alignment, including qwords
-referenced by code), ASCII and UTF-16 forms used by classic `discord-rpc`, and
-preserve the original file size when replacing an ID. Junk-shaped numbers (round values,
-repeated digit patterns, parts of longer numbers) are filtered out, and a
-candidate is only acted on automatically when the evidence is unambiguous, so
-the detector no longer reports a wrong ID on builds it used to mis-read.
-Close the emulator before writing; the first backup is kept as
-`<file>.rpcid-bak`.
+referenced by code), and the ASCII and UTF-16 forms used by classic
+`discord-rpc`, and preserve the original file size when replacing an ID.
+Junk-shaped numbers (round values, repeated digit patterns, parts of longer
+numbers) are filtered out, and a candidate is only acted on automatically when
+the evidence is unambiguous, so the detector does not report a wrong ID on
+builds that used to be mis-read. Close the emulator before writing; the first
+backup is kept as `<file>.rpcid-bak`.
 
 ```powershell
-python rpcid.py selftest
-python rpcid.py find "C:\Program Files\BlueStacks_nxt\HD-Player.exe"
-python rpcid.py replace HD-Player.exe --new 1234567890123456789 --yes
-python rpcid.py undo HD-Player.exe
-python rpcid.py status HD-Player.exe --no-net   # JSON, used by the UI
+BSI-Customizer.exe --rpcid selftest
+BSI-Customizer.exe --rpcid find "C:\Program Files\BlueStacks_nxt\HD-Player.exe"
+BSI-Customizer.exe --rpcid replace HD-Player.exe --new 1234567890123456789 --yes
+BSI-Customizer.exe --rpcid undo HD-Player.exe
+BSI-Customizer.exe --rpcid status HD-Player.exe --json
+BSI-Customizer.exe --rpcid name HD-Player.exe --set "My Player" --yes
 ```
+
+The customizer is a GUI application, so a console command prints into the
+terminal it was started from and never stops to ask a question there: writing
+commands require `--yes`, and without it they print the same preview
+`--dry-run` would. Exit codes are 0 (done), 1 (the operation failed) and 2
+(the command line itself is wrong). Everything runs offline.
 
 Re-patching is supported: every replace records the IDs it has written in
 `<file>.rpcid.json`, so the next replace targets the current ID exactly
-instead of re-guessing from a heuristic scan. The sites are always re-derived
+instead of re-guessing from a heuristic scan. The UI and the command line
+share that state file and the `.rpcid-bak` backup, so a file patched in one
+can be re-patched or undone from the other. The sites are always re-derived
 from the bytes on disk and the result is verified by reading the written
 offsets back, so the same executable can be re-pointed to a new Application ID
 any number of times. If a stored copy sits in a slot too small for the new ID
@@ -154,15 +163,21 @@ repaired automatically by the next patch it fits — instead of silently
 leaving the old ID behind. `undo` restores the backup and clears the recorded
 state.
 
-`find` can ask Discord's public application endpoint to identify candidates;
-use `--no-net` for offline scans. `replace --dry-run` previews changes, and
-`--old <id>` selects a specific candidate when a binary contains more than
-one application ID (it must be the full 17-20 digit ID, and it must actually
-be present in the file). `name --set` edits the PE version-resource
-`FileDescription`/`ProductName`; it does not rename the Discord application,
-which must still be changed in the Discord Developer Portal. The same helper
-is available from the **Discord RPC** tab in the customizer; the tab uses the
-selected emulator path and keeps the scan offline by default.
+`replace --dry-run` previews changes, and `--old <id>` selects a specific
+candidate when a binary contains more than one application ID (it must be the
+full 17-20 digit ID, and it must actually be present in the file).
+The **Windows name** card on the same page, and `name --set` on the command
+line, edit the Windows version resource (`FileDescription` and `ProductName`
+by default, or a single `--key`) — the text Explorer, Task Manager and most
+overlays show for the executable. Every translation in the file is updated
+inside the slot the compiler reserved, so the resource tree and the file size
+stay valid, and a text that does not fit is refused with the exact limit
+instead of corrupting the resource; the card lists each name with its limit
+and will not let you type past the shortest one. The original is kept as the
+same `.rpcid-bak` backup, so **Undo** restores it. It does not rename the
+Discord application itself, which must still be changed in the Discord
+Developer Portal. `--rpcid selftest` runs the complete engine self-test, the
+same one CI runs.
 
 ## Build and verify
 
@@ -182,7 +197,14 @@ Start-Process build/Release/BSI-Customizer.exe -ArgumentList '--selftest' -Wait
 
 The self-test covers resource detection/relocation, actual Qt QML loading in separate processes with disk caching enabled, repeated patch–launch cycles, embedded cache invalidation, palette parsing, and both FPS DLLs with MSVC/MinGW export names. On Windows x64 it executes controlled setter fixtures to verify that only 240 FPS is replaced while 60 FPS and other values (including NaN) pass unchanged. It also tests multiple compiler prologue styles, instruction boundaries, observable RIP-relative relocation, verified entry thunks, partial-patch recovery, legacy upgrades, repatching and exact restoration. Windows CI requires successful patch/repatch/restore checks on real **Qt 5.15.2** and **Qt 6.8.3** DLL copies, as well as the full Qt5/Qt6 × MSVC/MinGW fixture matrix. Neither modified DLL is loaded, and both originals remain untouched. No installed BlueStacks instance is exercised. GitHub CI runs the Windows build and self-test on pull requests.
 
-The Qt 5 test reference is extracted from the official PySide2 5.15.2.1 Windows x64 wheel with pinned SHA-256 checks for both the archive and DLL. It stays in the ignored build directory and is never installed, linked, executed, committed, or bundled with the app. `BSI_TEST_QT5_REFERENCE` defaults ON in Windows GitHub CI and OFF for ordinary/offline builds. To run the same real-Qt5 check locally, configure with `-DBSI_TEST_QT5_REFERENCE=ON`. Alternatively, an ordinary build's `--selftest` accepts `BSI_FPS_QT5_DLL` pointing to a clean `Qt5QuickTemplates2.dll`; only a temporary copy is patched.
+The Qt 5 test reference is extracted from the official PySide2 5.15.2.1 Windows x64 wheel — a plain ZIP archive that happens to contain a genuine `Qt5QuickTemplates2.dll` — with pinned SHA-256 checks for both the archive and the DLL. Nothing from it is installed, imported or executed, and no interpreter takes part in the build. It stays in the ignored build directory and is never installed, linked, executed, committed, or bundled with the app. `BSI_TEST_QT5_REFERENCE` defaults ON in Windows GitHub CI and OFF for ordinary/offline builds. To run the same real-Qt5 check locally, configure with `-DBSI_TEST_QT5_REFERENCE=ON`. Alternatively, an ordinary build's `--selftest` accepts `BSI_FPS_QT5_DLL` pointing to a clean `Qt5QuickTemplates2.dll`; only a temporary copy is patched.
+
+The packaging step's licence/attribution collector is a CMake script with its
+own offline self-test (no network, no Qt, no interpreter):
+
+```sh
+cmake -P cmake/tests/CollectQtNoticesTest.cmake
+```
 
 For an unsupported real EXE, collect a read-only diagnostic report:
 

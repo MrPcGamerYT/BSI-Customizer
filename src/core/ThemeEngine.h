@@ -12,7 +12,7 @@
 #include "QtResources.h"
 
 // ---------------------------------------------------------------------------
-// ThemeEngine — C++ port of the Python tool's theme changer.
+// ThemeEngine — the theme changer, compiled into the application.
 //
 // Three storage formats are auto-detected in HD-Player.exe:
 //   * zlib : new builds — UiThemeObject.qml stored as a compressed Qt

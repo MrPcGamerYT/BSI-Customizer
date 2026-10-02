@@ -14,6 +14,7 @@ set_source_files_properties(src/qml/Theme.qml PROPERTIES QT_QML_SINGLETON_TYPE T
 
 qt_add_executable(BSICustomizer
     src/main.cpp
+    src/cli.cpp
     src/selftest.cpp
     src/theme_runtime_test.cpp
     src/gradient_runtime_test.cpp
@@ -52,6 +53,8 @@ qt_add_executable(BSICustomizer
     src/core/RpcIdScan.cpp
     src/core/RpcIdPatcher.h
     src/core/RpcIdPatcher.cpp
+    src/core/VersionResource.h
+    src/core/VersionResource.cpp
     src/core/BootVideoPatcher.h
     src/core/BootVideoPatcher.cpp
     src/core/ExtrasPatcher.h
@@ -68,8 +71,8 @@ qt_add_executable(BSICustomizer
     src/core/SysInfo.cpp
 )
 
-# Windows: embed the requireAdministrator manifest (UAC elevation like the
-# Python tool's PyInstaller uac_admin=True).
+# Windows: embed the requireAdministrator manifest, so patching an
+# installation under Program Files never fails on a permission error.
 if(WIN32)
     target_sources(BSICustomizer PRIVATE src/app.rc)
 
@@ -194,8 +197,9 @@ target_link_libraries(BSICustomizer PRIVATE
 )
 
 install(TARGETS BSICustomizer RUNTIME DESTINATION bin)
-# Discord Rich Presence discovery/patching is compiled into the application;
-# the standalone rpcid.py file remains a developer/reference CLI only.
+# Discord Rich Presence discovery/patching is compiled into the application,
+# UI and command line alike (BSI-Customizer.exe --rpcid ...). The build and
+# the finished program need no interpreter or sidecar script of any kind.
 
 # Retain the decoder's BSD notices next to built/installed executables.
 add_custom_command(TARGET BSICustomizer POST_BUILD

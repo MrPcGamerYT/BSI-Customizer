@@ -15,7 +15,8 @@ class SettingsManager;
 /**
  * Backend — the single QML-facing facade for all patcher engines.
  * Every operation logs through the log() signal (msg + color) which the
- * UI's log panel renders, exactly like the Python tool's LOG hook.
+ * UI's log panel renders; nothing in the application shells out to another
+ * program, interpreter or helper script to do its work.
  */
 class Backend : public QObject
 {
@@ -158,6 +159,11 @@ public:
                                          bool dryRun = false, bool noNetwork = true);
     Q_INVOKABLE QVariantMap rpcidStatus(const QString &path);
     Q_INVOKABLE QVariantMap rpcidUndo(const QString &path);
+    // Windows version-resource names (what Explorer/Task Manager show).
+    Q_INVOKABLE QVariantMap rpcidNames(const QString &path);
+    Q_INVOKABLE QVariantMap rpcidSetName(const QString &path, const QString &text,
+                                         const QString &key = QString(),
+                                         bool dryRun = false);
 
 signals:
     void exePathChanged();

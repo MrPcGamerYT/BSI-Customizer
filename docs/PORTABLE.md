@@ -24,8 +24,14 @@ SmartScreen may show a warning. This workflow does not disable security checks.
 
 ## GitHub Actions
 
-There is one workflow: **`.github/workflows/release.yml`**. The redundant
-`ci.yml` has been removed; do not keep an older copy alongside it.
+Two workflows share the same sources:
+
+- **`.github/workflows/ci.yml`** builds the application on Windows, verifies the
+  embedded administrator manifest, runs the engine self-test and the packaging
+  script's own offline self-test. It is the fast check for pull requests and
+  manual runs.
+- **`.github/workflows/release.yml`** additionally bundles and tests the
+  one-file EXE and can publish it.
 
 - Pushes to `main`, pull requests and manual runs build the app, bundle/test the
   one-file EXE, run the full engine tests (including Qt 5/Qt 6 checks), and upload
@@ -34,9 +40,10 @@ There is one workflow: **`.github/workflows/release.yml`**. The redundant
   publish that tested EXE to GitHub Releases.
 - Ordinary push/PR builds and the default manual run never create a release/tag.
 
-Keep `scripts/`, `packaging/portable/`, `cmake/Qt5FpsReference.cmake`, the application
-sources, tests and license files: these are build dependencies, not loose files
-users need alongside the final EXE.
+Keep `scripts/`, `packaging/portable/`, `cmake/` (`Qt5FpsReference.cmake`,
+`CollectQtNotices.cmake` and its test), the application sources, tests and
+license files: these are build dependencies, not loose files users need
+alongside the final EXE.
 
 Use **Actions → Single EXE Release → Run workflow**. After a successful build:
 
@@ -52,9 +59,10 @@ SHA-256 is recorded in the workflow summary and verified before publication.
 
 ## Local build
 
-Requires Windows x64, MSVC C++ build tools, CMake 3.21+, Qt 6 development tools,
-Python 3.8+, and PowerShell 7. `makecab.exe` and the cabinet reader are built into
-Windows. The workflow uses Qt 6.8.3.
+Requires Windows x64, MSVC C++ build tools, CMake 3.21+, Qt 6 development tools
+and PowerShell 7 — no interpreter, runtime or extra tool beyond those.
+`makecab.exe` and the cabinet reader are built into Windows. The workflow uses
+Qt 6.8.3.
 
 ```powershell
 cmake -S . -B build -A x64 -DCMAKE_BUILD_TYPE=Release -DBSI_BUILD_PORTABLE=ON
@@ -66,7 +74,9 @@ The `BSI-Portable` target:
 - stages `windeployqt` output and app-local CRT DLLs (never `vc_redist.exe`);
 - fixes `qt.conf` to use the packaged QML/plugin paths;
 - checks every staged PE import for missing Qt/CRT/non-system dependencies;
-- gathers Qt source license/attribution text, plus the app and HDE64 licenses;
+- gathers Qt source license/attribution text with `cmake/CollectQtNotices.cmake`
+  (a CMake script, verified offline by `cmake/tests/CollectQtNoticesTest.cmake`),
+  plus the app and HDE64 licenses;
 - creates one LZX cabinet and embeds it as an EXE resource in a `/MT` native
   launcher that itself depends only on Windows system DLLs;
 - verifies the administrator manifest and runs the portable smoke tests.

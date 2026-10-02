@@ -79,6 +79,10 @@ jobs:
           }
           Write-Host 'OK: requireAdministrator manifest is embedded'
 
+      - name: Packaging licence collector self-test (offline)
+        shell: pwsh
+        run: cmake -P cmake/tests/CollectQtNoticesTest.cmake
+
       - name: Self-test (theme changer + config engine)
         shell: pwsh
         env:
