@@ -151,6 +151,13 @@ public:
     Q_INVOKABLE QVariantMap applyRemovals(const QStringList &names);
     Q_INVOKABLE QVariantMap restoreBackup(const QString &path);
 
+    // ---- Discord Rich Presence ID utility ----
+    Q_INVOKABLE QVariantMap rpcidFind(const QString &path, bool noNetwork = true);
+    Q_INVOKABLE QVariantMap rpcidReplace(const QString &path, const QString &newId,
+                                         const QString &oldId = QString(),
+                                         bool dryRun = false, bool noNetwork = true);
+    Q_INVOKABLE QVariantMap rpcidUndo(const QString &path);
+
 signals:
     void exePathChanged();
     void dllPathChanged();

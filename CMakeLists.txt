@@ -168,6 +168,7 @@ qt_add_qml_module(BSICustomizer
         src/qml/pages/IntegrityPage.qml
         src/qml/pages/BootVideoPage.qml
         src/qml/pages/ExtrasPage.qml
+        src/qml/pages/RpcidPage.qml
         src/qml/pages/AppearancePage.qml
         src/qml/pages/AboutPage.qml
     RESOURCES
@@ -189,6 +190,8 @@ target_link_libraries(BSICustomizer PRIVATE
 )
 
 install(TARGETS BSICustomizer RUNTIME DESTINATION bin)
+# The Discord RPC tab launches this standalone helper for discovery/patching.
+install(FILES rpcid.py DESTINATION bin)
 
 # Retain the decoder's BSD notices next to built/installed executables.
 add_custom_command(TARGET BSICustomizer POST_BUILD
