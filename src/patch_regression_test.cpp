@@ -24,6 +24,8 @@
 #include <QDataStream>
 #include <QFile>
 #include <QFileInfo>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QLibraryInfo>
 #include <QProcess>
 #include <QProcessEnvironment>
@@ -2222,6 +2224,130 @@ int runPatchRegressionTests()
         check(!RpcIdPatcher::replace(safe, QStringLiteral("1234567890123456789")).ok
                   && read(safe) == ambiguous && !QFileInfo::exists(RpcIdPatcher::backupPath(safe)),
               "an unconfirmed scan can never patch the wrong bytes");
+    }
+    {
+        // 32-bit builds have no single imm64 instruction: the 64-bit ID is
+        // pushed (or moved) as two separate 32-bit halves. That form is only
+        // looked for inside a section an actual 32-bit PE image marks
+        // executable, so the fixture needs real (if minimal) PE32 headers -
+        // not just bare instruction bytes - to exercise the exact
+        // auto-detection path RpcIdPatcher uses on a real 32-bit
+        // HD-Player.exe, instead of a shortcut that only proves the opcode
+        // decoder works in isolation.
+        const QString id = QStringLiteral("821361671729709086");
+        const quint64 numeric = id.toULongLong();
+
+        QByteArray image = peFile();
+        putLe16(image, 0x84, 0x14c);                                   // machine: x86
+        putLe16(image, 0x98, 0x10b);                                   // PE32 (not PE32+) magic
+        image.replace(0x188, 8, QByteArray(".text\0\0\0", 8));
+        putLe32(image, 0x190, 0x1000); putLe32(image, 0x194, 0x1000);  // vsize, va
+        putLe32(image, 0x198, 0x1000); putLe32(image, 0x19c, 0x1f000); // rawSize, raw
+        putLe32(image, 0x1ac, 0x60000020);                             // CODE | EXECUTE | READ
+
+        const int at = 0x1f100; // inside the executable .text range above
+        image.replace(at, 1, QByteArray::fromHex("68"));               // push imm32 (low half)
+        putLe32(image, at + 1, quint32(numeric & 0xffffffffu));
+        image.replace(at + 5, 1, QByteArray::fromHex("68"));           // push imm32 (high half)
+        putLe32(image, at + 6, quint32(numeric >> 32));
+
+        const RpcIdScan::Pe pe(std::string_view(image.constData(), static_cast<std::size_t>(image.size())));
+        check(pe.ok() && pe.is32(), "the Split32 fixture is recognized as a 32-bit PE image");
+
+        const auto records = RpcIdScan::harvest(
+            std::string_view(image.constData(), static_cast<std::size_t>(image.size())), &pe);
+        const auto pick = RpcIdScan::pickCandidate(records);
+        check(pick.index >= 0 && records[std::size_t(pick.index)].id == id.toStdString(),
+              "32-bit split push/push halves are harvested back into one Application ID");
+
+        const QString exe = temp.filePath(QStringLiteral("HD-Rpc-Split32.exe"));
+        write(exe, image);
+        const auto changed = RpcIdPatcher::replace(exe, QStringLiteral("1234567890123456789"));
+        check(changed.ok && RpcIdPatcher::status(exe).currentId == QStringLiteral("1234567890123456789"),
+              "a Split32 site is patched just like an imm64 one");
+        check(QFileInfo(exe).size() == image.size(),
+              "patching a Split32 pair never changes the file size");
+    }
+    {
+        // A signature captured from the exact slot just patched can find it
+        // again even after the surrounding code shifts position and the
+        // stored value changes to something that was never seen as text
+        // anywhere - exactly what a BlueStacks self-update that keeps the
+        // same structural layout looks like. Nothing here is specific to any
+        // one build: the signature is captured from whatever was actually
+        // written, not from a hardcoded table.
+        const QString firstId = QStringLiteral("821361671729709086");
+        QByteArray image(32, '\x90');
+        image += QByteArray::fromHex("48b8");
+        quint64 numeric = firstId.toULongLong();
+        for (int i = 0; i < 8; ++i) image += char((numeric >> (8 * i)) & 0xff);
+        image += QByteArray(32, '\x90');
+
+        const QString exe = temp.filePath(QStringLiteral("HD-Rpc-Sig.exe"));
+        write(exe, image);
+        const QString secondId = QStringLiteral("1284004339950120960");
+        check(RpcIdPatcher::replace(exe, secondId).ok,
+              "the signature-capture fixture's first patch succeeds");
+
+        const QJsonObject state = QJsonDocument::fromJson(read(RpcIdPatcher::statePath(exe))).object();
+        check(state.value(QStringLiteral("sig")).toObject().value(QStringLiteral("pre")).toString().size() > 0,
+              "a signature around the slot is captured right after patching it");
+
+        QByteArray rebuilt = read(exe);
+        const int at = rebuilt.indexOf(QByteArray::fromHex("48b8"));
+        check(at >= 0, "the imm64 opcode is still present to simulate a rebuild against");
+        rebuilt.insert(at, QByteArray(3, '\x90'));
+        const QString neverSeenId = QStringLiteral("999999999999999991");
+        const quint64 shifted = neverSeenId.toULongLong();
+        for (int i = 0; i < 8; ++i) rebuilt[at + 3 + 2 + i] = char((shifted >> (8 * i)) & 0xff);
+        write(exe, rebuilt);
+
+        const RpcIdPatcher::Status relocated = RpcIdPatcher::status(exe);
+        check(relocated.ok && relocated.currentId == neverSeenId,
+              "a remembered signature relocates the slot after the surrounding code shifts");
+        const auto repatched = RpcIdPatcher::replace(exe, QStringLiteral("1111111111111111111"));
+        check(repatched.ok && RpcIdPatcher::status(exe).currentId == QStringLiteral("1111111111111111111"),
+              "replace() itself uses the same signature relocation, not only status()");
+    }
+    {
+        // A file matching a documented build's exact byte layout is found
+        // even with no state file at all - the "never patched before, but a
+        // known build" case.
+        const QString exe = temp.filePath(QStringLiteral("HD-Rpc-Builtin.exe"));
+        QByteArray image(16, '\x90');
+        image += QByteArray::fromHex("c0743c48c70000000000488d4b1848b8");
+        const QString knownSlotId = QStringLiteral("555555555555555551");
+        const quint64 v = knownSlotId.toULongLong();
+        for (int i = 0; i < 8; ++i) image += char((v >> (8 * i)) & 0xff);
+        image += QByteArray::fromHex("c6431000ba0201000048894308e84c19");
+        image += QByteArray(16, '\x90');
+        write(exe, image);
+
+        const RpcIdPatcher::Status located = RpcIdPatcher::status(exe);
+        check(located.ok && located.currentId == knownSlotId,
+              "a documented build's byte layout is recognized by its built-in signature with no prior state");
+    }
+    {
+        // Last resort: no state file, no signature match, but a
+        // `.rpcid-bak` sits next to the file and differs from it in exactly
+        // one short run - the id slot.
+        const QString exe = temp.filePath(QStringLiteral("HD-Rpc-BackupDiff.exe"));
+        QByteArray original(16, '\x90');
+        original += QByteArray::fromHex("48b8");
+        const quint64 firstV = QStringLiteral("821361671729709086").toULongLong();
+        for (int i = 0; i < 8; ++i) original += char((firstV >> (8 * i)) & 0xff);
+        original += QByteArray(16, '\x90');
+        write(RpcIdPatcher::backupPath(exe), original);
+
+        QByteArray current = original;
+        const QString bakId = QStringLiteral("444444444444444441");
+        const quint64 bakV = bakId.toULongLong();
+        for (int i = 0; i < 8; ++i) current[18 + i] = char((bakV >> (8 * i)) & 0xff);
+        write(exe, current);
+
+        const RpcIdPatcher::Status located = RpcIdPatcher::status(exe);
+        check(located.ok && located.currentId == bakId,
+              "with no state and no signature match, a difference against .rpcid-bak locates the slot");
     }
     {
         // The Windows version-resource editor ("name") and the scriptable
