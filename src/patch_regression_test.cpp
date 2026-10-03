@@ -2227,20 +2227,35 @@ int runPatchRegressionTests()
     }
     {
         // 32-bit builds have no single imm64 instruction: the 64-bit ID is
-        // pushed (or moved) as two separate 32-bit halves. This Split32 form
-        // is harvested back into one Application ID and can be patched in
-        // place exactly like an imm64 site.
+        // pushed (or moved) as two separate 32-bit halves. That form is only
+        // looked for inside a section an actual 32-bit PE image marks
+        // executable, so the fixture needs real (if minimal) PE32 headers -
+        // not just bare instruction bytes - to exercise the exact
+        // auto-detection path RpcIdPatcher uses on a real 32-bit
+        // HD-Player.exe, instead of a shortcut that only proves the opcode
+        // decoder works in isolation.
         const QString id = QStringLiteral("821361671729709086");
         const quint64 numeric = id.toULongLong();
-        QByteArray image(16, '\x90');
-        image += QByteArray::fromHex("68");
-        for (int i = 0; i < 4; ++i) image += char((numeric >> (8 * i)) & 0xff);
-        image += QByteArray::fromHex("68");
-        for (int i = 4; i < 8; ++i) image += char((numeric >> (8 * i)) & 0xff);
-        image += QByteArray(16, '\x90');
+
+        QByteArray image = peFile();
+        putLe16(image, 0x84, 0x14c);                                   // machine: x86
+        putLe16(image, 0x98, 0x10b);                                   // PE32 (not PE32+) magic
+        image.replace(0x188, 8, QByteArray(".text\0\0\0", 8));
+        putLe32(image, 0x190, 0x1000); putLe32(image, 0x194, 0x1000);  // vsize, va
+        putLe32(image, 0x198, 0x1000); putLe32(image, 0x19c, 0x1f000); // rawSize, raw
+        putLe32(image, 0x1ac, 0x60000020);                             // CODE | EXECUTE | READ
+
+        const int at = 0x1f100; // inside the executable .text range above
+        image.replace(at, 1, QByteArray::fromHex("68"));               // push imm32 (low half)
+        putLe32(image, at + 1, quint32(numeric & 0xffffffffu));
+        image.replace(at + 5, 1, QByteArray::fromHex("68"));           // push imm32 (high half)
+        putLe32(image, at + 6, quint32(numeric >> 32));
+
+        const RpcIdScan::Pe pe(std::string_view(image.constData(), static_cast<std::size_t>(image.size())));
+        check(pe.ok() && pe.is32(), "the Split32 fixture is recognized as a 32-bit PE image");
 
         const auto records = RpcIdScan::harvest(
-            std::string_view(image.constData(), static_cast<std::size_t>(image.size())));
+            std::string_view(image.constData(), static_cast<std::size_t>(image.size())), &pe);
         const auto pick = RpcIdScan::pickCandidate(records);
         check(pick.index >= 0 && records[std::size_t(pick.index)].id == id.toStdString(),
               "32-bit split push/push halves are harvested back into one Application ID");
