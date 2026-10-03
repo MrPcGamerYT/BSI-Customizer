@@ -445,13 +445,29 @@ Result replace(const QString &path, const QString &newIdRaw, const QStringList &
 
     QByteArray fresh;
     if (!readFile(path, &fresh, &error)) return {false, QStringLiteral("The file was written but could not be verified: %1").arg(error), {}};
-    const auto hits = sitesForId(view(fresh), newId.toStdString());
+    auto hits = sitesForId(view(fresh), newId.toStdString());
+    // sitesForId() only recognizes one contiguous run of bytes (or text), so
+    // it can never see a Split32 pair - its two halves sit a few bytes apart
+    // with an opcode in between. Every site actually written is checked
+    // directly instead, the same way status() reads a slot back, so a
+    // 32-bit build's two-halves write is verified just like any other kind.
+    bool allWritten = true;
+    for (const Site &site : writes.done) {
+        if (siteValue(view(fresh), site) != newId.toStdString()) {
+            allWritten = false;
+            continue;
+        }
+        bool already = false;
+        for (const Site &found : hits)
+            if (found.kind == site.kind && found.off == site.off) { already = true; break; }
+        if (!already) hits.push_back(site);
+    }
     QStringList history = state.history;
     for (const Selection &item : selected) if (!history.contains(item.id)) history << item.id;
     QStringList stale;
     for (const QString &id : history)
         if (id != newId && !sitesForId(view(fresh), id.toStdString()).empty()) stale << id;
-    if (hits.empty()) return {false, QStringLiteral("Could not verify the new ID after writing."), {}};
+    if (hits.empty() || !allWritten) return {false, QStringLiteral("Could not verify the new ID after writing."), {}};
 
     // Remember the bytes around one of the exact slots just written, so a
     // later run can relocate it directly even if this ID is then changed by
