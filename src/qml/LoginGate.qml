@@ -44,8 +44,6 @@ Item {
     Rectangle {
         anchors.fill: parent
         gradient: Gradient {
-            startPoint: Qt.point(0, 0)
-            endPoint: Qt.point(gate.width, gate.height)
             GradientStop { position: 0.00; color: "#030a16" }
             GradientStop { position: 0.52; color: "#071224" }
             GradientStop { position: 1.00; color: "#030a16" }
@@ -151,8 +149,6 @@ Item {
             border.width: 1
             border.color: Qt.rgba(56 / 255, 225 / 255, 255 / 255, 0.4)
             gradient: Gradient {
-                startPoint: Qt.point(0, 0)
-                endPoint: Qt.point(card.width * 0.35, card.height)
                 GradientStop { position: 0.00; color: "#0a1a2c" }
                 GradientStop { position: 0.55; color: "#050f1d" }
                 GradientStop { position: 1.00; color: "#030a14" }
@@ -220,8 +216,6 @@ Item {
                     border.width: 1
                     border.color: Qt.rgba(61 / 255, 240 / 255, 192 / 255, 0.42)
                     gradient: Gradient {
-                        startPoint: Qt.point(0, 0)
-                        endPoint: Qt.point(resume.width, resume.height)
                         GradientStop { position: 0.00; color: "#0d223c" }
                         GradientStop { position: 0.55; color: "#0a1c33" }
                         GradientStop { position: 1.00; color: "#08162a" }
