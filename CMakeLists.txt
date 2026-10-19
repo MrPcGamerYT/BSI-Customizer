@@ -59,6 +59,10 @@ qt_add_executable(BSICustomizer
     src/core/BootVideoPatcher.cpp
     src/core/ExtrasPatcher.h
     src/core/ExtrasPatcher.cpp
+    src/core/QmlText.h
+    src/core/QmlText.cpp
+    src/core/LayoutPatcher.h
+    src/core/LayoutPatcher.cpp
     src/core/BsDetector.h
     src/core/BsDetector.cpp
     src/core/Backend.h

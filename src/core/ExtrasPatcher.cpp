@@ -1,6 +1,7 @@
 #include "ExtrasPatcher.h"
 
 #include "PeUtils.h"
+#include "QmlText.h"
 #include "QtResources.h"
 #include "ThemeEngine.h"
 
@@ -10,6 +11,8 @@
 #include <QRegularExpression>
 #include <QSet>
 #include <QTextStream>
+
+#include <algorithm>
 
 namespace ExtrasPatcher {
 
@@ -94,133 +97,32 @@ const QMap<QString, QString> &sidebarButtonAssets()
     return m;
 }
 
-// String/comment contents are blanked so brace counting and member search
-// never see the braces, colons or keywords inside a literal. BlueStacks' QML
-// mixes double- and single-quoted strings with both line comment styles.
-QString maskQml(const QString &qml)
-{
-    QString mask = qml;
-    const int n = mask.size();
-    int i = 0;
-    while (i < n) {
-        const QChar c = mask.at(i);
-        if (c == QLatin1Char('/') && i + 1 < n && mask.at(i + 1) == QLatin1Char('/')) {
-            while (i < n && mask.at(i) != QLatin1Char('\n')) mask[i++] = QLatin1Char(' ');
-        } else if (c == QLatin1Char('/') && i + 1 < n && mask.at(i + 1) == QLatin1Char('*')) {
-            mask[i++] = QLatin1Char(' ');
-            mask[i++] = QLatin1Char(' ');
-            while (i + 1 < n && !(mask.at(i) == QLatin1Char('*') && mask.at(i + 1) == QLatin1Char('/'))) mask[i++] = QLatin1Char(' ');
-            if (i < n) mask[i++] = QLatin1Char(' ');
-            if (i < n) mask[i++] = QLatin1Char(' ');
-        } else if (c == QLatin1Char('"') || c == QLatin1Char('\'')) {
-            const QChar quote = c;
-            mask[i++] = QLatin1Char(' ');
-            while (i < n && mask.at(i) != quote) {
-                if (mask.at(i) == QLatin1Char('\\') && i + 1 < n) mask[i++] = QLatin1Char(' ');
-                mask[i++] = QLatin1Char(' ');
-            }
-            if (i < n) mask[i++] = QLatin1Char(' ');
-        } else {
-            ++i;
-        }
-    }
-    return mask;
-}
-
-// Start offsets of `type {` object literals (the type may be qualified).
-QList<int> objectStarts(const QString &mask, const QString &type)
-{
-    QList<int> starts;
-    for (int at = mask.indexOf(type); at >= 0; at = mask.indexOf(type, at + 1)) {
-        if (at > 0 && (mask.at(at - 1).isLetterOrNumber() || mask.at(at - 1) == QLatin1Char('_')))
-            continue; // a longer identifier merely ends in `type`
-        int open = at + type.size();
-        while (open < mask.size() && mask.at(open).isSpace()) ++open;
-        if (open < mask.size() && mask.at(open) == QLatin1Char('{')) starts << open;
-    }
-    return starts;
-}
-
-// Exclusive end offset of the brace that opens at `open`.
-int blockEnd(const QString &mask, int open)
-{
-    int depth = 0;
-    for (int i = open; i < mask.size(); ++i) {
-        if (mask.at(i) == QLatin1Char('{')) ++depth;
-        else if (mask.at(i) == QLatin1Char('}') && --depth == 0) return i + 1;
-    }
-    return -1;
-}
-
-// [start, end) of a member's value expression inside one object block. The
-// value runs to the end of its statement: a line end at balanced (), [], {}
-// depth, or a ';' - BlueStacks writes one member per line and wraps long
-// calls across lines while the parentheses stay open.
-bool bindingValue(const QString &mask, int blockBegin, int blockStop,
-                  const QString &name, int *valueBegin, int *valueEnd)
-{
-    for (int at = blockBegin; at >= 0 && at < blockStop;) {
-        const int found = mask.indexOf(name, at);
-        if (found < 0 || found >= blockStop) return false;
-        const bool boundary = found == blockBegin
-            || !(mask.at(found - 1).isLetterOrNumber() || mask.at(found - 1) == QLatin1Char('_') || mask.at(found - 1) == QLatin1Char('.'));
-        int colon = found + name.size();
-        while (colon < blockStop && mask.at(colon).isSpace()) ++colon;
-        if (boundary && colon < blockStop && mask.at(colon) == QLatin1Char(':')
-            && !(colon + 1 < blockStop && mask.at(colon + 1) == QLatin1Char('='))) {
-            int start = colon + 1;
-            while (start < blockStop && mask.at(start).isSpace()) ++start;
-            int depth = 0;
-            int end = start;
-            for (; end < blockStop; ++end) {
-                const QChar c = mask.at(end);
-                if (c == QLatin1Char('(') || c == QLatin1Char('[') || c == QLatin1Char('{')) ++depth;
-                else if (c == QLatin1Char(')') || c == QLatin1Char(']') || c == QLatin1Char('}')) {
-                    if (depth == 0) break;
-                    --depth;
-                } else if (depth == 0 && (c == QLatin1Char('\n') || c == QLatin1Char(';'))) break;
-            }
-            // Never swallow the line ending itself: the replacement keeps the
-            // file's CRLF layout byte-stable around the edited member.
-            while (end > start && (mask.at(end - 1) == QLatin1Char(' ')
-                                   || mask.at(end - 1) == QLatin1Char('\t')
-                                   || mask.at(end - 1) == QLatin1Char('\r'))) --end;
-            *valueBegin = start;
-            *valueEnd = end;
-            return true;
-        }
-        at = found + name.size();
-    }
-    return false;
-}
-
 // Disable every PlrSidebarElement whose pAsset literal is one of `assets`.
 // Replacing the pIsFeatureEnable value with `false` is the same switch the
 // sidebar's own customization uses, so the element leaves pSidebarItems, the
 // Repeater and the kebab overflow together - no slot survives to show a gap.
 int disableSidebarElements(QString &qml, const QStringList &assets)
 {
-    const QString mask = maskQml(qml);
+    const QString masked = QmlText::mask(qml);
     struct Edit { int begin, length; QString replacement; };
     QList<Edit> edits;
     QSet<int> used;
     int hidden = 0;
     for (const QString &asset : assets) {
         const QString literal = QLatin1Char('"') + asset + QLatin1Char('"');
-        for (const int open : objectStarts(mask, QStringLiteral("PlrSidebarElement"))) {
-            const int end = blockEnd(mask, open);
-            if (end < 0) continue;
-            const int literalAt = qml.indexOf(literal, open);
-            if (literalAt < 0 || literalAt >= end) continue;
-            int valueBegin = 0, valueEnd = 0;
-            if (bindingValue(mask, open, end, QStringLiteral("pIsFeatureEnable"), &valueBegin, &valueEnd)) {
-                if (used.contains(valueBegin)) break;
-                used.insert(valueBegin);
-                edits << Edit { valueBegin, valueEnd - valueBegin, QStringLiteral("false") };
+        for (const auto &object : QmlText::objects(masked, QStringLiteral("PlrSidebarElement"))) {
+            const int literalAt = qml.indexOf(literal, object.open);
+            if (literalAt < 0 || literalAt >= object.end) continue;
+            QmlText::Binding feature;
+            if (QmlText::binding(masked, object.open, object.end, QStringLiteral("pIsFeatureEnable"), &feature)) {
+                if (used.contains(feature.valueBegin)) break;
+                used.insert(feature.valueBegin);
+                edits << Edit { feature.valueBegin, feature.valueEnd - feature.valueBegin,
+                                QStringLiteral("false") };
             } else {
-                if (used.contains(open + 1)) break;
-                used.insert(open + 1);
-                edits << Edit { open + 1, 0, QStringLiteral("\npIsFeatureEnable:false") };
+                if (used.contains(object.open + 1)) break;
+                used.insert(object.open + 1);
+                edits << Edit { object.open + 1, 0, QStringLiteral("\npIsFeatureEnable:false") };
             }
             ++hidden;
             break;

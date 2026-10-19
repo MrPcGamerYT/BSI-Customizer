@@ -158,6 +158,8 @@ public:
     Q_INVOKABLE QVariantList findVersions();
     Q_INVOKABLE QVariantMap applyVersion(const QString &oldV, const QString &newV);
     Q_INVOKABLE QVariantMap applyRemovals(const QStringList &names);
+    Q_INVOKABLE QVariantList layoutTweaks();
+    Q_INVOKABLE QVariantMap applyLayoutTweak(const QString &id, bool enabled);
     Q_INVOKABLE QVariantMap restoreBackup(const QString &path);
 
     // ---- Discord Rich Presence ID utility ----

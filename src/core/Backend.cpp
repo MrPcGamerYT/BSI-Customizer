@@ -5,6 +5,7 @@
 #include "BsDetector.h"
 #include "ExtrasPatcher.h"
 #include "IntegrityPatcher.h"
+#include "LayoutPatcher.h"
 #include "RpcIdPatcher.h"
 #include "SettingsManager.h"
 #include "ThemeEngine.h"
@@ -991,6 +992,39 @@ QVariantMap Backend::applyRemovals(const QStringList &names)
     ThemeEngine::backup(m_settings->exePath());
     const auto r = ExtrasPatcher::applyRemovals(m_settings->exePath(), names);
     return result(r.ok, r.msg, QStringLiteral("green"));
+}
+
+QVariantList Backend::layoutTweaks()
+{
+    QVariantList out;
+    QByteArray image;
+    const QString path = m_settings->exePath();
+    if (!path.isEmpty() && QFileInfo::exists(path)) {
+        QFile f(path);
+        if (f.open(QIODevice::ReadOnly)) {
+            image = f.readAll();
+            f.close();
+        }
+    }
+    for (const auto &t : LayoutPatcher::tweaks()) {
+        const auto state = LayoutPatcher::analyze(image, t.id);
+        out << QVariantMap {
+            { QStringLiteral("id"), t.id },
+            { QStringLiteral("label"), t.label },
+            { QStringLiteral("detail"), t.detail },
+            { QStringLiteral("supported"), state.supported },
+            { QStringLiteral("applied"), state.applied },
+            { QStringLiteral("state"), state.detail },
+        };
+    }
+    return out;
+}
+
+QVariantMap Backend::applyLayoutTweak(const QString &id, bool enabled)
+{
+    if (actionsLocked()) return lockedMap();
+    const auto r = LayoutPatcher::apply(m_settings->exePath(), id, enabled);
+    return result(r.ok, r.msg, r.ok ? QStringLiteral("green") : QStringLiteral("red"));
 }
 
 QVariantMap Backend::restoreBackup(const QString &path)
