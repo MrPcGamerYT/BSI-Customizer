@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QByteArray>
 #include <QNetworkAccessManager>
 #include <QObject>
 #include <QStringList>
@@ -32,9 +33,12 @@
  *   auth.json next to the EXE (or $BSIC_AUTH_FILE), with env overrides
  *   BSIC_DISCORD_CLIENT_ID / BSIC_DISCORD_CLIENT_SECRET /
  *   BSIC_DISCORD_ALLOW_USERS / BSIC_DISCORD_REDIRECT_PORT / BSIC_DISCORD_SCOPE.
+ *   The whole auth.json can also be supplied as one JSON blob - $ZLP_AUTH_JSON
+ *   (alias $BSIC_AUTH_JSON) at runtime, and the ZLP_AUTH_JSON repository secret
+ *   baked into the EXE at build time so releases need no sidecar file.
  *
  * The redirect URI must be registered in the Discord developer portal exactly:
- *   http://127.0.0.1:43712/auth/discord/callback
+ *   http://127.0.0.1:43713/auth/discord/callback
  * (127.0.0.1 on purpose - not localhost, which may resolve to ::1.)
  */
 class AuthManager : public QObject
@@ -62,7 +66,7 @@ public:
         QString clientSecret; // optional - public-client PKCE needs no secret
         QString scope = QStringLiteral("identify");
         QString redirectUri;
-        int redirectPort = 43712;
+        int redirectPort = 43713;
         QStringList allowUsers;
         QString inviteUrl;
         QString sourceFile;
@@ -79,6 +83,13 @@ public:
 
     /** Load auth.json + env overrides. Exposed like FalcoForge's loadAuthConfig. */
     static Config loadConfig();
+
+    /**
+     * The auth.json blob baked into this build from the ZLP_AUTH_JSON secret
+     * (empty when the build carried none). Lowest-priority config source: a
+     * file next to the EXE or the ZLP_AUTH_JSON env blob still overrides it.
+     */
+    static QByteArray embeddedAuthJson();
 
     bool isAuthorized() const { return m_authorized; }
     bool busy() const { return m_busy; }

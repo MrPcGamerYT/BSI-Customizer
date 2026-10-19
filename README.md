@@ -9,10 +9,13 @@ sign-in card with **one option - Continue with Discord**. Access follows a
 dev allowlist of Discord user IDs (`discord.allowUsers` in `auth.json`, or
 `BSIC_DISCORD_ALLOW_USERS`); a rejected sign-in shows the account's Discord
 ID on the result page so it can be added. The flow is Discord OAuth2 with
-PKCE + a `127.0.0.1:43712` loopback callback (paste-the-link fallback), and a
+PKCE + a `127.0.0.1:43713` loopback callback (paste-the-link fallback), and a
 successful sign-in writes an HMAC-signed machine-bound session that only
 earns a one-click "Welcome back" continue on the next launch. The gate is
 enforced in C++ (`AuthManager` + `Backend` guards), not only in the UI.
+The whole `auth.json` can also be baked into the EXE at build time from the
+`ZLP_AUTH_JSON` repository secret (the Actions workflows pass it through), so
+releases sign in with no sidecar config file.
 Setup: [docs/AUTH.md](docs/AUTH.md) and `auth.example.json`.
 
 ## Single portable EXE

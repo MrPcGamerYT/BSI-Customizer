@@ -127,6 +127,33 @@ target_compile_definitions(BSICustomizer PRIVATE
     BSI_VERSION="${PROJECT_VERSION}"
 )
 
+# ---------------------------------------------------------------------------
+# Optional build-time auth embed ("zip auth json"): the whole auth.json blob
+# comes from the ZLP_AUTH_JSON repository secret (BSIC_AUTH_JSON accepted as
+# an alias) and is baked into the EXE as :/bsic_auth/auth.json, so released
+# builds sign in with no sidecar file. At runtime an auth.json next to the
+# EXE - or a ZLP_AUTH_JSON env blob - still overrides it. No secret -> the
+# build simply carries no embed and the file/env paths work as before.
+# ---------------------------------------------------------------------------
+set(BSI_AUTH_EMBED_DIR "${CMAKE_BINARY_DIR}/generated")
+set(BSI_AUTH_EMBED_JSON "${BSI_AUTH_EMBED_DIR}/auth.json")
+set(BSI_AUTH_BLOB "$ENV{ZLP_AUTH_JSON}")
+if(BSI_AUTH_BLOB STREQUAL "")
+    set(BSI_AUTH_BLOB "$ENV{BSIC_AUTH_JSON}")
+endif()
+if(NOT BSI_AUTH_BLOB STREQUAL "")
+    file(MAKE_DIRECTORY "${BSI_AUTH_EMBED_DIR}")
+    file(WRITE "${BSI_AUTH_EMBED_JSON}" "${BSI_AUTH_BLOB}")
+    string(LENGTH "${BSI_AUTH_BLOB}" BSI_AUTH_BLOB_LEN)
+    message(STATUS "Embedding auth.json from ZLP_AUTH_JSON (${BSI_AUTH_BLOB_LEN} bytes)")
+    qt_add_resources(BSICustomizer "bsic_auth_embedded"
+        BASE "${BSI_AUTH_EMBED_DIR}"
+        PREFIX "/bsic_auth"
+        FILES "${BSI_AUTH_EMBED_JSON}")
+else()
+    message(STATUS "No ZLP_AUTH_JSON in the environment: building without an embedded auth.json")
+endif()
+
 # Qt 6 is the application's build/runtime dependency, not an FPS target restriction.
 # Require a real Qt 5 reference in Windows CI; ordinary/offline builds stay network-free.
 set(_bsi_qt5_reference_default OFF)

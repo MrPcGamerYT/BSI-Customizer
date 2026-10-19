@@ -40,6 +40,10 @@ jobs:
           cache: true
 
       - name: Configure
+        env:
+          # Whole auth.json to embed at build time (falls back to the
+          # BSIC_AUTH_JSON secret name; empty = build without an embed).
+          ZLP_AUTH_JSON: ${{ secrets.ZLP_AUTH_JSON || secrets.BSIC_AUTH_JSON }}
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release
 
       - name: Build

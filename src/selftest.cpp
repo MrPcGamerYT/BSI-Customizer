@@ -15,6 +15,8 @@
 #include <QDataStream>
 #include <QFile>
 #include <QFileInfo>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QQuickStyle>
@@ -1485,7 +1487,7 @@ int runSelfTest()
 
         // ---- readCode (callback URL and bare code) ----
         QString code, state;
-        AuthManager::readCode(QStringLiteral("http://127.0.0.1:43712/auth/discord/callback"
+        AuthManager::readCode(QStringLiteral("http://127.0.0.1:43713/auth/discord/callback"
                                              "?code=abc123&state=deadbeef"),
                               code, state);
         check(code == QLatin1String("abc123") && state == QLatin1String("deadbeef"),
@@ -1496,19 +1498,60 @@ int runSelfTest()
         // ---- config from env (restored afterwards) ----
         const QByteArray oldClient = qgetenv("BSIC_DISCORD_CLIENT_ID");
         const QByteArray oldAllow = qgetenv("BSIC_DISCORD_ALLOW_USERS");
+        const QByteArray oldPort = qgetenv("BSIC_DISCORD_REDIRECT_PORT");
+        const QByteArray oldBlob = qgetenv("ZLP_AUTH_JSON");
         qputenv("BSIC_DISCORD_CLIENT_ID", QByteArrayLiteral("fake-client-id"));
         qputenv("BSIC_DISCORD_ALLOW_USERS", QByteArrayLiteral("111, 222;333"));
+        qputenv("BSIC_DISCORD_REDIRECT_PORT", QByteArrayLiteral("43713"));
         {
             const AuthManager::Config cfg = AuthManager::loadConfig();
             check(cfg.configured, "client id configures Discord sign-in");
             check(cfg.allowUsers.size() == 3 && cfg.allowUsers.contains(QStringLiteral("222")),
                   "dev allowlist parses comma/semicolon lists");
             check(cfg.redirectUri
-                      == QLatin1String("http://127.0.0.1:43712/auth/discord/callback"),
+                      == QLatin1String("http://127.0.0.1:43713/auth/discord/callback"),
                   "redirect URI is the portal string (127.0.0.1, not localhost)");
             check(!cfg.setupHint.contains(QStringLiteral("not configured")),
                   "configured builds get a source line instead of a setup hint");
         }
+
+        // ---- the whole auth.json as one blob: $ZLP_AUTH_JSON ----
+        // (the name the CI secret carries; wins over any file/embedded config,
+        // so this stays deterministic even when the build embeds a real blob.
+        // Per-field BSIC_DISCORD_* env vars still override it, so clear those
+        // for the duration of this block.)
+        qunsetenv("BSIC_DISCORD_REDIRECT_PORT");
+        qunsetenv("BSIC_DISCORD_CLIENT_ID");
+        qunsetenv("BSIC_DISCORD_ALLOW_USERS");
+        qputenv("ZLP_AUTH_JSON",
+                QByteArrayLiteral("{\"discord\":{\"clientId\":\"zip-client\","
+                                  "\"allowUsers\":[\"777\"]}}"));
+        {
+            const AuthManager::Config cfg = AuthManager::loadConfig();
+            check(cfg.configured && cfg.clientId == QLatin1String("zip-client"),
+                  "the ZLP_AUTH_JSON blob is the whole auth.json config");
+            check(cfg.allowUsers == QStringList { QStringLiteral("777") },
+                  "the blob's allowlist wins over files and other sources");
+            check(cfg.redirectUri
+                      == QLatin1String("http://127.0.0.1:43713/auth/discord/callback"),
+                  "a blob without redirectPort falls back to the registered 43713 default");
+            check(cfg.sourceFile.contains(QLatin1String("ZLP_AUTH_JSON")),
+                  "the setup line names the blob as the config source");
+        }
+        {
+            // Build-time embed: the release workflow bakes the same blob into
+            // the EXE from the ZLP_AUTH_JSON secret. Whatever was baked must
+            // parse as an auth.json.
+            const QByteArray embedded = AuthManager::embeddedAuthJson();
+            if (!embedded.isEmpty()) {
+                QJsonParseError embedError;
+                const QJsonDocument doc = QJsonDocument::fromJson(embedded, &embedError);
+                check(embedError.error == QJsonParseError::NoError && doc.isObject()
+                          && doc.object().value(QStringLiteral("discord")).isObject(),
+                      "the build-time embedded ZLP_AUTH_JSON blob is a valid auth.json");
+            }
+        }
+        qunsetenv("ZLP_AUTH_JSON");
 
         // ---- gate authority: Backend refuses while the gate is closed ----
         {
@@ -1553,6 +1596,14 @@ int runSelfTest()
             qunsetenv("BSIC_DISCORD_ALLOW_USERS");
         else
             qputenv("BSIC_DISCORD_ALLOW_USERS", oldAllow);
+        if (oldPort.isNull())
+            qunsetenv("BSIC_DISCORD_REDIRECT_PORT");
+        else
+            qputenv("BSIC_DISCORD_REDIRECT_PORT", oldPort);
+        if (oldBlob.isNull())
+            qunsetenv("ZLP_AUTH_JSON");
+        else
+            qputenv("ZLP_AUTH_JSON", oldBlob);
     }
 
     g_failures += runPatchRegressionTests();

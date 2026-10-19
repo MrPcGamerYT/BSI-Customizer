@@ -30,7 +30,7 @@ const char kAuthorizeUrl[] = "https://discord.com/oauth2/authorize";
 const char kTokenUrl[] = "https://discord.com/api/oauth2/token";
 const char kApiUrl[] = "https://discord.com/api";
 const char kRedirectPath[] = "/auth/discord/callback";
-const int kDefaultRedirectPort = 43712;
+const int kDefaultRedirectPort = 43713;
 const int kDiscordHandoffMs = 180000;   // same 3-minute window as FalcoForge
 const int kLoopbackRetries = 4;
 const int kLoopbackRetryDelayMs = 150;
@@ -83,29 +83,52 @@ AuthManager::Config AuthManager::loadConfig()
 
     const QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
 
-    // auth.json lookup: $BSIC_AUTH_FILE, then next to the EXE, then app data.
-    QStringList candidates;
-    const QString envFile = env.value(QStringLiteral("BSIC_AUTH_FILE")).trimmed();
-    if (!envFile.isEmpty())
-        candidates << envFile;
-    candidates << QCoreApplication::applicationDirPath() + QStringLiteral("/auth.json");
-    candidates << QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)
-                   + QStringLiteral("/auth.json");
+    // Config sources for the `discord` object, first one that parses wins:
+    //   1. the whole auth.json as a JSON blob - $ZLP_AUTH_JSON (the name the
+    //      CI secret carries; $BSIC_AUTH_JSON accepted as an alias);
+    //   2. an auth.json file: $BSIC_AUTH_FILE, then next to the EXE, then app
+    //      data;
+    //   3. the blob baked into this build from the ZLP_AUTH_JSON secret.
+    auto parseDiscord = [](const QByteArray &bytes, QJsonObject *out) {
+        if (bytes.trimmed().isEmpty())
+            return false;
+        QJsonParseError parseError;
+        const QJsonDocument doc = QJsonDocument::fromJson(bytes, &parseError);
+        if (parseError.error != QJsonParseError::NoError || !doc.isObject())
+            return false;
+        *out = doc.object().value(QStringLiteral("discord")).toObject();
+        return true;
+    };
 
     QJsonObject discord;
-    for (const QString &path : candidates) {
-        QFile f(path);
-        if (!f.open(QIODevice::ReadOnly))
-            continue;
-        QJsonParseError parseError;
-        const QJsonDocument doc = QJsonDocument::fromJson(f.readAll(), &parseError);
-        f.close();
-        if (parseError.error != QJsonParseError::NoError || !doc.isObject())
-            continue;
-        const QJsonObject root = doc.object();
-        discord = root.value(QStringLiteral("discord")).toObject();
-        config.sourceFile = path;
-        break;
+    const QByteArray zlpBlob = env.value(QStringLiteral("ZLP_AUTH_JSON")).toUtf8();
+    const QByteArray bsicBlob = env.value(QStringLiteral("BSIC_AUTH_JSON")).toUtf8();
+    if (parseDiscord(zlpBlob, &discord)) {
+        config.sourceFile = QStringLiteral("environment (ZLP_AUTH_JSON)");
+    } else if (parseDiscord(bsicBlob, &discord)) {
+        config.sourceFile = QStringLiteral("environment (BSIC_AUTH_JSON)");
+    } else {
+        QStringList candidates;
+        const QString envFile = env.value(QStringLiteral("BSIC_AUTH_FILE")).trimmed();
+        if (!envFile.isEmpty())
+            candidates << envFile;
+        candidates << QCoreApplication::applicationDirPath() + QStringLiteral("/auth.json");
+        candidates << QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)
+                       + QStringLiteral("/auth.json");
+
+        for (const QString &path : candidates) {
+            QFile f(path);
+            if (!f.open(QIODevice::ReadOnly))
+                continue;
+            if (parseDiscord(f.readAll(), &discord)) {
+                config.sourceFile = path;
+                f.close();
+                break;
+            }
+            f.close();
+        }
+        if (config.sourceFile.isEmpty() && parseDiscord(embeddedAuthJson(), &discord))
+            config.sourceFile = QStringLiteral("embedded auth.json (build-time ZLP_AUTH_JSON)");
     }
 
     config.clientId = envOr(env, "BSIC_DISCORD_CLIENT_ID", discord.value("clientId").toString()).trimmed();
@@ -158,7 +181,8 @@ AuthManager::Config AuthManager::loadConfig()
         config.setupHint = QStringLiteral(
             "Discord sign-in is not configured yet. Set BSIC_DISCORD_CLIENT_ID, or copy "
             "auth.example.json to auth.json next to the EXE and fill in discord.clientId - "
-            "see docs/AUTH.md.");
+            "or bake the whole auth.json into the build with the ZLP_AUTH_JSON secret. "
+            "See docs/AUTH.md.");
     } else if (config.allowUsers.isEmpty()) {
         config.setupHint = QStringLiteral(
             "No dev allowlist is configured (discord.allowUsers). Add your Discord user ID to "
@@ -169,6 +193,14 @@ AuthManager::Config AuthManager::loadConfig()
                                                                 : config.sourceFile);
     }
     return config;
+}
+
+QByteArray AuthManager::embeddedAuthJson()
+{
+    QFile f(QStringLiteral(":/bsic_auth/auth.json"));
+    if (!f.open(QIODevice::ReadOnly))
+        return {};
+    return f.readAll();
 }
 
 // ---------------------------------------------------------------------------
@@ -649,7 +681,8 @@ QVariantMap AuthManager::startDiscord()
         if (m_config.sourceFile.isEmpty())
             message = QStringLiteral(
                 "Discord sign-in is not configured yet. Set BSIC_DISCORD_CLIENT_ID, or copy "
-                "auth.example.json to auth.json next to the EXE and fill in discord.clientId. "
+                "auth.example.json to auth.json next to the EXE and fill in discord.clientId, "
+                "or bake the whole auth.json into the build with the ZLP_AUTH_JSON secret. "
                 "See docs/AUTH.md.");
         else
             message = QStringLiteral("Discord sign-in is not configured yet (source: %1). Add "
