@@ -1,6 +1,7 @@
 #include "core/Backend.h"
 #include "core/BootVideoPatcher.h"
 #include "core/BsDetector.h"
+#include "core/ExtrasPatcher.h"
 #include "core/IntegrityPatcher.h"
 #include "core/ByteUtils.h"
 #include "core/FpsPatcher.h"
@@ -1518,6 +1519,142 @@ int runPatchRegressionTests()
         backend.loadTheme(QStringLiteral("hex"));
         check(backend.resolvedThemeMethod() == QLatin1String("hex") && backend.detectedQtMajor() == 6,
               "Hex (old) stays selectable as an informed override on a Qt 6 player");
+    }
+
+    std::printf("[settings-gradient] settings panel surface in both gradient editors\n");
+    {
+        // The settings window paints its whole panel with one full-window
+        // Rectangle under UiShadowContainer (root objectName "settingsWindow").
+        // The catalog used to stop at the player chrome, so the old players
+        // showed a themed sidebar beside an untouched settings panel - the
+        // report that "the gradient only works on the sidebar". The panel
+        // background has to become a first-class surface, while the transparent
+        // content pane and the decorative fade divider stay untouched.
+        const QString settings = QStringLiteral(
+            "import QtQuick 2.15\r\n"
+            "import QtQuick.Window 2.15\r\n"
+            "Window {\r\n"
+            "    id: iSettingsWindow\r\n"
+            "    objectName: \"settingsWindow\"\r\n"
+            "    color: \"transparent\"\r\n"
+            "    UiShadowContainer {\r\n"
+            "        id: iSettingsWindowShadowContainer\r\n"
+            "        Rectangle {\r\n"
+            "            anchors.fill: parent\r\n"
+            "            color: UiTheme.colors.primary80\r\n"
+            "            Rectangle {\r\n"
+            "                Layout.preferredWidth: 548\r\n"
+            "                color: \"transparent\"\r\n"
+            "            }\r\n"
+            "            Rectangle {\r\n"
+            "                width: 1\r\n"
+            "                gradient: Gradient {\r\n"
+            "                    GradientStop { position: 0.0; color: \"#ff0000\" }\r\n"
+            "                    GradientStop { position: 1.0; color: \"#0000ff\" }\r\n"
+            "                }\r\n"
+            "            }\r\n"
+            "        }\r\n"
+            "    }\r\n"
+            "}\r\n");
+        const QString palette = QStringLiteral(
+            "import QtQuick\nQtObject{property QtObject colors:QtObject{property color primary80:'#223344'}}\n");
+        auto r = resources({ { QStringLiteral("UiThemeObject.qml"), palette },
+                             { QStringLiteral("UiSettingsWindow.qml"), settings } }, true, {});
+        addRegistration(r, false);
+        const auto discovered = GradientPatcher::analyze(r.f.bytes);
+        QString key;
+        int painted = 0;
+        for (const auto &target : discovered.targets) {
+            if (target.label == QLatin1String("Settings window background")) {
+                key = target.key;
+                ++painted;
+            }
+            check(target.hexGradient, "the settings surfaces are offered to the hex gradient editor too");
+        }
+        check(discovered.ok && !key.isEmpty() && painted == 1,
+              "the settings panel background is offered exactly once as a gradient surface");
+        auto image = r.f.bytes;
+        QString error;
+        check(GradientPatcher::apply(image, key, { true, QStringLiteral("#ff0000"), QStringLiteral("#0000ff"), true }, &error),
+              QStringLiteral("the settings panel accepts a two-stop gradient (%1)")
+                  .arg(error.isEmpty() ? QStringLiteral("ok") : error));
+        const auto text = resourceText(image, r, QStringLiteral("UiSettingsWindow.qml"));
+        check(text.contains(QLatin1String("Rectangle {\ngradient:Gradient"))
+                  && text.contains(QStringLiteral("color: UiTheme.colors.primary80"))
+                  && text.contains(QStringLiteral("anchors.fill: parent")),
+              "the panel background keeps its solid fallback and gains the gradient");
+        check(text.contains(QStringLiteral("color: \"transparent\""))
+                  && text.contains(QStringLiteral("GradientStop { position: 0.0; color: \"#ff0000\" }")),
+              "the transparent content pane and the decorative fade divider stay untouched");
+        check(GradientPatcher::apply(image, key, { false, {}, {}, true }, &error)
+                  && resourceText(image, r, QStringLiteral("UiSettingsWindow.qml"))
+                         .contains(QLatin1String("Rectangle {\ngradient:null")),
+              "the settings panel gradient can be disabled back to the solid binding");
+        // The combined Hex (old) action paints every surface at once - on the
+        // old players that is the only gradient editor, so the settings panel
+        // must ride along with the sidebar and top bar there.
+        auto all = r.f.bytes;
+        GradientPatcher::Spec spec;
+        spec.first = QStringLiteral("#ff0000");
+        spec.second = QStringLiteral("#0000ff");
+        check(GradientPatcher::applySurfaces(all, GradientPatcher::allGradientKey(), spec, &error),
+              QStringLiteral("one hex call paints the settings panel with the rest (%1)")
+                  .arg(error.isEmpty() ? QStringLiteral("ok") : error));
+        check(resourceText(all, r, QStringLiteral("UiSettingsWindow.qml")).contains(QLatin1String("Rectangle {\ngradient:Gradient")),
+              "the all-at-once hex gradient reaches the settings panel");
+    }
+
+    std::printf("[extras-removals] removed sidebar buttons collapse the QML layout\n");
+    {
+        // Nulling an icon name only blanks the glyph: the button keeps its
+        // 32px slot and the sidebar shows an empty gap where it used to be
+        // (reported against the latest player). A sidebar removal has to
+        // disable the owning PlrSidebarElement too, so the element leaves
+        // pSidebarItems and the column closes up - the fix "by qml".
+        const QString sidebar = QStringLiteral(
+            "import QtQuick 2.15\r\n"
+            "Rectangle {\r\n"
+            "    id: iSidebar\r\n"
+            "    property list<QtObject> pAllSidebarItems: [\r\n"
+            "        PlrSidebarElement {\r\n"
+            "            pElementId: pRotate\r\n"
+            "            pAsset: \"SidebarRotate\"\r\n"
+            "            pTooltipText: qsTranslate(\"QObject\", \"Rotate\")\r\n"
+            "            pIsFeatureEnable: iSidebarProperties.pIsRotateEnabled\r\n"
+            "            pShowOnKebabMenu: true\r\n"
+            "        },\r\n"
+            "        PlrSidebarElement {\r\n"
+            "            pElementId: pLockCursor\r\n"
+            "            pAsset: pMouseCursorLocked ? \"SidebarLockCursorActive\" : \"SidebarLockCursor\"\r\n"
+            "            pIsFeatureEnable: uiBackend.confGetBoolDefaultWhenEmpty(\"bst.feature.macros\",\r\n"
+            "                uiBackend.confGetBool(\"bst.feature.macros\"))\r\n"
+            "        }\r\n"
+            "    ]\r\n"
+            "}\r\n");
+        auto r = resources({ { QStringLiteral("PlrSidebar.qml"), sidebar } }, true, {});
+        addRegistration(r, false);
+        const QString path = temp.filePath(QStringLiteral("sidebar-removals.exe"));
+        write(path, r.f.bytes);
+        const auto rr = ExtrasPatcher::applyRemovals(path,
+            { QStringLiteral("Sidebar Rotate"), QStringLiteral("Sidebar Lock Cursor"),
+              QStringLiteral("Sidebar Macro") });
+        check(rr.ok && rr.msg.contains(QLatin1String("Hid 2")),
+              QStringLiteral("the two matching sidebar buttons are hidden in QML (%1)").arg(rr.msg));
+        const auto text = resourceText(read(path), r, QStringLiteral("PlrSidebar.qml"));
+        check(text.contains(QStringLiteral("pIsFeatureEnable: false"))
+                  && !text.contains(QLatin1String("iSidebarProperties.pIsRotateEnabled"))
+                  && !text.contains(QLatin1String("confGetBoolDefaultWhenEmpty")),
+              "both feature switches are replaced with false, including the wrapped call");
+        check(text.count(QStringLiteral("pIsFeatureEnable: false")) == 2
+                  && text.contains(QStringLiteral("pAsset: \"SidebarRotate\""))
+                  && text.contains(QStringLiteral("pAsset: pMouseCursorLocked")),
+              "the elements themselves stay intact - only the switch flips");
+        const auto again = ExtrasPatcher::applyRemovals(path,
+            { QStringLiteral("Sidebar Rotate"), QStringLiteral("Sidebar Lock Cursor") });
+        check(again.ok, "a repeated removal stays idempotent instead of corrupting the sidebar");
+        check(resourceText(read(path), r, QStringLiteral("PlrSidebar.qml"))
+                  .count(QStringLiteral("pIsFeatureEnable: false")) == 2,
+              "a repeated removal does not stack further edits");
     }
 
     std::printf("[boot-discovery] renamed/raw controllers and the host's selected component\n");

@@ -532,9 +532,10 @@ Item {
                         Layout.fillWidth: true
                         elide: Text.ElideRight
                         text: qsTr("Legacy palette - replaces color constants directly in the "
-                                   + "binary. Gradient theme paints the top bar / title bar "
-                                   + "with custom stops you choose, one surface or all at once; "
-                                   + "the sidebar and everything else uses the solid colors below.")
+                                   + "binary. Gradient theme paints the top bar / title bar, "
+                                   + "the sidebar and the settings panel with custom stops you "
+                                   + "choose, one surface or all at once; "
+                                   + "everything else uses the solid colors below.")
                         color: Theme.textDim
                         font.pixelSize: 12
                     }
