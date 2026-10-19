@@ -13,9 +13,9 @@ ThemeManager::ThemeManager(QObject *parent)
         m_theme = Dark;
 
     m_accent = QColor(s.value(QStringLiteral("appearance/accent"),
-                              QStringLiteral("#7c5cff")).toString());
+                              QStringLiteral("#23e3ff")).toString());
     if (!m_accent.isValid())
-        m_accent = QColor(QStringLiteral("#7c5cff"));
+        m_accent = QColor(QStringLiteral("#23e3ff"));
 
 #if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
     // In "System" mode, follow live OS dark/light switches.

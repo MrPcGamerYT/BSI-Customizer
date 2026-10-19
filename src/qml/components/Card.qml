@@ -39,7 +39,13 @@ Rectangle {
     }
 
     color: Theme.card
-    radius: 14
+    // FalcoForge .panel: deep layered surface with one neon hairline.
+    gradient: Gradient {
+        GradientStop { position: 0.0; color: Theme.dark ? "#081524" : "#ffffff" }
+        GradientStop { position: 0.58; color: Theme.dark ? "#040b16" : "#fbfcff" }
+        GradientStop { position: 1.0; color: Theme.dark ? "#03080f" : "#f6f8fc" }
+    }
+    radius: 16
     border.width: 1
     border.color: Theme.border
 

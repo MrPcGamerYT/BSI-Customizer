@@ -21,6 +21,7 @@
 #include <memory>
 
 #include "core/Backend.h"
+#include "core/AuthManager.h"
 #include "core/SettingsManager.h"
 #include "core/SysInfo.h"
 #include "core/ThemeEngine.h"
@@ -153,6 +154,11 @@ int main(int argc, char *argv[])
     SettingsManager settings;
     Backend backend(&settings);
     SysInfo sysinfo;
+    // The Discord sign-in gate (Premium-Optimizer login system). Backend
+    // refuses its actions until auth verifies a sign-in; the login card in
+    // QML is only the UX side of it.
+    AuthManager auth;
+    backend.setAuthManager(&auth);
 
     QQmlApplicationEngine engine;
     QStringList deploymentErrors;
@@ -169,6 +175,7 @@ int main(int argc, char *argv[])
     engine.rootContext()->setContextProperty(QStringLiteral("settings"), &settings);
     engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
     engine.rootContext()->setContextProperty(QStringLiteral("sysinfo"), &sysinfo);
+    engine.rootContext()->setContextProperty(QStringLiteral("auth"), &auth);
 
     engine.load(QUrl(QStringLiteral("qrc:/qt/qml/BSICustomizer/src/qml/Main.qml")));
     if (engine.rootObjects().isEmpty()) {

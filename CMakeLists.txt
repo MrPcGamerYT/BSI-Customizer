@@ -5,7 +5,7 @@ project(BSICustomizer VERSION 2.0.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Qml Quick QuickControls2 Svg)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Network Qml Quick QuickControls2 Svg)
 
 qt_standard_project_setup(REQUIRES 6.5)
 
@@ -63,6 +63,10 @@ qt_add_executable(BSICustomizer
     src/core/BsDetector.cpp
     src/core/Backend.h
     src/core/Backend.cpp
+    src/core/AuthManager.h
+    src/core/AuthManager.cpp
+    src/core/SessionStore.h
+    src/core/SessionStore.cpp
     src/core/ThemeManager.h
     src/core/ThemeManager.cpp
     src/core/SettingsManager.h
@@ -157,7 +161,9 @@ qt_add_qml_module(BSICustomizer
         src/qml/Main.qml
         src/qml/Theme.qml
         src/qml/Icons.js
+        src/qml/LoginGate.qml
         src/qml/components/SidebarButton.qml
+        src/qml/components/WinControls.qml
         src/qml/components/Card.qml
         src/qml/components/ActionButton.qml
         src/qml/components/ToggleSwitch.qml
@@ -180,6 +186,12 @@ qt_add_qml_module(BSICustomizer
         src/qml/pages/AboutPage.qml
     RESOURCES
         "BSI CUSTOMIZER.ico"
+        src/qml/img/app-icon.png
+        src/qml/img/discord-mark.svg
+        src/qml/img/orb-cyan.png
+        src/qml/img/orb-blue.png
+        src/qml/img/orb-green.png
+        src/qml/img/orb-violet.png
 )
 
 # Short, space-free qrc path used by main.cpp for the window/taskbar icon:
@@ -190,6 +202,7 @@ set_source_files_properties("BSI CUSTOMIZER.ico" PROPERTIES
 target_link_libraries(BSICustomizer PRIVATE
     Qt6::Core
     Qt6::Gui
+    Qt6::Network
     Qt6::Qml
     Qt6::Quick
     Qt6::QuickControls2
