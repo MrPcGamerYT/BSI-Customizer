@@ -162,12 +162,14 @@ int main(int argc, char *argv[])
 
     QQmlApplicationEngine engine;
     QStringList deploymentErrors;
+    // Collect QML diagnostics so a failed load can report WHY the root object
+    // never appeared (the error text must reach redirected stdio for CI).
+    QObject::connect(&engine, &QQmlEngine::warnings, &app, [&deploymentErrors](const QList<QQmlError> &warnings) {
+        for (const auto &warning : warnings)
+            deploymentErrors << warning.toString();
+    });
     if (deploymentTest) {
         engine.setInitialProperties({ { QStringLiteral("visible"), false } });
-        QObject::connect(&engine, &QQmlEngine::warnings, &app, [&deploymentErrors](const QList<QQmlError> &warnings) {
-            for (const auto &warning : warnings)
-                deploymentErrors << warning.toString();
-        });
     }
 
     // IMPORTANT: context properties MUST be registered BEFORE engine.load().
@@ -177,8 +179,22 @@ int main(int argc, char *argv[])
     engine.rootContext()->setContextProperty(QStringLiteral("sysinfo"), &sysinfo);
     engine.rootContext()->setContextProperty(QStringLiteral("auth"), &auth);
 
-    engine.load(QUrl(QStringLiteral("qrc:/qt/qml/BSICustomizer/src/qml/Main.qml")));
+    const QUrl mainUrl(QStringLiteral("qrc:/qt/qml/BSICustomizer/src/qml/Main.qml"));
+    engine.load(mainUrl);
     if (engine.rootObjects().isEmpty()) {
+        // Print through both CRT streams (Qt's handler may not reach the
+        // redirected pipes a GUI subsystem process inherits) so packaging
+        // tests capture the actual QML error instead of a bare exit code.
+        std::fprintf(stderr, "BSI Customizer: failed to load QML UI (%s)\n",
+                     qUtf8Printable(mainUrl.toString()));
+        std::printf("BSI Customizer: failed to load QML UI (%s)\n",
+                    qUtf8Printable(mainUrl.toString()));
+        for (const QString &line : deploymentErrors) {
+            std::fprintf(stderr, "%s\n", qUtf8Printable(line));
+            std::printf("%s\n", qUtf8Printable(line));
+        }
+        std::fflush(stderr);
+        std::fflush(stdout);
         qCritical("BSI Customizer: failed to load QML UI");
         return -1;
     }
