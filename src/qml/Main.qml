@@ -183,7 +183,7 @@ ApplicationWindow {
                     anchors.centerIn: parent
                     text: auth.authorized ? qsTr("Dev access") : qsTr("Locked")
                     color: auth.authorized ? Theme.green : Theme.textDim
-                    font.pixelSize: 11.5
+                    font.pixelSize: 12
                     font.weight: Font.DemiBold
                 }
             }
@@ -345,7 +345,7 @@ ApplicationWindow {
                             Text {
                                 text: qsTr("Dev access")
                                 color: Theme.green
-                                font.pixelSize: 10.5
+                                font.pixelSize: 11
                             }
                         }
 
@@ -510,7 +510,7 @@ ApplicationWindow {
                 anchors.leftMargin: 16
                 anchors.verticalCenter: parent.verticalCenter
                 color: Theme.textDim
-                font.pixelSize: 10.5
+                font.pixelSize: 11
                 font.weight: Font.Bold
                 font.letterSpacing: 1.2
                 opacity: 0.8

@@ -56,7 +56,7 @@ Item {
             Text {
                 text: button.label
                 color: button.active ? Theme.accentText : Theme.textDim
-                font.pixelSize: 13.5
+                font.pixelSize: 14
                 font.weight: button.active ? Font.DemiBold : Font.Normal
                 anchors.verticalCenter: parent.verticalCenter
             }

@@ -198,7 +198,7 @@ Item {
                             Layout.fillWidth: true
                             text: qsTr("BSI Customizer is private dev software - sign in with your Discord account to unlock it.")
                             color: Theme.textDim
-                            font.pixelSize: 12.5
+                            font.pixelSize: 13
                             wrapMode: Text.WordWrap
                         }
                     }
@@ -253,14 +253,14 @@ Item {
                                 Text {
                                     text: qsTr("Welcome back!")
                                     color: "#e8fff6"
-                                    font.pixelSize: 14.5
+                                    font.pixelSize: 15
                                     font.weight: Font.ExtraBold
                                 }
                                 Text {
                                     Layout.fillWidth: true
                                     text: qsTr("We found your previous sign-in on this PC")
                                     color: Qt.rgba(147 / 255, 180 / 255, 210 / 255, 0.8)
-                                    font.pixelSize: 11.5
+                                    font.pixelSize: 12
                                     elide: Text.ElideRight
                                 }
                             }
@@ -336,7 +336,7 @@ Item {
                                         anchors.centerIn: parent
                                         text: qsTr("Discord")
                                         color: "#c2c8ff"
-                                        font.pixelSize: 10.5
+                                        font.pixelSize: 11
                                         font.letterSpacing: 0.2
                                     }
                                 }
@@ -385,7 +385,7 @@ Item {
                                                 : qsTr("Continue as %1").arg(name);
                                     }
                                     color: "#04131c"
-                                    font.pixelSize: 14.5
+                                    font.pixelSize: 15
                                     font.weight: Font.ExtraBold
                                 }
                             }
@@ -551,7 +551,7 @@ Item {
                     color: auth.noteKind === "bad" ? "#ffc0cb"
                          : auth.noteKind === "good" ? "#9dffe4"
                          : Theme.textDim
-                    font.pixelSize: 12.5
+                    font.pixelSize: 13
                     wrapMode: Text.WordWrap
                     horizontalAlignment: Text.AlignHCenter
                     Layout.minimumHeight: 34
@@ -576,7 +576,7 @@ Item {
                         Text {
                             text: qsTr("Discord authorization URL or code")
                             color: Theme.textDim
-                            font.pixelSize: 11.5
+                            font.pixelSize: 12
                             font.letterSpacing: 0.4
                         }
                         RowLayout {
@@ -634,7 +634,7 @@ Item {
                     Layout.topMargin: 10
                     text: auth.setupHint
                     color: Theme.textDim
-                    font.pixelSize: 11.5
+                    font.pixelSize: 12
                     wrapMode: Text.WordWrap
                     horizontalAlignment: Text.AlignHCenter
                     opacity: 0.85
