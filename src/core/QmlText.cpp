@@ -2,6 +2,13 @@
 
 namespace QmlText {
 
+// Placeholder for one masked string-literal character. It must not be
+// whitespace (a binding whose value is a literal would otherwise start on the
+// next line and swallow the following member), must not be an operator or
+// member-list punctuation, and must not be usable inside an identifier, so
+// the masked text cannot invent a property, type or brace.
+constexpr QChar kLiteralMark = QChar::fromLatin1('@');
+
 QString mask(const QString &qml)
 {
     QString out = qml;
@@ -19,12 +26,12 @@ QString mask(const QString &qml)
             if (i < n) out[i++] = QLatin1Char(' ');
         } else if (c == QLatin1Char('"') || c == QLatin1Char('\'')) {
             const QChar quote = c;
-            out[i++] = QLatin1Char(' ');
+            out[i++] = kLiteralMark;
             while (i < n && out.at(i) != quote) {
-                if (out.at(i) == QLatin1Char('\\') && i + 1 < n) out[i++] = QLatin1Char(' ');
-                out[i++] = QLatin1Char(' ');
+                if (out.at(i) == QLatin1Char('\\') && i + 1 < n) out[i++] = kLiteralMark;
+                out[i++] = kLiteralMark;
             }
-            if (i < n) out[i++] = QLatin1Char(' ');
+            if (i < n) out[i++] = kLiteralMark;
         } else {
             ++i;
         }
@@ -71,7 +78,11 @@ bool binding(const QString &m, int begin, int end, const QString &name, Binding 
         if (boundary && colon < end && m.at(colon) == QLatin1Char(':')
             && !(colon + 1 < end && m.at(colon + 1) == QLatin1Char('='))) {
             int start = colon + 1;
-            while (start < end && m.at(start).isSpace()) ++start;
+            // The value starts on the member's own line: skipping past a line
+            // ending here would attach the next member as this value.
+            while (start < end && (m.at(start) == QLatin1Char(' ')
+                                   || m.at(start) == QLatin1Char('\t')
+                                   || m.at(start) == QLatin1Char('\r'))) ++start;
             int depth = 0;
             int stop = start;
             for (; stop < end; ++stop) {
