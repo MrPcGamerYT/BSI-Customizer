@@ -57,6 +57,10 @@ void check(bool cond, const char *what)
     } else {
         std::printf("  FAIL  %s\n", what);
         ++g_failures;
+        // Windows CI runs expose the job log only as annotations, so surface
+        // each failed assertion as one (same as patch_regression_test.cpp).
+        if (qEnvironmentVariableIsSet("GITHUB_ACTIONS"))
+            std::printf("::error file=src/selftest.cpp::self-test failure: %s\n", what);
     }
 }
 
@@ -1552,6 +1556,12 @@ int runSelfTest()
             }
         }
         qunsetenv("ZLP_AUTH_JSON");
+        // The gate blocks below were written against the env config set above
+        // (the staged "111" session must stay on the allowlist for the
+        // one-click continue check), so put that env back.
+        qputenv("BSIC_DISCORD_CLIENT_ID", QByteArrayLiteral("fake-client-id"));
+        qputenv("BSIC_DISCORD_ALLOW_USERS", QByteArrayLiteral("111, 222;333"));
+        qputenv("BSIC_DISCORD_REDIRECT_PORT", QByteArrayLiteral("43713"));
 
         // ---- gate authority: Backend refuses while the gate is closed ----
         {
