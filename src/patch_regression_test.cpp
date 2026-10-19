@@ -1661,36 +1661,16 @@ int runPatchRegressionTests()
     std::printf("[layout] sidebar-to-titlebar layout tweak by QML\n");
     {
         // The layout family's first tweak: the side strip is gone and every
-        // sidebar button becomes one centered row inside the title bar. The
-        // fixture is the stock latest-player shape (the same member spellings
-        // the real plr.qml / PlrSidebar.qml / PlrTopbar.qml use), and the
-        // claim pinned here is reversibility: toggling the option off writes
-        // the stock QML back byte-for-byte, so the change needs no backup
-        // restore to undo.
-        const QString plr = QStringLiteral(
-            "import QtQuick 2.15\r\n"
-            "Rectangle {\r\n"
-            "    id: iAppwin\r\n"
-            "    property int pSidebarWidth: 32\r\n"
-            "    PlrSidebar {\r\n"
-            "        id: iSidebar\r\n"
-            "        anchors.bottom: parent.bottom\r\n"
-            "        anchors.right: parent.right\r\n"
-            "        anchors.top: iTopbar.bottom\r\n"
-            "        color: uiBackend.oem === \"msi5\" ? UiTheme.colors.primary70 : UiTheme.colors.primary80\r\n"
-            "        width: pSidebarWidth\r\n"
-            "        visible: uiBackend.confGetInstanceBool(\"show_sidebar\")\r\n"
-            "        onSidebarSettingClicked: fOpenSettingsWindow()\r\n"
-            "    }\r\n"
-            "    function fSetUiParams(sidebarVisible) {\r\n"
-            "        plrBackend.setBackendUiParams(\r\n"
-            "                    pBorderWidth + adsBackend.pExtendedBannerAdWidth,\r\n"
-            "                    iTopbar.height + pBorderWidth,\r\n"
-            "                    pBorderWidth + (sidebarVisible ? iAppwin.pSidebarWidth : 0),\r\n"
-            "                    pBorderWidth,\r\n"
-            "                    7 * iTopbar.height + 50 + pBorderWidth * 2)\r\n"
-            "    }\r\n"
-            "}\r\n");
+        // sidebar button becomes one centered row inside the title bar. Two
+        // real player generations are covered here:
+        //   * the current player anchors PlrSidebar to the right-hand strip and
+        //     sizes it with `width: pSidebarWidth`;
+        //   * the old 5.10/5.12 player lays it out as a `PlrSidebar` item of a
+        //     UiRowLayout and sizes it with `Layout.preferredWidth`.
+        // Both used to be reduced to a zero-width strip and host a second
+        // instance inside the title bar. Reversibility is pinned at the
+        // document level: toggling the option off writes every edited QML file
+        // back byte-for-byte, so the change needs no backup restore to undo.
         const QString sidebar = QStringLiteral(
             "import QtQuick 2.15\r\n"
             "Rectangle {\r\n"
@@ -1758,43 +1738,128 @@ int runPatchRegressionTests()
             "        }\r\n"
             "    }\r\n"
             "}\r\n");
-        auto r = resources({ { QStringLiteral("plr.qml"), plr },
+        // Current player: the sidebar is a sibling of the title bar inside the
+        // main content rectangle.
+        const QString anchoredPlr = QStringLiteral(
+            "import QtQuick 2.15\r\n"
+            "Rectangle {\r\n"
+            "    id: iAppwin\r\n"
+            "    property int pSidebarWidth: 32\r\n"
+            "    PlrTopbar {\r\n"
+            "        id: iTopbar\r\n"
+            "    }\r\n"
+            "    PlrSidebar {\r\n"
+            "        id: iSidebar\r\n"
+            "        anchors.bottom: parent.bottom\r\n"
+            "        anchors.right: parent.right\r\n"
+            "        anchors.top: iTopbar.bottom\r\n"
+            "        color: uiBackend.oem === \"msi5\" ? UiTheme.colors.primary70 : UiTheme.colors.primary80\r\n"
+            "        width: pSidebarWidth\r\n"
+            "        visible: uiBackend.confGetInstanceBool(\"show_sidebar\")\r\n"
+            "        onSidebarSettingClicked: fOpenSettingsWindow()\r\n"
+            "    }\r\n"
+            "    function fSetUiParams(sidebarVisible) {\r\n"
+            "        plrBackend.setBackendUiParams(\r\n"
+            "                    pBorderWidth + adsBackend.pExtendedBannerAdWidth,\r\n"
+            "                    iTopbar.height + pBorderWidth,\r\n"
+            "                    pBorderWidth + (sidebarVisible ? iAppwin.pSidebarWidth : 0),\r\n"
+            "                    pBorderWidth,\r\n"
+            "                    7 * iTopbar.height + 50 + pBorderWidth * 2)\r\n"
+            "    }\r\n"
+            "}\r\n");
+        // Old 5.10/5.12 player: a column root, the title bar and a row layout
+        // are siblings, and the sidebar is an item of that row layout.
+        const QString legacyPlr = QStringLiteral(
+            "import QtQuick 2.15\r\n"
+            "Rectangle {\r\n"
+            "    id: iAppwin\r\n"
+            "    property int pSidebarWidth: 32\r\n"
+            "    UiColumnLayout {\r\n"
+            "        anchors.fill: parent\r\n"
+            "        PlrTopbar {\r\n"
+            "            id: iTopbar\r\n"
+            "        }\r\n"
+            "        UiRowLayout {\r\n"
+            "            id: iMainContentLayout\r\n"
+            "            Loader {\r\n"
+            "                id: iBootLoader\r\n"
+            "                Layout.fillWidth: true\r\n"
+            "            }\r\n"
+            "            PlrSidebar {\r\n"
+            "                id: iSidebar\r\n"
+            "                color: uiBackend.oem === \"msi5\" ? UiTheme.colors.primary70 : UiTheme.colors.primary80\r\n"
+            "                Layout.preferredWidth: pSidebarWidth\r\n"
+            "                Layout.fillHeight: true\r\n"
+            "                visible: uiBackend.confGetInstanceBool(\"show_sidebar\")\r\n"
+            "                onSidebarSettingClicked: fOpenSettingsWindow()\r\n"
+            "            }\r\n"
+            "        }\r\n"
+            "    }\r\n"
+            "    function fSetUiParams(sidebarVisible) {\r\n"
+            "        plrBackend.setBackendUiParams(\r\n"
+            "                    pBorderWidth + adsBackend.pExtendedBannerAdWidth,\r\n"
+            "                    iTopbar.height + pBorderWidth,\r\n"
+            "                    pBorderWidth + (sidebarVisible ? iAppwin.pSidebarWidth : 0),\r\n"
+            "                    pBorderWidth,\r\n"
+            "                    7 * iTopbar.height + 50 + pBorderWidth * 2)\r\n"
+            "    }\r\n"
+            "}\r\n");
+
+        // The inserted title-bar copy must sit inside the PlrTopbar body (it is
+        // appended just before the closing brace so it paints above the bar).
+        const auto insideTitlebar = [](const QString &text) {
+            const int topbarAt = text.indexOf(QLatin1String("PlrTopbar {"));
+            const int overlayAt = text.indexOf(QLatin1String("iSidebarTitlebar"));
+            if (topbarAt < 0 || overlayAt < 0) return false;
+            int depth = 0;
+            for (int i = text.indexOf(QLatin1Char('{'), topbarAt); i < text.size(); ++i) {
+                if (text.at(i) == QLatin1Char('{')) ++depth;
+                else if (text.at(i) == QLatin1Char('}') && --depth == 0) return overlayAt < i;
+            }
+            return false;
+        };
+
+        const QString id = QStringLiteral("sidebar-to-titlebar");
+        check(LayoutPatcher::tweaks().size() == 1 && LayoutPatcher::tweaks().front().id == id,
+              "the layout family exposes the sidebar-to-titlebar tweak");
+
+        auto r = resources({ { QStringLiteral("plr.qml"), anchoredPlr },
                              { QStringLiteral("PlrSidebar.qml"), sidebar },
                              { QStringLiteral("PlrTopbar.qml"), topbar } }, true,
                            { QStringLiteral("PlrTopbar.qml") });
         addRegistration(r, false);
         const QByteArray original = r.f.bytes;
-        const QString id = QStringLiteral("sidebar-to-titlebar");
-        check(LayoutPatcher::tweaks().size() == 1 && LayoutPatcher::tweaks().front().id == id,
-              "the layout family exposes the sidebar-to-titlebar tweak");
         const auto stock = LayoutPatcher::analyze(original, id);
-        check(stock.supported && !stock.applied, "the stock player shape is recognized as supported and unpatched");
+        check(stock.supported && !stock.applied, "the stock anchored player shape is recognized as supported and unpatched");
         check(!LayoutPatcher::analyze(original, QStringLiteral("no-such-tweak")).supported,
               "an unknown tweak id is unsupported instead of guessed at");
         const QString path = temp.filePath(QStringLiteral("layout.exe"));
         write(path, original);
         const auto applied = LayoutPatcher::apply(path, id, true);
         if (!applied.ok) std::printf("    %s\n", qPrintable(applied.msg));
-        check(applied.ok, "the sidebar-to-titlebar tweak applies to the stock player shape");
+        check(applied.ok, "the sidebar-to-titlebar tweak applies to the current player shape");
         const auto patchedPlr = resourceText(read(path), r, QStringLiteral("plr.qml"));
-        check(patchedPlr.contains(QLatin1String("anchors.top: iTopbar.top"))
-                  && patchedPlr.contains(QLatin1String("anchors.bottom: iTopbar.bottom"))
-                  && patchedPlr.contains(QLatin1String("anchors.right: iTopbar.right")),
-              "the sidebar instance is re-anchored to the title bar strip");
-        check(patchedPlr.contains(QLatin1String("anchors.left: iTopbar.left"))
+        check(patchedPlr.contains(QLatin1String("width: 0"))
                   && !patchedPlr.contains(QLatin1String("width: pSidebarWidth")),
-              "its width member becomes a span anchor instead of leaving an anchors/width conflict");
+              "the side strip shrinks to zero width instead of staying visible over the title bar");
+        check(patchedPlr.contains(QLatin1String("anchors.top: iTopbar.bottom"))
+                  && patchedPlr.contains(QLatin1String("anchors.right: parent.right")),
+              "the stock content-area anchors are left alone so the game view stays full width");
+        check(patchedPlr.contains(QLatin1String("id: iSidebarTitlebar"))
+                  && patchedPlr.contains(QLatin1String("anchors.fill: parent"))
+                  && insideTitlebar(patchedPlr),
+              "a transparent sidebar copy is inserted inside the title bar");
         check(patchedPlr.contains(QLatin1String("color: \"transparent\""))
-                  && patchedPlr.contains(QLatin1String("visible: true")),
-              "the overlay is transparent and always shown");
-        check(patchedPlr.contains(QStringLiteral("pBorderWidth + 0"))
+                  && patchedPlr.contains(QStringLiteral("pBorderWidth + 0"))
                   && !patchedPlr.contains(QLatin1String("sidebarVisible ? iAppwin.pSidebarWidth")),
-              "the Android frame stops reserving the side strip (and the write does not swallow the CRLF)");
+              "the zero-width strip is transparent and the Android frame stops reserving it");
         const auto patchedSidebar = resourceText(read(path), r, QStringLiteral("PlrSidebar.qml"));
         check(patchedSidebar.contains(QLatin1String("UiRowLayout"))
                   && !patchedSidebar.contains(QLatin1String("UiColumnLayout"))
                   && patchedSidebar.contains(QLatin1String("anchors.centerIn: parent")),
               "the button column becomes a row centered inside the title bar");
+        check(patchedSidebar.contains(QLatin1String("visible: iSidebar.width > 0")),
+              "the zero-width original hides its row instead of painting outside the strip");
         check(patchedSidebar.contains(QLatin1String("onWidthChanged"))
                   && !patchedSidebar.contains(QLatin1String("onHeightChanged"))
                   && !patchedSidebar.contains(QLatin1String("iSidebar.height")),
@@ -1814,17 +1879,49 @@ int runPatchRegressionTests()
         const auto patchedState = LayoutPatcher::analyze(read(path), id);
         check(patchedState.supported && patchedState.applied, "the patched player reports the tweak as applied");
         check(LayoutPatcher::apply(path, id, false).ok, "turning the option off restores the stock layout");
-        // Reversibility is pinned at the document level: every edited QML file
-        // comes back byte-for-byte (the EXE itself keeps replaceResource's
-        // refreshed resource timestamps, which is what makes Qt reject stale
-        // caches after any patch cycle).
         const QByteArray restoredBytes = read(path);
-        check(resourceText(restoredBytes, r, QStringLiteral("plr.qml")) == plr
+        check(resourceText(restoredBytes, r, QStringLiteral("plr.qml")) == anchoredPlr
                   && resourceText(restoredBytes, r, QStringLiteral("PlrSidebar.qml")) == sidebar
                   && resourceText(restoredBytes, r, QStringLiteral("PlrTopbar.qml")) == topbar,
               "the restore writes every edited document back byte-for-byte");
         const auto restored = LayoutPatcher::analyze(read(path), id);
         check(restored.supported && !restored.applied, "the restored player reports stock again");
+
+        // ---- old row-layout player (the shape that used to be disabled) ----
+        auto legacy = resources({ { QStringLiteral("plr.qml"), legacyPlr },
+                                  { QStringLiteral("PlrSidebar.qml"), sidebar },
+                                  { QStringLiteral("PlrTopbar.qml"), topbar } }, true,
+                                { QStringLiteral("PlrTopbar.qml") });
+        addRegistration(legacy, false);
+        const auto legacyStock = LayoutPatcher::analyze(legacy.f.bytes, id);
+        check(legacyStock.supported && !legacyStock.applied,
+              "the old row-layout player is recognized instead of being refused as unsafe");
+        const QString legacyPath = temp.filePath(QStringLiteral("layout-legacy.exe"));
+        write(legacyPath, legacy.f.bytes);
+        const auto legacyApplied = LayoutPatcher::apply(legacyPath, id, true);
+        if (!legacyApplied.ok) std::printf("    %s\n", qPrintable(legacyApplied.msg));
+        check(legacyApplied.ok, "the tweak applies to the old row-layout player");
+        const auto legacyPlrText = resourceText(read(legacyPath), legacy, QStringLiteral("plr.qml"));
+        check(legacyPlrText.contains(QLatin1String("Layout.preferredWidth: 0"))
+                  && !legacyPlrText.contains(QLatin1String("Layout.preferredWidth: pSidebarWidth")),
+              "the old sidebar item takes no horizontal space once the layout is moved");
+        check(legacyPlrText.contains(QLatin1String("id: iSidebarTitlebar"))
+                  && insideTitlebar(legacyPlrText)
+                  && legacyPlrText.contains(QStringLiteral("pBorderWidth + 0")),
+              "the old player gets the same title-bar copy and full-width Android frame");
+        const auto legacySidebarText = resourceText(read(legacyPath), legacy, QStringLiteral("PlrSidebar.qml"));
+        check(legacySidebarText.contains(QLatin1String("UiRowLayout"))
+                  && legacySidebarText.contains(QLatin1String("visible: iSidebar.width > 0")),
+              "the old sidebar component uses the same centered row");
+        const auto legacyState = LayoutPatcher::analyze(read(legacyPath), id);
+        check(legacyState.supported && legacyState.applied, "the old patched player reports applied");
+        check(LayoutPatcher::apply(legacyPath, id, false).ok, "the old row-layout player restores");
+        const QByteArray legacyRestored = read(legacyPath);
+        check(resourceText(legacyRestored, legacy, QStringLiteral("plr.qml")) == legacyPlr
+                  && resourceText(legacyRestored, legacy, QStringLiteral("PlrSidebar.qml")) == sidebar
+                  && resourceText(legacyRestored, legacy, QStringLiteral("PlrTopbar.qml")) == topbar,
+              "the old player restores every edited document byte-for-byte");
+
         auto other = resources({ { QStringLiteral("Other.qml"),
                                    QStringLiteral("import QtQuick\r\nRectangle { }\r\n") } }, true, {});
         addRegistration(other, false);
