@@ -1922,6 +1922,67 @@ int runPatchRegressionTests()
                   && resourceText(legacyRestored, legacy, QStringLiteral("PlrTopbar.qml")) == topbar,
               "the old player restores every edited document byte-for-byte");
 
+        // ---- 5.10 title bar whose toggle already binds `visible` ----
+        // A second `visible:` member would be a duplicate binding (a QML error),
+        // so the existing expression has to be wrapped and unwrapped, not
+        // replaced. This is the shape real 5.10.150 uses.
+        const QString boundTopbar = QStringLiteral(
+            "import QtQuick 2.15\r\n"
+            "Rectangle {\r\n"
+            "    id: iTopbar\r\n"
+            "    property list<QtObject> pNonFixedTopbarItems: [\r\n"
+            "        PlrTopbarElement {\r\n"
+            "            pVisible: true\r\n"
+            "            pWidth: iBackBtn.width\r\n"
+            "            onChangeVisibility: function(visibility) {\r\n"
+            "                iBackBtn.visible = visibility\r\n"
+            "            }\r\n"
+            "        },\r\n"
+            "        PlrTopbarElement {\r\n"
+            "            pVisible: true\r\n"
+            "            pWidth: iHomeBtn.width\r\n"
+            "            onChangeVisibility: function(visibility) {\r\n"
+            "                iHomeBtn.visible = visibility\r\n"
+            "            }\r\n"
+            "        },\r\n"
+            "        PlrTopbarElement {\r\n"
+            "            pVisible: true\r\n"
+            "            pWidth: iRecentBtn.width\r\n"
+            "            onChangeVisibility: function(visibility) {\r\n"
+            "                iRecentBtn.visible = visibility\r\n"
+            "            }\r\n"
+            "        }\r\n"
+            "    ]\r\n"
+            "    Row {\r\n"
+            "        UiImageButton {\r\n"
+            "            id: iSidebarShowBtn\r\n"
+            "            asset: \"TitlebarExpand\"\r\n"
+            "            visible: !iSidebar.visible\r\n"
+            "        }\r\n"
+            "    }\r\n"
+            "}\r\n");
+        auto bound = resources({ { QStringLiteral("plr.qml"), anchoredPlr },
+                                 { QStringLiteral("PlrSidebar.qml"), sidebar },
+                                 { QStringLiteral("PlrTopbar.qml"), boundTopbar } }, true,
+                               { QStringLiteral("PlrTopbar.qml") });
+        addRegistration(bound, false);
+        check(LayoutPatcher::analyze(bound.f.bytes, id).supported,
+              "a title bar whose toggle already binds visible is still supported");
+        const QString boundPath = temp.filePath(QStringLiteral("layout-bound.exe"));
+        write(boundPath, bound.f.bytes);
+        const auto boundApplied = LayoutPatcher::apply(boundPath, id, true);
+        if (!boundApplied.ok) std::printf("    %s\n", qPrintable(boundApplied.msg));
+        check(boundApplied.ok, "the tweak applies when the toggle already binds visible");
+        const auto boundText = resourceText(read(boundPath), bound, QStringLiteral("PlrTopbar.qml"));
+        check(boundText.contains(QLatin1String("visible: false && (!iSidebar.visible)"))
+                  && !boundText.contains(QLatin1String("visible: !iSidebar.visible")),
+              "an existing visibility binding is wrapped, not duplicated");
+        check(LayoutPatcher::apply(boundPath, id, false).ok
+                  && resourceText(read(boundPath), bound, QStringLiteral("PlrTopbar.qml")) == boundTopbar
+                  && resourceText(read(boundPath), bound, QStringLiteral("plr.qml")) == anchoredPlr
+                  && resourceText(read(boundPath), bound, QStringLiteral("PlrSidebar.qml")) == sidebar,
+              "the wrapped visibility binding unwraps byte-for-byte on restore");
+
         auto other = resources({ { QStringLiteral("Other.qml"),
                                    QStringLiteral("import QtQuick\r\nRectangle { }\r\n") } }, true, {});
         addRegistration(other, false);

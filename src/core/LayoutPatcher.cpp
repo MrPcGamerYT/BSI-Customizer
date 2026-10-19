@@ -32,6 +32,10 @@ const QString kInsetStock = QStringLiteral(
     "pBorderWidth + (sidebarVisible ? iAppwin.pSidebarWidth : 0)");
 const QString kInsetPatched = QStringLiteral("pBorderWidth + 0");
 const QString kHidden = QStringLiteral("\nvisible: false");
+// Prefix used when the toggle already binds `visible` (a second member would
+// be a duplicate binding). The original expression is kept verbatim inside the
+// parentheses so restoring is an exact text unwrap.
+const QString kHiddenPrefix = QStringLiteral("false && ");
 const QString kOverlayId = QStringLiteral("iSidebarTitlebar");
 const QString kOverlayMarker = QStringLiteral("// BSI CUSTOMIZER: sidebar buttons over the title bar");
 // The old (5.x) player lays the sidebar out as a row-layout item; the new one
@@ -373,9 +377,8 @@ bool sidebarEdits(QString &qml, bool enabled, QList<Edit> &edits)
 bool topbarEdits(QString &qml, bool enabled, QList<Edit> &edits)
 {
     const QString masked = QmlText::mask(qml);
-    // The sidebar toggle has nothing left to toggle; hiding it keeps the
-    // title bar honest. It is not part of the width-managed item lists, so a
-    // plain visibility member sticks.
+    // The sidebar toggle has nothing left to toggle, and leaving it live would
+    // still resize the window by pSidebarWidth on click, so it is hidden.
     QmlText::Object toggle;
     bool found = false;
     for (const auto &object : QmlText::objects(masked, QStringLiteral("UiImageButton"))) {
@@ -386,14 +389,37 @@ bool topbarEdits(QString &qml, bool enabled, QList<Edit> &edits)
         }
     }
     if (!found) return false;
+    // Some builds already bind the toggle's visibility (5.10: `visible:
+    // !iSidebar.visible`). A second `visible:` member would be a duplicate
+    // binding, so wrap the existing expression in `false && (...)` instead and
+    // unwrap it verbatim when restoring. Builds without one get a plain member.
+    QmlText::Binding toggleVisible;
+    const bool hasVisible =
+        QmlText::binding(masked, toggle.open, toggle.end, QStringLiteral("visible"), &toggleVisible)
+        && directChild(masked, toggle.open, toggleVisible.nameBegin);
+    const auto toggleValue = [&] {
+        return qml.mid(toggleVisible.valueBegin, toggleVisible.valueEnd - toggleVisible.valueBegin);
+    };
     if (enabled) {
-        if (qml.mid(toggle.open, toggle.end - toggle.open).contains(QLatin1String("visible: false")))
+        if (hasVisible) {
+            if (toggleValue().startsWith(kHiddenPrefix)) return false;
+            addEdit(edits, toggleVisible.valueBegin, toggleVisible.valueEnd - toggleVisible.valueBegin,
+                    kHiddenPrefix + QLatin1Char('(') + toggleValue() + QLatin1Char(')'));
+        } else {
+            addEdit(edits, toggle.open + 1, 0, kHidden);
+        }
+    } else if (qml.mid(toggle.open + 1, kHidden.size()) == kHidden) {
+        addEdit(edits, toggle.open + 1, kHidden.size(), QString());
+    } else if (hasVisible) {
+        const QString current = toggleValue();
+        if (!current.startsWith(kHiddenPrefix + QLatin1Char('('))
+            || !current.endsWith(QLatin1Char(')')))
             return false;
-        addEdit(edits, toggle.open + 1, 0, kHidden);
+        addEdit(edits, toggleVisible.valueBegin, toggleVisible.valueEnd - toggleVisible.valueBegin,
+                current.mid(int(kHiddenPrefix.size()) + 1,
+                            current.size() - int(kHiddenPrefix.size()) - 2));
     } else {
-        const int at = qml.indexOf(kHidden, toggle.open);
-        if (at < 0 || at + kHidden.size() > toggle.end) return false;
-        addEdit(edits, at, kHidden.size(), QString());
+        return false;
     }
     // The title bar's own Back/Home/Recent live in pNonFixedTopbarItems and
     // are toggled imperatively; switching their element's pVisible off is the
@@ -410,7 +436,9 @@ bool topbarEdits(QString &qml, bool enabled, QList<Edit> &edits)
         for (const auto &wanted : duplicates) {
             if (!text.contains(wanted.first) || handled.contains(wanted.first)) continue;
             QmlText::Binding visible;
-            if (!QmlText::binding(masked, object.open, object.end, wanted.second, &visible)) return false;
+            if (!QmlText::binding(masked, object.open, object.end, wanted.second, &visible)
+                || !directChild(masked, object.open, visible.nameBegin))
+                return false;
             const QString current = qml.mid(visible.valueBegin, visible.valueEnd - visible.valueBegin);
             const QString from = enabled ? QStringLiteral("true") : QStringLiteral("false");
             if (current != from) return false;
