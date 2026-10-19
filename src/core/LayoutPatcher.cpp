@@ -85,16 +85,6 @@ bool swapMember(const QString &qml, const QString &masked, int begin, int end, c
     return true;
 }
 
-// Swap only the member name (`onHeightChanged` <-> `onWidthChanged`).
-bool swapName(const QString &masked, int begin, int end, const QString &from, const QString &to,
-              QList<Edit> &edits)
-{
-    QmlText::Binding binding;
-    if (!QmlText::binding(masked, begin, end, from, &binding)) return false;
-    addEdit(edits, binding.nameBegin, binding.nameEnd - binding.nameBegin, to);
-    return true;
-}
-
 // Span of `function <name>(...) { ... }` in the masked text: [bodyBegin, bodyEnd).
 bool functionSpan(const QString &masked, const QString &name, int *bodyBegin, int *bodyEnd)
 {
@@ -286,30 +276,55 @@ bool plrEdits(QString &qml, bool enabled, SidebarLayout layout, QList<Edit> &edi
 
 // --------------------------------------------------------- PlrSidebar.qml
 
+// True when `childBegin` is a direct member of the object opened at
+// `parentOpen` (the only braces between them are balanced member blocks,
+// e.g. a Component or a signal handler).
+bool directChild(const QString &masked, int parentOpen, int childBegin)
+{
+    int depth = 0;
+    for (int i = parentOpen + 1; i < childBegin; ++i) {
+        const QChar c = masked.at(i);
+        if (c == QLatin1Char('{')) ++depth;
+        else if (c == QLatin1Char('}')) --depth;
+    }
+    return depth == 0;
+}
+
 bool sidebarEdits(QString &qml, bool enabled, QList<Edit> &edits)
 {
-    QString masked = QmlText::mask(qml);
+    const QString masked = QmlText::mask(qml);
+    // The component's root Rectangle owns fResetSidebar. Locate it first so
+    // the button strip below can only be the root's direct child layout, not
+    // some popup's column that happens to mention the kebab button.
+    QmlText::Object root;
+    bool rooted = false;
+    for (const auto &object : QmlText::objects(masked, QStringLiteral("Rectangle"))) {
+        if (qml.mid(object.open, object.end - object.open).contains(QLatin1String("function fResetSidebar"))) {
+            root = object;
+            rooted = true;
+            break;
+        }
+    }
+    if (!rooted) return false;
+
     // The button column becomes a centered row: the same elements, the same
     // overflow logic, one dimension over. The vertical spacer's Layout.fillHeight
     // is inert in a row layout, so it costs no horizontal space.
     QmlText::Object column;
     bool found = false;
-    for (const auto &object : QmlText::objects(masked, QStringLiteral("UiColumnLayout"))) {
-        if (qml.mid(object.open, object.end - object.open).contains(QLatin1String("iKebabMenuBtn"))) {
-            column = object;
-            found = true;
-            break;
-        }
-    }
-    if (!found && !enabled) {
-        for (const auto &object : QmlText::objects(masked, QStringLiteral("UiRowLayout"))) {
+    const auto pickColumn = [&](const QString &type) {
+        for (const auto &object : QmlText::objects(masked, type)) {
+            if (object.nameBegin <= root.open || object.end > root.end) continue;
+            if (!directChild(masked, root.open, object.nameBegin)) continue;
             if (qml.mid(object.open, object.end - object.open).contains(QLatin1String("iKebabMenuBtn"))) {
                 column = object;
-                found = true;
-                break;
+                return true;
             }
         }
-    }
+        return false;
+    };
+    found = pickColumn(QStringLiteral("UiColumnLayout"));
+    if (!found && !enabled) found = pickColumn(QStringLiteral("UiRowLayout"));
     if (!found) return false;
     if (enabled) {
         addEdit(edits, column.nameBegin, int(QStringLiteral("UiColumnLayout").size()),
@@ -332,22 +347,15 @@ bool sidebarEdits(QString &qml, bool enabled, QList<Edit> &edits)
     }
     // The overflow budget is measured in buttons of 32px; in a horizontal
     // strip that budget is the width, and the row re-lays out when it changes.
-    const auto roots = QmlText::objects(masked, QStringLiteral("Rectangle"));
-    QmlText::Object root;
-    bool rooted = false;
-    for (const auto &object : roots) {
-        if (qml.mid(object.open, object.end - object.open).contains(QLatin1String("function fResetSidebar"))) {
-            root = object;
-            rooted = true;
-            break;
-        }
-    }
-    if (!rooted) return false;
-    if (!swapName(masked, root.open, root.end,
-                  enabled ? QStringLiteral("onHeightChanged") : QStringLiteral("onWidthChanged"),
-                  enabled ? QStringLiteral("onWidthChanged") : QStringLiteral("onHeightChanged"),
-                  edits))
-        return false;
+    // Only the root's own handler may be renamed - a child object's
+    // onHeightChanged must stay untouched.
+    QmlText::Binding handler;
+    const QString handlerFrom = enabled ? QStringLiteral("onHeightChanged")
+                                        : QStringLiteral("onWidthChanged");
+    if (!QmlText::binding(masked, root.open, root.end, handlerFrom, &handler)) return false;
+    if (!directChild(masked, root.open, handler.nameBegin)) return false;
+    addEdit(edits, handler.nameBegin, handler.nameEnd - handler.nameBegin,
+            enabled ? QStringLiteral("onWidthChanged") : QStringLiteral("onHeightChanged"));
     int bodyBegin = 0, bodyEnd = 0;
     if (!functionSpan(masked, QStringLiteral("fResetSidebar"), &bodyBegin, &bodyEnd)) return false;
     const QString from = enabled ? QStringLiteral("iSidebar.height") : QStringLiteral("iSidebar.width");
