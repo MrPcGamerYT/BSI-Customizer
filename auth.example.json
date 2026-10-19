@@ -4,8 +4,16 @@
     "that is committed. Copy it to auth.json next to the EXE (or anywhere and point",
     "BSIC_AUTH_FILE at it) and fill that in; never commit or ship the filled-in copy.",
     "Every value here can come from an environment variable instead - see _env below.",
-    "discord.clientSecret is OPTIONAL: the app is a public OAuth2 client using PKCE,",
-    "so no secret needs to exist at all. Only set one if you know you need it.",
+    "Access is granted when EITHER gate passes:",
+    "  1. discord.allowUsers lists the Discord user ID, OR",
+    "  2. discord.guildId + discord.roles + discord.requiredTier: the signed-in user",
+    "     is a member of that server and holds a listed role whose tier matches.",
+    "The role gate uses GET /users/@me/guilds/{guildId}/member, which needs the",
+    "guilds.members.read scope (added automatically when a role gate is configured,",
+    "so the identify-only scope below is enough).",
+    "discord.clientSecret is OPTIONAL: the app is a public OAuth2 client using PKCE.",
+    "If Discord answers invalid_client with an empty secret, either enable the Public",
+    "Client flag for the application (Developer Portal -> OAuth2) or set the secret.",
     "The whole file can also be baked into the build from the ZLP_AUTH_JSON secret",
     "(or passed as the ZLP_AUTH_JSON env blob) - see _embed below."
   ],
@@ -17,6 +25,11 @@
     "allowUsers": [
       "PUT_YOUR_DISCORD_USER_ID_HERE"
     ],
+    "guildId": "",
+    "requiredTier": "",
+    "roles": {
+      "PUT_A_ROLE_ID_HERE": { "tier": "Dev", "label": "Dev" }
+    },
     "inviteUrl": ""
   },
   "session": {
@@ -32,7 +45,9 @@
       "BSIC_DISCORD_SCOPE",
       "BSIC_DISCORD_REDIRECT_PORT",
       "BSIC_DISCORD_ALLOW_USERS  (comma/semicolon separated user IDs)",
-      "BSIC_DISCORD_INVITE"
+      "BSIC_DISCORD_GUILD_ID",
+      "BSIC_DISCORD_REQUIRED_TIER",
+      "BSIC_DISCORD_INVITE  (discord.roles comes from the file/blob)"
     ],
     "discord_portal": [
       "Add a redirect URI in the Discord developer portal that matches exactly:",

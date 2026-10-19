@@ -30,6 +30,7 @@ const char kAuthorizeUrl[] = "https://discord.com/oauth2/authorize";
 const char kTokenUrl[] = "https://discord.com/api/oauth2/token";
 const char kApiUrl[] = "https://discord.com/api";
 const char kRedirectPath[] = "/auth/discord/callback";
+const char kGuildMemberScope[] = "guilds.members.read";
 const int kDefaultRedirectPort = 43713;
 const int kDiscordHandoffMs = 180000;   // same 3-minute window as FalcoForge
 const int kLoopbackRetries = 4;
@@ -70,6 +71,78 @@ QString buildForm(const QList<QPair<QString, QString>> &fields)
     return query.toString(QUrl::FullyEncoded);
 }
 
+// GitHub secrets are often pasted with a surrounding ```json fence (or a BOM).
+// Strip that packaging so the blob itself parses as JSON.
+QByteArray cleanJsonBlob(QByteArray bytes)
+{
+    bytes = bytes.trimmed();
+    if (bytes.startsWith("\xEF\xBB\xBF"))
+        bytes.remove(0, 3);
+    if (bytes.startsWith("```")) {
+        const int firstNewline = bytes.indexOf('\n');
+        if (firstNewline >= 0)
+            bytes = bytes.mid(firstNewline + 1);
+        const int closingFence = bytes.lastIndexOf("```");
+        if (closingFence >= 0)
+            bytes = bytes.left(closingFence);
+        bytes = bytes.trimmed();
+    }
+    return bytes;
+}
+
+// Snowflake-ish config values are sometimes written unquoted in JSON. Those
+// arrive as doubles; accept them so a numeric clientId/guildId still works.
+QString jsonText(const QJsonValue &value)
+{
+    if (value.isString())
+        return value.toString();
+    if (value.isDouble()) {
+        const double raw = value.toDouble();
+        if (raw > 0 && raw <= 9.2e18)
+            return QString::number(qulonglong(raw));
+    }
+    return {};
+}
+
+// Chat apps auto-link "guilds.members.read" (and bare invite URLs) into
+// "[label](target)" markdown when an auth.json is copied through them. Strip
+// that shape so the value that reaches Discord is the real scope/URL.
+QString stripMarkdownLink(const QString &input, bool preferLabel)
+{
+    static const QRegularExpression markdown(
+        QStringLiteral("\\[([^\\]]*)\\]\\(([^)]*)\\)"));
+    if (!markdown.match(input).hasMatch())
+        return input.trimmed();
+    QString cleaned = input;
+    // For scopes keep the label ("guilds.members.read"); for URLs keep the
+    // target ("https://discord.gg/..."). Everything around the link survives,
+    // so "identify [guilds.members.read](...)" keeps the identify scope.
+    cleaned.replace(markdown, preferLabel ? QStringLiteral("\\1") : QStringLiteral("\\2"));
+    return cleaned.trimmed();
+}
+
+// Discord wants scopes space separated. Accept commas/semicolons/extra spaces,
+// dedupe, always keep identify, and make sure the role gate carries the member
+// scope. A malformed scope here is the usual cause of Discord refusing login.
+QString normalizeScope(const QString &raw, bool needsGuildMemberRead)
+{
+    QString cleaned = stripMarkdownLink(raw, true);
+    cleaned.replace(QLatin1Char(','), QLatin1Char(' '));
+    cleaned.replace(QLatin1Char(';'), QLatin1Char(' '));
+    QStringList scopes;
+    for (const QString &piece : cleaned.split(QRegularExpression(QStringLiteral("\\s+")),
+                                              Qt::SkipEmptyParts)) {
+        const QString scope = piece.trimmed().toLower();
+        if (!scope.isEmpty() && !scopes.contains(scope))
+            scopes << scope;
+    }
+    if (!scopes.contains(QStringLiteral("identify")))
+        scopes.prepend(QStringLiteral("identify"));
+    if (needsGuildMemberRead && !scopes.contains(QLatin1String(kGuildMemberScope)))
+        scopes << QLatin1String(kGuildMemberScope);
+    return scopes.join(QLatin1Char(' '));
+}
+
 } // namespace
 
 // ---------------------------------------------------------------------------
@@ -90,10 +163,11 @@ AuthManager::Config AuthManager::loadConfig()
     //      data;
     //   3. the blob baked into this build from the ZLP_AUTH_JSON secret.
     auto parseDiscord = [](const QByteArray &bytes, QJsonObject *out) {
-        if (bytes.trimmed().isEmpty())
+        const QByteArray json = cleanJsonBlob(bytes);
+        if (json.isEmpty())
             return false;
         QJsonParseError parseError;
-        const QJsonDocument doc = QJsonDocument::fromJson(bytes, &parseError);
+        const QJsonDocument doc = QJsonDocument::fromJson(json, &parseError);
         if (parseError.error != QJsonParseError::NoError || !doc.isObject())
             return false;
         *out = doc.object().value(QStringLiteral("discord")).toObject();
@@ -131,15 +205,76 @@ AuthManager::Config AuthManager::loadConfig()
             config.sourceFile = QStringLiteral("embedded auth.json (build-time ZLP_AUTH_JSON)");
     }
 
-    config.clientId = envOr(env, "BSIC_DISCORD_CLIENT_ID", discord.value("clientId").toString()).trimmed();
+    config.clientId = envOr(env, "BSIC_DISCORD_CLIENT_ID",
+                            jsonText(discord.value("clientId")))
+                          .trimmed();
     config.clientSecret = envOr(env, "BSIC_DISCORD_CLIENT_SECRET",
-                                discord.value("clientSecret").toString()).trimmed();
-    config.scope = envOr(env, "BSIC_DISCORD_SCOPE",
-                         discord.value("scope").toString(QStringLiteral("identify")))
-                       .trimmed();
-    if (config.scope.isEmpty())
-        config.scope = QStringLiteral("identify");
-    config.inviteUrl = envOr(env, "BSIC_DISCORD_INVITE", discord.value("inviteUrl").toString()).trimmed();
+                                jsonText(discord.value("clientSecret")))
+                              .trimmed();
+    config.guildId = envOr(env, "BSIC_DISCORD_GUILD_ID",
+                           jsonText(discord.value("guildId")))
+                         .trimmed();
+    config.requiredTier = envOr(env, "BSIC_DISCORD_REQUIRED_TIER",
+                                jsonText(discord.value("requiredTier")))
+                              .trimmed();
+
+    // Role gate: discord.roles maps a role snowflake to either a tier string or
+    // {"tier": "Dev", "label": "Dev"} - the shape Premium-Optimizer's auth.json
+    // uses. An array of {"id", "tier"} objects is accepted too.
+    const QJsonValue rolesValue = discord.value(QStringLiteral("roles"));
+    if (rolesValue.isObject()) {
+        const QJsonObject roleMap = rolesValue.toObject();
+        for (auto it = roleMap.constBegin(); it != roleMap.constEnd(); ++it) {
+            const QString roleId = it.key().trimmed();
+            if (roleId.isEmpty())
+                continue;
+            QString tier;
+            if (it.value().isObject()) {
+                const QJsonObject definition = it.value().toObject();
+                tier = firstNonEmpty({
+                    jsonText(definition.value(QStringLiteral("tier"))),
+                    jsonText(definition.value(QStringLiteral("label"))),
+                    jsonText(definition.value(QStringLiteral("name"))),
+                });
+            } else {
+                tier = jsonText(it.value());
+            }
+            config.roles.insert(roleId, tier.trimmed());
+        }
+    } else if (rolesValue.isArray()) {
+        for (const QJsonValue &entry : rolesValue.toArray()) {
+            if (entry.isString()) {
+                const QString roleId = entry.toString().trimmed();
+                if (!roleId.isEmpty())
+                    config.roles.insert(roleId, QString());
+                continue;
+            }
+            if (!entry.isObject())
+                continue;
+            const QJsonObject definition = entry.toObject();
+            const QString roleId = firstNonEmpty({
+                jsonText(definition.value(QStringLiteral("id"))),
+                jsonText(definition.value(QStringLiteral("roleId"))),
+                jsonText(definition.value(QStringLiteral("role"))),
+            });
+            if (roleId.isEmpty())
+                continue;
+            QString tier = firstNonEmpty({
+                jsonText(definition.value(QStringLiteral("tier"))),
+                jsonText(definition.value(QStringLiteral("label"))),
+                jsonText(definition.value(QStringLiteral("name"))),
+            });
+            config.roles.insert(roleId, tier.trimmed());
+        }
+    }
+
+    // Keep the scopes Discord needs. guilds.members.read is added for a role
+    // gate even when the blob forgets it; identify is always present.
+    config.scope = normalizeScope(envOr(env, "BSIC_DISCORD_SCOPE",
+                                        jsonText(discord.value("scope"))),
+                                  config.roleGateConfigured());
+    config.inviteUrl = stripMarkdownLink(
+        envOr(env, "BSIC_DISCORD_INVITE", jsonText(discord.value("inviteUrl"))), false);
 
     const QString portEnv = env.value(QStringLiteral("BSIC_DISCORD_REDIRECT_PORT")).trimmed();
     bool portOk = false;
@@ -183,14 +318,29 @@ AuthManager::Config AuthManager::loadConfig()
             "auth.example.json to auth.json next to the EXE and fill in discord.clientId - "
             "or bake the whole auth.json into the build with the ZLP_AUTH_JSON secret. "
             "See docs/AUTH.md.");
-    } else if (config.allowUsers.isEmpty()) {
-        config.setupHint = QStringLiteral(
-            "No dev allowlist is configured (discord.allowUsers). Add your Discord user ID to "
-            "auth.json or set BSIC_DISCORD_ALLOW_USERS - see docs/AUTH.md.");
+    } else if (config.allowUsers.isEmpty() && !config.roleGateConfigured()) {
+        if (!config.roles.isEmpty() && config.guildId.isEmpty()) {
+            config.setupHint = QStringLiteral(
+                "Discord roles are configured but discord.guildId is missing, so the role gate "
+                "cannot be checked. Add the server ID (Developer Mode -> Copy Server ID) - see "
+                "docs/AUTH.md.");
+        } else {
+            config.setupHint = QStringLiteral(
+                "No dev access gate is configured: add your Discord user ID to "
+                "discord.allowUsers, or set discord.guildId + discord.roles + "
+                "discord.requiredTier for a server-role gate - see docs/AUTH.md.");
+        }
     } else {
-        config.setupHint = QStringLiteral("Sign-in config: %1")
+        QString gate = QStringLiteral("allowlist");
+        if (config.roleGateConfigured()) {
+            gate = config.requiredTier.isEmpty()
+                       ? QStringLiteral("server roles")
+                       : QStringLiteral("server role tier %1").arg(config.requiredTier);
+        }
+        config.setupHint = QStringLiteral("Sign-in config: %1 (%2)")
                                .arg(config.sourceFile.isEmpty() ? QStringLiteral("environment")
-                                                                : config.sourceFile);
+                                                                : config.sourceFile,
+                                    gate);
     }
     return config;
 }
@@ -291,6 +441,39 @@ bool AuthManager::allowlisted(const QString &id) const
     if (id.isEmpty())
         return false;
     return m_config.allowUsers.contains(id);
+}
+
+bool AuthManager::tierForRoles(const Config &config, const QStringList &memberRoles,
+                               QString *tier, QString *roleId)
+{
+    const QString required = config.requiredTier.trimmed();
+    for (auto it = config.roles.constBegin(); it != config.roles.constEnd(); ++it) {
+        if (!memberRoles.contains(it.key()))
+            continue;
+        const QString label = it.value().trimmed();
+        // A plain role ID (no tier info) is an explicit grant; otherwise the
+        // role's tier must match discord.requiredTier (case-insensitive).
+        if (!required.isEmpty() && !label.isEmpty()
+            && label.compare(required, Qt::CaseInsensitive) != 0)
+            continue;
+        if (tier) {
+            *tier = label.isEmpty()
+                        ? (required.isEmpty() ? QStringLiteral("member") : required)
+                        : label;
+        }
+        if (roleId)
+            *roleId = it.key();
+        return true;
+    }
+    return false;
+}
+
+bool AuthManager::savedRoleStillGranted(const QVariantMap &identity) const
+{
+    const QString role = identity.value(QStringLiteral("AccessRole")).toString().trimmed();
+    if (role.isEmpty() || !m_config.roleGateConfigured())
+        return false;
+    return tierForRoles(m_config, QStringList { role }, nullptr, nullptr);
 }
 
 // ---------------------------------------------------------------------------
@@ -461,9 +644,13 @@ QString AuthManager::mapDiscordTokenError(int status, const QByteArray &body,
                + QStringLiteral("  (127.0.0.1 on purpose - not localhost), then press the Discord "
                                 "button once more.");
     if (containsText(desc, QStringLiteral("invalid_client")))
-        return QStringLiteral("Discord rejected the application credentials. Check that the client "
-                              "id is the numeric Application ID from the Discord Developer Portal "
-                              "and that the client secret (if set) is the current one.");
+        return QStringLiteral(
+            "Discord rejected the application credentials (invalid_client). Check that the "
+            "client id is the numeric Application ID from the Discord Developer Portal. If "
+            "discord.clientSecret is empty, Discord only accepts a secret-less PKCE exchange "
+            "when the application has the Public Client flag enabled (Developer Portal -> "
+            "OAuth2); otherwise put the current Client Secret into the ZLP_AUTH_JSON secret as "
+            "discord.clientSecret and re-run the build.");
     if (containsText(desc, QStringLiteral("code_verifier"))
         || containsText(desc, QStringLiteral("code verifier"))
         || containsText(desc, QStringLiteral("pkce"))
@@ -476,8 +663,10 @@ QString AuthManager::mapDiscordTokenError(int status, const QByteArray &body,
                               "Press the Discord button once more and finish in the browser "
                               "right away.");
     if (containsText(desc, QStringLiteral("scope")))
-        return QStringLiteral("Discord refused the requested scopes (%1). Make sure the "
-                              "application is allowed to request them.").arg(scope);
+        return QStringLiteral(
+                   "Discord refused the requested scopes (%1). Scopes must be space separated "
+                   "and the application has to be allowed to request them - see docs/AUTH.md.")
+            .arg(scope);
     if (!detail.isEmpty())
         return QStringLiteral("Discord refused the sign-in: ") + detail;
     return QStringLiteral("Discord refused the sign-in (HTTP %1). Press the Discord button once "
@@ -771,6 +960,81 @@ QVariantMap AuthManager::completeManual(const QString &urlOrCode)
     return out;
 }
 
+AuthManager::GuildRoleAnswer AuthManager::checkGuildRole(const QString &accessToken)
+{
+    GuildRoleAnswer out;
+    if (!m_config.roleGateConfigured())
+        return out;
+
+    const QString url = QStringLiteral("%1/users/@me/guilds/%2/member")
+                            .arg(QString::fromLatin1(kApiUrl), m_config.guildId);
+    const HttpAnswer answer = httpGet(url, accessToken);
+
+    if (answer.status == 0) {
+        out.message = answer.error.isEmpty()
+                          ? QStringLiteral("Discord could not be reached to check your server "
+                                           "roles. Check the internet connection and sign in "
+                                           "again.")
+                          : QStringLiteral("Discord could not be reached to check your server "
+                                           "roles: %1")
+                                .arg(answer.error);
+        return out;
+    }
+
+    QJsonParseError parseError;
+    const QJsonObject body = QJsonDocument::fromJson(answer.body, &parseError).object();
+    const int apiCode = body.value(QStringLiteral("code")).toInt();
+
+    // 404 = 10004 unknown guild / 10007 unknown member: the sign-in worked,
+    // the account simply is not in that server. That is a gate answer, not a
+    // technical failure.
+    if (answer.status == 404) {
+        out.ok = true;
+        out.notMember = true;
+        return out;
+    }
+    if (answer.status == 403) {
+        out.missingScope = true;
+        out.message = QStringLiteral(
+                          "Discord refused the server role check (HTTP 403%1). The access token "
+                          "must carry the guilds.members.read scope - the requested scopes were "
+                          "\"%2\". Check the application in the Discord Developer Portal, then "
+                          "sign in again.")
+                          .arg(apiCode > 0 ? QStringLiteral(", code %1").arg(apiCode) : QString(),
+                               m_config.scope);
+        return out;
+    }
+    if (answer.status == 401) {
+        out.message = QStringLiteral("Discord did not accept the access token (HTTP 401). Press "
+                                     "Continue with Discord to sign in again.");
+        return out;
+    }
+    if (answer.status != 200) {
+        out.message = QStringLiteral("Discord could not check your server roles (HTTP %1%2).")
+                          .arg(answer.status)
+                          .arg(apiCode > 0 ? QStringLiteral(", code %1").arg(apiCode) : QString());
+        return out;
+    }
+
+    const QJsonValue rolesValue = body.value(QStringLiteral("roles"));
+    if (!rolesValue.isArray()) {
+        out.message = QStringLiteral("Discord returned an unexpected server member object, so "
+                                     "the role gate cannot be checked. Press Continue with Discord "
+                                     "to try again.");
+        return out;
+    }
+
+    QStringList memberRoles;
+    for (const QJsonValue &value : rolesValue.toArray()) {
+        if (value.isString())
+            memberRoles << value.toString();
+    }
+
+    out.ok = true;
+    out.granted = tierForRoles(m_config, memberRoles, &out.tier, &out.roleId);
+    return out;
+}
+
 AuthManager::DiscordProfile AuthManager::completeDiscord(const QString &urlOrCode)
 {
     DiscordProfile profile;
@@ -851,21 +1115,71 @@ AuthManager::DiscordProfile AuthManager::completeDiscord(const QString &urlOrCod
     identity.insert(QStringLiteral("LinkedAt"),
                     QDateTime::currentDateTimeUtc().toString(Qt::ISODate));
 
-    // ---- the dev allowlist: the only plan this tool has ----
-    if (!allowlisted(id)) {
+    // ---- dev access: explicit allowlist OR the Discord server role gate ----
+    const QString displayName = identity.value(QStringLiteral("DisplayName")).toString();
+    bool granted = allowlisted(id);
+    QString accessVia = granted ? QStringLiteral("allowlist") : QString();
+    QString accessTier;
+    QString accessRole;
+
+    if (!granted && m_config.roleGateConfigured()) {
+        const GuildRoleAnswer role = checkGuildRole(accessToken);
+        if (!role.ok) {
+            profile.identity = identity;
+            profile.message = role.message;
+            return profile;
+        }
+        if (role.granted) {
+            granted = true;
+            accessVia = QStringLiteral("role");
+            accessTier = role.tier;
+            accessRole = role.roleId;
+        } else {
+            QString why;
+            if (role.notMember) {
+                why = QStringLiteral(
+                          "that account is not a member of the required Discord server (guild "
+                          "%1). Join the server%2, then press Continue with Discord again.")
+                          .arg(m_config.guildId,
+                               m_config.inviteUrl.isEmpty()
+                                   ? QString()
+                                   : QStringLiteral(": %1").arg(m_config.inviteUrl));
+            } else {
+                const QString requirement =
+                    m_config.requiredTier.isEmpty()
+                        ? QStringLiteral("one of the configured server roles")
+                        : QStringLiteral("the \"%1\" role tier").arg(m_config.requiredTier);
+                why = QStringLiteral(
+                          "none of that account's roles in the required Discord server grant "
+                          "%1. Ask a server admin for the role, or add the ID to "
+                          "discord.allowUsers in auth.json.")
+                          .arg(requirement);
+            }
+            profile.identity = identity;
+            profile.message = QStringLiteral("Discord linked as %1 (ID %2), but %3")
+                                  .arg(displayName, id, why);
+            return profile;
+        }
+    }
+
+    identity.insert(QStringLiteral("AccessVia"), accessVia);
+    identity.insert(QStringLiteral("AccessTier"), accessTier);
+    identity.insert(QStringLiteral("AccessRole"), accessRole);
+
+    if (!granted) {
         profile.identity = identity;
         profile.message =
-            m_config.allowUsers.isEmpty()
+            (m_config.allowUsers.isEmpty() && !m_config.roleGateConfigured())
                 ? QStringLiteral(
-                      "Discord linked as %1 (ID %2), but no dev allowlist is configured "
-                      "(discord.allowUsers). Add that ID to auth.json or set "
-                      "BSIC_DISCORD_ALLOW_USERS - see docs/AUTH.md.")
-                      .arg(identity.value(QStringLiteral("DisplayName")).toString(), id)
+                      "Discord linked as %1 (ID %2), but no dev access gate is configured. Add "
+                      "that ID to discord.allowUsers, or configure discord.guildId + "
+                      "discord.roles + discord.requiredTier - see docs/AUTH.md.")
+                      .arg(displayName, id)
                 : QStringLiteral(
                       "Discord linked as %1 (ID %2), but this account is not on the dev "
                       "allowlist. Add that ID to discord.allowUsers in auth.json to grant "
                       "access.")
-                      .arg(identity.value(QStringLiteral("DisplayName")).toString(), id);
+                      .arg(displayName, id);
         return profile;
     }
 
@@ -929,13 +1243,18 @@ bool AuthManager::continueSaved()
 
     const QVariantMap identity = m_store.identity();
     const QString id = identity.value(QStringLiteral("Id")).toString();
-    if (!allowlisted(id)) {
+    const bool byAllowlist = allowlisted(id);
+    // A role-based session stored the matched role ID in its signed envelope.
+    // Re-check it against the CURRENT config so removing/retiering a role
+    // closes the gate on the next continue.
+    const bool byRole = !byAllowlist && savedRoleStillGranted(identity);
+    if (!byAllowlist && !byRole) {
         m_store.clear();
         emit sessionChanged();
-        setNote(QStringLiteral("That account is no longer on the dev allowlist. Sign in with "
-                               "Discord again."),
+        setNote(QStringLiteral("That account no longer passes the dev allowlist or Discord role "
+                               "gate. Sign in with Discord again."),
                 QStringLiteral("bad"));
-        emit signInFinished(false, QStringLiteral("Not on the dev allowlist."));
+        emit signInFinished(false, QStringLiteral("The saved sign-in no longer passes the gate."));
         return false;
     }
 

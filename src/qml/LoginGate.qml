@@ -629,6 +629,19 @@ Item {
 
                 // ---- foot ----
                 Text {
+                    visible: auth.inviteUrl.length > 0
+                    Layout.fillWidth: true
+                    Layout.topMargin: 8
+                    text: "Need access? <a href=\"" + auth.inviteUrl + "\">Join the Discord server</a>"
+                    textFormat: Text.StyledText
+                    color: Theme.textDim
+                    linkColor: Theme.neonSoft
+                    font.pixelSize: 12
+                    wrapMode: Text.WordWrap
+                    horizontalAlignment: Text.AlignHCenter
+                    onLinkActivated: Qt.openUrlExternally(link)
+                }
+                Text {
                     visible: auth.setupHint.length > 0
                     Layout.fillWidth: true
                     Layout.topMargin: 10
