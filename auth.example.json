@@ -1,0 +1,52 @@
+{
+  "_readme": [
+    "BSI Customizer sign-in configuration template - the only version of this file",
+    "that is committed. Copy it to auth.json next to the EXE (or anywhere and point",
+    "BSIC_AUTH_FILE at it) and fill that in; never commit or ship the filled-in copy.",
+    "Every value here can come from an environment variable instead - see _env below.",
+    "discord.clientSecret is OPTIONAL: the app is a public OAuth2 client using PKCE,",
+    "so no secret needs to exist at all. Only set one if you know you need it.",
+    "The whole file can also be baked into the build from the ZLP_AUTH_JSON secret",
+    "(or passed as the ZLP_AUTH_JSON env blob) - see _embed below."
+  ],
+  "discord": {
+    "clientId": "",
+    "clientSecret": "",
+    "scope": "identify",
+    "redirectPort": 43713,
+    "allowUsers": [
+      "PUT_YOUR_DISCORD_USER_ID_HERE"
+    ],
+    "inviteUrl": ""
+  },
+  "session": {
+    "rememberMe": true
+  },
+  "_env": {
+    "files": [
+      "BSIC_AUTH_FILE=/absolute/path/to/auth.json"
+    ],
+    "discord": [
+      "BSIC_DISCORD_CLIENT_ID",
+      "BSIC_DISCORD_CLIENT_SECRET",
+      "BSIC_DISCORD_SCOPE",
+      "BSIC_DISCORD_REDIRECT_PORT",
+      "BSIC_DISCORD_ALLOW_USERS  (comma/semicolon separated user IDs)",
+      "BSIC_DISCORD_INVITE"
+    ],
+    "discord_portal": [
+      "Add a redirect URI in the Discord developer portal that matches exactly:",
+      "http://127.0.0.1:43713/auth/discord/callback",
+      "Scheme, host, port and path all have to match, and 127.0.0.1 is used",
+      "instead of localhost on purpose (localhost may resolve to ::1)."
+    ],
+    "_embed": [
+      "ZLP_AUTH_JSON (repository secret) = this whole auth.json as one blob,",
+      "embedded into the EXE at build time by the GitHub Actions workflows.",
+      "ZLP_AUTH_JSON as a runtime env var (alias BSIC_AUTH_JSON) supplies the",
+      "same blob and wins over any file. Precedence: per-field BSIC_DISCORD_*",
+      "env vars > ZLP_AUTH_JSON blob > BSIC_AUTH_FILE > auth.json next to the",
+      "EXE > auth.json in app data > the build-time embedded blob."
+    ]
+  }
+}

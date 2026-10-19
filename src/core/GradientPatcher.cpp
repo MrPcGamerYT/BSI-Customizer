@@ -348,6 +348,7 @@ Catalog catalog(const QByteArray &image)
             && !doc.qml.contains(QLatin1String("topbar"), Qt::CaseInsensitive)
             && !doc.qml.contains(QLatin1String("titlebar"), Qt::CaseInsensitive)
             && !doc.qml.contains(QLatin1String("title bar"), Qt::CaseInsensitive)
+            && !doc.qml.contains(QLatin1String("settingsWindow"), Qt::CaseInsensitive)
             && !doc.qml.contains(QLatin1String("PlrSidebar")) && !doc.qml.contains(QLatin1String("PlrTopbar"))
             && file.name != QLatin1String("UiButton.qml")) continue;
         ++out.candidates;
@@ -415,6 +416,30 @@ Catalog catalog(const QByteArray &image)
                                    : QStringLiteral("Top bar (player window)"),
                 QStringLiteral("chrome"),
                 { Site { i, member(doc, i, QStringLiteral("gradient")) } });
+        }
+        // The settings window paints its whole panel with one full-window
+        // Rectangle below UiShadowContainer (root objectName "settingsWindow").
+        // That background is the surface users mean by "the settings panel",
+        // and without a target here the gradient feature silently stops at the
+        // player chrome - exactly the "gradient only works on the sidebar"
+        // report against the older players, whose settings window is the same
+        // structure. The solid `color:` binding is kept as the fallback, so a
+        // disabled gradient restores the panel's original look unchanged.
+        bool settingsWindow = false;
+        for (const auto &o : doc.objects)
+            if (o.objectName.compare(QLatin1String("settingsWindow"), Qt::CaseInsensitive) == 0) { settingsWindow = true; break; }
+        if (settingsWindow) {
+            QList<Site> sites;
+            for (int i = 0; i < doc.objects.size(); ++i) {
+                const Object &o = doc.objects.at(i);
+                if (o.type != QLatin1String("Rectangle") || member(doc, i, QStringLiteral("color")) < 0) continue;
+                bool fills = false;
+                for (const auto &b : doc.bindings)
+                    if (b.owner == i && b.name == QLatin1String("anchors.fill")) { fills = true; break; }
+                if (fills) sites << Site { i, member(doc, i, QStringLiteral("gradient")) };
+            }
+            add(QStringLiteral("settings.window"), QStringLiteral("Settings window background"),
+                QStringLiteral("background"), sites);
         }
         if (doc.name == QLatin1String("UiButton.qml")) {
             QList<Site> sites;
@@ -729,8 +754,8 @@ bool qmlMethodSupported(const QByteArray &image, int *qtMajor, QString *why)
         *why = QStringLiteral("This player is built against Qt 5, and its UI never reads the palette's gradient "
                               "properties - a QML gradient target there changes nothing you can see. Use the "
                               "gradient option in the Hex (old) theme method instead: it writes your custom "
-                              "stops over the player's top bar / title bar, which is the chrome that can hold "
-                              "a gradient there.");
+                              "stops over the player's chrome - top bar / title bar, sidebar and the "
+                              "settings panel - which are the surfaces that can hold a gradient there.");
     }
     return false;
 }

@@ -11,6 +11,7 @@
 #include "ThemeEngine.h"
 
 class SettingsManager;
+class AuthManager;
 
 /**
  * Backend — the single QML-facing facade for all patcher engines.
@@ -45,6 +46,13 @@ class Backend : public QObject
 
 public:
     explicit Backend(SettingsManager *settings, QObject *parent = nullptr);
+
+    // ---- sign-in gate (the Premium-Optimizer rule: the renderer is not the
+    //      gate) ----
+    // While an AuthManager is attached and the Discord sign-in has not been
+    // verified, every action below refuses to run. Tests and the CLI build
+    // Backend without an AuthManager and stay ungated.
+    void setAuthManager(AuthManager *auth);
 
     QString exePath() const;
     void setExePath(const QString &p);
@@ -150,6 +158,8 @@ public:
     Q_INVOKABLE QVariantList findVersions();
     Q_INVOKABLE QVariantMap applyVersion(const QString &oldV, const QString &newV);
     Q_INVOKABLE QVariantMap applyRemovals(const QStringList &names);
+    Q_INVOKABLE QVariantList layoutTweaks();
+    Q_INVOKABLE QVariantMap applyLayoutTweak(const QString &id, bool enabled);
     Q_INVOKABLE QVariantMap restoreBackup(const QString &path);
 
     // ---- Discord Rich Presence ID utility ----
@@ -177,12 +187,15 @@ signals:
     void log(const QString &message, const QString &color);
 
 private:
+    bool actionsLocked() const;
+    QVariantMap lockedMap() const;
     FpsPatcher::DllDetection resolveFpsTarget();
     void doLog(const QString &msg, const QString &color);
     QVariantMap result(bool ok, const QString &msg, const QString &color);
     QByteArray readExe();
     void noteThemeFileState();     // remember the EXE mtime/size we loaded from
 
+    AuthManager *m_auth = nullptr;
     SettingsManager *m_settings;
     ThemeInfo m_themeInfo;
     QString m_themeStatus;

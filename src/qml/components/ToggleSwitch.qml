@@ -38,10 +38,20 @@ RowLayout {
         Layout.preferredWidth: 46
         Layout.preferredHeight: 26
         radius: 13
-        color: control.checked ? Theme.accent : Theme.raised
+        gradient: Gradient {
+            orientation: Gradient.Horizontal
+            GradientStop {
+                position: 0
+                color: control.checked ? "#06b6d4" : Theme.raised
+            }
+            GradientStop {
+                position: 1
+                color: control.checked ? "#4dffd9" : Theme.raised
+            }
+        }
         border.width: 1
         border.color: control.checked ? "transparent" : Theme.border
-        Behavior on color { ColorAnimation { duration: 150 } }
+        Behavior on opacity { NumberAnimation { duration: 150 } }
 
         Rectangle {
             id: knob
@@ -50,7 +60,7 @@ RowLayout {
             radius: 9
             y: 3
             x: control.checked ? track.width - width - 4 : 4
-            color: control.checked ? "#ffffff" : Theme.textDim
+            color: control.checked ? "#04202b" : Theme.textDim
             Behavior on x { NumberAnimation { duration: 150; easing.type: Easing.OutCubic } }
         }
 

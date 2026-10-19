@@ -13,6 +13,9 @@ CMakeLists.txt.user
 .DS_Store
 Thumbs.db
 
+# Sign-in secrets (see auth.example.json / docs/AUTH.md) - never commit
+auth.json
+
 # Python bytecode
 __pycache__/
 *.pyc

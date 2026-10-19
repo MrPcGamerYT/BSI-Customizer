@@ -1,5 +1,8 @@
 #include "ExtrasPatcher.h"
 
+#include "PeUtils.h"
+#include "QmlText.h"
+#include "QtResources.h"
 #include "ThemeEngine.h"
 
 #include <QFile>
@@ -8,6 +11,8 @@
 #include <QRegularExpression>
 #include <QSet>
 #include <QTextStream>
+
+#include <algorithm>
 
 namespace ExtrasPatcher {
 
@@ -64,6 +69,110 @@ const QList<ContextualRemoval> &contextualRemovals()
         { "Titlebar Back", "iBackBtn", "SidebarBack", "null" },
     };
     return list;
+}
+
+// Sidebar buttons whose icon name a removal row nulls. Blankening the glyph is
+// only half of a removal: the button keeps its 32px slot and the sidebar shows
+// an empty gap where it used to be (reported against the latest player). The
+// QML side of the removal disables the owning PlrSidebarElement, so it drops
+// out of pSidebarItems before the first layout pass and the column closes up.
+const QMap<QString, QString> &sidebarButtonAssets()
+{
+    static const QMap<QString, QString> m = {
+        { "Sidebar InstanceManager", "SidebarInstanceManager" },
+        { "Sidebar Rotate", "SidebarRotate" },
+        { "Sidebar Location", "SidebarLocation" },
+        { "Sidebar Shake", "SidebarShake" },
+        { "Sidebar Macro", "SidebarMacro" },
+        { "Sidebar Screenshot", "SidebarScreenshot" },
+        { "Sidebar MediaFolder", "SidebarMediaFolder" },
+        { "Sidebar Fullscreen", "SidebarFullScreen" },
+        { "Sidebar Airplane Mode", "AirplaneModeOff" },
+        { "Sidebar Sync Mode", "SidebarSync" },
+        { "Sidebar Lock Cursor", "SidebarLockCursor" },
+        { "Sidebar Eco Mode", "SidebarEcoMode" },
+        { "Sidebar Side Panel", "SidebarSidePanel" },
+        { "Sidebar Screen Record", "SidebarScreenRecord" },
+    };
+    return m;
+}
+
+// Disable every PlrSidebarElement whose pAsset literal is one of `assets`.
+// Replacing the pIsFeatureEnable value with `false` is the same switch the
+// sidebar's own customization uses, so the element leaves pSidebarItems, the
+// Repeater and the kebab overflow together - no slot survives to show a gap.
+int disableSidebarElements(QString &qml, const QStringList &assets)
+{
+    const QString masked = QmlText::mask(qml);
+    struct Edit { int begin, length; QString replacement; };
+    QList<Edit> edits;
+    QSet<int> used;
+    int hidden = 0;
+    for (const QString &asset : assets) {
+        const QString literal = QLatin1Char('"') + asset + QLatin1Char('"');
+        for (const auto &object : QmlText::objects(masked, QStringLiteral("PlrSidebarElement"))) {
+            const int literalAt = qml.indexOf(literal, object.open);
+            if (literalAt < 0 || literalAt >= object.end) continue;
+            QmlText::Binding feature;
+            if (QmlText::binding(masked, object.open, object.end, QStringLiteral("pIsFeatureEnable"), &feature)) {
+                if (used.contains(feature.valueBegin)) break;
+                used.insert(feature.valueBegin);
+                edits << Edit { feature.valueBegin, feature.valueEnd - feature.valueBegin,
+                                QStringLiteral("false") };
+            } else {
+                if (used.contains(object.open + 1)) break;
+                used.insert(object.open + 1);
+                edits << Edit { object.open + 1, 0, QStringLiteral("\npIsFeatureEnable:false") };
+            }
+            ++hidden;
+            break;
+        }
+    }
+    std::sort(edits.begin(), edits.end(), [](const Edit &a, const Edit &b) { return a.begin > b.begin; });
+    int boundary = qml.size();
+    for (const auto &edit : edits) {
+        if (edit.begin + edit.length > boundary) continue;
+        qml.replace(edit.begin, edit.length, edit.replacement);
+        boundary = edit.begin;
+    }
+    return hidden;
+}
+
+// Locate the sidebar document in the image's Qt resources and disable the
+// removed buttons inside it. Players without an embedded PlrSidebar.qml are
+// not an error: their removals are string-only and there is no layout to
+// close up.
+bool collapseSidebarButtons(QByteArray &data, const QStringList &assets, int *hidden, QString *error)
+{
+    const auto refuse = [&](const QString &message) { if (error) *error = message; return false; };
+    const auto theme = ThemeEngine::findThemeZlib(data);
+    auto files = QtResources::registeredFiles(data);
+    if (theme.hasQrcNode)
+        for (const auto &file : QtResources::filesInPool(data, theme.resource)) {
+            bool present = false;
+            for (const auto &old : files) if (old.entryOff == file.entryOff && old.name == file.name) present = true;
+            if (!present) files << file;
+        }
+    for (const auto &file : files) {
+        if (file.name != QLatin1String("PlrSidebar.qml") && file.name != QLatin1String("qrc:/PlrSidebar.qml")) continue;
+        const auto bytes = QtResources::readFile(data, file);
+        if (bytes.isEmpty()) return refuse(QStringLiteral("The sidebar QML resource could not be read; no file was written."));
+        const bool bom = bytes.startsWith(QByteArray::fromHex("efbbbf"));
+        QString qml = QString::fromUtf8(bom ? bytes.mid(3) : bytes);
+        if (qml.toUtf8() != (bom ? bytes.mid(3) : bytes))
+            return refuse(QStringLiteral("The sidebar QML is not UTF-8; no file was written."));
+        const int count = disableSidebarElements(qml, assets);
+        const auto link = QtResources::findLink(data, file.entryOff, file.name);
+        if (!link.found || link.ambiguous)
+            return refuse(QStringLiteral("The sidebar QML resource mapping is ambiguous; no file was written."));
+        const QByteArray header = bom ? QByteArray::fromHex("efbbbf") : QByteArray();
+        const QByteArray source = header + qml.toUtf8();
+        if (source != bytes && !QtResources::replaceResource(data, file.entryOff, link, source, error))
+            return false;
+        if (hidden) *hidden = count;
+        return true;
+    }
+    return true; // No embedded sidebar: nothing to collapse.
 }
 
 // Instance detection patterns from bluestacks.conf.
@@ -191,7 +300,14 @@ Result applyRemovals(const QString &exePath, const QStringList &enabledNames)
         }
     }
 
-    if (replacements.isEmpty())
+    QStringList hiddenAssets;
+    for (const QString &name : enabledNames) {
+        const auto it = sidebarButtonAssets().constFind(name);
+        if (it != sidebarButtonAssets().constEnd() && !hiddenAssets.contains(*it))
+            hiddenAssets << *it;
+    }
+
+    if (replacements.isEmpty() && hiddenAssets.isEmpty())
         return { false, QStringLiteral("No matching strings found.") };
 
     std::sort(replacements.begin(), replacements.end(),
@@ -201,12 +317,28 @@ Result applyRemovals(const QString &exePath, const QStringList &enabledNames)
     for (const auto &r : replacements)
         data.replace(int(r.pos), r.len, r.rep);
 
+    // The QML half of the sidebar removals: a nulled icon name blanks the
+    // glyph but leaves the button's 32px slot behind, so the sidebar shows a
+    // gap where the button used to be. Disabling the owning element removes
+    // the whole row from the layout. Files that carry no Qt resources have
+    // nothing to collapse and skip this stage.
+    int hidden = 0;
+    if (!hiddenAssets.isEmpty() && PeUtils::peHeaderOffset(data) >= 0) {
+        QString error;
+        if (!collapseSidebarButtons(data, hiddenAssets, &hidden, &error))
+            return { false, error };
+    }
+
     QFile out(exePath);
     if (!out.open(QIODevice::WriteOnly | QIODevice::Truncate))
         return { false, QStringLiteral("Write error (run as administrator?).") };
     out.write(data);
     out.close();
-    return { true, QStringLiteral("Removed %1 string(s).").arg(replacements.size()) };
+    QString msg = QStringLiteral("Removed %1 string(s).").arg(replacements.size());
+    if (hidden > 0)
+        msg += QStringLiteral(" Hid %1 removed sidebar button(s) in the player QML so the sidebar closes up without leaving a gap.")
+                   .arg(hidden);
+    return { true, msg };
 }
 
 QVariantList detectInstances(const QString &confPath)

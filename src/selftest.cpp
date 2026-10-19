@@ -11,9 +11,12 @@
 
 #include <QColor>
 #include <QCoreApplication>
+#include <QCryptographicHash>
 #include <QDataStream>
 #include <QFile>
 #include <QFileInfo>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QQuickStyle>
@@ -24,11 +27,13 @@
 #include <cstdio>
 
 #include "core/Backend.h"
+#include "core/AuthManager.h"
 #include "core/BootVideoPatcher.h"
 #include "core/ByteUtils.h"
 #include "core/ExtrasPatcher.h"
 #include "core/FpsPatcher.h"
 #include "core/IntegrityPatcher.h"
+#include "core/SessionStore.h"
 #include "core/SettingsManager.h"
 #include "core/SvgEngine.h"
 #include "core/SysInfo.h"
@@ -52,6 +57,10 @@ void check(bool cond, const char *what)
     } else {
         std::printf("  FAIL  %s\n", what);
         ++g_failures;
+        // Windows CI runs expose the job log only as annotations, so surface
+        // each failed assertion as one (same as patch_regression_test.cpp).
+        if (qEnvironmentVariableIsSet("GITHUB_ACTIONS"))
+            std::printf("::error file=src/selftest.cpp::self-test failure: %s\n", what);
     }
 }
 
@@ -261,12 +270,15 @@ int runSelfTest()
         ThemeManager themes;
         Backend backend(&settings);
         SysInfo sysinfo;
+        AuthManager auth;
+        backend.setAuthManager(&auth);
 
         QQmlApplicationEngine engine;
         engine.rootContext()->setContextProperty(QStringLiteral("themes"), &themes);
         engine.rootContext()->setContextProperty(QStringLiteral("settings"), &settings);
         engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
         engine.rootContext()->setContextProperty(QStringLiteral("sysinfo"), &sysinfo);
+        engine.rootContext()->setContextProperty(QStringLiteral("auth"), &auth);
         engine.load(QUrl(QStringLiteral("qrc:/qt/qml/BSICustomizer/src/qml/Main.qml")));
 
         QObject *root = engine.rootObjects().value(0, nullptr);
@@ -1416,6 +1428,192 @@ int runSelfTest()
         check(!r.ok, "unregistered raw boot blobs are not treated as a verified Qt resource");
         QFile f(exePath); f.open(QIODevice::ReadOnly);
         check(f.readAll() == data, "unsupported boot layouts are left unchanged");
+    }
+
+    // ------------------------------------------------------------------
+    // N) Discord sign-in gate (the Premium-Optimizer login system): session
+    //    envelope, PKCE math, config parsing and the Backend gate authority.
+    // ------------------------------------------------------------------
+    {
+        std::printf("[auth] Discord gate: session, PKCE, config, gate authority\n");
+
+        // ---- session envelope: sign, verify, tamper, clear ----
+        QTemporaryDir authTmp;
+        check(authTmp.isValid(), "temp dir for the session store");
+        SessionStore store(authTmp.path());
+        check(!store.hasSaved(), "fresh store starts signed out");
+
+        QVariantMap identity;
+        identity.insert(QStringLiteral("Id"), QStringLiteral("42"));
+        identity.insert(QStringLiteral("Username"), QStringLiteral("mrpcgamer"));
+        identity.insert(QStringLiteral("DisplayName"), QStringLiteral("MR.PC GAMER"));
+        QString saveError;
+        check(store.saveIdentity(identity, &saveError), "session saved");
+        {
+            SessionStore reloaded(authTmp.path());
+            check(reloaded.hasSaved(), "session verifies after reload");
+            check(reloaded.identity().value(QStringLiteral("Id")).toString()
+                      == QStringLiteral("42"),
+                  "identity round-trips");
+        }
+        {
+            QFile f(authTmp.path() + QStringLiteral("/session.json"));
+            f.open(QIODevice::ReadOnly);
+            QByteArray raw = f.readAll();
+            f.close();
+            raw.replace("mrpcgamer", "attacker");
+            f.open(QIODevice::WriteOnly | QIODevice::Truncate);
+            f.write(raw);
+            f.close();
+            SessionStore tampered(authTmp.path());
+            check(!tampered.hasSaved(), "edited session file is rejected");
+        }
+
+        // ---- token: purpose-bound, tamper-evident ----
+        const QString token = store.issueToken(QByteArrayLiteral("payload"),
+                                               QStringLiteral("test"));
+        check(store.verifyToken(token, QStringLiteral("test")) == QByteArrayLiteral("payload"),
+              "token verifies for its purpose");
+        check(store.verifyToken(token, QStringLiteral("other")).isEmpty(),
+              "token is bound to its purpose");
+        check(store.verifyToken(token + QLatin1Char('x'), QStringLiteral("test")).isEmpty(),
+              "tampered token is rejected");
+
+        // ---- PKCE: verifier -> S256 challenge ----
+        const QString verifier = AuthManager::pkceVerifier();
+        check(verifier.length() >= 43, "PKCE verifier is base64url of 32 bytes");
+        const QByteArray expected =
+            QCryptographicHash::hash(verifier.toUtf8(), QCryptographicHash::Sha256)
+                .toBase64(QByteArray::Base64UrlEncoding | QByteArray::OmitTrailingEquals);
+        check(AuthManager::pkceChallenge(verifier) == QString::fromLatin1(expected),
+              "PKCE challenge is S256 of the verifier");
+        check(AuthManager::randomHex(16).length() == 32, "state is 16 hex bytes");
+
+        // ---- readCode (callback URL and bare code) ----
+        QString code, state;
+        AuthManager::readCode(QStringLiteral("http://127.0.0.1:43713/auth/discord/callback"
+                                             "?code=abc123&state=deadbeef"),
+                              code, state);
+        check(code == QLatin1String("abc123") && state == QLatin1String("deadbeef"),
+              "callback URL parses into code + state");
+        AuthManager::readCode(QStringLiteral("only-a-code"), code, state);
+        check(code == QLatin1String("only-a-code") && state.isEmpty(), "bare code accepted");
+
+        // ---- config from env (restored afterwards) ----
+        const QByteArray oldClient = qgetenv("BSIC_DISCORD_CLIENT_ID");
+        const QByteArray oldAllow = qgetenv("BSIC_DISCORD_ALLOW_USERS");
+        const QByteArray oldPort = qgetenv("BSIC_DISCORD_REDIRECT_PORT");
+        const QByteArray oldBlob = qgetenv("ZLP_AUTH_JSON");
+        qputenv("BSIC_DISCORD_CLIENT_ID", QByteArrayLiteral("fake-client-id"));
+        qputenv("BSIC_DISCORD_ALLOW_USERS", QByteArrayLiteral("111, 222;333"));
+        qputenv("BSIC_DISCORD_REDIRECT_PORT", QByteArrayLiteral("43713"));
+        {
+            const AuthManager::Config cfg = AuthManager::loadConfig();
+            check(cfg.configured, "client id configures Discord sign-in");
+            check(cfg.allowUsers.size() == 3 && cfg.allowUsers.contains(QStringLiteral("222")),
+                  "dev allowlist parses comma/semicolon lists");
+            check(cfg.redirectUri
+                      == QLatin1String("http://127.0.0.1:43713/auth/discord/callback"),
+                  "redirect URI is the portal string (127.0.0.1, not localhost)");
+            check(!cfg.setupHint.contains(QStringLiteral("not configured")),
+                  "configured builds get a source line instead of a setup hint");
+        }
+
+        // ---- the whole auth.json as one blob: $ZLP_AUTH_JSON ----
+        // (the name the CI secret carries; wins over any file/embedded config,
+        // so this stays deterministic even when the build embeds a real blob.
+        // Per-field BSIC_DISCORD_* env vars still override it, so clear those
+        // for the duration of this block.)
+        qunsetenv("BSIC_DISCORD_REDIRECT_PORT");
+        qunsetenv("BSIC_DISCORD_CLIENT_ID");
+        qunsetenv("BSIC_DISCORD_ALLOW_USERS");
+        qputenv("ZLP_AUTH_JSON",
+                QByteArrayLiteral("{\"discord\":{\"clientId\":\"zip-client\","
+                                  "\"allowUsers\":[\"777\"]}}"));
+        {
+            const AuthManager::Config cfg = AuthManager::loadConfig();
+            check(cfg.configured && cfg.clientId == QLatin1String("zip-client"),
+                  "the ZLP_AUTH_JSON blob is the whole auth.json config");
+            check(cfg.allowUsers == QStringList { QStringLiteral("777") },
+                  "the blob's allowlist wins over files and other sources");
+            check(cfg.redirectUri
+                      == QLatin1String("http://127.0.0.1:43713/auth/discord/callback"),
+                  "a blob without redirectPort falls back to the registered 43713 default");
+            check(cfg.sourceFile.contains(QLatin1String("ZLP_AUTH_JSON")),
+                  "the setup line names the blob as the config source");
+        }
+        {
+            // Build-time embed: the release workflow bakes the same blob into
+            // the EXE from the ZLP_AUTH_JSON secret. Whatever was baked must
+            // parse as an auth.json.
+            const QByteArray embedded = AuthManager::embeddedAuthJson();
+            if (!embedded.isEmpty()) {
+                QJsonParseError embedError;
+                const QJsonDocument doc = QJsonDocument::fromJson(embedded, &embedError);
+                check(embedError.error == QJsonParseError::NoError && doc.isObject()
+                          && doc.object().value(QStringLiteral("discord")).isObject(),
+                      "the build-time embedded ZLP_AUTH_JSON blob is a valid auth.json");
+            }
+        }
+        qunsetenv("ZLP_AUTH_JSON");
+        // The gate blocks below were written against the env config set above
+        // (the staged "111" session must stay on the allowlist for the
+        // one-click continue check), so put that env back.
+        qputenv("BSIC_DISCORD_CLIENT_ID", QByteArrayLiteral("fake-client-id"));
+        qputenv("BSIC_DISCORD_ALLOW_USERS", QByteArrayLiteral("111, 222;333"));
+        qputenv("BSIC_DISCORD_REDIRECT_PORT", QByteArrayLiteral("43713"));
+
+        // ---- gate authority: Backend refuses while the gate is closed ----
+        {
+            SettingsManager gateSettings;
+            Backend gated(&gateSettings);
+            AuthManager gate;
+            gated.setAuthManager(&gate);
+            check(!gate.isAuthorized(), "saved sign-in alone never opens the gate");
+            const QVariantMap refused = gated.patchThemeQml();
+            check(!refused.value(QStringLiteral("ok")).toBool()
+                      && refused.value(QStringLiteral("error"))
+                             .toString()
+                             .contains(QStringLiteral("Sign in with Discord")),
+                  "Backend refuses patching while the Discord gate is closed");
+            Backend ungated(&gateSettings);
+            check(ungated.patchThemeQml().value(QStringLiteral("error")).toString()
+                      != QStringLiteral("Sign in with Discord to unlock BSI Customizer."),
+                  "Backend without an AuthManager stays ungated (tests/scripts)");
+        }
+
+        // ---- one-click continue over a saved, allowlisted session ----
+        {
+            SessionStore staged; // the store the gate itself reads
+            QVariantMap mine;
+            mine.insert(QStringLiteral("Id"), QStringLiteral("111"));
+            mine.insert(QStringLiteral("Username"), QStringLiteral("mrpcgamer"));
+            mine.insert(QStringLiteral("DisplayName"), QStringLiteral("MR.PC GAMER"));
+            check(staged.saveIdentity(mine, &saveError), "gate session staged");
+            AuthManager gate;
+            check(gate.hasSavedSession(), "gate offers the one-click continue");
+            check(gate.continueSaved(), "allowlisted saved sign-in opens the gate");
+            check(gate.isAuthorized(), "gate is open after continue");
+            gate.signOut();
+            check(!gate.hasSavedSession(), "sign-out drops the session");
+        }
+
+        if (oldClient.isNull())
+            qunsetenv("BSIC_DISCORD_CLIENT_ID");
+        else
+            qputenv("BSIC_DISCORD_CLIENT_ID", oldClient);
+        if (oldAllow.isNull())
+            qunsetenv("BSIC_DISCORD_ALLOW_USERS");
+        else
+            qputenv("BSIC_DISCORD_ALLOW_USERS", oldAllow);
+        if (oldPort.isNull())
+            qunsetenv("BSIC_DISCORD_REDIRECT_PORT");
+        else
+            qputenv("BSIC_DISCORD_REDIRECT_PORT", oldPort);
+        if (oldBlob.isNull())
+            qunsetenv("ZLP_AUTH_JSON");
+        else
+            qputenv("ZLP_AUTH_JSON", oldBlob);
     }
 
     g_failures += runPatchRegressionTests();

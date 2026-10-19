@@ -121,8 +121,9 @@ import BSICustomizer
             font.pixelSize: 12
             wrapMode: Text.WordWrap
             text: editor.hexMode
-                  ? qsTr("Hex gradients can paint every listed surface - top bar, title bar, sidebar, buttons "
-                         + "and the other compatible targets - with custom start/end colors and a direction, "
+                  ? qsTr("Hex gradients can paint every listed surface - top bar, title bar, sidebar, "
+                         + "the settings panel, buttons and the other compatible targets - with custom "
+                         + "start/end colors and a direction, "
                          + "applied to one target or to all of them at once. A solid fallback color is always "
                          + "kept underneath the gradient; the solid hex colors from the list stay editable too.")
                   : qsTr("Apply two-stop gradients to compatible backgrounds or existing Gradient properties. "

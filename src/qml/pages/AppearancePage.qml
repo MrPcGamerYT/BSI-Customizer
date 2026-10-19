@@ -51,8 +51,8 @@ Item {
                 RowLayout {
                     spacing: 10
                     Repeater {
-                        model: ["#7c5cff", "#5aa7ff", "#38d996", "#ffb454", "#ff6b6b",
-                                "#e05cff", "#00c2ff", "#f5d76e"]
+                        model: ["#23e3ff", "#4dffd9", "#4f8cff", "#9d7bff", "#ffc45c",
+                                "#ff6f83", "#00c2ff", "#f5d76e"]
                         delegate: Rectangle {
                             required property string modelData
                             width: 34

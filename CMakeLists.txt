@@ -5,7 +5,7 @@ project(BSICustomizer VERSION 2.0.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Qml Quick QuickControls2 Svg)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Network Qml Quick QuickControls2 Svg)
 
 qt_standard_project_setup(REQUIRES 6.5)
 
@@ -59,10 +59,18 @@ qt_add_executable(BSICustomizer
     src/core/BootVideoPatcher.cpp
     src/core/ExtrasPatcher.h
     src/core/ExtrasPatcher.cpp
+    src/core/QmlText.h
+    src/core/QmlText.cpp
+    src/core/LayoutPatcher.h
+    src/core/LayoutPatcher.cpp
     src/core/BsDetector.h
     src/core/BsDetector.cpp
     src/core/Backend.h
     src/core/Backend.cpp
+    src/core/AuthManager.h
+    src/core/AuthManager.cpp
+    src/core/SessionStore.h
+    src/core/SessionStore.cpp
     src/core/ThemeManager.h
     src/core/ThemeManager.cpp
     src/core/SettingsManager.h
@@ -119,6 +127,33 @@ target_compile_definitions(BSICustomizer PRIVATE
     BSI_VERSION="${PROJECT_VERSION}"
 )
 
+# ---------------------------------------------------------------------------
+# Optional build-time auth embed ("zip auth json"): the whole auth.json blob
+# comes from the ZLP_AUTH_JSON repository secret (BSIC_AUTH_JSON accepted as
+# an alias) and is baked into the EXE as :/bsic_auth/auth.json, so released
+# builds sign in with no sidecar file. At runtime an auth.json next to the
+# EXE - or a ZLP_AUTH_JSON env blob - still overrides it. No secret -> the
+# build simply carries no embed and the file/env paths work as before.
+# ---------------------------------------------------------------------------
+set(BSI_AUTH_EMBED_DIR "${CMAKE_BINARY_DIR}/generated")
+set(BSI_AUTH_EMBED_JSON "${BSI_AUTH_EMBED_DIR}/auth.json")
+set(BSI_AUTH_BLOB "$ENV{ZLP_AUTH_JSON}")
+if(BSI_AUTH_BLOB STREQUAL "")
+    set(BSI_AUTH_BLOB "$ENV{BSIC_AUTH_JSON}")
+endif()
+if(NOT BSI_AUTH_BLOB STREQUAL "")
+    file(MAKE_DIRECTORY "${BSI_AUTH_EMBED_DIR}")
+    file(WRITE "${BSI_AUTH_EMBED_JSON}" "${BSI_AUTH_BLOB}")
+    string(LENGTH "${BSI_AUTH_BLOB}" BSI_AUTH_BLOB_LEN)
+    message(STATUS "Embedding auth.json from ZLP_AUTH_JSON (${BSI_AUTH_BLOB_LEN} bytes)")
+    qt_add_resources(BSICustomizer "bsic_auth_embedded"
+        BASE "${BSI_AUTH_EMBED_DIR}"
+        PREFIX "/bsic_auth"
+        FILES "${BSI_AUTH_EMBED_JSON}")
+else()
+    message(STATUS "No ZLP_AUTH_JSON in the environment: building without an embedded auth.json")
+endif()
+
 # Qt 6 is the application's build/runtime dependency, not an FPS target restriction.
 # Require a real Qt 5 reference in Windows CI; ordinary/offline builds stay network-free.
 set(_bsi_qt5_reference_default OFF)
@@ -157,7 +192,9 @@ qt_add_qml_module(BSICustomizer
         src/qml/Main.qml
         src/qml/Theme.qml
         src/qml/Icons.js
+        src/qml/LoginGate.qml
         src/qml/components/SidebarButton.qml
+        src/qml/components/WinControls.qml
         src/qml/components/Card.qml
         src/qml/components/ActionButton.qml
         src/qml/components/ToggleSwitch.qml
@@ -180,6 +217,12 @@ qt_add_qml_module(BSICustomizer
         src/qml/pages/AboutPage.qml
     RESOURCES
         "BSI CUSTOMIZER.ico"
+        src/qml/img/app-icon.png
+        src/qml/img/discord-mark.svg
+        src/qml/img/orb-cyan.png
+        src/qml/img/orb-blue.png
+        src/qml/img/orb-green.png
+        src/qml/img/orb-violet.png
 )
 
 # Short, space-free qrc path used by main.cpp for the window/taskbar icon:
@@ -190,6 +233,7 @@ set_source_files_properties("BSI CUSTOMIZER.ico" PROPERTIES
 target_link_libraries(BSICustomizer PRIVATE
     Qt6::Core
     Qt6::Gui
+    Qt6::Network
     Qt6::Qml
     Qt6::Quick
     Qt6::QuickControls2

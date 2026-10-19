@@ -9,6 +9,8 @@ Item {
 
     // how many removal rows are ticked (drives the Apply button state/label)
     property int checkedCount: 0
+    // player layout tweaks with their live applied/supported state
+    property var layoutTweaks: []
 
     function recountChecked() {
         let n = 0;
@@ -18,6 +20,17 @@ Item {
                 n++;
         }
         page.checkedCount = n;
+    }
+
+    function refreshLayout() {
+        page.layoutTweaks = backend.layoutTweaks();
+    }
+
+    Component.onCompleted: refreshLayout()
+
+    Connections {
+        target: backend
+        function onExePathChanged() { page.refreshLayout(); }
     }
 
     ColumnLayout {
@@ -41,7 +54,7 @@ Item {
                 }
                 Text {
                     Layout.fillWidth: true
-                    text: qsTr("Ad/UI string removal and version spoofing for HD-Player.exe. "
+                    text: qsTr("Ad/UI string removal, version spoofing and player layout patches for HD-Player.exe. "
                                + "A backup is created automatically before any patch.")
                     color: Theme.textDim
                     font.pixelSize: 12
@@ -66,6 +79,76 @@ Item {
             label: qsTr("HD-Player.exe")
             text: backend.exePath
             onLoad: backend.exePath = text
+        }
+
+        // ---------------- player layout (QML) ----------------
+        Card {
+            Layout.fillWidth: true
+            pad: 14
+
+            ColumnLayout {
+                anchors.fill: parent
+                spacing: 8
+
+                Text {
+                    text: qsTr("Player layout (QML)")
+                    color: Theme.text
+                    font.pixelSize: 15
+                    font.weight: Font.Bold
+                }
+                Text {
+                    Layout.fillWidth: true
+                    wrapMode: Text.Wrap
+                    text: qsTr("Structural QML patches that rearrange the player UI. Reversible - "
+                               + "turn an option off and apply again to restore the stock layout.")
+                    color: Theme.textDim
+                    font.pixelSize: 11
+                }
+
+                Repeater {
+                    model: page.layoutTweaks
+                    delegate: RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 10
+                        required property var modelData
+
+                        CheckBox {
+                            id: tweakCheck
+                            checked: !!modelData.applied
+                            enabled: modelData.supported
+                        }
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            spacing: 2
+                            Text {
+                                Layout.fillWidth: true
+                                wrapMode: Text.Wrap
+                                text: modelData.label
+                                color: modelData.supported ? Theme.text : Theme.textDim
+                                font.pixelSize: 12
+                            }
+                            Text {
+                                Layout.fillWidth: true
+                                wrapMode: Text.Wrap
+                                text: modelData.supported ? modelData.detail : modelData.state
+                                color: Theme.textDim
+                                font.pixelSize: 11
+                            }
+                        }
+                        ActionButton {
+                            Layout.alignment: Qt.AlignTop
+                            accent: true
+                            implicitHeight: 28
+                            text: qsTr("Apply")
+                            enabled: modelData.supported
+                            onClicked: {
+                                backend.applyLayoutTweak(modelData.id, tweakCheck.checked);
+                                page.refreshLayout();
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         RowLayout {

@@ -1,7 +1,9 @@
 #include "core/Backend.h"
 #include "core/BootVideoPatcher.h"
 #include "core/BsDetector.h"
+#include "core/ExtrasPatcher.h"
 #include "core/IntegrityPatcher.h"
+#include "core/LayoutPatcher.h"
 #include "core/ByteUtils.h"
 #include "core/FpsPatcher.h"
 #include "core/GradientPatcher.h"
@@ -1518,6 +1520,320 @@ int runPatchRegressionTests()
         backend.loadTheme(QStringLiteral("hex"));
         check(backend.resolvedThemeMethod() == QLatin1String("hex") && backend.detectedQtMajor() == 6,
               "Hex (old) stays selectable as an informed override on a Qt 6 player");
+    }
+
+    std::printf("[settings-gradient] settings panel surface in both gradient editors\n");
+    {
+        // The settings window paints its whole panel with one full-window
+        // Rectangle under UiShadowContainer (root objectName "settingsWindow").
+        // The catalog used to stop at the player chrome, so the old players
+        // showed a themed sidebar beside an untouched settings panel - the
+        // report that "the gradient only works on the sidebar". The panel
+        // background has to become a first-class surface, while the transparent
+        // content pane and the decorative fade divider stay untouched.
+        const QString settings = QStringLiteral(
+            "import QtQuick 2.15\r\n"
+            "import QtQuick.Window 2.15\r\n"
+            "Window {\r\n"
+            "    id: iSettingsWindow\r\n"
+            "    objectName: \"settingsWindow\"\r\n"
+            "    color: \"transparent\"\r\n"
+            "    UiShadowContainer {\r\n"
+            "        id: iSettingsWindowShadowContainer\r\n"
+            "        Rectangle {\r\n"
+            "            anchors.fill: parent\r\n"
+            "            color: UiTheme.colors.primary80\r\n"
+            "            Rectangle {\r\n"
+            "                Layout.preferredWidth: 548\r\n"
+            "                color: \"transparent\"\r\n"
+            "            }\r\n"
+            "            Rectangle {\r\n"
+            "                width: 1\r\n"
+            "                gradient: Gradient {\r\n"
+            "                    GradientStop { position: 0.0; color: \"#ff0000\" }\r\n"
+            "                    GradientStop { position: 1.0; color: \"#0000ff\" }\r\n"
+            "                }\r\n"
+            "            }\r\n"
+            "        }\r\n"
+            "    }\r\n"
+            "}\r\n");
+        const QString palette = QStringLiteral(
+            "import QtQuick\nQtObject{property QtObject colors:QtObject{property color primary80:'#223344'}}\n");
+        auto r = resources({ { QStringLiteral("UiThemeObject.qml"), palette },
+                             { QStringLiteral("UiSettingsWindow.qml"), settings } }, true, {});
+        addRegistration(r, false);
+        const auto discovered = GradientPatcher::analyze(r.f.bytes);
+        QString key;
+        int painted = 0;
+        for (const auto &target : discovered.targets) {
+            if (target.label == QLatin1String("Settings window background")) {
+                key = target.key;
+                ++painted;
+            }
+            check(target.hexGradient, "the settings surfaces are offered to the hex gradient editor too");
+        }
+        check(discovered.ok && !key.isEmpty() && painted == 1,
+              "the settings panel background is offered exactly once as a gradient surface");
+        auto image = r.f.bytes;
+        QString error;
+        check(GradientPatcher::apply(image, key, { true, QStringLiteral("#ff0000"), QStringLiteral("#0000ff"), true }, &error),
+              QStringLiteral("the settings panel accepts a two-stop gradient (%1)")
+                  .arg(error.isEmpty() ? QStringLiteral("ok") : error));
+        const auto text = resourceText(image, r, QStringLiteral("UiSettingsWindow.qml"));
+        check(text.contains(QLatin1String("Rectangle {\ngradient:Gradient"))
+                  && text.contains(QStringLiteral("color: UiTheme.colors.primary80"))
+                  && text.contains(QStringLiteral("anchors.fill: parent")),
+              "the panel background keeps its solid fallback and gains the gradient");
+        check(text.contains(QStringLiteral("color: \"transparent\""))
+                  && text.contains(QStringLiteral("GradientStop { position: 0.0; color: \"#ff0000\" }")),
+              "the transparent content pane and the decorative fade divider stay untouched");
+        check(GradientPatcher::apply(image, key, { false, {}, {}, true }, &error)
+                  && resourceText(image, r, QStringLiteral("UiSettingsWindow.qml"))
+                         .contains(QLatin1String("Rectangle {\ngradient:null")),
+              "the settings panel gradient can be disabled back to the solid binding");
+        // The combined Hex (old) action paints every surface at once - on the
+        // old players that is the only gradient editor, so the settings panel
+        // must ride along with the sidebar and top bar there.
+        auto all = r.f.bytes;
+        GradientPatcher::Spec spec;
+        spec.first = QStringLiteral("#ff0000");
+        spec.second = QStringLiteral("#0000ff");
+        check(GradientPatcher::applySurfaces(all, GradientPatcher::allGradientKey(), spec, &error),
+              QStringLiteral("one hex call paints the settings panel with the rest (%1)")
+                  .arg(error.isEmpty() ? QStringLiteral("ok") : error));
+        check(resourceText(all, r, QStringLiteral("UiSettingsWindow.qml")).contains(QLatin1String("Rectangle {\ngradient:Gradient")),
+              "the all-at-once hex gradient reaches the settings panel");
+    }
+
+    std::printf("[extras-removals] removed sidebar buttons collapse the QML layout\n");
+    {
+        // Nulling an icon name only blanks the glyph: the button keeps its
+        // 32px slot and the sidebar shows an empty gap where it used to be
+        // (reported against the latest player). A sidebar removal has to
+        // disable the owning PlrSidebarElement too, so the element leaves
+        // pSidebarItems and the column closes up - the fix "by qml".
+        const QString sidebar = QStringLiteral(
+            "import QtQuick 2.15\r\n"
+            "Rectangle {\r\n"
+            "    id: iSidebar\r\n"
+            "    property list<QtObject> pAllSidebarItems: [\r\n"
+            "        PlrSidebarElement {\r\n"
+            "            pElementId: pRotate\r\n"
+            "            pAsset: \"SidebarRotate\"\r\n"
+            "            pTooltipText: qsTranslate(\"QObject\", \"Rotate\")\r\n"
+            "            pIsFeatureEnable: iSidebarProperties.pIsRotateEnabled\r\n"
+            "            pShowOnKebabMenu: true\r\n"
+            "        },\r\n"
+            "        PlrSidebarElement {\r\n"
+            "            pElementId: pLockCursor\r\n"
+            "            pAsset: pMouseCursorLocked ? \"SidebarLockCursorActive\" : \"SidebarLockCursor\"\r\n"
+            "            pIsFeatureEnable: uiBackend.confGetBoolDefaultWhenEmpty(\"bst.feature.macros\",\r\n"
+            "                uiBackend.confGetBool(\"bst.feature.macros\"))\r\n"
+            "        }\r\n"
+            "    ]\r\n"
+            "}\r\n");
+        auto r = resources({ { QStringLiteral("PlrSidebar.qml"), sidebar } }, true, {});
+        addRegistration(r, false);
+        const QString path = temp.filePath(QStringLiteral("sidebar-removals.exe"));
+        write(path, r.f.bytes);
+        const auto rr = ExtrasPatcher::applyRemovals(path,
+            { QStringLiteral("Sidebar Rotate"), QStringLiteral("Sidebar Lock Cursor"),
+              QStringLiteral("Sidebar Macro") });
+        check(rr.ok && rr.msg.contains(QLatin1String("Hid 2")),
+              QStringLiteral("the two matching sidebar buttons are hidden in QML (%1)").arg(rr.msg));
+        const auto text = resourceText(read(path), r, QStringLiteral("PlrSidebar.qml"));
+        check(text.contains(QStringLiteral("pIsFeatureEnable: false"))
+                  && !text.contains(QLatin1String("iSidebarProperties.pIsRotateEnabled"))
+                  && !text.contains(QLatin1String("confGetBoolDefaultWhenEmpty")),
+              "both feature switches are replaced with false, including the wrapped call");
+        check(text.count(QStringLiteral("pIsFeatureEnable: false")) == 2
+                  && text.contains(QStringLiteral("pAsset: \"SidebarRotate\""))
+                  && text.contains(QStringLiteral("pAsset: pMouseCursorLocked")),
+              "the elements themselves stay intact - only the switch flips");
+        const auto again = ExtrasPatcher::applyRemovals(path,
+            { QStringLiteral("Sidebar Rotate"), QStringLiteral("Sidebar Lock Cursor") });
+        check(again.ok, "a repeated removal stays idempotent instead of corrupting the sidebar");
+        check(resourceText(read(path), r, QStringLiteral("PlrSidebar.qml"))
+                  .count(QStringLiteral("pIsFeatureEnable: false")) == 2,
+              "a repeated removal does not stack further edits");
+    }
+
+    std::printf("[layout] sidebar-to-titlebar layout tweak by QML\n");
+    {
+        // The layout family's first tweak: the side strip is gone and every
+        // sidebar button becomes one centered row inside the title bar. The
+        // fixture is the stock latest-player shape (the same member spellings
+        // the real plr.qml / PlrSidebar.qml / PlrTopbar.qml use), and the
+        // claim pinned here is reversibility: toggling the option off writes
+        // the stock QML back byte-for-byte, so the change needs no backup
+        // restore to undo.
+        const QString plr = QStringLiteral(
+            "import QtQuick 2.15\r\n"
+            "Rectangle {\r\n"
+            "    id: iAppwin\r\n"
+            "    property int pSidebarWidth: 32\r\n"
+            "    PlrSidebar {\r\n"
+            "        id: iSidebar\r\n"
+            "        anchors.bottom: parent.bottom\r\n"
+            "        anchors.right: parent.right\r\n"
+            "        anchors.top: iTopbar.bottom\r\n"
+            "        color: uiBackend.oem === \"msi5\" ? UiTheme.colors.primary70 : UiTheme.colors.primary80\r\n"
+            "        width: pSidebarWidth\r\n"
+            "        visible: uiBackend.confGetInstanceBool(\"show_sidebar\")\r\n"
+            "        onSidebarSettingClicked: fOpenSettingsWindow()\r\n"
+            "    }\r\n"
+            "    function fSetUiParams(sidebarVisible) {\r\n"
+            "        plrBackend.setBackendUiParams(\r\n"
+            "                    pBorderWidth + adsBackend.pExtendedBannerAdWidth,\r\n"
+            "                    iTopbar.height + pBorderWidth,\r\n"
+            "                    pBorderWidth + (sidebarVisible ? iAppwin.pSidebarWidth : 0),\r\n"
+            "                    pBorderWidth,\r\n"
+            "                    7 * iTopbar.height + 50 + pBorderWidth * 2)\r\n"
+            "    }\r\n"
+            "}\r\n");
+        const QString sidebar = QStringLiteral(
+            "import QtQuick 2.15\r\n"
+            "Rectangle {\r\n"
+            "    id: iSidebar\r\n"
+            "    onHeightChanged: {\r\n"
+            "        fResetSidebar()\r\n"
+            "    }\r\n"
+            "    function fResetSidebar() {\r\n"
+            "        var availableHeight = iSidebar.height\r\n"
+            "        if (iSidebar.height < 32 * 7)\r\n"
+            "            availableHeight = availableHeight - iKebabMenuBtn.height\r\n"
+            "    }\r\n"
+            "    UiColumnLayout {\r\n"
+            "        anchors.fill: parent\r\n"
+            "        UiImageButton {\r\n"
+            "            id: iKebabMenuBtn\r\n"
+            "            Layout.alignment: Qt.AlignHCenter\r\n"
+            "        }\r\n"
+            "        Item {\r\n"
+            "            Layout.fillHeight: true\r\n"
+            "        }\r\n"
+            "        UiImageButton {\r\n"
+            "            id: iDiscordBtn\r\n"
+            "            Layout.preferredWidth: pSidebarElementSize\r\n"
+            "        }\r\n"
+            "        UiImageButton {\r\n"
+            "            id: iBackBtn\r\n"
+            "        }\r\n"
+            "    }\r\n"
+            "}\r\n");
+        const QString topbar = QStringLiteral(
+            "import QtQuick 2.15\r\n"
+            "Rectangle {\r\n"
+            "    id: iTopbar\r\n"
+            "    property list<QtObject> pNonFixedTopbarItems: [\r\n"
+            "        PlrTopbarElement {\r\n"
+            "            pVisible: true\r\n"
+            "            pWidth: iBackBtn.width\r\n"
+            "            onChangeVisibility: function(visibility) {\r\n"
+            "                iBackBtn.visible = visibility\r\n"
+            "            }\r\n"
+            "        },\r\n"
+            "        PlrTopbarElement {\r\n"
+            "            pVisible: true\r\n"
+            "            pWidth: iHomeBtn.width\r\n"
+            "            onChangeVisibility: function(visibility) {\r\n"
+            "                iHomeBtn.visible = visibility\r\n"
+            "            }\r\n"
+            "        },\r\n"
+            "        PlrTopbarElement {\r\n"
+            "            pVisible: true\r\n"
+            "            pWidth: iRecentBtn.width\r\n"
+            "            onChangeVisibility: function(visibility) {\r\n"
+            "                iRecentBtn.visible = visibility\r\n"
+            "            }\r\n"
+            "        }\r\n"
+            "    ]\r\n"
+            "    Row {\r\n"
+            "        UiImageButton {\r\n"
+            "            id: iSidebarShowBtn\r\n"
+            "            asset: \"TitlebarCollapse\"\r\n"
+            "        }\r\n"
+            "        UiImageButton {\r\n"
+            "            id: iBackBtn\r\n"
+            "        }\r\n"
+            "    }\r\n"
+            "}\r\n");
+        auto r = resources({ { QStringLiteral("plr.qml"), plr },
+                             { QStringLiteral("PlrSidebar.qml"), sidebar },
+                             { QStringLiteral("PlrTopbar.qml"), topbar } }, true,
+                           { QStringLiteral("PlrTopbar.qml") });
+        addRegistration(r, false);
+        const QByteArray original = r.f.bytes;
+        const QString id = QStringLiteral("sidebar-to-titlebar");
+        check(LayoutPatcher::tweaks().size() == 1 && LayoutPatcher::tweaks().front().id == id,
+              "the layout family exposes the sidebar-to-titlebar tweak");
+        const auto stock = LayoutPatcher::analyze(original, id);
+        check(stock.supported && !stock.applied, "the stock player shape is recognized as supported and unpatched");
+        check(!LayoutPatcher::analyze(original, QStringLiteral("no-such-tweak")).supported,
+              "an unknown tweak id is unsupported instead of guessed at");
+        const QString path = temp.filePath(QStringLiteral("layout.exe"));
+        write(path, original);
+        const auto applied = LayoutPatcher::apply(path, id, true);
+        if (!applied.ok) std::printf("    %s\n", qPrintable(applied.msg));
+        check(applied.ok, "the sidebar-to-titlebar tweak applies to the stock player shape");
+        const auto patchedPlr = resourceText(read(path), r, QStringLiteral("plr.qml"));
+        check(patchedPlr.contains(QLatin1String("anchors.top: iTopbar.top"))
+                  && patchedPlr.contains(QLatin1String("anchors.bottom: iTopbar.bottom"))
+                  && patchedPlr.contains(QLatin1String("anchors.right: iTopbar.right")),
+              "the sidebar instance is re-anchored to the title bar strip");
+        check(patchedPlr.contains(QLatin1String("anchors.left: iTopbar.left"))
+                  && !patchedPlr.contains(QLatin1String("width: pSidebarWidth")),
+              "its width member becomes a span anchor instead of leaving an anchors/width conflict");
+        check(patchedPlr.contains(QLatin1String("color: \"transparent\""))
+                  && patchedPlr.contains(QLatin1String("visible: true")),
+              "the overlay is transparent and always shown");
+        check(patchedPlr.contains(QStringLiteral("pBorderWidth + 0"))
+                  && !patchedPlr.contains(QLatin1String("sidebarVisible ? iAppwin.pSidebarWidth")),
+              "the Android frame stops reserving the side strip (and the write does not swallow the CRLF)");
+        const auto patchedSidebar = resourceText(read(path), r, QStringLiteral("PlrSidebar.qml"));
+        check(patchedSidebar.contains(QLatin1String("UiRowLayout"))
+                  && !patchedSidebar.contains(QLatin1String("UiColumnLayout"))
+                  && patchedSidebar.contains(QLatin1String("anchors.centerIn: parent")),
+              "the button column becomes a row centered inside the title bar");
+        check(patchedSidebar.contains(QLatin1String("onWidthChanged"))
+                  && !patchedSidebar.contains(QLatin1String("onHeightChanged"))
+                  && !patchedSidebar.contains(QLatin1String("iSidebar.height")),
+              "the overflow budget is measured on the new dimension");
+        const auto patchedTopbar = resourceText(read(path), r, QStringLiteral("PlrTopbar.qml"));
+        check(patchedTopbar.count(QStringLiteral("visible: false")) == 1
+                  && !patchedTopbar.contains(QLatin1String("iBackBtn.visible: false")),
+              "the show-sidebar button is disabled without touching the toggled Back entry");
+        check(patchedTopbar.count(QStringLiteral("pVisible: false")) == 3
+                  && patchedTopbar.count(QStringLiteral("pVisible: true")) == 0,
+              "the duplicated Back/Home/Recent entries leave the title bar");
+        const QByteArray afterFirst = read(path);
+        const auto again = LayoutPatcher::apply(path, id, true);
+        check(again.ok && read(path) == afterFirst
+                  && resourceText(read(path), r, QStringLiteral("plr.qml")) == patchedPlr,
+              "applying an already-applied tweak is a no-op");
+        const auto patchedState = LayoutPatcher::analyze(read(path), id);
+        check(patchedState.supported && patchedState.applied, "the patched player reports the tweak as applied");
+        check(LayoutPatcher::apply(path, id, false).ok, "turning the option off restores the stock layout");
+        // Reversibility is pinned at the document level: every edited QML file
+        // comes back byte-for-byte (the EXE itself keeps replaceResource's
+        // refreshed resource timestamps, which is what makes Qt reject stale
+        // caches after any patch cycle).
+        const QByteArray restoredBytes = read(path);
+        check(resourceText(restoredBytes, r, QStringLiteral("plr.qml")) == plr
+                  && resourceText(restoredBytes, r, QStringLiteral("PlrSidebar.qml")) == sidebar
+                  && resourceText(restoredBytes, r, QStringLiteral("PlrTopbar.qml")) == topbar,
+              "the restore writes every edited document back byte-for-byte");
+        const auto restored = LayoutPatcher::analyze(read(path), id);
+        check(restored.supported && !restored.applied, "the restored player reports stock again");
+        auto other = resources({ { QStringLiteral("Other.qml"),
+                                   QStringLiteral("import QtQuick\r\nRectangle { }\r\n") } }, true, {});
+        addRegistration(other, false);
+        check(!LayoutPatcher::analyze(other.f.bytes, id).supported,
+              "a player without the known layout documents is refused instead of rewritten");
+        const QString otherPath = temp.filePath(QStringLiteral("layout-other.exe"));
+        write(otherPath, other.f.bytes);
+        check(!LayoutPatcher::apply(otherPath, id, true).ok && read(otherPath) == other.f.bytes,
+              "an unsupported player is left untouched");
     }
 
     std::printf("[boot-discovery] renamed/raw controllers and the host's selected component\n");
