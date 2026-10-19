@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QByteArray>
+#include <QMap>
 #include <QNetworkAccessManager>
 #include <QObject>
 #include <QStringList>
@@ -23,8 +24,14 @@
  *  - a loopback listener on 127.0.0.1:<redirectPort> catches the browser
  *    redirect (path /auth/discord/callback) and a branded result page is shown;
  *    when the port cannot be opened the card falls back to paste-the-link;
- *  - access = the Discord user id is on the dev allowlist (discord.allowUsers);
- *    this tool is private dev software, so there is no plan/tier layer;
+ *  - access is granted by either of the two dev gates below (OR), so the same
+ *    auth.json works for a user-ID allowlist and for a Discord server role:
+ *      * discord.allowUsers - explicit Discord user IDs, or
+ *      * discord.guildId + discord.roles + discord.requiredTier - the signed-in
+ *        user must be a member of that guild and hold one of the listed roles
+ *        whose "tier" matches requiredTier (checked live through
+ *        GET /users/@me/guilds/{guildId}/member with the guilds.members.read
+ *        scope, the same gate Premium-Optimizer uses);
  *  - a successful sign-in writes an HMAC-signed, machine-bound session which
  *    only earns a one-click "Welcome back" continue on the next launch - a
  *    saved session is never an automatic login.
@@ -32,7 +39,9 @@
  * Configuration (see docs/AUTH.md and auth.example.json):
  *   auth.json next to the EXE (or $BSIC_AUTH_FILE), with env overrides
  *   BSIC_DISCORD_CLIENT_ID / BSIC_DISCORD_CLIENT_SECRET /
- *   BSIC_DISCORD_ALLOW_USERS / BSIC_DISCORD_REDIRECT_PORT / BSIC_DISCORD_SCOPE.
+ *   BSIC_DISCORD_ALLOW_USERS / BSIC_DISCORD_GUILD_ID /
+ *   BSIC_DISCORD_REQUIRED_TIER / BSIC_DISCORD_REDIRECT_PORT /
+ *   BSIC_DISCORD_SCOPE.
  *   The whole auth.json can also be supplied as one JSON blob - $ZLP_AUTH_JSON
  *   (alias $BSIC_AUTH_JSON) at runtime, and the ZLP_AUTH_JSON repository secret
  *   baked into the EXE at build time so releases need no sidecar file.
@@ -58,6 +67,7 @@ class AuthManager : public QObject
     Q_PROPERTY(QVariantMap savedUser READ savedUser NOTIFY sessionChanged)
     Q_PROPERTY(QString savedMeta READ savedMeta NOTIFY sessionChanged)
     Q_PROPERTY(QString redirectUri READ redirectUri NOTIFY configChanged)
+    Q_PROPERTY(QString inviteUrl READ inviteUrl NOTIFY configChanged)
 
 public:
     struct Config {
@@ -67,10 +77,20 @@ public:
         QString scope = QStringLiteral("identify");
         QString redirectUri;
         int redirectPort = 43713;
+        /** Explicit Discord user IDs that always pass the gate. */
         QStringList allowUsers;
+        /** Guild whose member roles are checked (discord.guildId). */
+        QString guildId;
+        /** Role ID -> tier label (discord.roles). Empty label = explicit grant. */
+        QMap<QString, QString> roles;
+        /** Lowest/required tier in that role map (discord.requiredTier). */
+        QString requiredTier;
         QString inviteUrl;
         QString sourceFile;
         QString setupHint;
+
+        /** True when a Discord server role gate is configured. */
+        bool roleGateConfigured() const { return !guildId.isEmpty() && !roles.isEmpty(); }
     };
 
     struct DiscordProfile {
@@ -102,6 +122,7 @@ public:
     QString setupHint() const { return m_config.setupHint; }
     QString sourceFile() const { return m_config.sourceFile; }
     QString redirectUri() const { return m_config.redirectUri; }
+    QString inviteUrl() const { return m_config.inviteUrl; }
 
     bool hasSavedSession() const;
     QVariantMap savedUser() const;
@@ -115,7 +136,7 @@ public:
     /** Paste-the-link fallback: finish with a pasted redirect URL or code. */
     Q_INVOKABLE QVariantMap completeManual(const QString &urlOrCode);
     Q_INVOKABLE void cancelDiscord();
-    /** One-click continue over the saved session (re-checks the allowlist). */
+    /** One-click continue over the saved session (re-checks the gate). */
     Q_INVOKABLE bool continueSaved();
     /** "Use a different account": drop the saved session, stay on the card. */
     Q_INVOKABLE void forgetSaved();
@@ -128,6 +149,15 @@ public:
     static QString randomHex(int bytes);
     QString authorizeUrl(const QString &state, const QString &challenge) const;
     static void readCode(const QString &input, QString &code, QString &state);
+
+    /**
+     * Match a guild member's role IDs against discord.roles.
+     * Returns true when one of the held roles satisfies discord.requiredTier
+     * (or any listed role when requiredTier is empty); tier/roleId receive the
+     * matched label and role ID. Public so --selftest can pin the gate rules.
+     */
+    static bool tierForRoles(const Config &config, const QStringList &memberRoles,
+                             QString *tier = nullptr, QString *roleId = nullptr);
 
 signals:
     void authorizedChanged();
@@ -154,6 +184,17 @@ private:
         QString error;
     };
 
+    /** Result of the live Discord guild-member role check. */
+    struct GuildRoleAnswer {
+        bool ok = false;        // the API request itself succeeded
+        bool granted = false;   // one held role satisfies requiredTier
+        bool notMember = false; // 404: not in the guild (or wrong guild id)
+        bool missingScope = false; // 403: token lacks guilds.members.read
+        QString tier;
+        QString roleId;
+        QString message; // technical failure text when ok == false
+    };
+
     bool startLoopback(QString *error);
     void stopLoopback();
     QString handleCallback(const QString &path, const QString &query);
@@ -161,9 +202,14 @@ private:
     HttpAnswer httpGet(const QString &url, const QString &bearer = QString());
     HttpAnswer httpPostForm(const QString &url, const QByteArray &form);
 
-    /** Full exchange: code -> token -> /users/@me -> allowlist check. */
+    /** Full exchange: code -> token -> /users/@me -> allowlist or role check. */
     DiscordProfile completeDiscord(const QString &urlOrCode);
     void finishHandoff(const DiscordProfile &profile);
+
+    /** GET /users/@me/guilds/{guildId}/member and match discord.roles. */
+    GuildRoleAnswer checkGuildRole(const QString &accessToken);
+    /** True when a saved role-based session still satisfies the current config. */
+    bool savedRoleStillGranted(const QVariantMap &identity) const;
 
     void setNote(const QString &text, const QString &kind);
     void setProgress(qreal value, bool indeterminate);

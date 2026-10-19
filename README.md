@@ -5,10 +5,12 @@ Qt Quick desktop customizer for BlueStacks / MSI App Player on Windows.
 ## Sign-in gate (Discord only)
 
 This is a private dev tool: the app opens on the Premium-Optimizer-style
-sign-in card with **one option - Continue with Discord**. Access follows a
-dev allowlist of Discord user IDs (`discord.allowUsers` in `auth.json`, or
-`BSIC_DISCORD_ALLOW_USERS`); a rejected sign-in shows the account's Discord
-ID on the result page so it can be added. The flow is Discord OAuth2 with
+sign-in card with **one option - Continue with Discord**. Access follows
+either a dev allowlist of Discord user IDs (`discord.allowUsers`) or a
+**Discord server role gate** (`discord.guildId` + `discord.roles` +
+`discord.requiredTier`, checked live with the `guilds.members.read` scope);
+a rejected sign-in shows the account's Discord ID on the result page so it
+can be added. The flow is Discord OAuth2 with
 PKCE + a `127.0.0.1:43713` loopback callback (paste-the-link fallback), and a
 successful sign-in writes an HMAC-signed machine-bound session that only
 earns a one-click "Welcome back" continue on the next launch. The gate is

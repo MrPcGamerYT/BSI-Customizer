@@ -1548,12 +1548,86 @@ int runSelfTest()
             // parse as an auth.json.
             const QByteArray embedded = AuthManager::embeddedAuthJson();
             if (!embedded.isEmpty()) {
-                QJsonParseError embedError;
-                const QJsonDocument doc = QJsonDocument::fromJson(embedded, &embedError);
-                check(embedError.error == QJsonParseError::NoError && doc.isObject()
-                          && doc.object().value(QStringLiteral("discord")).isObject(),
-                      "the build-time embedded ZLP_AUTH_JSON blob is a valid auth.json");
+                const AuthManager::Config embeddedCfg = AuthManager::loadConfig();
+                check(embeddedCfg.configured && !embeddedCfg.clientId.isEmpty(),
+                      "the build-time embedded ZLP_AUTH_JSON blob parses and configures sign-in");
             }
+        }
+
+        // ---- server role gate (Premium-Optimizer auth.json shape) ----
+        // guildId + roles + requiredTier must grant access without any
+        // allowUsers entry, and a scope mangled into markdown by a chat app
+        // must be repaired before it reaches Discord.
+        qputenv("ZLP_AUTH_JSON",
+                QByteArrayLiteral("{\"discord\":{"
+                                  "\"clientId\":\"role-client\","
+                                  "\"scope\":\"identify [guilds.members.read]"
+                                  "(http://guilds.members.read)\","
+                                  "\"guildId\":\"1380048834876674108\","
+                                  "\"requiredTier\":\"Dev\","
+                                  "\"roles\":{\"1488215210010611932\":"
+                                  "{\"tier\":\"Dev\",\"label\":\"Dev\"}},"
+                                  "\"inviteUrl\":\"[https://discord.gg/5qkKPRZkWa]"
+                                  "(https://discord.gg/5qkKPRZkWa)\""
+                                  "}}"));
+        {
+            const AuthManager::Config cfg = AuthManager::loadConfig();
+            check(cfg.configured, "a role-gated blob configures sign-in with no allowlist");
+            check(cfg.roleGateConfigured(), "guildId + roles enable the role gate");
+            check(cfg.guildId == QLatin1String("1380048834876674108"),
+                  "discord.guildId parses");
+            check(cfg.requiredTier == QLatin1String("Dev"),
+                  "discord.requiredTier parses");
+            check(cfg.roles.value(QStringLiteral("1488215210010611932")) == QLatin1String("Dev"),
+                  "discord.roles parses the {tier,label} object form");
+            check(cfg.scope == QLatin1String("identify guilds.members.read"),
+                  "a markdown-mangled scope is repaired to space-separated scopes");
+            check(cfg.inviteUrl == QLatin1String("https://discord.gg/5qkKPRZkWa"),
+                  "a markdown-mangled invite URL is repaired");
+            check(!cfg.setupHint.contains(QStringLiteral("No dev access gate")),
+                  "the role gate suppresses the no-gate setup hint");
+
+            QString tier;
+            QString roleId;
+            check(AuthManager::tierForRoles(cfg,
+                                            QStringList { QStringLiteral("1488215210010611932") },
+                                            &tier, &roleId)
+                      && tier == QLatin1String("Dev")
+                      && roleId == QLatin1String("1488215210010611932"),
+                  "holding a listed role grants its tier");
+            check(!AuthManager::tierForRoles(cfg,
+                                             QStringList { QStringLiteral("999999999999999999") }),
+                  "a role outside discord.roles is rejected");
+
+            AuthManager::Config wrongTier = cfg;
+            wrongTier.requiredTier = QStringLiteral("Mod");
+            check(!AuthManager::tierForRoles(
+                      wrongTier, QStringList { QStringLiteral("1488215210010611932") }),
+                  "a role below discord.requiredTier is rejected");
+
+            AuthManager::Config anyRole = cfg;
+            anyRole.requiredTier.clear();
+            check(AuthManager::tierForRoles(
+                      anyRole, QStringList { QStringLiteral("1488215210010611932") }),
+                  "an empty requiredTier accepts any listed role");
+
+            AuthManager::Config idOnly = cfg;
+            idOnly.roles.clear();
+            idOnly.roles.insert(QStringLiteral("1488215210010611932"), QString());
+            check(AuthManager::tierForRoles(
+                      idOnly, QStringList { QStringLiteral("1488215210010611932") }),
+                  "a role listed without a tier is an explicit grant");
+        }
+
+        // A secret pasted as a ```json fence (and a numeric client id) still
+        // has to parse - both are common copy/paste accidents.
+        qputenv("ZLP_AUTH_JSON",
+                QByteArrayLiteral("```json\n{\"discord\":{\"clientId\":123456789,"
+                                  "\"allowUsers\":[\"555\"]}}\n```"));
+        {
+            const AuthManager::Config cfg = AuthManager::loadConfig();
+            check(cfg.configured && cfg.clientId == QLatin1String("123456789"),
+                  "a code-fenced blob with a numeric clientId still parses");
         }
         qunsetenv("ZLP_AUTH_JSON");
         // The gate blocks below were written against the env config set above
