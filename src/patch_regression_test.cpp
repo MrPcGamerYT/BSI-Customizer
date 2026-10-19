@@ -1665,7 +1665,8 @@ int runPatchRegressionTests()
         // fixture is the stock latest-player shape (the same member spellings
         // the real plr.qml / PlrSidebar.qml / PlrTopbar.qml use), and the
         // claim pinned here is reversibility: toggling the option off writes
-        // the stock bytes back, so the change needs no backup restore to undo.
+        // the stock QML back byte-for-byte, so the change needs no backup
+        // restore to undo.
         const QString plr = QStringLiteral(
             "import QtQuick 2.15\r\n"
             "Rectangle {\r\n"
@@ -1813,7 +1814,15 @@ int runPatchRegressionTests()
         const auto patchedState = LayoutPatcher::analyze(read(path), id);
         check(patchedState.supported && patchedState.applied, "the patched player reports the tweak as applied");
         check(LayoutPatcher::apply(path, id, false).ok, "turning the option off restores the stock layout");
-        check(read(path) == original, "the restore returns the exact original bytes");
+        // Reversibility is pinned at the document level: every edited QML file
+        // comes back byte-for-byte (the EXE itself keeps replaceResource's
+        // refreshed resource timestamps, which is what makes Qt reject stale
+        // caches after any patch cycle).
+        const QByteArray restoredBytes = read(path);
+        check(resourceText(restoredBytes, r, QStringLiteral("plr.qml")) == plr
+                  && resourceText(restoredBytes, r, QStringLiteral("PlrSidebar.qml")) == sidebar
+                  && resourceText(restoredBytes, r, QStringLiteral("PlrTopbar.qml")) == topbar,
+              "the restore writes every edited document back byte-for-byte");
         const auto restored = LayoutPatcher::analyze(read(path), id);
         check(restored.supported && !restored.applied, "the restored player reports stock again");
         auto other = resources({ { QStringLiteral("Other.qml"),
