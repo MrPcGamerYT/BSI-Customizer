@@ -73,6 +73,10 @@ QVariantMap Backend::lockedMap() const
                   QStringLiteral("Sign in with Discord to unlock BSI Customizer."));
     locked.insert(QStringLiteral("message"),
                   QStringLiteral("Sign in with Discord to unlock BSI Customizer."));
+    // QML reads `msg` from every apply result (the toast uses it), so the
+    // locked short-circuit must carry one too.
+    locked.insert(QStringLiteral("msg"),
+                  QStringLiteral("Sign in with Discord to unlock BSI Customizer."));
     return locked;
 }
 

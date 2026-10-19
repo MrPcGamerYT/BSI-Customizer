@@ -393,7 +393,9 @@ ApplicationWindow {
                 FpsPage {}
                 IntegrityPage {}
                 BootVideoPage {}
-                ExtrasPage {}
+                ExtrasPage {
+                    onNotify: (msg) => toast.show(msg)
+                }
                 RpcidPage {}
                 AppearancePage {
                     onNotify: (msg) => toast.show(msg)

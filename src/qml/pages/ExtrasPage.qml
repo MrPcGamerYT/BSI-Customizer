@@ -7,6 +7,8 @@ import BSICustomizer
 Item {
     id: page
 
+    signal notify(string message)
+
     // how many removal rows are ticked (drives the Apply button state/label)
     property int checkedCount: 0
     // player layout tweaks with their live applied/supported state
@@ -99,8 +101,9 @@ Item {
                 Text {
                     Layout.fillWidth: true
                     wrapMode: Text.Wrap
-                    text: qsTr("Structural QML patches that rearrange the player UI. Reversible - "
-                               + "turn an option off and apply again to restore the stock layout.")
+                    text: qsTr("Structural QML patches that rearrange the player UI. Works with both "
+                               + "the current player and older 5.x builds. Reversible - turn an "
+                               + "option off and apply again to restore the stock layout.")
                     color: Theme.textDim
                     font.pixelSize: 11
                 }
@@ -112,38 +115,97 @@ Item {
                         spacing: 10
                         required property var modelData
 
+                        // A tick means "this is the state I want". It starts
+                        // from what the EXE currently has, so an applied tweak
+                        // unticks to "restore" and a stock one ticks to apply.
                         CheckBox {
                             id: tweakCheck
+                            Layout.alignment: Qt.AlignTop
                             checked: !!modelData.applied
                             enabled: modelData.supported
-                        }
-                        ColumnLayout {
-                            Layout.fillWidth: true
-                            spacing: 2
-                            Text {
-                                Layout.fillWidth: true
-                                wrapMode: Text.Wrap
-                                text: modelData.label
-                                color: modelData.supported ? Theme.text : Theme.textDim
-                                font.pixelSize: 12
+                            padding: 0
+                            implicitWidth: 18
+                            implicitHeight: 18
+                            indicator: Rectangle {
+                                implicitWidth: 18
+                                implicitHeight: 18
+                                radius: 5
+                                color: tweakCheck.checked ? Theme.accent : "transparent"
+                                border.width: 1
+                                border.color: tweakCheck.checked
+                                              ? Theme.accent
+                                              : (tweakCheck.enabled ? Theme.borderStrong
+                                                                    : Theme.border)
+                                Text {
+                                    anchors.centerIn: parent
+                                    visible: tweakCheck.checked
+                                    text: "\u2713"
+                                    color: Theme.primaryText
+                                    font.pixelSize: 11
+                                    font.weight: Font.Black
+                                }
                             }
-                            Text {
-                                Layout.fillWidth: true
-                                wrapMode: Text.Wrap
-                                text: modelData.supported ? modelData.detail : modelData.state
-                                color: Theme.textDim
-                                font.pixelSize: 11
+                        }
+                        Item {
+                            Layout.fillWidth: true
+                            implicitHeight: tweakText.implicitHeight
+                            ColumnLayout {
+                                id: tweakText
+                                anchors.fill: parent
+                                spacing: 2
+                                Text {
+                                    Layout.fillWidth: true
+                                    wrapMode: Text.Wrap
+                                    text: modelData.label
+                                    color: modelData.supported ? Theme.text : Theme.textDim
+                                    font.pixelSize: 12
+                                }
+                                Text {
+                                    Layout.fillWidth: true
+                                    wrapMode: Text.Wrap
+                                    text: modelData.detail
+                                    color: Theme.textDim
+                                    font.pixelSize: 11
+                                }
+                                Text {
+                                    Layout.fillWidth: true
+                                    wrapMode: Text.Wrap
+                                    text: !modelData.supported ? modelData.state
+                                          : (modelData.applied
+                                             ? qsTr("Currently applied — untick to restore the stock sidebar.")
+                                             : qsTr("Ready — tick and press Apply to move the buttons to the title bar."))
+                                    color: !modelData.supported ? Theme.warn
+                                           : (modelData.applied ? Theme.green : Theme.textDim)
+                                    font.pixelSize: 11
+                                    font.weight: Font.DemiBold
+                                }
+                            }
+                            // The whole description toggles the tick too, so the
+                            // option is not a tiny 18px target.
+                            MouseArea {
+                                anchors.fill: parent
+                                enabled: modelData.supported
+                                cursorShape: enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+                                onClicked: tweakCheck.checked = !tweakCheck.checked
                             }
                         }
                         ActionButton {
                             Layout.alignment: Qt.AlignTop
                             accent: true
                             implicitHeight: 28
-                            text: qsTr("Apply")
                             enabled: modelData.supported
+                                     && tweakCheck.checked !== !!modelData.applied
+                            text: !modelData.supported
+                                  ? qsTr("Unavailable")
+                                  : (modelData.applied
+                                     ? (tweakCheck.checked ? qsTr("Applied") : qsTr("Restore"))
+                                     : qsTr("Apply"))
                             onClicked: {
-                                backend.applyLayoutTweak(modelData.id, tweakCheck.checked);
+                                const result = backend.applyLayoutTweak(modelData.id,
+                                                                        tweakCheck.checked);
                                 page.refreshLayout();
+                                if (result && result.msg)
+                                    page.notify(result.msg);
                             }
                         }
                     }
