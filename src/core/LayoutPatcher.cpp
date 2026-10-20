@@ -1108,14 +1108,22 @@ QString responsiveHelper(const SidebarControls &controls, bool autoInstalled, co
         QStringLiteral("        if (elementId === undefined) return Qt.point(popup.x, popup.y)"),
         QStringLiteral("        popup.pBSIAnchor = elementId"),
         QStringLiteral("        var button = null"),
-        QStringLiteral("        if (elementId && typeof elementId === 'object') button = elementId"),
-        QStringLiteral("        else if (elementId !== null) {"),
+        // Some Qt 5/Qt 6 builds pass the sidebar model object (for example
+        // pSound), not its string pElementId and not the visual button. Only
+        // treat an object as the trigger when it really exposes mapToGlobal;
+        // otherwise resolve its element id through the fixed/model delegates.
+        QStringLiteral("        var lookupId = elementId"),
+        QStringLiteral("        if (elementId && typeof elementId === 'object') {"),
+        QStringLiteral("            if (typeof elementId.mapToGlobal === 'function') button = elementId"),
+        QStringLiteral("            else if (elementId.pElementId !== undefined) lookupId = elementId.pElementId"),
+        QStringLiteral("        }"),
+        QStringLiteral("        if (!button && lookupId !== null && lookupId !== undefined) {"),
         // Search the fixed (non-Repeater) buttons first — Settings, Back,
         // Home, Recent, etc. — so their own panels open beneath them instead
         // of snapping to the three dots.
         QStringLiteral("            var fixed = [") + fixed.join(QStringLiteral(", ")) + QStringLiteral("]"),
         QStringLiteral("            for (var n = 0; n < fixed.length; ++n) {"),
-        QStringLiteral("                if (fixed[n].elementId === elementId) {"),
+        QStringLiteral("                if (fixed[n].elementId === lookupId || fixed[n].elementId === elementId) {"),
         QStringLiteral("                    if (fixed[n].button && fixed[n].button.visible)"),
         QStringLiteral("                        button = fixed[n].button"),
         QStringLiteral("                    break"),
@@ -1126,15 +1134,16 @@ QString responsiveHelper(const SidebarControls &controls, bool autoInstalled, co
         QStringLiteral("            var unmodelled = [") + unmodelled.join(QStringLiteral(", ")) + QStringLiteral("]"),
         QStringLiteral("            for (var n = 0; !button && n < unmodelled.length; ++n) {"),
         QStringLiteral("                if (unmodelled[n].button && unmodelled[n].allowed) {"),
-        QStringLiteral("                    if (unmodelled[n].button === elementId") + QStringLiteral(") button = unmodelled[n].button"),
+        QStringLiteral("                    if (unmodelled[n].button === elementId || unmodelled[n].button === lookupId")
+            + QStringLiteral(") button = unmodelled[n].button"),
         QStringLiteral("                }"),
         QStringLiteral("            }"),
         // Fallback: some builds pass the button's own id as a string (e.g.
         // the literal "iGameControlsBtn"). Try resolving it as a property
         // of the sidebar component scope before giving up.
-        QStringLiteral("            if (!button && typeof this[elementId] !== 'undefined'")
-        + QStringLiteral(" && this[elementId] && this[elementId].mapToGlobal) {"),
-        QStringLiteral("                button = this[elementId]"),
+        QStringLiteral("            if (!button && typeof lookupId === 'string' && typeof this[lookupId] !== 'undefined'")
+        + QStringLiteral(" && this[lookupId] && this[lookupId].mapToGlobal) {"),
+        QStringLiteral("                button = this[lookupId]"),
         QStringLiteral("            }"),
         // Finally the Repeater model (volume, game controls, macros,
         // screenshot, location, shake, fullscreen, … — whichever the build
@@ -1142,7 +1151,7 @@ QString responsiveHelper(const SidebarControls &controls, bool autoInstalled, co
         QStringLiteral("            if (!button) {"),
         QStringLiteral("                var items = ") + controls.itemsName,
         QStringLiteral("                for (var i = 0; i < items.length; ++i) {"),
-        QStringLiteral("                    if (items[i].pIsFeatureEnable && items[i].pElementId === elementId) {"),
+        QStringLiteral("                    if (items[i].pIsFeatureEnable && (items[i] === elementId || items[i].pElementId === lookupId)) {"),
         QStringLiteral("                        var delegate = ") + controls.repeaterId + QStringLiteral(".itemAt(i)"),
         QStringLiteral("                        if (delegate && delegate.visible) button = delegate"),
         QStringLiteral("                        break"),
@@ -1160,7 +1169,10 @@ QString responsiveHelper(const SidebarControls &controls, bool autoInstalled, co
         QStringLiteral("        var left = bounds.x, right = bounds.x + bounds.width"),
         QStringLiteral("        var upper = bounds.y, lower = bounds.y + bounds.height"),
         QStringLiteral("        var x = bottom.x - popup.width / 2"),
-        QStringLiteral("        var y = bottom.y + 6 - shadow"),
+        // Place the popup's visible top edge flush with the bottom of its
+        // trigger. Account for the popup shadow so the panel opens directly
+        // below the button rather than floating away from it.
+        QStringLiteral("        var y = bottom.y - shadow"),
         QStringLiteral("        if (y + popup.height > lower && top.y - 6 + shadow - popup.height >= upper)"),
         QStringLiteral("            y = top.y - 6 + shadow - popup.height"),
         QStringLiteral("        return Qt.point(Math.max(left, Math.min(x, right - popup.width)),"),

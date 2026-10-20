@@ -2101,6 +2101,12 @@ Window {
             var point = fBSIPopupPoint(mockPopup, "sound")
             mockPopup.x = point.x; mockPopup.y = point.y
         }
+        function probeSoundModel() {
+            // Some legacy and current player builds pass the model QObject
+            // (pSound) to their popup helper instead of its element-id string.
+            var point = fBSIPopupPoint(mockPopup, pAllSidebarItems[2])
+            mockPopup.x = point.x; mockPopup.y = point.y
+        }
         function probeMenu() {
             var point = fBSIPopupPoint(mockPopup, null)
             mockPopup.x = point.x; mockPopup.y = point.y
@@ -2138,8 +2144,16 @@ Window {
                           "no three dots at exact fit, including a disabled model entry in the index cutoff");
                     QMetaObject::invokeMethod(bar, "probeSound");
                     const QPointF soundBottom = sound->mapToGlobal(QPointF(sound->width() / 2, sound->height()));
-                    check(qAbs(panel->property("y").toReal() - (soundBottom.y() + 2)) < 1,
-                          "the sound panel opens below its own visible top-bar button");
+                    check(qAbs(panel->property("y").toReal() - (soundBottom.y() - 4)) < 1,
+                          "the sound panel opens flush below its own visible top-bar button");
+                    const QPointF soundCenter = sound->mapToGlobal(
+                        QPointF(sound->width() / 2, sound->height() / 2));
+                    const qreal expectedSoundX = soundCenter.x() - panel->property("width").toReal() / 2;
+                    QMetaObject::invokeMethod(bar, "probeSoundModel");
+                    check(std::isfinite(panel->property("x").toReal())
+                              && qAbs(panel->property("x").toReal() - expectedSoundX) < 1
+                              && qAbs(panel->property("y").toReal() - (soundBottom.y() - 4)) < 1,
+                          "a model-object popup anchor resolves to the actual volume button, not the window origin");
                     bar->setWidth(256);
                     QMetaObject::invokeMethod(bar, "fBSIUpdateOverflow");
                     QCoreApplication::processEvents();
@@ -2155,8 +2169,8 @@ Window {
                           "a hidden sound button moves into the three-dot menu even if its stock menu flag is false");
                     QMetaObject::invokeMethod(bar, "probeSound");
                     const QPointF dotsBottom = dots->mapToGlobal(QPointF(dots->width() / 2, dots->height()));
-                    check(qAbs(panel->property("y").toReal() - (dotsBottom.y() + 2)) < 1,
-                          "the overflowed sound panel opens below the three-dot button");
+                    check(qAbs(panel->property("y").toReal() - (dotsBottom.y() - 4)) < 1,
+                          "the overflowed sound panel opens flush below the three-dot button");
                     bar->setWidth(288);
                     QMetaObject::invokeMethod(bar, "fBSIUpdateOverflow");
                     QCoreApplication::processEvents();
@@ -2463,6 +2477,10 @@ Window {
         check(legacySidebarText.contains(QLatin1String("UiRowLayout"))
                   && legacySidebarText.contains(QLatin1String("visible: iSidebar.width > 0")),
               "the old sidebar component uses the same centered row");
+        check(legacySidebarText.contains(QLatin1String("typeof elementId.mapToGlobal === 'function'"))
+                  && legacySidebarText.contains(QLatin1String("items[i].pElementId === lookupId"))
+                  && legacySidebarText.contains(QLatin1String("fBSIPopupPoint(soundWin, pSound).x")),
+              "the old player also anchors each popup to its resolved button instead of the sidebar edge");
         const auto legacyState = LayoutPatcher::analyze(read(legacyPath), id);
         check(legacyState.supported && legacyState.applied, "the old patched player reports applied");
         check(LayoutPatcher::apply(legacyPath, id, false).ok, "the old row-layout player restores");
