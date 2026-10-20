@@ -2212,6 +2212,30 @@ Window {
                   && resourceText(read(earlierTitlebarPath), earlierTitlebar, QStringLiteral("PlrSidebar.qml")) == sidebar
                   && resourceText(read(earlierTitlebarPath), earlierTitlebar, QStringLiteral("plr.qml")) == anchoredPlr,
               "the updated title bar restores every original document");
+        // The intermediate release added a line break after the Collapse
+        // comment but did not version that comment. Even an inline button
+        // must still be restored exactly after its helper is upgraded.
+        QString intermediateSidebar = olderResponsive(patchedSidebar);
+        const QString currentCollapse = QStringLiteral(
+            "visible: false // BSI CUSTOMIZER: no sidebar to collapse in the title bar [v2]\r\n");
+        const QString intermediateCollapse = QStringLiteral(
+            "visible: false // BSI CUSTOMIZER: no sidebar to collapse in the title bar\r\n");
+        check(intermediateSidebar.count(currentCollapse) == 1,
+              "the inline Collapse fixture contains the versioned, terminated comment");
+        intermediateSidebar.replace(currentCollapse, intermediateCollapse);
+        auto intermediate = resources({ { QStringLiteral("plr.qml"), patchedPlr },
+                                         { QStringLiteral("PlrSidebar.qml"), intermediateSidebar },
+                                         { QStringLiteral("PlrTopbar.qml"), patchedTopbar } }, true, {});
+        addRegistration(intermediate, false);
+        const QString intermediatePath = temp.filePath(QStringLiteral("layout-intermediate.exe"));
+        write(intermediatePath, intermediate.f.bytes);
+        check(LayoutPatcher::analyze(read(intermediatePath), id).needsUpdate
+                  && LayoutPatcher::apply(intermediatePath, id, true).ok,
+              "the intermediate unversioned Collapse marker permits a responsive-helper Update");
+        check(LayoutPatcher::apply(intermediatePath, id, false).ok
+                  && resourceText(read(intermediatePath), intermediate, QStringLiteral("PlrSidebar.qml")) == sidebar
+                  && resourceText(read(intermediatePath), intermediate, QStringLiteral("plr.qml")) == anchoredPlr,
+              "the intermediate inline Collapse marker restores its original line ending exactly");
         auto earlierManual = resources({ { QStringLiteral("plr.qml"), patchedPlr },
                                          { QStringLiteral("PlrSidebar.qml"), olderResponsive(movedSmart) },
                                          { QStringLiteral("PlrTopbar.qml"), patchedTopbar } }, true, {});
