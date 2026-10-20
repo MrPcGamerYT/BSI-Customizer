@@ -20,6 +20,18 @@ namespace LayoutPatcher {
 namespace {
 
 const QString kSidebarToTitlebar = QStringLiteral("sidebar-to-titlebar");
+const QString kResponsiveSidebar = QStringLiteral("responsive-sidebar");
+// The responsive fix can be selected for the stock sidebar on its own. When
+// moving the controls into the title bar, it is installed automatically; that
+// copy is removed on restore, while a separately selected fix is preserved.
+const QString kResponsiveBegin = QStringLiteral("// BSI CUSTOMIZER: responsive sidebar begin");
+const QString kResponsiveEnd = QStringLiteral("// BSI CUSTOMIZER: responsive sidebar end");
+const QString kResponsiveAuto = QStringLiteral(" [titlebar]");
+const QString kResponsiveCall = QStringLiteral("fBSIUpdateOverflow() /* BSI CUSTOMIZER: smart overflow */");
+const QString kPopupOriginal = QStringLiteral(" // BSI CUSTOMIZER: popup original:");
+const QString kMenuOriginal = QStringLiteral(" /* BSI CUSTOMIZER: overflow menu original:");
+const QString kLayoutId = QStringLiteral("iBSISidebarLayout");
+const QString kRepeaterId = QStringLiteral("iBSISidebarButtons");
 
 // The stock shapes this tweak reads and the patched shapes it writes. Every
 // edit is a value/name swap between the two (plus one inserted title-bar
@@ -333,6 +345,425 @@ bool directChild(const QString &masked, int parentOpen, int childBegin)
     return depth == 0;
 }
 
+// The stock sidebar's overflow math can leave the kebab visible even when all
+// enabled buttons fit, and only counting the other dimension when it is moved
+// to a title bar makes this worse. Keep the player's original reset (it also
+// owns other state), then correct the visible buttons using the *actual* slot
+// budget. This is shared by the stock column and the relocated row.
+struct SidebarControls
+{
+    QmlText::Object root, layout, repeater;
+    QmlText::Binding menuVisibility;
+    QString layoutId, repeaterId, itemsName;
+    QStringList fixedButtons;
+    bool horizontal = false;
+    int resetEnd = -1;
+};
+
+bool sidebarControls(const QString &qml, const QString &masked, SidebarControls *out)
+{
+    SidebarControls controls;
+    for (const auto &object : QmlText::objects(masked, QStringLiteral("Rectangle"))) {
+        QmlText::Binding id;
+        if (!QmlText::binding(masked, object.open, object.end, QStringLiteral("id"), &id)
+            || !directChild(masked, object.open, id.nameBegin)
+            || qml.mid(id.valueBegin, id.valueEnd - id.valueBegin) != QLatin1String("iSidebar"))
+            continue;
+        int begin = 0, end = 0;
+        if (!functionSpan(masked, QStringLiteral("fResetSidebar"), &begin, &end)
+            || begin <= object.open || end >= object.end
+            || !directChild(masked, object.open,
+                            masked.lastIndexOf(QLatin1String("function fResetSidebar"), begin)))
+            return false;
+        controls.root = object;
+        controls.resetEnd = end;
+        break;
+    }
+    if (controls.resetEnd < 0) return false;
+
+    const auto member = [&](const QString &name) {
+        QmlText::Binding b;
+        return QmlText::binding(masked, controls.root.open, controls.root.end, name, &b)
+            && directChild(masked, controls.root.open, b.nameBegin);
+    };
+    if (!member(QStringLiteral("pSidebarElementSize"))
+        || !member(QStringLiteral("pVisibleSidebarElementsCount"))) return false;
+    for (const auto &name : { QStringLiteral("pAllSidebarItems"),
+                              QStringLiteral("iAllSidebarItems"), QStringLiteral("pSidebarItems") }) {
+        if (member(name)) { controls.itemsName = name; break; }
+    }
+    if (controls.itemsName.isEmpty()) return false;
+
+    // Do not confuse a popup's nested layout/repeater with the button strip.
+    int layouts = 0;
+    for (const auto &type : { QStringLiteral("UiColumnLayout"), QStringLiteral("UiRowLayout") }) {
+        for (const auto &object : QmlText::objects(masked, type)) {
+            if (object.open <= controls.root.open || object.end > controls.root.end
+                || !directChild(masked, controls.root.open, object.nameBegin)
+                || !qml.mid(object.open, object.end - object.open).contains(QLatin1String("iKebabMenuBtn")))
+                continue;
+            controls.layout = object;
+            controls.horizontal = type == QLatin1String("UiRowLayout");
+            ++layouts;
+        }
+    }
+    if (layouts != 1) return false;
+
+    int repeaters = 0;
+    for (const auto &object : QmlText::objects(masked, QStringLiteral("Repeater"))) {
+        if (object.open <= controls.layout.open || object.end > controls.layout.end
+            || !directChild(masked, controls.layout.open, object.nameBegin)) continue;
+        QmlText::Binding model;
+        if (QmlText::binding(masked, object.open, object.end, QStringLiteral("model"), &model)
+            && directChild(masked, object.open, model.nameBegin)
+            && qml.mid(model.valueBegin, model.valueEnd - model.valueBegin) == controls.itemsName) {
+            controls.repeater = object;
+            ++repeaters;
+        }
+    }
+    if (repeaters != 1) return false;
+
+    bool kebab = false;
+    for (const auto &object : QmlText::objects(masked, QStringLiteral("UiImageButton"))) {
+        if (object.open <= controls.layout.open || object.end > controls.layout.end
+            || !directChild(masked, controls.layout.open, object.nameBegin)) continue;
+        QmlText::Binding id;
+        if (!QmlText::binding(masked, object.open, object.end, QStringLiteral("id"), &id)
+            || !directChild(masked, object.open, id.nameBegin)) return false;
+        const QString name = qml.mid(id.valueBegin, id.valueEnd - id.valueBegin);
+        if (name == QLatin1String("iKebabMenuBtn")) { kebab = true; continue; }
+        if (!QRegularExpression(QStringLiteral("^[_a-zA-Z][_a-zA-Z0-9]*$")).match(name).hasMatch())
+            return false;
+        // A fixed control with a declarative visibility binding must not be
+        // overwritten by imperative overflow updates.
+        QmlText::Binding visible;
+        if (QmlText::binding(masked, object.open, object.end, QStringLiteral("visible"), &visible)
+            && directChild(masked, object.open, visible.nameBegin)) return false;
+        controls.fixedButtons.prepend(name); // stock reset prioritizes the end of the strip
+    }
+    if (!kebab) return false;
+
+    const auto objectId = [&](const QmlText::Object &object, const QString &fallback) {
+        QmlText::Binding b;
+        if (QmlText::binding(masked, object.open, object.end, QStringLiteral("id"), &b)
+            && directChild(masked, object.open, b.nameBegin)) {
+            const QString name = qml.mid(b.valueBegin, b.valueEnd - b.valueBegin);
+            if (QRegularExpression(QStringLiteral("^[_a-zA-Z][_a-zA-Z0-9]*$")).match(name).hasMatch())
+                return name;
+            return QString();
+        }
+        if (qml.contains(fallback)) return QString(); // avoid an id collision
+        return fallback;
+    };
+    controls.layoutId = objectId(controls.layout, kLayoutId);
+    controls.repeaterId = objectId(controls.repeater, kRepeaterId);
+    if (controls.layoutId.isEmpty() || controls.repeaterId.isEmpty()) return false;
+    *out = controls;
+    return true;
+}
+
+// Some player builds leave disabled entries in the Repeater's model. Count
+// only enabled buttons for the space budget but keep the Repeater's raw index
+// as the visibility cutoff; otherwise a later enabled button disappears with
+// no three-dot menu to reach it. The menu must also admit *all* overflowing
+// repeatable buttons, including ones whose stock pShowOnKebabMenu is false.
+bool menuEdits(const QString &qml, const QString &masked, const SidebarControls &controls,
+               QList<Edit> &edits)
+{
+    int found = 0;
+    for (const auto &repeater : QmlText::objects(masked, QStringLiteral("Repeater"))) {
+        if (repeater.open == controls.repeater.open || repeater.open <= controls.root.open
+            || repeater.end >= controls.root.end) continue;
+        QmlText::Binding model;
+        if (!QmlText::binding(masked, repeater.open, repeater.end, QStringLiteral("model"), &model)
+            || !directChild(masked, repeater.open, model.nameBegin)
+            || qml.mid(model.valueBegin, model.valueEnd - model.valueBegin) != controls.itemsName)
+            continue;
+        for (const auto &button : QmlText::objects(masked, QStringLiteral("UiImageButton"))) {
+            if (button.open <= repeater.open || button.end >= repeater.end) continue;
+            QmlText::Binding visible;
+            if (!QmlText::binding(masked, button.open, button.end,
+                                  QStringLiteral("visible"), &visible)
+                || !directChild(masked, button.open, visible.nameBegin)) continue;
+            const QString value = qml.mid(visible.valueBegin, visible.valueEnd - visible.valueBegin);
+            if (!value.contains(QLatin1String("pVisibleSidebarElementsCount"))
+                || !value.contains(QLatin1String("pIsFeatureEnable"))
+                || !value.contains(QLatin1String("pShowOnKebabMenu"))
+                || !value.contains(QLatin1String("index"))) continue;
+            const QString item = value.contains(QLatin1String("model.modelData."))
+                ? QStringLiteral("model.modelData") : QStringLiteral("modelData");
+            const QString replacement = QStringLiteral("(") + item + QStringLiteral(".pIsFeatureEnable && ((")
+                + item + QStringLiteral(".pShowViaRepaterOnly && index >= pVisibleSidebarElementsCount) || (!")
+                + item + QStringLiteral(".pShowViaRepaterOnly && ") + item
+                + QStringLiteral(".pShowOnKebabMenu)))") + kMenuOriginal
+                + QString::fromLatin1(value.toUtf8().toBase64()) + QStringLiteral(" */");
+            addEdit(edits, visible.valueBegin, visible.valueEnd - visible.valueBegin, replacement);
+            ++found;
+        }
+    }
+    return found == 1; // never leave a hidden button unreachable
+}
+
+// The original popup placement in the sidebar uses the sidebar's global X
+// and an index-based Y. After reparenting, neither is the trigger's position:
+// use the real Repeater delegate (or the kebab when that button is hidden).
+// Preserve each original assignment in a tagged comment so every supported
+// player's exact source and line endings can be restored without guessing.
+struct PopupLine
+{
+    int begin = 0, length = 0;
+    QString object, axis, expression, original;
+};
+
+QString popupReplacement(const PopupLine &line, const QString &anchor)
+{
+    int indentLength = 0;
+    while (indentLength < line.original.size() && line.original.at(indentLength).isSpace())
+        ++indentLength;
+    const QString replacement = line.original.left(indentLength) + line.object + QLatin1Char('.') + line.axis
+        + QStringLiteral(" = fBSIPopupPoint(") + line.object + QStringLiteral(", ") + anchor
+        + QStringLiteral(").") + line.axis;
+    return replacement + kPopupOriginal + QString::fromLatin1(line.original.toUtf8().toBase64());
+}
+
+bool popupEdits(const QString &qml, const QString &masked, const SidebarControls &controls,
+                QList<Edit> &edits)
+{
+    const QRegularExpression lineRx(QStringLiteral(
+        R"((?m)^([ \t]*)([_a-zA-Z][_a-zA-Z0-9]*)\.(x|y)[ \t]*=[ \t]*([^\r\n]+))"));
+    QList<PopupLine> lines;
+    auto it = lineRx.globalMatch(masked);
+    while (it.hasNext()) {
+        const auto match = it.next();
+        if (match.capturedStart() <= controls.root.open || match.capturedEnd() >= controls.root.end)
+            continue;
+        lines << PopupLine { match.capturedStart(), match.capturedLength(), match.captured(2),
+                             match.captured(3),
+                             qml.mid(match.capturedStart(4), match.capturedLength(4)).trimmed(),
+                             qml.mid(match.capturedStart(), match.capturedLength()) };
+    }
+    const QRegularExpression pointRx(QStringLiteral(
+        R"(\bfGetPopupTopPoint\s*\(\s*([_a-zA-Z][_a-zA-Z0-9]*)\s*\))"));
+    const QRegularExpression buttonRx(QStringLiteral(
+        R"(\b(i[_a-zA-Z0-9]*Btn)\.mapToGlobal\s*\()"));
+    QSet<int> used;
+    int paired = 0;
+    for (int j = 0; j < lines.size(); ++j) {
+        const auto &y = lines.at(j);
+        if (y.axis != QLatin1String("y")) continue;
+        const auto point = pointRx.match(y.expression);
+        const auto button = buttonRx.match(y.expression);
+        if (!point.hasMatch() && !button.hasMatch()) continue;
+        const QString anchor = point.hasMatch() ? point.captured(1)
+            : button.captured(1) == QLatin1String("iKebabMenuBtn")
+                  ? QStringLiteral("null") : button.captured(1);
+        int xIndex = -1;
+        for (int i = j - 1; i >= 0; --i) {
+            if (y.begin - lines.at(i).begin > 700) break;
+            if (lines.at(i).axis == QLatin1String("x") && lines.at(i).object == y.object
+                && !used.contains(i)) { xIndex = i; break; }
+        }
+        if (xIndex < 0 || !lines.at(xIndex).expression.contains(QLatin1String("mapToGlobal")))
+            return false; // unknown popup geometry: don't leave it half-moved
+        for (const int index : { xIndex, j }) {
+            const auto &line = lines.at(index);
+            addEdit(edits, line.begin, line.length, popupReplacement(line, anchor));
+            used.insert(index);
+        }
+        ++paired;
+    }
+    // Popup content sometimes resizes after creation. Its own onWidthChanged
+    // must follow the same anchor, not snap back to the old right-hand strip.
+    for (int i = 0; i < lines.size(); ++i) {
+        const auto &line = lines.at(i);
+        if (used.contains(i) || line.axis != QLatin1String("x")
+            || !line.expression.contains(QLatin1String("iSidebar.mapToGlobal"))) continue;
+        bool widthHandler = false;
+        for (const auto &popup : QmlText::objects(masked, QStringLiteral("UiWindowedPopup"))) {
+            if (popup.open >= line.begin || popup.end <= line.begin) continue;
+            QmlText::Binding id, handler;
+            if (!QmlText::binding(masked, popup.open, popup.end, QStringLiteral("id"), &id)
+                || !directChild(masked, popup.open, id.nameBegin)
+                || qml.mid(id.valueBegin, id.valueEnd - id.valueBegin) != line.object
+                || !QmlText::binding(masked, popup.open, popup.end,
+                                     QStringLiteral("onWidthChanged"), &handler)
+                || !directChild(masked, popup.open, handler.nameBegin)) continue;
+            widthHandler = line.begin >= handler.valueBegin && line.begin < handler.valueEnd;
+            if (widthHandler) break;
+        }
+        if (!widthHandler) return false;
+        addEdit(edits, line.begin, line.length,
+                popupReplacement(line, line.object + QStringLiteral(".pBSIAnchor")));
+        used.insert(i);
+    }
+    // A different form of fGetPopupTopPoint call could otherwise leave a
+    // window stranded beside the old sidebar while the button has moved.
+    if (qml.count(QLatin1String("fGetPopupTopPoint(")) > paired + 1) return false;
+    if (used.isEmpty()) return true; // players with no windowed button panels
+    for (const auto &popup : QmlText::objects(masked, QStringLiteral("UiWindowedPopup"))) {
+        if (popup.open < controls.root.open || popup.end > controls.root.end) continue;
+        QmlText::Binding existing;
+        if (QmlText::binding(masked, popup.open, popup.end,
+                             QStringLiteral("pBSIAnchor"), &existing)) return false;
+        addEdit(edits, popup.open + 1, 0,
+                lineEnding(qml) + QStringLiteral("            property var pBSIAnchor: undefined // BSI CUSTOMIZER: popup anchor"));
+    }
+    return true;
+}
+
+QString responsiveHelper(const SidebarControls &controls, bool autoInstalled, const QString &nl)
+{
+    const QString axis = controls.horizontal ? QStringLiteral("width") : QStringLiteral("height");
+    const QString startPad = controls.horizontal ? QStringLiteral("leftPadding") : QStringLiteral("topPadding");
+    const QString endPad = controls.horizontal ? QStringLiteral("rightPadding") : QStringLiteral("bottomPadding");
+    const QStringList lines {
+        QStringLiteral("    ") + kResponsiveBegin + (autoInstalled ? kResponsiveAuto : QString()),
+        QStringLiteral("    function fBSIUpdateOverflow() {"),
+        QStringLiteral("        var slot = pSidebarElementSize"),
+        QStringLiteral("        if (slot <= 0) return"),
+        QStringLiteral("        var items = ") + controls.itemsName,
+        QStringLiteral("        var count = 0"),
+        QStringLiteral("        for (var i = 0; i < items.length; ++i)"),
+        QStringLiteral("            if (items[i].pIsFeatureEnable && items[i].pShowViaRepaterOnly) ++count"),
+        QStringLiteral("        var gap = Math.max(0, ") + controls.layoutId + QStringLiteral(".spacing || 0)"),
+        QStringLiteral("        var available = iSidebar.") + axis + QStringLiteral(" - (")
+            + controls.layoutId + QLatin1Char('.') + startPad + QStringLiteral(" || 0) - (")
+            + controls.layoutId + QLatin1Char('.') + endPad + QStringLiteral(" || 0)"),
+        QStringLiteral("        var capacity = Math.max(0, Math.floor((available + gap) / (slot + gap)))"),
+        QStringLiteral("        var fixed = [") + controls.fixedButtons.join(QStringLiteral(", ")) + QLatin1Char(']'),
+        QStringLiteral("        var overflow = count + fixed.length > capacity"),
+        QStringLiteral("        var remaining = Math.max(0, capacity - (overflow ? 1 : 0))"),
+        QStringLiteral("        for (var n = 0; n < fixed.length; ++n) {"),
+        QStringLiteral("            fixed[n].visible = remaining > 0"),
+        QStringLiteral("            if (fixed[n].visible) --remaining"),
+        QStringLiteral("        }"),
+        QStringLiteral("        var toShow = Math.min(count, remaining)"),
+        QStringLiteral("        var cutoff = -1"),
+        QStringLiteral("        for (var i = 0; i < items.length && toShow > 0; ++i) {"),
+        QStringLiteral("            if (items[i].pIsFeatureEnable && items[i].pShowViaRepaterOnly) {"),
+        QStringLiteral("                cutoff = i"),
+        QStringLiteral("                --toShow"),
+        QStringLiteral("            }"),
+        QStringLiteral("        }"),
+        QStringLiteral("        pVisibleSidebarElementsCount = cutoff + 1"),
+        QStringLiteral("        iKebabMenuBtn.visible = overflow && capacity > 0"),
+        QStringLiteral("    }"),
+        QStringLiteral("    function fBSIPopupPoint(popup, elementId) {"),
+        QStringLiteral("        if (elementId === undefined) return Qt.point(popup.x, popup.y)"),
+        QStringLiteral("        popup.pBSIAnchor = elementId"),
+        QStringLiteral("        var button = null"),
+        QStringLiteral("        if (elementId && typeof elementId === 'object') button = elementId"),
+        QStringLiteral("        else if (elementId !== null) {"),
+        QStringLiteral("            var items = ") + controls.itemsName,
+        QStringLiteral("            for (var i = 0; i < items.length; ++i) {"),
+        QStringLiteral("                if (items[i].pIsFeatureEnable && items[i].pElementId === elementId) {"),
+        QStringLiteral("                    var delegate = ") + controls.repeaterId + QStringLiteral(".itemAt(i)"),
+        QStringLiteral("                    if (delegate && delegate.visible) button = delegate"),
+        QStringLiteral("                    break"),
+        QStringLiteral("                }"),
+        QStringLiteral("            }"),
+        QStringLiteral("        }"),
+        QStringLiteral("        if (!button || !button.visible) button = iKebabMenuBtn"),
+        QStringLiteral("        var bottom = button.mapToGlobal(button.width / 2, button.height)"),
+        QStringLiteral("        var top = button.mapToGlobal(button.width / 2, 0)"),
+        QStringLiteral("        var shadow = popup.shadowThickness || 0"),
+        QStringLiteral("        var bounds = popup.screen ? popup.screen.availableGeometry : null"),
+        QStringLiteral("        if (!bounds || bounds.width <= 0)"),
+        QStringLiteral("            bounds = Qt.rect(iAppwin.x, iAppwin.y, iAppwin.width, iAppwin.height)"),
+        QStringLiteral("        var left = bounds.x, right = bounds.x + bounds.width"),
+        QStringLiteral("        var upper = bounds.y, lower = bounds.y + bounds.height"),
+        QStringLiteral("        var x = bottom.x - popup.width / 2"),
+        QStringLiteral("        var y = bottom.y + 6 - shadow"),
+        QStringLiteral("        if (y + popup.height > lower && top.y - 6 + shadow - popup.height >= upper)"),
+        QStringLiteral("            y = top.y - 6 + shadow - popup.height"),
+        QStringLiteral("        return Qt.point(Math.max(left, Math.min(x, right - popup.width)),"),
+        QStringLiteral("                        Math.max(upper, Math.min(y, lower - popup.height)))"),
+        QStringLiteral("    }"),
+        QStringLiteral("    ") + kResponsiveEnd
+    };
+    return nl + lines.join(nl) + nl;
+}
+
+bool responsiveEdits(QString &qml, bool enabled, bool autoInstalled, QList<Edit> &edits)
+{
+    const QString masked = QmlText::mask(qml);
+    SidebarControls controls;
+    if (!sidebarControls(qml, masked, &controls)) return false;
+    const QString nl = lineEnding(qml);
+    const bool applied = qml.contains(kResponsiveBegin);
+    if (enabled) {
+        if (applied || qml.contains(kResponsiveEnd) || qml.contains(kPopupOriginal)
+            || qml.contains(kLayoutId) || qml.contains(kRepeaterId)
+            || qml.contains(QLatin1String("pBSIAnchor"))) return false;
+        if (!menuEdits(qml, masked, controls, edits)
+            || !popupEdits(qml, masked, controls, edits)) return false;
+        if (controls.layoutId == kLayoutId)
+            addEdit(edits, controls.layout.open + 1, 0,
+                    nl + QStringLiteral("        id: ") + kLayoutId
+                       + QStringLiteral(" // BSI CUSTOMIZER: layout id"));
+        if (controls.repeaterId == kRepeaterId)
+            addEdit(edits, controls.repeater.open + 1, 0,
+                    nl + QStringLiteral("        id: ") + kRepeaterId
+                       + QStringLiteral(" // BSI CUSTOMIZER: repeater id"));
+        addEdit(edits, controls.resetEnd, 0,
+                nl + QStringLiteral("        ") + kResponsiveCall + nl + QStringLiteral("    "));
+        addEdit(edits, controls.root.end - 1, 0, responsiveHelper(controls, autoInstalled, nl));
+    } else {
+        if (!applied || !qml.contains(kResponsiveEnd)) return false;
+        const int begin = qml.indexOf(nl + QStringLiteral("    ") + kResponsiveBegin, controls.root.open);
+        const int end = qml.indexOf(QStringLiteral("    ") + kResponsiveEnd, begin);
+        if (begin < 0 || end < begin || end >= controls.root.end
+            || qml.count(kResponsiveBegin) != 1 || qml.count(kResponsiveEnd) != 1) return false;
+        addEdit(edits, begin, end + 4 + kResponsiveEnd.size() + nl.size() - begin, QString());
+        const QString call = nl + QStringLiteral("        ") + kResponsiveCall + nl + QStringLiteral("    ");
+        const int at = qml.indexOf(call, controls.root.open);
+        if (at < 0 || at + call.size() > controls.resetEnd || qml.count(kResponsiveCall) != 1)
+            return false;
+        addEdit(edits, at, call.size(), QString());
+        for (const auto &tag : { QStringLiteral("        id: ") + kLayoutId
+                                    + QStringLiteral(" // BSI CUSTOMIZER: layout id"),
+                                 QStringLiteral("        id: ") + kRepeaterId
+                                    + QStringLiteral(" // BSI CUSTOMIZER: repeater id"),
+                                 QStringLiteral("            property var pBSIAnchor: undefined // BSI CUSTOMIZER: popup anchor") }) {
+            int from = 0;
+            while ((from = qml.indexOf(nl + tag, from)) >= 0) {
+                addEdit(edits, from, nl.size() + tag.size(), QString());
+                from += nl.size() + tag.size();
+            }
+        }
+        const QRegularExpression originalRx(QStringLiteral(
+            R"((?m)^([^\r\n]*?) // BSI CUSTOMIZER: popup original:([A-Za-z0-9+/=]+))"));
+        auto iter = originalRx.globalMatch(qml);
+        int count = 0;
+        while (iter.hasNext()) {
+            const auto match = iter.next();
+            const QByteArray encoded = match.captured(2).toLatin1();
+            const QByteArray bytes = QByteArray::fromBase64(encoded);
+            if (bytes.toBase64() != encoded || QString::fromUtf8(bytes).toUtf8() != bytes
+                || !match.captured(1).contains(QLatin1String("fBSIPopupPoint("))) return false;
+            const QString original = QString::fromUtf8(bytes);
+            if (!original.contains(QLatin1String(".x ="))
+                && !original.contains(QLatin1String(".y ="))) return false;
+            addEdit(edits, match.capturedStart(), match.capturedLength(), original);
+            ++count;
+        }
+        if (count != qml.count(kPopupOriginal)) return false;
+        const QRegularExpression menuRx(QStringLiteral(
+            R"(\((?:model\.modelData|modelData)\.pIsFeatureEnable[^\r\n]*? /\* BSI CUSTOMIZER: overflow menu original:([A-Za-z0-9+/=]+) \*/)"));
+        auto menu = menuRx.globalMatch(qml);
+        if (!menu.hasNext() || qml.count(kMenuOriginal) != 1) return false;
+        const auto match = menu.next();
+        if (menu.hasNext()) return false;
+        const QByteArray encoded = match.captured(1).toLatin1();
+        const QByteArray bytes = QByteArray::fromBase64(encoded);
+        const QString value = QString::fromUtf8(bytes);
+        if (bytes.toBase64() != encoded || value.toUtf8() != bytes
+            || !value.contains(QLatin1String("pVisibleSidebarElementsCount"))) return false;
+        addEdit(edits, match.capturedStart(), match.capturedLength(), value);
+    }
+    return true;
+}
+
 bool sidebarEdits(QString &qml, bool enabled, QList<Edit> &edits)
 {
     const QString masked = QmlText::mask(qml);
@@ -407,6 +838,17 @@ bool sidebarEdits(QString &qml, bool enabled, QList<Edit> &edits)
     while ((at = qml.indexOf(from, at)) >= 0 && at < bodyEnd) {
         addEdit(edits, at, from.size(), to);
         at += from.size();
+    }
+    // If the separate responsive option is already on, keep its overflow
+    // budget on the new axis as the original sidebar is moved/restored.
+    if (qml.contains(kResponsiveBegin)) {
+        const int start = qml.indexOf(kResponsiveBegin);
+        const int end = qml.indexOf(kResponsiveEnd, start);
+        const QString oldBudget = QStringLiteral("var available = ") + from;
+        const int budgetAt = qml.indexOf(oldBudget, start);
+        if (end <= start || budgetAt < start || budgetAt + oldBudget.size() > end)
+            return false;
+        addEdit(edits, budgetAt, oldBudget.size(), QStringLiteral("var available = ") + to);
     }
     return !edits.isEmpty();
 }
@@ -492,7 +934,20 @@ bool topbarEdits(QString &qml, bool enabled, QList<Edit> &edits)
 // Adapters so the write loop can treat the two non-plr collectors uniformly.
 bool collectSidebarEdits(QString &qml, bool enabled, SidebarLayout, QList<Edit> &edits)
 {
-    return sidebarEdits(qml, enabled, edits);
+    const bool responsive = qml.contains(kResponsiveBegin);
+    const bool installedByTitlebar = qml.contains(kResponsiveBegin + kResponsiveAuto);
+    if (!enabled && installedByTitlebar) {
+        // Remove only the fix we installed on behalf of this layout option.
+        if (!responsiveEdits(qml, false, true, edits) || !applyEdits(qml, edits)) return false;
+        edits.clear();
+    }
+    if (!sidebarEdits(qml, enabled, edits)) return false;
+    if (enabled && !responsive) {
+        if (!applyEdits(qml, edits)) return false;
+        edits.clear();
+        return responsiveEdits(qml, true, true, edits);
+    }
+    return true;
 }
 
 bool collectTopbarEdits(QString &qml, bool enabled, SidebarLayout, QList<Edit> &edits)
@@ -508,6 +963,8 @@ struct Shape
     bool stock = false;
     bool patched = false;
     bool legacyOverlay = false;
+    bool responsive = false;
+    bool installedByTitlebar = false;
     bool editable = false;
     QString detail;
 };
@@ -531,6 +988,8 @@ Snapshot inspect(const QByteArray &image)
         return snapshot;
     }
 
+    snapshot.shape.responsive = snapshot.sidebar.qml.contains(kResponsiveBegin);
+    snapshot.shape.installedByTitlebar = snapshot.sidebar.qml.contains(kResponsiveBegin + kResponsiveAuto);
     const QString &qml = snapshot.plr.qml;
     const QString masked = QmlText::mask(qml);
     const auto instances = QmlText::objects(masked, QStringLiteral("PlrSidebar"));
@@ -625,10 +1084,10 @@ Snapshot inspect(const QByteArray &image)
             "unsafe to write.");
         return snapshot;
     }
-    if (!sidebarEdits(sidebar, enabled, sidebarPlan)) {
+    if (!collectSidebarEdits(sidebar, enabled, snapshot.shape.layout, sidebarPlan)) {
         snapshot.shape.detail = QStringLiteral(
-            "PlrSidebar.qml does not match the supported button-column layout; the tweak would "
-            "be unsafe to write.");
+            "PlrSidebar.qml does not have the supported button strip, overflow logic and "
+            "popup anchors; the tweak would be unsafe to write.");
         return snapshot;
     }
     if (!topbarEdits(topbar, enabled, topbarPlan)) {
@@ -643,6 +1102,17 @@ Snapshot inspect(const QByteArray &image)
             "The layout edits overlap in this player; no file would be written.");
         return snapshot;
     }
+    if (snapshot.shape.patched && !snapshot.shape.responsive) {
+        // An EXE patched by an earlier version can still be upgraded without
+        // toggling the layout off first, but only if the new fix fits its QML.
+        QString oldSidebar = snapshot.sidebar.qml;
+        QList<Edit> repair;
+        if (!responsiveEdits(oldSidebar, true, true, repair) || !applyEdits(oldSidebar, repair)) {
+            snapshot.shape.detail = QStringLiteral(
+                "The older title-bar layout cannot be upgraded safely on this player.");
+            return snapshot;
+        }
+    }
     snapshot.shape.editable = true;
     return snapshot;
 }
@@ -654,19 +1124,23 @@ QList<Tweak> tweaks()
     return {
         { kSidebarToTitlebar,
           QStringLiteral("Remove sidebar · buttons to the title bar (centered)"),
-          QStringLiteral("Lays every sidebar button out as one centered row inside the title "
-                         "bar and removes the side strip. Moves the original controls, keeping "
-                         "popup and animation ownership intact. Works with both the current player "
-                         "and the older 5.x layout. The title bar's own duplicate "
-                         "Back/Home/Recent buttons step aside so nothing shows twice. "
-                         "Turn the option off and apply again to restore the stock layout.") },
+          QStringLiteral("Moves the original buttons into a centered title-bar row. All visible "
+                         "buttons stay out until they no longer fit; only then do the extras go "
+                         "into the three-dot menu. Panels open directly beneath their buttons. "
+                         "Turn this off and apply to restore the sidebar.") },
+        { kResponsiveSidebar,
+          QStringLiteral("Responsive sidebar buttons and aligned panels"),
+          QStringLiteral("Keep the three-dot menu hidden while all enabled sidebar buttons fit. "
+                         "Overflow only the buttons that need it, and open sound, controls and "
+                         "other panels below their own buttons. Included automatically when "
+                         "moving the buttons to the title bar; use this option for the stock sidebar.") },
     };
 }
 
 State analyze(const QByteArray &image, const QString &id)
 {
     State state;
-    if (id != kSidebarToTitlebar) {
+    if (id != kSidebarToTitlebar && id != kResponsiveSidebar) {
         state.detail = QStringLiteral("Unknown layout tweak.");
         return state;
     }
@@ -679,18 +1153,37 @@ State analyze(const QByteArray &image, const QString &id)
         state.detail = snapshot.shape.detail;
         return state;
     }
+    if (id == kResponsiveSidebar) {
+        state.applied = snapshot.shape.responsive;
+        if (snapshot.shape.patched) {
+            state.detail = QStringLiteral("Included with the title-bar layout. Restore the sidebar "
+                                          "first to change this separately.");
+            return state;
+        }
+        QString sidebar = snapshot.sidebar.qml;
+        QList<Edit> plan;
+        if (!responsiveEdits(sidebar, !state.applied, false, plan) || !applyEdits(sidebar, plan)) {
+            state.detail = QStringLiteral("This sidebar does not have supported overflow and popup anchors.");
+            return state;
+        }
+        state.supported = true;
+        state.detail = state.applied ? QStringLiteral("Applied.") : QStringLiteral("Ready.");
+        return state;
+    }
     state.supported = true;
     state.applied = snapshot.shape.patched;
-    state.detail = snapshot.shape.legacyOverlay ? QStringLiteral("Older layout applied. Apply again to repair popup ownership.")
-                  : state.applied ? QStringLiteral("Applied.")
-                                 : QStringLiteral("Ready.");
+    state.needsUpdate = state.applied && (snapshot.shape.legacyOverlay || !snapshot.shape.responsive);
+    state.detail = snapshot.shape.legacyOverlay ? QStringLiteral("Older layout applied. Press Update to repair it.")
+                  : state.needsUpdate ? QStringLiteral("Press Update for smart overflow and panels beneath buttons.")
+                  : state.applied ? QStringLiteral("Applied.") : QStringLiteral("Ready.");
     return state;
 }
 
 Result apply(const QString &exePath, const QString &id, bool enabled)
 {
     const auto refuse = [&](const QString &message) { return Result { false, message }; };
-    if (id != kSidebarToTitlebar) return refuse(QStringLiteral("Unknown layout tweak."));
+    if (id != kSidebarToTitlebar && id != kResponsiveSidebar)
+        return refuse(QStringLiteral("Unknown layout tweak."));
     if (BsDetector::isProcessRunning(QStringLiteral("HD-Player.exe")))
         return refuse(QStringLiteral("Close all BlueStacks instances before changing the layout."));
     QFile file(exePath);
@@ -701,48 +1194,74 @@ Result apply(const QString &exePath, const QString &id, bool enabled)
     const Snapshot before = inspect(original);
     if (before.shape.layout == SidebarLayout::None || !before.shape.editable)
         return refuse(before.shape.detail);
-    const bool upgrade = enabled && before.shape.patched && before.shape.legacyOverlay;
-    if (before.shape.patched == enabled && !upgrade)
-        return { true, enabled ? QStringLiteral("This layout tweak is already applied.")
-                              : QStringLiteral("The stock sidebar layout is already in place.") };
 
-    struct Role
-    {
-        QString name;
-        bool (*collect)(QString &, bool, SidebarLayout, QList<Edit> &);
-    };
-    const QList<Role> roles {
-        { QStringLiteral("plr.qml"), &plrEdits },
-        { QStringLiteral("PlrSidebar.qml"), &collectSidebarEdits },
-        { QStringLiteral("PlrTopbar.qml"), &collectTopbarEdits },
-    };
     QByteArray changed = original;
-    for (const auto &role : roles) {
+    if (id == kResponsiveSidebar) {
+        if (before.shape.patched)
+            return refuse(QStringLiteral("The responsive fix is included with the title-bar layout. "
+                                         "Restore the sidebar first to change it separately."));
+        if (before.shape.responsive == enabled)
+            return { true, enabled ? QStringLiteral("Responsive sidebar is already applied.")
+                                   : QStringLiteral("Stock sidebar overflow is already in place.") };
         Doc doc;
         QString error;
-        if (!findDoc(changed, role.name, &doc, &error)) return refuse(error);
+        if (!findDoc(changed, QStringLiteral("PlrSidebar.qml"), &doc, &error)) return refuse(error);
         QList<Edit> edits;
-        if (upgrade) {
-            // Normalize old copies in memory, then apply the new version. Only
-            // the verified final image is written; never expose a half-upgrade.
-            if (!role.collect(doc.qml, false, before.shape.layout, edits)
-                || !applyEdits(doc.qml, edits))
-                return refuse(QStringLiteral("Cannot safely upgrade the old layout; no file was written."));
-            edits.clear();
-        }
-        if (!role.collect(doc.qml, enabled, before.shape.layout, edits))
-            return refuse(QStringLiteral("%1 does not match the expected layout; no file was written.")
-                              .arg(role.name));
-        if (!applyEdits(doc.qml, edits))
-            return refuse(QStringLiteral("Layout edits in %1 overlap; no file was written.").arg(role.name));
+        if (!responsiveEdits(doc.qml, enabled, false, edits) || !applyEdits(doc.qml, edits))
+            return refuse(QStringLiteral("The sidebar's overflow/popup QML is not a supported shape; "
+                                         "no file was written."));
         const QByteArray header = doc.bom ? QByteArray::fromHex("efbbbf") : QByteArray();
-        const QByteArray source = header + doc.qml.toUtf8();
-        if (!QtResources::replaceResource(changed, doc.file.entryOff, doc.link, source, &error))
-            return refuse(error);
+        if (!QtResources::replaceResource(changed, doc.file.entryOff, doc.link,
+                                          header + doc.qml.toUtf8(), &error)) return refuse(error);
+    } else {
+        const bool upgrade = enabled && before.shape.patched && before.shape.legacyOverlay;
+        const bool repair = enabled && before.shape.patched && !before.shape.responsive && !upgrade;
+        if (before.shape.patched == enabled && !upgrade && !repair)
+            return { true, enabled ? QStringLiteral("This layout tweak is already applied.")
+                                  : QStringLiteral("The stock sidebar layout is already in place.") };
+
+        struct Role
+        {
+            QString name;
+            bool (*collect)(QString &, bool, SidebarLayout, QList<Edit> &);
+        };
+        const QList<Role> roles {
+            { QStringLiteral("plr.qml"), &plrEdits },
+            { QStringLiteral("PlrSidebar.qml"), &collectSidebarEdits },
+            { QStringLiteral("PlrTopbar.qml"), &collectTopbarEdits },
+        };
+        for (const auto &role : roles) {
+            if (repair && role.name != QLatin1String("PlrSidebar.qml")) continue;
+            Doc doc;
+            QString error;
+            if (!findDoc(changed, role.name, &doc, &error)) return refuse(error);
+            QList<Edit> edits;
+            if (upgrade) {
+                // Normalize old copies in memory, then apply the new version.
+                // Only the verified final image is ever written to disk.
+                if (!role.collect(doc.qml, false, before.shape.layout, edits)
+                    || !applyEdits(doc.qml, edits))
+                    return refuse(QStringLiteral("Cannot safely upgrade the old layout; no file was written."));
+                edits.clear();
+            }
+            if (repair ? !responsiveEdits(doc.qml, true, true, edits)
+                       : !role.collect(doc.qml, enabled, before.shape.layout, edits))
+                return refuse(QStringLiteral("%1 does not match the expected layout; no file was written.")
+                                  .arg(role.name));
+            if (!applyEdits(doc.qml, edits))
+                return refuse(QStringLiteral("Layout edits in %1 overlap; no file was written.").arg(role.name));
+            const QByteArray header = doc.bom ? QByteArray::fromHex("efbbbf") : QByteArray();
+            if (!QtResources::replaceResource(changed, doc.file.entryOff, doc.link,
+                                              header + doc.qml.toUtf8(), &error)) return refuse(error);
+        }
     }
     const Snapshot after = inspect(changed);
-    if (after.shape.layout == SidebarLayout::None || !after.shape.editable
-        || after.shape.patched != enabled || (enabled && after.shape.legacyOverlay))
+    const bool verified = after.shape.layout != SidebarLayout::None && after.shape.editable
+        && (id == kResponsiveSidebar
+            ? !after.shape.patched && after.shape.responsive == enabled
+            : after.shape.patched == enabled && (!enabled ||
+                (after.shape.responsive && !after.shape.legacyOverlay)));
+    if (!verified)
         return refuse(QStringLiteral("The written layout did not pass resource/read-back "
                                      "verification; no file was written."));
     if (!ThemeEngine::backup(exePath))
@@ -750,10 +1269,15 @@ Result apply(const QString &exePath, const QString &id, bool enabled)
     QString error;
     if (!PatchFile::writeVerified(exePath, original, changed, &error)) return refuse(error);
     const int caches = QtResources::clearPlayerQmlCache(exePath);
-    QString msg = enabled
-        ? QStringLiteral("Sidebar removed: its buttons now sit as one centered row in the title "
-                         "bar. Restart BlueStacks.")
-        : QStringLiteral("Stock sidebar layout restored. Restart BlueStacks.");
+    QString msg = id == kResponsiveSidebar
+        ? (enabled ? QStringLiteral("Sidebar buttons now overflow only when needed; panels open "
+                                    "beneath their buttons. Restart BlueStacks.")
+                   : QStringLiteral("Stock sidebar overflow and panel placement restored. "
+                                    "Restart BlueStacks."))
+        : (enabled ? QStringLiteral("Sidebar buttons now sit in the title bar; extras overflow "
+                                    "only when needed and panels open beneath their buttons. "
+                                    "Restart BlueStacks.")
+                   : QStringLiteral("Sidebar layout restored. Restart BlueStacks."));
     if (caches > 0)
         msg += QStringLiteral(" Cleared the player QML disk cache so BlueStacks reloads the source.");
     return { true, msg };

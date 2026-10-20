@@ -50,12 +50,21 @@ The layout tweak moves the **original sidebar** into a centered title-bar host
 instead of creating a second set of controls. This keeps button state, animations,
 and popup ownership attached to the same instance used by the player. The host
 reserves space at both ends for title-bar controls and follows window resizing.
+The buttons stay visible until the available width runs out; only then does a
+three-dot overflow button replace the buttons that don't fit. Sound, controls,
+and other button panels open beneath the button that launched them (or beneath
+the three dots when opened from overflow), staying inside the visible screen.
 
-If you used an earlier version of this tweak, close BlueStacks, keep the option
-checked, and click **Apply** again to upgrade the old duplicate-instance layout.
-Restart BlueStacks afterward. Unticking and applying restores the stock layout.
-Player-specific popup positioning still needs verification on the target build;
-the patcher refuses unrecognized QML shapes rather than guessing edits.
+To get the same behavior on the **stock vertical sidebar** without moving the
+buttons, select **Responsive sidebar buttons and aligned panels** in Extras →
+Player layout (QML). The fix is included automatically with the title-bar tweak;
+if enabled separately first, it stays enabled when the title-bar tweak is
+restored. Either option can be unticked and applied to restore its stock QML.
+
+If you used an earlier version of the title-bar tweak, close BlueStacks, keep
+the option checked, and click **Update** to upgrade the old layout. Restart
+BlueStacks afterward. Actual windowed-popup behavior still needs testing on
+each supported player build; unrecognized QML is refused rather than guessed.
 
 ## Gradient themes
 
