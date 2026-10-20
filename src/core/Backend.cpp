@@ -431,8 +431,8 @@ void Backend::loadTheme(const QString &method)
         doLog(QStringLiteral("Theme loaded (hex): %1 color(s) found.")
                   .arg(m_hexQmlColors.size()),
               QStringLiteral("blue"));
-        doLog(QStringLiteral("Tick the colors you want, then Apply Selected. Gradient theme paints any listed "
-                             "surface with stops you choose."),
+        doLog(QStringLiteral("Pick a preset or tick the colors you want, then Apply Theme. Gradient "
+                             "theme paints any listed surface with stops you choose."),
               QStringLiteral("gray"));
         emit themeChanged();
         return;
@@ -657,6 +657,58 @@ int Backend::applyPreset(const QString &id)
           QStringLiteral("blue"));
     if (matched.isEmpty())
         doLog(QStringLiteral("The EXE already has this palette. Press PATCH THEME to refresh its cache."),
+              QStringLiteral("orange"));
+    return matched.size();
+}
+
+int Backend::applyHexPreset(const QString &id)
+{
+    if (actionsLocked()) return 0;
+    const ThemePreset *p = ThemePresets::byId(id);
+    if (!p) {
+        doLog(QStringLiteral("Unknown preset: %1").arg(id), QStringLiteral("red"));
+        return 0;
+    }
+    if (!m_themeInfo.found || m_themeInfo.mode != QLatin1String("hex")) {
+        doLog(QStringLiteral("Load the Hex (old) theme first, then pick a preset."),
+              QStringLiteral("orange"));
+        return 0;
+    }
+    if (m_hexQmlColors.isEmpty()) {
+        doLog(QStringLiteral("This player has no palette color names the Hex (old) editor can "
+                             "match, so a preset cannot be staged. Use Gradient theme for its "
+                             "surfaces instead."),
+              QStringLiteral("orange"));
+        return 0;
+    }
+
+    const QMap<QString, QString> matched = ThemePresets::matchHexColors(*p, m_hexQmlColors);
+    for (HexColorItem &c : m_hexQmlColors) {
+        const QString staged = matched.value(c.name);
+        if (staged.isEmpty())
+            continue;
+        c.color = staged;
+        c.enabled = true;
+    }
+    emit themeChanged();
+
+    // "Already match" counts the rows this preset covers, not every row the
+    // EXE happens to expose.
+    int covered = 0;
+    for (const HexColorItem &c : m_hexQmlColors) {
+        if (!p->colors.value(ThemePresets::normalize(c.name)).isEmpty())
+            ++covered;
+    }
+    const int already = covered - matched.size();
+    doLog(QStringLiteral("Preset \"%1\" (Hex (old)): %2 color(s) staged, %3 already match. "
+                         "Press APPLY THEME to write them into HD-Player.exe.")
+              .arg(p->name)
+              .arg(matched.size())
+              .arg(already),
+          QStringLiteral("blue"));
+    if (matched.isEmpty())
+        doLog(QStringLiteral("The EXE already has this palette. Press APPLY THEME to write it again "
+                             "if BlueStacks still shows the old colors."),
               QStringLiteral("orange"));
     return matched.size();
 }

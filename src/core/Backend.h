@@ -120,6 +120,10 @@ public:
     // Stage a whole palette as edits (still needs PATCH THEME).  Returns how
     // many colors the preset covers in this EXE.
     Q_INVOKABLE int applyPreset(const QString &id);
+    // Same presets for the Hex (old) method: fills the New value column of
+    // every legacy palette color the EXE carries (still needs APPLY THEME).
+    // Returns how many rows were staged.
+    Q_INVOKABLE int applyHexPreset(const QString &id);
     Q_INVOKABLE QString presetToggleOff(const QString &id) const;
     Q_INVOKABLE QString presetToggleOn(const QString &id) const;
 

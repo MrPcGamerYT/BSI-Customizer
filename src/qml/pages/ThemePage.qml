@@ -13,6 +13,7 @@ Item {
     property bool fileChanged: backend.themeFileChanged()
     property string filterText: ""
     property string presetId: ""
+    property string hexPresetId: ""
 
     GradientEditor {
         id: gradientEditor
@@ -48,6 +49,10 @@ Item {
     // follows whatever was resolved.
     function reload() {
         const methods = ["auto", "qml", "hex"];
+        // Loading re-reads the EXE and drops every staged edit; the preset
+        // selection describes those edits, so it goes with them.
+        page.presetId = "";
+        page.hexPresetId = "";
         backend.loadTheme(methods[Math.max(0, Math.min(2, methodChips.currentIndex))]);
         page.fileChanged = backend.themeFileChanged();
     }
@@ -81,7 +86,11 @@ Item {
         function onThemeChanged() { page.fileChanged = backend.themeFileChanged() }
         // An EXE picked on the Dashboard (or restored from settings) can need
         // the other method: re-arm full auto-detection for the next load.
-        function onExePathChanged() { methodChips.currentIndex = 0 }
+        function onExePathChanged() {
+            methodChips.currentIndex = 0;
+            page.presetId = "";
+            page.hexPresetId = "";
+        }
     }
 
     ColumnLayout {
@@ -147,6 +156,8 @@ Item {
                 // instead of hiding the chooser.
                 model: [qsTr("Auto"), qsTr("QML (new)"), qsTr("Hex (old)")]
                 onSelected: (index) => {
+                    page.presetId = "";
+                    page.hexPresetId = "";
                     backend.loadTheme(index === 0 ? "auto" : index === 1 ? "qml" : "hex");
                     page.fileChanged = backend.themeFileChanged();
                 }
@@ -525,6 +536,144 @@ Item {
                 Layout.fillHeight: true
                 spacing: 10
 
+                // ---- presets (same palettes as the QML editor, staged as
+                //      legacy color values instead of QML source edits) ----
+                Card {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 146
+
+                    ColumnLayout {
+                        anchors.fill: parent
+                        spacing: 6
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 10
+                            Text {
+                                text: qsTr("Theme presets")
+                                color: Theme.text
+                                font.pixelSize: 15
+                                font.weight: Font.Bold
+                            }
+                            Text {
+                                Layout.fillWidth: true
+                                elide: Text.ElideRight
+                                text: !backend.themeFound
+                                      ? qsTr("Load the Hex (old) theme first - then pick a palette.")
+                                      : (backend.hexColors.length === 0
+                                         ? qsTr("This player exposes no legacy palette names - "
+                                                + "use Gradient theme for its surfaces.")
+                                         : (page.hexPresetId === ""
+                                            ? qsTr("Pick a palette to fill the New value column, "
+                                                   + "then Apply Theme.")
+                                            : qsTr("Preset staged - press Apply Theme to write it.")))
+                                color: Theme.textDim
+                                font.pixelSize: 12
+                            }
+                            ActionButton {
+                                text: qsTr("Clear")
+                                onClicked: {
+                                    page.hexPresetId = "";
+                                    backend.resetHexColors();
+                                }
+                            }
+                            ActionButton {
+                                text: qsTr("Recolor switches")
+                                enabled: page.hexPresetId !== ""
+                                onClicked: backend.recolorTogglesFromPreset(page.hexPresetId)
+                            }
+                        }
+
+                        ListView {
+                            id: hexPresetList
+                            Layout.fillWidth: true
+                            Layout.fillHeight: true
+                            clip: true
+                            orientation: ListView.Horizontal
+                            spacing: 8
+                            model: backend.themePresets
+                            opacity: backend.themeFound ? 1.0 : 0.55
+                            Behavior on opacity { NumberAnimation { duration: 140 } }
+                            ScrollBar.horizontal: ScrollBar {}
+
+                            delegate: Rectangle {
+                                id: hexPresetItem
+                                required property var modelData
+                                readonly property bool chosen: page.hexPresetId === modelData.id
+
+                                width: 168
+                                height: hexPresetList.height - 4
+                                radius: 10
+                                color: chosen ? Theme.accentSoft : Theme.raised
+                                border.width: 1
+                                border.color: chosen ? Theme.accent : Theme.border
+
+                                Behavior on color { ColorAnimation { duration: 120 } }
+
+                                ColumnLayout {
+                                    anchors.fill: parent
+                                    anchors.margins: 7
+                                    spacing: 2
+
+                                    Row {
+                                        Layout.fillWidth: true
+                                        spacing: 4
+                                        Repeater {
+                                            model: hexPresetItem.modelData.preview
+                                            delegate: Rectangle {
+                                                required property var modelData
+                                                width: 15
+                                                height: 10
+                                                radius: 3
+                                                color: modelData
+                                                border.width: 1
+                                                border.color: Theme.border
+                                            }
+                                        }
+                                    }
+                                    Text {
+                                        Layout.fillWidth: true
+                                        elide: Text.ElideRight
+                                        text: hexPresetItem.modelData.name
+                                        color: Theme.text
+                                        font.pixelSize: 12
+                                        font.weight: Font.Medium
+                                    }
+                                    Text {
+                                        Layout.fillWidth: true
+                                        elide: Text.ElideRight
+                                        text: hexPresetItem.modelData.desc
+                                        color: Theme.textDim
+                                        font.pixelSize: 11
+                                    }
+                                }
+
+                                MouseArea {
+                                    anchors.fill: parent
+                                    cursorShape: Qt.PointingHandCursor
+                                    onClicked: {
+                                        if (!backend.themeFound)
+                                            page.reload();
+                                        // A reload can resolve to QML (new) and
+                                        // hide this pane; only stage when the
+                                        // Hex method is still the active one.
+                                        if (!backend.themeFound
+                                                || backend.themeMode !== "hex")
+                                            return;
+                                        if (backend.hexColors.length === 0) {
+                                            // Reports the reason in the log.
+                                            backend.applyHexPreset(hexPresetItem.modelData.id);
+                                            return;
+                                        }
+                                        page.hexPresetId = hexPresetItem.modelData.id;
+                                        backend.applyHexPreset(hexPresetItem.modelData.id);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
                 RowLayout {
                     Layout.fillWidth: true
                     spacing: 8
@@ -532,7 +681,8 @@ Item {
                         Layout.fillWidth: true
                         elide: Text.ElideRight
                         text: qsTr("Legacy palette - replaces color constants directly in the "
-                                   + "binary. Gradient theme paints the top bar / title bar, "
+                                   + "binary. Pick a preset above or set individual colors. "
+                                   + "Gradient theme paints the top bar / title bar, "
                                    + "the sidebar and the settings panel with custom stops you "
                                    + "choose, one surface or all at once; "
                                    + "everything else uses the solid colors below.")
@@ -549,7 +699,10 @@ Item {
                     }
                     ActionButton {
                         text: qsTr("Reset All")
-                        onClicked: backend.resetHexColors()
+                        onClicked: {
+                            page.hexPresetId = "";
+                            backend.resetHexColors();
+                        }
                     }
                     ActionButton {
                         text: qsTr("Preview")
@@ -558,7 +711,11 @@ Item {
                     ActionButton {
                         accent: true
                         text: qsTr("Apply Theme")
-                        onClicked: backend.applyHex()
+                        onClicked: {
+                            const r = backend.applyHex();
+                            if (r.ok)
+                                page.hexPresetId = "";
+                        }
                     }
                 }
 
