@@ -56,7 +56,7 @@ jobs:
       sha256: ${{ steps.artifact.outputs.sha256 }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Resolve and validate release version
         id: meta
