@@ -663,6 +663,71 @@ int runSelfTest()
 
         check(ThemePresets::toVariantList().size() == presets.size(),
               "presets: QML list matches the C++ list");
+
+        // ---- Hex (old) method: the same palettes reach the legacy editor ----
+        QList<HexColorItem> hexRows;
+        for (const QString &name : ThemeEngine::qmlColorNames()) {
+            HexColorItem item;
+            item.name = name;
+            item.currentHex = QStringLiteral("#010203");
+            hexRows << item;
+        }
+        for (const ThemePreset &p : presets) {
+            const QMap<QString, QString> m = ThemePresets::matchHexColors(p, hexRows);
+            check(m.size() == hexRows.size(),
+                  "presets: hex method covers every palette color name");
+            bool allHex = true;
+            for (auto it = m.constBegin(); it != m.constEnd(); ++it) {
+                if (!hex6.match(it.value()).hasMatch())
+                    allHex = false;
+            }
+            check(allHex, "presets: hex values are 6-digit hex");
+        }
+
+        // An already-applied legacy value is not staged again.
+        QList<HexColorItem> sameRow;
+        HexColorItem sameItem;
+        sameItem.name = QStringLiteral("accentNormal");
+        sameItem.currentHex = nord ? nord->colors.value(QStringLiteral("accentnormal")) : QString();
+        sameRow << sameItem;
+        check(nord && ThemePresets::matchHexColors(*nord, sameRow).isEmpty(),
+              "presets: an already-applied hex color is not staged");
+
+        // An 8-digit ARGB slot keeps its alpha, so an equal RGB is unchanged.
+        const QString nordRgb = nord ? nord->colors.value(QStringLiteral("accentnormal")) : QString();
+        QList<HexColorItem> alphaRow;
+        HexColorItem alphaItem;
+        alphaItem.name = QStringLiteral("accentNormal");
+        alphaItem.currentHex = nordRgb.isEmpty() ? QString()
+                                                 : QStringLiteral("#FF") + nordRgb.mid(1);
+        alphaRow << alphaItem;
+        check(nord && ThemePresets::matchHexColors(*nord, alphaRow).isEmpty(),
+              "presets: alpha-only difference is not a staged hex change");
+
+        // Unknown legacy slots keep their value.
+        QList<HexColorItem> unknownRow;
+        HexColorItem unknown;
+        unknown.name = QStringLiteral("notAThemeSlot");
+        unknown.currentHex = QStringLiteral("#123456");
+        unknownRow << unknown;
+        check(ThemePresets::matchHexColors(*presets.constFirst(), unknownRow).isEmpty(),
+              "presets: unknown hex color names are left alone");
+
+        // A preset staged through the hex matcher really becomes a replacement.
+        QByteArray legacy;
+        legacy += utf16le(QStringLiteral("accentNormal"));
+        legacy += utf16le(QStringLiteral(": \"#1A90FF\","));
+        HexColorItem legacyRow;
+        legacyRow.name = QStringLiteral("accentNormal");
+        legacyRow.currentHex = QStringLiteral("#1A90FF");
+        const QMap<QString, QString> staged =
+            ThemePresets::matchHexColors(*nord, QList<HexColorItem> { legacyRow });
+        legacyRow.color = staged.value(QStringLiteral("accentNormal"));
+        legacyRow.enabled = true;
+        const auto repls = ThemeEngine::collectThemeReplacements(
+            legacy, QStringLiteral("NXT"), {}, QList<HexColorItem> { legacyRow });
+        check(repls.size() == 1 && repls.first().rep == utf16le(QStringLiteral("#88C0D0")),
+              "presets: staged hex color replaces the EXE value");
     }
         // ------------------------------------------------------------------
     // 2g) Toggle SVG recolor (PatchToggleSvgs): length-safe, knob preserved

@@ -409,6 +409,21 @@ QVariantList toVariantList()
     return out;
 }
 
+namespace {
+
+// Compare on RGB only: an 8-digit (ARGB) slot keeps its alpha when patched,
+// so "#FF8B5CF6" in the EXE already equals a preset's "#8B5CF6" and staging it
+// would show a change that is not one.
+QString rgbOnly(const QString &hex)
+{
+    QString value = hex.trimmed();
+    if (value.size() == 9 && value.startsWith(QLatin1Char('#')))
+        value = QStringLiteral("#") + value.mid(3);
+    return value;
+}
+
+} // namespace
+
 QMap<QString, QString> matchEntries(const ThemePreset &preset, const QList<QmlEntry> &entries)
 {
     QMap<QString, QString> out;
@@ -416,14 +431,22 @@ QMap<QString, QString> matchEntries(const ThemePreset &preset, const QList<QmlEn
         const QString v = preset.colors.value(normalize(e.name));
         if (v.isEmpty())
             continue;                 // name this preset does not cover
-        // Compare on RGB only: buildQml keeps the alpha of an 8-digit (ARGB)
-        // slot, so "#FF8B5CF6" in the EXE already equals the preset's
-        // "#8B5CF6" and staging it would show a change that is not one.
-        QString current = e.value.trimmed();
-        if (current.size() == 9 && current.startsWith(QLatin1Char('#')))
-            current = QStringLiteral("#") + current.mid(3);
-        if (v.compare(current, Qt::CaseInsensitive) != 0)
+        if (v.compare(rgbOnly(e.value), Qt::CaseInsensitive) != 0)
             out.insert(e.name, v);
+    }
+    return out;
+}
+
+QMap<QString, QString> matchHexColors(const ThemePreset &preset,
+                                      const QList<HexColorItem> &colors)
+{
+    QMap<QString, QString> out;
+    for (const HexColorItem &c : colors) {
+        const QString v = preset.colors.value(normalize(c.name));
+        if (v.isEmpty())
+            continue;                 // name this preset does not cover
+        if (v.compare(rgbOnly(c.currentHex), Qt::CaseInsensitive) != 0)
+            out.insert(c.name, v);
     }
     return out;
 }
