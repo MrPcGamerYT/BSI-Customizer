@@ -808,7 +808,7 @@ bool responsiveEdits(QString &qml, bool enabled, bool autoInstalled, QList<Edit>
                     continue;
                 if (QmlText::binding(masked, button.open, button.end, QStringLiteral("visible"), &visible)
                     && directChild(masked, button.open, visible.nameBegin)) return false;
-                addEdit(edits, button.open + 1, 0, kCollapseHidden);
+                addEdit(edits, button.open + 1, 0, kCollapseHidden + lineEnding(qml));
             }
         }
         if (controls.layoutId == kLayoutId)
@@ -925,11 +925,18 @@ bool sidebarEdits(QString &qml, bool enabled, QList<Edit> &edits)
             || qml.mid(id.valueBegin, id.valueEnd - id.valueBegin) != QLatin1String("iCollapseBtn"))
             continue;
         QmlText::Binding visible;
+        // The marker is a line comment: it must end on a line of its own, or
+        // it would comment out whatever the player keeps after `{` (a
+        // one-line UiImageButton loses its id and its closing brace).
+        const QString collapseHidden = kCollapseHidden + lineEnding(qml);
         if (enabled) {
             if (QmlText::binding(masked, button.open, button.end, QStringLiteral("visible"), &visible)
                 && directChild(masked, button.open, visible.nameBegin)) return false;
-            addEdit(edits, button.open + 1, 0, kCollapseHidden);
+            addEdit(edits, button.open + 1, 0, collapseHidden);
+        } else if (qml.mid(button.open + 1, collapseHidden.size()) == collapseHidden) {
+            addEdit(edits, button.open + 1, collapseHidden.size(), QString());
         } else if (qml.mid(button.open + 1, kCollapseHidden.size()) == kCollapseHidden) {
+            // Older patches wrote the member without a terminating line break.
             addEdit(edits, button.open + 1, kCollapseHidden.size(), QString());
         } // older patches did not hide Collapse; normalize them on upgrade
     }
