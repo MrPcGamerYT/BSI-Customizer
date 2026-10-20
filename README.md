@@ -73,6 +73,14 @@ the original text, so undo still restores the document byte-for-byte. The
 responsive option edits only `PlrSidebar.qml` and no longer depends on the
 `plr.qml` title-bar shape at all.
 
+The title-bar move itself now needs only the **button strip**: one layout inside
+`PlrSidebar.qml` that holds the sidebar buttons. Builds whose sidebar has no
+three-dot button, Repeater model or windowed popups are moved as well; they keep
+their own overflow code (the status line says *"This build keeps its own overflow
+menu"*), and the smart overflow/panel placement option stays unavailable there
+because that sidebar has nothing to control. A sidebar with no movable strip at
+all is still refused with that reason instead of being written blindly.
+
 If you used an earlier version of the title-bar tweak, close BlueStacks, keep
 the option checked, and click **Update** to upgrade the old layout. Restart
 BlueStacks afterward. Actual windowed-popup behavior still needs testing on

@@ -2380,6 +2380,61 @@ Window {
                   && resourceText(read(variantPath), variant, QStringLiteral("PlrTopbar.qml")) == variantTopbar,
               "the unfamiliar build restores every document byte-for-byte from the tags");
 
+        // ---- a sidebar that only carries the button strip: no three-dot
+        // button, no Repeater model and no windowed popups. The title-bar move
+        // is still well defined, but it used to be refused together with the
+        // smart helper ("does not have the supported button strip, overflow
+        // logic and popup anchors"). ----
+        const QString plainSidebar = QStringLiteral(
+            "import QtQuick 2.15\r\n"
+            "Rectangle {\r\n"
+            "    id: iSidebar\r\n"
+            "    property int pSidebarElementSize: 32\r\n"
+            "    onHeightChanged: fResetSidebar()\r\n"
+            "    function fResetSidebar() {\r\n"
+            "        var availableHeight = iSidebar.height\r\n"
+            "        if (availableHeight >= iSoundBtn.height) iSoundBtn.visible = true\r\n"
+            "    }\r\n"
+            "    UiColumnLayout {\r\n"
+            "        anchors.fill: parent\r\n"
+            "        UiImageButton { id: iSoundBtn }\r\n"
+            "        UiImageButton { id: iSettingsBtn }\r\n"
+            "    }\r\n"
+            "}\r\n");
+        auto plain = resources({ { QStringLiteral("plr.qml"), anchoredPlr },
+                                 { QStringLiteral("PlrSidebar.qml"), plainSidebar },
+                                 { QStringLiteral("PlrTopbar.qml"), topbar } }, true, {});
+        addRegistration(plain, false);
+        const auto plainStock = LayoutPatcher::analyze(plain.f.bytes, id);
+        check(plainStock.supported && !plainStock.applied,
+              "a sidebar with only the button strip still offers the title-bar move");
+        check(!LayoutPatcher::analyze(plain.f.bytes, smartId).supported,
+              "that sidebar is not offered the smart overflow helper it cannot host");
+        const QString plainPath = temp.filePath(QStringLiteral("layout-plain.exe"));
+        write(plainPath, plain.f.bytes);
+        const auto plainApplied = LayoutPatcher::apply(plainPath, id, true);
+        if (!plainApplied.ok) std::printf("    %s\n", qPrintable(plainApplied.msg));
+        const QString plainPatched = resourceText(read(plainPath), plain, QStringLiteral("PlrSidebar.qml"));
+        check(plainApplied.ok
+                  && plainPatched.contains(QLatin1String("UiRowLayout"))
+                  && plainPatched.contains(QLatin1String("anchors.centerIn: parent"))
+                  && plainPatched.contains(QLatin1String("visible: iSidebar.width > 0"))
+                  && plainPatched.contains(QLatin1String("stock overflow only"))
+                  && plainPatched.contains(QLatin1String("var availableHeight = iSidebar.width"))
+                  && plainPatched.contains(QLatin1String("onWidthChanged")),
+              "the strip becomes a centered row and keeps the build's own overflow code");
+        const auto plainState = LayoutPatcher::analyze(read(plainPath), id);
+        check(plainState.supported && plainState.applied && !plainState.needsUpdate,
+              "the patched plain build reports applied without asking for an upgrade");
+        check(resourceText(read(plainPath), plain, QStringLiteral("plr.qml"))
+                  .contains(QStringLiteral("id: iSidebarTitlebar")),
+              "the plain build gets the same single-owner title-bar host");
+        check(LayoutPatcher::apply(plainPath, id, false).ok
+                  && resourceText(read(plainPath), plain, QStringLiteral("PlrSidebar.qml")) == plainSidebar
+                  && resourceText(read(plainPath), plain, QStringLiteral("plr.qml")) == anchoredPlr
+                  && resourceText(read(plainPath), plain, QStringLiteral("PlrTopbar.qml")) == topbar,
+              "the plain build restores every document byte-for-byte");
+
         // ---- old row-layout player (the shape that used to be disabled) ----
         auto legacy = resources({ { QStringLiteral("plr.qml"), legacyPlr },
                                   { QStringLiteral("PlrSidebar.qml"), sidebar },
