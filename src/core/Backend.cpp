@@ -14,11 +14,14 @@
 #include <QColor>
 #include <QDateTime>
 #include <QDir>
+#include <QEventLoop>
 #include <QFile>
 #include <QFileInfo>
 #include <QStringList>
+#include <QThread>
 
 #include <algorithm>
+#include <exception>
 
 Backend::Backend(SettingsManager *settings, QObject *parent)
     : QObject(parent)
@@ -45,12 +48,98 @@ Backend::Backend(SettingsManager *settings, QObject *parent)
     });
 }
 
+// An isolated facade/settings snapshot keeps all engine state thread-local.
+// Keep the existing return contract while allowing the GUI to paint and respond.
+void Backend::copyPatchState(const Backend &source)
+{
+    m_themeInfo = source.m_themeInfo;
+    m_themeStatus = source.m_themeStatus;
+    m_themeMethod = source.m_themeMethod;
+    m_themeDetection = source.m_themeDetection;
+    m_detectedQtMajor = source.m_detectedQtMajor;
+    m_qmlThemeAvailable = source.m_qmlThemeAvailable;
+    m_themeFilePath = source.m_themeFilePath;
+    m_themeFileMsecs = source.m_themeFileMsecs;
+    m_themeFileBytes = source.m_themeFileBytes;
+    m_themeEntries = source.m_themeEntries;
+    m_gradientTargets = source.m_gradientTargets;
+    m_edits = source.m_edits;
+    m_hexQmlColors = source.m_hexQmlColors;
+    m_svgs = source.m_svgs;
+    m_installs = source.m_installs;
+    m_versions = source.m_versions;
+}
+
+QVariantMap Backend::runBackground(const std::function<QVariantMap(Backend &)> &operation)
+{
+    if (actionsLocked()) return lockedMap();
+    auto *settings = new SettingsManager(nullptr, false);
+    settings->m_exePath = m_settings->m_exePath;
+    settings->m_dllPath = m_settings->m_dllPath;
+    settings->m_confPath = m_settings->m_confPath;
+    settings->m_fpsAutoDetect = m_settings->m_fpsAutoDetect;
+    auto *worker = new Backend(settings);
+    settings->setParent(worker);
+    worker->copyPatchState(*this);
+    worker->m_backgroundWorker = true;
+    connect(worker, &Backend::log, this, &Backend::log, Qt::QueuedConnection);
+    QVariantMap response;
+    QEventLoop loop;
+    QEventLoopLocker quitLock;
+    QThread *guiThread = thread();
+    auto *job = QThread::create([worker, operation, &response, guiThread] {
+        try {
+            response = operation(*worker);
+        } catch (const std::exception &e) {
+            response = {{"ok", false}, {"msg", QString::fromUtf8(e.what())}};
+        } catch (...) {
+            response = {{"ok", false}, {"msg", QStringLiteral("Patch operation failed unexpectedly.")}};
+        }
+        worker->moveToThread(guiThread);
+    });
+    worker->moveToThread(job);
+    connect(job, &QThread::finished, &loop, &QEventLoop::quit);
+    m_busy = true;
+    emit busyChanged();
+    job->start();
+    loop.exec();
+    job->wait();
+    // Do not trigger a second expensive DLL scan while synchronizing paths.
+    if (m_settings->m_exePath != settings->m_exePath) {
+        m_settings->m_exePath = settings->m_exePath;
+        emit m_settings->exePathChanged();
+    }
+    if (m_settings->m_dllPath != settings->m_dllPath) {
+        m_settings->m_dllPath = settings->m_dllPath;
+        emit m_settings->dllPathChanged();
+    }
+    if (m_settings->m_confPath != settings->m_confPath) {
+        m_settings->m_confPath = settings->m_confPath;
+        emit m_settings->confPathChanged();
+    }
+    if (m_settings->m_fpsAutoDetect != settings->m_fpsAutoDetect) {
+        m_settings->m_fpsAutoDetect = settings->m_fpsAutoDetect;
+        emit m_settings->fpsAutoDetectChanged();
+    }
+    copyPatchState(*worker);
+    delete worker;
+    delete job;
+    emit themeChanged();
+    emit gradientTargetsChanged();
+    emit svgsChanged();
+    emit installsChanged();
+    emit versionsChanged();
+    m_busy = false;
+    emit busyChanged();
+    return response;
+}
+
 QString Backend::exePath() const { return m_settings->exePath(); }
-void Backend::setExePath(const QString &p) { m_settings->setExePath(p); }
+void Backend::setExePath(const QString &p) { if (!m_busy) m_settings->setExePath(p); }
 QString Backend::dllPath() const { return m_settings->dllPath(); }
-void Backend::setDllPath(const QString &p) { m_settings->setDllPath(p); }
+void Backend::setDllPath(const QString &p) { if (!m_busy) m_settings->setDllPath(p); }
 QString Backend::confPath() const { return m_settings->confPath(); }
-void Backend::setConfPath(const QString &p) { m_settings->setConfPath(p); }
+void Backend::setConfPath(const QString &p) { if (!m_busy) m_settings->setConfPath(p); }
 
 void Backend::setAuthManager(AuthManager *auth)
 {
@@ -62,11 +151,13 @@ bool Backend::actionsLocked() const
     // No AuthManager attached (tests, scripts) -> ungated. With one attached,
     // the Discord sign-in must be verified first - same authority rule as
     // FalcoForge's Core::needsPaidAccess.
-    return m_auth && !m_auth->isAuthorized();
+    return m_busy || (m_auth && !m_auth->isAuthorized());
 }
 
 QVariantMap Backend::lockedMap() const
 {
+    if (m_busy)
+        return {{"ok", false}, {"msg", QStringLiteral("An operation is already running. Please wait.")}};
     QVariantMap locked;
     locked.insert(QStringLiteral("ok"), false);
     locked.insert(QStringLiteral("error"),
@@ -214,6 +305,11 @@ QVariantList Backend::hexColors() const
 
 void Backend::loadTheme(const QString &method)
 {
+    if (!m_backgroundWorker) {
+        const auto response = runBackground([=](Backend &worker) { worker.loadTheme(method); return QVariantMap{}; });
+        Q_UNUSED(response);
+        return;
+    }
     if (actionsLocked()) return;
     m_themeInfo = {};
     m_themeEntries.clear();
@@ -428,6 +524,8 @@ void Backend::clearThemeEdits()
 QVariantMap Backend::patchThemeQml()
 {
     if (actionsLocked()) return lockedMap();
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) { return worker.patchThemeQml(); });
     if (!m_themeInfo.found || m_themeInfo.mode == QLatin1String("hex")) {
         return result(false,
                       QStringLiteral("PATCH THEME is for the QML method; use Apply Selected for hex."),
@@ -473,6 +571,8 @@ QVariantList Backend::gradientTargets() const
 QVariantMap Backend::loadGradientTargets()
 {
     if (actionsLocked()) return lockedMap();
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) { return worker.loadGradientTargets(); });
     const auto bytes = readExe();
     m_gradientTargets.clear();
     if (bytes.isEmpty()) {
@@ -496,6 +596,8 @@ QVariantMap Backend::applyThemeGradient(const QString &key, const QString &first
                                       bool horizontal, bool enabled)
 {
     if (actionsLocked()) return lockedMap();
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) { return worker.applyThemeGradient(key, first, second, horizontal, enabled); });
     if (!m_edits.isEmpty())
         return result(false, QStringLiteral("Apply or clear the pending solid-color edits before applying a gradient."), QStringLiteral("orange"));
     const auto applied = GradientPatcher::patch(m_settings->exePath(), key, { enabled, first, second, horizontal });
@@ -510,6 +612,8 @@ QVariantMap Backend::applyHexGradient(const QString &key, const QString &first, 
                                       bool horizontal, bool enabled)
 {
     if (actionsLocked()) return lockedMap();
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) { return worker.applyHexGradient(key, first, second, horizontal, enabled); });
     if (!m_edits.isEmpty())
         return result(false, QStringLiteral("Apply or clear the pending solid-color edits before applying a gradient."), QStringLiteral("orange"));
     const auto applied = GradientPatcher::patchSurfaces(m_settings->exePath(), key,
@@ -608,6 +712,10 @@ void Backend::resetHexColors()
 
 int Backend::previewHex()
 {
+    if (!m_backgroundWorker) {
+        const auto response = runBackground([=](Backend &worker) { return QVariantMap{{"count", worker.previewHex()}}; });
+        return response.value("count").toInt();
+    }
     if (actionsLocked()) return 0;
     const QByteArray data = readExe();
     if (data.isEmpty()) {
@@ -624,6 +732,8 @@ int Backend::previewHex()
 QVariantMap Backend::applyHex()
 {
     if (actionsLocked()) return lockedMap();
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) { return worker.applyHex(); });
     if (!m_themeInfo.found || m_themeInfo.mode != QLatin1String("hex"))
         return result(false, QStringLiteral("Load an old (hex) theme first."),
                       QStringLiteral("orange"));
@@ -680,6 +790,8 @@ QVariantList Backend::svgInfos() const
 QVariantMap Backend::guessToggleSvgs()
 {
     if (actionsLocked()) return lockedMap();
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) { return worker.guessToggleSvgs(); });
     if (m_svgs.isEmpty())
         scanSvgs();
     const SvgEngine::ToggleGuess g = SvgEngine::guessToggles(m_svgs);
@@ -728,6 +840,8 @@ QVariantMap Backend::recolorToggleSvgs(int offIndex, int onIndex, const QString 
                                        const QString &onHex)
 {
     if (actionsLocked()) return lockedMap();
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) { return worker.recolorToggleSvgs(offIndex, onIndex, offHex, onHex); });
     if (m_svgs.isEmpty())
         scanSvgs();
     const auto r = SvgEngine::recolorToggles(
@@ -747,6 +861,8 @@ QVariantMap Backend::recolorToggleSvgs(int offIndex, int onIndex, const QString 
 QVariantMap Backend::recolorTogglesFromPreset(const QString &id)
 {
     if (actionsLocked()) return lockedMap();
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) { return worker.recolorTogglesFromPreset(id); });
     const ThemePreset *p = ThemePresets::byId(id);
     if (!p)
         return result(false, QStringLiteral("Unknown preset: %1").arg(id), QStringLiteral("red"));
@@ -772,6 +888,10 @@ QVariantMap Backend::recolorTogglesFromPreset(const QString &id)
 
 int Backend::scanSvgs()
 {
+    if (!m_backgroundWorker) {
+        const auto response = runBackground([=](Backend &worker) { return QVariantMap{{"count", worker.scanSvgs()}}; });
+        return response.value("count").toInt();
+    }
     if (actionsLocked()) return 0;
     m_svgs.clear();
     const QByteArray data = readExe();
@@ -798,6 +918,8 @@ QString Backend::svgTextAt(int index) const
 QVariantMap Backend::extractSvgs()
 {
     if (actionsLocked()) return lockedMap();
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) { return worker.extractSvgs(); });
     const QString outDir = QFileInfo(m_settings->exePath()).absolutePath()
                            + QStringLiteral("/svg_extracted");
     int count = 0;
@@ -812,6 +934,8 @@ QVariantMap Backend::extractSvgs()
 QVariantMap Backend::replaceSvg(int index, const QString &newSvgPath)
 {
     if (actionsLocked()) return lockedMap();
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) { return worker.replaceSvg(index, newSvgPath); });
     const auto r = SvgEngine::replaceSvg(m_settings->exePath(), index, newSvgPath);
     if (r.ok)
         scanSvgs();
@@ -853,6 +977,8 @@ FpsPatcher::DllDetection Backend::resolveFpsTarget()
 QVariantMap Backend::fpsDetect()
 {
     if (actionsLocked()) return lockedMap();
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) { return worker.fpsDetect(); });
     m_settings->setFpsAutoDetect(true);
     const auto detection = resolveFpsTarget();
     auto reply = result(detection.ok, detection.msg, detection.ok ? QStringLiteral("blue") : QStringLiteral("orange"));
@@ -865,6 +991,8 @@ QVariantMap Backend::fpsDetect()
 QVariantMap Backend::fpsAnalyze()
 {
     if (actionsLocked()) return lockedMap();
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) { return worker.fpsAnalyze(); });
     if (m_settings->fpsAutoDetect()) {
         const auto detection = resolveFpsTarget();
         if (!detection.ok) return result(false, detection.msg, QStringLiteral("red"));
@@ -888,6 +1016,8 @@ QVariantMap Backend::fpsAnalyze()
 QVariantMap Backend::fpsPatch(double hi)
 {
     if (actionsLocked()) return lockedMap();
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) { return worker.fpsPatch(hi); });
     if (m_settings->fpsAutoDetect()) {
         const auto detection = resolveFpsTarget();
         if (!detection.ok) return result(false, detection.msg, QStringLiteral("red"));
@@ -900,6 +1030,8 @@ QVariantMap Backend::fpsPatch(double hi)
 QVariantMap Backend::fpsRestore()
 {
     if (actionsLocked()) return lockedMap();
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) { return worker.fpsRestore(); });
     if (m_settings->fpsAutoDetect()) {
         const auto detection = resolveFpsTarget();
         if (!detection.ok) return result(false, detection.msg, QStringLiteral("red"));
@@ -914,6 +1046,8 @@ QVariantMap Backend::fpsRestore()
 QVariantMap Backend::integrityCheck()
 {
     if (actionsLocked()) return lockedMap();
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) { return worker.integrityCheck(); });
     const auto a = IntegrityPatcher::analyze(m_settings->exePath());
     QString color = QStringLiteral("blue");
     if (a.state == QLatin1String("bad") || a.state == QLatin1String("notfound")
@@ -929,6 +1063,8 @@ QVariantMap Backend::integrityCheck()
 QVariantMap Backend::integrityPatch()
 {
     if (actionsLocked()) return lockedMap();
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) { return worker.integrityPatch(); });
     const auto r = IntegrityPatcher::patch(m_settings->exePath());
     auto reply = result(r.ok, r.msg, r.ok ? QStringLiteral("green") : QStringLiteral("red"));
     reply.insert(QStringLiteral("state"), r.ok ? QStringLiteral("patched") : QStringLiteral("error"));
@@ -938,6 +1074,8 @@ QVariantMap Backend::integrityPatch()
 QVariantMap Backend::integrityRestore()
 {
     if (actionsLocked()) return lockedMap();
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) { return worker.integrityRestore(); });
     const auto r = IntegrityPatcher::restore(m_settings->exePath());
     auto reply = result(r.ok, r.msg, r.ok ? QStringLiteral("green") : QStringLiteral("red"));
     reply.insert(QStringLiteral("state"), r.ok ? QStringLiteral("clean") : QStringLiteral("error"));
@@ -949,6 +1087,8 @@ QVariantMap Backend::integrityRestore()
 QVariantMap Backend::bootPatch()
 {
     if (actionsLocked()) return lockedMap();
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) { return worker.bootPatch(); });
     const auto r = BootVideoPatcher::patch(m_settings->exePath());
     return result(r.ok, r.msg, QStringLiteral("green"));
 }
@@ -979,6 +1119,8 @@ QVariantList Backend::findVersions()
 QVariantMap Backend::applyVersion(const QString &oldV, const QString &newV)
 {
     if (actionsLocked()) return lockedMap();
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) { return worker.applyVersion(oldV, newV); });
     if (oldV.isEmpty() || newV.isEmpty())
         return result(false, QStringLiteral("Select a version and enter a new one."),
                       QStringLiteral("orange"));
@@ -990,6 +1132,8 @@ QVariantMap Backend::applyVersion(const QString &oldV, const QString &newV)
 QVariantMap Backend::applyRemovals(const QStringList &names)
 {
     if (actionsLocked()) return lockedMap();
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) { return worker.applyRemovals(names); });
     if (names.isEmpty())
         return result(false, QStringLiteral("Select at least one item."),
                       QStringLiteral("orange"));
@@ -1027,6 +1171,8 @@ QVariantList Backend::layoutTweaks()
 QVariantMap Backend::applyLayoutTweak(const QString &id, bool enabled)
 {
     if (actionsLocked()) return lockedMap();
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) { return worker.applyLayoutTweak(id, enabled); });
     const auto r = LayoutPatcher::apply(m_settings->exePath(), id, enabled);
     return result(r.ok, r.msg, r.ok ? QStringLiteral("green") : QStringLiteral("red"));
 }
@@ -1034,6 +1180,8 @@ QVariantMap Backend::applyLayoutTweak(const QString &id, bool enabled)
 QVariantMap Backend::restoreBackup(const QString &path)
 {
     if (actionsLocked()) return lockedMap();
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) { return worker.restoreBackup(path); });
     const QString bak = path + QStringLiteral(".bak");
     if (!QFileInfo::exists(bak))
         return result(false, QStringLiteral("No backup found."), QStringLiteral("red"));
@@ -1046,6 +1194,8 @@ QVariantMap Backend::restoreBackup(const QString &path)
 QVariantMap Backend::rpcidFind(const QString &path, bool noNetwork)
 {
     if (actionsLocked()) return lockedMap();
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) { return worker.rpcidFind(path, noNetwork); });
     Q_UNUSED(noNetwork)
     const auto r = RpcIdPatcher::find(path);
     doLog(r.msg, r.ok ? QStringLiteral("blue") : QStringLiteral("red"));
@@ -1056,6 +1206,8 @@ QVariantMap Backend::rpcidReplace(const QString &path, const QString &newId,
                                   const QString &oldId, bool dryRun, bool noNetwork)
 {
     if (actionsLocked()) return lockedMap();
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) { return worker.rpcidReplace(path, newId, oldId, dryRun, noNetwork); });
     Q_UNUSED(noNetwork)
     const QStringList oldIds = oldId.trimmed().isEmpty() ? QStringList{} : QStringList{oldId.trimmed()};
     const auto r = RpcIdPatcher::replace(path, newId, oldIds, dryRun);
@@ -1066,6 +1218,8 @@ QVariantMap Backend::rpcidReplace(const QString &path, const QString &newId,
 QVariantMap Backend::rpcidStatus(const QString &path)
 {
     if (actionsLocked()) return lockedMap();
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) { return worker.rpcidStatus(path); });
     const auto s = RpcIdPatcher::status(path);
     QVariantMap info{{QStringLiteral("ok"), s.ok},
                      {QStringLiteral("patched"), s.patched},
@@ -1082,6 +1236,8 @@ QVariantMap Backend::rpcidStatus(const QString &path)
 QVariantMap Backend::rpcidUndo(const QString &path)
 {
     if (actionsLocked()) return lockedMap();
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) { return worker.rpcidUndo(path); });
     const auto r = RpcIdPatcher::undo(path);
     doLog(r.msg, r.ok ? QStringLiteral("green") : QStringLiteral("red"));
     return {{QStringLiteral("ok"), r.ok}, {QStringLiteral("msg"), r.msg}};
@@ -1090,6 +1246,8 @@ QVariantMap Backend::rpcidUndo(const QString &path)
 QVariantMap Backend::rpcidNames(const QString &path)
 {
     if (actionsLocked()) return lockedMap();
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) { return worker.rpcidNames(path); });
     const auto n = RpcIdPatcher::names(path);
     QVariantList entries;
     for (const RpcIdPatcher::NameEntry &entry : n.entries) {
@@ -1106,6 +1264,8 @@ QVariantMap Backend::rpcidSetName(const QString &path, const QString &text,
                                   const QString &key, bool dryRun)
 {
     if (actionsLocked()) return lockedMap();
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) { return worker.rpcidSetName(path, text, key, dryRun); });
     const auto r = RpcIdPatcher::setName(path, text, key, dryRun);
     doLog(r.msg, r.ok ? QStringLiteral("green") : QStringLiteral("red"));
     return {{QStringLiteral("ok"), r.ok}, {QStringLiteral("msg"), r.msg}};

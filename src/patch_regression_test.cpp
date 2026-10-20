@@ -4,6 +4,7 @@
 #include "core/ExtrasPatcher.h"
 #include "core/IntegrityPatcher.h"
 #include "core/LayoutPatcher.h"
+#include "core/QmlText.h"
 #include "core/ByteUtils.h"
 #include "core/FpsPatcher.h"
 #include "core/GradientPatcher.h"
@@ -33,6 +34,7 @@
 #include <QProcessEnvironment>
 #include <QQmlComponent>
 #include <QQmlEngine>
+#include <QQuickItem>
 #include <QSettings>
 #include <QSet>
 #include <QTemporaryDir>
@@ -1848,7 +1850,56 @@ int runPatchRegressionTests()
         check(patchedPlr.contains(QLatin1String("id: iSidebarTitlebar"))
                   && patchedPlr.contains(QLatin1String("anchors.fill: parent"))
                   && insideTitlebar(patchedPlr),
-              "a transparent sidebar copy is inserted inside the title bar");
+              "a transparent host is inserted inside the title bar");
+        check(QmlText::objects(QmlText::mask(patchedPlr), QStringLiteral("PlrSidebar")).size() == 1
+                  && patchedPlr.contains(QStringLiteral("iSidebar.parent = iSidebarTitlebar")),
+              "one original sidebar owns the controls, backend connections and animations");
+        check(patchedPlr.contains(QStringLiteral("anchors.leftMargin: Math.min(144, parent.width / 4)"))
+                  && patchedPlr.contains(QStringLiteral("anchors.rightMargin: Math.min(144, parent.width / 4)")),
+              "the moved row reserves space for title-bar controls instead of covering them");
+
+        // Execute the actual injected mount QML, not a reimplementation. The
+        // original sidebar is deliberately declared AFTER its host, as in plr.
+        QString hostQml;
+        for (const auto &item : QmlText::objects(QmlText::mask(patchedPlr), QStringLiteral("Item"))) {
+            const QString body = patchedPlr.mid(item.nameBegin, item.end - item.nameBegin);
+            if (body.contains(QStringLiteral("id: iSidebarTitlebar"))) hostQml = body;
+        }
+        QQmlEngine mountEngine;
+        QQmlComponent mountComponent(&mountEngine);
+        const QString mountSource = QStringLiteral(
+            "import QtQuick 2.15\n"
+            "Item { id: scene; width: 1000; height: 600\n"
+            " Rectangle { id: iTopbar; width: parent.width; height: 32\n")
+            + hostQml + QStringLiteral(
+            "\n }\n"
+            " Rectangle { id: iSidebar; objectName: 'movedSidebar'; width: 0\n"
+            "  anchors.right: parent.right; anchors.bottom: parent.bottom; anchors.top: iTopbar.bottom\n"
+            "  property int resets: 0\n"
+            "  function fResetSidebar() { resets += 1 }\n"
+            "  Rectangle { objectName: 'volumeButton'; x: 40; width: 32; height: 32 }\n"
+            " }\n}\n");
+        mountComponent.setData(mountSource.toUtf8(), QUrl());
+        std::unique_ptr<QObject> mounted(mountComponent.create());
+        check(mounted != nullptr, "the single-owner title-bar mount compiles as real QML");
+        if (mounted) {
+            auto *scene = qobject_cast<QQuickItem *>(mounted.get());
+            auto *moved = mounted->findChild<QQuickItem *>(QStringLiteral("movedSidebar"));
+            auto *button = mounted->findChild<QQuickItem *>(QStringLiteral("volumeButton"));
+            // Flush the deferred mount and the subsequent overflow recalculation.
+            for (int i = 0; i < 4; ++i) QCoreApplication::processEvents();
+            check(moved && moved->width() == 712 && moved->height() == 32
+                      && moved->mapToItem(scene, QPointF()) == QPointF(144, 0),
+                  "the original controls use title-bar geometry, not the old side strip");
+            check(button && button->mapToItem(scene, QPointF()) == QPointF(184, 0),
+                  "button coordinates for popup placement follow the moved top-bar button");
+            scene->setWidth(600);
+            for (int i = 0; i < 4; ++i) QCoreApplication::processEvents();
+            check(moved && moved->width() == 312 && moved->property("resets").toInt() >= 1,
+                  "resizing updates the available width and refreshes the overflow budget");
+            check(mounted->findChildren<QQuickItem *>(QStringLiteral("movedSidebar")).size() == 1,
+                  "mounting and resizing never create another animated sidebar instance");
+        }
         check(patchedPlr.contains(QLatin1String("color: \"transparent\""))
                   && patchedPlr.contains(QStringLiteral("pBorderWidth + 0"))
                   && !patchedPlr.contains(QLatin1String("sidebarVisible ? iAppwin.pSidebarWidth")),
@@ -1871,6 +1922,43 @@ int runPatchRegressionTests()
         check(patchedTopbar.count(QStringLiteral("pVisible: false")) == 3
                   && patchedTopbar.count(QStringLiteral("pVisible: true")) == 0,
               "the duplicated Back/Home/Recent entries leave the title bar");
+        // Upgrade an EXE patched by the previous duplicate-instance version.
+        // Its exact generated text is kept here to pin backwards compatibility.
+        const QString oldHost = QStringLiteral(
+            "\r\n        PlrSidebar {\r\n"
+            "            // BSI CUSTOMIZER: sidebar buttons over the title bar\r\n"
+            "            id: iSidebarTitlebar\r\n"
+            "            anchors.fill: parent\r\n"
+            "            color: \"transparent\"\r\n"
+            "            visible: true\r\n"
+            "            onSidebarSettingClicked: fOpenSettingsWindow()\r\n"
+            "        }");
+        QString oldPlr = patchedPlr;
+        const int hostAt = oldPlr.indexOf(hostQml);
+        check(hostAt >= 0, "the generated host can be located for the upgrade fixture");
+        if (hostAt >= 0) {
+            // hostQml starts at Item, after the preceding newline + indentation.
+            oldPlr.replace(QStringLiteral("\r\n        ") + hostQml, oldHost);
+            auto previous = resources({ { QStringLiteral("plr.qml"), oldPlr },
+                                        { QStringLiteral("PlrSidebar.qml"), patchedSidebar },
+                                        { QStringLiteral("PlrTopbar.qml"), patchedTopbar } }, true, {});
+            addRegistration(previous, false);
+            const QString previousPath = temp.filePath(QStringLiteral("layout-upgrade.exe"));
+            write(previousPath, previous.f.bytes);
+            const auto previousState = LayoutPatcher::analyze(previous.f.bytes, id);
+            check(previousState.supported && previousState.applied,
+                  "previous duplicate-instance patches remain recognized");
+            check(LayoutPatcher::apply(previousPath, id, true).ok,
+                  "Apply upgrades an already-enabled old layout instead of returning a no-op");
+            const QString upgraded = resourceText(read(previousPath), previous, QStringLiteral("plr.qml"));
+            check(QmlText::objects(QmlText::mask(upgraded), QStringLiteral("PlrSidebar")).size() == 1
+                      && upgraded == patchedPlr,
+                  "the upgrade removes the duplicate and writes the single-owner layout");
+            check(LayoutPatcher::apply(previousPath, id, false).ok
+                      && resourceText(read(previousPath), previous, QStringLiteral("plr.qml")) == anchoredPlr
+                      && resourceText(read(previousPath), previous, QStringLiteral("PlrSidebar.qml")) == sidebar,
+                  "the upgraded version still restores the original stock documents exactly");
+        }
         const QByteArray afterFirst = read(path);
         const auto again = LayoutPatcher::apply(path, id, true);
         check(again.ok && read(path) == afterFirst
@@ -1908,7 +1996,7 @@ int runPatchRegressionTests()
         check(legacyPlrText.contains(QLatin1String("id: iSidebarTitlebar"))
                   && insideTitlebar(legacyPlrText)
                   && legacyPlrText.contains(QStringLiteral("pBorderWidth + 0")),
-              "the old player gets the same title-bar copy and full-width Android frame");
+              "the old player gets the same single-owner host and full-width Android frame");
         const auto legacySidebarText = resourceText(read(legacyPath), legacy, QStringLiteral("PlrSidebar.qml"));
         check(legacySidebarText.contains(QLatin1String("UiRowLayout"))
                   && legacySidebarText.contains(QLatin1String("visible: iSidebar.width > 0")),

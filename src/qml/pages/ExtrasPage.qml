@@ -172,7 +172,7 @@ Item {
                                     wrapMode: Text.Wrap
                                     text: !modelData.supported ? modelData.state
                                           : (modelData.applied
-                                             ? qsTr("Currently applied — untick to restore the stock sidebar.")
+                                             ? modelData.state + qsTr(" Untick to restore the stock sidebar.")
                                              : qsTr("Ready — tick and press Apply to move the buttons to the title bar."))
                                     color: !modelData.supported ? Theme.warn
                                            : (modelData.applied ? Theme.green : Theme.textDim)

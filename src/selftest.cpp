@@ -260,6 +260,38 @@ int runSelfTest()
         return 1;
     }
 
+    // Background patch facade: event delivery, serialization and error cleanup.
+    {
+        std::printf("[worker] responsive GUI event loop during patch operations\n");
+        SettingsManager settings(nullptr, false);
+        settings.setFpsAutoDetect(false);
+        settings.setExePath(tmp.filePath(QStringLiteral("missing-player.exe")));
+        Backend backend(&settings);
+        const QString originalPath = backend.exePath();
+        bool deliveredWhileBusy = false;
+        bool overlapRejected = false;
+        int transitions = 0;
+        QObject::connect(&backend, &Backend::busyChanged, &backend, [&] {
+            ++transitions;
+            if (!backend.busy()) return;
+            // Enqueued before the worker starts, so this runs before its
+            // finished notification even on a very fast machine.
+            QMetaObject::invokeMethod(&backend, [&] {
+                deliveredWhileBusy = backend.busy();
+                overlapRejected = !backend.integrityPatch().value("ok").toBool();
+                backend.setExePath(tmp.filePath(QStringLiteral("wrong-player.exe")));
+            }, Qt::QueuedConnection);
+        });
+        const QVariantMap failed = backend.integrityPatch();
+        check(deliveredWhileBusy, "GUI receives events while a background patch is active");
+        check(overlapRejected, "overlapping patches are refused");
+        check(backend.exePath() == originalPath, "target cannot change during a patch");
+        check(!failed.value("ok").toBool(), "worker preserves patch failure result");
+        check(!backend.busy() && transitions == 2, "failed patch clears busy state exactly once");
+        backend.integrityPatch();
+        check(!backend.busy() && transitions == 4, "another operation can run after failure");
+    }
+
     // ------------------------------------------------------------------
     // 1) App UI theme chain (C++ NOTIFY -> QML bindings)
     // ------------------------------------------------------------------

@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Effects
 import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import QtQuick.Window
@@ -6,6 +7,8 @@ import BSICustomizer
 import "Icons.js" as Icons
 
 ApplicationWindow {
+    onClosing: (close) => { if (backend.busy) close.accepted = false; }
+
     id: window
     width: 1180
     height: 760
@@ -304,11 +307,10 @@ ApplicationWindow {
                         Rectangle {
                             Layout.preferredWidth: 38
                             Layout.preferredHeight: 38
-                            radius: 19
+                            radius: width / 2
                             color: "#0a1a2c"
                             border.width: 1
                             border.color: Qt.rgba(56 / 255, 225 / 255, 255 / 255, 0.5)
-                            clip: true
 
                             Text {
                                 anchors.centerIn: parent
@@ -324,10 +326,26 @@ ApplicationWindow {
                             Image {
                                 id: accountAvatar
                                 anchors.fill: parent
+                                anchors.margins: 1
                                 source: auth.user.AvatarUrl || ""
                                 fillMode: Image.PreserveAspectCrop
                                 asynchronous: true
                                 smooth: true
+                                layer.enabled: true
+                                layer.effect: MultiEffect {
+                                    maskEnabled: true
+                                    maskSource: accountAvatarMask
+                                }
+                            }
+                            Rectangle {
+                                id: accountAvatarMask
+                                width: accountAvatar.width
+                                height: accountAvatar.height
+                                radius: width / 2
+                                color: "white"
+                                antialiasing: true
+                                visible: false
+                                layer.enabled: true
                             }
                         }
 
@@ -537,4 +555,45 @@ ApplicationWindow {
         target: backend
         function onLog(message, color) { logPanel.append(message, color) }
     }
+
+    // Modal while the isolated patch worker owns the selected files. The GUI
+    // keeps rendering; keyboard shortcuts and repeat clicks cannot start writes.
+    Popup {
+        parent: Overlay.overlay
+        anchors.centerIn: parent
+        width: 340
+        modal: true
+        dim: true
+        focus: true
+        closePolicy: Popup.NoAutoClose
+        visible: backend.busy
+        padding: 24
+        background: Rectangle {
+            color: "#0a1a2c"
+            radius: 16
+            border.color: Theme.neonFaint
+        }
+        contentItem: ColumnLayout {
+            spacing: 14
+            BusyIndicator {
+                Layout.alignment: Qt.AlignHCenter
+                running: backend.busy
+            }
+            Label {
+                Layout.alignment: Qt.AlignHCenter
+                text: qsTr("Working…")
+                color: Theme.text
+                font.pixelSize: 18
+                font.bold: true
+            }
+            Label {
+                Layout.fillWidth: true
+                text: qsTr("Please wait while the operation finishes.\nDo not close the app or start BlueStacks.")
+                color: Theme.textDim
+                horizontalAlignment: Text.AlignHCenter
+                wrapMode: Text.WordWrap
+            }
+        }
+    }
+
 }

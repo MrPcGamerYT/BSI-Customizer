@@ -17,7 +17,7 @@ class SettingsManager : public QObject
     Q_PROPERTY(bool fpsAutoDetect READ fpsAutoDetect WRITE setFpsAutoDetect NOTIFY fpsAutoDetectChanged)
 
 public:
-    explicit SettingsManager(QObject *parent = nullptr);
+    explicit SettingsManager(QObject *parent = nullptr, bool initialize = true);
 
     QString exePath() const { return m_exePath; }
     void setExePath(const QString &path);
@@ -43,6 +43,7 @@ signals:
     void fpsAutoDetectChanged();
 
 private:
+    friend class Backend; // isolated settings snapshot for background patch jobs
     QString m_exePath;
     QString m_dllPath;
     QString m_confPath;
