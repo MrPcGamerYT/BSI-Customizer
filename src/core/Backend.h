@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QObject>
+#include <functional>
 #include <QVariantList>
 #include <QVariantMap>
 #include <QUrl>
@@ -22,6 +23,7 @@ class AuthManager;
 class Backend : public QObject
 {
     Q_OBJECT
+    Q_PROPERTY(bool busy READ busy NOTIFY busyChanged)
     Q_PROPERTY(QString exePath READ exePath WRITE setExePath NOTIFY exePathChanged)
     Q_PROPERTY(QString dllPath READ dllPath WRITE setDllPath NOTIFY dllPathChanged)
     Q_PROPERTY(QString confPath READ confPath WRITE setConfPath NOTIFY confPathChanged)
@@ -46,6 +48,8 @@ class Backend : public QObject
 
 public:
     explicit Backend(SettingsManager *settings, QObject *parent = nullptr);
+
+    bool busy() const { return m_busy; }
 
     // ---- sign-in gate (the Premium-Optimizer rule: the renderer is not the
     //      gate) ----
@@ -176,6 +180,7 @@ public:
                                          bool dryRun = false);
 
 signals:
+    void busyChanged();
     void exePathChanged();
     void dllPathChanged();
     void confPathChanged();
@@ -187,6 +192,10 @@ signals:
     void log(const QString &message, const QString &color);
 
 private:
+    QVariantMap runBackground(const std::function<QVariantMap(Backend &)> &operation);
+    void copyPatchState(const Backend &source);
+    bool m_busy = false;
+    bool m_backgroundWorker = false;
     bool actionsLocked() const;
     QVariantMap lockedMap() const;
     FpsPatcher::DllDetection resolveFpsTarget();

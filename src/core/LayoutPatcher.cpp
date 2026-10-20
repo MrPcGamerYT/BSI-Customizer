@@ -11,6 +11,7 @@
 #include <QMap>
 #include <QRegularExpression>
 #include <QSet>
+#include <QStringList>
 
 #include <algorithm>
 
@@ -44,7 +45,7 @@ const QString kOverlayMarker = QStringLiteral("// BSI CUSTOMIZER: sidebar button
 const QString kSidebarWidthName = QStringLiteral("width");
 const QString kSidebarLayoutWidthName = QStringLiteral("Layout.preferredWidth");
 // Hides the button strip inside the *original* (now zero-width) sidebar
-// instance. The title-bar copy has a real width, so it keeps drawing.
+// instance before it is mounted. The mounted sidebar has a real width.
 const QString kRowHidden = QStringLiteral("\nvisible: iSidebar.width > 0");
 
 // Which shape the selected player uses. The tweak writes the same title-bar
@@ -114,11 +115,9 @@ QString lineEnding(const QString &qml)
     return qml.contains(QLatin1String("\r\n")) ? QStringLiteral("\r\n") : QStringLiteral("\n");
 }
 
-// The instance that is inserted into the title bar. It carries the stock
-// component with a transparent background, so the existing column becomes the
-// centered row after the PlrSidebar.qml edits. Inserted at the end of the
-// title bar's body so it paints above the bar's own items.
-QString titlebarOverlay(const QString &nl, bool settingsHandler)
+// Exact old overlay retained only for restoring/upgrading already-patched
+// players. New patches must not create another live sidebar component.
+QString legacyTitlebarOverlay(const QString &nl, bool settingsHandler)
 {
     QString text = nl
         + QStringLiteral("        PlrSidebar {") + nl
@@ -130,6 +129,36 @@ QString titlebarOverlay(const QString &nl, bool settingsHandler)
     if (settingsHandler)
         text += nl + QStringLiteral("            onSidebarSettingClicked: fOpenSettingsWindow()");
     return text + nl + QStringLiteral("        }");
+}
+
+// Move the *existing* sidebar, rather than constructing another one. Backend
+// Connections, popup owners and button animations must have exactly one owner.
+// The mount runs after the whole player is constructed (the sidebar can be
+// declared after the top bar). Clearing old anchors is essential on Qt 5 too.
+QString titlebarOverlay(const QString &nl)
+{
+    const QStringList lines {
+        QStringLiteral("        Item {"),
+        QStringLiteral("            ") + kOverlayMarker,
+        QStringLiteral("            id: ") + kOverlayId,
+        QStringLiteral("            anchors.fill: parent"),
+        QStringLiteral("            anchors.leftMargin: Math.min(144, parent.width / 4)"),
+        QStringLiteral("            anchors.rightMargin: Math.min(144, parent.width / 4)"),
+        QStringLiteral("            function fMountSidebar() {"),
+        QStringLiteral("                iSidebar.anchors.top = undefined"),
+        QStringLiteral("                iSidebar.anchors.bottom = undefined"),
+        QStringLiteral("                iSidebar.anchors.left = undefined"),
+        QStringLiteral("                iSidebar.anchors.right = undefined"),
+        QStringLiteral("                iSidebar.anchors.centerIn = undefined"),
+        QStringLiteral("                iSidebar.parent = iSidebarTitlebar"),
+        QStringLiteral("                iSidebar.anchors.fill = iSidebarTitlebar"),
+        QStringLiteral("                iSidebar.visible = true"),
+        QStringLiteral("                Qt.callLater(function() { iSidebar.fResetSidebar() })"),
+        QStringLiteral("            }"),
+        QStringLiteral("            Component.onCompleted: Qt.callLater(fMountSidebar)"),
+        QStringLiteral("        }")
+    };
+    return nl + lines.join(nl);
 }
 
 bool hasOverlay(const QString &qml)
@@ -195,12 +224,16 @@ bool applyEdits(QString &qml, QList<Edit> edits)
 
 // ---------------------------------------------------------------- plr.qml
 
+bool directChild(const QString &masked, int parentOpen, int childBegin);
+
 bool findTitlebarOverlay(const QString &qml, const QString &masked,
                          const QList<QmlText::Object> &instances, QmlText::Object *overlay)
 {
-    Q_UNUSED(masked)
     for (const auto &instance : instances) {
-        if (qml.mid(instance.open, instance.end - instance.open).contains(kOverlayId)) {
+        QmlText::Binding id;
+        if (QmlText::binding(masked, instance.open, instance.end, QStringLiteral("id"), &id)
+            && directChild(masked, instance.open, id.nameBegin)
+            && qml.mid(id.valueBegin, id.valueEnd - id.valueBegin) == kOverlayId) {
             *overlay = instance;
             return true;
         }
@@ -222,7 +255,7 @@ bool findOriginalSidebar(const QString &qml, const QList<QmlText::Object> &insta
 }
 
 // plr.qml: shrink the player-window sidebar to zero width and host its
-// buttons in an overlay instance inside the title bar. Works for the anchored
+// buttons in a single-owner host inside the title bar. Works for the anchored
 // strip (5.21/5.22) and for the old row-layout item (5.10/5.12): only the
 // member that carries the strip width changes.
 bool plrEdits(QString &qml, bool enabled, SidebarLayout layout, QList<Edit> &edits)
@@ -243,19 +276,25 @@ bool plrEdits(QString &qml, bool enabled, SidebarLayout layout, QList<Edit> &edi
         if (!swapValue(qml, masked, instance.open, instance.end, QStringLiteral("color"),
                        true, kColorStock, kColorPatched, edits))
             return false;
-        const QString instanceText = qml.mid(instance.open, instance.end - instance.open);
-        const QString overlay = titlebarOverlay(lineEnding(qml),
-                                                instanceText.contains(QLatin1String("onSidebarSettingClicked")));
+        QmlText::Binding id;
+        if (!QmlText::binding(masked, instance.open, instance.end, QStringLiteral("id"), &id)
+            || qml.mid(id.valueBegin, id.valueEnd - id.valueBegin) != QLatin1String("iSidebar"))
+            return false;
+        const QString overlay = titlebarOverlay(lineEnding(qml));
         addEdit(edits, topbars.first().end - 1, 0, overlay);
     } else {
-        if (instances.size() != 2) return false;
+        if (instances.size() != 1 && instances.size() != 2) return false;
         QmlText::Object original;
         QmlText::Object overlayInstance;
         if (!findOriginalSidebar(qml, instances, &original)) return false;
-        if (!findTitlebarOverlay(qml, masked, instances, &overlayInstance)) return false;
+        const bool legacy = instances.size() == 2;
+        if (!findTitlebarOverlay(qml, masked,
+                                legacy ? instances : QmlText::objects(masked, QStringLiteral("Item")),
+                                &overlayInstance)) return false;
         const QString instanceText = qml.mid(original.open, original.end - original.open);
-        const QString overlay = titlebarOverlay(lineEnding(qml),
-                                                instanceText.contains(QLatin1String("onSidebarSettingClicked")));
+        const QString overlay = legacy
+            ? legacyTitlebarOverlay(lineEnding(qml), instanceText.contains(QLatin1String("onSidebarSettingClicked")))
+            : titlebarOverlay(lineEnding(qml));
         const int at = topbars.first().end - 1 - overlay.size();
         if (at < 0 || qml.mid(at, overlay.size()) != overlay) return false;
         addEdit(edits, at, overlay.size(), QString());
@@ -336,8 +375,8 @@ bool sidebarEdits(QString &qml, bool enabled, QList<Edit> &edits)
         if (!swapMember(qml, masked, column.open, column.end, QStringLiteral("anchors.fill"),
                         QStringLiteral("parent"), QStringLiteral("anchors.centerIn: parent"), edits))
             return false;
-        // Only the title-bar copy has a real width; the shrunk original must
-        // not paint a centered row overflowing its zero-width rectangle.
+        // Suppress the row before the original sidebar is mounted into its
+        // title-bar host and receives the actual available width.
         addEdit(edits, column.open + 1, 0, kRowHidden);
     } else {
         addEdit(edits, column.nameBegin, int(QStringLiteral("UiRowLayout").size()),
@@ -468,6 +507,7 @@ struct Shape
     SidebarLayout layout = SidebarLayout::None;
     bool stock = false;
     bool patched = false;
+    bool legacyOverlay = false;
     bool editable = false;
     QString detail;
 };
@@ -530,12 +570,16 @@ Snapshot inspect(const QByteArray &image)
                 snapshot.shape.stock = true;
             }
         }
-    } else if (overlay && instances.size() == 2) {
-        // Patched: one zero-width original plus the inserted title-bar copy.
+    } else if (overlay && (instances.size() == 1 || instances.size() == 2)) {
+        // Recognize both the old duplicate and the new single-owner host.
+        snapshot.shape.legacyOverlay = instances.size() == 2;
         QmlText::Object original;
         QmlText::Object overlayInstance;
         if (findOriginalSidebar(qml, instances, &original)
-            && findTitlebarOverlay(qml, masked, instances, &overlayInstance)) {
+            && findTitlebarOverlay(qml, masked,
+                                   snapshot.shape.legacyOverlay ? instances
+                                       : QmlText::objects(masked, QStringLiteral("Item")),
+                                   &overlayInstance)) {
             QString color, width, layoutWidth, fill, overlayColor, overlayVisible;
             const bool haveColor = value(original, QStringLiteral("color"), &color);
             const bool haveWidth = value(original, kSidebarWidthName, &width);
@@ -544,8 +588,9 @@ Snapshot inspect(const QByteArray &image)
             const bool haveOverlayColor = value(overlayInstance, QStringLiteral("color"), &overlayColor);
             const bool haveOverlayVisible = value(overlayInstance, QStringLiteral("visible"), &overlayVisible);
             if (haveColor && color == kColorPatched && haveFill && fill == QLatin1String("parent")
-                && haveOverlayColor && overlayColor == kColorPatched
-                && haveOverlayVisible && overlayVisible == QLatin1String("true")
+                && (!snapshot.shape.legacyOverlay
+                    || (haveOverlayColor && overlayColor == kColorPatched
+                        && haveOverlayVisible && overlayVisible == QLatin1String("true")))
                 && qml.contains(kInsetPatched)) {
                 if (haveWidth && width == QLatin1String("0")) {
                     snapshot.shape.layout = SidebarLayout::Anchored;
@@ -610,7 +655,8 @@ QList<Tweak> tweaks()
         { kSidebarToTitlebar,
           QStringLiteral("Remove sidebar · buttons to the title bar (centered)"),
           QStringLiteral("Lays every sidebar button out as one centered row inside the title "
-                         "bar and removes the side strip. Works with both the current player "
+                         "bar and removes the side strip. Moves the original controls, keeping "
+                         "popup and animation ownership intact. Works with both the current player "
                          "and the older 5.x layout. The title bar's own duplicate "
                          "Back/Home/Recent buttons step aside so nothing shows twice. "
                          "Turn the option off and apply again to restore the stock layout.") },
@@ -635,7 +681,8 @@ State analyze(const QByteArray &image, const QString &id)
     }
     state.supported = true;
     state.applied = snapshot.shape.patched;
-    state.detail = state.applied ? QStringLiteral("Applied.")
+    state.detail = snapshot.shape.legacyOverlay ? QStringLiteral("Older layout applied. Apply again to repair popup ownership.")
+                  : state.applied ? QStringLiteral("Applied.")
                                  : QStringLiteral("Ready.");
     return state;
 }
@@ -654,7 +701,8 @@ Result apply(const QString &exePath, const QString &id, bool enabled)
     const Snapshot before = inspect(original);
     if (before.shape.layout == SidebarLayout::None || !before.shape.editable)
         return refuse(before.shape.detail);
-    if (before.shape.patched == enabled)
+    const bool upgrade = enabled && before.shape.patched && before.shape.legacyOverlay;
+    if (before.shape.patched == enabled && !upgrade)
         return { true, enabled ? QStringLiteral("This layout tweak is already applied.")
                               : QStringLiteral("The stock sidebar layout is already in place.") };
 
@@ -674,6 +722,14 @@ Result apply(const QString &exePath, const QString &id, bool enabled)
         QString error;
         if (!findDoc(changed, role.name, &doc, &error)) return refuse(error);
         QList<Edit> edits;
+        if (upgrade) {
+            // Normalize old copies in memory, then apply the new version. Only
+            // the verified final image is written; never expose a half-upgrade.
+            if (!role.collect(doc.qml, false, before.shape.layout, edits)
+                || !applyEdits(doc.qml, edits))
+                return refuse(QStringLiteral("Cannot safely upgrade the old layout; no file was written."));
+            edits.clear();
+        }
         if (!role.collect(doc.qml, enabled, before.shape.layout, edits))
             return refuse(QStringLiteral("%1 does not match the expected layout; no file was written.")
                               .arg(role.name));
@@ -686,7 +742,7 @@ Result apply(const QString &exePath, const QString &id, bool enabled)
     }
     const Snapshot after = inspect(changed);
     if (after.shape.layout == SidebarLayout::None || !after.shape.editable
-        || after.shape.patched != enabled)
+        || after.shape.patched != enabled || (enabled && after.shape.legacyOverlay))
         return refuse(QStringLiteral("The written layout did not pass resource/read-back "
                                      "verification; no file was written."));
     if (!ThemeEngine::backup(exePath))

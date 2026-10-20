@@ -44,6 +44,19 @@ If an older patch already wrote the desired colors but BlueStacks still shows an
 
 The original `.bak` is preserved. Theme edits are made against the current EXE, not a stale backup. Writes are checked and atomically replaced where supported; close BlueStacks and run the tool as administrator if Windows refuses access.
 
+## Sidebar buttons in the title bar
+
+The layout tweak moves the **original sidebar** into a centered title-bar host
+instead of creating a second set of controls. This keeps button state, animations,
+and popup ownership attached to the same instance used by the player. The host
+reserves space at both ends for title-bar controls and follows window resizing.
+
+If you used an earlier version of this tweak, close BlueStacks, keep the option
+checked, and click **Apply** again to upgrade the old duplicate-instance layout.
+Restart BlueStacks afterward. Unticking and applying restores the stock layout.
+Player-specific popup positioning still needs verification on the target build;
+the patcher refuses unrecognized QML shapes rather than guessing edits.
+
 ## Gradient themes
 
 BlueStacks paints the sidebar and top bar from `plr.qml`'s `PlrSidebar` /

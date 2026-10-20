@@ -9,9 +9,10 @@
 #include <QProcessEnvironment>
 #include <QUrl>
 
-SettingsManager::SettingsManager(QObject *parent)
+SettingsManager::SettingsManager(QObject *parent, bool initialize)
     : QObject(parent)
 {
+    if (!initialize) return;
     QSettings settings;
     m_exePath = settings.value(QStringLiteral("paths/exe")).toString();
     m_dllPath = settings.value(QStringLiteral("paths/dll")).toString();

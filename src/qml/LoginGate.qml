@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Effects
 import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import QtQuick.Window
@@ -275,11 +276,10 @@ Item {
                             Rectangle {
                                 Layout.preferredWidth: 48
                                 Layout.preferredHeight: 48
-                                radius: 14
+                                radius: width / 2
                                 color: "#0a1a2c"
                                 border.width: 2
                                 border.color: Qt.rgba(61 / 255, 240 / 255, 192 / 255, 0.45)
-                                clip: true
 
                                 Text {
                                     anchors.centerIn: parent
@@ -301,6 +301,21 @@ Item {
                                     fillMode: Image.PreserveAspectCrop
                                     asynchronous: true
                                     smooth: true
+                                    layer.enabled: true
+                                    layer.effect: MultiEffect {
+                                        maskEnabled: true
+                                        maskSource: resumeAvatarMask
+                                    }
+                                }
+                                Rectangle {
+                                    id: resumeAvatarMask
+                                    width: resumeAvatar.width
+                                    height: resumeAvatar.height
+                                    radius: width / 2
+                                    color: "white"
+                                    antialiasing: true
+                                    visible: false
+                                    layer.enabled: true
                                 }
                             }
 
