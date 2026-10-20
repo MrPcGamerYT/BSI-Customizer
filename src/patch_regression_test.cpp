@@ -2026,13 +2026,18 @@ int runPatchRegressionTests()
         if (helperAt >= 0 && helperEnd > helperAt) {
             const QString helpers = patchedSidebar.mid(helperAt, helperEnd - helperAt
                 + QStringLiteral("    // BSI CUSTOMIZER: responsive sidebar end").size());
+            // The sidebar is its own component, exactly like the real
+            // PlrSidebar.qml: QML resolves an unqualified property name
+            // through the component root, so a plain nested Item would make
+            // pAllSidebarItems/pVisibleSidebarElementsCount invisible to the
+            // generated helpers and to the Repeater's model/delegate.
             const QString testQml = QStringLiteral(R"QML(import QtQuick 2.15
 import QtQuick.Window 2.15
 Window {
     id: iAppwin
     visible: false
     width: 900; height: 600
-    Item {
+    component MockSidebar: Item {
         id: iSidebar
         objectName: "responsiveBar"
         x: 144; width: 288; height: 32
@@ -2087,7 +2092,7 @@ Window {
             mockPopup.x = point.x; mockPopup.y = point.y
         }
         function soundIsOverflow() { soundOverflow = fBSIInOverflow(pAllSidebarItems[2]) }
-)QML") + helpers + QStringLiteral("\n    }\n}\n");
+)QML") + helpers + QStringLiteral("\n    }\n    MockSidebar { }\n}\n");
             QQmlEngine runtimeEngine;
             QQmlComponent runtime(&runtimeEngine);
             runtime.setData(testQml.toUtf8(), QUrl());
@@ -2098,8 +2103,17 @@ Window {
             if (window) {
                 auto *bar = window->findChild<QQuickItem *>(QStringLiteral("responsiveBar"));
                 auto *dots = window->findChild<QQuickItem *>(QStringLiteral("threeDots"));
-                auto *sound = window->findChild<QQuickItem *>(QStringLiteral("sound"));
                 auto *panel = window->findChild<QObject *>(QStringLiteral("soundPanel"));
+                // A Repeater's delegates are visual children without a QObject
+                // parent, so findChild() cannot reach them: walk the item tree.
+                QQuickItem *sound = nullptr;
+                QList<QQuickItem *> pending { bar };
+                while (!pending.isEmpty() && !sound) {
+                    QQuickItem *item = pending.takeFirst();
+                    if (!item) continue;
+                    if (item->objectName() == QLatin1String("sound")) sound = item;
+                    pending += item->childItems();
+                }
                 if (bar && dots && sound && panel) {
                     bar->setWidth(288); // five enabled repeatable + four fixed = nine 32px slots
                     QMetaObject::invokeMethod(bar, "fBSIUpdateOverflow");

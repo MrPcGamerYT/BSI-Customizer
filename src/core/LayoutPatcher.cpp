@@ -600,8 +600,10 @@ bool popupEdits(const QString &qml, const QString &masked, const SidebarControls
         const auto match = it.next();
         if (match.capturedStart() <= controls.root.open || match.capturedEnd() >= controls.root.end)
             continue;
-        lines << PopupLine { match.capturedStart(), match.capturedLength(), match.captured(2),
-                             match.captured(3),
+        // capturedStart()/capturedLength() are qsizetype; the braces below
+        // would turn that conversion into a narrowing error (MSVC C2397).
+        lines << PopupLine { int(match.capturedStart()), int(match.capturedLength()),
+                             match.captured(2), match.captured(3),
                              qml.mid(match.capturedStart(4), match.capturedLength(4)).trimmed(),
                              qml.mid(match.capturedStart(), match.capturedLength()) };
     }
@@ -806,7 +808,7 @@ bool responsiveEdits(QString &qml, bool enabled, bool autoInstalled, QList<Edit>
                     continue;
                 if (QmlText::binding(masked, button.open, button.end, QStringLiteral("visible"), &visible)
                     && directChild(masked, button.open, visible.nameBegin)) return false;
-                addEdit(edits, button.open + 1, 0, kCollapseHidden);
+                addEdit(edits, button.open + 1, 0, kCollapseHidden + lineEnding(qml));
             }
         }
         if (controls.layoutId == kLayoutId)
@@ -856,7 +858,7 @@ bool responsiveEdits(QString &qml, bool enabled, bool autoInstalled, QList<Edit>
             const QString original = QString::fromUtf8(bytes);
             if (!original.contains(QLatin1String(".x ="))
                 && !original.contains(QLatin1String(".y ="))) return false;
-            addEdit(edits, match.capturedStart(), match.capturedLength(), original);
+            addEdit(edits, int(match.capturedStart()), int(match.capturedLength()), original);
             ++count;
         }
         if (count != qml.count(kPopupOriginal)) return false;
@@ -871,7 +873,7 @@ bool responsiveEdits(QString &qml, bool enabled, bool autoInstalled, QList<Edit>
         const QString value = QString::fromUtf8(bytes);
         if (bytes.toBase64() != encoded || value.toUtf8() != bytes
             || !value.contains(QLatin1String("pVisibleSidebarElementsCount"))) return false;
-        addEdit(edits, match.capturedStart(), match.capturedLength(), value);
+        addEdit(edits, int(match.capturedStart()), int(match.capturedLength()), value);
     }
     return true;
 }
@@ -923,11 +925,18 @@ bool sidebarEdits(QString &qml, bool enabled, QList<Edit> &edits)
             || qml.mid(id.valueBegin, id.valueEnd - id.valueBegin) != QLatin1String("iCollapseBtn"))
             continue;
         QmlText::Binding visible;
+        // The marker is a line comment: it must end on a line of its own, or
+        // it would comment out whatever the player keeps after `{` (a
+        // one-line UiImageButton loses its id and its closing brace).
+        const QString collapseHidden = kCollapseHidden + lineEnding(qml);
         if (enabled) {
             if (QmlText::binding(masked, button.open, button.end, QStringLiteral("visible"), &visible)
                 && directChild(masked, button.open, visible.nameBegin)) return false;
-            addEdit(edits, button.open + 1, 0, kCollapseHidden);
+            addEdit(edits, button.open + 1, 0, collapseHidden);
+        } else if (qml.mid(button.open + 1, collapseHidden.size()) == collapseHidden) {
+            addEdit(edits, button.open + 1, collapseHidden.size(), QString());
         } else if (qml.mid(button.open + 1, kCollapseHidden.size()) == kCollapseHidden) {
+            // Older patches wrote the member without a terminating line break.
             addEdit(edits, button.open + 1, kCollapseHidden.size(), QString());
         } // older patches did not hide Collapse; normalize them on upgrade
     }
