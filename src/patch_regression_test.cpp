@@ -1922,7 +1922,9 @@ int runPatchRegressionTests()
               "the responsive stock sidebar can move to the title bar");
         const auto movedSmart = resourceText(read(smartPath), r, QStringLiteral("PlrSidebar.qml"));
         check(movedSmart.contains(QLatin1String("var available = iSidebar.width"))
-                  && !movedSmart.contains(QLatin1String("var available = iSidebar.height")),
+                  && !movedSmart.contains(QLatin1String("var available = iSidebar.height"))
+                  && movedSmart.contains(QLatin1String("iBSISidebarLayout.leftPadding"))
+                  && !movedSmart.contains(QLatin1String("stock overflow only")),
               "an independently enabled smart overflow budget follows the title-bar width");
         check(LayoutPatcher::apply(smartPath, id, false).ok
                   && resourceText(read(smartPath), r, QStringLiteral("PlrSidebar.qml")) == smartSidebar

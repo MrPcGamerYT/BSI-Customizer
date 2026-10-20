@@ -628,7 +628,8 @@ bool sidebarControls(const QString &qml, const QString &masked, SidebarControls 
     QList<QmlText::Object> candidates;
     QList<bool> candidateHorizontal;
     for (const auto &type : { QStringLiteral("UiColumnLayout"), QStringLiteral("UiRowLayout"),
-                              QStringLiteral("UiFlow"), QStringLiteral("Row"), QStringLiteral("Column") }) {
+                              QStringLiteral("UiFlow"), QStringLiteral("Flow"),
+                              QStringLiteral("Row"), QStringLiteral("Column") }) {
         for (const auto &object : QmlText::objects(masked, type)) {
             if (object.open <= controls.root.open || object.end > controls.root.end
                 || !directChild(masked, controls.root.open, object.nameBegin)
@@ -636,7 +637,8 @@ bool sidebarControls(const QString &qml, const QString &masked, SidebarControls 
                 continue;
             candidates << object;
             candidateHorizontal << (type == QLatin1String("UiRowLayout")
-                                    || type == QLatin1String("Row"));
+                                    || type == QLatin1String("Row")
+                                    || qml.mid(object.open, object.end - object.open).contains(kRowHidden));
         }
     }
     if (candidates.isEmpty()) return false;
@@ -1526,7 +1528,7 @@ bool collectSidebarEdits(QString &qml, bool enabled, SidebarLayout, QList<Edit> 
     // a copy: builds without the kebab button, Repeater model or popup anchors
     // still get the title-bar move and keep their own overflow code.
     bool smart = responsive;
-    if (enabled) {
+    if (enabled && !responsive) {
         QString probe = qml;
         QList<Edit> row, helper;
         smart = sidebarRowEdits(probe, true, row) && applyEdits(probe, row)
@@ -1655,11 +1657,11 @@ Snapshot inspect(const QByteArray &image)
                     || (haveOverlayColor && overlayColor == kColorPatched
                         && haveOverlayVisible && overlayVisible == QLatin1String("true")))
                 && insetOk) {
-                if (haveWidth && zeroWidthValue(width)) {
-                    snapshot.shape.layout = SidebarLayout::Anchored;
-                    snapshot.shape.patched = true;
-                } else if (haveLayoutWidth && zeroWidthValue(layoutWidth)) {
+                if (haveLayoutWidth && zeroWidthValue(layoutWidth)) {
                     snapshot.shape.layout = SidebarLayout::RowItem;
+                    snapshot.shape.patched = true;
+                } else if (haveWidth && zeroWidthValue(width)) {
+                    snapshot.shape.layout = SidebarLayout::Anchored;
                     snapshot.shape.patched = true;
                 }
             }
