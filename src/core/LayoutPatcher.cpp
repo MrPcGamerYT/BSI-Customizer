@@ -663,8 +663,10 @@ bool popupEdits(const QString &qml, const QString &masked, const SidebarControls
         const auto match = it.next();
         if (match.capturedStart() <= controls.root.open || match.capturedEnd() >= controls.root.end)
             continue;
-        lines << PopupLine { int(match.capturedStart()), int(match.capturedLength()), match.captured(2),
-                             match.captured(3),
+        // capturedStart()/capturedLength() are qsizetype; braced initialization
+        // would make the implicit conversion to int an MSVC C2397 error.
+        lines << PopupLine { int(match.capturedStart()), int(match.capturedLength()),
+                             match.captured(2), match.captured(3),
                              qml.mid(match.capturedStart(4), match.capturedLength(4)).trimmed(),
                              qml.mid(match.capturedStart(), match.capturedLength()) };
     }
@@ -938,7 +940,7 @@ bool responsiveEdits(QString &qml, bool enabled, bool autoInstalled, QList<Edit>
             const QString original = QString::fromUtf8(bytes);
             if (!original.contains(QLatin1String(".x ="))
                 && !original.contains(QLatin1String(".y ="))) return false;
-            addEdit(edits, match.capturedStart(), match.capturedLength(), original);
+            addEdit(edits, int(match.capturedStart()), int(match.capturedLength()), original);
             ++count;
         }
         if (count != qml.count(kPopupOriginal)) return false;
@@ -953,7 +955,7 @@ bool responsiveEdits(QString &qml, bool enabled, bool autoInstalled, QList<Edit>
         const QString value = QString::fromUtf8(bytes);
         if (bytes.toBase64() != encoded || value.toUtf8() != bytes
             || !value.contains(QLatin1String("pVisibleSidebarElementsCount"))) return false;
-        addEdit(edits, match.capturedStart(), match.capturedLength(), value);
+        addEdit(edits, int(match.capturedStart()), int(match.capturedLength()), value);
     }
     return true;
 }
@@ -1005,14 +1007,28 @@ bool sidebarEdits(QString &qml, bool enabled, QList<Edit> &edits)
             || qml.mid(id.valueBegin, id.valueEnd - id.valueBegin) != QLatin1String("iCollapseBtn"))
             continue;
         QmlText::Binding visible;
+        // The marker is a line comment: it must end before an inline `id:`
+        // or `}`. Distinguish the current versioned insertion from earlier
+        // releases so their original line breaks are restored byte-for-byte.
+        const QString nl = lineEnding(qml);
+        const QString currentMarker = kCollapseHiddenCurrent + nl;
+        const QString earlierMarker = kCollapseHidden + nl;
         if (enabled) {
             if (QmlText::binding(masked, button.open, button.end, QStringLiteral("visible"), &visible)
                 && directChild(masked, button.open, visible.nameBegin)) return false;
-            addEdit(edits, button.open + 1, 0, kCollapseHiddenCurrent + lineEnding(qml));
+            addEdit(edits, button.open + 1, 0, currentMarker);
         } else if (qml.mid(button.open + 1, kCollapseHiddenCurrent.size()) == kCollapseHiddenCurrent) {
-            const QString marker = kCollapseHiddenCurrent + lineEnding(qml);
-            if (qml.mid(button.open + 1, marker.size()) != marker) return false;
-            addEdit(edits, button.open + 1, marker.size(), QString());
+            if (qml.mid(button.open + 1, currentMarker.size()) != currentMarker) return false;
+            addEdit(edits, button.open + 1, currentMarker.size(), QString());
+        } else if (qml.mid(button.open + 1, earlierMarker.size()) == earlierMarker) {
+            // The intermediate release inserted a terminating line break;
+            // the first release did not. Two consecutive breaks (or a
+            // one-line original button) identify the inserted one.
+            const int bodyAt = button.open + 1 + earlierMarker.size();
+            const bool inserted = qml.mid(bodyAt, nl.size()) == nl
+                || !qml.mid(bodyAt, button.end - bodyAt).contains(nl);
+            addEdit(edits, button.open + 1,
+                    inserted ? earlierMarker.size() : kCollapseHidden.size(), QString());
         } else if (qml.mid(button.open + 1, kCollapseHidden.size()) == kCollapseHidden) {
             addEdit(edits, button.open + 1, kCollapseHidden.size(), QString());
         } // older patches did not hide Collapse; normalize them on upgrade
