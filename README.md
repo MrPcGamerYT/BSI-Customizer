@@ -35,12 +35,14 @@ EXE artifact in a transport ZIP.
 
 1. Select the **HD-Player.exe from the installation you actually launch**.
 2. Close **all** running HD-Player instances. Running processes keep their old theme in memory and Windows can lock their files.
-3. Load the QML theme, choose a preset or edit colors, then click **Patch Theme**.
+3. Load the theme (Auto picks QML (new) or Hex (old)), choose a preset or edit colors, then click **Patch Theme** (QML) or **Apply Theme** (Hex).
 4. Start BlueStacks again. You can close it, change the palette, and relaunch it again; another theme changer is not a prerequisite.
 
 The QML patcher validates Qt resource trees (14-byte v1 and 22-byte v2/v3 nodes), preserves neighboring resource headers, and uses memory-relative offsets when relocating a resource across PE sections. It refreshes the resource timestamp so a previous run's disk cache is rejected, and invalidates the theme's embedded compiled QML where identified. It does not globally disable Qt caching or delete application data.
 
 If an older patch already wrote the desired colors but BlueStacks still shows an old palette, click **Patch Theme** again (even without new edits) to refresh the cache. Ambiguous resource layouts and edits that cannot fit are reported instead of silently claiming success. Use the **Hex (old)** method for legacy builds without a QML theme.
+
+Presets work in **both** methods. On **QML (new)** a preset stages the palette for **Patch Theme**. On **Hex (old)** the same eleven presets fill the **New value** column for every palette color the EXE carries (the camelCase names such as `accentNormal` and `primary70`), ready for **Apply Theme**. Names are matched against the spelling variants BlueStacks uses across builds, so a palette looks the same on a Qt 6 player and on a legacy Qt 5 / MSI 5 one. **Recolor switches** uses the preset's toggle colors in either method.
 
 The original `.bak` is preserved. Theme edits are made against the current EXE, not a stale backup. Writes are checked and atomically replaced where supported; close BlueStacks and run the tool as administrator if Windows refuses access.
 
