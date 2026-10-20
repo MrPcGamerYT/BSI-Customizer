@@ -388,11 +388,6 @@ bool sidebarControls(const QString &qml, const QString &masked, SidebarControls 
     };
     if (!member(QStringLiteral("pSidebarElementSize"))
         || !member(QStringLiteral("pVisibleSidebarElementsCount"))) return false;
-    for (const auto &name : { QStringLiteral("pAllSidebarItems"),
-                              QStringLiteral("iAllSidebarItems"), QStringLiteral("pSidebarItems") }) {
-        if (member(name)) { controls.itemsName = name; break; }
-    }
-    if (controls.itemsName.isEmpty()) return false;
 
     // Do not confuse a popup's nested layout/repeater with the button strip.
     int layouts = 0;
@@ -414,9 +409,12 @@ bool sidebarControls(const QString &qml, const QString &masked, SidebarControls 
         if (object.open <= controls.layout.open || object.end > controls.layout.end
             || !directChild(masked, controls.layout.open, object.nameBegin)) continue;
         QmlText::Binding model;
-        if (QmlText::binding(masked, object.open, object.end, QStringLiteral("model"), &model)
-            && directChild(masked, object.open, model.nameBegin)
-            && qml.mid(model.valueBegin, model.valueEnd - model.valueBegin) == controls.itemsName) {
+        if (!QmlText::binding(masked, object.open, object.end, QStringLiteral("model"), &model)
+            || !directChild(masked, object.open, model.nameBegin)) continue;
+        const QString name = qml.mid(model.valueBegin, model.valueEnd - model.valueBegin);
+        if ((name == QLatin1String("pAllSidebarItems") || name == QLatin1String("iAllSidebarItems")
+             || name == QLatin1String("pSidebarItems")) && member(name)) {
+            controls.itemsName = name;
             controls.repeater = object;
             ++repeaters;
         }
@@ -474,11 +472,17 @@ bool menuEdits(const QString &qml, const QString &masked, const SidebarControls 
     for (const auto &repeater : QmlText::objects(masked, QStringLiteral("Repeater"))) {
         if (repeater.open == controls.repeater.open || repeater.open <= controls.root.open
             || repeater.end >= controls.root.end) continue;
-        QmlText::Binding model;
+        bool windowed = false;
+        for (const auto &popup : QmlText::objects(masked, QStringLiteral("UiWindowedPopup"))) {
+            if (repeater.open > popup.open && repeater.end < popup.end) windowed = true;
+        }
+        if (!windowed) continue;
+        QmlText::Binding model, property;
         if (!QmlText::binding(masked, repeater.open, repeater.end, QStringLiteral("model"), &model)
-            || !directChild(masked, repeater.open, model.nameBegin)
-            || qml.mid(model.valueBegin, model.valueEnd - model.valueBegin) != controls.itemsName)
-            continue;
+            || !directChild(masked, repeater.open, model.nameBegin)) continue;
+        const QString modelName = qml.mid(model.valueBegin, model.valueEnd - model.valueBegin);
+        if (!QmlText::binding(masked, controls.root.open, controls.root.end, modelName, &property)
+            || !directChild(masked, controls.root.open, property.nameBegin)) continue;
         for (const auto &button : QmlText::objects(masked, QStringLiteral("UiImageButton"))) {
             if (button.open <= repeater.open || button.end >= repeater.end) continue;
             QmlText::Binding visible;
@@ -492,10 +496,8 @@ bool menuEdits(const QString &qml, const QString &masked, const SidebarControls 
                 || !value.contains(QLatin1String("index"))) continue;
             const QString item = value.contains(QLatin1String("model.modelData."))
                 ? QStringLiteral("model.modelData") : QStringLiteral("modelData");
-            const QString replacement = QStringLiteral("(") + item + QStringLiteral(".pIsFeatureEnable && ((")
-                + item + QStringLiteral(".pShowViaRepaterOnly && index >= pVisibleSidebarElementsCount) || (!")
-                + item + QStringLiteral(".pShowViaRepaterOnly && ") + item
-                + QStringLiteral(".pShowOnKebabMenu)))") + kMenuOriginal
+            const QString replacement = QStringLiteral("fBSIInOverflow(") + item
+                + QLatin1Char(')') + kMenuOriginal
                 + QString::fromLatin1(value.toUtf8().toBase64()) + QStringLiteral(" */");
             addEdit(edits, visible.valueBegin, visible.valueEnd - visible.valueBegin, replacement);
             ++found;
@@ -648,6 +650,18 @@ QString responsiveHelper(const SidebarControls &controls, bool autoInstalled, co
         QStringLiteral("        pVisibleSidebarElementsCount = cutoff + 1"),
         QStringLiteral("        iKebabMenuBtn.visible = overflow && capacity > 0"),
         QStringLiteral("    }"),
+        QStringLiteral("    function fBSIInOverflow(item) {"),
+        QStringLiteral("        if (!item.pIsFeatureEnable) return false"),
+        QStringLiteral("        if (!item.pShowViaRepaterOnly) return item.pShowOnKebabMenu"),
+        QStringLiteral("        var items = ") + controls.itemsName,
+        QStringLiteral("        for (var i = 0; i < items.length; ++i) {"),
+        QStringLiteral("            if (items[i].pElementId === item.pElementId && items[i].pShowViaRepaterOnly) {"),
+        QStringLiteral("                var delegate = ") + controls.repeaterId + QStringLiteral(".itemAt(i)"),
+        QStringLiteral("                return !delegate || !delegate.visible"),
+        QStringLiteral("            }"),
+        QStringLiteral("        }"),
+        QStringLiteral("        return true"),
+        QStringLiteral("    }"),
         QStringLiteral("    function fBSIPopupPoint(popup, elementId) {"),
         QStringLiteral("        if (elementId === undefined) return Qt.point(popup.x, popup.y)"),
         QStringLiteral("        popup.pBSIAnchor = elementId"),
@@ -749,7 +763,7 @@ bool responsiveEdits(QString &qml, bool enabled, bool autoInstalled, QList<Edit>
         }
         if (count != qml.count(kPopupOriginal)) return false;
         const QRegularExpression menuRx(QStringLiteral(
-            R"(\((?:model\.modelData|modelData)\.pIsFeatureEnable[^\r\n]*? /\* BSI CUSTOMIZER: overflow menu original:([A-Za-z0-9+/=]+) \*/)"));
+            R"(fBSIInOverflow\((?:model\.modelData|modelData)\) /\* BSI CUSTOMIZER: overflow menu original:([A-Za-z0-9+/=]+) \*/)"));
         auto menu = menuRx.globalMatch(qml);
         if (!menu.hasNext() || qml.count(kMenuOriginal) != 1) return false;
         const auto match = menu.next();
