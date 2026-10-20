@@ -891,19 +891,59 @@ bool popupEdits(const QString &qml, const QString &masked, const SidebarControls
     }
     const QRegularExpression pointRx(QStringLiteral(
         R"(\bfGetPopupTopPoint\s*\(\s*([_a-zA-Z][_a-zA-Z0-9]*)\s*\))"));
-    const QRegularExpression buttonRx(QStringLiteral(
-        R"(\b(i[_a-zA-Z0-9]*Btn)\.mapToGlobal\s*\()"));
+    // Popups for volume, game controls, macros, screenshot, location,
+    // shake, fullscreen, settings, etc. all anchor to a sidebar button via
+    // `<btn>.mapToGlobal(...)`. Older/newer player builds don't always name
+    // those buttons with a "Btn" suffix (e.g. iSound, iGameControls,
+    // pScreenshot), so build the set of valid button ids from the sidebar
+    // we actually parsed instead of hard-coding an i*Btn regex — that way
+    // every panel drops beneath its real button on every supported build.
+    QSet<QString> buttonIds;
+    for (const auto &b : controls.fixedButtons) buttonIds.insert(b.id);
+    for (const auto &b : controls.unmodelledButtons) buttonIds.insert(b.id);
+    for (const auto &b : controls.pinnedButtons) buttonIds.insert(b);
+    buttonIds.insert(QStringLiteral("iKebabMenuBtn"));
+    // Also pick up any other direct UiImageButton/Item ids inside the strip
+    // that weren't already listed (builds that don't model a button in
+    // pAllSidebarItems / fResetSidebar still have panels that anchor to it).
+    for (const auto &type : { QStringLiteral("UiImageButton"), QStringLiteral("Item") }) {
+        for (const auto &object : QmlText::objects(masked, type)) {
+            if (object.open <= controls.layout.open || object.end > controls.layout.end
+                || !directChild(masked, controls.layout.open, object.nameBegin)) continue;
+            QmlText::Binding id;
+            if (!QmlText::binding(masked, object.open, object.end, QStringLiteral("id"), &id)
+                || !directChild(masked, object.open, id.nameBegin)) continue;
+            const QString name = qml.mid(id.valueBegin, id.valueEnd - id.valueBegin);
+            if (QRegularExpression(QStringLiteral("^[_a-zA-Z][_a-zA-Z0-9]*$")).match(name).hasMatch())
+                buttonIds.insert(name);
+        }
+    }
+    const QRegularExpression anyButtonRx(QStringLiteral(
+        R"(\b([_a-zA-Z][_a-zA-Z0-9]*)\.mapToGlobal\s*\()"));
     QSet<int> used;
     int paired = 0;
     for (int j = 0; j < lines.size(); ++j) {
         const auto &y = lines.at(j);
         if (y.axis != QLatin1String("y")) continue;
         const auto point = pointRx.match(y.expression);
-        const auto button = buttonRx.match(y.expression);
-        if (!point.hasMatch() && !button.hasMatch()) continue;
-        const QString anchor = point.hasMatch() ? point.captured(1)
-            : button.captured(1) == QLatin1String("iKebabMenuBtn")
-                  ? QStringLiteral("null") : button.captured(1);
+        QString anchor;
+        if (point.hasMatch()) {
+            anchor = point.captured(1);
+        } else {
+            // Walk every .mapToGlobal( on the line and pick the first one that
+            // actually names a sidebar button; the kebab is mapped to null so
+            // its popup opens under the three dots.
+            auto btns = anyButtonRx.globalMatch(y.expression);
+            while (btns.hasNext()) {
+                const auto m = btns.next();
+                const QString name = m.captured(1);
+                if (!buttonIds.contains(name)) continue;
+                anchor = (name == QLatin1String("iKebabMenuBtn"))
+                    ? QStringLiteral("null") : name;
+                break;
+            }
+            if (anchor.isEmpty()) continue;
+        }
         int xIndex = -1;
         for (int i = j - 1; i >= 0; --i) {
             if (y.begin - lines.at(i).begin > 700) break;
@@ -923,28 +963,47 @@ bool popupEdits(const QString &qml, const QString &masked, const SidebarControls
     // must follow the same anchor, not snap back to the old right-hand strip.
     for (int i = 0; i < lines.size(); ++i) {
         const auto &line = lines.at(i);
-        if (used.contains(i) || line.axis != QLatin1String("x")
-            || !line.expression.contains(QLatin1String("iSidebar.mapToGlobal"))) continue;
-        bool widthHandler = false;
+        if (used.contains(i) || line.axis != QLatin1String("x")) continue;
+        // Old/new builds use different coordinate sources for the x anchor:
+        // iSidebar.mapToGlobal, the popup's parent.mapToGlobal, or a named
+        // button's .mapToGlobal. If the line doesn't reference global coords
+        // at all it's just a static offset — leave it untouched.
+        if (!line.expression.contains(QLatin1String(".mapToGlobal"))) continue;
+        bool sizeHandler = false;
+        const QStringList sizeHandlers {
+            QStringLiteral("onWidthChanged"), QStringLiteral("onHeightChanged"),
+            QStringLiteral("onVisibleChanged"), QStringLiteral("onVisibleToParentChanged")
+        };
         for (const auto &popup : QmlText::objects(masked, QStringLiteral("UiWindowedPopup"))) {
             if (popup.open >= line.begin || popup.end <= line.begin) continue;
-            QmlText::Binding id, handler;
+            QmlText::Binding id;
             if (!QmlText::binding(masked, popup.open, popup.end, QStringLiteral("id"), &id)
-                || !directChild(masked, popup.open, id.nameBegin)
-                || qml.mid(id.valueBegin, id.valueEnd - id.valueBegin) != line.object
-                || !QmlText::binding(masked, popup.open, popup.end,
-                                     QStringLiteral("onWidthChanged"), &handler)
-                || !directChild(masked, popup.open, handler.nameBegin)) continue;
-            widthHandler = line.begin >= handler.valueBegin && line.begin < handler.valueEnd;
-            if (widthHandler) break;
+                || !directChild(masked, popup.open, id.nameBegin)) continue;
+            if (qml.mid(id.valueBegin, id.valueEnd - id.valueBegin) != line.object) continue;
+            for (const auto &handlerName : sizeHandlers) {
+                QmlText::Binding handler;
+                if (!QmlText::binding(masked, popup.open, popup.end, handlerName, &handler)
+                    || !directChild(masked, popup.open, handler.nameBegin)) continue;
+                if (line.begin >= handler.valueBegin && line.begin < handler.valueEnd) {
+                    sizeHandler = true;
+                    break;
+                }
+            }
+            if (sizeHandler) break;
         }
-        if (!widthHandler) return false;
+        // Any mapToGlobal-using X assignment inside a popup's size/visibility
+        // handler must be re-anchored, otherwise that panel would snap back
+        // to the old sidebar strip the moment it resizes/appears.
+        if (!sizeHandler) return false;
         addEdit(edits, line.begin, line.length,
                 popupReplacement(line, line.object + QStringLiteral(".pBSIAnchor")));
         used.insert(i);
     }
-    // A different form of fGetPopupTopPoint call could otherwise leave a
-    // window stranded beside the old sidebar while the button has moved.
+    // Any remaining fGetPopupTopPoint() call we didn't match is one whose
+    // anchor button we don't know about; refuse the patch instead of
+    // stranding that panel at the old sidebar X. We accept one extra
+    // (paired+1) because older builds declare the helper function itself
+    // whose name contains the substring — definition lines don't count.
     if (qml.count(QLatin1String("fGetPopupTopPoint(")) > paired + 1) return false;
     if (used.isEmpty()) return true; // players with no windowed button panels
     for (const auto &popup : QmlText::objects(masked, QStringLiteral("UiWindowedPopup"))) {
@@ -1051,12 +1110,43 @@ QString responsiveHelper(const SidebarControls &controls, bool autoInstalled, co
         QStringLiteral("        var button = null"),
         QStringLiteral("        if (elementId && typeof elementId === 'object') button = elementId"),
         QStringLiteral("        else if (elementId !== null) {"),
-        QStringLiteral("            var items = ") + controls.itemsName,
-        QStringLiteral("            for (var i = 0; i < items.length; ++i) {"),
-        QStringLiteral("                if (items[i].pIsFeatureEnable && items[i].pElementId === elementId) {"),
-        QStringLiteral("                    var delegate = ") + controls.repeaterId + QStringLiteral(".itemAt(i)"),
-        QStringLiteral("                    if (delegate && delegate.visible) button = delegate"),
+        // Search the fixed (non-Repeater) buttons first — Settings, Back,
+        // Home, Recent, etc. — so their own panels open beneath them instead
+        // of snapping to the three dots.
+        QStringLiteral("            var fixed = [") + fixed.join(QStringLiteral(", ")) + QStringLiteral("]"),
+        QStringLiteral("            for (var n = 0; n < fixed.length; ++n) {"),
+        QStringLiteral("                if (fixed[n].elementId === elementId) {"),
+        QStringLiteral("                    if (fixed[n].button && fixed[n].button.visible)"),
+        QStringLiteral("                        button = fixed[n].button"),
         QStringLiteral("                    break"),
+        QStringLiteral("                }"),
+        QStringLiteral("            }"),
+        // Then unmodelled buttons (Discord/AI on builds that ship them) and
+        // any fixed button passed by direct id instead of pElementId.
+        QStringLiteral("            var unmodelled = [") + unmodelled.join(QStringLiteral(", ")) + QStringLiteral("]"),
+        QStringLiteral("            for (var n = 0; !button && n < unmodelled.length; ++n) {"),
+        QStringLiteral("                if (unmodelled[n].button && unmodelled[n].allowed) {"),
+        QStringLiteral("                    if (unmodelled[n].button === elementId") + QStringLiteral(") button = unmodelled[n].button"),
+        QStringLiteral("                }"),
+        QStringLiteral("            }"),
+        // Fallback: some builds pass the button's own id as a string (e.g.
+        // the literal "iGameControlsBtn"). Try resolving it as a property
+        // of the sidebar component scope before giving up.
+        QStringLiteral("            if (!button && typeof this[elementId] !== 'undefined'")
+        + QStringLiteral(" && this[elementId] && this[elementId].mapToGlobal) {"),
+        QStringLiteral("                button = this[elementId]"),
+        QStringLiteral("            }"),
+        // Finally the Repeater model (volume, game controls, macros,
+        // screenshot, location, shake, fullscreen, … — whichever the build
+        // exposes).
+        QStringLiteral("            if (!button) {"),
+        QStringLiteral("                var items = ") + controls.itemsName,
+        QStringLiteral("                for (var i = 0; i < items.length; ++i) {"),
+        QStringLiteral("                    if (items[i].pIsFeatureEnable && items[i].pElementId === elementId) {"),
+        QStringLiteral("                        var delegate = ") + controls.repeaterId + QStringLiteral(".itemAt(i)"),
+        QStringLiteral("                        if (delegate && delegate.visible) button = delegate"),
+        QStringLiteral("                        break"),
+        QStringLiteral("                    }"),
         QStringLiteral("                }"),
         QStringLiteral("            }"),
         QStringLiteral("        }"),
@@ -1741,17 +1831,18 @@ QList<Tweak> tweaks()
 {
     return {
         { kSidebarToTitlebar,
-          QStringLiteral("Remove sidebar · buttons to the title bar (centered)"),
-          QStringLiteral("Moves the original buttons into a centered title-bar row. All visible "
-                         "buttons stay out until they no longer fit; only then do the extras go "
-                         "into the three-dot menu. Panels open directly beneath their buttons. "
-                         "Turn this off and apply to restore the sidebar.") },
+          QStringLiteral("Sidebar buttons to the top bar"),
+          QStringLiteral("Moves the original sidebar buttons into a centered top-bar row. All "
+                         "visible buttons stay shown until they no longer fit; extras then go "
+                         "into the three-dot menu. Every popup panel opens directly beneath its "
+                         "own button. Turn this off and apply to restore the stock sidebar.") },
+        // kResponsiveSidebar is kept internally for byte-for-byte restore of
+        // any player that had the old standalone option applied, and for the
+        // regression tests. It is NOT surfaced in the UI: the helper is
+        // installed automatically as part of the title-bar move above.
         { kResponsiveSidebar,
           QStringLiteral("Responsive sidebar buttons and aligned panels"),
-          QStringLiteral("Keep the three-dot menu hidden while all enabled sidebar buttons fit. "
-                         "Overflow only the buttons that need it, and open sound, controls and "
-                         "other panels below their own buttons. Included automatically when "
-                         "moving the buttons to the title bar; use this option for the stock sidebar.") },
+          QStringLiteral("Internal: included automatically with the top-bar layout.") },
     };
 }
 

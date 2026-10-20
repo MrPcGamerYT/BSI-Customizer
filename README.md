@@ -54,37 +54,32 @@ and popup ownership attached to the same instance used by the player. The host
 reserves space at both ends for title-bar controls and follows window resizing.
 The buttons stay visible until the available width runs out; only then does a
 three-dot overflow button replace the buttons that don't fit. Sound, controls,
-and other button panels open beneath the button that launched them (or beneath
-the three dots when opened from overflow), staying inside the visible screen.
+and other button panels open directly beneath the button that launched them
+(or beneath the three dots when opened from overflow), staying inside the
+visible screen. There is no separate option for responsive overflow or
+panel placement - that behavior is built into the title-bar move and applied
+automatically. Untick and apply to restore the stock sidebar.
 
-To get the same behavior on the **stock vertical sidebar** without moving the
-buttons, select **Responsive sidebar buttons and aligned panels** in Extras →
-Player layout (QML). The fix is included automatically with the title-bar tweak;
-if enabled separately first, it stays enabled when the title-bar tweak is
-restored. Either option can be unticked and applied to restore its stock QML.
-
-Both options recognize the player's sidebar by its **structure** (the instance
+The tweak recognizes the player's sidebar by its **structure** (the instance
 that carries the stock sidebar width, the sidebar component and its button
-strip), not by one exact palette, visibility or Android-frame expression. Those
-spellings change between BlueStacks builds, and matching them literally used to
-report *Unavailable* for **both** options at once on such a build. A value this
-tool has not seen before is replaced by the patched value plus a tagged copy of
-the original text, so undo still restores the document byte-for-byte. The
-responsive option edits only `PlrSidebar.qml` and no longer depends on the
-`plr.qml` title-bar shape at all.
+strip), not by one exact palette, visibility or Android-frame expression.
+Those spellings change between BlueStacks builds, and matching them literally
+used to report *Unavailable* on such a build. A value this tool has not seen
+before is replaced by the patched value plus a tagged copy of the original
+text, so undo still restores the document byte-for-byte.
 
-The title-bar move itself now needs only the **button strip**: one layout inside
+The title-bar move needs only the **button strip**: one layout inside
 `PlrSidebar.qml` that holds the sidebar buttons. Builds whose sidebar has no
-three-dot button, Repeater model or windowed popups are moved as well; they keep
-their own overflow code (the status line says *"This build keeps its own overflow
-menu"*), and the smart overflow/panel placement option stays unavailable there
-because that sidebar has nothing to control. A sidebar with no movable strip at
-all is still refused with that reason instead of being written blindly.
+three-dot button, Repeater model or windowed popups are moved as well; they
+keep their own overflow code (the status line says *"This build keeps its own
+overflow menu"*). A sidebar with no movable strip at all is refused with that
+reason instead of being written blindly.
 
-If you used an earlier version of the title-bar tweak, close BlueStacks, keep
-the option checked, and click **Update** to upgrade the old layout. Restart
-BlueStacks afterward. Actual windowed-popup behavior still needs testing on
-each supported player build; unrecognized QML is refused rather than guessed.
+If you used an earlier version of the title-bar tweak, close BlueStacks,
+keep the option checked, and click **Update** to upgrade the old layout.
+Restart BlueStacks afterward. Actual windowed-popup behavior still needs
+testing on each supported player build; unrecognized QML is refused rather
+than guessed.
 
 ## Gradient themes
 

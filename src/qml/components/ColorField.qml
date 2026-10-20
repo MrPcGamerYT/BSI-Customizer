@@ -17,6 +17,7 @@ RowLayout {
     readonly property string shown: value !== "" ? value : current
 
     Rectangle {
+        id: swatch
         width: 34
         height: 22
         radius: 5
@@ -87,10 +88,29 @@ RowLayout {
 
         modal: true
         focus: true
-        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutsideParent
-        parent: control
-        x: 0
-        y: control.height + 6
+        closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
+        parent: Overlay.overlay
+        // Open the picker directly beneath the color swatch that triggered it,
+        // regardless of how wide the hex field beside the swatch is. Flip above
+        // the swatch if the picker would run off the bottom of the window.
+        x: {
+            const root = swatch.Window.contentItem || picker.parent;
+            const g = swatch.mapToGlobal(0, swatch.height);
+            const p = picker.parent.mapFromGlobal(g.x, g.y);
+            const maxX = root.width - picker.width - 6;
+            return Math.max(6, Math.min(p.x, maxX));
+        }
+        y: {
+            const root = swatch.Window.contentItem || picker.parent;
+            const g = swatch.mapToGlobal(0, swatch.height);
+            const p = picker.parent.mapFromGlobal(g.x, g.y);
+            if (p.y + picker.height + 6 > root.height) {
+                const above = swatch.mapToGlobal(0, 0);
+                const a = picker.parent.mapFromGlobal(above.x, above.y);
+                return a.y - picker.height - 6;
+            }
+            return p.y + 6;
+        }
         width: 268
         height: pickerCol.implicitHeight + 28
         padding: 14
