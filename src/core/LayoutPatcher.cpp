@@ -27,6 +27,9 @@ const QString kResponsiveSidebar = QStringLiteral("responsive-sidebar");
 const QString kResponsiveBegin = QStringLiteral("// BSI CUSTOMIZER: responsive sidebar begin");
 const QString kResponsiveEnd = QStringLiteral("// BSI CUSTOMIZER: responsive sidebar end");
 const QString kResponsiveAuto = QStringLiteral(" [titlebar]");
+// Distinguish this helper from earlier responsive patches, which did not keep
+// unmodelled controls such as Discord accessible when space became tight.
+const QString kResponsiveCurrent = QStringLiteral(" [v2]");
 const QString kResponsiveCall = QStringLiteral("fBSIUpdateOverflow() /* BSI CUSTOMIZER: smart overflow */");
 const QString kPopupOriginal = QStringLiteral(" // BSI CUSTOMIZER: popup original:");
 const QString kMenuOriginal = QStringLiteral(" /* BSI CUSTOMIZER: overflow menu original:");
@@ -60,6 +63,9 @@ const QString kSidebarLayoutWidthName = QStringLiteral("Layout.preferredWidth");
 // instance before it is mounted. The mounted sidebar has a real width.
 const QString kRowHidden = QStringLiteral("\nvisible: iSidebar.width > 0");
 const QString kCollapseHidden = QStringLiteral("\nvisible: false // BSI CUSTOMIZER: no sidebar to collapse in the title bar");
+// Finish the comment before an inline `id:` or `}`. Older patches did not
+// include this line break, so keep accepting their marker on restore.
+const QString kCollapseHiddenCurrent = kCollapseHidden + QStringLiteral(" [v2]");
 
 // Which shape the selected player uses. The tweak writes the same title-bar
 // overlay for both; only the width member of the sidebar instance differs.
@@ -128,6 +134,15 @@ QString lineEnding(const QString &qml)
     return qml.contains(QLatin1String("\r\n")) ? QStringLiteral("\r\n") : QStringLiteral("\n");
 }
 
+bool hasCurrentResponsiveHelper(const QString &qml)
+{
+    const int at = qml.indexOf(kResponsiveBegin);
+    if (at < 0) return false;
+    const QString suffix = qml.mid(at + kResponsiveBegin.size());
+    return suffix.startsWith(kResponsiveCurrent)
+        || suffix.startsWith(kResponsiveAuto + kResponsiveCurrent);
+}
+
 // Exact old overlay retained only for restoring/upgrading already-patched
 // players. New patches must not create another live sidebar component.
 QString legacyTitlebarOverlay(const QString &nl, bool settingsHandler)
@@ -189,14 +204,22 @@ struct Doc
 
 bool findDoc(const QByteArray &image, const QString &name, Doc *out, QString *error)
 {
-    const auto theme = ThemeEngine::findThemeZlib(image);
     auto files = QtResources::registeredFiles(image);
-    if (theme.hasQrcNode)
-        for (const auto &file : QtResources::filesInPool(image, theme.resource)) {
-            bool present = false;
-            for (const auto &old : files) if (old.entryOff == file.entryOff && old.name == file.name) present = true;
-            if (!present) files << file;
-        }
+    // Both 5.10 and newer players register these QML resources. The theme
+    // fallback probes every zlib stream in the EXE; avoid that expensive scan
+    // when the requested file is already present in the validated registry.
+    // Retain it for players whose resource tree is not registered.
+    const bool registered = std::any_of(files.cbegin(), files.cend(),
+                                        [&](const QtResources::File &file) { return file.name == name; });
+    if (!registered) {
+        const auto theme = ThemeEngine::findThemeZlib(image);
+        if (theme.hasQrcNode)
+            for (const auto &file : QtResources::filesInPool(image, theme.resource)) {
+                bool present = false;
+                for (const auto &old : files) if (old.entryOff == file.entryOff && old.name == file.name) present = true;
+                if (!present) files << file;
+            }
+    }
     for (const auto &file : files) {
         if (file.name != name) continue;
         const auto bytes = QtResources::readFile(image, file);
@@ -353,10 +376,11 @@ bool directChild(const QString &masked, int parentOpen, int childBegin)
 // budget. This is shared by the stock column and the relocated row.
 struct SidebarControls
 {
-    struct Fixed { QString id, allowed; };
+    struct Fixed { QString id, allowed, elementId; };
     QmlText::Object root, layout, repeater;
     QString layoutId, repeaterId, itemsName, allItemsName, repeatFlag;
-    QList<Fixed> fixedButtons; // order of the player's own priority checks
+    QList<Fixed> fixedButtons; // budgeted and represented in pAllSidebarItems
+    QList<Fixed> unmodelledButtons; // budgeted but without a menu entry (e.g. Discord in 5.22)
     QStringList pinnedButtons; // always-present controls (e.g. Collapse in 5.10)
     bool horizontal = false;
     int resetEnd = -1;
@@ -473,6 +497,41 @@ bool sidebarControls(const QString &qml, const QString &masked, SidebarControls 
     int bodyBegin = 0, bodyEnd = 0;
     if (!functionSpan(masked, QStringLiteral("fResetSidebar"), &bodyBegin, &bodyEnd)) return false;
     QSet<QString> managed;
+    // A fixed button can be moved to the menu only if the player's model
+    // actually contains an item for it. The latest player's Discord button
+    // has no such item: hiding it would silently lose its action. Find the
+    // model relationship from its stock !button.visible menu binding rather
+    // than assuming every button in fResetSidebar has a matching model.
+    QmlText::Binding allItems;
+    const bool hasAllItems = QmlText::binding(masked, controls.root.open, controls.root.end,
+                                              QStringLiteral("pAllSidebarItems"), &allItems)
+        && directChild(masked, controls.root.open, allItems.nameBegin);
+    const auto elements = QmlText::objects(masked, QStringLiteral("PlrSidebarElement"));
+    const auto menuModelId = [&](const QString &button) -> QString {
+        if (!hasAllItems) return {};
+        QString found;
+        for (const auto &element : elements) {
+            if (element.nameBegin < allItems.valueBegin || element.end > allItems.valueEnd) continue;
+            QmlText::Binding menu, id, repeat;
+            if (!QmlText::binding(masked, element.open, element.end,
+                                  QStringLiteral("pShowOnKebabMenu"), &menu)
+                || !directChild(masked, element.open, menu.nameBegin)
+                || qml.mid(menu.valueBegin, menu.valueEnd - menu.valueBegin)
+                       != QStringLiteral("!") + button + QStringLiteral(".visible")
+                || !QmlText::binding(masked, element.open, element.end,
+                                     QStringLiteral("pElementId"), &id)
+                || !directChild(masked, element.open, id.nameBegin)
+                || !QmlText::binding(masked, element.open, element.end, controls.repeatFlag, &repeat)
+                || !directChild(masked, element.open, repeat.nameBegin)
+                || qml.mid(repeat.valueBegin, repeat.valueEnd - repeat.valueBegin) != QLatin1String("false"))
+                continue;
+            const QString modelId = qml.mid(id.valueBegin, id.valueEnd - id.valueBegin);
+            if (!QRegularExpression(QStringLiteral("^[_a-zA-Z][_a-zA-Z0-9]*$"))
+                     .match(modelId).hasMatch() || !found.isEmpty()) return {};
+            found = modelId;
+        }
+        return found;
+    };
     const QRegularExpression fixedRx(QStringLiteral(R"(\b(i[_a-zA-Z0-9]+)\.visible\s*=)"));
     auto assignments = fixedRx.globalMatch(masked.mid(bodyBegin, bodyEnd - bodyBegin));
     while (assignments.hasNext()) {
@@ -488,7 +547,11 @@ bool sidebarControls(const QString &qml, const QString &masked, SidebarControls 
             if (allowed.contains(QLatin1String("parent.")) || allowed.contains(QLatin1String("this.")))
                 return false; // not necessarily in scope in the root's helper
         }
-        controls.fixedButtons << SidebarControls::Fixed { name, allowed };
+        const QString modelId = menuModelId(name);
+        if (modelId.isEmpty())
+            controls.unmodelledButtons << SidebarControls::Fixed { name, allowed, {} };
+        else
+            controls.fixedButtons << SidebarControls::Fixed { name, allowed, modelId };
     }
     for (const auto &type : { QStringLiteral("UiImageButton"), QStringLiteral("Item") }) {
         for (const auto &object : QmlText::objects(masked, type)) {
@@ -600,8 +663,8 @@ bool popupEdits(const QString &qml, const QString &masked, const SidebarControls
         const auto match = it.next();
         if (match.capturedStart() <= controls.root.open || match.capturedEnd() >= controls.root.end)
             continue;
-        // capturedStart()/capturedLength() are qsizetype; the braces below
-        // would turn that conversion into a narrowing error (MSVC C2397).
+        // capturedStart()/capturedLength() are qsizetype; braced initialization
+        // would make the implicit conversion to int an MSVC C2397 error.
         lines << PopupLine { int(match.capturedStart()), int(match.capturedLength()),
                              match.captured(2), match.captured(3),
                              qml.mid(match.capturedStart(4), match.capturedLength(4)).trimmed(),
@@ -681,18 +744,27 @@ QString responsiveHelper(const SidebarControls &controls, bool autoInstalled, co
     const QString axis = controls.horizontal ? QStringLiteral("width") : QStringLiteral("height");
     const QString startPad = controls.horizontal ? QStringLiteral("leftPadding") : QStringLiteral("topPadding");
     const QString endPad = controls.horizontal ? QStringLiteral("rightPadding") : QStringLiteral("bottomPadding");
-    QStringList fixed;
+    QStringList fixed, unmodelled;
     for (const auto &button : controls.fixedButtons)
         fixed << QStringLiteral("{ button: ") + button.id + QStringLiteral(", allowed: (")
-                 + button.allowed + QStringLiteral(") }");
+                 + button.allowed + QStringLiteral("), elementId: ") + button.elementId
+                 + QStringLiteral(" }");
+    for (const auto &button : controls.unmodelledButtons)
+        unmodelled << QStringLiteral("{ button: ") + button.id + QStringLiteral(", allowed: (")
+                      + button.allowed + QStringLiteral(") }");
     const QString rebuild = controls.allItemsName.isEmpty() ? QString() :
         QStringLiteral("        var enabledItems = []") + nl
         + QStringLiteral("        for (var i = 0; i < ") + controls.allItemsName + QStringLiteral(".length; ++i)") + nl
         + QStringLiteral("            if (") + controls.allItemsName + QStringLiteral("[i].pIsFeatureEnable)") + nl
         + QStringLiteral("                enabledItems.push(") + controls.allItemsName + QStringLiteral("[i])") + nl
-        + QStringLiteral("        ") + controls.itemsName + QStringLiteral(" = enabledItems") + nl;
+        + QStringLiteral("        var changed = enabledItems.length !== ") + controls.itemsName
+        + QStringLiteral(".length") + nl
+        + QStringLiteral("        for (var i = 0; !changed && i < enabledItems.length; ++i)") + nl
+        + QStringLiteral("            if (enabledItems[i] !== ") + controls.itemsName + QStringLiteral("[i]) changed = true") + nl
+        + QStringLiteral("        if (changed) ") + controls.itemsName + QStringLiteral(" = enabledItems") + nl;
     const QStringList lines {
-        QStringLiteral("    ") + kResponsiveBegin + (autoInstalled ? kResponsiveAuto : QString()),
+        QStringLiteral("    ") + kResponsiveBegin + (autoInstalled ? kResponsiveAuto : QString())
+            + kResponsiveCurrent,
         QStringLiteral("    function fBSIUpdateOverflow() {"),
         QStringLiteral("        var slot = pSidebarElementSize"),
         QStringLiteral("        if (slot <= 0) return"),
@@ -708,6 +780,11 @@ QString responsiveHelper(const SidebarControls &controls, bool autoInstalled, co
         QStringLiteral("        var capacity = Math.max(0, Math.floor((available + gap) / (slot + gap)))"),
         QStringLiteral("        var pinned = [") + controls.pinnedButtons.join(QStringLiteral(", ")) + QLatin1Char(']'),
         QStringLiteral("        for (var n = 0; n < pinned.length; ++n) if (pinned[n].visible) --capacity"),
+        QStringLiteral("        var unmodelled = [") + unmodelled.join(QStringLiteral(", ")) + QLatin1Char(']'),
+        QStringLiteral("        for (var n = 0; n < unmodelled.length; ++n) {"),
+        QStringLiteral("            unmodelled[n].button.visible = unmodelled[n].allowed"),
+        QStringLiteral("            if (unmodelled[n].button.visible) --capacity"),
+        QStringLiteral("        }"),
         QStringLiteral("        capacity = Math.max(0, capacity)"),
         QStringLiteral("        var fixed = [") + fixed.join(QStringLiteral(", ")) + QLatin1Char(']'),
         QStringLiteral("        var enabledFixed = 0"),
@@ -732,8 +809,13 @@ QString responsiveHelper(const SidebarControls &controls, bool autoInstalled, co
         QStringLiteral("    }"),
         QStringLiteral("    function fBSIInOverflow(item) {"),
         QStringLiteral("        if (!item.pIsFeatureEnable) return false"),
-        QStringLiteral("        if (!item.") + controls.repeatFlag
-            + QStringLiteral(") return item.pShowOnKebabMenu"),
+        QStringLiteral("        if (!item.") + controls.repeatFlag + QStringLiteral(") {"),
+        QStringLiteral("            var fixed = [") + fixed.join(QStringLiteral(", ")) + QLatin1Char(']'),
+        QStringLiteral("            for (var n = 0; n < fixed.length; ++n)"),
+        QStringLiteral("                if (fixed[n].elementId === item.pElementId)"),
+        QStringLiteral("                    return fixed[n].allowed && !fixed[n].button.visible"),
+        QStringLiteral("            return false"),
+        QStringLiteral("        }"),
         QStringLiteral("        var items = ") + controls.itemsName,
         QStringLiteral("        for (var i = 0; i < items.length; ++i) {"),
         QStringLiteral("            if (items[i].pElementId === item.pElementId && items[i].")
@@ -808,7 +890,7 @@ bool responsiveEdits(QString &qml, bool enabled, bool autoInstalled, QList<Edit>
                     continue;
                 if (QmlText::binding(masked, button.open, button.end, QStringLiteral("visible"), &visible)
                     && directChild(masked, button.open, visible.nameBegin)) return false;
-                addEdit(edits, button.open + 1, 0, kCollapseHidden + lineEnding(qml));
+                addEdit(edits, button.open + 1, 0, kCollapseHiddenCurrent + nl);
             }
         }
         if (controls.layoutId == kLayoutId)
@@ -925,18 +1007,29 @@ bool sidebarEdits(QString &qml, bool enabled, QList<Edit> &edits)
             || qml.mid(id.valueBegin, id.valueEnd - id.valueBegin) != QLatin1String("iCollapseBtn"))
             continue;
         QmlText::Binding visible;
-        // The marker is a line comment: it must end on a line of its own, or
-        // it would comment out whatever the player keeps after `{` (a
-        // one-line UiImageButton loses its id and its closing brace).
-        const QString collapseHidden = kCollapseHidden + lineEnding(qml);
+        // The marker is a line comment: it must end before an inline `id:`
+        // or `}`. Distinguish the current versioned insertion from earlier
+        // releases so their original line breaks are restored byte-for-byte.
+        const QString nl = lineEnding(qml);
+        const QString currentMarker = kCollapseHiddenCurrent + nl;
+        const QString earlierMarker = kCollapseHidden + nl;
         if (enabled) {
             if (QmlText::binding(masked, button.open, button.end, QStringLiteral("visible"), &visible)
                 && directChild(masked, button.open, visible.nameBegin)) return false;
-            addEdit(edits, button.open + 1, 0, collapseHidden);
-        } else if (qml.mid(button.open + 1, collapseHidden.size()) == collapseHidden) {
-            addEdit(edits, button.open + 1, collapseHidden.size(), QString());
+            addEdit(edits, button.open + 1, 0, currentMarker);
+        } else if (qml.mid(button.open + 1, kCollapseHiddenCurrent.size()) == kCollapseHiddenCurrent) {
+            if (qml.mid(button.open + 1, currentMarker.size()) != currentMarker) return false;
+            addEdit(edits, button.open + 1, currentMarker.size(), QString());
+        } else if (qml.mid(button.open + 1, earlierMarker.size()) == earlierMarker) {
+            // The intermediate release inserted a terminating line break;
+            // the first release did not. Two consecutive breaks (or a
+            // one-line original button) identify the inserted one.
+            const int bodyAt = button.open + 1 + earlierMarker.size();
+            const bool inserted = qml.mid(bodyAt, nl.size()) == nl
+                || !qml.mid(bodyAt, button.end - bodyAt).contains(nl);
+            addEdit(edits, button.open + 1,
+                    inserted ? earlierMarker.size() : kCollapseHidden.size(), QString());
         } else if (qml.mid(button.open + 1, kCollapseHidden.size()) == kCollapseHidden) {
-            // Older patches wrote the member without a terminating line break.
             addEdit(edits, button.open + 1, kCollapseHidden.size(), QString());
         } // older patches did not hide Collapse; normalize them on upgrade
     }
@@ -989,6 +1082,28 @@ bool sidebarEdits(QString &qml, bool enabled, QList<Edit> &edits)
         if (end <= start || budgetAt < start || budgetAt + oldBudget.size() > end)
             return false;
         addEdit(edits, budgetAt, oldBudget.size(), QStringLiteral("var available = ") + to);
+        // An independently selected stock-sidebar helper survives moving the
+        // row and later restoring it. Its padding must follow the new axis as
+        // well as `available`; older moved helpers sometimes still have the
+        // vertical padding, so accept either before normalizing it.
+        SidebarControls responsiveControls;
+        if (!sidebarControls(qml, masked, &responsiveControls)) return false;
+        for (const auto &pair : { QPair<QString, QString> {
+                                     enabled ? QStringLiteral("topPadding") : QStringLiteral("leftPadding"),
+                                     enabled ? QStringLiteral("leftPadding") : QStringLiteral("topPadding") },
+                                  QPair<QString, QString> {
+                                     enabled ? QStringLiteral("bottomPadding") : QStringLiteral("rightPadding"),
+                                     enabled ? QStringLiteral("rightPadding") : QStringLiteral("bottomPadding") } }) {
+            const QString oldPad = responsiveControls.layoutId + QLatin1Char('.') + pair.first;
+            const QString newPad = responsiveControls.layoutId + QLatin1Char('.') + pair.second;
+            const int padAt = qml.indexOf(oldPad, start);
+            if (padAt >= start && padAt + oldPad.size() <= end)
+                addEdit(edits, padAt, oldPad.size(), newPad);
+            else {
+                const int already = qml.indexOf(newPad, start);
+                if (already < start || already + newPad.size() > end) return false;
+            }
+        }
     }
     return !edits.isEmpty();
 }
@@ -1076,6 +1191,17 @@ bool collectSidebarEdits(QString &qml, bool enabled, SidebarLayout, QList<Edit> 
 {
     const bool responsive = qml.contains(kResponsiveBegin);
     const bool installedByTitlebar = qml.contains(kResponsiveBegin + kResponsiveAuto);
+    if (enabled && responsive && !hasCurrentResponsiveHelper(qml)) {
+        // If the stock sidebar had the earlier independently selected fix,
+        // refresh it before moving the row. Keep it independent so restoring
+        // the title-bar layout will not silently turn that option off.
+        if (!responsiveEdits(qml, false, installedByTitlebar, edits)
+            || !applyEdits(qml, edits)) return false;
+        edits.clear();
+        if (!responsiveEdits(qml, true, installedByTitlebar, edits)
+            || !applyEdits(qml, edits)) return false;
+        edits.clear();
+    }
     if (!enabled && installedByTitlebar) {
         // Remove only the fix we installed on behalf of this layout option.
         if (!responsiveEdits(qml, false, true, edits) || !applyEdits(qml, edits)) return false;
@@ -1104,6 +1230,7 @@ struct Shape
     bool patched = false;
     bool legacyOverlay = false;
     bool responsive = false;
+    bool responsiveCurrent = false;
     bool installedByTitlebar = false;
     bool editable = false;
     QString detail;
@@ -1129,6 +1256,7 @@ Snapshot inspect(const QByteArray &image)
     }
 
     snapshot.shape.responsive = snapshot.sidebar.qml.contains(kResponsiveBegin);
+    snapshot.shape.responsiveCurrent = hasCurrentResponsiveHelper(snapshot.sidebar.qml);
     snapshot.shape.installedByTitlebar = snapshot.sidebar.qml.contains(kResponsiveBegin + kResponsiveAuto);
     const QString &qml = snapshot.plr.qml;
     const QString masked = QmlText::mask(qml);
@@ -1242,12 +1370,23 @@ Snapshot inspect(const QByteArray &image)
             "The layout edits overlap in this player; no file would be written.");
         return snapshot;
     }
-    if (snapshot.shape.patched && !snapshot.shape.responsive) {
-        // An EXE patched by an earlier version can still be upgraded without
-        // toggling the layout off first, but only if the new fix fits its QML.
+    if (snapshot.shape.patched && !snapshot.shape.responsiveCurrent) {
+        // An earlier layout (with or without the older responsive helper)
+        // can be upgraded in place, but only after proving the whole change
+        // against its QML. Never overwrite an unfamiliar patch speculatively.
         QString oldSidebar = snapshot.sidebar.qml;
         QList<Edit> repair;
-        if (!responsiveEdits(oldSidebar, true, true, repair) || !applyEdits(oldSidebar, repair)) {
+        if (snapshot.shape.responsive) {
+            if (!responsiveEdits(oldSidebar, false, snapshot.shape.installedByTitlebar, repair)
+                || !applyEdits(oldSidebar, repair)) {
+                snapshot.shape.detail = QStringLiteral("The older responsive layout cannot be upgraded safely.");
+                return snapshot;
+            }
+            repair.clear();
+        }
+        const bool autoInstalled = !snapshot.shape.responsive || snapshot.shape.installedByTitlebar;
+        if (!responsiveEdits(oldSidebar, true, autoInstalled, repair)
+            || !applyEdits(oldSidebar, repair)) {
             snapshot.shape.detail = QStringLiteral(
                 "The older title-bar layout cannot be upgraded safely on this player.");
             return snapshot;
@@ -1307,12 +1446,14 @@ State analyze(const QByteArray &image, const QString &id)
             return state;
         }
         state.supported = true;
-        state.detail = state.applied ? QStringLiteral("Applied.") : QStringLiteral("Ready.");
+        state.needsUpdate = state.applied && !snapshot.shape.responsiveCurrent;
+        state.detail = state.needsUpdate ? QStringLiteral("Earlier responsive layout applied. Press Update.")
+                     : state.applied ? QStringLiteral("Applied.") : QStringLiteral("Ready.");
         return state;
     }
     state.supported = true;
     state.applied = snapshot.shape.patched;
-    state.needsUpdate = state.applied && (snapshot.shape.legacyOverlay || !snapshot.shape.responsive);
+    state.needsUpdate = state.applied && (snapshot.shape.legacyOverlay || !snapshot.shape.responsiveCurrent);
     state.detail = snapshot.shape.legacyOverlay ? QStringLiteral("Older layout applied. Press Update to repair it.")
                   : state.needsUpdate ? QStringLiteral("Press Update for smart overflow and panels beneath buttons.")
                   : state.applied ? QStringLiteral("Applied.") : QStringLiteral("Ready.");
@@ -1340,13 +1481,19 @@ Result apply(const QString &exePath, const QString &id, bool enabled)
         if (before.shape.patched)
             return refuse(QStringLiteral("The responsive fix is included with the title-bar layout. "
                                          "Restore the sidebar first to change it separately."));
-        if (before.shape.responsive == enabled)
+        const bool update = enabled && before.shape.responsive && !before.shape.responsiveCurrent;
+        if (before.shape.responsive == enabled && !update)
             return { true, enabled ? QStringLiteral("Responsive sidebar is already applied.")
                                    : QStringLiteral("Stock sidebar overflow is already in place.") };
         Doc doc;
         QString error;
         if (!findDoc(changed, QStringLiteral("PlrSidebar.qml"), &doc, &error)) return refuse(error);
         QList<Edit> edits;
+        if (update) {
+            if (!responsiveEdits(doc.qml, false, false, edits) || !applyEdits(doc.qml, edits))
+                return refuse(QStringLiteral("Cannot safely update the previous responsive layout; no file was written."));
+            edits.clear();
+        }
         if (!responsiveEdits(doc.qml, enabled, false, edits) || !applyEdits(doc.qml, edits))
             return refuse(QStringLiteral("The sidebar's overflow/popup QML is not a supported shape; "
                                          "no file was written."));
@@ -1355,7 +1502,7 @@ Result apply(const QString &exePath, const QString &id, bool enabled)
                                           header + doc.qml.toUtf8(), &error)) return refuse(error);
     } else {
         const bool upgrade = enabled && before.shape.patched && before.shape.legacyOverlay;
-        const bool repair = enabled && before.shape.patched && !before.shape.responsive && !upgrade;
+        const bool repair = enabled && before.shape.patched && !before.shape.responsiveCurrent && !upgrade;
         if (before.shape.patched == enabled && !upgrade && !repair)
             return { true, enabled ? QStringLiteral("This layout tweak is already applied.")
                                   : QStringLiteral("The stock sidebar layout is already in place.") };
@@ -1384,7 +1531,14 @@ Result apply(const QString &exePath, const QString &id, bool enabled)
                     return refuse(QStringLiteral("Cannot safely upgrade the old layout; no file was written."));
                 edits.clear();
             }
-            if (repair ? !responsiveEdits(doc.qml, true, true, edits)
+            if (repair && before.shape.responsive) {
+                if (!responsiveEdits(doc.qml, false, before.shape.installedByTitlebar, edits)
+                    || !applyEdits(doc.qml, edits))
+                    return refuse(QStringLiteral("Cannot safely update the older responsive layout; no file was written."));
+                edits.clear();
+            }
+            const bool autoInstalled = !before.shape.responsive || before.shape.installedByTitlebar;
+            if (repair ? !responsiveEdits(doc.qml, true, autoInstalled, edits)
                        : !role.collect(doc.qml, enabled, before.shape.layout, edits))
                 return refuse(QStringLiteral("%1 does not match the expected layout; no file was written.")
                                   .arg(role.name));
@@ -1399,8 +1553,9 @@ Result apply(const QString &exePath, const QString &id, bool enabled)
     const bool verified = after.shape.layout != SidebarLayout::None && after.shape.editable
         && (id == kResponsiveSidebar
             ? !after.shape.patched && after.shape.responsive == enabled
+                  && (!enabled || after.shape.responsiveCurrent)
             : after.shape.patched == enabled && (!enabled ||
-                (after.shape.responsive && !after.shape.legacyOverlay)));
+                (after.shape.responsiveCurrent && !after.shape.legacyOverlay)));
     if (!verified)
         return refuse(QStringLiteral("The written layout did not pass resource/read-back "
                                      "verification; no file was written."));

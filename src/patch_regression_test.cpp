@@ -1680,9 +1680,17 @@ int runPatchRegressionTests()
             "    property int pSidebarElementSize: 32\r\n"
             "    property int pVisibleSidebarElementsCount: 0\r\n"
             "    property string pSound: \"sound\"\r\n"
+            "    property string pRecent: \"recent\"\r\n"
+            "    property string pHome: \"home\"\r\n"
+            "    property string pBack: \"back\"\r\n"
+            "    property string pSettings: \"settings\"\r\n"
             "    property list<QtObject> pAllSidebarItems: [\r\n"
             "        PlrSidebarElement { pElementId: pSound; pShowViaRepaterOnly: true; pIsFeatureEnable: true },\r\n"
-            "        PlrSidebarElement { pElementId: \"screen\"; pShowViaRepaterOnly: true; pIsFeatureEnable: false }\r\n"
+            "        PlrSidebarElement { pElementId: \"screen\"; pShowViaRepaterOnly: true; pIsFeatureEnable: false },\r\n"
+            "        PlrSidebarElement { pElementId: pRecent; pShowViaRepaterOnly: false; pIsFeatureEnable: true; pShowOnKebabMenu: !iRecentBtn.visible },\r\n"
+            "        PlrSidebarElement { pElementId: pHome; pShowViaRepaterOnly: false; pIsFeatureEnable: true; pShowOnKebabMenu: !iHomeBtn.visible },\r\n"
+            "        PlrSidebarElement { pElementId: pBack; pShowViaRepaterOnly: false; pIsFeatureEnable: true; pShowOnKebabMenu: !iBackBtn.visible },\r\n"
+            "        PlrSidebarElement { pElementId: pSettings; pShowViaRepaterOnly: false; pIsFeatureEnable: true; pShowOnKebabMenu: !iSettingsBtn.visible }\r\n"
             "    ]\r\n"
             "    onHeightChanged: {\r\n"
             "        fResetSidebar()\r\n"
@@ -2044,13 +2052,17 @@ Window {
         property int pSidebarElementSize: 32
         property int pVisibleSidebarElementsCount: 0
         property bool soundOverflow: false
-        property var pAllSidebarItems: [
-            { pElementId: "first", pIsFeatureEnable: true, pShowViaRepaterOnly: true, pShowOnKebabMenu: false },
-            { pElementId: "disabled", pIsFeatureEnable: false, pShowViaRepaterOnly: true, pShowOnKebabMenu: false },
-            { pElementId: "sound", pIsFeatureEnable: true, pShowViaRepaterOnly: true, pShowOnKebabMenu: false },
-            { pElementId: "third", pIsFeatureEnable: true, pShowViaRepaterOnly: true, pShowOnKebabMenu: false },
-            { pElementId: "fourth", pIsFeatureEnable: true, pShowViaRepaterOnly: true, pShowOnKebabMenu: false },
-            { pElementId: "fifth", pIsFeatureEnable: true, pShowViaRepaterOnly: true, pShowOnKebabMenu: false }
+        property string pRecent: "recent"
+        property string pHome: "home"
+        property string pBack: "back"
+        property string pSettings: "settings"
+        property list<QtObject> pAllSidebarItems: [
+            QtObject { property string pElementId: "first"; property bool pIsFeatureEnable: true; property bool pShowViaRepaterOnly: true; property bool pShowOnKebabMenu: false },
+            QtObject { property string pElementId: "disabled"; property bool pIsFeatureEnable: false; property bool pShowViaRepaterOnly: true; property bool pShowOnKebabMenu: false },
+            QtObject { property string pElementId: "sound"; property bool pIsFeatureEnable: true; property bool pShowViaRepaterOnly: true; property bool pShowOnKebabMenu: false },
+            QtObject { property string pElementId: "third"; property bool pIsFeatureEnable: true; property bool pShowViaRepaterOnly: true; property bool pShowOnKebabMenu: false },
+            QtObject { property string pElementId: "fourth"; property bool pIsFeatureEnable: true; property bool pShowViaRepaterOnly: true; property bool pShowOnKebabMenu: false },
+            QtObject { property string pElementId: "fifth"; property bool pIsFeatureEnable: true; property bool pShowViaRepaterOnly: true; property bool pShowOnKebabMenu: false }
         ]
         Item {
             id: iBSISidebarLayout
@@ -2059,16 +2071,16 @@ Window {
             property int rightPadding: 0
             Repeater {
                 id: iBSISidebarButtons
-                model: pAllSidebarItems
+                model: iSidebar.pAllSidebarItems
                 delegate: Rectangle {
                     objectName: modelData.pElementId
                     x: index * 32
                     width: 32; height: 32
-                    visible: index < pVisibleSidebarElementsCount && modelData.pIsFeatureEnable
+                    visible: index < iSidebar.pVisibleSidebarElementsCount && modelData.pIsFeatureEnable
                 }
             }
         }
-        Rectangle { id: iKebabMenuBtn; objectName: "threeDots"; x: pVisibleSidebarElementsCount * 32; width: 32; height: 32 }
+        Rectangle { id: iKebabMenuBtn; objectName: "threeDots"; x: iSidebar.pVisibleSidebarElementsCount * 32; width: 32; height: 32 }
         Rectangle { id: iCollapseBtn; visible: false; width: 32; height: 32 }
         Rectangle { id: iSettingsBtn; width: 32; height: 32 }
         Rectangle { id: iBackBtn; width: 32; height: 32 }
@@ -2106,6 +2118,7 @@ Window {
                 auto *panel = window->findChild<QObject *>(QStringLiteral("soundPanel"));
                 // A Repeater's delegates are visual children without a QObject
                 // parent, so findChild() cannot reach them: walk the item tree.
+                for (int i = 0; i < 4; ++i) QCoreApplication::processEvents();
                 QQuickItem *sound = nullptr;
                 QList<QQuickItem *> pending { bar };
                 while (!pending.isEmpty() && !sound) {
@@ -2157,6 +2170,97 @@ Window {
         check(patchedTopbar.count(QStringLiteral("pVisible: false")) == 3
                   && patchedTopbar.count(QStringLiteral("pVisible: true")) == 0,
               "the duplicated Back/Home/Recent entries leave the title bar");
+        // An older responsive helper was shipped before the fixed-button
+        // model relationship and unmodelled Discord were accounted for. The
+        // version marker upgrades it in place without changing the ownership
+        // of an independently selected stock-sidebar option.
+        const auto olderResponsive = [](QString qml) {
+            qml.replace(QStringLiteral("// BSI CUSTOMIZER: responsive sidebar begin [titlebar] [v2]"),
+                        QStringLiteral("// BSI CUSTOMIZER: responsive sidebar begin [titlebar]"));
+            qml.replace(QStringLiteral("// BSI CUSTOMIZER: responsive sidebar begin [v2]"),
+                        QStringLiteral("// BSI CUSTOMIZER: responsive sidebar begin"));
+            return qml;
+        };
+        auto earlierStock = resources({ { QStringLiteral("plr.qml"), anchoredPlr },
+                                        { QStringLiteral("PlrSidebar.qml"), olderResponsive(smartSidebar) },
+                                        { QStringLiteral("PlrTopbar.qml"), topbar } }, true, {});
+        addRegistration(earlierStock, false);
+        const QString earlierStockPath = temp.filePath(QStringLiteral("layout-earlier-smart.exe"));
+        write(earlierStockPath, earlierStock.f.bytes);
+        const auto earlierStockState = LayoutPatcher::analyze(read(earlierStockPath), smartId);
+        check(earlierStockState.supported && earlierStockState.applied && earlierStockState.needsUpdate,
+              "the stock sidebar offers Update for an older responsive helper");
+        check(LayoutPatcher::apply(earlierStockPath, smartId, true).ok
+                  && resourceText(read(earlierStockPath), earlierStock, QStringLiteral("PlrSidebar.qml")) == smartSidebar,
+              "updating the stock sidebar replaces the old helper in place");
+        check(LayoutPatcher::apply(earlierStockPath, smartId, false).ok
+                  && resourceText(read(earlierStockPath), earlierStock, QStringLiteral("PlrSidebar.qml")) == sidebar,
+              "the upgraded stock sidebar still restores the original QML");
+        auto earlierTitlebar = resources({ { QStringLiteral("plr.qml"), patchedPlr },
+                                           { QStringLiteral("PlrSidebar.qml"), olderResponsive(patchedSidebar) },
+                                           { QStringLiteral("PlrTopbar.qml"), patchedTopbar } }, true, {});
+        addRegistration(earlierTitlebar, false);
+        const QString earlierTitlebarPath = temp.filePath(QStringLiteral("layout-earlier-titlebar.exe"));
+        write(earlierTitlebarPath, earlierTitlebar.f.bytes);
+        const auto earlierTitlebarState = LayoutPatcher::analyze(read(earlierTitlebarPath), id);
+        check(earlierTitlebarState.supported && earlierTitlebarState.applied && earlierTitlebarState.needsUpdate,
+              "an older title-bar helper offers an in-place Update");
+        check(LayoutPatcher::apply(earlierTitlebarPath, id, true).ok
+                  && resourceText(read(earlierTitlebarPath), earlierTitlebar, QStringLiteral("PlrSidebar.qml")) == patchedSidebar,
+              "Update installs the current helper without moving the sidebar twice");
+        check(LayoutPatcher::apply(earlierTitlebarPath, id, false).ok
+                  && resourceText(read(earlierTitlebarPath), earlierTitlebar, QStringLiteral("PlrSidebar.qml")) == sidebar
+                  && resourceText(read(earlierTitlebarPath), earlierTitlebar, QStringLiteral("plr.qml")) == anchoredPlr,
+              "the updated title bar restores every original document");
+        // The intermediate release added a line break after the Collapse
+        // comment but did not version that comment. Even an inline button
+        // must still be restored exactly after its helper is upgraded.
+        QString intermediateSidebar = olderResponsive(patchedSidebar);
+        const QString currentCollapse = QStringLiteral(
+            "visible: false // BSI CUSTOMIZER: no sidebar to collapse in the title bar [v2]\r\n");
+        const QString intermediateCollapse = QStringLiteral(
+            "visible: false // BSI CUSTOMIZER: no sidebar to collapse in the title bar\r\n");
+        check(intermediateSidebar.count(currentCollapse) == 1,
+              "the inline Collapse fixture contains the versioned, terminated comment");
+        intermediateSidebar.replace(currentCollapse, intermediateCollapse);
+        auto intermediate = resources({ { QStringLiteral("plr.qml"), patchedPlr },
+                                         { QStringLiteral("PlrSidebar.qml"), intermediateSidebar },
+                                         { QStringLiteral("PlrTopbar.qml"), patchedTopbar } }, true, {});
+        addRegistration(intermediate, false);
+        const QString intermediatePath = temp.filePath(QStringLiteral("layout-intermediate.exe"));
+        write(intermediatePath, intermediate.f.bytes);
+        check(LayoutPatcher::analyze(read(intermediatePath), id).needsUpdate
+                  && LayoutPatcher::apply(intermediatePath, id, true).ok,
+              "the intermediate unversioned Collapse marker permits a responsive-helper Update");
+        check(LayoutPatcher::apply(intermediatePath, id, false).ok
+                  && resourceText(read(intermediatePath), intermediate, QStringLiteral("PlrSidebar.qml")) == sidebar
+                  && resourceText(read(intermediatePath), intermediate, QStringLiteral("plr.qml")) == anchoredPlr,
+              "the intermediate inline Collapse marker restores its original line ending exactly");
+        auto earlierManual = resources({ { QStringLiteral("plr.qml"), patchedPlr },
+                                         { QStringLiteral("PlrSidebar.qml"), olderResponsive(movedSmart) },
+                                         { QStringLiteral("PlrTopbar.qml"), patchedTopbar } }, true, {});
+        addRegistration(earlierManual, false);
+        const QString earlierManualPath = temp.filePath(QStringLiteral("layout-earlier-manual.exe"));
+        write(earlierManualPath, earlierManual.f.bytes);
+        const auto manualState = LayoutPatcher::analyze(read(earlierManualPath), id);
+        const auto manualUpgrade = LayoutPatcher::apply(earlierManualPath, id, true);
+        const auto manualMoved = resourceText(read(earlierManualPath), earlierManual, QStringLiteral("PlrSidebar.qml"));
+        check(manualState.needsUpdate && manualUpgrade.ok
+                  && manualMoved.contains(QLatin1String("responsive sidebar begin [v2]"))
+                  && !manualMoved.contains(QLatin1String("responsive sidebar begin [titlebar]"))
+                  && manualMoved.contains(QLatin1String("var available = iSidebar.width - (iBSISidebarLayout.leftPadding")),
+              "an older manual helper is updated for horizontal space without becoming title-bar-owned");
+        const auto manualRestore = LayoutPatcher::apply(earlierManualPath, id, false);
+        const auto manualStock = resourceText(read(earlierManualPath), earlierManual, QStringLiteral("PlrSidebar.qml"));
+        const auto manualSmartState = LayoutPatcher::analyze(read(earlierManualPath), smartId);
+        check(manualRestore.ok && manualSmartState.supported && manualSmartState.applied
+                  && !manualSmartState.needsUpdate
+                  && manualStock.contains(QLatin1String("var available = iSidebar.height - (iBSISidebarLayout.topPadding")),
+              "restoring that title bar keeps the independent smart sidebar with vertical spacing");
+        check(LayoutPatcher::apply(earlierManualPath, smartId, false).ok
+                  && resourceText(read(earlierManualPath), earlierManual, QStringLiteral("PlrSidebar.qml")) == sidebar
+                  && resourceText(read(earlierManualPath), earlierManual, QStringLiteral("plr.qml")) == anchoredPlr,
+              "the upgraded manual helper can also be removed to restore the original QML byte-for-byte");
         // Upgrade an EXE patched by the previous duplicate-instance version.
         // That version had the horizontal row but no responsive/popup fix.
         QString oldSidebar = sidebar;
@@ -2276,11 +2380,6 @@ Window {
                                 QStringLiteral("pShowViaRepeaterOnly"));
         filteredSidebar.replace(QStringLiteral("model: pAllSidebarItems"),
                                 QStringLiteral("model: pSidebarItems"));
-        filteredSidebar.replace(QStringLiteral("pIsFeatureEnable: false }\r\n    ]"),
-                                QStringLiteral("pIsFeatureEnable: false },\r\n"
-                                               "        PlrSidebarElement { pElementId: \"back\"; "
-                                               "pShowViaRepeaterOnly: false; pIsFeatureEnable: true; "
-                                               "pShowOnKebabMenu: !iBackBtn.visible }\r\n    ]"));
         filteredSidebar.replace(QStringLiteral("        else iSettingsBtn.visible = false\r\n"),
                                 QStringLiteral("        else iSettingsBtn.visible = false\r\n"
                                                "        iDiscordBtn.visible = iAppwin.pIsBootComplete\r\n"
@@ -2314,8 +2413,10 @@ Window {
         check(filteredApplied.ok && fixedQml.contains(QLatin1String("pSidebarItems = enabledItems"))
                   && fixedQml.contains(QLatin1String("enabledItems.push(pAllSidebarItems[i])"))
                   && fixedQml.contains(QLatin1String("items[i].pShowViaRepeaterOnly"))
-                  && fixedQml.contains(QLatin1String("allowed: (iAppwin.pIsBootComplete)")),
-              "active and hidden fixed buttons remain in the kebab model; conditional buttons keep their feature gate");
+                  && fixedQml.contains(QLatin1String("elementId: pRecent"))
+                  && fixedQml.contains(QLatin1String("fixed[n].allowed && !fixed[n].button.visible"))
+                  && fixedQml.contains(QLatin1String("var unmodelled = [{ button: iDiscordBtn, allowed: (iAppwin.pIsBootComplete) }]")),
+              "modelled fixed buttons overflow only when eligible; unmodelled Discord stays visible and budgeted");
         check(LayoutPatcher::apply(filteredPath, id, false).ok
                   && resourceText(read(filteredPath), filtered, QStringLiteral("PlrSidebar.qml")) == filteredSidebar,
               "filtered current-player shape restores byte-for-byte");
