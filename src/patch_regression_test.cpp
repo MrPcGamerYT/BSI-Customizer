@@ -2335,6 +2335,51 @@ Window {
         const auto restored = LayoutPatcher::analyze(read(path), id);
         check(restored.supported && !restored.applied, "the restored player reports stock again");
 
+        // ---- a build that spells the palette, the sidebar width and the
+        // Android-frame inset differently, and has no sidebar toggle. Both
+        // layout options used to report "Unavailable" together because the
+        // stock shape was recognized by exact strings. ----
+        QString variantPlr = anchoredPlr;
+        variantPlr.replace(
+            QStringLiteral("color: uiBackend.oem === \"msi5\" ? UiTheme.colors.primary70 : UiTheme.colors.primary80"),
+            QStringLiteral("color: UiTheme.colors.sidebarSurface"));
+        variantPlr.replace(QStringLiteral("width: pSidebarWidth"),
+                           QStringLiteral("width: iAppwin.pSidebarWidth"));
+        variantPlr.replace(
+            QStringLiteral("pBorderWidth + (sidebarVisible ? iAppwin.pSidebarWidth : 0)"),
+            QStringLiteral("pBorderWidth + (sidebarVisible ? Math.round(pSidebarWidth) : 0)"));
+        QString variantTopbar = topbar;
+        variantTopbar.replace(QStringLiteral("        UiImageButton {\r\n"
+                                             "            id: iSidebarShowBtn\r\n"
+                                             "            asset: \"TitlebarCollapse\"\r\n"
+                                             "        }\r\n"),
+                              QString());
+        auto variant = resources({ { QStringLiteral("plr.qml"), variantPlr },
+                                   { QStringLiteral("PlrSidebar.qml"), sidebar },
+                                   { QStringLiteral("PlrTopbar.qml"), variantTopbar } }, true, {});
+        addRegistration(variant, false);
+        const auto variantStock = LayoutPatcher::analyze(variant.f.bytes, id);
+        check(variantStock.supported && !variantStock.applied,
+              "a build with an unfamiliar palette, width and inset is recognized instead of disabled");
+        check(LayoutPatcher::analyze(variant.f.bytes, smartId).supported,
+              "responsive overflow is offered independently of the title-bar spelling");
+        const QString variantPath = temp.filePath(QStringLiteral("layout-variant.exe"));
+        write(variantPath, variant.f.bytes);
+        const auto variantApplied = LayoutPatcher::apply(variantPath, id, true);
+        if (!variantApplied.ok) std::printf("    %s\n", qPrintable(variantApplied.msg));
+        const auto variantPatchedPlr = resourceText(read(variantPath), variant, QStringLiteral("plr.qml"));
+        check(variantApplied.ok
+                  && variantPatchedPlr.contains(QLatin1String("width: 0 /* BSI CUSTOMIZER: width original:"))
+                  && variantPatchedPlr.contains(QLatin1String("color: \"transparent\" /* BSI CUSTOMIZER: color original:"))
+                  && variantPatchedPlr.contains(QLatin1String("0 /* BSI CUSTOMIZER: inset original:"))
+                  && variantPatchedPlr.contains(QStringLiteral("id: iSidebarTitlebar")),
+              "the unfamiliar expressions are replaced and their originals kept in tags");
+        check(LayoutPatcher::apply(variantPath, id, false).ok
+                  && resourceText(read(variantPath), variant, QStringLiteral("plr.qml")) == variantPlr
+                  && resourceText(read(variantPath), variant, QStringLiteral("PlrSidebar.qml")) == sidebar
+                  && resourceText(read(variantPath), variant, QStringLiteral("PlrTopbar.qml")) == variantTopbar,
+              "the unfamiliar build restores every document byte-for-byte from the tags");
+
         // ---- old row-layout player (the shape that used to be disabled) ----
         auto legacy = resources({ { QStringLiteral("plr.qml"), legacyPlr },
                                   { QStringLiteral("PlrSidebar.qml"), sidebar },

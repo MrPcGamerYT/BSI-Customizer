@@ -63,6 +63,16 @@ Player layout (QML). The fix is included automatically with the title-bar tweak;
 if enabled separately first, it stays enabled when the title-bar tweak is
 restored. Either option can be unticked and applied to restore its stock QML.
 
+Both options recognize the player's sidebar by its **structure** (the instance
+that carries the stock sidebar width, the sidebar component and its button
+strip), not by one exact palette, visibility or Android-frame expression. Those
+spellings change between BlueStacks builds, and matching them literally used to
+report *Unavailable* for **both** options at once on such a build. A value this
+tool has not seen before is replaced by the patched value plus a tagged copy of
+the original text, so undo still restores the document byte-for-byte. The
+responsive option edits only `PlrSidebar.qml` and no longer depends on the
+`plr.qml` title-bar shape at all.
+
 If you used an earlier version of the title-bar tweak, close BlueStacks, keep
 the option checked, and click **Update** to upgrade the old layout. Restart
 BlueStacks afterward. Actual windowed-popup behavior still needs testing on

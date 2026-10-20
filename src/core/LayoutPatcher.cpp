@@ -43,10 +43,18 @@ const QString kRepeaterId = QStringLiteral("iBSISidebarButtons");
 const QString kColorStock = QStringLiteral(
     "uiBackend.oem === \"msi5\" ? UiTheme.colors.primary70 : UiTheme.colors.primary80");
 const QString kColorPatched = QStringLiteral("\"transparent\"");
-const QString kVisibleStock = QStringLiteral("uiBackend.confGetInstanceBool(\"show_sidebar\")");
 const QString kInsetStock = QStringLiteral(
     "pBorderWidth + (sidebarVisible ? iAppwin.pSidebarWidth : 0)");
 const QString kInsetPatched = QStringLiteral("pBorderWidth + 0");
+// BlueStacks changes these spellings between builds (palette names, a
+// qualified sidebar id, the ad/inset arithmetic). A tweak that only accepted
+// one exact spelling disabled both layout options on every other build, so a
+// value that does not match the known stock text is replaced by *our* value
+// followed by the original, base64-tagged. Restoring decodes that tag, which
+// keeps the byte-for-byte undo promise for shapes this file has never seen.
+const QString kColorOriginal = QStringLiteral(" /* BSI CUSTOMIZER: color original:");
+const QString kInsetOriginal = QStringLiteral(" /* BSI CUSTOMIZER: inset original:");
+const QString kWidthOriginal = QStringLiteral(" /* BSI CUSTOMIZER: width original:");
 const QString kHidden = QStringLiteral("\nvisible: false");
 // Prefix used when the toggle already binds `visible` (a second member would
 // be a duplicate binding). The original expression is kept verbatim inside the
@@ -66,6 +74,8 @@ const QString kCollapseHidden = QStringLiteral("\nvisible: false // BSI CUSTOMIZ
 // Finish the comment before an inline `id:` or `}`. Older patches did not
 // include this line break, so keep accepting their marker on restore.
 const QString kCollapseHiddenCurrent = kCollapseHidden + QStringLiteral(" [v2]");
+// Added only when a player build has no stock resize handler to rename.
+const QString kAxisHandler = QStringLiteral(" // BSI CUSTOMIZER: sidebar axis handler");
 
 // Which shape the selected player uses. The tweak writes the same title-bar
 // overlay for both; only the width member of the sidebar instance differs.
@@ -83,19 +93,54 @@ void addEdit(QList<Edit> &edits, int begin, int length, const QString &replaceme
     edits << Edit { begin, length, replacement };
 }
 
-// Swap one member's value expression, refusing when the current text is
-// neither the expected stock nor the expected patched form.
-bool swapValue(const QString &qml, const QString &masked, int begin, int end, const QString &name,
-               bool enabled, const QString &stock, const QString &patched, QList<Edit> &edits)
+// `value` followed by an inert QML comment carrying the original expression.
+// The comment is read back from the source text (taggedAfter), not from the
+// binding value, so the exact original text stays recoverable.
+QString withOriginal(const QString &value, const QString &original, const QString &marker)
 {
-    QmlText::Binding binding;
-    if (!QmlText::binding(masked, begin, end, name, &binding)) return false;
-    const QString current = qml.mid(binding.valueBegin, binding.valueEnd - binding.valueBegin);
-    const QString from = enabled ? stock : patched;
-    const QString to = enabled ? patched : stock;
-    if (current != from) return false;
-    addEdit(edits, binding.valueBegin, binding.valueEnd - binding.valueBegin, to);
+    return value + marker + QString::fromLatin1(original.toUtf8().toBase64())
+        + QStringLiteral(" */");
+}
+
+bool originalFrom(const QString &value, const QString &marker, QString *original)
+{
+    const int at = value.indexOf(marker);
+    if (at < 0) return false;
+    const int begin = at + marker.size();
+    const int end = value.indexOf(QLatin1String("*/"), begin);
+    if (end < 0) return false;
+    const QByteArray encoded = value.mid(begin, end - begin).trimmed().toLatin1();
+    const QByteArray bytes = QByteArray::fromBase64(encoded);
+    // Reject anything that is not the exact encoding we write, so a foreign
+    // comment cannot make the restore path write arbitrary text.
+    if (bytes.isEmpty() || bytes.toBase64() != encoded
+        || QString::fromUtf8(bytes).toUtf8() != bytes) return false;
+    *original = QString::fromUtf8(bytes);
     return true;
+}
+
+// The trailing comment that follows a patched value on the same line.
+// QmlText::mask() blanks comments and binding() trims the resulting spaces,
+// so the tag is not part of the binding value: read it from the source text
+// right after the value instead.
+bool taggedAfter(const QString &qml, int valueBegin, const QString &marker,
+                 QString *original, int *tagEnd)
+{
+    const int at = qml.indexOf(marker, valueBegin);
+    if (at < 0) return false;
+    if (qml.mid(valueBegin, at - valueBegin).contains(QLatin1Char('\n'))) return false;
+    const int close = qml.indexOf(QLatin1String("*/"), at + marker.size());
+    if (close < 0) return false;
+    if (!originalFrom(qml.mid(at, close + 2 - at), marker, original)) return false;
+    *tagEnd = close + 2;
+    return true;
+}
+
+// True for the zero width this tweak writes. A tagged original is a comment,
+// which the binding scanner trims, so the value itself is always exactly `0`.
+bool zeroWidthValue(const QString &value)
+{
+    return value == QLatin1String("0");
 }
 
 // Swap a whole member (`name: value`) for different member text.
@@ -262,6 +307,24 @@ bool applyEdits(QString &qml, QList<Edit> edits)
 
 bool directChild(const QString &masked, int parentOpen, int childBegin);
 
+// First member `name` that belongs to the object itself (not to a nested
+// child that happens to declare a member with the same name).
+bool directBinding(const QString &masked, int open, int end, const QString &name,
+                   QmlText::Binding *out)
+{
+    int from = open;
+    while (from < end) {
+        QmlText::Binding binding;
+        if (!QmlText::binding(masked, from, end, name, &binding)) return false;
+        if (directChild(masked, open, binding.nameBegin)) {
+            *out = binding;
+            return true;
+        }
+        from = binding.nameBegin + name.size();
+    }
+    return false;
+}
+
 bool findTitlebarOverlay(const QString &qml, const QString &masked,
                          const QList<QmlText::Object> &instances, QmlText::Object *overlay)
 {
@@ -306,14 +369,40 @@ bool plrEdits(QString &qml, bool enabled, SidebarLayout layout, QList<Edit> &edi
     if (enabled) {
         if (instances.size() != 1) return false;
         const auto &instance = instances.first();
-        if (!swapValue(qml, masked, instance.open, instance.end, widthName,
-                       true, QStringLiteral("pSidebarWidth"), QStringLiteral("0"), edits))
+        // The width member is the one thing every supported build spells the
+        // same way: it carries the stock sidebar width. A build that qualifies
+        // it (`iAppwin.pSidebarWidth`) or wraps it in arithmetic still gets the
+        // same zero-width strip, and the original expression is kept in a tag.
+        QmlText::Binding width;
+        if (!directBinding(masked, instance.open, instance.end, widthName, &width)
+            || !directChild(masked, instance.open, width.nameBegin))
             return false;
-        if (!swapValue(qml, masked, instance.open, instance.end, QStringLiteral("color"),
-                       true, kColorStock, kColorPatched, edits))
-            return false;
+        const QString widthValue = qml.mid(width.valueBegin, width.valueEnd - width.valueBegin);
+        if (zeroWidthValue(widthValue)) return false; // already moved
+        if (!widthValue.contains(QLatin1String("pSidebarWidth"))) return false;
+        addEdit(edits, width.valueBegin, width.valueEnd - width.valueBegin,
+                widthValue == QLatin1String("pSidebarWidth")
+                    ? QStringLiteral("0")
+                    : withOriginal(QStringLiteral("0"), widthValue, kWidthOriginal));
+        // Palette expressions differ between builds (and the panel colour is
+        // irrelevant once the strip is zero width), so keep the exact stock
+        // text when it is the known one and tag anything else. A build that
+        // paints the colour in the component itself simply has no member.
+        QmlText::Binding color;
+        if (directBinding(masked, instance.open, instance.end, QStringLiteral("color"), &color)
+            && directChild(masked, instance.open, color.nameBegin)) {
+            const QString colorValue = qml.mid(color.valueBegin, color.valueEnd - color.valueBegin);
+            if (colorValue == kColorStock) {
+                addEdit(edits, color.valueBegin, color.valueEnd - color.valueBegin, kColorPatched);
+            } else if (colorValue != kColorPatched && !colorValue.contains(kColorOriginal)) {
+                addEdit(edits, color.valueBegin, color.valueEnd - color.valueBegin,
+                        withOriginal(kColorPatched, colorValue, kColorOriginal));
+            } else {
+                return false; // already patched by us
+            }
+        }
         QmlText::Binding id;
-        if (!QmlText::binding(masked, instance.open, instance.end, QStringLiteral("id"), &id)
+        if (!directBinding(masked, instance.open, instance.end, QStringLiteral("id"), &id)
             || qml.mid(id.valueBegin, id.valueEnd - id.valueBegin) != QLatin1String("iSidebar"))
             return false;
         const QString overlay = titlebarOverlay(lineEnding(qml));
@@ -334,22 +423,67 @@ bool plrEdits(QString &qml, bool enabled, SidebarLayout layout, QList<Edit> &edi
         const int at = topbars.first().end - 1 - overlay.size();
         if (at < 0 || qml.mid(at, overlay.size()) != overlay) return false;
         addEdit(edits, at, overlay.size(), QString());
-        if (!swapValue(qml, masked, original.open, original.end, widthName,
-                       false, QStringLiteral("pSidebarWidth"), QStringLiteral("0"), edits))
+        QmlText::Binding width;
+        if (!directBinding(masked, original.open, original.end, widthName, &width)) return false;
+        if (qml.mid(width.valueBegin, width.valueEnd - width.valueBegin) != QLatin1String("0"))
             return false;
-        if (!swapValue(qml, masked, original.open, original.end, QStringLiteral("color"),
-                       false, kColorStock, kColorPatched, edits))
-            return false;
+        QString restoredWidth = QStringLiteral("pSidebarWidth");
+        int widthEnd = width.valueEnd;
+        QString widthOriginal;
+        if (taggedAfter(qml, width.valueBegin, kWidthOriginal, &widthOriginal, &widthEnd))
+            restoredWidth = widthOriginal;
+        addEdit(edits, width.valueBegin, widthEnd - width.valueBegin, restoredWidth);
+        QmlText::Binding color;
+        if (directBinding(masked, original.open, original.end, QStringLiteral("color"), &color)) {
+            const QString colorValue = qml.mid(color.valueBegin, color.valueEnd - color.valueBegin);
+            if (colorValue != kColorPatched) return false;
+            QString restoredColor = kColorStock;
+            int colorEnd = color.valueEnd;
+            QString colorOriginal;
+            if (taggedAfter(qml, color.valueBegin, kColorOriginal, &colorOriginal, &colorEnd))
+                restoredColor = colorOriginal;
+            addEdit(edits, color.valueBegin, colorEnd - color.valueBegin, restoredColor);
+        }
     }
 
     // The Android frame must span the full window width now that no side strip
     // exists; fSetUiParams keeps receiving `sidebarVisible` from its callers.
+    // The known spelling is restored from the original constant; anything else
+    // is matched structurally and stored in a tag so unknown indentation and
+    // identifier qualification still round-trip byte-for-byte.
     int bodyBegin = 0, bodyEnd = 0;
     if (!functionSpan(masked, QStringLiteral("fSetUiParams"), &bodyBegin, &bodyEnd)) return false;
-    const QString from = enabled ? kInsetStock : kInsetPatched;
-    const int at = qml.indexOf(from, bodyBegin);
-    if (at < 0 || at + from.size() > bodyEnd) return false;
-    addEdit(edits, at, from.size(), enabled ? kInsetPatched : kInsetStock);
+    if (enabled) {
+        const int exact = qml.indexOf(kInsetStock, bodyBegin);
+        if (exact >= 0 && exact + kInsetStock.size() <= bodyEnd) {
+            addEdit(edits, exact, kInsetStock.size(), kInsetPatched);
+        } else {
+            const QRegularExpression insetRx(QStringLiteral(
+                "sidebarVisible\\s*\\?\\s*[^:?\\r\\n]*pSidebarWidth[^:?\\r\\n]*:\\s*0\\b"));
+            const auto match = insetRx.match(masked.mid(bodyBegin, bodyEnd - bodyBegin));
+            if (!match.hasMatch()) return false;
+            const int start = bodyBegin + int(match.capturedStart());
+            const int length = int(match.capturedLength());
+            if (start < bodyBegin || start + length > bodyEnd) return false;
+            addEdit(edits, start, length,
+                    withOriginal(QStringLiteral("0"), qml.mid(start, length), kInsetOriginal));
+        }
+    } else {
+        const QString tagged = QStringLiteral("0") + kInsetOriginal;
+        const int taggedAt = qml.indexOf(tagged, bodyBegin);
+        if (taggedAt >= 0 && taggedAt + tagged.size() <= bodyEnd) {
+            const int close = qml.indexOf(QLatin1String("*/"), taggedAt);
+            if (close < 0 || close + 2 > bodyEnd) return false;
+            QString original;
+            if (!originalFrom(qml.mid(taggedAt + 1, close + 2 - taggedAt - 1),
+                              kInsetOriginal, &original)) return false;
+            addEdit(edits, taggedAt, close + 2 - taggedAt, original);
+        } else {
+            const int exact = qml.indexOf(kInsetPatched, bodyBegin);
+            if (exact < 0 || exact + kInsetPatched.size() > bodyEnd) return false;
+            addEdit(edits, exact, kInsetPatched.size(), kInsetStock);
+        }
+    }
     return true;
 }
 
@@ -386,26 +520,38 @@ struct SidebarControls
     int resetEnd = -1;
 };
 
+// The sidebar component's root, whatever object type the player uses. Both
+// known generations write a Rectangle, but the id (`iSidebar`) and the
+// fResetSidebar owner are the parts the inserted helpers depend on.
+bool findSidebarRoot(const QString &qml, const QString &masked, QmlText::Object *root)
+{
+    for (const auto &type : { QStringLiteral("Rectangle"), QStringLiteral("Item"),
+                              QStringLiteral("UiRectangle"), QStringLiteral("FocusScope") }) {
+        for (const auto &object : QmlText::objects(masked, type)) {
+            if (!qml.mid(object.open, object.end - object.open)
+                     .contains(QLatin1String("function fResetSidebar"))) continue;
+            QmlText::Binding id;
+            if (!directBinding(masked, object.open, object.end, QStringLiteral("id"), &id)
+                || qml.mid(id.valueBegin, id.valueEnd - id.valueBegin) != QLatin1String("iSidebar"))
+                continue;
+            int begin = 0, end = 0;
+            if (!functionSpan(masked, QStringLiteral("fResetSidebar"), &begin, &end)
+                || begin <= object.open || end >= object.end) continue;
+            *root = object;
+            return true;
+        }
+    }
+    return false;
+}
+
 bool sidebarControls(const QString &qml, const QString &masked, SidebarControls *out)
 {
     SidebarControls controls;
-    for (const auto &object : QmlText::objects(masked, QStringLiteral("Rectangle"))) {
-        QmlText::Binding id;
-        if (!QmlText::binding(masked, object.open, object.end, QStringLiteral("id"), &id)
-            || !directChild(masked, object.open, id.nameBegin)
-            || qml.mid(id.valueBegin, id.valueEnd - id.valueBegin) != QLatin1String("iSidebar"))
-            continue;
-        int begin = 0, end = 0;
-        if (!functionSpan(masked, QStringLiteral("fResetSidebar"), &begin, &end)
-            || begin <= object.open || end >= object.end
-            || !directChild(masked, object.open,
-                            masked.lastIndexOf(QLatin1String("function fResetSidebar"), begin)))
-            return false;
-        controls.root = object;
-        controls.resetEnd = end;
-        break;
-    }
-    if (controls.resetEnd < 0) return false;
+    if (!findSidebarRoot(qml, masked, &controls.root)) return false;
+    int resetBegin = 0, resetEnd = 0;
+    if (!functionSpan(masked, QStringLiteral("fResetSidebar"), &resetBegin, &resetEnd)
+        || resetBegin <= controls.root.open || resetEnd >= controls.root.end) return false;
+    controls.resetEnd = resetEnd;
 
     const auto member = [&](const QString &name) {
         QmlText::Binding b;
@@ -427,19 +573,37 @@ bool sidebarControls(const QString &qml, const QString &masked, SidebarControls 
         || !member(QStringLiteral("pVisibleSidebarElementsCount"))) return false;
 
     // Do not confuse a popup's nested layout/repeater with the button strip.
-    int layouts = 0;
-    for (const auto &type : { QStringLiteral("UiColumnLayout"), QStringLiteral("UiRowLayout") }) {
+    // A build may declare more than one direct layout; prefer the one that
+    // also hosts the Repeater, and stay ambiguous rather than guessing.
+    QList<QmlText::Object> candidates;
+    QList<bool> candidateHorizontal;
+    for (const auto &type : { QStringLiteral("UiColumnLayout"), QStringLiteral("UiRowLayout"),
+                              QStringLiteral("UiFlow"), QStringLiteral("Row"), QStringLiteral("Column") }) {
         for (const auto &object : QmlText::objects(masked, type)) {
             if (object.open <= controls.root.open || object.end > controls.root.end
                 || !directChild(masked, controls.root.open, object.nameBegin)
                 || !qml.mid(object.open, object.end - object.open).contains(QLatin1String("iKebabMenuBtn")))
                 continue;
-            controls.layout = object;
-            controls.horizontal = type == QLatin1String("UiRowLayout");
-            ++layouts;
+            candidates << object;
+            candidateHorizontal << (type == QLatin1String("UiRowLayout")
+                                    || type == QLatin1String("Row"));
         }
     }
-    if (layouts != 1) return false;
+    if (candidates.isEmpty()) return false;
+    int chosen = 0;
+    if (candidates.size() > 1) {
+        int withRepeater = -1;
+        for (int i = 0; i < candidates.size(); ++i) {
+            if (!qml.mid(candidates.at(i).open, candidates.at(i).end - candidates.at(i).open)
+                     .contains(QLatin1String("Repeater"))) continue;
+            if (withRepeater >= 0) return false;
+            withRepeater = i;
+        }
+        if (withRepeater < 0) return false;
+        chosen = withRepeater;
+    }
+    controls.layout = candidates.at(chosen);
+    controls.horizontal = candidateHorizontal.at(chosen);
 
     int repeaters = 0;
     for (const auto &object : QmlText::objects(masked, QStringLiteral("Repeater"))) {
@@ -449,8 +613,11 @@ bool sidebarControls(const QString &qml, const QString &masked, SidebarControls 
         if (!QmlText::binding(masked, object.open, object.end, QStringLiteral("model"), &model)
             || !directChild(masked, object.open, model.nameBegin)) continue;
         const QString name = qml.mid(model.valueBegin, model.valueEnd - model.valueBegin);
-        if ((name == QLatin1String("pAllSidebarItems") || name == QLatin1String("iAllSidebarItems")
-             || name == QLatin1String("pSidebarItems")) && member(name)) {
+        // Player builds name this model property differently (pAllSidebarItems,
+        // iAllSidebarItems, pSidebarItems, ...). Any model that is one of the
+        // root's own list members is usable by the generated helper.
+        if (QRegularExpression(QStringLiteral("^[_a-zA-Z][_a-zA-Z0-9]*$")).match(name).hasMatch()
+            && member(name)) {
             controls.itemsName = name;
             controls.repeater = object;
             ++repeaters;
@@ -963,19 +1130,11 @@ bool responsiveEdits(QString &qml, bool enabled, bool autoInstalled, QList<Edit>
 bool sidebarEdits(QString &qml, bool enabled, QList<Edit> &edits)
 {
     const QString masked = QmlText::mask(qml);
-    // The component's root Rectangle owns fResetSidebar. Locate it first so
-    // the button strip below can only be the root's direct child layout, not
-    // some popup's column that happens to mention the kebab button.
+    // The component's root owns fResetSidebar. Locate it first so the button
+    // strip below can only be the root's direct child layout, not some popup's
+    // column that happens to mention the kebab button.
     QmlText::Object root;
-    bool rooted = false;
-    for (const auto &object : QmlText::objects(masked, QStringLiteral("Rectangle"))) {
-        if (qml.mid(object.open, object.end - object.open).contains(QLatin1String("function fResetSidebar"))) {
-            root = object;
-            rooted = true;
-            break;
-        }
-    }
-    if (!rooted) return false;
+    if (!findSidebarRoot(qml, masked, &root)) return false;
 
     // The button column becomes a centered row: the same elements, the same
     // overflow logic, one dimension over. The vertical spacer's Layout.fillHeight
@@ -1055,14 +1214,37 @@ bool sidebarEdits(QString &qml, bool enabled, QList<Edit> &edits)
     // The overflow budget is measured in buttons of 32px; in a horizontal
     // strip that budget is the width, and the row re-lays out when it changes.
     // Only the root's own handler may be renamed - a child object's
-    // onHeightChanged must stay untouched.
+    // onHeightChanged must stay untouched. A build that has no stock handler
+    // gets a tagged one, so the restore still removes exactly what was added.
+    const QString axisNl = lineEnding(qml);
     QmlText::Binding handler;
-    const QString handlerFrom = enabled ? QStringLiteral("onHeightChanged")
-                                        : QStringLiteral("onWidthChanged");
-    if (!QmlText::binding(masked, root.open, root.end, handlerFrom, &handler)) return false;
-    if (!directChild(masked, root.open, handler.nameBegin)) return false;
-    addEdit(edits, handler.nameBegin, handler.nameEnd - handler.nameBegin,
-            enabled ? QStringLiteral("onWidthChanged") : QStringLiteral("onHeightChanged"));
+    if (enabled) {
+        if (directBinding(masked, root.open, root.end, QStringLiteral("onHeightChanged"), &handler)) {
+            addEdit(edits, handler.nameBegin, handler.nameEnd - handler.nameBegin,
+                    QStringLiteral("onWidthChanged"));
+        } else if (!directBinding(masked, root.open, root.end,
+                                  QStringLiteral("onWidthChanged"), &handler)) {
+            addEdit(edits, root.open + 1, 0,
+                    axisNl + QStringLiteral("    onWidthChanged: fResetSidebar()") + kAxisHandler);
+        }
+    } else {
+        // Prefer removing the handler this file added over renaming it back:
+        // the inserted marker line includes the member, so renaming would
+        // leave a duplicate stock-looking handler behind.
+        const QString inserted = axisNl + QStringLiteral("    onWidthChanged: fResetSidebar()")
+            + kAxisHandler;
+        const int at = qml.indexOf(inserted, root.open);
+        if (at >= 0 && at + inserted.size() <= root.end) {
+            addEdit(edits, at, inserted.size(), QString());
+        } else if (directBinding(masked, root.open, root.end,
+                                 QStringLiteral("onWidthChanged"), &handler)) {
+            addEdit(edits, handler.nameBegin, handler.nameEnd - handler.nameBegin,
+                    QStringLiteral("onHeightChanged"));
+        } else if (!directBinding(masked, root.open, root.end,
+                                  QStringLiteral("onHeightChanged"), &handler)) {
+            return false;
+        }
+    }
     int bodyBegin = 0, bodyEnd = 0;
     if (!functionSpan(masked, QStringLiteral("fResetSidebar"), &bodyBegin, &bodyEnd)) return false;
     const QString from = enabled ? QStringLiteral("iSidebar.height") : QStringLiteral("iSidebar.width");
@@ -1115,52 +1297,70 @@ bool topbarEdits(QString &qml, bool enabled, QList<Edit> &edits)
     const QString masked = QmlText::mask(qml);
     // The sidebar toggle has nothing left to toggle, and leaving it live would
     // still resize the window by pSidebarWidth on click, so it is hidden.
+    // Builds that do not carry the toggle (or name its id differently) are not
+    // refused any more: there is simply nothing to hide.
     QmlText::Object toggle;
     bool found = false;
     for (const auto &object : QmlText::objects(masked, QStringLiteral("UiImageButton"))) {
-        if (qml.mid(object.open, object.end - object.open).contains(QLatin1String("id: iSidebarShowBtn"))) {
+        QmlText::Binding id;
+        if (directBinding(masked, object.open, object.end, QStringLiteral("id"), &id)
+            && qml.mid(id.valueBegin, id.valueEnd - id.valueBegin)
+                   == QLatin1String("iSidebarShowBtn")) {
+            toggle = object;
+            found = true;
+            break;
+        }
+        if (qml.mid(object.open, object.end - object.open)
+                .contains(QLatin1String("id: iSidebarShowBtn"))) {
             toggle = object;
             found = true;
             break;
         }
     }
-    if (!found) return false;
-    // Some builds already bind the toggle's visibility (5.10: `visible:
-    // !iSidebar.visible`). A second `visible:` member would be a duplicate
-    // binding, so wrap the existing expression in `false && (...)` instead and
-    // unwrap it verbatim when restoring. Builds without one get a plain member.
-    QmlText::Binding toggleVisible;
-    const bool hasVisible =
-        QmlText::binding(masked, toggle.open, toggle.end, QStringLiteral("visible"), &toggleVisible)
-        && directChild(masked, toggle.open, toggleVisible.nameBegin);
-    const auto toggleValue = [&] {
-        return qml.mid(toggleVisible.valueBegin, toggleVisible.valueEnd - toggleVisible.valueBegin);
-    };
-    if (enabled) {
-        if (hasVisible) {
-            if (toggleValue().startsWith(kHiddenPrefix)) return false;
-            addEdit(edits, toggleVisible.valueBegin, toggleVisible.valueEnd - toggleVisible.valueBegin,
-                    kHiddenPrefix + QLatin1Char('(') + toggleValue() + QLatin1Char(')'));
-        } else {
-            addEdit(edits, toggle.open + 1, 0, kHidden);
+    if (found) {
+        // Some builds already bind the toggle's visibility (5.10: `visible:
+        // !iSidebar.visible`). A second `visible:` member would be a duplicate
+        // binding, so wrap the existing expression in `false && (...)` instead
+        // and unwrap it verbatim when restoring. Builds without one get a
+        // plain member.
+        QmlText::Binding toggleVisible;
+        const bool hasVisible =
+            directBinding(masked, toggle.open, toggle.end, QStringLiteral("visible"), &toggleVisible);
+        const auto toggleValue = [&] {
+            return qml.mid(toggleVisible.valueBegin, toggleVisible.valueEnd - toggleVisible.valueBegin);
+        };
+        if (enabled) {
+            if (hasVisible) {
+                if (toggleValue().startsWith(kHiddenPrefix)) return false;
+                addEdit(edits, toggleVisible.valueBegin,
+                        toggleVisible.valueEnd - toggleVisible.valueBegin,
+                        kHiddenPrefix + QLatin1Char('(') + toggleValue() + QLatin1Char(')'));
+            } else {
+                addEdit(edits, toggle.open + 1, 0, kHidden);
+            }
+        } else if (qml.mid(toggle.open + 1, kHidden.size()) == kHidden) {
+            addEdit(edits, toggle.open + 1, kHidden.size(), QString());
+        } else if (hasVisible) {
+            const QString current = toggleValue();
+            if (current.startsWith(kHiddenPrefix + QLatin1Char('('))
+                && current.endsWith(QLatin1Char(')'))) {
+                addEdit(edits, toggleVisible.valueBegin,
+                        toggleVisible.valueEnd - toggleVisible.valueBegin,
+                        current.mid(int(kHiddenPrefix.size()) + 1,
+                                    current.size() - int(kHiddenPrefix.size()) - 2));
+            } else if (current == QLatin1String("false") || current == QLatin1String("true")) {
+                // Stock visibility: nothing this tweak changed.
+            } else {
+                return false; // unknown binding: do not leave it half-hidden
+            }
         }
-    } else if (qml.mid(toggle.open + 1, kHidden.size()) == kHidden) {
-        addEdit(edits, toggle.open + 1, kHidden.size(), QString());
-    } else if (hasVisible) {
-        const QString current = toggleValue();
-        if (!current.startsWith(kHiddenPrefix + QLatin1Char('('))
-            || !current.endsWith(QLatin1Char(')')))
-            return false;
-        addEdit(edits, toggleVisible.valueBegin, toggleVisible.valueEnd - toggleVisible.valueBegin,
-                current.mid(int(kHiddenPrefix.size()) + 1,
-                            current.size() - int(kHiddenPrefix.size()) - 2));
-    } else {
-        return false;
     }
     // The title bar's own Back/Home/Recent live in pNonFixedTopbarItems and
     // are toggled imperatively; switching their element's pVisible off is the
     // one hook that survives the width manager. The moved sidebar row carries
-    // its own copies centered, so the duplicates step aside.
+    // its own copies centered, so the duplicates step aside. A build that has
+    // renamed, removed or re-bound one of these entries keeps working: only
+    // the entries that are still in the expected stock state are edited.
     const QList<QPair<QString, QString>> duplicates {
         { QStringLiteral("iBackBtn.visible"), QStringLiteral("pVisible") },
         { QStringLiteral("iHomeBtn.visible"), QStringLiteral("pVisible") },
@@ -1172,18 +1372,20 @@ bool topbarEdits(QString &qml, bool enabled, QList<Edit> &edits)
         for (const auto &wanted : duplicates) {
             if (!text.contains(wanted.first) || handled.contains(wanted.first)) continue;
             QmlText::Binding visible;
-            if (!QmlText::binding(masked, object.open, object.end, wanted.second, &visible)
-                || !directChild(masked, object.open, visible.nameBegin))
-                return false;
+            if (!directBinding(masked, object.open, object.end, wanted.second, &visible)) {
+                handled.insert(wanted.first);
+                continue;
+            }
             const QString current = qml.mid(visible.valueBegin, visible.valueEnd - visible.valueBegin);
             const QString from = enabled ? QStringLiteral("true") : QStringLiteral("false");
-            if (current != from) return false;
-            addEdit(edits, visible.valueBegin, visible.valueEnd - visible.valueBegin,
-                    enabled ? QStringLiteral("false") : QStringLiteral("true"));
+            if (current == from) {
+                addEdit(edits, visible.valueBegin, visible.valueEnd - visible.valueBegin,
+                        enabled ? QStringLiteral("false") : QStringLiteral("true"));
+            }
             handled.insert(wanted.first);
         }
     }
-    return handled.size() == duplicates.size();
+    return true;
 }
 
 // Adapters so the write loop can treat the two non-plr collectors uniformly.
@@ -1270,7 +1472,7 @@ Snapshot inspect(const QByteArray &image)
 
     const auto value = [&](const QmlText::Object &object, const QString &name, QString *out) {
         QmlText::Binding binding;
-        if (!QmlText::binding(masked, object.open, object.end, name, &binding)) return false;
+        if (!directBinding(masked, object.open, object.end, name, &binding)) return false;
         *out = qml.mid(binding.valueBegin, binding.valueEnd - binding.valueBegin);
         return true;
     };
@@ -1278,24 +1480,24 @@ Snapshot inspect(const QByteArray &image)
     const bool overlay = hasOverlay(qml);
     if (!overlay && instances.size() == 1) {
         // Stock: either the anchored side strip (5.21/5.22) or the old
-        // row-layout item (5.10/5.12).
+        // row-layout item (5.10/5.12). Recognize the shape structurally - the
+        // member that carries the stock sidebar width - instead of matching a
+        // palette expression or a visibility call that changes between builds
+        // (which used to disable both layout options on those builds). The
+        // dry run below still proves every edit against the real text.
         const auto &instance = instances.first();
-        QString color, visible, width, layoutWidth, top;
-        const bool haveColor = value(instance, QStringLiteral("color"), &color);
-        const bool haveVisible = value(instance, QStringLiteral("visible"), &visible);
+        QString width, layoutWidth;
         const bool haveWidth = value(instance, kSidebarWidthName, &width);
         const bool haveLayoutWidth = value(instance, kSidebarLayoutWidthName, &layoutWidth);
-        const bool haveTop = value(instance, QStringLiteral("anchors.top"), &top);
-        if (haveColor && color == kColorStock && haveVisible && visible == kVisibleStock
-            && qml.contains(kInsetStock)) {
-            if (haveWidth && width == QLatin1String("pSidebarWidth") && haveTop
-                && top == QLatin1String("iTopbar.bottom")) {
-                snapshot.shape.layout = SidebarLayout::Anchored;
-                snapshot.shape.stock = true;
-            } else if (haveLayoutWidth && layoutWidth == QLatin1String("pSidebarWidth")) {
-                snapshot.shape.layout = SidebarLayout::RowItem;
-                snapshot.shape.stock = true;
-            }
+        // Prefer the layout-member shape when both are present: inside a
+        // UiRowLayout the layout owns the width, so zeroing `width` alone
+        // would leave the strip in place.
+        if (haveLayoutWidth && layoutWidth.contains(QLatin1String("pSidebarWidth"))) {
+            snapshot.shape.layout = SidebarLayout::RowItem;
+            snapshot.shape.stock = true;
+        } else if (haveWidth && width.contains(QLatin1String("pSidebarWidth"))) {
+            snapshot.shape.layout = SidebarLayout::Anchored;
+            snapshot.shape.stock = true;
         }
     } else if (overlay && (instances.size() == 1 || instances.size() == 2)) {
         // Recognize both the old duplicate and the new single-owner host.
@@ -1314,15 +1516,18 @@ Snapshot inspect(const QByteArray &image)
             const bool haveFill = value(overlayInstance, QStringLiteral("anchors.fill"), &fill);
             const bool haveOverlayColor = value(overlayInstance, QStringLiteral("color"), &overlayColor);
             const bool haveOverlayVisible = value(overlayInstance, QStringLiteral("visible"), &overlayVisible);
-            if (haveColor && color == kColorPatched && haveFill && fill == QLatin1String("parent")
+            // Ours and older patches both write the same transparent colour.
+            const bool colorOk = !haveColor || color == kColorPatched;
+            const bool insetOk = qml.contains(kInsetPatched) || qml.contains(kInsetOriginal);
+            if (colorOk && haveFill && fill == QLatin1String("parent")
                 && (!snapshot.shape.legacyOverlay
                     || (haveOverlayColor && overlayColor == kColorPatched
                         && haveOverlayVisible && overlayVisible == QLatin1String("true")))
-                && qml.contains(kInsetPatched)) {
-                if (haveWidth && width == QLatin1String("0")) {
+                && insetOk) {
+                if (haveWidth && zeroWidthValue(width)) {
                     snapshot.shape.layout = SidebarLayout::Anchored;
                     snapshot.shape.patched = true;
-                } else if (haveLayoutWidth && layoutWidth == QLatin1String("0")) {
+                } else if (haveLayoutWidth && zeroWidthValue(layoutWidth)) {
                     snapshot.shape.layout = SidebarLayout::RowItem;
                     snapshot.shape.patched = true;
                 }
@@ -1427,28 +1632,39 @@ State analyze(const QByteArray &image, const QString &id)
         state.detail = QStringLiteral("Select the HD-Player.exe path first.");
         return state;
     }
-    const Snapshot snapshot = inspect(image);
-    if (snapshot.shape.layout == SidebarLayout::None || !snapshot.shape.editable) {
-        state.detail = snapshot.shape.detail;
-        return state;
-    }
     if (id == kResponsiveSidebar) {
-        state.applied = snapshot.shape.responsive;
-        if (snapshot.shape.patched) {
+        // This option edits PlrSidebar.qml only. It used to be gated by the
+        // whole plr.qml/title-bar dry run, so a build whose plr.qml spelling
+        // differed disabled it even when its sidebar was perfectly supported.
+        QString error;
+        Doc sidebarDoc;
+        if (!findDoc(image, QStringLiteral("PlrSidebar.qml"), &sidebarDoc, &error)) {
+            state.detail = error;
+            return state;
+        }
+        state.applied = sidebarDoc.qml.contains(kResponsiveBegin);
+        Doc plrDoc;
+        if (findDoc(image, QStringLiteral("plr.qml"), &plrDoc, &error)
+            && hasOverlay(plrDoc.qml)) {
             state.detail = QStringLiteral("Included with the title-bar layout. Restore the sidebar "
                                           "first to change this separately.");
             return state;
         }
-        QString sidebar = snapshot.sidebar.qml;
+        QString sidebar = sidebarDoc.qml;
         QList<Edit> plan;
         if (!responsiveEdits(sidebar, !state.applied, false, plan) || !applyEdits(sidebar, plan)) {
             state.detail = QStringLiteral("This sidebar does not have supported overflow and popup anchors.");
             return state;
         }
         state.supported = true;
-        state.needsUpdate = state.applied && !snapshot.shape.responsiveCurrent;
+        state.needsUpdate = state.applied && !hasCurrentResponsiveHelper(sidebarDoc.qml);
         state.detail = state.needsUpdate ? QStringLiteral("Earlier responsive layout applied. Press Update.")
                      : state.applied ? QStringLiteral("Applied.") : QStringLiteral("Ready.");
+        return state;
+    }
+    const Snapshot snapshot = inspect(image);
+    if (snapshot.shape.layout == SidebarLayout::None || !snapshot.shape.editable) {
+        state.detail = snapshot.shape.detail;
         return state;
     }
     state.supported = true;
@@ -1472,22 +1688,25 @@ Result apply(const QString &exePath, const QString &id, bool enabled)
         return refuse(QStringLiteral("Cannot read the selected EXE."));
     const QByteArray original = file.readAll();
     file.close();
-    const Snapshot before = inspect(original);
-    if (before.shape.layout == SidebarLayout::None || !before.shape.editable)
-        return refuse(before.shape.detail);
 
     QByteArray changed = original;
     if (id == kResponsiveSidebar) {
-        if (before.shape.patched)
+        // The sidebar option never edits plr.qml, so it must not depend on the
+        // title-bar shape. Only our own overlay marker hides it.
+        Doc plrDoc;
+        QString plrError;
+        if (findDoc(original, QStringLiteral("plr.qml"), &plrDoc, &plrError)
+            && hasOverlay(plrDoc.qml))
             return refuse(QStringLiteral("The responsive fix is included with the title-bar layout. "
                                          "Restore the sidebar first to change it separately."));
-        const bool update = enabled && before.shape.responsive && !before.shape.responsiveCurrent;
-        if (before.shape.responsive == enabled && !update)
-            return { true, enabled ? QStringLiteral("Responsive sidebar is already applied.")
-                                   : QStringLiteral("Stock sidebar overflow is already in place.") };
         Doc doc;
         QString error;
         if (!findDoc(changed, QStringLiteral("PlrSidebar.qml"), &doc, &error)) return refuse(error);
+        const bool applied = doc.qml.contains(kResponsiveBegin);
+        const bool update = enabled && applied && !hasCurrentResponsiveHelper(doc.qml);
+        if (applied == enabled && !update)
+            return { true, enabled ? QStringLiteral("Responsive sidebar is already applied.")
+                                   : QStringLiteral("Stock sidebar overflow is already in place.") };
         QList<Edit> edits;
         if (update) {
             if (!responsiveEdits(doc.qml, false, false, edits) || !applyEdits(doc.qml, edits))
@@ -1501,6 +1720,9 @@ Result apply(const QString &exePath, const QString &id, bool enabled)
         if (!QtResources::replaceResource(changed, doc.file.entryOff, doc.link,
                                           header + doc.qml.toUtf8(), &error)) return refuse(error);
     } else {
+        const Snapshot before = inspect(original);
+        if (before.shape.layout == SidebarLayout::None || !before.shape.editable)
+            return refuse(before.shape.detail);
         const bool upgrade = enabled && before.shape.patched && before.shape.legacyOverlay;
         const bool repair = enabled && before.shape.patched && !before.shape.responsiveCurrent && !upgrade;
         if (before.shape.patched == enabled && !upgrade && !repair)
@@ -1549,13 +1771,21 @@ Result apply(const QString &exePath, const QString &id, bool enabled)
                                               header + doc.qml.toUtf8(), &error)) return refuse(error);
         }
     }
-    const Snapshot after = inspect(changed);
-    const bool verified = after.shape.layout != SidebarLayout::None && after.shape.editable
-        && (id == kResponsiveSidebar
-            ? !after.shape.patched && after.shape.responsive == enabled
-                  && (!enabled || after.shape.responsiveCurrent)
-            : after.shape.patched == enabled && (!enabled ||
-                (after.shape.responsiveCurrent && !after.shape.legacyOverlay)));
+    // The sidebar option is verified on PlrSidebar.qml alone; the title-bar
+    // option still has to prove the complete layout on all three files.
+    bool verified = false;
+    if (id == kResponsiveSidebar) {
+        Doc after;
+        QString error;
+        verified = findDoc(changed, QStringLiteral("PlrSidebar.qml"), &after, &error)
+            && after.qml.contains(kResponsiveBegin) == enabled
+            && (!enabled || hasCurrentResponsiveHelper(after.qml));
+    } else {
+        const Snapshot after = inspect(changed);
+        verified = after.shape.layout != SidebarLayout::None && after.shape.editable
+            && after.shape.patched == enabled
+            && (!enabled || (after.shape.responsiveCurrent && !after.shape.legacyOverlay));
+    }
     if (!verified)
         return refuse(QStringLiteral("The written layout did not pass resource/read-back "
                                      "verification; no file was written."));
