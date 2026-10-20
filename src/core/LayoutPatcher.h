@@ -24,6 +24,7 @@ struct State
 {
     bool supported = false; // the player's QML has the expected shape
     bool applied = false;   // the tweak is currently written into the EXE
+    bool needsUpdate = false; // older title-bar patch can be upgraded in place
     QString detail;         // why not supported, when applicable
 };
 

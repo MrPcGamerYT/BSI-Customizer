@@ -170,10 +170,11 @@ Item {
                                 Text {
                                     Layout.fillWidth: true
                                     wrapMode: Text.Wrap
-                                    text: !modelData.supported ? modelData.state
+                                    text: !modelData.supported || modelData.needsUpdate
+                                          ? modelData.state
                                           : (modelData.applied
-                                             ? modelData.state + qsTr(" Untick to restore the stock sidebar.")
-                                             : qsTr("Ready — tick and press Apply to move the buttons to the title bar."))
+                                             ? modelData.state + qsTr(" Untick to restore this tweak.")
+                                             : qsTr("Ready — tick and press Apply."))
                                     color: !modelData.supported ? Theme.warn
                                            : (modelData.applied ? Theme.green : Theme.textDim)
                                     font.pixelSize: 11
@@ -194,11 +195,14 @@ Item {
                             accent: true
                             implicitHeight: 28
                             enabled: modelData.supported
-                                     && tweakCheck.checked !== !!modelData.applied
+                                     && (tweakCheck.checked !== !!modelData.applied
+                                         || (modelData.needsUpdate && tweakCheck.checked))
                             text: !modelData.supported
                                   ? qsTr("Unavailable")
                                   : (modelData.applied
-                                     ? (tweakCheck.checked ? qsTr("Applied") : qsTr("Restore"))
+                                     ? (tweakCheck.checked
+                                        ? (modelData.needsUpdate ? qsTr("Update") : qsTr("Applied"))
+                                        : qsTr("Restore"))
                                      : qsTr("Apply"))
                             onClicked: {
                                 const result = backend.applyLayoutTweak(modelData.id,

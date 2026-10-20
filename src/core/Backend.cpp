@@ -1162,6 +1162,7 @@ QVariantList Backend::layoutTweaks()
             { QStringLiteral("detail"), t.detail },
             { QStringLiteral("supported"), state.supported },
             { QStringLiteral("applied"), state.applied },
+            { QStringLiteral("needsUpdate"), state.needsUpdate },
             { QStringLiteral("state"), state.detail },
         };
     }

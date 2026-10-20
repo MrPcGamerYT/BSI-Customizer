@@ -1677,31 +1677,86 @@ int runPatchRegressionTests()
             "import QtQuick 2.15\r\n"
             "Rectangle {\r\n"
             "    id: iSidebar\r\n"
+            "    property int pSidebarElementSize: 32\r\n"
+            "    property int pVisibleSidebarElementsCount: 0\r\n"
+            "    property string pSound: \"sound\"\r\n"
+            "    property list<QtObject> pAllSidebarItems: [\r\n"
+            "        PlrSidebarElement { pElementId: pSound; pShowViaRepaterOnly: true; pIsFeatureEnable: true },\r\n"
+            "        PlrSidebarElement { pElementId: \"screen\"; pShowViaRepaterOnly: true; pIsFeatureEnable: false }\r\n"
+            "    ]\r\n"
             "    onHeightChanged: {\r\n"
             "        fResetSidebar()\r\n"
             "    }\r\n"
             "    function fResetSidebar() {\r\n"
-            "        var availableHeight = iSidebar.height\r\n"
+            "        var availableHeight = iSidebar.height - iCollapseBtn.height\r\n"
             "        if (iSidebar.height < 32 * 7)\r\n"
             "            availableHeight = availableHeight - iKebabMenuBtn.height\r\n"
+            "        if (availableHeight >= iRecentBtn.height) { iRecentBtn.visible = true; availableHeight -= iRecentBtn.height }\r\n"
+            "        else iRecentBtn.visible = false\r\n"
+            "        if (availableHeight >= iHomeBtn.height) { iHomeBtn.visible = true; availableHeight -= iHomeBtn.height }\r\n"
+            "        else iHomeBtn.visible = false\r\n"
+            "        if (availableHeight >= iBackBtn.height) { iBackBtn.visible = true; availableHeight -= iBackBtn.height }\r\n"
+            "        else iBackBtn.visible = false\r\n"
+            "        if (availableHeight >= iSettingsBtn.height) { iSettingsBtn.visible = true; availableHeight -= iSettingsBtn.height }\r\n"
+            "        else iSettingsBtn.visible = false\r\n"
+            "    }\r\n"
+            "    Component {\r\n"
+            "        id: iSoundPopupComponent\r\n"
+            "        UiWindowedPopup {\r\n"
+            "            id: iSoundPopup\r\n"
+            "            onWidthChanged: {\r\n"
+            "                iSoundPopup.x = iSidebar.mapToGlobal(0, 0).x - iSoundPopup.width + iSoundPopup.shadowThickness\r\n"
+            "            }\r\n"
+            "        }\r\n"
+            "    }\r\n"
+            "    Component {\r\n"
+            "        id: iMenuPopupComponent\r\n"
+            "        UiWindowedPopup {\r\n"
+            "            Flow {\r\n"
+            "                Repeater {\r\n"
+            "                    model: pAllSidebarItems\r\n"
+            "                    delegate: UiImageButton {\r\n"
+            "                        visible: (index >= pVisibleSidebarElementsCount) && model.modelData.pIsFeatureEnable && model.modelData.pShowOnKebabMenu\r\n"
+            "                    }\r\n"
+            "                }\r\n"
+            "            }\r\n"
+            "        }\r\n"
             "    }\r\n"
             "    UiColumnLayout {\r\n"
             "        anchors.fill: parent\r\n"
+            "        UiImageButton { id: iCollapseBtn }\r\n"
+            "        Repeater {\r\n"
+            "            model: pAllSidebarItems\r\n"
+            "            delegate: UiImageButton {\r\n"
+            "                visible: index < pVisibleSidebarElementsCount && modelData.pIsFeatureEnable\r\n"
+            "            }\r\n"
+            "        }\r\n"
             "        UiImageButton {\r\n"
             "            id: iKebabMenuBtn\r\n"
             "            Layout.alignment: Qt.AlignHCenter\r\n"
+            "            onClicked: {\r\n"
+            "                var menuWin = iSoundPopupComponent.createObject(iAppwin)\r\n"
+            "                menuWin.x = iSidebar.mapToGlobal(0, 0).x - menuWin.width + menuWin.shadowThickness\r\n"
+            "                menuWin.y = iKebabMenuBtn.mapToGlobal(0, 0).y - menuWin.shadowThickness\r\n"
+            "            }\r\n"
             "        }\r\n"
             "        Item {\r\n"
             "            Layout.fillHeight: true\r\n"
             "        }\r\n"
             "        UiImageButton {\r\n"
-            "            id: iDiscordBtn\r\n"
+            "            id: iSettingsBtn\r\n"
             "            Layout.preferredWidth: pSidebarElementSize\r\n"
             "        }\r\n"
-            "        UiImageButton {\r\n"
-            "            id: iBackBtn\r\n"
-            "        }\r\n"
+            "        UiImageButton { id: iBackBtn }\r\n"
+            "        UiImageButton { id: iHomeBtn }\r\n"
+            "        UiImageButton { id: iRecentBtn }\r\n"
             "    }\r\n"
+            "    function fOpenSoundPopup() {\r\n"
+            "        var soundWin = iSoundPopupComponent.createObject(iAppwin)\r\n"
+            "        soundWin.x = iSidebar.mapToGlobal(0, 0).x - soundWin.width + soundWin.shadowThickness\r\n"
+            "        soundWin.y = fGetPopupTopPoint(pSound) - soundWin.shadowThickness\r\n"
+            "    }\r\n"
+            "    function fGetPopupTopPoint(elementId) { return iSidebar.mapToGlobal(0, 0).y }\r\n"
             "}\r\n");
         const QString topbar = QStringLiteral(
             "import QtQuick 2.15\r\n"
@@ -1822,8 +1877,11 @@ int runPatchRegressionTests()
         };
 
         const QString id = QStringLiteral("sidebar-to-titlebar");
-        check(LayoutPatcher::tweaks().size() == 1 && LayoutPatcher::tweaks().front().id == id,
-              "the layout family exposes the sidebar-to-titlebar tweak");
+        const QString smartId = QStringLiteral("responsive-sidebar");
+        check(LayoutPatcher::tweaks().size() == 2
+                  && LayoutPatcher::tweaks().front().id == id
+                  && LayoutPatcher::tweaks().last().id == smartId,
+              "the layout family offers responsive overflow for the stock sidebar and title bar");
 
         auto r = resources({ { QStringLiteral("plr.qml"), anchoredPlr },
                              { QStringLiteral("PlrSidebar.qml"), sidebar },
@@ -1833,8 +1891,39 @@ int runPatchRegressionTests()
         const QByteArray original = r.f.bytes;
         const auto stock = LayoutPatcher::analyze(original, id);
         check(stock.supported && !stock.applied, "the stock anchored player shape is recognized as supported and unpatched");
+        check(LayoutPatcher::analyze(original, smartId).supported
+                  && !LayoutPatcher::analyze(original, smartId).applied,
+              "smart overflow is available on the stock vertical sidebar");
         check(!LayoutPatcher::analyze(original, QStringLiteral("no-such-tweak")).supported,
               "an unknown tweak id is unsupported instead of guessed at");
+        const QString smartPath = temp.filePath(QStringLiteral("layout-smart.exe"));
+        write(smartPath, original);
+        const auto smartApplied = LayoutPatcher::apply(smartPath, smartId, true);
+        if (!smartApplied.ok) std::printf("    %s\n", qPrintable(smartApplied.msg));
+        check(smartApplied.ok && LayoutPatcher::analyze(read(smartPath), smartId).applied,
+              "stock sidebar can turn on responsive overflow without moving buttons");
+        const QString smartSidebar = resourceText(read(smartPath), r, QStringLiteral("PlrSidebar.qml"));
+        check(smartSidebar.contains(QLatin1String("var available = iSidebar.height"))
+                  && smartSidebar.contains(QLatin1String("var cutoff = -1"))
+                  && smartSidebar.contains(QLatin1String("fBSIPopupPoint(soundWin, pSound).y"))
+                  && smartSidebar.contains(QLatin1String("fBSIPopupPoint(menuWin, null).y"))
+                  && smartSidebar.contains(QLatin1String("fBSIPopupPoint(iSoundPopup, iSoundPopup.pBSIAnchor).x"))
+                  && smartSidebar.contains(QLatin1String("fBSIInOverflow(model.modelData)")),
+              "stock layout fits enabled buttons, sends only overflow to kebab, and anchors panels below their trigger");
+        check(LayoutPatcher::apply(smartPath, id, true).ok,
+              "the responsive stock sidebar can move to the title bar");
+        const auto movedSmart = resourceText(read(smartPath), r, QStringLiteral("PlrSidebar.qml"));
+        check(movedSmart.contains(QLatin1String("var available = iSidebar.width"))
+                  && !movedSmart.contains(QLatin1String("var available = iSidebar.height")),
+              "an independently enabled smart overflow budget follows the title-bar width");
+        check(LayoutPatcher::apply(smartPath, id, false).ok
+                  && resourceText(read(smartPath), r, QStringLiteral("PlrSidebar.qml")) == smartSidebar
+                  && LayoutPatcher::analyze(read(smartPath), smartId).applied,
+              "restoring the sidebar keeps a separately enabled responsive fix, byte-for-byte");
+        check(LayoutPatcher::apply(smartPath, smartId, false).ok
+                  && resourceText(read(smartPath), r, QStringLiteral("PlrSidebar.qml")) == sidebar
+                  && resourceText(read(smartPath), r, QStringLiteral("plr.qml")) == anchoredPlr,
+              "turning off the responsive fix restores the original stock QML byte-for-byte");
         const QString path = temp.filePath(QStringLiteral("layout.exe"));
         write(path, original);
         const auto applied = LayoutPatcher::apply(path, id, true);
@@ -1913,8 +2002,140 @@ int runPatchRegressionTests()
               "the zero-width original hides its row instead of painting outside the strip");
         check(patchedSidebar.contains(QLatin1String("onWidthChanged"))
                   && !patchedSidebar.contains(QLatin1String("onHeightChanged"))
-                  && !patchedSidebar.contains(QLatin1String("iSidebar.height")),
-              "the overflow budget is measured on the new dimension");
+                  && !patchedSidebar.contains(QLatin1String("iSidebar.height"))
+                  && patchedSidebar.contains(QLatin1String("var available = iSidebar.width"))
+                  && patchedSidebar.contains(QLatin1String("iKebabMenuBtn.visible = overflow && capacity > 0")),
+              "the kebab appears only when enabled buttons exceed the width budget");
+        check(patchedSidebar.contains(QLatin1String("var cutoff = -1"))
+                  && patchedSidebar.contains(QLatin1String("pVisibleSidebarElementsCount = cutoff + 1"))
+                  && patchedSidebar.contains(QLatin1String("fBSIInOverflow(model.modelData)"))
+                  && patchedSidebar.contains(QLatin1String("return !delegate || !delegate.visible")),
+              "disabled items do not consume a slot or hide later buttons from the overflow menu");
+        check(patchedSidebar.contains(QLatin1String("fBSIPopupPoint(soundWin, pSound).x"))
+                  && patchedSidebar.contains(QLatin1String("fBSIPopupPoint(soundWin, pSound).y"))
+                  && patchedSidebar.contains(QLatin1String("fBSIPopupPoint(menuWin, null).y"))
+                  && patchedSidebar.contains(QLatin1String("iBSISidebarButtons.itemAt(i)"))
+                  && patchedSidebar.contains(QLatin1String("button.mapToGlobal(button.width / 2, button.height)")),
+              "sound and other panels follow their real button (or the three dots), below it");
+        // Execute the injected QML itself with real QtQuick items: a disabled
+        // model entry must not steal a slot, and popup coordinates must come
+        // from the delegate actually under the sound button (or the kebab).
+        const int helperAt = patchedSidebar.indexOf(QStringLiteral("    // BSI CUSTOMIZER: responsive sidebar begin"));
+        const int helperEnd = patchedSidebar.indexOf(QStringLiteral("    // BSI CUSTOMIZER: responsive sidebar end"), helperAt);
+        check(helperAt >= 0 && helperEnd > helperAt, "responsive overflow and popup helpers are present in the patched source");
+        if (helperAt >= 0 && helperEnd > helperAt) {
+            const QString helpers = patchedSidebar.mid(helperAt, helperEnd - helperAt
+                + QStringLiteral("    // BSI CUSTOMIZER: responsive sidebar end").size());
+            const QString testQml = QStringLiteral(R"QML(import QtQuick 2.15
+import QtQuick.Window 2.15
+Window {
+    id: iAppwin
+    visible: false
+    width: 900; height: 600
+    Item {
+        id: iSidebar
+        objectName: "responsiveBar"
+        x: 144; width: 288; height: 32
+        property int pSidebarElementSize: 32
+        property int pVisibleSidebarElementsCount: 0
+        property bool soundOverflow: false
+        property var pAllSidebarItems: [
+            { pElementId: "first", pIsFeatureEnable: true, pShowViaRepaterOnly: true, pShowOnKebabMenu: false },
+            { pElementId: "disabled", pIsFeatureEnable: false, pShowViaRepaterOnly: true, pShowOnKebabMenu: false },
+            { pElementId: "sound", pIsFeatureEnable: true, pShowViaRepaterOnly: true, pShowOnKebabMenu: false },
+            { pElementId: "third", pIsFeatureEnable: true, pShowViaRepaterOnly: true, pShowOnKebabMenu: false },
+            { pElementId: "fourth", pIsFeatureEnable: true, pShowViaRepaterOnly: true, pShowOnKebabMenu: false },
+            { pElementId: "fifth", pIsFeatureEnable: true, pShowViaRepaterOnly: true, pShowOnKebabMenu: false }
+        ]
+        Item {
+            id: iBSISidebarLayout
+            property int spacing: 0
+            property int leftPadding: 0
+            property int rightPadding: 0
+            Repeater {
+                id: iBSISidebarButtons
+                model: pAllSidebarItems
+                delegate: Rectangle {
+                    objectName: modelData.pElementId
+                    x: index * 32
+                    width: 32; height: 32
+                    visible: index < pVisibleSidebarElementsCount && modelData.pIsFeatureEnable
+                }
+            }
+        }
+        Rectangle { id: iKebabMenuBtn; objectName: "threeDots"; x: pVisibleSidebarElementsCount * 32; width: 32; height: 32 }
+        Rectangle { id: iCollapseBtn; visible: false; width: 32; height: 32 }
+        Rectangle { id: iSettingsBtn; width: 32; height: 32 }
+        Rectangle { id: iBackBtn; width: 32; height: 32 }
+        Rectangle { id: iHomeBtn; width: 32; height: 32 }
+        Rectangle { id: iRecentBtn; width: 32; height: 32 }
+        QtObject {
+            id: mockPopup
+            objectName: "soundPanel"
+            property real x: 0; property real y: 0
+            property real width: 100; property real height: 90
+            property int shadowThickness: 4
+            property var pBSIAnchor: undefined
+            property var screen: null
+        }
+        function probeSound() {
+            var point = fBSIPopupPoint(mockPopup, "sound")
+            mockPopup.x = point.x; mockPopup.y = point.y
+        }
+        function probeMenu() {
+            var point = fBSIPopupPoint(mockPopup, null)
+            mockPopup.x = point.x; mockPopup.y = point.y
+        }
+        function soundIsOverflow() { soundOverflow = fBSIInOverflow(pAllSidebarItems[2]) }
+)QML") + helpers + QStringLiteral("\n    }\n}\n");
+            QQmlEngine runtimeEngine;
+            QQmlComponent runtime(&runtimeEngine);
+            runtime.setData(testQml.toUtf8(), QUrl());
+            std::unique_ptr<QObject> window(runtime.create());
+            if (!window) for (const auto &error : runtime.errors())
+                std::printf("    layout QML: %s\n", qPrintable(error.toString()));
+            check(window != nullptr, "the injected responsive sidebar helpers compile in QtQuick");
+            if (window) {
+                auto *bar = window->findChild<QQuickItem *>(QStringLiteral("responsiveBar"));
+                auto *dots = window->findChild<QQuickItem *>(QStringLiteral("threeDots"));
+                auto *sound = window->findChild<QQuickItem *>(QStringLiteral("sound"));
+                auto *panel = window->findChild<QObject *>(QStringLiteral("soundPanel"));
+                if (bar && dots && sound && panel) {
+                    bar->setWidth(288); // five enabled repeatable + four fixed = nine 32px slots
+                    QMetaObject::invokeMethod(bar, "fBSIUpdateOverflow");
+                    QCoreApplication::processEvents();
+                    check(!dots->isVisible() && bar->property("pVisibleSidebarElementsCount").toInt() == 6
+                              && sound->isVisible(),
+                          "no three dots at exact fit, including a disabled model entry in the index cutoff");
+                    QMetaObject::invokeMethod(bar, "probeSound");
+                    const QPointF soundBottom = sound->mapToGlobal(QPointF(sound->width() / 2, sound->height()));
+                    check(qAbs(panel->property("y").toReal() - (soundBottom.y() + 2)) < 1,
+                          "the sound panel opens below its own visible top-bar button");
+                    bar->setWidth(256);
+                    QMetaObject::invokeMethod(bar, "fBSIUpdateOverflow");
+                    QCoreApplication::processEvents();
+                    check(dots->isVisible() && bar->property("pVisibleSidebarElementsCount").toInt() == 4
+                              && sound->isVisible(),
+                          "one slot lost triggers overflow without hiding earlier enabled buttons");
+                    bar->setWidth(32);
+                    QMetaObject::invokeMethod(bar, "fBSIUpdateOverflow");
+                    QCoreApplication::processEvents();
+                    QMetaObject::invokeMethod(bar, "soundIsOverflow");
+                    check(dots->isVisible() && !sound->isVisible()
+                              && bar->property("soundOverflow").toBool(),
+                          "a hidden sound button moves into the three-dot menu even if its stock menu flag is false");
+                    QMetaObject::invokeMethod(bar, "probeSound");
+                    const QPointF dotsBottom = dots->mapToGlobal(QPointF(dots->width() / 2, dots->height()));
+                    check(qAbs(panel->property("y").toReal() - (dotsBottom.y() + 2)) < 1,
+                          "the overflowed sound panel opens below the three-dot button");
+                    bar->setWidth(288);
+                    QMetaObject::invokeMethod(bar, "fBSIUpdateOverflow");
+                    QCoreApplication::processEvents();
+                    check(!dots->isVisible() && sound->isVisible(),
+                          "resizing larger restores every fitting button and hides the three dots again");
+                } else check(false, "the responsive QML exposes its panel, buttons and three-dot menu");
+            }
+        }
         const auto patchedTopbar = resourceText(read(path), r, QStringLiteral("PlrTopbar.qml"));
         check(patchedTopbar.count(QStringLiteral("visible: false")) == 1
                   && !patchedTopbar.contains(QLatin1String("iBackBtn.visible: false")),
@@ -1923,7 +2144,12 @@ int runPatchRegressionTests()
                   && patchedTopbar.count(QStringLiteral("pVisible: true")) == 0,
               "the duplicated Back/Home/Recent entries leave the title bar");
         // Upgrade an EXE patched by the previous duplicate-instance version.
-        // Its exact generated text is kept here to pin backwards compatibility.
+        // That version had the horizontal row but no responsive/popup fix.
+        QString oldSidebar = sidebar;
+        oldSidebar.replace(QStringLiteral("onHeightChanged"), QStringLiteral("onWidthChanged"));
+        oldSidebar.replace(QStringLiteral("iSidebar.height"), QStringLiteral("iSidebar.width"));
+        oldSidebar.replace(QStringLiteral("    UiColumnLayout {\r\n        anchors.fill: parent"),
+                           QStringLiteral("    UiRowLayout {\nvisible: iSidebar.width > 0\r\n        anchors.centerIn: parent"));
         const QString oldHost = QStringLiteral(
             "\r\n        PlrSidebar {\r\n"
             "            // BSI CUSTOMIZER: sidebar buttons over the title bar\r\n"
@@ -1940,7 +2166,7 @@ int runPatchRegressionTests()
             // hostQml starts at Item, after the preceding newline + indentation.
             oldPlr.replace(QStringLiteral("\r\n        ") + hostQml, oldHost);
             auto previous = resources({ { QStringLiteral("plr.qml"), oldPlr },
-                                        { QStringLiteral("PlrSidebar.qml"), patchedSidebar },
+                                        { QStringLiteral("PlrSidebar.qml"), oldSidebar },
                                         { QStringLiteral("PlrTopbar.qml"), patchedTopbar } }, true, {});
             addRegistration(previous, false);
             const QString previousPath = temp.filePath(QStringLiteral("layout-upgrade.exe"));
@@ -1959,6 +2185,22 @@ int runPatchRegressionTests()
                       && resourceText(read(previousPath), previous, QStringLiteral("PlrSidebar.qml")) == sidebar,
                   "the upgraded version still restores the original stock documents exactly");
         }
+        auto oldSingle = resources({ { QStringLiteral("plr.qml"), patchedPlr },
+                                     { QStringLiteral("PlrSidebar.qml"), oldSidebar },
+                                     { QStringLiteral("PlrTopbar.qml"), patchedTopbar } }, true, {});
+        addRegistration(oldSingle, false);
+        const QString oldSinglePath = temp.filePath(QStringLiteral("layout-old-single.exe"));
+        write(oldSinglePath, oldSingle.f.bytes);
+        const auto oldState = LayoutPatcher::analyze(read(oldSinglePath), id);
+        check(oldState.supported && oldState.applied && oldState.needsUpdate,
+              "earlier single-owner title bars offer an in-place overflow/popup update");
+        check(LayoutPatcher::apply(oldSinglePath, id, true).ok
+                  && resourceText(read(oldSinglePath), oldSingle, QStringLiteral("PlrSidebar.qml")) == patchedSidebar
+                  && !LayoutPatcher::analyze(read(oldSinglePath), id).needsUpdate,
+              "Update adds smart overflow and anchored panels without changing the existing title bar");
+        check(LayoutPatcher::apply(oldSinglePath, id, false).ok
+                  && resourceText(read(oldSinglePath), oldSingle, QStringLiteral("PlrSidebar.qml")) == sidebar,
+              "an updated earlier title bar still restores the stock sidebar byte-for-byte");
         const QByteArray afterFirst = read(path);
         const auto again = LayoutPatcher::apply(path, id, true);
         check(again.ok && read(path) == afterFirst
@@ -2009,6 +2251,60 @@ int runPatchRegressionTests()
                   && resourceText(legacyRestored, legacy, QStringLiteral("PlrSidebar.qml")) == sidebar
                   && resourceText(legacyRestored, legacy, QStringLiteral("PlrTopbar.qml")) == topbar,
               "the old player restores every edited document byte-for-byte");
+
+        // ---- current player: filtered list, conditional AI/Discord controls,
+        // decorated Settings Item, and the correct "Repeater" spelling ----
+        QString filteredSidebar = sidebar;
+        filteredSidebar.replace(QStringLiteral("    property list<QtObject> pAllSidebarItems:"),
+                                QStringLiteral("    property list<QtObject> pSidebarItems\r\n"
+                                               "    property list<QtObject> pAllSidebarItems:"));
+        filteredSidebar.replace(QStringLiteral("pShowViaRepaterOnly"),
+                                QStringLiteral("pShowViaRepeaterOnly"));
+        filteredSidebar.replace(QStringLiteral("model: pAllSidebarItems"),
+                                QStringLiteral("model: pSidebarItems"));
+        filteredSidebar.replace(QStringLiteral("pIsFeatureEnable: false }\r\n    ]"),
+                                QStringLiteral("pIsFeatureEnable: false },\r\n"
+                                               "        PlrSidebarElement { pElementId: \"back\"; "
+                                               "pShowViaRepeaterOnly: false; pIsFeatureEnable: true; "
+                                               "pShowOnKebabMenu: !iBackBtn.visible }\r\n    ]"));
+        filteredSidebar.replace(QStringLiteral("        else iSettingsBtn.visible = false\r\n"),
+                                QStringLiteral("        else iSettingsBtn.visible = false\r\n"
+                                               "        iDiscordBtn.visible = iAppwin.pIsBootComplete\r\n"
+                                               "        pSidebarItems = []\r\n"
+                                               "        for (var i = 0; i < pAllSidebarItems.length; ++i)\r\n"
+                                               "            if (pAllSidebarItems[i].pIsFeatureEnable && "
+                                               "pAllSidebarItems[i].pShowViaRepeaterOnly)\r\n"
+                                               "                pSidebarItems.push(pAllSidebarItems[i])\r\n"));
+        filteredSidebar.replace(QStringLiteral("        UiImageButton {\r\n"
+                                               "            id: iSettingsBtn\r\n"
+                                               "            Layout.preferredWidth: pSidebarElementSize\r\n"
+                                               "        }"),
+                                QStringLiteral("        UiImageButton { id: iDiscordBtn; "
+                                               "visible: iAppwin.pIsBootComplete }\r\n"
+                                               "        Item {\r\n"
+                                               "            id: iSettingsBtn\r\n"
+                                               "            Layout.preferredWidth: pSidebarElementSize\r\n"
+                                               "            UiImageButton { }\r\n"
+                                               "        }"));
+        auto filtered = resources({ { QStringLiteral("plr.qml"), anchoredPlr },
+                                    { QStringLiteral("PlrSidebar.qml"), filteredSidebar },
+                                    { QStringLiteral("PlrTopbar.qml"), topbar } }, true, {});
+        addRegistration(filtered, false);
+        const auto filteredStock = LayoutPatcher::analyze(filtered.f.bytes, id);
+        check(filteredStock.supported, "filtered current-player model and decorated Settings are supported");
+        const QString filteredPath = temp.filePath(QStringLiteral("layout-filtered.exe"));
+        write(filteredPath, filtered.f.bytes);
+        const auto filteredApplied = LayoutPatcher::apply(filteredPath, id, true);
+        if (!filteredApplied.ok) std::printf("    %s\n", qPrintable(filteredApplied.msg));
+        const auto fixedQml = resourceText(read(filteredPath), filtered, QStringLiteral("PlrSidebar.qml"));
+        check(filteredApplied.ok && fixedQml.contains(QLatin1String("pSidebarItems = enabledItems"))
+                  && fixedQml.contains(QLatin1String("enabledItems.push(pAllSidebarItems[i])"))
+                  && fixedQml.contains(QLatin1String("items[i].pShowViaRepeaterOnly"))
+                  && fixedQml.contains(QLatin1String("allowed: (iAppwin.pIsBootComplete)")),
+              "active and hidden fixed buttons remain in the kebab model; conditional buttons keep their feature gate");
+        check(LayoutPatcher::apply(filteredPath, id, false).ok
+                  && resourceText(read(filteredPath), filtered, QStringLiteral("PlrSidebar.qml")) == filteredSidebar,
+              "filtered current-player shape restores byte-for-byte");
 
         // ---- 5.10 title bar whose toggle already binds `visible` ----
         // A second `visible:` member would be a duplicate binding (a QML error),
