@@ -1688,9 +1688,17 @@ int runPatchRegressionTests()
             "        fResetSidebar()\r\n"
             "    }\r\n"
             "    function fResetSidebar() {\r\n"
-            "        var availableHeight = iSidebar.height\r\n"
+            "        var availableHeight = iSidebar.height - iCollapseBtn.height\r\n"
             "        if (iSidebar.height < 32 * 7)\r\n"
             "            availableHeight = availableHeight - iKebabMenuBtn.height\r\n"
+            "        if (availableHeight >= iRecentBtn.height) { iRecentBtn.visible = true; availableHeight -= iRecentBtn.height }\r\n"
+            "        else iRecentBtn.visible = false\r\n"
+            "        if (availableHeight >= iHomeBtn.height) { iHomeBtn.visible = true; availableHeight -= iHomeBtn.height }\r\n"
+            "        else iHomeBtn.visible = false\r\n"
+            "        if (availableHeight >= iBackBtn.height) { iBackBtn.visible = true; availableHeight -= iBackBtn.height }\r\n"
+            "        else iBackBtn.visible = false\r\n"
+            "        if (availableHeight >= iSettingsBtn.height) { iSettingsBtn.visible = true; availableHeight -= iSettingsBtn.height }\r\n"
+            "        else iSettingsBtn.visible = false\r\n"
             "    }\r\n"
             "    Component {\r\n"
             "        id: iSoundPopupComponent\r\n"
@@ -1716,6 +1724,7 @@ int runPatchRegressionTests()
             "    }\r\n"
             "    UiColumnLayout {\r\n"
             "        anchors.fill: parent\r\n"
+            "        UiImageButton { id: iCollapseBtn }\r\n"
             "        Repeater {\r\n"
             "            model: pAllSidebarItems\r\n"
             "            delegate: UiImageButton {\r\n"
@@ -2029,6 +2038,7 @@ Window {
         x: 144; width: 288; height: 32
         property int pSidebarElementSize: 32
         property int pVisibleSidebarElementsCount: 0
+        property bool soundOverflow: false
         property var pAllSidebarItems: [
             { pElementId: "first", pIsFeatureEnable: true, pShowViaRepaterOnly: true, pShowOnKebabMenu: false },
             { pElementId: "disabled", pIsFeatureEnable: false, pShowViaRepaterOnly: true, pShowOnKebabMenu: false },
@@ -2054,6 +2064,7 @@ Window {
             }
         }
         Rectangle { id: iKebabMenuBtn; objectName: "threeDots"; x: pVisibleSidebarElementsCount * 32; width: 32; height: 32 }
+        Rectangle { id: iCollapseBtn; visible: false; width: 32; height: 32 }
         Rectangle { id: iSettingsBtn; width: 32; height: 32 }
         Rectangle { id: iBackBtn; width: 32; height: 32 }
         Rectangle { id: iHomeBtn; width: 32; height: 32 }
@@ -2075,7 +2086,7 @@ Window {
             var point = fBSIPopupPoint(mockPopup, null)
             mockPopup.x = point.x; mockPopup.y = point.y
         }
-        function soundIsOverflow() { return fBSIInOverflow(pAllSidebarItems[2]) }
+        function soundIsOverflow() { soundOverflow = fBSIInOverflow(pAllSidebarItems[2]) }
 )QML") + helpers + QStringLiteral("\n    }\n}\n");
             QQmlEngine runtimeEngine;
             QQmlComponent runtime(&runtimeEngine);
@@ -2109,9 +2120,9 @@ Window {
                     bar->setWidth(32);
                     QMetaObject::invokeMethod(bar, "fBSIUpdateOverflow");
                     QCoreApplication::processEvents();
-                    QVariant overflow;
-                    QMetaObject::invokeMethod(bar, "soundIsOverflow", Q_RETURN_ARG(QVariant, overflow));
-                    check(dots->isVisible() && !sound->isVisible() && overflow.toBool(),
+                    QMetaObject::invokeMethod(bar, "soundIsOverflow");
+                    check(dots->isVisible() && !sound->isVisible()
+                              && bar->property("soundOverflow").toBool(),
                           "a hidden sound button moves into the three-dot menu even if its stock menu flag is false");
                     QMetaObject::invokeMethod(bar, "probeSound");
                     const QPointF dotsBottom = dots->mapToGlobal(QPointF(dots->width() / 2, dots->height()));
@@ -2240,6 +2251,60 @@ Window {
                   && resourceText(legacyRestored, legacy, QStringLiteral("PlrSidebar.qml")) == sidebar
                   && resourceText(legacyRestored, legacy, QStringLiteral("PlrTopbar.qml")) == topbar,
               "the old player restores every edited document byte-for-byte");
+
+        // ---- current player: filtered list, conditional AI/Discord controls,
+        // decorated Settings Item, and the correct "Repeater" spelling ----
+        QString filteredSidebar = sidebar;
+        filteredSidebar.replace(QStringLiteral("    property list<QtObject> pAllSidebarItems:"),
+                                QStringLiteral("    property list<QtObject> pSidebarItems\r\n"
+                                               "    property list<QtObject> pAllSidebarItems:"));
+        filteredSidebar.replace(QStringLiteral("pShowViaRepaterOnly"),
+                                QStringLiteral("pShowViaRepeaterOnly"));
+        filteredSidebar.replace(QStringLiteral("model: pAllSidebarItems"),
+                                QStringLiteral("model: pSidebarItems"));
+        filteredSidebar.replace(QStringLiteral("pIsFeatureEnable: false }\r\n    ]"),
+                                QStringLiteral("pIsFeatureEnable: false },\r\n"
+                                               "        PlrSidebarElement { pElementId: \"back\"; "
+                                               "pShowViaRepeaterOnly: false; pIsFeatureEnable: true; "
+                                               "pShowOnKebabMenu: !iBackBtn.visible }\r\n    ]"));
+        filteredSidebar.replace(QStringLiteral("        else iSettingsBtn.visible = false\r\n"),
+                                QStringLiteral("        else iSettingsBtn.visible = false\r\n"
+                                               "        iDiscordBtn.visible = iAppwin.pIsBootComplete\r\n"
+                                               "        pSidebarItems = []\r\n"
+                                               "        for (var i = 0; i < pAllSidebarItems.length; ++i)\r\n"
+                                               "            if (pAllSidebarItems[i].pIsFeatureEnable && "
+                                               "pAllSidebarItems[i].pShowViaRepeaterOnly)\r\n"
+                                               "                pSidebarItems.push(pAllSidebarItems[i])\r\n"));
+        filteredSidebar.replace(QStringLiteral("        UiImageButton {\r\n"
+                                               "            id: iSettingsBtn\r\n"
+                                               "            Layout.preferredWidth: pSidebarElementSize\r\n"
+                                               "        }"),
+                                QStringLiteral("        UiImageButton { id: iDiscordBtn; "
+                                               "visible: iAppwin.pIsBootComplete }\r\n"
+                                               "        Item {\r\n"
+                                               "            id: iSettingsBtn\r\n"
+                                               "            Layout.preferredWidth: pSidebarElementSize\r\n"
+                                               "            UiImageButton { }\r\n"
+                                               "        }"));
+        auto filtered = resources({ { QStringLiteral("plr.qml"), anchoredPlr },
+                                    { QStringLiteral("PlrSidebar.qml"), filteredSidebar },
+                                    { QStringLiteral("PlrTopbar.qml"), topbar } }, true, {});
+        addRegistration(filtered, false);
+        const auto filteredStock = LayoutPatcher::analyze(filtered.f.bytes, id);
+        check(filteredStock.supported, "filtered current-player model and decorated Settings are supported");
+        const QString filteredPath = temp.filePath(QStringLiteral("layout-filtered.exe"));
+        write(filteredPath, filtered.f.bytes);
+        const auto filteredApplied = LayoutPatcher::apply(filteredPath, id, true);
+        if (!filteredApplied.ok) std::printf("    %s\n", qPrintable(filteredApplied.msg));
+        const auto fixedQml = resourceText(read(filteredPath), filtered, QStringLiteral("PlrSidebar.qml"));
+        check(filteredApplied.ok && fixedQml.contains(QLatin1String("pSidebarItems = enabledItems"))
+                  && fixedQml.contains(QLatin1String("enabledItems.push(pAllSidebarItems[i])"))
+                  && fixedQml.contains(QLatin1String("items[i].pShowViaRepeaterOnly"))
+                  && fixedQml.contains(QLatin1String("allowed: (iAppwin.pIsBootComplete)")),
+              "active and hidden fixed buttons remain in the kebab model; conditional buttons keep their feature gate");
+        check(LayoutPatcher::apply(filteredPath, id, false).ok
+                  && resourceText(read(filteredPath), filtered, QStringLiteral("PlrSidebar.qml")) == filteredSidebar,
+              "filtered current-player shape restores byte-for-byte");
 
         // ---- 5.10 title bar whose toggle already binds `visible` ----
         // A second `visible:` member would be a duplicate binding (a QML error),

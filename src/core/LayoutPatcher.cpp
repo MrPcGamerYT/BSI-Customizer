@@ -59,6 +59,7 @@ const QString kSidebarLayoutWidthName = QStringLiteral("Layout.preferredWidth");
 // Hides the button strip inside the *original* (now zero-width) sidebar
 // instance before it is mounted. The mounted sidebar has a real width.
 const QString kRowHidden = QStringLiteral("\nvisible: iSidebar.width > 0");
+const QString kCollapseHidden = QStringLiteral("\nvisible: false // BSI CUSTOMIZER: no sidebar to collapse in the title bar");
 
 // Which shape the selected player uses. The tweak writes the same title-bar
 // overlay for both; only the width member of the sidebar instance differs.
@@ -352,10 +353,11 @@ bool directChild(const QString &masked, int parentOpen, int childBegin)
 // budget. This is shared by the stock column and the relocated row.
 struct SidebarControls
 {
+    struct Fixed { QString id, allowed; };
     QmlText::Object root, layout, repeater;
-    QmlText::Binding menuVisibility;
-    QString layoutId, repeaterId, itemsName;
-    QStringList fixedButtons;
+    QString layoutId, repeaterId, itemsName, allItemsName, repeatFlag;
+    QList<Fixed> fixedButtons; // order of the player's own priority checks
+    QStringList pinnedButtons; // always-present controls (e.g. Collapse in 5.10)
     bool horizontal = false;
     int resetEnd = -1;
 };
@@ -383,8 +385,19 @@ bool sidebarControls(const QString &qml, const QString &masked, SidebarControls 
 
     const auto member = [&](const QString &name) {
         QmlText::Binding b;
-        return QmlText::binding(masked, controls.root.open, controls.root.end, name, &b)
-            && directChild(masked, controls.root.open, b.nameBegin);
+        if (QmlText::binding(masked, controls.root.open, controls.root.end, name, &b)
+            && directChild(masked, controls.root.open, b.nameBegin)) return true;
+        // pSidebarItems is declared as `property list<QtObject> pSidebarItems`
+        // (no colon/initializer) in both real 5.10 and 5.22 players.
+        const QRegularExpression declaration(QStringLiteral("\\bproperty\\s+list\\s*<\\s*QtObject\\s*>\\s*")
+                                             + QRegularExpression::escape(name) + QStringLiteral("\\b"));
+        auto declarations = declaration.globalMatch(masked);
+        while (declarations.hasNext()) {
+            const int at = declarations.next().capturedStart();
+            if (at > controls.root.open && at < controls.root.end
+                && directChild(masked, controls.root.open, at)) return true;
+        }
+        return false;
     };
     if (!member(QStringLiteral("pSidebarElementSize"))
         || !member(QStringLiteral("pVisibleSidebarElementsCount"))) return false;
@@ -420,26 +433,75 @@ bool sidebarControls(const QString &qml, const QString &masked, SidebarControls 
         }
     }
     if (repeaters != 1) return false;
+    // BlueStacks 5.10/5.22 spell this Repeater flag correctly; older sidebar
+    // components spell it "Repater". Use the player's actual property.
+    controls.repeatFlag = qml.contains(QLatin1String("pShowViaRepeaterOnly"))
+        ? QStringLiteral("pShowViaRepeaterOnly")
+        : qml.contains(QLatin1String("pShowViaRepaterOnly"))
+            ? QStringLiteral("pShowViaRepaterOnly") : QString();
+    if (controls.repeatFlag.isEmpty()) return false;
+    if (controls.itemsName == QLatin1String("pSidebarItems") && member(QStringLiteral("pAllSidebarItems"))) {
+        int bodyBegin = 0, bodyEnd = 0;
+        if (!functionSpan(masked, QStringLiteral("fResetSidebar"), &bodyBegin, &bodyEnd)
+            || !qml.mid(bodyBegin, bodyEnd - bodyBegin).contains(
+                   QLatin1String("pSidebarItems.push(pAllSidebarItems[i])"))) return false;
+        controls.allItemsName = QStringLiteral("pAllSidebarItems");
+    }
 
+    QMap<QString, QmlText::Object> buttons;
     bool kebab = false;
-    for (const auto &object : QmlText::objects(masked, QStringLiteral("UiImageButton"))) {
-        if (object.open <= controls.layout.open || object.end > controls.layout.end
-            || !directChild(masked, controls.layout.open, object.nameBegin)) continue;
-        QmlText::Binding id;
-        if (!QmlText::binding(masked, object.open, object.end, QStringLiteral("id"), &id)
-            || !directChild(masked, object.open, id.nameBegin)) return false;
-        const QString name = qml.mid(id.valueBegin, id.valueEnd - id.valueBegin);
-        if (name == QLatin1String("iKebabMenuBtn")) { kebab = true; continue; }
-        if (!QRegularExpression(QStringLiteral("^[_a-zA-Z][_a-zA-Z0-9]*$")).match(name).hasMatch())
-            return false;
-        // A fixed control with a declarative visibility binding must not be
-        // overwritten by imperative overflow updates.
-        QmlText::Binding visible;
-        if (QmlText::binding(masked, object.open, object.end, QStringLiteral("visible"), &visible)
-            && directChild(masked, object.open, visible.nameBegin)) return false;
-        controls.fixedButtons.prepend(name); // stock reset prioritizes the end of the strip
+    for (const auto &type : { QStringLiteral("UiImageButton"), QStringLiteral("Item") }) {
+        for (const auto &object : QmlText::objects(masked, type)) {
+            if (object.open <= controls.layout.open || object.end > controls.layout.end)
+                continue;
+            QmlText::Binding id;
+            if (!QmlText::binding(masked, object.open, object.end, QStringLiteral("id"), &id)
+                || !directChild(masked, object.open, id.nameBegin)) continue;
+            const QString name = qml.mid(id.valueBegin, id.valueEnd - id.valueBegin);
+            if (name == QLatin1String("iKebabMenuBtn")) { kebab = true; continue; }
+            if (!QRegularExpression(QStringLiteral("^[_a-zA-Z][_a-zA-Z0-9]*$")).match(name).hasMatch()
+                || buttons.contains(name)) return false;
+            buttons.insert(name, object);
+        }
     }
     if (!kebab) return false;
+    // Only the controls that stock fResetSidebar itself budgets may have
+    // their visibility reassigned. This includes the decorated Settings Item
+    // in 5.22 and optional Discord/AI buttons (which have feature bindings).
+    // Other direct buttons, like 5.10's Collapse, remain pinned and take one
+    // slot only while they are visible.
+    int bodyBegin = 0, bodyEnd = 0;
+    if (!functionSpan(masked, QStringLiteral("fResetSidebar"), &bodyBegin, &bodyEnd)) return false;
+    QSet<QString> managed;
+    const QRegularExpression fixedRx(QStringLiteral(R"(\b(i[_a-zA-Z0-9]+)\.visible\s*=)"));
+    auto assignments = fixedRx.globalMatch(masked.mid(bodyBegin, bodyEnd - bodyBegin));
+    while (assignments.hasNext()) {
+        const QString name = assignments.next().captured(1);
+        if (!buttons.contains(name) || managed.contains(name)) continue;
+        managed.insert(name);
+        const auto object = buttons.value(name);
+        QmlText::Binding visible;
+        QString allowed = QStringLiteral("true");
+        if (QmlText::binding(masked, object.open, object.end, QStringLiteral("visible"), &visible)
+            && directChild(masked, object.open, visible.nameBegin)) {
+            allowed = qml.mid(visible.valueBegin, visible.valueEnd - visible.valueBegin);
+            if (allowed.contains(QLatin1String("parent.")) || allowed.contains(QLatin1String("this.")))
+                return false; // not necessarily in scope in the root's helper
+        }
+        controls.fixedButtons << SidebarControls::Fixed { name, allowed };
+    }
+    for (const auto &type : { QStringLiteral("UiImageButton"), QStringLiteral("Item") }) {
+        for (const auto &object : QmlText::objects(masked, type)) {
+            if (object.open <= controls.layout.open || object.end > controls.layout.end
+                || !directChild(masked, controls.layout.open, object.nameBegin)) continue;
+            QmlText::Binding id;
+            if (!QmlText::binding(masked, object.open, object.end, QStringLiteral("id"), &id)
+                || !directChild(masked, object.open, id.nameBegin)) continue;
+            const QString name = qml.mid(id.valueBegin, id.valueEnd - id.valueBegin);
+            if (name != QLatin1String("iKebabMenuBtn") && !managed.contains(name))
+                controls.pinnedButtons << name;
+        }
+    }
 
     const auto objectId = [&](const QmlText::Object &object, const QString &fallback) {
         QmlText::Binding b;
@@ -477,12 +539,11 @@ bool menuEdits(const QString &qml, const QString &masked, const SidebarControls 
             if (repeater.open > popup.open && repeater.end < popup.end) windowed = true;
         }
         if (!windowed) continue;
-        QmlText::Binding model, property;
+        QmlText::Binding model;
         if (!QmlText::binding(masked, repeater.open, repeater.end, QStringLiteral("model"), &model)
             || !directChild(masked, repeater.open, model.nameBegin)) continue;
         const QString modelName = qml.mid(model.valueBegin, model.valueEnd - model.valueBegin);
-        if (!QmlText::binding(masked, controls.root.open, controls.root.end, modelName, &property)
-            || !directChild(masked, controls.root.open, property.nameBegin)) continue;
+        if (modelName != controls.itemsName && modelName != controls.allItemsName) continue;
         for (const auto &button : QmlText::objects(masked, QStringLiteral("UiImageButton"))) {
             if (button.open <= repeater.open || button.end >= repeater.end) continue;
             QmlText::Binding visible;
@@ -618,31 +679,48 @@ QString responsiveHelper(const SidebarControls &controls, bool autoInstalled, co
     const QString axis = controls.horizontal ? QStringLiteral("width") : QStringLiteral("height");
     const QString startPad = controls.horizontal ? QStringLiteral("leftPadding") : QStringLiteral("topPadding");
     const QString endPad = controls.horizontal ? QStringLiteral("rightPadding") : QStringLiteral("bottomPadding");
+    QStringList fixed;
+    for (const auto &button : controls.fixedButtons)
+        fixed << QStringLiteral("{ button: ") + button.id + QStringLiteral(", allowed: (")
+                 + button.allowed + QStringLiteral(") }");
+    const QString rebuild = controls.allItemsName.isEmpty() ? QString() :
+        QStringLiteral("        var enabledItems = []") + nl
+        + QStringLiteral("        for (var i = 0; i < ") + controls.allItemsName + QStringLiteral(".length; ++i)") + nl
+        + QStringLiteral("            if (") + controls.allItemsName + QStringLiteral("[i].pIsFeatureEnable)") + nl
+        + QStringLiteral("                enabledItems.push(") + controls.allItemsName + QStringLiteral("[i])") + nl
+        + QStringLiteral("        ") + controls.itemsName + QStringLiteral(" = enabledItems") + nl;
     const QStringList lines {
         QStringLiteral("    ") + kResponsiveBegin + (autoInstalled ? kResponsiveAuto : QString()),
         QStringLiteral("    function fBSIUpdateOverflow() {"),
         QStringLiteral("        var slot = pSidebarElementSize"),
         QStringLiteral("        if (slot <= 0) return"),
-        QStringLiteral("        var items = ") + controls.itemsName,
+        rebuild + QStringLiteral("        var items = ") + controls.itemsName,
         QStringLiteral("        var count = 0"),
         QStringLiteral("        for (var i = 0; i < items.length; ++i)"),
-        QStringLiteral("            if (items[i].pIsFeatureEnable && items[i].pShowViaRepaterOnly) ++count"),
+        QStringLiteral("            if (items[i].pIsFeatureEnable && items[i].")
+            + controls.repeatFlag + QStringLiteral(") ++count"),
         QStringLiteral("        var gap = Math.max(0, ") + controls.layoutId + QStringLiteral(".spacing || 0)"),
         QStringLiteral("        var available = iSidebar.") + axis + QStringLiteral(" - (")
             + controls.layoutId + QLatin1Char('.') + startPad + QStringLiteral(" || 0) - (")
             + controls.layoutId + QLatin1Char('.') + endPad + QStringLiteral(" || 0)"),
         QStringLiteral("        var capacity = Math.max(0, Math.floor((available + gap) / (slot + gap)))"),
-        QStringLiteral("        var fixed = [") + controls.fixedButtons.join(QStringLiteral(", ")) + QLatin1Char(']'),
-        QStringLiteral("        var overflow = count + fixed.length > capacity"),
+        QStringLiteral("        var pinned = [") + controls.pinnedButtons.join(QStringLiteral(", ")) + QLatin1Char(']'),
+        QStringLiteral("        for (var n = 0; n < pinned.length; ++n) if (pinned[n].visible) --capacity"),
+        QStringLiteral("        capacity = Math.max(0, capacity)"),
+        QStringLiteral("        var fixed = [") + fixed.join(QStringLiteral(", ")) + QLatin1Char(']'),
+        QStringLiteral("        var enabledFixed = 0"),
+        QStringLiteral("        for (var n = 0; n < fixed.length; ++n) if (fixed[n].allowed) ++enabledFixed"),
+        QStringLiteral("        var overflow = count + enabledFixed > capacity"),
         QStringLiteral("        var remaining = Math.max(0, capacity - (overflow ? 1 : 0))"),
         QStringLiteral("        for (var n = 0; n < fixed.length; ++n) {"),
-        QStringLiteral("            fixed[n].visible = remaining > 0"),
-        QStringLiteral("            if (fixed[n].visible) --remaining"),
+        QStringLiteral("            fixed[n].button.visible = fixed[n].allowed && remaining > 0"),
+        QStringLiteral("            if (fixed[n].button.visible) --remaining"),
         QStringLiteral("        }"),
         QStringLiteral("        var toShow = Math.min(count, remaining)"),
         QStringLiteral("        var cutoff = -1"),
         QStringLiteral("        for (var i = 0; i < items.length && toShow > 0; ++i) {"),
-        QStringLiteral("            if (items[i].pIsFeatureEnable && items[i].pShowViaRepaterOnly) {"),
+        QStringLiteral("            if (items[i].pIsFeatureEnable && items[i].")
+            + controls.repeatFlag + QStringLiteral(") {"),
         QStringLiteral("                cutoff = i"),
         QStringLiteral("                --toShow"),
         QStringLiteral("            }"),
@@ -652,10 +730,12 @@ QString responsiveHelper(const SidebarControls &controls, bool autoInstalled, co
         QStringLiteral("    }"),
         QStringLiteral("    function fBSIInOverflow(item) {"),
         QStringLiteral("        if (!item.pIsFeatureEnable) return false"),
-        QStringLiteral("        if (!item.pShowViaRepaterOnly) return item.pShowOnKebabMenu"),
+        QStringLiteral("        if (!item.") + controls.repeatFlag
+            + QStringLiteral(") return item.pShowOnKebabMenu"),
         QStringLiteral("        var items = ") + controls.itemsName,
         QStringLiteral("        for (var i = 0; i < items.length; ++i) {"),
-        QStringLiteral("            if (items[i].pElementId === item.pElementId && items[i].pShowViaRepaterOnly) {"),
+        QStringLiteral("            if (items[i].pElementId === item.pElementId && items[i].")
+            + controls.repeatFlag + QStringLiteral(") {"),
         QStringLiteral("                var delegate = ") + controls.repeaterId + QStringLiteral(".itemAt(i)"),
         QStringLiteral("                return !delegate || !delegate.visible"),
         QStringLiteral("            }"),
@@ -711,6 +791,24 @@ bool responsiveEdits(QString &qml, bool enabled, bool autoInstalled, QList<Edit>
             || qml.contains(QLatin1String("pBSIAnchor"))) return false;
         if (!menuEdits(qml, masked, controls, edits)
             || !popupEdits(qml, masked, controls, edits)) return false;
+        // Updating an *already moved* single-owner layout does not pass
+        // through sidebarEdits(true). Earlier releases left 5.10's Collapse
+        // button live; hide it here as well so clicking it cannot remove the
+        // entire new title-bar row. The normal move already inserted this.
+        if (autoInstalled && controls.horizontal && !qml.contains(kCollapseHidden)) {
+            for (const auto &button : QmlText::objects(masked, QStringLiteral("UiImageButton"))) {
+                if (button.open <= controls.layout.open || button.end > controls.layout.end
+                    || !directChild(masked, controls.layout.open, button.nameBegin)) continue;
+                QmlText::Binding id, visible;
+                if (!QmlText::binding(masked, button.open, button.end, QStringLiteral("id"), &id)
+                    || !directChild(masked, button.open, id.nameBegin)
+                    || qml.mid(id.valueBegin, id.valueEnd - id.valueBegin) != QLatin1String("iCollapseBtn"))
+                    continue;
+                if (QmlText::binding(masked, button.open, button.end, QStringLiteral("visible"), &visible)
+                    && directChild(masked, button.open, visible.nameBegin)) return false;
+                addEdit(edits, button.open + 1, 0, kCollapseHidden);
+            }
+        }
         if (controls.layoutId == kLayoutId)
             addEdit(edits, controls.layout.open + 1, 0,
                     nl + QStringLiteral("        id: ") + kLayoutId
@@ -814,6 +912,25 @@ bool sidebarEdits(QString &qml, bool enabled, QList<Edit> &edits)
     found = pickColumn(QStringLiteral("UiColumnLayout"));
     if (!found && !enabled) found = pickColumn(QStringLiteral("UiRowLayout"));
     if (!found) return false;
+    // 5.10 puts a Collapse button at the start of the sidebar. It has no
+    // meaning once the side strip is removed (and could hide the moved row).
+    for (const auto &button : QmlText::objects(masked, QStringLiteral("UiImageButton"))) {
+        if (button.open <= column.open || button.end > column.end
+            || !directChild(masked, column.open, button.nameBegin)) continue;
+        QmlText::Binding id;
+        if (!QmlText::binding(masked, button.open, button.end, QStringLiteral("id"), &id)
+            || !directChild(masked, button.open, id.nameBegin)
+            || qml.mid(id.valueBegin, id.valueEnd - id.valueBegin) != QLatin1String("iCollapseBtn"))
+            continue;
+        QmlText::Binding visible;
+        if (enabled) {
+            if (QmlText::binding(masked, button.open, button.end, QStringLiteral("visible"), &visible)
+                && directChild(masked, button.open, visible.nameBegin)) return false;
+            addEdit(edits, button.open + 1, 0, kCollapseHidden);
+        } else if (qml.mid(button.open + 1, kCollapseHidden.size()) == kCollapseHidden) {
+            addEdit(edits, button.open + 1, kCollapseHidden.size(), QString());
+        } // older patches did not hide Collapse; normalize them on upgrade
+    }
     if (enabled) {
         addEdit(edits, column.nameBegin, int(QStringLiteral("UiColumnLayout").size()),
                 QStringLiteral("UiRowLayout"));
