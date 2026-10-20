@@ -98,7 +98,7 @@ jobs:
           "exe_name=BSI-Customizer-$version-win64.exe" >> $env:GITHUB_OUTPUT
 
       - name: Install Qt 6 build tools
-        uses: jurplel/install-qt-action@v4
+        uses: jurplel/install-qt-action@v4.3.1
         with:
           version: ${{ env.QT_VERSION }}
           host: windows
