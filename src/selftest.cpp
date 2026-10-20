@@ -710,7 +710,7 @@ int runSelfTest()
         unknown.name = QStringLiteral("notAThemeSlot");
         unknown.currentHex = QStringLiteral("#123456");
         unknownRow << unknown;
-        check(ThemePresets::matchHexColors(*presets.constFirst(), unknownRow).isEmpty(),
+        check(ThemePresets::matchHexColors(presets.constFirst(), unknownRow).isEmpty(),
               "presets: unknown hex color names are left alone");
 
         // A preset staged through the hex matcher really becomes a replacement.
