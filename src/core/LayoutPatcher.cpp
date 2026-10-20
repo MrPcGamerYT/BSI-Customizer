@@ -600,8 +600,10 @@ bool popupEdits(const QString &qml, const QString &masked, const SidebarControls
         const auto match = it.next();
         if (match.capturedStart() <= controls.root.open || match.capturedEnd() >= controls.root.end)
             continue;
-        lines << PopupLine { match.capturedStart(), match.capturedLength(), match.captured(2),
-                             match.captured(3),
+        // capturedStart()/capturedLength() are qsizetype; the braces below
+        // would turn that conversion into a narrowing error (MSVC C2397).
+        lines << PopupLine { int(match.capturedStart()), int(match.capturedLength()),
+                             match.captured(2), match.captured(3),
                              qml.mid(match.capturedStart(4), match.capturedLength(4)).trimmed(),
                              qml.mid(match.capturedStart(), match.capturedLength()) };
     }
@@ -856,7 +858,7 @@ bool responsiveEdits(QString &qml, bool enabled, bool autoInstalled, QList<Edit>
             const QString original = QString::fromUtf8(bytes);
             if (!original.contains(QLatin1String(".x ="))
                 && !original.contains(QLatin1String(".y ="))) return false;
-            addEdit(edits, match.capturedStart(), match.capturedLength(), original);
+            addEdit(edits, int(match.capturedStart()), int(match.capturedLength()), original);
             ++count;
         }
         if (count != qml.count(kPopupOriginal)) return false;
@@ -871,7 +873,7 @@ bool responsiveEdits(QString &qml, bool enabled, bool autoInstalled, QList<Edit>
         const QString value = QString::fromUtf8(bytes);
         if (bytes.toBase64() != encoded || value.toUtf8() != bytes
             || !value.contains(QLatin1String("pVisibleSidebarElementsCount"))) return false;
-        addEdit(edits, match.capturedStart(), match.capturedLength(), value);
+        addEdit(edits, int(match.capturedStart()), int(match.capturedLength()), value);
     }
     return true;
 }
