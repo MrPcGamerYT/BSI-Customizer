@@ -1207,6 +1207,12 @@ QVariantList Backend::layoutTweaks()
         }
     }
     for (const auto &t : LayoutPatcher::tweaks()) {
+        // The "responsive sidebar / aligned panels" helper is installed
+        // automatically when moving the buttons to the title bar and is
+        // restored when that layout is removed. It is not offered as a
+        // separate UI option.
+        if (t.id == QStringLiteral("responsive-sidebar"))
+            continue;
         const auto state = LayoutPatcher::analyze(image, t.id);
         out << QVariantMap {
             { QStringLiteral("id"), t.id },
