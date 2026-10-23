@@ -4036,7 +4036,7 @@ Window {
             "89504e470d0a1a0a0000000d494844520000000200000002080600000072b60d24000000114944"
             "415478da63f8cfc0f01f8441080c0145cc07f9b7c886d10000000049454e44ae426082");
         auto r = resourcesBytes({ { QStringLiteral("images/logo.png"), logo },
-                                  { QStringLiteral("UiThemeObject.qml"), QByteArray("Item {}\n") } });
+                                  { QStringLiteral("ui/notes.txt"), QByteArray("not a picture\n") } });
         addRegistration(r, false);
 
         const auto images = EmbeddedImages::list(r.f.bytes, false);
@@ -4054,7 +4054,7 @@ Window {
         check(everything.size() == 2
                   && std::any_of(everything.cbegin(), everything.cend(),
                                  [](const EmbeddedImages::Asset &asset) {
-                                     return asset.path == QLatin1String("UiThemeObject.qml")
+                                     return asset.path == QLatin1String("ui/notes.txt")
                                          && !asset.image;
                                  }),
               "the other embedded files are listed too, marked as not replaceable here");

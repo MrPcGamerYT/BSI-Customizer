@@ -193,12 +193,13 @@ QList<Asset> list(const QByteArray &image, bool includeAll)
             if (bytes.size() == asset.size) {
                 const QSize size = asset.family == QLatin1String("svg") ? svgSize(bytes)
                                                                        : rasterSize(bytes);
-                asset.width = size.width();
-                asset.height = size.height();
+                if (!size.isEmpty()) {
+                    asset.width = size.width();
+                    asset.height = size.height();
+                }
                 // A picture the player can load but this build cannot decode is
-                // still replaceable; only the preview has to give up.
-                if (size.isEmpty() && asset.family != QLatin1String("svg") && !bytes.isEmpty())
-                    asset.width = asset.height = 0;
+                // still replaceable; only the preview gives up, and the entry
+                // simply reports no dimensions.
             }
         }
         out << asset;
