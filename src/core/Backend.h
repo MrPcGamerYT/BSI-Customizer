@@ -43,7 +43,6 @@ class Backend : public QObject
 
     Q_PROPERTY(QVariantList svgInfos READ svgInfos NOTIFY svgsChanged)
     Q_PROPERTY(QVariantList installs READ installs NOTIFY installsChanged)
-    Q_PROPERTY(QVariantList versions READ versions NOTIFY versionsChanged)
     Q_PROPERTY(QVariantList removalNames READ removalNames CONSTANT)
 
 public:
@@ -92,7 +91,6 @@ public:
 
     QVariantList svgInfos() const;
     QVariantList installs() const { return m_installs; }
-    QVariantList versions() const { return m_versions; }
     QVariantList removalNames() const;
 
     // ---- detection ----
@@ -163,8 +161,6 @@ public:
     Q_INVOKABLE QVariantMap bootPatch();
 
     // ---- extras ----
-    Q_INVOKABLE QVariantList findVersions();
-    Q_INVOKABLE QVariantMap applyVersion(const QString &oldV, const QString &newV);
     Q_INVOKABLE QVariantMap applyRemovals(const QStringList &names);
     Q_INVOKABLE QVariantList layoutTweaks();
     Q_INVOKABLE QVariantMap applyLayoutTweak(const QString &id, bool enabled);
@@ -195,7 +191,6 @@ signals:
     void gradientTargetsChanged();
     void svgsChanged();
     void installsChanged();
-    void versionsChanged();
     void log(const QString &message, const QString &color);
 
 private:
@@ -229,5 +224,4 @@ private:
 
     QList<SvgBlob> m_svgs;
     QVariantList m_installs;
-    QVariantList m_versions;
 };

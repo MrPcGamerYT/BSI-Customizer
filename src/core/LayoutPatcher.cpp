@@ -105,6 +105,13 @@ const QString kCleanVisibleTag = QStringLiteral(
 // runtime.
 const QString kCleanWidthTag = QStringLiteral(
     " /* BSI CUSTOMIZER: clean player UI width:");
+// Sidebar buttons are hidden through `pIsFeatureEnable`, the switch the sidebar
+// itself uses to build pSidebarItems: the element leaves the column and the
+// kebab overflow together, so no 32px gap is left behind.
+const QString kSidebarCleanTag = QStringLiteral(
+    " /* BSI CUSTOMIZER: sidebar clean:");
+const QString kSidebarCleanLine = QStringLiteral(
+    "pIsFeatureEnable: false // BSI CUSTOMIZER: sidebar clean");
 
 // Which shape the selected player uses. The tweak writes the same title-bar
 // overlay for both; only the width member of the sidebar instance differs.
@@ -1826,11 +1833,11 @@ bool cleanShowObject(const QString &qml, const QmlText::Object &object, QList<Ed
 // The clean player UI leaves the sidebar alone: the strip is only removed by
 // moving it into the title bar ("Sidebar buttons to the top bar"), which is a
 // separate option. An earlier build of this tool did hide `iSidebar` and
-// collapsed its width from here, so the restore path below still undoes those
-// edits; enabling writes nothing into plr.qml any more.
+// collapsed its width from here, so both directions undo those edits: updating
+// such a patch must not leave an empty column behind.
 bool cleanPlrEdits(QString &qml, bool enabled, QList<Edit> &edits)
 {
-    if (enabled) return true; // the sidebar is not ours to remove
+    Q_UNUSED(enabled); // only ever undoes the old strip hiding, in both directions
 
     const QString masked = QmlText::mask(qml);
     QmlText::Object target;
@@ -1870,15 +1877,122 @@ bool cleanPlrEdits(QString &qml, bool enabled, QList<Edit> &edits)
 }
 
 // PlrSidebar.qml is likewise only touched to undo the earlier strip hiding.
+// The sidebar buttons the clean keeps: the five the player is actually used
+// with. Everything else in the strip (screenshot, screen record, media folder,
+// rotate, location, shake, lock cursor, macro, sync, eco mode, instance
+// manager, side panel, live stream, chat, settings and the strip's own
+// Back / Home / Recent) is switched off.
+const QStringList &cleanKeepSidebarIds()
+{
+    static const QStringList ids {
+        QStringLiteral("pFullscreen"), QStringLiteral("pVolume"),
+        QStringLiteral("pGameControl"), QStringLiteral("pMemoryTrim"),
+        QStringLiteral("pInstallApk")
+    };
+    return ids;
+}
+
+// The `pElementId: pVolume` value of a PlrSidebarElement, read from its body.
+QString sidebarElementId(const QString &qml, const QmlText::Object &object)
+{
+    static const QRegularExpression rx(
+        QStringLiteral("\\bpElementId\\s*:\\s*([A-Za-z_][A-Za-z0-9_]*)"));
+    const auto match = rx.match(qml.mid(object.open, object.end - object.open));
+    return match.hasMatch() ? match.captured(1) : QString();
+}
+
+// Where an inserted `pIsFeatureEnable: false` line goes: directly under the
+// element's opening line, indented one level deeper. The site stays put while
+// the line is there, so the undo can match it byte-for-byte.
+bool sidebarMemberSite(const QString &qml, const QmlText::Object &object, int *at, QString *text)
+{
+    const int openLineEnd = qml.indexOf(QLatin1Char('\n'), object.open);
+    if (openLineEnd < 0 || openLineEnd >= object.end) return false;
+    const int typeLineStart = qml.lastIndexOf(QLatin1Char('\n'), object.open) + 1;
+    QString indent;
+    int i = typeLineStart;
+    while (i < qml.size() && (qml.at(i) == QLatin1Char(' ') || qml.at(i) == QLatin1Char('\t')))
+        indent += qml.at(i++);
+    indent += QStringLiteral("    ");
+    *at = openLineEnd + 1;
+    *text = indent + kSidebarCleanLine + lineEnding(qml);
+    return true;
+}
+
+// Hide (or bring back) every sidebar button outside the keep list.
+bool cleanSidebarButtonEdits(const QString &qml, bool enabled, QList<Edit> &edits)
+{
+    const QString masked = QmlText::mask(qml);
+    bool changed = false;
+    for (const auto &element : QmlText::objects(masked, QStringLiteral("PlrSidebarElement"))) {
+        const QString id = sidebarElementId(qml, element);
+        if (id.isEmpty() || cleanKeepSidebarIds().contains(id)) continue;
+        QmlText::Binding feature;
+        const bool hasFeature = directBinding(masked, element.open, element.end,
+                                              QStringLiteral("pIsFeatureEnable"), &feature);
+        if (enabled) {
+            if (hasFeature) {
+                const QString value = qml.mid(feature.valueBegin,
+                                              feature.valueEnd - feature.valueBegin);
+                // `false` is either our own edit or a removal the user applied
+                // through the Ads/UI list: leave it alone either way.
+                if (value.startsWith(QLatin1String("false"))) continue;
+                addEdit(edits, feature.valueBegin, feature.valueEnd - feature.valueBegin,
+                        withOriginal(QStringLiteral("false"), value, kSidebarCleanTag));
+                changed = true;
+                continue;
+            }
+            int at = 0;
+            QString text;
+            if (!sidebarMemberSite(qml, element, &at, &text)) continue;
+            if (qml.mid(at, text.size()) == text) continue; // already inserted
+            addEdit(edits, at, 0, text);
+            changed = true;
+        } else {
+            // A line this tool inserted reads back as a plain `pIsFeatureEnable`
+            // binding, so the inserted line is matched before the tag: it is
+            // the only trace of that edit.
+            int at = 0;
+            QString text;
+            const bool site = sidebarMemberSite(qml, element, &at, &text);
+            if (site && qml.mid(at, text.size()) == text) {
+                addEdit(edits, at, text.size(), QString());
+                changed = true;
+                continue;
+            }
+            if (!hasFeature) continue;
+            const QString value = qml.mid(feature.valueBegin,
+                                          feature.valueEnd - feature.valueBegin);
+            if (!value.startsWith(QLatin1String("false"))) continue;
+            QString original;
+            int tagEnd = -1;
+            if (!taggedAfter(qml, feature.valueBegin, kSidebarCleanTag, &original, &tagEnd))
+                continue; // a stock/removal false, not ours
+            addEdit(edits, feature.valueBegin, tagEnd - feature.valueBegin, original);
+            changed = true;
+        }
+    }
+    return changed;
+}
+
+bool sidebarButtonsCleaned(const QString &qml)
+{
+    return qml.contains(kSidebarCleanTag) || qml.contains(kSidebarCleanLine);
+}
+
 bool cleanSidebarEdits(QString &qml, bool enabled, QList<Edit> &edits)
 {
-    if (enabled) return true;
+    // The strip itself is never removed any more: an older version did that, so
+    // the strip is brought back in both directions (updating a clean written by
+    // that version must not leave an empty column behind).
     const QString masked = QmlText::mask(qml);
     QmlText::Object root;
-    if (!findSidebarRoot(qml, masked, &root, false)) return true;
-    QmlText::Object strip;
-    if (!findButtonStrip(qml, masked, root, &strip)) return true;
-    return cleanShowObject(qml, strip, edits);
+    if (findSidebarRoot(qml, masked, &root, false)) {
+        QmlText::Object strip;
+        if (findButtonStrip(qml, masked, root, &strip)) cleanShowObject(qml, strip, edits);
+    }
+    cleanSidebarButtonEdits(qml, enabled, edits);
+    return true;
 }
 
 // True while an already-patched player still has the sidebar itself hidden by
@@ -2035,9 +2149,15 @@ State analyzeCleanUi(const QByteArray &image)
     findDoc(image, QStringLiteral("plr.qml"), &plr, &error);
     findDoc(image, QStringLiteral("PlrSidebar.qml"), &sidebar, &error);
     // The sidebar may already live in the title bar: this option only edits the
-    // title-bar buttons, so both layouts are fine.
-    state.applied = plr.qml.contains(kCleanMarker) || sidebar.qml.contains(kCleanMarker)
-        || topbar.qml.contains(kCleanMarker);
+    // buttons themselves, so both layouts are fine.
+    const bool topbarClean = topbar.qml.contains(kCleanMarker);
+    const bool sidebarClean = sidebarButtonsCleaned(sidebar.qml);
+    const bool legacy = plr.qml.contains(kCleanMarker) || sidebar.qml.contains(kCleanMarker);
+    state.applied = topbarClean || sidebarClean || legacy;
+    // A clean-up written by an older version only hid the title-bar buttons (and
+    // sometimes the whole strip). It is reported as an update so the missing
+    // half can be written without restoring first.
+    state.needsUpdate = state.applied && !(topbarClean && sidebarClean);
     QString p = plr.qml;
     QString s = sidebar.qml;
     QString t = topbar.qml;
@@ -2059,11 +2179,15 @@ State analyzeCleanUi(const QByteArray &image)
         return state;
     }
     state.supported = true;
-    state.detail = state.applied
-        ? QStringLiteral("Applied: the extra top-bar buttons are hidden. The sidebar itself is "
-                         "untouched.")
-        : QStringLiteral("Ready: hides the extra top-bar buttons in one apply. The sidebar stays "
-                         "where it is; use “Sidebar buttons to the top bar” to remove it.");
+    state.detail = state.needsUpdate
+        ? QStringLiteral("An older clean-up is applied. Press Update to hide the extra sidebar "
+                         "buttons too.")
+        : state.applied
+          ? QStringLiteral("Applied: the extra title-bar buttons are hidden and the sidebar keeps "
+                           "only fullscreen, volume, game controls, install APK and trim memory.")
+          : QStringLiteral("Ready: one apply hides every extra top-bar button and every sidebar "
+                           "button except fullscreen, volume, game controls, install APK and trim "
+                           "memory.");
     return state;
 }
 
@@ -2080,9 +2204,10 @@ Result applyCleanUi(const QString &exePath, bool enabled)
 
     const State before = analyzeCleanUi(original);
     if (!before.supported) return refuse(before.detail);
-    if (before.applied == enabled)
-        return { true, enabled ? QStringLiteral("The extra top-bar buttons are already hidden.")
-                               : QStringLiteral("The stock title bar is already in place.") };
+    if (before.applied == enabled && !before.needsUpdate)
+        return { true, enabled ? QStringLiteral("The extra top-bar buttons and the extra sidebar "
+                                                "buttons are already hidden.")
+                               : QStringLiteral("The stock title bar and sidebar are already in place.") };
 
     QByteArray changed = original;
     struct Role
@@ -2095,6 +2220,7 @@ Result applyCleanUi(const QString &exePath, bool enabled)
         { QStringLiteral("PlrSidebar.qml"), &cleanSidebarEdits },
         { QStringLiteral("PlrTopbar.qml"), &cleanTopbarEdits },
     };
+    bool changedAny = false;
     for (const auto &role : roles) {
         Doc doc;
         QString error;
@@ -2102,11 +2228,13 @@ Result applyCleanUi(const QString &exePath, bool enabled)
             if (role.name == QLatin1String("PlrTopbar.qml")) return refuse(error);
             continue; // no such document: nothing to restore there
         }
+        // analyzeCleanUi() has already vetted the shape; here a document that
+        // has nothing of ours (for example the title bar of a player cleaned by
+        // an older version) is simply skipped so the missing half can be
+        // written.
         QList<Edit> edits;
-        if (!role.collect(doc.qml, enabled, edits))
-            return refuse(QStringLiteral("%1 does not match the supported player UI; "
-                                         "no file was written.").arg(role.name));
-        if (edits.isEmpty()) continue; // nothing of ours in this document
+        role.collect(doc.qml, enabled, edits);
+        if (edits.isEmpty()) continue;
         if (!applyEdits(doc.qml, edits))
             return refuse(QStringLiteral("Clean-UI edits in %1 overlap; no file was written.")
                               .arg(role.name));
@@ -2114,9 +2242,13 @@ Result applyCleanUi(const QString &exePath, bool enabled)
         if (!QtResources::replaceResource(changed, doc.file.entryOff, doc.link,
                                           header + doc.qml.toUtf8(), &error))
             return refuse(error);
+        changedAny = true;
     }
+    if (!changedAny)
+        return { true, enabled ? QStringLiteral("The extra buttons are already hidden.")
+                               : QStringLiteral("The stock player UI is already in place.") };
     const State after = analyzeCleanUi(changed);
-    if (!after.supported || after.applied != enabled)
+    if (!after.supported || after.applied != enabled || (enabled && after.needsUpdate))
         return refuse(QStringLiteral("The written player UI did not pass read-back verification; "
                                      "no file was written."));
     if (!ThemeEngine::backup(exePath))
@@ -2125,11 +2257,12 @@ Result applyCleanUi(const QString &exePath, bool enabled)
     if (!PatchFile::writeVerified(exePath, original, changed, &error)) return refuse(error);
     const int caches = QtResources::clearPlayerQmlCache(exePath);
     QString msg = enabled
-        ? QStringLiteral("Extra top-bar buttons hidden. Back, Home, Recent, the logo, the "
-                         "title/version, the window controls and the sidebar stay. Restart "
-                         "BlueStacks.")
-        : QStringLiteral("Stock title-bar buttons restored (and any sidebar hidden by the old "
-                         "clean-up). Restart BlueStacks.");
+        ? QStringLiteral("Clean UI applied: the extra title-bar buttons are gone and the sidebar "
+                         "keeps only fullscreen, volume, game controls, install APK and trim "
+                         "memory. Back, Home, Recent, the logo, the title/version and the window "
+                         "controls stay. Restart BlueStacks.")
+        : QStringLiteral("Stock title-bar and sidebar buttons restored (including any sidebar "
+                         "hidden by the old clean-up). Restart BlueStacks.");
     if (caches > 0)
         msg += QStringLiteral(" Cleared the player QML disk cache so BlueStacks reloads the source.");
     return { true, msg };
@@ -2328,13 +2461,15 @@ QList<Tweak> tweaks()
                          "into the three-dot menu. Every popup panel opens directly beneath its "
                          "own button. Turn this off and apply to restore the stock sidebar.") },
         { kCleanUi,
-          QStringLiteral("Extra top-bar buttons (one click)"),
-          QStringLiteral("Hides the extra title-bar buttons in one apply: help, menu/settings, "
+          QStringLiteral("Clean player UI (one click)"),
+          QStringLiteral("Hides every extra button in one apply. Title bar: help, menu/settings, "
                          "quests, rewards, account, nowbuX, pin-to-top, top-bar icons, macro, "
-                         "sync and screen recording. Back, Home, Recent, the BlueStacks logo, the "
-                         "title/version and the minimize/maximize/close controls stay, and the "
-                         "sidebar is left untouched. To remove the sidebar itself, turn on "
-                         "“Sidebar buttons to the top bar”. Untick and apply to restore.") },
+                         "sync and screen recording. Sidebar: screenshot, screen record, media "
+                         "folder, rotate, location, shake, lock cursor, macro, sync, eco mode, "
+                         "instance manager, side panel and its own settings/back/home/recent. "
+                         "Back, Home, Recent, the BlueStacks logo, the title/version and the "
+                         "window controls stay, and the sidebar keeps fullscreen, volume, game "
+                         "controls, install APK and trim memory. Untick and apply to restore.") },
         // kResponsiveSidebar is kept internally for byte-for-byte restore of
         // any player that had the old standalone option applied, and for the
         // regression tests. It is NOT surfaced in the UI: the helper is

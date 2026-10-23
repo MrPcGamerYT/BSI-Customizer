@@ -3564,7 +3564,7 @@ Window {
         check(runRpcIdCli({ QStringLiteral("undo"), rpc }) == 0 && read(rpc) == player,
               "undo restores the original bytes from the command line too");
     }
-    std::printf("[layout] one-click clean-up hides the extra title-bar buttons only\n");
+    std::printf("[layout] one-click clean-up hides the extra title-bar and sidebar buttons\n");
     {
         const QString cleanPlr = QStringLiteral(
             "import QtQuick 2.15\r\n"
@@ -3587,6 +3587,26 @@ Window {
             "        UiImageButton { id: iCollapseBtn }\r\n"
             "        UiImageButton { id: iSoundBtn }\r\n"
             "    }\r\n"
+            "    property list<QtObject> pAllSidebarItems: [\r\n"
+            "        PlrSidebarElement {\r\n"
+            "            pElementId: pFullscreen\r\n"
+            "            pAsset: \"SidebarFullScreen\"\r\n"
+            "            pIsFeatureEnable: iSidebarProperties.pIsFullScreenEnabled\r\n"
+            "        },\r\n"
+            "        PlrSidebarElement {\r\n"
+            "            pElementId: pVolume\r\n"
+            "            pIsFeatureEnable: iSidebarProperties.pIsVolumeEnabled\r\n"
+            "        },\r\n"
+            "        PlrSidebarElement {\r\n"
+            "            pElementId: pScreenshot\r\n"
+            "            pAsset: \"SidebarScreenshot\"\r\n"
+            "            pIsFeatureEnable: iSidebarProperties.pIsScreenshotEnabled\r\n"
+            "        },\r\n"
+            "        PlrSidebarElement {\r\n"
+            "            pElementId: pRotate\r\n"
+            "            pAsset: \"SidebarRotate\"\r\n"
+            "        }\r\n"
+            "    ]\r\n"
             "}\r\n");
         const QString cleanTopbar = QStringLiteral(
             "import QtQuick 2.15\r\n"
@@ -3643,8 +3663,14 @@ Window {
         const auto cleanPlrText = resourceText(cleanBytes, r, QStringLiteral("plr.qml"));
         const auto cleanSidebarText = resourceText(cleanBytes, r, QStringLiteral("PlrSidebar.qml"));
         const auto cleanTopbarText = resourceText(cleanBytes, r, QStringLiteral("PlrTopbar.qml"));
-        check(cleanPlrText == cleanPlr && cleanSidebarText == cleanSidebar,
-              "the sidebar instance and the sidebar document are left exactly as stock");
+        check(cleanPlrText == cleanPlr,
+              "the sidebar instance is left exactly as stock");
+        check(cleanSidebarText.contains(QLatin1String("pIsFeatureEnable: false /* BSI CUSTOMIZER: sidebar clean:"))
+                  && cleanSidebarText.contains(QLatin1String("pIsFeatureEnable: false // BSI CUSTOMIZER: sidebar clean"))
+                  && cleanSidebarText.contains(QLatin1String("pIsFeatureEnable: iSidebarProperties.pIsFullScreenEnabled"))
+                  && cleanSidebarText.contains(QLatin1String("pIsFeatureEnable: iSidebarProperties.pIsVolumeEnabled"))
+                  && !cleanSidebarText.contains(QLatin1String("pIsScreenshotEnabled")),
+              "the sidebar keeps fullscreen and volume and switches screenshot and rotate off");
         check(cleanTopbarText.count(QLatin1String("pVisible: false /* BSI CUSTOMIZER: clean player UI visible:")) == 2
                   && cleanTopbarText.contains(QLatin1String("pVisible: true\r\n            pWidth: iBackBtn.width"))
                   && cleanTopbarText.contains(QLatin1String("visible: false // BSI CUSTOMIZER: clean player UI")),
@@ -3665,6 +3691,47 @@ Window {
                   && resourceText(restoredBytes, r, QStringLiteral("PlrSidebar.qml")) == cleanSidebar
                   && resourceText(restoredBytes, r, QStringLiteral("PlrTopbar.qml")) == cleanTopbar,
               "turning the clean UI off restores every document byte-for-byte");
+
+        // A clean-up written by an older version only hid the title-bar buttons
+        // and the whole sidebar strip. It is reported as an update and the
+        // missing half is written without restoring first.
+        const QString legacyPlr = QStringLiteral(
+            "import QtQuick 2.15\r\n"
+            "Rectangle {\r\n"
+            "    id: iAppwin\r\n"
+            "    property int pSidebarWidth: 32\r\n"
+            "    PlrTopbar { id: iTopbar }\r\n"
+            "    PlrSidebar {\r\n"
+            "        visible: false // BSI CUSTOMIZER: clean player UI\r\n"
+            "        id: iSidebar\r\n"
+            "        width: 0 /* BSI CUSTOMIZER: clean player UI width: cFNpZGViYXJXaWR0aA== */\r\n"
+            "        visible: uiBackend.confGetInstanceBool(\"show_sidebar\")\r\n"
+            "    }\r\n"
+            "}\r\n");
+        auto legacy = resources({ { QStringLiteral("plr.qml"), legacyPlr },
+                                  { QStringLiteral("PlrSidebar.qml"), cleanSidebar },
+                                  { QStringLiteral("PlrTopbar.qml"), cleanTopbar } }, true, {});
+        addRegistration(legacy, false);
+        const QString legacyPath = temp.filePath(QStringLiteral("layout-clean-legacy.exe"));
+        write(legacyPath, legacy.f.bytes);
+        const auto legacyState = LayoutPatcher::analyze(legacy.f.bytes, cleanId);
+        check(legacyState.supported && legacyState.applied && legacyState.needsUpdate,
+              "a clean-up written by an older version is offered as an update");
+        check(LayoutPatcher::apply(legacyPath, cleanId, true).ok,
+              "the update completes an older clean-up instead of refusing it");
+        const auto updatedSidebar = resourceText(read(legacyPath), legacy, QStringLiteral("PlrSidebar.qml"));
+        check(resourceText(read(legacyPath), legacy, QStringLiteral("plr.qml")) == cleanPlr,
+              "the update brings the sidebar strip back (the old patch hid it)");
+        check(updatedSidebar.contains(QLatin1String("pIsFeatureEnable: false /* BSI CUSTOMIZER: sidebar clean:"))
+                  && !updatedSidebar.contains(QLatin1String("iSidebarProperties.pIsScreenshotEnabled")),
+              "the update hides the extra sidebar buttons");
+        check(!LayoutPatcher::analyze(read(legacyPath), cleanId).needsUpdate,
+              "the updated clean-up is reported as complete");
+        check(LayoutPatcher::apply(legacyPath, cleanId, false).ok
+                  && resourceText(read(legacyPath), legacy, QStringLiteral("plr.qml")) == cleanPlr
+                  && resourceText(read(legacyPath), legacy, QStringLiteral("PlrSidebar.qml")) == cleanSidebar
+                  && resourceText(read(legacyPath), legacy, QStringLiteral("PlrTopbar.qml")) == cleanTopbar,
+              "restoring the updated clean-up leaves the stock documents");
 
         // MSI 5.9 / 5.10 shape: the sidebar instance is a layout child sized by
         // Layout.preferredWidth and the top bar re-asserts `visible` from a

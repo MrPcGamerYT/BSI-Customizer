@@ -81,25 +81,40 @@ Restart BlueStacks afterward. Actual windowed-popup behavior still needs
 testing on each supported player build; unrecognized QML is refused rather
 than guessed.
 
-## Player UI: one-click clean-up and the About page
+## UI tab: clean-up, layout, removals and the About page
 
-The **Player UI** page has two independent one-click tools for the selected
-`HD-Player.exe`. Both refuse to write while BlueStacks is running, keep the
-original `.bak`, verify the rewritten QML by reading it back, and clear the
-player's QML disk cache so the change is picked up on the next start.
+The **UI** tab (formerly *Extras*) holds everything that changes what the
+player window shows, plus a one-click clean-up and the About editor. Every
+option refuses to write while BlueStacks is running, keeps the original
+`.bak`, verifies the rewritten QML by reading it back, and clears the player's
+QML disk cache so the change is picked up on the next start.
 
-**Extra top-bar buttons (one click).** One apply hides the extra title-bar
-buttons: help, menu/settings, quests, rewards, raw-mode warning, now.gg account,
-nowbuX, pin-to-top, the top-bar icon list, macro, sync, screen recording and
-the sidebar toggle. It deliberately keeps the BlueStacks logo, the
-title/version, the title bar's **Back, Home and Recent** buttons and the
-minimize/restore/close controls, so the window stays usable. **The sidebar is
-not touched** — it keeps its buttons and its place next to the game view. The
-sidebar only disappears when the **Sidebar buttons to the top bar** option (on
-the *Extras* page) moves it into the title bar; the two options can be used
-together. Press **Restore stock UI** to write the original QML back
-byte-for-byte (this also undoes a sidebar-hiding clean-up written by an older
-version of the tool).
+**Clean player UI (one click).** One apply hides every extra button.
+
+* **Title bar:** help, menu/settings, quests, rewards, raw-mode warning,
+  now.gg account, nowbuX, pin-to-top, the top-bar icon list, macro, sync,
+  screen recording and the sidebar toggle.
+* **Sidebar:** screenshot, screen record, media folder, rotate, location,
+  shake, lock cursor, macro, sync, eco mode, instance manager, side panel,
+  live stream, chat, settings and the strip's own Back / Home / Recent.
+
+What stays is what the window needs: the BlueStacks logo, the title/version,
+the title bar's **Back, Home and Recent** buttons, the minimize/restore/close
+controls — and in the sidebar **fullscreen, volume, game controls, install
+APK and trim memory**. **The sidebar itself is not removed**: it keeps those
+five buttons in place. The sidebar only leaves the side of the game view when
+**Sidebar buttons to the top bar** is applied, which moves it into the title
+bar; the two options compose. Press **Restore stock UI** to write the original
+QML back byte-for-byte (this also undoes a sidebar-hiding clean-up written by
+an older version of the tool). A player that still carries such an older
+clean-up — title-bar buttons hidden, sidebar buttons visible — is recognised:
+the button reads **Update clean-up** and writes the missing sidebar half (and
+brings the strip back) without restoring first.
+
+**Ads / UI Removal** nulls the selected ad/UI strings so those elements never
+render. Back, Home, Recent, the title-bar logo and fullscreen are not removal
+rows: the clean-up above is the only thing that hides navigation, and it keeps
+them.
 
 **Settings → About page.** The card reads the page itself, so every field
 starts with exactly what that build prints — nothing is retyped:
@@ -133,11 +148,13 @@ BlueStacks updates any more. Press **Restore stock About** to restore the
 untouched page byte-for-byte.
 
 Both tools work on the Qt 5 and Qt 6 players: BlueStacks 5.22 and the older
-5.10 build, plus the MSI App Player 5.9 and the current MSI build. The title-bar
+5.10 build, plus the MSI App Player 5.9 and the current MSI build. The
 clean-up understands both shapes the player uses to re-assert button
 visibility (`PlrTopbarElement.pVisible` and the MSI 5.9
-`iTopbarItems.append({ "id" : …, "visible" : … })` list), and the About page is
-rewritten on both page generations (they differ only in the copyright year).
+`iTopbarItems.append({ "id" : …, "visible" : … })` list) and both sidebar
+shapes (an explicit `pIsFeatureEnable` binding, or none — the tool adds one
+and removes it again on restore), and the About page is rewritten on both page
+generations (they differ only in the copyright year).
 
 ## Gradient themes
 

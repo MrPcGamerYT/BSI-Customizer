@@ -68,7 +68,6 @@ void Backend::copyPatchState(const Backend &source)
     m_hexQmlColors = source.m_hexQmlColors;
     m_svgs = source.m_svgs;
     m_installs = source.m_installs;
-    m_versions = source.m_versions;
 }
 
 QVariantMap Backend::runBackground(const std::function<QVariantMap(Backend &)> &operation)
@@ -129,7 +128,6 @@ QVariantMap Backend::runBackground(const std::function<QVariantMap(Backend &)> &
     emit gradientTargetsChanged();
     emit svgsChanged();
     emit installsChanged();
-    emit versionsChanged();
     m_busy = false;
     emit busyChanged();
     return response;
@@ -1147,40 +1145,6 @@ QVariantMap Backend::bootPatch()
 }
 
 // ------------------------------------------------------------------ extras
-
-QVariantList Backend::findVersions()
-{
-    if (actionsLocked()) return {};
-    const QByteArray data = readExe();
-    if (data.isEmpty()) {
-        doLog(QStringLiteral("EXE not found."), QStringLiteral("red"));
-        m_versions.clear();
-        emit versionsChanged();
-        return m_versions;
-    }
-    const auto found = ExtrasPatcher::findVersions(data);
-    m_versions.clear();
-    for (const QVariantMap &m : found)
-        m_versions << m.value(QStringLiteral("version")).toString();
-    emit versionsChanged();
-    doLog(m_versions.isEmpty() ? QStringLiteral("No version strings found.")
-                               : QStringLiteral("Found %1 version string(s).").arg(m_versions.size()),
-          m_versions.isEmpty() ? QStringLiteral("orange") : QStringLiteral("blue"));
-    return m_versions;
-}
-
-QVariantMap Backend::applyVersion(const QString &oldV, const QString &newV)
-{
-    if (actionsLocked()) return lockedMap();
-    if (!m_backgroundWorker)
-        return runBackground([=](Backend &worker) { return worker.applyVersion(oldV, newV); });
-    if (oldV.isEmpty() || newV.isEmpty())
-        return result(false, QStringLiteral("Select a version and enter a new one."),
-                      QStringLiteral("orange"));
-    ThemeEngine::backup(m_settings->exePath());
-    const auto r = ExtrasPatcher::applyVersion(m_settings->exePath(), oldV, newV);
-    return result(r.ok, r.msg, QStringLiteral("green"));
-}
 
 QVariantMap Backend::applyRemovals(const QStringList &names)
 {

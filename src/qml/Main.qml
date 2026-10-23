@@ -261,12 +261,11 @@ ApplicationWindow {
                         { page: 4, label: qsTr("Integrity"),   icon: Icons.integrity },
                         { page: 5, label: qsTr("Boot Video"),  icon: Icons.boot },
                         { header: true,  label: qsTr("TOOLS") },
-                        { page: 6, label: qsTr("Extras"),      icon: Icons.extras },
-                        { page: 7, label: qsTr("Player UI"),   icon: Icons.settings },
-                        { page: 8, label: qsTr("Discord RPC"), icon: Icons.discord },
+                        { page: 6, label: qsTr("UI"),          icon: Icons.extras },
+                        { page: 7, label: qsTr("Discord RPC"), icon: Icons.discord },
                         { header: true,  label: qsTr("APP") },
-                        { page: 9, label: qsTr("Appearance"),  icon: Icons.appearance },
-                        { page: 10, label: qsTr("About"),      icon: Icons.about }
+                        { page: 8, label: qsTr("Appearance"),  icon: Icons.appearance },
+                        { page: 9, label: qsTr("About"),       icon: Icons.about }
                     ]
                     delegate: Loader {
                         required property var modelData
@@ -412,10 +411,7 @@ ApplicationWindow {
                 FpsPage {}
                 IntegrityPage {}
                 BootVideoPage {}
-                ExtrasPage {
-                    onNotify: (msg) => toast.show(msg)
-                }
-                PlayerUiPage {
+                UiPage {
                     onNotify: (msg) => toast.show(msg)
                 }
                 RpcidPage {}
