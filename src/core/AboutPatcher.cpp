@@ -911,10 +911,6 @@ QString debugValue;
 QString debugChunks;
 QString debugReadBack;
 
-QString debugLastValue() { return debugValue; }
-QString debugLastChunks() { return debugChunks; }
-QString debugLastReadBack() { return debugReadBack; }
-
 bool readShown(const QString &qml, const QString &masked, const Anchors &anchors, Config *config)
 {
     Config out;
@@ -1166,6 +1162,11 @@ Result refuse(const QString &message)
 }
 
 } // namespace
+
+// TEMPORARY accessors (outside the anonymous namespace so the self-test links).
+QString debugLastValue() { return debugValue; }
+QString debugLastChunks() { return debugChunks; }
+QString debugLastReadBack() { return debugReadBack; }
 
 State analyze(const QByteArray &image)
 {
