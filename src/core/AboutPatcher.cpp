@@ -8,6 +8,7 @@
 #include "ThemeEngine.h"
 
 #include <QFile>
+#include <QFileInfo>
 #include <QTemporaryDir>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -1342,6 +1343,42 @@ QString span(const QmlText::Object &object)
 }
 
 } // namespace
+
+// A few lines the card can show when the editor still refuses or the page
+// does not change: what was found, what it reads now, and the exact reason.
+QString summary(const QString &exePath)
+{
+    QStringList lines;
+    QFile file(exePath);
+    const QFileInfo info(exePath);
+    lines << QStringLiteral("File: %1 (%2 MB)")
+                 .arg(info.fileName())
+                 .arg(double(info.size()) / 1048576.0, 0, 'f', 1);
+    if (!file.open(QIODevice::ReadOnly)) {
+        lines << QStringLiteral("Cannot read the selected EXE.");
+        return lines.join(QLatin1Char('\n'));
+    }
+    const QByteArray image = file.readAll();
+    file.close();
+    const State state = analyze(image);
+    lines << QStringLiteral("Supported: %1   applied: %2   sections hidden: %3")
+                 .arg(state.supported ? QStringLiteral("yes") : QStringLiteral("no"),
+                      state.applied ? QStringLiteral("yes") : QStringLiteral("no"),
+                      state.sectionsHidden ? QStringLiteral("yes") : QStringLiteral("no"));
+    if (!state.supported) {
+        lines << QStringLiteral("Reason: %1").arg(state.detail);
+        return lines.join(QLatin1Char('\n'));
+    }
+    lines << QStringLiteral("Text now: \"%1\"").arg(oneLine(state.config.text, 120));
+    lines << QStringLiteral("Link rows: %1").arg(state.config.links.size());
+    for (const auto &link : state.config.links) {
+        lines << QStringLiteral("  %1  %2 -> %3%4")
+                     .arg(link.id.isEmpty() ? QStringLiteral("(no id)") : link.id,
+                          link.name, link.url,
+                          link.hidden ? QStringLiteral("  [hidden]") : QString());
+    }
+    return lines.join(QLatin1Char('\n'));
+}
 
 QString probeReport(const QString &exePath)
 {

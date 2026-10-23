@@ -562,6 +562,17 @@ Item {
 
                             ActionButton {
                                 Layout.alignment: Qt.AlignTop
+                                implicitHeight: 30
+                                text: qsTr("Diagnose")
+                                onClicked: {
+                                    const report = backend.aboutPageReport();
+                                    page.aboutMsg = report;
+                                    console.log(report);
+                                }
+                            }
+
+                            ActionButton {
+                                Layout.alignment: Qt.AlignTop
                                 text: qsTr("Restore stock About")
                                 implicitHeight: 30
                                 enabled: !!page.about.applied
@@ -769,6 +780,7 @@ Item {
                             wrapMode: Text.Wrap
                             visible: page.aboutMsg.length > 0
                             text: page.aboutMsg
+                            font.family: "Consolas"
                             color: page.about.applied ? Theme.green : Theme.warn
                             font.pixelSize: 11
                             font.weight: Font.DemiBold

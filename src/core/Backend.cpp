@@ -1413,6 +1413,14 @@ QVariantMap Backend::applyAboutPage(const QString &text, const QVariantList &lin
     return result(r.ok, r.msg, r.ok ? QStringLiteral("green") : QStringLiteral("red"));
 }
 
+QString Backend::aboutPageReport()
+{
+    const QString path = m_settings->exePath();
+    if (path.isEmpty() || !QFileInfo::exists(path))
+        return QStringLiteral("Select the HD-Player.exe path first.");
+    return AboutPatcher::summary(path);
+}
+
 QVariantMap Backend::restoreBackup(const QString &path)
 {
     if (actionsLocked()) return lockedMap();

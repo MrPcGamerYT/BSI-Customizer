@@ -128,13 +128,17 @@ starts with exactly what that build prints — nothing is retyped:
 * a **Show** tick per row, so a single stock link can be hidden while the
   others stay.
 
-On the pages that gate both sections with `visible: uiBackend.oem !== "msi5"`
-(BlueStacks 5.22 and the current MSI build) the sections are drawn hidden, so
-the card opens with **Unhide links + About** — the first step on those builds.
-Pressing it makes the patch switch both sections on, which is what makes the
-edited text and the links visible at all; leaving it alone keeps the page
-exactly as the build draws it. The 5.10 / MSI 5.9 pages have no such binding,
-so the button only offers to restore the build's own behaviour.
+Some pages gate both sections with a binding such as
+`visible: uiBackend.oem !== "msi5"`, which is false on every MSI install, so
+those sections are drawn hidden there. The patch always switches both sections
+on by default — that is what makes the edited text and the links visible at
+all, and it is the only value that is correct on both the MSI and the
+BlueStacks builds (where the binding is already true). The toggle is still
+there as **Sections shown — switch back to stock** for anyone who wants the
+page left exactly as the build draws it, and the cards says which build drew
+them hidden. **Diagnose** prints what the editor found on the selected EXE —
+the page, its current text, every row and the reason if the card refuses — so
+nothing has to be guessed.
 
 One apply keeps the page and its layout exactly as it is (logo, version banner,
 section headings) and only changes what it says: your text replaces the

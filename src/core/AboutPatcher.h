@@ -55,6 +55,7 @@ Result apply(const QString &exePath, bool enabled, const Config &config);
 // when the About page reports "not supported", this says which step failed and
 // what the page actually contains, instead of leaving it to guesswork.
 QString probeReport(const QString &exePath);
+QString summary(const QString &exePath);
 
 
 } // namespace AboutPatcher

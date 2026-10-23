@@ -180,6 +180,9 @@ public:
     Q_INVOKABLE QVariantMap aboutPageState();
     Q_INVOKABLE QVariantMap applyAboutPage(const QString &text, const QVariantList &links,
                                            bool showSections, bool enabled);
+    // What the About editor sees, in a few lines: what was located, what the
+    // page prints now and why it is refused when it is.
+    Q_INVOKABLE QString aboutPageReport();
     Q_INVOKABLE QVariantMap restoreBackup(const QString &path);
 
     // ---- Discord Rich Presence ID utility ----
