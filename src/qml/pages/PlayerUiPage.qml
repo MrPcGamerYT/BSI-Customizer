@@ -12,8 +12,12 @@ Item {
     // Settings → About replacement (AboutPatcher).
     property var cleanTweak: ({ id: "clean-player-ui", supported: false, applied: false,
                                 label: "", detail: "", state: "" })
-    property var about: ({ supported: false, applied: false, detail: "",
-                           text: "", linkLabel: "", linkUrl: "" })
+    property var about: ({ supported: false, applied: false, detail: "", text: "",
+                           links: [], showSections: true, sectionsHidden: false })
+    // Whether the patch switches the two sections back on.
+    property bool showSectionsWanted: true
+    // One entry per stock link row: { id, name, url, hidden }.
+    property var aboutLinks: []
 
     function refreshClean() {
         const list = backend.layoutTweaks();
@@ -32,10 +36,24 @@ Item {
         const state = backend.aboutPageState();
         page.about = state;
         if (loadFields) {
+            page.aboutLinks = state.links || [];
             aboutText.text = state.text || "";
-            aboutLabel.text = state.linkLabel || "";
-            aboutUrl.text = state.linkUrl || "";
+            page.showSectionsWanted = state.showSections !== false;
         }
+    }
+
+    // The editors are the source of truth when applying: read what is on
+    // screen instead of tracking every keystroke in a model.
+    function collectLinks() {
+        const out = [];
+        for (let i = 0; i < linkRepeater.count; i++) {
+            const item = linkRepeater.itemAt(i);
+            if (!item)
+                continue;
+            out.push({ id: item.linkId, name: item.linkName, url: item.linkUrl,
+                       hidden: item.linkHidden });
+        }
+        return out;
     }
 
     Component.onCompleted: {
@@ -183,13 +201,12 @@ Item {
                             Text {
                                 Layout.fillWidth: true
                                 wrapMode: Text.Wrap
-                                text: qsTr("The fields below are filled with what the About page "
-                                           + "says right now, so you can edit the stock text and "
-                                           + "link instead of retyping them. Apply replaces that "
-                                           + "text and the stock support / website / QQ links with "
-                                           + "your text and one link, and disables the “Check for "
-                                           + "updates” button. The page keeps its layout, logo and "
-                                           + "version.")
+                                text: qsTr("Everything below is read from the About page itself: "
+                                           + "the sentence it prints and every link with its name "
+                                           + "and address. Edit them, hide the ones you do not "
+                                           + "want and apply — the page keeps its layout, logo and "
+                                           + "version and the “Check for updates” button stays "
+                                           + "disabled.")
                                 color: Theme.textDim
                                 font.pixelSize: 11
                             }
@@ -201,7 +218,7 @@ Item {
                             implicitHeight: 30
                             enabled: !!page.about.applied
                             onClicked: {
-                                const result = backend.applyAboutPage("", "", "", false);
+                                const result = backend.applyAboutPage("", [], false, false);
                                 page.refreshAbout(true);
                                 if (result && result.msg) {
                                     page.notify(result.msg);
@@ -211,8 +228,49 @@ Item {
                         }
                     }
 
+                    // ---- the sections the MSI build hides -----------------
+                    // On MSI 5 both sections are bound to `oem !== "msi5"`, so they are
+                    // drawn hidden and the links cannot be seen or used. This button is
+                    // the first step there: it switches them back on, then the stock
+                    // links and the About text below can be edited and applied.
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 10
+
+                        ActionButton {
+                            accent: !page.showSectionsWanted && !!page.about.supported
+                            implicitHeight: 30
+                            enabled: !!page.about.supported
+                            text: page.showSectionsWanted
+                                  ? qsTr("Leave the sections as the build draws them")
+                                  : qsTr("Unhide links + About")
+                            onClicked: page.showSectionsWanted = !page.showSectionsWanted
+                        }
+
+                        Text {
+                            Layout.fillWidth: true
+                            wrapMode: Text.Wrap
+                            font.pixelSize: 11
+                            color: page.showSectionsWanted ? Theme.textDim : Theme.warn
+                            text: {
+                                if (!page.about.supported)
+                                    return "";
+                                if (!page.about.sectionsHidden)
+                                    return qsTr("This build already shows both sections; the page "
+                                                + "text and the rows below are editable as they are.");
+                                return page.showSectionsWanted
+                                    ? qsTr("This build hides “Important links” and “About and other "
+                                           + "info” (oem !== \"msi5\"). Applying switches both back "
+                                           + "on, so the text and the rows below are the ones shown.")
+                                    : qsTr("Both sections stay hidden, exactly as the build draws "
+                                           + "them. Press “Unhide links + About” to bring them back.");
+                            }
+                        }
+                    }
+
+                    // ---- the About sentence -------------------------------
                     Text {
-                        text: qsTr("About text (the stock copyright / Terms line, editable)")
+                        text: qsTr("About text — exactly what the page prints now")
                         color: Theme.textDim
                         font.pixelSize: 11
                         font.weight: Font.DemiBold
@@ -220,7 +278,7 @@ Item {
                     TextArea {
                         id: aboutText
                         Layout.fillWidth: true
-                        Layout.preferredHeight: 106
+                        Layout.preferredHeight: 96
                         wrapMode: TextArea.Wrap
                         selectByMouse: true
                         placeholderText: qsTr("e.g. Modded by Mr.Pc Gamer — join the channel for "
@@ -236,23 +294,55 @@ Item {
                         }
                     }
 
+                    // ---- the stock links ----------------------------------
                     RowLayout {
                         Layout.fillWidth: true
-                        spacing: 10
+                        spacing: 8
+                        Text {
+                            text: qsTr("Links — name and address, untick “Show” to remove one")
+                            color: Theme.textDim
+                            font.pixelSize: 11
+                            font.weight: Font.DemiBold
+                        }
+                        Item { Layout.fillWidth: true }
+                        Text {
+                            visible: page.aboutLinks.length === 0
+                            text: page.about.supported ? qsTr("No stock link rows in this player")
+                                                       : qsTr("Select HD-Player.exe first")
+                            color: Theme.warn
+                            font.pixelSize: 10
+                        }
+                    }
 
-                        ColumnLayout {
+                    Repeater {
+                        id: linkRepeater
+                        model: page.aboutLinks
+
+                        delegate: RowLayout {
+                            required property var modelData
                             Layout.fillWidth: true
-                            spacing: 4
-                            Text {
-                                text: qsTr("Link label (optional — the stock label is shown)")
-                                color: Theme.textDim
+                            spacing: 8
+
+                            // Read back by collectLinks() when Apply is pressed.
+                            property string linkId: modelData.id
+                            property alias linkName: linkNameField.text
+                            property alias linkUrl: linkUrlField.text
+                            property alias linkHidden: linkShow.checked
+
+                            CheckBox {
+                                id: linkShow
+                                text: qsTr("Show")
+                                checked: !modelData.hidden
                                 font.pixelSize: 11
-                                font.weight: Font.DemiBold
+                                palette.windowText: Theme.text
+                                palette.buttonText: Theme.text
+                                property bool checkedToggle: checked
                             }
                             TextField {
-                                id: aboutLabel
-                                Layout.fillWidth: true
-                                placeholderText: qsTr("Join my channel")
+                                id: linkNameField
+                                Layout.preferredWidth: 190
+                                text: modelData.name
+                                placeholderText: qsTr("Support email")
                                 color: Theme.text
                                 placeholderTextColor: Theme.textDim
                                 font.pixelSize: 12
@@ -260,24 +350,14 @@ Item {
                                     color: Theme.raised
                                     radius: 8
                                     border.width: 1
-                                    border.color: aboutLabel.activeFocus ? Theme.accent : Theme.border
+                                    border.color: linkNameField.activeFocus ? Theme.accent : Theme.border
                                 }
                             }
-                        }
-
-                        ColumnLayout {
-                            Layout.fillWidth: true
-                            spacing: 4
-                            Text {
-                                text: qsTr("Link URL (the stock link is shown)")
-                                color: Theme.textDim
-                                font.pixelSize: 11
-                                font.weight: Font.DemiBold
-                            }
                             TextField {
-                                id: aboutUrl
+                                id: linkUrlField
                                 Layout.fillWidth: true
-                                placeholderText: qsTr("https://…")
+                                text: modelData.url
+                                placeholderText: qsTr("https://… or name@site.com")
                                 color: Theme.text
                                 placeholderTextColor: Theme.textDim
                                 font.pixelSize: 12
@@ -286,7 +366,7 @@ Item {
                                     color: Theme.raised
                                     radius: 8
                                     border.width: 1
-                                    border.color: aboutUrl.activeFocus ? Theme.accent : Theme.border
+                                    border.color: linkUrlField.activeFocus ? Theme.accent : Theme.border
                                 }
                             }
                         }
@@ -300,13 +380,12 @@ Item {
                             accent: true
                             implicitHeight: 30
                             enabled: !!page.about.supported
-                                     && (aboutText.text.trim() !== "" || aboutUrl.text.trim() !== "")
                             text: page.about.applied ? qsTr("Update About page")
                                                      : qsTr("Apply About page")
                             onClicked: {
                                 const result = backend.applyAboutPage(aboutText.text,
-                                                                      aboutLabel.text,
-                                                                      aboutUrl.text,
+                                                                      page.collectLinks(),
+                                                                      page.showSectionsWanted,
                                                                       true);
                                 page.refreshAbout(true);
                                 if (result && result.msg) {
@@ -320,10 +399,10 @@ Item {
                             Layout.fillWidth: true
                             wrapMode: Text.Wrap
                             text: page.about.applied
-                                  ? qsTr("Applied. Edit the fields and press Update to change it.")
+                                  ? qsTr("Applied. Edit any field and press Update to change it.")
                                   : (page.about.supported
-                                     ? qsTr("Ready — the stock texts and links are replaced and the "
-                                            + "update button is disabled.")
+                                     ? qsTr("Ready — the text and links above are what the page "
+                                            + "prints now; the update button will be disabled.")
                                      : (page.about.detail || qsTr("Unavailable")))
                             color: page.about.applied ? Theme.green
                                    : (page.about.supported ? Theme.textDim : Theme.warn)
@@ -335,9 +414,23 @@ Item {
                     Text {
                         Layout.fillWidth: true
                         wrapMode: Text.Wrap
+                        visible: !!page.about.supported && page.about.sectionsHidden
+                                 && !page.showSectionsWanted
+                        text: qsTr("Heads-up: this build hides both sections, so the text and links "
+                                   + "you apply now will not be visible until you press “Unhide "
+                                   + "links + About”.")
+                        color: Theme.warn
+                        font.pixelSize: 11
+                        font.weight: Font.DemiBold
+                    }
+
+                    Text {
+                        Layout.fillWidth: true
+                        wrapMode: Text.Wrap
                         text: qsTr("Only the About page is edited; every other Settings tab stays "
-                                   + "stock. Clearing both link fields hides the link section "
-                                   + "entirely. Restart BlueStacks after applying.")
+                                   + "stock. A row whose “Show” is unticked is hidden on the page, "
+                                   + "and an address written as an e-mail opens the mail app. "
+                                   + "Restart BlueStacks after applying.")
                         color: Theme.textDim
                         font.pixelSize: 10
                         font.italic: true

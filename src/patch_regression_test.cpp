@@ -3728,7 +3728,7 @@ Window {
               "the MSI 5.9 style clean-up also restores byte-for-byte");
     }
 
-    std::printf("[about] Settings About page keeps its layout and replaces texts/links\n");
+    std::printf("[about] Settings About page offers every stock link and the About text\n");
     {
         const QString about = QStringLiteral(
             "import QtQuick 2.15\r\n"
@@ -3815,79 +3815,93 @@ Window {
         addRegistration(r, false);
         const QByteArray original = r.f.bytes;
         const auto stock = AboutPatcher::analyze(original);
-        check(stock.supported && !stock.applied,
-              "the stock About page is recognized");
-        // The editors are prefilled with what the page says right now, so the
-        // stock text and link can be edited instead of retyped.
+        check(stock.supported && !stock.applied, "the stock About page is recognized");
+        check(stock.sectionsHidden && !stock.config.showSections,
+              "the oem-gated sections are reported as hidden, so the Unhide button starts offered");
         check(stock.config.text
                   == QStringLiteral("Copyright 2026. By using it you agree to the Terms of use"),
               QStringLiteral("the About text editor is prefilled with the stock text (%1)")
                   .arg(stock.config.text));
-        check(stock.config.linkLabel == QStringLiteral("www.bluestacks.com")
-                  && stock.config.linkUrl == QStringLiteral("http://www.bluestacks.com"),
-              QStringLiteral("the link editors are prefilled with the stock link (%1 -> %2)")
-                  .arg(stock.config.linkLabel, stock.config.linkUrl));
+        check(stock.config.links.size() == 3,
+              QStringLiteral("every stock link row is offered to the editor (%1)")
+                  .arg(stock.config.links.size()));
+        check(stock.config.links.value(0).name == QStringLiteral("Support email")
+                  && stock.config.links.value(0).url == QStringLiteral("support@bluestacks.com"),
+              QStringLiteral("the e-mail row keeps its name and address (%1 -> %2)")
+                  .arg(stock.config.links.value(0).name, stock.config.links.value(0).url));
+        check(stock.config.links.value(2).name == QStringLiteral("Website")
+                  && stock.config.links.value(2).url == QStringLiteral("http://www.bluestacks.com"),
+              QStringLiteral("the website row keeps its name and handler URL (%1 -> %2)")
+                  .arg(stock.config.links.value(2).name, stock.config.links.value(2).url));
+
         const QString aboutPath = temp.filePath(QStringLiteral("about-page.exe"));
         write(aboutPath, original);
-        AboutPatcher::Config config;
+        AboutPatcher::Config config = stock.config;
+        config.showSections = true; // the Unhide button was pressed
         config.text = QStringLiteral("Modded by Mr.Pc Gamer");
-        config.linkLabel = QStringLiteral("Join my channel");
-        config.linkUrl = QStringLiteral("https://example.com/join");
+        config.links[0].name = QStringLiteral("Telegram");
+        config.links[0].url = QStringLiteral("https://t.me/mrpcgamer");
+        config.links[1].name = QStringLiteral("Discord");
+        config.links[1].url = QStringLiteral("https://discord.gg/example");
+        config.links[2].name = QStringLiteral("Channel");
+        config.links[2].url = QStringLiteral("https://youtube.com/@MrPcGamer");
         const auto applied = AboutPatcher::apply(aboutPath, true, config);
         check(applied.ok, QStringLiteral("the About page is updated (%1)").arg(applied.msg));
-        const auto aboutText = resourceText(read(aboutPath), r, QStringLiteral("PlrAboutSetting.qml"));
-        check(aboutText.contains(QLatin1String("Modded by Mr.Pc Gamer"))
-                  && aboutText.contains(QLatin1String("<a href=\\\"https://example.com/join\\\">Join my channel</a>"))
-                  && aboutText.contains(QLatin1String("onLinkActivated: Qt.openUrlExternally(\"https://example.com/join\")"))
-                  && aboutText.contains(QLatin1String("BSI CUSTOMIZER: about-config ")),
-              "the custom About text and the single custom link replace the stock ones");
-        check(aboutText.contains(QLatin1String("id: iWebsiteText"))
-                  && aboutText.contains(QLatin1String("id: iTermsOfUseText"))
-                  && aboutText.contains(QLatin1String("Important links"))
-                  && aboutText.contains(QLatin1String("About and other info")),
-              "the About page keeps its layout, section headings and text fields instead of going empty");
-        check(aboutText.count(QLatin1String("visible: false // BSI CUSTOMIZER: about hidden")) == 3
-                  && aboutText.count(QLatin1String("false /* BSI CUSTOMIZER: about hidden */ && (")) == 3,
-              "the stock e-mail/support/QQ links and the update button are hidden");
-        check(aboutText.count(QLatin1String("visible: true /* BSI CUSTOMIZER: about shown:")) == 2,
-              "the links and About sections are forced visible so the MSI build shows them too");
-        const auto state = AboutPatcher::analyze(read(aboutPath));
-        check(state.applied && state.config.text == config.text
-                  && state.config.linkUrl == config.linkUrl,
-              "the applied About content reads back");
-        AboutPatcher::Config second = config;
-        second.text = QStringLiteral("Second build of the page");
-        second.linkUrl = QStringLiteral("https://example.com/two");
-        check(AboutPatcher::apply(aboutPath, true, second).ok
-                  && resourceText(read(aboutPath), r, QStringLiteral("PlrAboutSetting.qml"))
-                         .contains(QLatin1String("Second build of the page"))
+        QString patched = resourceText(read(aboutPath), r, QStringLiteral("PlrAboutSetting.qml"));
+        check(patched.contains(QLatin1String("Modded by Mr.Pc Gamer"))
+                  && patched.contains(QLatin1String("Telegram - <a href=\\\"https://t.me/mrpcgamer\\\">t.me/mrpcgamer</a>"))
+                  && patched.contains(QLatin1String("Discord - <a href=\\\"https://discord.gg/example\\\">discord.gg/example</a>"))
+                  && patched.contains(QLatin1String("Channel - <a href=\\\"https://youtube.com/@MrPcGamer\\\">youtube.com/@MrPcGamer</a>")),
+              "all three stock links are rewritten with the edited names and addresses");
+        check(patched.contains(QLatin1String("onLinkActivated: Qt.openUrlExternally(\"https://t.me/mrpcgamer\")"))
+                  && patched.count(QLatin1String("// BSI CUSTOMIZER: about handler")) == 2,
+              "rows without a stock handler get one, and it is tagged so the undo removes it");
+        check(patched.contains(QLatin1String("Important links"))
+                  && patched.contains(QLatin1String("About and other info"))
+                  && patched.count(QLatin1String("visible: true /* BSI CUSTOMIZER: about shown:")) == 2,
+              "the page keeps its layout and the hidden MSI sections are switched back on");
+        auto state = AboutPatcher::analyze(read(aboutPath));
+        check(state.applied && !state.sectionsHidden && state.config.links.size() == 3
+                  && state.config.links.value(1).url == QStringLiteral("https://discord.gg/example"),
+              "the applied text and every link read back from the page");
+
+        // Per-link hide: one row is switched off, the others stay.
+        AboutPatcher::Config perLink = config;
+        perLink.links[1].hidden = true;
+        check(AboutPatcher::apply(aboutPath, true, perLink).ok,
+              "a single link can be hidden without touching the rest");
+        patched = resourceText(read(aboutPath), r, QStringLiteral("PlrAboutSetting.qml"));
+        check(patched.contains(QLatin1String("visible: false // BSI CUSTOMIZER: about hidden"))
+                  && !patched.contains(QLatin1String("Discord - <a"))
+                  && patched.contains(QLatin1String("Telegram - <a"))
+                  && patched.contains(QLatin1String("Channel - <a")),
+              "the hidden row disappears and the other two links stay");
+        state = AboutPatcher::analyze(read(aboutPath));
+        check(state.config.links.value(1).hidden && !state.config.links.value(0).hidden,
+              "the per-link hide state reads back");
+
+        // The sections can also be left exactly as the build draws them.
+        AboutPatcher::Config gated = perLink;
+        gated.showSections = false;
+        check(AboutPatcher::apply(aboutPath, true, gated).ok
                   && !resourceText(read(aboutPath), r, QStringLiteral("PlrAboutSetting.qml"))
-                          .contains(QLatin1String("Modded by Mr.Pc Gamer")),
+                          .contains(QLatin1String("BSI CUSTOMIZER: about shown:"))
+                  && resourceText(read(aboutPath), r, QStringLiteral("PlrAboutSetting.qml"))
+                         .contains(QLatin1String("visible: uiBackend.oem !== \"msi5\"")),
+              "the sections can be left hidden on the builds that hide them");
+
+        check(AboutPatcher::apply(aboutPath, true, config).ok
+                  && resourceText(read(aboutPath), r, QStringLiteral("PlrAboutSetting.qml"))
+                         .count(QLatin1String("BSI CUSTOMIZER: about-config ")) == 1,
               "applying different content updates the same page instead of stacking edits");
-        check(resourceText(read(aboutPath), r, QStringLiteral("PlrAboutSetting.qml"))
-                  .count(QLatin1String("BSI CUSTOMIZER: about-config ")) == 1,
-              "only one configuration line is ever written");
         const auto restored = AboutPatcher::apply(aboutPath, false, {});
         check(restored.ok, QStringLiteral("the stock About page restores (%1)").arg(restored.msg));
         check(resourceText(read(aboutPath), r, QStringLiteral("PlrAboutSetting.qml")) == about,
               "restoring the About page is byte-for-byte identical to stock");
 
-        // Text only: the stock links are hidden and the page still shows the
-        // custom text (no link row with a stock target left behind).
-        const QString textPath = temp.filePath(QStringLiteral("about-text-only.exe"));
-        write(textPath, original);
-        AboutPatcher::Config textOnly;
-        textOnly.text = QStringLiteral("Just my text");
-        check(AboutPatcher::apply(textPath, true, textOnly).ok
-                  && resourceText(read(textPath), r, QStringLiteral("PlrAboutSetting.qml"))
-                         .contains(QLatin1String("Just my text"))
-                  && AboutPatcher::apply(textPath, false, {}).ok
-                  && resourceText(read(textPath), r, QStringLiteral("PlrAboutSetting.qml")) == about,
-              "a text-only About patch applies and restores byte-for-byte");
-
         // The values prefill hands the editors can be applied unchanged: the
-        // page then shows the same words through the custom link, and the undo
-        // is still byte-exact.
+        // page then shows the same words through the custom rows, the e-mail
+        // row keeps a working mailto: target, and the undo is still byte-exact.
         const QString prefillPath = temp.filePath(QStringLiteral("about-prefill.exe"));
         write(prefillPath, original);
         const auto prefilled = AboutPatcher::apply(prefillPath, true, stock.config);
@@ -3895,11 +3909,36 @@ Window {
                                                 QStringLiteral("PlrAboutSetting.qml"));
         check(prefilled.ok
                   && prefilledText.contains(QLatin1String("Copyright 2026. By using it you agree to the Terms of use"))
-                  && prefilledText.contains(QLatin1String("<a href=\\\"http://www.bluestacks.com\\\">www.bluestacks.com</a>")),
+                  && prefilledText.contains(QLatin1String("Website - <a href=\\\"http://www.bluestacks.com\\\">www.bluestacks.com</a>"))
+                  && prefilledText.contains(QLatin1String("Support email - <a href=\\\"mailto:support@bluestacks.com\\\">support@bluestacks.com</a>")),
               QStringLiteral("the prefilled stock values can be applied unchanged (%1)").arg(prefilled.msg));
+        const auto prefilledState = AboutPatcher::analyze(read(prefillPath));
+        check(prefilledState.config.links.value(0).url
+                  == QStringLiteral("mailto:support@bluestacks.com"),
+              "the e-mail row reads back as the mailto: target it now uses");
+        check(prefilledText.contains(QLatin1String("visible: uiBackend.oem !== \"msi5\""))
+                  && !prefilledText.contains(QLatin1String("BSI CUSTOMIZER: about shown:")),
+              "applying without pressing Unhide leaves the build's own section visibility alone");
+        check(AboutPatcher::apply(prefillPath, true, stock.config).msg
+                  == QStringLiteral("This About page content is already applied."),
+              "applying the same prefill twice is a no-op rather than a rewrite");
         check(AboutPatcher::apply(prefillPath, false, {}).ok
                   && resourceText(read(prefillPath), r, QStringLiteral("PlrAboutSetting.qml")) == about,
               "and that prefill-only patch also restores byte-for-byte");
+
+        // Text only: every stock link row is hidden and the page still shows
+        // the custom text.
+        const QString textPath = temp.filePath(QStringLiteral("about-text-only.exe"));
+        write(textPath, original);
+        AboutPatcher::Config textOnly;
+        textOnly.text = QStringLiteral("Just my text");
+        textOnly.showSections = true;
+        check(AboutPatcher::apply(textPath, true, textOnly).ok
+                  && resourceText(read(textPath), r, QStringLiteral("PlrAboutSetting.qml"))
+                         .contains(QLatin1String("Just my text"))
+                  && AboutPatcher::apply(textPath, false, {}).ok
+                  && resourceText(read(textPath), r, QStringLiteral("PlrAboutSetting.qml")) == about,
+              "a text-only About patch applies and restores byte-for-byte");
     }
 
     return failures;

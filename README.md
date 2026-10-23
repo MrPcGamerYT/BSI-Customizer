@@ -101,22 +101,36 @@ together. Press **Restore stock UI** to write the original QML back
 byte-for-byte (this also undoes a sidebar-hiding clean-up written by an older
 version of the tool).
 
-**Settings → About page.** Both editors are filled with what the page says at
-that moment — the stock About text, and the label and URL of the stock website
-link — so they can be edited in place instead of retyped. One apply keeps the
-page and its layout exactly as it is (logo, version banner, section headings)
-and only changes what it says:
-the copyright/Terms-of-use line becomes your About text, and the stock support
-e-mail, support site, website and QQ links are replaced by **one** link of any
-kind (a plain URL is used as its own label when you leave the label empty). The
-stock link handlers are never kept: the custom link calls
-`Qt.openUrlExternally` with exactly the URL you entered. The **Check for
-updates** button is disabled by hiding it together with its "More info" and
-incompatible-version rows, so nothing on the page points at BlueStacks updates
-any more. On the MSI build the stock page hides the links/About sections when
-`uiBackend.oem === "msi5"`; the tool flips those bindings to `visible: true` so
-the custom texts are actually shown. Press **Restore stock About** to restore
-the untouched page byte-for-byte.
+**Settings → About page.** The card reads the page itself, so every field
+starts with exactly what that build prints — nothing is retyped:
+
+* the **About text** — the copyright/Terms-of-use sentence, markup flattened to
+  the words the page shows;
+* one row per stock link (**Support email**, **Support**, **Website**), each
+  with the name it prints and the address it opens. The address is taken from
+  the row's own handler (`Qt.openUrlExternally(…)`) or, for rows that open a
+  mail client, from the address the row prints;
+* a **Show** tick per row, so a single stock link can be hidden while the
+  others stay.
+
+On the pages that gate both sections with `visible: uiBackend.oem !== "msi5"`
+(BlueStacks 5.22 and the current MSI build) the sections are drawn hidden, so
+the card opens with **Unhide links + About** — the first step on those builds.
+Pressing it makes the patch switch both sections on, which is what makes the
+edited text and the links visible at all; leaving it alone keeps the page
+exactly as the build draws it. The 5.10 / MSI 5.9 pages have no such binding,
+so the button only offers to restore the build's own behaviour.
+
+One apply keeps the page and its layout exactly as it is (logo, version banner,
+section headings) and only changes what it says: your text replaces the
+copyright line, and each link row is rewritten with the name and address you
+left in it, using `Qt.openUrlExternally` — a bare e-mail address becomes a
+`mailto:` link and a bare domain gets `https://`, so an edited row always
+opens something. Rows ticked off, plus the stock QQ row, are hidden. The
+**Check for updates** button is disabled by hiding it together with its
+"More info" and incompatible-version rows, so nothing on the page points at
+BlueStacks updates any more. Press **Restore stock About** to restore the
+untouched page byte-for-byte.
 
 Both tools work on the Qt 5 and Qt 6 players: BlueStacks 5.22 and the older
 5.10 build, plus the MSI App Player 5.9 and the current MSI build. The title-bar
