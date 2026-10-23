@@ -3564,7 +3564,7 @@ Window {
         check(runRpcIdCli({ QStringLiteral("undo"), rpc }) == 0 && read(rpc) == player,
               "undo restores the original bytes from the command line too");
     }
-    std::printf("[layout] clean player UI hides the sidebar and extra title-bar buttons\n");
+    std::printf("[layout] one-click clean-up hides the extra title-bar buttons only\n");
     {
         const QString cleanPlr = QStringLiteral(
             "import QtQuick 2.15\r\n"
@@ -3634,7 +3634,7 @@ Window {
         const QString cleanId = QStringLiteral("clean-player-ui");
         const auto stock = LayoutPatcher::analyze(original, cleanId);
         check(stock.supported && !stock.applied,
-              "the clean player UI is offered on a stock sidebar/title bar");
+              "the one-click clean-up is offered on a stock sidebar/title bar");
         const QString cleanPath = temp.filePath(QStringLiteral("layout-clean.exe"));
         write(cleanPath, original);
         const auto applied = LayoutPatcher::apply(cleanPath, cleanId, true);
@@ -3643,10 +3643,8 @@ Window {
         const auto cleanPlrText = resourceText(cleanBytes, r, QStringLiteral("plr.qml"));
         const auto cleanSidebarText = resourceText(cleanBytes, r, QStringLiteral("PlrSidebar.qml"));
         const auto cleanTopbarText = resourceText(cleanBytes, r, QStringLiteral("PlrTopbar.qml"));
-        check(cleanPlrText.contains(QLatin1String("false /* BSI CUSTOMIZER: clean player UI */"))
-                  && cleanPlrText.contains(QLatin1String("width: 0 /* BSI CUSTOMIZER: clean player UI width:"))
-                  && cleanSidebarText.contains(QLatin1String("visible: false // BSI CUSTOMIZER: clean player UI")),
-              "the live sidebar instance and its button strip are hidden, and the instance width collapses");
+        check(cleanPlrText == cleanPlr && cleanSidebarText == cleanSidebar,
+              "the sidebar instance and the sidebar document are left exactly as stock");
         check(cleanTopbarText.count(QLatin1String("pVisible: false /* BSI CUSTOMIZER: clean player UI visible:")) == 2
                   && cleanTopbarText.contains(QLatin1String("pVisible: true\r\n            pWidth: iBackBtn.width"))
                   && cleanTopbarText.contains(QLatin1String("visible: false // BSI CUSTOMIZER: clean player UI")),
@@ -3656,8 +3654,10 @@ Window {
               "an object written on a single line is hidden inline instead of being split across lines");
         check(LayoutPatcher::analyze(cleanBytes, cleanId).applied,
               "the written clean UI is detected on read-back");
-        check(!LayoutPatcher::apply(cleanPath, QStringLiteral("sidebar-to-titlebar"), true).ok,
-              "the title-bar move refuses to stack on the clean UI");
+        // The clean-up writes nothing into plr.qml, so it never blocks the
+        // title-bar move (which is the only option that removes the sidebar).
+        check(!cleanPlrText.contains(QLatin1String("BSI CUSTOMIZER")),
+              "the clean-up leaves no marker in plr.qml, so the title-bar move is still offered");
         const auto restored = LayoutPatcher::apply(cleanPath, cleanId, false);
         const auto restoredBytes = read(cleanPath);
         check(restored.ok, QStringLiteral("the clean player UI restores (%1)").arg(restored.msg));
@@ -3720,8 +3720,8 @@ Window {
                   && oldTopbarText.contains(QLatin1String("\"id\" : iBackBtn,           \"visible\" : true"))
                   && oldTopbarText.contains(QLatin1String("id: iQuestbtn; visible: false /* BSI CUSTOMIZER")),
               "the ListModel entries for the menu/help buttons are switched off while the title and Back stay");
-        check(oldPlrText.contains(QLatin1String("Layout.preferredWidth: 0 /* BSI CUSTOMIZER: clean player UI width:")),
-              "a layout-child sidebar collapses its Layout.preferredWidth");
+        check(oldPlrText == oldPlr,
+              "the layout-child sidebar keeps its stock Layout.preferredWidth");
         check(LayoutPatcher::apply(oldPath, cleanId, false).ok
                   && resourceText(read(oldPath), old, QStringLiteral("PlrTopbar.qml")) == oldTopbar
                   && resourceText(read(oldPath), old, QStringLiteral("plr.qml")) == oldPlr,
@@ -3803,7 +3803,7 @@ Window {
             "                    Text { text: qsTranslate(\"QObject\", \"About and other info\") }\r\n"
             "                    UiTextUrl {\r\n"
             "                        id: iTermsOfUseText\r\n"
-            "                        text: qsTranslate(\"QObject\", \"Copyright\") + \"<a href=\\\"javascript:void(0)\\\">Terms of use</a>\"\r\n"
+            "                        text: qsTranslate(\"QObject\", \"Copyright 2026. By using it you agree to the \") + \"<a href=\\\"javascript:void(0)\\\">\" + qsTranslate(\"QObject\", \"Terms of use\") + \"</a>\"\r\n"
             "                        onLinkActivated: uiBackend.openHelpArticle(\"terms_of_use\")\r\n"
             "                    }\r\n"
             "                }\r\n"
@@ -3817,6 +3817,16 @@ Window {
         const auto stock = AboutPatcher::analyze(original);
         check(stock.supported && !stock.applied,
               "the stock About page is recognized");
+        // The editors are prefilled with what the page says right now, so the
+        // stock text and link can be edited instead of retyped.
+        check(stock.config.text
+                  == QStringLiteral("Copyright 2026. By using it you agree to the Terms of use"),
+              QStringLiteral("the About text editor is prefilled with the stock text (%1)")
+                  .arg(stock.config.text));
+        check(stock.config.linkLabel == QStringLiteral("www.bluestacks.com")
+                  && stock.config.linkUrl == QStringLiteral("http://www.bluestacks.com"),
+              QStringLiteral("the link editors are prefilled with the stock link (%1 -> %2)")
+                  .arg(stock.config.linkLabel, stock.config.linkUrl));
         const QString aboutPath = temp.filePath(QStringLiteral("about-page.exe"));
         write(aboutPath, original);
         AboutPatcher::Config config;
@@ -3874,6 +3884,22 @@ Window {
                   && AboutPatcher::apply(textPath, false, {}).ok
                   && resourceText(read(textPath), r, QStringLiteral("PlrAboutSetting.qml")) == about,
               "a text-only About patch applies and restores byte-for-byte");
+
+        // The values prefill hands the editors can be applied unchanged: the
+        // page then shows the same words through the custom link, and the undo
+        // is still byte-exact.
+        const QString prefillPath = temp.filePath(QStringLiteral("about-prefill.exe"));
+        write(prefillPath, original);
+        const auto prefilled = AboutPatcher::apply(prefillPath, true, stock.config);
+        const auto prefilledText = resourceText(read(prefillPath), r,
+                                                QStringLiteral("PlrAboutSetting.qml"));
+        check(prefilled.ok
+                  && prefilledText.contains(QLatin1String("Copyright 2026. By using it you agree to the Terms of use"))
+                  && prefilledText.contains(QLatin1String("<a href=\\\"http://www.bluestacks.com\\\">www.bluestacks.com</a>")),
+              QStringLiteral("the prefilled stock values can be applied unchanged (%1)").arg(prefilled.msg));
+        check(AboutPatcher::apply(prefillPath, false, {}).ok
+                  && resourceText(read(prefillPath), r, QStringLiteral("PlrAboutSetting.qml")) == about,
+              "and that prefill-only patch also restores byte-for-byte");
     }
 
     return failures;

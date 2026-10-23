@@ -10,6 +10,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QRegularExpression>
+#include <QStringList>
 
 #include <algorithm>
 
@@ -539,6 +540,193 @@ Config normalized(Config config)
     return config;
 }
 
+// ------------------------------------------------- what the page shows right now
+// The About editors are prefilled with the values the page has at this moment,
+// so the stock text/link can be edited instead of retyped. Reading them needs
+// no QML engine: a text expression is flattened to the strings it can render
+// (`qsTranslate("c", "x")` -> `x`, literals decoded), and the markup the stock
+// page uses is turned back into plain text.
+
+// The index just past the ')' that closes the '(' at `open`, quote-aware.
+int closingParen(const QString &text, int open)
+{
+    int depth = 0;
+    QChar quote;
+    for (int i = open; i < text.size(); ++i) {
+        const QChar c = text.at(i);
+        if (!quote.isNull()) {
+            if (c == QLatin1Char('\\')) { ++i; continue; }
+            if (c == quote) quote = QChar();
+            continue;
+        }
+        if (c == QLatin1Char('"') || c == QLatin1Char('\'')) { quote = c; continue; }
+        if (c == QLatin1Char('(')) ++depth;
+        else if (c == QLatin1Char(')') && --depth == 0) return i + 1;
+    }
+    return -1;
+}
+
+QString decodeQmlString(const QString &raw)
+{
+    QString out;
+    out.reserve(raw.size());
+    for (int i = 0; i < raw.size(); ++i) {
+        const QChar c = raw.at(i);
+        if (c != QLatin1Char('\\')) {
+            out += c;
+            continue;
+        }
+        if (++i >= raw.size()) break;
+        const QChar escaped = raw.at(i);
+        switch (escaped.unicode()) {
+        case 'n': out += QLatin1Char('\n'); break;
+        case 'r': out += QLatin1Char('\r'); break;
+        case 't': out += QLatin1Char('\t'); break;
+        default: out += escaped; break;
+        }
+    }
+    return out;
+}
+
+// Every string a QML text expression can contribute, in source order. Calls
+// such as `qsTranslate("QObject", "Terms of use")` contribute their text
+// argument only; other identifiers and operators are skipped.
+QString renderedText(const QString &expression)
+{
+    QString out;
+    const int n = expression.size();
+    int i = 0;
+    while (i < n) {
+        const QChar c = expression.at(i);
+        if (c == QLatin1Char('"') || c == QLatin1Char('\'')) {
+            const QChar quote = c;
+            QString raw;
+            int j = i + 1;
+            while (j < n && expression.at(j) != quote) {
+                if (expression.at(j) == QLatin1Char('\\') && j + 1 < n) raw += expression.at(j++);
+                raw += expression.at(j++);
+            }
+            out += decodeQmlString(raw);
+            i = j + 1;
+            continue;
+        }
+        if (c.isLetter() || c == QLatin1Char('_')) {
+            int j = i;
+            while (j < n && (expression.at(j).isLetterOrNumber()
+                             || expression.at(j) == QLatin1Char('_')))
+                ++j;
+            const QString name = expression.mid(i, j - i);
+            int open = j;
+            while (open < n && expression.at(open).isSpace()) ++open;
+            const bool translated = name == QLatin1String("qsTranslate")
+                || name == QLatin1String("qsTr") || name == QLatin1String("qsTrId");
+            if (translated && open < n && expression.at(open) == QLatin1Char('(')) {
+                const int close = closingParen(expression, open);
+                if (close > 0) {
+                    const QString arguments = expression.mid(open + 1, close - open - 1);
+                    // Quote-aware split, so a comma inside the text is kept.
+                    QStringList parts;
+                    QString part;
+                    QChar active;
+                    for (int k = 0; k < arguments.size(); ++k) {
+                        const QChar d = arguments.at(k);
+                        if (!active.isNull()) {
+                            part += d;
+                            if (d == QLatin1Char('\\') && k + 1 < arguments.size())
+                                part += arguments.at(++k);
+                            else if (d == active) active = QChar();
+                            continue;
+                        }
+                        if (d == QLatin1Char('"') || d == QLatin1Char('\'')) active = d;
+                        if (d == QLatin1Char(',')) { parts << part; part.clear(); continue; }
+                        part += d;
+                    }
+                    parts << part;
+                    QString text = parts.last().trimmed();
+                    if (text.size() >= 2 && (text.front() == QLatin1Char('"')
+                                             || text.front() == QLatin1Char('\''))
+                        && text.back() == text.front())
+                        text = text.mid(1, text.size() - 2);
+                    out += decodeQmlString(text);
+                    i = close;
+                    continue;
+                }
+            }
+            i = j;
+            continue;
+        }
+        ++i;
+    }
+    return out;
+}
+
+QString htmlToPlain(const QString &html)
+{
+    QString out;
+    out.reserve(html.size());
+    bool inTag = false;
+    for (const QChar c : html) {
+        if (inTag) {
+            if (c == QLatin1Char('>')) inTag = false;
+            continue;
+        }
+        if (c == QLatin1Char('<')) {
+            inTag = true;
+            continue;
+        }
+        out += c;
+    }
+    out.replace(QLatin1String("&nbsp;"), QStringLiteral(" "));
+    out.replace(QLatin1String("&lt;"), QStringLiteral("<"));
+    out.replace(QLatin1String("&gt;"), QStringLiteral(">"));
+    out.replace(QLatin1String("&quot;"), QStringLiteral("\""));
+    out.replace(QLatin1String("&#39;"), QStringLiteral("'"));
+    out.replace(QLatin1String("&#039;"), QStringLiteral("'"));
+    out.replace(QLatin1String("&amp;"), QStringLiteral("&"));
+    return out;
+}
+
+// The text of the last `<a …>label</a>` a row can render. The stock rows read
+// `cond ? " - <a…>cn</a>" : " - <a…>com</a>"`, and the second branch is the
+// one this build shows outside China.
+QString lastAnchorLabel(const QString &rendered)
+{
+    static const QRegularExpression rx(QStringLiteral(">([^<>]*)</a\\s*>"),
+                                       QRegularExpression::CaseInsensitiveOption);
+    QString label;
+    auto iter = rx.globalMatch(rendered);
+    while (iter.hasNext()) label = iter.next().captured(1);
+    return htmlToPlain(label).trimmed();
+}
+
+// Where a stock link row sends the user: the URL of its own handler first
+// (`Qt.openUrlExternally("…")`), otherwise the anchor's href when it is a real
+// address instead of the stock `javascript:void(0)` placeholder.
+QString shownLinkUrl(const QString &handler, const QString &rendered)
+{
+    static const QRegularExpression call(
+        QStringLiteral("Qt\\s*\\.\\s*openUrlExternally\\s*\\(\\s*\"((?:[^\"\\\\]|\\\\.)*)\""));
+    QString url;
+    auto calls = call.globalMatch(handler);
+    while (calls.hasNext()) url = decodeQmlString(calls.next().captured(1));
+    if (!url.isEmpty()) return url;
+    static const QRegularExpression href(QStringLiteral("href\\s*=\\s*\"([^\"]*)\""),
+                                         QRegularExpression::CaseInsensitiveOption);
+    auto links = href.globalMatch(rendered);
+    while (links.hasNext()) {
+        const QString candidate = decodeQmlString(links.next().captured(1)).trimmed();
+        if (candidate.isEmpty() || candidate.startsWith(QLatin1String("javascript:"))
+            || candidate == QLatin1String("#"))
+            continue;
+        url = candidate;
+    }
+    return url;
+}
+
+struct Anchors;
+
+bool readShown(const QString &qml, const QString &masked, const Anchors &anchors, Config *config);
+
 struct Anchors
 {
     QmlText::Object content;
@@ -601,6 +789,42 @@ Anchors findAnchors(const QString &qml, const QString &masked, QString *why)
                                                                          anchors.aboutText });
     anchors.ok = true;
     return anchors;
+}
+
+// What the About page says right now, in the shape the editors take: the text
+// line without its markup, and the label/URL of the one stock link that is
+// still shown. The values are read-only input for the UI; applying them is an
+// ordinary patch that replaces the stock text and the stock link.
+bool readShown(const QString &qml, const QString &masked, const Anchors &anchors, Config *config)
+{
+    Config out;
+    const QmlText::Object &textRow = anchors.aboutText.open >= 0 ? anchors.aboutText
+                                                                  : anchors.linkText;
+    if (textRow.open >= 0) {
+        QmlText::Binding text;
+        if (directBinding(masked, textRow.open, textRow.end, QStringLiteral("text"), &text)) {
+            const QString value = qml.mid(text.valueBegin, text.valueEnd - text.valueBegin);
+            out.text = htmlToPlain(renderedText(value)).trimmed();
+        }
+    }
+    if (anchors.linkText.open >= 0) {
+        QmlText::Binding link;
+        if (directBinding(masked, anchors.linkText.open, anchors.linkText.end,
+                          QStringLiteral("text"), &link)) {
+            const QString value = qml.mid(link.valueBegin, link.valueEnd - link.valueBegin);
+            const QString rendered = renderedText(value);
+            out.linkLabel = lastAnchorLabel(rendered);
+            const QString handler = anchors.hasLinkHandler
+                ? qml.mid(anchors.linkHandler.valueBegin,
+                          anchors.linkHandler.valueEnd - anchors.linkHandler.valueBegin)
+                : QString();
+            out.linkUrl = shownLinkUrl(handler, rendered);
+        }
+    }
+    if (out.linkLabel.isEmpty() && !out.linkUrl.isEmpty()) out.linkLabel = out.linkUrl;
+    if (out.text.isEmpty() && out.linkUrl.isEmpty()) return false;
+    *config = out;
+    return true;
 }
 
 bool sameObject(const QmlText::Object &a, const QmlText::Object &b)
@@ -812,7 +1036,12 @@ State analyze(const QByteArray &image)
         state.applied = true;
         state.detail = QStringLiteral("Custom About text and link are applied; the update button is disabled.");
     } else {
-        state.detail = QStringLiteral("Stock About page. Apply to replace the stock texts and links "
+        // Not patched: hand the fields the values the page has now, so the
+        // stock text and link can be edited in place instead of retyped.
+        Config shown;
+        if (readShown(doc.qml, masked, anchors, &shown)) state.config = shown;
+        state.detail = QStringLiteral("Stock About page. The fields show what the page has now; "
+                                      "edit them and apply to replace the stock texts and links "
                                       "and disable the update button.");
     }
     return state;

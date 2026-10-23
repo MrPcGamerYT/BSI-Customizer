@@ -88,20 +88,24 @@ The **Player UI** page has two independent one-click tools for the selected
 original `.bak`, verify the rewritten QML by reading it back, and clear the
 player's QML disk cache so the change is picked up on the next start.
 
-**Sidebar + extra button remover.** One apply hides the whole sidebar (every
-sidebar button, including the sidebar's own Back/Home/Recent copies) and the
-extra title-bar buttons: help, menu/settings, quests, rewards, raw-mode
-warning, now.gg account, nowbuX, pin-to-top, the top-bar icon list, macro,
-sync, screen recording and the sidebar toggle. It deliberately keeps the
-BlueStacks logo, the title/version, the title bar's **Back, Home and Recent**
-buttons and the minimize/restore/close controls, so the window stays usable.
-The sidebar instance is hidden, its width is collapsed to zero (so the game
-view keeps the full window width even after a fullscreen round-trip) and the
-button strip inside `PlrSidebar.qml` is hidden as well. Press **Restore stock
-UI** to write the original QML back byte-for-byte.
+**Extra top-bar buttons (one click).** One apply hides the extra title-bar
+buttons: help, menu/settings, quests, rewards, raw-mode warning, now.gg account,
+nowbuX, pin-to-top, the top-bar icon list, macro, sync, screen recording and
+the sidebar toggle. It deliberately keeps the BlueStacks logo, the
+title/version, the title bar's **Back, Home and Recent** buttons and the
+minimize/restore/close controls, so the window stays usable. **The sidebar is
+not touched** — it keeps its buttons and its place next to the game view. The
+sidebar only disappears when the **Sidebar buttons to the top bar** option (on
+the *Extras* page) moves it into the title bar; the two options can be used
+together. Press **Restore stock UI** to write the original QML back
+byte-for-byte (this also undoes a sidebar-hiding clean-up written by an older
+version of the tool).
 
-**Settings → About page.** One apply keeps the page and its layout exactly as
-it is (logo, version banner, section headings) and only changes what it says:
+**Settings → About page.** Both editors are filled with what the page says at
+that moment — the stock About text, and the label and URL of the stock website
+link — so they can be edited in place instead of retyped. One apply keeps the
+page and its layout exactly as it is (logo, version banner, section headings)
+and only changes what it says:
 the copyright/Terms-of-use line becomes your About text, and the stock support
 e-mail, support site, website and QQ links are replaced by **one** link of any
 kind (a plain URL is used as its own label when you leave the label empty). The

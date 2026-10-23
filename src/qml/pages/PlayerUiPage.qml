@@ -23,7 +23,7 @@ Item {
                 found = list[i];
         }
         page.cleanTweak = found || ({ id: "clean-player-ui", supported: false, applied: false,
-                                      label: qsTr("Clean player UI"),
+                                      label: qsTr("Extra top-bar buttons"),
                                       detail: qsTr("Select the HD-Player.exe path first."),
                                       state: qsTr("Unavailable") });
     }
@@ -98,7 +98,7 @@ Item {
                             Layout.fillWidth: true
                             spacing: 3
                             Text {
-                                text: qsTr("Sidebar + extra button remover")
+                                text: qsTr("Extra top-bar buttons (one click)")
                                 color: Theme.text
                                 font.pixelSize: 15
                                 font.weight: Font.Bold
@@ -106,11 +106,14 @@ Item {
                             Text {
                                 Layout.fillWidth: true
                                 wrapMode: Text.Wrap
-                                text: qsTr("One apply removes the whole sidebar and every extra top-bar "
-                                           + "button — help, menu/settings, rewards, account, top-bar "
-                                           + "icons and the sidebar toggle. Back, Home, Recent, the "
-                                           + "BlueStacks logo, the title/version and the window "
-                                           + "controls stay.")
+                                text: qsTr("One apply hides the extra title-bar buttons — help, "
+                                           + "menu/settings, rewards, account, top-bar icons, "
+                                           + "macro, sync and screen recording. Back, Home, Recent, "
+                                           + "the BlueStacks logo, the title/version and the window "
+                                           + "controls stay. The sidebar itself is not touched: to "
+                                           + "remove it, turn on “Sidebar buttons to the top bar” "
+                                           + "on the Extras page — that moves the sidebar into the "
+                                           + "title bar.")
                                 color: Theme.textDim
                                 font.pixelSize: 11
                             }
@@ -141,8 +144,9 @@ Item {
                         Layout.fillWidth: true
                         wrapMode: Text.Wrap
                         text: page.cleanTweak.applied
-                              ? qsTr("Applied — the sidebar and the extra top-bar buttons are "
-                                     + "hidden. Press “Restore stock UI” to bring them back.")
+                              ? qsTr("Applied — the extra top-bar buttons are hidden and the "
+                                     + "sidebar is untouched. Press “Restore stock UI” to bring "
+                                     + "the stock title bar back.")
                               : (page.cleanTweak.supported
                                  ? qsTr("Ready — one click hides everything listed above.")
                                  : (page.cleanTweak.state || page.cleanTweak.detail))
@@ -179,10 +183,13 @@ Item {
                             Text {
                                 Layout.fillWidth: true
                                 wrapMode: Text.Wrap
-                                text: qsTr("Keeps the About page layout and logo/version, replaces "
-                                           + "BlueStacks' stock About text with yours, replaces the "
-                                           + "stock support / website / QQ links with one link of "
-                                           + "yours, and disables the “Check for updates” button.")
+                                text: qsTr("The fields below are filled with what the About page "
+                                           + "says right now, so you can edit the stock text and "
+                                           + "link instead of retyping them. Apply replaces that "
+                                           + "text and the stock support / website / QQ links with "
+                                           + "your text and one link, and disables the “Check for "
+                                           + "updates” button. The page keeps its layout, logo and "
+                                           + "version.")
                                 color: Theme.textDim
                                 font.pixelSize: 11
                             }
@@ -205,7 +212,7 @@ Item {
                     }
 
                     Text {
-                        text: qsTr("About text (replaces the stock copyright / Terms line)")
+                        text: qsTr("About text (the stock copyright / Terms line, editable)")
                         color: Theme.textDim
                         font.pixelSize: 11
                         font.weight: Font.DemiBold
@@ -237,7 +244,7 @@ Item {
                             Layout.fillWidth: true
                             spacing: 4
                             Text {
-                                text: qsTr("Your link label (optional)")
+                                text: qsTr("Link label (optional — the stock label is shown)")
                                 color: Theme.textDim
                                 font.pixelSize: 11
                                 font.weight: Font.DemiBold
@@ -262,7 +269,7 @@ Item {
                             Layout.fillWidth: true
                             spacing: 4
                             Text {
-                                text: qsTr("Link URL (optional)")
+                                text: qsTr("Link URL (the stock link is shown)")
                                 color: Theme.textDim
                                 font.pixelSize: 11
                                 font.weight: Font.DemiBold
@@ -329,8 +336,8 @@ Item {
                         Layout.fillWidth: true
                         wrapMode: Text.Wrap
                         text: qsTr("Only the About page is edited; every other Settings tab stays "
-                                   + "stock. Leave the link fields empty to keep your text and hide "
-                                   + "the stock links. Restart BlueStacks after applying.")
+                                   + "stock. Clearing both link fields hides the link section "
+                                   + "entirely. Restart BlueStacks after applying.")
                         color: Theme.textDim
                         font.pixelSize: 10
                         font.italic: true
