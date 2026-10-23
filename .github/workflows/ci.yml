@@ -47,7 +47,16 @@ jobs:
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release
 
       - name: Build
-        run: cmake --build build --config Release --parallel
+        shell: pwsh
+        run: |
+          # TEMPORARY: surface compiler errors as annotations (the job log is
+          # not reachable from this environment).
+          cmake --build build --config Release --parallel *>&1 | Tee-Object -FilePath build.log
+          if ($LASTEXITCODE -ne 0) {
+            Get-Content build.log | Select-String -Pattern 'error' | Select-Object -First 8 |
+              ForEach-Object { Write-Host ("::error::" + $_.Line.Trim().Replace('%', '%25')) }
+            exit 1
+          }
 
       - name: Locate build output
         shell: pwsh
