@@ -4000,9 +4000,12 @@ Window {
         AboutPatcher::Config textOnly;
         textOnly.text = QStringLiteral("Just my text");
         textOnly.showSections = true;
-        check(AboutPatcher::apply(textPath, true, textOnly).ok
+        const auto textOnlyApplied = AboutPatcher::apply(textPath, true, textOnly);
+        const auto textOnlyState = AboutPatcher::analyze(read(textPath));
+        check(textOnlyApplied.ok
                   && resourceText(read(textPath), r, QStringLiteral("PlrAboutSetting.qml"))
                          .contains(QLatin1String("Just my text"))
+                  && textOnlyState.applied && textOnlyState.config.links.isEmpty()
                   && AboutPatcher::apply(textPath, false, {}).ok
                   && resourceText(read(textPath), r, QStringLiteral("PlrAboutSetting.qml")) == about,
               "a text-only About patch applies and restores byte-for-byte");

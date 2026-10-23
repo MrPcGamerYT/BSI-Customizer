@@ -50,4 +50,5 @@ struct Result
 State analyze(const QByteArray &image);
 Result apply(const QString &exePath, bool enabled, const Config &config);
 
+
 } // namespace AboutPatcher

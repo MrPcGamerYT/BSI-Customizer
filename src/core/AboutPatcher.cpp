@@ -515,7 +515,7 @@ QString configLine(const Config &config)
     return kConfigBegin + QString::fromLatin1(json.toBase64());
 }
 
-bool readConfig(const QString &qml, Config *config)
+bool readConfig(const QString &qml, Config *config, bool *hasLinksField)
 {
     const int at = qml.indexOf(kConfigBegin);
     if (at < 0) return false;
@@ -531,6 +531,7 @@ bool readConfig(const QString &qml, Config *config)
     const auto document = QJsonDocument::fromJson(bytes, &error);
     if (error.error != QJsonParseError::NoError || !document.isObject()) return false;
     const auto object = document.object();
+    if (hasLinksField) *hasLinksField = object.contains(QStringLiteral("links"));
     Config out;
     out.text = object.value(QStringLiteral("text")).toString();
     out.showSections = object.value(QStringLiteral("show")).toBool(true);
@@ -673,7 +674,9 @@ QStringList renderedChunks(const QString &expression)
             if (translated && open < n && expression.at(open) == QLatin1Char('(')) {
                 const int close = closingParen(expression, open);
                 if (close > 0) {
-                    const QString arguments = expression.mid(open + 1, close - open - 1);
+                    // `close` is one past the ')', so the arguments are the
+                    // characters strictly between it and the '('.
+                    const QString arguments = expression.mid(open + 1, close - open - 2);
                     // Quote-aware split, so a comma inside the text is kept.
                     QStringList parts;
                     QString part;
@@ -692,12 +695,22 @@ QStringList renderedChunks(const QString &expression)
                         part += d;
                     }
                     parts << part;
-                    QString text = parts.last().trimmed();
-                    if (text.size() >= 2 && (text.front() == QLatin1Char('"')
-                                             || text.front() == QLatin1Char('\''))
-                        && text.back() == text.front())
-                        text = text.mid(1, text.size() - 2);
-                    out << decodeQmlString(text);
+                    // The words to show: `qsTranslate("ctx", "text")` keeps its
+                    // text in the second argument, `qsTr("text")` and
+                    // `qsTrId("id")` in the first. A trailing argument (a plural
+                    // count, a disambiguation string) is not part of the text.
+                    QStringList literals;
+                    for (const auto &candidate : parts) {
+                        const QString value = candidate.trimmed();
+                        if (value.size() >= 2
+                            && (value.front() == QLatin1Char('"')
+                                || value.front() == QLatin1Char('\''))
+                            && value.back() == value.front())
+                            literals << value.mid(1, value.size() - 2);
+                    }
+                    const int messageIndex = name == QLatin1String("qsTranslate") ? 1 : 0;
+                    if (literals.size() > messageIndex)
+                        out << decodeQmlString(literals.at(messageIndex));
                     i = close;
                     continue;
                 }
@@ -1178,11 +1191,13 @@ State analyze(const QByteArray &image)
     }
     state.supported = true;
     state.sectionsHidden = anchors.sectionsHidden;
-    if (readConfig(doc.qml, &state.config)) {
+    bool hasLinksField = false;
+    if (readConfig(doc.qml, &state.config, &hasLinksField)) {
         state.applied = true;
         // A tag written by an older version holds one custom link only; the
-        // rows are then read back from the page itself.
-        if (state.config.links.isEmpty()) {
+        // rows are then read back from the page itself. A current tag always
+        // lists its rows, so an empty list really means "no row was named".
+        if (!hasLinksField) {
             Config shown;
             if (readShown(doc.qml, masked, anchors, &shown)) state.config.links = shown.links;
         }

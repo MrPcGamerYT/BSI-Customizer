@@ -1873,7 +1873,10 @@ bool cleanPlrEdits(QString &qml, bool enabled, QList<Edit> &edits)
         changed = true;
     }
     if (cleanShowObject(qml, target, edits)) changed = true;
-    return changed;
+    // Nothing of ours in plr.qml is the normal case: the clean-up only edits the
+    // sidebar and the title bar, and this function exists to undo an old
+    // strip-hiding patch. It must therefore report success, not "changed".
+    return true;
 }
 
 // PlrSidebar.qml is likewise only touched to undo the earlier strip hiding.
@@ -2164,9 +2167,14 @@ State analyzeCleanUi(const QByteArray &image)
     QList<Edit> plrPlan;
     QList<Edit> sidebarPlan;
     QList<Edit> topbarPlan;
+    // The title bar is the only document that says whether the player has the
+    // expected shape: enabling must find something to hide. Restoring a patch
+    // that never touched the title bar (an old build only hid the strip) is
+    // fine and leaves `topbarPlan` empty.
+    const bool topbarOk = cleanTopbarEdits(t, !state.applied, topbarPlan);
     if (!cleanPlrEdits(p, !state.applied, plrPlan)
         || !cleanSidebarEdits(s, !state.applied, sidebarPlan)
-        || !cleanTopbarEdits(t, !state.applied, topbarPlan)) {
+        || (!topbarOk && !state.applied)) {
         state.detail = state.applied
             ? QStringLiteral("The applied clean UI could not be read back safely.")
             : QStringLiteral("This player's sidebar/top-bar QML is not a supported shape; "
