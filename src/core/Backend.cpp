@@ -67,6 +67,8 @@ void Backend::copyPatchState(const Backend &source)
     m_edits = source.m_edits;
     m_hexQmlColors = source.m_hexQmlColors;
     m_svgs = source.m_svgs;
+    m_images = source.m_images;
+    m_imagesShowAll = source.m_imagesShowAll;
     m_installs = source.m_installs;
 }
 
@@ -127,6 +129,7 @@ QVariantMap Backend::runBackground(const std::function<QVariantMap(Backend &)> &
     emit themeChanged();
     emit gradientTargetsChanged();
     emit svgsChanged();
+    emit imagesChanged();
     emit installsChanged();
     m_busy = false;
     emit busyChanged();
@@ -991,6 +994,152 @@ QVariantMap Backend::replaceSvg(int index, const QString &newSvgPath)
     if (r.ok)
         scanSvgs();
     return result(r.ok, r.msg, QStringLiteral("green"));
+}
+
+// ------------------------------------------------------------ embedded images
+
+QVariantList Backend::imageInfos() const
+{
+    QVariantList out;
+    for (int i = 0; i < m_images.size(); ++i) {
+        const EmbeddedImages::Asset &asset = m_images.at(i);
+        out << QVariantMap { { "index", i },
+                             { "path", asset.path },
+                             { "name", asset.path.section(QLatin1Char('/'), -1) },
+                             { "folder", asset.path.section(QLatin1Char('/'), 0, -2) },
+                             { "format", asset.family.toUpper() },
+                             { "image", asset.image },
+                             { "size", asset.size },
+                             { "width", asset.width },
+                             { "height", asset.height } };
+    }
+    return out;
+}
+
+int Backend::scanImages(bool includeAll)
+{
+    if (!m_backgroundWorker) {
+        const auto response = runBackground(
+            [includeAll](Backend &worker) { return QVariantMap { { "count", worker.scanImages(includeAll) } }; });
+        return response.value("count").toInt();
+    }
+    if (actionsLocked()) return 0;
+    m_images.clear();
+    m_imagesShowAll = includeAll;
+    const QByteArray data = readExe();
+    if (data.isEmpty()) {
+        doLog(QStringLiteral("Images: EXE not found."), QStringLiteral("red"));
+    } else {
+        m_images = EmbeddedImages::list(data, includeAll);
+        int pictures = 0;
+        for (const auto &asset : m_images)
+            if (asset.image) ++pictures;
+        doLog(QStringLiteral("Images: found %1 embedded image(s)%2 in %3")
+                  .arg(pictures)
+                  .arg(includeAll ? QStringLiteral(" among %1 embedded files").arg(m_images.size())
+                                  : QString())
+                  .arg(QFileInfo(m_settings->exePath()).fileName()),
+              QStringLiteral("blue"));
+    }
+    emit imagesChanged();
+    return m_images.size();
+}
+
+QString Backend::imagePreviewAt(int index, int maxSide) const
+{
+    if (index < 0 || index >= m_images.size()) return {};
+    const EmbeddedImages::Asset &asset = m_images.at(index);
+    if (!asset.image) return {};
+    const QByteArray bytes = EmbeddedImages::readEntry(m_settings->exePath(), asset.entryOff,
+                                                       asset.flags);
+    if (bytes.isEmpty()) return {};
+    return EmbeddedImages::previewDataUrl(bytes, asset.family, maxSide);
+}
+
+QVariantMap Backend::replaceImage(int index, const QString &newImagePath)
+{
+    if (actionsLocked()) return lockedMap();
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) { return worker.replaceImage(index, newImagePath); });
+    if (index < 0 || index >= m_images.size())
+        return result(false, QStringLiteral("That embedded image is no longer listed; scan again."),
+                      QStringLiteral("red"));
+    const QString path = m_images.at(index).path;
+    const auto r = EmbeddedImages::replace(m_settings->exePath(), path, newImagePath);
+    if (r.ok) scanImages(m_imagesShowAll);
+    return result(r.ok, r.msg, QStringLiteral("green"));
+}
+
+QVariantMap Backend::extractImage(int index, const QString &targetPath)
+{
+    if (actionsLocked()) return lockedMap();
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) { return worker.extractImage(index, targetPath); });
+    if (index < 0 || index >= m_images.size())
+        return result(false, QStringLiteral("Select an embedded image first."), QStringLiteral("red"));
+    const EmbeddedImages::Asset &asset = m_images.at(index);
+    const QByteArray bytes = EmbeddedImages::readEntry(m_settings->exePath(), asset.entryOff, asset.flags);
+    if (bytes.isEmpty())
+        return result(false, QStringLiteral("That entry could not be read from the EXE."),
+                      QStringLiteral("red"));
+    QFile out(targetPath);
+    if (!out.open(QIODevice::WriteOnly | QIODevice::Truncate) || out.write(bytes) != bytes.size())
+        return result(false, QStringLiteral("Could not write %1.").arg(QDir::toNativeSeparators(targetPath)),
+                      QStringLiteral("red"));
+    out.close();
+    return result(true, QStringLiteral("Saved %1 (%2 bytes) to %3")
+                           .arg(asset.path.section(QLatin1Char('/'), -1))
+                           .arg(bytes.size())
+                           .arg(QDir::toNativeSeparators(targetPath)),
+                  QStringLiteral("green"));
+}
+
+QVariantMap Backend::extractAllImages()
+{
+    if (actionsLocked()) return lockedMap();
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) { return worker.extractAllImages(); });
+    if (m_images.isEmpty())
+        return result(false, QStringLiteral("Scan the EXE first; there is no image list yet."),
+                      QStringLiteral("red"));
+    const QString root = QFileInfo(m_settings->exePath()).absolutePath()
+        + QStringLiteral("/embedded_images");
+    int count = 0;
+    QStringList failed;
+    for (const auto &asset : m_images) {
+        if (!asset.image) continue;
+        // Keep the pool's folder layout so two "logo.png" in different folders
+        // cannot overwrite each other, but never let a crafted resource name
+        // walk out of the extraction folder.
+        QStringList segments;
+        for (const QString &part : asset.path.split(QLatin1Char('/'), Qt::SkipEmptyParts))
+            if (part != QLatin1String(".") && part != QLatin1String("..")
+                && !part.contains(QLatin1Char(':')))
+                segments << part;
+        if (segments.isEmpty()) continue;
+        const QString target = root + QLatin1Char('/') + segments.join(QLatin1Char('/'));
+        QDir().mkpath(QFileInfo(target).absolutePath());
+        const QByteArray bytes = EmbeddedImages::readEntry(m_settings->exePath(), asset.entryOff, asset.flags);
+        QFile out(target);
+        if (bytes.isEmpty() || !out.open(QIODevice::WriteOnly | QIODevice::Truncate)
+            || out.write(bytes) != bytes.size()) {
+            failed << asset.path;
+            continue;
+        }
+        out.close();
+        ++count;
+    }
+    const QString dir = QDir::toNativeSeparators(root);
+    if (count == 0)
+        return result(false, QStringLiteral("No embedded image could be written to %1.").arg(dir),
+                      QStringLiteral("red"));
+    return result(true, QStringLiteral("Extracted %1 embedded image(s) to %2%3")
+                           .arg(count)
+                           .arg(dir)
+                           .arg(failed.isEmpty()
+                                    ? QString()
+                                    : QStringLiteral(" (%1 could not be read)").arg(failed.size())),
+                  QStringLiteral("green"));
 }
 
 // ---------------------------------------------------------------------- fps

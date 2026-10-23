@@ -30,6 +30,11 @@ var svg = "<rect x='3' y='3' width='18' height='18' rx='2'/>"
         + "<circle cx='9' cy='9' r='2'/>"
         + "<path d='m21 15-3.09-3.09a2 2 0 0 0-2.82 0L6 21'/>";
 
+// picture frame with a mountain and a sun: the embedded-images tab
+var images = "<rect x='3' y='3' width='18' height='18' rx='2.5'/>"
+           + "<circle cx='8.5' cy='8.5' r='1.6'/>"
+           + "<path d='m21 15.5-4.2-4.2a2 2 0 0 0-2.8 0L5.5 20'/>";
+
 var fps = "<path d='M12 14 8.5 9.5'/>"
         + "<path d='M20.5 16a9 9 0 1 0-17 0'/>"
         + "<circle cx='12' cy='14' r='1'/>";

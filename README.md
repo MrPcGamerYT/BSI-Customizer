@@ -156,6 +156,34 @@ shapes (an explicit `pIsFeatureEnable` binding, or none — the tool adds one
 and removes it again on restore), and the About page is rewritten on both page
 generations (they differ only in the copyright year).
 
+## Embedded images
+
+The **Images** tab lists every picture the player draws that is not a raw
+`<svg>` blob: the PNG, JPEG, BMP, GIF, ICO, WEBP, TGA and SVG files that live
+in HD-Player.exe's Qt resource pools (button art, backgrounds, logos, the
+window icon). It is the same list → preview → replace flow as the SVG tab, but
+for the resource tree instead of the inline markup:
+
+- **Scan Images** walks every resource pool the EXE registers (plus the main
+  QML pool) and lists each entry with its size, format and pixel dimensions.
+  The thumbnail and the large preview are decoded in-process; nothing is
+  written.
+- **Show every embedded file** also lists the other resources (QML, compiled
+  caches, …). They can be inspected, but only pictures are previewable and
+  replaceable here.
+- **Extract…** saves the selected entry exactly as the EXE stores it;
+  **Extract All** writes every picture to `embedded_images\` next to the EXE,
+  keeping the pool's folder layout.
+- **Replace…** validates the chosen file first — the real format is sniffed
+  from its bytes and has to match the entry (a JPEG cannot be dropped into a
+  PNG slot), and the file has to decode — then rewrites the resource with its
+  zlib flag and the PE layout preserved, verifies the result, and only then
+  replaces the EXE on disk. The original is kept as `HD-Player.exe.bak` before
+  the first write, and the tool refuses to write while HD-Player.exe runs.
+
+Restart BlueStacks after a replacement; the player reads its art from the
+resource at startup.
+
 ## Gradient themes
 
 BlueStacks paints the sidebar and top bar from `plr.qml`'s `PlrSidebar` /
