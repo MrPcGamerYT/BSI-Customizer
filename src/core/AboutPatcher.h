@@ -50,5 +50,11 @@ struct Result
 State analyze(const QByteArray &image);
 Result apply(const QString &exePath, bool enabled, const Config &config);
 
+// Everything analyze() concluded about one file, printed for the command line
+// (`BSI-Customizer --about-probe <exe>`). Same role as ThemeEngine::probeReport:
+// when the About page reports "not supported", this says which step failed and
+// what the page actually contains, instead of leaving it to guesswork.
+QString probeReport(const QString &exePath);
+
 
 } // namespace AboutPatcher
