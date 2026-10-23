@@ -4081,9 +4081,14 @@ Window {
         check(prefilledState.config.links.value(0).url
                   == QStringLiteral("mailto:support@bluestacks.com"),
               "the e-mail row reads back as the mailto: target it now uses");
-        check(prefilledText.contains(QLatin1String("visible: uiBackend.oem !== \"msi5\""))
-                  && !prefilledText.contains(QLatin1String("BSI CUSTOMIZER: about shown:")),
-              "applying without pressing Unhide leaves the build's own section visibility alone");
+        // The editor offers both sections shown (that is the only value that is
+        // right on MSI, where the stock binding hides them, and on BlueStacks,
+        // where they are already visible), so applying the prefilled values
+        // carries that Unhide step with it. Turning the toggle off keeps the
+        // build's own binding - that is the check above.
+        check(prefilledText.count(QLatin1String("visible: true /* BSI CUSTOMIZER: about shown:"))
+                  == 2,
+              "the prefilled values carry the Unhide step the editor offers by default");
         check(AboutPatcher::apply(prefillPath, true, stock.config).msg
                   == QStringLiteral("This About page content is already applied."),
               "applying the same prefill twice is a no-op rather than a rewrite");

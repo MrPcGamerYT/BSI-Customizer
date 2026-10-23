@@ -535,11 +535,14 @@ bool invalidateThemeCacheResources(QByteArray &data, const Link &link, QString *
         QByteArray unit = data.mid(cache.first + 4, size);
         if (cache.second == 1)
             unit = qUncompress(unit);
+        // A resource whose leaf is "<name>c" only counts as a compiled unit when
+        // it really carries the qv4cdata header: the naming rule alone pairs any
+        // file that ends in c. Anything else is left alone instead of failing the
+        // edit - Qt rejects a unit it cannot parse by itself and compiles the
+        // edited source, so there is nothing to invalidate here.
         if (unit.size() < 28 || !unit.startsWith(QByteArray("qv4cdata\0", 8))
-            || le32(unit, 24) > quint32(unit.size())) {
-            *error = QStringLiteral("Cannot validate the embedded theme cache. No file was written.");
-            return false;
-        }
+            || le32(unit, 24) > quint32(unit.size()))
+            continue;
         // The tree itself proves this is UiThemeObject.qmlc. This also handles
         // older Qt Unit layouts without relying on sourceFileIndex offsets.
         if (le32(unit, 8) == 0)
