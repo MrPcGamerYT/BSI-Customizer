@@ -1,12 +1,15 @@
 #include "AboutPatcher.h"
 
 #include "BsDetector.h"
+#include "ByteUtils.h"
 #include "PatchFile.h"
 #include "QmlText.h"
 #include "QtResources.h"
 #include "ThemeEngine.h"
 
 #include <QFile>
+#include <QFileInfo>
+#include <QTemporaryDir>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -25,6 +28,8 @@ const QString kHiddenWrap = QStringLiteral(
     "false /* BSI CUSTOMIZER: about hidden */ && (");
 const QString kHiddenLine = QStringLiteral(
     "visible: false // BSI CUSTOMIZER: about hidden");
+const QString kHiddenInline = QStringLiteral(
+    "visible: false /* BSI CUSTOMIZER: about hidden */");
 // BlueStacks hides the whole "Important links" and "About and other info"
 // blocks on MSI builds (`visible: uiBackend.oem !== "msi5"`). The custom page
 // must show them there too, so their binding is switched to `true` while the
@@ -358,7 +363,7 @@ bool hiddenMemberSite(const QString &qml, const QmlText::Object &object, int *at
     // a separator and a block comment instead; the inline form is removed by
     // the same byte-exact site match in showObject().
     *at = object.open + 1;
-    *text = QStringLiteral(" visible: false /* BSI CUSTOMIZER: about hidden */;");
+    *text = QStringLiteral(" ") + kHiddenInline + QStringLiteral(";");
     return true;
 }
 
@@ -876,22 +881,23 @@ Anchors findAnchors(const QString &qml, const QString &masked, QString *why)
                                        QStringLiteral("onLinkActivated"), &row.handler);
         anchors.links << row;
     }
-    if (anchors.links.isEmpty()) {
-        if (why) *why = QStringLiteral("The stock About links were not found in this player.");
-        return anchors;
-    }
-    if (!sectionOf(masked, anchors.content, anchors.links.first().object,
-                   &anchors.linksBlock)) {
-        if (why) *why = QStringLiteral("The stock About links are not inside the About content column.");
-        return anchors;
+    // A build whose link rows are shaped differently (renamed ids, a Repeater,
+    // a new section) must still get the working text editor: the rows are only
+    // skipped, they never take the whole card down. The card says so itself
+    // ("No stock link rows in this player") when the list comes back empty.
+    if (!anchors.links.isEmpty()
+        && sectionOf(masked, anchors.content, anchors.links.first().object, &anchors.linksBlock)) {
+        anchors.qqRows = findQqRows(qml, masked, anchors.linksBlock);
+    } else {
+        anchors.links.clear();
+        anchors.linksBlock = QmlText::Object();
     }
     findUpdateButton(qml, masked, anchors.content, &anchors.updateButton);
-    anchors.qqRows = findQqRows(qml, masked, anchors.linksBlock);
     QList<QmlText::Object> keep { anchors.aboutText };
     for (const auto &row : anchors.links) keep << row.object;
     anchors.updateInfoRows = findUpdateInfoRows(qml, masked, anchors.content, keep);
     anchors.sectionsHidden = hidesItself(masked, anchors.aboutBlock);
-    if (!sameObject(anchors.aboutBlock, anchors.linksBlock))
+    if (anchors.linksBlock.open >= 0 && !sameObject(anchors.aboutBlock, anchors.linksBlock))
         anchors.sectionsHidden = anchors.sectionsHidden || hidesItself(masked, anchors.linksBlock);
     anchors.ok = true;
     return anchors;
@@ -915,7 +921,11 @@ QString rowName(const QString &expression)
 bool rowIsHidden(const QString &qml, const QmlText::Object &object)
 {
     const QString body = qml.mid(object.open, object.end - object.open);
-    return body.contains(kHiddenLine) || body.contains(kHiddenWrap);
+    // Both forms hideObject() can write: the member on its own line, the
+    // wrapped existing binding, and the inline member used when the object's
+    // opening brace shares its line with the members.
+    return body.contains(kHiddenLine) || body.contains(kHiddenWrap)
+        || body.contains(kHiddenInline);
 }
 
 // What the page says right now: the About text without its markup, and every
@@ -952,10 +962,12 @@ bool readShown(const QString &qml, const QString &masked, const Anchors &anchors
         if (link.name.isEmpty()) link.name = link.url;
         out.links << link;
     }
-    // Start from what the page does now: on the MSI-style pages both sections
-    // are bound to `oem !== "msi5"` and drawn hidden, which is exactly the
-    // state the "Unhide links + About" button is there to change.
-    out.showSections = !anchors.sectionsHidden;
+    // The sections are always offered shown. `visible: uiBackend.oem !== "msi5"`
+    // is hidden on MSI builds and already true on BlueStacks ones, so forcing
+    // `visible: true` is the only value that is correct on every build - and
+    // reading "a non-true binding exists" as "the user wants it left alone" is
+    // what made the patch look like it did nothing on MSI installs.
+    out.showSections = true;
     if (out.text.isEmpty() && out.links.isEmpty()) return false;
     *config = out;
     return true;
@@ -1037,7 +1049,8 @@ bool planEnable(const QString &qml, const Config &config, QList<Edit> &edits, QS
         return false;
     }
 
-    const bool sharedBlock = sameObject(anchors.aboutBlock, anchors.linksBlock);
+    const bool haveLinksBlock = anchors.linksBlock.open >= 0;
+    const bool sharedBlock = !haveLinksBlock || sameObject(anchors.aboutBlock, anchors.linksBlock);
 
     // ---- the two sections the MSI build hides ---------------------------
     if (config.showSections) {
@@ -1105,13 +1118,14 @@ bool planDisable(const QString &qml, QList<Edit> &edits, QString *error)
     const Anchors anchors = findAnchors(qml, masked, error);
     if (!anchors.ok) return false;
 
+    const bool haveLinksBlock = anchors.linksBlock.open >= 0;
     restoreShown(qml, anchors.aboutBlock, edits);
-    if (!sameObject(anchors.linksBlock, anchors.aboutBlock))
+    if (haveLinksBlock && !sameObject(anchors.linksBlock, anchors.aboutBlock))
         restoreShown(qml, anchors.linksBlock, edits);
     // Rows/sections hidden when the text or every link was switched off.
     showObject(qml, anchors.aboutText, edits);
     showObject(qml, anchors.aboutBlock, edits);
-    if (!sameObject(anchors.linksBlock, anchors.aboutBlock))
+    if (haveLinksBlock && !sameObject(anchors.linksBlock, anchors.aboutBlock))
         showObject(qml, anchors.linksBlock, edits);
 
     for (const auto &row : anchors.links) showObject(qml, row.object, edits);
@@ -1298,6 +1312,265 @@ Result apply(const QString &exePath, bool enabled, const Config &rawConfig)
     if (caches > 0)
         msg += QStringLiteral(" Cleared the player QML disk cache so BlueStacks reloads the source.");
     return { true, msg };
+}
+
+
+// ---------------------------------------------------------------- diagnostics
+
+namespace {
+
+QByteArray readAll(const QString &path)
+{
+    QFile file(path);
+    return file.open(QIODevice::ReadOnly) ? file.readAll() : QByteArray();
+}
+
+QString oneLine(const QString &text, int limit = 160)
+{
+    QString out = text;
+    out.replace(QLatin1Char('\r'), QLatin1Char(' '));
+    out.replace(QLatin1Char('\n'), QLatin1Char(' '));
+    out = out.simplified();
+    if (out.size() > limit)
+        out = out.left(limit) + QStringLiteral(" …");
+    return out;
+}
+
+QString span(const QmlText::Object &object)
+{
+    return object.open < 0 ? QStringLiteral("not found")
+                           : QStringLiteral("%1..%2").arg(object.open).arg(object.end);
+}
+
+} // namespace
+
+// A few lines the card can show when the editor still refuses or the page
+// does not change: what was found, what it reads now, and the exact reason.
+QString summary(const QString &exePath)
+{
+    QStringList lines;
+    QFile file(exePath);
+    const QFileInfo info(exePath);
+    lines << QStringLiteral("File: %1 (%2 MB)")
+                 .arg(info.fileName())
+                 .arg(double(info.size()) / 1048576.0, 0, 'f', 1);
+    if (!file.open(QIODevice::ReadOnly)) {
+        lines << QStringLiteral("Cannot read the selected EXE.");
+        return lines.join(QLatin1Char('\n'));
+    }
+    const QByteArray image = file.readAll();
+    file.close();
+    const State state = analyze(image);
+    lines << QStringLiteral("Supported: %1   applied: %2   sections hidden: %3")
+                 .arg(state.supported ? QStringLiteral("yes") : QStringLiteral("no"),
+                      state.applied ? QStringLiteral("yes") : QStringLiteral("no"),
+                      state.sectionsHidden ? QStringLiteral("yes") : QStringLiteral("no"));
+    if (!state.supported) {
+        lines << QStringLiteral("Reason: %1").arg(state.detail);
+        return lines.join(QLatin1Char('\n'));
+    }
+    lines << QStringLiteral("Text now: \"%1\"").arg(oneLine(state.config.text, 120));
+    lines << QStringLiteral("Link rows: %1").arg(state.config.links.size());
+    for (const auto &link : state.config.links) {
+        lines << QStringLiteral("  %1  %2 -> %3%4")
+                     .arg(link.id.isEmpty() ? QStringLiteral("(no id)") : link.id,
+                          link.name, link.url,
+                          link.hidden ? QStringLiteral("  [hidden]") : QString());
+    }
+    return lines.join(QLatin1Char('\n'));
+}
+
+QString probeReport(const QString &exePath)
+{
+    QStringList lines;
+    const auto add = [&lines](const QString &text) { lines << text; };
+
+    QFile file(exePath);
+    if (!file.open(QIODevice::ReadOnly)) {
+        add(QStringLiteral("*** CANNOT READ %1 ***").arg(exePath));
+        return lines.join(QLatin1Char('\n')) + QLatin1Char('\n');
+    }
+    const QByteArray image = file.readAll();
+    file.close();
+    add(QStringLiteral("file: %1 (%2 bytes)").arg(exePath).arg(image.size()));
+
+    const auto files = QtResources::registeredFiles(image);
+    add(QStringLiteral("registered resource files: %1").arg(files.size()));
+    int matches = 0;
+    for (const auto &entry : files) {
+        if (entry.name == QLatin1String("PlrAboutSetting.qml")) {
+            ++matches;
+            const auto bytes = QtResources::readFile(image, entry);
+            add(QStringLiteral("  PlrAboutSetting.qml: entryOff=%1 flags=%2 stored=%3 decoded=%4")
+                    .arg(entry.entryOff)
+                    .arg(entry.flags)
+                    .arg(QtResources::readFile(image, entry).isEmpty()
+                             ? QStringLiteral("unreadable")
+                             : QString::number(ByteUtils::be32(image, entry.entryOff)))
+                    .arg(bytes.size()));
+        }
+    }
+    add(QStringLiteral("PlrAboutSetting.qml entries: %1").arg(matches));
+
+    const ThemeInfo theme = ThemeEngine::findThemeZlib(image);
+    add(QStringLiteral("theme pool: hasQrcNode=%1 ambiguous=%2")
+            .arg(theme.hasQrcNode ? QStringLiteral("yes") : QStringLiteral("no"))
+            .arg(theme.ambiguous ? QStringLiteral("yes") : QStringLiteral("no")));
+    if (theme.hasQrcNode) {
+        int named = 0;
+        for (const auto &entry : QtResources::filesInPool(image, theme.resource))
+            if (entry.name == QLatin1String("PlrAboutSetting.qml")) ++named;
+        add(QStringLiteral("  PlrAboutSetting.qml in that pool: %1").arg(named));
+    }
+
+    QString error;
+    Doc doc;
+    if (!findDoc(image, QStringLiteral("PlrAboutSetting.qml"), &doc, &error)) {
+        add(QStringLiteral("*** DOC NOT FOUND: %1 ***").arg(error));
+        return lines.join(QLatin1Char('\n')) + QLatin1Char('\n');
+    }
+    add(QStringLiteral("document: %1 chars, bom=%2, crlf=%3")
+            .arg(doc.qml.size())
+            .arg(doc.bom ? QStringLiteral("yes") : QStringLiteral("no"))
+            .arg(doc.qml.contains(QLatin1String("\r\n")) ? QStringLiteral("yes")
+                                                         : QStringLiteral("no")));
+
+    const QString masked = QmlText::mask(doc.qml);
+    const Anchors anchors = findAnchors(doc.qml, masked, &error);
+    if (!anchors.ok) {
+        add(QStringLiteral("*** ANCHORS FAILED: %1 ***").arg(error));
+        // Say which half of the shape is missing, so the next build can be
+        // compared instead of re-guessed.
+        QmlText::Object content;
+        add(QStringLiteral("  iContentLayout: %1")
+                .arg(findObjectById(doc.qml, masked, QStringLiteral("iContentLayout"), &content)
+                         ? span(content)
+                         : QStringLiteral("missing")));
+        for (const auto &type : { QStringLiteral("UiScrollView"), QStringLiteral("ScrollView"),
+                                  QStringLiteral("Flickable") }) {
+            add(QStringLiteral("  %1 objects: %2").arg(type)
+                    .arg(QmlText::objects(masked, type).size()));
+        }
+        for (const auto &id : stockLinkIds()) {
+            QmlText::Object object;
+            add(QStringLiteral("  %1: %2").arg(id,
+                    findObjectById(doc.qml, masked, id, &object) ? span(object)
+                                                                 : QStringLiteral("missing")));
+        }
+        QmlText::Object terms;
+        add(QStringLiteral("  iTermsOfUseText: %1")
+                .arg(findObjectById(doc.qml, masked, QStringLiteral("iTermsOfUseText"), &terms)
+                         ? span(terms)
+                         : QStringLiteral("missing")));
+        return lines.join(QLatin1Char('\n')) + QLatin1Char('\n');
+    }
+
+    add(QStringLiteral("content column: %1").arg(span(anchors.content)));
+    add(QStringLiteral("about text object: %1  (binding %2..%3)")
+            .arg(span(anchors.aboutText))
+            .arg(anchors.aboutTextBinding.valueBegin)
+            .arg(anchors.aboutTextBinding.valueEnd));
+    add(QStringLiteral("  raw: %1")
+            .arg(oneLine(doc.qml.mid(anchors.aboutTextBinding.valueBegin,
+                                     anchors.aboutTextBinding.valueEnd
+                                         - anchors.aboutTextBinding.valueBegin))));
+    add(QStringLiteral("  chunks: %1")
+            .arg(oneLine(renderedChunks(doc.qml.mid(anchors.aboutTextBinding.valueBegin,
+                                                    anchors.aboutTextBinding.valueEnd
+                                                        - anchors.aboutTextBinding.valueBegin))
+                             .join(QStringLiteral(" | ")))));
+    add(QStringLiteral("about block: %1   links block: %2   hidden=%3/%4")
+            .arg(span(anchors.aboutBlock), span(anchors.linksBlock))
+            .arg(hidesItself(masked, anchors.aboutBlock) ? QStringLiteral("yes")
+                                                         : QStringLiteral("no"))
+            .arg(hidesItself(masked, anchors.linksBlock) ? QStringLiteral("yes")
+                                                         : QStringLiteral("no")));
+    add(QStringLiteral("update button: %1   update rows: %2   qq rows: %3")
+            .arg(anchors.updateButton.open >= 0 ? span(anchors.updateButton)
+                                                : QStringLiteral("not found"))
+            .arg(anchors.updateInfoRows.size())
+            .arg(anchors.qqRows.size()));
+    for (const auto &row : anchors.links) {
+        const QString text = doc.qml.mid(row.text.valueBegin,
+                                         row.text.valueEnd - row.text.valueBegin);
+        add(QStringLiteral("row %1: %2 handler=%3")
+                .arg(row.id, span(row.object),
+                     row.hasHandler ? QStringLiteral("yes") : QStringLiteral("no")));
+        add(QStringLiteral("   text: %1").arg(oneLine(text)));
+        add(QStringLiteral("   chunks: %1")
+                .arg(oneLine(renderedChunks(text).join(QStringLiteral(" | ")))));
+        if (row.hasHandler) {
+            add(QStringLiteral("   handler: %1")
+                    .arg(oneLine(doc.qml.mid(row.handler.valueBegin,
+                                             row.handler.valueEnd - row.handler.valueBegin))));
+        }
+    }
+
+    Config config;
+    if (readShown(doc.qml, masked, anchors, &config)) {
+        add(QStringLiteral("readShown text: \"%1\"").arg(oneLine(config.text, 240)));
+        for (const auto &link : config.links) {
+            add(QStringLiteral("readShown link %1: name=\"%2\" url=\"%3\" hidden=%4")
+                    .arg(link.id, oneLine(link.name, 60), oneLine(link.url, 80))
+                    .arg(link.hidden ? QStringLiteral("yes") : QStringLiteral("no")));
+        }
+    } else {
+        add(QStringLiteral("*** readShown FAILED (empty text and links) ***"));
+    }
+
+    // End-to-end proof on a throw-away copy: plan the edit against the values
+    // the page has now, write it, read it back, then restore and compare the
+    // bytes with the original. This is what the UI's Apply button does, so a
+    // failure here is a failure there, named step by step.
+    {
+        QTemporaryDir scratch;
+        if (!scratch.isValid()) {
+            add(QStringLiteral("round trip: no temporary directory"));
+        } else {
+            const QString copy = scratch.filePath(QStringLiteral("about-probe.exe"));
+            if (!QFile::copy(exePath, copy)) {
+                add(QStringLiteral("round trip: cannot copy the EXE next to the probe"));
+            } else {
+                const State stock = analyze(image);
+                Config wanted = stock.config;
+                wanted.text = QStringLiteral("BSI Customizer probe");
+                wanted.showSections = true;
+                for (int i = 0; i < wanted.links.size(); ++i)
+                    wanted.links[i].hidden = false;
+                const Result wrote = apply(copy, true, wanted);
+                add(QStringLiteral("round trip apply: ok=%1 %2")
+                        .arg(wrote.ok ? QStringLiteral("yes") : QStringLiteral("no"), wrote.msg));
+                if (wrote.ok) {
+                    const State after = analyze(readAll(copy));
+                    add(QStringLiteral("   read back: supported=%1 applied=%2 text=\"%3\" links=%4")
+                            .arg(after.supported ? QStringLiteral("yes") : QStringLiteral("no"),
+                                 after.applied ? QStringLiteral("yes") : QStringLiteral("no"),
+                                 oneLine(after.config.text, 60))
+                            .arg(after.config.links.size()));
+                }
+                const Result undone = apply(copy, false, Config {});
+                add(QStringLiteral("round trip restore: ok=%1 %2")
+                        .arg(undone.ok ? QStringLiteral("yes") : QStringLiteral("no"), undone.msg));
+                const QByteArray back = readAll(copy);
+                add(QStringLiteral("   bytes identical to the original: %1")
+                        .arg(back == image ? QStringLiteral("yes") : QStringLiteral("no")));
+            }
+        }
+    }
+
+    const State state = analyze(image);
+    add(QStringLiteral("analyze: supported=%1 applied=%2 sectionsHidden=%3")
+            .arg(state.supported ? QStringLiteral("yes") : QStringLiteral("no"))
+            .arg(state.applied ? QStringLiteral("yes") : QStringLiteral("no"))
+            .arg(state.sectionsHidden ? QStringLiteral("yes") : QStringLiteral("no")));
+    add(QStringLiteral("  detail: %1").arg(oneLine(state.detail, 300)));
+    add(QStringLiteral("  config.text: \"%1\"").arg(oneLine(state.config.text, 240)));
+    for (const auto &link : state.config.links) {
+        add(QStringLiteral("  config link %1: name=\"%2\" url=\"%3\" hidden=%4")
+                .arg(link.id, oneLine(link.name, 60), oneLine(link.url, 80))
+                .arg(link.hidden ? QStringLiteral("yes") : QStringLiteral("no")));
+    }
+    return lines.join(QLatin1Char('\n')) + QLatin1Char('\n');
 }
 
 } // namespace AboutPatcher

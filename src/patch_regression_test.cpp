@@ -2,6 +2,7 @@
 #include "core/BootVideoPatcher.h"
 #include "core/BsDetector.h"
 #include "core/EmbeddedImages.h"
+#include "core/EmbeddedResources.h"
 #include "core/ExtrasPatcher.h"
 #include "core/AboutPatcher.h"
 #include "core/IntegrityPatcher.h"
@@ -26,9 +27,11 @@
 #include <QCryptographicHash>
 #include <QColor>
 #include <QDir>
+#include <QBuffer>
 #include <QDataStream>
 #include <QFile>
 #include <QFileInfo>
+#include <QImage>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QLibraryInfo>
@@ -3976,8 +3979,10 @@ Window {
         const QByteArray original = r.f.bytes;
         const auto stock = AboutPatcher::analyze(original);
         check(stock.supported && !stock.applied, "the stock About page is recognized");
-        check(stock.sectionsHidden && !stock.config.showSections,
-              "the oem-gated sections are reported as hidden, so the Unhide button starts offered");
+        check(stock.sectionsHidden && stock.config.showSections,
+              "the oem-gated sections are reported as hidden, yet the editor offers them shown: "
+              "`visible: uiBackend.oem !== \"msi5\"` is false on every MSI install, so leaving it "
+              "alone is what made Apply look like it did nothing there");
         check(stock.config.text
                   == QStringLiteral("Copyright 2026. By using it you agree to the Terms of use"),
               QStringLiteral("the About text editor is prefilled with the stock text (%1)")
@@ -4102,6 +4107,32 @@ Window {
                   && AboutPatcher::apply(textPath, false, {}).ok
                   && resourceText(read(textPath), r, QStringLiteral("PlrAboutSetting.qml")) == about,
               "a text-only About patch applies and restores byte-for-byte");
+
+        // A build whose link rows are shaped differently (renamed ids) must
+        // still get the text editor instead of losing the whole card.
+        QString odd = about;
+        odd.replace(QStringLiteral("iSupportEmailText"), QStringLiteral("iMailRow"));
+        odd.replace(QStringLiteral("iSupportText"), QStringLiteral("iHelpRow"));
+        odd.replace(QStringLiteral("iWebsiteText"), QStringLiteral("iSiteRow"));
+        auto oddResources = resources({ { QStringLiteral("PlrAboutSetting.qml"), odd } }, true, {});
+        addRegistration(oddResources, false);
+        const QString oddPath = temp.filePath(QStringLiteral("about-odd-rows.exe"));
+        write(oddPath, oddResources.f.bytes);
+        const auto oddState = AboutPatcher::analyze(oddResources.f.bytes);
+        check(oddState.supported && oddState.config.links.isEmpty()
+                  && !oddState.config.text.isEmpty(),
+              "an About page whose rows use other ids still reports the text it prints");
+        AboutPatcher::Config oddConfig;
+        oddConfig.text = QStringLiteral("Only the sentence is edited here");
+        oddConfig.showSections = true;
+        check(AboutPatcher::apply(oddPath, true, oddConfig).ok
+                  && resourceText(read(oddPath), oddResources,
+                                  QStringLiteral("PlrAboutSetting.qml"))
+                         .contains(QLatin1String("Only the sentence is edited here"))
+                  && AboutPatcher::apply(oddPath, false, {}).ok
+                  && resourceText(read(oddPath), oddResources,
+                                  QStringLiteral("PlrAboutSetting.qml")) == odd,
+              "such a build gets a working text editor and restores byte-for-byte");
     }
 
     std::printf("[images] embedded pictures are listed, previewed and replaced\n");
@@ -4176,6 +4207,208 @@ Window {
                   && EmbeddedImages::readEntry(exePath, finalList.first().entryOff, finalList.first().flags)
                          == logo,
               "the stock picture can be written back over the replacement");
+    }
+
+    std::printf("[resources] every embedded file is listed, edited and never grown\n");
+    {
+        const QByteArray logo = QByteArray::fromHex(
+            "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d4944"
+            "415478da63f8cfc0f01f00050001ff56c72f0d0000000049454e44ae426082");
+        const QString qmlSource = QStringLiteral(
+            "import QtQuick\n"
+            "Item {\n"
+            "    width: 100\n"
+            "    height: 100\n"
+            "    Text { text: qsTr(\"stock\") }\n"
+            "}\n");
+        const QString svgSource = QStringLiteral(
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\">"
+            "<path fill=\"#ffffff\" d=\"M0 0h16v16H0z\"/></svg>");
+        auto r = nestedResources({ { QStringLiteral("ui/panel.qml"), qmlSource.toUtf8() },
+                                   { QStringLiteral("icons/star.svg"), svgSource.toUtf8() },
+                                   { QStringLiteral("images/logo.png"), logo },
+                                   { QStringLiteral("cache/panel.qmlc"), QByteArray("qv4cdata\0\0\0\0", 12) } });
+        addRegistration(r, false);
+
+        const auto entries = EmbeddedResources::list(r.f.bytes, true);
+        const auto find = [&entries](const QString &path) {
+            for (const auto &entry : entries)
+                if (entry.path == path) return entry;
+            return EmbeddedResources::Entry();
+        };
+        const auto qmlEntry = find(QStringLiteral("ui/panel.qml"));
+        const auto svgEntry = find(QStringLiteral("icons/star.svg"));
+        const auto pngEntry = find(QStringLiteral("images/logo.png"));
+        const auto cacheEntry = find(QStringLiteral("cache/panel.qmlc"));
+        check(entries.size() == 4, QStringLiteral("every embedded file is listed (%1)").arg(entries.size()));
+        check(qmlEntry.kind == EmbeddedResources::Kind::Text && qmlEntry.text
+                  && qmlEntry.folder == QLatin1String("ui")
+                  && qmlEntry.format == QLatin1String("qml"),
+              "QML is listed as an editable text resource");
+        check(svgEntry.kind == EmbeddedResources::Kind::Svg && svgEntry.text
+                  && svgEntry.width == 16 && svgEntry.height == 16,
+              "SVG is listed as code, with its viewport size");
+        check(pngEntry.kind == EmbeddedResources::Kind::Image && pngEntry.width == 1
+                  && pngEntry.height == 1,
+              "pictures keep the preview path the Images tab used");
+        check(cacheEntry.kind == EmbeddedResources::Kind::Binary && !cacheEntry.text,
+              "compiled caches are listed but never offered as code");
+
+        check(EmbeddedResources::decodeText(qmlSource.toUtf8()) == qmlSource
+                  && EmbeddedResources::decodeText(QByteArray("\x00\x01\x02", 3)).isEmpty(),
+              "only real UTF-8 is handed to the code editor");
+
+        const QByteArray original = r.f.bytes;
+        const qint64 originalSize = original.size();
+        const auto room = EmbeddedResources::budget(original, qmlEntry.entryOff, qmlEntry.leaf);
+        check(room.known && room.capacity == room.used && room.used > 0,
+              QStringLiteral("the entry's in-place space is measured (%1)").arg(room.detail));
+
+        // The rule the whole tab is built on: nothing may need the file to grow.
+        QString noise;
+        noise.reserve(8000);
+        quint32 seed = 12345;
+        for (int i = 0; i < 8000; ++i) {
+            seed = seed * 1103515245u + 12345u;
+            noise += QChar(ushort('a' + (seed >> 16) % 26));
+        }
+        const QString longer = qmlSource + noise;
+        check(EmbeddedResources::payloadSizeFor(longer.toUtf8(), qmlEntry.flags) > room.capacity,
+              "a longer version of the same file is over the entry's space");
+
+        const QString exePath = temp.filePath(QStringLiteral("resources.exe"));
+        write(exePath, original);
+        const auto refusedText = EmbeddedResources::replaceText(exePath, qmlEntry.path, longer);
+        check(!refusedText.ok && refusedText.msg.contains(QLatin1String("never made bigger"))
+                  && read(exePath) == original,
+              QStringLiteral("a QML edit that grows the embedded file is refused outright (%1)")
+                  .arg(refusedText.msg));
+        check(!QFileInfo::exists(exePath + QStringLiteral(".bak")),
+              "a refused edit does not even create a backup: the EXE was never opened for writing");
+
+        const QString shorter = QStringLiteral("import QtQuick\nItem { width: 10 }\n");
+        const auto saved = EmbeddedResources::replaceText(exePath, qmlEntry.path, shorter);
+        check(saved.ok, QStringLiteral("a QML file that fits in its own space is saved (%1)").arg(saved.msg));
+        const QByteArray afterSave = read(exePath);
+        check(afterSave.size() == originalSize,
+              "the EXE is exactly the same size after the write - nothing was appended");
+        check(EmbeddedResources::readEntry(exePath, qmlEntry.entryOff, qmlEntry.flags)
+                  == shorter.toUtf8(),
+              "the edited QML reads back byte for byte");
+
+        const auto savedList = EmbeddedResources::list(afterSave, true);
+        bool textReadBack = false;
+        for (const auto &entry : savedList)
+            if (entry.path == QLatin1String("ui/panel.qml") && entry.text) textReadBack = true;
+        check(textReadBack, "the list still offers the edited file as code");
+
+        // Same rule for pictures and binary entries.
+        QImage wider(32, 32, QImage::Format_ARGB32);
+        for (int y = 0; y < wider.height(); ++y)
+            for (int x = 0; x < wider.width(); ++x)
+                wider.setPixelColor(x, y, QColor((x * 37) % 256, (y * 53) % 256, (x * y) % 256));
+        QByteArray widerPng;
+        QBuffer widerBuffer(&widerPng);
+        widerBuffer.open(QIODevice::WriteOnly);
+        wider.save(&widerBuffer, "PNG");
+        widerBuffer.close();
+        const QString biggerPng = temp.filePath(QStringLiteral("bigger.png"));
+        write(biggerPng, widerPng);
+        const auto refusedPicture = EmbeddedResources::replacePicture(
+            exePath, pngEntry.path, biggerPng);
+        check(!refusedPicture.ok && read(exePath) == afterSave,
+              QStringLiteral("a bigger picture is refused, not grown into the file (%1)")
+                  .arg(refusedPicture.msg));
+
+        const auto refusedBinary = EmbeddedResources::replaceBytes(
+            exePath, cacheEntry.path, QByteArray(4096, char(0x42)));
+        check(!refusedBinary.ok && read(exePath) == afterSave,
+              QStringLiteral("an oversized binary resource is refused (%1)").arg(refusedBinary.msg));
+
+        const auto svgEdit = EmbeddedResources::replaceText(
+            exePath, svgEntry.path, QStringLiteral("<svg xmlns=\"http://www.w3.org/2000/svg\" "
+                                                  "width=\"16\" height=\"16\"/>"));
+        check(svgEdit.ok && read(exePath).size() == originalSize,
+              QStringLiteral("SVG markup is editable in place (%1)").arg(svgEdit.msg));
+        check(EmbeddedResources::readEntry(exePath, svgEntry.entryOff, svgEntry.flags)
+                  .contains("<svg"),
+              "the edited SVG reads back as markup");
+    }
+
+    // A compressed entry whose new payload no longer fits its own slot, while the
+    // file it decodes to is EXACTLY the same size: the hard rule allows the edit,
+    // so the record is rebuilt in free space the file already has and the tree
+    // node is re-pointed at it. Nothing is appended and the EXE size is unchanged.
+    {
+        // Long and extremely repetitive on purpose: zlib turns it into a few
+        // dozen bytes, so the same-length incompressible edit below cannot
+        // possibly fit the slot it occupies.
+        QString qmlSource = QStringLiteral("import QtQuick\nItem {\n");
+        for (int line = 0; line < 120; ++line)
+            qmlSource += QStringLiteral("    property string field%1: \"%2\"\n")
+                             .arg(line).arg(QStringLiteral("stock"));
+        qmlSource += QStringLiteral("}\n");
+        auto r = nestedResources({ { QStringLiteral("ui/panel.qml"), qmlSource.toUtf8() },
+                                   { QStringLiteral("icons/star.svg"),
+                                     QByteArray("<svg xmlns=\"http://www.w3.org/2000/svg\" "
+                                                "width=\"16\" height=\"16\"/>") } });
+        addRegistration(r, false);
+
+        const auto entries = EmbeddedResources::list(r.f.bytes, true);
+        EmbeddedResources::Entry qmlEntry;
+        for (const auto &entry : entries)
+            if (entry.path == QLatin1String("ui/panel.qml")) qmlEntry = entry;
+        const auto room = EmbeddedResources::budget(r.f.bytes, qmlEntry.entryOff, qmlEntry.leaf);
+        check(qmlEntry.flags == 1 && room.known && room.capacity == room.used,
+              QStringLiteral("the compressed QML slot is measured (%1)").arg(room.detail));
+
+        // Same length, incompressible: the decoded file is the same size, the
+        // zlib payload is not.
+        QString scrambled = qmlSource;
+        quint32 seed = 987654321u;
+        for (int i = 0; i < scrambled.size(); ++i) {
+            if (scrambled.at(i) == QLatin1Char('\n'))
+                continue;
+            seed = seed * 1664525u + 1013904223u;
+            scrambled[i] = QChar(ushort('A' + (seed >> 24) % 26));
+        }
+        const QByteArray scrambledBytes = scrambled.toUtf8();
+        const qint64 needed = EmbeddedResources::payloadSizeFor(scrambledBytes, qmlEntry.flags);
+        check(scrambledBytes.size() == qmlEntry.size && needed > room.capacity,
+              QStringLiteral("a same-size edit can still overrun the compressed slot (%1 > %2)")
+                  .arg(needed).arg(room.capacity));
+
+        const QString exePath = temp.filePath(QStringLiteral("resources-move.exe"));
+        write(exePath, r.f.bytes);
+        const auto saved = EmbeddedResources::replaceText(exePath, qmlEntry.path, scrambled);
+        check(saved.ok && saved.msg.contains(QLatin1String("moved into free space")),
+              QStringLiteral("the payload is rebuilt in free space instead of being refused (%1)")
+                  .arg(saved.msg));
+        const QByteArray afterMove = read(exePath);
+        check(afterMove.size() == r.f.bytes.size(),
+              "relocating a resource never changes the EXE size");
+
+        const auto movedList = EmbeddedResources::list(afterMove, true);
+        check(movedList.size() == entries.size(),
+              QStringLiteral("the moved file is still listed exactly once (%1 entries)")
+                  .arg(movedList.size()));
+        bool found = false;
+        for (const auto &entry : movedList) {
+            if (entry.path != QLatin1String("ui/panel.qml")) continue;
+            found = true;
+            check(entry.entryOff != qmlEntry.entryOff,
+                  "the tree node now points at the new record");
+            check(EmbeddedResources::readEntry(exePath, entry.entryOff, entry.flags)
+                      == scrambledBytes,
+                  "the moved QML reads back byte for byte through the tree");
+        }
+        check(found, "the moved QML is still addressable by its resource path");
+
+        // A second edit on the relocated entry still obeys both size rules.
+        const auto again = EmbeddedResources::replaceText(
+            exePath, qmlEntry.path, QStringLiteral("import QtQuick\nItem {}\n"));
+        check(again.ok && read(exePath).size() == r.f.bytes.size(),
+              QStringLiteral("the relocated entry stays editable (%1)").arg(again.msg));
     }
 
     return failures;

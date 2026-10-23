@@ -128,13 +128,17 @@ starts with exactly what that build prints — nothing is retyped:
 * a **Show** tick per row, so a single stock link can be hidden while the
   others stay.
 
-On the pages that gate both sections with `visible: uiBackend.oem !== "msi5"`
-(BlueStacks 5.22 and the current MSI build) the sections are drawn hidden, so
-the card opens with **Unhide links + About** — the first step on those builds.
-Pressing it makes the patch switch both sections on, which is what makes the
-edited text and the links visible at all; leaving it alone keeps the page
-exactly as the build draws it. The 5.10 / MSI 5.9 pages have no such binding,
-so the button only offers to restore the build's own behaviour.
+Some pages gate both sections with a binding such as
+`visible: uiBackend.oem !== "msi5"`, which is false on every MSI install, so
+those sections are drawn hidden there. The patch always switches both sections
+on by default — that is what makes the edited text and the links visible at
+all, and it is the only value that is correct on both the MSI and the
+BlueStacks builds (where the binding is already true). The toggle is still
+there as **Sections shown — switch back to stock** for anyone who wants the
+page left exactly as the build draws it, and the cards says which build drew
+them hidden. **Diagnose** prints what the editor found on the selected EXE —
+the page, its current text, every row and the reason if the card refuses — so
+nothing has to be guessed.
 
 One apply keeps the page and its layout exactly as it is (logo, version banner,
 section headings) and only changes what it says: your text replaces the
@@ -156,33 +160,52 @@ shapes (an explicit `pIsFeatureEnable` binding, or none — the tool adds one
 and removes it again on restore), and the About page is rewritten on both page
 generations (they differ only in the copyright year).
 
-## Embedded images
+## Embedded resources
 
-The **Images** tab lists every picture the player draws that is not a raw
-`<svg>` blob: the PNG, JPEG, BMP, GIF, ICO, WEBP, TGA and SVG files that live
-in HD-Player.exe's Qt resource pools (button art, backgrounds, logos, the
-window icon). It is the same list → preview → replace flow as the SVG tab, but
-for the resource tree instead of the inline markup:
+The **Resources** tab lists **every** file embedded in HD-Player.exe's Qt
+resource pools — QML, JavaScript, SVG markup, PNG/JPEG/BMP/GIF/ICO/WEBP/TGA
+art, JSON/XML/CSS/HTML, compiled caches and everything else. The SVG and
+Images tabs are gone: both live here, with the whole pool beside them.
 
-- **Scan Images** walks every resource pool the EXE registers (plus the main
-  QML pool) and lists each entry with its size, format and pixel dimensions.
-  The thumbnail and the large preview are decoded in-process; nothing is
-  written.
-- **Show every embedded file** also lists the other resources (QML, compiled
-  caches, …). They can be inspected, but only pictures are previewable and
-  replaceable here.
-- **Extract…** saves the selected entry exactly as the EXE stores it;
-  **Extract All** writes every picture to `embedded_images\` next to the EXE,
-  keeping the pool's folder layout.
-- **Replace…** validates the chosen file first — the real format is sniffed
-  from its bytes and has to match the entry (a JPEG cannot be dropped into a
-  PNG slot), and the file has to decode — then rewrites the resource with its
-  zlib flag and the PE layout preserved, verifies the result, and only then
-  replaces the EXE on disk. The original is kept as `HD-Player.exe.bak` before
-  the first write, and the tool refuses to write while HD-Player.exe runs.
+- **Scan Resources** walks every resource pool the EXE registers (plus the main
+  QML pool) and lists each entry with its path, format, size and, for pictures,
+  its pixel dimensions. Filter by name or by kind (Pictures / SVG / Code /
+  Binary).
+- **Pictures** get a thumbnail in the list and a large preview; **Extract…**
+  saves the selected entry exactly as stored and **Extract All** writes the
+  whole pool to `embedded_resources\` next to the EXE, keeping its folders.
+- **Code** — QML, JS, SVG, JSON, XML, CSS, HTML and text — opens in the editor
+  as the source the player actually loads, and **Save code** writes it back.
+  Editing QML also invalidates its compiled `.qmlc` companion and the player's
+  QML disk cache, so the new source is what runs.
+- **Binary** entries (compiled caches, fonts) are listed and can be extracted
+  or replaced with a file of the same kind.
+- **Replace with file…** validates a picture first (its real format is sniffed
+  from the bytes and has to match the entry) and verifies the rewrite before
+  the EXE is replaced on disk. The original stays as `HD-Player.exe.bak` and
+  nothing is written while HD-Player.exe runs.
 
-Restart BlueStacks after a replacement; the player reads its art from the
-resource at startup.
+**Two hard limits, checked before anything is written.**
+
+1. *The embedded file never grows.* An edit or replacement that decodes to more
+   bytes than the entry already holds is refused outright — no save, no backup,
+   no change to the EXE.
+2. *HD-Player.exe never grows.* The record has to fit the space the entry
+   already owns. Because the shipped pools are packed without padding, that is
+   usually too tight for a recompressed edit, so the writer looks for an empty
+   gap inside the same PE section, builds the record there and re-points the
+   resource tree node at it. Every other payload is blocked out of the search,
+   the file size is asserted again after the rewrite, and the new record is read
+   back through the tree before the EXE on disk is touched. Nothing is ever
+   appended and no section changes size. Only when there is no gap left is the
+   edit refused, with the exact byte counts.
+
+The meter under the editor shows both numbers live as you type — the entry's
+slot (`used / available`) and the file size (`file N of M bytes`) — and turns
+red the moment the embedded file would grow.
+
+Restart BlueStacks after a replacement; the player reads these resources at
+startup.
 
 ## Gradient themes
 

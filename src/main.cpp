@@ -20,6 +20,7 @@
 #include <cstdio>
 #include <memory>
 
+#include "core/AboutPatcher.h"
 #include "core/Backend.h"
 #include "core/AuthManager.h"
 #include "core/SettingsManager.h"
@@ -130,6 +131,25 @@ int main(int argc, char *argv[])
                    || report.contains(QLatin1String("*** ZERO ENTRIES ***"))
                ? 1
                : 0;
+    }
+
+    // Diagnostics: dump what the Settings->About editor sees in a real
+    // HD-Player.exe - which resource holds PlrAboutSetting.qml, whether the
+    // content column, the About line and every stock link row were located,
+    // and what the editor would prefill. When the UI reports "not supported",
+    // this names the step that failed instead of leaving it to guesswork.
+    //   BSI-Customizer.exe --about-probe "C:\...\HD-Player.exe"
+    const int aboutProbeAt = args.indexOf(QStringLiteral("--about-probe"));
+    if (aboutProbeAt >= 0) {
+        ensureConsoleOutput();
+        const QString target = (aboutProbeAt + 1 < args.size()) ? args.at(aboutProbeAt + 1) : QString();
+        if (target.isEmpty()) {
+            std::printf("usage: BSI-Customizer --about-probe <path-to-HD-Player.exe>\n");
+            return 2;
+        }
+        std::printf("%s", qPrintable(AboutPatcher::probeReport(target)));
+        std::fflush(stdout);
+        return 0;
     }
 
     // Packaging-only smoke mode: instantiate the real UI without changing

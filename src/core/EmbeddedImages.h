@@ -4,15 +4,17 @@
 #include <QList>
 #include <QString>
 
-// Image files embedded in HD-Player.exe's Qt resource pools ("images/...").
+// Picture helpers for HD-Player.exe's Qt resource pools ("images/...").
 //
-// The SVG page scans the EXE for raw <svg> text blobs; every other picture the
-// player draws (PNG, JPEG, BMP, GIF, ICO, WEBP, TGA and SVG files) lives in a
-// Qt resource tree instead, zlib-compressed and addressed by name. This is the
-// same list -> preview -> replace flow for those entries: the pool is
-// enumerated, each image is decoded for a preview, and a replacement is
-// written back through the validated resource rewrite (compression flag and PE
-// layout preserved) with the original EXE backed up first.
+// The Resources tab (EmbeddedResources) lists the whole pool; this module keeps
+// the picture-specific parts it reuses: format sniffing, the decoded preview
+// data URL, a bounded entry reader, and the replace flow that validates a
+// replacement picture's real format before it is written.
+//
+// Note that this module's own replace() lets the writer grow the file; the
+// Resources tab does not use it for that reason - it writes through
+// EmbeddedResources, which refuses any replacement that does not fit in the
+// entry's existing space.
 namespace EmbeddedImages {
 
 struct Asset
