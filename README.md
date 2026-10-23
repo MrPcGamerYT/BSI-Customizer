@@ -81,6 +81,33 @@ Restart BlueStacks afterward. Actual windowed-popup behavior still needs
 testing on each supported player build; unrecognized QML is refused rather
 than guessed.
 
+## Player UI: one-click clean-up and the About page
+
+The **Player UI** page has two independent one-click tools for the selected
+`HD-Player.exe`. Both refuse to write while BlueStacks is running, keep the
+original `.bak`, verify the rewritten QML by reading it back, and clear the
+player's QML disk cache so the change is picked up on the next start.
+
+**Sidebar + extra button remover.** One apply hides the whole sidebar (every
+sidebar button, including the sidebar's own Back/Home/Recent copies) and the
+extra title-bar buttons: help, menu/settings, quests, rewards, raw-mode
+warning, now.gg account, nowbuX, pin-to-top, the top-bar icon list, macro,
+sync, screen recording and the sidebar toggle. It deliberately keeps the
+BlueStacks logo, the title/version, the title bar's **Back, Home and Recent**
+buttons and the minimize/restore/close controls, so the window stays usable.
+The sidebar instance is hidden, its width is collapsed to zero (so the game
+view keeps the full window width even after a fullscreen round-trip) and the
+button strip inside `PlrSidebar.qml` is hidden as well. Press **Restore stock
+UI** to write the original QML back byte-for-byte.
+
+**Settings → About page.** One apply removes the entire stock About content -
+logo and version banner, update check, support e-mail, support site, website,
+QQ links and the copyright/Terms-of-use line - and replaces it with your own
+text plus **one** optional link of any kind (a plain URL is used as its own
+label when you leave the label empty). The stock link handlers are never kept:
+the custom link calls `Qt.openUrlExternally` with exactly the URL you entered.
+Press **Restore stock About** to restore the untouched page.
+
 ## Gradient themes
 
 BlueStacks paints the sidebar and top bar from `plr.qml`'s `PlrSidebar` /

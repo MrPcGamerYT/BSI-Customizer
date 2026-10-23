@@ -63,6 +63,8 @@ qt_add_executable(BSICustomizer
     src/core/QmlText.cpp
     src/core/LayoutPatcher.h
     src/core/LayoutPatcher.cpp
+    src/core/AboutPatcher.h
+    src/core/AboutPatcher.cpp
     src/core/BsDetector.h
     src/core/BsDetector.cpp
     src/core/Backend.h
@@ -212,6 +214,7 @@ qt_add_qml_module(BSICustomizer
         src/qml/pages/IntegrityPage.qml
         src/qml/pages/BootVideoPage.qml
         src/qml/pages/ExtrasPage.qml
+        src/qml/pages/PlayerUiPage.qml
         src/qml/pages/RpcidPage.qml
         src/qml/pages/AppearancePage.qml
         src/qml/pages/AboutPage.qml

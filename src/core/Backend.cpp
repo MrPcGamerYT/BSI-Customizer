@@ -5,6 +5,7 @@
 #include "BsDetector.h"
 #include "ExtrasPatcher.h"
 #include "IntegrityPatcher.h"
+#include "AboutPatcher.h"
 #include "LayoutPatcher.h"
 #include "RpcIdPatcher.h"
 #include "SettingsManager.h"
@@ -1233,6 +1234,50 @@ QVariantMap Backend::applyLayoutTweak(const QString &id, bool enabled)
     if (!m_backgroundWorker)
         return runBackground([=](Backend &worker) { return worker.applyLayoutTweak(id, enabled); });
     const auto r = LayoutPatcher::apply(m_settings->exePath(), id, enabled);
+    return result(r.ok, r.msg, r.ok ? QStringLiteral("green") : QStringLiteral("red"));
+}
+
+QVariantMap Backend::aboutPageState()
+{
+    QVariantMap map {
+        { QStringLiteral("supported"), false },
+        { QStringLiteral("applied"), false },
+        { QStringLiteral("detail"), QStringLiteral("Select the HD-Player.exe path first.") },
+        { QStringLiteral("text"), QString() },
+        { QStringLiteral("linkLabel"), QString() },
+        { QStringLiteral("linkUrl"), QString() },
+    };
+    const QString path = m_settings->exePath();
+    if (path.isEmpty() || !QFileInfo::exists(path)) return map;
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) {
+        map[QStringLiteral("detail")] = QStringLiteral("Cannot read the selected EXE.");
+        return map;
+    }
+    const auto state = AboutPatcher::analyze(file.readAll());
+    file.close();
+    map[QStringLiteral("supported")] = state.supported;
+    map[QStringLiteral("applied")] = state.applied;
+    map[QStringLiteral("detail")] = state.detail;
+    map[QStringLiteral("text")] = state.config.text;
+    map[QStringLiteral("linkLabel")] = state.config.linkLabel;
+    map[QStringLiteral("linkUrl")] = state.config.linkUrl;
+    return map;
+}
+
+QVariantMap Backend::applyAboutPage(const QString &text, const QString &linkLabel,
+                                    const QString &linkUrl, bool enabled)
+{
+    if (actionsLocked()) return lockedMap();
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) {
+            return worker.applyAboutPage(text, linkLabel, linkUrl, enabled);
+        });
+    AboutPatcher::Config config;
+    config.text = text;
+    config.linkLabel = linkLabel;
+    config.linkUrl = linkUrl;
+    const auto r = AboutPatcher::apply(m_settings->exePath(), enabled, config);
     return result(r.ok, r.msg, r.ok ? QStringLiteral("green") : QStringLiteral("red"));
 }
 

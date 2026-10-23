@@ -2,6 +2,7 @@
 #include "core/BootVideoPatcher.h"
 #include "core/BsDetector.h"
 #include "core/ExtrasPatcher.h"
+#include "core/AboutPatcher.h"
 #include "core/IntegrityPatcher.h"
 #include "core/LayoutPatcher.h"
 #include "core/QmlText.h"
@@ -1886,10 +1887,11 @@ int runPatchRegressionTests()
 
         const QString id = QStringLiteral("sidebar-to-titlebar");
         const QString smartId = QStringLiteral("responsive-sidebar");
-        check(LayoutPatcher::tweaks().size() == 2
+        check(LayoutPatcher::tweaks().size() == 3
                   && LayoutPatcher::tweaks().front().id == id
+                  && LayoutPatcher::tweaks().at(1).id == QStringLiteral("clean-player-ui")
                   && LayoutPatcher::tweaks().last().id == smartId,
-              "the layout family offers responsive overflow for the stock sidebar and title bar");
+              "the layout family offers the clean player UI plus responsive overflow for the stock sidebar and title bar");
 
         auto r = resources({ { QStringLiteral("plr.qml"), anchoredPlr },
                              { QStringLiteral("PlrSidebar.qml"), sidebar },
@@ -3562,5 +3564,207 @@ Window {
         check(runRpcIdCli({ QStringLiteral("undo"), rpc }) == 0 && read(rpc) == player,
               "undo restores the original bytes from the command line too");
     }
+    std::printf("[layout] clean player UI hides the sidebar and extra title-bar buttons\n");
+    {
+        const QString cleanPlr = QStringLiteral(
+            "import QtQuick 2.15\r\n"
+            "Rectangle {\r\n"
+            "    id: iAppwin\r\n"
+            "    property int pSidebarWidth: 32\r\n"
+            "    PlrTopbar { id: iTopbar }\r\n"
+            "    PlrSidebar {\r\n"
+            "        id: iSidebar\r\n"
+            "        width: pSidebarWidth\r\n"
+            "        visible: uiBackend.confGetInstanceBool(\"show_sidebar\")\r\n"
+            "    }\r\n"
+            "}\r\n");
+        const QString cleanSidebar = QStringLiteral(
+            "import QtQuick 2.15\r\n"
+            "Rectangle {\r\n"
+            "    id: iSidebar\r\n"
+            "    UiColumnLayout {\r\n"
+            "        anchors.fill: parent\r\n"
+            "        UiImageButton { id: iCollapseBtn }\r\n"
+            "        UiImageButton { id: iSoundBtn }\r\n"
+            "    }\r\n"
+            "}\r\n");
+        const QString cleanTopbar = QStringLiteral(
+            "import QtQuick 2.15\r\n"
+            "Rectangle {\r\n"
+            "    id: iTopbar\r\n"
+            "    property list<QtObject> pNonFixedTopbarItems: [\r\n"
+            "        PlrTopbarElement {\r\n"
+            "            pVisible: true\r\n"
+            "            pWidth: iBackBtn.width\r\n"
+            "            onChangeVisibility: function(visibility) {\r\n"
+            "                iBackBtn.visible = visibility\r\n"
+            "            }\r\n"
+            "        },\r\n"
+            "        PlrTopbarElement {\r\n"
+            "            pVisible: true\r\n"
+            "            pWidth: iHelpBtn.width\r\n"
+            "            onChangeVisibility: function(visibility) {\r\n"
+            "                iHelpBtn.visible = visibility\r\n"
+            "            }\r\n"
+            "        },\r\n"
+            "        PlrTopbarElement {\r\n"
+            "            pVisible: pIsNowbuxEnabled\r\n"
+            "            pWidth: iCfgBtn.width\r\n"
+            "            onChangeVisibility: function(visibility) {\r\n"
+            "                iCfgBtn.visible = visibility\r\n"
+            "            }\r\n"
+            "        }\r\n"
+            "    ]\r\n"
+            "    Row {\r\n"
+            "        UiImageButton { id: iSidebarShowBtn }\r\n"
+            "        UiImageButton { id: iBackBtn }\r\n"
+            "        UiImageButton { id: iHomeBtn }\r\n"
+            "        UiImageButton { id: iRecentBtn }\r\n"
+            "        UiImageButton { id: iHelpBtn }\r\n"
+            "        UiImageButton { id: iCfgBtn }\r\n"
+            "    }\r\n"
+            "}\r\n");
+        auto r = resources({ { QStringLiteral("plr.qml"), cleanPlr },
+                             { QStringLiteral("PlrSidebar.qml"), cleanSidebar },
+                             { QStringLiteral("PlrTopbar.qml"), cleanTopbar } }, true, {});
+        addRegistration(r, false);
+        const QByteArray original = r.f.bytes;
+        const QString cleanId = QStringLiteral("clean-player-ui");
+        const auto stock = LayoutPatcher::analyze(original, cleanId);
+        check(stock.supported && !stock.applied,
+              "the clean player UI is offered on a stock sidebar/title bar");
+        const QString cleanPath = temp.filePath(QStringLiteral("layout-clean.exe"));
+        write(cleanPath, original);
+        const auto applied = LayoutPatcher::apply(cleanPath, cleanId, true);
+        check(applied.ok, QStringLiteral("the one-click clean-up applies (%1)").arg(applied.msg));
+        const auto cleanBytes = read(cleanPath);
+        const auto cleanPlrText = resourceText(cleanBytes, r, QStringLiteral("plr.qml"));
+        const auto cleanSidebarText = resourceText(cleanBytes, r, QStringLiteral("PlrSidebar.qml"));
+        const auto cleanTopbarText = resourceText(cleanBytes, r, QStringLiteral("PlrTopbar.qml"));
+        check(cleanPlrText.contains(QLatin1String("false /* BSI CUSTOMIZER: clean player UI */"))
+                  && cleanPlrText.contains(QLatin1String("width: 0 /* BSI CUSTOMIZER: clean player UI width:"))
+                  && cleanSidebarText.contains(QLatin1String("visible: false // BSI CUSTOMIZER: clean player UI")),
+              "the live sidebar instance and its button strip are hidden, and the instance width collapses");
+        check(cleanTopbarText.count(QLatin1String("pVisible: false /* BSI CUSTOMIZER: clean player UI visible:")) == 2
+                  && cleanTopbarText.contains(QLatin1String("pVisible: true\r\n            pWidth: iBackBtn.width"))
+                  && cleanTopbarText.contains(QLatin1String("visible: false // BSI CUSTOMIZER: clean player UI")),
+              "the help/menu elements stop being shown by fReloadTopbarElements while Back stays, and the sidebar toggle is hidden");
+        check(LayoutPatcher::analyze(cleanBytes, cleanId).applied,
+              "the written clean UI is detected on read-back");
+        check(!LayoutPatcher::apply(cleanPath, QStringLiteral("sidebar-to-titlebar"), true).ok,
+              "the title-bar move refuses to stack on the clean UI");
+        const auto restored = LayoutPatcher::apply(cleanPath, cleanId, false);
+        const auto restoredBytes = read(cleanPath);
+        check(restored.ok, QStringLiteral("the clean player UI restores (%1)").arg(restored.msg));
+        check(resourceText(restoredBytes, r, QStringLiteral("plr.qml")) == cleanPlr
+                  && resourceText(restoredBytes, r, QStringLiteral("PlrSidebar.qml")) == cleanSidebar
+                  && resourceText(restoredBytes, r, QStringLiteral("PlrTopbar.qml")) == cleanTopbar,
+              "turning the clean UI off restores every document byte-for-byte");
+    }
+
+    std::printf("[about] Settings About page replacement\n");
+    {
+        const QString about = QStringLiteral(
+            "import QtQuick 2.15\r\n"
+            "import QtQuick.Layouts 1.15\r\n"
+            "Item {\r\n"
+            "    objectName: \"aboutSettings\"\r\n"
+            "    UiColumnLayout {\r\n"
+            "        anchors.fill: parent\r\n"
+            "        UiScrollView {\r\n"
+            "            id: iScrollView\r\n"
+            "            contentHeight: iContentLayout.height + 10\r\n"
+            "            UiColumnLayout {\r\n"
+            "                id: iContentLayout\r\n"
+            "                width: 548\r\n"
+            "                spacing: 16\r\n"
+            "                UiRowLayout {\r\n"
+            "                    Layout.fillWidth: true\r\n"
+            "                    UiImage { asset: \"BlueStacks5Beta\" }\r\n"
+            "                    Text { text: qsTranslate(\"QObject\", \"%1\").arg(uiBackend.productName) }\r\n"
+            "                }\r\n"
+            "                Rectangle {\r\n"
+            "                    Layout.preferredHeight: 1\r\n"
+            "                    color: UiTheme.colors.seperator\r\n"
+            "                }\r\n"
+            "                UiColumnLayout {\r\n"
+            "                    Layout.fillWidth: true\r\n"
+            "                    visible: uiBackend.oem !== \"msi5\"\r\n"
+            "                    Text { text: qsTranslate(\"QObject\", \"Important links\") }\r\n"
+            "                    UiTextUrl {\r\n"
+            "                        id: iSupportEmailText\r\n"
+            "                        text: \"Support email\"\r\n"
+            "                    }\r\n"
+            "                    UiTextUrl {\r\n"
+            "                        id: iWebsiteText\r\n"
+            "                        text: \"Website\"\r\n"
+            "                    }\r\n"
+            "                }\r\n"
+            "                Rectangle {\r\n"
+            "                    Layout.preferredHeight: 1\r\n"
+            "                    color: UiTheme.colors.seperator\r\n"
+            "                    visible: uiBackend.oem !== \"msi5\"\r\n"
+            "                }\r\n"
+            "                UiColumnLayout {\r\n"
+            "                    Layout.fillWidth: true\r\n"
+            "                    visible: uiBackend.oem !== \"msi5\"\r\n"
+            "                    Text { text: qsTranslate(\"QObject\", \"About and other info\") }\r\n"
+            "                    UiTextUrl {\r\n"
+            "                        id: iTermsOfUseText\r\n"
+            "                        text: qsTranslate(\"QObject\", \"Copyright\") + \"<a href=\\\"javascript:void(0)\\\">Terms of use</a>\"\r\n"
+            "                        onLinkActivated: uiBackend.openHelpArticle(\"terms_of_use\")\r\n"
+            "                    }\r\n"
+            "                }\r\n"
+            "            }\r\n"
+            "        }\r\n"
+            "    }\r\n"
+            "}\r\n");
+        auto r = resources({ { QStringLiteral("PlrAboutSetting.qml"), about } }, true, {});
+        addRegistration(r, false);
+        const QByteArray original = r.f.bytes;
+        const auto stock = AboutPatcher::analyze(original);
+        check(stock.supported && !stock.applied,
+              "the stock About page is recognized");
+        const QString aboutPath = temp.filePath(QStringLiteral("about-page.exe"));
+        write(aboutPath, original);
+        AboutPatcher::Config config;
+        config.text = QStringLiteral("Modded by Mr.Pc Gamer");
+        config.linkLabel = QStringLiteral("Join my channel");
+        config.linkUrl = QStringLiteral("https://example.com/join");
+        const auto applied = AboutPatcher::apply(aboutPath, true, config);
+        check(applied.ok, QStringLiteral("the About page is replaced (%1)").arg(applied.msg));
+        const auto aboutText = resourceText(read(aboutPath), r, QStringLiteral("PlrAboutSetting.qml"));
+        check(aboutText.contains(QLatin1String("// BSI CUSTOMIZER: about-block-begin"))
+                  && aboutText.contains(QLatin1String("// BSI CUSTOMIZER: about-block-end"))
+                  && aboutText.contains(QLatin1String("Modded by Mr.Pc Gamer"))
+                  && aboutText.contains(QLatin1String("<a href=\\\"https://example.com/join\\\">Join my channel</a>"))
+                  && aboutText.contains(QLatin1String("onLinkActivated: Qt.openUrlExternally(\"https://example.com/join\")"))
+                  && aboutText.contains(QLatin1String("BSI CUSTOMIZER: about-config ")),
+              "the custom text and the single custom link are written as a new block");
+        check(aboutText.count(QLatin1String("visible: false // BSI CUSTOMIZER: about hidden")) == 2
+                  && aboutText.count(QLatin1String("false /* BSI CUSTOMIZER: about hidden */ && (uiBackend.oem !== \"msi5\")")) == 3,
+              "every stock About block is hidden, including the logo/version row and the update check");
+        check(aboutText.contains(QLatin1String("iTermsOfUseText"))
+                  && aboutText.contains(QLatin1String("iWebsiteText")),
+              "the stock link fields stay in the document but inside hidden blocks");
+        const auto state = AboutPatcher::analyze(read(aboutPath));
+        check(state.applied && state.config.text == config.text
+                  && state.config.linkUrl == config.linkUrl,
+              "the applied About content reads back");
+        AboutPatcher::Config second = config;
+        second.text = QStringLiteral("Second build of the page");
+        second.linkUrl = QStringLiteral("https://example.com/two");
+        check(AboutPatcher::apply(aboutPath, true, second).ok
+                  && resourceText(read(aboutPath), r, QStringLiteral("PlrAboutSetting.qml"))
+                         .contains(QLatin1String("Second build of the page"))
+                  && !resourceText(read(aboutPath), r, QStringLiteral("PlrAboutSetting.qml"))
+                          .contains(QLatin1String("Modded by Mr.Pc Gamer")),
+              "applying a different text replaces the previous About block");
+        const auto restored = AboutPatcher::apply(aboutPath, false, {});
+        check(restored.ok, QStringLiteral("the stock About page restores (%1)").arg(restored.msg));
+        check(resourceText(read(aboutPath), r, QStringLiteral("PlrAboutSetting.qml")) == about,
+              "restoring the About page is byte-for-byte identical to stock");
+    }
+
     return failures;
 }
