@@ -1,0 +1,119 @@
+name: CI diagnostics
+
+# Temporary: the Actions job log cannot be downloaded from this environment, so
+# this workflow rebuilds the same configuration and republishes the compiler
+# errors as check-run annotations, which the API does return. Delete it once
+# the build is green again.
+on:
+  push:
+    branches: ['**']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-diagnostics-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  QT_VERSION: "6.8.3"
+
+jobs:
+  build:
+    name: Diagnostic build
+    runs-on: windows-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: pwsh
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install Qt 6
+        uses: jurplel/install-qt-action@v4.3.1
+        with:
+          version: ${{ env.QT_VERSION }}
+          host: windows
+          target: desktop
+          arch: win64_msvc2022_64
+          cache: true
+
+      - name: Configure
+        env:
+          ZLP_AUTH_JSON: ${{ secrets.ZLP_AUTH_JSON || secrets.BSIC_AUTH_JSON }}
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build (captured)
+        id: build
+        continue-on-error: true
+        run: |
+          cmake --build build --config Release --parallel *>&1 |
+            Tee-Object -FilePath "$env:RUNNER_TEMP\build.log"
+          exit $LASTEXITCODE
+
+      - name: Collect error lines
+        if: steps.build.outcome == 'failure'
+        run: |
+          $log = "$env:RUNNER_TEMP\build.log"
+          $all = @(Get-Content -LiteralPath $log -ErrorAction SilentlyContinue)
+          $errors = @($all | Where-Object {
+              $_ -match 'error [A-Z]+[0-9]{3,4}' -or
+              $_ -match 'fatal error' -or
+              $_ -match 'error LNK' -or
+              $_ -match 'error MSB' -or
+              $_ -match 'CMake Error' -or
+              $_ -match '\bFAILED\b' -or
+              $_ -match 'undefined reference'
+          })
+          if ($errors.Count -eq 0) {
+              $errors = @($all | Select-Object -Last 40)
+          }
+          $errors | Select-Object -First 40 | Set-Content -LiteralPath "$env:RUNNER_TEMP\errors.txt"
+          Write-Output "captured $($errors.Count) error line(s) of $($all.Count) log line(s)"
+          $errors | Select-Object -First 5 | ForEach-Object { Write-Output $_ }
+
+      - name: Report errors 1/4
+        if: steps.build.outcome == 'failure'
+        run: |
+          $f = "$env:RUNNER_TEMP\errors.txt"
+          if (Test-Path $f) {
+            Get-Content $f | Select-Object -Skip 0 -First 10 | ForEach-Object {
+              Write-Output ("::error::" + ($_ -replace '[\r\n]+', ' ').Trim())
+            }
+          }
+
+      - name: Report errors 2/4
+        if: steps.build.outcome == 'failure'
+        run: |
+          $f = "$env:RUNNER_TEMP\errors.txt"
+          if (Test-Path $f) {
+            Get-Content $f | Select-Object -Skip 10 -First 10 | ForEach-Object {
+              Write-Output ("::error::" + ($_ -replace '[\r\n]+', ' ').Trim())
+            }
+          }
+
+      - name: Report errors 3/4
+        if: steps.build.outcome == 'failure'
+        run: |
+          $f = "$env:RUNNER_TEMP\errors.txt"
+          if (Test-Path $f) {
+            Get-Content $f | Select-Object -Skip 20 -First 10 | ForEach-Object {
+              Write-Output ("::error::" + ($_ -replace '[\r\n]+', ' ').Trim())
+            }
+          }
+
+      - name: Report errors 4/4
+        if: steps.build.outcome == 'failure'
+        run: |
+          $f = "$env:RUNNER_TEMP\errors.txt"
+          if (Test-Path $f) {
+            Get-Content $f | Select-Object -Skip 30 -First 10 | ForEach-Object {
+              Write-Output ("::error::" + ($_ -replace '[\r\n]+', ' ').Trim())
+            }
+          }
+
+      - name: Fail the job when the build failed
+        if: steps.build.outcome == 'failure'
+        run: throw 'The build failed; see the annotations above for the compiler output.'
