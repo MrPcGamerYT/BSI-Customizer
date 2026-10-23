@@ -363,7 +363,7 @@ bool hiddenMemberSite(const QString &qml, const QmlText::Object &object, int *at
     // a separator and a block comment instead; the inline form is removed by
     // the same byte-exact site match in showObject().
     *at = object.open + 1;
-    *text = QLatin1Char(' ') + kHiddenInline + QStringLiteral(";");
+    *text = QStringLiteral(" ") + kHiddenInline + QStringLiteral(";");
     return true;
 }
 
