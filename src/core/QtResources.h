@@ -78,9 +78,32 @@ int clearPlayerQmlCache(const QString &exePath);
 // Grow only a validated PE's mapped, read-only resource storage. Never append
 // an unmapped blob or overwrite an arbitrary copy of an offset.
 qint64 appendStorage(QByteArray &data, qint64 size, QString *error);
+// The largest payload the entry can hold **in place**: its current
+// [size][payload] record plus the zero padding that follows it, bounded by the
+// next resource, name record, tree or section end. Nothing is written. This is
+// the budget a replacement must respect when the file size may not grow; -1
+// when the entry cannot be measured.
+qint64 inPlaceCapacity(const QByteArray &data, qint64 entry,
+                       const QString &name = QString(), QString *error = nullptr);
+
+// Free space inside a mapped PE section that `need` bytes fit in without
+// touching any resource payload, name record or tree the link knows. Used to
+// move a resource whose payload outgrew its slot: the record is built in the
+// cave and the tree node is re-pointed at it, so the file does not grow by a
+// single byte. -1 when the file has no such space.
+qint64 findFreeSpace(const QByteArray &data, const Link &link, qint64 need,
+                     QString *error = nullptr);
+
 // Atomic-in-memory resource rewrite: on failure the input bytes are unchanged.
+// With allowGrowth = false the record must fit in the space the entry already
+// occupies; the tool never appends a section and never moves the resource, so
+// the EXE cannot grow - a replacement that does not fit is refused instead.
+// `forcedDestination` places an oversized record at a verified free offset
+// (see findFreeSpace) and re-points the tree at it; the file size still cannot
+// change because the destination is inside the mapped section already.
 bool replaceResource(QByteArray &data, qint64 entry, const Link &link,
-                     const QByteArray &source, QString *error, qint64 *newEntry = nullptr);
+                     const QByteArray &source, QString *error, qint64 *newEntry = nullptr,
+                     bool allowGrowth = true, qint64 forcedDestination = -1);
 bool replaceCompressed(QByteArray &data, qint64 entry, const Link &link,
                        const QByteArray &source, QString *error, qint64 *newEntry = nullptr);
 bool invalidateThemeCacheResources(QByteArray &data, const Link &link, QString *error);

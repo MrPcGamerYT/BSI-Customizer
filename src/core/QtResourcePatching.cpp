@@ -111,8 +111,116 @@ bool replaceCompressed(QByteArray &data, qint64 entry, const Link &snapshot,
     return replaceResource(data, entry, snapshot, source, error, newEntry);
 }
 
+namespace {
+
+// Where the entry's own space ends: its record plus the zero padding behind it,
+// bounded by whatever the writer must not overwrite. Shared by the writer and
+// by inPlaceCapacity() so the budget shown in the UI is the exact one enforced.
+qint64 entrySpaceEnd(const QByteArray &data, const Link &link, qint64 entry, QString *error)
+{
+    if (!inRange(data, entry, 4)) {
+        if (error) *error = QStringLiteral("The resource record is outside the file.");
+        return -1;
+    }
+    if (!PeUtils::sectionForRaw(PeUtils::sections(data), entry)) {
+        if (error) *error = QStringLiteral("The resource is not mapped by a PE section.");
+        return -1;
+    }
+    const quint32 stored = be32(data, entry);
+    const auto sections = PeUtils::sections(data);
+    const auto *section = PeUtils::sectionForRaw(sections, entry);
+    qint64 limit = qMin<qint64>(data.size(), qint64(section->rawPtr) + section->rawSize);
+    const qint64 oldEnd = entry + 4 + stored;
+    for (const auto &range : link.reserved) {
+        if (range.first >= oldEnd) limit = qMin(limit, range.first);
+        else if (range.second > oldEnd) limit = oldEnd;
+    }
+    qint64 end = oldEnd;
+    while (end < limit && data[int(end)] == '\0') ++end;
+    return end;
+}
+
+} // namespace
+
+qint64 inPlaceCapacity(const QByteArray &data, qint64 entry, const QString &name,
+                       QString *error)
+{
+    if (entry < 0 || !inRange(data, entry, 4)) {
+        if (error) *error = QStringLiteral("The resource record is outside the file.");
+        return -1;
+    }
+    const Link link = findLink(data, entry, name);
+    if (!link.found || link.ambiguous) {
+        if (error) *error = link.found ? QStringLiteral("The resource mapping is ambiguous.")
+                                       : QStringLiteral("The resource mapping was not found.");
+        return -1;
+    }
+    const qint64 end = entrySpaceEnd(data, link, entry, error);
+    if (end < 0) return -1;
+    return end - entry - 4;
+}
+
+qint64 findFreeSpace(const QByteArray &data, const Link &link, qint64 need, QString *error)
+{
+    const auto fail = [&](const QString &message) {
+        if (error) *error = message;
+        return qint64(-1);
+    };
+    if (!link.found || link.ambiguous || link.nodes.isEmpty() || link.dataBaseRva < 0)
+        return fail(QStringLiteral("The resource mapping is not unique, so the record cannot be "
+                                   "moved anywhere else."));
+    if (need <= 0 || need > 50000000)
+        return fail(QStringLiteral("That replacement size cannot be placed."));
+    const auto sections = PeUtils::sections(data);
+    if (sections.isEmpty())
+        return fail(QStringLiteral("The PE section table could not be read."));
+
+    // Data sections first (that is where rcc puts resources), never .text unless
+    // nothing else has room: overwriting zero bytes in code is still a code change.
+    QList<const PeSection *> order;
+    for (const QString &wanted : { QStringLiteral(".rdata"), QStringLiteral(".data"),
+                                   QStringLiteral(".rsrc") })
+        for (const PeSection &section : sections)
+            if (section.name == wanted && !order.contains(&section)) order << &section;
+    for (const PeSection &section : sections)
+        if (section.name != QLatin1String(".text") && !order.contains(&section)) order << &section;
+
+    // link.reserved covers the target's own pool (payloads, names, tree). A cave
+    // in another pool's payload could hold a long run of zero bytes too, so every
+    // payload the EXE registers is blocked as well: only bytes no resource owns
+    // may be reused.
+    QList<QPair<qint64, qint64>> blocked = link.reserved;
+    for (const auto &file : registeredFiles(data)) {
+        if (file.entryOff < 0 || !inRange(data, file.entryOff, 4)) continue;
+        blocked << qMakePair(file.entryOff, file.entryOff + 4 + qint64(be32(data, file.entryOff)));
+    }
+
+    const QByteArray probe(int(qMin<qint64>(need, 64)), '\0');
+    const QByteArray wanted(int(need), '\0');
+    for (const PeSection *section : order) {
+        const qint64 begin = section->rawPtr;
+        const qint64 end = qMin<qint64>(data.size(), qint64(section->rawPtr) + section->rawSize);
+        if (end - begin < need) continue;
+        qsizetype pos = data.indexOf(probe, qsizetype(begin));
+        while (pos >= 0 && pos + need <= end) {
+            const qint64 at = qMax<qint64>(qint64(pos), (begin + 3) & ~qint64(3));
+            if (at >= pos && at + need <= end && data.mid(at, int(need)) == wanted) {
+                bool free = true;
+                for (const auto &range : blocked) {
+                    if (at < range.second && at + need > range.first) { free = false; break; }
+                }
+                if (free && PeUtils::rawToRva(sections, at) >= 0) return at;
+            }
+            pos = data.indexOf(probe, pos + 1);
+        }
+    }
+    return fail(QStringLiteral("The EXE has no free space left for a record of %1 bytes. Nothing was "
+                               "written.").arg(need));
+}
+
 bool replaceResource(QByteArray &data, qint64 entry, const Link &snapshot,
-                     const QByteArray &source, QString *error, qint64 *newEntry)
+                     const QByteArray &source, QString *error, qint64 *newEntry,
+                     bool allowGrowth, qint64 forcedDestination)
 {
     const auto refuse = [&](const QString &message) { if (error) *error = message; return false; };
     if (!snapshot.found || snapshot.ambiguous || source.isEmpty() || source.size() > 50000000)
@@ -131,22 +239,33 @@ bool replaceResource(QByteArray &data, qint64 entry, const Link &snapshot,
     QByteArray record(4, '\0');
     putBe32(record, 0, payload.size()); record += payload;
     QByteArray changed = data;
-    const auto sections = PeUtils::sections(changed);
-    const auto *section = PeUtils::sectionForRaw(sections, entry);
-    if (!section) return refuse(QStringLiteral("Resource is not mapped by a PE section."));
-    qint64 limit = qMin<qint64>(changed.size(), qint64(section->rawPtr) + section->rawSize);
-    const qint64 oldEnd = entry + 4 + stored;
-    for (const auto &range : link.reserved) {
-        if (range.first >= oldEnd) limit = qMin(limit, range.first);
-        else if (range.second > oldEnd) limit = oldEnd;
-    }
-    qint64 end = oldEnd;
-    while (end < limit && changed[int(end)] == '\0') ++end;
+    if (!PeUtils::sectionForRaw(PeUtils::sections(changed), entry))
+        return refuse(QStringLiteral("Resource is not mapped by a PE section."));
+    const qint64 end = entrySpaceEnd(changed, link, entry, error);
+    if (end < 0) return false;
     qint64 destination = entry;
     if (record.size() > end - entry) {
-        destination = appendStorage(changed, record.size(), error);
-        if (destination < 0) return false;
+        if (forcedDestination >= 0) {
+            // Relocation into space the file already has: the record is built
+            // in a verified zero run and the tree node points at it. The file
+            // size never changes, so nothing needs to move.
+            if (!inRange(changed, forcedDestination, record.size()))
+                return refuse(QStringLiteral("The chosen free space does not fit the replacement."));
+            if (changed.mid(forcedDestination, record.size()) != QByteArray(record.size(), '\0'))
+                return refuse(QStringLiteral("The chosen free space is not empty any more."));
+            destination = forcedDestination;
+        } else if (!allowGrowth) {
+            return refuse(QStringLiteral("The replacement needs %1 bytes, but this entry only has %2 bytes "
+                                         "of room. Growing the file is disabled, so nothing was written - "
+                                         "make the replacement smaller.")
+                              .arg(record.size())
+                              .arg(end - entry));
+        } else {
+            destination = appendStorage(changed, record.size(), error);
+            if (destination < 0) return false;
+        }
         const qint64 rva = PeUtils::rawToRva(PeUtils::sections(changed), destination);
+        if (rva < 0) return refuse(QStringLiteral("New resource offset is not mapped by a PE section."));
         const qint64 delta = rva - link.dataBaseRva;
         if (delta < 0 || delta > 0xffffffffLL) return refuse(QStringLiteral("New resource offset is out of range."));
         for (qint64 node : link.nodes) putBe32(changed, node + 10, quint32(delta));

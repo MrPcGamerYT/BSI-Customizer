@@ -6,7 +6,7 @@
 #include <QVariantMap>
 #include <QUrl>
 
-#include "EmbeddedImages.h"
+#include "EmbeddedResources.h"
 #include "FpsPatcher.h"
 #include "GradientPatcher.h"
 #include "SvgEngine.h"
@@ -43,7 +43,8 @@ class Backend : public QObject
     Q_PROPERTY(QVariantList gradientTargets READ gradientTargets NOTIFY gradientTargetsChanged)
 
     Q_PROPERTY(QVariantList svgInfos READ svgInfos NOTIFY svgsChanged)
-    Q_PROPERTY(QVariantList imageInfos READ imageInfos NOTIFY imagesChanged)
+    // Every file in the player's Qt resource pools (QML, SVG, pictures, caches).
+    Q_PROPERTY(QVariantList resourceInfos READ resourceInfos NOTIFY resourcesChanged)
     Q_PROPERTY(QVariantList installs READ installs NOTIFY installsChanged)
     Q_PROPERTY(QVariantList removalNames READ removalNames CONSTANT)
 
@@ -92,7 +93,7 @@ public:
     QVariantList gradientTargets() const;
 
     QVariantList svgInfos() const;
-    QVariantList imageInfos() const;
+    QVariantList resourceInfos() const;
     QVariantList installs() const { return m_installs; }
     QVariantList removalNames() const;
 
@@ -136,28 +137,35 @@ public:
 
     // ---- svg ----
     Q_INVOKABLE int scanSvgs();
-    Q_INVOKABLE QString svgTextAt(int index) const;
-    Q_INVOKABLE QVariantMap extractSvgs();
-    Q_INVOKABLE QVariantMap replaceSvg(int index, const QString &newSvgPath);
-    // Switch/toggle SVG colors (BS_THEME_CHANGER's PatchToggleSvgs).
-    // guessToggleSvgs -> { off, on, offColor, onColor, offPreview, onPreview }:
-    // blob indexes (-1 = not recognised), the track color already in each blob
-    // (6-digit hex, the knob's white/black is skipped) and a short text snippet
-    // of each blob for a status line.
-    Q_INVOKABLE QVariantMap guessToggleSvgs();
+    // Switch/toggle SVG colors (BS_THEME_CHANGER's PatchToggleSvgs). The blob
+    // indexes are found by scanSvgs(); the standalone SVG tab is gone, so the
+    // Theme page's preset button is the only caller.
     Q_INVOKABLE QVariantMap recolorToggleSvgs(int offIndex, int onIndex, const QString &offHex,
                                               const QString &onHex);
     Q_INVOKABLE QVariantMap recolorTogglesFromPreset(const QString &id);
 
-    // ---- embedded images (every picture in the Qt resource pools) ----
-    // scanImages lists the image entries; includeAll also lists the other
-    // embedded files (they are shown but cannot be previewed or replaced).
-    // imagePreviewAt returns a data: URL QML's Image can render.
-    Q_INVOKABLE int scanImages(bool includeAll);
-    Q_INVOKABLE QString imagePreviewAt(int index, int maxSide) const;
-    Q_INVOKABLE QVariantMap replaceImage(int index, const QString &newImagePath);
-    Q_INVOKABLE QVariantMap extractImage(int index, const QString &targetPath);
-    Q_INVOKABLE QVariantMap extractAllImages();
+    // ---- embedded resources (every file in the Qt resource pools) ----
+    // One list for QML, SVG, pictures and the rest. Text entries are shown as
+    // code and edited in place; pictures are previewed and replaced. A write is
+    // refused when it would grow the embedded file, and the EXE never grows by
+    // a single byte: an oversized payload is rebuilt in free space the file
+    // already has, or refused.
+    Q_INVOKABLE int scanResources(bool includeBinary);
+    Q_INVOKABLE QString resourcePreviewAt(int index, int maxSide) const;
+    Q_INVOKABLE QString resourceTextAt(int index) const;
+    Q_INVOKABLE QVariantMap resourceBudgetAt(int index);
+    // The payload size `text` would take in that entry (compressed when the
+    // entry is compressed), so the editor can show the budget before saving.
+    // No EXE read: the entry's compression flag and BOM are all it needs.
+    Q_INVOKABLE int resourcePayloadSize(int index, const QString &text, bool bom) const;
+    // Bytes the editor's text occupies once decoded (UTF-8, BOM included). The
+    // embedded file is never made bigger, so this is the number the page checks
+    // against the entry's original size before allowing a save.
+    Q_INVOKABLE int resourceTextSize(const QString &text, bool bom) const;
+    Q_INVOKABLE QVariantMap saveResourceText(int index, const QString &text);
+    Q_INVOKABLE QVariantMap replaceResourceWithFile(int index, const QString &filePath);
+    Q_INVOKABLE QVariantMap extractResource(int index, const QString &targetPath);
+    Q_INVOKABLE QVariantMap extractAllResources();
 
     // ---- fps ----
     Q_INVOKABLE QVariantMap fpsDetect();
@@ -206,7 +214,7 @@ signals:
     void themeChanged();
     void gradientTargetsChanged();
     void svgsChanged();
-    void imagesChanged();
+    void resourcesChanged();
     void installsChanged();
     void log(const QString &message, const QString &color);
 
@@ -240,7 +248,7 @@ private:
     QList<HexColorItem> m_hexQmlColors;
 
     QList<SvgBlob> m_svgs;
-    QList<EmbeddedImages::Asset> m_images;
-    bool m_imagesShowAll = false; // the list on screen includes non-image files
+    QList<EmbeddedResources::Entry> m_resources;
+    bool m_resourcesIncludeBinary = true; // the list on screen keeps binary entries
     QVariantList m_installs;
 };

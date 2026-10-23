@@ -59,6 +59,7 @@ qt_add_executable(BSICustomizer
     src/core/BootVideoPatcher.cpp
     src/core/EmbeddedImages.h
     src/core/EmbeddedImages.cpp
+    src/core/EmbeddedResources.cpp
     src/core/ExtrasPatcher.h
     src/core/ExtrasPatcher.cpp
     src/core/QmlText.h
@@ -211,8 +212,7 @@ qt_add_qml_module(BSICustomizer
         src/qml/components/LogPanel.qml
         src/qml/pages/DashboardPage.qml
         src/qml/pages/ThemePage.qml
-        src/qml/pages/SvgPage.qml
-        src/qml/pages/ImagesPage.qml
+        src/qml/pages/ResourcesPage.qml
         src/qml/pages/FpsPage.qml
         src/qml/pages/IntegrityPage.qml
         src/qml/pages/BootVideoPage.qml

@@ -43,6 +43,7 @@ Backend::Backend(SettingsManager *settings, QObject *parent)
         m_detectedQtMajor = 0;
         m_qmlThemeAvailable = false;
         m_svgs.clear();
+        m_resources.clear();
         emit exePathChanged();
         emit themeChanged();
         emit svgsChanged();
@@ -67,8 +68,8 @@ void Backend::copyPatchState(const Backend &source)
     m_edits = source.m_edits;
     m_hexQmlColors = source.m_hexQmlColors;
     m_svgs = source.m_svgs;
-    m_images = source.m_images;
-    m_imagesShowAll = source.m_imagesShowAll;
+    m_resources = source.m_resources;
+    m_resourcesIncludeBinary = source.m_resourcesIncludeBinary;
     m_installs = source.m_installs;
 }
 
@@ -129,7 +130,7 @@ QVariantMap Backend::runBackground(const std::function<QVariantMap(Backend &)> &
     emit themeChanged();
     emit gradientTargetsChanged();
     emit svgsChanged();
-    emit imagesChanged();
+    emit resourcesChanged();
     emit installsChanged();
     m_busy = false;
     emit busyChanged();
@@ -841,55 +842,6 @@ QVariantList Backend::svgInfos() const
     return out;
 }
 
-QVariantMap Backend::guessToggleSvgs()
-{
-    if (actionsLocked()) return lockedMap();
-    if (!m_backgroundWorker)
-        return runBackground([=](Backend &worker) { return worker.guessToggleSvgs(); });
-    if (m_svgs.isEmpty())
-        scanSvgs();
-    const SvgEngine::ToggleGuess g = SvgEngine::guessToggles(m_svgs);
-
-    auto previewAt = [this](int index) {
-        if (index < 0 || index >= m_svgs.size())
-            return QString();
-        return SvgEngine::preview(m_svgs.at(index).data);
-    };
-    // The color worth pre-filling is the track, not the knob: a switch knob is
-    // nearly always pure white or black, and recolor keeps it that way.
-    auto trackColorAt = [this](int index) {
-        if (index < 0 || index >= m_svgs.size())
-            return QString();
-        const QStringList cols = SvgEngine::colorsIn(m_svgs.at(index).data);
-        // The color field only speaks "#RRGGBB"; SVG also allows "#RRGGBBAA"
-        // (alpha last, unlike Qt) and "#RGB".
-        auto toSix = [](const QString &c) {
-            QString h = c;
-            if (h.size() == 9)
-                h = h.left(7);
-            else if (h.size() == 4)
-                h = QStringLiteral("#") + h.mid(1, 1) + h.mid(1, 1) + h.mid(2, 1) + h.mid(2, 1)
-                    + h.mid(3, 1) + h.mid(3, 1);
-            return h.toUpper();
-        };
-        for (const QString &c : cols) {
-            const QString six = toSix(c);
-            const QColor col(six);
-            if (!col.isValid())
-                continue;
-            const bool knob = (col.red() == 255 && col.green() == 255 && col.blue() == 255)
-                              || (col.red() == 0 && col.green() == 0 && col.blue() == 0);
-            if (!knob)
-                return six;
-        }
-        return cols.isEmpty() ? QString() : toSix(cols.first());
-    };
-
-    return { { "off", g.off }, { "on", g.on },
-             { "offColor", trackColorAt(g.off) }, { "onColor", trackColorAt(g.on) },
-             { "offPreview", previewAt(g.off) }, { "onPreview", previewAt(g.on) } };
-}
-
 QVariantMap Backend::recolorToggleSvgs(int offIndex, int onIndex, const QString &offHex,
                                        const QString &onHex)
 {
@@ -925,8 +877,8 @@ QVariantMap Backend::recolorTogglesFromPreset(const QString &id)
     const SvgEngine::ToggleGuess g = SvgEngine::guessToggles(m_svgs);
     if (g.off < 0 && g.on < 0) {
         return result(false,
-                      QStringLiteral("No switch/toggle SVG found in this EXE. Pick the two blobs "
-                                     "manually on the SVG page and recolor them there."),
+                      QStringLiteral("No switch/toggle SVG was found in this EXE, so the preset "
+                                     "colors were not applied to the switches."),
                       QStringLiteral("orange"));
     }
     doLog(QStringLiteral("Switch SVGs found - OFF index %1, ON index %2. Recoloring both from "
@@ -962,123 +914,188 @@ int Backend::scanSvgs()
     return m_svgs.size();
 }
 
-QString Backend::svgTextAt(int index) const
-{
-    if (index < 0 || index >= m_svgs.size())
-        return {};
-    return QString::fromLatin1(m_svgs.at(index).data);
-}
+// --------------------------------------------------------- embedded resources
 
-QVariantMap Backend::extractSvgs()
-{
-    if (actionsLocked()) return lockedMap();
-    if (!m_backgroundWorker)
-        return runBackground([=](Backend &worker) { return worker.extractSvgs(); });
-    const QString outDir = QFileInfo(m_settings->exePath()).absolutePath()
-                           + QStringLiteral("/svg_extracted");
-    int count = 0;
-    SvgEngine::extractSvgs(m_settings->exePath(), outDir, &count);
-    return result(count > 0,
-                  QStringLiteral("Extracted %1 SVG(s) to %2")
-                      .arg(count)
-                      .arg(QDir::toNativeSeparators(outDir)),
-                  QStringLiteral("green"));
-}
-
-QVariantMap Backend::replaceSvg(int index, const QString &newSvgPath)
-{
-    if (actionsLocked()) return lockedMap();
-    if (!m_backgroundWorker)
-        return runBackground([=](Backend &worker) { return worker.replaceSvg(index, newSvgPath); });
-    const auto r = SvgEngine::replaceSvg(m_settings->exePath(), index, newSvgPath);
-    if (r.ok)
-        scanSvgs();
-    return result(r.ok, r.msg, QStringLiteral("green"));
-}
-
-// ------------------------------------------------------------ embedded images
-
-QVariantList Backend::imageInfos() const
+QVariantList Backend::resourceInfos() const
 {
     QVariantList out;
-    for (int i = 0; i < m_images.size(); ++i) {
-        const EmbeddedImages::Asset &asset = m_images.at(i);
+    for (int i = 0; i < m_resources.size(); ++i) {
+        const EmbeddedResources::Entry &entry = m_resources.at(i);
+        QString kind = QStringLiteral("binary");
+        switch (entry.kind) {
+        case EmbeddedResources::Kind::Image: kind = QStringLiteral("image"); break;
+        case EmbeddedResources::Kind::Svg: kind = QStringLiteral("svg"); break;
+        case EmbeddedResources::Kind::Text: kind = QStringLiteral("text"); break;
+        case EmbeddedResources::Kind::Binary: kind = QStringLiteral("binary"); break;
+        }
         out << QVariantMap { { "index", i },
-                             { "path", asset.path },
-                             { "name", asset.path.section(QLatin1Char('/'), -1) },
-                             { "folder", asset.path.section(QLatin1Char('/'), 0, -2) },
-                             { "format", asset.family.toUpper() },
-                             { "image", asset.image },
-                             { "size", asset.size },
-                             { "width", asset.width },
-                             { "height", asset.height } };
+                             { "path", entry.path },
+                             { "name", entry.leaf },
+                             { "folder", entry.folder },
+                             { "format", entry.format.toUpper() },
+                             { "kind", kind },
+                             { "text", entry.text },
+                             { "size", entry.size },
+                             { "stored", entry.stored },
+                             { "compressed", entry.flags == 1 },
+                             { "width", entry.width },
+                             { "height", entry.height },
+                             { "entryOff", entry.entryOff } };
     }
     return out;
 }
 
-int Backend::scanImages(bool includeAll)
+int Backend::scanResources(bool includeBinary)
 {
     if (!m_backgroundWorker) {
         const auto response = runBackground(
-            [includeAll](Backend &worker) { return QVariantMap { { "count", worker.scanImages(includeAll) } }; });
+            [includeBinary](Backend &worker) {
+                return QVariantMap { { "count", worker.scanResources(includeBinary) } };
+            });
         return response.value("count").toInt();
     }
     if (actionsLocked()) return 0;
-    m_images.clear();
-    m_imagesShowAll = includeAll;
+    m_resources.clear();
+    m_resourcesIncludeBinary = includeBinary;
     const QByteArray data = readExe();
     if (data.isEmpty()) {
-        doLog(QStringLiteral("Images: EXE not found."), QStringLiteral("red"));
+        doLog(QStringLiteral("Resources: EXE not found."), QStringLiteral("red"));
     } else {
-        m_images = EmbeddedImages::list(data, includeAll);
-        int pictures = 0;
-        for (const auto &asset : m_images)
-            if (asset.image) ++pictures;
-        doLog(QStringLiteral("Images: found %1 embedded image(s)%2 in %3")
+        m_resources = EmbeddedResources::list(data, includeBinary);
+        int text = 0, pictures = 0;
+        for (const auto &entry : m_resources) {
+            if (entry.text) ++text;
+            if (entry.kind == EmbeddedResources::Kind::Image
+                || entry.kind == EmbeddedResources::Kind::Svg) ++pictures;
+        }
+        doLog(QStringLiteral("Resources: %1 embedded file(s) - %2 editable text, %3 picture(s) - in %4")
+                  .arg(m_resources.size())
+                  .arg(text)
                   .arg(pictures)
-                  .arg(includeAll ? QStringLiteral(" among %1 embedded files").arg(m_images.size())
-                                  : QString())
                   .arg(QFileInfo(m_settings->exePath()).fileName()),
               QStringLiteral("blue"));
     }
-    emit imagesChanged();
-    return m_images.size();
+    emit resourcesChanged();
+    return m_resources.size();
 }
 
-QString Backend::imagePreviewAt(int index, int maxSide) const
+QString Backend::resourcePreviewAt(int index, int maxSide) const
 {
-    if (index < 0 || index >= m_images.size()) return {};
-    const EmbeddedImages::Asset &asset = m_images.at(index);
-    if (!asset.image) return {};
-    const QByteArray bytes = EmbeddedImages::readEntry(m_settings->exePath(), asset.entryOff,
-                                                       asset.flags);
+    if (index < 0 || index >= m_resources.size()) return {};
+    const EmbeddedResources::Entry &entry = m_resources.at(index);
+    if (entry.kind != EmbeddedResources::Kind::Image && entry.kind != EmbeddedResources::Kind::Svg)
+        return {};
+    const QByteArray bytes = EmbeddedResources::readEntry(m_settings->exePath(), entry.entryOff,
+                                                          entry.flags);
     if (bytes.isEmpty()) return {};
-    return EmbeddedImages::previewDataUrl(bytes, asset.family, maxSide);
+    return EmbeddedResources::previewDataUrl(bytes, entry.format, maxSide);
 }
 
-QVariantMap Backend::replaceImage(int index, const QString &newImagePath)
+QString Backend::resourceTextAt(int index) const
+{
+    if (index < 0 || index >= m_resources.size()) return {};
+    const EmbeddedResources::Entry &entry = m_resources.at(index);
+    if (!entry.text) return {};
+    const QByteArray bytes = EmbeddedResources::readEntry(m_settings->exePath(), entry.entryOff,
+                                                          entry.flags);
+    return EmbeddedResources::decodeText(bytes);
+}
+
+QVariantMap Backend::resourceBudgetAt(int index)
 {
     if (actionsLocked()) return lockedMap();
-    if (!m_backgroundWorker)
-        return runBackground([=](Backend &worker) { return worker.replaceImage(index, newImagePath); });
-    if (index < 0 || index >= m_images.size())
-        return result(false, QStringLiteral("That embedded image is no longer listed; scan again."),
+    // Measured on the calling thread on purpose: this is one validated lookup
+    // for the row the user just selected, and routing it through
+    // runBackground() would emit resourcesChanged() and re-enter the page's
+    // selection handler (which asks for this measurement again).
+    if (index < 0 || index >= m_resources.size())
+        return result(false, QStringLiteral("That embedded file is no longer listed; scan again."),
                       QStringLiteral("red"));
-    const QString path = m_images.at(index).path;
-    const auto r = EmbeddedImages::replace(m_settings->exePath(), path, newImagePath);
-    if (r.ok) scanImages(m_imagesShowAll);
-    return result(r.ok, r.msg, QStringLiteral("green"));
+    const EmbeddedResources::Entry entry = m_resources.at(index);
+    const QByteArray data = readExe();
+    if (data.isEmpty())
+        return result(false, QStringLiteral("Cannot read the selected EXE."), QStringLiteral("red"));
+    const auto room = EmbeddedResources::budget(data, entry.entryOff, entry.leaf);
+    // The editor needs to know whether a UTF-8 BOM is part of the record it
+    // has to stay inside.
+    bool bom = false;
+    if (entry.text) {
+        const QByteArray bytes = EmbeddedResources::readEntry(m_settings->exePath(),
+                                                              entry.entryOff, entry.flags);
+        bom = bytes.startsWith(QByteArray::fromHex("efbbbf"));
+    }
+    return { { QStringLiteral("ok"), room.known },
+             { QStringLiteral("known"), room.known },
+             { QStringLiteral("capacity"), room.capacity },
+             { QStringLiteral("used"), room.used },
+             { QStringLiteral("bom"), bom },
+             { QStringLiteral("msg"), room.detail } };
 }
 
-QVariantMap Backend::extractImage(int index, const QString &targetPath)
+int Backend::resourcePayloadSize(int index, const QString &text, bool bom) const
+{
+    if (index < 0 || index >= m_resources.size()) return -1;
+    QByteArray bytes = text.toUtf8();
+    if (bom) bytes.prepend(QByteArray::fromHex("efbbbf"));
+    return int(EmbeddedResources::payloadSizeFor(bytes, m_resources.at(index).flags));
+}
+
+int Backend::resourceTextSize(const QString &text, bool bom) const
+{
+    return int(text.toUtf8().size()) + (bom ? 3 : 0);
+}
+
+QVariantMap Backend::saveResourceText(int index, const QString &text)
 {
     if (actionsLocked()) return lockedMap();
     if (!m_backgroundWorker)
-        return runBackground([=](Backend &worker) { return worker.extractImage(index, targetPath); });
-    if (index < 0 || index >= m_images.size())
-        return result(false, QStringLiteral("Select an embedded image first."), QStringLiteral("red"));
-    const EmbeddedImages::Asset &asset = m_images.at(index);
-    const QByteArray bytes = EmbeddedImages::readEntry(m_settings->exePath(), asset.entryOff, asset.flags);
+        return runBackground([=](Backend &worker) { return worker.saveResourceText(index, text); });
+    if (index < 0 || index >= m_resources.size())
+        return result(false, QStringLiteral("That embedded file is no longer listed; scan again."),
+                      QStringLiteral("red"));
+    const QString path = m_resources.at(index).path;
+    const auto r = EmbeddedResources::replaceText(m_settings->exePath(), path, text);
+    if (r.ok) scanResources(m_resourcesIncludeBinary);
+    return result(r.ok, r.msg, r.ok ? QStringLiteral("green") : QStringLiteral("red"));
+}
+
+QVariantMap Backend::replaceResourceWithFile(int index, const QString &filePath)
+{
+    if (actionsLocked()) return lockedMap();
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) {
+            return worker.replaceResourceWithFile(index, filePath);
+        });
+    if (index < 0 || index >= m_resources.size())
+        return result(false, QStringLiteral("That embedded file is no longer listed; scan again."),
+                      QStringLiteral("red"));
+    const EmbeddedResources::Entry entry = m_resources.at(index);
+    EmbeddedResources::Result r;
+    if (entry.kind == EmbeddedResources::Kind::Image || entry.kind == EmbeddedResources::Kind::Svg) {
+        r = EmbeddedResources::replacePicture(m_settings->exePath(), entry.path, filePath);
+    } else {
+        QFile in(filePath);
+        if (!in.open(QIODevice::ReadOnly))
+            return result(false, QStringLiteral("Cannot read the replacement file."),
+                          QStringLiteral("red"));
+        const QByteArray bytes = in.readAll();
+        in.close();
+        r = EmbeddedResources::replaceBytes(m_settings->exePath(), entry.path, bytes);
+    }
+    if (r.ok) scanResources(m_resourcesIncludeBinary);
+    return result(r.ok, r.msg, r.ok ? QStringLiteral("green") : QStringLiteral("red"));
+}
+
+QVariantMap Backend::extractResource(int index, const QString &targetPath)
+{
+    if (actionsLocked()) return lockedMap();
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) { return worker.extractResource(index, targetPath); });
+    if (index < 0 || index >= m_resources.size())
+        return result(false, QStringLiteral("Select an embedded file first."), QStringLiteral("red"));
+    const EmbeddedResources::Entry &entry = m_resources.at(index);
+    const QByteArray bytes = EmbeddedResources::readEntry(m_settings->exePath(), entry.entryOff,
+                                                          entry.flags);
     if (bytes.isEmpty())
         return result(false, QStringLiteral("That entry could not be read from the EXE."),
                       QStringLiteral("red"));
@@ -1088,42 +1105,42 @@ QVariantMap Backend::extractImage(int index, const QString &targetPath)
                       QStringLiteral("red"));
     out.close();
     return result(true, QStringLiteral("Saved %1 (%2 bytes) to %3")
-                           .arg(asset.path.section(QLatin1Char('/'), -1))
+                           .arg(entry.leaf)
                            .arg(bytes.size())
                            .arg(QDir::toNativeSeparators(targetPath)),
                   QStringLiteral("green"));
 }
 
-QVariantMap Backend::extractAllImages()
+QVariantMap Backend::extractAllResources()
 {
     if (actionsLocked()) return lockedMap();
     if (!m_backgroundWorker)
-        return runBackground([=](Backend &worker) { return worker.extractAllImages(); });
-    if (m_images.isEmpty())
-        return result(false, QStringLiteral("Scan the EXE first; there is no image list yet."),
+        return runBackground([=](Backend &worker) { return worker.extractAllResources(); });
+    if (m_resources.isEmpty())
+        return result(false, QStringLiteral("Scan the EXE first; there is no resource list yet."),
                       QStringLiteral("red"));
     const QString root = QFileInfo(m_settings->exePath()).absolutePath()
-        + QStringLiteral("/embedded_images");
+        + QStringLiteral("/embedded_resources");
     int count = 0;
     QStringList failed;
-    for (const auto &asset : m_images) {
-        if (!asset.image) continue;
+    for (const auto &entry : m_resources) {
         // Keep the pool's folder layout so two "logo.png" in different folders
         // cannot overwrite each other, but never let a crafted resource name
         // walk out of the extraction folder.
         QStringList segments;
-        for (const QString &part : asset.path.split(QLatin1Char('/'), Qt::SkipEmptyParts))
+        for (const QString &part : entry.path.split(QLatin1Char('/'), Qt::SkipEmptyParts))
             if (part != QLatin1String(".") && part != QLatin1String("..")
                 && !part.contains(QLatin1Char(':')))
                 segments << part;
         if (segments.isEmpty()) continue;
         const QString target = root + QLatin1Char('/') + segments.join(QLatin1Char('/'));
         QDir().mkpath(QFileInfo(target).absolutePath());
-        const QByteArray bytes = EmbeddedImages::readEntry(m_settings->exePath(), asset.entryOff, asset.flags);
+        const QByteArray bytes = EmbeddedResources::readEntry(m_settings->exePath(), entry.entryOff,
+                                                              entry.flags);
         QFile out(target);
         if (bytes.isEmpty() || !out.open(QIODevice::WriteOnly | QIODevice::Truncate)
             || out.write(bytes) != bytes.size()) {
-            failed << asset.path;
+            failed << entry.path;
             continue;
         }
         out.close();
@@ -1131,9 +1148,9 @@ QVariantMap Backend::extractAllImages()
     }
     const QString dir = QDir::toNativeSeparators(root);
     if (count == 0)
-        return result(false, QStringLiteral("No embedded image could be written to %1.").arg(dir),
+        return result(false, QStringLiteral("No embedded file could be written to %1.").arg(dir),
                       QStringLiteral("red"));
-    return result(true, QStringLiteral("Extracted %1 embedded image(s) to %2%3")
+    return result(true, QStringLiteral("Extracted %1 embedded file(s) to %2%3")
                            .arg(count)
                            .arg(dir)
                            .arg(failed.isEmpty()

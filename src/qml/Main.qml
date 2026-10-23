@@ -255,18 +255,17 @@ ApplicationWindow {
                         { header: true,  label: qsTr("CUSTOMIZE") },
                         { page: 0, label: qsTr("Dashboard"),   icon: Icons.dashboard },
                         { page: 1, label: qsTr("Theme"),       icon: Icons.theme },
-                        { page: 2, label: qsTr("SVG"),         icon: Icons.svg },
-                        { page: 3, label: qsTr("Images"),      icon: Icons.images },
+                        { page: 2, label: qsTr("Resources"),   icon: Icons.images },
                         { header: true,  label: qsTr("TUNE") },
-                        { page: 4, label: qsTr("FPS"),         icon: Icons.fps },
-                        { page: 5, label: qsTr("Integrity"),   icon: Icons.integrity },
-                        { page: 6, label: qsTr("Boot Video"),  icon: Icons.boot },
+                        { page: 3, label: qsTr("FPS"),         icon: Icons.fps },
+                        { page: 4, label: qsTr("Integrity"),   icon: Icons.integrity },
+                        { page: 5, label: qsTr("Boot Video"),  icon: Icons.boot },
                         { header: true,  label: qsTr("TOOLS") },
-                        { page: 7, label: qsTr("UI"),          icon: Icons.extras },
-                        { page: 8, label: qsTr("Discord RPC"), icon: Icons.discord },
+                        { page: 6, label: qsTr("UI"),          icon: Icons.extras },
+                        { page: 7, label: qsTr("Discord RPC"), icon: Icons.discord },
                         { header: true,  label: qsTr("APP") },
-                        { page: 9, label: qsTr("Appearance"),  icon: Icons.appearance },
-                        { page: 10, label: qsTr("About"),      icon: Icons.about }
+                        { page: 8, label: qsTr("Appearance"),  icon: Icons.appearance },
+                        { page: 9, label: qsTr("About"),       icon: Icons.about }
                     ]
                     delegate: Loader {
                         required property var modelData
@@ -408,8 +407,7 @@ ApplicationWindow {
 
                 DashboardPage {}
                 ThemePage {}
-                SvgPage {}
-                ImagesPage {}
+                ResourcesPage {}
                 FpsPage {}
                 IntegrityPage {}
                 BootVideoPage {}
