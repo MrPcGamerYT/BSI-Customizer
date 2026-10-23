@@ -175,8 +175,10 @@ qint64 findFreeSpace(const QByteArray &data, const Link &link, qint64 need, QStr
     if (sections.isEmpty())
         return fail(QStringLiteral("The PE section table could not be read."));
 
-    // Data sections first (that is where rcc puts resources), never .text unless
-    // nothing else has room: overwriting zero bytes in code is still a code change.
+    // Data sections only: that is where rcc puts resource payloads, and a zero
+    // run inside .text may be alignment padding between functions that some
+    // later build fetches into. A build with no free data section gets a clear
+    // refusal instead.
     QList<const PeSection *> order;
     for (const QString &wanted : { QStringLiteral(".rdata"), QStringLiteral(".data"),
                                    QStringLiteral(".rsrc") })
