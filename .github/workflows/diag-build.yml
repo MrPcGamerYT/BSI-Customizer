@@ -1,0 +1,57 @@
+name: Diag build
+
+# Temporary diagnostic workflow: builds the same way the release job does and
+# republishes the compiler/linker errors as check-run annotations, which are
+# readable through the API. Delete once the build is green again.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  QT_VERSION: "6.8.3"
+
+jobs:
+  build:
+    name: Diag build (Windows x64)
+    runs-on: windows-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Install Qt 6 build tools
+        uses: jurplel/install-qt-action@v4.3.1
+        with:
+          version: ${{ env.QT_VERSION }}
+          host: windows
+          target: desktop
+          arch: win64_msvc2022_64
+          cache: true
+
+      - name: Configure
+        run: cmake -S . -B build -A x64 -DCMAKE_BUILD_TYPE=Release -DBSI_BUILD_PORTABLE=ON
+
+      - name: Build
+        run: |
+          cmake --build build --config Release --parallel 2>&1 | Tee-Object -FilePath build.log
+          $code = $LASTEXITCODE
+          $errors = Select-String -Path build.log -Pattern 'error (C|LNK|MSB|RC)[0-9]+|fatal error' |
+                    Select-Object -First 20
+          if ($errors) {
+            foreach ($e in $errors) {
+              $line = $e.Line.Trim()
+              $line = $line -replace '%', '%25' -replace "`r", '%0D' -replace "`n", '%0A'
+              Write-Host "::error title=BUILD::$line"
+            }
+          }
+          if ($code -eq 0) {
+            Write-Host "::notice title=BUILD::build succeeded"
+          } else {
+            Write-Host "::error title=BUILD::cmake --build failed with exit code $code"
+          }
+          exit $code
