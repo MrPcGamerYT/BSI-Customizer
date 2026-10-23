@@ -179,10 +179,10 @@ Item {
                             Text {
                                 Layout.fillWidth: true
                                 wrapMode: Text.Wrap
-                                text: qsTr("Removes the whole stock About content — logo and "
-                                           + "version banner, update check, support e-mail, "
-                                           + "support/website and Terms-of-use links — and shows "
-                                           + "only your text plus one optional link.")
+                                text: qsTr("Keeps the About page layout and logo/version, replaces "
+                                           + "BlueStacks' stock About text with yours, replaces the "
+                                           + "stock support / website / QQ links with one link of "
+                                           + "yours, and disables the “Check for updates” button.")
                                 color: Theme.textDim
                                 font.pixelSize: 11
                             }
@@ -205,7 +205,7 @@ Item {
                     }
 
                     Text {
-                        text: qsTr("Text shown on the About page")
+                        text: qsTr("About text (replaces the stock copyright / Terms line)")
                         color: Theme.textDim
                         font.pixelSize: 11
                         font.weight: Font.DemiBold
@@ -237,7 +237,7 @@ Item {
                             Layout.fillWidth: true
                             spacing: 4
                             Text {
-                                text: qsTr("Link label (optional)")
+                                text: qsTr("Your link label (optional)")
                                 color: Theme.textDim
                                 font.pixelSize: 11
                                 font.weight: Font.DemiBold
@@ -292,7 +292,8 @@ Item {
                         ActionButton {
                             accent: true
                             implicitHeight: 30
-                            enabled: !!page.about.supported && aboutText.text.trim() !== ""
+                            enabled: !!page.about.supported
+                                     && (aboutText.text.trim() !== "" || aboutUrl.text.trim() !== "")
                             text: page.about.applied ? qsTr("Update About page")
                                                      : qsTr("Apply About page")
                             onClicked: {
@@ -314,7 +315,8 @@ Item {
                             text: page.about.applied
                                   ? qsTr("Applied. Edit the fields and press Update to change it.")
                                   : (page.about.supported
-                                     ? qsTr("Ready — the stock links and copyright line are replaced.")
+                                     ? qsTr("Ready — the stock texts and links are replaced and the "
+                                            + "update button is disabled.")
                                      : (page.about.detail || qsTr("Unavailable")))
                             color: page.about.applied ? Theme.green
                                    : (page.about.supported ? Theme.textDim : Theme.warn)
@@ -327,7 +329,8 @@ Item {
                         Layout.fillWidth: true
                         wrapMode: Text.Wrap
                         text: qsTr("Only the About page is edited; every other Settings tab stays "
-                                   + "stock. Restart BlueStacks after applying.")
+                                   + "stock. Leave the link fields empty to keep your text and hide "
+                                   + "the stock links. Restart BlueStacks after applying.")
                         color: Theme.textDim
                         font.pixelSize: 10
                         font.italic: true

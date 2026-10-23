@@ -100,13 +100,27 @@ view keeps the full window width even after a fullscreen round-trip) and the
 button strip inside `PlrSidebar.qml` is hidden as well. Press **Restore stock
 UI** to write the original QML back byte-for-byte.
 
-**Settings → About page.** One apply removes the entire stock About content -
-logo and version banner, update check, support e-mail, support site, website,
-QQ links and the copyright/Terms-of-use line - and replaces it with your own
-text plus **one** optional link of any kind (a plain URL is used as its own
-label when you leave the label empty). The stock link handlers are never kept:
-the custom link calls `Qt.openUrlExternally` with exactly the URL you entered.
-Press **Restore stock About** to restore the untouched page.
+**Settings → About page.** One apply keeps the page and its layout exactly as
+it is (logo, version banner, section headings) and only changes what it says:
+the copyright/Terms-of-use line becomes your About text, and the stock support
+e-mail, support site, website and QQ links are replaced by **one** link of any
+kind (a plain URL is used as its own label when you leave the label empty). The
+stock link handlers are never kept: the custom link calls
+`Qt.openUrlExternally` with exactly the URL you entered. The **Check for
+updates** button is disabled by hiding it together with its "More info" and
+incompatible-version rows, so nothing on the page points at BlueStacks updates
+any more. On the MSI build the stock page hides the links/About sections when
+`uiBackend.oem === "msi5"`; the tool flips those bindings to `visible: true` so
+the custom texts are actually shown. Press **Restore stock About** to restore
+the untouched page byte-for-byte.
+
+Both tools work on the Qt 5 and Qt 6 players: BlueStacks 5.22 and the older
+5.10 build, plus the MSI App Player 5.9 and the current MSI build. The title-bar
+clean-up understands both shapes the player uses to re-assert button
+visibility (`PlrTopbarElement.pVisible` and the MSI 5.9
+`iTopbarItems.append({ "id" : …, "visible" : … })` list), and the sidebar
+width is collapsed through `width` or `Layout.preferredWidth`, whichever the
+build uses.
 
 ## Gradient themes
 

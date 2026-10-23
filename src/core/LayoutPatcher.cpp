@@ -550,13 +550,19 @@ struct SidebarControls
 // The innermost object that opens the block containing `pos`.
 bool enclosingObject(const QString &masked, int pos, QmlText::Object *object)
 {
+    // Walk backwards to the nearest brace that is still open at `pos`. Scanning
+    // forwards and remembering the last '{' returns a sibling that already
+    // closed, which breaks parent lookup for objects declared after a nested
+    // child (for example a text field under a Text item). Backward scanning also
+    // steps over the document's own function bodies, whose braces do not open a
+    // QML object.
     int depth = 0;
     int open = -1;
-    for (int i = 0; i < pos && i < masked.size(); ++i) {
+    for (int i = qMin(pos, int(masked.size())) - 1; i >= 0; --i) {
         const QChar c = masked.at(i);
-        if (c == QLatin1Char('{')) { open = i; ++depth; }
-        else if (c == QLatin1Char('}')) {
-            if (depth == 0) return false; // outside the document's object tree
+        if (c == QLatin1Char('}')) ++depth;
+        else if (c == QLatin1Char('{')) {
+            if (depth == 0) { open = i; break; }
             --depth;
         }
     }
@@ -1703,7 +1709,8 @@ const QStringList &cleanHideIds()
 {
     static const QStringList ids {
         QStringLiteral("iSidebarShowBtn"), QStringLiteral("iHelpBtn"),
-        QStringLiteral("iCfgBtn"), QStringLiteral("iQuestBtn"),
+        // MSI 5.9 spells the quest button `iQuestbtn`.
+        QStringLiteral("iCfgBtn"), QStringLiteral("iQuestBtn"), QStringLiteral("iQuestbtn"),
         QStringLiteral("iRewardsCenterBtn"), QStringLiteral("iRawModeWarningBtn"),
         QStringLiteral("iNowbuxBtn"), QStringLiteral("iNowggAccountBtn"),
         QStringLiteral("iDisablePinToTopBtn"), QStringLiteral("iTopbarIconsList"),
@@ -1735,6 +1742,41 @@ bool findObjectById(const QString &qml, const QString &masked, const QString &id
     return false;
 }
 
+// Where a `visible: false` member can be inserted, and the exact text written
+// there. A multi-line object gets the line at its first member's indentation
+// (no extra blank line); a one-line object gets it wrapped in its own line so
+// the line comment cannot swallow the members that follow it.
+bool cleanHiddenSite(const QString &qml, const QmlText::Object &object, int *at, QString *text)
+{
+    const QString nl = lineEnding(qml);
+    int probe = object.open + 1;
+    while (probe < qml.size()
+           && (qml.at(probe) == QLatin1Char(' ') || qml.at(probe) == QLatin1Char('\t')))
+        ++probe;
+    const bool firstMemberOnNewLine = probe < object.end
+        && (qml.at(probe) == QLatin1Char('\n') || qml.at(probe) == QLatin1Char('\r'));
+    if (firstMemberOnNewLine) {
+        const int newline = qml.indexOf(QLatin1Char('\n'), probe);
+        if (newline < 0 || newline >= object.end) return false;
+        const int lineStart = newline + 1;
+        QString indent;
+        int i = lineStart;
+        while (i < qml.size()
+               && (qml.at(i) == QLatin1Char(' ') || qml.at(i) == QLatin1Char('\t')))
+            indent += qml.at(i++);
+        *at = lineStart;
+        *text = indent + kCleanHiddenLine + nl;
+        return true;
+    }
+    // The object shares its opening line with its members (`UiButton { id: …`),
+    // so a newline insertion would split that line. Add the member inline with
+    // a separator and a block comment instead; cleanShowObject() removes it by
+    // the same byte-exact site match.
+    *at = object.open + 1;
+    *text = QStringLiteral(" visible: false /* BSI CUSTOMIZER: clean player UI */;");
+    return true;
+}
+
 bool cleanHideObject(const QString &qml, const QmlText::Object &object, QList<Edit> &edits)
 {
     const QString masked = QmlText::mask(qml);
@@ -1745,10 +1787,10 @@ bool cleanHideObject(const QString &qml, const QmlText::Object &object, QList<Ed
         addEdit(edits, visible.valueBegin, visible.valueEnd - visible.valueBegin,
                 kCleanHidePrefix + value + QStringLiteral(")"));
     } else {
-        // Keep the line comment on its own line: an object written on one
-        // line would otherwise have its remaining members commented out.
-        addEdit(edits, object.open + 1, 0,
-                lineEnding(qml) + QStringLiteral("        ") + kCleanHiddenLine + lineEnding(qml));
+        int at = 0;
+        QString text;
+        if (!cleanHiddenSite(qml, object, &at, &text)) return false;
+        addEdit(edits, at, 0, text);
     }
     return true;
 }
@@ -1756,12 +1798,12 @@ bool cleanHideObject(const QString &qml, const QmlText::Object &object, QList<Ed
 bool cleanShowObject(const QString &qml, const QmlText::Object &object, QList<Edit> &edits)
 {
     const QString masked = QmlText::mask(qml);
-    const QString inserted = lineEnding(qml) + QStringLiteral("        ") + kCleanHiddenLine
-        + lineEnding(qml);
+    int at = 0;
+    QString inserted;
+    if (!cleanHiddenSite(qml, object, &at, &inserted)) return false;
     // Only the line this tweak wrote itself counts: searching further would
     // find the same marker inserted into a nested object (iMacroDetail inside
     // iMacroRowLayout) and remove it twice.
-    const int at = object.open + 1;
     if (qml.mid(at, inserted.size()) == inserted) {
         addEdit(edits, at, inserted.size(), QString());
         return true;
@@ -1797,37 +1839,42 @@ bool cleanPlrEdits(QString &qml, bool enabled, QList<Edit> &edits)
     }
     if (target.open < 0) return false;
 
+    // 5.10 / MSI 5.9 declare the sidebar instance as a layout child and size it
+    // with Layout.preferredWidth instead of width; newer builds use width.
+    QList<QPair<QString, QmlText::Binding>> sizes;
+    for (const auto &name : { QStringLiteral("width"), QStringLiteral("Layout.preferredWidth") }) {
+        QmlText::Binding binding;
+        if (directBinding(masked, target.open, target.end, name, &binding))
+            sizes << qMakePair(name, binding);
+    }
+
     bool changed = false;
-    QmlText::Binding width;
-    const bool hasWidth =
-        directBinding(masked, target.open, target.end, QStringLiteral("width"), &width);
     if (enabled) {
         changed = cleanHideObject(qml, target, edits);
-        if (hasWidth) {
-            const QString value = qml.mid(width.valueBegin, width.valueEnd - width.valueBegin);
+        for (const auto &size : sizes) {
+            const auto &binding = size.second;
+            const QString value = qml.mid(binding.valueBegin, binding.valueEnd - binding.valueBegin);
             QString original;
             int tagEnd = -1;
             const bool already = value == QLatin1String("0")
-                && taggedAfter(qml, width.valueBegin, kCleanWidthTag, &original, &tagEnd);
-            if (!already) {
-                addEdit(edits, width.valueBegin, width.valueEnd - width.valueBegin,
-                        withOriginal(QStringLiteral("0"), value, kCleanWidthTag));
-                changed = true;
-            }
+                && taggedAfter(qml, binding.valueBegin, kCleanWidthTag, &original, &tagEnd);
+            if (already) continue;
+            addEdit(edits, binding.valueBegin, binding.valueEnd - binding.valueBegin,
+                    withOriginal(QStringLiteral("0"), value, kCleanWidthTag));
+            changed = true;
         }
         return changed;
     }
 
-    if (hasWidth) {
-        const QString value = qml.mid(width.valueBegin, width.valueEnd - width.valueBegin);
-        if (value == QLatin1String("0")) {
-            QString original;
-            int tagEnd = -1;
-            if (taggedAfter(qml, width.valueBegin, kCleanWidthTag, &original, &tagEnd)) {
-                addEdit(edits, width.valueBegin, tagEnd - width.valueBegin, original);
-                changed = true;
-            }
-        }
+    for (const auto &size : sizes) {
+        const auto &binding = size.second;
+        const QString value = qml.mid(binding.valueBegin, binding.valueEnd - binding.valueBegin);
+        if (value != QLatin1String("0")) continue;
+        QString original;
+        int tagEnd = -1;
+        if (!taggedAfter(qml, binding.valueBegin, kCleanWidthTag, &original, &tagEnd)) continue;
+        addEdit(edits, binding.valueBegin, tagEnd - binding.valueBegin, original);
+        changed = true;
     }
     if (cleanShowObject(qml, target, edits)) changed = true;
     return changed;
@@ -1845,6 +1892,50 @@ bool cleanSidebarEdits(QString &qml, bool enabled, QList<Edit> &edits)
     if (!findButtonStrip(qml, masked, root, &strip)) return false;
     return enabled ? cleanHideObject(qml, strip, edits)
                    : cleanShowObject(qml, strip, edits);
+}
+
+// MSI 5.9 does not have PlrTopbarElement objects at all: its stock
+// fReloadTopbarElements() re-asserts `id.visible` from a ListModel whose entries
+// are `{ "id" : iCfgBtn, "visible" : true, "width" : ... }`. Those entries are
+// found here (raw text, because the member names are string literals) so the
+// model itself says `false` and the reload can never show the button again.
+bool modelEntryVisible(const QString &qml, const QString &id, int *valueBegin, int *valueEnd)
+{
+    const QString idToken = QStringLiteral("\"id\"");
+    for (int at = qml.indexOf(idToken); at >= 0; at = qml.indexOf(idToken, at + idToken.size())) {
+        int i = at + idToken.size();
+        while (i < qml.size() && qml.at(i).isSpace()) ++i;
+        if (i >= qml.size() || qml.at(i) != QLatin1Char(':')) continue;
+        ++i;
+        while (i < qml.size() && qml.at(i).isSpace()) ++i;
+        int idEnd = i;
+        while (idEnd < qml.size() && (qml.at(idEnd).isLetterOrNumber()
+                                      || qml.at(idEnd) == QLatin1Char('_')))
+            ++idEnd;
+        if (qml.mid(i, idEnd - i) != id) continue;
+        const int visibleToken = qml.indexOf(QStringLiteral("\"visible\""), idEnd);
+        if (visibleToken < 0 || visibleToken - idEnd > 200) continue;
+        int v = visibleToken + int(QStringLiteral("\"visible\"").size());
+        while (v < qml.size() && qml.at(v).isSpace()) ++v;
+        if (v >= qml.size() || qml.at(v) != QLatin1Char(':')) continue;
+        ++v;
+        while (v < qml.size() && qml.at(v).isSpace()) ++v;
+        int depth = 0;
+        int stop = v;
+        for (; stop < qml.size(); ++stop) {
+            const QChar c = qml.at(stop);
+            if (c == QLatin1Char('(') || c == QLatin1Char('[') || c == QLatin1Char('{')) ++depth;
+            else if (c == QLatin1Char(')') || c == QLatin1Char(']')) --depth;
+            else if (c == QLatin1Char('}') && depth == 0) break;
+            else if (c == QLatin1Char(',') && depth == 0) break;
+        }
+        while (stop > v && qml.at(stop - 1).isSpace()) --stop;
+        if (stop <= v) continue;
+        *valueBegin = v;
+        *valueEnd = stop;
+        return true;
+    }
+    return false;
 }
 
 // PlrTopbar.qml: switch every PlrTopbarElement that owns a removable button
@@ -1887,6 +1978,27 @@ bool cleanTopbarEdits(QString &qml, bool enabled, QList<Edit> &edits)
     }
 
     for (const auto &id : cleanHideIds()) {
+        int valueBegin = 0;
+        int valueEnd = 0;
+        if (modelEntryVisible(qml, id, &valueBegin, &valueEnd)) {
+            // The model value spans to the following comma, so a patched entry
+            // reads back as `false <tag>` rather than as a bare `false`; the
+            // tag is what tells our edit apart from a stock `false`.
+            const QString value = qml.mid(valueBegin, valueEnd - valueBegin);
+            QString original;
+            int tagEnd = -1;
+            const bool tagged = taggedAfter(qml, valueBegin, kCleanVisibleTag, &original, &tagEnd);
+            if (enabled) {
+                if (value != QLatin1String("false") && !tagged) {
+                    addEdit(edits, valueBegin, valueEnd - valueBegin,
+                            withOriginal(QStringLiteral("false"), value, kCleanVisibleTag));
+                    ++changed;
+                }
+            } else if (tagged) {
+                addEdit(edits, valueBegin, tagEnd - valueBegin, original);
+                ++changed;
+            }
+        }
         QmlText::Object object;
         if (!findObjectById(qml, masked, id, &object)) continue;
         if (enabled) {
