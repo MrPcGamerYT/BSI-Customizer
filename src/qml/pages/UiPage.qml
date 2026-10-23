@@ -18,8 +18,12 @@ Item {
     property var cleanTweak: ({ id: "clean-player-ui", supported: false, applied: false,
                                 needsUpdate: false, label: "", detail: "", state: "" })
     // Settings -> About editors
-    property var about: ({ supported: false, applied: false, detail: "",
-                           text: "", linkLabel: "", linkUrl: "" })
+    property var about: ({ supported: false, applied: false, detail: "", text: "",
+                           links: [], showSections: true, sectionsHidden: false })
+    // the link rows read from the page, one editable row each
+    property var aboutLinks: []
+    // whether the two sections the MSI build draws hidden are switched on
+    property bool showSectionsWanted: true
 
     function recountChecked() {
         let n = 0;
@@ -52,10 +56,23 @@ Item {
         const state = backend.aboutPageState();
         page.about = state;
         if (loadFields) {
+            page.aboutLinks = state.links || [];
             aboutText.text = state.text || "";
-            aboutLabel.text = state.linkLabel || "";
-            aboutUrl.text = state.linkUrl || "";
+            page.showSectionsWanted = state.showSections !== false;
         }
+    }
+
+    // Every row as it is edited right now, handed to backend.applyAboutPage().
+    function collectLinks() {
+        const out = [];
+        for (let i = 0; i < linkRepeater.count; i++) {
+            const item = linkRepeater.itemAt(i);
+            if (!item)
+                continue;
+            out.push({ id: item.linkId, name: item.linkName, url: item.linkUrl,
+                       hidden: item.linkHidden });
+        }
+        return out;
     }
 
     Component.onCompleted: {

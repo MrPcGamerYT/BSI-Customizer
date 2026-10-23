@@ -1,8 +1,9 @@
 name: Diag build
 
-# Temporary diagnostic workflow: builds the same way the release job does and
-# republishes the compiler/linker errors as check-run annotations, which are
-# readable through the API. Delete once the build is green again.
+# Temporary diagnostic workflow: builds exactly the way the release job does and
+# republishes the interesting log lines as check-run annotations, which can be
+# read back through the API even when the raw logs are not reachable. Delete
+# once the build is green again.
 on:
   workflow_dispatch:
 
@@ -40,18 +41,20 @@ jobs:
         run: |
           cmake --build build --config Release --parallel 2>&1 | Tee-Object -FilePath build.log
           $code = $LASTEXITCODE
+          $escape = { param($text) $text -replace '%', '%25' -replace "`r", '%0D' -replace "`n", '%0A' }
           $errors = Select-String -Path build.log -Pattern 'error (C|LNK|MSB|RC)[0-9]+|fatal error' |
-                    Select-Object -First 20
-          if ($errors) {
-            foreach ($e in $errors) {
-              $line = $e.Line.Trim()
-              $line = $line -replace '%', '%25' -replace "`r", '%0D' -replace "`n", '%0A'
-              Write-Host "::error title=BUILD::$line"
-            }
+                    Select-Object -First 12
+          foreach ($match in $errors) {
+            Write-Host ("::error title=BUILD::{0}" -f (& $escape $match.Line.Trim()))
           }
           if ($code -eq 0) {
-            Write-Host "::notice title=BUILD::build succeeded"
+            Write-Host '::notice title=BUILD::build succeeded'
           } else {
-            Write-Host "::error title=BUILD::cmake --build failed with exit code $code"
+            Write-Host ("::error title=BUILD::cmake --build failed with exit code {0}" -f $code)
+            $tail = Get-Content build.log -Tail 60 |
+                    Where-Object { $_.Trim() -ne '' } | Select-Object -Last 12
+            $text = ($tail -join ' | ')
+            if ($text.Length -gt 5000) { $text = $text.Substring($text.Length - 5000) }
+            Write-Host ("::error title=BUILD-TAIL::{0}" -f (& $escape $text))
           }
           exit $code
