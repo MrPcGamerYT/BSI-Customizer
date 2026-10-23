@@ -50,9 +50,5 @@ struct Result
 State analyze(const QByteArray &image);
 Result apply(const QString &exePath, bool enabled, const Config &config);
 
-// TEMPORARY CI diagnostics (removed once the About read-back defects are found).
-QString debugLastValue();
-QString debugLastChunks();
-QString debugLastReadBack();
 
 } // namespace AboutPatcher

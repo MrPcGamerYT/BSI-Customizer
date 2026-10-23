@@ -515,7 +515,7 @@ QString configLine(const Config &config)
     return kConfigBegin + QString::fromLatin1(json.toBase64());
 }
 
-bool readConfig(const QString &qml, Config *config)
+bool readConfig(const QString &qml, Config *config, bool *hasLinksField)
 {
     const int at = qml.indexOf(kConfigBegin);
     if (at < 0) return false;
@@ -531,6 +531,7 @@ bool readConfig(const QString &qml, Config *config)
     const auto document = QJsonDocument::fromJson(bytes, &error);
     if (error.error != QJsonParseError::NoError || !document.isObject()) return false;
     const auto object = document.object();
+    if (hasLinksField) *hasLinksField = object.contains(QStringLiteral("links"));
     Config out;
     out.text = object.value(QStringLiteral("text")).toString();
     out.showSections = object.value(QStringLiteral("show")).toBool(true);
@@ -673,7 +674,9 @@ QStringList renderedChunks(const QString &expression)
             if (translated && open < n && expression.at(open) == QLatin1Char('(')) {
                 const int close = closingParen(expression, open);
                 if (close > 0) {
-                    const QString arguments = expression.mid(open + 1, close - open - 1);
+                    // `close` is one past the ')', so the arguments are the
+                    // characters strictly between it and the '('.
+                    const QString arguments = expression.mid(open + 1, close - open - 2);
                     // Quote-aware split, so a comma inside the text is kept.
                     QStringList parts;
                     QString part;
@@ -692,12 +695,22 @@ QStringList renderedChunks(const QString &expression)
                         part += d;
                     }
                     parts << part;
-                    QString text = parts.last().trimmed();
-                    if (text.size() >= 2 && (text.front() == QLatin1Char('"')
-                                             || text.front() == QLatin1Char('\''))
-                        && text.back() == text.front())
-                        text = text.mid(1, text.size() - 2);
-                    out << decodeQmlString(text);
+                    // The words to show: `qsTranslate("ctx", "text")` keeps its
+                    // text in the second argument, `qsTr("text")` and
+                    // `qsTrId("id")` in the first. A trailing argument (a plural
+                    // count, a disambiguation string) is not part of the text.
+                    QStringList literals;
+                    for (const auto &candidate : parts) {
+                        const QString value = candidate.trimmed();
+                        if (value.size() >= 2
+                            && (value.front() == QLatin1Char('"')
+                                || value.front() == QLatin1Char('\''))
+                            && value.back() == value.front())
+                            literals << value.mid(1, value.size() - 2);
+                    }
+                    const int messageIndex = name == QLatin1String("qsTranslate") ? 1 : 0;
+                    if (literals.size() > messageIndex)
+                        out << decodeQmlString(literals.at(messageIndex));
                     i = close;
                     continue;
                 }
@@ -907,10 +920,6 @@ bool rowIsHidden(const QString &qml, const QmlText::Object &object)
 
 // What the page says right now: the About text without its markup, and every
 // stock link row with the name it prints and the URL it opens.
-QString debugValue;
-QString debugChunks;
-QString debugReadBack;
-
 bool readShown(const QString &qml, const QString &masked, const Anchors &anchors, Config *config)
 {
     Config out;
@@ -919,8 +928,6 @@ bool readShown(const QString &qml, const QString &masked, const Anchors &anchors
         && directBinding(masked, anchors.aboutText.open, anchors.aboutText.end,
                          QStringLiteral("text"), &text)) {
         const QString value = qml.mid(text.valueBegin, text.valueEnd - text.valueBegin);
-        debugValue = value;
-        debugChunks = renderedChunks(value).join(QStringLiteral("|"));
         out.text = htmlToPlain(renderedText(value)).trimmed();
     }
     for (const auto &row : anchors.links) {
@@ -1163,11 +1170,6 @@ Result refuse(const QString &message)
 
 } // namespace
 
-// TEMPORARY accessors (outside the anonymous namespace so the self-test links).
-QString debugLastValue() { return debugValue; }
-QString debugLastChunks() { return debugChunks; }
-QString debugLastReadBack() { return debugReadBack; }
-
 State analyze(const QByteArray &image)
 {
     State state;
@@ -1189,11 +1191,13 @@ State analyze(const QByteArray &image)
     }
     state.supported = true;
     state.sectionsHidden = anchors.sectionsHidden;
-    if (readConfig(doc.qml, &state.config)) {
+    bool hasLinksField = false;
+    if (readConfig(doc.qml, &state.config, &hasLinksField)) {
         state.applied = true;
         // A tag written by an older version holds one custom link only; the
-        // rows are then read back from the page itself.
-        if (state.config.links.isEmpty()) {
+        // rows are then read back from the page itself. A current tag always
+        // lists its rows, so an empty list really means "no row was named".
+        if (!hasLinksField) {
             Config shown;
             if (readShown(doc.qml, masked, anchors, &shown)) state.config.links = shown.links;
         }
@@ -1273,11 +1277,6 @@ Result apply(const QString &exePath, bool enabled, const Config &rawConfig)
     }
 
     const State after = analyze(changed);
-    debugReadBack = QStringLiteral("applied=%1 sections=%2 text=[%3] links=%4")
-                        .arg(after.applied)
-                        .arg(after.config.showSections)
-                        .arg(after.config.text)
-                        .arg(after.config.links.size());
     if (!after.supported)
         return refuse(QStringLiteral("The written About page did not pass read-back verification; "
                                      "no file was written."));
