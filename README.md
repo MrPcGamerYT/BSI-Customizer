@@ -122,9 +122,8 @@ Both tools work on the Qt 5 and Qt 6 players: BlueStacks 5.22 and the older
 5.10 build, plus the MSI App Player 5.9 and the current MSI build. The title-bar
 clean-up understands both shapes the player uses to re-assert button
 visibility (`PlrTopbarElement.pVisible` and the MSI 5.9
-`iTopbarItems.append({ "id" : …, "visible" : … })` list), and the sidebar
-width is collapsed through `width` or `Layout.preferredWidth`, whichever the
-build uses.
+`iTopbarItems.append({ "id" : …, "visible" : … })` list), and the About page is
+rewritten on both page generations (they differ only in the copyright year).
 
 ## Gradient themes
 
