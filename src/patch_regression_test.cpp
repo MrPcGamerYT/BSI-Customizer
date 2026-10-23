@@ -3885,8 +3885,12 @@ Window {
         check(stock.supported && !stock.applied, "the stock About page is recognized");
         check(stock.sectionsHidden && !stock.config.showSections,
               "the oem-gated sections are reported as hidden, so the Unhide button starts offered");
-        ciNotice(QStringLiteral("about-stock-text-hex=%1")
-                     .arg(QString::fromLatin1(stock.config.text.toUtf8().toHex())));
+        const auto hex = [](const QString &v) {
+            return QString::fromLatin1(v.toUtf8().toHex());
+        };
+        ciNotice(QStringLiteral("about-stock-text-hex=%1").arg(hex(stock.config.text)));
+        ciNotice(QStringLiteral("about-value-hex=%1").arg(hex(AboutPatcher::debugLastValue())));
+        ciNotice(QStringLiteral("about-chunks-hex=%1").arg(hex(AboutPatcher::debugLastChunks())));
         check(stock.config.text
                   == QStringLiteral("Copyright 2026. By using it you agree to the Terms of use"),
               QStringLiteral("the About text editor is prefilled with the stock text (%1)")
@@ -4012,6 +4016,8 @@ Window {
         while (textDiff < textBack.size() && textDiff < about.size()
                && textBack.at(textDiff) == about.at(textDiff))
             ++textDiff;
+        ciNotice(QStringLiteral("about-text-only-readback-hex=%1")
+                     .arg(hex(AboutPatcher::debugLastReadBack())));
         ciNotice(QStringLiteral("about-text-only apply=%1 restore=%2 diff=%3/%4 at=%5")
                      .arg(textApplied.ok ? QStringLiteral("ok") : textApplied.msg)
                      .arg(textRestored.ok ? QStringLiteral("ok") : textRestored.msg)

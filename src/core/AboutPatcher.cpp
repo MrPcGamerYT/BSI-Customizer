@@ -907,6 +907,14 @@ bool rowIsHidden(const QString &qml, const QmlText::Object &object)
 
 // What the page says right now: the About text without its markup, and every
 // stock link row with the name it prints and the URL it opens.
+QString debugValue;
+QString debugChunks;
+QString debugReadBack;
+
+QString debugLastValue() { return debugValue; }
+QString debugLastChunks() { return debugChunks; }
+QString debugLastReadBack() { return debugReadBack; }
+
 bool readShown(const QString &qml, const QString &masked, const Anchors &anchors, Config *config)
 {
     Config out;
@@ -915,6 +923,8 @@ bool readShown(const QString &qml, const QString &masked, const Anchors &anchors
         && directBinding(masked, anchors.aboutText.open, anchors.aboutText.end,
                          QStringLiteral("text"), &text)) {
         const QString value = qml.mid(text.valueBegin, text.valueEnd - text.valueBegin);
+        debugValue = value;
+        debugChunks = renderedChunks(value).join(QStringLiteral("|"));
         out.text = htmlToPlain(renderedText(value)).trimmed();
     }
     for (const auto &row : anchors.links) {
@@ -1262,6 +1272,11 @@ Result apply(const QString &exePath, bool enabled, const Config &rawConfig)
     }
 
     const State after = analyze(changed);
+    debugReadBack = QStringLiteral("applied=%1 sections=%2 text=[%3] links=%4")
+                        .arg(after.applied)
+                        .arg(after.config.showSections)
+                        .arg(after.config.text)
+                        .arg(after.config.links.size());
     if (!after.supported)
         return refuse(QStringLiteral("The written About page did not pass read-back verification; "
                                      "no file was written."));
