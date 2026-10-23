@@ -180,8 +180,10 @@ QList<Asset> list(const QByteArray &image, bool includeAll)
     for (const auto &file : allFiles(image)) {
         if (file.entryOff < 0 || seen.contains(file.entryOff)) continue;
         Asset asset;
-        asset.path = file.name;
-        asset.family = familyOf(file.name);
+        // filesInPool rebuilds the rcc path ("images/logo.png") from the tree's
+        // directory nodes; fall back to the leaf for flat pools.
+        asset.path = file.path.isEmpty() ? file.name : file.path;
+        asset.family = familyOf(asset.path);
         asset.image = imageFamilies().contains(asset.family);
         if (!asset.image && !includeAll) continue;
         seen.insert(file.entryOff);
@@ -318,7 +320,8 @@ Result replace(const QString &exePath, const QString &path, const QString &newIm
             return { false, QStringLiteral("The replacement image cannot be decoded; the EXE was not changed.") };
     }
 
-    const auto link = QtResources::findLink(original, asset.entryOff, asset.path);
+    // The tree node stores only the leaf; the path is the list's label.
+    const auto link = QtResources::findLink(original, asset.entryOff, shortName(path));
     if (!link.found || link.ambiguous)
         return { false, QStringLiteral("The %1 resource mapping is ambiguous; no file was written.")
                             .arg(shortName(path)) };

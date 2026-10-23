@@ -45,12 +45,18 @@ Link findLink(const QByteArray &data, qint64 entryOff,
 
 struct File
 {
-    QString name;
+    QString name;   // the leaf name the node stores ("logo.png")
     qint64 entryOff = -1;
     quint16 flags = 0;
+    // The resource path rebuilt from the tree's directory nodes
+    // ("images/logo.png"). Empty when the caller did not ask for it; `name`
+    // keeps its old meaning so every existing matcher is unchanged.
+    QString path;
 };
 // Enumerate files only in an already-validated pool. This lets consumers find
 // related QML (e.g. a multimedia import) without guessing a small filename list.
+// `File::name` is the leaf the node stores, `File::path` the full resource path
+// rebuilt from the directory nodes ("images/logo.png").
 QList<File> filesInPool(const QByteArray &data, const Link &pool);
 QList<File> registeredFiles(const QByteArray &data);
 QByteArray readFile(const QByteArray &data, const File &file, qint64 limit = 5000000);

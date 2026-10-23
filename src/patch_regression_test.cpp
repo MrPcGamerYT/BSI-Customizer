@@ -380,6 +380,84 @@ ResourceFixture resources(const QList<QPair<QString, QString>> &sources, bool de
     return resourcesBytes(payloads, dense, rawNames);
 }
 
+// rcc writes one node per path component: "images" is a directory node owning
+// a contiguous block of children, and a file node stores only its leaf name.
+// The flat builder above puts the whole path in a single node, which the reader
+// rightly rejects (a resource name never contains a slash), so the picture tests
+// build the shape a real player pool has.
+ResourceFixture nestedResources(const QList<QPair<QString, QByteArray>> &sources)
+{
+    ResourceFixture r = resourcesBytes(sources);
+    auto &b = r.f.bytes;
+    const qint64 tree = r.f.tree;
+    const qint64 stride = 22;
+
+    QStringList dirs;
+    QMap<QString, QStringList> dirFiles;
+    QStringList rootFiles;
+    for (const auto &source : sources) {
+        const int slash = source.first.lastIndexOf(QLatin1Char('/'));
+        const QString dir = slash > 0 ? source.first.left(slash) : QString();
+        const QString leaf = slash >= 0 ? source.first.mid(slash + 1) : source.first;
+        if (!dir.isEmpty()) {
+            if (!dirs.contains(dir)) dirs << dir;
+            dirFiles[dir] << leaf;
+        } else {
+            rootFiles << leaf;
+        }
+    }
+
+    const int nodes = 1 + int(dirs.size()) + int(sources.size());
+    b.replace(tree, qint64(nodes) * stride, QByteArray(nodes * int(stride), '\0'));
+
+    qint64 nameCursor = r.f.names;
+    const auto addName = [&](const QString &text) {
+        const qint64 at = nameCursor;
+        putBe16(b, at, quint16(text.size()));
+        putBe32(b, at + 2, resourceHash(text));
+        for (int i = 0; i < text.size(); ++i)
+            putBe16(b, at + 6 + 2 * i, text[i].unicode());
+        nameCursor += 6 + 2 * text.size();
+        return int(at - r.f.names);
+    };
+    const auto fileNode = [&](int index, const QString &dir, const QString &leaf) {
+        const qint64 node = tree + index * stride;
+        const QString key = dir.isEmpty() ? leaf : dir + QLatin1Char('/') + leaf;
+        putBe32(b, node, quint32(addName(leaf)));
+        putBe16(b, node + 4, 1);
+        putBe32(b, node + 10, quint32(r.entries.value(key) - r.f.payloads));
+        putBe64(b, node + 14, 1600000000000ULL);
+    };
+    const auto dirNode = [&](int index, const QString &name, int first, int count) {
+        const qint64 node = tree + index * stride;
+        putBe32(b, node, quint32(addName(name)));
+        putBe16(b, node + 4, 2);
+        putBe32(b, node + 6, quint32(count));
+        putBe32(b, node + 10, quint32(first));
+        putBe64(b, node + 14, 1600000000000ULL);
+    };
+
+    int next = 1;
+    QMap<QString, int> dirAt;
+    for (const QString &dir : dirs)
+        dirAt.insert(dir, next++);
+    // Children of a directory must be contiguous, so the root's own files sit
+    // right after the directory nodes and every directory block follows.
+    for (const QString &leaf : rootFiles)
+        fileNode(next++, QString(), leaf);
+    for (const QString &dir : dirs) {
+        const QStringList kids = dirFiles.value(dir);
+        const int first = next;
+        dirNode(dirAt.value(dir), dir, first, kids.size());
+        for (const QString &leaf : kids)
+            fileNode(next++, dir, leaf);
+    }
+    putBe16(b, tree + 4, 2);
+    putBe32(b, tree + 6, quint32(int(dirs.size()) + int(rootFiles.size())));
+    putBe32(b, tree + 10, 1);
+    return r;
+}
+
 void addRegistration(ResourceFixture &r, bool nonCanonical)
 {
     auto &b = r.f.bytes;
@@ -4035,8 +4113,8 @@ Window {
         const QByteArray bigger = QByteArray::fromHex(
             "89504e470d0a1a0a0000000d494844520000000200000002080600000072b60d24000000114944"
             "415478da63f8cfc0f01f8441080c0145cc07f9b7c886d10000000049454e44ae426082");
-        auto r = resourcesBytes({ { QStringLiteral("images/logo.png"), logo },
-                                  { QStringLiteral("ui/notes.txt"), QByteArray("not a picture\n") } });
+        auto r = nestedResources({ { QStringLiteral("images/logo.png"), logo },
+                                   { QStringLiteral("ui/notes.txt"), QByteArray("not a picture\n") } });
         addRegistration(r, false);
 
         const auto images = EmbeddedImages::list(r.f.bytes, false);
