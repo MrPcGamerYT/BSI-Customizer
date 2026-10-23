@@ -1,0 +1,76 @@
+---
+# TEMPORARY workflow (removed before this branch is merged).
+#
+# The GitHub Actions job log is not reachable from the development session, so a
+# failing build cannot be read there. This workflow builds exactly like "Single
+# EXE Release" does and republishes the compiler/linker errors - and the tail of
+# the self-test output - as check-run annotations, which are readable.
+name: Diag build
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Diag build & self-test (Windows x64)
+    runs-on: windows-latest
+    timeout-minutes: 90
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Qt 6
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.*'
+          cache: true
+
+      - name: Configure
+        env:
+          ZLP_AUTH_JSON: ${{ secrets.ZLP_AUTH_JSON || secrets.BSIC_AUTH_JSON }}
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+
+      - name: Build
+        shell: pwsh
+        run: |
+          $log = Join-Path $env:RUNNER_TEMP 'build.log'
+          cmake --build build --config Release --parallel *>&1 | Tee-Object -FilePath $log
+          $code = $LASTEXITCODE
+          if ($code -ne 0) {
+            Get-Content -LiteralPath $log |
+              Select-String -Pattern 'error |error: |fatal error|LNK\d{4}|C\d{4}' |
+              Select-Object -First 20 |
+              ForEach-Object {
+                Write-Host ("::error file=.github/workflows/diag-build.yml::" +
+                            $_.Line.Trim().Replace('%', '%25').Replace("`r", '').Replace("`n", ''))
+              }
+            exit $code
+          }
+
+      - name: Self-test
+        shell: pwsh
+        env:
+          QT_QPA_PLATFORM: offscreen
+          __COMPAT_LAYER: RUNASINVOKER
+        run: |
+          $exe = Get-ChildItem -Path build -Recurse -Filter 'BSI-Customizer.exe' -File |
+                 Select-Object -First 1 -ExpandProperty FullName
+          if (-not $exe) { Write-Host '::error file=.github/workflows/diag-build.yml::BSI-Customizer.exe was not built'; exit 1 }
+          $out = Join-Path $env:RUNNER_TEMP 'selftest.log'
+          $err = Join-Path $env:RUNNER_TEMP 'selftest.err'
+          $p = Start-Process -FilePath $exe -ArgumentList '--selftest' -NoNewWindow -Wait -PassThru `
+                 -RedirectStandardOutput $out -RedirectStandardError $err
+          $lines = @()
+          $lines += Get-Content $out -ErrorAction SilentlyContinue
+          $lines += Get-Content $err -ErrorAction SilentlyContinue
+          $lines | Select-Object -Last 60 | ForEach-Object {
+            $text = $_.ToString().Trim().Replace('%', '%25').Replace("`r", '').Replace("`n", '')
+            if ($text.Length -gt 0) {
+              Write-Host ("::warning file=.github/workflows/diag-build.yml::" + $text)
+            }
+          }
+          $passed = Select-String -Path $out -Pattern 'ALL TESTS PASSED' -Quiet
+          if ($p.ExitCode -ne 0 -or -not $passed) {
+            Write-Host "::error file=.github/workflows/diag-build.yml::self-test failed (exit $($p.ExitCode))"
+            exit 1
+          }
