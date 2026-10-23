@@ -3976,8 +3976,10 @@ Window {
         const QByteArray original = r.f.bytes;
         const auto stock = AboutPatcher::analyze(original);
         check(stock.supported && !stock.applied, "the stock About page is recognized");
-        check(stock.sectionsHidden && !stock.config.showSections,
-              "the oem-gated sections are reported as hidden, so the Unhide button starts offered");
+        check(stock.sectionsHidden && stock.config.showSections,
+              "the oem-gated sections are reported as hidden, yet the editor offers them shown: "
+              "`visible: uiBackend.oem !== \"msi5\"` is false on every MSI install, so leaving it "
+              "alone is what made Apply look like it did nothing there");
         check(stock.config.text
                   == QStringLiteral("Copyright 2026. By using it you agree to the Terms of use"),
               QStringLiteral("the About text editor is prefilled with the stock text (%1)")
@@ -4102,6 +4104,32 @@ Window {
                   && AboutPatcher::apply(textPath, false, {}).ok
                   && resourceText(read(textPath), r, QStringLiteral("PlrAboutSetting.qml")) == about,
               "a text-only About patch applies and restores byte-for-byte");
+
+        // A build whose link rows are shaped differently (renamed ids) must
+        // still get the text editor instead of losing the whole card.
+        QString odd = about;
+        odd.replace(QStringLiteral("iSupportEmailText"), QStringLiteral("iMailRow"));
+        odd.replace(QStringLiteral("iSupportText"), QStringLiteral("iHelpRow"));
+        odd.replace(QStringLiteral("iWebsiteText"), QStringLiteral("iSiteRow"));
+        auto oddResources = resources({ { QStringLiteral("PlrAboutSetting.qml"), odd } }, true, {});
+        addRegistration(oddResources, false);
+        const QString oddPath = temp.filePath(QStringLiteral("about-odd-rows.exe"));
+        write(oddPath, oddResources.f.bytes);
+        const auto oddState = AboutPatcher::analyze(oddResources.f.bytes);
+        check(oddState.supported && oddState.config.links.isEmpty()
+                  && !oddState.config.text.isEmpty(),
+              "an About page whose rows use other ids still reports the text it prints");
+        AboutPatcher::Config oddConfig;
+        oddConfig.text = QStringLiteral("Only the sentence is edited here");
+        oddConfig.showSections = true;
+        check(AboutPatcher::apply(oddPath, true, oddConfig).ok
+                  && resourceText(read(oddPath), oddResources,
+                                  QStringLiteral("PlrAboutSetting.qml"))
+                         .contains(QLatin1String("Only the sentence is edited here"))
+                  && AboutPatcher::apply(oddPath, false, {}).ok
+                  && resourceText(read(oddPath), oddResources,
+                                  QStringLiteral("PlrAboutSetting.qml")) == odd,
+              "such a build gets a working text editor and restores byte-for-byte");
     }
 
     std::printf("[images] embedded pictures are listed, previewed and replaced\n");

@@ -24,6 +24,8 @@ Item {
     property var aboutLinks: []
     // whether the two sections the MSI build draws hidden are switched on
     property bool showSectionsWanted: true
+    // the last Apply/Restore answer, kept on the card (a toast can be missed)
+    property string aboutMsg: ""
 
     function recountChecked() {
         let n = 0;
@@ -69,22 +71,31 @@ Item {
             const item = linkRepeater.itemAt(i);
             if (!item)
                 continue;
+            // The checkbox says “Show”, so a ticked row is visible: the engine
+            // wants the opposite flag. Passing it straight through hid every
+            // row the user kept and showed the ones they unticked.
             out.push({ id: item.linkId, name: item.linkName, url: item.linkUrl,
-                       hidden: item.linkHidden });
+                       hidden: !item.linkHidden });
         }
         return out;
     }
 
-    Component.onCompleted: {
+    // The About card reads the player, so it follows the file: on first show,
+    // whenever the path changes, and every time the tab is opened again (the
+    // EXE may have been patched or restored from another tab meanwhile).
+    function reloadAll() {
         refreshLayout();
         refreshAbout(true);
     }
 
+    Component.onCompleted: reloadAll()
+
+    onVisibleChanged: if (visible) reloadAll()
+
     Connections {
         target: backend
         function onExePathChanged() {
-            page.refreshLayout();
-            page.refreshAbout(true);
+            page.reloadAll();
         }
     }
 
@@ -556,6 +567,7 @@ Item {
                                 enabled: !!page.about.applied
                                 onClicked: {
                                     const result = backend.applyAboutPage("", [], false, false);
+                                    page.aboutMsg = (result && result.msg) ? result.msg : "";
                                     page.refreshAbout(true);
                                     if (result && result.msg) {
                                         page.notify(result.msg);
@@ -579,7 +591,7 @@ Item {
                                 implicitHeight: 30
                                 enabled: !!page.about.supported
                                 text: page.showSectionsWanted
-                                      ? qsTr("Leave the sections as the build draws them")
+                                      ? qsTr("Sections shown — switch back to stock")
                                       : qsTr("Unhide links + About")
                                 onClicked: page.showSectionsWanted = !page.showSectionsWanted
                             }
@@ -596,11 +608,14 @@ Item {
                                         return qsTr("This build already shows both sections; the page "
                                                     + "text and the rows below are editable as they are.");
                                     return page.showSectionsWanted
-                                        ? qsTr("This build hides “Important links” and “About and other "
-                                               + "info” (oem !== \"msi5\"). Applying switches both back "
-                                               + "on, so the text and the rows below are the ones shown.")
-                                        : qsTr("Both sections stay hidden, exactly as the build draws "
-                                               + "them. Press “Unhide links + About” to bring them back.");
+                                        ? qsTr("This build draws “Important links” and “About and "
+                                               + "other info” with visible: uiBackend.oem !== \"msi5\", "
+                                               + "which is hidden on MSI installs. Applying forces both "
+                                               + "sections visible, so the text and the rows below are "
+                                               + "always shown.")
+                                        : qsTr("The sections keep the build's own oem binding, so an MSI "
+                                               + "install still hides them. Press “Unhide links + About” "
+                                               + "to switch them on.");
                                 }
                             }
                         }
@@ -724,6 +739,7 @@ Item {
                                                                           page.collectLinks(),
                                                                           page.showSectionsWanted,
                                                                           true);
+                                    page.aboutMsg = (result && result.msg) ? result.msg : "";
                                     page.refreshAbout(true);
                                     if (result && result.msg) {
                                         page.notify(result.msg);
@@ -746,6 +762,16 @@ Item {
                                 font.pixelSize: 11
                                 font.weight: Font.DemiBold
                             }
+                        }
+
+                        Text {
+                            Layout.fillWidth: true
+                            wrapMode: Text.Wrap
+                            visible: page.aboutMsg.length > 0
+                            text: page.aboutMsg
+                            color: page.about.applied ? Theme.green : Theme.warn
+                            font.pixelSize: 11
+                            font.weight: Font.DemiBold
                         }
 
                         Text {

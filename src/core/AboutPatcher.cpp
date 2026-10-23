@@ -8,6 +8,7 @@
 #include "ThemeEngine.h"
 
 #include <QFile>
+#include <QTemporaryDir>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -26,6 +27,8 @@ const QString kHiddenWrap = QStringLiteral(
     "false /* BSI CUSTOMIZER: about hidden */ && (");
 const QString kHiddenLine = QStringLiteral(
     "visible: false // BSI CUSTOMIZER: about hidden");
+const QString kHiddenInline = QStringLiteral(
+    "visible: false /* BSI CUSTOMIZER: about hidden */");
 // BlueStacks hides the whole "Important links" and "About and other info"
 // blocks on MSI builds (`visible: uiBackend.oem !== "msi5"`). The custom page
 // must show them there too, so their binding is switched to `true` while the
@@ -359,7 +362,7 @@ bool hiddenMemberSite(const QString &qml, const QmlText::Object &object, int *at
     // a separator and a block comment instead; the inline form is removed by
     // the same byte-exact site match in showObject().
     *at = object.open + 1;
-    *text = QStringLiteral(" visible: false /* BSI CUSTOMIZER: about hidden */;");
+    *text = QLatin1Char(' ') + kHiddenInline + QStringLiteral(";");
     return true;
 }
 
@@ -877,22 +880,23 @@ Anchors findAnchors(const QString &qml, const QString &masked, QString *why)
                                        QStringLiteral("onLinkActivated"), &row.handler);
         anchors.links << row;
     }
-    if (anchors.links.isEmpty()) {
-        if (why) *why = QStringLiteral("The stock About links were not found in this player.");
-        return anchors;
-    }
-    if (!sectionOf(masked, anchors.content, anchors.links.first().object,
-                   &anchors.linksBlock)) {
-        if (why) *why = QStringLiteral("The stock About links are not inside the About content column.");
-        return anchors;
+    // A build whose link rows are shaped differently (renamed ids, a Repeater,
+    // a new section) must still get the working text editor: the rows are only
+    // skipped, they never take the whole card down. The card says so itself
+    // ("No stock link rows in this player") when the list comes back empty.
+    if (!anchors.links.isEmpty()
+        && sectionOf(masked, anchors.content, anchors.links.first().object, &anchors.linksBlock)) {
+        anchors.qqRows = findQqRows(qml, masked, anchors.linksBlock);
+    } else {
+        anchors.links.clear();
+        anchors.linksBlock = QmlText::Object();
     }
     findUpdateButton(qml, masked, anchors.content, &anchors.updateButton);
-    anchors.qqRows = findQqRows(qml, masked, anchors.linksBlock);
     QList<QmlText::Object> keep { anchors.aboutText };
     for (const auto &row : anchors.links) keep << row.object;
     anchors.updateInfoRows = findUpdateInfoRows(qml, masked, anchors.content, keep);
     anchors.sectionsHidden = hidesItself(masked, anchors.aboutBlock);
-    if (!sameObject(anchors.aboutBlock, anchors.linksBlock))
+    if (anchors.linksBlock.open >= 0 && !sameObject(anchors.aboutBlock, anchors.linksBlock))
         anchors.sectionsHidden = anchors.sectionsHidden || hidesItself(masked, anchors.linksBlock);
     anchors.ok = true;
     return anchors;
@@ -916,7 +920,11 @@ QString rowName(const QString &expression)
 bool rowIsHidden(const QString &qml, const QmlText::Object &object)
 {
     const QString body = qml.mid(object.open, object.end - object.open);
-    return body.contains(kHiddenLine) || body.contains(kHiddenWrap);
+    // Both forms hideObject() can write: the member on its own line, the
+    // wrapped existing binding, and the inline member used when the object's
+    // opening brace shares its line with the members.
+    return body.contains(kHiddenLine) || body.contains(kHiddenWrap)
+        || body.contains(kHiddenInline);
 }
 
 // What the page says right now: the About text without its markup, and every
@@ -953,10 +961,12 @@ bool readShown(const QString &qml, const QString &masked, const Anchors &anchors
         if (link.name.isEmpty()) link.name = link.url;
         out.links << link;
     }
-    // Start from what the page does now: on the MSI-style pages both sections
-    // are bound to `oem !== "msi5"` and drawn hidden, which is exactly the
-    // state the "Unhide links + About" button is there to change.
-    out.showSections = !anchors.sectionsHidden;
+    // The sections are always offered shown. `visible: uiBackend.oem !== "msi5"`
+    // is hidden on MSI builds and already true on BlueStacks ones, so forcing
+    // `visible: true` is the only value that is correct on every build - and
+    // reading "a non-true binding exists" as "the user wants it left alone" is
+    // what made the patch look like it did nothing on MSI installs.
+    out.showSections = true;
     if (out.text.isEmpty() && out.links.isEmpty()) return false;
     *config = out;
     return true;
@@ -1038,7 +1048,8 @@ bool planEnable(const QString &qml, const Config &config, QList<Edit> &edits, QS
         return false;
     }
 
-    const bool sharedBlock = sameObject(anchors.aboutBlock, anchors.linksBlock);
+    const bool haveLinksBlock = anchors.linksBlock.open >= 0;
+    const bool sharedBlock = !haveLinksBlock || sameObject(anchors.aboutBlock, anchors.linksBlock);
 
     // ---- the two sections the MSI build hides ---------------------------
     if (config.showSections) {
@@ -1106,13 +1117,14 @@ bool planDisable(const QString &qml, QList<Edit> &edits, QString *error)
     const Anchors anchors = findAnchors(qml, masked, error);
     if (!anchors.ok) return false;
 
+    const bool haveLinksBlock = anchors.linksBlock.open >= 0;
     restoreShown(qml, anchors.aboutBlock, edits);
-    if (!sameObject(anchors.linksBlock, anchors.aboutBlock))
+    if (haveLinksBlock && !sameObject(anchors.linksBlock, anchors.aboutBlock))
         restoreShown(qml, anchors.linksBlock, edits);
     // Rows/sections hidden when the text or every link was switched off.
     showObject(qml, anchors.aboutText, edits);
     showObject(qml, anchors.aboutBlock, edits);
-    if (!sameObject(anchors.linksBlock, anchors.aboutBlock))
+    if (haveLinksBlock && !sameObject(anchors.linksBlock, anchors.aboutBlock))
         showObject(qml, anchors.linksBlock, edits);
 
     for (const auto &row : anchors.links) showObject(qml, row.object, edits);
@@ -1306,6 +1318,12 @@ Result apply(const QString &exePath, bool enabled, const Config &rawConfig)
 
 namespace {
 
+QByteArray readAll(const QString &path)
+{
+    QFile file(path);
+    return file.open(QIODevice::ReadOnly) ? file.readAll() : QByteArray();
+}
+
 QString oneLine(const QString &text, int limit = 160)
 {
     QString out = text;
@@ -1461,6 +1479,46 @@ QString probeReport(const QString &exePath)
         }
     } else {
         add(QStringLiteral("*** readShown FAILED (empty text and links) ***"));
+    }
+
+    // End-to-end proof on a throw-away copy: plan the edit against the values
+    // the page has now, write it, read it back, then restore and compare the
+    // bytes with the original. This is what the UI's Apply button does, so a
+    // failure here is a failure there, named step by step.
+    {
+        QTemporaryDir scratch;
+        if (!scratch.isValid()) {
+            add(QStringLiteral("round trip: no temporary directory"));
+        } else {
+            const QString copy = scratch.filePath(QStringLiteral("about-probe.exe"));
+            if (!QFile::copy(exePath, copy)) {
+                add(QStringLiteral("round trip: cannot copy the EXE next to the probe"));
+            } else {
+                const State stock = analyze(image);
+                Config wanted = stock.config;
+                wanted.text = QStringLiteral("BSI Customizer probe");
+                wanted.showSections = true;
+                for (int i = 0; i < wanted.links.size(); ++i)
+                    wanted.links[i].hidden = false;
+                const Result wrote = apply(copy, true, wanted);
+                add(QStringLiteral("round trip apply: ok=%1 %2")
+                        .arg(wrote.ok ? QStringLiteral("yes") : QStringLiteral("no"), wrote.msg));
+                if (wrote.ok) {
+                    const State after = analyze(readAll(copy));
+                    add(QStringLiteral("   read back: supported=%1 applied=%2 text=\"%3\" links=%4")
+                            .arg(after.supported ? QStringLiteral("yes") : QStringLiteral("no"),
+                                 after.applied ? QStringLiteral("yes") : QStringLiteral("no"),
+                                 oneLine(after.config.text, 60))
+                            .arg(after.config.links.size()));
+                }
+                const Result undone = apply(copy, false, Config {});
+                add(QStringLiteral("round trip restore: ok=%1 %2")
+                        .arg(undone.ok ? QStringLiteral("yes") : QStringLiteral("no"), undone.msg));
+                const QByteArray back = readAll(copy);
+                add(QStringLiteral("   bytes identical to the original: %1")
+                        .arg(back == image ? QStringLiteral("yes") : QStringLiteral("no")));
+            }
+        }
     }
 
     const State state = analyze(image);
