@@ -9,6 +9,11 @@ Rectangle {
     property string text
     property bool accent: false
 
+    // Tracked with a HoverHandler, not the MouseArea: the MouseArea is disabled
+    // with the button, and a disabled button still needs to explain itself
+    // through a ToolTip.
+    readonly property bool hovered: buttonHover.hovered
+
     signal clicked()
 
     implicitWidth: buttonLabel.implicitWidth + 30
@@ -64,5 +69,9 @@ Rectangle {
         // Finish a focused color/path edit BEFORE the action consumes it.
         onPressed: button.forceActiveFocus(Qt.MouseFocusReason)
         onClicked: button.clicked()
+    }
+
+    HoverHandler {
+        id: buttonHover
     }
 }
