@@ -213,8 +213,7 @@ qt_add_qml_module(BSICustomizer
         src/qml/pages/FpsPage.qml
         src/qml/pages/IntegrityPage.qml
         src/qml/pages/BootVideoPage.qml
-        src/qml/pages/ExtrasPage.qml
-        src/qml/pages/PlayerUiPage.qml
+        src/qml/pages/UiPage.qml
         src/qml/pages/RpcidPage.qml
         src/qml/pages/AppearancePage.qml
         src/qml/pages/AboutPage.qml

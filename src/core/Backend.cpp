@@ -68,7 +68,6 @@ void Backend::copyPatchState(const Backend &source)
     m_hexQmlColors = source.m_hexQmlColors;
     m_svgs = source.m_svgs;
     m_installs = source.m_installs;
-    m_versions = source.m_versions;
 }
 
 QVariantMap Backend::runBackground(const std::function<QVariantMap(Backend &)> &operation)
@@ -129,7 +128,6 @@ QVariantMap Backend::runBackground(const std::function<QVariantMap(Backend &)> &
     emit gradientTargetsChanged();
     emit svgsChanged();
     emit installsChanged();
-    emit versionsChanged();
     m_busy = false;
     emit busyChanged();
     return response;
@@ -1148,40 +1146,6 @@ QVariantMap Backend::bootPatch()
 
 // ------------------------------------------------------------------ extras
 
-QVariantList Backend::findVersions()
-{
-    if (actionsLocked()) return {};
-    const QByteArray data = readExe();
-    if (data.isEmpty()) {
-        doLog(QStringLiteral("EXE not found."), QStringLiteral("red"));
-        m_versions.clear();
-        emit versionsChanged();
-        return m_versions;
-    }
-    const auto found = ExtrasPatcher::findVersions(data);
-    m_versions.clear();
-    for (const QVariantMap &m : found)
-        m_versions << m.value(QStringLiteral("version")).toString();
-    emit versionsChanged();
-    doLog(m_versions.isEmpty() ? QStringLiteral("No version strings found.")
-                               : QStringLiteral("Found %1 version string(s).").arg(m_versions.size()),
-          m_versions.isEmpty() ? QStringLiteral("orange") : QStringLiteral("blue"));
-    return m_versions;
-}
-
-QVariantMap Backend::applyVersion(const QString &oldV, const QString &newV)
-{
-    if (actionsLocked()) return lockedMap();
-    if (!m_backgroundWorker)
-        return runBackground([=](Backend &worker) { return worker.applyVersion(oldV, newV); });
-    if (oldV.isEmpty() || newV.isEmpty())
-        return result(false, QStringLiteral("Select a version and enter a new one."),
-                      QStringLiteral("orange"));
-    ThemeEngine::backup(m_settings->exePath());
-    const auto r = ExtrasPatcher::applyVersion(m_settings->exePath(), oldV, newV);
-    return result(r.ok, r.msg, QStringLiteral("green"));
-}
-
 QVariantMap Backend::applyRemovals(const QStringList &names)
 {
     if (actionsLocked()) return lockedMap();
@@ -1244,8 +1208,9 @@ QVariantMap Backend::aboutPageState()
         { QStringLiteral("applied"), false },
         { QStringLiteral("detail"), QStringLiteral("Select the HD-Player.exe path first.") },
         { QStringLiteral("text"), QString() },
-        { QStringLiteral("linkLabel"), QString() },
-        { QStringLiteral("linkUrl"), QString() },
+        { QStringLiteral("links"), QVariantList() },
+        { QStringLiteral("showSections"), true },
+        { QStringLiteral("sectionsHidden"), false },
     };
     const QString path = m_settings->exePath();
     if (path.isEmpty() || !QFileInfo::exists(path)) return map;
@@ -1260,23 +1225,41 @@ QVariantMap Backend::aboutPageState()
     map[QStringLiteral("applied")] = state.applied;
     map[QStringLiteral("detail")] = state.detail;
     map[QStringLiteral("text")] = state.config.text;
-    map[QStringLiteral("linkLabel")] = state.config.linkLabel;
-    map[QStringLiteral("linkUrl")] = state.config.linkUrl;
+    map[QStringLiteral("showSections")] = state.config.showSections;
+    map[QStringLiteral("sectionsHidden")] = state.sectionsHidden;
+    QVariantList links;
+    for (const auto &link : state.config.links) {
+        links << QVariantMap {
+            { QStringLiteral("id"), link.id },
+            { QStringLiteral("name"), link.name },
+            { QStringLiteral("url"), link.url },
+            { QStringLiteral("hidden"), link.hidden },
+        };
+    }
+    map[QStringLiteral("links")] = links;
     return map;
 }
 
-QVariantMap Backend::applyAboutPage(const QString &text, const QString &linkLabel,
-                                    const QString &linkUrl, bool enabled)
+QVariantMap Backend::applyAboutPage(const QString &text, const QVariantList &links,
+                                    bool showSections, bool enabled)
 {
     if (actionsLocked()) return lockedMap();
     if (!m_backgroundWorker)
         return runBackground([=](Backend &worker) {
-            return worker.applyAboutPage(text, linkLabel, linkUrl, enabled);
+            return worker.applyAboutPage(text, links, showSections, enabled);
         });
     AboutPatcher::Config config;
     config.text = text;
-    config.linkLabel = linkLabel;
-    config.linkUrl = linkUrl;
+    config.showSections = showSections;
+    for (const auto &value : links) {
+        const auto map = value.toMap();
+        AboutPatcher::Link link;
+        link.id = map.value(QStringLiteral("id")).toString();
+        link.name = map.value(QStringLiteral("name")).toString();
+        link.url = map.value(QStringLiteral("url")).toString();
+        link.hidden = map.value(QStringLiteral("hidden")).toBool();
+        if (!link.id.isEmpty()) config.links << link;
+    }
     const auto r = AboutPatcher::apply(m_settings->exePath(), enabled, config);
     return result(r.ok, r.msg, r.ok ? QStringLiteral("green") : QStringLiteral("red"));
 }

@@ -3564,7 +3564,7 @@ Window {
         check(runRpcIdCli({ QStringLiteral("undo"), rpc }) == 0 && read(rpc) == player,
               "undo restores the original bytes from the command line too");
     }
-    std::printf("[layout] clean player UI hides the sidebar and extra title-bar buttons\n");
+    std::printf("[layout] one-click clean-up hides the extra title-bar and sidebar buttons\n");
     {
         const QString cleanPlr = QStringLiteral(
             "import QtQuick 2.15\r\n"
@@ -3587,6 +3587,26 @@ Window {
             "        UiImageButton { id: iCollapseBtn }\r\n"
             "        UiImageButton { id: iSoundBtn }\r\n"
             "    }\r\n"
+            "    property list<QtObject> pAllSidebarItems: [\r\n"
+            "        PlrSidebarElement {\r\n"
+            "            pElementId: pFullscreen\r\n"
+            "            pAsset: \"SidebarFullScreen\"\r\n"
+            "            pIsFeatureEnable: iSidebarProperties.pIsFullScreenEnabled\r\n"
+            "        },\r\n"
+            "        PlrSidebarElement {\r\n"
+            "            pElementId: pVolume\r\n"
+            "            pIsFeatureEnable: iSidebarProperties.pIsVolumeEnabled\r\n"
+            "        },\r\n"
+            "        PlrSidebarElement {\r\n"
+            "            pElementId: pScreenshot\r\n"
+            "            pAsset: \"SidebarScreenshot\"\r\n"
+            "            pIsFeatureEnable: iSidebarProperties.pIsScreenshotEnabled\r\n"
+            "        },\r\n"
+            "        PlrSidebarElement {\r\n"
+            "            pElementId: pRotate\r\n"
+            "            pAsset: \"SidebarRotate\"\r\n"
+            "        }\r\n"
+            "    ]\r\n"
             "}\r\n");
         const QString cleanTopbar = QStringLiteral(
             "import QtQuick 2.15\r\n"
@@ -3634,7 +3654,7 @@ Window {
         const QString cleanId = QStringLiteral("clean-player-ui");
         const auto stock = LayoutPatcher::analyze(original, cleanId);
         check(stock.supported && !stock.applied,
-              "the clean player UI is offered on a stock sidebar/title bar");
+              "the one-click clean-up is offered on a stock sidebar/title bar");
         const QString cleanPath = temp.filePath(QStringLiteral("layout-clean.exe"));
         write(cleanPath, original);
         const auto applied = LayoutPatcher::apply(cleanPath, cleanId, true);
@@ -3643,10 +3663,14 @@ Window {
         const auto cleanPlrText = resourceText(cleanBytes, r, QStringLiteral("plr.qml"));
         const auto cleanSidebarText = resourceText(cleanBytes, r, QStringLiteral("PlrSidebar.qml"));
         const auto cleanTopbarText = resourceText(cleanBytes, r, QStringLiteral("PlrTopbar.qml"));
-        check(cleanPlrText.contains(QLatin1String("false /* BSI CUSTOMIZER: clean player UI */"))
-                  && cleanPlrText.contains(QLatin1String("width: 0 /* BSI CUSTOMIZER: clean player UI width:"))
-                  && cleanSidebarText.contains(QLatin1String("visible: false // BSI CUSTOMIZER: clean player UI")),
-              "the live sidebar instance and its button strip are hidden, and the instance width collapses");
+        check(cleanPlrText == cleanPlr,
+              "the sidebar instance is left exactly as stock");
+        check(cleanSidebarText.contains(QLatin1String("pIsFeatureEnable: false /* BSI CUSTOMIZER: sidebar clean:"))
+                  && cleanSidebarText.contains(QLatin1String("pIsFeatureEnable: false // BSI CUSTOMIZER: sidebar clean"))
+                  && cleanSidebarText.contains(QLatin1String("pIsFeatureEnable: iSidebarProperties.pIsFullScreenEnabled"))
+                  && cleanSidebarText.contains(QLatin1String("pIsFeatureEnable: iSidebarProperties.pIsVolumeEnabled"))
+                  && !cleanSidebarText.contains(QLatin1String("pIsScreenshotEnabled")),
+              "the sidebar keeps fullscreen and volume and switches screenshot and rotate off");
         check(cleanTopbarText.count(QLatin1String("pVisible: false /* BSI CUSTOMIZER: clean player UI visible:")) == 2
                   && cleanTopbarText.contains(QLatin1String("pVisible: true\r\n            pWidth: iBackBtn.width"))
                   && cleanTopbarText.contains(QLatin1String("visible: false // BSI CUSTOMIZER: clean player UI")),
@@ -3656,8 +3680,10 @@ Window {
               "an object written on a single line is hidden inline instead of being split across lines");
         check(LayoutPatcher::analyze(cleanBytes, cleanId).applied,
               "the written clean UI is detected on read-back");
-        check(!LayoutPatcher::apply(cleanPath, QStringLiteral("sidebar-to-titlebar"), true).ok,
-              "the title-bar move refuses to stack on the clean UI");
+        // The clean-up writes nothing into plr.qml, so it never blocks the
+        // title-bar move (which is the only option that removes the sidebar).
+        check(!cleanPlrText.contains(QLatin1String("BSI CUSTOMIZER")),
+              "the clean-up leaves no marker in plr.qml, so the title-bar move is still offered");
         const auto restored = LayoutPatcher::apply(cleanPath, cleanId, false);
         const auto restoredBytes = read(cleanPath);
         check(restored.ok, QStringLiteral("the clean player UI restores (%1)").arg(restored.msg));
@@ -3665,6 +3691,47 @@ Window {
                   && resourceText(restoredBytes, r, QStringLiteral("PlrSidebar.qml")) == cleanSidebar
                   && resourceText(restoredBytes, r, QStringLiteral("PlrTopbar.qml")) == cleanTopbar,
               "turning the clean UI off restores every document byte-for-byte");
+
+        // A clean-up written by an older version only hid the title-bar buttons
+        // and the whole sidebar strip. It is reported as an update and the
+        // missing half is written without restoring first.
+        const QString legacyPlr = QStringLiteral(
+            "import QtQuick 2.15\r\n"
+            "Rectangle {\r\n"
+            "    id: iAppwin\r\n"
+            "    property int pSidebarWidth: 32\r\n"
+            "    PlrTopbar { id: iTopbar }\r\n"
+            "    PlrSidebar {\r\n"
+            "        visible: false // BSI CUSTOMIZER: clean player UI\r\n"
+            "        id: iSidebar\r\n"
+            "        width: 0 /* BSI CUSTOMIZER: clean player UI width: cFNpZGViYXJXaWR0aA== */\r\n"
+            "        visible: uiBackend.confGetInstanceBool(\"show_sidebar\")\r\n"
+            "    }\r\n"
+            "}\r\n");
+        auto legacy = resources({ { QStringLiteral("plr.qml"), legacyPlr },
+                                  { QStringLiteral("PlrSidebar.qml"), cleanSidebar },
+                                  { QStringLiteral("PlrTopbar.qml"), cleanTopbar } }, true, {});
+        addRegistration(legacy, false);
+        const QString legacyPath = temp.filePath(QStringLiteral("layout-clean-legacy.exe"));
+        write(legacyPath, legacy.f.bytes);
+        const auto legacyState = LayoutPatcher::analyze(legacy.f.bytes, cleanId);
+        check(legacyState.supported && legacyState.applied && legacyState.needsUpdate,
+              "a clean-up written by an older version is offered as an update");
+        check(LayoutPatcher::apply(legacyPath, cleanId, true).ok,
+              "the update completes an older clean-up instead of refusing it");
+        const auto updatedSidebar = resourceText(read(legacyPath), legacy, QStringLiteral("PlrSidebar.qml"));
+        check(resourceText(read(legacyPath), legacy, QStringLiteral("plr.qml")) == cleanPlr,
+              "the update brings the sidebar strip back (the old patch hid it)");
+        check(updatedSidebar.contains(QLatin1String("pIsFeatureEnable: false /* BSI CUSTOMIZER: sidebar clean:"))
+                  && !updatedSidebar.contains(QLatin1String("iSidebarProperties.pIsScreenshotEnabled")),
+              "the update hides the extra sidebar buttons");
+        check(!LayoutPatcher::analyze(read(legacyPath), cleanId).needsUpdate,
+              "the updated clean-up is reported as complete");
+        check(LayoutPatcher::apply(legacyPath, cleanId, false).ok
+                  && resourceText(read(legacyPath), legacy, QStringLiteral("plr.qml")) == cleanPlr
+                  && resourceText(read(legacyPath), legacy, QStringLiteral("PlrSidebar.qml")) == cleanSidebar
+                  && resourceText(read(legacyPath), legacy, QStringLiteral("PlrTopbar.qml")) == cleanTopbar,
+              "restoring the updated clean-up leaves the stock documents");
 
         // MSI 5.9 / 5.10 shape: the sidebar instance is a layout child sized by
         // Layout.preferredWidth and the top bar re-asserts `visible` from a
@@ -3720,15 +3787,15 @@ Window {
                   && oldTopbarText.contains(QLatin1String("\"id\" : iBackBtn,           \"visible\" : true"))
                   && oldTopbarText.contains(QLatin1String("id: iQuestbtn; visible: false /* BSI CUSTOMIZER")),
               "the ListModel entries for the menu/help buttons are switched off while the title and Back stay");
-        check(oldPlrText.contains(QLatin1String("Layout.preferredWidth: 0 /* BSI CUSTOMIZER: clean player UI width:")),
-              "a layout-child sidebar collapses its Layout.preferredWidth");
+        check(oldPlrText == oldPlr,
+              "the layout-child sidebar keeps its stock Layout.preferredWidth");
         check(LayoutPatcher::apply(oldPath, cleanId, false).ok
                   && resourceText(read(oldPath), old, QStringLiteral("PlrTopbar.qml")) == oldTopbar
                   && resourceText(read(oldPath), old, QStringLiteral("plr.qml")) == oldPlr,
               "the MSI 5.9 style clean-up also restores byte-for-byte");
     }
 
-    std::printf("[about] Settings About page keeps its layout and replaces texts/links\n");
+    std::printf("[about] Settings About page offers every stock link and the About text\n");
     {
         const QString about = QStringLiteral(
             "import QtQuick 2.15\r\n"
@@ -3803,7 +3870,7 @@ Window {
             "                    Text { text: qsTranslate(\"QObject\", \"About and other info\") }\r\n"
             "                    UiTextUrl {\r\n"
             "                        id: iTermsOfUseText\r\n"
-            "                        text: qsTranslate(\"QObject\", \"Copyright\") + \"<a href=\\\"javascript:void(0)\\\">Terms of use</a>\"\r\n"
+            "                        text: qsTranslate(\"QObject\", \"Copyright 2026. By using it you agree to the \") + \"<a href=\\\"javascript:void(0)\\\">\" + qsTranslate(\"QObject\", \"Terms of use\") + \"</a>\"\r\n"
             "                        onLinkActivated: uiBackend.openHelpArticle(\"terms_of_use\")\r\n"
             "                    }\r\n"
             "                }\r\n"
@@ -3815,59 +3882,124 @@ Window {
         addRegistration(r, false);
         const QByteArray original = r.f.bytes;
         const auto stock = AboutPatcher::analyze(original);
-        check(stock.supported && !stock.applied,
-              "the stock About page is recognized");
+        check(stock.supported && !stock.applied, "the stock About page is recognized");
+        check(stock.sectionsHidden && !stock.config.showSections,
+              "the oem-gated sections are reported as hidden, so the Unhide button starts offered");
+        check(stock.config.text
+                  == QStringLiteral("Copyright 2026. By using it you agree to the Terms of use"),
+              QStringLiteral("the About text editor is prefilled with the stock text (%1)")
+                  .arg(stock.config.text));
+        check(stock.config.links.size() == 3,
+              QStringLiteral("every stock link row is offered to the editor (%1)")
+                  .arg(stock.config.links.size()));
+        check(stock.config.links.value(0).name == QStringLiteral("Support email")
+                  && stock.config.links.value(0).url == QStringLiteral("support@bluestacks.com"),
+              QStringLiteral("the e-mail row keeps its name and address (%1 -> %2)")
+                  .arg(stock.config.links.value(0).name, stock.config.links.value(0).url));
+        check(stock.config.links.value(2).name == QStringLiteral("Website")
+                  && stock.config.links.value(2).url == QStringLiteral("http://www.bluestacks.com"),
+              QStringLiteral("the website row keeps its name and handler URL (%1 -> %2)")
+                  .arg(stock.config.links.value(2).name, stock.config.links.value(2).url));
+
         const QString aboutPath = temp.filePath(QStringLiteral("about-page.exe"));
         write(aboutPath, original);
-        AboutPatcher::Config config;
+        AboutPatcher::Config config = stock.config;
+        config.showSections = true; // the Unhide button was pressed
         config.text = QStringLiteral("Modded by Mr.Pc Gamer");
-        config.linkLabel = QStringLiteral("Join my channel");
-        config.linkUrl = QStringLiteral("https://example.com/join");
+        config.links[0].name = QStringLiteral("Telegram");
+        config.links[0].url = QStringLiteral("https://t.me/mrpcgamer");
+        config.links[1].name = QStringLiteral("Discord");
+        config.links[1].url = QStringLiteral("https://discord.gg/example");
+        config.links[2].name = QStringLiteral("Channel");
+        config.links[2].url = QStringLiteral("https://youtube.com/@MrPcGamer");
         const auto applied = AboutPatcher::apply(aboutPath, true, config);
         check(applied.ok, QStringLiteral("the About page is updated (%1)").arg(applied.msg));
-        const auto aboutText = resourceText(read(aboutPath), r, QStringLiteral("PlrAboutSetting.qml"));
-        check(aboutText.contains(QLatin1String("Modded by Mr.Pc Gamer"))
-                  && aboutText.contains(QLatin1String("<a href=\\\"https://example.com/join\\\">Join my channel</a>"))
-                  && aboutText.contains(QLatin1String("onLinkActivated: Qt.openUrlExternally(\"https://example.com/join\")"))
-                  && aboutText.contains(QLatin1String("BSI CUSTOMIZER: about-config ")),
-              "the custom About text and the single custom link replace the stock ones");
-        check(aboutText.contains(QLatin1String("id: iWebsiteText"))
-                  && aboutText.contains(QLatin1String("id: iTermsOfUseText"))
-                  && aboutText.contains(QLatin1String("Important links"))
-                  && aboutText.contains(QLatin1String("About and other info")),
-              "the About page keeps its layout, section headings and text fields instead of going empty");
-        check(aboutText.count(QLatin1String("visible: false // BSI CUSTOMIZER: about hidden")) == 3
-                  && aboutText.count(QLatin1String("false /* BSI CUSTOMIZER: about hidden */ && (")) == 3,
-              "the stock e-mail/support/QQ links and the update button are hidden");
-        check(aboutText.count(QLatin1String("visible: true /* BSI CUSTOMIZER: about shown:")) == 2,
-              "the links and About sections are forced visible so the MSI build shows them too");
-        const auto state = AboutPatcher::analyze(read(aboutPath));
-        check(state.applied && state.config.text == config.text
-                  && state.config.linkUrl == config.linkUrl,
-              "the applied About content reads back");
-        AboutPatcher::Config second = config;
-        second.text = QStringLiteral("Second build of the page");
-        second.linkUrl = QStringLiteral("https://example.com/two");
-        check(AboutPatcher::apply(aboutPath, true, second).ok
-                  && resourceText(read(aboutPath), r, QStringLiteral("PlrAboutSetting.qml"))
-                         .contains(QLatin1String("Second build of the page"))
+        QString patched = resourceText(read(aboutPath), r, QStringLiteral("PlrAboutSetting.qml"));
+        check(patched.contains(QLatin1String("Modded by Mr.Pc Gamer"))
+                  && patched.contains(QLatin1String("Telegram - <a href=\\\"https://t.me/mrpcgamer\\\">t.me/mrpcgamer</a>"))
+                  && patched.contains(QLatin1String("Discord - <a href=\\\"https://discord.gg/example\\\">discord.gg/example</a>"))
+                  && patched.contains(QLatin1String("Channel - <a href=\\\"https://youtube.com/@MrPcGamer\\\">youtube.com/@MrPcGamer</a>")),
+              "all three stock links are rewritten with the edited names and addresses");
+        check(patched.contains(QLatin1String("onLinkActivated: Qt.openUrlExternally(\"https://t.me/mrpcgamer\")"))
+                  && patched.count(QLatin1String("// BSI CUSTOMIZER: about handler")) == 2,
+              "rows without a stock handler get one, and it is tagged so the undo removes it");
+        check(patched.contains(QLatin1String("Important links"))
+                  && patched.contains(QLatin1String("About and other info"))
+                  && patched.count(QLatin1String("visible: true /* BSI CUSTOMIZER: about shown:")) == 2,
+              "the page keeps its layout and the hidden MSI sections are switched back on");
+        auto state = AboutPatcher::analyze(read(aboutPath));
+        check(state.applied && !state.sectionsHidden && state.config.links.size() == 3
+                  && state.config.links.value(1).url == QStringLiteral("https://discord.gg/example"),
+              "the applied text and every link read back from the page");
+
+        // Per-link hide: one row is switched off, the others stay.
+        AboutPatcher::Config perLink = config;
+        perLink.links[1].hidden = true;
+        check(AboutPatcher::apply(aboutPath, true, perLink).ok,
+              "a single link can be hidden without touching the rest");
+        patched = resourceText(read(aboutPath), r, QStringLiteral("PlrAboutSetting.qml"));
+        check(patched.contains(QLatin1String("visible: false // BSI CUSTOMIZER: about hidden"))
+                  && !patched.contains(QLatin1String("Discord - <a"))
+                  && patched.contains(QLatin1String("Telegram - <a"))
+                  && patched.contains(QLatin1String("Channel - <a")),
+              "the hidden row disappears and the other two links stay");
+        state = AboutPatcher::analyze(read(aboutPath));
+        check(state.config.links.value(1).hidden && !state.config.links.value(0).hidden,
+              "the per-link hide state reads back");
+
+        // The sections can also be left exactly as the build draws them.
+        AboutPatcher::Config gated = perLink;
+        gated.showSections = false;
+        check(AboutPatcher::apply(aboutPath, true, gated).ok
                   && !resourceText(read(aboutPath), r, QStringLiteral("PlrAboutSetting.qml"))
-                          .contains(QLatin1String("Modded by Mr.Pc Gamer")),
+                          .contains(QLatin1String("BSI CUSTOMIZER: about shown:"))
+                  && resourceText(read(aboutPath), r, QStringLiteral("PlrAboutSetting.qml"))
+                         .contains(QLatin1String("visible: uiBackend.oem !== \"msi5\"")),
+              "the sections can be left hidden on the builds that hide them");
+
+        check(AboutPatcher::apply(aboutPath, true, config).ok
+                  && resourceText(read(aboutPath), r, QStringLiteral("PlrAboutSetting.qml"))
+                         .count(QLatin1String("BSI CUSTOMIZER: about-config ")) == 1,
               "applying different content updates the same page instead of stacking edits");
-        check(resourceText(read(aboutPath), r, QStringLiteral("PlrAboutSetting.qml"))
-                  .count(QLatin1String("BSI CUSTOMIZER: about-config ")) == 1,
-              "only one configuration line is ever written");
         const auto restored = AboutPatcher::apply(aboutPath, false, {});
         check(restored.ok, QStringLiteral("the stock About page restores (%1)").arg(restored.msg));
         check(resourceText(read(aboutPath), r, QStringLiteral("PlrAboutSetting.qml")) == about,
               "restoring the About page is byte-for-byte identical to stock");
 
-        // Text only: the stock links are hidden and the page still shows the
-        // custom text (no link row with a stock target left behind).
+        // The values prefill hands the editors can be applied unchanged: the
+        // page then shows the same words through the custom rows, the e-mail
+        // row keeps a working mailto: target, and the undo is still byte-exact.
+        const QString prefillPath = temp.filePath(QStringLiteral("about-prefill.exe"));
+        write(prefillPath, original);
+        const auto prefilled = AboutPatcher::apply(prefillPath, true, stock.config);
+        const auto prefilledText = resourceText(read(prefillPath), r,
+                                                QStringLiteral("PlrAboutSetting.qml"));
+        check(prefilled.ok
+                  && prefilledText.contains(QLatin1String("Copyright 2026. By using it you agree to the Terms of use"))
+                  && prefilledText.contains(QLatin1String("Website - <a href=\\\"http://www.bluestacks.com\\\">www.bluestacks.com</a>"))
+                  && prefilledText.contains(QLatin1String("Support email - <a href=\\\"mailto:support@bluestacks.com\\\">support@bluestacks.com</a>")),
+              QStringLiteral("the prefilled stock values can be applied unchanged (%1)").arg(prefilled.msg));
+        const auto prefilledState = AboutPatcher::analyze(read(prefillPath));
+        check(prefilledState.config.links.value(0).url
+                  == QStringLiteral("mailto:support@bluestacks.com"),
+              "the e-mail row reads back as the mailto: target it now uses");
+        check(prefilledText.contains(QLatin1String("visible: uiBackend.oem !== \"msi5\""))
+                  && !prefilledText.contains(QLatin1String("BSI CUSTOMIZER: about shown:")),
+              "applying without pressing Unhide leaves the build's own section visibility alone");
+        check(AboutPatcher::apply(prefillPath, true, stock.config).msg
+                  == QStringLiteral("This About page content is already applied."),
+              "applying the same prefill twice is a no-op rather than a rewrite");
+        check(AboutPatcher::apply(prefillPath, false, {}).ok
+                  && resourceText(read(prefillPath), r, QStringLiteral("PlrAboutSetting.qml")) == about,
+              "and that prefill-only patch also restores byte-for-byte");
+
+        // Text only: every stock link row is hidden and the page still shows
+        // the custom text.
         const QString textPath = temp.filePath(QStringLiteral("about-text-only.exe"));
         write(textPath, original);
         AboutPatcher::Config textOnly;
         textOnly.text = QStringLiteral("Just my text");
+        textOnly.showSections = true;
         check(AboutPatcher::apply(textPath, true, textOnly).ok
                   && resourceText(read(textPath), r, QStringLiteral("PlrAboutSetting.qml"))
                          .contains(QLatin1String("Just my text"))

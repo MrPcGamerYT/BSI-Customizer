@@ -7,9 +7,11 @@
 #include "ThemeEngine.h"
 
 #include <QFile>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QRegularExpression>
+#include <QStringList>
 
 #include <algorithm>
 
@@ -498,8 +500,17 @@ QString configLine(const Config &config)
 {
     QJsonObject object;
     object.insert(QStringLiteral("text"), config.text);
-    object.insert(QStringLiteral("label"), config.linkLabel);
-    object.insert(QStringLiteral("url"), config.linkUrl);
+    object.insert(QStringLiteral("show"), config.showSections);
+    QJsonArray links;
+    for (const auto &link : config.links) {
+        QJsonObject entry;
+        entry.insert(QStringLiteral("id"), link.id);
+        entry.insert(QStringLiteral("name"), link.name);
+        entry.insert(QStringLiteral("url"), link.url);
+        entry.insert(QStringLiteral("hidden"), link.hidden);
+        links.append(entry);
+    }
+    object.insert(QStringLiteral("links"), links);
     const QByteArray json = QJsonDocument(object).toJson(QJsonDocument::Compact);
     return kConfigBegin + QString::fromLatin1(json.toBase64());
 }
@@ -520,41 +531,306 @@ bool readConfig(const QString &qml, Config *config)
     const auto document = QJsonDocument::fromJson(bytes, &error);
     if (error.error != QJsonParseError::NoError || !document.isObject()) return false;
     const auto object = document.object();
-    config->text = object.value(QStringLiteral("text")).toString();
-    config->linkLabel = object.value(QStringLiteral("label")).toString();
-    config->linkUrl = object.value(QStringLiteral("url")).toString();
+    Config out;
+    out.text = object.value(QStringLiteral("text")).toString();
+    out.showSections = object.value(QStringLiteral("show")).toBool(true);
+    for (const auto &value : object.value(QStringLiteral("links")).toArray()) {
+        const auto entry = value.toObject();
+        Link link;
+        link.id = entry.value(QStringLiteral("id")).toString();
+        link.name = entry.value(QStringLiteral("name")).toString();
+        link.url = entry.value(QStringLiteral("url")).toString();
+        link.hidden = entry.value(QStringLiteral("hidden")).toBool();
+        if (!link.id.isEmpty()) out.links << link;
+    }
+    *config = out;
     return true;
+}
+
+// The address a row opens. A bare e-mail address keeps the stock "Support
+// email" row working after it is edited, and a bare domain becomes a real URL
+// instead of a dead Qt.openUrlExternally call.
+QString targetUrl(const QString &url)
+{
+    const QString trimmed = url.trimmed();
+    if (trimmed.contains(QLatin1Char(':'))) return trimmed;
+    if (trimmed.contains(QLatin1Char('@'))) return QStringLiteral("mailto:") + trimmed;
+    if (trimmed.contains(QLatin1Char('.')) && !trimmed.contains(QLatin1Char(' ')))
+        return QStringLiteral("https://") + trimmed;
+    return trimmed;
+}
+
+bool sameLink(const Link &a, const Link &b)
+{
+    return a.id == b.id && a.name == b.name && a.url == b.url && a.hidden == b.hidden;
 }
 
 bool sameConfig(const Config &a, const Config &b)
 {
-    return a.text == b.text && a.linkLabel == b.linkLabel && a.linkUrl == b.linkUrl;
+    if (a.text != b.text || a.showSections != b.showSections || a.links.size() != b.links.size())
+        return false;
+    for (int i = 0; i < a.links.size(); ++i)
+        if (!sameLink(a.links.at(i), b.links.at(i))) return false;
+    return true;
 }
 
 Config normalized(Config config)
 {
     config.text = config.text.trimmed();
-    config.linkLabel = config.linkLabel.trimmed();
-    config.linkUrl = config.linkUrl.trimmed();
+    for (auto &link : config.links) {
+        link.name = link.name.trimmed();
+        link.url = link.url.trimmed();
+        // Store the form the page ends up with, so reading it back matches
+        // what was applied.
+        link.url = targetUrl(link.url);
+        // A row with nothing to point at and nothing to say is a hidden row.
+        if (link.url.isEmpty() && link.name.isEmpty()) link.hidden = true;
+        if (link.name.isEmpty()) link.name = link.url;
+    }
     return config;
 }
 
+// ------------------------------------------------- what the page shows right now
+// The About editors are prefilled with the values the page has at this moment,
+// so the stock text/link can be edited instead of retyped. Reading them needs
+// no QML engine: a text expression is flattened to the strings it can render
+// (`qsTranslate("c", "x")` -> `x`, literals decoded), and the markup the stock
+// page uses is turned back into plain text.
+
+// The index just past the ')' that closes the '(' at `open`, quote-aware.
+int closingParen(const QString &text, int open)
+{
+    int depth = 0;
+    QChar quote;
+    for (int i = open; i < text.size(); ++i) {
+        const QChar c = text.at(i);
+        if (!quote.isNull()) {
+            if (c == QLatin1Char('\\')) { ++i; continue; }
+            if (c == quote) quote = QChar();
+            continue;
+        }
+        if (c == QLatin1Char('"') || c == QLatin1Char('\'')) { quote = c; continue; }
+        if (c == QLatin1Char('(')) ++depth;
+        else if (c == QLatin1Char(')') && --depth == 0) return i + 1;
+    }
+    return -1;
+}
+
+QString decodeQmlString(const QString &raw)
+{
+    QString out;
+    out.reserve(raw.size());
+    for (int i = 0; i < raw.size(); ++i) {
+        const QChar c = raw.at(i);
+        if (c != QLatin1Char('\\')) {
+            out += c;
+            continue;
+        }
+        if (++i >= raw.size()) break;
+        const QChar escaped = raw.at(i);
+        switch (escaped.unicode()) {
+        case 'n': out += QLatin1Char('\n'); break;
+        case 'r': out += QLatin1Char('\r'); break;
+        case 't': out += QLatin1Char('\t'); break;
+        default: out += escaped; break;
+        }
+    }
+    return out;
+}
+
+// Every string a QML text expression can contribute, in source order. Calls
+// such as `qsTranslate("QObject", "Terms of use")` contribute their text
+// argument only; other identifiers and operators are skipped.
+QStringList renderedChunks(const QString &expression)
+{
+    QStringList out;
+    const int n = expression.size();
+    int i = 0;
+    while (i < n) {
+        const QChar c = expression.at(i);
+        if (c == QLatin1Char('"') || c == QLatin1Char('\'')) {
+            const QChar quote = c;
+            QString raw;
+            int j = i + 1;
+            while (j < n && expression.at(j) != quote) {
+                if (expression.at(j) == QLatin1Char('\\') && j + 1 < n) raw += expression.at(j++);
+                raw += expression.at(j++);
+            }
+            out << decodeQmlString(raw);
+            i = j + 1;
+            continue;
+        }
+        if (c.isLetter() || c == QLatin1Char('_')) {
+            int j = i;
+            while (j < n && (expression.at(j).isLetterOrNumber()
+                             || expression.at(j) == QLatin1Char('_')))
+                ++j;
+            const QString name = expression.mid(i, j - i);
+            int open = j;
+            while (open < n && expression.at(open).isSpace()) ++open;
+            const bool translated = name == QLatin1String("qsTranslate")
+                || name == QLatin1String("qsTr") || name == QLatin1String("qsTrId");
+            if (translated && open < n && expression.at(open) == QLatin1Char('(')) {
+                const int close = closingParen(expression, open);
+                if (close > 0) {
+                    const QString arguments = expression.mid(open + 1, close - open - 1);
+                    // Quote-aware split, so a comma inside the text is kept.
+                    QStringList parts;
+                    QString part;
+                    QChar active;
+                    for (int k = 0; k < arguments.size(); ++k) {
+                        const QChar d = arguments.at(k);
+                        if (!active.isNull()) {
+                            part += d;
+                            if (d == QLatin1Char('\\') && k + 1 < arguments.size())
+                                part += arguments.at(++k);
+                            else if (d == active) active = QChar();
+                            continue;
+                        }
+                        if (d == QLatin1Char('"') || d == QLatin1Char('\'')) active = d;
+                        if (d == QLatin1Char(',')) { parts << part; part.clear(); continue; }
+                        part += d;
+                    }
+                    parts << part;
+                    QString text = parts.last().trimmed();
+                    if (text.size() >= 2 && (text.front() == QLatin1Char('"')
+                                             || text.front() == QLatin1Char('\''))
+                        && text.back() == text.front())
+                        text = text.mid(1, text.size() - 2);
+                    out << decodeQmlString(text);
+                    i = close;
+                    continue;
+                }
+            }
+            i = j;
+            continue;
+        }
+        ++i;
+    }
+    return out;
+}
+
+QString renderedText(const QString &expression)
+{
+    return renderedChunks(expression).join(QString());
+}
+
+QString htmlToPlain(const QString &html)
+{
+    QString out;
+    out.reserve(html.size());
+    bool inTag = false;
+    for (const QChar c : html) {
+        if (inTag) {
+            if (c == QLatin1Char('>')) inTag = false;
+            continue;
+        }
+        if (c == QLatin1Char('<')) {
+            inTag = true;
+            continue;
+        }
+        out += c;
+    }
+    out.replace(QLatin1String("&nbsp;"), QStringLiteral(" "));
+    out.replace(QLatin1String("&lt;"), QStringLiteral("<"));
+    out.replace(QLatin1String("&gt;"), QStringLiteral(">"));
+    out.replace(QLatin1String("&quot;"), QStringLiteral("\""));
+    out.replace(QLatin1String("&#39;"), QStringLiteral("'"));
+    out.replace(QLatin1String("&#039;"), QStringLiteral("'"));
+    out.replace(QLatin1String("&amp;"), QStringLiteral("&"));
+    return out;
+}
+
+// The text of the last `<a …>label</a>` a row can render. The stock rows read
+// `cond ? " - <a…>cn</a>" : " - <a…>com</a>"`, and the second branch is the
+// one this build shows outside China.
+QString lastAnchorLabel(const QString &rendered)
+{
+    static const QRegularExpression rx(QStringLiteral(">([^<>]*)</a\\s*>"),
+                                       QRegularExpression::CaseInsensitiveOption);
+    QString label;
+    auto iter = rx.globalMatch(rendered);
+    while (iter.hasNext()) label = iter.next().captured(1);
+    return htmlToPlain(label).trimmed();
+}
+
+// Where a stock link row sends the user: the URL of its own handler first
+// (`Qt.openUrlExternally("…")`), otherwise the anchor's href when it is a real
+// address instead of the stock `javascript:void(0)` placeholder.
+QString shownLinkUrl(const QString &handler, const QString &rendered)
+{
+    static const QRegularExpression call(
+        QStringLiteral("Qt\\s*\\.\\s*openUrlExternally\\s*\\(\\s*\"((?:[^\"\\\\]|\\\\.)*)\""));
+    QString url;
+    auto calls = call.globalMatch(handler);
+    while (calls.hasNext()) url = decodeQmlString(calls.next().captured(1));
+    if (!url.isEmpty()) return url;
+    static const QRegularExpression href(QStringLiteral("href\\s*=\\s*\"([^\"]*)\""),
+                                         QRegularExpression::CaseInsensitiveOption);
+    auto links = href.globalMatch(rendered);
+    while (links.hasNext()) {
+        const QString candidate = decodeQmlString(links.next().captured(1)).trimmed();
+        if (candidate.isEmpty() || candidate.startsWith(QLatin1String("javascript:"))
+            || candidate == QLatin1String("#"))
+            continue;
+        url = candidate;
+    }
+    return url;
+}
+
+// One stock link row, located and read from the document.
+struct Row
+{
+    QString id;
+    QmlText::Object object;
+    QmlText::Binding text;
+    QmlText::Binding handler;
+    bool hasHandler = false;
+};
+
+// The About columns and the rows inside them.
 struct Anchors
 {
     QmlText::Object content;
     QmlText::Object aboutBlock;
     QmlText::Object linksBlock;
     QmlText::Object aboutText;
-    QmlText::Object linkText;
-    QList<QmlText::Object> qqRows;
     QList<QmlText::Object> updateInfoRows;
+    QList<QmlText::Object> qqRows;
+    QList<Row> links;
     QmlText::Object updateButton;
     QmlText::Binding aboutTextBinding;
-    QmlText::Binding linkTextBinding;
-    QmlText::Binding linkHandler;
-    bool hasLinkHandler = false;
+    bool sectionsHidden = false;
     bool ok = false;
 };
+
+bool sameObject(const QmlText::Object &a, const QmlText::Object &b)
+{
+    return a.open == b.open && a.end == b.end;
+}
+
+// True when the build's own binding can keep the section switched off, i.e.
+// the MSI shape `visible: uiBackend.oem !== "msi5"`. A plain `true` (or no
+// binding) is already shown and needs no unhide.
+bool hidesItself(const QString &masked, const QmlText::Object &object)
+{
+    QmlText::Binding visible;
+    if (!directBinding(masked, object.open, object.end, QStringLiteral("visible"), &visible))
+        return false;
+    return masked.mid(visible.valueBegin, visible.valueEnd - visible.valueBegin).trimmed()
+        != QLatin1String("true");
+}
+
+// The stock link rows, in the order the page lays them out. A build may have
+// fewer of them; the ones it has are the ones the editor shows.
+const QStringList &stockLinkIds()
+{
+    static const QStringList ids {
+        QStringLiteral("iSupportEmailText"), QStringLiteral("iSupportText"),
+        QStringLiteral("iWebsiteText")
+    };
+    return ids;
+}
 
 Anchors findAnchors(const QString &qml, const QString &masked, QString *why)
 {
@@ -576,36 +852,160 @@ Anchors findAnchors(const QString &qml, const QString &masked, QString *why)
         if (why) *why = QStringLiteral("The About text is not inside the About content column.");
         return anchors;
     }
-    QmlText::Object website;
-    if (!findObjectById(qml, masked, QStringLiteral("iWebsiteText"), &website)
-        && !findObjectById(qml, masked, QStringLiteral("iSupportText"), &website)) {
+    for (const auto &id : stockLinkIds()) {
+        Row row;
+        row.id = id;
+        if (!findObjectById(qml, masked, id, &row.object)) continue;
+        if (!directBinding(masked, row.object.open, row.object.end,
+                           QStringLiteral("text"), &row.text))
+            continue;
+        row.hasHandler = directBinding(masked, row.object.open, row.object.end,
+                                       QStringLiteral("onLinkActivated"), &row.handler);
+        anchors.links << row;
+    }
+    if (anchors.links.isEmpty()) {
         if (why) *why = QStringLiteral("The stock About links were not found in this player.");
         return anchors;
     }
-    anchors.linkText = website;
-    if (!directBinding(masked, anchors.linkText.open, anchors.linkText.end,
-                       QStringLiteral("text"), &anchors.linkTextBinding)) {
-        if (why) *why = QStringLiteral("The stock About link is not a text field; nothing would be written.");
-        return anchors;
-    }
-    if (!sectionOf(masked, anchors.content, anchors.linkText, &anchors.linksBlock)) {
+    if (!sectionOf(masked, anchors.content, anchors.links.first().object,
+                   &anchors.linksBlock)) {
         if (why) *why = QStringLiteral("The stock About links are not inside the About content column.");
         return anchors;
     }
-    anchors.hasLinkHandler = directBinding(masked, anchors.linkText.open, anchors.linkText.end,
-                                           QStringLiteral("onLinkActivated"), &anchors.linkHandler);
     findUpdateButton(qml, masked, anchors.content, &anchors.updateButton);
     anchors.qqRows = findQqRows(qml, masked, anchors.linksBlock);
-    anchors.updateInfoRows = findUpdateInfoRows(qml, masked, anchors.content,
-                                                QList<QmlText::Object> { anchors.linkText,
-                                                                         anchors.aboutText });
+    QList<QmlText::Object> keep { anchors.aboutText };
+    for (const auto &row : anchors.links) keep << row.object;
+    anchors.updateInfoRows = findUpdateInfoRows(qml, masked, anchors.content, keep);
+    anchors.sectionsHidden = hidesItself(masked, anchors.aboutBlock);
+    if (!sameObject(anchors.aboutBlock, anchors.linksBlock))
+        anchors.sectionsHidden = anchors.sectionsHidden || hidesItself(masked, anchors.linksBlock);
     anchors.ok = true;
     return anchors;
 }
 
-bool sameObject(const QmlText::Object &a, const QmlText::Object &b)
+// The name a row prints before its link ("Support email - <a…>"). That is the
+// first string the text expression contributes; the branches after it only
+// repeat the label with a different link.
+QString rowName(const QString &expression)
 {
-    return a.open == b.open && a.end == b.end;
+    QString prefix = renderedChunks(expression).value(0);
+    const int anchor = prefix.indexOf(QLatin1String("<a"), 0, Qt::CaseInsensitive);
+    if (anchor >= 0) prefix = prefix.left(anchor);
+    prefix = htmlToPlain(prefix).trimmed();
+    while (prefix.endsWith(QLatin1Char('-')) || prefix.endsWith(QLatin1Char(':'))
+           || prefix.endsWith(QLatin1Char(' ')))
+        prefix.chop(1);
+    return prefix.trimmed();
+}
+
+bool rowIsHidden(const QString &qml, const QmlText::Object &object)
+{
+    const QString body = qml.mid(object.open, object.end - object.open);
+    return body.contains(kHiddenLine) || body.contains(kHiddenWrap);
+}
+
+// What the page says right now: the About text without its markup, and every
+// stock link row with the name it prints and the URL it opens.
+bool readShown(const QString &qml, const QString &masked, const Anchors &anchors, Config *config)
+{
+    Config out;
+    QmlText::Binding text;
+    if (anchors.aboutText.open >= 0
+        && directBinding(masked, anchors.aboutText.open, anchors.aboutText.end,
+                         QStringLiteral("text"), &text)) {
+        const QString value = qml.mid(text.valueBegin, text.valueEnd - text.valueBegin);
+        out.text = htmlToPlain(renderedText(value)).trimmed();
+    }
+    for (const auto &row : anchors.links) {
+        Link link;
+        link.id = row.id;
+        const QString value = qml.mid(row.text.valueBegin, row.text.valueEnd - row.text.valueBegin);
+        const QString rendered = renderedText(value);
+        link.name = rowName(value);
+        const QString handler = row.hasHandler
+            ? qml.mid(row.handler.valueBegin, row.handler.valueEnd - row.handler.valueBegin)
+            : QString();
+        link.url = shownLinkUrl(handler, rendered);
+        if (link.url.isEmpty()) {
+            // Rows that open a mail client (`uiBackend.openEmail`) or a help
+            // page carry no external URL: their printed address is the target.
+            const QString label = lastAnchorLabel(rendered).trimmed();
+            if (label.contains(QLatin1Char('@'))
+                || (label.contains(QLatin1Char('.')) && !label.contains(QLatin1Char(' '))))
+                link.url = label;
+        }
+        link.hidden = rowIsHidden(qml, row.object);
+        if (link.name.isEmpty()) link.name = link.url;
+        out.links << link;
+    }
+    // Start from what the page does now: on the MSI-style pages both sections
+    // are bound to `oem !== "msi5"` and drawn hidden, which is exactly the
+    // state the "Unhide links + About" button is there to change.
+    out.showSections = !anchors.sectionsHidden;
+    if (out.text.isEmpty() && out.links.isEmpty()) return false;
+    *config = out;
+    return true;
+}
+
+// The text a link row should print: the name, then the address the way the
+// stock page prints it (no scheme, no "mailto:").
+QString displayFor(const QString &url)
+{
+    QString shown = url.trimmed();
+    if (shown.startsWith(QLatin1String("mailto:"), Qt::CaseInsensitive))
+        shown = shown.mid(7);
+    if (shown.startsWith(QLatin1String("http://"), Qt::CaseInsensitive))
+        shown = shown.mid(7);
+    else if (shown.startsWith(QLatin1String("https://"), Qt::CaseInsensitive))
+        shown = shown.mid(8);
+    if (shown.endsWith(QLatin1Char('/'))) shown.chop(1);
+    return shown;
+}
+
+QString linkLiteral(const Link &link)
+{
+    QString html;
+    if (!link.name.isEmpty()) html += escapeHtml(link.name) + QStringLiteral(" - ");
+    html += QStringLiteral("<a href=\"") + escapeHtml(targetUrl(link.url))
+        + QStringLiteral("\">") + escapeHtml(displayFor(link.url)) + QStringLiteral("</a>");
+    return QLatin1Char('"') + escapeQml(html) + QLatin1Char('"');
+}
+
+const Link *findLink(const Config &config, const QString &id)
+{
+    for (const auto &link : config.links)
+        if (link.id == id) return &link;
+    return nullptr;
+}
+
+// Rewrite a row's text and handler, or add the handler when the build has none.
+void writeLink(const QString &qml, const Row &row, const Link &link, QList<Edit> &edits)
+{
+    const QString nl = lineEnding(qml);
+    const QString original = qml.mid(row.text.valueBegin, row.text.valueEnd - row.text.valueBegin);
+    addEdit(edits, row.text.valueBegin, row.text.valueEnd - row.text.valueBegin,
+            tagged(linkLiteral(link), original, kTextTag));
+    const QString call = QStringLiteral("Qt.openUrlExternally(\"")
+        + escapeQml(targetUrl(link.url)) + QStringLiteral("\")");
+    if (row.hasHandler) {
+        const QString handlerOriginal =
+            qml.mid(row.handler.valueBegin, row.handler.valueEnd - row.handler.valueBegin);
+        addEdit(edits, row.handler.valueBegin,
+                row.handler.valueEnd - row.handler.valueBegin,
+                tagged(call, handlerOriginal, kHandlerTag));
+        return;
+    }
+    // No handler in this build: add one above the text member, tagged so
+    // restoring removes exactly these lines.
+    const int lineStart = qml.lastIndexOf(QLatin1Char('\n'), row.text.nameBegin - 1) + 1;
+    QString indent;
+    int i = lineStart;
+    while (i < qml.size() && (qml.at(i) == QLatin1Char(' ') || qml.at(i) == QLatin1Char('\t')))
+        indent += qml.at(i++);
+    addEdit(edits, lineStart, 0,
+            indent + kHandlerMarker + nl + indent
+                + QStringLiteral("onLinkActivated: ") + call + nl);
 }
 
 bool planEnable(const QString &qml, const Config &config, QList<Edit> &edits, QString *error)
@@ -613,19 +1013,32 @@ bool planEnable(const QString &qml, const Config &config, QList<Edit> &edits, QS
     const QString masked = QmlText::mask(qml);
     const Anchors anchors = findAnchors(qml, masked, error);
     if (!anchors.ok) return false;
-    const QString nl = lineEnding(qml);
+
     const bool hasText = !config.text.isEmpty();
-    const bool hasLink = !config.linkUrl.isEmpty();
-    if (!hasText && !hasLink) {
-        if (error) *error = QStringLiteral("Enter the text to show on the About page first.");
+    bool visibleLinks = false;
+    for (const auto &link : config.links)
+        if (!link.hidden && !link.url.isEmpty()) visibleLinks = true;
+    if (!hasText && !visibleLinks && !config.showSections) {
+        if (error) *error = QStringLiteral("Nothing to apply: the text is empty, every link is "
+                                           "hidden and the sections stay as they are.");
         return false;
     }
 
     const bool sharedBlock = sameObject(anchors.aboutBlock, anchors.linksBlock);
 
-    // ---- the About text: replace the stock copyright/Terms line ----------
-    if (hasText) {
+    // ---- the two sections the MSI build hides ---------------------------
+    if (config.showSections) {
         forceShown(qml, anchors.aboutBlock, edits);
+        if (!sharedBlock) forceShown(qml, anchors.linksBlock, edits);
+    } else {
+        // Keep the build's own behaviour: undo a force this tool applied
+        // earlier, and leave the stock binding alone.
+        restoreShown(qml, anchors.aboutBlock, edits);
+        if (!sharedBlock) restoreShown(qml, anchors.linksBlock, edits);
+    }
+
+    // ---- the About text --------------------------------------------------
+    if (hasText) {
         const QString literal = QLatin1Char('"') + escapeQml(escapeHtml(config.text))
             + QLatin1Char('"');
         const QString original = qml.mid(anchors.aboutTextBinding.valueBegin,
@@ -634,78 +1047,43 @@ bool planEnable(const QString &qml, const Config &config, QList<Edit> &edits, QS
         addEdit(edits, anchors.aboutTextBinding.valueBegin,
                 anchors.aboutTextBinding.valueEnd - anchors.aboutTextBinding.valueBegin,
                 tagged(literal, original, kTextTag));
-    } else if (!sharedBlock || !hasLink) {
-        // Only a link was configured: keep the page tidy by hiding the empty
-        // About-text section instead of leaving a stock copyright line.
-        hideObject(qml, anchors.aboutBlock, edits);
-    }
-
-    // ---- the stock links: one user link replaces all of them -------------
-    if (hasLink) {
-        // `forceShown` is skipped for the block that already got it above:
-        // two edits on the same binding would overlap.
-        if (!sharedBlock || !hasText) forceShown(qml, anchors.linksBlock, edits);
-        for (const auto &id : { QStringLiteral("iSupportEmailText"), QStringLiteral("iSupportText"),
-                                QStringLiteral("iWebsiteText") }) {
-            QmlText::Object row;
-            if (!findObjectById(qml, masked, id, &row)) continue;
-            if (sameObject(row, anchors.linkText)) continue; // the row we repurpose
-            hideObject(qml, row, edits);
-        }
-        for (const auto &row : anchors.qqRows) hideObject(qml, row, edits);
-
-        const QString label = config.linkLabel.isEmpty() ? config.linkUrl : config.linkLabel;
-        const QString html = QStringLiteral("<a href=\"") + escapeHtml(config.linkUrl)
-            + QStringLiteral("\">") + escapeHtml(label) + QStringLiteral("</a>");
-        const QString literal = QLatin1Char('"') + escapeQml(html) + QLatin1Char('"');
-        const QString original = qml.mid(anchors.linkTextBinding.valueBegin,
-                                         anchors.linkTextBinding.valueEnd
-                                             - anchors.linkTextBinding.valueBegin);
-        addEdit(edits, anchors.linkTextBinding.valueBegin,
-                anchors.linkTextBinding.valueEnd - anchors.linkTextBinding.valueBegin,
-                tagged(literal, original, kTextTag));
-
-        const QString call = QStringLiteral("Qt.openUrlExternally(\"")
-            + escapeQml(config.linkUrl) + QStringLiteral("\")");
-        if (anchors.hasLinkHandler) {
-            const QString handlerOriginal =
-                qml.mid(anchors.linkHandler.valueBegin,
-                        anchors.linkHandler.valueEnd - anchors.linkHandler.valueBegin);
-            addEdit(edits, anchors.linkHandler.valueBegin,
-                    anchors.linkHandler.valueEnd - anchors.linkHandler.valueBegin,
-                    tagged(call, handlerOriginal, kHandlerTag));
-        } else {
-            // No handler in this build: add one above the text member, tagged
-            // so turning the option off removes exactly these two lines.
-            const int lineStart =
-                qml.lastIndexOf(QLatin1Char('\n'), anchors.linkTextBinding.nameBegin - 1) + 1;
-            QString indent;
-            int i = lineStart;
-            while (i < qml.size()
-                   && (qml.at(i) == QLatin1Char(' ') || qml.at(i) == QLatin1Char('\t')))
-                indent += qml.at(i++);
-            addEdit(edits, lineStart, 0,
-                    indent + kHandlerMarker + nl + indent
-                        + QStringLiteral("onLinkActivated: ") + call + nl);
-        }
-    } else if (!sameObject(anchors.linksBlock, anchors.aboutBlock)) {
-        // Text only: no custom link, and no stock links either.
-        hideObject(qml, anchors.linksBlock, edits);
     } else {
-        for (const auto &id : { QStringLiteral("iSupportEmailText"), QStringLiteral("iSupportText"),
-                                QStringLiteral("iWebsiteText") }) {
-            QmlText::Object row;
-            if (findObjectById(qml, masked, id, &row)) hideObject(qml, row, edits);
-        }
-        for (const auto &row : anchors.qqRows) hideObject(qml, row, edits);
+        hideObject(qml, anchors.aboutText, edits);
     }
+
+    // ---- the stock links: rename, re-point or hide each one --------------
+    for (const auto &row : anchors.links) {
+        const Link *link = findLink(config, row.id);
+        const bool hidden = !link || link->hidden || link->url.isEmpty();
+        if (hidden) {
+            hideObject(qml, row.object, edits);
+            continue;
+        }
+        showObject(qml, row.object, edits); // undo our own earlier hiding
+        writeLink(qml, row, *link, edits);
+    }
+    for (const auto &row : anchors.qqRows) hideObject(qml, row, edits);
 
     // ---- the update button and its "More info" links: never offered again -
     if (anchors.updateButton.open >= 0) hideObject(qml, anchors.updateButton, edits);
     for (const auto &row : anchors.updateInfoRows) hideObject(qml, row, edits);
 
-    addEdit(edits, qml.size(), 0, nl + configLine(config));
+    addEdit(edits, qml.size(), 0, lineEnding(qml) + configLine(config));
     return true;
+}
+
+// Remove the lines this tool inserted for rows that had no handler.
+void restoreAddedHandlers(const QString &qml, QList<Edit> &edits)
+{
+    for (int at = qml.indexOf(kHandlerMarker); at >= 0;
+         at = qml.indexOf(kHandlerMarker, at + kHandlerMarker.size())) {
+        const int start = qml.lastIndexOf(QLatin1Char('\n'), at - 1) + 1;
+        const int firstEnd = qml.indexOf(QLatin1Char('\n'), at);
+        int stop = firstEnd < 0 ? qml.size() : qml.indexOf(QLatin1Char('\n'), firstEnd + 1);
+        if (stop < 0) stop = qml.size();
+        else ++stop;
+        addEdit(edits, start, stop - start, QString());
+    }
 }
 
 bool planDisable(const QString &qml, QList<Edit> &edits, QString *error)
@@ -717,16 +1095,13 @@ bool planDisable(const QString &qml, QList<Edit> &edits, QString *error)
     restoreShown(qml, anchors.aboutBlock, edits);
     if (!sameObject(anchors.linksBlock, anchors.aboutBlock))
         restoreShown(qml, anchors.linksBlock, edits);
-    // Sections hidden when only one of text/link was configured.
+    // Rows/sections hidden when the text or every link was switched off.
+    showObject(qml, anchors.aboutText, edits);
     showObject(qml, anchors.aboutBlock, edits);
     if (!sameObject(anchors.linksBlock, anchors.aboutBlock))
         showObject(qml, anchors.linksBlock, edits);
 
-    for (const auto &id : { QStringLiteral("iSupportEmailText"), QStringLiteral("iSupportText"),
-                            QStringLiteral("iWebsiteText") }) {
-        QmlText::Object row;
-        if (findObjectById(qml, masked, id, &row)) showObject(qml, row, edits);
-    }
+    for (const auto &row : anchors.links) showObject(qml, row.object, edits);
     for (const auto &row : anchors.qqRows) showObject(qml, row, edits);
     if (anchors.updateButton.open >= 0) showObject(qml, anchors.updateButton, edits);
     for (const auto &row : anchors.updateInfoRows) showObject(qml, row, edits);
@@ -740,32 +1115,26 @@ bool planDisable(const QString &qml, QList<Edit> &edits, QString *error)
         if (taggedAfter(qml, text.valueBegin, kTextTag, &original, &tagEnd))
             addEdit(edits, text.valueBegin, tagEnd - text.valueBegin, original);
     }
-    // The custom link text and its handler.
-    QmlText::Binding link;
-    if (directBinding(masked, anchors.linkText.open, anchors.linkText.end,
-                      QStringLiteral("text"), &link)) {
-        QString original;
-        int tagEnd = -1;
-        if (taggedAfter(qml, link.valueBegin, kTextTag, &original, &tagEnd))
-            addEdit(edits, link.valueBegin, tagEnd - link.valueBegin, original);
+    // Every link row's text and handler.
+    for (const auto &row : anchors.links) {
+        QmlText::Binding link;
+        if (directBinding(masked, row.object.open, row.object.end,
+                          QStringLiteral("text"), &link)) {
+            QString original;
+            int tagEnd = -1;
+            if (taggedAfter(qml, link.valueBegin, kTextTag, &original, &tagEnd))
+                addEdit(edits, link.valueBegin, tagEnd - link.valueBegin, original);
+        }
+        QmlText::Binding handler;
+        if (directBinding(masked, row.object.open, row.object.end,
+                          QStringLiteral("onLinkActivated"), &handler)) {
+            QString original;
+            int tagEnd = -1;
+            if (taggedAfter(qml, handler.valueBegin, kHandlerTag, &original, &tagEnd))
+                addEdit(edits, handler.valueBegin, tagEnd - handler.valueBegin, original);
+        }
     }
-    QmlText::Binding handler;
-    if (directBinding(masked, anchors.linkText.open, anchors.linkText.end,
-                      QStringLiteral("onLinkActivated"), &handler)) {
-        QString original;
-        int tagEnd = -1;
-        if (taggedAfter(qml, handler.valueBegin, kHandlerTag, &original, &tagEnd))
-            addEdit(edits, handler.valueBegin, tagEnd - handler.valueBegin, original);
-    }
-    const int marker = qml.indexOf(kHandlerMarker);
-    if (marker >= 0) {
-        const int start = qml.lastIndexOf(QLatin1Char('\n'), marker - 1) + 1;
-        const int firstEnd = qml.indexOf(QLatin1Char('\n'), marker);
-        int stop = firstEnd < 0 ? qml.size() : qml.indexOf(QLatin1Char('\n'), firstEnd + 1);
-        if (stop < 0) stop = qml.size();
-        else ++stop;
-        addEdit(edits, start, stop - start, QString());
-    }
+    restoreAddedHandlers(qml, edits);
 
     const int at = qml.indexOf(kConfigBegin);
     if (at >= 0) {
@@ -808,12 +1177,25 @@ State analyze(const QByteArray &image)
         return state;
     }
     state.supported = true;
+    state.sectionsHidden = anchors.sectionsHidden;
     if (readConfig(doc.qml, &state.config)) {
         state.applied = true;
-        state.detail = QStringLiteral("Custom About text and link are applied; the update button is disabled.");
+        // A tag written by an older version holds one custom link only; the
+        // rows are then read back from the page itself.
+        if (state.config.links.isEmpty()) {
+            Config shown;
+            if (readShown(doc.qml, masked, anchors, &shown)) state.config.links = shown.links;
+        }
+        state.detail = QStringLiteral("Applied: the About text and the link rows below are the "
+                                      "patched ones, and the update button is disabled.");
     } else {
-        state.detail = QStringLiteral("Stock About page. Apply to replace the stock texts and links "
-                                      "and disable the update button.");
+        // Not patched: hand the fields what the page says now, so the text and
+        // each link can be edited in place instead of retyped.
+        Config shown;
+        if (readShown(doc.qml, masked, anchors, &shown)) state.config = shown;
+        state.detail = QStringLiteral("Stock About page. The fields show the text and links the "
+                                      "page has now; edit them, untick a row to hide it and "
+                                      "apply. The update button is disabled by the patch.");
     }
     return state;
 }
@@ -829,8 +1211,12 @@ Result apply(const QString &exePath, bool enabled, const Config &rawConfig)
     file.close();
 
     const Config config = normalized(rawConfig);
-    if (enabled && config.text.isEmpty() && config.linkUrl.isEmpty())
-        return refuse(QStringLiteral("Enter the text or the link to show on the About page first."));
+    bool anyLink = false;
+    for (const auto &link : config.links)
+        if (!link.hidden && !link.url.isEmpty()) anyLink = true;
+    if (enabled && config.text.isEmpty() && !anyLink && !config.showSections)
+        return refuse(QStringLiteral("Enter the About text, keep at least one link or switch the "
+                                     "sections on first."));
 
     QByteArray changed = original;
     Doc doc;
@@ -890,11 +1276,10 @@ Result apply(const QString &exePath, bool enabled, const Config &rawConfig)
     if (!PatchFile::writeVerified(exePath, original, changed, &error)) return refuse(error);
     const int caches = QtResources::clearPlayerQmlCache(exePath);
     QString msg = enabled
-        ? QStringLiteral("About page updated: the stock texts are replaced by yours, the stock links "
-                         "are replaced by your single link and the update button is disabled. "
-                         "Restart BlueStacks.")
-        : QStringLiteral("Stock About page restored (texts, links and update button). "
-                         "Restart BlueStacks.");
+        ? QStringLiteral("About page updated: the text and every link row are written as edited "
+                         "and the update button is disabled. Restart BlueStacks.")
+        : QStringLiteral("Stock About page restored (text, every link row, section visibility and "
+                         "the update button). Restart BlueStacks.");
     if (caches > 0)
         msg += QStringLiteral(" Cleared the player QML disk cache so BlueStacks reloads the source.");
     return { true, msg };

@@ -1424,14 +1424,12 @@ int runSelfTest()
     }
 
     // ------------------------------------------------------------------
-    // 9) Version spoof + string removals
+    // 9) Ad/UI string removals
     // ------------------------------------------------------------------
     {
-        std::printf("[extras] version spoof + ad/string removal\n");
+        std::printf("[extras] ad/UI string removal\n");
 
         QByteArray d(32, 'Z');
-        d += "5.21.151.6303";
-        d += QByteArray(32, 'Y');
         d += "5.21.151.6303";
         d += QByteArray(32, 'W');
         d += utf16le(QStringLiteral("SidebarMacro.svg"));
@@ -1444,17 +1442,6 @@ int runSelfTest()
             f.write(d);
         }
 
-        const auto vers = ExtrasPatcher::findVersions(d);
-        bool hasVersion = false;
-        for (const QVariantMap &m : vers)
-            hasVersion |= (m.value(QStringLiteral("version")).toString()
-                           == QLatin1String("5.21.151.6303"));
-        check(hasVersion, "version string found");
-
-        const auto rv = ExtrasPatcher::applyVersion(exePath, QStringLiteral("5.21.151.6303"),
-                                                    QStringLiteral("5.21.151.9999"));
-        check(rv.ok, "version spoofed");
-
         const auto rr = ExtrasPatcher::applyRemovals(exePath,
                                                      { QStringLiteral("Sidebar Macro") });
         check(rr.ok, "removals applied");
@@ -1463,10 +1450,18 @@ int runSelfTest()
         f.open(QIODevice::ReadOnly);
         const QByteArray patched = f.readAll();
         f.close();
-        check(patched.contains("5.21.151.9999"), "new version present");
-        check(!patched.contains("5.21.151.6303"), "old version gone");
         check(!patched.contains(utf16le(QStringLiteral("SidebarMacro.svg"))),
               "sidebar macro string nulled");
+
+        // The controls that keep the window usable are no longer offered as
+        // removals: Back, Home, Recent, the logo and fullscreen stay.
+        const QStringList names = ExtrasPatcher::removalNames();
+        check(!names.contains(QStringLiteral("Titlebar Back"))
+                  && !names.contains(QStringLiteral("Titlebar Home"))
+                  && !names.contains(QStringLiteral("Titlebar Recents"))
+                  && !names.contains(QStringLiteral("Titlebar Logo"))
+                  && !names.contains(QStringLiteral("Sidebar Fullscreen")),
+              "Back/Home/Recent, the logo and fullscreen are not removal rows");
     }
 
     // ------------------------------------------------------------------

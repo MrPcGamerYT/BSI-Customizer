@@ -81,46 +81,80 @@ Restart BlueStacks afterward. Actual windowed-popup behavior still needs
 testing on each supported player build; unrecognized QML is refused rather
 than guessed.
 
-## Player UI: one-click clean-up and the About page
+## UI tab: clean-up, layout, removals and the About page
 
-The **Player UI** page has two independent one-click tools for the selected
-`HD-Player.exe`. Both refuse to write while BlueStacks is running, keep the
-original `.bak`, verify the rewritten QML by reading it back, and clear the
-player's QML disk cache so the change is picked up on the next start.
+The **UI** tab (formerly *Extras*) holds everything that changes what the
+player window shows, plus a one-click clean-up and the About editor. Every
+option refuses to write while BlueStacks is running, keeps the original
+`.bak`, verifies the rewritten QML by reading it back, and clears the player's
+QML disk cache so the change is picked up on the next start.
 
-**Sidebar + extra button remover.** One apply hides the whole sidebar (every
-sidebar button, including the sidebar's own Back/Home/Recent copies) and the
-extra title-bar buttons: help, menu/settings, quests, rewards, raw-mode
-warning, now.gg account, nowbuX, pin-to-top, the top-bar icon list, macro,
-sync, screen recording and the sidebar toggle. It deliberately keeps the
-BlueStacks logo, the title/version, the title bar's **Back, Home and Recent**
-buttons and the minimize/restore/close controls, so the window stays usable.
-The sidebar instance is hidden, its width is collapsed to zero (so the game
-view keeps the full window width even after a fullscreen round-trip) and the
-button strip inside `PlrSidebar.qml` is hidden as well. Press **Restore stock
-UI** to write the original QML back byte-for-byte.
+**Clean player UI (one click).** One apply hides every extra button.
 
-**Settings → About page.** One apply keeps the page and its layout exactly as
-it is (logo, version banner, section headings) and only changes what it says:
-the copyright/Terms-of-use line becomes your About text, and the stock support
-e-mail, support site, website and QQ links are replaced by **one** link of any
-kind (a plain URL is used as its own label when you leave the label empty). The
-stock link handlers are never kept: the custom link calls
-`Qt.openUrlExternally` with exactly the URL you entered. The **Check for
-updates** button is disabled by hiding it together with its "More info" and
-incompatible-version rows, so nothing on the page points at BlueStacks updates
-any more. On the MSI build the stock page hides the links/About sections when
-`uiBackend.oem === "msi5"`; the tool flips those bindings to `visible: true` so
-the custom texts are actually shown. Press **Restore stock About** to restore
-the untouched page byte-for-byte.
+* **Title bar:** help, menu/settings, quests, rewards, raw-mode warning,
+  now.gg account, nowbuX, pin-to-top, the top-bar icon list, macro, sync,
+  screen recording and the sidebar toggle.
+* **Sidebar:** screenshot, screen record, media folder, rotate, location,
+  shake, lock cursor, macro, sync, eco mode, instance manager, side panel,
+  live stream, chat, settings and the strip's own Back / Home / Recent.
+
+What stays is what the window needs: the BlueStacks logo, the title/version,
+the title bar's **Back, Home and Recent** buttons, the minimize/restore/close
+controls — and in the sidebar **fullscreen, volume, game controls, install
+APK and trim memory**. **The sidebar itself is not removed**: it keeps those
+five buttons in place. The sidebar only leaves the side of the game view when
+**Sidebar buttons to the top bar** is applied, which moves it into the title
+bar; the two options compose. Press **Restore stock UI** to write the original
+QML back byte-for-byte (this also undoes a sidebar-hiding clean-up written by
+an older version of the tool). A player that still carries such an older
+clean-up — title-bar buttons hidden, sidebar buttons visible — is recognised:
+the button reads **Update clean-up** and writes the missing sidebar half (and
+brings the strip back) without restoring first.
+
+**Ads / UI Removal** nulls the selected ad/UI strings so those elements never
+render. Back, Home, Recent, the title-bar logo and fullscreen are not removal
+rows: the clean-up above is the only thing that hides navigation, and it keeps
+them.
+
+**Settings → About page.** The card reads the page itself, so every field
+starts with exactly what that build prints — nothing is retyped:
+
+* the **About text** — the copyright/Terms-of-use sentence, markup flattened to
+  the words the page shows;
+* one row per stock link (**Support email**, **Support**, **Website**), each
+  with the name it prints and the address it opens. The address is taken from
+  the row's own handler (`Qt.openUrlExternally(…)`) or, for rows that open a
+  mail client, from the address the row prints;
+* a **Show** tick per row, so a single stock link can be hidden while the
+  others stay.
+
+On the pages that gate both sections with `visible: uiBackend.oem !== "msi5"`
+(BlueStacks 5.22 and the current MSI build) the sections are drawn hidden, so
+the card opens with **Unhide links + About** — the first step on those builds.
+Pressing it makes the patch switch both sections on, which is what makes the
+edited text and the links visible at all; leaving it alone keeps the page
+exactly as the build draws it. The 5.10 / MSI 5.9 pages have no such binding,
+so the button only offers to restore the build's own behaviour.
+
+One apply keeps the page and its layout exactly as it is (logo, version banner,
+section headings) and only changes what it says: your text replaces the
+copyright line, and each link row is rewritten with the name and address you
+left in it, using `Qt.openUrlExternally` — a bare e-mail address becomes a
+`mailto:` link and a bare domain gets `https://`, so an edited row always
+opens something. Rows ticked off, plus the stock QQ row, are hidden. The
+**Check for updates** button is disabled by hiding it together with its
+"More info" and incompatible-version rows, so nothing on the page points at
+BlueStacks updates any more. Press **Restore stock About** to restore the
+untouched page byte-for-byte.
 
 Both tools work on the Qt 5 and Qt 6 players: BlueStacks 5.22 and the older
-5.10 build, plus the MSI App Player 5.9 and the current MSI build. The title-bar
+5.10 build, plus the MSI App Player 5.9 and the current MSI build. The
 clean-up understands both shapes the player uses to re-assert button
 visibility (`PlrTopbarElement.pVisible` and the MSI 5.9
-`iTopbarItems.append({ "id" : …, "visible" : … })` list), and the sidebar
-width is collapsed through `width` or `Layout.preferredWidth`, whichever the
-build uses.
+`iTopbarItems.append({ "id" : …, "visible" : … })` list) and both sidebar
+shapes (an explicit `pIsFeatureEnable` binding, or none — the tool adds one
+and removes it again on restore), and the About page is rewritten on both page
+generations (they differ only in the copyright year).
 
 ## Gradient themes
 
