@@ -1,6 +1,7 @@
 #include "core/Backend.h"
 #include "core/BootVideoPatcher.h"
 #include "core/BsDetector.h"
+#include "core/EmbeddedImages.h"
 #include "core/ExtrasPatcher.h"
 #include "core/AboutPatcher.h"
 #include "core/IntegrityPatcher.h"
@@ -331,7 +332,10 @@ struct ResourceFixture {
     Fixture f;
     QMap<QString, qint64> entries, nodes;
 };
-ResourceFixture resources(const QList<QPair<QString, QString>> &sources, bool dense = false, const QSet<QString> &rawNames = {})
+// Same fixture, but the payloads are bytes: pictures cannot survive a round
+// trip through QString the way QML text can.
+ResourceFixture resourcesBytes(const QList<QPair<QString, QByteArray>> &sources, bool dense = false,
+                               const QSet<QString> &rawNames = {})
 {
     ResourceFixture r;
     r.f.bytes = peFile();
@@ -342,7 +346,7 @@ ResourceFixture resources(const QList<QPair<QString, QString>> &sources, bool de
     putLe32(r.f.bytes, 0x98 + 60, 0x1000);
     qint64 cursor = r.f.payloads;
     for (const auto &source : sources) {
-        const auto bytes = record(source.second.toUtf8(), !rawNames.contains(source.first));
+        const auto bytes = record(source.second, !rawNames.contains(source.first));
         r.entries[source.first] = cursor;
         r.f.bytes.replace(cursor, bytes.size(), bytes);
         cursor += bytes.size();
@@ -365,6 +369,17 @@ ResourceFixture resources(const QList<QPair<QString, QString>> &sources, bool de
     }
     return r;
 }
+
+ResourceFixture resources(const QList<QPair<QString, QString>> &sources, bool dense = false,
+                          const QSet<QString> &rawNames = {})
+{
+    QList<QPair<QString, QByteArray>> payloads;
+    payloads.reserve(sources.size());
+    for (const auto &source : sources)
+        payloads << qMakePair(source.first, source.second.toUtf8());
+    return resourcesBytes(payloads, dense, rawNames);
+}
+
 void addRegistration(ResourceFixture &r, bool nonCanonical)
 {
     auto &b = r.f.bytes;
@@ -4009,6 +4024,80 @@ Window {
                   && AboutPatcher::apply(textPath, false, {}).ok
                   && resourceText(read(textPath), r, QStringLiteral("PlrAboutSetting.qml")) == about,
               "a text-only About patch applies and restores byte-for-byte");
+    }
+
+    std::printf("[images] embedded pictures are listed, previewed and replaced\n");
+    {
+        // 1x1 red and 2x2 red/green RGBA PNGs, byte-exact fixtures.
+        const QByteArray logo = QByteArray::fromHex(
+            "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d4944"
+            "415478da63f8cfc0f01f00050001ff56c72f0d0000000049454e44ae426082");
+        const QByteArray bigger = QByteArray::fromHex(
+            "89504e470d0a1a0a0000000d494844520000000200000002080600000072b60d24000000114944"
+            "415478da63f8cfc0f01f8441080c0145cc07f9b7c886d10000000049454e44ae426082");
+        auto r = resourcesBytes({ { QStringLiteral("images/logo.png"), logo },
+                                  { QStringLiteral("ui/notes.txt"), QByteArray("not a picture\n") } });
+        addRegistration(r, false);
+
+        const auto images = EmbeddedImages::list(r.f.bytes, false);
+        check(images.size() == 1 && images.first().path == QLatin1String("images/logo.png"),
+              QStringLiteral("only the picture is listed by default (%1 entries)").arg(images.size()));
+        const QString entry = images.isEmpty() ? QString() : images.first().path;
+        check(!images.isEmpty() && images.first().image
+                  && images.first().family == QLatin1String("png")
+                  && images.first().width == 1 && images.first().height == 1
+                  && images.first().size == logo.size(),
+              QStringLiteral("the PNG entry carries its size and 1x1 dimensions (%1)")
+                  .arg(entry));
+
+        const auto everything = EmbeddedImages::list(r.f.bytes, true);
+        check(everything.size() == 2
+                  && std::any_of(everything.cbegin(), everything.cend(),
+                                 [](const EmbeddedImages::Asset &asset) {
+                                     return asset.path == QLatin1String("ui/notes.txt")
+                                         && !asset.image;
+                                 }),
+              "the other embedded files are listed too, marked as not replaceable here");
+
+        check(EmbeddedImages::sniffFormat(logo) == QLatin1String("png")
+                  && EmbeddedImages::sniffFormat(QByteArray("GIF89a not really a gif")) == QLatin1String("gif")
+                  && EmbeddedImages::sniffFormat(QByteArray("plain text")).isEmpty(),
+              "a replacement's real format is read from its bytes, not its name");
+        const QString preview = EmbeddedImages::previewDataUrl(logo, QStringLiteral("png"), 64);
+        check(preview.startsWith(QLatin1String("data:image/png;base64,")) && preview.size() > 40,
+              "the list gets a renderable preview of the embedded picture");
+
+        const QString exePath = temp.filePath(QStringLiteral("images.exe"));
+        const QString newLogo = temp.filePath(QStringLiteral("new-logo.png"));
+        write(exePath, r.f.bytes);
+        write(newLogo, bigger);
+        const auto replaced = EmbeddedImages::replace(exePath, QStringLiteral("images/logo.png"), newLogo);
+        check(replaced.ok, QStringLiteral("the embedded PNG is replaced (%1)").arg(replaced.msg));
+        check(QFileInfo::exists(exePath + QStringLiteral(".bak")),
+              "the original EXE is backed up before the first image write");
+
+        const auto after = EmbeddedImages::list(read(exePath), false);
+        check(after.size() == 1 && after.first().width == 2 && after.first().height == 2
+                  && EmbeddedImages::readEntry(exePath, after.first().entryOff, after.first().flags)
+                         == bigger,
+              "the replacement reads back at its own size, byte for byte");
+
+        const QString wrong = temp.filePath(QStringLiteral("wrong.gif"));
+        write(wrong, QByteArray("GIF89a") + QByteArray(40, char(0)));
+        const auto refused = EmbeddedImages::replace(exePath, QStringLiteral("images/logo.png"), wrong);
+        check(!refused.ok && refused.msg.contains(QLatin1String("PNG")),
+              QStringLiteral("a different image format is refused instead of written (%1)").arg(refused.msg));
+        check(EmbeddedImages::replace(exePath, QStringLiteral("images/missing.png"), newLogo).ok == false,
+              "an entry that is not in the EXE is refused");
+
+        const QString back = temp.filePath(QStringLiteral("logo-back.png"));
+        write(back, logo);
+        const auto restored = EmbeddedImages::replace(exePath, QStringLiteral("images/logo.png"), back);
+        const auto finalList = EmbeddedImages::list(read(exePath), false);
+        check(restored.ok && finalList.size() == 1 && finalList.first().width == 1
+                  && EmbeddedImages::readEntry(exePath, finalList.first().entryOff, finalList.first().flags)
+                         == logo,
+              "the stock picture can be written back over the replacement");
     }
 
     return failures;

@@ -6,6 +6,7 @@
 #include <QVariantMap>
 #include <QUrl>
 
+#include "EmbeddedImages.h"
 #include "FpsPatcher.h"
 #include "GradientPatcher.h"
 #include "SvgEngine.h"
@@ -42,6 +43,7 @@ class Backend : public QObject
     Q_PROPERTY(QVariantList gradientTargets READ gradientTargets NOTIFY gradientTargetsChanged)
 
     Q_PROPERTY(QVariantList svgInfos READ svgInfos NOTIFY svgsChanged)
+    Q_PROPERTY(QVariantList imageInfos READ imageInfos NOTIFY imagesChanged)
     Q_PROPERTY(QVariantList installs READ installs NOTIFY installsChanged)
     Q_PROPERTY(QVariantList removalNames READ removalNames CONSTANT)
 
@@ -90,6 +92,7 @@ public:
     QVariantList gradientTargets() const;
 
     QVariantList svgInfos() const;
+    QVariantList imageInfos() const;
     QVariantList installs() const { return m_installs; }
     QVariantList removalNames() const;
 
@@ -146,6 +149,16 @@ public:
                                               const QString &onHex);
     Q_INVOKABLE QVariantMap recolorTogglesFromPreset(const QString &id);
 
+    // ---- embedded images (every picture in the Qt resource pools) ----
+    // scanImages lists the image entries; includeAll also lists the other
+    // embedded files (they are shown but cannot be previewed or replaced).
+    // imagePreviewAt returns a data: URL QML's Image can render.
+    Q_INVOKABLE int scanImages(bool includeAll);
+    Q_INVOKABLE QString imagePreviewAt(int index, int maxSide) const;
+    Q_INVOKABLE QVariantMap replaceImage(int index, const QString &newImagePath);
+    Q_INVOKABLE QVariantMap extractImage(int index, const QString &targetPath);
+    Q_INVOKABLE QVariantMap extractAllImages();
+
     // ---- fps ----
     Q_INVOKABLE QVariantMap fpsDetect();
     Q_INVOKABLE QVariantMap fpsAnalyze();
@@ -190,6 +203,7 @@ signals:
     void themeChanged();
     void gradientTargetsChanged();
     void svgsChanged();
+    void imagesChanged();
     void installsChanged();
     void log(const QString &message, const QString &color);
 
@@ -223,5 +237,7 @@ private:
     QList<HexColorItem> m_hexQmlColors;
 
     QList<SvgBlob> m_svgs;
+    QList<EmbeddedImages::Asset> m_images;
+    bool m_imagesShowAll = false; // the list on screen includes non-image files
     QVariantList m_installs;
 };
