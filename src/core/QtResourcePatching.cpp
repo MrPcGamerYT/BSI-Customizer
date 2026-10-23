@@ -207,11 +207,20 @@ qint64 findFreeSpace(const QByteArray &data, const Link &link, qint64 need, QStr
         while (pos >= 0 && pos + need <= end) {
             const qint64 at = qMax<qint64>(qint64(pos), (begin + 3) & ~qint64(3));
             if (at >= pos && at + need <= end && data.mid(at, int(need)) == wanted) {
-                bool free = true;
+                bool usable = true;
                 for (const auto &range : blocked) {
-                    if (at < range.second && at + need > range.first) { free = false; break; }
+                    if (at < range.second && at + need > range.first) { usable = false; break; }
                 }
-                if (free && PeUtils::rawToRva(sections, at) >= 0) return at;
+                if (usable) {
+                    const qint64 rva = PeUtils::rawToRva(sections, at);
+                    if (rva >= 0) {
+                        // The tree node stores an unsigned distance from the pool's
+                        // data base, so a gap in front of that base cannot be
+                        // addressed at all - relocation would go negative.
+                        const qint64 delta = rva - link.dataBaseRva;
+                        if (delta >= 0 && delta <= 0xffffffffLL) return at;
+                    }
+                }
             }
             pos = data.indexOf(probe, pos + 1);
         }
