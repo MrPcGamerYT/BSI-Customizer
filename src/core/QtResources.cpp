@@ -7,7 +7,10 @@
 #include <QDateTime>
 #include <QDir>
 #include <QFileInfo>
+#include <QHash>
 #include <QSet>
+
+#include <functional>
 
 using namespace ByteUtils;
 
@@ -330,24 +333,58 @@ QList<File> filesInPool(const QByteArray &data, const Link &pool)
     const auto *treeSection = PeUtils::sectionForRaw(sections, pool.treeOff);
     if (tree.isEmpty() || !treeSection || pool.treeOff + span > qint64(treeSection->rawPtr) + treeSection->rawSize)
         return {};
+
+    // rcc stores one node per path component: "images" is a directory node and
+    // "logo.png" is its child, so the node name alone is not the resource name.
+    // Walk the tree to rebuild the full path; `name` stays the leaf.
+    QHash<qint64, const Node *> byOffset;
+    byOffset.reserve(tree.size());
+    for (const auto &node : tree)
+        byOffset.insert(node.off, &node);
+
     QList<File> files;
     QSet<QString> seen;
-    for (const auto &node : tree) {
-        if (node.flags == 2) continue;
+    std::function<bool(qint64, const QString &)> walk = [&](qint64 off, const QString &prefix) -> bool {
+        const auto found = byOffset.constFind(off);
+        if (found == byOffset.cend())
+            return false;
+        const Node &node = *found.value();
+        if (node.flags == 2) {
+            QString childPrefix = prefix;
+            // The root's name word is unused and may hold anything (Qt leaves it
+            // zero, some builds write garbage), so it is never read.
+            if (off != pool.treeOff) {
+                const QString directory = readName(data, pool.nameBaseRaw + node.name);
+                if (directory.isEmpty())
+                    return false;
+                childPrefix += directory + QLatin1Char('/');
+            }
+            const quint32 count = be32(data, node.off + 6);
+            const quint32 first = be32(data, node.off + 10);
+            for (quint32 i = 0; i < count; ++i) {
+                if (!walk(pool.treeOff + qint64(first + i) * pool.nodeSize, childPrefix))
+                    return false;
+            }
+            return true;
+        }
         const QString name = readName(data, pool.nameBaseRaw + node.name);
         const qint64 rva = pool.dataBaseRva + node.value;
-        if (name.isEmpty() || rva < 0 || rva > 0xffffffffLL) return {};
+        if (name.isEmpty() || rva < 0 || rva > 0xffffffffLL) return false;
         const qint64 raw = PeUtils::rvaToRaw(sections, quint32(rva));
-        if (!inRange(data, raw, 4)) return {};
+        if (!inRange(data, raw, 4)) return false;
         const quint32 size = be32(data, raw);
         const auto *section = PeUtils::sectionForRaw(sections, raw);
         if (!section || !inRange(data, raw + 4, size)
-            || raw + 4 + qint64(size) > qint64(section->rawPtr) + section->rawSize) return {};
+            || raw + 4 + qint64(size) > qint64(section->rawPtr) + section->rawSize) return false;
         const QString key = name + QLatin1Char(':') + QString::number(raw);
-        if (seen.contains(key)) continue;
-        seen.insert(key);
-        files << File { name, raw, node.flags };
-    }
+        if (!seen.contains(key)) {
+            seen.insert(key);
+            files << File { name, raw, node.flags, prefix + name };
+        }
+        return true;
+    };
+    if (!walk(pool.treeOff, QString()))
+        return {};
     return files;
 }
 
