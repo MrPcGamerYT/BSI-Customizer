@@ -3885,6 +3885,8 @@ Window {
         check(stock.supported && !stock.applied, "the stock About page is recognized");
         check(stock.sectionsHidden && !stock.config.showSections,
               "the oem-gated sections are reported as hidden, so the Unhide button starts offered");
+        ciNotice(QStringLiteral("about-stock-text-hex=%1")
+                     .arg(QString::fromLatin1(stock.config.text.toUtf8().toHex())));
         check(stock.config.text
                   == QStringLiteral("Copyright 2026. By using it you agree to the Terms of use"),
               QStringLiteral("the About text editor is prefilled with the stock text (%1)")
@@ -4000,11 +4002,25 @@ Window {
         AboutPatcher::Config textOnly;
         textOnly.text = QStringLiteral("Just my text");
         textOnly.showSections = true;
-        check(AboutPatcher::apply(textPath, true, textOnly).ok
-                  && resourceText(read(textPath), r, QStringLiteral("PlrAboutSetting.qml"))
-                         .contains(QLatin1String("Just my text"))
-                  && AboutPatcher::apply(textPath, false, {}).ok
-                  && resourceText(read(textPath), r, QStringLiteral("PlrAboutSetting.qml")) == about,
+        const auto textApplied = AboutPatcher::apply(textPath, true, textOnly);
+        const QString textPatched = resourceText(read(textPath), r,
+                                                 QStringLiteral("PlrAboutSetting.qml"));
+        const auto textRestored = AboutPatcher::apply(textPath, false, {});
+        const QString textBack = resourceText(read(textPath), r,
+                                              QStringLiteral("PlrAboutSetting.qml"));
+        int textDiff = 0;
+        while (textDiff < textBack.size() && textDiff < about.size()
+               && textBack.at(textDiff) == about.at(textDiff))
+            ++textDiff;
+        ciNotice(QStringLiteral("about-text-only apply=%1 restore=%2 diff=%3/%4 at=%5")
+                     .arg(textApplied.ok ? QStringLiteral("ok") : textApplied.msg)
+                     .arg(textRestored.ok ? QStringLiteral("ok") : textRestored.msg)
+                     .arg(int(textDiff))
+                     .arg(int(qMin(textBack.size(), about.size())))
+                     .arg(QString::fromLatin1(
+                         textBack.mid(qMax(0, textDiff - 60), 140).toUtf8().toPercentEncoding())));
+        check(textApplied.ok && textPatched.contains(QLatin1String("Just my text"))
+                  && textRestored.ok && textBack == about,
               "a text-only About patch applies and restores byte-for-byte");
     }
 
