@@ -266,6 +266,11 @@ int runRpcIdCli(const QStringList &arguments)
 // without opening the UI. Exit codes: 0 up to date, 1 the check failed, 2 the
 // updater is not configured / the command line is wrong, 3 an update is
 // available, 4 an update was downloaded and verified (--download).
+//
+// --explain prints what the bot actually received, one line per message. It is
+// there for the one failure Discord reports silently: an app without the
+// Message Content intent gets every message with its text and attachments
+// stripped, which looks exactly like an empty channel from the outside.
 // ---------------------------------------------------------------------------
 
 namespace {
@@ -274,6 +279,7 @@ int runUpdateCommand(const QStringList &arguments)
 {
     bool json = false;
     bool wantDownload = false;
+    bool explain = false;
     int timeoutSeconds = 30;
     for (int i = 0; i < arguments.size(); ++i) {
         const QString argument = arguments.at(i);
@@ -281,6 +287,8 @@ int runUpdateCommand(const QStringList &arguments)
             json = true;
         } else if (argument == QLatin1String("--download")) {
             wantDownload = true;
+        } else if (argument == QLatin1String("--explain")) {
+            explain = true;
         } else if (argument == QLatin1String("--timeout") && i + 1 < arguments.size()) {
             timeoutSeconds = qMax(1, arguments.at(++i).toInt());
         } else if (argument.startsWith(QLatin1String("-"))) {
@@ -324,7 +332,8 @@ int runUpdateCommand(const QStringList &arguments)
         if (state == QLatin1String("error")) {
             result = QJsonObject{ { QStringLiteral("ok"), false },
                                   { QStringLiteral("state"), state },
-                                  { QStringLiteral("error"), checker.note() } };
+                                  { QStringLiteral("error"), checker.note() },
+                                  { QStringLiteral("report"), checker.channelReport() } };
             finish(1);
             return;
         }
@@ -407,6 +416,13 @@ int runUpdateCommand(const QStringList &arguments)
     if (json) {
         line(QString::fromUtf8(QJsonDocument(result).toJson(QJsonDocument::Compact)));
         return exitCode;
+    }
+    // --explain prints what the bot actually received from the channel. A
+    // failed check without it is one paragraph the user cannot act on.
+    if (explain) {
+        line(QStringLiteral("  What the bot sees:"));
+        for (const QString &reportLine : checker.channelReport().split(QLatin1Char('\n')))
+            line(QStringLiteral("  %1").arg(reportLine));
     }
     if (exitCode == 0) {
         line(QStringLiteral("  Result: you are on the newest build (%1).")

@@ -28,7 +28,10 @@ finds it by looking for a `manifest.json` attachment in the newest messages.
 1. **Application + bot**
    <https://discord.com/developers/applications> → *New Application* →
    *Bot* → *Reset Token* → copy the token. Switch **Public Bot** off.
-   *(No privileged intents needed.)*
+   *(No privileged intents needed **as long as the bot writes the release
+   message itself** — which `publish.mjs` does. A message typed by a human is
+   only readable with the Message Content intent on, or when it mentions the
+   bot; see `docs/UPDATER.md` §7.)*
 2. **Channel** — create `#bsi-releases`, copy its ID
    (*Settings → Advanced → Developer Mode* on, right-click → *Copy Channel ID*).
 3. **Invite the bot** to that channel with View Channel, Read Message History,

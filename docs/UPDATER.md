@@ -38,7 +38,7 @@ What the app looks for:
 
 Rules that keep it predictable:
 
-* the **highest version** in the last 50 messages wins, so re-posting a fixed
+* the **highest version** in the newest 100 messages wins, so re-posting a fixed
   link for the same version replaces the old one;
 * `http://` links, GIFs (tenor/giphy) and picture links are ignored;
 * if the channel also has a `manifest.json` attachment (the strict form below),
@@ -88,14 +88,21 @@ channel history, a bot token can.
 `UpdateChecker` (`src/core/UpdateChecker.{h,cpp}`) is created in `main()` next to
 `AuthManager`, exposed to QML as `updates`, and starts a check **4 s after the
 window opens** (switchable on the About page, stored in
-`QSettings updates/autoCheck`). It does nothing at all when no updater config is
+`QSettings updates/autoCheck`). It then looks again **every 10 minutes** while
+nothing is pending, so a build posted while the window is open is picked up
+without pressing *Check now*. It does nothing at all when no updater config is
 present.
 
-1. `GET {apiBase}/channels/{channelId}/messages?limit=50` with
+1. `GET {apiBase}/channels/{channelId}/messages?limit=100` with
    `Authorization: Bot <token>`.
 2. Takes the release out of that list: a message carrying a `manifest.json`
    attachment when there is one, otherwise the message that names the highest
-   version together with an https link (the easy way above).
+   version together with an https (or scheme-less) link (the easy way above).
+   A message's text is read from `content` **and** from its embeds (title,
+   description, fields), so a link preview or a webhook post works too. If the
+   list comes back with every message stripped of text and attachments, the
+   error says so and names the Message Content intent (§7) instead of pretending
+   the channel is empty.
 3. Validates it (schema/version, file name, and size + SHA-256 when the release
    provides them, plus the optional HMAC signature) and compares `version` with
    `BSI_VERSION` (the CMake project version).
@@ -133,6 +140,7 @@ installed version, or `mandatory: true`. `unskip()`/the About page clears it.
 BSI-Customizer.exe --check-updates            # 0 = up to date, 3 = update, 1 = error, 2 = not configured
 BSI-Customizer.exe --check-updates --json     # machine-readable
 BSI-Customizer.exe --check-updates --download # also fetch + verify it (4)
+BSI-Customizer.exe --check-updates --explain  # ...and what the bot received, message by message
 ```
 
 The probe reads the same config as the window, so it is the fastest way to check
@@ -507,7 +515,68 @@ Nothing about the swap changes, so all the safety rules above still apply.
 ## 7. Troubleshooting
 
 The app never says "update failed" without a reason; `--check-updates` prints the
-same text in a terminal.
+same text in a terminal, and `--explain` adds what the bot actually received.
+
+### "The channel is fine, but the updater finds nothing"
+
+This is almost always the **Message Content intent**. It is a *privileged* intent,
+and it is not about the Gateway: without it Discord empties the `content`,
+`embeds`, `attachments`, `components` and `poll` fields of every message object
+the app did **not** send itself - including in the plain REST response
+`GET /channels/{id}/messages` that the updater reads. Nothing errors: the bot
+sees the message ID, the author and the timestamp, and nothing else.
+
+Two ways to be sure:
+
+```
+BSI-Customizer.exe --check-updates --explain
+#   Bot sees 1 message(s) in the channel: 0 readable, 1 withheld, 0 attachment(s).
+#   Discord returns no text, no embeds and no attachments for any of them. That is
+#   the Message Content intent: ...
+```
+
+```
+node updater-bot/setup.mjs --auth-file auth.json
+#   PROBLEM  Discord returns no text and no attachments for any message in the channel ...
+```
+
+**The bot does not have to be online.** The updater never opens a gateway
+connection: it makes one `GET /channels/{id}/messages` and reads the JSON. A bot
+that shows as offline in the member list still reads that channel perfectly -
+"the bot is offline" is never the reason a release goes undetected.
+
+Three fixes, in order of preference:
+
+1. **Enable the intent** - Discord Developer Portal -> your application -> *Bot* ->
+   *Privileged Gateway Intents* -> **Message Content Intent** -> Save. An
+   unverified app does not need Discord's approval for this; the toggle is enough
+   and takes effect immediately (the app is not restarted, it is a per-app
+   setting). The app knows its own application ID from the token, so the error
+   prints the exact page:
+   `https://discord.com/developers/applications/<APP_ID>/bot`.
+2. **Mention the bot in the release message.** Messages that mention the app are
+   exempt from the restriction, so a message the *user* types still reaches the
+   app if it mentions the bot:
+
+   ```
+   @bsi-updater
+   BSI Customizer v2.0.2
+   https://u.pcloud.link/publink/show?code=XXXXXXXX
+   ```
+
+   Pick the bot's name from the member list so Discord inserts a real mention
+   (it may render as a highlighted `@name`). `publish.mjs` appends a plain-text
+   mention of the bot account for exactly this reason.
+3. **Let the bot post it.** `updater-bot/publish.mjs` writes the message as the
+   bot itself; an app always sees the text of its own messages. This is the
+   normal release path and needs no intent at all.
+
+A message the bot can read is parsed from its text **and** from its embeds
+(title, description, fields), so a link preview or a webhook post is understood
+too. The version may be written `v2.0.1`, `version 2.0.1`, `BSI Customizer 2.0.1`
+or as a bare `2.0.1` line; the download link is the best-scoring https URL in the
+message (an `.exe` link on its own line always wins).
+
 
 | message | cause |
 | --- | --- |
@@ -515,7 +584,8 @@ same text in a terminal.
 | `The updater bot cannot read the releases channel (403)` | channel overwrites: give the bot View Channel + Read Message History |
 | `The releases channel was not found (404)` | wrong channel ID, or the bot is not in that server |
 | `Discord is rate-limiting the updater (429)` | too many checks; wait a minute |
-| `No release in the last 50 messages of channel …` | nothing published yet, or the message has no `v2.0.x` and no https link — check the two lines |
+| `No release in the last 100 messages of channel …` | nothing published yet, or the message has no `v2.0.x` and no https link — check the two lines. The report below the message says which of the two it is |
+| `... 0 readable, N withheld` in that report | the Message Content intent — see "The channel is fine, but the updater finds nothing" above |
 | `the message does not name a version` | the message had a link but no `v2.0.x` |
 | `the message has no download link` | the version is there but no https URL |
 | `the download link must start with https://` | `http://` links are refused on purpose |

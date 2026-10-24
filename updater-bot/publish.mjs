@@ -228,11 +228,24 @@ async function saveState(state) {
     }
 }
 
-function messagePayload(manifest, notes) {
-    const lines = [`**BSI Customizer ${manifest.version}**`];
-    if (manifest.mandatory) lines.push('*This update is required.*');
-    if (notes) lines.push('', notes.slice(0, 1800));
+// The message says everything the shipped updater needs in its text alone:
+// `v<version>` on the first line, one link per line. Clients without the
+// Message Content intent read neither the text nor the manifest attachment, so
+// a message the bot writes is only guaranteed to be readable through the
+// mention exception - see buildPayload().
+function messagePayload(manifest, notes, botUserId) {
+    const lines = [`**BSI Customizer v${manifest.version}**`];
+    if (notes) lines.push('', notes.slice(0, 1600));
+    // The link on a line of its own: that is what the updater scores highest
+    // when it picks the download out of a message.
+    if (manifest.url) lines.push('', manifest.url);
+    if (manifest.mandatory) lines.push('', '*This update is required.*');
     if (!manifest.url) lines.push('', '`manifest.json` and the portable EXE are attached.');
+    // Discord only guarantees the text of a message to an app without the
+    // (privileged) Message Content intent when the app is mentioned in it. The
+    // mention is plain text, not `<@id>`: nothing is highlighted and nothing is
+    // notified, but the exception still applies.
+    if (botUserId) lines.push('', `(posted by <@${botUserId}> for its own updater)`);
     return {
         content: lines.join('\n').slice(0, 1900),
         allowed_mentions: { parse: [] },
@@ -537,7 +550,18 @@ async function main() {
         return;
     }
 
-    const payload = messagePayload(manifest, notes);
+    // With a bot token the message is written by the bot, so its own id can be
+    // quoted; without one the webhook's message is still the app's own post and
+    // needs no mention.
+    let botUserId = null;
+    if (!config.useWebhook) {
+        try {
+            botUserId = (await api('/users/@me', { token: config.botToken })).id;
+        } catch (error) {
+            info(`warning: could not read the bot account (${error.message}); publishing without the mention`);
+        }
+    }
+    const payload = messagePayload(manifest, notes, botUserId);
     const messageId = config.useWebhook
         ? await publishWithWebhook(config, args, manifest, args.url ? null : bytes, payload)
         : await publishWithBot(config, args, manifest, args.url ? null : bytes, payload);

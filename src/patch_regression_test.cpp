@@ -4797,6 +4797,141 @@ Window {
               QStringLiteral("the notes keep the prose and drop the bookkeeping (%1)")
                   .arg(release.value(QStringLiteral("notes")).toString()));
 
+        // The same announcement written as an embed (a webhook, a link preview,
+        // a message the bot itself posted): the text is empty, the embed holds
+        // the version and the link.
+        const QJsonObject embedded{
+            { QStringLiteral("id"), QStringLiteral("14") },
+            { QStringLiteral("content"), QString() },
+            { QStringLiteral("attachments"), QJsonArray{} },
+            { QStringLiteral("embeds"),
+              QJsonArray{ QJsonObject{
+                  { QStringLiteral("title"), QStringLiteral("BSI Customizer v2.0.6") },
+                  { QStringLiteral("description"),
+                    QStringLiteral("https://u.pcloud.link/publink/show?code=EMBED") },
+              } } },
+        };
+        check(UpdateChecker::parseMessageRelease(embedded, &release, &releaseError),
+              QStringLiteral("an announcement carried by an embed is read too (%1)")
+                  .arg(releaseError));
+        check(release.value(QStringLiteral("version")).toString() == QLatin1String("2.0.6")
+                  && release.value(QStringLiteral("url")).toString()
+                         == QLatin1String("https://u.pcloud.link/publink/show?code=EMBED"),
+              QStringLiteral("the embed's title and description are the release (%1 / %2)")
+                  .arg(release.value(QStringLiteral("version")).toString(),
+                       release.value(QStringLiteral("url")).toString()));
+
+        // A link copied out of a browser's address bar has no https:// in front
+        // of it. It is still the download link, not "a message without a link".
+        check(UpdateChecker::parseMessageRelease(
+                  msg(QStringLiteral("16"),
+                      QStringLiteral("BSI Customizer v2.0.8\n"
+                                     "u.pcloud.link/publink/show?code=NOSCHEME")),
+                  &release, &releaseError),
+              QStringLiteral("a link pasted without its scheme is still the release (%1)")
+                  .arg(releaseError));
+        check(release.value(QStringLiteral("url")).toString()
+                  == QLatin1String("https://u.pcloud.link/publink/show?code=NOSCHEME"),
+              QStringLiteral("the scheme is restored as https (%1)")
+                  .arg(release.value(QStringLiteral("url")).toString()));
+        // ...but a sentence must never turn into a release.
+        check(!UpdateChecker::parseMessageRelease(
+                  msg(QStringLiteral("17"),
+                      QStringLiteral("BSI Customizer v2.0.9\nLooks good, thanks! (see notes.txt)")),
+                  &release, &releaseError),
+              "a bare word with a slash is not a download link");
+
+        // Exactly what publish.mjs writes now: version, notes, the link on its
+        // own line, and the bot mention that makes the text readable without
+        // the Message Content intent. The mention is plumbing, not notes.
+        const QString published = QStringLiteral(
+            "**BSI Customizer v2.0.7**\n"
+            "\n"
+            "Fixed the About editor.\n"
+            "\n"
+            "https://u.pcloud.link/publink/show?code=PUB2\n"
+            "\n"
+            "(posted by <@1234567890> for its own updater)");
+        check(UpdateChecker::parseMessageRelease(msg(QStringLiteral("15"), published), &release,
+                                                 &releaseError),
+              QStringLiteral("the published message shape parses (%1)").arg(releaseError));
+        check(release.value(QStringLiteral("version")).toString() == QLatin1String("2.0.7")
+                  && release.value(QStringLiteral("url")).toString()
+                         == QLatin1String("https://u.pcloud.link/publink/show?code=PUB2"),
+              QStringLiteral("version and link come out of the published message (%1 / %2)")
+                  .arg(release.value(QStringLiteral("version")).toString(),
+                       release.value(QStringLiteral("url")).toString()));
+        check(release.value(QStringLiteral("notes")).toString()
+                  == QLatin1String("Fixed the About editor."),
+              QStringLiteral("the bot mention is dropped from the notes (%1)")
+                  .arg(release.value(QStringLiteral("notes")).toString()));
+
+        // The token carries the application ID, which is the only way to name
+        // the exact Developer Portal page of the Message Content toggle.
+        check(UpdateChecker::applicationIdFromToken(
+                  QStringLiteral("MTIzNDU2Nzg5MDEyMzQ1Njc4.GaBcDe.signature-part"))
+                  == QLatin1String("123456789012345678"),
+              QStringLiteral("the application ID is read out of the bot token (%1)")
+                  .arg(UpdateChecker::applicationIdFromToken(
+                      QStringLiteral("MTIzNDU2Nzg5MDEyMzQ1Njc4.GaBcDe.signature-part"))));
+        check(UpdateChecker::applicationIdFromToken(QStringLiteral("not-a-token")).isEmpty()
+                  && UpdateChecker::applicationIdFromToken(QString()).isEmpty(),
+              "a token that is not shaped like one yields no application ID");
+
+        // What Discord sends when the app has no Message Content intent: the
+        // message and its author, with the text and the attachments stripped.
+        // The check has to say that instead of reporting an empty channel.
+        const QJsonArray stripped{
+            QJsonObject{ { QStringLiteral("id"), QStringLiteral("21") },
+                         { QStringLiteral("content"), QString() },
+                         { QStringLiteral("attachments"), QJsonArray{} },
+                         { QStringLiteral("author"),
+                           QJsonObject{ { QStringLiteral("username"), QStringLiteral("MrPcGamer") } } } },
+            QJsonObject{ { QStringLiteral("id"), QStringLiteral("20") },
+                         { QStringLiteral("content"), QString() },
+                         { QStringLiteral("embeds"), QJsonArray{} },
+                         { QStringLiteral("attachments"), QJsonArray{} } },
+        };
+        const QString blind = UpdateChecker::explainChannel(stripped,
+                                                           QStringLiteral("manifest.json"), true);
+        check(blind.contains(QLatin1String("Message Content intent"))
+                  && blind.contains(QLatin1String("withheld")),
+              QStringLiteral("messages with their text withheld are named as the intent (%1)")
+                  .arg(blind.left(160)));
+        const QString blindLinked =
+            UpdateChecker::explainChannel(stripped, QStringLiteral("manifest.json"), true,
+                                          QStringLiteral("123456789012345678"));
+        check(blindLinked.contains(
+                  QLatin1String("https://discord.com/developers/applications/"
+                                "123456789012345678/bot")),
+              QStringLiteral("the fix links straight to the toggle (%1)")
+                  .arg(blindLinked.section(QLatin1Char('\n'), 3, 3)));
+        const QString empty = UpdateChecker::explainChannel(QJsonArray{},
+                                                           QStringLiteral("manifest.json"), true);
+        check(empty.contains(QLatin1String("channel is empty")),
+              QStringLiteral("an empty channel is reported as empty, not as an intent problem (%1)")
+                  .arg(empty.left(120)));
+        // One readable message proves the intent is on; the rest is a parsing
+        // question and the report has to say which message failed and why.
+        const QJsonArray mixed{
+            msg(QStringLiteral("31"), QStringLiteral("v2.0.1 without a link")),
+            msg(QStringLiteral("30"), QStringLiteral("hello")),
+        };
+        const QString report = UpdateChecker::explainChannel(mixed,
+                                                            QStringLiteral("manifest.json"), true);
+        check(!report.contains(QLatin1String("Message Content intent"))
+                  && report.contains(QLatin1String("#31"))
+                  && report.contains(QLatin1String("no download link")),
+              QStringLiteral("readable messages are explained one by one (%1)")
+                  .arg(report.left(200)));
+        // A signed channel refuses text releases; the report must say so
+        // instead of claiming the messages are unreadable.
+        const QJsonArray oneRelease{ msg(QStringLiteral("41"),
+                                        QStringLiteral("v2.0.2\nhttps://x.pcloud.link/a.exe")) };
+        check(UpdateChecker::explainChannel(oneRelease, QStringLiteral("manifest.json"), false)
+                  .contains(QLatin1String("only accepts manifest.json")),
+              "the signature-protected channel explains why a text message is ignored");
+
         // Things that are not announcements.
         const auto notRelease = [&msg](const QString &content, const QString &why) {
             QJsonObject out;

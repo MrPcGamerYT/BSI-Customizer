@@ -336,6 +336,25 @@ async function main() {
     } else {
         // Both announcement styles count: a manifest.json attachment, or a
         // plain message that names a version and an https link.
+        // Discord hides the text, embeds and attachments of messages the app did
+        // not write unless it holds the Message Content intent. Every message
+        // arriving stripped is that, not an empty channel - and it is exactly
+        // what makes the updater "see nothing" while the channel looks fine.
+        const blank = history.data.filter((message) =>
+            !(message.content ?? '').trim() && !(message.attachments ?? []).length);
+        report.messagesSeen = history.data.length;
+        report.messagesBlank = blank.length;
+        if (history.data.length > 0 && blank.length === history.data.length) {
+            fail('Discord returns no text and no attachments for any message in the channel.\n'
+                + '      That is the Message Content intent: without it the app is blind to every\n'
+                + '      message it did not post itself. The bot being offline is irrelevant -\n'
+                + '      the app reads the channel with one REST call, never a gateway connection.\n'
+                + '      Fix: open this page and enable "Message Content Intent":\n'
+                + `        https://discord.com/developers/applications/${me.data.id}/bot\n`
+                + '      No portal access? Mention the bot in the release message, or publish\n'
+                + '      with publish.mjs (the bot posts it, so it is readable).');
+        }
+
         const manifestMessage = history.data.find((message) =>
             (message.attachments ?? []).some((a) => a.filename === 'manifest.json'));
         const textRelease = history.data.find((message) =>
@@ -344,7 +363,13 @@ async function main() {
         report.manifestFound = Boolean(manifestMessage);
         report.releaseMessage = (manifestMessage ?? textRelease)?.id ?? null;
         if (!manifestMessage && !textRelease) {
-            warn('no release in the last 50 messages yet - post the version and the download link.');
+            if (blank.length > 0) {
+                warn(`${blank.length} of ${history.data.length} message(s) came back with their text `
+                    + 'and attachments stripped - the bot can only read its own posts. Enable the '
+                    + 'Message Content intent, or mention the bot in the release message.');
+            } else {
+                warn('no release in the last 50 messages yet - post the version and the download link.');
+            }
         } else if (!manifestMessage) {
             warn(`the newest release is a plain message (${textRelease.id}); it works, but it `
                 + 'carries no SHA-256 unless you add a "sha256: ..." line.');

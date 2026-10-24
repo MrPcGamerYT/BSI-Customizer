@@ -197,6 +197,8 @@ public:
     Q_INVOKABLE void showStagedFile();
     /** Path of the helper's log, so a failed swap can be explained. */
     Q_INVOKABLE QString helperLogPath() const;
+    /** What the last check received, one line per message (for --explain). */
+    QString channelReport() const;
 
     // ---- pure helpers (shared with the self-test, no network) -----------
     /** "v2.0.1" -> "2.0.1"; keeps pre-release text, trims everything else. */
@@ -215,12 +217,37 @@ public:
     static ReleasePick findRelease(const QJsonArray &messages, const QString &manifestName,
                                    bool allowTextReleases);
     /**
+     * Everything a message says: its text, then the title/description/fields
+     * of every embed on it. Discord hides `content` - and, with it, embeds and
+     * attachments - on messages a bot did not write unless the app holds the
+     * Message Content intent, but a message the bot *does* get in full can
+     * carry the announcement in either place (a hand-written message, a link
+     * preview, a webhook embed), so both are read the same way.
+     */
+    static QString messageText(const QJsonObject &message);
+    /**
      * Turn one ordinary message into a release object (version/file/url/notes,
      * plus size/sha256 when the message carries them). Returns false and sets
      * `error` when the message is not an announcement.
      */
     static bool parseMessageRelease(const QJsonObject &message, QJsonObject *manifest,
                                     QString *error);
+    /**
+     * Why a channel produced no release, in words the user can act on: the
+     * per-message summary (what the bot actually received) plus the fix for
+     * the one failure Discord causes silently - an app without the Message
+     * Content intent gets empty `content`, `embeds` and `attachments` on every
+     * message it did not send itself.
+     */
+    static QString explainChannel(const QJsonArray &messages, const QString &manifestName,
+                                  bool allowTextReleases, const QString &applicationId = QString());
+    /**
+     * The application ID of a bot token. A Discord token starts with the
+     * base64url form of the bot's user ID, which is the same number as the
+     * application ID - enough to link straight to the page that carries the
+     * Message Content toggle. Empty when the token is not shaped like one.
+     */
+    static QString applicationIdFromToken(const QString &botToken);
     /** Attachment URL for `fileName` inside a message found by the above. */
     static QString attachmentUrl(const QJsonObject &message, const QString &fileName);
     /** The exact byte string the publisher signs. */
@@ -299,4 +326,7 @@ private:
     bool m_autoCheck = true;
     QString m_skippedVersion;
     QString m_lastError;
+    QJsonArray m_lastMessages;   // exactly what the last check fetched
+    bool m_lastAllowText = true;
+    class QTimer *m_recheck = nullptr;  // periodic look at the channel
 };
