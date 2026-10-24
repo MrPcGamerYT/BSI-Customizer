@@ -249,6 +249,17 @@ unchanged.
    A **user** OAuth login (what the sign-in gate uses) can never read channel
    history — only a bot token can. Reusing the same application keeps it to one
    Discord app; a second app works just as well.
+
+   **"Private application cannot have a default authorization link"** — Discord
+   refuses to save *Public Bot = off* while the app still offers its default
+   install link. Fix it in the same application: **Installation** tab →
+   *Install Link* = **None** → Save, then **Bot** tab → *Public Bot* off → Save.
+   The hand-written invite URL below keeps working with Install Link = None.
+   If the sign-in gate stops working after that (it uses OAuth2, not the install
+   link), either set the install link back to *Discord Provided Link* and leave
+   *Public Bot* on — a public bot whose token only reads one channel of your
+   server is not a leak of anything — or keep the login app untouched and make a
+   **second application** for the updater.
 2. **Create a channel** in your server, e.g. `#bsi-releases`, and restrict it to
    the members who should see builds. Copy its ID (Discord → *Settings →
    Advanced → Developer Mode*, then right-click the channel → *Copy Channel ID*).
@@ -441,6 +452,7 @@ same text in a terminal.
 | pCloud `7005` / `7006` in the browser | that link hit its traffic/download limit — create a new link and republish |
 | `Windows does not let this app write to …` | install lives under `Program Files`; run the app as administrator |
 | nothing in the UI at all | `--check-updates` — if that is happy, the app is already current |
+| portal: `Private application cannot have a default authorization link` | *Installation* tab → **Install Link = None** → Save; then turn *Public Bot* off |
 
 The helper's log: `%TEMP%\BSI-Customizer-update\apply-update.log`.
 
