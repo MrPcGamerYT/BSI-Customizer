@@ -169,7 +169,8 @@ Item {
 
                     Text {
                         Layout.fillWidth: true
-                        visible: !updates.configured
+                        // Only when the status line above is not already this text.
+                        visible: !updates.configured && updates.note !== updates.setupHint
                         text: updates.setupHint
                         color: Theme.textDim
                         font.pixelSize: 11
@@ -191,6 +192,11 @@ Item {
                             accent: true
                             enabled: !updates.busy && !backend.busy
                             onClicked: updates.download()
+                        }
+                        ActionButton {
+                            visible: updates.skipped
+                            text: qsTr("Offer %1 again").arg(updates.latestVersion)
+                            onClicked: updates.unskip()
                         }
                         ActionButton {
                             visible: updates.readyToInstall
