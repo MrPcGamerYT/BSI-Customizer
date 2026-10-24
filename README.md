@@ -22,18 +22,27 @@ The whole `auth.json` can also be baked into the EXE at build time from the
 releases sign in with no sidecar config file.
 Setup: [docs/AUTH.md](docs/AUTH.md) and `auth.example.json`.
 
-## Single portable EXE
+## Download: installer (and the single EXE next to it)
 
-Release output is **`BSI-Customizer-<version>-win64.exe`**, not an installer.
-The app, Qt/QML plugins, SVG support, and VC runtime DLLs are included inside it.
-A native launcher unpacks into a private temporary directory, runs the app, and
-cleans up on normal exit. No runtime download or installation is performed.
-See [the full portable workflow/build guide](docs/PORTABLE.md) for Actions,
-local builds, clean-environment tests, temporary-file behavior, and license/DLL
-extraction. GitHub Releases provide the EXE directly; Actions wraps its single
-EXE artifact in a transport ZIP. Every push and pull request builds the Windows
-x64 EXE on a GitHub-hosted runner and runs the whole engine self-test there
-(`--selftest`), so a change is only mergeable when the real MSVC build is green.
+The release download is **`BSI-Customizer-<version>-setup.exe`** — a normal
+installer that puts the app in `C:\Program Files\BSI Customizer`, adds a Start
+menu shortcut and an uninstaller, and starts it when it is done.
+
+The same release also carries **`BSI-Customizer-<version>-win64.exe`**, which is
+the whole app in one file: Qt/QML plugins, SVG support and the VC runtime DLLs
+included. A native launcher unpacks into a private temporary directory, runs the
+app, and cleans up on normal exit. Nothing is installed and nothing is
+downloaded at runtime, so it runs from a USB stick — it just cannot update
+itself, because Windows will not let a running program overwrite its own file.
+
+That is the reason the installer is the default download: **the built-in updater
+runs the setup**, so an update replaces the installed files properly and starts
+the new build. See [the full portable workflow/build guide](docs/PORTABLE.md)
+for Actions, local builds, clean-environment tests, temporary-file behavior, and
+license/DLL extraction. Every push and pull request builds the Windows x64 EXE
+on a GitHub-hosted runner, compiles the installer and runs the whole engine
+self-test there (`--selftest`), so a change is only mergeable when the real MSVC
+build is green.
 
 ## Theme patching
 
