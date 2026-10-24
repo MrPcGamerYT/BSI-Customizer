@@ -122,9 +122,13 @@ starts with exactly what that build prints — nothing is retyped:
 * the **About text** — the copyright/Terms-of-use sentence, markup flattened to
   the words the page shows;
 * one row per stock link (**Support email**, **Support**, **Website**), each
-  with the name it prints and the address it opens. The address is taken from
-  the row's own handler (`Qt.openUrlExternally(…)`) or, for rows that open a
-  mail client, from the address the row prints;
+  with three separate fields: the **name** the row starts with, the **text the
+  row prints** for the link itself, and the **address it opens**. The address is
+  taken from the row's own handler (`Qt.openUrlExternally(…)`) or, for rows that
+  open a mail client, from the address the row prints. The printed text and the
+  address are independent — a row can open `https://example.com/join` and still
+  print `Join the channel`; leave the text empty and the row prints the address
+  the way the stock page does;
 * a **Show** tick per row, so a single stock link can be hidden while the
   others stay.
 
@@ -139,6 +143,15 @@ page left exactly as the build draws it, and the cards says which build drew
 them hidden. **Diagnose** prints what the editor found on the selected EXE —
 the page, its current text, every row and the reason if the card refuses — so
 nothing has to be guessed.
+
+Applying writes every copy of the page the file carries, then reads the page
+back **from the file on disk** — a write that does not read back is undone and
+reported instead of being called a success. The player's QML caches are cleared
+too, both next to `HD-Player.exe` and in the places Qt itself uses
+(`%LOCALAPPDATA%\…\qmlcache`, `<ProgramData>\BlueStacks_nxt\…`), because a
+compiled unit from an earlier launch otherwise keeps painting the old page.
+Closing the player window does not stop BlueStacks: quit it from the tray icon
+before the new page can be compiled.
 
 One apply keeps the page and its layout exactly as it is (logo, version banner,
 section headings) and only changes what it says: your text replaces the
@@ -174,6 +187,15 @@ Images tabs are gone: both live here, with the whole pool beside them.
 - **Pictures** get a thumbnail in the list and a large preview; **Extract…**
   saves the selected entry exactly as stored and **Extract All** writes the
   whole pool to `embedded_resources\` next to the EXE, keeping its folders.
+  What a row holds is decided from its **bytes**, not from its name: a build
+  that stores an icon under an unfamiliar or missing extension still gets its
+  picture. When QML will not take a `data:` URL the same bytes are handed to it
+  as a temp file with the right suffix (which is how the SVG plugin is loaded on
+  the older players), and an entry that genuinely is not a picture says so
+  under the preview instead of leaving an empty box.
+- The list belongs to one EXE: selecting another `HD-Player.exe` drops it and
+  the tab scans itself again, so a preview can never be read from the previous
+  file at the new file's coordinates.
 - **Code** — QML, JS, SVG, JSON, XML, CSS, HTML and text — opens in the editor
   as the source the player actually loads, and **Save code** writes it back.
   Editing QML also invalidates its compiled `.qmlc` companion and the player's

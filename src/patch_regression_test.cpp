@@ -30,6 +30,7 @@
 #include <QBuffer>
 #include <QDataStream>
 #include <QFile>
+#include <QUrl>
 #include <QFileInfo>
 #include <QImage>
 #include <QJsonDocument>
@@ -4021,6 +4022,33 @@ Window {
         check(patched.contains(QLatin1String("onLinkActivated: Qt.openUrlExternally(\"https://t.me/mrpcgamer\")"))
                   && patched.count(QLatin1String("// BSI CUSTOMIZER: about handler")) == 2,
               "rows without a stock handler get one, and it is tagged so the undo removes it");
+
+        // The address and the words that print it are two fields: a row can
+        // open https://t.me/mrpcgamer and still print "Join the channel".
+        AboutPatcher::Config named = config;
+        named.links[0].label = QStringLiteral("Join the channel");
+        check(AboutPatcher::apply(aboutPath, true, named).ok,
+              "a link's displayed text can be set separately from its address");
+        patched = resourceText(read(aboutPath), r, QStringLiteral("PlrAboutSetting.qml"));
+        check(patched.contains(QLatin1String("Telegram - <a href=\\\"https://t.me/mrpcgamer\\\">Join the channel</a>")),
+              "the row prints the edited text while the href stays the edited address");
+        auto namedState = AboutPatcher::analyze(read(aboutPath));
+        check(namedState.applied && namedState.config.links.size() == 3
+                  && namedState.config.links.value(0).label == QStringLiteral("Join the channel")
+                  && namedState.config.links.value(0).url == QStringLiteral("https://t.me/mrpcgamer"),
+              "the displayed text and the address both read back, independently");
+        // A row whose text is left empty keeps printing the address, the way
+        // the stock page does, and reading that back changes nothing.
+        AboutPatcher::Config plain = config;
+        plain.links[2].label = QString();
+        check(AboutPatcher::apply(aboutPath, true, plain).ok,
+              "a row without an edited text still applies");
+        patched = resourceText(read(aboutPath), r, QStringLiteral("PlrAboutSetting.qml"));
+        check(patched.contains(QLatin1String("Channel - <a href=\\\"https://youtube.com/@MrPcGamer\\\">youtube.com/@MrPcGamer</a>")),
+              "an empty display text falls back to printing the address");
+        const auto plainState = AboutPatcher::analyze(read(aboutPath));
+        check(plainState.config.links.value(2).label == QStringLiteral("youtube.com/@MrPcGamer"),
+              "that fallback is what the editor is then prefilled with");
         check(patched.contains(QLatin1String("Important links"))
                   && patched.contains(QLatin1String("About and other info"))
                   && patched.count(QLatin1String("visible: true /* BSI CUSTOMIZER: about shown:")) == 2,
@@ -4180,6 +4208,29 @@ Window {
         const QString preview = EmbeddedImages::previewDataUrl(logo, QStringLiteral("png"), 64);
         check(preview.startsWith(QLatin1String("data:image/png;base64,")) && preview.size() > 40,
               "the list gets a renderable preview of the embedded picture");
+
+        // The same picture through a real file, for the builds where QML will
+        // not take a data: URL. The suffix comes from the entry's own format.
+        const QString previewFile = EmbeddedImages::previewFileUrl(logo, QStringLiteral("png"));
+        check(previewFile.startsWith(QLatin1String("file://"))
+                  && previewFile.endsWith(QLatin1String(".png"))
+                  && QFileInfo(QUrl(previewFile).toLocalFile()).size() == logo.size(),
+              "a picture also previews through a temp file when a data URL is refused");
+
+        // Older players carry pictures under names that do not say what they
+        // hold: the bytes decide, not the extension.
+        const QByteArray svgIcon =
+            "<svg width=\"16\" height=\"16\" xmlns=\"http://www.w3.org/2000/svg\">"
+            "<rect width=\"16\" height=\"16\" fill=\"#123456\"/></svg>";
+        const QString svgPreview = EmbeddedImages::previewDataUrl(svgIcon, QStringLiteral("dat"), 64);
+        check(svgPreview.startsWith(QLatin1String("data:image/svg+xml;base64,")),
+              "markup stored under another name still previews as SVG");
+        const QString svgFile = EmbeddedImages::previewFileUrl(svgIcon, QStringLiteral("bin"));
+        check(svgFile.endsWith(QLatin1String(".svg")),
+              "the temp-file fallback names SVG by what the bytes are, not by the entry name");
+        check(EmbeddedImages::previewDataUrl(QByteArray("not a picture"), QStringLiteral("png"), 64).isEmpty()
+                  && EmbeddedImages::previewFileUrl(QByteArray(), QStringLiteral("png")).isEmpty(),
+              "an unreadable entry reports no preview instead of inventing one");
 
         const QString exePath = temp.filePath(QStringLiteral("images.exe"));
         const QString newLogo = temp.filePath(QStringLiteral("new-logo.png"));

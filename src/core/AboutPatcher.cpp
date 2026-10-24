@@ -47,6 +47,9 @@ struct Edit
     QString replacement;
 };
 
+// Defined below with the other "what the page prints" helpers.
+QString displayFor(const QString &url);
+
 void addEdit(QList<Edit> &edits, int begin, int length, const QString &replacement)
 {
     edits << Edit { begin, length, replacement };
@@ -65,7 +68,7 @@ struct Doc
     bool bom = false;
 };
 
-bool findDoc(const QByteArray &image, const QString &name, Doc *out, QString *error)
+bool findDocs(const QByteArray &image, const QString &name, QList<Doc> *out, QString *error)
 {
     auto files = QtResources::registeredFiles(image);
     const bool registered = std::any_of(files.cbegin(), files.cend(),
@@ -100,11 +103,32 @@ bool findDoc(const QByteArray &image, const QString &name, Doc *out, QString *er
                                      .arg(name);
             return false;
         }
-        *out = Doc { file, link, qml, bom };
-        return true;
+        if (out) *out << Doc { file, link, qml, bom };
     }
+    if (out && !out->isEmpty()) return true;
     if (error) *error = QStringLiteral("%1 is not embedded in this player.").arg(name);
     return false;
+}
+
+// The page the editors read. A player that embeds the page twice answers with
+// the copy that carries our config line when there is one, so the editors and
+// analyze() always describe the content that was applied.
+bool findDoc(const QByteArray &image, const QString &name, Doc *out, QString *error)
+{
+    QList<Doc> docs;
+    if (!findDocs(image, name, &docs, error)) return false;
+    if (docs.isEmpty()) {
+        if (error) *error = QStringLiteral("%1 is not embedded in this player.").arg(name);
+        return false;
+    }
+    for (const auto &doc : docs) {
+        if (doc.qml.contains(kConfigBegin)) {
+            *out = doc;
+            return true;
+        }
+    }
+    *out = docs.first();
+    return true;
 }
 
 bool applyEdits(QString &qml, QList<Edit> edits)
@@ -512,6 +536,7 @@ QString configLine(const Config &config)
         entry.insert(QStringLiteral("id"), link.id);
         entry.insert(QStringLiteral("name"), link.name);
         entry.insert(QStringLiteral("url"), link.url);
+        entry.insert(QStringLiteral("label"), link.label);
         entry.insert(QStringLiteral("hidden"), link.hidden);
         links.append(entry);
     }
@@ -546,6 +571,9 @@ bool readConfig(const QString &qml, Config *config, bool *hasLinksField)
         link.id = entry.value(QStringLiteral("id")).toString();
         link.name = entry.value(QStringLiteral("name")).toString();
         link.url = entry.value(QStringLiteral("url")).toString();
+        // Configs written before the display text existed have no label: the
+        // anchor printed the address, and that is what an empty label means.
+        link.label = entry.value(QStringLiteral("label")).toString();
         link.hidden = entry.value(QStringLiteral("hidden")).toBool();
         if (!link.id.isEmpty()) out.links << link;
     }
@@ -568,7 +596,8 @@ QString targetUrl(const QString &url)
 
 bool sameLink(const Link &a, const Link &b)
 {
-    return a.id == b.id && a.name == b.name && a.url == b.url && a.hidden == b.hidden;
+    return a.id == b.id && a.name == b.name && a.url == b.url && a.label == b.label
+        && a.hidden == b.hidden;
 }
 
 bool sameConfig(const Config &a, const Config &b)
@@ -589,6 +618,10 @@ Config normalized(Config config)
         // Store the form the page ends up with, so reading it back matches
         // what was applied.
         link.url = targetUrl(link.url);
+        link.label = link.label.trimmed();
+        // The anchor prints the edited text when there is one, otherwise the
+        // address itself: one value, so a read-back always matches.
+        if (link.label.isEmpty()) link.label = displayFor(link.url);
         // A row with nothing to point at and nothing to say is a hidden row.
         if (link.url.isEmpty() && link.name.isEmpty()) link.hidden = true;
         if (link.name.isEmpty()) link.name = link.url;
@@ -946,6 +979,7 @@ bool readShown(const QString &qml, const QString &masked, const Anchors &anchors
         const QString value = qml.mid(row.text.valueBegin, row.text.valueEnd - row.text.valueBegin);
         const QString rendered = renderedText(value);
         link.name = rowName(value);
+        link.label = lastAnchorLabel(rendered);
         const QString handler = row.hasHandler
             ? qml.mid(row.handler.valueBegin, row.handler.valueEnd - row.handler.valueBegin)
             : QString();
@@ -992,8 +1026,12 @@ QString linkLiteral(const Link &link)
 {
     QString html;
     if (!link.name.isEmpty()) html += escapeHtml(link.name) + QStringLiteral(" - ");
+    // The address and the words that print it are separate: `label` is what
+    // the user typed for the anchor, the URL stays the target.
+    const QString shown = link.label.trimmed().isEmpty() ? displayFor(link.url)
+                                                         : link.label.trimmed();
     html += QStringLiteral("<a href=\"") + escapeHtml(targetUrl(link.url))
-        + QStringLiteral("\">") + escapeHtml(displayFor(link.url)) + QStringLiteral("</a>");
+        + QStringLiteral("\">") + escapeHtml(shown) + QStringLiteral("</a>");
     return QLatin1Char('"') + escapeQml(html) + QLatin1Char('"');
 }
 
@@ -1215,6 +1253,10 @@ State analyze(const QByteArray &image)
             Config shown;
             if (readShown(doc.qml, masked, anchors, &shown)) state.config.links = shown.links;
         }
+        // A tag written before the display text existed has no label for a row:
+        // the anchor printed the address, which is exactly what an empty label
+        // means, so both forms read back the same.
+        state.config = normalized(state.config);
         state.detail = QStringLiteral("Applied: the About text and the link rows below are the "
                                       "patched ones, and the update button is disabled.");
     } else {
@@ -1228,6 +1270,78 @@ State analyze(const QByteArray &image)
     }
     return state;
 }
+
+namespace {
+
+// Rewrites every copy of the page the file carries, not just the first one: a
+// player that embeds the same QML twice (a second pool, an alias) would
+// otherwise keep loading the untouched copy and the patch would look like it
+// did nothing. Copies are re-located after each write, so a copy that had to be
+// moved into free space is followed instead of being patched at a stale offset.
+bool rewritePage(QByteArray &changed, bool enabled, const Config &config,
+                 int *patched, QString *error)
+{
+    *patched = 0;
+    for (int pass = 0; pass < 8; ++pass) {
+        QList<Doc> docs;
+        if (!findDocs(changed, QStringLiteral("PlrAboutSetting.qml"), &docs, error))
+            return false;
+        const Doc *next = nullptr;
+        for (const auto &doc : docs) {
+            // An applied copy carries our config line; a stock copy does not.
+            const bool applied = doc.qml.contains(kConfigBegin);
+            if (applied != enabled) {
+                next = &doc;
+                break;
+            }
+        }
+        if (!next) return true;
+        Doc doc = *next;
+        QList<Edit> edits;
+        if (enabled) {
+            if (doc.qml.contains(kConfigBegin)) {
+                // Re-applying with different content: back to the stock page
+                // first, then plan the new content against it.
+                if (!planDisable(doc.qml, edits, error) || !applyEdits(doc.qml, edits)) {
+                    if (error && error->isEmpty())
+                        *error = QStringLiteral("Cannot safely update the previous About page edit; "
+                                                "no file was written.");
+                    return false;
+                }
+                edits.clear();
+            }
+            if (!planEnable(doc.qml, config, edits, error)) {
+                if (error && error->isEmpty())
+                    *error = QStringLiteral("The About page is not a supported shape; no file was written.");
+                return false;
+            }
+            if (!applyEdits(doc.qml, edits)) {
+                if (error)
+                    *error = QStringLiteral("About page edits overlap in this player; "
+                                            "no file was written.");
+                return false;
+            }
+        } else {
+            if (!planDisable(doc.qml, edits, error) || !applyEdits(doc.qml, edits)) {
+                if (error && error->isEmpty())
+                    *error = QStringLiteral("Cannot safely restore the stock About page; "
+                                            "no file was written.");
+                return false;
+            }
+        }
+        const QByteArray header = doc.bom ? QByteArray::fromHex("efbbbf") : QByteArray();
+        if (!QtResources::replaceResource(changed, doc.file.entryOff, doc.link,
+                                          header + doc.qml.toUtf8(), error))
+            return false;
+        ++*patched;
+    }
+    if (error)
+        *error = QStringLiteral("This player carries more copies of the About page than can be "
+                                "rewritten safely; no file was written.");
+    return false;
+}
+
+} // namespace
 
 Result apply(const QString &exePath, bool enabled, const Config &rawConfig)
 {
@@ -1247,48 +1361,19 @@ Result apply(const QString &exePath, bool enabled, const Config &rawConfig)
         return refuse(QStringLiteral("Enter the About text, keep at least one link or switch the "
                                      "sections on first."));
 
-    QByteArray changed = original;
-    Doc doc;
-    QString error;
-    if (!findDoc(changed, QStringLiteral("PlrAboutSetting.qml"), &doc, &error))
-        return refuse(error);
-
     const State before = analyze(original);
     if (!before.supported) return refuse(before.detail);
+    if (enabled && before.applied && sameConfig(before.config, config))
+        return { true, QStringLiteral("This About page content is already applied.") };
+    if (!enabled && !before.applied)
+        return { true, QStringLiteral("The stock About page is already in place.") };
 
-    if (enabled) {
-        if (before.applied && sameConfig(before.config, config))
-            return { true, QStringLiteral("This About page content is already applied.") };
-        QList<Edit> edits;
-        if (before.applied) {
-            // Re-enable with different content: build the stock document
-            // first, then plan the new content against it.
-            if (!planDisable(doc.qml, edits, &error) || !applyEdits(doc.qml, edits))
-                return refuse(QStringLiteral("Cannot safely update the previous About page edit; "
-                                             "no file was written."));
-            edits.clear();
-        }
-        if (!planEnable(doc.qml, config, edits, &error))
-            return refuse(error.isEmpty() ? QStringLiteral("The About page is not a supported shape; "
-                                                           "no file was written.") : error);
-        if (!applyEdits(doc.qml, edits))
-            return refuse(QStringLiteral("About page edits overlap in this player; no file was written."));
-        const QByteArray header = doc.bom ? QByteArray::fromHex("efbbbf") : QByteArray();
-        if (!QtResources::replaceResource(changed, doc.file.entryOff, doc.link,
-                                          header + doc.qml.toUtf8(), &error))
-            return refuse(error);
-    } else {
-        if (!before.applied)
-            return { true, QStringLiteral("The stock About page is already in place.") };
-        QList<Edit> edits;
-        if (!planDisable(doc.qml, edits, &error) || !applyEdits(doc.qml, edits))
-            return refuse(error.isEmpty() ? QStringLiteral("Cannot safely restore the stock About page; "
-                                                           "no file was written.") : error);
-        const QByteArray header = doc.bom ? QByteArray::fromHex("efbbbf") : QByteArray();
-        if (!QtResources::replaceResource(changed, doc.file.entryOff, doc.link,
-                                          header + doc.qml.toUtf8(), &error))
-            return refuse(error);
-    }
+    QByteArray changed = original;
+    QString error;
+    int patched = 0;
+    if (!rewritePage(changed, enabled, config, &patched, &error))
+        return refuse(error.isEmpty() ? QStringLiteral("The About page could not be rewritten; "
+                                                       "no file was written.") : error);
 
     const State after = analyze(changed);
     if (!after.supported)
@@ -1303,17 +1388,43 @@ Result apply(const QString &exePath, bool enabled, const Config &rawConfig)
     if (!ThemeEngine::backup(exePath))
         return refuse(QStringLiteral("Could not preserve the original backup; no EXE was written."));
     if (!PatchFile::writeVerified(exePath, original, changed, &error)) return refuse(error);
+
+    // What the player will read: the file on disk, not the buffer that was
+    // planned. This is the check that catches a write which "succeeded" but
+    // left the page it loads untouched.
+    QFile written(exePath);
+    if (!written.open(QIODevice::ReadOnly))
+        return refuse(QStringLiteral("The EXE was written but cannot be read back; restore the .bak."));
+    const QByteArray onDisk = written.readAll();
+    written.close();
+    const State disk = analyze(onDisk);
+    if (!disk.supported || disk.applied != enabled
+        || (enabled && !sameConfig(disk.config, config))) {
+        // Put the original back: a page that does not read back from disk is a
+        // patch the player would not show either.
+        PatchFile::writeVerified(exePath, onDisk, original, &error);
+        return refuse(QStringLiteral("The About page does not read back from the file on disk; "
+                                     "the original EXE was restored."));
+    }
+
     const int caches = QtResources::clearPlayerQmlCache(exePath);
+    const QString pageCount = patched > 1
+        ? QStringLiteral(" (%1 copies of the page)").arg(patched) : QString();
     QString msg = enabled
-        ? QStringLiteral("About page updated: the text and every link row are written as edited "
-                         "and the update button is disabled. Restart BlueStacks.")
-        : QStringLiteral("Stock About page restored (text, every link row, section visibility and "
-                         "the update button). Restart BlueStacks.");
+        ? QStringLiteral("About page updated%1: the text and every link row are written as edited "
+                         "and the update button is disabled. Verified in the file on disk. ")
+              .arg(pageCount)
+        : QStringLiteral("Stock About page restored%1 (text, every link row, section visibility and "
+                         "the update button). Verified in the file on disk. ").arg(pageCount);
+    // Closing the player window does not stop BlueStacks - the page is compiled
+    // when the Settings window is built, so an instance that is still running
+    // keeps showing the old one no matter what the file says.
+    msg += QStringLiteral("Quit BlueStacks completely (tray icon → Quit BlueStacks), then start it "
+                          "again: closing the window leaves the player running with the old page.");
     if (caches > 0)
-        msg += QStringLiteral(" Cleared the player QML disk cache so BlueStacks reloads the source.");
+        msg += QStringLiteral(" Cleared the player QML cache so the edited page is compiled again.");
     return { true, msg };
 }
-
 
 // ---------------------------------------------------------------- diagnostics
 
@@ -1510,8 +1621,9 @@ QString probeReport(const QString &exePath)
     if (readShown(doc.qml, masked, anchors, &config)) {
         add(QStringLiteral("readShown text: \"%1\"").arg(oneLine(config.text, 240)));
         for (const auto &link : config.links) {
-            add(QStringLiteral("readShown link %1: name=\"%2\" url=\"%3\" hidden=%4")
-                    .arg(link.id, oneLine(link.name, 60), oneLine(link.url, 80))
+            add(QStringLiteral("readShown link %1: name=\"%2\" prints=\"%3\" url=\"%4\" hidden=%5")
+                    .arg(link.id, oneLine(link.name, 60), oneLine(link.label, 60),
+                         oneLine(link.url, 80))
                     .arg(link.hidden ? QStringLiteral("yes") : QStringLiteral("no")));
         }
     } else {

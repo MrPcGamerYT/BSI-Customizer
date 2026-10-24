@@ -254,6 +254,11 @@ QString previewDataUrl(const QByteArray &bytes, const QString &format, int maxSi
     return EmbeddedImages::previewDataUrl(bytes, format, maxSide);
 }
 
+QString previewFileUrl(const QByteArray &bytes, const QString &format)
+{
+    return EmbeddedImages::previewFileUrl(bytes, format);
+}
+
 Budget budget(const QByteArray &image, qint64 entryOff, const QString &leaf)
 {
     Budget out;
