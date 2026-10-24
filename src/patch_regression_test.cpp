@@ -4916,8 +4916,11 @@ Window {
                              "address %2)")
                   .arg(limited.config.links.at(1).nameMax)
                   .arg(limited.config.links.at(1).urlMax));
+        // Row 0 is the one that is shown: a hidden row's name travels in its
+        // anchor's href, which has room to spare, so the tight record is the
+        // name of a row the page actually prints.
         AboutPatcher::Config wide = limited.config;
-        wide.links[1].name = QString(limited.config.links.at(1).nameMax + 1, QLatin1Char('n'));
+        wide.links[0].name = QString(limited.config.links.at(0).nameMax + 1, QLatin1Char('n'));
         const QByteArray beforeWide = read(path);
         const auto refuseName = AboutPatcher::apply(path, true, wide);
         check(!refuseName.ok && refuseName.msg.contains(QLatin1String("holds")),
