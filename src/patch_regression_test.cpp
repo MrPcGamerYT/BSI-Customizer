@@ -4935,8 +4935,8 @@ Window {
         AboutPatcher::Config stockConfig;
         const auto restored = AboutPatcher::apply(path, false, stockConfig);
         check(restored.ok, QStringLiteral("the stock page comes back (%1)").arg(restored.msg));
-        const QByteArray back = read(path);
-        check(back.mid(tableAt, table.size()) == table,
+        const QByteArray restoredBytes = read(path);
+        check(restoredBytes.mid(tableAt, table.size()) == table,
               "every compiled string is put back byte for byte from the backup");
     }
 
