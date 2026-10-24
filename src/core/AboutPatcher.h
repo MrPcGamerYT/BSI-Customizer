@@ -37,6 +37,18 @@ struct Config
     bool showSections = true;  // force the MSI-hidden sections visible
 };
 
+// One literal of the About page as the player *loads* it. BlueStacks ships
+// PlrAboutSetting.qml as text and a compiled copy of the same page, and the
+// window reads the compiled one: every word on the page is a UTF-16LE record
+// of that unit's string table. Editing the .qml alone therefore reaches a copy
+// nothing displays, which is why the About card looked like it did nothing.
+struct TableString
+{
+    int index = 0;      // position in the page's string table, in file order
+    QString text;       // what the page prints now
+    int maxChars = 0;   // characters that still fit, padding included
+};
+
 struct State
 {
     bool supported = false; // the player's About QML has the expected shape
@@ -51,6 +63,15 @@ struct State
     // True when the page was found by the byte scan (no resource tree behind
     // it): it can be read and analyzed, but not rewritten.
     bool scanned = false;
+    // The words the compiled copy of the page prints, in file order. Empty on a
+    // build whose About page is plain QML only. Every one of them is rewritten
+    // in place - never moved, never grown - when the config is applied.
+    QList<TableString> table;
+    bool compiledPage = false;
+    // True when the .qml copy is a shape the editor can rewrite. A build whose
+    // page is only recognizable as compiled code reports supported and can have
+    // its strings rewritten, but there is no .qml to edit.
+    bool qmlEditable = false;
 };
 
 struct Result

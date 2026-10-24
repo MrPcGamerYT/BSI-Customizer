@@ -200,6 +200,17 @@ bool titlebarHiddenSite(const QString &qml, const QmlText::Object &object, int *
 }
 
 // Hide the object whose `id:` is one of `ids`. Returns how many were hidden.
+//
+// Every edit below is measured so that it cannot grow the document. A player
+// record has a fixed size, and growing it means finding free space in a 24 MB
+// EXE that has none - which is the "needs N bytes but its record only holds M"
+// error these two rows used to end in on a real build. The stock elements have
+// no `visible:` member, so the label is emptied instead:
+//
+//     text: plrBackend.version   ->   text: ""
+//
+// The element stays, every binding the layout reads stays, and nothing is
+// added to the file.
 int hideTitlebarElements(QString &qml, const QStringList &ids)
 {
     const QString masked = QmlText::mask(qml);
@@ -214,16 +225,49 @@ int hideTitlebarElements(QString &qml, const QStringList &ids)
             if (qml.mid(idBinding.valueBegin, idBinding.valueEnd - idBinding.valueBegin) != id)
                 continue;
             // The tag is only ever written by us, so finding it inside the
-            // element (on the `visible:` line or the member added below) means
-            // an earlier removal already hid this label - leave it alone.
+            // element means an earlier removal already hid this label.
             if (qml.mid(object.open, object.end - object.open).contains(kTitlebarHideTag))
                 break;
+            // 1) A member the player already reads is switched off in place.
+            //    `false` fits wherever the expression was at least five
+            //    characters long; anything shorter takes `!1`, also false.
             QmlText::Binding visible;
             if (QmlText::binding(masked, object.open, object.end, QStringLiteral("visible"), &visible)) {
                 const QString value = qml.mid(visible.valueBegin, visible.valueEnd - visible.valueBegin);
-                edits << TitlebarEdit { visible.valueBegin, visible.valueEnd - visible.valueBegin,
-                                        kTitlebarHidePrefix + value + QLatin1Char(')') };
-            } else {
+                const QString replacement = value.size() >= 5 ? QStringLiteral("false")
+                                           : value.size() >= 2 ? QStringLiteral("!1")
+                                                               : QStringLiteral("0");
+                edits << TitlebarEdit { visible.valueBegin, value.size(), replacement };
+                ++hidden;
+                break;
+            }
+            // 2) The label prints nothing: its text binding is emptied. No
+            //    byte is added, so the record never has to move.
+            QmlText::Binding text;
+            if (QmlText::binding(masked, object.open, object.end, QStringLiteral("text"), &text)) {
+                const QString value = qml.mid(text.valueBegin, text.valueEnd - text.valueBegin);
+                // Already empty (the quotes may or may not be part of the
+                // value): nothing to do, and nothing to grow.
+                if (value.trimmed().isEmpty() || value == QLatin1String("\"\"")) break;
+                // A one-character expression cannot be replaced by an empty
+                // string without adding a byte, so it is left to the fallback.
+                if (value.size() < 2) break;
+                edits << TitlebarEdit { text.valueBegin, value.size(), QStringLiteral("\"\"") };
+                // An empty label still reserves its left margin; zero it in
+                // the same pass so the row really closes up.
+                QmlText::Binding margin;
+                if (QmlText::binding(masked, object.open, object.end,
+                                     QStringLiteral("Layout.leftMargin"), &margin)) {
+                    const QString spacing =
+                        qml.mid(margin.valueBegin, margin.valueEnd - margin.valueBegin);
+                    if (spacing.trimmed() != QLatin1String("0") && spacing.size() >= 1)
+                        edits << TitlebarEdit { margin.valueBegin, spacing.size(),
+                                                QStringLiteral("0") };
+                }
+                ++hidden;
+                break;
+            }
+            {
                 int at = 0;
                 QString text;
                 if (!titlebarHiddenSite(qml, object, &at, &text)) break;

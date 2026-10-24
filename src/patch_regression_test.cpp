@@ -1792,10 +1792,8 @@ int runPatchRegressionTests()
         QSet<QString> raw;
         raw.insert(QStringLiteral("i18n.de-DE.qm"));
         // The QML comes first and the table is packed straight behind it, so the
-        // record has no slack - on a real player every slot is exactly full too.
-        // Hiding a label therefore always relocates the record, which is the
-        // path that has to update the tree node: a node left behind keeps the
-        // player's copy of the old QML and the label never goes away.
+        // record has no slack - on a real player every slot is exactly full too,
+        // and that is why a growing edit used to end in "needs more bytes".
         auto r = resourcesBytes({ qMakePair(QStringLiteral("PlrTopbar.qml"), topbar.toUtf8()),
                                   qMakePair(QStringLiteral("i18n.de-DE.qm"), german) },
                                 false, raw);
@@ -1815,30 +1813,32 @@ int runPatchRegressionTests()
         check(after.contains(german),
               "the UTF-16 string 'version' in the translator table is untouched");
         const QByteArray qmlAfter = resourceText(after, r, QStringLiteral("PlrTopbar.qml")).toUtf8();
+        // The record is exactly full, like every slot in a real player, and the
+        // hide still has to work: the edit empties the text binding instead of
+        // adding a member, so nothing grows and no free space is needed. This is
+        // the fix for "it says it wants more bytes to hide".
         check(be32(after, r.nodes.value(QStringLiteral("PlrTopbar.qml")) + 10)
-                  != quint32(r.entries.value(QStringLiteral("PlrTopbar.qml")) - r.f.payloads),
-              "the grown record was moved, and the tree node follows it");
-        check(qmlAfter.contains("visible: false // BSI CUSTOMIZER: titlebar hide"),
-              "the version Text element gains a visible: false member");
+                  == quint32(r.entries.value(QStringLiteral("PlrTopbar.qml")) - r.f.payloads),
+              "hiding a label keeps its record where it was - no growth, no relocation");
+        check(qmlAfter.size() <= topbar.toUtf8().size(),
+              "and the document is not one byte larger than the stock one");
         const QString text = QString::fromUtf8(qmlAfter);
-        check(text.contains(QStringLiteral("text: plrBackend.version")),
-              "its text binding is left alone, so the player still builds the label it hides");
-        check(text.count(QStringLiteral("BSI CUSTOMIZER: titlebar hide")) == 1
-                  && text.contains(QStringLiteral("text: \"N32\""))
-                  && text.contains(QStringLiteral("visible: uiBackend.oem === \"msi5\"")),
-              "the engine label is a separate removal and stays visible with its own expression");
+        check(text.contains(QStringLiteral("text: \"\""))
+                  && !text.contains(QStringLiteral("text: plrBackend.version")),
+              "the version Text prints nothing; the binding, not the element, was emptied");
+        check(text.contains(QStringLiteral("text: \"N32\"")),
+              "the engine label is a separate removal and is still there");
 
         const auto engine = ExtrasPatcher::applyRemovals(
             path, { QStringLiteral("Titlebar Instance Label") });
         check(engine.ok && engine.msg.contains(QLatin1String("Hid 1 title-bar label")),
               QStringLiteral("the engine label is hidden by its own row (%1)").arg(engine.msg));
         const QString both = resourceText(read(path), r, QStringLiteral("PlrTopbar.qml"));
-        check(both.count(QStringLiteral("BSI CUSTOMIZER: titlebar hide")) == 2,
-              QStringLiteral("both labels are hidden, each exactly once (%1)")
-                  .arg(both.count(QStringLiteral("BSI CUSTOMIZER: titlebar hide"))));
         check(both.contains(QStringLiteral("visible: false /* BSI CUSTOMIZER: titlebar hide */ && ("
-                                          "uiBackend.oem === \"msi5\")")),
-              "an existing visible: expression is kept and ANDed with false");
+                                           "uiBackend.oem === \"msi5\")")),
+              "an existing visible: expression is switched off in place, keeping the expression");
+        check(both.size() <= topbar.size(),
+              "and the whole document still did not grow");
         check(read(path).contains(german),
               "and the string table is still intact after both removals");
 
@@ -1847,8 +1847,8 @@ int runPatchRegressionTests()
         check(repeat.ok && repeat.msg.contains(QLatin1String("already hidden")),
               QStringLiteral("a repeated removal reports the label as already hidden (%1)").arg(repeat.msg));
         check(resourceText(read(path), r, QStringLiteral("PlrTopbar.qml"))
-                      .count(QStringLiteral("BSI CUSTOMIZER: titlebar hide")) == 2,
-              "a repeated removal does not stack a second visible: member");
+                      .count(QStringLiteral("text: \"\"")) == 1,
+              "a repeated removal does not edit the label a second time");
     }
 
     std::printf("[layout] sidebar-to-titlebar layout tweak by QML\n");
@@ -4700,6 +4700,131 @@ Window {
               "the card can show the source it actually read");
         check(state.detail.contains(QLatin1String("scanning")),
               QStringLiteral("the card says the page was found by scanning (%1)").arg(state.detail));
+    }
+
+    std::printf("[about] the compiled copy of the page is what gets rewritten\n");
+    {
+        // BlueStacks ships PlrAboutSetting.qml as text and a compiled copy of
+        // the same page, and the window shows the compiled one. Its words live
+        // in this UTF-16LE table:
+        //   FF FF FF FF | be32 chars | be32 0 | be32 0x18 | be32 0x18 | text | pad
+        // The .qml edits used to land in a copy nothing displays, so the card
+        // said "applied" and the window never changed. The table is now read and
+        // rewritten in place: same bytes, same offsets, no growth.
+        const auto utf16 = [](const QString &text) {
+            QByteArray bytes;
+            for (const QChar ch : text) {
+                bytes.append(char(ch.unicode() & 0xff));
+                bytes.append(char((ch.unicode() >> 8) & 0xff));
+            }
+            return bytes;
+        };
+        // Little-endian, and 24 bytes of header: marker, chars, 0, 24, 24, 0.
+        const auto le32 = [](int value) {
+            QByteArray bytes(4, '\0');
+            bytes[0] = char(value & 0xff);
+            bytes[1] = char((value >> 8) & 0xff);
+            bytes[2] = char((value >> 16) & 0xff);
+            bytes[3] = char((value >> 24) & 0xff);
+            return bytes;
+        };
+        const auto record = [&](const QString &text, int padding) {
+            QByteArray out = QByteArray::fromHex("ffffffff");
+            out += le32(text.size());
+            out += le32(0);
+            out += le32(0x18);
+            out += le32(0x18);
+            out += le32(0);
+            out += utf16(text);
+            out += QByteArray(padding, '\0');
+            return out;
+        };
+        const QString quote = QString(QChar(34));
+        const auto row = [&](const QString &label) {
+            return QStringLiteral(" - <a href=") + quote + QStringLiteral("javascript:void(0)")
+                   + quote + QLatin1Char('>') + label + QStringLiteral("</a>");
+        };
+        const QString copyright = QString(QChar(0x00A9))
+            + QStringLiteral(" BlueStack Systems, Inc. 2011 through 2021, all rights reserved.");
+
+        // The name of a row and its " - <a …>" fragment are separate records on
+        // a real player, and the China branch repeats the fragment, so the
+        // fixture keeps them apart too.
+        QByteArray table;
+        table += record(QStringLiteral("More info"), 6);
+        table += record(QStringLiteral("Check for updates"), 4);
+        table += record(QStringLiteral("Important links"), 6);
+        table += record(QStringLiteral("Support email"), 6);
+        table += record(row(QStringLiteral("support@bluestacks.com")), 3);
+        table += record(QStringLiteral("Support"), 6);
+        table += record(row(QStringLiteral("support.bluestacks.com")), 3);
+        table += record(QStringLiteral("http://support.bluestacks.com"), 4);
+        table += record(QStringLiteral("About and other info"), 6);
+        table += record(copyright, 3);
+        table += record(QStringLiteral("<a href=") + quote + QStringLiteral("javascript:void(0)")
+                        + quote + QLatin1Char('>'), 4);
+        table += record(QStringLiteral("Terms of use"), 3);
+        // A real PE with no Qt resources in it: the page is present only as
+        // compiled code, which is the build this test is about.
+        auto r = resourcesBytes({}, false, {});
+        QByteArray compiled = r.f.bytes;
+        const int tableAt = compiled.size();
+        compiled += table;
+        compiled += QByteArray(0x200, '\0');
+        const QString path = temp.filePath(QStringLiteral("about-compiled.exe"));
+        write(path, compiled);
+
+        const auto stock = AboutPatcher::analyze(compiled);
+        check(stock.supported && stock.compiledPage,
+              QStringLiteral("the compiled page is found without a .qml (%1)").arg(stock.detail));
+        check(stock.table.size() == 12,
+              QStringLiteral("every record of the page is listed (%1)").arg(stock.table.size()));
+        check(stock.config.text == copyright,
+              QStringLiteral("the text field shows the sentence the window prints (%1)")
+                  .arg(stock.config.text.left(60)));
+
+        AboutPatcher::Config config;
+        config.text = QStringLiteral("Patched by BSI Customizer: support is closed.");
+        AboutPatcher::Link support;
+        support.id = QStringLiteral("iSupportText");
+        support.name = QStringLiteral("Support");
+        support.url = QStringLiteral("https://example.com/help");
+        config.links << support;
+        const auto applied = AboutPatcher::apply(path, true, config);
+        check(applied.ok, QStringLiteral("the compiled page is patched (%1)").arg(applied.msg));
+        const QByteArray after = read(path);
+        check(after.size() == compiled.size(),
+              "the patch never grows or moves the file - every literal stays in its own slot");
+        check(after.contains(utf16(config.text)),
+              "the About sentence the window prints is the edited one");
+        check(!after.contains(utf16(copyright)), "the stock sentence is gone from the compiled page");
+        check(after.contains(utf16(QStringLiteral("https://example.com/help")))
+                  && !after.contains(utf16(QStringLiteral("http://support.bluestacks.com"))),
+              "the link the row opens is the edited address");
+        check(after.contains(utf16(QStringLiteral("example.com/help"))),
+              "and the row prints the edited address as well");
+        check(!after.contains(utf16(QStringLiteral("Check for updates"))),
+              "the update button prints nothing, so it cannot offer a download");
+
+        const auto reread = AboutPatcher::analyze(after);
+        check(reread.compiledPage && reread.config.text == config.text,
+              QStringLiteral("the edited page reads back from the file (%1)")
+                  .arg(reread.config.text.left(60)));
+
+        // A text that does not fit its slot is refused instead of overwriting
+        // the next record.
+        AboutPatcher::Config tooLong;
+        tooLong.text = QString(400, QLatin1Char('x'));
+        const auto refused = AboutPatcher::apply(path, true, tooLong);
+        check(!refused.ok && refused.msg.contains(QLatin1String("holds")),
+              QStringLiteral("a text longer than its slot is refused (%1)").arg(refused.msg));
+
+        AboutPatcher::Config stockConfig;
+        const auto restored = AboutPatcher::apply(path, false, stockConfig);
+        check(restored.ok, QStringLiteral("the stock page comes back (%1)").arg(restored.msg));
+        const QByteArray back = read(path);
+        check(back.mid(tableAt, table.size()) == table,
+              "every compiled string is put back byte for byte from the backup");
     }
 
     // ------------------------------------------------------------------

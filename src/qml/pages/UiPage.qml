@@ -19,7 +19,8 @@ Item {
                                 needsUpdate: false, label: "", detail: "", state: "" })
     // Settings -> About editors
     property var about: ({ supported: false, applied: false, detail: "", text: "",
-                           links: [], showSections: true, sectionsHidden: false })
+                           links: [], showSections: true, sectionsHidden: false,
+                           compiledPage: false, strings: [] })
     // the link rows read from the page, one editable row each
     property var aboutLinks: []
     // whether the two sections the MSI build draws hidden are switched on
@@ -807,6 +808,58 @@ Item {
                                         radius: 8
                                         border.width: 1
                                         border.color: linkUrlField.activeFocus ? Theme.accent : Theme.border
+                                    }
+                                }
+                            }
+                        }
+
+                        // What the window prints. A BlueStacks player ships the
+                        // page twice: the .qml this card edits and a compiled
+                        // copy, and the compiled one is what is on screen. Its
+                        // words are listed here so the editor cannot claim a
+                        // page it never reached - and so a build that answers
+                        // "nothing changed" shows exactly why.
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            spacing: 3
+                            visible: !!page.about.compiledPage
+                                     && (page.about.strings || []).length > 0
+
+                            Text {
+                                Layout.fillWidth: true
+                                wrapMode: Text.WordWrap
+                                text: qsTr("Text the window prints — read from the compiled page and "
+                                           + "rewritten in place when you apply, never grown")
+                                color: Theme.textDim
+                                font.pixelSize: 11
+                                font.weight: Font.DemiBold
+                            }
+                            Repeater {
+                                model: (page.about.strings || []).slice(0, 40)
+                                delegate: RowLayout {
+                                    required property var modelData
+                                    Layout.fillWidth: true
+                                    spacing: 6
+                                    Text {
+                                        text: (modelData.index + 1) + "."
+                                        color: Theme.textDim
+                                        font.pixelSize: 10
+                                        Layout.preferredWidth: 24
+                                    }
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: modelData.text
+                                        elide: Text.ElideRight
+                                        color: Theme.text
+                                        font.pixelSize: 11
+                                        font.family: "Consolas"
+                                    }
+                                    Text {
+                                        text: qsTr("%1 ch").arg(modelData.max)
+                                        color: Theme.textDim
+                                        font.pixelSize: 10
+                                        horizontalAlignment: Text.AlignRight
+                                        Layout.preferredWidth: 46
                                     }
                                 }
                             }
