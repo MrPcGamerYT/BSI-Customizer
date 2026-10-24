@@ -1290,7 +1290,15 @@ bool rewritePage(QByteArray &changed, bool enabled, const Config &config,
         for (const auto &doc : docs) {
             // An applied copy carries our config line; a stock copy does not.
             const bool applied = doc.qml.contains(kConfigBegin);
-            if (applied != enabled) {
+            bool needsWork = applied != enabled;
+            // Updating a page that is already patched has to be recognised as
+            // work too: the tag is there, but it holds other content.
+            if (enabled && applied) {
+                Config current;
+                const bool tagged = readConfig(doc.qml, &current, nullptr);
+                needsWork = !tagged || !sameConfig(normalized(current), config);
+            }
+            if (needsWork) {
                 next = &doc;
                 break;
             }
