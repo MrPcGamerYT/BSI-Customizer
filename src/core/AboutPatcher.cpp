@@ -1951,6 +1951,19 @@ State analyze(const QByteArray &image)
             link.url = pageRowUrl(layout, row);
             link.label = pageRowLabel(layout, row);
             link.hidden = pageRowHidden(layout, row);
+            // The record's own room, so the editor can stop at it instead of
+            // letting a value be typed that the apply then has to refuse.
+            if (row.name >= 0) link.nameMax = layout.records.at(row.name).maxChars();
+            if (!row.fragments.isEmpty()) {
+                // The record holds " - <a href=\"…\">label</a>", so only what
+                // is left after the tag around it is room for the label.
+                const Slot &fragment = layout.records.at(row.fragments.last());
+                const QString printed = link.label;
+                const QString whole = fragmentWith(fragment.text, printed, false);
+                link.labelMax = qMax(0, fragment.maxChars() - (whole.size() - printed.size()));
+            }
+            if (!row.addresses.isEmpty())
+                link.urlMax = layout.records.at(row.addresses.last()).maxChars();
             fromPage.links << link;
         }
     }
@@ -2469,7 +2482,7 @@ QString probeReport(const QString &exePath)
                 .arg(layout.links)
                 .arg(layout.about)
                 .arg(layout.patched() ? QStringLiteral("yes") : QStringLiteral("no")));
-        if (layout.about >= 0) {
+        if (layout.about >= 0 && layout.about + 1 < layout.records.size()) {
             const int label = layout.about + 3;
             add(QStringLiteral("  sentence @%1 room=%2  %3")
                     .arg(layout.records.at(layout.about + 1).marker)

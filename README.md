@@ -192,7 +192,7 @@ intact.
 
 Every replacement is written **inside its own record**: the count is updated and
 the rest of the slot is padded, so the file never grows and no offset moves. A
-text longer than its slot is refused with the length that fits, never truncated.
+text longer than its slot is refused with the length that fits, never truncated, and the link fields stop at the room their own record has, so a value the player would have to refuse cannot even be typed.
 The About sentence is the literal right after its heading, with the "Terms of
 use" link the page appends to it kept when the edited text still ends with those
 words and cleared when it does not.

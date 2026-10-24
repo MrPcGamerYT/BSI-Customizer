@@ -767,6 +767,11 @@ Item {
                                 TextField {
                                     id: linkNameField
                                     Layout.preferredWidth: 190
+                                    // The page's record for this row cannot
+                                    // grow, so the field stops where the room
+                                    // does instead of failing at Apply.
+                                    maximumLength: modelData.nameMax > 0 ? modelData.nameMax
+                                                                         : 32767
                                     text: modelData.name
                                     placeholderText: qsTr("Support email")
                                     color: Theme.text
@@ -782,6 +787,8 @@ Item {
                                 TextField {
                                     id: linkLabelField
                                     Layout.preferredWidth: 190
+                                    maximumLength: modelData.labelMax > 0 ? modelData.labelMax
+                                                                          : 32767
                                     text: modelData.label !== undefined ? modelData.label : ""
                                     placeholderText: qsTr("text it prints")
                                     color: Theme.text
@@ -797,6 +804,7 @@ Item {
                                 TextField {
                                     id: linkUrlField
                                     Layout.fillWidth: true
+                                    maximumLength: modelData.urlMax > 0 ? modelData.urlMax : 32767
                                     text: modelData.url
                                     placeholderText: qsTr("https://… or name@site.com")
                                     color: Theme.text

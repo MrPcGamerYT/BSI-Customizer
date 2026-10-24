@@ -1471,6 +1471,11 @@ QVariantMap Backend::aboutPageState()
             { QStringLiteral("url"), link.url },
             { QStringLiteral("label"), link.label },
             { QStringLiteral("hidden"), link.hidden },
+            // The page's records do not grow, so the editor stops at the room
+            // each field really has instead of failing when Apply is pressed.
+            { QStringLiteral("nameMax"), link.nameMax },
+            { QStringLiteral("labelMax"), link.labelMax },
+            { QStringLiteral("urlMax"), link.urlMax },
         };
     }
     map[QStringLiteral("links")] = links;

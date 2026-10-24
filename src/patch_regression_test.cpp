@@ -4808,7 +4808,8 @@ Window {
         AboutPatcher::Config config;
         config.text = QStringLiteral("Patched by BSI Customizer: support is closed.");
         AboutPatcher::Link support;
-        support.id = QStringLiteral("iSupportText");
+        // The row's position is its id on the compiled path.
+        support.id = QStringLiteral("row1");
         support.name = QStringLiteral("Support");
         support.url = QStringLiteral("https://example.com/help");
         config.links << support;
@@ -4867,6 +4868,27 @@ Window {
         check(shown.ok, QStringLiteral("the row can be switched back on (%1)").arg(shown.msg));
         check(read(path).contains(utf16(QStringLiteral(">support.bluestacks.com</a>"))),
               "and it prints its words again");
+
+        // A record's room is finite and the card is told how much of it is
+        // left, so a rename that the player would have to refuse cannot be
+        // typed in the first place - and if it is forced, nothing is written.
+        const auto limited = AboutPatcher::analyze(read(path));
+        check(limited.config.links.size() == 2
+                  && limited.config.links.at(1).nameMax
+                         >= limited.config.links.at(1).name.size()
+                  && limited.config.links.at(1).urlMax
+                         >= limited.config.links.at(1).url.size(),
+              QStringLiteral("each row reports the room its own record has (name %1, "
+                             "address %2)")
+                  .arg(limited.config.links.at(1).nameMax)
+                  .arg(limited.config.links.at(1).urlMax));
+        AboutPatcher::Config wide = limited.config;
+        wide.links[1].name = QString(limited.config.links.at(1).nameMax + 1, QLatin1Char('n'));
+        const QByteArray beforeWide = read(path);
+        const auto refuseName = AboutPatcher::apply(path, true, wide);
+        check(!refuseName.ok && refuseName.msg.contains(QLatin1String("holds")),
+              QStringLiteral("a name longer than its record is refused (%1)").arg(refuseName.msg));
+        check(read(path) == beforeWide, "and a refused apply writes nothing at all");
 
         // A text that does not fit its slot is refused instead of overwriting
         // the next record.
