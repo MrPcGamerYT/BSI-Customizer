@@ -4824,7 +4824,9 @@ Window {
         // The row's position is its id on the compiled path.
         support.id = QStringLiteral("row1");
         support.name = QStringLiteral("Support");
-        support.url = QStringLiteral("https://example.com/help");
+        // The e-mail row's address record holds 23 characters on the players we
+        // have, so the test uses an address that fits it.
+        support.url = QStringLiteral("https://example.com");
         config.links << support;
         const auto applied = AboutPatcher::apply(path, true, config);
         check(applied.ok, QStringLiteral("the compiled page is patched (%1)").arg(applied.msg));
@@ -4834,10 +4836,10 @@ Window {
         check(after.contains(utf16(config.text)),
               "the About sentence the window prints is the edited one");
         check(!after.contains(utf16(copyright)), "the stock sentence is gone from the compiled page");
-        check(after.contains(utf16(QStringLiteral("https://example.com/help")))
+        check(after.contains(utf16(QStringLiteral("https://example.com")))
                   && !after.contains(utf16(QStringLiteral("http://support.bluestacks.com"))),
               "the link the row opens is the edited address");
-        check(after.contains(utf16(QStringLiteral("example.com/help"))),
+        check(after.contains(utf16(QStringLiteral(">example.com</a>"))),
               "and the row prints the edited address as well");
         check(!after.contains(utf16(QStringLiteral("Check for updates"))),
               "the update button prints nothing, so it cannot offer a download");
@@ -4901,7 +4903,7 @@ Window {
         AboutPatcher::Link only;
         only.id = QStringLiteral("row0");
         only.name = QStringLiteral("Help");
-        only.url = QStringLiteral("https://example.com/help");
+        only.url = QStringLiteral("https://example.com");
         one.links << only;
         const auto singly = AboutPatcher::apply(path, true, one);
         check(singly.ok, QStringLiteral("a single-row config applies (%1)").arg(singly.msg));
