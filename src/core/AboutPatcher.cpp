@@ -1491,11 +1491,18 @@ QString summary(const QString &exePath)
     lines << QStringLiteral("Text now: \"%1\"").arg(oneLine(state.config.text, 120));
     lines << QStringLiteral("Link rows: %1").arg(state.config.links.size());
     for (const auto &link : state.config.links) {
-        lines << QStringLiteral("  %1  %2 -> %3%4")
+        lines << QStringLiteral("  %1  %2 -> %3  prints \"%4\"%5")
                      .arg(link.id.isEmpty() ? QStringLiteral("(no id)") : link.id,
-                          link.name, link.url,
+                          link.name, link.url, oneLine(link.label, 60),
                           link.hidden ? QStringLiteral("  [hidden]") : QString());
     }
+    // How many copies of the page the file carries: a player that embeds it
+    // twice is why a single-copy patch could look like it did nothing.
+    QList<Doc> copies;
+    QString ignored;
+    const int count = findDocs(image, QStringLiteral("PlrAboutSetting.qml"), &copies, &ignored)
+        ? copies.size() : 0;
+    lines << QStringLiteral("Copies of the page in this EXE: %1").arg(count);
     return lines.join(QLatin1Char('\n'));
 }
 
