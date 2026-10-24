@@ -156,7 +156,7 @@ int main(int argc, char *argv[])
 
     // Self-update probe: reads the Discord releases channel the same way the
     // window does, so the bot/channel setup can be verified without a GUI.
-    //   BSI-Customizer.exe --check-updates [--json] [--timeout 25]
+    //   BSI-Customizer.exe --check-updates [--json] [--download] [--explain] [--timeout 25]
     const int updatesAt = args.indexOf(QStringLiteral("--check-updates"));
     if (updatesAt >= 0) {
         ensureConsoleOutput();

@@ -460,7 +460,17 @@ Verify a channel without opening the window:
 .\BSI-Customizer.exe --check-updates --json
 # 0 = up to date, 3 = update available, 4 = downloaded and verified (--download),
 # 1 = error, 2 = no updater config
+
+.\BSI-Customizer.exe --check-updates --explain
+# the same check, plus what the bot received from the channel, message by message
 ```
+
+If the channel clearly has the release but the updater "sees nothing", run the
+`--explain` form: when every message comes back with no text and no attachments,
+Discord is withholding them because the app does not hold the **Message Content
+intent** — a privileged per-app switch in the Developer Portal. See
+[Troubleshooting](docs/UPDATER.md#troubleshooting) for the three fixes (enable
+the intent, mention the bot in the message, or let `publish.mjs` post it).
 
 ## Build and verify
 

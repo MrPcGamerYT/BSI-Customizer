@@ -365,6 +365,23 @@ void UpdateChecker::startAutoCheck()
         if (isConfigured() && m_state == QLatin1String("idle") && !m_available)
             check();
     });
+
+    // A release is published by posting a message, and the app can be open for
+    // days. One check at startup meant a message posted afterwards was never
+    // seen until the user pressed "Check now" - which reads exactly like "the
+    // updater does not detect the message". Look again every few minutes while
+    // nothing is pending; the channel is one small JSON read.
+    if (m_recheck)
+        return;
+    m_recheck = new QTimer(this);
+    m_recheck->setInterval(10 * 60 * 1000);
+    QObject::connect(m_recheck, &QTimer::timeout, this, [this] {
+        // Never interrupt a download or replace an update already offered.
+        if (!isConfigured() || !m_autoCheck || busy() || m_available)
+            return;
+        check();
+    });
+    m_recheck->start();
 }
 
 void UpdateChecker::setState(const QString &state, const QString &note, const QString &kind)
@@ -409,7 +426,9 @@ void UpdateChecker::check()
     setProgress(0);
     setState(QStringLiteral("checking"), QStringLiteral("Checking the Discord releases channel..."));
 
-    const QUrl url(QStringLiteral("%1/channels/%2/messages?limit=50")
+    // 100 is the endpoint's maximum: a busy channel must not push the release
+    // message out of the window.
+    const QUrl url(QStringLiteral("%1/channels/%2/messages?limit=100")
                        .arg(m_config.apiBase, m_config.channelId));
     QNetworkRequest request(url);
     request.setRawHeader("Authorization", QByteArrayLiteral("Bot ") + m_config.token.toUtf8());
@@ -445,17 +464,20 @@ void UpdateChecker::check()
         }
         // A signed channel only accepts manifests (a text message carries no
         // signature, so accepting one would bypass the key).
-        const ReleasePick release = findRelease(doc.array(), m_config.manifestName,
-                                                m_config.hmacKey.isEmpty());
+        const bool allowText = m_config.hmacKey.isEmpty();
+        m_lastMessages = doc.array();
+        m_lastAllowText = allowText;
+        const ReleasePick release = findRelease(m_lastMessages, m_config.manifestName, allowText);
         if (!release.found) {
-            fail(QStringLiteral("No release in the last 50 messages of channel %1. Post the "
+            fail(QStringLiteral("No release in the last 100 messages of channel %1. Post the "
                                 "version and the download link, for example:\n"
                                 "    BSI Customizer v2.0.1\n"
                                 "    https://u.pcloud.link/publink/show?code=XXXX\n"
-                                "or upload a manifest.json with updater-bot/publish.mjs.%2")
+                                "or upload a manifest.json with updater-bot/publish.mjs.%2\n\n%3")
                      .arg(m_config.channelId,
                           release.error.isEmpty() ? QString()
-                                                  : QStringLiteral("\n(%1)").arg(release.error)));
+                                                  : QStringLiteral("\n(%1)").arg(release.error),
+                          explainChannel(m_lastMessages, m_config.manifestName, allowText)));
             return;
         }
         m_pendingMessage = release.message;
@@ -532,8 +554,14 @@ void UpdateChecker::handleRelease(const QJsonObject &manifest, bool fromManifest
         m_available = false;
         m_latest = QJsonObject();
         emit releaseChanged();
+        // Say which message was actually read: "nothing happened" and "the
+        // channel offers the version you already run" look identical otherwise.
         setState(QStringLiteral("uptodate"),
-                 QStringLiteral("You are on the newest build (%1).").arg(currentVersion()),
+                 version.isEmpty() || version == currentVersion()
+                     ? QStringLiteral("You are on the newest build (%1).").arg(currentVersion())
+                     : QStringLiteral("The channel offers v%1; you run %2, so there is nothing "
+                                      "to install.")
+                           .arg(version, currentVersion()),
                  QStringLiteral("good"));
         return;
     }
@@ -980,6 +1008,13 @@ void UpdateChecker::writeHelper(const QString &sibling, const QString &target)
     emit restartRequested();
 }
 
+QString UpdateChecker::channelReport() const
+{
+    if (m_lastMessages.isEmpty())
+        return QStringLiteral("No check has run yet (or it never reached the channel).");
+    return explainChannel(m_lastMessages, m_config.manifestName, m_lastAllowText);
+}
+
 QString UpdateChecker::helperLogPath() const
 {
     return QStandardPaths::writableLocation(QStandardPaths::TempLocation)
@@ -1240,6 +1275,121 @@ UpdateChecker::ReleasePick UpdateChecker::findRelease(const QJsonArray &messages
     return pick;
 }
 
+QString UpdateChecker::messageText(const QJsonObject &message)
+{
+    QStringList parts;
+    const auto add = [&parts](const QString &value) {
+        const QString text = value.trimmed();
+        if (!text.isEmpty() && !parts.contains(text))
+            parts << text;
+    };
+
+    add(message.value(QStringLiteral("content")).toString());
+    // A link preview, a webhook post, or a message written through another
+    // tool can carry the whole announcement in an embed instead of the text.
+    for (const QJsonValue &value : message.value(QStringLiteral("embeds")).toArray()) {
+        const QJsonObject embed = value.toObject();
+        add(embed.value(QStringLiteral("title")).toString());
+        add(embed.value(QStringLiteral("url")).toString());
+        add(embed.value(QStringLiteral("description")).toString());
+        for (const QJsonValue &fieldValue : embed.value(QStringLiteral("fields")).toArray()) {
+            const QJsonObject field = fieldValue.toObject();
+            add(field.value(QStringLiteral("name")).toString());
+            add(field.value(QStringLiteral("value")).toString());
+        }
+        add(embed.value(QStringLiteral("author")).toObject().value(QStringLiteral("name")).toString());
+        add(embed.value(QStringLiteral("footer")).toObject().value(QStringLiteral("text")).toString());
+    }
+    return parts.join(QLatin1Char('\n'));
+}
+
+QString UpdateChecker::explainChannel(const QJsonArray &messages, const QString &manifestName,
+                                      bool allowTextReleases)
+{
+    // Discord answers with the messages even when the app may not read them:
+    // whatever content, embeds and attachments it withheld simply arrive empty.
+    // Counting the empty ones is what separates "nothing was posted" from
+    // "posted, but the bot is blind to it" - two problems with different fixes.
+    int blank = 0;
+    int readable = 0;
+    int attachments = 0;
+    QStringList lines;
+    for (const QJsonValue &value : messages) {
+        const QJsonObject message = value.toObject();
+        const QString text = messageText(message);
+        const QJsonArray files = message.value(QStringLiteral("attachments")).toArray();
+        const bool hidden = text.isEmpty() && files.isEmpty();
+        if (hidden)
+            ++blank;
+        else
+            ++readable;
+        attachments += files.size();
+
+        QStringList names;
+        for (const QJsonValue &fileValue : files)
+            names << fileValue.toObject().value(QStringLiteral("filename")).toString();
+        const QString id = message.value(QStringLiteral("id")).toString();
+        const QString author =
+            message.value(QStringLiteral("author")).toObject().value(QStringLiteral("username"))
+                .toString();
+        QString verdict;
+        if (hidden) {
+            verdict = QStringLiteral("text withheld by Discord");
+        } else if (!allowTextReleases) {
+            verdict = QStringLiteral("readable, but this channel only accepts manifest.json");
+        } else {
+            QJsonObject release;
+            QString error;
+            if (parseMessageRelease(message, &release, &error))
+                verdict = QStringLiteral("release %1").arg(release.value(QStringLiteral("version")).toString());
+            else if (!error.isEmpty())
+                verdict = error;
+            else
+                verdict = QStringLiteral("no version + link");
+        }
+        lines << QStringLiteral("  #%1 %2%3 - %4%5")
+                     .arg(id.isEmpty() ? QStringLiteral("?") : id,
+                          author.isEmpty() ? QString() : QStringLiteral("<%1> ").arg(author),
+                          hidden ? QStringLiteral("0 chars")
+                                 : QStringLiteral("%1 chars").arg(text.size()),
+                          verdict,
+                          names.isEmpty()
+                              ? QString()
+                              : QStringLiteral(" [%1]").arg(names.join(QStringLiteral(", "))));
+        if (lines.size() >= 30)
+            break;
+    }
+
+    QStringList out;
+    out << QStringLiteral("Bot sees %1 message(s) in the channel: %2 readable, %3 withheld, "
+                          "%4 attachment(s).")
+               .arg(messages.size())
+               .arg(readable)
+               .arg(blank)
+               .arg(attachments);
+    if (!messages.isEmpty() && readable == 0) {
+        out << QStringLiteral(
+                   "Discord returns no text, no embeds and no attachments for any of them. That "
+                   "is the Message Content intent: an app without it is blind to every message it "
+                   "did not post itself. Fix it in the Developer Portal (your app -> Bot -> "
+                   "Privileged Gateway Intents -> Message Content Intent) and check again.");
+        out << QStringLiteral(
+                   "No portal access? Two things work without the intent: mention the bot in the "
+                   "release message (@bot v2.0.1 ...), or publish with updater-bot/publish.mjs so "
+                   "the message is written by the bot itself.");
+    }
+    if (!messages.isEmpty() && readable > 0 && blank > 0)
+        out << QStringLiteral("Some messages were withheld and some were not, which means the "
+                              "intent is off and only the bot's own posts are readable.");
+    if (messages.isEmpty())
+        out << QStringLiteral("The channel is empty for this bot: check that the channel ID is "
+                              "the releases channel and not a category, and that the bot can read "
+                              "its history.");
+    if (!lines.isEmpty())
+        out << lines;
+    return out.join(QLatin1Char('\n'));
+}
+
 bool UpdateChecker::parseMessageRelease(const QJsonObject &message, QJsonObject *manifest,
                                        QString *error)
 {
@@ -1257,7 +1407,7 @@ bool UpdateChecker::parseMessageRelease(const QJsonObject &message, QJsonObject 
 
     // Markdown emphasis and backticks are formatting, not content: the same
     // message has to parse whether it was typed **v2.0.1** or `v2.0.1`.
-    QString text = message.value(QStringLiteral("content")).toString();
+    QString text = messageText(message);
     if (text.trimmed().isEmpty())
         return reject({});
     text.remove(QLatin1Char('`'));
@@ -1326,6 +1476,48 @@ bool UpdateChecker::parseMessageRelease(const QJsonObject &message, QJsonObject 
         if (score > bestUrl.score)
             bestUrl = { url, score };
     }
+    if (bestUrl.url.isEmpty()) {
+        // A link pasted without its scheme ("u.pcloud.link/publink/show?code=X",
+        // which is what a browser's address bar shows without https://) is
+        // still the download link; the same tolerance the manifest url gets.
+        static const QRegularExpression bareHost(
+            QStringLiteral("\\b([a-z0-9][a-z0-9-]*(?:\\.[a-z0-9-]+)+/[^\\s<>()\\[\\]\"']*)"),
+            QRegularExpression::CaseInsensitiveOption);
+        static const QRegularExpression notAHost(
+            QStringLiteral("^(?:[0-9]+\\.[0-9]+\\.[0-9]+\\.[0-9]+)"),
+            QRegularExpression::CaseInsensitiveOption);
+        for (const auto &match : bareHost.globalMatch(text)) {
+            const QString candidate = QStringLiteral("https://") + match.captured(1);
+            if (notAHost.match(match.captured(1)).hasMatch())
+                continue;
+            const QString lower = candidate.toLower();
+            const QString path = lower.section(QLatin1Char('?'), 0, 0);
+            bool skip = false;
+            for (const QString &bad : notDownloads) {
+                if (lower.contains(bad)) {
+                    skip = true;
+                    break;
+                }
+            }
+            if (skip)
+                continue;
+            int score = 0;
+            if (path.endsWith(QLatin1String(".exe")))
+                score += 100;
+            for (const QString &host : fileHosts) {
+                if (lower.contains(host)) {
+                    score += 60;
+                    break;
+                }
+            }
+            if (score > bestUrl.score)
+                bestUrl = { candidate, score };
+        }
+        // Never invent a release out of a sentence: a bare candidate only
+        // counts when it is a file host or an .exe.
+        if (!bestUrl.url.isEmpty() && bestUrl.score <= 0)
+            bestUrl = Candidate();
+    }
     if (bestUrl.url.isEmpty())
         return reject(QStringLiteral("the message has no download link"));
     if (!bestUrl.url.startsWith(QLatin1String("https://"), Qt::CaseInsensitive))
@@ -1388,6 +1580,9 @@ bool UpdateChecker::parseMessageRelease(const QJsonObject &message, QJsonObject 
     // ---- notes: what is left once the bookkeeping is removed -------------
     QString notes = text;
     notes.remove(bestUrl.url);
+    // ...and the same link as it was pasted, without the scheme.
+    if (bestUrl.url.startsWith(QLatin1String("https://")))
+        notes.remove(bestUrl.url.mid(8));
     // Any other link (a video, a chat message) is not release notes.
     notes.remove(urlPattern);
     notes.remove(shaPattern);
@@ -1412,6 +1607,14 @@ bool UpdateChecker::parseMessageRelease(const QJsonObject &message, QJsonObject 
             QRegularExpression::CaseInsensitiveOption);
         if (labelLine.match(trimmed).hasMatch())
             continue; // the word before the link we already removed
+        // publish.mjs appends a mention of the bot so Discord hands the text
+        // over without the Message Content intent; it is plumbing, not notes.
+        static const QRegularExpression mentionLine(
+            QStringLiteral("^\\(?\\s*(posted|published)\\s+by\\s+<@[!&]?[0-9]+>.*$|"
+                           "^<@[!&]?[0-9]+>\\s*$"),
+            QRegularExpression::CaseInsensitiveOption);
+        if (mentionLine.match(trimmed).hasMatch())
+            continue;
         kept << trimmed;
     }
     while (!kept.isEmpty() && kept.last().isEmpty())
