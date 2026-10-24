@@ -311,7 +311,7 @@ QList<Slot> scanSlots(const QByteArray &image)
 // A row can carry two of everything: the page branches on the OEM
 // (`oem === "nxt_cn" ? A : B`), so both copies are rewritten together and the
 // row is never half changed.
-struct Row
+struct PageRow
 {
     int name = -1;
     QList<int> fragments;
@@ -326,7 +326,7 @@ struct Layout
     QList<Slot> records;
     int about = -1;  // "About and other info"
     int links = -1;  // "Important links"
-    QList<Row> rows;
+    QList<PageRow> rows;
 
     bool valid() const { return about >= 0 || links >= 0; }
     // Every patch blanks the update button's caption and only a restore writes
@@ -447,7 +447,7 @@ Layout layoutOf(const QByteArray &image)
             ++i;
             continue;
         }
-        Row row;
+        PageRow row;
         int j = i;
         while (j < stop && isFragment(layout.records.at(j).text)) row.fragments << j++;
         // The name is the slot in front of the anchors. Identifiers are stepped
@@ -473,26 +473,26 @@ Layout layoutOf(const QByteArray &image)
     return layout;
 }
 
-QString rowName(const Layout &layout, const Row &row)
+QString pageRowName(const Layout &layout, const PageRow &row)
 {
     if (row.name < 0 || row.name >= layout.records.size()) return QString();
     return layout.records.at(row.name).text;
 }
 
-QString rowLabel(const Layout &layout, const Row &row)
+QString pageRowLabel(const Layout &layout, const PageRow &row)
 {
     if (row.fragments.isEmpty()) return QString();
     return anchorLabel(layout.records.at(row.fragments.last()).text);
 }
 
-QString rowUrl(const Layout &layout, const Row &row)
+QString pageRowUrl(const Layout &layout, const PageRow &row)
 {
     if (row.addresses.isEmpty()) return QString();
     const QString text = layout.records.at(row.addresses.last()).text;
     return text.trimmed() == QLatin1String(" ") ? QString() : text;
 }
 
-bool rowHidden(const Layout &layout, const Row &row)
+bool pageRowHidden(const Layout &layout, const PageRow &row)
 {
     if (row.fragments.isEmpty()) return true;
     for (const int i : row.fragments)
@@ -507,9 +507,10 @@ QString layoutText(const Layout &layout)
 {
     if (layout.about < 0 || layout.about + 1 >= layout.records.size()) return QString();
     QString text = layout.records.at(layout.about + 1).text;
+    const int anchor = layout.about + 2;
     const int label = layout.about + 3;
-    if (label < layout.records.size()
-        && layout.records.at(layout.about + 2).text.startsWith(QLatin1String("<a href="))
+    if (anchor < layout.records.size() && label < layout.records.size()
+        && layout.records.at(anchor).text.startsWith(QLatin1String("<a href="))
         && layout.records.at(label).text.trimmed() != QLatin1String(" "))
         text += layout.records.at(label).text;
     return text;
@@ -537,16 +538,19 @@ bool writeSlot(QByteArray &image, const Slot &slot, const QString &text, QString
         return false;
     };
     if (text.contains(QChar(0))) return refuse(QStringLiteral("A page text contains a NUL."));
-    if (text.size() > slot.maxChars())
+    // A zero-length record cannot be read back (its own count says "no text"),
+    // so an empty value is stored as the one blank every hidden slot uses.
+    const QString value = text.isEmpty() ? kBlankSlot : text;
+    if (value.size() > slot.maxChars())
         return refuse(QStringLiteral("%1 needs %2 characters but its slot on this player only "
                                      "holds %3; nothing was written.")
-                          .arg(text.left(40))
-                          .arg(text.size())
+                          .arg(value.left(40))
+                          .arg(value.size())
                           .arg(slot.maxChars()));
     QByteArray bytes;
-    bytes.reserve(int(text.size()) * 2);
-    for (int i = 0; i < text.size(); ++i) {
-        const ushort unit = text.at(i).unicode();
+    bytes.reserve(int(value.size()) * 2);
+    for (int i = 0; i < value.size(); ++i) {
+        const ushort unit = value.at(i).unicode();
         bytes.append(char(unit & 0xff));
         bytes.append(char((unit >> 8) & 0xff));
     }
@@ -561,7 +565,7 @@ bool writeSlot(QByteArray &image, const Slot &slot, const QString &text, QString
     // prints the padding as part of the sentence.
     if (!ByteUtils::inRange(image, slot.marker + 4, 4))
         return refuse(QStringLiteral("Slot header out of range."));
-    ByteUtils::putLe32(image, slot.marker + 4, quint32(text.size()));
+    ByteUtils::putLe32(image, slot.marker + 4, quint32(value.size()));
     return true;
 }
 
@@ -655,19 +659,19 @@ void planTable(const Layout &layout, const Config &config, QList<SlotEdit> *edit
         if (pick < 0 && !link.name.isEmpty()) {
             for (int r = 0; r < layout.rows.size() && pick < 0; ++r)
                 if (!used.contains(r)
-                    && rowName(layout, layout.rows.at(r)).compare(link.name, Qt::CaseInsensitive) == 0)
+                    && pageRowName(layout, layout.rows.at(r)).compare(link.name, Qt::CaseInsensitive) == 0)
                     pick = r;
         }
         if (pick < 0 && !link.url.isEmpty()) {
             for (int r = 0; r < layout.rows.size() && pick < 0; ++r)
                 if (!used.contains(r)
-                    && rowUrl(layout, layout.rows.at(r)).compare(link.url, Qt::CaseInsensitive) == 0)
+                    && pageRowUrl(layout, layout.rows.at(r)).compare(link.url, Qt::CaseInsensitive) == 0)
                     pick = r;
         }
         if (pick < 0 && !link.label.isEmpty()) {
             for (int r = 0; r < layout.rows.size() && pick < 0; ++r)
                 if (!used.contains(r)
-                    && rowLabel(layout, layout.rows.at(r)).compare(link.label, Qt::CaseInsensitive) == 0)
+                    && pageRowLabel(layout, layout.rows.at(r)).compare(link.label, Qt::CaseInsensitive) == 0)
                     pick = r;
         }
         // 3) The rows and the links are in the same order on every build seen so
@@ -679,7 +683,7 @@ void planTable(const Layout &layout, const Config &config, QList<SlotEdit> *edit
             continue;
         }
         used.insert(pick);
-        const Row &row = layout.rows.at(pick);
+        const PageRow &row = layout.rows.at(pick);
         const bool hidden = link.hidden;
         if (row.name >= 0)
             set(row.name, hidden ? kBlankSlot
@@ -1938,15 +1942,15 @@ State analyze(const QByteArray &image)
         fromPage.text = layoutText(layout);
         fromPage.links.clear();
         for (int r = 0; r < layout.rows.size(); ++r) {
-            const Row &row = layout.rows.at(r);
+            const PageRow &row = layout.rows.at(r);
             Link link;
             // The row's position is its identity: a row that was renamed or
             // hidden is still this row, so applying twice changes nothing.
             link.id = QStringLiteral("row%1").arg(r);
-            link.name = rowName(layout, row);
-            link.url = rowUrl(layout, row);
-            link.label = rowLabel(layout, row);
-            link.hidden = rowHidden(layout, row);
+            link.name = pageRowName(layout, row);
+            link.url = pageRowUrl(layout, row);
+            link.label = pageRowLabel(layout, row);
+            link.hidden = pageRowHidden(layout, row);
             fromPage.links << link;
         }
     }
@@ -2476,12 +2480,12 @@ QString probeReport(const QString &exePath)
                         .arg(oneLine(layout.records.at(label).text, 40)));
         }
         for (int r = 0; r < layout.rows.size(); ++r) {
-            const Row &row = layout.rows.at(r);
+            const PageRow &row = layout.rows.at(r);
             add(QStringLiteral("  row %1: name=%2 -> %3  prints \"%4\"%5")
                     .arg(r)
-                    .arg(oneLine(rowName(layout, row), 40), rowUrl(layout, row),
-                         oneLine(rowLabel(layout, row), 60),
-                         rowHidden(layout, row) ? QStringLiteral("  [hidden]") : QString()));
+                    .arg(oneLine(pageRowName(layout, row), 40), pageRowUrl(layout, row),
+                         oneLine(pageRowLabel(layout, row), 60),
+                         pageRowHidden(layout, row) ? QStringLiteral("  [hidden]") : QString()));
             add(QStringLiteral("       records: name=%1 fragments=%2 addresses=%3")
                     .arg(row.name)
                     .arg([&row]() {
