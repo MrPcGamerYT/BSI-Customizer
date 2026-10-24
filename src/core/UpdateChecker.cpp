@@ -1,4 +1,4 @@
-#include "core/UpdateChecker.h"
+#include "UpdateChecker.h"
 
 #include <QCoreApplication>
 #include <QCryptographicHash>

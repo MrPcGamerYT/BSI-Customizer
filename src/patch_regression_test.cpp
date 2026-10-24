@@ -4817,8 +4817,8 @@ Window {
             msg(QStringLiteral("31"), QStringLiteral("v2.0.4\nhttps://u.pcloud.link/publink/show?code=FIXED")),
             msg(QStringLiteral("30"), QStringLiteral("v2.0.4\nhttps://u.pcloud.link/publink/show?code=OLD")),
         };
-        const auto newest = UpdateChecker::findRelease(rePosted, QStringLiteral("manifest.json"), true);
-        check(newest.found && newest.manifest.value(QStringLiteral("url")).toString()
+        const auto rePostedPick = UpdateChecker::findRelease(rePosted, QStringLiteral("manifest.json"), true);
+        check(rePostedPick.found && rePostedPick.manifest.value(QStringLiteral("url")).toString()
                                   .endsWith(QLatin1String("FIXED")),
               "re-posting the same version with a fixed link replaces the old one");
         check(!UpdateChecker::findRelease(channel, QStringLiteral("manifest.json"), false).found,
