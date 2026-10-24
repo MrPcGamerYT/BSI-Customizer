@@ -4016,6 +4016,15 @@ Window {
         const auto applied = AboutPatcher::apply(aboutPath, true, config);
         check(applied.ok, QStringLiteral("the About page is updated (%1)").arg(applied.msg));
         QString patched = resourceText(read(aboutPath), r, QStringLiteral("PlrAboutSetting.qml"));
+        if (!patched.contains(QLatin1String("t.me/mrpcgamer"))) {
+            // Only a failing run needs this, and a failing Windows run is
+            // otherwise invisible: print the rows the patch actually wrote.
+            QStringList rows;
+            for (const QString &line : patched.split(QLatin1Char('\n')))
+                if (line.contains(QLatin1String("href="))) rows << line.trimmed();
+            ciNotice(QStringLiteral("about rows after apply: %1")
+                         .arg(rows.mid(0, 6).join(QStringLiteral(" | "))));
+        }
         check(patched.contains(QLatin1String("Modded by Mr.Pc Gamer"))
                   && patched.contains(QLatin1String("Telegram - <a href=\\\"https://t.me/mrpcgamer\\\">t.me/mrpcgamer</a>"))
                   && patched.contains(QLatin1String("Discord - <a href=\\\"https://discord.gg/example\\\">discord.gg/example</a>"))

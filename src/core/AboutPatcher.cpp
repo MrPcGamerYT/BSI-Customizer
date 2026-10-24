@@ -994,6 +994,13 @@ bool readShown(const QString &qml, const QString &masked, const Anchors &anchors
         }
         link.hidden = rowIsHidden(qml, row.object);
         if (link.name.isEmpty()) link.name = link.url;
+        // The label is the text the row prints. When it is nothing but the
+        // address - which is how the stock page prints every one of its links -
+        // it is not a caption the user chose, so it is left empty: a replaced
+        // URL must print its own address, not keep advertising the BlueStacks
+        // one it just supplanted. `normalized()` fills it back from whatever
+        // URL the editor ends up with.
+        if (!link.url.isEmpty() && link.label == displayFor(link.url)) link.label.clear();
         out.links << link;
     }
     // The sections are always offered shown. `visible: uiBackend.oem !== "msi5"`
