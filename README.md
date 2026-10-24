@@ -188,7 +188,9 @@ row's **position** is its identity, which is what makes an edited page read back
 exactly and a second apply a no-op — and a hidden row stays a row (its name and
 printed words are blanked, its anchor is left pointing nowhere) instead of
 disappearing from the list, so it can be switched back on later with its address
-intact.
+intact. The name it had is kept in the hidden anchor's `href` — on a player that
+carries no `.qml` that are the only two copies of it left — so showing the row
+again gives back its name, its words and its address.
 
 Every replacement is written **inside its own record**: the count is updated and
 the rest of the slot is padded, so the file never grows and no offset moves. A

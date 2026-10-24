@@ -378,6 +378,24 @@ QString anchorLabel(const QString &fragment)
     return fragment.mid(open + 1, close - open - 1);
 }
 
+// The href a hidden row's anchor carries. The row's own name goes in it: the
+// page prints that name in a record of its own, which has to be blanked to make
+// the row disappear, and on a build that keeps only the compiled page there is
+// no second copy to put it back from. The href is never clicked (the anchor
+// prints a blank), so it can hold the one word that would otherwise be lost.
+const QString kHiddenHref = QStringLiteral("hidden:");
+
+QString hrefOf(const QString &head)
+{
+    const int hrefAt = head.indexOf(QLatin1String("href=\""));
+    if (hrefAt < 0) return QString();
+    const int from = hrefAt + 6;
+    const int to = head.indexOf(QLatin1Char('"'), from);
+    if (to < 0) return QString();
+    return head.mid(from, to - from);
+}
+
+
 // Finds the heading by its words, case-insensitively, so a table read back
 // after a patch is found by the one line the patch never touches.
 int findHeading(const QList<Slot> &records, const QString &words)
@@ -475,6 +493,14 @@ Layout layoutOf(const QByteArray &image)
 
 QString pageRowName(const Layout &layout, const PageRow &row)
 {
+    // A hidden row has a blank name record by design; the words it had are in
+    // its anchor's href, which is what makes "hide, then show again" give the
+    // row back with its name.
+    if (!row.fragments.isEmpty()) {
+        const QString href = hrefOf(layout.records.at(row.fragments.last()).text);
+        if (href.startsWith(kHiddenHref) && href.size() > kHiddenHref.size())
+            return href.mid(kHiddenHref.size());
+    }
     if (row.name < 0 || row.name >= layout.records.size()) return QString();
     return layout.records.at(row.name).text;
 }
@@ -571,19 +597,28 @@ bool writeSlot(QByteArray &image, const Slot &slot, const QString &text, QString
 
 // " - <a href="…">label</a>": the row's anchor with a new label, keeping the
 // href it already has (or the stock one when it has none - an unhidden row must
-// be clickable again).
-QString fragmentWith(const QString &current, const QString &label, bool hidden)
+// be clickable again). A name is only passed when the row is being hidden.
+QString fragmentWith(const QString &current, const QString &label, bool hidden,
+                     const QString &name = QString())
 {
     const int close = current.lastIndexOf(QLatin1String("</a>"));
     const int open = close < 0 ? -1 : current.indexOf(QLatin1Char('>'));
     QString head = open > 0 ? current.left(open + 1) : QString();
     if (head.isEmpty()) head = QStringLiteral(" - <a href=\"javascript:void(0)\">");
-    if (hidden) return QStringLiteral(" - ") + kDeadAnchor + QLatin1Char(' ') + QStringLiteral("</a>");
+    if (hidden) {
+        const QString kept = name.simplified();
+        const bool usable = !kept.isEmpty() && !kept.contains(QLatin1Char('"'))
+                            && !kept.contains(QLatin1Char('<')) && !kept.contains(QLatin1Char('>'));
+        return QStringLiteral(" - <a href=\"") + kHiddenHref
+               + (usable ? kept : QString()) + QStringLiteral("\"> </a>");
+    }
     const int hrefAt = head.indexOf(QLatin1String("href=\""));
     if (hrefAt >= 0) {
         const int from = hrefAt + 6;
         const int to = head.indexOf(QLatin1Char('"'), from);
-        if (to == from)
+        // An empty href and the one a hidden row carries are both "nothing to
+        // click yet": the row has to open something again once it is shown.
+        if (to == from || head.mid(from, to - from).startsWith(kHiddenHref))
             head = head.left(from) + QStringLiteral("javascript:void(0)") + head.mid(to);
     }
     const int gt = head.lastIndexOf(QLatin1Char('>'));
@@ -693,7 +728,7 @@ void planTable(const Layout &layout, const Config &config, QList<SlotEdit> *edit
         for (int i = 0; i < row.fragments.size(); ++i) {
             const int fragment = row.fragments.at(i);
             const QString current = layout.records.at(fragment).text;
-            const QString next = hidden ? fragmentWith(current, QString(), true)
+            const QString next = hidden ? fragmentWith(current, QString(), true, link.name)
                                         : fragmentWith(current, shown, false);
             set(fragment, next);
             if (i >= row.addresses.size()) continue;

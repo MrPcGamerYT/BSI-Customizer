@@ -4850,8 +4850,12 @@ Window {
         const auto afterHide = AboutPatcher::analyze(read(path));
         check(afterHide.config.links.size() == 2 && afterHide.config.links.at(1).hidden,
               QStringLiteral("the hidden row reads back as hidden and keeps its place"));
-        check(read(path).contains(utf16(QStringLiteral(" - <a href=\"\"> </a>"))),
-              "a hidden row prints nothing: its anchor points nowhere and shows a blank");
+        check(read(path).contains(utf16(QStringLiteral(" - <a href=\"hidden:Support\"> </a>"))),
+              "a hidden row prints nothing: its anchor shows a blank and points at its own name, "
+              "which is the only copy of that name left once the row is blank");
+        check(afterHide.config.links.at(1).name == QLatin1String("Support"),
+              QStringLiteral("so hiding does not lose the name (%1)")
+                  .arg(afterHide.config.links.at(1).name));
         check(afterHide.config.links.at(1).url == reread.config.links.at(1).url,
               QStringLiteral("and the address it opened is kept (%1), so the row can be "
                              "switched back on")
@@ -4868,6 +4872,8 @@ Window {
         check(shown.ok, QStringLiteral("the row can be switched back on (%1)").arg(shown.msg));
         check(read(path).contains(utf16(QStringLiteral(">support.bluestacks.com</a>"))),
               "and it prints its words again");
+        check(!read(path).contains(utf16(QStringLiteral("hidden:"))),
+              "its anchor points somewhere real again, not at the name it kept");
 
         // A record's room is finite and the card is told how much of it is
         // left, so a rename that the player would have to refuse cannot be
