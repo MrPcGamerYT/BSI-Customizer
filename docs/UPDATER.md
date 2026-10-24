@@ -441,9 +441,16 @@ the webhook-only variant.
 
 ---
 
+> **What gets published.** The manifest names the **installer**
+> (`BSI-Customizer-<version>-setup.exe`), because that is what the app runs to
+> update itself: a setup can replace a program Windows has open, a copied EXE
+> cannot. Publish it with `--exe build/artifacts/BSI-Customizer-<version>-setup.exe`.
+> A manifest that names the portable EXE still works with builds older than
+> 2.3.0, which simply copy the file over themselves.
+
 ## 6. When the EXE is too big for Discord (pCloud and other hosts)
 
-A free Discord server allows 10 MB per file; the portable EXE is ~30 MB. You
+A free Discord server allows 10 MB per file; the release is ~30 MB. You
 have two options, and the second is the one that needs no server boost:
 
 1. **Boost the server** (50 MB) and upload straight to Discord — nothing else
