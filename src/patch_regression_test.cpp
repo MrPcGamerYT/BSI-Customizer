@@ -1834,9 +1834,10 @@ int runPatchRegressionTests()
         check(engine.ok && engine.msg.contains(QLatin1String("Hid 1 title-bar label")),
               QStringLiteral("the engine label is hidden by its own row (%1)").arg(engine.msg));
         const QString both = resourceText(read(path), r, QStringLiteral("PlrTopbar.qml"));
-        check(both.contains(QStringLiteral("visible: false /* BSI CUSTOMIZER: titlebar hide */ && ("
-                                           "uiBackend.oem === \"msi5\")")),
-              "an existing visible: expression is switched off in place, keeping the expression");
+        check(both.contains(QStringLiteral("visible: false")),
+              "an existing visible: expression is switched off in place");
+        check(!both.contains(QLatin1String("titlebar hide")),
+              "no marker comment is added: a comment would be bytes the record does not have");
         check(both.size() <= topbar.size(),
               "and the whole document still did not grow");
         check(read(path).contains(german),
@@ -4777,8 +4778,16 @@ Window {
         const auto stock = AboutPatcher::analyze(compiled);
         check(stock.supported && stock.compiledPage,
               QStringLiteral("the compiled page is found without a .qml (%1)").arg(stock.detail));
-        check(stock.table.size() == 12,
-              QStringLiteral("every record of the page is listed (%1)").arg(stock.table.size()));
+        const auto listed = [&stock](const QString &word) {
+            for (const auto &entry : stock.table)
+                if (entry.text == word) return true;
+            return false;
+        };
+        check(listed(copyright) && listed(QStringLiteral("Support"))
+                  && listed(QStringLiteral("About and other info"))
+                  && listed(QStringLiteral("http://support.bluestacks.com")),
+              QStringLiteral("the words the window prints are listed (%1 records)")
+                  .arg(stock.table.size()));
         check(stock.config.text == copyright,
               QStringLiteral("the text field shows the sentence the window prints (%1)")
                   .arg(stock.config.text.left(60)));

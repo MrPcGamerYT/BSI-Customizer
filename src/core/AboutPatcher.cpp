@@ -170,17 +170,18 @@ bool findDocByBytes(const QByteArray &image, Doc *out)
     for (qsizetype at = image.indexOf(QByteArray::fromHex("78")); at >= 0; at = image.indexOf(QByteArray::fromHex("78"), at + 1)) {
         if (attempts >= 4000) break;
         if (at < 8 || at + 2 > image.size()) continue;
-        const int second = quint8(image.at(int(at) + 1));
-        if ((0x7800 + second) % 31 != 0) continue;
+        const int zlibFlag = quint8(image.at(int(at) + 1));
+        if ((0x7800 + zlibFlag) % 31 != 0) continue;
         const qint64 record = qint64(at) - 8;
-        const quint32 first = ByteUtils::be32(image, record);
-        const quint32 second = ByteUtils::be32(image, record + 4);
+        const quint32 fieldA = ByteUtils::be32(image, record);
+        const quint32 fieldB = ByteUtils::be32(image, record + 4);
         // A record says (decoded, stored) in this order in every player seen so
         // far, and the reverse in one older 5.x build: try both, and let the
         // decoded size of the zlib stream decide which reading is right.
-        for (const auto &pair : { qMakePair(first, second), qMakePair(second, first) }) {
-            const quint32 decoded = pair.first;
-            const quint32 stored = pair.second;
+        const quint32 orders[2][2] { { fieldA, fieldB }, { fieldB, fieldA } };
+        for (const auto &pair : orders) {
+            const quint32 decoded = pair[0];
+            const quint32 stored = pair[1];
             if (stored < 16u || stored > 4u * 1024u * 1024u || decoded < 4096u
                 || decoded > 4u * 1024u * 1024u)
                 continue;
@@ -269,14 +270,18 @@ bool parseSlot(const QByteArray &image, int marker, Slot *slot)
         if (unit == 0xFFFE || unit == 0xFFFF) return false;
         text.append(QChar(unit));
     }
-    int end = at + bytes;
-    while (end < image.size() && image.at(end) == '\0' && end - (at + bytes) < 16) ++end;
     // The slot owns everything up to the next record's marker. Measuring with
     // the marker (and not only with the zeros) keeps a record recognizable
     // after it was rewritten shorter - otherwise the page could be edited once
-    // and never read again.
+    // and never read again. The last record of a table has no next marker: its
+    // slot is the text and the zero padding behind it.
+    int end = at + bytes;
     const qsizetype next = image.indexOf(slotMarker(), at + bytes);
-    if (next > 0 && next - (at + bytes) <= 4096) end = int(next);
+    if (next > 0 && next - (at + bytes) <= 4096) {
+        end = int(next);
+    } else {
+        while (end < image.size() && image.at(end) == '\0' && end - (at + bytes) < 4096) ++end;
+    }
     Slot parsed;
     parsed.marker = marker;
     parsed.textAt = at;
@@ -289,17 +294,17 @@ bool parseSlot(const QByteArray &image, int marker, Slot *slot)
 
 QList<Slot> scanSlots(const QByteArray &image)
 {
-    QList<Slot> slots;
+    QList<Slot> page;
     for (int at = int(image.indexOf(slotMarker())); at >= 0;
          at = int(image.indexOf(slotMarker(), at + 1))) {
         Slot slot;
         if (!parseSlot(image, at, &slot)) continue;
-        slots << slot;
+        page << slot;
         // Nothing inside a literal can be a marker, so the next search may
         // resume at the end of this one.
         at = slot.textAt + slot.chars * 2;
     }
-    return slots;
+    return page;
 }
 
 // The run of records that holds the About page. Records of one compiled unit
@@ -349,20 +354,20 @@ QList<Slot> aboutTable(const QByteArray &image)
     return best;
 }
 
-int aboutTextSlot(const QList<Slot> &slots)
+int aboutTextSlot(const QList<Slot> &page)
 {
     // The sentence is the literal the page puts in front of its "Terms of use"
     // anchor, which is the only slot in the table that *starts* with an <a> tag
     // (a row's own fragment starts with " - "). Finding it by shape keeps
     // working after the sentence has been replaced - the copyright sign is no
     // longer there to look for.
-    for (int i = 0; i + 1 < slots.size(); ++i) {
-        if (!slots[i + 1].text.startsWith(QLatin1String("<a href="))) continue;
-        if (slots[i].text.contains(QLatin1Char('<'))) continue;
+    for (int i = 0; i + 1 < page.size(); ++i) {
+        if (!page[i + 1].text.startsWith(QLatin1String("<a href="))) continue;
+        if (page[i].text.contains(QLatin1Char('<'))) continue;
         return i;
     }
-    for (int i = 0; i < slots.size(); ++i) {
-        const QString text = slots[i].text;
+    for (int i = 0; i < page.size(); ++i) {
+        const QString text = page[i].text;
         if (text.startsWith(QStringLiteral("\u00A9"))
             || text.contains(QLatin1String("rights reserved"), Qt::CaseInsensitive))
             return i;
@@ -388,26 +393,26 @@ QString anchorLabel(const QString &fragment)
     return fragment.mid(open + 1, close - open - 1);
 }
 
-QList<TableRow> tableRows(const QList<Slot> &slots)
+QList<TableRow> tableRows(const QList<Slot> &page)
 {
     QList<TableRow> rows;
-    for (int i = 0; i < slots.size(); ++i) {
-        const QString text = slots[i].text;
+    for (int i = 0; i < page.size(); ++i) {
+        const QString text = page[i].text;
         if (!text.contains(QLatin1String("<a "), Qt::CaseInsensitive)) continue;
         if (anchorLabel(text).isEmpty()) continue;
         TableRow row;
         row.fragment = i;
         for (int j = i - 1; j >= 0; --j) {
-            if (slots[j].text.contains(QLatin1String("<a "), Qt::CaseInsensitive)) continue;
+            if (page[j].text.contains(QLatin1String("<a "), Qt::CaseInsensitive)) continue;
             row.name = j;
             break;
         }
         const QString label = anchorLabel(text);
-        for (int j = 0; j < slots.size(); ++j) {
+        for (int j = 0; j < page.size(); ++j) {
             if (j == i || j == row.name) continue;
-            if (row.label < 0 && slots[j].text == label) row.label = j;
-            if (row.url < 0 && slots[j].text.startsWith(QLatin1String("http"), Qt::CaseInsensitive)
-                && slots[j].text.contains(label, Qt::CaseInsensitive))
+            if (row.label < 0 && page[j].text == label) row.label = j;
+            if (row.url < 0 && page[j].text.startsWith(QLatin1String("http"), Qt::CaseInsensitive)
+                && page[j].text.contains(label, Qt::CaseInsensitive))
                 row.url = j;
         }
         rows << row;
@@ -424,10 +429,10 @@ struct RowGroup
     QList<TableRow> rows;
 };
 
-QList<RowGroup> tableGroups(const QList<Slot> &slots)
+QList<RowGroup> tableGroups(const QList<Slot> &page)
 {
     QList<RowGroup> groups;
-    for (const TableRow &row : tableRows(slots)) {
+    for (const TableRow &row : tableRows(page)) {
         if (row.name < 0) continue;
         bool placed = false;
         for (RowGroup &group : groups) {
@@ -490,13 +495,13 @@ bool writeSlot(QByteArray &image, const Slot &slot, const QString &text, QString
 // found by the name it prints, then by the text or the address it shows, so a
 // row that was already edited is still found on the next apply. Anything the
 // table does not carry is skipped and reported by the caller.
-void planTable(const QList<Slot> &slots, const Config &config, QList<SlotEdit> *edits,
+void planTable(const QList<Slot> &page, const Config &config, QList<SlotEdit> *edits,
                QStringList *missing)
 {
     QSet<int> touched;
     const auto set = [&](int index, const QString &text) {
-        if (index < 0 || index >= slots.size() || touched.contains(index)) return;
-        if (slots[index].text == text) return;
+        if (index < 0 || index >= page.size() || touched.contains(index)) return;
+        if (page[index].text == text) return;
         touched.insert(index);
         *edits << SlotEdit { index, text };
     };
@@ -505,8 +510,8 @@ void planTable(const QList<Slot> &slots, const Config &config, QList<SlotEdit> *
     // China branch keeps its token in between).
     const auto setText = [&](const QString &from, const QString &to) {
         if (from.isEmpty() || from == to) return;
-        for (int i = 0; i < slots.size(); ++i)
-            if (slots[i].text.compare(from, Qt::CaseInsensitive) == 0) {
+        for (int i = 0; i < page.size(); ++i)
+            if (page[i].text.compare(from, Qt::CaseInsensitive) == 0) {
                 set(i, to);
                 return;
             }
@@ -514,12 +519,12 @@ void planTable(const QList<Slot> &slots, const Config &config, QList<SlotEdit> *
 
     // The update button is disabled: its caption goes, so a stray click opens an
     // empty confirmation instead of a download.
-    for (int i = 0; i < slots.size(); ++i) {
-        const QString text = slots[i].text;
+    for (int i = 0; i < page.size(); ++i) {
+        const QString text = page[i].text;
         if (text == QLatin1String("Check for updates") || text == QLatin1String("Download Update"))
             set(i, kBlankSlot);
     }
-    const int about = aboutTextSlot(slots);
+    const int about = aboutTextSlot(page);
     if (about >= 0 && !config.text.isEmpty()) {
         // The stock sentence is one literal plus the "Terms of use" link the
         // page appends to it, and the editor shows both together. Writing the
@@ -530,14 +535,14 @@ void planTable(const QList<Slot> &slots, const Config &config, QList<SlotEdit> *
         // cleared so the line prints exactly what was typed.
         int label = -1;
         QString labelText;
-        for (int i = about + 1; i < slots.size() && i <= about + 3; ++i) {
-            if (!slots[i].text.startsWith(QLatin1String("<a href="))) continue;
-            for (int j = i + 1; j < slots.size() && j <= i + 2; ++j) {
-                if (slots[j].text.contains(QLatin1Char('<'))) continue;
-                if (slots[j].text.compare(QLatin1String("Terms of use"), Qt::CaseInsensitive) != 0)
+        for (int i = about + 1; i < page.size() && i <= about + 3; ++i) {
+            if (!page[i].text.startsWith(QLatin1String("<a href="))) continue;
+            for (int j = i + 1; j < page.size() && j <= i + 2; ++j) {
+                if (page[j].text.contains(QLatin1Char('<'))) continue;
+                if (page[j].text.compare(QLatin1String("Terms of use"), Qt::CaseInsensitive) != 0)
                     continue;
                 label = j;
-                labelText = slots[j].text;
+                labelText = page[j].text;
             }
         }
         QString prefix = config.text;
@@ -551,8 +556,8 @@ void planTable(const QList<Slot> &slots, const Config &config, QList<SlotEdit> *
             // next read; the label it used to print is cleared.
             const QString emptyAnchor = QStringLiteral("<a href=") + QLatin1Char('"')
                                         + QLatin1Char('"') + QLatin1Char('>');
-            for (int i = about + 1; i < slots.size() && i <= about + 3; ++i) {
-                const QString text = slots[i].text;
+            for (int i = about + 1; i < page.size() && i <= about + 3; ++i) {
+                const QString text = page[i].text;
                 if (text.startsWith(QLatin1String("<a href=")))
                     set(i, emptyAnchor);
                 else if (i == label || text == QLatin1String("Terms of use"))
@@ -561,24 +566,24 @@ void planTable(const QList<Slot> &slots, const Config &config, QList<SlotEdit> *
         }
     }
 
-    const QList<RowGroup> groups = tableGroups(slots);
+    const QList<RowGroup> groups = tableGroups(page);
     QSet<int> assigned;
     for (const Link &link : config.links) {
         int pick = -1;
         for (int g = 0; g < groups.size() && pick < 0; ++g) {
             if (assigned.contains(g)) continue;
-            if (slots[groups[g].name].text.compare(link.name, Qt::CaseInsensitive) == 0) pick = g;
+            if (page[groups[g].name].text.compare(link.name, Qt::CaseInsensitive) == 0) pick = g;
         }
         for (int g = 0; g < groups.size() && pick < 0; ++g) {
             if (assigned.contains(g)) continue;
             for (const TableRow &row : groups[g].rows) {
                 if (row.label >= 0 && !link.label.isEmpty()
-                    && slots[row.label].text.compare(link.label, Qt::CaseInsensitive) == 0) {
+                    && page[row.label].text.compare(link.label, Qt::CaseInsensitive) == 0) {
                     pick = g;
                     break;
                 }
                 if (row.url >= 0 && !link.url.isEmpty()
-                    && slots[row.url].text.compare(link.url, Qt::CaseInsensitive) == 0) {
+                    && page[row.url].text.compare(link.url, Qt::CaseInsensitive) == 0) {
                     pick = g;
                     break;
                 }
@@ -602,7 +607,7 @@ void planTable(const QList<Slot> &slots, const Config &config, QList<SlotEdit> *
         const QString label = link.label.trimmed().isEmpty() ? displayFor(link.url) : link.label;
         for (const TableRow &row : groups[pick].rows) {
             if (!label.isEmpty() && row.fragment >= 0) {
-                QString fragment = slots[row.fragment].text;
+                QString fragment = page[row.fragment].text;
                 const int close = fragment.lastIndexOf(QLatin1String("</a>"));
                 const int open = close < 0 ? -1 : fragment.lastIndexOf(QLatin1Char('>'), close);
                 if (open >= 0 && close > open)
@@ -615,13 +620,13 @@ void planTable(const QList<Slot> &slots, const Config &config, QList<SlotEdit> *
     }
 }
 
-bool applyTable(QByteArray &image, const QList<Slot> &slots, const QList<SlotEdit> &edits,
+bool applyTable(QByteArray &image, const QList<Slot> &page, const QList<SlotEdit> &edits,
                 int *written, QString *error)
 {
     int count = 0;
     for (const SlotEdit &edit : edits) {
-        if (edit.index < 0 || edit.index >= slots.size()) continue;
-        if (!writeSlot(image, slots[edit.index], edit.text, error)) return false;
+        if (edit.index < 0 || edit.index >= page.size()) continue;
+        if (!writeSlot(image, page[edit.index], edit.text, error)) return false;
         ++count;
     }
     if (written) *written = count;
@@ -1985,10 +1990,10 @@ Result apply(const QString &exePath, bool enabled, const Config &rawConfig)
     // The compiled copy of the page is the one the window shows, so it is
     // planned before anything is written: "already applied" has to mean both
     // copies agree, not just the .qml nothing displays.
-    const QList<Slot> slots = aboutTable(original);
+    const QList<Slot> page = aboutTable(original);
     QList<SlotEdit> tableEdits;
     QStringList unlisted;
-    if (!slots.isEmpty() && enabled) planTable(slots, config, &tableEdits, &unlisted);
+    if (!page.isEmpty() && enabled) planTable(page, config, &tableEdits, &unlisted);
 
     // Restoring needs the words that were there before, and the only copy of
     // them is the .bak this tool writes before its first edit. Slots are fixed
@@ -2000,11 +2005,11 @@ Result apply(const QString &exePath, bool enabled, const Config &rawConfig)
         if (bak.open(QIODevice::ReadOnly)) backup = bak.readAll();
     }
     const QList<Slot> backupSlots = backup.isEmpty() ? QList<Slot>() : aboutTable(backup);
-    const bool canRestore = !backupSlots.isEmpty() && backupSlots.size() == slots.size();
+    const bool canRestore = !backupSlots.isEmpty() && backupSlots.size() == page.size();
     bool tablePatched = false;
     if (canRestore)
-        for (int i = 0; i < slots.size(); ++i)
-            if (slots[i].text != backupSlots[i].text) { tablePatched = true; break; }
+        for (int i = 0; i < page.size(); ++i)
+            if (page[i].text != backupSlots[i].text) { tablePatched = true; break; }
 
     if (enabled && before.applied && sameConfig(before.config, config) && tableEdits.isEmpty())
         return { true, QStringLiteral("This About page content is already applied.") };
@@ -2021,7 +2026,7 @@ Result apply(const QString &exePath, bool enabled, const Config &rawConfig)
     QString qmlError;
     const bool hasQmlPage = findDocs(original, QStringLiteral("PlrAboutSetting.qml"), &qmlDocs, &qmlError);
     const bool qmlWritable = hasQmlPage && (!enabled || before.qmlEditable);
-    if (enabled && !qmlWritable && slots.isEmpty())
+    if (enabled && !qmlWritable && page.isEmpty())
         return refuse(QStringLiteral("The About page on this build was found by scanning and cannot be "
                                      "rewritten; no file was written."));
     if (qmlWritable
@@ -2030,20 +2035,20 @@ Result apply(const QString &exePath, bool enabled, const Config &rawConfig)
                                                        "no file was written.") : error);
 
     int strings = 0;
-    if (!slots.isEmpty()) {
+    if (!page.isEmpty()) {
         if (enabled) {
-            if (!applyTable(changed, slots, tableEdits, &strings, &error)) return refuse(error);
+            if (!applyTable(changed, page, tableEdits, &strings, &error)) return refuse(error);
         } else if (canRestore) {
-            for (int i = 0; i < slots.size(); ++i) {
-                if (slots[i].text == backupSlots[i].text) continue;
-                const int size = slots[i].end - slots[i].marker;
-                if (backupSlots[i].end - backupSlots[i].marker != size
-                    || !ByteUtils::inRange(backup, backupSlots[i].marker, size)
-                    || !ByteUtils::inRange(changed, slots[i].marker, size))
-                    return refuse(QStringLiteral("The backup does not line up with this EXE, so the "
-                                                 "compiled About text cannot be put back; nothing was "
-                                                 "written. Restore the .bak file instead."));
-                changed.replace(slots[i].marker, size, backup.mid(backupSlots[i].marker, size));
+            // Each slot is restored by writing its own words back, not by
+            // copying a byte span: a slot is as long as the text it holds, so
+            // the span of a record that was shortened is not the span it had.
+            // The padding behind every record is zeros on both sides, so the
+            // result is the original bytes.
+            for (int i = 0; i < page.size(); ++i) {
+                if (page[i].text == backupSlots[i].text) continue;
+                if (!writeSlot(changed, page[i], backupSlots[i].text, &error))
+                    return refuse(QStringLiteral("The compiled About text cannot be put back from the "
+                                                 "backup: %1").arg(error));
                 ++strings;
             }
         } else if (tablePatched) {
@@ -2066,7 +2071,7 @@ Result apply(const QString &exePath, bool enabled, const Config &rawConfig)
     // The compiled page is read back too: the words the window will print are
     // checked against the config, not only the .qml that was written next to
     // them.
-    if (!slots.isEmpty()) {
+    if (!page.isEmpty()) {
         const QList<Slot> written = aboutTable(changed);
         if (enabled) {
             QList<SlotEdit> left;
@@ -2099,7 +2104,7 @@ Result apply(const QString &exePath, bool enabled, const Config &rawConfig)
     bool diskOk = disk.supported;
     if (diskOk && qmlWritable)
         diskOk = disk.applied == enabled && (!enabled || sameConfig(disk.config, config));
-    if (diskOk && enabled && !slots.isEmpty()) {
+    if (diskOk && enabled && !page.isEmpty()) {
         QList<SlotEdit> left;
         QStringList ignored;
         planTable(aboutTable(onDisk), config, &left, &ignored);
