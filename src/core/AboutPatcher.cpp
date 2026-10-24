@@ -270,14 +270,18 @@ bool parseSlot(const QByteArray &image, int marker, Slot *slot)
         if (unit == 0xFFFE || unit == 0xFFFF) return false;
         text.append(QChar(unit));
     }
-    int end = at + bytes;
-    while (end < image.size() && image.at(end) == '\0' && end - (at + bytes) < 16) ++end;
     // The slot owns everything up to the next record's marker. Measuring with
     // the marker (and not only with the zeros) keeps a record recognizable
     // after it was rewritten shorter - otherwise the page could be edited once
-    // and never read again.
+    // and never read again. The last record of a table has no next marker: its
+    // slot is the text and the zero padding behind it.
+    int end = at + bytes;
     const qsizetype next = image.indexOf(slotMarker(), at + bytes);
-    if (next > 0 && next - (at + bytes) <= 4096) end = int(next);
+    if (next > 0 && next - (at + bytes) <= 4096) {
+        end = int(next);
+    } else {
+        while (end < image.size() && image.at(end) == '\0' && end - (at + bytes) < 4096) ++end;
+    }
     Slot parsed;
     parsed.marker = marker;
     parsed.textAt = at;
@@ -2035,16 +2039,16 @@ Result apply(const QString &exePath, bool enabled, const Config &rawConfig)
         if (enabled) {
             if (!applyTable(changed, page, tableEdits, &strings, &error)) return refuse(error);
         } else if (canRestore) {
+            // Each slot is restored by writing its own words back, not by
+            // copying a byte span: a slot is as long as the text it holds, so
+            // the span of a record that was shortened is not the span it had.
+            // The padding behind every record is zeros on both sides, so the
+            // result is the original bytes.
             for (int i = 0; i < page.size(); ++i) {
                 if (page[i].text == backupSlots[i].text) continue;
-                const int size = page[i].end - page[i].marker;
-                if (backupSlots[i].end - backupSlots[i].marker != size
-                    || !ByteUtils::inRange(backup, backupSlots[i].marker, size)
-                    || !ByteUtils::inRange(changed, page[i].marker, size))
-                    return refuse(QStringLiteral("The backup does not line up with this EXE, so the "
-                                                 "compiled About text cannot be put back; nothing was "
-                                                 "written. Restore the .bak file instead."));
-                changed.replace(page[i].marker, size, backup.mid(backupSlots[i].marker, size));
+                if (!writeSlot(changed, page[i], backupSlots[i].text, &error))
+                    return refuse(QStringLiteral("The compiled About text cannot be put back from the "
+                                                 "backup: %1").arg(error));
                 ++strings;
             }
         } else if (tablePatched) {

@@ -224,16 +224,23 @@ int hideTitlebarElements(QString &qml, const QStringList &ids)
                 continue;
             if (qml.mid(idBinding.valueBegin, idBinding.valueEnd - idBinding.valueBegin) != id)
                 continue;
-            // The tag is only ever written by us, so finding it inside the
-            // element means an earlier removal already hid this label.
-            if (qml.mid(object.open, object.end - object.open).contains(kTitlebarHideTag))
-                break;
+            // A tag from an older version of this row, or the edit itself, is
+            // what "already hidden" looks like. The current edit adds no tag -
+            // a tag would be bytes the record does not have - so the marker is
+            // structural: a label that prints nothing, or a `visible` member
+            // that is dead.
+            const QString body = qml.mid(object.open, object.end - object.open);
+            if (body.contains(kTitlebarHideTag)) break;
             // 1) A member the player already reads is switched off in place.
             //    `false` fits wherever the expression was at least five
             //    characters long; anything shorter takes `!1`, also false.
             QmlText::Binding visible;
             if (QmlText::binding(masked, object.open, object.end, QStringLiteral("visible"), &visible)) {
                 const QString value = qml.mid(visible.valueBegin, visible.valueEnd - visible.valueBegin);
+                const QString trimmed = value.trimmed();
+                if (trimmed == QLatin1String("false") || trimmed == QLatin1String("0")
+                    || trimmed == QLatin1String("!1"))
+                    break; // switched off by an earlier pass
                 const QString replacement = value.size() >= 5 ? QStringLiteral("false")
                                            : value.size() >= 2 ? QStringLiteral("!1")
                                                                : QStringLiteral("0");
@@ -247,7 +254,7 @@ int hideTitlebarElements(QString &qml, const QStringList &ids)
             if (QmlText::binding(masked, object.open, object.end, QStringLiteral("text"), &text)) {
                 const QString value = qml.mid(text.valueBegin, text.valueEnd - text.valueBegin);
                 // Already empty (the quotes may or may not be part of the
-                // value): nothing to do, and nothing to grow.
+                // value): this label was hidden by an earlier pass.
                 if (value.trimmed().isEmpty() || value == QLatin1String("\"\"")) break;
                 // A one-character expression cannot be replaced by an empty
                 // string without adding a byte, so it is left to the fallback.
