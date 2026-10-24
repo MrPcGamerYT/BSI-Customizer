@@ -166,19 +166,39 @@ the page, its current text, every row and the reason if the card refuses — so
 nothing has to be guessed.
 
 A BlueStacks player carries the page **twice**: `PlrAboutSetting.qml` as text,
-and a compiled copy of the same page that the window actually loads. The text
-the page prints — the headings, every row's words and address, the copyright
-sentence, the update button's caption — is a UTF-16LE record of that compiled
-unit's string table, and editing only the `.qml` reaches a copy nothing
-displays (which is exactly what "it patches but the page never changes" looks
-like). The card therefore reads that table too, lists its words, and rewrites
-them **in place**: each record has a fixed slot, so a replacement is written
-inside it and the rest is padded — the file never grows and no offset moves.
-A text longer than its slot is refused with the length that fits, never
-truncated. The About sentence is the one literal the player prints in front of
-its "Terms of use" anchor, so the editor's text replaces the words and keeps
-(or clears) that anchor, which is how the field can show the whole sentence the
-page prints while the record only holds the part before the link.
+and a compiled copy of the same page that the window actually loads. Every word
+the page prints — the headings, each row's name, the address it opens, the
+words the link shows, the copyright sentence, the update button's caption — is
+a UTF-16LE record of that compiled unit's string table, and editing only the
+`.qml` reaches a copy nothing displays (which is exactly what "it patches but
+the page never changes" looks like).
+
+The card therefore reads **that** table, and the fields show what it says:
+`FF FF FF FF`, the character count, the header size, then the text. The page is
+not recognized by any sentence — it is found by the headings it never loses
+(`Important links`, `About and other info`) and parsed by shape:
+
+```
+[name] [nxt_cn] " - <a …>label</a>" " - <a …>label</a>" [address] [address]
+```
+
+so the name, the words the anchor prints and the address it opens are read as
+three separate things, for both the normal and the China branch of a row. Each
+row's **position** is its identity, which is what makes an edited page read back
+exactly and a second apply a no-op — and a hidden row stays a row (its name and
+printed words are blanked, its anchor is left pointing nowhere) instead of
+disappearing from the list, so it can be switched back on later with its address
+intact. The name it had is kept in the hidden anchor's `href` — on a player that
+carries no `.qml`, that is the only copy of it left — so showing the row again
+gives back its name, its words and its address.
+
+Every replacement is written **inside its own record**: the count is updated and
+the rest of the slot is padded, so the file never grows and no offset moves. A
+text longer than its slot is refused with the length that fits, never truncated,
+and the link fields stop at the room their own record has, so a value the player
+would have to refuse cannot even be typed. The About sentence is the literal
+right after its heading, with the "Terms of use" link the page appends to it kept
+when the edited text still ends with those words and cleared when it does not.
 
 Applying writes every copy of the page the file carries, then reads the page
 back **from the file on disk** — a write that does not read back is undone and
@@ -194,12 +214,12 @@ section headings) and only changes what it says: your text replaces the
 copyright line, and each link row is rewritten with the name and address you
 left in it, using `Qt.openUrlExternally` — a bare e-mail address becomes a
 `mailto:` link and a bare domain gets `https://`, so an edited row always
-opens something. Rows ticked off, plus the stock QQ row, are hidden. The
-**Check for updates** button is disabled by hiding it together with its
-"More info" and incompatible-version rows, so nothing on the page points at
-BlueStacks updates any more; on the compiled copy its caption is cleared the
-same way. Press **Restore stock About** to restore the
-untouched page byte-for-byte.
+opens something. Rows ticked off, any stock row the list does not name, and the
+stock QQ row are hidden. The **Check for updates** button is disabled by hiding
+it together with its "More info" and incompatible-version rows, so nothing on
+the page points at BlueStacks updates any more; on the compiled copy its caption
+is cleared the same way. Press **Restore stock About** to restore the untouched
+page byte-for-byte.
 
 Both tools work on the Qt 5 and Qt 6 players: BlueStacks 5.22 and the older
 5.10 build, plus the MSI App Player 5.9 and the current MSI build. The

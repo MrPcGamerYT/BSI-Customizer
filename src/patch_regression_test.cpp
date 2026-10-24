@@ -4788,14 +4788,28 @@ Window {
                   && listed(QStringLiteral("http://support.bluestacks.com")),
               QStringLiteral("the words the window prints are listed (%1 records)")
                   .arg(stock.table.size()));
-        check(stock.config.text == copyright,
-              QStringLiteral("the text field shows the sentence the window prints (%1)")
+        check(stock.config.text == copyright + QStringLiteral("Terms of use"),
+              QStringLiteral("the text field shows the sentence and its link, as the page prints "
+                             "them (%1)")
                   .arg(stock.config.text.left(60)));
+        check(stock.config.links.size() == 2,
+              QStringLiteral("both link rows are found by structure (%1)")
+                  .arg(stock.config.links.size()));
+        check(!stock.config.links.isEmpty()
+                  && stock.config.links.at(0).name == QLatin1String("Support email")
+                  && stock.config.links.at(0).id == QLatin1String("row0"),
+              QStringLiteral("the first row is the one the page prints first (%1)")
+                  .arg(stock.config.links.isEmpty() ? QString() : stock.config.links.at(0).name));
+        check(stock.config.links.size() > 1
+                  && stock.config.links.at(1).name == QLatin1String("Support")
+                  && stock.config.links.at(1).url == QLatin1String("http://support.bluestacks.com"),
+              QStringLiteral("a row's name and the address it opens are read separately"));
 
         AboutPatcher::Config config;
         config.text = QStringLiteral("Patched by BSI Customizer: support is closed.");
         AboutPatcher::Link support;
-        support.id = QStringLiteral("iSupportText");
+        // The row's position is its id on the compiled path.
+        support.id = QStringLiteral("row1");
         support.name = QStringLiteral("Support");
         support.url = QStringLiteral("https://example.com/help");
         config.links << support;
@@ -4819,6 +4833,92 @@ Window {
         check(reread.compiledPage && reread.config.text == config.text,
               QStringLiteral("the edited page reads back from the file (%1)")
                   .arg(reread.config.text.left(60)));
+        // The row it was written into is found again by its position, so a second
+        // apply has nothing left to do - this is the "it does not even see the
+        // text it already changed" failure.
+        const auto again = AboutPatcher::apply(path, true, config);
+        check(again.ok && again.msg.contains(QLatin1String("already applied")),
+              QStringLiteral("applying the same content twice changes nothing (%1)").arg(again.msg));
+
+        // Hiding a row must leave the row recognizable: its name and printed
+        // words go, but the record that holds them stays, so a later apply can
+        // still find the same row and switch it back on.
+        AboutPatcher::Config hidden = reread.config;
+        hidden.links[1].hidden = true;
+        const auto hid = AboutPatcher::apply(path, true, hidden);
+        check(hid.ok, QStringLiteral("a row can be hidden (%1)").arg(hid.msg));
+        const auto afterHide = AboutPatcher::analyze(read(path));
+        check(afterHide.config.links.size() == 2 && afterHide.config.links.at(1).hidden,
+              QStringLiteral("the hidden row reads back as hidden and keeps its place"));
+        check(read(path).contains(utf16(QStringLiteral(" - <a href=\"hidden:Support\"> </a>"))),
+              "a hidden row prints nothing: its anchor shows a blank and points at its own name, "
+              "which is the only copy of that name left once the row is blank");
+        check(afterHide.config.links.at(1).name == QLatin1String("Support"),
+              QStringLiteral("so hiding does not lose the name (%1)")
+                  .arg(afterHide.config.links.at(1).name));
+        check(afterHide.config.links.at(1).url == reread.config.links.at(1).url,
+              QStringLiteral("and the address it opened is kept (%1), so the row can be "
+                             "switched back on")
+                  .arg(afterHide.config.links.at(1).url));
+        const auto againHidden = AboutPatcher::apply(path, true, hidden);
+        check(againHidden.ok && againHidden.msg.contains(QLatin1String("already applied")),
+              QStringLiteral("hiding twice is a no-op too (%1)").arg(againHidden.msg));
+
+        AboutPatcher::Config back = afterHide.config;
+        back.links[1].hidden = false;
+        back.links[1].url = QStringLiteral("http://support.bluestacks.com");
+        back.links[1].label = QStringLiteral("support.bluestacks.com");
+        const auto shown = AboutPatcher::apply(path, true, back);
+        check(shown.ok, QStringLiteral("the row can be switched back on (%1)").arg(shown.msg));
+        check(read(path).contains(utf16(QStringLiteral(">support.bluestacks.com</a>"))),
+              "and it prints its words again");
+        check(!read(path).contains(utf16(QStringLiteral("hidden:"))),
+              "its anchor points somewhere real again, not at the name it kept");
+
+        // A config that names one row - what an older version wrote, and what
+        // "replace every stock link with mine" means - has to leave the page
+        // saying exactly that: the rows it does not name are hidden, not left
+        // printing the stock addresses.
+        AboutPatcher::Config one;
+        one.text = QStringLiteral("Only this row is mine.");
+        AboutPatcher::Link only;
+        only.id = QStringLiteral("row0");
+        only.name = QStringLiteral("Help");
+        only.url = QStringLiteral("https://example.com/help");
+        one.links << only;
+        const auto singly = AboutPatcher::apply(path, true, one);
+        check(singly.ok, QStringLiteral("a single-row config applies (%1)").arg(singly.msg));
+        const auto oneAfter = AboutPatcher::analyze(read(path));
+        check(oneAfter.config.links.size() == 2 && !oneAfter.config.links.at(0).hidden
+                  && oneAfter.config.links.at(1).hidden,
+              QStringLiteral("the rows it does not name are hidden (%1)")
+                  .arg(oneAfter.config.links.size() > 1 && oneAfter.config.links.at(1).hidden
+                           ? QStringLiteral("row 1 hidden")
+                           : QStringLiteral("row 1 still shown")));
+        const auto againOne = AboutPatcher::apply(path, true, one);
+        check(againOne.ok && againOne.msg.contains(QLatin1String("already applied")),
+              QStringLiteral("and applying it twice is still a no-op (%1)").arg(againOne.msg));
+
+        // A record's room is finite and the card is told how much of it is
+        // left, so a rename that the player would have to refuse cannot be
+        // typed in the first place - and if it is forced, nothing is written.
+        const auto limited = AboutPatcher::analyze(read(path));
+        check(limited.config.links.size() == 2
+                  && limited.config.links.at(1).nameMax
+                         >= limited.config.links.at(1).name.size()
+                  && limited.config.links.at(1).urlMax
+                         >= limited.config.links.at(1).url.size(),
+              QStringLiteral("each row reports the room its own record has (name %1, "
+                             "address %2)")
+                  .arg(limited.config.links.at(1).nameMax)
+                  .arg(limited.config.links.at(1).urlMax));
+        AboutPatcher::Config wide = limited.config;
+        wide.links[1].name = QString(limited.config.links.at(1).nameMax + 1, QLatin1Char('n'));
+        const QByteArray beforeWide = read(path);
+        const auto refuseName = AboutPatcher::apply(path, true, wide);
+        check(!refuseName.ok && refuseName.msg.contains(QLatin1String("holds")),
+              QStringLiteral("a name longer than its record is refused (%1)").arg(refuseName.msg));
+        check(read(path) == beforeWide, "and a refused apply writes nothing at all");
 
         // A text that does not fit its slot is refused instead of overwriting
         // the next record.

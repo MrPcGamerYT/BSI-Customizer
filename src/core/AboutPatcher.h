@@ -28,6 +28,12 @@ struct Link
     // stock page does", which is also what an older config file implies.
     QString label;
     bool hidden = false;
+    // How many characters the page's record has room for, when the link came
+    // from the compiled copy of the page (a fixed-size record cannot grow).
+    // 0 means "no known limit": the .qml this card also edits is a text file.
+    int nameMax = 0;
+    int labelMax = 0;
+    int urlMax = 0;
 };
 
 struct Config
