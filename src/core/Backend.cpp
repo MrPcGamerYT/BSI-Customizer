@@ -1433,6 +1433,9 @@ QVariantMap Backend::aboutPageState()
         // found the page that is on screen.
         { QStringLiteral("compiledPage"), false },
         { QStringLiteral("strings"), QVariantList() },
+        // The longest sentence the compiled page can hold (0 = no compiled
+        // page, so no limit to enforce here).
+        { QStringLiteral("textMax"), 0 },
     };
     const QString path = m_settings->exePath();
     if (path.isEmpty() || !QFileInfo::exists(path)) return map;
@@ -1455,6 +1458,7 @@ QVariantMap Backend::aboutPageState()
     // mis-decoded one (and to copy out when a build reports something odd).
     map[QStringLiteral("source")] = state.source.left(2000);
     map[QStringLiteral("compiledPage")] = state.compiledPage;
+    map[QStringLiteral("textMax")] = state.textMax;
     QVariantList strings;
     for (const auto &entry : state.table)
         strings << QVariantMap {
