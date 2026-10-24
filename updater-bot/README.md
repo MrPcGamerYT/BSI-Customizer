@@ -40,11 +40,13 @@ finds it by looking for a `manifest.json` attachment in the newest messages.
    publisher needs the send/attach/manage bits.
 5. **Check it before publishing anything**
    ```bash
-   DISCORD_BOT_TOKEN=... node updater-bot/setup.mjs --channel <channelId>
+   node updater-bot/setup.mjs --auth-file auth.json
    ```
-   It reads only: it prints the bot, the server, the channel, whether the app can
-   read it, whether publishing will work, and the exact `auth.json` block. Exit
-   code 0 means the updater will work from that channel.
+   Reads the `updater` block out of the file, lints it the way the app does
+   (notes markdown-mangled values, a missing block, ignored keys), then checks
+   the bot, server, channel and permissions live. Read-only; it prints the exact
+   block to paste. Exit code 0 means the updater will work from that channel.
+   `--channel`/`--token`/`DISCORD_BOT_TOKEN` work instead of a file.
 6. **Configure this script**
    ```bash
    cp updater-bot/config.example.json updater-bot/config.json

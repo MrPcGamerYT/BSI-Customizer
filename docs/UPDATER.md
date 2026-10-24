@@ -283,9 +283,13 @@ unchanged.
    `109568` = all five. A build that only *reads* needs `66560`
    (View Channel + Read Message History).
    Verify the whole thing without publishing anything (read-only, changes
-   nothing on Discord):
+   nothing on Discord). Point it at the actual `auth.json` and it also lints
+   that file the way the app reads it — markdown-mangled values, a missing
+   `updater` block, ignored keys:
 
    ```bash
+   node updater-bot/setup.mjs --auth-file auth.json
+   # or, with the values on the command line / in the environment:
    DISCORD_BOT_TOKEN=... node updater-bot/setup.mjs --channel <channelId>
    ```
 
