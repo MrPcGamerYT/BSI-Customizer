@@ -1778,6 +1778,7 @@ int runPatchRegressionTests()
             "        }\r\n"
             "        Text {\r\n"
             "            id: iImageTxt\r\n"
+            "            visible: uiBackend.oem === \"msi5\"\r\n"
             "            text: \"N32\"\r\n"
             "            opacity: 0.7\r\n"
             "        }\r\n"
@@ -1786,9 +1787,13 @@ int runPatchRegressionTests()
         // A translator table: the same word, UTF-16LE, exactly what the old
         // removal silently zeroed.
         const QByteArray german = QByteArray("v\0e\0r\0s\0i\0o\0n\0", 14);
+        // Stored raw, not zlib'd: the point of the test is that those bytes come
+        // out of the patch byte-for-byte, which a compressed record would hide.
+        QSet<QString> raw;
+        raw.insert(QStringLiteral("i18n.de-DE.qm"));
         auto r = resourcesBytes({ qMakePair(QStringLiteral("i18n.de-DE.qm"), german),
                                   qMakePair(QStringLiteral("PlrTopbar.qml"), topbar.toUtf8()) },
-                                false, {});
+                                false, raw);
         addRegistration(r, false);
         const QString path = temp.filePath(QStringLiteral("titlebar-removals.exe"));
         write(path, r.f.bytes);
@@ -1809,59 +1814,32 @@ int runPatchRegressionTests()
               "the version Text element gains a visible: false member");
         check(text.contains(QStringLiteral("text: plrBackend.version")),
               "its text binding is left alone, so the player still builds the label it hides");
-        check(text.count(QStringLiteral("visible: false // BSI CUSTOMIZER: titlebar hide")) == 1
-                  && text.contains(QStringLiteral("text: \"N32\"")),
-              "the engine label is a separate removal and stays visible");
+        check(text.count(QStringLiteral("BSI CUSTOMIZER: titlebar hide")) == 1
+                  && text.contains(QStringLiteral("text: \"N32\""))
+                  && text.contains(QStringLiteral("visible: uiBackend.oem === \"msi5\"")),
+              "the engine label is a separate removal and stays visible with its own expression");
 
         const auto engine = ExtrasPatcher::applyRemovals(
             path, { QStringLiteral("Titlebar Instance Label") });
         check(engine.ok && engine.msg.contains(QLatin1String("Hid 1 title-bar label")),
               QStringLiteral("the engine label is hidden by its own row (%1)").arg(engine.msg));
         const QString both = resourceText(read(path), r, QStringLiteral("PlrTopbar.qml"));
-        check(both.count(QStringLiteral("visible: false // BSI CUSTOMIZER: titlebar hide")) == 2,
+        check(both.count(QStringLiteral("BSI CUSTOMIZER: titlebar hide")) == 2,
               QStringLiteral("both labels are hidden, each exactly once (%1)")
-                  .arg(both.count(QStringLiteral("visible: false // BSI CUSTOMIZER: titlebar hide"))));
+                  .arg(both.count(QStringLiteral("BSI CUSTOMIZER: titlebar hide"))));
+        check(both.contains(QStringLiteral("visible: false /* BSI CUSTOMIZER: titlebar hide */ && ("
+                                          "uiBackend.oem === \"msi5\")")),
+              "an existing visible: expression is kept and ANDed with false");
         check(read(path).contains(german),
               "and the string table is still intact after both removals");
 
         const auto repeat = ExtrasPatcher::applyRemovals(
             path, { QStringLiteral("Titlebar Version") });
-        check(repeat.ok && resourceText(read(path), r, QStringLiteral("PlrTopbar.qml"))
-                               .count(QStringLiteral("visible: false // BSI CUSTOMIZER: titlebar hide")) == 2,
-              QStringLiteral("repeating a title-bar removal changes nothing (%1)").arg(repeat.msg));
-    }
-
-    std::printf("[about] a renamed About line is still read, not left empty\n");
-    {
-        // The editor prefills itself with what the page prints. That lookup
-        // used to depend on one object id (iTermsOfUseText); a build that
-        // renames the row made the whole card read as empty. The copyright
-        // marker now finds the line by what it says.
-        const QString about = QStringLiteral(
-            "import QtQuick 2.15\r\n"
-            "UiScrollView {\r\n"
-            "    UiColumnLayout {\r\n"
-            "        id: iContentLayout\r\n"
-            "        UiColumnLayout {\r\n"
-            "            Layout.fillWidth: true\r\n"
-            "            Text { text: qsTranslate(\"QObject\", \"About and other info\") }\r\n"
-            "            UiTextUrl {\r\n"
-            "                id: iTheSmallPrint\r\n"
-            "                text: qsTranslate(\"QObject\", \"©2011 through 2026 now.gg, Inc. All rights reserved worldwide. By using BlueStacks you agree to our \") + \"<a href=\\\"javascript:void(0)\\\">\" + qsTranslate(\"QObject\", \"Terms of use\") + \"</a>\"\r\n"
-            "                onLinkActivated: uiBackend.openHelpArticle(\"terms_of_use\")\r\n"
-            "            }\r\n"
-            "        }\r\n"
-            "    }\r\n"
-            "}\r\n");
-        auto r = resources({ { QStringLiteral("PlrAboutSetting.qml"), about } }, true, {});
-        addRegistration(r, false);
-        const auto state = AboutPatcher::analyze(r.f.bytes);
-        check(state.supported && !state.applied,
-              QStringLiteral("the renamed About page is recognised (%1)").arg(state.detail));
-        check(state.config.text.contains(QLatin1String("2011 through 2026"))
-                  && state.config.text.contains(QLatin1String("Terms of use")),
-              QStringLiteral("the editor shows the text the page prints now (%1)")
-                  .arg(state.config.text.left(90)));
+        check(repeat.ok && repeat.msg.contains(QLatin1String("already hidden")),
+              QStringLiteral("a repeated removal reports the label as already hidden (%1)").arg(repeat.msg));
+        check(resourceText(read(path), r, QStringLiteral("PlrTopbar.qml"))
+                      .count(QStringLiteral("BSI CUSTOMIZER: titlebar hide")) == 2,
+              "a repeated removal does not stack a second visible: member");
     }
 
     std::printf("[layout] sidebar-to-titlebar layout tweak by QML\n");
@@ -4105,6 +4083,20 @@ Window {
                   && stock.config.links.value(2).url == QStringLiteral("http://www.bluestacks.com"),
               QStringLiteral("the website row keeps its name and handler URL (%1 -> %2)")
                   .arg(stock.config.links.value(2).name, stock.config.links.value(2).url));
+
+        // A build that renames the copyright row (or never had the id) still has
+        // to prefill: the line is located by the marker it prints, not by its id.
+        QString renamed = about;
+        renamed.replace(QStringLiteral("id: iTermsOfUseText"), QStringLiteral("id: iTheSmallPrint"));
+        auto renamedFixture = resources({ { QStringLiteral("PlrAboutSetting.qml"), renamed } }, true, {});
+        addRegistration(renamedFixture, false);
+        const auto renamedState = AboutPatcher::analyze(renamedFixture.f.bytes);
+        check(renamedState.supported && !renamedState.applied,
+              QStringLiteral("an About page whose copyright row lost its id is still recognised (%1)")
+                  .arg(renamedState.detail));
+        check(renamedState.config.text == stock.config.text,
+              QStringLiteral("the renamed row is read by the text it prints (%1)")
+                  .arg(renamedState.config.text));
 
         const QString aboutPath = temp.filePath(QStringLiteral("about-page.exe"));
         write(aboutPath, original);

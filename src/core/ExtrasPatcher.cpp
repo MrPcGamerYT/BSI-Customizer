@@ -171,20 +171,22 @@ struct TitlebarEdit { int begin = 0, length = 0; QString text; };
 
 bool titlebarHiddenSite(const QString &qml, const QmlText::Object &object, int *at, QString *text)
 {
-    const QString nl = qml.contains(QLatin1String("\\r\\n")) ? QStringLiteral("\\r\\n")
-                                                             : QStringLiteral("\\n");
+    const QString nl = qml.contains(QLatin1String("\r\n")) ? QStringLiteral("\r\n")
+                                                          : QStringLiteral("\n");
     int probe = object.open + 1;
-    while (probe < qml.size() && (qml.at(probe) == QLatin1Char(' ') || qml.at(probe) == QLatin1Char('\\t')))
+    while (probe < qml.size() && (qml.at(probe) == QLatin1Char(' ') || qml.at(probe) == QLatin1Char('\t')))
         ++probe;
     const bool membersOnNewLine = probe < object.end
-        && (qml.at(probe) == QLatin1Char('\\n') || qml.at(probe) == QLatin1Char('\\r'));
+        && (qml.at(probe) == QLatin1Char('\n') || qml.at(probe) == QLatin1Char('\r'));
     if (membersOnNewLine) {
-        const int newline = qml.indexOf(QLatin1Char('\\n'), probe);
+        // Insert a tagged member on its own line, indented like the first one
+        // already inside the element.
+        const int newline = qml.indexOf(QLatin1Char('\n'), probe);
         if (newline < 0 || newline >= object.end) return false;
         const int lineStart = newline + 1;
         QString indent;
         int i = lineStart;
-        while (i < qml.size() && (qml.at(i) == QLatin1Char(' ') || qml.at(i) == QLatin1Char('\\t')))
+        while (i < qml.size() && (qml.at(i) == QLatin1Char(' ') || qml.at(i) == QLatin1Char('\t')))
             indent += qml.at(i++);
         *at = lineStart;
         *text = indent + QStringLiteral("visible: false // ") + kTitlebarHideTag + nl;
@@ -211,10 +213,14 @@ int hideTitlebarElements(QString &qml, const QStringList &ids)
                 continue;
             if (qml.mid(idBinding.valueBegin, idBinding.valueEnd - idBinding.valueBegin) != id)
                 continue;
+            // The tag is only ever written by us, so finding it inside the
+            // element (on the `visible:` line or the member added below) means
+            // an earlier removal already hid this label - leave it alone.
+            if (qml.mid(object.open, object.end - object.open).contains(kTitlebarHideTag))
+                break;
             QmlText::Binding visible;
             if (QmlText::binding(masked, object.open, object.end, QStringLiteral("visible"), &visible)) {
                 const QString value = qml.mid(visible.valueBegin, visible.valueEnd - visible.valueBegin);
-                if (value.startsWith(kTitlebarHidePrefix)) break; // hidden by us already
                 edits << TitlebarEdit { visible.valueBegin, visible.valueEnd - visible.valueBegin,
                                         kTitlebarHidePrefix + value + QLatin1Char(')') };
             } else {
