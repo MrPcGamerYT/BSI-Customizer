@@ -240,7 +240,14 @@ public:
      * message it did not send itself.
      */
     static QString explainChannel(const QJsonArray &messages, const QString &manifestName,
-                                  bool allowTextReleases);
+                                  bool allowTextReleases, const QString &applicationId = QString());
+    /**
+     * The application ID of a bot token. A Discord token starts with the
+     * base64url form of the bot's user ID, which is the same number as the
+     * application ID - enough to link straight to the page that carries the
+     * Message Content toggle. Empty when the token is not shaped like one.
+     */
+    static QString applicationIdFromToken(const QString &botToken);
     /** Attachment URL for `fileName` inside a message found by the above. */
     static QString attachmentUrl(const QJsonObject &message, const QString &fileName);
     /** The exact byte string the publisher signs. */

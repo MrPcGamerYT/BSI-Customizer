@@ -540,17 +540,33 @@ node updater-bot/setup.mjs --auth-file auth.json
 #   PROBLEM  Discord returns no text and no attachments for any message in the channel ...
 ```
 
+**The bot does not have to be online.** The updater never opens a gateway
+connection: it makes one `GET /channels/{id}/messages` and reads the JSON. A bot
+that shows as offline in the member list still reads that channel perfectly -
+"the bot is offline" is never the reason a release goes undetected.
+
 Three fixes, in order of preference:
 
 1. **Enable the intent** - Discord Developer Portal -> your application -> *Bot* ->
    *Privileged Gateway Intents* -> **Message Content Intent** -> Save. An
    unverified app does not need Discord's approval for this; the toggle is enough
    and takes effect immediately (the app is not restarted, it is a per-app
-   setting).
+   setting). The app knows its own application ID from the token, so the error
+   prints the exact page:
+   `https://discord.com/developers/applications/<APP_ID>/bot`.
 2. **Mention the bot in the release message.** Messages that mention the app are
-   exempt from the restriction, so a release message that starts with `@<your bot>`
-   is readable with the intent off. `publish.mjs` now appends a plain-text mention
-   of the bot account for exactly this reason.
+   exempt from the restriction, so a message the *user* types still reaches the
+   app if it mentions the bot:
+
+   ```
+   @bsi-updater
+   BSI Customizer v2.0.2
+   https://u.pcloud.link/publink/show?code=XXXXXXXX
+   ```
+
+   Pick the bot's name from the member list so Discord inserts a real mention
+   (it may render as a highlighted `@name`). `publish.mjs` appends a plain-text
+   mention of the bot account for exactly this reason.
 3. **Let the bot post it.** `updater-bot/publish.mjs` writes the message as the
    bot itself; an app always sees the text of its own messages. This is the
    normal release path and needs no intent at all.

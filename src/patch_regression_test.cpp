@@ -4866,6 +4866,18 @@ Window {
               QStringLiteral("the bot mention is dropped from the notes (%1)")
                   .arg(release.value(QStringLiteral("notes")).toString()));
 
+        // The token carries the application ID, which is the only way to name
+        // the exact Developer Portal page of the Message Content toggle.
+        check(UpdateChecker::applicationIdFromToken(
+                  QStringLiteral("MTIzNDU2Nzg5MDEyMzQ1Njc4.GaBcDe.signature-part"))
+                  == QLatin1String("123456789012345678"),
+              QStringLiteral("the application ID is read out of the bot token (%1)")
+                  .arg(UpdateChecker::applicationIdFromToken(
+                      QStringLiteral("MTIzNDU2Nzg5MDEyMzQ1Njc4.GaBcDe.signature-part"))));
+        check(UpdateChecker::applicationIdFromToken(QStringLiteral("not-a-token")).isEmpty()
+                  && UpdateChecker::applicationIdFromToken(QString()).isEmpty(),
+              "a token that is not shaped like one yields no application ID");
+
         // What Discord sends when the app has no Message Content intent: the
         // message and its author, with the text and the attachments stripped.
         // The check has to say that instead of reporting an empty channel.
@@ -4886,6 +4898,14 @@ Window {
                   && blind.contains(QLatin1String("withheld")),
               QStringLiteral("messages with their text withheld are named as the intent (%1)")
                   .arg(blind.left(160)));
+        const QString blindLinked =
+            UpdateChecker::explainChannel(stripped, QStringLiteral("manifest.json"), true,
+                                          QStringLiteral("123456789012345678"));
+        check(blindLinked.contains(
+                  QLatin1String("https://discord.com/developers/applications/"
+                                "123456789012345678/bot")),
+              QStringLiteral("the fix links straight to the toggle (%1)")
+                  .arg(blindLinked.section(QLatin1Char('\n'), 3, 3)));
         const QString empty = UpdateChecker::explainChannel(QJsonArray{},
                                                            QStringLiteral("manifest.json"), true);
         check(empty.contains(QLatin1String("channel is empty")),

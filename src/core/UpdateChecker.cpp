@@ -477,7 +477,8 @@ void UpdateChecker::check()
                      .arg(m_config.channelId,
                           release.error.isEmpty() ? QString()
                                                   : QStringLiteral("\n(%1)").arg(release.error),
-                          explainChannel(m_lastMessages, m_config.manifestName, allowText)));
+                          explainChannel(m_lastMessages, m_config.manifestName, allowText,
+                                         applicationIdFromToken(m_config.token))));
             return;
         }
         m_pendingMessage = release.message;
@@ -1012,7 +1013,8 @@ QString UpdateChecker::channelReport() const
 {
     if (m_lastMessages.isEmpty())
         return QStringLiteral("No check has run yet (or it never reached the channel).");
-    return explainChannel(m_lastMessages, m_config.manifestName, m_lastAllowText);
+    return explainChannel(m_lastMessages, m_config.manifestName, m_lastAllowText,
+                          applicationIdFromToken(m_config.token));
 }
 
 QString UpdateChecker::helperLogPath() const
@@ -1303,8 +1305,29 @@ QString UpdateChecker::messageText(const QJsonObject &message)
     return parts.join(QLatin1Char('\n'));
 }
 
+QString UpdateChecker::applicationIdFromToken(const QString &botToken)
+{
+    // Discord tokens are dot-separated; the first part is the bot's user ID
+    // (== application ID) in base64url, e.g. "MTIzNDU2Nzg5MDEyMzQ1Njc4".
+    const QString first = botToken.section(QLatin1Char('.'), 0, 0).trimmed();
+    if (first.size() < 4)
+        return QString();
+    QString encoded = first;
+    encoded.replace(QLatin1Char('-'), QLatin1Char('+')).replace(QLatin1Char('_'), QLatin1Char('/'));
+    while (encoded.size() % 4 != 0)
+        encoded += QLatin1Char('=');
+    const QByteArray decoded = QByteArray::fromBase64(encoded.toLatin1());
+    if (decoded.isEmpty() || decoded.size() > 20)
+        return QString();
+    for (const char c : decoded) {
+        if (c < '0' || c > '9')
+            return QString(); // not an ID: this token was not pasted whole
+    }
+    return QString::fromLatin1(decoded);
+}
+
 QString UpdateChecker::explainChannel(const QJsonArray &messages, const QString &manifestName,
-                                      bool allowTextReleases)
+                                      bool allowTextReleases, const QString &applicationId)
 {
     // Discord answers with the messages even when the app may not read them:
     // whatever content, embeds and attachments it withheld simply arrive empty.
@@ -1374,12 +1397,21 @@ QString UpdateChecker::explainChannel(const QJsonArray &messages, const QString 
         out << QStringLiteral(
                    "Discord returns no text, no embeds and no attachments for any of them. That "
                    "is the Message Content intent: an app without it is blind to every message it "
-                   "did not post itself. Fix it in the Developer Portal (your app -> Bot -> "
-                   "Privileged Gateway Intents -> Message Content Intent) and check again.");
+                   "did not post itself - a bot being offline makes no difference, this is a "
+                   "per-app setting, not a connection.");
+        out << (applicationId.isEmpty()
+                    ? QStringLiteral("Fix: Developer Portal -> your application -> Bot -> "
+                                     "Privileged Gateway Intents -> enable \"Message Content "
+                                     "Intent\", then check again.")
+                    : QStringLiteral("Fix: open https://discord.com/developers/applications/%1/bot "
+                                     "-> Privileged Gateway Intents -> enable \"Message Content "
+                                     "Intent\" -> Save, then check again.")
+                          .arg(applicationId));
         out << QStringLiteral(
                    "No portal access? Two things work without the intent: mention the bot in the "
-                   "release message (@bot v2.0.1 ...), or publish with updater-bot/publish.mjs so "
-                   "the message is written by the bot itself.");
+                   "release message (@%1 v2.0.1 ...), or publish with updater-bot/publish.mjs so "
+                   "the message is written by the bot itself.")
+                   .arg(applicationId.isEmpty() ? QStringLiteral("your-bot") : applicationId);
     }
     if (!messages.isEmpty() && readable > 0 && blank > 0)
         out << QStringLiteral("Some messages were withheld and some were not, which means the "

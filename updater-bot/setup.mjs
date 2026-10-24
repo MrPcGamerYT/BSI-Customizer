@@ -347,10 +347,12 @@ async function main() {
         if (history.data.length > 0 && blank.length === history.data.length) {
             fail('Discord returns no text and no attachments for any message in the channel.\n'
                 + '      That is the Message Content intent: without it the app is blind to every\n'
-                + '      message it did not post itself.\n'
-                + `      Fix: Developer Portal -> your app -> Bot -> Privileged Gateway Intents ->\n`
-                + '      enable "Message Content Intent". Or mention the bot in the release\n'
-                + '      message, or publish with publish.mjs (the bot posts it, so it is readable).');
+                + '      message it did not post itself. The bot being offline is irrelevant -\n'
+                + '      the app reads the channel with one REST call, never a gateway connection.\n'
+                + '      Fix: open this page and enable "Message Content Intent":\n'
+                + `        https://discord.com/developers/applications/${me.data.id}/bot\n`
+                + '      No portal access? Mention the bot in the release message, or publish\n'
+                + '      with publish.mjs (the bot posts it, so it is readable).');
         }
 
         const manifestMessage = history.data.find((message) =>
