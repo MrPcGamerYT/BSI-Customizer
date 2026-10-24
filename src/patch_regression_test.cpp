@@ -4872,8 +4872,12 @@ Window {
         check(shown.ok, QStringLiteral("the row can be switched back on (%1)").arg(shown.msg));
         check(read(path).contains(utf16(QStringLiteral(">support.bluestacks.com</a>"))),
               "and it prints its words again");
-        check(!read(path).contains(utf16(QStringLiteral("hidden:"))),
-              "its anchor points somewhere real again, not at the name it kept");
+        const auto afterShow = AboutPatcher::analyze(read(path));
+        check(afterShow.config.links.size() == 2 && !afterShow.config.links.at(1).hidden
+                  && afterShow.config.links.at(1).label == QLatin1String("support.bluestacks.com"),
+              QStringLiteral("its own anchor points somewhere real again (%1)")
+                  .arg(afterShow.config.links.size() > 1 ? afterShow.config.links.at(1).label
+                                                         : QString()));
 
         // A config that names one row - what an older version wrote, and what
         // "replace every stock link with mine" means - has to leave the page
