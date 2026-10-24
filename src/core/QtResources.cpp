@@ -558,11 +558,15 @@ QStringList playerCacheRoots(const QString &exePath, bool includeSystemCaches)
     bases.removeDuplicates();
     // Matched token by token: "Microsoft" must not look like "MSI".
     const QStringList owners = { QStringLiteral("bluestacks"), QStringLiteral("msi"),
-                                 QStringLiteral("now.gg"), QStringLiteral("hd-player"),
-                                 QStringLiteral("hdplayer") };
+                                 QStringLiteral("now.gg") };
     const auto belongsToPlayer = [&owners](const QString &folderName) {
         const QString lower = folderName.toLower();
         if (lower.startsWith(QLatin1String("bluestacks")))
+            return true;
+        // Qt's own location is <org>/<app>, so the app folder is often plain
+        // "HD-Player": matched as a whole name, since splitting on '-' would
+        // leave only "hd" and "player".
+        if (lower.contains(QLatin1String("hd-player")) || lower.contains(QLatin1String("hdplayer")))
             return true;
         const QStringList tokens = lower.split(QRegularExpression(QStringLiteral("[^a-z0-9.]+")),
                                                Qt::SkipEmptyParts);
