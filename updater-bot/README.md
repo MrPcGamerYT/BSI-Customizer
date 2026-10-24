@@ -35,9 +35,11 @@ finds it by looking for a `manifest.json` attachment in the newest messages.
    Send Messages, Attach Files and Manage Messages:
    `https://discord.com/oauth2/authorize?client_id=<APP_ID>&scope=bot&permissions=109568`
    A build that only reads needs `66560`.
-4. **Tell the app** — `updater.channelId` + `updater.botToken` in `auth.json`
-   (or the `ZLP_AUTH_JSON` secret). Read-only token is enough for the app; the
-   publisher needs the send/attach/manage bits.
+4. **Tell the app** — `updater.channelId` + `updater.botToken` in `auth.json`,
+   or bake them into the EXE by putting the whole file in the `ZLP_AUTH_JSON`
+   repository secret and building afterwards (see *Release checklist* in
+   [`docs/UPDATER.md`](../docs/UPDATER.md)). Read-only token is enough for the
+   app; the publisher needs the send/attach/manage bits.
 5. **Check it before publishing anything**
    ```bash
    node updater-bot/setup.mjs --auth-file auth.json

@@ -319,6 +319,76 @@ leave `updater.botToken` read-only.
 
 ---
 
+## 4b. Release checklist (bake the config into the EXE once)
+
+The `updater` block can travel **inside the EXE**, so users need no file at all.
+That is a build-time step, and order matters:
+
+1. **Bump the version first.** The app compares its own version with the channel,
+   and its own version is the CMake project version:
+
+   ```cmake
+   project(BSICustomizer VERSION 2.0.1 LANGUAGES CXX)
+   ```
+
+   Build `2.0.1` and post `2.0.1`. If you build `2.0.0` and post `2.0.1`, every
+   copy will keep offering an "update" that is the same file.
+
+2. **Put the whole `auth.json` in the build.** The workflows read the
+   `ZLP_AUTH_JSON` repository secret at configure time and bake it into the EXE
+   as `:/bsic_auth/auth.json`. It must be the complete file — `discord` **and**
+   `updater`:
+
+   ```json
+   {
+     "discord": { "...": "your sign-in settings" },
+     "updater": {
+       "apiBase": "https://discord.com/api/v10",
+       "channelId": "1…………………………………………",
+       "botToken": "…",
+       "manifest": "manifest.json",
+       "hmacKey": "",
+       "enabled": true
+     }
+   }
+   ```
+
+   **Building locally instead of in CI?** The embed is configure-time, so set the
+   variable before `cmake`:
+
+   ```powershell
+   $env:ZLP_AUTH_JSON = Get-Content .\auth.json -Raw
+   cmake -S . -B build -A x64 -DCMAKE_BUILD_TYPE=Release -DBSI_BUILD_PORTABLE=ON
+   cmake --build build --config Release --parallel
+   ```
+
+   Nothing is embedded if the variable is empty, and the app then reports
+   *self-update needs updater.channelId …* on the About page.
+
+3. **Do not ship a sidecar `auth.json` next to the EXE** (and delete an old one
+   from `%APPDATA%\BSI Customizer\`). A file wins over the embedded blob, so a
+   stale copy without the `updater` block hides the baked one. The app now reads
+   each section from the first source that actually has it, but a clean folder is
+   still the reliable setup.
+
+4. **Check what the EXE really got** — `--check-updates` prints where the config
+   came from:
+
+   ```
+   BSI Customizer 2.0.1 - update check
+     Channel 1234…  (config: embedded auth.json (build-time ZLP_AUTH_JSON))
+   ```
+
+   Anything else in the parentheses means a file or an environment variable
+   won.
+
+5. **Upload that exact EXE** to pCloud, then post the two lines in the channel.
+
+From then on a release is only: bump the version, build, upload, post. The
+config is already inside every copy.
+
+---
+
 ## 5. Publishing a build
 
 > Remember the easy way at the top: if you only want to publish, **posting a

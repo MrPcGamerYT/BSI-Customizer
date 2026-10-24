@@ -49,7 +49,38 @@ jobs:
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release
 
       - name: Build
-        run: cmake --build build --config Release --parallel
+        shell: pwsh
+        run: |
+          $log = Join-Path $env:RUNNER_TEMP 'build.log'
+          cmake --build build --config Release --parallel 2>&1 | Tee-Object -FilePath $log
+          if ($LASTEXITCODE -eq 0) { exit 0 }
+
+          # The job log of a failed run is not retrievable from the API on this
+          # account (the blob storage redirect answers EOF), so the compiler
+          # errors are republished as check-run annotations - they are.
+          $pattern = ': (error|fatal error) [A-Z]+[0-9]+'
+          $hits = Select-String -Path $log -Pattern $pattern -Context 0, 1
+          $count = 0
+          foreach ($hit in $hits) {
+            if ($count -ge 40) { break }
+            $text = $hit.Line.Trim()
+            if ($hit.Context.PostContext.Count -gt 0) {
+              $text += ' ' + ($hit.Context.PostContext -join ' ')
+            }
+            $text = $text -replace '%', '%25' -replace "`r", ' ' -replace "`n", ' '
+            if ($text.Length -gt 400) { $text = $text.Substring(0, 400) }
+            Write-Host "::error::$text"
+            $count++
+          }
+          if ($count -eq 0) {
+            $tail = Get-Content -LiteralPath $log -Tail 25
+            Write-Host '::error::build failed without a compiler error line; last lines:'
+            foreach ($line in $tail) {
+              $clean = $line -replace '%', '%25' -replace "`r", ' '
+              Write-Host "::error::$clean"
+            }
+          }
+          exit 1
 
       - name: Locate build output
         shell: pwsh

@@ -1,4 +1,4 @@
-#include "core/UpdateChecker.h"
+#include "UpdateChecker.h"
 
 #include <QCoreApplication>
 #include <QCryptographicHash>
@@ -75,46 +75,67 @@ bool parsesAsObject(const QByteArray &raw)
 //   EXE -> app data -> the blob baked in at build time.
 QByteArray authJsonBytes(QString *source)
 {
+    // Every place an auth.json can come from, in priority order. The first one
+    // that actually carries an "updater" object wins; a file that only has the
+    // sign-in part (or the other way round) must not hide the build-time
+    // config, which is the whole point of baking a blob into the EXE.
+    struct Candidate
+    {
+        QString label;
+        QByteArray bytes;
+    };
+    QList<Candidate> candidates;
+
     const QProcessEnvironment env = QProcessEnvironment::systemEnvironment();
     for (const char *name : { "ZLP_AUTH_JSON", "BSIC_AUTH_JSON" }) {
         const QByteArray blob = env.value(QLatin1String(name)).toUtf8();
-        if (parsesAsObject(blob)) {
-            if (source)
-                *source = QStringLiteral("environment (%1)").arg(QLatin1String(name));
-            return cleanJsonBlob(blob);
-        }
+        if (parsesAsObject(blob))
+            candidates << Candidate{ QStringLiteral("environment (%1)").arg(QLatin1String(name)),
+                                     cleanJsonBlob(blob) };
     }
 
-    QStringList candidates;
+    QStringList files;
     const QString envFile = env.value(QStringLiteral("BSIC_AUTH_FILE")).trimmed();
     if (!envFile.isEmpty())
-        candidates << envFile;
+        files << envFile;
     if (QCoreApplication::instance())
-        candidates << QCoreApplication::applicationDirPath() + QStringLiteral("/auth.json");
-    candidates << QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)
-                      + QStringLiteral("/auth.json");
-
-    for (const QString &path : candidates) {
+        files << QCoreApplication::applicationDirPath() + QStringLiteral("/auth.json");
+    files << QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)
+                 + QStringLiteral("/auth.json");
+    for (const QString &path : files) {
         QFile file(path);
         if (!file.open(QIODevice::ReadOnly))
             continue;
         const QByteArray bytes = file.readAll();
         file.close();
-        if (parsesAsObject(bytes)) {
-            if (source)
-                *source = path;
-            return cleanJsonBlob(bytes);
-        }
+        if (parsesAsObject(bytes))
+            candidates << Candidate{ path, cleanJsonBlob(bytes) };
     }
 
     QFile embedded(QStringLiteral(":/bsic_auth/auth.json"));
     if (embedded.open(QIODevice::ReadOnly)) {
         const QByteArray bytes = embedded.readAll();
         if (parsesAsObject(bytes)) {
-            if (source)
-                *source = QStringLiteral("embedded auth.json (build-time ZLP_AUTH_JSON)");
-            return cleanJsonBlob(bytes);
+            candidates << Candidate{ QStringLiteral("embedded auth.json (build-time "
+                                                    "ZLP_AUTH_JSON)"),
+                                     cleanJsonBlob(bytes) };
         }
+    }
+
+    const auto holdsUpdater = [](const QByteArray &bytes) {
+        return QJsonDocument::fromJson(bytes).object().value(QStringLiteral("updater")).isObject();
+    };
+    for (const Candidate &candidate : candidates) {
+        if (holdsUpdater(candidate.bytes)) {
+            if (source)
+                *source = candidate.label;
+            return candidate.bytes;
+        }
+    }
+    if (!candidates.isEmpty()) {
+        if (source)
+            *source = candidates.first().label;
+        return candidates.first().bytes;
     }
     return {};
 }
@@ -449,7 +470,7 @@ void UpdateChecker::check()
             return;
         }
 
-        QNetworkRequest manifestRequest(QUrl(ref.manifestUrl));
+        QNetworkRequest manifestRequest{QUrl(release.manifestUrl)};
         manifestRequest.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
                                      QNetworkRequest::NoLessSafeRedirectPolicy);
         manifestRequest.setRawHeader("User-Agent", QByteArrayLiteral("BSI-Customizer/")
@@ -648,7 +669,7 @@ void UpdateChecker::beginDownload(const QString &urlText)
                  : QStringLiteral("Downloading version %1 from %2...")
                        .arg(latestVersion(), QUrl(source).host()));
 
-    QNetworkRequest request(QUrl(source));
+    QNetworkRequest request{QUrl(source)};
     request.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
                          QNetworkRequest::NoLessSafeRedirectPolicy);
     // File hosts take a browser-looking agent more seriously than a bare one.
