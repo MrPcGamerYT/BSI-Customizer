@@ -1347,15 +1347,18 @@ QString UpdateChecker::explainChannel(const QJsonArray &messages, const QString 
             else
                 verdict = QStringLiteral("no version + link");
         }
-        lines << QStringLiteral("  #%1 %2%3 - %4%5")
-                     .arg(id.isEmpty() ? QStringLiteral("?") : id,
-                          author.isEmpty() ? QString() : QStringLiteral("<%1> ").arg(author),
-                          hidden ? QStringLiteral("0 chars")
-                                 : QStringLiteral("%1 chars").arg(text.size()),
-                          verdict,
-                          names.isEmpty()
-                              ? QString()
-                              : QStringLiteral(" [%1]").arg(names.join(QStringLiteral(", "))));
+        // Qt 6.8's QString::arg() takes at most four arguments (the variadic
+        // overload is 6.9+), so the attachment list is a second call.
+        QString line = QStringLiteral("  #%1 %2%3 - %4%5")
+                           .arg(id.isEmpty() ? QStringLiteral("?") : id,
+                                author.isEmpty() ? QString() : QStringLiteral("<%1> ").arg(author),
+                                hidden ? QStringLiteral("0 chars")
+                                       : QStringLiteral("%1 chars").arg(text.size()),
+                                verdict);
+        line = line.arg(names.isEmpty()
+                            ? QString()
+                            : QStringLiteral(" [%1]").arg(names.join(QStringLiteral(", "))));
+        lines << line;
         if (lines.size() >= 30)
             break;
     }
