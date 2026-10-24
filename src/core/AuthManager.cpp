@@ -170,6 +170,11 @@ AuthManager::Config AuthManager::loadConfig()
         const QJsonDocument doc = QJsonDocument::fromJson(json, &parseError);
         if (parseError.error != QJsonParseError::NoError || !doc.isObject())
             return false;
+        // A file without a "discord" object is not a sign-in config - a
+        // sidecar that only carries the updater must not hide the build-time
+        // blob (or the next candidate) that does configure the gate.
+        if (!doc.object().value(QStringLiteral("discord")).isObject())
+            return false;
         *out = doc.object().value(QStringLiteral("discord")).toObject();
         return true;
     };

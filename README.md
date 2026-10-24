@@ -446,7 +446,9 @@ inside the file. The updater therefore uses a **Discord server**: the publisher
 
 Full setup (bot permissions, channel, secrets, publishing, troubleshooting):
 [`docs/UPDATER.md`](docs/UPDATER.md) and
-[`updater-bot/README.md`](updater-bot/README.md).
+[`updater-bot/README.md`](updater-bot/README.md). The `updater` block can be
+baked into the EXE from the `ZLP_AUTH_JSON` secret, so users need no sidecar
+file — see *Release checklist* in that document.
 
 Verify a channel without opening the window:
 
