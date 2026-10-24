@@ -189,15 +189,16 @@ exactly and a second apply a no-op — and a hidden row stays a row (its name an
 printed words are blanked, its anchor is left pointing nowhere) instead of
 disappearing from the list, so it can be switched back on later with its address
 intact. The name it had is kept in the hidden anchor's `href` — on a player that
-carries no `.qml` that are the only two copies of it left — so showing the row
-again gives back its name, its words and its address.
+carries no `.qml`, that is the only copy of it left — so showing the row again
+gives back its name, its words and its address.
 
 Every replacement is written **inside its own record**: the count is updated and
 the rest of the slot is padded, so the file never grows and no offset moves. A
-text longer than its slot is refused with the length that fits, never truncated, and the link fields stop at the room their own record has, so a value the player would have to refuse cannot even be typed.
-The About sentence is the literal right after its heading, with the "Terms of
-use" link the page appends to it kept when the edited text still ends with those
-words and cleared when it does not.
+text longer than its slot is refused with the length that fits, never truncated,
+and the link fields stop at the room their own record has, so a value the player
+would have to refuse cannot even be typed. The About sentence is the literal
+right after its heading, with the "Terms of use" link the page appends to it kept
+when the edited text still ends with those words and cleared when it does not.
 
 Applying writes every copy of the page the file carries, then reads the page
 back **from the file on disk** — a write that does not read back is undone and
@@ -214,12 +215,11 @@ copyright line, and each link row is rewritten with the name and address you
 left in it, using `Qt.openUrlExternally` — a bare e-mail address becomes a
 `mailto:` link and a bare domain gets `https://`, so an edited row always
 opens something. Rows ticked off, any stock row the list does not name, and the
-stock QQ row are hidden. The
-**Check for updates** button is disabled by hiding it together with its
-"More info" and incompatible-version rows, so nothing on the page points at
-BlueStacks updates any more; on the compiled copy its caption is cleared the
-same way. Press **Restore stock About** to restore the
-untouched page byte-for-byte.
+stock QQ row are hidden. The **Check for updates** button is disabled by hiding
+it together with its "More info" and incompatible-version rows, so nothing on
+the page points at BlueStacks updates any more; on the compiled copy its caption
+is cleared the same way. Press **Restore stock About** to restore the untouched
+page byte-for-byte.
 
 Both tools work on the Qt 5 and Qt 6 players: BlueStacks 5.22 and the older
 5.10 build, plus the MSI App Player 5.9 and the current MSI build. The

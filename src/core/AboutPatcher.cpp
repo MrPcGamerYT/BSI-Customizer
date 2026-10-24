@@ -513,7 +513,10 @@ QString pageRowName(const Layout &layout, const PageRow &row)
 QString pageRowLabel(const Layout &layout, const PageRow &row)
 {
     if (row.fragments.isEmpty()) return QString();
-    return anchorLabel(layout.records.at(row.fragments.last()).text);
+    const QString label = anchorLabel(layout.records.at(row.fragments.last()).text);
+    // A hidden row's anchor prints one blank; that is "nothing", not a space in
+    // the editor's field.
+    return isBlank(label) ? QString() : label;
 }
 
 QString pageRowUrl(const Layout &layout, const PageRow &row)
