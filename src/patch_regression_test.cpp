@@ -4875,6 +4875,30 @@ Window {
         check(!read(path).contains(utf16(QStringLiteral("hidden:"))),
               "its anchor points somewhere real again, not at the name it kept");
 
+        // A config that names one row - what an older version wrote, and what
+        // "replace every stock link with mine" means - has to leave the page
+        // saying exactly that: the rows it does not name are hidden, not left
+        // printing the stock addresses.
+        AboutPatcher::Config one;
+        one.text = QStringLiteral("Only this row is mine.");
+        AboutPatcher::Link only;
+        only.id = QStringLiteral("row0");
+        only.name = QStringLiteral("Help");
+        only.url = QStringLiteral("https://example.com/help");
+        one.links << only;
+        const auto singly = AboutPatcher::apply(path, true, one);
+        check(singly.ok, QStringLiteral("a single-row config applies (%1)").arg(singly.msg));
+        const auto oneAfter = AboutPatcher::analyze(read(path));
+        check(oneAfter.config.links.size() == 2 && !oneAfter.config.links.at(0).hidden
+                  && oneAfter.config.links.at(1).hidden,
+              QStringLiteral("the rows it does not name are hidden (%1)")
+                  .arg(oneAfter.config.links.size() > 1 && oneAfter.config.links.at(1).hidden
+                           ? QStringLiteral("row 1 hidden")
+                           : QStringLiteral("row 1 still shown")));
+        const auto againOne = AboutPatcher::apply(path, true, one);
+        check(againOne.ok && againOne.msg.contains(QLatin1String("already applied")),
+              QStringLiteral("and applying it twice is still a no-op (%1)").arg(againOne.msg));
+
         // A record's room is finite and the card is told how much of it is
         // left, so a rename that the player would have to refuse cannot be
         // typed in the first place - and if it is forced, nothing is written.

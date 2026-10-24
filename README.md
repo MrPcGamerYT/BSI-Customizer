@@ -213,7 +213,8 @@ section headings) and only changes what it says: your text replaces the
 copyright line, and each link row is rewritten with the name and address you
 left in it, using `Qt.openUrlExternally` — a bare e-mail address becomes a
 `mailto:` link and a bare domain gets `https://`, so an edited row always
-opens something. Rows ticked off, plus the stock QQ row, are hidden. The
+opens something. Rows ticked off, any stock row the list does not name, and the
+stock QQ row are hidden. The
 **Check for updates** button is disabled by hiding it together with its
 "More info" and incompatible-version rows, so nothing on the page points at
 BlueStacks updates any more; on the compiled copy its caption is cleared the

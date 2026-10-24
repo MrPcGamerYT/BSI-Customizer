@@ -644,6 +644,26 @@ void planTable(const Layout &layout, const Config &config, QList<SlotEdit> *edit
         *edits << SlotEdit { index, text };
     };
 
+    // A row prints nothing: its name record and the words its anchor shows go,
+    // the anchor is left showing a blank - and the name it had is carried in
+    // that anchor's href, because on a player that keeps only the compiled page
+    // there is no other copy of it left to switch the row back on with.
+    const auto hideRow = [&](const PageRow &row, const QString &name) {
+        if (row.name >= 0) set(row.name, kBlankSlot);
+        for (int i = 0; i < row.fragments.size(); ++i) {
+            const int fragment = row.fragments.at(i);
+            const QString current = layout.records.at(fragment).text;
+            set(fragment, fragmentWith(current, QString(), true, name));
+            if (i >= row.addresses.size()) continue;
+            // The record the page shows the address in - the one that merely
+            // holds the target is not displayed and is what the row reopens.
+            const int address = row.addresses.at(i);
+            if (layout.records.at(address).text.compare(anchorLabel(current),
+                                                        Qt::CaseInsensitive) == 0)
+                set(address, kBlankSlot);
+        }
+    };
+
     // The update button is switched off: its caption goes, so a stray click
     // opens an empty confirmation instead of a download.
     const int stop = layout.about >= 0 ? layout.about + 4 : layout.records.size();
@@ -719,18 +739,16 @@ void planTable(const Layout &layout, const Config &config, QList<SlotEdit> *edit
         }
         used.insert(pick);
         const PageRow &row = layout.rows.at(pick);
-        const bool hidden = link.hidden;
-        if (row.name >= 0)
-            set(row.name, hidden ? kBlankSlot
-                                 : (link.name.isEmpty() ? layout.records.at(row.name).text
-                                                        : link.name));
+        if (link.hidden) {
+            hideRow(row, link.name);
+            continue;
+        }
+        if (row.name >= 0 && !link.name.isEmpty()) set(row.name, link.name);
         const QString shown = link.label.trimmed().isEmpty() ? displayFor(link.url) : link.label;
         for (int i = 0; i < row.fragments.size(); ++i) {
             const int fragment = row.fragments.at(i);
             const QString current = layout.records.at(fragment).text;
-            const QString next = hidden ? fragmentWith(current, QString(), true, link.name)
-                                        : fragmentWith(current, shown, false);
-            set(fragment, next);
+            set(fragment, fragmentWith(current, shown, false));
             if (i >= row.addresses.size()) continue;
             // The address slot prints the words when the anchor above it only
             // points at them (the e-mail row), and is hidden from the page when
@@ -739,24 +757,24 @@ void planTable(const Layout &layout, const Config &config, QList<SlotEdit> *edit
             const int address = row.addresses.at(i);
             const bool prints = layout.records.at(address).text.compare(
                                     anchorLabel(current), Qt::CaseInsensitive) == 0;
-            if (hidden) {
-                // A hidden row prints nothing at all: the record the page shows
-                // is blanked. The record it merely opens is left alone - it is
-                // not displayed, the anchor above it is already dead, and
-                // keeping it is what lets the row be switched back on with its
-                // address intact.
-                if (prints) set(address, kBlankSlot);
-            } else if (prints) {
+            if (prints) {
                 set(address, shown.isEmpty() ? kBlankSlot : shown);
             } else if (!link.url.isEmpty()) {
                 set(address, link.url);
             }
         }
-        for (int i = row.fragments.size(); i < row.addresses.size(); ++i) {
-            if (hidden) continue;
-            const int address = row.addresses.at(i);
-            if (!link.url.isEmpty()) set(address, link.url);
-        }
+        for (int i = row.fragments.size(); i < row.addresses.size(); ++i)
+            if (!link.url.isEmpty()) set(row.addresses.at(i), link.url);
+    }
+
+    // A row the config does not name is a stock link the page still prints. It
+    // is hidden, not left alone: the page has to say what the config says, and
+    // the .qml copy of the page is hidden the same way.
+    for (int r = 0; r < layout.rows.size(); ++r) {
+        if (used.contains(r)) continue;
+        const PageRow &row = layout.rows.at(r);
+        hideRow(row, pageRowName(layout, row).trimmed() == QLatin1String(" ")
+                            ? QString() : pageRowName(layout, row));
     }
 }
 
