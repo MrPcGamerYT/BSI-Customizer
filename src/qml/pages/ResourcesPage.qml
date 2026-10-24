@@ -47,7 +47,10 @@ Item {
             const row = list[i];
             if (needle !== "" && String(row.path).toLowerCase().indexOf(needle) < 0)
                 continue;
-            if (kind === 1 && row.kind !== "image") continue;
+            // "Pictures" means every picture: the old players keep almost all of
+            // their artwork as SVG (399 of 424 files on 5.9), so filtering only
+            // raster entries made the tab look like it had found no images.
+            if (kind === 1 && row.kind !== "image" && row.kind !== "svg") continue;
             if (kind === 2 && row.kind !== "svg") continue;
             if (kind === 3 && !row.text) continue;
             if (kind === 4 && row.kind !== "binary") continue;

@@ -1760,6 +1760,110 @@ int runPatchRegressionTests()
               "a repeated removal does not stack further edits");
     }
 
+    std::printf("[extras-titlebar] the version and engine labels are hidden, never deleted\n");
+    {
+        // "Titlebar Version" used to null every UTF-16 "version" in the file.
+        // That also hit the compiled QML caches and the translator tables, and
+        // the latest player then refused to start (0x…05). The label is hidden
+        // in PlrTopbar.qml instead: the same two Text elements exist in 5.9,
+        // 5.10 and the current build.
+        const QString topbar = QStringLiteral(
+            "import QtQuick 2.15\r\n"
+            "UiRowLayout {\r\n"
+            "    UiRowLayout{\r\n"
+            "        Text {\r\n"
+            "            id: iVersionTxt\r\n"
+            "            text: plrBackend.version\r\n"
+            "            opacity: 0.7\r\n"
+            "        }\r\n"
+            "        Text {\r\n"
+            "            id: iImageTxt\r\n"
+            "            text: \"N32\"\r\n"
+            "            opacity: 0.7\r\n"
+            "        }\r\n"
+            "    }\r\n"
+            "}\r\n");
+        // A translator table: the same word, UTF-16LE, exactly what the old
+        // removal silently zeroed.
+        const QByteArray german = QByteArray("v\0e\0r\0s\0i\0o\0n\0", 14);
+        auto r = resourcesBytes({ qMakePair(QStringLiteral("i18n.de-DE.qm"), german),
+                                  qMakePair(QStringLiteral("PlrTopbar.qml"), topbar.toUtf8()) },
+                                false, {});
+        addRegistration(r, false);
+        const QString path = temp.filePath(QStringLiteral("titlebar-removals.exe"));
+        write(path, r.f.bytes);
+
+        check(ExtrasPatcher::removalNames().contains(QStringLiteral("Titlebar Version"))
+                  && ExtrasPatcher::removalNames().contains(QStringLiteral("Titlebar Instance Label")),
+              "the title bar offers both the version and the engine label as removals");
+
+        const auto applied = ExtrasPatcher::applyRemovals(
+            path, { QStringLiteral("Titlebar Version") });
+        check(applied.ok && applied.msg.contains(QLatin1String("Hid 1 title-bar label")),
+              QStringLiteral("the version label is hidden in the QML (%1)").arg(applied.msg));
+        const QByteArray after = read(path);
+        check(after.contains(german),
+              "the UTF-16 string 'version' in the translator table is untouched");
+        const QString text = resourceText(after, r, QStringLiteral("PlrTopbar.qml"));
+        check(text.contains(QStringLiteral("visible: false // BSI CUSTOMIZER: titlebar hide")),
+              "the version Text element gains a visible: false member");
+        check(text.contains(QStringLiteral("text: plrBackend.version")),
+              "its text binding is left alone, so the player still builds the label it hides");
+        check(text.count(QStringLiteral("visible: false // BSI CUSTOMIZER: titlebar hide")) == 1
+                  && text.contains(QStringLiteral("text: \"N32\"")),
+              "the engine label is a separate removal and stays visible");
+
+        const auto engine = ExtrasPatcher::applyRemovals(
+            path, { QStringLiteral("Titlebar Instance Label") });
+        check(engine.ok && engine.msg.contains(QLatin1String("Hid 1 title-bar label")),
+              QStringLiteral("the engine label is hidden by its own row (%1)").arg(engine.msg));
+        const QString both = resourceText(read(path), r, QStringLiteral("PlrTopbar.qml"));
+        check(both.count(QStringLiteral("visible: false // BSI CUSTOMIZER: titlebar hide")) == 2,
+              QStringLiteral("both labels are hidden, each exactly once (%1)")
+                  .arg(both.count(QStringLiteral("visible: false // BSI CUSTOMIZER: titlebar hide"))));
+        check(read(path).contains(german),
+              "and the string table is still intact after both removals");
+
+        const auto repeat = ExtrasPatcher::applyRemovals(
+            path, { QStringLiteral("Titlebar Version") });
+        check(repeat.ok && resourceText(read(path), r, QStringLiteral("PlrTopbar.qml"))
+                               .count(QStringLiteral("visible: false // BSI CUSTOMIZER: titlebar hide")) == 2,
+              QStringLiteral("repeating a title-bar removal changes nothing (%1)").arg(repeat.msg));
+    }
+
+    std::printf("[about] a renamed About line is still read, not left empty\n");
+    {
+        // The editor prefills itself with what the page prints. That lookup
+        // used to depend on one object id (iTermsOfUseText); a build that
+        // renames the row made the whole card read as empty. The copyright
+        // marker now finds the line by what it says.
+        const QString about = QStringLiteral(
+            "import QtQuick 2.15\r\n"
+            "UiScrollView {\r\n"
+            "    UiColumnLayout {\r\n"
+            "        id: iContentLayout\r\n"
+            "        UiColumnLayout {\r\n"
+            "            Layout.fillWidth: true\r\n"
+            "            Text { text: qsTranslate(\"QObject\", \"About and other info\") }\r\n"
+            "            UiTextUrl {\r\n"
+            "                id: iTheSmallPrint\r\n"
+            "                text: qsTranslate(\"QObject\", \"©2011 through 2026 now.gg, Inc. All rights reserved worldwide. By using BlueStacks you agree to our \") + \"<a href=\\\"javascript:void(0)\\\">\" + qsTranslate(\"QObject\", \"Terms of use\") + \"</a>\"\r\n"
+            "                onLinkActivated: uiBackend.openHelpArticle(\"terms_of_use\")\r\n"
+            "            }\r\n"
+            "        }\r\n"
+            "    }\r\n"
+            "}\r\n");
+        auto r = resources({ { QStringLiteral("PlrAboutSetting.qml"), about } }, true, {});
+        addRegistration(r, false);
+        const auto state = AboutPatcher::analyze(r.f.bytes);
+        check(state.supported && !state.applied,
+              QStringLiteral("the renamed About page is recognised (%1)").arg(state.detail));
+        check(state.config.text.contains(QLatin1String("2011 through 2026"))
+                  && state.config.text.contains(QLatin1String("Terms of use")),
+              QStringLiteral("the editor shows the text the page prints now (%1)")
+                  .arg(state.config.text.left(90)));
+    }
+
     std::printf("[layout] sidebar-to-titlebar layout tweak by QML\n");
     {
         // The layout family's first tweak: the side strip is gone and every

@@ -973,16 +973,24 @@ int Backend::scanResources(bool includeBinary)
                                  "Check that it is BlueStacks' HD-Player.exe and that the player "
                                  "is not running."), QStringLiteral("red"));
         }
-        int text = 0, pictures = 0;
+        int text = 0, raster = 0, vector = 0, binary = 0;
         for (const auto &entry : m_resources) {
             if (entry.text) ++text;
-            if (entry.kind == EmbeddedResources::Kind::Image
-                || entry.kind == EmbeddedResources::Kind::Svg) ++pictures;
+            if (entry.kind == EmbeddedResources::Kind::Image) ++raster;
+            else if (entry.kind == EmbeddedResources::Kind::Svg) ++vector;
+            else if (entry.kind == EmbeddedResources::Kind::Binary) ++binary;
         }
-        doLog(QStringLiteral("Resources: %1 embedded file(s) - %2 editable text, %3 picture(s) - in %4")
+        // Say what was found, not just how many: "21 pictures" and "424 pictures
+        // (399 SVG)" are very different answers when a build carries its whole
+        // artwork set as vectors.
+        doLog(QStringLiteral("Resources: %1 embedded file(s) - %2 editable text, %3 picture(s) "
+                             "(%4 raster + %5 SVG), %6 other - in %7")
                   .arg(m_resources.size())
                   .arg(text)
-                  .arg(pictures)
+                  .arg(raster + vector)
+                  .arg(raster)
+                  .arg(vector)
+                  .arg(binary)
                   .arg(QFileInfo(m_settings->exePath()).fileName()),
               QStringLiteral("blue"));
     }

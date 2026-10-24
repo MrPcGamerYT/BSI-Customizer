@@ -883,6 +883,28 @@ const QStringList &stockLinkIds()
     return ids;
 }
 
+// The About/copyright line by what it says, for builds that renamed the object
+// (or dropped the id). Only a row whose *rendered* text carries the copyright
+// marker counts, so the update banner and the link rows are never mistaken for
+// the About text.
+bool findAboutTextByContent(const QString &qml, const QString &masked, QmlText::Object *out)
+{
+    static const QRegularExpression marker(
+        QStringLiteral("(©|\\bcopyright\\b|rights reserved)"),
+        QRegularExpression::CaseInsensitiveOption);
+    for (const auto &object : QmlText::objects(masked, QStringLiteral("UiTextUrl"))) {
+        QmlText::Binding text;
+        if (!directBinding(masked, object.open, object.end, QStringLiteral("text"), &text))
+            continue;
+        const QString value = qml.mid(text.valueBegin, text.valueEnd - text.valueBegin);
+        if (marker.match(renderedText(value)).hasMatch()) {
+            *out = object;
+            return true;
+        }
+    }
+    return false;
+}
+
 Anchors findAnchors(const QString &qml, const QString &masked, QString *why)
 {
     Anchors anchors;
@@ -890,7 +912,8 @@ Anchors findAnchors(const QString &qml, const QString &masked, QString *why)
         if (why) *why = QStringLiteral("This player's About page has no replaceable content column.");
         return anchors;
     }
-    if (!findObjectById(qml, masked, QStringLiteral("iTermsOfUseText"), &anchors.aboutText)) {
+    if (!findObjectById(qml, masked, QStringLiteral("iTermsOfUseText"), &anchors.aboutText)
+        && !findAboutTextByContent(qml, masked, &anchors.aboutText)) {
         if (why) *why = QStringLiteral("This player's About page has no replaceable About text line.");
         return anchors;
     }
