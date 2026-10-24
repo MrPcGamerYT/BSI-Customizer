@@ -99,6 +99,132 @@ Item {
                 }
             }
 
+            // ---------------- updates card ----------------
+            //
+            // The self-updater's home. The strip under the title bar only
+            // appears when there is something to install; everything else
+            // (why a check failed, which channel is used, the switch that
+            // turns the startup check off) lives here.
+            Card {
+                Layout.fillWidth: true
+                pad: 18
+
+                ColumnLayout {
+                    anchors.fill: parent
+                    spacing: 10
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 8
+                        Text {
+                            text: qsTr("Updates")
+                            color: Theme.text
+                            font.pixelSize: 15
+                            font.weight: Font.Bold
+                        }
+                        Item { Layout.fillWidth: true }
+                        Text {
+                            text: qsTr("delivered through the Discord releases bot")
+                            color: Theme.textDim
+                            font.pixelSize: 10
+                            font.italic: true
+                        }
+                    }
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 8
+                        Text {
+                            text: qsTr("Installed")
+                            color: Theme.textDim
+                            font.pixelSize: 12
+                        }
+                        Text {
+                            text: updates.currentVersion
+                            color: Theme.text
+                            font.pixelSize: 12
+                            font.family: "Consolas"
+                        }
+                        Item { Layout.fillWidth: true }
+                        Text {
+                            visible: updates.available
+                            text: qsTr("Newest: %1").arg(updates.latestVersion)
+                            color: Theme.accentText
+                            font.pixelSize: 12
+                            font.weight: Font.DemiBold
+                        }
+                    }
+
+                    Text {
+                        Layout.fillWidth: true
+                        visible: updates.note.length > 0
+                        text: updates.note
+                        color: updates.noteKind === "bad" ? Theme.danger
+                             : updates.noteKind === "warn" ? Theme.warn
+                             : updates.noteKind === "good" ? Theme.green
+                             : Theme.textDim
+                        font.pixelSize: 12
+                        wrapMode: Text.Wrap
+                    }
+
+                    Text {
+                        Layout.fillWidth: true
+                        visible: !updates.configured
+                        text: updates.setupHint
+                        color: Theme.textDim
+                        font.pixelSize: 11
+                        wrapMode: Text.Wrap
+                    }
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 8
+
+                        ActionButton {
+                            text: updates.checking ? qsTr("Checking…") : qsTr("Check now")
+                            enabled: updates.configured && !updates.busy
+                            onClicked: updates.check()
+                        }
+                        ActionButton {
+                            visible: updates.available && !updates.readyToInstall
+                            text: qsTr("Download %1").arg(updates.latestVersion)
+                            accent: true
+                            enabled: !updates.busy && !backend.busy
+                            onClicked: updates.download()
+                        }
+                        ActionButton {
+                            visible: updates.readyToInstall
+                            text: qsTr("Install and restart")
+                            accent: true
+                            enabled: !backend.busy
+                            onClicked: updates.apply()
+                        }
+                        ActionButton {
+                            visible: updates.readyToInstall
+                            text: qsTr("Show the downloaded file")
+                            onClicked: updates.showStagedFile()
+                        }
+                        Item { Layout.fillWidth: true }
+                        Text {
+                            visible: updates.busy
+                            text: Math.round(updates.progress * 100) + "%"
+                            color: Theme.textDim
+                            font.pixelSize: 12
+                            font.family: "Consolas"
+                        }
+                    }
+
+                    ToggleSwitch {
+                        Layout.fillWidth: true
+                        label: qsTr("Check for updates when the app starts")
+                        description: qsTr("One request to the Discord channel a few seconds after " +
+                                          "the window opens; nothing is downloaded until you say so.")
+                        checked: updates.autoCheck
+                        onToggled: updates.autoCheck = !updates.autoCheck
+                    }
+                }
+            }
+
             // ---------------- credits card ----------------
             Card {
                 Layout.fillWidth: true

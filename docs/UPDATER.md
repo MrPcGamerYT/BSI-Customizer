@@ -1,0 +1,306 @@
+# Self-update through a Discord bot
+
+The repository is private, so GitHub Releases cannot be the update channel:
+a released EXE has no public endpoint to ask *"is there a newer build?"*, and a
+GitHub token cannot be baked into a file the user can read. The updater
+therefore uses a **Discord server** as the delivery channel:
+
+```
+  your PC / CI                                    User's PC
++-------------------------+              +-----------------------------+
+| updater-bot/publish.mjs |   upload     | BSI Customizer              |
+|  - SHA-256 of the EXE   | -----------> |  UpdateChecker (C++)        |
+|  - manifest.json        |  manifest +  |  1. GET channel messages    |
+|  - signs it (optional)  |  EXE         |  2. newest manifest.json    |
++-------------------------+              |  3. compare versions        |
+            |                            |  4. download + verify       |
+            v                            |  5. swap EXE, restart       |
+   #bsi-releases (Discord channel) <---- +-----------------------------+
+```
+
+Read side = a **bot token** with *View Channel* + *Read Message History* on one
+channel. Publish side = the same bot (or a channel **webhook**, whose URL stays
+in CI secrets only). No OAuth user token is involved: a user token cannot read
+channel history, a bot token can.
+
+---
+
+## 1. What the app does
+
+`UpdateChecker` (`src/core/UpdateChecker.{h,cpp}`) is created in `main()` next to
+`AuthManager`, exposed to QML as `updates`, and starts a check **4 s after the
+window opens** (switchable on the About page, stored in
+`QSettings updates/autoCheck`). It does nothing at all when no updater config is
+present.
+
+1. `GET {apiBase}/channels/{channelId}/messages?limit=50` with
+   `Authorization: Bot <token>`.
+2. Takes the **newest** message that carries an attachment named `manifest.json`
+   (name configurable) and downloads that attachment.
+3. Validates it (schema, version, file name, size, SHA-256, optional HMAC) and
+   compares `version` with `BSI_VERSION` (the CMake project version).
+4. Newer version → a strip appears under the title bar:
+   *Update 2.0.1 is available* → **What's new** / **Update now** / **Later**.
+5. **Update now** streams the EXE to `%TEMP%\BSI-Customizer-update\`, hashing as
+   it goes, then verifies:
+   - byte size equals the manifest `size`,
+   - SHA-256 equals the manifest `sha256`,
+   - the file is a 64-bit Windows program (`MZ`, `PE\0\0`, machine `0x8664`,
+     PE32+ optional header).
+   Any mismatch deletes the file and nothing is installed.
+6. **Install and restart** writes a hidden PowerShell helper that waits for the
+   app's PID to exit, copies the verified EXE over the running one with retries,
+   starts it again and deletes itself. A log ends up in
+   `%TEMP%\BSI-Customizer-update\apply-update.log` if the copy never succeeds.
+7. The app cannot overwrite itself when it is not allowed to (for example an
+   install under `Program Files` without rights): the write test fails *before*
+   anything is replaced and the UI says so, offering *Show the downloaded file*
+   for a manual copy.
+
+Nothing is written outside `%TEMP%` until the user presses **Install and
+restart**, and the running EXE is only touched by the helper after the app has
+closed.
+
+### "Later"
+
+**Later** stores `updates/skippedVersion`. That exact version stays hidden until
+a newer one is published — unless the manifest sets `minSupported` above the
+installed version, or `mandatory: true`. `unskip()`/the About page clears it.
+
+### Verifying without the GUI
+
+```
+BSI-Customizer.exe --check-updates            # 0 = up to date, 3 = update, 1 = error, 2 = not configured
+BSI-Customizer.exe --check-updates --json     # machine-readable
+BSI-Customizer.exe --check-updates --download # also fetch + verify it (4)
+```
+
+The probe reads the same config as the window, so it is the fastest way to check
+a token, a channel ID or a freshly published manifest.
+
+---
+
+## 2. Configuration
+
+The updater block lives in the **same `auth.json`** the sign-in gate uses (see
+`docs/AUTH.md`), so one `ZLP_AUTH_JSON` secret configures both and one embedded
+blob ships inside the EXE:
+
+```json
+{
+  "discord": { "...": "unchanged sign-in settings" },
+  "updater": {
+    "apiBase": "https://discord.com/api/v10",
+    "channelId": "1234567890123456789",
+    "botToken": "READ-ONLY-BOT-TOKEN",
+    "manifest": "manifest.json",
+    "hmacKey": "",
+    "enabled": true
+  }
+}
+```
+
+Source order (identical to `AuthManager`):
+
+1. `$ZLP_AUTH_JSON` (alias `$BSIC_AUTH_JSON`) — the blob CI bakes in;
+2. `$BSIC_AUTH_FILE`, then `auth.json` next to the EXE, then the app-data copy;
+3. the blob embedded at build time into `:/bsic_auth/auth.json`.
+
+Per-field environment overrides:
+`BSIC_UPDATE_CHANNEL_ID`, `BSIC_UPDATE_TOKEN`, `BSIC_UPDATE_API`,
+`BSIC_UPDATE_MANIFEST`, `BSIC_UPDATE_HMAC_KEY`. `BSI_NO_UPDATER=1` disables the
+feature (CI and the deployment test set it).
+
+`updater.enabled: false` also disables it, for a build that must never phone
+home.
+
+---
+
+## 3. Manifest schema (version 1)
+
+`manifest.json` is an attachment of the release message:
+
+```json
+{
+  "schema": 1,
+  "app": "BSI Customizer",
+  "version": "2.0.1",
+  "file": "BSI-Customizer-2.0.1-win64.exe",
+  "size": 18392064,
+  "sha256": "4de96eb5f3d5260c89e2dc2f21c2076be68ba4511e8399ce695bdf542a8354ac",
+  "released": "2026-10-24T12:00:00Z",
+  "notes": "Markdown release notes, plain text is fine.",
+  "mandatory": false,
+  "minSupported": "1.9.0",
+  "url": "https://example.com/BSI-Customizer-2.0.1-win64.exe",
+  "signature": "base64 HMAC-SHA256"
+}
+```
+
+| field | required | meaning |
+| --- | --- | --- |
+| `schema` | yes | `1` — the app refuses anything else |
+| `version` | yes | `2.0.1` (a leading `v` is tolerated); compared with `BSI_VERSION` |
+| `file` | yes | bare file name ending in `.exe`; also the attachment name |
+| `size` | yes | exact byte count |
+| `sha256` | yes | 64 lower-case hex characters |
+| `notes` | no | shown in the update strip |
+| `released` | no | informational |
+| `mandatory` | no | always offered, "Later" does not hide it |
+| `minSupported` | no | builds older than this must update |
+| `url` | no | where the EXE actually lives; when absent the app uses the `file` attachment **of the same message** |
+| `signature` | when `hmacKey` is set | base64 HMAC-SHA256 (see below) |
+
+The **signature** covers exactly:
+
+```
+bsi-update-v1\n
+<version>\n
+<file>\n
+<size>\n
+<sha256>\n
+```
+
+keyed with `updater.hmacKey` (`BSI_UPDATE_HMAC_KEY` in the publisher). If the key
+is configured the app **rejects an unsigned manifest**; if it is not, the channel
+itself is the trust boundary. `publish.mjs` computes the same bytes, so the two
+implementations are interchangeable (there is a known-answer test for this in
+`src/patch_regression_test.cpp`).
+
+`url` makes the manifest independent of Discord's upload limit: publish only the
+manifest and point `url` at any https host. The size + SHA-256 checks are
+unchanged.
+
+---
+
+## 4. One-time Discord setup
+
+1. **Create the bot.** <https://discord.com/developers/applications> → *New
+   Application* → *Bot* → *Reset Token* → copy it. Turn **Public Bot** off.
+   No privileged intents are needed (the manifest is an attachment, not message
+   content).
+2. **Create a channel** in your server, e.g. `#bsi-releases`, and restrict it to
+   the members who should see builds. Copy its ID (Discord → *Settings →
+   Advanced → Developer Mode*, then right-click the channel → *Copy Channel ID*).
+3. **Invite the bot** with only these permissions in that channel:
+
+   | permission | bit |
+   | --- | --- |
+   | View Channel | 1024 |
+   | Read Message History | 65536 |
+   | Send Messages (publisher only) | 2048 |
+   | Attach Files (publisher only) | 32768 |
+   | Manage Messages (publisher only, to delete the old message) | 8192 |
+
+   ```
+   https://discord.com/oauth2/authorize?client_id=<APP_ID>&scope=bot&permissions=109568
+   ```
+
+   `109568` = all five. A build that only *reads* needs `66560`
+   (View Channel + Read Message History).
+   Verify the whole thing without publishing anything (read-only, changes
+   nothing on Discord):
+
+   ```bash
+   DISCORD_BOT_TOKEN=... node updater-bot/setup.mjs --channel <channelId>
+   ```
+
+   It prints the bot, server and channel it resolved, whether the app can read
+   them, whether publishing will work, and the exact `auth.json` block to paste.
+   Exit code 0 means the updater will work from that channel.
+
+5. **Put the values in the app's config** — `updater.channelId` and
+   `updater.botToken` in `auth.json` (or the `ZLP_AUTH_JSON` secret, so every
+   build carries them).
+6. **Give CI the publisher credentials** (repository → *Settings → Secrets and
+   variables → Actions*):
+
+   | secret | used by |
+   | --- | --- |
+   | `DISCORD_BOT_TOKEN` | `publish.mjs` in `release.yml` |
+   | `DISCORD_CHANNEL_ID` | `publish.mjs` |
+   | `BSI_UPDATE_HMAC_KEY` | optional signing, must match `updater.hmacKey` |
+
+   (`DISCORD_PUBLISH_TOKEN` and `DISCORD_WEBHOOK_URL` are accepted as
+   alternatives; a webhook needs no bot at all to publish.)
+
+Banking on one bot for both roles is fine **if** the bot exists only for this
+server: a token found in the EXE can post *only* to the channel where the bot
+has Send Messages. For stricter setups use a second bot just for publishing and
+leave `updater.botToken` read-only.
+
+---
+
+## 5. Publishing a build
+
+```bash
+# once, locally
+cp updater-bot/config.example.json updater-bot/config.json   # then fill it in
+
+# every release
+node updater-bot/publish.mjs \
+     --exe build/artifacts/BSI-Customizer-2.0.1-win64.exe \
+     --version 2.0.1 \
+     --notes-file notes.md
+```
+
+The script prints the version, size, SHA-256 and channel, uploads
+`manifest.json` + the EXE, pins the message, and deletes the previous release
+message so the channel always shows exactly one.
+
+`--dry-run` prints the manifest without touching Discord. `--url https://…`
+publishes only the manifest and lets the EXE live anywhere (use it when the file
+is bigger than the server's upload limit — 10 MB on unboosted servers; Discord
+answers HTTP 413 otherwise).
+
+### Automatic on a release tag
+
+`.github/workflows/release.yml` runs the publisher right after the tested EXE is
+attached to the GitHub release (tags `v*`, or a manual run with
+*publish_release*). It passes the generated release body as `--notes-file`, so
+the Discord message and the GitHub release say the same thing. If the Discord
+secrets are missing the step is skipped with a notice — the build itself never
+depends on Discord.
+
+### Without CI
+
+`updater-bot/README.md` has the same steps with the exact commands, including
+the webhook-only variant.
+
+---
+
+## 6. Troubleshooting
+
+The app never says "update failed" without a reason; `--check-updates` prints the
+same text in a terminal.
+
+| message | cause |
+| --- | --- |
+| `Discord rejected the updater token (401)` | token reset in the portal, or `updater.botToken` still has the `Bot ` prefix / is the *client secret* by mistake |
+| `The updater bot cannot read the releases channel (403)` | channel overwrites: give the bot View Channel + Read Message History |
+| `The releases channel was not found (404)` | wrong channel ID, or the bot is not in that server |
+| `Discord is rate-limiting the updater (429)` | too many checks; wait a minute |
+| `No "manifest.json" attachment in the last 50 messages` | nothing published yet, or `--manifest` name mismatch |
+| `The update manifest is invalid: …` | someone edited `manifest.json` by hand; republish |
+| `The update manifest is not signed by this build's key` | `BSI_UPDATE_HMAC_KEY` and `updater.hmacKey` differ |
+| `SHA-256 mismatch` | the upload was truncated or the manifest is stale — republish |
+| `Windows does not let this app write to …` | install lives under `Program Files`; run the app as administrator |
+| nothing in the UI at all | `--check-updates` — if that is happy, the app is already current |
+
+The helper's log: `%TEMP%\BSI-Customizer-update\apply-update.log`.
+
+---
+
+## 7. Security summary
+
+* The shipped token is **read-only** on **one channel**; it cannot read the
+  server's other channels, cannot send, and cannot see message *content* of
+  channels it is not in.
+* Every download is pinned by size + SHA-256 from the manifest, and must look
+  like a 64-bit PE before the swap.
+* Optional HMAC signing authenticates the manifest itself, so a leaked read-only
+  token is not enough to point the updater at a different EXE.
+* Only https URLs are accepted; `file://`, http and non-CDN schemes are refused.
+* Nothing is written outside `%TEMP%` before the user presses **Install and
+  restart**; a failed verification deletes the file.
+* `BSI_NO_UPDATER=1` and `updater.enabled: false` turn the whole feature off.

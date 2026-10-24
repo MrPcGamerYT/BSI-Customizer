@@ -38,6 +38,10 @@ concurrency:
 
 env:
   QT_VERSION: "6.8.3"
+  # The self-test never talks to Discord: the updater is disabled in every job
+  # that only builds and verifies the EXE (the publish step below uses the
+  # script directly).
+  BSI_NO_UPDATER: "1"
 
 jobs:
   build-windows:
@@ -221,3 +225,43 @@ jobs:
 
           echo "Published $EXE_NAME (SHA-256 $EXPECTED_SHA256)" \
             >> "$GITHUB_STEP_SUMMARY"
+
+      # The application updates itself from a Discord channel because the
+      # repository is private (docs/UPDATER.md). Skipped, with a notice, until
+      # the Discord secrets exist - a release never depends on Discord.
+      - name: Publish the self-update to the Discord releases channel
+        if: (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')) || (github.event_name == 'workflow_dispatch' && inputs.publish_release)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ steps.meta.outputs.version }}
+          EXE_NAME: ${{ steps.meta.outputs.exe_name }}
+          EXPECTED_SHA256: ${{ steps.artifact.outputs.sha256 }}
+          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN || secrets.DISCORD_PUBLISH_TOKEN }}
+          DISCORD_CHANNEL_ID: ${{ secrets.DISCORD_CHANNEL_ID || secrets.DISCORD_UPDATER_CHANNEL_ID }}
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          BSI_UPDATE_HMAC_KEY: ${{ secrets.BSI_UPDATE_HMAC_KEY }}
+        run: |
+          set -euo pipefail
+
+          if [[ -z "${DISCORD_BOT_TOKEN}${DISCORD_WEBHOOK_URL}" ]]; then
+            echo "::notice::DISCORD_BOT_TOKEN / DISCORD_WEBHOOK_URL is not set - skipping the Discord self-update publish."
+            exit 0
+          fi
+
+          asset="build/artifacts/$EXE_NAME"
+          [[ -f "$asset" ]]
+          echo "$EXPECTED_SHA256  $asset" | sha256sum --check --strict
+
+          # Same notes as the GitHub release, so both say the same thing.
+          notes="$(mktemp)"
+          gh release view "v$VERSION" --repo "$GH_REPO" --json body -q .body > "$notes" 2>/dev/null || true
+
+          node --version
+          node updater-bot/publish.mjs \
+            --exe "$asset" \
+            --version "$VERSION" \
+            --notes-file "$notes"
+
+          echo "The app's \"Check now\" now offers $VERSION." >> "$GITHUB_STEP_SUMMARY"

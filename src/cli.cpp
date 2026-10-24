@@ -12,7 +12,9 @@
 // ---------------------------------------------------------------------------
 
 #include "core/RpcIdPatcher.h"
+#include "core/UpdateChecker.h"
 
+#include <QEventLoop>
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -20,6 +22,7 @@
 #include <QJsonValue>
 #include <QString>
 #include <QStringList>
+#include <QTimer>
 
 #include <cstdio>
 
@@ -253,4 +256,179 @@ int runRpcIdCli(const QStringList &arguments)
                                             options.dryRun, options.all));
     }
     return usage(QStringLiteral("unknown command %1").arg(options.command));
+}
+
+// ---------------------------------------------------------------------------
+// Self-update probe (BSI-Customizer --check-updates)
+//
+// Reads the Discord releases channel exactly like the window's updater does, so
+// the bot token + channel ID setup can be verified from a terminal (or CI)
+// without opening the UI. Exit codes: 0 up to date, 1 the check failed, 2 the
+// updater is not configured / the command line is wrong, 3 an update is
+// available, 4 an update was downloaded and verified (--download).
+// ---------------------------------------------------------------------------
+
+namespace {
+
+int runUpdateCommand(const QStringList &arguments)
+{
+    bool json = false;
+    bool wantDownload = false;
+    int timeoutSeconds = 30;
+    for (int i = 0; i < arguments.size(); ++i) {
+        const QString argument = arguments.at(i);
+        if (argument == QLatin1String("--json")) {
+            json = true;
+        } else if (argument == QLatin1String("--download")) {
+            wantDownload = true;
+        } else if (argument == QLatin1String("--timeout") && i + 1 < arguments.size()) {
+            timeoutSeconds = qMax(1, arguments.at(++i).toInt());
+        } else if (argument.startsWith(QLatin1String("-"))) {
+            line(QStringLiteral("error: unknown option %1").arg(argument));
+            return 2;
+        }
+    }
+
+    const UpdateChecker::Config config = UpdateChecker::loadConfig();
+    if (!config.configured) {
+        line(config.setupHint);
+        if (json) {
+            QJsonObject result{
+                { QStringLiteral("ok"), false },
+                { QStringLiteral("configured"), false },
+                { QStringLiteral("hint"), config.setupHint },
+            };
+            line(QStringLiteral("%1").arg(QString::fromUtf8(
+                QJsonDocument(result).toJson(QJsonDocument::Compact))));
+        }
+        return 2;
+    }
+
+    UpdateChecker checker;
+    QEventLoop loop;
+    int exitCode = 1;
+    bool finished = false;
+    QJsonObject result;
+    auto finish = [&](int code) {
+        exitCode = code;
+        finished = true;
+        loop.quit();
+    };
+
+    QObject::connect(&checker, &UpdateChecker::stateChanged, &loop, [&] {
+        if (finished)
+            return;
+        const QString state = checker.state();
+        if (state == QLatin1String("checking"))
+            return;
+        if (state == QLatin1String("error")) {
+            result = QJsonObject{ { QStringLiteral("ok"), false },
+                                  { QStringLiteral("state"), state },
+                                  { QStringLiteral("error"), checker.note() } };
+            finish(1);
+            return;
+        }
+        if (state == QLatin1String("disabled")) {
+            result = QJsonObject{ { QStringLiteral("ok"), false },
+                                  { QStringLiteral("state"), state },
+                                  { QStringLiteral("error"), checker.note() } };
+            finish(2);
+            return;
+        }
+        if (state == QLatin1String("uptodate")) {
+            result = QJsonObject{ { QStringLiteral("ok"), true },
+                                  { QStringLiteral("state"), state },
+                                  { QStringLiteral("current"), checker.currentVersion() },
+                                  { QStringLiteral("available"), false } };
+            finish(0);
+            return;
+        }
+        if (state == QLatin1String("available")) {
+            result = QJsonObject{
+                { QStringLiteral("ok"), true },
+                { QStringLiteral("state"), state },
+                { QStringLiteral("current"), checker.currentVersion() },
+                { QStringLiteral("available"), true },
+                { QStringLiteral("latest"), checker.latestVersion() },
+                { QStringLiteral("file"), checker.fileName() },
+                { QStringLiteral("size"), checker.downloadSize() },
+                { QStringLiteral("released"), checker.releasedAt() },
+                { QStringLiteral("mandatory"), checker.mandatory() },
+                { QStringLiteral("notes"), checker.releaseNotes() },
+            };
+            if (!wantDownload) {
+                finish(3);
+                return;
+            }
+            checker.download();
+            return;
+        }
+        if (state == QLatin1String("downloading"))
+            return;
+        if (state == QLatin1String("ready")) {
+            result.insert(QStringLiteral("state"), state);
+            result.insert(QStringLiteral("staged"), checker.stagedFile());
+            finish(4);
+            return;
+        }
+    });
+
+    if (!json) {
+        line(QStringLiteral("BSI Customizer %1 - update check").arg(checker.currentVersion()));
+        line(QStringLiteral("  Channel %1%2")
+                 .arg(config.channelId,
+                      config.sourceFile.isEmpty()
+                          ? QString()
+                          : QStringLiteral(" (config: %1)").arg(config.sourceFile)));
+    }
+
+    QTimer::singleShot(timeoutSeconds * 1000, &loop, [&] {
+        if (finished)
+            return;
+        // Mark it finished BEFORE cancelling: cancel() changes the state, and
+        // the handler above would otherwise start a download after the timeout.
+        finished = true;
+        checker.cancel();
+        exitCode = 1;
+        result = QJsonObject{ { QStringLiteral("ok"), false },
+                              { QStringLiteral("state"), QStringLiteral("timeout") },
+                              { QStringLiteral("error"),
+                                QStringLiteral("no answer within %1 s").arg(timeoutSeconds) } };
+        loop.quit();
+    });
+
+    checker.check();
+    loop.exec();
+
+    if (json) {
+        line(QString::fromUtf8(QJsonDocument(result).toJson(QJsonDocument::Compact)));
+        return exitCode;
+    }
+    if (exitCode == 0) {
+        line(QStringLiteral("  Result: you are on the newest build (%1).")
+                 .arg(checker.currentVersion()));
+    } else if (exitCode == 3) {
+        line(QStringLiteral("  Result: version %1 is available (%2, %3).")
+                 .arg(checker.latestVersion(), checker.fileName(), checker.downloadSize()));
+        if (!checker.releaseNotes().trimmed().isEmpty()) {
+            line(QStringLiteral("  Notes:"));
+            for (const QString &noteLine : checker.releaseNotes().split(QLatin1Char('\n')))
+                line(QStringLiteral("    %1").arg(noteLine));
+        }
+        line(QStringLiteral("  Add --download to fetch and verify it, or open the app and press Update."));
+    } else if (exitCode == 4) {
+        line(QStringLiteral("  Result: version %1 downloaded and verified.").arg(checker.latestVersion()));
+        line(QStringLiteral("  File: %1").arg(checker.stagedFile()));
+        line(QStringLiteral("  Start the app and press Install, or replace the EXE with this file."));
+    } else {
+        line(QStringLiteral("  Result: %1").arg(result.value(QStringLiteral("error")).toString()));
+    }
+    return exitCode;
+}
+
+} // namespace
+
+int runUpdateCli(const QStringList &arguments)
+{
+    return runUpdateCommand(arguments);
 }

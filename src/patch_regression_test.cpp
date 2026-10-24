@@ -20,6 +20,7 @@
 #include "core/SettingsManager.h"
 #include "core/VersionResource.h"
 #include "core/ThemeEngine.h"
+#include "core/UpdateChecker.h"
 #include "core/ZlibUtils.h"
 #include "core/X64Prologue.h"
 
@@ -33,6 +34,7 @@
 #include <QUrl>
 #include <QFileInfo>
 #include <QImage>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QLibraryInfo>
@@ -4466,6 +4468,205 @@ Window {
         check(again.ok && read(exePath).size() == r.f.bytes.size(),
               QStringLiteral("the relocated entry stays editable (%1)").arg(again.msg));
     }
+
+    // ------------------------------------------------------------------
+    // Self-update through the Discord releases bot (docs/UPDATER.md)
+    //
+    // Everything the updater decides before a single byte reaches the disk is
+    // a pure function, so it is checked here against fixed vectors - including
+    // one signature produced by updater-bot/publish.mjs, which keeps the Node
+    // and C++ implementations of the signed text in sync.
+    // ------------------------------------------------------------------
+    std::printf("[updater] manifest validation, version order, signature, file checks\n");
+    {
+        check(UpdateChecker::compareVersions(QStringLiteral("2.0.1"), QStringLiteral("2.0.0")) > 0,
+              "2.0.1 is newer than 2.0.0");
+        check(UpdateChecker::compareVersions(QStringLiteral("2.0.0"), QStringLiteral("2.0.0")) == 0,
+              "the same version compares equal");
+        check(UpdateChecker::compareVersions(QStringLiteral("v2.0.1"), QStringLiteral("2.0.1")) == 0,
+              "a leading v is packaging, not a version difference");
+        check(UpdateChecker::compareVersions(QStringLiteral("2.0"), QStringLiteral("2.0.0")) == 0,
+              "2.0 and 2.0.0 are the same build");
+        check(UpdateChecker::compareVersions(QStringLiteral("2.0.10"), QStringLiteral("2.0.9")) > 0,
+              "2.0.10 is newer than 2.0.9 (numeric, not textual)");
+        check(UpdateChecker::compareVersions(QStringLiteral("2.0.1-beta"), QStringLiteral("2.0.1")) < 0,
+              "a pre-release sorts before its release");
+        check(UpdateChecker::compareVersions(QStringLiteral("1.9.9"), QStringLiteral("2.0.0")) < 0,
+              "a major bump wins");
+        check(UpdateChecker::normalizedVersion(QStringLiteral("  v2.0.1 ")) == QLatin1String("2.0.1"),
+              "normalizedVersion trims and drops the v");
+
+        const QByteArray sha = QByteArrayLiteral(
+            "4de96eb5f3d5260c89e2dc2f21c2076be68ba4511e8399ce695bdf542a8354ac");
+        QJsonObject good{
+            { QStringLiteral("schema"), 1 },
+            { QStringLiteral("app"), QStringLiteral("BSI Customizer") },
+            { QStringLiteral("version"), QStringLiteral("v2.0.1") },
+            { QStringLiteral("file"), QStringLiteral("BSI-Customizer-2.0.1-win64.exe") },
+            { QStringLiteral("size"), 1200000 },
+            { QStringLiteral("sha256"), QString::fromLatin1(sha) },
+            { QStringLiteral("notes"), QStringLiteral("Fixes the About editor.") },
+        };
+        QString manifestError;
+        const QJsonObject parsed = UpdateChecker::parseManifest(
+            QJsonDocument(good).toJson(QJsonDocument::Compact), &manifestError);
+        check(!parsed.isEmpty()
+                  && parsed.value(QStringLiteral("version")).toString() == QLatin1String("2.0.1"),
+              QStringLiteral("a valid manifest parses and its version is normalized (%1)").arg(manifestError));
+        check(parsed.value(QStringLiteral("sha256")).toString().toLower() == QString::fromLatin1(sha),
+              "the SHA-256 from the manifest survives parsing");
+
+        const auto rejected = [](const QJsonObject &manifest, const QString &why) {
+            QString error;
+            const QJsonObject out = UpdateChecker::parseManifest(
+                QJsonDocument(manifest).toJson(QJsonDocument::Compact), &error);
+            check(out.isEmpty() && !error.isEmpty(),
+                  QStringLiteral("%1 is refused (%2)").arg(why, error));
+        };
+        QJsonObject bad = good;
+        bad.insert(QStringLiteral("schema"), 2);
+        rejected(bad, "a future schema");
+        bad = good;
+        bad.remove(QStringLiteral("sha256"));
+        rejected(bad, "a manifest without a SHA-256");
+        bad = good;
+        bad.insert(QStringLiteral("sha256"), QStringLiteral("abc"));
+        rejected(bad, "a truncated SHA-256");
+        bad = good;
+        bad.insert(QStringLiteral("file"), QStringLiteral("..\\evil.exe"));
+        rejected(bad, "a file name with a path");
+        bad = good;
+        bad.insert(QStringLiteral("file"), QStringLiteral("notes.txt"));
+        rejected(bad, "a file that is not an .exe");
+        bad = good;
+        bad.insert(QStringLiteral("version"), QStringLiteral("latest"));
+        rejected(bad, "a version that is not a number");
+        bad = good;
+        bad.insert(QStringLiteral("size"), 0);
+        rejected(bad, "a zero size");
+
+        const QJsonObject newest{
+            { QStringLiteral("id"), QStringLiteral("222") },
+            { QStringLiteral("attachments"),
+              QJsonArray{ QJsonObject{
+                  { QStringLiteral("id"), QStringLiteral("9") },
+                  { QStringLiteral("filename"), QStringLiteral("BSI-Customizer-2.0.1-win64.exe") },
+                  { QStringLiteral("url"), QStringLiteral("https://cdn.discordapp.com/a/x.exe") },
+                  { QStringLiteral("size"), 1200000 } } } },
+        };
+        const QJsonObject older{
+            { QStringLiteral("id"), QStringLiteral("111") },
+            { QStringLiteral("attachments"),
+              QJsonArray{
+                  QJsonObject{
+                      { QStringLiteral("id"), QStringLiteral("1") },
+                      { QStringLiteral("filename"), QStringLiteral("manifest.json") },
+                      { QStringLiteral("url"), QStringLiteral("https://cdn.discordapp.com/a/m.json") } },
+                  QJsonObject{
+                      { QStringLiteral("id"), QStringLiteral("2") },
+                      { QStringLiteral("filename"), QStringLiteral("BSI-Customizer-2.0.1-win64.exe") },
+                      { QStringLiteral("url"), QStringLiteral("https://cdn.discordapp.com/a/x.exe") } } } },
+        };
+        const auto found = UpdateChecker::findManifestMessage(
+            QJsonArray{ newest, older }, QStringLiteral("manifest.json"));
+        check(found.found && found.messageId == QLatin1String("111")
+                  && found.manifestUrl.endsWith(QLatin1String("/m.json")),
+              "the newest message with a manifest.json attachment is the release");
+        check(!UpdateChecker::findManifestMessage(QJsonArray{ newest },
+                                                  QStringLiteral("manifest.json")).found,
+              "a channel with only the EXE and no manifest is refused");
+        check(UpdateChecker::attachmentUrl(older, QStringLiteral("bsi-customizer-2.0.1-WIN64.exe"))
+                  == QLatin1String("https://cdn.discordapp.com/a/x.exe"),
+              "the EXE attachment is found case-insensitively by its manifest name");
+
+        check(UpdateChecker::signedManifestText(parsed)
+                  == QByteArrayLiteral("bsi-update-v1\n2.0.1\nBSI-Customizer-2.0.1-win64.exe\n"
+                                       "1200000\n4de96eb5f3d5260c89e2dc2f21c2076be68ba4511e8399ce"
+                                       "695bdf542a8354ac\n"),
+              "the signed manifest text is version/file/size/sha256, one per line");
+        const QString key = QStringLiteral("test-key-2026");
+        const QString expectedSignature = QStringLiteral("fBbRNx4qNHcswibUpxO656TM0B7ehswUBDQD+e5Bgd4=");
+        check(UpdateChecker::manifestSignature(parsed, key) == expectedSignature,
+              "the C++ signature matches the one publish.mjs computes");
+        QJsonObject signedManifest = parsed;
+        signedManifest.insert(QStringLiteral("signature"), expectedSignature);
+        QString signatureError;
+        check(UpdateChecker::verifyManifestSignature(signedManifest, key, &signatureError),
+              "a correctly signed manifest verifies");
+        QJsonObject tampered = signedManifest;
+        tampered.insert(QStringLiteral("size"), 1200001);
+        check(!UpdateChecker::verifyManifestSignature(tampered, key, &signatureError)
+                  && signatureError.contains(QLatin1String("signature")),
+              "changing one field of a signed manifest breaks the signature");
+        check(!UpdateChecker::verifyManifestSignature(parsed, key, &signatureError),
+              "an unsigned manifest is refused when a key is configured");
+        check(UpdateChecker::verifyManifestSignature(parsed, QString(), &signatureError),
+              "without a key the channel itself is the trust boundary");
+
+        QByteArray pe(0x400, '\0');
+        pe[0] = 'M';
+        pe[1] = 'Z';
+        const auto put16 = [&pe](int off, int value) {
+            pe[off] = char(value & 0xff);
+            pe[off + 1] = char((value >> 8) & 0xff);
+        };
+        const auto put32 = [&pe](int off, quint32 value) {
+            for (int i = 0; i < 4; ++i)
+                pe[off + i] = char((value >> (8 * i)) & 0xff);
+        };
+        const quint32 peOffset = 0x80;
+        put32(0x3c, peOffset);
+        pe[peOffset] = 'P';
+        pe[peOffset + 1] = 'E';
+        put16(peOffset + 4, 0x8664); // machine: x86-64
+        put16(peOffset + 24, 0x20b); // optional header: PE32+
+        const QString pePath = temp.filePath(QStringLiteral("fake-portable.exe"));
+        check(write(pePath, pe), "write a minimal 64-bit PE for the updater checks");
+        const QString peHash = UpdateChecker::fileSha256(pePath);
+        check(peHash == QString::fromLatin1(
+                            QCryptographicHash::hash(pe, QCryptographicHash::Sha256).toHex()),
+              "fileSha256 hashes the whole file");
+        QString stageError;
+        check(UpdateChecker::verifyStagedFile(pePath, pe.size(), peHash, &stageError),
+              QStringLiteral("a download that matches size + SHA-256 + PE verifies (%1)")
+                  .arg(stageError));
+        check(!UpdateChecker::verifyStagedFile(pePath, pe.size() + 1, peHash, &stageError)
+                  && stageError.contains(QLatin1String("size mismatch")),
+              "a truncated download is refused");
+        check(!UpdateChecker::verifyStagedFile(pePath, pe.size(),
+                                               QString(64, QLatin1Char('0')), &stageError)
+                  && stageError.contains(QLatin1String("SHA-256")),
+              "a download whose bytes changed is refused");
+        const QString notPe = temp.filePath(QStringLiteral("not-a-program.exe"));
+        write(notPe, QByteArrayLiteral("MZ but nothing else after it"));
+        check(!UpdateChecker::looksLikeExecutable(notPe, &stageError),
+              QStringLiteral("a file that only starts with MZ is refused (%1)").arg(stageError));
+        QByteArray wrongMachine = pe;
+        wrongMachine[peOffset + 4] = char(0x4c);
+        wrongMachine[peOffset + 5] = char(0x01); // 0x014c = i386
+        const QString i386Path = temp.filePath(QStringLiteral("thirty-two-bit.exe"));
+        write(i386Path, wrongMachine);
+        check(!UpdateChecker::looksLikeExecutable(i386Path, &stageError)
+                  && stageError.contains(QLatin1String("64-bit")),
+              "a 32-bit program is refused before it can replace a 64-bit build");
+
+        check(UpdateChecker::describeHttpError(401, "{}").contains(QLatin1String("token")),
+              "401 names the token");
+        check(UpdateChecker::describeHttpError(403, "{}").contains(QLatin1String("View Channel")),
+              "403 names the missing channel permissions");
+        check(UpdateChecker::describeHttpError(404, "{}").contains(QLatin1String("channelId")),
+              "404 names the channel id");
+        check(UpdateChecker::describeHttpError(429, "{\"retry_after\": 12.5}")
+                  .contains(QLatin1String("rate-limiting")),
+              "429 explains the rate limit");
+        check(UpdateChecker::describeHttpError(500, "{\"message\": \"boom\"}")
+                  .contains(QLatin1String("boom")),
+              "a Discord message is passed through for diagnosis");
+        check(UpdateChecker::readableSize(1200000) == QLatin1String("1.14 MB"),
+              QStringLiteral("readableSize formats a download (%1)")
+                  .arg(UpdateChecker::readableSize(1200000)));
+    }
+
 
     return failures;
 }

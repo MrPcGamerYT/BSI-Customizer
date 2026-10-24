@@ -411,6 +411,43 @@ Discord application itself, which must still be changed in the Discord
 Developer Portal. `--rpcid selftest` runs the complete engine self-test, the
 same one CI runs.
 
+## Self-update through Discord
+
+The repository is private, so GitHub Releases cannot be the update channel: a
+shipped EXE has no public endpoint to ask, and a GitHub token cannot travel
+inside the file. The updater therefore uses a **Discord server**: the publisher
+(`updater-bot/publish.mjs`) uploads the portable EXE plus a small
+`manifest.json` to one channel, and the app reads the newest manifest with a
+**read-only bot token** limited to that channel.
+
+- `UpdateChecker` (`src/core/UpdateChecker.{h,cpp}`) checks a few seconds after
+  the window opens (switchable on the About page) and shows a strip under the
+  title bar when a newer `version` is announced: **What's new** / **Update now**
+  / **Later**.
+- The download is written to `%TEMP%` and verified before anything is replaced:
+  exact byte size, SHA-256 and a 64-bit PE check. Any mismatch deletes the file.
+- **Install and restart** hands the swap to a hidden PowerShell helper that
+  waits for the app to exit, copies the verified EXE over it, starts it again
+  and deletes itself. Nothing outside `%TEMP%` is touched before that.
+- The manifest can be HMAC-SHA256 signed (`updater.hmacKey`), in which case an
+  unsigned manifest is refused. `url` lets the EXE live on any https host when
+  it is larger than the server's upload limit.
+- Configuration is the `updater` object of the same `auth.json` the sign-in gate
+  uses, so one `ZLP_AUTH_JSON` secret configures both. `BSI_NO_UPDATER=1`
+  disables it.
+
+Full setup (bot permissions, channel, secrets, publishing, troubleshooting):
+[`docs/UPDATER.md`](docs/UPDATER.md) and
+[`updater-bot/README.md`](updater-bot/README.md).
+
+Verify a channel without opening the window:
+
+```powershell
+.\BSI-Customizer.exe --check-updates --json
+# 0 = up to date, 3 = update available, 4 = downloaded and verified (--download),
+# 1 = error, 2 = no updater config
+```
+
 ## Build and verify
 
 Requires CMake 3.21+, C++17, and Qt 6.5+ with Core, Gui, Qml, Quick, QuickControls2, and Svg. **Qt 6 builds the customizer UI; it does not limit FPS patching to Qt 6 installations. Qt 5 and Qt 6 target DLLs use the same patching engine.**

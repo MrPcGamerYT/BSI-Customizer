@@ -1,0 +1,15 @@
+{
+  "//": "Copy to updater-bot/config.json (git-ignored). Every field can also come from the environment - see README.md.",
+
+  "channelId": "1234567890123456789",
+  "//botToken": "Bot token used by the publisher. The token baked into the app only needs View Channel + Read Message History.",
+  "botToken": "PASTE_THE_BOT_TOKEN",
+
+  "//webhookUrl": "Alternative to botToken: a channel webhook (no bot needed to publish). Discord cannot edit webhook messages without an id, so the script keeps one in .state.json.",
+  "webhookUrl": "",
+
+  "//hmacKey": "Optional. Same value as updater.hmacKey in auth.json; when set the manifest is signed and the app refuses unsigned ones.",
+  "hmacKey": "",
+
+  "manifest": "manifest.json"
+}

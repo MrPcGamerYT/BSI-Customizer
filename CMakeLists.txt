@@ -76,6 +76,8 @@ qt_add_executable(BSICustomizer
     src/core/AuthManager.cpp
     src/core/SessionStore.h
     src/core/SessionStore.cpp
+    src/core/UpdateChecker.h
+    src/core/UpdateChecker.cpp
     src/core/ThemeManager.h
     src/core/ThemeManager.cpp
     src/core/SettingsManager.h
@@ -198,6 +200,7 @@ qt_add_qml_module(BSICustomizer
         src/qml/Theme.qml
         src/qml/Icons.js
         src/qml/LoginGate.qml
+        src/qml/UpdateBanner.qml
         src/qml/components/SidebarButton.qml
         src/qml/components/WinControls.qml
         src/qml/components/Card.qml
