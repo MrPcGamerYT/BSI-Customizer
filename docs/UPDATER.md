@@ -127,8 +127,10 @@ present.
    folder with no `unins000.exe` next to it and not the portable build's
    temporary extraction). That path writes a hidden PowerShell helper which
    waits for the PID, waits until the program file can be opened **with no
-   sharing at all**, then copies with retries; if the overwrite keeps failing it
-   renames the old file aside and moves the new one in. On final failure it
+   sharing at all**, copies the new build into a `*.new` file next to it (so a
+   copy that dies half way cannot damage the program the user has), then swaps it
+   in with `File::Replace` - falling back to renaming the old file aside and
+   moving the new one in. On final failure it
    **starts the old build again** and leaves
    `%TEMP%\BSI-Customizer-update\apply-update.log` behind, which the app shows
    on that next start (with the last Windows error) under *The last update could
