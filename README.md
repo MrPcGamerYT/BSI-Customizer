@@ -1,5 +1,7 @@
 # BSI Customizer
 
+[![CI](https://github.com/MrPcGamerYT/BSI-Customizer/actions/workflows/ci.yml/badge.svg)](https://github.com/MrPcGamerYT/BSI-Customizer/actions/workflows/ci.yml)
+
 Qt Quick desktop customizer for BlueStacks / MSI App Player on Windows.
 
 ## Sign-in gate (Discord only)
@@ -29,7 +31,9 @@ cleans up on normal exit. No runtime download or installation is performed.
 See [the full portable workflow/build guide](docs/PORTABLE.md) for Actions,
 local builds, clean-environment tests, temporary-file behavior, and license/DLL
 extraction. GitHub Releases provide the EXE directly; Actions wraps its single
-EXE artifact in a transport ZIP.
+EXE artifact in a transport ZIP. Every push and pull request builds the Windows
+x64 EXE on a GitHub-hosted runner and runs the whole engine self-test there
+(`--selftest`), so a change is only mergeable when the real MSVC build is green.
 
 ## Theme patching
 
