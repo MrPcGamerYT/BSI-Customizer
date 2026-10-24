@@ -470,7 +470,7 @@ void UpdateChecker::check()
             return;
         }
 
-        QNetworkRequest manifestRequest(QUrl(ref.manifestUrl));
+        QNetworkRequest manifestRequest{QUrl(release.manifestUrl)};
         manifestRequest.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
                                      QNetworkRequest::NoLessSafeRedirectPolicy);
         manifestRequest.setRawHeader("User-Agent", QByteArrayLiteral("BSI-Customizer/")
@@ -669,7 +669,7 @@ void UpdateChecker::beginDownload(const QString &urlText)
                  : QStringLiteral("Downloading version %1 from %2...")
                        .arg(latestVersion(), QUrl(source).host()));
 
-    QNetworkRequest request(QUrl(source));
+    QNetworkRequest request{QUrl(source)};
     request.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
                          QNetworkRequest::NoLessSafeRedirectPolicy);
     // File hosts take a browser-looking agent more seriously than a bare one.
