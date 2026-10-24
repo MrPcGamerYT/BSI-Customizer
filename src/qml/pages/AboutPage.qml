@@ -7,6 +7,21 @@ import "../Icons.js" as Icons
 Item {
     id: page
 
+    // The restart helper starts the old build again when it could not replace
+    // the program file, so the first start after a failed update is the only
+    // chance to say why. Read once; the reason is written to the update log.
+    property string updateFailure: ""
+
+    signal notify(string message)
+
+    Component.onCompleted: {
+        const reason = updates.helperFailure();
+        if (reason && reason.length > 0) {
+            page.updateFailure = reason;
+            page.notify(qsTr("The last update failed - the reason is on the About page."));
+        }
+    }
+
     // Small outline YouTube play button, drawn as inline SVG so nothing has to be
     // shipped or downloaded. The stroke colour is passed in so the logo can follow
     // the theme (and the accent on hover) without a second asset.
@@ -201,6 +216,54 @@ Item {
                         color: Theme.textDim
                         font.pixelSize: 11
                         wrapMode: Text.Wrap
+                    }
+
+                    Rectangle {
+                        Layout.fillWidth: true
+                        visible: page.updateFailure.length > 0
+                        implicitHeight: failureColumn.implicitHeight + 16
+                        radius: 8
+                        color: Qt.rgba(Theme.warn.r, Theme.warn.g, Theme.warn.b, 0.12)
+                        border.width: 1
+                        border.color: Theme.warn
+
+                        ColumnLayout {
+                            id: failureColumn
+                            anchors.fill: parent
+                            anchors.margins: 8
+                            spacing: 6
+                            Text {
+                                Layout.fillWidth: true
+                                text: qsTr("The last update could not be installed")
+                                color: Theme.warn
+                                font.pixelSize: 12
+                                font.weight: Font.DemiBold
+                            }
+                            Text {
+                                Layout.fillWidth: true
+                                text: page.updateFailure
+                                color: Theme.text
+                                font.pixelSize: 11
+                                font.family: "Consolas"
+                                wrapMode: Text.WrapAnywhere
+                            }
+                            RowLayout {
+                                spacing: 8
+                                ActionButton {
+                                    text: qsTr("Update log")
+                                    onClicked: updates.showHelperLog()
+                                }
+                                ActionButton {
+                                    text: qsTr("Open the release page")
+                                    onClicked: updates.openDownloadPage()
+                                }
+                                ActionButton {
+                                    text: qsTr("Dismiss")
+                                    onClicked: page.updateFailure = ""
+                                }
+                                Item { Layout.fillWidth: true }
+                            }
+                        }
                     }
 
                     RowLayout {

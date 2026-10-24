@@ -4863,6 +4863,51 @@ Window {
         check(UpdateChecker::normalizedVersion(QStringLiteral("  v2.0.1 ")) == QLatin1String("2.0.1"),
               "normalizedVersion trims and drops the v");
 
+        // A release is shipped as a setup program, and the updater has to see
+        // that from the file itself: a name is the publisher's to choose, and a
+        // setup that is mistaken for a plain EXE gets copied over the running
+        // app - which leaves a program that only installs.
+        {
+            const auto utf16 = [](const QString &text) {
+                QByteArray bytes;
+                for (const QChar ch : text) {
+                    bytes.append(char(ch.unicode() & 0xff));
+                    bytes.append(char((ch.unicode() >> 8) & 0xff));
+                }
+                return bytes;
+            };
+            const QString inno = temp.filePath(QStringLiteral("release-download.bin"));
+            QByteArray payload(4096, '\0');
+            payload.replace(1024, 42, QByteArray("MZ") + QByteArray(1000, '\0'));
+            payload += utf16(QStringLiteral("Inno Setup Setup Data (6.2.2)"));
+            payload += QByteArray(512, '\0');
+            write(inno, payload);
+            check(UpdateChecker::looksLikeInstaller(inno),
+                  "a setup is recognized by its own Inno markers, whatever it is called");
+
+            const QString plain = temp.filePath(QStringLiteral("BSI-Customizer-9.9.9-setup.exe"));
+            write(plain, QByteArray("MZ") + QByteArray(8192, '\x90'));
+            check(!UpdateChecker::looksLikeInstaller(plain),
+                  "a plain program is not called an installer just because its name says setup");
+
+            const QString nsis = temp.filePath(QStringLiteral("other.bin"));
+            write(nsis, QByteArray("MZ") + QByteArray(600, '\0') + QByteArray("NullsoftInst"));
+            check(UpdateChecker::looksLikeInstaller(nsis), "an NSIS setup is recognized too");
+
+            // An installed copy is recognised by the uninstaller next to it: that
+            // is the difference between "replace this file" and "there is an
+            // install record that has to stay in step".
+            const QString installedDir = temp.filePath(QStringLiteral("installed"));
+            QDir().mkpath(installedDir);
+            const QString installedExe = installedDir + QStringLiteral("/BSI-Customizer.exe");
+            write(installedExe, QByteArray("MZ"));
+            check(!UpdateChecker::isInstalledCopy(installedExe),
+                  "a folder without unins000.exe is a portable copy");
+            write(installedDir + QStringLiteral("/unins000.exe"), QByteArray("MZ"));
+            check(UpdateChecker::isInstalledCopy(installedExe),
+                  "an uninstaller next to the program marks an installed copy");
+        }
+
         const QByteArray sha = QByteArrayLiteral(
             "4de96eb5f3d5260c89e2dc2f21c2076be68ba4511e8399ce695bdf542a8354ac");
         QJsonObject good{

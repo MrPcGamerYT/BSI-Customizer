@@ -428,7 +428,9 @@ ApplicationWindow {
                 AppearancePage {
                     onNotify: (msg) => toast.show(msg)
                 }
-                AboutPage {}
+                AboutPage {
+                    onNotify: (msg) => toast.show(msg)
+                }
             }
 
             LogPanel {

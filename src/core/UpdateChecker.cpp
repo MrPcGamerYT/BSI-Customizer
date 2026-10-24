@@ -889,14 +889,64 @@ void UpdateChecker::installNow()
     }
 }
 
+// A setup program is recognized by what it contains, not only by its name. The
+// manifest names the file, but the name is the publisher's to choose: a build
+// published as "BSI-Customizer-2.4.0.exe" (or with any other name) is still an
+// Inno Setup installer, and overwriting this program with it would replace the
+// app with a program that only installs on every start.
+bool UpdateChecker::looksLikeInstaller(const QString &path)
+{
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) return false;
+    const QByteArray head = file.read(4 * 1024 * 1024);
+    if (head.size() < 64) return false;
+    // Inno Setup keeps its loader markers as UTF-16LE: "Inno Setup Setup Data"
+    // in setup.e32, "InnoSetupLdr" in the loader stub, and "Inno Setup" in the
+    // version resource of every build.
+    const auto utf16 = [](const char *ascii) {
+        QByteArray out;
+        for (const char *c = ascii; *c; ++c) {
+            out.append(*c);
+            out.append('\0');
+        }
+        return out;
+    };
+    for (const char *needle : { "Inno Setup Setup Data", "InnoSetupLdr", "Inno Setup" })
+        if (head.contains(utf16(needle))) return true;
+    // NSIS ("Nullsoft.NSIS" in the stub, "NullsoftInst" in the header).
+    for (const char *needle : { "Nullsoft.NSIS", "NullsoftInst" })
+        if (head.contains(QByteArray(needle))) return true;
+    // 7-Zip SFX and WiX burn bundles.
+    if (head.contains("7zS.sfx") || head.contains("7zSFX")) return true;
+    if (head.contains("WixBundle")) return true;
+    return false;
+}
+
+// True when the running program is the copy an installer wrote. Inno leaves
+// unins000.exe (and .dat) next to it; a portable copy has neither. The
+// difference matters because only an installed copy has an install record to
+// keep in step - overwriting it with a loose EXE would leave that record
+// pointing at a file the uninstaller no longer describes.
+bool UpdateChecker::isInstalledCopy(const QString &exePath)
+{
+    const QDir dir = QFileInfo(exePath).absoluteDir();
+    return QFileInfo::exists(dir.filePath(QStringLiteral("unins000.exe")))
+           || QFileInfo::exists(dir.filePath(QStringLiteral("unins000.dat")))
+           || QFileInfo::exists(dir.filePath(QStringLiteral("unins001.exe")));
+}
+
 bool UpdateChecker::stagedIsInstaller() const
 {
     if (m_stagedFile.isEmpty())
         return false;
-    // The manifest may say so outright; the file name is the second signal, and
-    // it is the one that works for a release message that only carries a link.
+    // Three signals, strongest first: the manifest may say so outright, the
+    // file itself says what it is (an Inno/NSIS bundle carries its own
+    // markers), and the name is the weakest of them - it is the publisher's to
+    // choose, so a build published under another name is still a setup.
     const QJsonValue flag = m_latest.value(QStringLiteral("installer"));
     if (flag.isBool() && flag.toBool())
+        return true;
+    if (looksLikeInstaller(m_stagedFile))
         return true;
     const QString name = QFileInfo(m_stagedFile).fileName().toLower();
     return name.contains(QLatin1String("setup")) || name.contains(QLatin1String("installer"))
@@ -953,6 +1003,32 @@ void UpdateChecker::apply()
         return;
     }
 
+    // The one-file portable build unpacks itself under %TEMP% and runs the
+    // unpacked copy, so the file this process is running is not the file the
+    // user has: replacing it would change nothing, and the next start would
+    // unpack the old payload again. That copy must be updated by the setup.
+    const QString tempRoot = QDir::cleanPath(QDir::tempPath());
+    if (QDir::cleanPath(QFileInfo(target).absolutePath())
+            .startsWith(tempRoot, Qt::CaseInsensitive)) {
+        fail(QStringLiteral("This is the portable build running from a temporary folder, so there "
+                            "is no program file to replace. Download %1 from the release page: "
+                            "the setup installs the new version properly.")
+                 .arg(latestVersion()));
+        return;
+    }
+
+    // An installed copy is only ever updated by its installer. Replacing the
+    // program file under an install record leaves the uninstaller describing a
+    // file that is no longer there - and a loose EXE has no install to keep in
+    // step in the first place.
+    if (isInstalledCopy(target)) {
+        fail(QStringLiteral("This copy was installed by the setup program, so it is updated by the "
+                            "setup, not by overwriting itself. The downloaded file %1 is not an "
+                            "installer - open the release page and run the -setup.exe from there.")
+                 .arg(QFileInfo(m_stagedFile).fileName()));
+        return;
+    }
+
     const QString dirPath = QFileInfo(target).absolutePath();
     // The honest test for "may we write here": create a file. QFileInfo's
     // isWritable() only reflects the DOS read-only attribute on Windows.
@@ -987,8 +1063,22 @@ void UpdateChecker::writeHelper(const QString &sibling, const QString &target)
     QFile::remove(logPath);
 
     // The application is gone by the time any of this runs, so the script is
-    // the whole transaction: wait for this PID, copy over the EXE with retries,
-    // start it again, delete itself. Everything is logged for the failure case.
+    // the whole transaction. What it learned to do the hard way:
+    //
+    //   * wait for this PID, but do not assume the file unlocks the moment the
+    //     process is gone - Windows keeps the image section a little longer, and
+    //     an antivirus scans a freshly written EXE;
+    //   * probe the file until it can be opened with no sharing at all, which is
+    //     the only honest test for "may I replace this now";
+    //   * if a plain overwrite still fails, rename the old file aside and move
+    //     the new one in - a rename needs no free space next to it and is the
+    //     path that works when the destination is locked only for writing;
+    //   * if everything fails, START THE OLD BUILD AGAIN. The old file is
+    //     untouched, so the user is not left with an app that vanished, and the
+    //     log is left on disk for the app to show on that next start.
+    //
+    // Everything is logged, including the last Windows error, so a failure says
+    // what happened instead of only that it happened.
     const qint64 pid = QCoreApplication::applicationPid();
     const QString script = QStringLiteral(
         "$ErrorActionPreference = 'Continue'\n"
@@ -996,24 +1086,58 @@ void UpdateChecker::writeHelper(const QString &sibling, const QString &target)
         "$source = %2\n"
         "$log = %3\n"
         "$waitFor = %4\n"
+        "$lastError = ''\n"
         "function Write-Log([string]$text) {\n"
         "    try { Add-Content -LiteralPath $log -Value (\"{0:yyyy-MM-dd HH:mm:ss} {1}\" -f (Get-Date), $text) } catch {}\n"
         "}\n"
         "Write-Log \"update: waiting for PID $waitFor to exit\"\n"
-        "for ($i = 0; $i -lt 900; $i++) {\n"
+        "for ($i = 0; $i -lt 600; $i++) {\n"
         "    if (-not (Get-Process -Id $waitFor -ErrorAction SilentlyContinue)) { break }\n"
         "    Start-Sleep -Milliseconds 200\n"
         "}\n"
+        "Write-Log 'update: waiting until the program file can be replaced'\n"
+        "for ($i = 0; $i -lt 120; $i++) {\n"
+        "    try {\n"
+        "        $handle = [System.IO.File]::Open($target, [System.IO.FileMode]::Open, [System.IO.FileAccess]::ReadWrite, [System.IO.FileShare]::None)\n"
+        "        $handle.Close()\n"
+        "        Write-Log ('update: the file is free after {0} probe(s)' -f ($i + 1))\n"
+        "        break\n"
+        "    } catch {\n"
+        "        $lastError = $_.Exception.Message\n"
+        "        Start-Sleep -Milliseconds 500\n"
+        "    }\n"
+        "}\n"
         "$copied = $false\n"
-        "for ($i = 0; $i -lt 30; $i++) {\n"
+        "for ($i = 0; $i -lt 60; $i++) {\n"
         "    try {\n"
         "        Copy-Item -LiteralPath $source -Destination $target -Force -ErrorAction Stop\n"
         "        $copied = $true\n"
         "        break\n"
         "    } catch {\n"
-        "        Write-Log (\"copy attempt {0} failed: {1}\" -f ($i + 1), $_.Exception.Message)\n"
-        "        Start-Sleep -Milliseconds 500\n"
+        "        $lastError = $_.Exception.Message\n"
+        "        Write-Log (\"copy attempt {0} failed: {1}\" -f ($i + 1), $lastError)\n"
         "    }\n"
+        "    if (-not $copied) {\n"
+        "        $old = \"$target.old\"\n"
+        "        try {\n"
+        "            Remove-Item -LiteralPath $old -Force -ErrorAction SilentlyContinue\n"
+        "            Move-Item -LiteralPath $target -Destination $old -Force -ErrorAction Stop\n"
+        "            Move-Item -LiteralPath $source -Destination $target -Force -ErrorAction Stop\n"
+        "            Remove-Item -LiteralPath $old -Force -ErrorAction SilentlyContinue\n"
+        "            Write-Log 'update: replaced by renaming the old file aside'\n"
+        "            $copied = $true\n"
+        "            break\n"
+        "        } catch {\n"
+        "            $lastError = $_.Exception.Message\n"
+        "            Write-Log (\"rename attempt {0} failed: {1}\" -f ($i + 1), $lastError)\n"
+        "            try {\n"
+        "                if ((Test-Path -LiteralPath $old) -and -not (Test-Path -LiteralPath $target)) {\n"
+        "                    Move-Item -LiteralPath $old -Destination $target -Force -ErrorAction SilentlyContinue\n"
+        "                }\n"
+        "            } catch {}\n"
+        "        }\n"
+        "    }\n"
+        "    Start-Sleep -Milliseconds 1000\n"
         "}\n"
         "if ($copied) {\n"
         "    Write-Log 'update: replaced, restarting'\n"
@@ -1021,7 +1145,10 @@ void UpdateChecker::writeHelper(const QString &sibling, const QString &target)
         "    Remove-Item -LiteralPath $source -Force -ErrorAction SilentlyContinue\n"
         "    Remove-Item -LiteralPath $log -Force -ErrorAction SilentlyContinue\n"
         "} else {\n"
+        "    Write-Log (\"update: FAILED - the file could not be replaced. Last Windows error: {0}\" -f $lastError)\n"
         "    Write-Log 'update: FAILED - the file could not be replaced. Close every other copy of BSI Customizer and run it as administrator.'\n"
+        "    try { Start-Process -FilePath $target } catch { Write-Log ('restart after failure failed: ' + $_.Exception.Message) }\n"
+        "    Remove-Item -LiteralPath $source -Force -ErrorAction SilentlyContinue\n"
         "}\n"
         "Remove-Item -LiteralPath $PSCommandPath -Force -ErrorAction SilentlyContinue\n")
                              .arg(singleQuoted(target), singleQuoted(sibling),
@@ -1071,6 +1198,48 @@ QString UpdateChecker::helperLogPath() const
 {
     return QStandardPaths::writableLocation(QStandardPaths::TempLocation)
            + QStringLiteral("/BSI-Customizer-update/apply-update.log");
+}
+
+// What the restart helper said the last time it ran, when it failed. The helper
+// starts the old build again after a failure, so this is read on the first
+// start after one: the app was closed before the swap, and this is the only
+// place the reason survives. Shown once per log, so a restart does not keep
+// repeating it.
+QString UpdateChecker::helperFailure() const
+{
+    QFile log(helperLogPath());
+    if (!log.open(QIODevice::ReadOnly)) return QString();
+    const QString text = QString::fromUtf8(log.readAll());
+    log.close();
+    if (!text.contains(QLatin1String("FAILED"))) return QString();
+    const QFileInfo info(helperLogPath());
+    const QString key = QStringLiteral("%1:%2").arg(info.size())
+                            .arg(info.lastModified().toMSecsSinceEpoch());
+    QSettings settings;
+    if (settings.value(QStringLiteral("updates/failureShown")).toString() == key) return QString();
+    settings.setValue(QStringLiteral("updates/failureShown"), key);
+    QStringList reasons;
+    for (const QString &line : text.split(QLatin1Char('\n'))) {
+        const QString trimmed = line.trimmed();
+        if (!trimmed.contains(QLatin1String("FAILED")) && !trimmed.contains(QLatin1String("failed")))
+            continue;
+        // Strip the timestamp the helper puts in front of every line.
+        const int space = trimmed.indexOf(QLatin1Char(' '), 19);
+        const QString reason = space > 0 ? trimmed.mid(space + 1) : trimmed;
+        if (!reasons.contains(reason)) reasons << reason;
+    }
+    if (reasons.isEmpty()) return QStringLiteral("The update helper reported a failure.");
+    return reasons.join(QStringLiteral("\n"));
+}
+
+void UpdateChecker::showHelperLog()
+{
+    const QString path = helperLogPath();
+    if (!QFileInfo::exists(path)) {
+        fail(QStringLiteral("No update log exists - the last update did not leave one."));
+        return;
+    }
+    QDesktopServices::openUrl(QUrl::fromLocalFile(path));
 }
 
 // ---------------------------------------------------------------------------
