@@ -170,15 +170,17 @@ bool findDocByBytes(const QByteArray &image, Doc *out)
     for (qsizetype at = image.indexOf(QByteArray::fromHex("78")); at >= 0; at = image.indexOf(QByteArray::fromHex("78"), at + 1)) {
         if (attempts >= 4000) break;
         if (at < 8 || at + 2 > image.size()) continue;
-        const int second = quint8(image.at(int(at) + 1));
-        if ((0x7800 + second) % 31 != 0) continue;
+        const int zlibFlag = quint8(image.at(int(at) + 1));
+        if ((0x7800 + zlibFlag) % 31 != 0) continue;
         const qint64 record = qint64(at) - 8;
-        const quint32 first = ByteUtils::be32(image, record);
-        const quint32 second = ByteUtils::be32(image, record + 4);
+        const quint32 fieldA = ByteUtils::be32(image, record);
+        const quint32 fieldB = ByteUtils::be32(image, record + 4);
         // A record says (decoded, stored) in this order in every player seen so
         // far, and the reverse in one older 5.x build: try both, and let the
         // decoded size of the zlib stream decide which reading is right.
-        for (const auto &pair : { qMakePair(first, second), qMakePair(second, first) }) {
+        const QPair<quint32, quint32> orders[] { qMakePair(fieldA, fieldB),
+                                                 qMakePair(fieldB, fieldA) };
+        for (const auto &pair : orders) {
             const quint32 decoded = pair.first;
             const quint32 stored = pair.second;
             if (stored < 16u || stored > 4u * 1024u * 1024u || decoded < 4096u

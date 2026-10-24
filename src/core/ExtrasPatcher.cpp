@@ -237,7 +237,7 @@ int hideTitlebarElements(QString &qml, const QStringList &ids)
                 const QString replacement = value.size() >= 5 ? QStringLiteral("false")
                                            : value.size() >= 2 ? QStringLiteral("!1")
                                                                : QStringLiteral("0");
-                edits << TitlebarEdit { visible.valueBegin, value.size(), replacement };
+                edits << TitlebarEdit { visible.valueBegin, int(value.size()), replacement };
                 ++hidden;
                 break;
             }
@@ -252,7 +252,7 @@ int hideTitlebarElements(QString &qml, const QStringList &ids)
                 // A one-character expression cannot be replaced by an empty
                 // string without adding a byte, so it is left to the fallback.
                 if (value.size() < 2) break;
-                edits << TitlebarEdit { text.valueBegin, value.size(), QStringLiteral("\"\"") };
+                edits << TitlebarEdit { text.valueBegin, int(value.size()), QStringLiteral("\"\"") };
                 // An empty label still reserves its left margin; zero it in
                 // the same pass so the row really closes up.
                 QmlText::Binding margin;
@@ -261,7 +261,7 @@ int hideTitlebarElements(QString &qml, const QStringList &ids)
                     const QString spacing =
                         qml.mid(margin.valueBegin, margin.valueEnd - margin.valueBegin);
                     if (spacing.trimmed() != QLatin1String("0") && spacing.size() >= 1)
-                        edits << TitlebarEdit { margin.valueBegin, spacing.size(),
+                        edits << TitlebarEdit { margin.valueBegin, int(spacing.size()),
                                                 QStringLiteral("0") };
                 }
                 ++hidden;
