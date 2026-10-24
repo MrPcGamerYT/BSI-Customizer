@@ -137,6 +137,46 @@ QString powerShellPath()
     return found.isEmpty() ? bundled : found;
 }
 
+// A landing page keeps the real download URL in JSON ("downloadlink") with the
+// slashes escaped as \/ , or in an ordinary href. Turn either into a URL.
+QString unescapePageValue(QString value)
+{
+    value.replace(QLatin1String("\\/"), QLatin1String("/"));
+    value.replace(QLatin1String("\\u002F"), QLatin1String("/"), Qt::CaseInsensitive);
+    value.replace(QLatin1String("\\u002f"), QLatin1String("/"));
+    value.replace(QLatin1String("&amp;"), QLatin1String("&"));
+    value.replace(QLatin1String("&#x2F;"), QLatin1String("/"), Qt::CaseInsensitive);
+    value.replace(QLatin1String("&#47;"), QLatin1String("/"));
+    return value.trimmed();
+}
+
+// First kilobyte of a downloaded file: does it open a web page instead of being
+// the program we asked for?
+bool looksLikeHtmlFile(const QString &path)
+{
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly))
+        return false;
+    const QByteArray head = file.read(1024);
+    file.close();
+    QByteArray probe = head;
+    if (probe.startsWith("\xEF\xBB\xBF"))
+        probe = probe.mid(3);
+    probe = probe.trimmed().toLower();
+    if (probe.startsWith("mz") || probe.startsWith("pk"))
+        return false;
+    return probe.startsWith("<!doctype html") || probe.startsWith("<html")
+           || probe.startsWith("<?xml") || probe.startsWith("<head")
+           || (probe.startsWith("<") && probe.contains("</"));
+}
+
+bool isHttpsUrl(const QString &text)
+{
+    const QUrl url(text);
+    return url.isValid() && url.scheme().compare(QLatin1String("https"), Qt::CaseInsensitive) == 0
+           && !url.host().isEmpty();
+}
+
 QString singleQuoted(const QString &path)
 {
     return QStringLiteral("'") + QString(path).replace(QLatin1Char('\''), QLatin1String("''"))
@@ -455,6 +495,8 @@ void UpdateChecker::handleManifest(const QByteArray &bytes)
     }
 
     m_latest = manifest;
+    m_downloadUrl.clear();
+    m_hops = 0;
     m_available = true;
     emit releaseChanged();
 
@@ -519,30 +561,52 @@ void UpdateChecker::download()
     }
     if (busy())
         return;
+    m_hops = 0;
+    m_downloadUrl.clear();
     beginDownload();
 }
 
-void UpdateChecker::beginDownload()
+void UpdateChecker::beginDownload(const QString &urlText)
 {
     const QString fileName = m_latest.value(QStringLiteral("file")).toString();
-    const QString urlText = attachmentUrl(m_pendingMessage, fileName);
-    if (urlText.isEmpty()) {
-        fail(QStringLiteral("The release message has no attachment named '%1'. The publisher "
-                            "must upload the EXE with exactly the name in the manifest.")
+
+    // Three places a download link can come from:
+    //  1. the URL the previous step resolved from a landing page,
+    //  2. `url` in the manifest (pCloud, any https host, a CDN),
+    //  3. the attachment of the release message (Discord's own upload).
+    QString source = urlText;
+    if (source.isEmpty())
+        source = m_latest.value(QStringLiteral("url")).toString().trimmed();
+    if (source.isEmpty())
+        source = attachmentUrl(m_pendingMessage, fileName);
+    if (source.isEmpty()) {
+        fail(QStringLiteral("The release message has no attachment named '%1', and the manifest "
+                            "does not name a url to download it from.")
                  .arg(fileName));
         return;
     }
-    if (!urlText.startsWith(QLatin1String("https://"), Qt::CaseInsensitive)) {
-        fail(QStringLiteral("The download link is not https - refusing to trust it."));
+    // A publisher may paste "pcloud.link/..." without the scheme; the manifest
+    // still has to point at https.
+    if (!source.startsWith(QLatin1String("http"), Qt::CaseInsensitive))
+        source.prepend(QLatin1String("https://"));
+    if (!isHttpsUrl(source)) {
+        fail(QStringLiteral("The download link is not a valid https address, so it was refused: %1")
+                 .arg(source));
         return;
     }
 
+    m_downloadUrl = source;
     const QString target = stagingDirectory() + QLatin1Char('/') + QFileInfo(fileName).fileName();
     if (!m_stagedFile.isEmpty() && m_stagedFile != target && QFileInfo::exists(m_stagedFile))
         QFile::remove(m_stagedFile);
     m_stagedFile.clear();
     emit stateChanged();
 
+    if (m_sink) {
+        m_sink->close();
+        delete m_sink;
+        m_sink = nullptr;
+    }
     m_sink = new QFile(target);
     if (!m_sink->open(QIODevice::WriteOnly | QIODevice::Truncate)) {
         const QString why = m_sink->errorString();
@@ -555,12 +619,19 @@ void UpdateChecker::beginDownload()
 
     setProgress(0);
     setState(QStringLiteral("downloading"),
-             QStringLiteral("Downloading version %1...").arg(latestVersion()));
+             m_hops == 0
+                 ? QStringLiteral("Downloading version %1...").arg(latestVersion())
+                 : QStringLiteral("Downloading version %1 from %2...")
+                       .arg(latestVersion(), QUrl(source).host()));
 
-    QNetworkRequest request(QUrl(urlText));
+    QNetworkRequest request(QUrl(source));
     request.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
                          QNetworkRequest::NoLessSafeRedirectPolicy);
-    request.setRawHeader("User-Agent", QByteArrayLiteral("BSI-Customizer/") + QByteArray(BSI_VERSION));
+    // File hosts take a browser-looking agent more seriously than a bare one.
+    request.setRawHeader("User-Agent",
+                         QByteArrayLiteral("BSI-Customizer/") + QByteArray(BSI_VERSION)
+                             + QByteArrayLiteral(" (Windows; self-updater)"));
+    request.setRawHeader("Accept", QByteArrayLiteral("*/*"));
     request.setTransferTimeout(120000);
 
     m_reply = m_network->get(request);
@@ -615,6 +686,36 @@ void UpdateChecker::finishDownload()
     if (status != 0 && status != 200) {
         QFile::remove(target);
         fail(describeHttpError(status, body));
+        return;
+    }
+
+    // A "share" link (pCloud and similar) answers with a web page, not the file.
+    // The page carries the real download URL, so follow it once or twice.
+    QString pageError;
+    if (looksLikeHtmlFile(target) && m_hops < 2) {
+        QFile page(target);
+        QString resolved;
+        if (page.open(QIODevice::ReadOnly)) {
+            const QByteArray html = page.read(4ll * 1024ll * 1024ll);
+            page.close();
+            QString detail;
+            resolved = resolveDownloadLink(html, QUrl(m_downloadUrl), &detail);
+            pageError = detail;
+        }
+        if (!resolved.isEmpty()) {
+            QFile::remove(target);
+            ++m_hops;
+            setProgress(0);
+            beginDownload(resolved);
+            return;
+        }
+        QFile::remove(target);
+        fail(QStringLiteral("The link opened a web page instead of the file (%1). %2")
+                 .arg(QUrl(m_downloadUrl).host(),
+                      pageError.isEmpty()
+                          ? QStringLiteral("Use the file's direct download link, or a link that "
+                                           "downloads it without a page in between.")
+                          : pageError));
         return;
     }
 
@@ -679,8 +780,11 @@ void UpdateChecker::installNow()
         return;
     }
     m_installAfterDownload = true;
-    if (!busy())
+    if (!busy()) {
+        m_hops = 0;
+        m_downloadUrl.clear();
         beginDownload();
+    }
 }
 
 void UpdateChecker::apply()
@@ -838,8 +942,11 @@ void UpdateChecker::unskip()
 
 void UpdateChecker::openDownloadPage()
 {
-    const QString url = attachmentUrl(m_pendingMessage,
-                                      m_latest.value(QStringLiteral("file")).toString());
+    QString url = m_downloadUrl;
+    if (url.isEmpty())
+        url = m_latest.value(QStringLiteral("url")).toString().trimmed();
+    if (url.isEmpty())
+        url = attachmentUrl(m_pendingMessage, m_latest.value(QStringLiteral("file")).toString());
     if (url.isEmpty() || !QDesktopServices::openUrl(QUrl(url))) {
         fail(QStringLiteral("The release link could not be opened in the browser."));
         return;
@@ -1150,6 +1257,92 @@ bool UpdateChecker::verifyStagedFile(const QString &path, qint64 expectedSize,
     if (!looksLikeExecutable(path, &peError))
         return reject(peError);
     return true;
+}
+
+bool UpdateChecker::looksLikeHtml(const QByteArray &bytes)
+{
+    QByteArray probe = bytes.left(1024);
+    if (probe.startsWith("\xEF\xBB\xBF"))
+        probe = probe.mid(3);
+    probe = probe.trimmed().toLower();
+    if (probe.startsWith("mz") || probe.startsWith("pk"))
+        return false;
+    return probe.startsWith("<!doctype html") || probe.startsWith("<html")
+           || probe.startsWith("<head") || probe.startsWith("<?xml")
+           || (probe.startsWith("<") && probe.contains("</"));
+}
+
+QString UpdateChecker::resolveDownloadLink(const QByteArray &page, const QUrl &baseUrl,
+                                           QString *detail)
+{
+    const auto none = [detail, &baseUrl](const QString &why) {
+        if (detail) {
+            const QString host = baseUrl.host().toLower();
+            if (host.contains(QLatin1String("pcloud")))
+                *detail = QStringLiteral("On pCloud, a normal share link only opens a page. Either "
+                                         "put the EXE in the Public folder and use Share > Direct "
+                                         "link, or make sure the page offers a download button "
+                                         "(%1)").arg(why);
+            else
+                *detail = why;
+        }
+        return QString();
+    };
+    if (detail)
+        detail->clear();
+    if (page.isEmpty())
+        return none(QStringLiteral("the page was empty"));
+
+    // 2 MB is far more than any landing page needs and keeps a wrong URL cheap.
+    const QString text = QString::fromUtf8(page.left(2 * 1024 * 1024));
+
+    // pCloud (and many other hosts) embed the real URL in JSON as
+    // "downloadlink":"https:\/\/p-def2.pcloud.com\/...". The key names differ.
+    static const QStringList keys{
+        QStringLiteral("downloadlink"), QStringLiteral("downloadLink"),
+        QStringLiteral("downloadurl"), QStringLiteral("downloadUrl"),
+        QStringLiteral("directlink"), QStringLiteral("directLink"),
+        QStringLiteral("filelink"), QStringLiteral("fileLink"),
+        QStringLiteral("fileurl"), QStringLiteral("fileUrl")
+    };
+    for (const QString &key : keys) {
+        const QRegularExpression pattern(
+            QStringLiteral("\"%1\"\\s*:\\s*\"([^\"]{8,4096})\"").arg(QRegularExpression::escape(key)),
+            QRegularExpression::CaseInsensitiveOption);
+        const auto match = pattern.match(text);
+        if (!match.hasMatch())
+            continue;
+        const QString candidate = unescapePageValue(match.captured(1));
+        if (isHttpsUrl(candidate))
+            return candidate;
+    }
+
+    // An ordinary <a href="...">download...</a> button.
+    static const QRegularExpression href(
+        QStringLiteral("href\\s*=\\s*[\"']([^\"']+\\.(?:exe|zip|7z|msi|bin)(?:\\?[^\"']*)?)[\"']"),
+        QRegularExpression::CaseInsensitiveOption);
+    for (const auto &match : href.globalMatch(text)) {
+        const QString candidate = unescapePageValue(match.captured(1));
+        const QUrl url(candidate);
+        const QString absolute = url.isRelative() ? baseUrl.resolved(url).toString()
+                                                  : candidate;
+        if (isHttpsUrl(absolute))
+            return absolute;
+    }
+
+    // Last resort: a bare link to the file somewhere in the page source.
+    static const QRegularExpression bare(
+        QStringLiteral("https://[^\"'\\s<>()]+\\.(?:exe|zip)(?:\\?[^\"'\\s<>()]*)?"));
+    const auto bareMatch = bare.match(text);
+    if (bareMatch.hasMatch() && isHttpsUrl(bareMatch.captured(0)))
+        return bareMatch.captured(0);
+
+    return none(QStringLiteral("no https download link was found on the page"));
+}
+
+QString UpdateChecker::downloadHost() const
+{
+    return QUrl(m_downloadUrl).host();
 }
 
 QString UpdateChecker::describeHttpError(int status, const QByteArray &body)

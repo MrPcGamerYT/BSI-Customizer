@@ -4665,6 +4665,55 @@ Window {
         check(UpdateChecker::readableSize(1200000) == QLatin1String("1.14 MB"),
               QStringLiteral("readableSize formats a download (%1)")
                   .arg(UpdateChecker::readableSize(1200000)));
+
+        // A 30 MB EXE cannot ride on a Discord message (10 MB per file on an
+        // unboosted server), so the manifest may name a `url`. Hosts like
+        // pCloud answer that URL with a web page, and the page carries the real
+        // download link - resolved here without guessing.
+        const QUrl pcloudPage(QStringLiteral("https://u.pcloud.link/publink/show?code=XZ123"));
+        const QByteArray pcloudHtml =
+            "<html><script>var publinkData={\"code\":\"XZ123\",\"downloadlink\":"
+            "\"https:\\/\\/p-def2.pcloud.com\\/cfZabc\\/BSI-Customizer-2.0.1-win64.exe"
+            "?download=1\",\"size\":30000000}</script></html>";
+        check(UpdateChecker::looksLikeHtml(pcloudHtml), "a share page is recognised as HTML");
+        check(UpdateChecker::looksLikeHtml(QByteArrayLiteral("\xEF\xBB\xBF  <!DOCTYPE html>")),
+              "a BOM and leading spaces do not hide an HTML page");
+        check(!UpdateChecker::looksLikeHtml(pe), "a real program is not mistaken for a page");
+        check(UpdateChecker::resolveDownloadLink(pcloudHtml, pcloudPage)
+                  == QLatin1String("https://p-def2.pcloud.com/cfZabc/"
+                                   "BSI-Customizer-2.0.1-win64.exe?download=1"),
+              QStringLiteral("the pCloud page's escaped download link is unescaped (%1)")
+                  .arg(UpdateChecker::resolveDownloadLink(pcloudHtml, pcloudPage)));
+        QString pageDetail;
+        check(UpdateChecker::resolveDownloadLink(
+                  QByteArrayLiteral("<html>{\"downloadlink\":\"http:\\/\\/p-def2.pcloud.com"
+                                    "\\/x.exe\"}</html>"),
+                  pcloudPage, &pageDetail).isEmpty()
+                  && pageDetail.contains(QLatin1String("pCloud")),
+              "an http-only download link is refused with a pCloud-specific hint");
+        check(UpdateChecker::resolveDownloadLink(
+                  QByteArrayLiteral("<html><a href=\"/download/file.exe?token=1\">Download</a>"
+                                    "</html>"),
+                  pcloudPage)
+                  == QLatin1String("https://u.pcloud.link/download/file.exe?token=1"),
+              "a relative download button resolves against the page");
+        check(UpdateChecker::resolveDownloadLink(
+                  QByteArrayLiteral("<html><a href=\"https://cdn.example.com/BSI.exe\">get</a>"
+                                    "</html>"),
+                  pcloudPage)
+                  == QLatin1String("https://cdn.example.com/BSI.exe"),
+              "an absolute download button works on any host");
+        check(UpdateChecker::resolveDownloadLink(
+                  QByteArrayLiteral("nothing but https://files.example.org/BSI-Customizer.exe?x=1 "
+                                    "in here"),
+                  pcloudPage)
+                  == QLatin1String("https://files.example.org/BSI-Customizer.exe?x=1"),
+              "a bare .exe link in the page source is the last resort");
+        check(UpdateChecker::resolveDownloadLink(
+                  QByteArrayLiteral("<html><body>nothing here</body></html>"), pcloudPage,
+                  &pageDetail).isEmpty()
+                  && pageDetail.contains(QLatin1String("no https download link")),
+              "a page without a link says so instead of downloading garbage");
     }
 
 

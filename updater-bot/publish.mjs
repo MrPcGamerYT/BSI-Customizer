@@ -70,7 +70,8 @@ const USAGE = `BSI Customizer - Discord releases publisher
   --min-supported <ver>  builds below this must update
   --mandatory            mark the update as required
   --url <https://...>    publish only the manifest, EXE lives at this link
-  --channel <id>         override DISCORD_CHANNEL_ID
+                         (pCloud, Drive, S3, any https host - it is verified)
+  --skip-verify          do not fetch --url to check it (offline publishing)
   --manifest <name>      manifest attachment name (default manifest.json)
   --dry-run              print the manifest and exit
   --quiet                only print the result
@@ -96,6 +97,7 @@ function parseArgs(argv) {
             case '--url': args.url = next(); break;
             case '--channel': args.channel = next(); break;
             case '--manifest': args.manifest = next(); break;
+            case '--skip-verify': args.skipVerify = true; break;
             case '--mandatory': args.mandatory = true; break;
             case '--dry-run': args.dryRun = true; break;
             case '--quiet': args.quiet = true; break;
@@ -309,6 +311,110 @@ async function publishWithWebhook(config, args, manifest, bytes, payload) {
     return posted.id;
 }
 
+
+// ---------------------------------------------------------------------------
+// Hosting the EXE somewhere else (pCloud, Drive, S3, ...)
+//
+// A 30 MB EXE does not fit a Discord message on an unboosted server, so the
+// manifest may carry `url` instead of the file. Share links from pCloud are
+// web pages, not files, so this resolves the page exactly like the application
+// does (src/core/UpdateChecker.cpp) and then checks that the hosted file really
+// is this build: same byte count, same SHA-256.
+// ---------------------------------------------------------------------------
+
+const DOWNLOAD_KEYS = [
+    'downloadlink', 'downloadLink', 'downloadurl', 'downloadUrl',
+    'directlink', 'directLink', 'filelink', 'fileLink', 'fileurl', 'fileUrl',
+];
+
+function unescapePageValue(value) {
+    return value
+        .replace(/\\\//g, '/')
+        .replace(/\\u002f/gi, '/')
+        .replace(/&amp;/g, '&')
+        .replace(/&#x2f;/gi, '/')
+        .replace(/&#47;/g, '/')
+        .trim();
+}
+
+function isHttpsUrl(text) {
+    try {
+        return new URL(text).protocol === 'https:';
+    } catch {
+        return false;
+    }
+}
+
+function resolveDownloadLink(page, baseUrl) {
+    for (const key of DOWNLOAD_KEYS) {
+        const pattern = new RegExp(`"${key}"\\s*:\\s*"([^"]{8,4096})"`, 'i');
+        const match = pattern.exec(page);
+        if (!match) continue;
+        const candidate = unescapePageValue(match[1]);
+        if (isHttpsUrl(candidate)) return candidate;
+    }
+    const href = /href\s*=\s*["']([^"']+\.(?:exe|zip|7z|msi|bin)(?:\?[^"']*)?)["']/gi;
+    for (const match of page.matchAll(href)) {
+        const candidate = unescapePageValue(match[1]);
+        try {
+            const absolute = new URL(candidate, baseUrl).toString();
+            if (isHttpsUrl(absolute)) return absolute;
+        } catch { /* not a URL, keep looking */ }
+    }
+    const bare = /https:\/\/[^"'\s<>()]+\.(?:exe|zip)(?:\?[^"'\s<>()]*)?/i.exec(page);
+    return bare && isHttpsUrl(bare[0]) ? bare[0] : null;
+}
+
+function looksLikeHtml(buffer) {
+    const head = buffer.subarray(0, 1024).toString('latin1').replace(/^\uFEFF/, '').trim().toLowerCase();
+    if (head.startsWith('mz') || head.startsWith('pk')) return false;
+    return head.startsWith('<!doctype html') || head.startsWith('<html') || head.startsWith('<head')
+        || head.startsWith('<?xml') || (head.startsWith('<') && head.includes('</'));
+}
+
+async function fetchHosted(url, { maxBytes = 300 * 1024 * 1024 } = {}) {
+    const response = await fetch(url, {
+        redirect: 'follow',
+        headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) BSI-Customizer-publisher/1.0',
+            Accept: '*/*',
+        },
+    });
+    if (!response.ok) {
+        throw new Error(`HTTP ${response.status} from ${url}`);
+    }
+    const declared = Number(response.headers.get('content-length') ?? 0);
+    if (declared > maxBytes) throw new Error(`${declared} bytes is larger than expected`);
+    return { buffer: Buffer.from(await response.arrayBuffer()), contentType: response.headers.get('content-type') ?? '' };
+}
+
+async function verifyHostedUrl(url, expectedSize, expectedSha) {
+    let current = url;
+    for (let hop = 0; hop < 3; hop += 1) {
+        const { buffer, contentType } = await fetchHosted(current);
+        const html = contentType.includes('text/html') || looksLikeHtml(buffer);
+        if (!html) {
+            const sha = createHash('sha256').update(buffer).digest('hex');
+            const ok = sha === expectedSha && buffer.length === expectedSize;
+            return { ok, url: current, size: buffer.length, sha256: sha };
+        }
+        const resolved = resolveDownloadLink(buffer.toString('utf8'), current);
+        if (!resolved) {
+            return {
+                ok: false,
+                url: current,
+                reason: 'the link opened a web page that has no download link on it'
+                    + (/pcloud/i.test(new URL(url).host)
+                        ? ' - on pCloud put the EXE in the Public folder and use Share > Direct link'
+                        : ''),
+            };
+        }
+        info(`  ${new URL(current).host} answered with a page, following it to ${new URL(resolved).host}`);
+        current = resolved;
+    }
+    return { ok: false, url: current, reason: 'still a web page after three hops' };
+}
+
 async function main() {
     const args = parseArgs(process.argv.slice(2));
     if (Number(process.versions.node.split('.')[0]) < 18) {
@@ -355,7 +461,33 @@ async function main() {
     info(`  channel  ${config.channelId}${config.useWebhook ? ' (webhook)' : ' (bot)'}`);
     info(`  signed   ${config.hmacKey ? 'yes (HMAC-SHA256)' : 'no - set BSI_UPDATE_HMAC_KEY to sign'}`);
 
+    // The manifest promises size + SHA-256; make sure the host really serves
+    // exactly that file before every installed copy is pointed at it.
+    if (args.url) {
+        if (args.skipVerify) {
+            info('  hosted   not checked (--skip-verify)');
+        } else {
+            let verified;
+            try {
+                verified = await verifyHostedUrl(args.url, manifest.size, sha256);
+            } catch (error) {
+                die(`could not read the hosted file: ${error.message}\n`
+                    + 'Check that the link is public and downloads the EXE without a page in between,'
+                    + ' or publish with --skip-verify and test with --check-updates --download.');
+            }
+            if (!verified.ok) {
+                die(`the hosted link does not serve this build: ${verified.reason ?? ''}\n`
+                    + `  expected ${manifest.size} bytes, sha256 ${sha256}\n`
+                    + `  got      ${verified.size ?? '?'} bytes, sha256 ${verified.sha256 ?? '?'}\n`
+                    + 'Upload the exact file you are publishing, or pass --skip-verify.');
+            }
+            info(`  hosted   ${verified.url}`);
+            info(`  verified ${humanSize(verified.size)}, SHA-256 matches the local EXE`);
+        }
+    }
+
     if (args.dryRun) {
+        info('dry run: nothing was posted to Discord.');
         console.log(JSON.stringify(manifest, null, 2));
         return;
     }

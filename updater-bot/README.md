@@ -55,7 +55,8 @@ Environment variables work instead of `config.json` (CI uses this):
 | `--notes-file notes.md` | release notes shown in the app's update strip |
 | `--min-supported 2.0.0` | older builds must update even after "Later" |
 | `--mandatory` | mark it required |
-| `--url https://…` | publish only the manifest; the EXE lives at that link |
+| `--url https://…` | publish only the manifest; the EXE lives at that link (downloaded and checked before posting) |
+| `--skip-verify` | do not download `--url` to check it (offline publishing) |
 | `--dry-run` | print the manifest, send nothing (works without credentials) |
 | `--channel <id>` / `--manifest <name>` | one-off overrides |
 
@@ -75,6 +76,25 @@ A channel webhook can post without a bot. Set `DISCORD_WEBHOOK_URL`
 last message id is kept in `updater-bot/.state.json` so the previous message can
 be removed. Webhooks cannot pin, and CI runners do not keep `.state.json`, so
 the bot-token route is the recommended one.
+
+## pCloud / Google Drive / any https host
+
+The manifest may carry `url` instead of attaching the EXE. `publish.mjs`
+downloads that URL first, follows a landing page if there is one (pCloud share
+links are pages, not files) and refuses to publish unless the hosted file has
+the same size and SHA-256 as the local EXE:
+
+```bash
+node updater-bot/publish.mjs \
+     --exe build/artifacts/BSI-Customizer-2.0.1-win64.exe \
+     --url "https://u.pcloud.link/publink/show?code=XXXX" \
+     --notes-file notes.md
+```
+
+Google Drive links work too, but the file must be "Anyone with the link" and
+large files hit Drive's virus-scan page — prefer a plain host. pCloud's
+direct links from the **Public folder** (`Share > Direct link`) download
+straight away and need no page hop at all.
 
 ## Upload limits
 

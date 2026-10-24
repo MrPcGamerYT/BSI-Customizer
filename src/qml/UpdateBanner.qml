@@ -79,7 +79,11 @@ Rectangle {
                     Layout.fillWidth: true
                     text: {
                         if (updates.state === "downloading")
-                            return Math.round(updates.progress * 100) + qsTr("% of %1").arg(updates.downloadSize);
+                            return updates.downloadHost.length > 0
+                                ? qsTr("%1% of %2 from %3").arg(Math.round(updates.progress * 100))
+                                      .arg(updates.downloadSize).arg(updates.downloadHost)
+                                : qsTr("%1% of %2").arg(Math.round(updates.progress * 100))
+                                      .arg(updates.downloadSize);
                         if (updates.state === "ready")
                             return qsTr("%1 · it replaces the running EXE and restarts the app").arg(updates.downloadSize);
                         if (updates.state === "applying")

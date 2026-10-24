@@ -77,6 +77,7 @@ class UpdateChecker : public QObject
     Q_PROPERTY(bool skipped READ skipped NOTIFY releaseChanged)
     Q_PROPERTY(QString fileName READ fileName NOTIFY releaseChanged)
 
+    Q_PROPERTY(QString downloadHost READ downloadHost NOTIFY stateChanged)
     Q_PROPERTY(bool readyToInstall READ readyToInstall NOTIFY stateChanged)
     Q_PROPERTY(QString stagedFile READ stagedFile NOTIFY stateChanged)
     Q_PROPERTY(bool installedPending READ installedPending NOTIFY stateChanged)
@@ -136,6 +137,11 @@ public:
     bool mandatory() const { return m_latest.value(QStringLiteral("mandatory")).toBool(false); }
     bool skipped() const;
 
+    /** Host the EXE is actually coming from (cdn.discordapp.com, p-def2.pcloud.com, ...). */
+    QString downloadHost() const;
+    /** The exact URL being downloaded (after any landing-page resolution). */
+    QString downloadUrl() const { return m_downloadUrl; }
+
     bool readyToInstall() const { return !m_stagedFile.isEmpty(); }
     QString stagedFile() const { return m_stagedFile; }
     /** True once `apply()` handed the swap to the helper: next start is the new build. */
@@ -177,6 +183,16 @@ public:
     static QString manifestSignature(const QJsonObject &manifest, const QString &key);
     static bool verifyManifestSignature(const QJsonObject &manifest, const QString &key,
                                         QString *error);
+    /** True when a download turned out to be a web page, not a file. */
+    static bool looksLikeHtml(const QByteArray &bytes);
+    /**
+     * A "share" link (pCloud's u.pcloud.link/publink/show?code=..., and other
+     * file hosts that serve a landing page) is not the file. The page embeds
+     * the real download URL; this finds it. Empty when there is none, and then
+     * `detail` says what was wrong.
+     */
+    static QString resolveDownloadLink(const QByteArray &page, const QUrl &baseUrl,
+                                       QString *detail = nullptr);
     /** SHA-256 of a whole file, lower-case hex ("" on failure). */
     static QString fileSha256(const QString &path);
     /** Size + hash + PE check of the downloaded file. */
@@ -206,7 +222,7 @@ private:
     void startAutoCheck();
     void fail(const QString &note, const QString &detail = QString());
     void handleManifest(const QByteArray &bytes);
-    void beginDownload();
+    void beginDownload(const QString &urlText = QString());
     void finishDownload();
     void writeHelper(const QString &sibling, const QString &target);
     QString stagingDirectory() const;
@@ -227,7 +243,8 @@ private:
     QJsonObject m_pendingMessage; // message the manifest came from (attachment URLs)
 
     QString m_stagedFile;
-    QString m_stagedDir;
+    QString m_downloadUrl;
+    int m_hops = 0;
     bool m_installed = false;
     bool m_installAfterDownload = false;
     bool m_autoCheck = true;

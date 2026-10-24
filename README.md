@@ -430,8 +430,11 @@ inside the file. The updater therefore uses a **Discord server**: the publisher
   waits for the app to exit, copies the verified EXE over it, starts it again
   and deletes itself. Nothing outside `%TEMP%` is touched before that.
 - The manifest can be HMAC-SHA256 signed (`updater.hmacKey`), in which case an
-  unsigned manifest is refused. `url` lets the EXE live on any https host when
-  it is larger than the server's upload limit.
+  unsigned manifest is refused.
+- `url` lets the EXE live on any https host (pCloud, Drive, S3) when it is
+  larger than the server's 10 MB upload limit. Landing pages such as pCloud's
+  share links are followed to the real download link, and the publisher
+  verifies the hosted file's size + SHA-256 before it posts anything.
 - Configuration is the `updater` object of the same `auth.json` the sign-in gate
   uses, so one `ZLP_AUTH_JSON` secret configures both. `BSI_NO_UPDATER=1`
   disables it.

@@ -148,7 +148,7 @@ home.
 | `released` | no | informational |
 | `mandatory` | no | always offered, "Later" does not hide it |
 | `minSupported` | no | builds older than this must update |
-| `url` | no | where the EXE actually lives; when absent the app uses the `file` attachment **of the same message** |
+| `url` | no | where the EXE actually lives (pCloud, Drive, S3, any https host); when absent the app uses the `file` attachment **of the same message**. A landing page is followed to the real file (see section 8) |
 | `signature` | when `hmacKey` is set | base64 HMAC-SHA256 (see below) |
 
 The **signature** covers exactly:
@@ -269,7 +269,78 @@ the webhook-only variant.
 
 ---
 
-## 6. Troubleshooting
+## 6. When the EXE is too big for Discord (pCloud and other hosts)
+
+A free Discord server allows 10 MB per file; the portable EXE is ~30 MB. You
+have two options, and the second is the one that needs no server boost:
+
+1. **Boost the server** (50 MB) and upload straight to Discord — nothing else
+   to do, the manifest needs no `url`.
+2. **Host the EXE elsewhere** and let the manifest point at it. The app
+   verifies the download against `size` + `sha256`, so a plain file host is
+   enough; it does not need to be a "release" system.
+
+### pCloud, step by step
+
+pCloud has two kinds of link:
+
+| Link | What the app gets | Works? |
+| --- | --- | --- |
+| **Direct link** (Public folder, `Share > Direct link`) | the file itself | yes, immediately |
+| **Share link** (`https://u.pcloud.link/publink/show?code=...`) | a web page with a Download button | yes — the app reads the page and follows the real download link inside it |
+
+The Public folder is a Premium feature; a free account only gives share links.
+That is fine: `UpdateChecker` detects the web page, pulls the `downloadlink`
+out of it (the same URL the Download button uses) and continues. If pCloud ever
+changes that page, the publisher catches it first — see below.
+
+> **Traffic limit.** pCloud share/direct links have a traffic and download
+> budget (per link). A 30 MB build downloaded by 100 people is 3 GB. If the link
+> runs out, pCloud answers `7005 this link has reached its traffic limit` and
+> downloads fail until you publish a **new** link. Keep an eye on it for large
+> audiences; a boosted Discord channel, GitHub Releases on a public mirror repo
+> or object storage (R2/B2/S3) are unlimited alternatives.
+
+### Publishing with a hosted URL
+
+```bash
+# 1. upload BSI-Customizer-2.0.1-win64.exe to pCloud, create a share (or direct) link
+# 2. publish ONLY the manifest:
+node updater-bot/publish.mjs \
+     --exe build/artifacts/BSI-Customizer-2.0.1-win64.exe \
+     --url "https://u.pcloud.link/publink/show?code=XXXX" \
+     --notes-file notes.md
+```
+
+Before it posts anything, the publisher **downloads the hosted file** (following
+a landing page if there is one) and compares it with the local EXE:
+
+```
+  127.0.0.1:8932 answered with a page, following it to 127.0.0.1:8932
+  hosted   https://p-def2.pcloud.com/cfZ.../BSI-Customizer-2.0.1-win64.exe
+  verified 30.51 MB, SHA-256 matches the local EXE
+```
+
+* wrong file / truncated upload → **refused**, with both hashes printed;
+* page without a download link (a folder link, a password-protected link) →
+  **refused** with a hint;
+* `--skip-verify` posts anyway (only use it when you cannot download on the
+  machine you publish from — then check with `--check-updates --download`).
+
+The `url` may also be added/edited by hand in `manifest.json`; it is covered by
+the signature when `hmacKey` is set, so it cannot be swapped afterwards either.
+
+### What the user's app does with it
+
+1. reads `url` from the manifest (or the attachment when it is absent);
+2. follows at most **two** landings — https only — by reading the download link
+   off the page;
+3. streams the result into `%TEMP%` and checks size + SHA-256 + 64-bit PE;
+4. installs exactly like a Discord-attached build.
+
+Nothing about the swap changes, so all the safety rules above still apply.
+
+## 7. Troubleshooting
 
 The app never says "update failed" without a reason; `--check-updates` prints the
 same text in a terminal.
@@ -283,7 +354,9 @@ same text in a terminal.
 | `No "manifest.json" attachment in the last 50 messages` | nothing published yet, or `--manifest` name mismatch |
 | `The update manifest is invalid: …` | someone edited `manifest.json` by hand; republish |
 | `The update manifest is not signed by this build's key` | `BSI_UPDATE_HMAC_KEY` and `updater.hmacKey` differ |
-| `SHA-256 mismatch` | the upload was truncated or the manifest is stale — republish |
+| `SHA-256 mismatch` | the upload was truncated, or the host served a different file — republish |
+| `The link opened a web page instead of the file` | the `url` is a share/landing page with no download link on it (pCloud folder link, password-protected link). Use a **direct link**, or a link whose page offers Download |
+| pCloud `7005` / `7006` in the browser | that link hit its traffic/download limit — create a new link and republish |
 | `Windows does not let this app write to …` | install lives under `Program Files`; run the app as administrator |
 | nothing in the UI at all | `--check-updates` — if that is happy, the app is already current |
 
@@ -291,7 +364,7 @@ The helper's log: `%TEMP%\BSI-Customizer-update\apply-update.log`.
 
 ---
 
-## 7. Security summary
+## 8. Security summary
 
 * The shipped token is **read-only** on **one channel**; it cannot read the
   server's other channels, cannot send, and cannot see message *content* of
