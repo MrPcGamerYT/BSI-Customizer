@@ -74,6 +74,9 @@ struct State
     // in place - never moved, never grown - when the config is applied.
     QList<TableString> table;
     bool compiledPage = false;
+    // How many characters the About sentence's record holds. The page's records
+    // do not grow, so this is the longest text the editor can accept.
+    int textMax = 0;
     // True when the .qml copy is a shape the editor can rewrite. A build whose
     // page is only recognizable as compiled code reports supported and can have
     // its strings rewritten, but there is no .qml to edit.

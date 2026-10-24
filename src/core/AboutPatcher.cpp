@@ -535,6 +535,49 @@ bool pageRowHidden(const Layout &layout, const PageRow &row)
     return true;
 }
 
+// How much text each editable field of a row can really hold.
+//
+// A value is not written into one record: the printed label goes into the anchor
+// *and* into the record that shows it, and a row has two of everything because
+// the page branches on the OEM. So the limit the editor may enforce is the
+// tightest record the value has to live in - any other number lets a value be
+// typed that the apply then has to refuse, or, worse, one that does not fit the
+// copy the page actually draws.
+// Declared here because the fit is measured with the very function that writes
+// the label, so the two can never disagree about the tag around it.
+QString fragmentWith(const QString &current, const QString &label, bool hidden,
+                     const QString &name = QString());
+
+void rowFit(const Layout &layout, const PageRow &row, int *nameMax, int *labelMax, int *urlMax)
+{
+    int name = 0;
+    int label = -1;
+    int url = -1;
+    if (row.name >= 0 && row.name < layout.records.size())
+        name = layout.records.at(row.name).maxChars();
+    for (int i = 0; i < row.fragments.size(); ++i) {
+        const Slot &fragment = layout.records.at(row.fragments.at(i));
+        const QString printed = anchorLabel(fragment.text);
+        // The record holds " - <a href=\"…\">label</a>", so only what is left
+        // after the tag around it is room for the label.
+        const QString whole = fragmentWith(fragment.text, printed, false);
+        const int room = qMax(0, fragment.maxChars() - (whole.size() - printed.size()));
+        label = label < 0 ? room : qMin(label, room);
+        if (i >= row.addresses.size()) continue;
+        // The address records hold the address, never the printed words, so
+        // only the fragments limit the label.
+        const int addressRoom = layout.records.at(row.addresses.at(i)).maxChars();
+        url = url < 0 ? addressRoom : qMin(url, addressRoom);
+    }
+    for (int i = row.fragments.size(); i < row.addresses.size(); ++i) {
+        const int room = layout.records.at(row.addresses.at(i)).maxChars();
+        url = url < 0 ? room : qMin(url, room);
+    }
+    if (nameMax) *nameMax = name;
+    if (labelMax) *labelMax = qMax(0, label);
+    if (urlMax) *urlMax = qMax(0, url);
+}
+
 // The sentence the page prints: the literal, plus the "Terms of use" link the
 // page appends to it when that link is still enabled.
 QString layoutText(const Layout &layout)
@@ -624,7 +667,7 @@ bool writeSlot(QByteArray &image, const Slot &slot, const QString &text, QString
 // href it already has (or the stock one when it has none - an unhidden row must
 // be clickable again). A name is only passed when the row is being hidden.
 QString fragmentWith(const QString &current, const QString &label, bool hidden,
-                     const QString &name = QString())
+                     const QString &name)
 {
     const int close = current.lastIndexOf(QLatin1String("</a>"));
     const int open = close < 0 ? -1 : current.indexOf(QLatin1Char('>'));
@@ -675,18 +718,13 @@ void planTable(const Layout &layout, const Config &config, QList<SlotEdit> *edit
     // there is no other copy of it left to switch the row back on with.
     const auto hideRow = [&](const PageRow &row, const QString &name) {
         if (row.name >= 0) set(row.name, kBlankSlot);
-        for (int i = 0; i < row.fragments.size(); ++i) {
-            const int fragment = row.fragments.at(i);
+        for (const int fragment : row.fragments) {
             const QString current = layout.records.at(fragment).text;
             set(fragment, fragmentWith(current, QString(), true, name));
-            if (i >= row.addresses.size()) continue;
-            // The record the page shows the address in - the one that merely
-            // holds the target is not displayed and is what the row reopens.
-            const int address = row.addresses.at(i);
-            if (layout.records.at(address).text.compare(anchorLabel(current),
-                                                        Qt::CaseInsensitive) == 0)
-                set(address, kBlankSlot);
         }
+        // The address records are left alone. They hold where the row goes, not
+        // something the page prints, and keeping them is what lets the row be
+        // switched back on with its target intact.
     };
 
     // The update button is switched off: its caption goes, so a stray click
@@ -764,7 +802,9 @@ void planTable(const Layout &layout, const Config &config, QList<SlotEdit> *edit
         }
         used.insert(pick);
         const PageRow &row = layout.rows.at(pick);
-        if (link.hidden) {
+        // A row with no address has nothing to open, and the .qml copy of the
+        // page hides it for the same reason: one rule, both copies.
+        if (link.hidden || link.url.isEmpty()) {
             hideRow(row, link.name);
             continue;
         }
@@ -775,21 +815,13 @@ void planTable(const Layout &layout, const Config &config, QList<SlotEdit> *edit
             const QString current = layout.records.at(fragment).text;
             set(fragment, fragmentWith(current, shown, false));
             if (i >= row.addresses.size()) continue;
-            // The address slot prints the words when the anchor above it only
-            // points at them (the e-mail row), and is hidden from the page when
-            // the anchor already prints them. Both are written, each with the
-            // value it is actually for.
-            const int address = row.addresses.at(i);
-            const bool prints = layout.records.at(address).text.compare(
-                                    anchorLabel(current), Qt::CaseInsensitive) == 0;
-            if (prints) {
-                set(address, shown.isEmpty() ? kBlankSlot : shown);
-            } else if (!link.url.isEmpty()) {
-                set(address, link.url);
-            }
+            // An address record holds the address, never the words the page
+            // prints: that is the field the row opens, and writing the label
+            // there would make an edited address do nothing.
+            set(row.addresses.at(i), link.url);
         }
         for (int i = row.fragments.size(); i < row.addresses.size(); ++i)
-            if (!link.url.isEmpty()) set(row.addresses.at(i), link.url);
+            set(row.addresses.at(i), link.url);
     }
 
     // A row the config does not name is a stock link the page still prints. It
@@ -1992,6 +2024,8 @@ State analyze(const QByteArray &image)
     // filled editor from here.
     const Layout layout = layoutOf(image);
     state.compiledPage = layout.valid();
+    if (layout.about >= 0 && layout.about + 1 < layout.records.size())
+        state.textMax = layout.records.at(layout.about + 1).maxChars();
     // Only the page's own words are listed. The table also holds property
     // names, ids and binding text ("objectName", "expression for text"), which
     // are not part of the page and would bury it in noise.
@@ -2028,19 +2062,9 @@ State analyze(const QByteArray &image)
             link.url = pageRowUrl(layout, row);
             link.label = pageRowLabel(layout, row);
             link.hidden = pageRowHidden(layout, row);
-            // The record's own room, so the editor can stop at it instead of
-            // letting a value be typed that the apply then has to refuse.
-            if (row.name >= 0) link.nameMax = layout.records.at(row.name).maxChars();
-            if (!row.fragments.isEmpty()) {
-                // The record holds " - <a href=\"…\">label</a>", so only what
-                // is left after the tag around it is room for the label.
-                const Slot &fragment = layout.records.at(row.fragments.last());
-                const QString printed = link.label;
-                const QString whole = fragmentWith(fragment.text, printed, false);
-                link.labelMax = qMax(0, fragment.maxChars() - (whole.size() - printed.size()));
-            }
-            if (!row.addresses.isEmpty())
-                link.urlMax = layout.records.at(row.addresses.last()).maxChars();
+            // How much each field can hold, so the editor can stop there
+            // instead of letting a value be typed that the apply must refuse.
+            rowFit(layout, row, &link.nameMax, &link.labelMax, &link.urlMax);
             fromPage.links << link;
         }
     }

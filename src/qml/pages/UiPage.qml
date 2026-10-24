@@ -683,6 +683,26 @@ Item {
                                 border.color: aboutText.activeFocus ? Theme.accent : Theme.border
                             }
                         }
+                        // A TextEdit has no maximumLength (only a single-line
+                        // TextField does), so the room is counted here and the
+                        // line says so before Apply has to refuse. The sentence's
+                        // record does not grow either.
+                        Text {
+                            Layout.fillWidth: true
+                            visible: page.about.textMax > 0
+                            wrapMode: Text.WordWrap
+                            color: aboutText.length > page.about.textMax ? Theme.warn : Theme.textDim
+                            font.pixelSize: 10
+                            text: aboutText.length > page.about.textMax
+                                  ? qsTr("%1 characters — the page's record holds %2, so Apply "
+                                         + "will refuse this. Shorten it by %3.")
+                                        .arg(aboutText.length)
+                                        .arg(page.about.textMax)
+                                        .arg(aboutText.length - page.about.textMax)
+                                  : qsTr("%1 of %2 characters — this is what the page's record holds")
+                                        .arg(aboutText.length)
+                                        .arg(page.about.textMax)
+                        }
 
                         // ---- the stock links ----------------------------------
                         RowLayout {
@@ -741,10 +761,10 @@ Item {
                             id: linkRepeater
                             model: page.aboutLinks
 
-                            delegate: RowLayout {
+                            delegate: ColumnLayout {
                                 required property var modelData
                                 Layout.fillWidth: true
-                                spacing: 8
+                                spacing: 2
 
                                 // Read back by collectLinks() when Apply is pressed.
                                 property string linkId: modelData.id
@@ -755,68 +775,93 @@ Item {
                                 property alias linkUrl: linkUrlField.text
                                 property alias linkHidden: linkShow.checked
 
-                                CheckBox {
-                                    id: linkShow
-                                    text: qsTr("Show")
-                                    checked: !modelData.hidden
-                                    font.pixelSize: 11
-                                    palette.windowText: Theme.text
-                                    palette.buttonText: Theme.text
-                                    property bool checkedToggle: checked
-                                }
-                                TextField {
-                                    id: linkNameField
-                                    Layout.preferredWidth: 190
-                                    // The page's record for this row cannot
-                                    // grow, so the field stops where the room
-                                    // does instead of failing at Apply.
-                                    maximumLength: modelData.nameMax > 0 ? modelData.nameMax
-                                                                         : 32767
-                                    text: modelData.name
-                                    placeholderText: qsTr("Support email")
-                                    color: Theme.text
-                                    placeholderTextColor: Theme.textDim
-                                    font.pixelSize: 12
-                                    background: Rectangle {
-                                        color: Theme.raised
-                                        radius: 8
-                                        border.width: 1
-                                        border.color: linkNameField.activeFocus ? Theme.accent : Theme.border
-                                    }
-                                }
-                                TextField {
-                                    id: linkLabelField
-                                    Layout.preferredWidth: 190
-                                    maximumLength: modelData.labelMax > 0 ? modelData.labelMax
-                                                                          : 32767
-                                    text: modelData.label !== undefined ? modelData.label : ""
-                                    placeholderText: qsTr("text it prints")
-                                    color: Theme.text
-                                    placeholderTextColor: Theme.textDim
-                                    font.pixelSize: 12
-                                    background: Rectangle {
-                                        color: Theme.raised
-                                        radius: 8
-                                        border.width: 1
-                                        border.color: linkLabelField.activeFocus ? Theme.accent : Theme.border
-                                    }
-                                }
-                                TextField {
-                                    id: linkUrlField
+                                RowLayout {
                                     Layout.fillWidth: true
-                                    maximumLength: modelData.urlMax > 0 ? modelData.urlMax : 32767
-                                    text: modelData.url
-                                    placeholderText: qsTr("https://… or name@site.com")
-                                    color: Theme.text
-                                    placeholderTextColor: Theme.textDim
-                                    font.pixelSize: 12
-                                    font.family: "Consolas"
-                                    background: Rectangle {
-                                        color: Theme.raised
-                                        radius: 8
-                                        border.width: 1
-                                        border.color: linkUrlField.activeFocus ? Theme.accent : Theme.border
+                                    spacing: 8
+
+                                    CheckBox {
+                                        id: linkShow
+                                        text: qsTr("Show")
+                                        checked: !modelData.hidden
+                                        font.pixelSize: 11
+                                        palette.windowText: Theme.text
+                                        palette.buttonText: Theme.text
+                                        property bool checkedToggle: checked
                                     }
+                                    TextField {
+                                        id: linkNameField
+                                        Layout.preferredWidth: 190
+                                        // The page's record for this row cannot
+                                        // grow, so the field stops where the room
+                                        // does instead of failing at Apply.
+                                        maximumLength: modelData.nameMax > 0 ? modelData.nameMax
+                                                                             : 32767
+                                        text: modelData.name
+                                        placeholderText: qsTr("Support email")
+                                        color: Theme.text
+                                        placeholderTextColor: Theme.textDim
+                                        font.pixelSize: 12
+                                        background: Rectangle {
+                                            color: Theme.raised
+                                            radius: 8
+                                            border.width: 1
+                                            border.color: linkNameField.activeFocus ? Theme.accent : Theme.border
+                                        }
+                                    }
+                                    TextField {
+                                        id: linkLabelField
+                                        Layout.preferredWidth: 190
+                                        maximumLength: modelData.labelMax > 0 ? modelData.labelMax
+                                                                              : 32767
+                                        text: modelData.label !== undefined ? modelData.label : ""
+                                        placeholderText: qsTr("text it prints")
+                                        color: Theme.text
+                                        placeholderTextColor: Theme.textDim
+                                        font.pixelSize: 12
+                                        background: Rectangle {
+                                            color: Theme.raised
+                                            radius: 8
+                                            border.width: 1
+                                            border.color: linkLabelField.activeFocus ? Theme.accent : Theme.border
+                                        }
+                                    }
+                                    TextField {
+                                        id: linkUrlField
+                                        Layout.fillWidth: true
+                                        maximumLength: modelData.urlMax > 0 ? modelData.urlMax : 32767
+                                        text: modelData.url
+                                        placeholderText: qsTr("https://… or name@site.com")
+                                        color: Theme.text
+                                        placeholderTextColor: Theme.textDim
+                                        font.pixelSize: 12
+                                        font.family: "Consolas"
+                                        background: Rectangle {
+                                            color: Theme.raised
+                                            radius: 8
+                                            border.width: 1
+                                            border.color: linkUrlField.activeFocus ? Theme.accent : Theme.border
+                                        }
+                                    }
+                                }
+
+                                // A compiled record cannot grow, so each field
+                                // stops where its record does. Saying the number
+                                // out loud is the difference between "the field
+                                // is broken" and "this row has 7 characters".
+                                Text {
+                                    Layout.fillWidth: true
+                                    Layout.leftMargin: 70
+                                    wrapMode: Text.WordWrap
+                                    color: Theme.textDim
+                                    font.pixelSize: 10
+                                    text: modelData.nameMax > 0
+                                          ? qsTr("Fits: %1 characters for the name, %2 for the "
+                                                 + "text it prints, %3 for the address")
+                                                .arg(modelData.nameMax)
+                                                .arg(modelData.labelMax)
+                                                .arg(modelData.urlMax)
+                                          : qsTr("Fits: a .qml row is a text file - no length limit "
+                                                 + "here")
                                 }
                             }
                         }

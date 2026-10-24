@@ -196,9 +196,12 @@ Every replacement is written **inside its own record**: the count is updated and
 the rest of the slot is padded, so the file never grows and no offset moves. A
 text longer than its slot is refused with the length that fits, never truncated,
 and the link fields stop at the room their own record has, so a value the player
-would have to refuse cannot even be typed. The About sentence is the literal
-right after its heading, with the "Terms of use" link the page appends to it kept
-when the edited text still ends with those words and cleared when it does not.
+would have to refuse cannot even be typed — the card prints those numbers under
+each row (on the builds we have: about 7–15 characters for a name, 19–23 for the
+words a row prints, 23–31 for the address), because a record is as long as the
+player made it and cannot grow. The About sentence is the literal right after
+its heading, with the "Terms of use" link the page appends to it kept when the
+edited text still ends with those words and cleared when it does not.
 
 Applying writes every copy of the page the file carries, then reads the page
 back **from the file on disk** — a write that does not read back is undone and
@@ -211,11 +214,12 @@ before the new page can be compiled.
 
 One apply keeps the page and its layout exactly as it is (logo, version banner,
 section headings) and only changes what it says: your text replaces the
-copyright line, and each link row is rewritten with the name and address you
-left in it, using `Qt.openUrlExternally` — a bare e-mail address becomes a
-`mailto:` link and a bare domain gets `https://`, so an edited row always
-opens something. Rows ticked off, any stock row the list does not name, and the
-stock QQ row are hidden. The **Check for updates** button is disabled by hiding
+copyright line, and each link row is rewritten with the name, the words it
+prints and the address you left in it. In the compiled copy the address record
+holds the address and the anchor holds the words — never the other way round, so
+editing the address really changes where the row goes. Rows ticked off, a row
+left without an address, any stock row the list does not name, and the stock QQ
+row are hidden. The **Check for updates** button is disabled by hiding
 it together with its "More info" and incompatible-version rows, so nothing on
 the page points at BlueStacks updates any more; on the compiled copy its caption
 is cleared the same way. Press **Restore stock About** to restore the untouched
