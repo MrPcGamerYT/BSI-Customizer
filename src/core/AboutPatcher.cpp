@@ -396,6 +396,11 @@ QString hrefOf(const QString &head)
 }
 
 
+// A record that prints nothing holds one blank (kBlankSlot). Every "is this
+// line empty?" test has to ask that of the trimmed text: a blank is a space, and
+// the trimmed form of a space is an empty string, not a space.
+bool isBlank(const QString &text) { return text.trimmed().isEmpty(); }
+
 // Finds the heading by its words, case-insensitively, so a table read back
 // after a patch is found by the one line the patch never touches.
 int findHeading(const QList<Slot> &records, const QString &words)
@@ -515,14 +520,14 @@ QString pageRowUrl(const Layout &layout, const PageRow &row)
 {
     if (row.addresses.isEmpty()) return QString();
     const QString text = layout.records.at(row.addresses.last()).text;
-    return text.trimmed() == QLatin1String(" ") ? QString() : text;
+    return isBlank(text) ? QString() : text;
 }
 
 bool pageRowHidden(const Layout &layout, const PageRow &row)
 {
     if (row.fragments.isEmpty()) return true;
     for (const int i : row.fragments)
-        if (anchorLabel(layout.records.at(i).text).trimmed() != QLatin1String(" "))
+        if (!isBlank(anchorLabel(layout.records.at(i).text)))
             return false;
     return true;
 }
@@ -537,7 +542,7 @@ QString layoutText(const Layout &layout)
     const int label = layout.about + 3;
     if (anchor < layout.records.size() && label < layout.records.size()
         && layout.records.at(anchor).text.startsWith(QLatin1String("<a href="))
-        && layout.records.at(label).text.trimmed() != QLatin1String(" "))
+        && !isBlank(layout.records.at(label).text))
         text += layout.records.at(label).text;
     return text;
 }
@@ -567,6 +572,23 @@ bool writeSlot(QByteArray &image, const Slot &slot, const QString &text, QString
     // A zero-length record cannot be read back (its own count says "no text"),
     // so an empty value is stored as the one blank every hidden slot uses.
     const QString value = text.isEmpty() ? kBlankSlot : text;
+    // The reader rejects a record holding one of these, so writing one would
+    // make the page lose that line - it is checked here, before the write.
+    for (const QChar ch : value) {
+        const ushort unit = ch.unicode();
+        const bool control = unit < 0x20 && unit != 9 && unit != 10 && unit != 13;
+        if (control)
+            return refuse(QStringLiteral("A page text contains a control character (0x%1); "
+                                         "nothing was written.")
+                              .arg(unit, 2, 16, QLatin1Char('0')));
+        if (unit >= 0xD800 && unit <= 0xDFFF)
+            return refuse(QStringLiteral("A page text contains half of a surrogate pair, which the "
+                                         "page cannot print; nothing was written."));
+        if (unit == 0xFFFE || unit == 0xFFFF)
+            return refuse(QStringLiteral("A page text contains U+%1, which the page cannot print; "
+                                         "nothing was written.")
+                              .arg(unit, 4, 16, QLatin1Char('0')));
+    }
     if (value.size() > slot.maxChars())
         return refuse(QStringLiteral("%1 needs %2 characters but its slot on this player only "
                                      "holds %3; nothing was written.")
@@ -679,7 +701,7 @@ void planTable(const Layout &layout, const Config &config, QList<SlotEdit> *edit
         const int label = layout.about + 3;
         const QString labelText =
             label < layout.records.size() ? layout.records.at(label).text : QString();
-        const bool keepsLink = labelText.trimmed() != QLatin1String(" ")
+        const bool keepsLink = !isBlank(labelText)
                                && !config.text.isEmpty()
                                && config.text.endsWith(labelText, Qt::CaseInsensitive);
         if (!config.text.isEmpty()) {
@@ -695,7 +717,7 @@ void planTable(const Layout &layout, const Config &config, QList<SlotEdit> *edit
             if (anchor < layout.records.size()
                 && layout.records.at(anchor).text.startsWith(QLatin1String("<a href=")))
                 set(anchor, kDeadAnchor);
-            if (label < layout.records.size() && labelText.trimmed() != QLatin1String(" "))
+            if (label < layout.records.size() && !isBlank(labelText))
                 set(label, kBlankSlot);
         }
     }
@@ -773,8 +795,7 @@ void planTable(const Layout &layout, const Config &config, QList<SlotEdit> *edit
     for (int r = 0; r < layout.rows.size(); ++r) {
         if (used.contains(r)) continue;
         const PageRow &row = layout.rows.at(r);
-        hideRow(row, pageRowName(layout, row).trimmed() == QLatin1String(" ")
-                            ? QString() : pageRowName(layout, row));
+        hideRow(row, isBlank(pageRowName(layout, row)) ? QString() : pageRowName(layout, row));
     }
 }
 
@@ -1976,7 +1997,7 @@ State analyze(const QByteArray &image)
         if (isIdentifier(text)) return false;
         if (isFragment(text)) return false;
         if (text.startsWith(QLatin1String("<a "))) return false;
-        if (text.trimmed() == QLatin1String(" ")) return false;
+        if (isBlank(text)) return false;
         return true;
     };
     const int firstWanted = layout.links >= 0 ? layout.links : layout.about;
