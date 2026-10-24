@@ -57,7 +57,9 @@ jobs:
       version: ${{ steps.meta.outputs.version }}
       commit: ${{ steps.meta.outputs.commit }}
       exe_name: ${{ steps.meta.outputs.exe_name }}
+      setup_name: ${{ steps.meta.outputs.setup_name }}
       sha256: ${{ steps.artifact.outputs.sha256 }}
+      setup_sha256: ${{ steps.installer.outputs.sha256 }}
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -100,6 +102,7 @@ jobs:
           "version=$version" >> $env:GITHUB_OUTPUT
           "commit=$commit" >> $env:GITHUB_OUTPUT
           "exe_name=BSI-Customizer-$version-win64.exe" >> $env:GITHUB_OUTPUT
+          "setup_name=BSI-Customizer-$version-setup.exe" >> $env:GITHUB_OUTPUT
 
       - name: Install Qt 6 build tools
         uses: jurplel/install-qt-action@v4.3.1
@@ -148,14 +151,54 @@ jobs:
           EXE_NAME: ${{ steps.meta.outputs.exe_name }}
         run: |
           $ErrorActionPreference = 'Stop'
-          $files = @(Get-ChildItem build/artifacts -File)
-          if ($files.Count -ne 1 -or $files[0].Name -ne $env:EXE_NAME) {
-            throw 'The distributable directory must contain exactly the portable EXE'
+          $exe = Join-Path 'build/artifacts' $env:EXE_NAME
+          if (-not (Test-Path $exe)) {
+            throw "The build did not produce $env:EXE_NAME"
           }
-          $sha = (Get-FileHash -LiteralPath $files[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+          $others = @(Get-ChildItem build/artifacts -File | Where-Object { $_.Name -ne $env:EXE_NAME })
+          if ($others.Count -ne 0) {
+            throw "Unexpected files in build/artifacts: $($others.Name -join ', ')"
+          }
+          $sha = (Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash.ToLowerInvariant()
           "sha256=$sha" >> $env:GITHUB_OUTPUT
           "### Single portable EXE" >> $env:GITHUB_STEP_SUMMARY
           "File: **$env:EXE_NAME**" >> $env:GITHUB_STEP_SUMMARY
+          "SHA-256: ``$sha``" >> $env:GITHUB_STEP_SUMMARY
+
+      # The download people get is the installer; the self-update runs it, which
+      # is the only way an update can replace a program Windows has open. The
+      # portable EXE stays in the same release for anyone who wants it.
+      - name: Build the installer
+        id: installer
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+          EXE_NAME: ${{ steps.meta.outputs.exe_name }}
+          SETUP_NAME: ${{ steps.meta.outputs.setup_name }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $iscc = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'
+          if (-not (Test-Path $iscc)) {
+            choco install innosetup --no-progress -y | Out-Host
+            $iscc = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'
+          }
+          if (-not (Test-Path $iscc)) {
+            throw 'Inno Setup (ISCC.exe) is not available on this runner'
+          }
+          $source = (Resolve-Path (Join-Path 'build/artifacts' $env:EXE_NAME)).Path
+          $out = (Resolve-Path 'build/artifacts').Path
+          & $iscc "/DAppVersion=$env:VERSION" "/DSourceExe=$source" "/DOutputDir=$out" `
+              'packaging/installer/BSI-Customizer.iss'
+          if ($LASTEXITCODE -ne 0) {
+            throw "ISCC failed with exit code $LASTEXITCODE"
+          }
+          $setup = Join-Path $out $env:SETUP_NAME
+          if (-not (Test-Path $setup)) {
+            throw "The installer was not produced as $env:SETUP_NAME"
+          }
+          $sha = (Get-FileHash -LiteralPath $setup -Algorithm SHA256).Hash.ToLowerInvariant()
+          "sha256=$sha" >> $env:GITHUB_OUTPUT
+          "### Installer" >> $env:GITHUB_STEP_SUMMARY
+          "File: **$env:SETUP_NAME** ($([math]::Round((Get-Item $setup).Length / 1MB, 1)) MB)" >> $env:GITHUB_STEP_SUMMARY
           "SHA-256: ``$sha``" >> $env:GITHUB_STEP_SUMMARY
 
       # Publish directly from the same Windows job that built and tested the
@@ -170,7 +213,9 @@ jobs:
           VERSION: ${{ steps.meta.outputs.version }}
           BUILD_COMMIT: ${{ steps.meta.outputs.commit }}
           EXE_NAME: ${{ steps.meta.outputs.exe_name }}
+          SETUP_NAME: ${{ steps.meta.outputs.setup_name }}
           EXPECTED_SHA256: ${{ steps.artifact.outputs.sha256 }}
+          EXPECTED_SETUP_SHA256: ${{ steps.installer.outputs.sha256 }}
           PRERELEASE: ${{ inputs.prerelease }}
         run: |
           set -euo pipefail
@@ -178,10 +223,13 @@ jobs:
           [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]
           [[ "$BUILD_COMMIT" =~ ^[0-9a-f]{40}$ ]]
           [[ "$EXE_NAME" == "BSI-Customizer-$VERSION-win64.exe" ]]
-          [[ "$(find build/artifacts -maxdepth 1 -type f | wc -l)" -eq 1 ]]
+          [[ "$SETUP_NAME" == "BSI-Customizer-$VERSION-setup.exe" ]]
+          [[ "$(find build/artifacts -maxdepth 1 -type f | wc -l)" -eq 2 ]]
 
           asset="build/artifacts/$EXE_NAME"
+          setup="build/artifacts/$SETUP_NAME"
           echo "$EXPECTED_SHA256  $asset" | sha256sum --check --strict
+          echo "$EXPECTED_SETUP_SHA256  $setup" | sha256sum --check --strict
 
           tag="v$VERSION"
 
@@ -206,16 +254,18 @@ jobs:
             exit 1
           fi
 
-          # The raw EXE goes into Releases exactly as built - never inside a
-          # zip. An existing release for this exact commit just gets its asset
-          # replaced; otherwise a fresh tag/release is created on it.
+          # The installer is the download; the portable EXE rides along for
+          # anyone who wants a single file. Both go into Releases exactly as
+          # built - never inside a zip. An existing release for this exact
+          # commit just gets its assets replaced; otherwise a fresh tag/release
+          # is created on it.
           if gh release view "$tag" --repo "$GH_REPO" >/dev/null 2>&1; then
-            gh release upload "$tag" "$asset" --repo "$GH_REPO" --clobber
+            gh release upload "$tag" "$asset" "$setup" --repo "$GH_REPO" --clobber
           else
             flags=()
             [[ "$PRERELEASE" != "true" ]] || flags+=(--prerelease)
 
-            gh release create "$tag" "$asset" \
+            gh release create "$tag" "$setup" "$asset" \
               --repo "$GH_REPO" \
               --target "$BUILD_COMMIT" \
               --title "BSI Customizer $VERSION" \
@@ -223,7 +273,7 @@ jobs:
               "${flags[@]}"
           fi
 
-          echo "Published $EXE_NAME (SHA-256 $EXPECTED_SHA256)" \
+          echo "Published $SETUP_NAME (SHA-256 $EXPECTED_SETUP_SHA256) and $EXE_NAME" \
             >> "$GITHUB_STEP_SUMMARY"
 
       # The application updates itself from a Discord channel because the
@@ -237,7 +287,9 @@ jobs:
           GH_REPO: ${{ github.repository }}
           VERSION: ${{ steps.meta.outputs.version }}
           EXE_NAME: ${{ steps.meta.outputs.exe_name }}
+          SETUP_NAME: ${{ steps.meta.outputs.setup_name }}
           EXPECTED_SHA256: ${{ steps.artifact.outputs.sha256 }}
+          EXPECTED_SETUP_SHA256: ${{ steps.installer.outputs.sha256 }}
           DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN || secrets.DISCORD_PUBLISH_TOKEN }}
           DISCORD_CHANNEL_ID: ${{ secrets.DISCORD_CHANNEL_ID || secrets.DISCORD_UPDATER_CHANNEL_ID }}
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
@@ -250,9 +302,12 @@ jobs:
             exit 0
           fi
 
-          asset="build/artifacts/$EXE_NAME"
+          # The manifest names the installer: the app updates by running it, so
+          # a manifest pointing at the portable EXE would only ever replace the
+          # program file and lose the install.
+          asset="build/artifacts/$SETUP_NAME"
           [[ -f "$asset" ]]
-          echo "$EXPECTED_SHA256  $asset" | sha256sum --check --strict
+          echo "$EXPECTED_SETUP_SHA256  $asset" | sha256sum --check --strict
 
           # Same notes as the GitHub release, so both say the same thing.
           notes="$(mktemp)"

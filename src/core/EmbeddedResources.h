@@ -43,6 +43,10 @@ struct Entry
     int width = 0;        // pictures only; 0 when the header could not be read
     int height = 0;
     bool text = false;    // the decoded bytes are UTF-8 the editor can show
+    // Found by the byte scan, not by the resource tree: the record is known and
+    // can be rewritten in place, but no node points at it, so the entry may
+    // only shrink - it can never be moved or grown.
+    bool scanned = false;
 };
 
 // Every embedded file, sorted by path. `includeBinary = false` drops compiled
@@ -75,8 +79,9 @@ struct Budget
     QString detail;        // why it is unknown, or a short summary
 };
 
-// How much room the entry has without growing the file.
-Budget budget(const QByteArray &image, qint64 entryOff, const QString &leaf);
+// How much room the entry has without growing the file. `inPlace` is set for a
+// scanned record: with no tree node behind it the only room it has is its own.
+Budget budget(const QByteArray &image, qint64 entryOff, const QString &leaf, bool inPlace = false);
 
 // The payload size `bytes` would take in this entry (compressed when the entry
 // is compressed). Used by the editor to show the budget before saving.

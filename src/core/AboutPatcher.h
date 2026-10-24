@@ -44,6 +44,13 @@ struct State
     QString detail;         // why not supported / what is currently there
     bool sectionsHidden = false; // the build hides the links/About sections
     Config config;          // what the page says now (or what was applied)
+    // The page source exactly as it was read out of the EXE. The editor shows
+    // the first lines of it, so a build whose page cannot be parsed says what
+    // it does contain instead of showing an empty card.
+    QString source;
+    // True when the page was found by the byte scan (no resource tree behind
+    // it): it can be read and analyzed, but not rewritten.
+    bool scanned = false;
 };
 
 struct Result

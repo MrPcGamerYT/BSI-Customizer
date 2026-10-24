@@ -132,6 +132,193 @@ QSize sniffSize(const QByteArray &bytes, const QString &format)
     return reader.size(); // header only: no full decode for a list entry
 }
 
+// ---------------------------------------------------------------------------
+// Byte-level picture scan
+//
+// The old SVG tab has always found every icon in every build, including the
+// ones whose resource pools this tool cannot map: it never asked the tree for
+// permission, it looked for "<svg" in the bytes. The pool walk above needs a
+// registration this build recognises (a qRegisterResourceData import, an x64
+// EIP-relative call, a tree whose root is a directory). A build that imports
+// the symbol under another name, that was linked statically, or whose .text is
+// packed is invisible to it - and then the Resources tab lists nothing while
+// the SVG tab happily lists 400 icons.
+//
+// So the bytes are scanned too, for every picture kind, with one extra check
+// that keeps the result honest: a hit only counts when the four bytes in front
+// of it are the size of the blob that follows. That is exactly the shape a raw
+// Qt resource payload has ([be32 stored][payload]), so an accepted hit is a
+// real record the player loads - and therefore one this tab can preview,
+// extract and replace in place - while a stray "GIF8" inside a texture or an
+// "<svg" inside a JavaScript string is rejected.
+struct ScannedBlob
+{
+    qint64 record = -1;  // offset of the [size][payload] record
+    qint64 stored = 0;   // payload bytes the record holds
+    QString format;
+};
+
+bool recordBehind(const QByteArray &image, qint64 start, qint64 length, qint64 *stored)
+{
+    if (start < 4 || length <= 0 || length > kMaxEntry) return false;
+    const qint64 size = ByteUtils::be32(image, start - 4);
+    // A payload may end in the whitespace the source file had; anything more
+    // than a few bytes of it means this is not the record that owns the blob.
+    if (size < length || size > length + 16) return false;
+    if (!ByteUtils::inRange(image, start - 4, size + 4)) return false;
+    for (qint64 at = start + length; at < start + size; ++at) {
+        const char c = image.at(int(at));
+        if (c != '\0' && c != '\r' && c != '\n' && c != '\t' && c != ' ') return false;
+    }
+    *stored = size;
+    return true;
+}
+
+void scanSvg(const QByteArray &image, QList<ScannedBlob> *out)
+{
+    for (qsizetype at = image.indexOf("<svg"); at >= 0; at = image.indexOf("<svg", at + 4)) {
+        const qsizetype close = image.indexOf("</svg>", at);
+        if (close < 0) break;
+        const qint64 end = qint64(close) + 6;
+        qint64 stored = 0;
+        if (!recordBehind(image, at, end - at, &stored)) continue;
+        out->append(ScannedBlob { qint64(at) - 4, stored, QStringLiteral("svg") });
+        at = qsizetype(end) - 4;
+    }
+}
+
+void scanPng(const QByteArray &image, QList<ScannedBlob> *out)
+{
+    const QByteArray magic = QByteArray::fromHex("89504e470d0a1a0a");
+    for (qsizetype at = image.indexOf(magic); at >= 0; at = image.indexOf(magic, at + 8)) {
+        qsizetype pos = at + 8;
+        qint64 end = -1;
+        while (pos + 8 <= image.size()) {
+            const quint32 length = ByteUtils::be32(image, pos);
+            if (length > quint32(kMaxEntry)) break;
+            const QByteArray type = image.mid(pos + 4, 4);
+            const qint64 next = qint64(pos) + 12 + qint64(length);
+            if (next > image.size()) break;
+            pos = qsizetype(next);
+            if (type == QByteArray("IEND")) { end = next; break; }
+        }
+        if (end < 0) continue;
+        qint64 stored = 0;
+        if (!recordBehind(image, at, end - at, &stored)) continue;
+        out->append(ScannedBlob { qint64(at) - 4, stored, QStringLiteral("png") });
+        at = qsizetype(end) - 8;
+    }
+}
+
+void scanJpeg(const QByteArray &image, QList<ScannedBlob> *out)
+{
+    const QByteArray soi = QByteArray::fromHex("ffd8ff");
+    const QByteArray eoi = QByteArray::fromHex("ffd9");
+    for (qsizetype at = image.indexOf(soi); at >= 0; at = image.indexOf(soi, at + 3)) {
+        qsizetype search = at + 3;
+        qint64 end = -1;
+        qint64 stored = 0;
+        while (true) {
+            const qsizetype close = image.indexOf(eoi, search);
+            if (close < 0) break;
+            const qint64 candidate = qint64(close) + 2;
+            if (candidate - at > kMaxEntry) break;
+            if (recordBehind(image, at, candidate - at, &stored)) { end = candidate; break; }
+            search = close + 2; // an FFD9 inside the scan data: keep looking
+        }
+        if (end < 0) continue;
+        out->append(ScannedBlob { qint64(at) - 4, stored, QStringLiteral("jpg") });
+        at = qsizetype(end) - 3;
+    }
+}
+
+void scanGif(const QByteArray &image, QList<ScannedBlob> *out)
+{
+    for (qsizetype at = image.indexOf("GIF8"); at >= 0; at = image.indexOf("GIF8", at + 4)) {
+        if (at + 13 > image.size()) continue;
+        const QByteArray version = image.mid(at + 4, 2);
+        if (version != QByteArray("7a") && version != QByteArray("9a")) continue;
+        const qint64 packed = quint8(image.at(at + 10));
+        qsizetype pos = at + 13;
+        if (packed & 0x80) pos += 3 * (1 << ((packed & 0x07) + 1));
+        bool ok = pos <= image.size();
+        while (ok && pos < image.size()) {
+            const qint64 block = quint8(image.at(pos));
+            if (block == 0x3b) { ++pos; break; }             // trailer
+            if (block == 0x21) {                             // extension
+                pos += 2;
+                while (pos < image.size()) {
+                    const qint64 length = quint8(image.at(pos));
+                    ++pos;
+                    if (length == 0) break;
+                    pos += length;
+                }
+                continue;
+            }
+            if (block == 0x2c) {                             // image descriptor
+                if (pos + 10 > image.size()) { ok = false; break; }
+                const qint64 flags = quint8(image.at(pos + 9));
+                pos += 10;
+                if (flags & 0x80) pos += 3 * (1 << ((flags & 0x07) + 1));
+                ++pos;                                       // LZW minimum code size
+                while (pos < image.size()) {
+                    const qint64 length = quint8(image.at(pos));
+                    ++pos;
+                    if (length == 0) break;
+                    pos += length;
+                }
+                continue;
+            }
+            ok = false;
+            break;
+        }
+        if (!ok || pos > image.size()) continue;
+        qint64 stored = 0;
+        if (!recordBehind(image, at, pos - at, &stored)) continue;
+        out->append(ScannedBlob { qint64(at) - 4, stored, QStringLiteral("gif") });
+        at = pos - 4;
+    }
+}
+
+void scanBmp(const QByteArray &image, QList<ScannedBlob> *out)
+{
+    for (qsizetype at = image.indexOf("BM"); at >= 0; at = image.indexOf("BM", at + 2)) {
+        if (at + 26 > image.size()) continue;
+        const qint64 size = ByteUtils::le32(image, at + 2);
+        if (size < 26 || size > kMaxEntry || qint64(at) + size > image.size()) continue;
+        qint64 stored = 0;
+        if (!recordBehind(image, at, size, &stored)) continue;
+        out->append(ScannedBlob { qint64(at) - 4, stored, QStringLiteral("bmp") });
+        at = qsizetype(at + size) - 2;
+    }
+}
+
+void scanWebp(const QByteArray &image, QList<ScannedBlob> *out)
+{
+    for (qsizetype at = image.indexOf("RIFF"); at >= 0; at = image.indexOf("RIFF", at + 4)) {
+        if (at + 12 > image.size()) continue;
+        if (image.mid(at + 8, 4) != QByteArray("WEBP")) continue;
+        const qint64 total = qint64(ByteUtils::le32(image, at + 4)) + 8;
+        if (total < 12 || total > kMaxEntry || qint64(at) + total > image.size()) continue;
+        qint64 stored = 0;
+        if (!recordBehind(image, at, total, &stored)) continue;
+        out->append(ScannedBlob { qint64(at) - 4, stored, QStringLiteral("webp") });
+        at = qsizetype(at + total) - 4;
+    }
+}
+
+QList<ScannedBlob> scanPictureRecords(const QByteArray &image)
+{
+    QList<ScannedBlob> out;
+    scanSvg(image, &out);
+    scanPng(image, &out);
+    scanJpeg(image, &out);
+    scanGif(image, &out);
+    scanBmp(image, &out);
+    scanWebp(image, &out);
+    return out;
+}
+
 // The entry the list row refers to, located again from the file on disk: the
 // list on screen may be older than the EXE.
 bool locate(const QByteArray &image, const QString &path, Entry *out, QString *error)
@@ -241,6 +428,45 @@ QList<Entry> list(const QByteArray &image, bool includeBinary)
         }
         out << entry;
     }
+
+    // Whatever the pool walk found, the bytes are scanned as well. On a build
+    // whose pools cannot be mapped this is what fills the tab (the same hits the
+    // SVG tab has always shown); on a build where the walk works the scan adds
+    // nothing, because a record that is already listed is skipped.
+    QList<QPair<qint64, qint64>> owned;
+    owned.reserve(out.size());
+    for (const auto &entry : out)
+        owned << qMakePair(entry.entryOff, entry.entryOff + 4 + entry.stored);
+    for (const auto &blob : scanPictureRecords(image)) {
+        if (blob.record < 0 || seen.contains(blob.record)) continue;
+        bool covered = false;
+        for (const auto &range : owned) {
+            if (blob.record >= range.first && blob.record < range.second) { covered = true; break; }
+        }
+        if (covered) continue;
+        seen.insert(blob.record);
+        Entry entry;
+        entry.scanned = true;
+        entry.format = blob.format;
+        entry.path = QStringLiteral("scanned/%1_%2.%3")
+                         .arg(blob.format)
+                         .arg(blob.record, 8, 16, QLatin1Char('0'))
+                         .arg(blob.format);
+        entry.leaf = shortName(entry.path);
+        entry.folder = QStringLiteral("scanned");
+        entry.entryOff = blob.record;
+        entry.flags = 0;
+        entry.size = blob.stored;
+        entry.stored = blob.stored;
+        entry.kind = blob.format == QLatin1String("svg") ? Kind::Svg : Kind::Image;
+        entry.text = entry.kind == Kind::Svg;
+        const QByteArray bytes = image.mid(int(blob.record) + 4, int(blob.stored));
+        const QSize size = sniffSize(bytes, entry.format);
+        entry.width = size.width();
+        entry.height = size.height();
+        out << entry;
+    }
+
     std::sort(out.begin(), out.end(), [](const Entry &a, const Entry &b) {
         const int byName = QString::compare(a.path, b.path, Qt::CaseInsensitive);
         return byName != 0 ? byName < 0 : a.entryOff < b.entryOff;
@@ -274,7 +500,7 @@ QString previewFileUrl(const QByteArray &bytes, const QString &format)
     return EmbeddedImages::previewFileUrl(bytes, format);
 }
 
-Budget budget(const QByteArray &image, qint64 entryOff, const QString &leaf)
+Budget budget(const QByteArray &image, qint64 entryOff, const QString &leaf, bool inPlace)
 {
     Budget out;
     if (entryOff < 0 || !ByteUtils::inRange(image, entryOff, 4)) {
@@ -282,6 +508,18 @@ Budget budget(const QByteArray &image, qint64 entryOff, const QString &leaf)
         return out;
     }
     out.used = ByteUtils::be32(image, entryOff);
+    if (inPlace) {
+        // A scanned record has no tree node, so it is never moved: the room it
+        // has is the room it already uses.
+        if (out.used <= 0 || out.used > kMaxEntry || !ByteUtils::inRange(image, entryOff + 4, out.used)) {
+            out.detail = QStringLiteral("The scanned record is not readable.");
+            return out;
+        }
+        out.known = true;
+        out.capacity = out.used;
+        out.detail = QStringLiteral("%1 bytes, rewritten in place (never moved, never grown)").arg(out.used);
+        return out;
+    }
     QString error;
     const qint64 capacity = QtResources::inPlaceCapacity(image, entryOff, leaf, &error);
     if (capacity < 0) {
@@ -322,6 +560,36 @@ Result replaceBytes(const QString &exePath, const QString &path, const QByteArra
     Entry entry;
     QString error;
     if (!locate(original, path, &entry, &error)) return { false, error };
+
+    if (entry.scanned) {
+        // No tree node owns this record, so it is only ever rewritten in place:
+        // the file cannot grow and no other entry's offset moves. The record
+        // keeps its slot and the rest of it is zero-filled, exactly like the
+        // in-place branch of the pool writer.
+        if (bytes.size() > entry.stored)
+            return { false, QStringLiteral("%1 holds %2 bytes and the replacement is %3. A scanned "
+                                           "record is never moved or grown, so it has to be the same "
+                                           "size or smaller; nothing was written.")
+                                .arg(entry.leaf)
+                                .arg(entry.stored)
+                                .arg(bytes.size()) };
+        QByteArray changed = original;
+        QByteArray record(4, '\0');
+        ByteUtils::putBe32(record, 0, quint32(bytes.size()));
+        record += bytes;
+        record += QByteArray(int(4 + entry.stored) - int(record.size()), '\0');
+        changed.replace(int(entry.entryOff), int(record.size()), record);
+        if (changed.size() != original.size()
+            || changed.mid(int(entry.entryOff) + 4, int(bytes.size())) != bytes)
+            return { false, QStringLiteral("The rewrite did not read back correctly; the EXE was not changed.") };
+        if (!ThemeEngine::backup(exePath))
+            return { false, QStringLiteral("Could not preserve the original backup; no EXE was written.") };
+        if (!PatchFile::writeVerified(exePath, original, changed, &error)) return { false, error };
+        return { true, QStringLiteral("%1 replaced (%2 bytes, was %3). Restart BlueStacks to see it.")
+                           .arg(entry.leaf)
+                           .arg(bytes.size())
+                           .arg(entry.size) };
+    }
 
     const auto link = QtResources::findLink(original, entry.entryOff, entry.leaf);
     if (!link.found || link.ambiguous)

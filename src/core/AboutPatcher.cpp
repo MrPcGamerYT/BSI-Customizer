@@ -66,6 +66,10 @@ struct Doc
     QtResources::Link link;
     QString qml;
     bool bom = false;
+    // Read straight out of the file by its own text because the resource tree
+    // could not be walked. Readable and analyzable, but not writable: writing
+    // needs the node the scan does not have.
+    bool scanned = false;
 };
 
 bool findDocs(const QByteArray &image, const QString &name, QList<Doc> *out, QString *error)
@@ -110,13 +114,90 @@ bool findDocs(const QByteArray &image, const QString &name, QList<Doc> *out, QSt
     return false;
 }
 
+// Last-resort read: the page is found by the object name it always carries and
+// the record that holds it is located by its own size field. The resource tree
+// is not consulted at all, so a build whose pools this tool cannot map still
+// gets a filled editor instead of an empty card - the same idea as the SVGs
+// that have always been found by their markup.
+bool findDocByBytes(const QByteArray &image, Doc *out)
+{
+    const auto isPage = [](const QString &qml) {
+        return qml.contains(QLatin1String("objectName")) && qml.contains(QLatin1String("aboutSettings"));
+    };
+    const auto accept = [out](const QString &qml, bool bom, bool scanned) {
+        Doc doc;
+        doc.qml = qml;
+        doc.bom = bom;
+        doc.scanned = scanned;
+        *out = doc;
+        return true;
+    };
+
+    // 1) A page stored raw: found by the object name it always carries, then
+    //    the record that holds it (the four bytes in front are its size).
+    static const QByteArray needles[] { QByteArray("objectName: \"aboutSettings\""),
+                                        QByteArray("objectName:\"aboutSettings\"") };
+    const auto looksLikePageStart = [](const QByteArray &head) {
+        const QByteArray trimmed = head.left(8).trimmed();
+        return trimmed.startsWith("/*") || trimmed.startsWith("//")
+               || trimmed.startsWith("import") || trimmed.startsWith("Item")
+               || head.startsWith(QByteArray::fromHex("efbbbf"));
+    };
+    for (const auto &needle : needles) {
+        for (qsizetype at = image.indexOf(needle); at >= 0; at = image.indexOf(needle, at + 1)) {
+            const qsizetype lowest = qMax<qsizetype>(4, at - 1024 * 1024);
+            for (qsizetype record = at - 4; record >= lowest; --record) {
+                const quint32 size = ByteUtils::be32(image, record);
+                if (size < 4096u || size > 4u * 1024u * 1024u) continue;
+                if (!ByteUtils::inRange(image, record + 4, size)) continue;
+                if (quint64(record) + 4 + size <= quint64(at)) continue;
+                if (!looksLikePageStart(image.mid(int(record) + 4, 8))) continue;
+                QByteArray body = image.mid(int(record) + 4, int(size));
+                const QString qml = QString::fromUtf8(body);
+                if (qml.toUtf8() != body || qml.contains(QChar(0))) continue;
+                return accept(qml, body.startsWith(QByteArray::fromHex("efbbbf")), false);
+            }
+        }
+    }
+
+    // 2) The page as every current player stores it: zlib, inside a record.
+    //    A qCompress payload opens with its decoded size and a zlib header
+    //    (78 01/5E/9C/DA), so the eight bytes in front of that header already
+    //    say "record of N bytes holding M bytes of text". Only those are
+    //    decompressed, and only until the page turns up.
+    int attempts = 0;
+    for (qsizetype at = image.indexOf(QByteArray::fromHex("78")); at >= 0; at = image.indexOf(QByteArray::fromHex("78"), at + 1)) {
+        if (attempts >= 4000) break;
+        if (at < 8 || at + 2 > image.size()) continue;
+        const int second = quint8(image.at(int(at) + 1));
+        if ((0x7800 + second) % 31 != 0) continue;
+        const qint64 record = qint64(at) - 8;
+        const quint32 stored = ByteUtils::be32(image, record);
+        const quint32 decoded = ByteUtils::be32(image, record + 4);
+        if (stored < 16u || stored > 4u * 1024u * 1024u || decoded < 4096u || decoded > 4u * 1024u * 1024u)
+            continue;
+        if (!ByteUtils::inRange(image, record + 4, stored)) continue;
+        ++attempts;
+        const QByteArray body = qUncompress(image.mid(int(record) + 4, int(stored)));
+        if (body.size() != int(decoded)) continue;
+        const QString qml = QString::fromUtf8(body);
+        if (qml.toUtf8() != body || !isPage(qml)) continue;
+        return accept(qml, body.startsWith(QByteArray::fromHex("efbbbf")), true);
+    }
+    return false;
+}
+
 // The page the editors read. A player that embeds the page twice answers with
 // the copy that carries our config line when there is one, so the editors and
 // analyze() always describe the content that was applied.
 bool findDoc(const QByteArray &image, const QString &name, Doc *out, QString *error)
 {
     QList<Doc> docs;
-    if (!findDocs(image, name, &docs, error)) return false;
+    if (!findDocs(image, name, &docs, error)) {
+        // Nothing came out of the tree: the page may still be there.
+        if (findDocByBytes(image, out)) return true;
+        return false;
+    }
     if (docs.isEmpty()) {
         if (error) *error = QStringLiteral("%1 is not embedded in this player.").arg(name);
         return false;
@@ -1273,6 +1354,8 @@ State analyze(const QByteArray &image)
     }
     state.supported = true;
     state.sectionsHidden = anchors.sectionsHidden;
+    state.source = doc.qml;
+    state.scanned = doc.scanned;
     bool hasLinksField = false;
     if (readConfig(doc.qml, &state.config, &hasLinksField)) {
         state.applied = true;
@@ -1298,6 +1381,10 @@ State analyze(const QByteArray &image)
                                       "page has now; edit them, untick a row to hide it and "
                                       "apply. The update button is disabled by the patch.");
     }
+    if (state.scanned && state.supported)
+        state.detail += QStringLiteral(" The page was read by scanning the file because the "
+                                       "resource tree could not be walked, so it can be viewed "
+                                       "but not rewritten on this build.");
     return state;
 }
 
