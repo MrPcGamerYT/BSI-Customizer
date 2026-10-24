@@ -92,8 +92,18 @@ jobs:
             Write-Output "Manual run: using typed version $version (CMakeLists patched for this build)."
           }
 
+          # A tag names the release, so it has to match the version the commit
+          # it points at declares. This is also what catches a tag created on
+          # the wrong branch (or on a stale local one): the run then fails here,
+          # before anything is built, and says which commit is at fault instead
+          # of leaving a bare "exit code 1" in the log.
           if ($env:GITHUB_REF -like 'refs/tags/*' -and $env:GITHUB_REF_NAME -ne "v$version") {
-            throw "Tag $env:GITHUB_REF_NAME does not match project version $version. Update CMakeLists.txt before tagging."
+            $sha = (git rev-parse HEAD).Trim()
+            $short = $sha.Substring(0, [Math]::Min(7, $sha.Length))
+            $hint = "Tag {0} points at commit {1}, whose CMakeLists.txt declares version {2}. " +
+                    "A tag must sit on the commit that declares the same version; " +
+                    "re-create it there: git tag -f -a {0} -m ""..."" <commit>"
+            throw ($hint -f $env:GITHUB_REF_NAME, $short, $version)
           }
           $commit = (git rev-parse HEAD).Trim()
           if ($LASTEXITCODE -ne 0) {
