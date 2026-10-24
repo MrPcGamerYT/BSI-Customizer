@@ -214,6 +214,21 @@ QList<Entry> list(const QByteArray &image, bool includeBinary)
         } else {
             entry.kind = Kind::Binary;
         }
+        // A build may carry a picture under a name the extension table does not
+        // know (`.dat`, `.asset`, nothing at all). The bytes are the better
+        // judge, and only a small header is read to decide.
+        if (entry.kind == Kind::Binary && entry.size > 0 && entry.size <= kMaxEntry) {
+            const QByteArray head = QtResources::readFile(image, file, 512);
+            const QString sniffed = EmbeddedImages::sniffFormat(head);
+            if (sniffed == QLatin1String("svg")) {
+                entry.kind = Kind::Svg;
+                entry.text = true;
+                entry.format = sniffed;
+            } else if (!sniffed.isEmpty()) {
+                entry.kind = Kind::Image;
+                entry.format = sniffed;
+            }
+        }
         if (!includeBinary && entry.kind == Kind::Binary) continue;
         if ((entry.kind == Kind::Image || entry.kind == Kind::Svg)
             && entry.size > 0 && entry.size <= kMaxEntry) {
