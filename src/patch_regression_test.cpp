@@ -4788,9 +4788,22 @@ Window {
                   && listed(QStringLiteral("http://support.bluestacks.com")),
               QStringLiteral("the words the window prints are listed (%1 records)")
                   .arg(stock.table.size()));
-        check(stock.config.text == copyright,
-              QStringLiteral("the text field shows the sentence the window prints (%1)")
+        check(stock.config.text == copyright + QStringLiteral("Terms of use"),
+              QStringLiteral("the text field shows the sentence and its link, as the page prints "
+                             "them (%1)")
                   .arg(stock.config.text.left(60)));
+        check(stock.config.links.size() == 2,
+              QStringLiteral("both link rows are found by structure (%1)")
+                  .arg(stock.config.links.size()));
+        check(!stock.config.links.isEmpty()
+                  && stock.config.links.at(0).name == QLatin1String("Support email")
+                  && stock.config.links.at(0).id == QLatin1String("row0"),
+              QStringLiteral("the first row is the one the page prints first (%1)")
+                  .arg(stock.config.links.isEmpty() ? QString() : stock.config.links.at(0).name));
+        check(stock.config.links.size() > 1
+                  && stock.config.links.at(1).name == QLatin1String("Support")
+                  && stock.config.links.at(1).url == QLatin1String("http://support.bluestacks.com"),
+              QStringLiteral("a row's name and the address it opens are read separately"));
 
         AboutPatcher::Config config;
         config.text = QStringLiteral("Patched by BSI Customizer: support is closed.");
@@ -4819,6 +4832,41 @@ Window {
         check(reread.compiledPage && reread.config.text == config.text,
               QStringLiteral("the edited page reads back from the file (%1)")
                   .arg(reread.config.text.left(60)));
+        // The row it was written into is found again by its position, so a second
+        // apply has nothing left to do - this is the "it does not even see the
+        // text it already changed" failure.
+        const auto again = AboutPatcher::apply(path, true, config);
+        check(again.ok && again.msg.contains(QLatin1String("already applied")),
+              QStringLiteral("applying the same content twice changes nothing (%1)").arg(again.msg));
+
+        // Hiding a row must leave the row recognizable: its name and printed
+        // words go, but the record that holds them stays, so a later apply can
+        // still find the same row and switch it back on.
+        AboutPatcher::Config hidden = reread.config;
+        hidden.links[1].hidden = true;
+        const auto hid = AboutPatcher::apply(path, true, hidden);
+        check(hid.ok, QStringLiteral("a row can be hidden (%1)").arg(hid.msg));
+        const auto afterHide = AboutPatcher::analyze(read(path));
+        check(afterHide.config.links.size() == 2 && afterHide.config.links.at(1).hidden,
+              QStringLiteral("the hidden row reads back as hidden and keeps its place"));
+        check(read(path).contains(utf16(QStringLiteral(" - <a href=\"\"> </a>"))),
+              "a hidden row prints nothing: its anchor points nowhere and shows a blank");
+        check(afterHide.config.links.at(1).url == reread.config.links.at(1).url,
+              QStringLiteral("and the address it opened is kept (%1), so the row can be "
+                             "switched back on")
+                  .arg(afterHide.config.links.at(1).url));
+        const auto againHidden = AboutPatcher::apply(path, true, hidden);
+        check(againHidden.ok && againHidden.msg.contains(QLatin1String("already applied")),
+              QStringLiteral("hiding twice is a no-op too (%1)").arg(againHidden.msg));
+
+        AboutPatcher::Config back = afterHide.config;
+        back.links[1].hidden = false;
+        back.links[1].url = QStringLiteral("http://support.bluestacks.com");
+        back.links[1].label = QStringLiteral("support.bluestacks.com");
+        const auto shown = AboutPatcher::apply(path, true, back);
+        check(shown.ok, QStringLiteral("the row can be switched back on (%1)").arg(shown.msg));
+        check(read(path).contains(utf16(QStringLiteral(">support.bluestacks.com</a>"))),
+              "and it prints its words again");
 
         // A text that does not fit its slot is refused instead of overwriting
         // the next record.

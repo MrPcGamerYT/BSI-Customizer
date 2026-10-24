@@ -198,6 +198,7 @@ bool findDocByBytes(const QByteArray &image, Doc *out)
 }
 
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
 // The compiled copy of the page
 // ---------------------------------------------------------------------------
 // A BlueStacks player ships PlrAboutSetting.qml as text *and* a compiled copy of
@@ -206,31 +207,26 @@ bool findDocByBytes(const QByteArray &image, Doc *out)
 // the update button's caption - is a UTF-16LE record in that unit's string
 // table:
 //
-//     FF FF FF FF | be32 chars | be32 0 | be32 0x18 | be32 0x18 | text | pad
+//     FF FF FF FF | le32 chars | le32 0 | le32 0x18 | le32 0x18 | le32 0 | text
 //
-// Rewriting the .qml therefore reaches a copy nothing displays, which is why the
-// About card could report "applied" while the window never changed. The records
-// below are what the window actually reads. There is no byte count in a record,
-// so its room is measured up to the following marker: a literal is replaced
-// inside its own slot and the rest of the slot is padded with U+0000. The file
-// never changes size, nothing moves, and a shorter text is as safe as the stock
-// one - only growth is refused.
+// Those records are the page. The .qml next to them is a copy nothing displays,
+// so the editors read *these* strings and the patch rewrites *these* strings.
+// Nothing here is matched by paragraph: a record is identified by where it sits
+// in the page's fixed structure, which is what makes a second apply, an edited
+// text and a hidden row all read back exactly.
 struct Slot
 {
     int marker = 0;  // first byte of FF FF FF FF
     int textAt = 0;  // first byte of the UTF-16LE text
     int chars = 0;   // characters the record holds now
-    int end = 0;     // first byte after the slot, padding included
+    int end = 0;     // first byte after the slot: the next record, or its padding
     QString text;
 
-    // Characters that still fit. The stock text always fits; the padding after
-    // it is room for a few more, and a text written shorter leaves that padding
-    // behind, so a record can be rewritten again later.
-    int maxChars() const
-    {
-        const int room = end - textAt - 2; // keep at least one terminating NUL
-        return qMax(chars, room / 2);
-    }
+    // Characters that still fit. A record owns the space up to the next record,
+    // not just the length of the text in it: writing a shorter text leaves the
+    // padding behind, so the slot keeps its room and can be edited - or put back
+    // from the backup - again later.
+    int maxChars() const { return qMax(chars, (end - textAt - 2) / 2); }
 };
 
 const QByteArray &slotMarker()
@@ -273,14 +269,14 @@ bool parseSlot(const QByteArray &image, int marker, Slot *slot)
     // The slot owns everything up to the next record's marker. Measuring with
     // the marker (and not only with the zeros) keeps a record recognizable
     // after it was rewritten shorter - otherwise the page could be edited once
-    // and never read again. The last record of a table has no next marker: its
-    // slot is the text and the zero padding behind it.
+    // and would lose its room. The last record of a table has no next marker:
+    // its slot is the text and the padding right behind it, never more.
     int end = at + bytes;
     const qsizetype next = image.indexOf(slotMarker(), at + bytes);
     if (next > 0 && next - (at + bytes) <= 4096) {
         end = int(next);
     } else {
-        while (end < image.size() && image.at(end) == '\0' && end - (at + bytes) < 4096) ++end;
+        while (end < image.size() && image.at(end) == '\0' && end - (at + bytes) < 64) ++end;
     }
     Slot parsed;
     parsed.marker = marker;
@@ -294,95 +290,84 @@ bool parseSlot(const QByteArray &image, int marker, Slot *slot)
 
 QList<Slot> scanSlots(const QByteArray &image)
 {
-    QList<Slot> page;
+    QList<Slot> records;
     for (int at = int(image.indexOf(slotMarker())); at >= 0;
          at = int(image.indexOf(slotMarker(), at + 1))) {
         Slot slot;
         if (!parseSlot(image, at, &slot)) continue;
-        page << slot;
+        records << slot;
         // Nothing inside a literal can be a marker, so the next search may
         // resume at the end of this one.
         at = slot.textAt + slot.chars * 2;
     }
-    return page;
+    return records;
 }
 
-// The run of records that holds the About page. Records of one compiled unit
-// sit next to each other with nothing but their padding between them; the page
-// is the run that carries both of its structural headings.
-QList<Slot> aboutTable(const QByteArray &image)
+// One link row of the page: the words in front of it, the anchor that prints
+// the address, and the address itself.
+//
+//   [name]  [nxt_cn]  " - <a …>label</a>"  " - <a …>label</a>"  [address]  [address]
+//
+// A row can carry two of everything: the page branches on the OEM
+// (`oem === "nxt_cn" ? A : B`), so both copies are rewritten together and the
+// row is never half changed.
+struct Row
 {
-    const QList<Slot> all = scanSlots(image);
-    QList<QList<Slot>> runs;
-    for (const Slot &slot : all) {
-        if (!runs.isEmpty() && slot.marker - runs.last().last().end <= 8)
-            runs.last() << slot;
-        else
-            runs << QList<Slot> { slot };
-    }
-    const auto holds = [](const QList<Slot> &run, const QString &text) {
-        for (const Slot &slot : run)
-            if (slot.text == text) return true;
-        return false;
-    };
-    const auto isCopyright = [](const QList<Slot> &run) {
-        for (const Slot &slot : run)
-            if (slot.text.startsWith(QStringLiteral("\u00A9"))) return true;
-        return false;
-    };
-    const auto hasAnchor = [](const QList<Slot> &run) {
-        for (const Slot &slot : run)
-            if (slot.text.startsWith(QLatin1String("<a href="))) return true;
-        return false;
-    };
-    QList<Slot> best;
-    for (const auto &run : runs) {
-        // "Terms of use" is one of the things the editor rewrites, so it cannot
-        // be the only way to recognize the page: after a patch the heading and
-        // the anchor are what is left of the shape. Both are never touched.
-        const bool page = holds(run, QStringLiteral("About and other info"))
-                          && (holds(run, QStringLiteral("Terms of use"))
-                              || holds(run, QStringLiteral("Important links")) || hasAnchor(run));
-        // A translated page keeps the shape but not the words: the copyright
-        // sign and the update button are enough to recognize it.
-        const bool translated = isCopyright(run)
-                                && (holds(run, QStringLiteral("Check for updates"))
-                                    || holds(run, QStringLiteral("Download Update")));
-        if (!page && !translated) continue;
-        if (run.size() > best.size()) best = run;
-    }
-    return best;
-}
-
-int aboutTextSlot(const QList<Slot> &page)
-{
-    // The sentence is the literal the page puts in front of its "Terms of use"
-    // anchor, which is the only slot in the table that *starts* with an <a> tag
-    // (a row's own fragment starts with " - "). Finding it by shape keeps
-    // working after the sentence has been replaced - the copyright sign is no
-    // longer there to look for.
-    for (int i = 0; i + 1 < page.size(); ++i) {
-        if (!page[i + 1].text.startsWith(QLatin1String("<a href="))) continue;
-        if (page[i].text.contains(QLatin1Char('<'))) continue;
-        return i;
-    }
-    for (int i = 0; i < page.size(); ++i) {
-        const QString text = page[i].text;
-        if (text.startsWith(QStringLiteral("\u00A9"))
-            || text.contains(QLatin1String("rights reserved"), Qt::CaseInsensitive))
-            return i;
-    }
-    return -1;
-}
-
-// One "name - <a …>label</a>" row of the compiled page.
-struct TableRow
-{
-    int name = -1;     // the slot before the row's text ("Support")
-    int fragment = -1; // the slot printing " - <a …>support.bluestacks.com</a>"
-    int label = -1;    // the slot printing the address on its own, if any
-    int url = -1;      // the slot holding the http:// address it opens
+    int name = -1;
+    QList<int> fragments;
+    QList<int> addresses;
 };
+
+// What the page's string table says, parsed by structure. Every index is a
+// position in `records`, and the structure is the same on every player seen so
+// far, so an index means the same row before and after a patch.
+struct Layout
+{
+    QList<Slot> records;
+    int about = -1;  // "About and other info"
+    int links = -1;  // "Important links"
+    QList<Row> rows;
+
+    bool valid() const { return about >= 0 || links >= 0; }
+    // Every patch blanks the update button's caption and only a restore writes
+    // it back, so its absence is the page's own way of saying "this was
+    // written by the customizer".
+    bool patched() const
+    {
+        if (about < 0) return false;
+        for (const Slot &slot : records)
+            if (slot.text == QLatin1String("Check for updates")
+                || slot.text == QLatin1String("Download Update"))
+                return false;
+        return true;
+    }
+};
+
+// A property name or id in the table ("nxt_cn", "openEmail", "bodySmall"). The
+// China branch keeps one of these between a row's name and its anchor, so the
+// name lookup has to step over it.
+bool isIdentifier(const QString &text)
+{
+    if (text.isEmpty()) return false;
+    if (!text.at(0).isLower()) return false;
+    for (const QChar ch : text) {
+        if (!ch.isLetterOrNumber() && ch != QLatin1Char('_')) return false;
+        if (ch.unicode() > 0x7f) return false;
+    }
+    return true;
+}
+
+bool isFragment(const QString &text) { return text.startsWith(QLatin1String(" - <a ")); }
+
+// Where a link points, as the page stores it: an address, never a name.
+bool isAddress(const QString &text)
+{
+    if (text.contains(QLatin1Char('<'))) return false;
+    if (text.contains(QLatin1Char('@'))) return true;
+    if (text.startsWith(QLatin1String("http"), Qt::CaseInsensitive)) return true;
+    if (text.contains(QLatin1Char('/'))) return true;
+    return text.contains(QLatin1Char('.'));
+}
 
 QString anchorLabel(const QString &fragment)
 {
@@ -393,57 +378,141 @@ QString anchorLabel(const QString &fragment)
     return fragment.mid(open + 1, close - open - 1);
 }
 
-QList<TableRow> tableRows(const QList<Slot> &page)
+// Finds the heading by its words, case-insensitively, so a table read back
+// after a patch is found by the one line the patch never touches.
+int findHeading(const QList<Slot> &records, const QString &words)
 {
-    QList<TableRow> rows;
-    for (int i = 0; i < page.size(); ++i) {
-        const QString text = page[i].text;
-        if (!text.contains(QLatin1String("<a "), Qt::CaseInsensitive)) continue;
-        if (anchorLabel(text).isEmpty()) continue;
-        TableRow row;
-        row.fragment = i;
-        for (int j = i - 1; j >= 0; --j) {
-            if (page[j].text.contains(QLatin1String("<a "), Qt::CaseInsensitive)) continue;
-            row.name = j;
-            break;
-        }
-        const QString label = anchorLabel(text);
-        for (int j = 0; j < page.size(); ++j) {
-            if (j == i || j == row.name) continue;
-            if (row.label < 0 && page[j].text == label) row.label = j;
-            if (row.url < 0 && page[j].text.startsWith(QLatin1String("http"), Qt::CaseInsensitive)
-                && page[j].text.contains(label, Qt::CaseInsensitive))
-                row.url = j;
-        }
-        rows << row;
-    }
-    return rows;
+    for (int i = 0; i < records.size(); ++i)
+        if (records.at(i).text.trimmed().compare(words, Qt::CaseInsensitive) == 0) return i;
+    return -1;
 }
 
-// A player draws one row twice when it has a China branch
-// (`oem === "nxt_cn" ? A : B`), so the two fragments that belong to one row are
-// edited together and never one without the other.
-struct RowGroup
+// Where a sentence sits in the file as UTF-16LE, whatever surrounds it. The
+// records are found by their header, but the words are found by themselves: a
+// build whose header differs still carries the page, and knowing that turns
+// "not supported" into a precise report instead of a guess.
+QList<int> wideFind(const QByteArray &image, const QString &text)
 {
-    int name = -1;
-    QList<TableRow> rows;
-};
+    QByteArray needle;
+    needle.reserve(int(text.size()) * 2);
+    for (const QChar ch : text) {
+        needle.append(char(ch.unicode() & 0xff));
+        needle.append(char((ch.unicode() >> 8) & 0xff));
+    }
+    QList<int> hits;
+    for (int at = int(image.indexOf(needle)); at >= 0;
+         at = int(image.indexOf(needle, at + 1))) {
+        hits << at;
+        if (hits.size() >= 16) break;
+    }
+    return hits;
+}
 
-QList<RowGroup> tableGroups(const QList<Slot> &page)
+Layout layoutOf(const QByteArray &image)
 {
-    QList<RowGroup> groups;
-    for (const TableRow &row : tableRows(page)) {
-        if (row.name < 0) continue;
-        bool placed = false;
-        for (RowGroup &group : groups) {
-            if (group.name != row.name) continue;
-            group.rows << row;
-            placed = true;
+    Layout layout;
+    const QList<Slot> all = scanSlots(image);
+    if (all.isEmpty()) return layout;
+
+    int about = findHeading(all, QStringLiteral("About and other info"));
+    int links = findHeading(all, QStringLiteral("Important links"));
+    if (about < 0 && links < 0) {
+        // A translated page keeps the shape but not the words: the copyright
+        // sign and the update button's caption still identify it.
+        for (int i = 1; i < all.size(); ++i) {
+            if (!all.at(i).text.startsWith(QStringLiteral("\u00A9"))) continue;
+            // The heading is the record right in front of the sentence; the
+            // sentence is always the one after the heading.
+            about = i - 1;
             break;
         }
-        if (!placed) groups << RowGroup { row.name, QList<TableRow> { row } };
+        if (about < 0) return layout;
     }
-    return groups;
+
+    // The records of one compiled unit sit next to each other; the rest of the
+    // file is other units, other tables, other pages. Only this run is the page.
+    const int anchor = about >= 0 ? about : links;
+    int lo = anchor;
+    int hi = anchor;
+    while (lo > 0 && all.at(lo).marker - all.at(lo - 1).end <= 8) --lo;
+    while (hi + 1 < all.size() && all.at(hi + 1).marker - all.at(hi).end <= 8) ++hi;
+    layout.records = all.mid(lo, hi - lo + 1);
+    layout.about = findHeading(layout.records, QStringLiteral("About and other info"));
+    layout.links = findHeading(layout.records, QStringLiteral("Important links"));
+
+    const int start = layout.links >= 0 ? layout.links + 1 : 0;
+    const int stop = layout.about >= 0 ? layout.about : layout.records.size();
+    for (int i = start; i < stop;) {
+        if (!isFragment(layout.records.at(i).text)) {
+            ++i;
+            continue;
+        }
+        Row row;
+        int j = i;
+        while (j < stop && isFragment(layout.records.at(j).text)) row.fragments << j++;
+        // The name is the slot in front of the anchors. Identifiers are stepped
+        // over; a blank is not - that is the name slot of a row that was
+        // hidden, and walking past it would hand this row the previous row's
+        // address.
+        int k = i - 1;
+        while (k >= start && isIdentifier(layout.records.at(k).text)) --k;
+        row.name = k >= start ? k : -1;
+        int at = j;
+        while (at < stop && row.addresses.size() < row.fragments.size()) {
+            const QString text = layout.records.at(at).text;
+            if (isIdentifier(text)) {
+                ++at;
+                continue;
+            }
+            if (!isAddress(text)) break;
+            row.addresses << at++;
+        }
+        layout.rows << row;
+        i = at;
+    }
+    return layout;
+}
+
+QString rowName(const Layout &layout, const Row &row)
+{
+    if (row.name < 0 || row.name >= layout.records.size()) return QString();
+    return layout.records.at(row.name).text;
+}
+
+QString rowLabel(const Layout &layout, const Row &row)
+{
+    if (row.fragments.isEmpty()) return QString();
+    return anchorLabel(layout.records.at(row.fragments.last()).text);
+}
+
+QString rowUrl(const Layout &layout, const Row &row)
+{
+    if (row.addresses.isEmpty()) return QString();
+    const QString text = layout.records.at(row.addresses.last()).text;
+    return text.trimmed() == QLatin1String(" ") ? QString() : text;
+}
+
+bool rowHidden(const Layout &layout, const Row &row)
+{
+    if (row.fragments.isEmpty()) return true;
+    for (const int i : row.fragments)
+        if (anchorLabel(layout.records.at(i).text).trimmed() != QLatin1String(" "))
+            return false;
+    return true;
+}
+
+// The sentence the page prints: the literal, plus the "Terms of use" link the
+// page appends to it when that link is still enabled.
+QString layoutText(const Layout &layout)
+{
+    if (layout.about < 0 || layout.about + 1 >= layout.records.size()) return QString();
+    QString text = layout.records.at(layout.about + 1).text;
+    const int label = layout.about + 3;
+    if (label < layout.records.size()
+        && layout.records.at(layout.about + 2).text.startsWith(QLatin1String("<a href="))
+        && layout.records.at(label).text.trimmed() != QLatin1String(" "))
+        text += layout.records.at(label).text;
+    return text;
 }
 
 struct SlotEdit
@@ -453,8 +522,13 @@ struct SlotEdit
 };
 
 // What a hidden caption becomes. One space, never an empty string: a zero
-// length record cannot be read back, so it could not be restored either.
+// length record cannot be read back, so it could not be restored either, and
+// the row would stop being recognizable.
 const QString kBlankSlot = QStringLiteral(" ");
+
+// What a hidden anchor becomes: the tag stays (so the row is still a row on the
+// next read), it points nowhere and prints one blank.
+const QString kDeadAnchor = QStringLiteral("<a href=\"\">");
 
 bool writeSlot(QByteArray &image, const Slot &slot, const QString &text, QString *error)
 {
@@ -491,142 +565,169 @@ bool writeSlot(QByteArray &image, const Slot &slot, const QString &text, QString
     return true;
 }
 
-// The edits that make the compiled page say what the config says. A link row is
-// found by the name it prints, then by the text or the address it shows, so a
-// row that was already edited is still found on the next apply. Anything the
-// table does not carry is skipped and reported by the caller.
-void planTable(const QList<Slot> &page, const Config &config, QList<SlotEdit> *edits,
+// " - <a href="…">label</a>": the row's anchor with a new label, keeping the
+// href it already has (or the stock one when it has none - an unhidden row must
+// be clickable again).
+QString fragmentWith(const QString &current, const QString &label, bool hidden)
+{
+    const int close = current.lastIndexOf(QLatin1String("</a>"));
+    const int open = close < 0 ? -1 : current.indexOf(QLatin1Char('>'));
+    QString head = open > 0 ? current.left(open + 1) : QString();
+    if (head.isEmpty()) head = QStringLiteral(" - <a href=\"javascript:void(0)\">");
+    if (hidden) return QStringLiteral(" - ") + kDeadAnchor + QLatin1Char(' ') + QStringLiteral("</a>");
+    const int hrefAt = head.indexOf(QLatin1String("href=\""));
+    if (hrefAt >= 0) {
+        const int from = hrefAt + 6;
+        const int to = head.indexOf(QLatin1Char('"'), from);
+        if (to == from)
+            head = head.left(from) + QStringLiteral("javascript:void(0)") + head.mid(to);
+    }
+    const int gt = head.lastIndexOf(QLatin1Char('>'));
+    return (gt > 0 ? head.left(gt + 1) : head) + label + QStringLiteral("</a>");
+}
+
+// The edits that make the compiled page say what the config says.
+//
+// Rows are matched by the position they hold in the page (the config stores it
+// as the link id), then - for a config written before that existed - by name,
+// address or printed label. Position first is what makes this idempotent: a row
+// that was renamed or hidden is still the same row, so a second apply finds
+// nothing left to change.
+void planTable(const Layout &layout, const Config &config, QList<SlotEdit> *edits,
                QStringList *missing)
 {
     QSet<int> touched;
+    QSet<int> used;
     const auto set = [&](int index, const QString &text) {
-        if (index < 0 || index >= page.size() || touched.contains(index)) return;
-        if (page[index].text == text) return;
+        if (index < 0 || index >= layout.records.size() || touched.contains(index)) return;
+        if (layout.records.at(index).text == text) return;
         touched.insert(index);
         *edits << SlotEdit { index, text };
     };
-    // An exact match anywhere in the page: this is how a row's own words are
-    // found when the record next to the fragment is not the row's name (the
-    // China branch keeps its token in between).
-    const auto setText = [&](const QString &from, const QString &to) {
-        if (from.isEmpty() || from == to) return;
-        for (int i = 0; i < page.size(); ++i)
-            if (page[i].text.compare(from, Qt::CaseInsensitive) == 0) {
-                set(i, to);
-                return;
-            }
-    };
 
-    // The update button is disabled: its caption goes, so a stray click opens an
-    // empty confirmation instead of a download.
-    for (int i = 0; i < page.size(); ++i) {
-        const QString text = page[i].text;
+    // The update button is switched off: its caption goes, so a stray click
+    // opens an empty confirmation instead of a download.
+    const int stop = layout.about >= 0 ? layout.about + 4 : layout.records.size();
+    for (int i = 0; i < layout.records.size() && i < stop; ++i) {
+        const QString text = layout.records.at(i).text;
         if (text == QLatin1String("Check for updates") || text == QLatin1String("Download Update"))
             set(i, kBlankSlot);
     }
-    const int about = aboutTextSlot(page);
-    if (about >= 0 && !config.text.isEmpty()) {
-        // The stock sentence is one literal plus the "Terms of use" link the
-        // page appends to it, and the editor shows both together. Writing the
-        // whole sentence into the literal would paste the link on a second time
-        // - and the literal is a fixed size, so it would not fit either. When
-        // the edited text still ends with the link's own words, only the part
-        // before it is written and the link stays; when it does not, the link is
-        // cleared so the line prints exactly what was typed.
-        int label = -1;
-        QString labelText;
-        for (int i = about + 1; i < page.size() && i <= about + 3; ++i) {
-            if (!page[i].text.startsWith(QLatin1String("<a href="))) continue;
-            for (int j = i + 1; j < page.size() && j <= i + 2; ++j) {
-                if (page[j].text.contains(QLatin1Char('<'))) continue;
-                if (page[j].text.compare(QLatin1String("Terms of use"), Qt::CaseInsensitive) != 0)
-                    continue;
-                label = j;
-                labelText = page[j].text;
-            }
+
+    if (layout.about >= 0) {
+        const int sentence = layout.about + 1;
+        const int anchor = layout.about + 2;
+        const int label = layout.about + 3;
+        const QString labelText =
+            label < layout.records.size() ? layout.records.at(label).text : QString();
+        const bool keepsLink = labelText.trimmed() != QLatin1String(" ")
+                               && !config.text.isEmpty()
+                               && config.text.endsWith(labelText, Qt::CaseInsensitive);
+        if (!config.text.isEmpty()) {
+            if (keepsLink)
+                set(sentence, config.text.left(config.text.size() - labelText.size()));
+            else
+                set(sentence, config.text);
         }
-        QString prefix = config.text;
-        const bool keepsLink = label >= 0 && !labelText.isEmpty()
-                               && prefix.endsWith(labelText, Qt::CaseInsensitive);
-        if (keepsLink) prefix.chop(labelText.size());
-        set(about, prefix);
-        if (!keepsLink) {
-            // The anchor tag itself stays (with nothing to open and no words in
-            // it), so the line is still recognizable as the About line on the
-            // next read; the label it used to print is cleared.
-            const QString emptyAnchor = QStringLiteral("<a href=") + QLatin1Char('"')
-                                        + QLatin1Char('"') + QLatin1Char('>');
-            for (int i = about + 1; i < page.size() && i <= about + 3; ++i) {
-                const QString text = page[i].text;
-                if (text.startsWith(QLatin1String("<a href=")))
-                    set(i, emptyAnchor);
-                else if (i == label || text == QLatin1String("Terms of use"))
-                    set(i, kBlankSlot);
-            }
+        if (!keepsLink && !config.text.isEmpty()) {
+            // The edited text does not end with the link's words, so the line
+            // must print exactly what was typed: the anchor stays (a row of the
+            // page has to stay recognizable) with nothing in it.
+            if (anchor < layout.records.size()
+                && layout.records.at(anchor).text.startsWith(QLatin1String("<a href=")))
+                set(anchor, kDeadAnchor);
+            if (label < layout.records.size() && labelText.trimmed() != QLatin1String(" "))
+                set(label, kBlankSlot);
         }
     }
 
-    const QList<RowGroup> groups = tableGroups(page);
-    QSet<int> assigned;
-    for (const Link &link : config.links) {
+    for (int n = 0; n < config.links.size(); ++n) {
+        const Link &link = config.links.at(n);
         int pick = -1;
-        for (int g = 0; g < groups.size() && pick < 0; ++g) {
-            if (assigned.contains(g)) continue;
-            if (page[groups[g].name].text.compare(link.name, Qt::CaseInsensitive) == 0) pick = g;
+        // 1) The row this link was written for: its position in the page.
+        if (link.id.startsWith(QLatin1String("row"))) {
+            bool ok = false;
+            const int index = link.id.mid(3).toInt(&ok);
+            if (ok && index >= 0 && index < layout.rows.size() && !used.contains(index)) pick = index;
         }
-        for (int g = 0; g < groups.size() && pick < 0; ++g) {
-            if (assigned.contains(g)) continue;
-            for (const TableRow &row : groups[g].rows) {
-                if (row.label >= 0 && !link.label.isEmpty()
-                    && page[row.label].text.compare(link.label, Qt::CaseInsensitive) == 0) {
-                    pick = g;
-                    break;
-                }
-                if (row.url >= 0 && !link.url.isEmpty()
-                    && page[row.url].text.compare(link.url, Qt::CaseInsensitive) == 0) {
-                    pick = g;
-                    break;
-                }
-            }
+        // 2) A config from before the ids were positions: the row that prints
+        //    this name, then the one that opens this address.
+        if (pick < 0 && !link.name.isEmpty()) {
+            for (int r = 0; r < layout.rows.size() && pick < 0; ++r)
+                if (!used.contains(r)
+                    && rowName(layout, layout.rows.at(r)).compare(link.name, Qt::CaseInsensitive) == 0)
+                    pick = r;
         }
-        // The rows and the links are in the same order on every build seen so
-        // far, which is the last resort when a row was already renamed.
-        for (int g = 0; g < groups.size() && pick < 0; ++g)
-            if (!assigned.contains(g)) pick = g;
+        if (pick < 0 && !link.url.isEmpty()) {
+            for (int r = 0; r < layout.rows.size() && pick < 0; ++r)
+                if (!used.contains(r)
+                    && rowUrl(layout, layout.rows.at(r)).compare(link.url, Qt::CaseInsensitive) == 0)
+                    pick = r;
+        }
+        if (pick < 0 && !link.label.isEmpty()) {
+            for (int r = 0; r < layout.rows.size() && pick < 0; ++r)
+                if (!used.contains(r)
+                    && rowLabel(layout, layout.rows.at(r)).compare(link.label, Qt::CaseInsensitive) == 0)
+                    pick = r;
+        }
+        // 3) The rows and the links are in the same order on every build seen so
+        //    far, which is the last resort.
+        for (int r = 0; r < layout.rows.size() && pick < 0; ++r)
+            if (!used.contains(r)) pick = r;
         if (pick < 0) {
             if (!link.hidden && missing) *missing << link.name;
             continue;
         }
-        assigned.insert(pick);
-        if (link.hidden) {
-            setText(link.name, kBlankSlot);
-            for (const TableRow &row : groups[pick].rows) set(row.fragment, kBlankSlot);
-            continue;
-        }
-        setText(link.name, link.name); // no-op unless the name is being kept
-        const QString label = link.label.trimmed().isEmpty() ? displayFor(link.url) : link.label;
-        for (const TableRow &row : groups[pick].rows) {
-            if (!label.isEmpty() && row.fragment >= 0) {
-                QString fragment = page[row.fragment].text;
-                const int close = fragment.lastIndexOf(QLatin1String("</a>"));
-                const int open = close < 0 ? -1 : fragment.lastIndexOf(QLatin1Char('>'), close);
-                if (open >= 0 && close > open)
-                    fragment = fragment.left(open + 1) + label + fragment.mid(close);
-                set(row.fragment, fragment);
-                if (row.label >= 0) set(row.label, label);
+        used.insert(pick);
+        const Row &row = layout.rows.at(pick);
+        const bool hidden = link.hidden;
+        if (row.name >= 0)
+            set(row.name, hidden ? kBlankSlot
+                                 : (link.name.isEmpty() ? layout.records.at(row.name).text
+                                                        : link.name));
+        const QString shown = link.label.trimmed().isEmpty() ? displayFor(link.url) : link.label;
+        for (int i = 0; i < row.fragments.size(); ++i) {
+            const int fragment = row.fragments.at(i);
+            const QString current = layout.records.at(fragment).text;
+            const QString next = hidden ? fragmentWith(current, QString(), true)
+                                        : fragmentWith(current, shown, false);
+            set(fragment, next);
+            if (i >= row.addresses.size()) continue;
+            // The address slot prints the words when the anchor above it only
+            // points at them (the e-mail row), and is hidden from the page when
+            // the anchor already prints them. Both are written, each with the
+            // value it is actually for.
+            const int address = row.addresses.at(i);
+            const bool prints = layout.records.at(address).text.compare(
+                                    anchorLabel(current), Qt::CaseInsensitive) == 0;
+            if (hidden) {
+                // A hidden row prints nothing at all: the record the page shows
+                // is blanked. The record it merely opens is left alone - it is
+                // not displayed, the anchor above it is already dead, and
+                // keeping it is what lets the row be switched back on with its
+                // address intact.
+                if (prints) set(address, kBlankSlot);
+            } else if (prints) {
+                set(address, shown.isEmpty() ? kBlankSlot : shown);
+            } else if (!link.url.isEmpty()) {
+                set(address, link.url);
             }
-            if (!link.url.isEmpty() && row.url >= 0) set(row.url, link.url);
+        }
+        for (int i = row.fragments.size(); i < row.addresses.size(); ++i) {
+            if (hidden) continue;
+            const int address = row.addresses.at(i);
+            if (!link.url.isEmpty()) set(address, link.url);
         }
     }
 }
 
-bool applyTable(QByteArray &image, const QList<Slot> &page, const QList<SlotEdit> &edits,
+bool applyTable(QByteArray &image, const Layout &layout, const QList<SlotEdit> &edits,
                 int *written, QString *error)
 {
     int count = 0;
     for (const SlotEdit &edit : edits) {
-        if (edit.index < 0 || edit.index >= page.size()) continue;
-        if (!writeSlot(image, page[edit.index], edit.text, error)) return false;
+        if (edit.index < 0 || edit.index >= layout.records.size()) continue;
+        if (!writeSlot(image, layout.records.at(edit.index), edit.text, error)) return false;
         ++count;
     }
     if (written) *written = count;
@@ -1127,6 +1228,16 @@ bool sameLink(const Link &a, const Link &b)
         && a.hidden == b.hidden;
 }
 
+// The row a saved config holds for this page row: by id when the config names
+// one, otherwise by the position the row had when it was written.
+Link savedLink(const Config &saved, const QString &id, int index)
+{
+    if (!id.isEmpty())
+        for (const Link &link : saved.links)
+            if (link.id == id) return link;
+    return index >= 0 && index < saved.links.size() ? saved.links.at(index) : Link();
+}
+
 bool sameConfig(const Config &a, const Config &b)
 {
     if (a.text != b.text || a.showSections != b.showSections || a.links.size() != b.links.size())
@@ -1592,11 +1703,17 @@ QString linkLiteral(const Link &link)
     return QLatin1Char('"') + escapeQml(html) + QLatin1Char('"');
 }
 
-const Link *findLink(const Config &config, const QString &id)
+// The config row that belongs to a .qml link object. A config written before
+// the rows were named by position carries the object id (`iSupportText`); this
+// version names them `row0`, `row1`, ... because that is what the compiled page
+// can match on. The rows are in the same order in both copies of the page, so
+// position is the fallback - and it is the one that keeps a renamed row in
+// place instead of hiding every row on the page.
+const Link *findLink(const Config &config, const QString &id, int index)
 {
     for (const auto &link : config.links)
         if (link.id == id) return &link;
-    return nullptr;
+    return index >= 0 && index < config.links.size() ? &config.links.at(index) : nullptr;
 }
 
 // Rewrite a row's text and handler, or add the handler when the build has none.
@@ -1673,8 +1790,9 @@ bool planEnable(const QString &qml, const Config &config, QList<Edit> &edits, QS
     }
 
     // ---- the stock links: rename, re-point or hide each one --------------
-    for (const auto &row : anchors.links) {
-        const Link *link = findLink(config, row.id);
+    for (int i = 0; i < anchors.links.size(); ++i) {
+        const auto &row = anchors.links.at(i);
+        const Link *link = findLink(config, row.id, i);
         const bool hidden = !link || link->hidden || link->url.isEmpty();
         if (hidden) {
             hideObject(qml, row.object, edits);
@@ -1786,43 +1904,85 @@ State analyze(const QByteArray &image)
         state.detail = QStringLiteral("Select the HD-Player.exe path first.");
         return state;
     }
-    // The words the window actually prints live in the compiled page. They are
-    // read first, so a build whose .qml is missing (or is only a stale copy)
-    // still gets a filled editor.
-    const QList<Slot> table = aboutTable(image);
-    state.compiledPage = !table.isEmpty();
-    // Only the words are listed. The same table also holds property names,
-    // ids and binding text ("objectName", "expression for text"), which are not
-    // part of the page and would bury it in noise.
+    // The words the window actually prints live in the compiled page, and that
+    // page is parsed first: it is the copy the window loads, so it is also the
+    // only honest answer to "what does the About page say now". The .qml is a
+    // second copy, and a build whose .qml is missing or stale still gets a
+    // filled editor from here.
+    const Layout layout = layoutOf(image);
+    state.compiledPage = layout.valid();
+    // Only the page's own words are listed. The table also holds property
+    // names, ids and binding text ("objectName", "expression for text"), which
+    // are not part of the page and would bury it in noise.
     const auto isWord = [](const QString &text) {
-        if (text.startsWith(QLatin1String("expression for "))) return false;
-        if (text.startsWith(QLatin1String("QtQuick"))) return false;
-        if (text.contains(QLatin1Char(' '))) return true;
-        if (text.contains(QLatin1Char('/')) || text.contains(QLatin1Char('@'))) return true;
-        if (text.startsWith(QStringLiteral("\u00A9"))) return true;
-        if (text.startsWith(QLatin1String("http"), Qt::CaseInsensitive)) return true;
-        return text.compare(QLatin1String("Support"), Qt::CaseInsensitive) == 0
-               || text.compare(QLatin1String("Website"), Qt::CaseInsensitive) == 0;
+        if (text.isEmpty()) return false;
+        if (isIdentifier(text)) return false;
+        if (isFragment(text)) return false;
+        if (text.startsWith(QLatin1String("<a "))) return false;
+        if (text.trimmed() == QLatin1String(" ")) return false;
+        return true;
     };
-    for (const Slot &slot : table)
-        if (isWord(slot.text))
+    const int firstWanted = layout.links >= 0 ? layout.links : layout.about;
+    for (int i = 0; i < layout.records.size(); ++i) {
+        const Slot &slot = layout.records.at(i);
+        const bool caption = slot.text == QLatin1String("Check for updates")
+                             || slot.text == QLatin1String("Download Update");
+        const bool inPage = layout.valid() && firstWanted >= 0 && i >= firstWanted
+                            && i <= layout.about + 3;
+        if ((caption || inPage) && isWord(slot.text))
             state.table << TableString { int(state.table.size()), slot.text, slot.maxChars() };
-    const int aboutSlot = aboutTextSlot(table);
+    }
+
+    Config fromPage;
+    if (layout.valid()) {
+        fromPage.text = layoutText(layout);
+        fromPage.links.clear();
+        for (int r = 0; r < layout.rows.size(); ++r) {
+            const Row &row = layout.rows.at(r);
+            Link link;
+            // The row's position is its identity: a row that was renamed or
+            // hidden is still this row, so applying twice changes nothing.
+            link.id = QStringLiteral("row%1").arg(r);
+            link.name = rowName(layout, row);
+            link.url = rowUrl(layout, row);
+            link.label = rowLabel(layout, row);
+            link.hidden = rowHidden(layout, row);
+            fromPage.links << link;
+        }
+    }
 
     Doc doc;
     QString error;
+    const auto wideNote = [&image]() {
+        // "About and other info" is the heading the page never loses, so it is
+        // the sentence the whole file is searched for: if it is there but no
+        // record holds it, the build stores the page in a shape this version
+        // does not rewrite - and that is worth saying instead of "not found".
+        const QList<int> hits = wideFind(image, QStringLiteral("About and other info"));
+        if (hits.isEmpty()) return QString();
+        QStringList where;
+        for (const int at : hits) where << QStringLiteral("0x%1").arg(at, 0, 16);
+        return QStringLiteral(" The page's own words \"About and other info\" are in this file at "
+                              "%1, but not inside a string record this version can rewrite.")
+            .arg(where.join(QStringLiteral(", ")));
+    };
     if (!findDoc(image, QStringLiteral("PlrAboutSetting.qml"), &doc, &error)) {
         if (!state.compiledPage) {
-            state.detail = error;
+            state.detail = error + wideNote();
             return state;
         }
-        // Compiled page only: the text can be edited, the row list cannot be
-        // named, because the names come from the QML this build does not carry.
+        // Compiled page only: there is no .qml to rewrite, but the page itself
+        // carries everything the editors need - the sentence and every row.
         state.supported = true;
-        state.detail = QStringLiteral("This player keeps the About page only as compiled code. The "
-                                      "text below is what the window prints and is rewritten in "
-                                      "place; the link rows cannot be listed on this build.");
-        if (aboutSlot >= 0) state.config.text = table[aboutSlot].text;
+        state.applied = layout.patched();
+        state.config = fromPage;
+        state.detail = layout.rows.isEmpty()
+            ? QStringLiteral("This player keeps the About page only as compiled code. The text "
+                             "below is what the window prints and is rewritten in place; the link "
+                             "rows cannot be listed on this build.")
+            : QStringLiteral("This player keeps the About page only as compiled code. Everything "
+                             "below - the text and every link row - is what the window prints, and "
+                             "it is rewritten in place without growing the file.");
         return state;
     }
     const QString masked = QmlText::mask(doc.qml);
@@ -1836,10 +1996,10 @@ State analyze(const QByteArray &image)
         // there: the text can still be rewritten where the window reads it.
         state.supported = true;
         state.source = doc.qml;
-        state.detail = error + QStringLiteral(" The compiled copy of the page was found, so the text "
-                                              "below can still be rewritten where the window reads "
-                                              "it; the link rows cannot be listed on this build.");
-        if (aboutSlot >= 0) state.config.text = table[aboutSlot].text;
+        state.config = fromPage;
+        state.detail = error + QStringLiteral(" The compiled copy of the page was found, so the "
+                                              "text and the link rows below can still be rewritten "
+                                              "where the window reads them.");
         return state;
     }
     state.supported = true;
@@ -1848,11 +2008,42 @@ State analyze(const QByteArray &image)
     state.source = doc.qml;
     state.scanned = doc.scanned;
     bool hasLinksField = false;
-    if (readConfig(doc.qml, &state.config, &hasLinksField)) {
+    Config tag;
+    const bool tagged = readConfig(doc.qml, &tag, &hasLinksField);
+    if (layout.valid()) {
+        // The compiled page is what the window shows, so it is what the fields
+        // show. The tag written into the .qml only supplies the values of a row
+        // that is hidden on the page (a hidden row prints nothing, so its own
+        // fields would otherwise come back empty and could not be switched back
+        // on), plus the flag saying the page was patched.
+        state.config = fromPage;
+        if (tagged) {
+            state.applied = true;
+            for (int i = 0; i < state.config.links.size(); ++i) {
+                const Link saved = savedLink(tag, state.config.links.at(i).id, i);
+                Link &shown = state.config.links[i];
+                if (shown.hidden && !saved.name.trimmed().isEmpty()) {
+                    shown.name = saved.name;
+                    shown.url = saved.url;
+                    shown.label = saved.label;
+                } else if (shown.name.trimmed().isEmpty()) {
+                    shown.name = saved.name;
+                }
+            }
+        }
+        const bool patched = layout.patched();
+        state.applied = state.applied || patched;
+        state.detail = patched
+            ? QStringLiteral("Applied: the text and the link rows below are what the window "
+                             "prints now. The update button is disabled.")
+            : QStringLiteral("Stock About page. The fields show the text and every link the page "
+                             "prints now - edit them, untick a row to hide it and apply.");
+    } else if (tagged) {
         state.applied = true;
         // A tag written by an older version holds one custom link only; the
         // rows are then read back from the page itself. A current tag always
         // lists its rows, so an empty list really means "no row was named".
+        state.config = tag;
         if (!hasLinksField) {
             Config shown;
             if (readShown(doc.qml, masked, anchors, &shown)) state.config.links = shown.links;
@@ -1873,11 +2064,10 @@ State analyze(const QByteArray &image)
                                       "apply. The update button is disabled by the patch.");
     }
     if (state.compiledPage) {
-        state.detail += QStringLiteral(" This player also carries a compiled copy of the page, and "
-                                       "that is the one the window shows: its %1 strings are "
-                                       "rewritten in place as well, so the text and links above "
-                                       "take effect on screen.")
-                            .arg(table.size());
+        state.detail += QStringLiteral(" These are the %1 compiled strings of the page itself - the "
+                                       "copy the window loads - and each one is rewritten in its own "
+                                       "slot, so the file never grows and nothing moves.")
+                            .arg(layout.records.size());
     }
     if (state.scanned && state.supported)
         state.detail += QStringLiteral(" The page was read by scanning the file because the "
@@ -1990,10 +2180,10 @@ Result apply(const QString &exePath, bool enabled, const Config &rawConfig)
     // The compiled copy of the page is the one the window shows, so it is
     // planned before anything is written: "already applied" has to mean both
     // copies agree, not just the .qml nothing displays.
-    const QList<Slot> page = aboutTable(original);
+    const Layout layout = layoutOf(original);
     QList<SlotEdit> tableEdits;
     QStringList unlisted;
-    if (!page.isEmpty() && enabled) planTable(page, config, &tableEdits, &unlisted);
+    if (layout.valid() && enabled) planTable(layout, config, &tableEdits, &unlisted);
 
     // Restoring needs the words that were there before, and the only copy of
     // them is the .bak this tool writes before its first edit. Slots are fixed
@@ -2004,14 +2194,24 @@ Result apply(const QString &exePath, bool enabled, const Config &rawConfig)
         QFile bak(exePath + QStringLiteral(".bak"));
         if (bak.open(QIODevice::ReadOnly)) backup = bak.readAll();
     }
-    const QList<Slot> backupSlots = backup.isEmpty() ? QList<Slot>() : aboutTable(backup);
-    const bool canRestore = !backupSlots.isEmpty() && backupSlots.size() == page.size();
+    const Layout backupLayout = backup.isEmpty() ? Layout() : layoutOf(backup);
+    // A backup is only usable when it holds the same records at the same
+    // offsets: anything else is a different build, and copying one page's words
+    // into another page's slots would corrupt it.
+    bool canRestore = backupLayout.valid() && backupLayout.records.size() == layout.records.size();
+    if (canRestore)
+        for (int i = 0; i < layout.records.size(); ++i)
+            if (layout.records.at(i).marker != backupLayout.records.at(i).marker) {
+                canRestore = false;
+                break;
+            }
     bool tablePatched = false;
     if (canRestore)
-        for (int i = 0; i < page.size(); ++i)
-            if (page[i].text != backupSlots[i].text) { tablePatched = true; break; }
+        for (int i = 0; i < layout.records.size(); ++i)
+            if (layout.records.at(i).text != backupLayout.records.at(i).text) { tablePatched = true; break; }
 
-    if (enabled && before.applied && sameConfig(before.config, config) && tableEdits.isEmpty())
+    if (enabled && before.applied && tableEdits.isEmpty()
+        && (layout.valid() || sameConfig(before.config, config)))
         return { true, QStringLiteral("This About page content is already applied.") };
     if (!enabled && !before.applied && !tablePatched)
         return { true, QStringLiteral("The stock About page is already in place.") };
@@ -2026,7 +2226,7 @@ Result apply(const QString &exePath, bool enabled, const Config &rawConfig)
     QString qmlError;
     const bool hasQmlPage = findDocs(original, QStringLiteral("PlrAboutSetting.qml"), &qmlDocs, &qmlError);
     const bool qmlWritable = hasQmlPage && (!enabled || before.qmlEditable);
-    if (enabled && !qmlWritable && page.isEmpty())
+    if (enabled && !qmlWritable && !layout.valid())
         return refuse(QStringLiteral("The About page on this build was found by scanning and cannot be "
                                      "rewritten; no file was written."));
     if (qmlWritable
@@ -2035,18 +2235,18 @@ Result apply(const QString &exePath, bool enabled, const Config &rawConfig)
                                                        "no file was written.") : error);
 
     int strings = 0;
-    if (!page.isEmpty()) {
+    if (layout.valid()) {
         if (enabled) {
-            if (!applyTable(changed, page, tableEdits, &strings, &error)) return refuse(error);
+            if (!applyTable(changed, layout, tableEdits, &strings, &error)) return refuse(error);
         } else if (canRestore) {
             // Each slot is restored by writing its own words back, not by
             // copying a byte span: a slot is as long as the text it holds, so
             // the span of a record that was shortened is not the span it had.
             // The padding behind every record is zeros on both sides, so the
             // result is the original bytes.
-            for (int i = 0; i < page.size(); ++i) {
-                if (page[i].text == backupSlots[i].text) continue;
-                if (!writeSlot(changed, page[i], backupSlots[i].text, &error))
+            for (int i = 0; i < layout.records.size(); ++i) {
+                if (layout.records.at(i).text == backupLayout.records.at(i).text) continue;
+                if (!writeSlot(changed, layout.records.at(i), backupLayout.records.at(i).text, &error))
                     return refuse(QStringLiteral("The compiled About text cannot be put back from the "
                                                  "backup: %1").arg(error));
                 ++strings;
@@ -2062,7 +2262,10 @@ Result apply(const QString &exePath, bool enabled, const Config &rawConfig)
         return refuse(QStringLiteral("The written About page did not pass read-back verification; "
                                      "no file was written."));
     if (qmlWritable) {
-        if (enabled && (!after.applied || !sameConfig(after.config, config)))
+        if (enabled && !after.applied)
+            return refuse(QStringLiteral("The written About page did not read back with the new content; "
+                                         "no file was written."));
+        if (enabled && !layout.valid() && !sameConfig(after.config, config))
             return refuse(QStringLiteral("The written About page did not read back with the new content; "
                                          "no file was written."));
         if (!enabled && after.applied)
@@ -2071,8 +2274,8 @@ Result apply(const QString &exePath, bool enabled, const Config &rawConfig)
     // The compiled page is read back too: the words the window will print are
     // checked against the config, not only the .qml that was written next to
     // them.
-    if (!page.isEmpty()) {
-        const QList<Slot> written = aboutTable(changed);
+    if (layout.valid()) {
+        const Layout written = layoutOf(changed);
         if (enabled) {
             QList<SlotEdit> left;
             QStringList ignored;
@@ -2081,8 +2284,11 @@ Result apply(const QString &exePath, bool enabled, const Config &rawConfig)
                 return refuse(QStringLiteral("The compiled About page did not read back with the new "
                                              "words; no file was written."));
         } else if (canRestore) {
-            for (int i = 0; i < written.size() && i < backupSlots.size(); ++i)
-                if (written[i].text != backupSlots[i].text)
+            if (written.records.size() != backupLayout.records.size())
+                return refuse(QStringLiteral("The compiled About page did not read back from the "
+                                             "backup; no file was written."));
+            for (int i = 0; i < written.records.size(); ++i)
+                if (written.records.at(i).text != backupLayout.records.at(i).text)
                     return refuse(QStringLiteral("The compiled About page is still patched; no file "
                                                  "was written."));
         }
@@ -2102,12 +2308,14 @@ Result apply(const QString &exePath, bool enabled, const Config &rawConfig)
     written.close();
     const State disk = analyze(onDisk);
     bool diskOk = disk.supported;
-    if (diskOk && qmlWritable)
-        diskOk = disk.applied == enabled && (!enabled || sameConfig(disk.config, config));
-    if (diskOk && enabled && !page.isEmpty()) {
+    if (diskOk && qmlWritable) {
+        diskOk = disk.applied == enabled;
+        if (diskOk && enabled && !layout.valid()) diskOk = sameConfig(disk.config, config);
+    }
+    if (diskOk && enabled && layout.valid()) {
         QList<SlotEdit> left;
         QStringList ignored;
-        planTable(aboutTable(onDisk), config, &left, &ignored);
+        planTable(layoutOf(onDisk), config, &left, &ignored);
         diskOk = left.isEmpty();
     }
     if (!diskOk) {
@@ -2234,13 +2442,62 @@ QString probeReport(const QString &exePath)
     const QByteArray image = file.readAll();
     file.close();
     add(QStringLiteral("file: %1 (%2 bytes)").arg(exePath).arg(image.size()));
-    // The compiled copy of the page: the strings the window prints, and the
-    // room each one has. This is what the About card rewrites, so a build that
-    // "does nothing" can be told apart from one whose page was never located.
-    const QList<Slot> table = aboutTable(image);
-    add(QStringLiteral("compiled page strings: %1").arg(table.size()));
-    for (const auto &slot : table)
-        add(QStringLiteral("  @%1 chars=%2 room=%3  %4")
+    // The compiled copy of the page: the records the window prints, and the
+    // room each one has. This is what the About card reads and rewrites, so a
+    // build that "does nothing" can be told apart from one whose page was never
+    // located - and a row that was mapped to the wrong record is visible here.
+    const Layout layout = layoutOf(image);
+    add(QStringLiteral("compiled page records: %1   table found: %2")
+            .arg(layout.records.size())
+            .arg(layout.valid() ? QStringLiteral("yes") : QStringLiteral("NO")));
+    // The words searched for on their own: a build whose records cannot be
+    // parsed still has the page's text, and this says where.
+    {
+        QStringList where;
+        for (const int at : wideFind(image, QStringLiteral("About and other info")))
+            where << QStringLiteral("0x%1").arg(at, 0, 16);
+        add(QStringLiteral("\"About and other info\" as UTF-16LE: %1")
+                .arg(where.isEmpty() ? QStringLiteral("not in this file")
+                                     : where.join(QStringLiteral(", "))));
+    }
+    if (layout.valid()) {
+        add(QStringLiteral("  headings: links=%1 about=%2   patched=%3")
+                .arg(layout.links)
+                .arg(layout.about)
+                .arg(layout.patched() ? QStringLiteral("yes") : QStringLiteral("no")));
+        if (layout.about >= 0) {
+            const int label = layout.about + 3;
+            add(QStringLiteral("  sentence @%1 room=%2  %3")
+                    .arg(layout.records.at(layout.about + 1).marker)
+                    .arg(layout.records.at(layout.about + 1).maxChars())
+                    .arg(oneLine(layout.records.at(layout.about + 1).text, 80)));
+            if (label < layout.records.size())
+                add(QStringLiteral("  terms label: \"%1\"")
+                        .arg(oneLine(layout.records.at(label).text, 40)));
+        }
+        for (int r = 0; r < layout.rows.size(); ++r) {
+            const Row &row = layout.rows.at(r);
+            add(QStringLiteral("  row %1: name=%2 -> %3  prints \"%4\"%5")
+                    .arg(r)
+                    .arg(oneLine(rowName(layout, row), 40), rowUrl(layout, row),
+                         oneLine(rowLabel(layout, row), 60),
+                         rowHidden(layout, row) ? QStringLiteral("  [hidden]") : QString()));
+            add(QStringLiteral("       records: name=%1 fragments=%2 addresses=%3")
+                    .arg(row.name)
+                    .arg([&row]() {
+                        QStringList list;
+                        for (const int i : row.fragments) list << QString::number(i);
+                        return list.join(QLatin1Char(','));
+                    }(),
+                         [&row]() {
+                             QStringList list;
+                             for (const int i : row.addresses) list << QString::number(i);
+                             return list.join(QLatin1Char(','));
+                         }()));
+        }
+    }
+    for (const auto &slot : layout.records)
+        add(QStringLiteral("    @%1 chars=%2 room=%3  %4")
                 .arg(slot.marker)
                 .arg(slot.chars)
                 .arg(slot.maxChars())
