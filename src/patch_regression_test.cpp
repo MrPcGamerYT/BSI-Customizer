@@ -4757,6 +4757,11 @@ Window {
         table += record(QStringLiteral("Important links"), 6);
         table += record(QStringLiteral("Support email"), 6);
         table += record(row(QStringLiteral("support@bluestacks.com")), 3);
+        // Every row on a real player has three records - the name, the anchor
+        // that prints the address and the address the anchor opens - and the
+        // e-mail row is no exception. A fixture that left the address out made
+        // the row look like it had no target at all.
+        table += record(QStringLiteral("support@bluestacks.com"), 4);
         table += record(QStringLiteral("Support"), 6);
         table += record(row(QStringLiteral("support.bluestacks.com")), 3);
         table += record(QStringLiteral("http://support.bluestacks.com"), 4);
@@ -4795,6 +4800,14 @@ Window {
         check(stock.config.links.size() == 2,
               QStringLiteral("both link rows are found by structure (%1)")
                   .arg(stock.config.links.size()));
+        // The rows have the shape a real player has: a name, the words the
+        // anchor prints and the address it opens. Without this the fixture can
+        // pass while testing a page the player never ships.
+        bool complete = !stock.config.links.isEmpty();
+        for (const auto &link : stock.config.links)
+            complete = complete && !link.name.isEmpty() && !link.label.isEmpty()
+                       && !link.url.isEmpty();
+        check(complete, QStringLiteral("every row has a name, printed words and an address"));
         check(!stock.config.links.isEmpty()
                   && stock.config.links.at(0).name == QLatin1String("Support email")
                   && stock.config.links.at(0).id == QLatin1String("row0"),
