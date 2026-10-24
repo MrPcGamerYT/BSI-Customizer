@@ -6,7 +6,7 @@
 ; single-file build CI already tested.
 ;
 ; Built by .github/workflows/release.yml:
-;   ISCC.exe /DAppVersion=2.4.2 /DSourceExe=<exe> /DOutputDir=<dir> BSI-Customizer.iss
+;   ISCC.exe /DAppVersion=2.5.1 /DSourceExe=<exe> /DOutputDir=<dir> BSI-Customizer.iss
 ;
 ; Nothing here is required to run the app: the installed EXE is still portable,
 ; a copy of it runs from anywhere.
