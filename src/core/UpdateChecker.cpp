@@ -1058,8 +1058,8 @@ bool UpdateChecker::verifyManifestSignature(const QJsonObject &manifest, const Q
     const QByteArray left = provided.toUtf8();
     const QByteArray right = expected.toUtf8();
     unsigned char difference = left.size() == right.size() ? 0 : 1;
-    const int count = qMin(left.size(), right.size());
-    for (int i = 0; i < count; ++i)
+    const qsizetype count = qMin(left.size(), right.size());
+    for (qsizetype i = 0; i < count; ++i)
         difference |= static_cast<unsigned char>(left.at(i) ^ right.at(i));
     if (difference != 0) {
         if (error) {
