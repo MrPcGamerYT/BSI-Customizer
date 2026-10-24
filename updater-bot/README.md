@@ -1,8 +1,18 @@
 # updater-bot — publish builds to Discord
 
 The application updates itself from a Discord channel (see
-[`docs/UPDATER.md`](../docs/UPDATER.md)). This folder is the **publisher** side:
-one Node script, no dependencies, no install step.
+[`docs/UPDATER.md`](../docs/UPDATER.md)).
+
+**You do not need anything in this folder to publish a build.** Post a message
+in the channel instead:
+
+```
+BSI Customizer v2.0.2
+https://u.pcloud.link/publink/show?code=XXXXXXXX
+```
+
+Everything below is the optional strict form (a pinned/signed `manifest.json`,
+automation, CI).
 
 ```
 node updater-bot/publish.mjs --exe build/artifacts/BSI-Customizer-2.0.1-win64.exe \

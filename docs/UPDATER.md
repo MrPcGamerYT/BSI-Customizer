@@ -1,5 +1,63 @@
 # Self-update through a Discord bot
 
+## The easy way: post the version and the link
+
+There is nothing to install, run or remember. Keep one private channel in your
+server and **write a message there**:
+
+```
+BSI Customizer v2.0.2
+https://u.pcloud.link/publink/show?code=XXXXXXXX
+```
+
+That is the whole release. Every copy of the app reads that channel a few
+seconds after it starts, sees `2.0.2` is newer than what it runs, offers the
+update, downloads it from your pCloud link, checks that the result really is a
+64-bit Windows program, replaces itself and restarts.
+
+You can be as tidy or as chatty as you like — the message is parsed, not
+matched byte for byte:
+
+```
+**BSI Customizer v2.0.2**
+https://u.pcloud.link/publink/show?code=XXXXXXXX
+
+Fixed the About editor.
+Link names can be edited separately now.
+```
+
+What the app looks for:
+
+| in the message | meaning |
+| --- | --- |
+| `v2.0.2`, `2.0.2`, `version 2.0.2`, `BSI 2.0.2`, or a line that is only `v2.0.2` | the version |
+| the **first https link** (preferring one that ends in `.exe` or lives on a file host) | where to download |
+| `sha256: <64 hex>` *(optional)* | pins the file; without it the fingerprint is recorded on first download |
+| `size: 12345678` *(optional)* | pins the size too |
+| everything else | the "What's new" text |
+
+Rules that keep it predictable:
+
+* the **highest version** in the last 50 messages wins, so re-posting a fixed
+  link for the same version replaces the old one;
+* `http://` links, GIFs (tenor/giphy) and picture links are ignored;
+* if the channel also has a `manifest.json` attachment (the strict form below),
+  that one wins — use one style per channel;
+* if `updater.hmacKey` is set, text messages are **not** accepted (they cannot
+  be signed); post manifests instead.
+
+Without a `sha256:` line the download cannot be checked against a known hash
+*before* it arrives — it is checked against size + "is this a real 64-bit
+program", and its fingerprint is then stored for that version, so the same
+version can never quietly become different bytes later. The About page shows
+which of the two you are on (*signed* / *hash-pinned* / *no SHA-256 yet*).
+
+Nothing has to be running: the bot is not a program you host, it is a token the
+app uses to **read** that channel (View Channel + Read Message History). The
+same bot you use for the sign-in gate works — it only ever reads.
+
+---
+
 The repository is private, so GitHub Releases cannot be the update channel:
 a released EXE has no public endpoint to ask *"is there a newer build?"*, and a
 GitHub token cannot be baked into a file the user can read. The updater
@@ -35,10 +93,12 @@ present.
 
 1. `GET {apiBase}/channels/{channelId}/messages?limit=50` with
    `Authorization: Bot <token>`.
-2. Takes the **newest** message that carries an attachment named `manifest.json`
-   (name configurable) and downloads that attachment.
-3. Validates it (schema, version, file name, size, SHA-256, optional HMAC) and
-   compares `version` with `BSI_VERSION` (the CMake project version).
+2. Takes the release out of that list: a message carrying a `manifest.json`
+   attachment when there is one, otherwise the message that names the highest
+   version together with an https link (the easy way above).
+3. Validates it (schema/version, file name, and size + SHA-256 when the release
+   provides them, plus the optional HMAC signature) and compares `version` with
+   `BSI_VERSION` (the CMake project version).
 4. Newer version → a strip appears under the title bar:
    *Update 2.0.1 is available* → **What's new** / **Update now** / **Later**.
 5. **Update now** streams the EXE to `%TEMP%\BSI-Customizer-update\`, hashing as
@@ -118,6 +178,9 @@ home.
 
 ## 3. Manifest schema (version 1)
 
+The strict form. When the channel has no `manifest.json` attachment, a plain
+message is used instead (see *The easy way* at the top).
+
 `manifest.json` is an attachment of the release message:
 
 ```json
@@ -175,13 +238,23 @@ unchanged.
 
 ## 4. One-time Discord setup
 
-1. **Create the bot.** <https://discord.com/developers/applications> → *New
-   Application* → *Bot* → *Reset Token* → copy it. Turn **Public Bot** off.
-   No privileged intents are needed (the manifest is an attachment, not message
-   content).
+1. **Create the bot — or reuse the login one.** The sign-in gate already has a
+   Discord *application*; open that same application in
+   <https://discord.com/developers/applications> → **Bot** → *Reset Token* →
+   copy it. (If the application has no Bot tab yet, *Add Bot* first.) Turn
+   **Public Bot** off. No privileged intents are needed: the app reads the
+   message text and attachments without the *Message Content* intent, and the
+   bot token is only ever used to read one channel.
+
+   A **user** OAuth login (what the sign-in gate uses) can never read channel
+   history — only a bot token can. Reusing the same application keeps it to one
+   Discord app; a second app works just as well.
 2. **Create a channel** in your server, e.g. `#bsi-releases`, and restrict it to
    the members who should see builds. Copy its ID (Discord → *Settings →
    Advanced → Developer Mode*, then right-click the channel → *Copy Channel ID*).
+   If the channel is **private**, add the bot to it explicitly
+   (*Edit Channel → Permissions → Add members → the bot*) — a private channel
+   hides itself from bots that are not listed.
 3. **Invite the bot** with only these permissions in that channel:
 
    | permission | bit |
@@ -233,15 +306,21 @@ leave `updater.botToken` read-only.
 
 ## 5. Publishing a build
 
+> Remember the easy way at the top: if you only want to publish, **posting a
+> message in the channel is enough** and needs none of this.
+
 ```bash
 # once, locally
 cp updater-bot/config.example.json updater-bot/config.json   # then fill it in
 
-# every release
+# every release, from the built EXE
 node updater-bot/publish.mjs \
      --exe build/artifacts/BSI-Customizer-2.0.1-win64.exe \
      --version 2.0.1 \
      --notes-file notes.md
+
+# or in one line, when the EXE is already uploaded and you want a pinned release
+node updater-bot/publish.mjs --version 2.0.1 --url "https://u.pcloud.link/publink/show?code=XXXX"
 ```
 
 The script prints the version, size, SHA-256 and channel, uploads
@@ -351,7 +430,10 @@ same text in a terminal.
 | `The updater bot cannot read the releases channel (403)` | channel overwrites: give the bot View Channel + Read Message History |
 | `The releases channel was not found (404)` | wrong channel ID, or the bot is not in that server |
 | `Discord is rate-limiting the updater (429)` | too many checks; wait a minute |
-| `No "manifest.json" attachment in the last 50 messages` | nothing published yet, or `--manifest` name mismatch |
+| `No release in the last 50 messages of channel …` | nothing published yet, or the message has no `v2.0.x` and no https link — check the two lines |
+| `the message does not name a version` | the message had a link but no `v2.0.x` |
+| `the message has no download link` | the version is there but no https URL |
+| `the download link must start with https://` | `http://` links are refused on purpose |
 | `The update manifest is invalid: …` | someone edited `manifest.json` by hand; republish |
 | `The update manifest is not signed by this build's key` | `BSI_UPDATE_HMAC_KEY` and `updater.hmacKey` differ |
 | `SHA-256 mismatch` | the upload was truncated, or the host served a different file — republish |
@@ -376,4 +458,7 @@ The helper's log: `%TEMP%\BSI-Customizer-update\apply-update.log`.
 * Only https URLs are accepted; `file://`, http and non-CDN schemes are refused.
 * Nothing is written outside `%TEMP%` before the user presses **Install and
   restart**; a failed verification deletes the file.
+* A plain "version + link" message cannot carry a signature. If you set
+  `updater.hmacKey`, text releases are refused and only signed manifests are
+  accepted; without a hash the first download is fingerprinted and pinned.
 * `BSI_NO_UPDATER=1` and `updater.enabled: false` turn the whole feature off.

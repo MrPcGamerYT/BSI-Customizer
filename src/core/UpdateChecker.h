@@ -76,6 +76,8 @@ class UpdateChecker : public QObject
     Q_PROPERTY(bool mandatory READ mandatory NOTIFY releaseChanged)
     Q_PROPERTY(bool skipped READ skipped NOTIFY releaseChanged)
     Q_PROPERTY(QString fileName READ fileName NOTIFY releaseChanged)
+    /** How the announced build is trusted: "signed", "pinned" or "first-use". */
+    Q_PROPERTY(QString trust READ trust NOTIFY releaseChanged)
 
     Q_PROPERTY(QString downloadHost READ downloadHost NOTIFY stateChanged)
     Q_PROPERTY(bool readyToInstall READ readyToInstall NOTIFY stateChanged)
@@ -105,6 +107,33 @@ public:
         bool found = false;
         QString messageId;
         QString manifestUrl;
+        QJsonObject message;
+        QString error;
+    };
+
+    /**
+     * One release found in the channel, in the shape the rest of the class
+     * works with. Two ways of announcing a build are accepted, and this is the
+     * type both of them end up as:
+     *  - a `manifest.json` attachment (publish.mjs / CI) - strict, signed,
+     *    hash-pinned, fetched separately;
+     *  - an ordinary message that names a version and an https link, e.g.
+     *
+     *        BSI Customizer v2.0.1
+     *        https://u.pcloud.link/publink/show?code=XXXX
+     *
+     *        Fixed the About editor.
+     *
+     *    Nothing to run and nothing to install: the app reads it and downloads
+     *    from the link. A `sha256: <64 hex>` line in the same message pins it;
+     *    without one the first download is pinned on this PC (see trust()).
+     */
+    struct ReleasePick
+    {
+        bool found = false;
+        bool fromManifest = false; // manifest.json attachment (needs a fetch)
+        QString manifestUrl;
+        QJsonObject manifest;      // normalized release (text messages)
         QJsonObject message;
         QString error;
     };
@@ -142,6 +171,8 @@ public:
     /** The exact URL being downloaded (after any landing-page resolution). */
     QString downloadUrl() const { return m_downloadUrl; }
 
+    QString trust() const;
+
     bool readyToInstall() const { return !m_stagedFile.isEmpty(); }
     QString stagedFile() const { return m_stagedFile; }
     /** True once `apply()` handed the swap to the helper: next start is the new build. */
@@ -176,6 +207,20 @@ public:
     static QJsonObject parseManifest(const QByteArray &json, QString *error);
     /** Newest message carrying an attachment called `manifestName`. */
     static ManifestRef findManifestMessage(const QJsonArray &messages, const QString &manifestName);
+    /**
+     * The best release in a message list: a manifest.json attachment when the
+     * channel has one, otherwise the message that names the highest version
+     * together with an https link (see ReleasePick).
+     */
+    static ReleasePick findRelease(const QJsonArray &messages, const QString &manifestName,
+                                   bool allowTextReleases);
+    /**
+     * Turn one ordinary message into a release object (version/file/url/notes,
+     * plus size/sha256 when the message carries them). Returns false and sets
+     * `error` when the message is not an announcement.
+     */
+    static bool parseMessageRelease(const QJsonObject &message, QJsonObject *manifest,
+                                    QString *error);
     /** Attachment URL for `fileName` inside a message found by the above. */
     static QString attachmentUrl(const QJsonObject &message, const QString &fileName);
     /** The exact byte string the publisher signs. */
@@ -222,6 +267,9 @@ private:
     void startAutoCheck();
     void fail(const QString &note, const QString &detail = QString());
     void handleManifest(const QByteArray &bytes);
+    void handleRelease(const QJsonObject &manifest, bool fromManifest);
+    QString pinnedHash(const QString &version) const;
+    void storePinnedHash(const QString &version, const QString &hash) const;
     void beginDownload(const QString &urlText = QString());
     void finishDownload();
     void writeHelper(const QString &sibling, const QString &target);
@@ -246,6 +294,7 @@ private:
     QString m_downloadUrl;
     int m_hops = 0;
     bool m_installed = false;
+    bool m_pinnedRelease = false;
     bool m_installAfterDownload = false;
     bool m_autoCheck = true;
     QString m_skippedVersion;

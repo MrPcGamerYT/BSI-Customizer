@@ -420,6 +420,11 @@ inside the file. The updater therefore uses a **Discord server**: the publisher
 `manifest.json` to one channel, and the app reads the newest manifest with a
 **read-only bot token** limited to that channel.
 
+- **Publishing is a message.** Post the version and the download link in a
+  private channel (`BSI Customizer v2.0.2` + the pCloud link) and every copy
+  picks it up — no tool, no bot process, nothing to run. A `manifest.json`
+  attachment (what `updater-bot/publish.mjs` writes) is the strict alternative
+  and takes precedence when present.
 - `UpdateChecker` (`src/core/UpdateChecker.{h,cpp}`) checks a few seconds after
   the window opens (switchable on the About page) and shows a strip under the
   title bar when a newer `version` is announced: **What's new** / **Update now**

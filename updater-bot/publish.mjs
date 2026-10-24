@@ -63,6 +63,7 @@ function info(message) {
 const USAGE = `BSI Customizer - Discord releases publisher
 
   node updater-bot/publish.mjs --exe <BSI-Customizer-X.Y.Z-win64.exe> [options]
+  node updater-bot/publish.mjs --version 2.1.0 --url <https link>   (EXE already uploaded)
 
   --version <ver>        default: from the file name
   --notes <text>         release notes
@@ -388,15 +389,26 @@ async function fetchHosted(url, { maxBytes = 300 * 1024 * 1024 } = {}) {
     return { buffer: Buffer.from(await response.arrayBuffer()), contentType: response.headers.get('content-type') ?? '' };
 }
 
-async function verifyHostedUrl(url, expectedSize, expectedSha) {
+async function verifyHostedUrl(url, expectedSize = 0, expectedSha = '') {
     let current = url;
     for (let hop = 0; hop < 3; hop += 1) {
         const { buffer, contentType } = await fetchHosted(current);
         const html = contentType.includes('text/html') || looksLikeHtml(buffer);
         if (!html) {
             const sha = createHash('sha256').update(buffer).digest('hex');
-            const ok = sha === expectedSha && buffer.length === expectedSize;
-            return { ok, url: current, size: buffer.length, sha256: sha };
+            const ok = (!expectedSha || sha === expectedSha)
+                && (!expectedSize || buffer.length === expectedSize);
+            const fileName = decodeURIComponent(new URL(current).pathname.split('/').pop() || '');
+            return {
+                ok,
+                url: current,
+                size: buffer.length,
+                sha256: sha,
+                buffer,
+                fileName: fileName.toLowerCase().endsWith('.exe')
+                    ? fileName
+                    : `BSI-Customizer-${sha.slice(0, 8)}-win64.exe`,
+            };
         }
         const resolved = resolveDownloadLink(buffer.toString('utf8'), current);
         if (!resolved) {
@@ -420,24 +432,63 @@ async function main() {
     if (Number(process.versions.node.split('.')[0]) < 18) {
         die(`Node 18 or newer is required (found ${process.versions.node}); fetch/FormData are built in.`);
     }
-    if (!args.exe) die(`--exe is required\n\n${USAGE}`);
+    if (!args.exe && !args.url) {
+        die(`--exe <file> (or --version + --url when the EXE is already uploaded)\n\n${USAGE}`);
+    }
 
     const config = await loadConfig(args, !args.dryRun);
     args.manifestName = config.manifestName;
+    if (args.url && !/^https:\/\//i.test(args.url)) die('--url must be an https:// link');
 
-    const exePath = path.resolve(args.exe);
-    if (!existsSync(exePath)) die(`no such file: ${exePath}`);
-    if (!exePath.toLowerCase().endsWith('.exe')) die('--exe must be the portable .exe');
-    const bytes = await readFile(exePath);
-    const manifestFile = path.basename(exePath);
-    const version = args.version || versionFromName(manifestFile);
+    // The EXE can come from the build folder or straight from the host it was
+    // uploaded to: `--version 2.1.0 --url <pCloud link>` is the one-line form.
+    let bytes = null;
+    let manifestFile = null;
+    if (args.exe) {
+        const exePath = path.resolve(args.exe);
+        if (!existsSync(exePath)) die(`no such file: ${exePath}`);
+        if (!exePath.toLowerCase().endsWith('.exe')) die('--exe must be the portable .exe');
+        bytes = await readFile(exePath);
+        manifestFile = path.basename(exePath);
+    }
+
+    let hosted = null;
+    if (args.url && !args.skipVerify) {
+        try {
+            hosted = await verifyHostedUrl(args.url, 0, '');
+        } catch (error) {
+            die(`could not read the hosted file: ${error.message}\n`
+                + 'Check that the link is public and downloads the EXE without a page in between,'
+                + ' or publish with --skip-verify and test with --check-updates --download.');
+        }
+        if (!hosted.buffer) {
+            die(`the hosted link does not serve a file: ${hosted.reason ?? 'no download link'}\n`
+                + 'Upload the exact EXE you are publishing, or pass --skip-verify.');
+        }
+        if (!bytes) {
+            bytes = hosted.buffer;
+            manifestFile = hosted.fileName;
+        }
+    }
+
+    if (!bytes) die('no EXE to publish: pass --exe, or a --url the publisher can download');
+    if (!manifestFile) manifestFile = args.version
+        ? `BSI-Customizer-${args.version}-win64.exe`
+        : 'BSI-Customizer-win64.exe';
+
+    const version = args.version || versionFromName(manifestFile)
+        || (args.url ? versionFromName(decodeURIComponent(args.url)) : null);
     if (!version) die('cannot read the version from the file name - pass --version 2.0.1');
     if (!/^\d+\.\d+\.\d+(\.\d+)?$/.test(version)) die(`"${version}" is not a version like 2.0.1`);
-    if (args.url && !/^https:\/\//i.test(args.url)) die('--url must be an https:// link');
     if (args.minSupported && !/^\d+\.\d+\.\d+(\.\d+)?$/.test(args.minSupported)) {
         die('--min-supported must be a version like 2.0.0');
     }
 
+    // Only reachable in the --url form: name the file the way the app expects
+    // instead of whatever the host called it.
+    if (!/bsi/i.test(manifestFile)) manifestFile = `BSI-Customizer-${version}-win64.exe`;
+
+    const size = bytes.length;
     const sha256 = createHash('sha256').update(bytes).digest('hex');
     const notes = await readNotes(args);
     const manifest = {
@@ -445,7 +496,7 @@ async function main() {
         app: 'BSI Customizer',
         version,
         file: manifestFile,
-        size: bytes.length,
+        size,
         sha256,
         released: new Date().toISOString().replace(/\.\d{3}Z$/, 'Z'),
         mandatory: Boolean(args.mandatory),
@@ -456,7 +507,7 @@ async function main() {
     if (config.hmacKey) manifest.signature = sign(manifest, config.hmacKey);
 
     info(`BSI Customizer ${version}`);
-    info(`  file     ${manifestFile} (${humanSize(bytes.length)})`);
+    info(`  file     ${manifestFile} (${humanSize(size)})`);
     info(`  sha256   ${sha256}`);
     info(`  channel  ${config.channelId}${config.useWebhook ? ' (webhook)' : ' (bot)'}`);
     info(`  signed   ${config.hmacKey ? 'yes (HMAC-SHA256)' : 'no - set BSI_UPDATE_HMAC_KEY to sign'}`);
@@ -467,22 +518,16 @@ async function main() {
         if (args.skipVerify) {
             info('  hosted   not checked (--skip-verify)');
         } else {
-            let verified;
-            try {
-                verified = await verifyHostedUrl(args.url, manifest.size, sha256);
-            } catch (error) {
-                die(`could not read the hosted file: ${error.message}\n`
-                    + 'Check that the link is public and downloads the EXE without a page in between,'
-                    + ' or publish with --skip-verify and test with --check-updates --download.');
-            }
-            if (!verified.ok) {
-                die(`the hosted link does not serve this build: ${verified.reason ?? ''}\n`
-                    + `  expected ${manifest.size} bytes, sha256 ${sha256}\n`
-                    + `  got      ${verified.size ?? '?'} bytes, sha256 ${verified.sha256 ?? '?'}\n`
+            const hostedSize = hosted.buffer.length;
+            const hostedSha = createHash('sha256').update(hosted.buffer).digest('hex');
+            if (hostedSize !== size || hostedSha !== sha256) {
+                die(`the hosted link does not serve this build:\n`
+                    + `  expected ${size} bytes, sha256 ${sha256}\n`
+                    + `  got      ${hostedSize} bytes, sha256 ${hostedSha}\n`
                     + 'Upload the exact file you are publishing, or pass --skip-verify.');
             }
-            info(`  hosted   ${verified.url}`);
-            info(`  verified ${humanSize(verified.size)}, SHA-256 matches the local EXE`);
+            info(`  hosted   ${hosted.url}`);
+            info(`  verified ${humanSize(hostedSize)}, SHA-256 matches the published EXE`);
         }
     }
 

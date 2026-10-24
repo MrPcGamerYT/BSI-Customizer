@@ -422,18 +422,32 @@ void UpdateChecker::check()
                                 "channel ID belongs to a text channel the bot can read."));
             return;
         }
-        const ManifestRef ref = findManifestMessage(doc.array(), m_config.manifestName);
-        if (!ref.found) {
-            fail(QStringLiteral("No '%1' attachment in the last 50 messages of channel %2. "
-                                "Publish one with updater-bot/publish.mjs.")
-                     .arg(m_config.manifestName, m_config.channelId));
+        // A signed channel only accepts manifests (a text message carries no
+        // signature, so accepting one would bypass the key).
+        const ReleasePick release = findRelease(doc.array(), m_config.manifestName,
+                                                m_config.hmacKey.isEmpty());
+        if (!release.found) {
+            fail(QStringLiteral("No release in the last 50 messages of channel %1. Post the "
+                                "version and the download link, for example:\n"
+                                "    BSI Customizer v2.0.1\n"
+                                "    https://u.pcloud.link/publink/show?code=XXXX\n"
+                                "or upload a manifest.json with updater-bot/publish.mjs.%2")
+                     .arg(m_config.channelId,
+                          release.error.isEmpty() ? QString()
+                                                  : QStringLiteral("\n(%1)").arg(release.error)));
             return;
         }
-        if (!ref.manifestUrl.startsWith(QLatin1String("https://"), Qt::CaseInsensitive)) {
+        m_pendingMessage = release.message;
+
+        if (!release.fromManifest) {
+            // Nothing else to fetch: the message itself is the manifest.
+            handleRelease(release.manifest, false);
+            return;
+        }
+        if (!release.manifestUrl.startsWith(QLatin1String("https://"), Qt::CaseInsensitive)) {
             fail(QStringLiteral("The manifest link is not https - refusing to trust it."));
             return;
         }
-        m_pendingMessage = ref.message;
 
         QNetworkRequest manifestRequest(QUrl(ref.manifestUrl));
         manifestRequest.setAttribute(QNetworkRequest::RedirectPolicyAttribute,
@@ -472,8 +486,15 @@ void UpdateChecker::handleManifest(const QByteArray &bytes)
         fail(QStringLiteral("The update manifest is invalid: %1").arg(error), error);
         return;
     }
+    handleRelease(manifest, true);
+}
 
-    if (!m_config.hmacKey.isEmpty()) {
+// Everything both announcement styles share: is it newer, is it skipped, what
+// does the UI say. `fromManifest` is false for a plain message, which has no
+// signature and possibly no hash.
+void UpdateChecker::handleRelease(const QJsonObject &manifest, bool fromManifest)
+{
+    if (fromManifest && !m_config.hmacKey.isEmpty()) {
         QString signatureError;
         if (!verifyManifestSignature(manifest, m_config.hmacKey, &signatureError)) {
             fail(QStringLiteral("The update manifest is not signed by this build's key: %1")
@@ -482,6 +503,8 @@ void UpdateChecker::handleManifest(const QByteArray &bytes)
             return;
         }
     }
+
+    m_pinnedRelease = !manifest.value(QStringLiteral("sha256")).toString().isEmpty();
 
     const QString version = manifest.value(QStringLiteral("version")).toString();
     if (compareVersions(version, currentVersion()) <= 0) {
@@ -510,10 +533,11 @@ void UpdateChecker::handleManifest(const QByteArray &bytes)
                  QStringLiteral("Version %1 is available (you skipped it).").arg(version));
         return;
     }
+    const qint64 size = qint64(m_latest.value(QStringLiteral("size")).toDouble(0));
     setState(QStringLiteral("available"),
-             QStringLiteral("Version %1 is available - %2.")
-                 .arg(version, readableSize(qint64(
-                                     m_latest.value(QStringLiteral("size")).toDouble(0)))),
+             size > 0 ? QStringLiteral("Version %1 is available - %2.").arg(version,
+                                                                           readableSize(size))
+                      : QStringLiteral("Version %1 is available.").arg(version),
              QStringLiteral("good"));
 }
 
@@ -720,20 +744,48 @@ void UpdateChecker::finishDownload()
     }
 
     const qint64 expectedSize = qint64(m_latest.value(QStringLiteral("size")).toDouble(0));
-    const QString expectedSha = m_latest.value(QStringLiteral("sha256")).toString();
+    QString expectedSha = m_latest.value(QStringLiteral("sha256")).toString();
+    // A release message that names only the version and the link has no hash to
+    // compare against. What this PC learned the first time is remembered, so
+    // the same version can never silently turn into different bytes.
+    bool firstUse = false;
+    if (expectedSha.isEmpty()) {
+        const QString known = pinnedHash(latestVersion());
+        if (!known.isEmpty())
+            expectedSha = known;
+        else
+            firstUse = true;
+    }
     QString verifyError;
     if (!verifyStagedFile(target, expectedSize, expectedSha, &verifyError)) {
         QFile::remove(target);
-        fail(QStringLiteral("The downloaded update did not verify, so it was deleted: %1")
-                 .arg(verifyError),
+        fail(expectedSha.isEmpty()
+                 ? QStringLiteral("The downloaded update is not a usable program, so it was "
+                                  "deleted: %1").arg(verifyError)
+                 : QStringLiteral("The downloaded update did not verify, so it was deleted: %1")
+                       .arg(verifyError),
              verifyError);
         return;
+    }
+    if (firstUse) {
+        const QString actual = fileSha256(target);
+        if (!actual.isEmpty()) {
+            storePinnedHash(latestVersion(), actual);
+            m_latest.insert(QStringLiteral("sha256"), actual);
+            m_latest.insert(QStringLiteral("size"), double(QFileInfo(target).size()));
+            m_pinnedRelease = true;
+            emit releaseChanged();
+        }
     }
 
     m_stagedFile = target;
     setProgress(1);
     setState(QStringLiteral("ready"),
-             QStringLiteral("Version %1 is downloaded and verified.").arg(latestVersion()),
+             firstUse
+                 ? QStringLiteral("Version %1 is downloaded. It carried no SHA-256, so its "
+                                  "fingerprint was recorded for next time.")
+                       .arg(latestVersion())
+                 : QStringLiteral("Version %1 is downloaded and verified.").arg(latestVersion()),
              QStringLiteral("good"));
     if (m_installAfterDownload) {
         m_installAfterDownload = false;
@@ -1110,6 +1162,297 @@ UpdateChecker::ManifestRef UpdateChecker::findManifestMessage(const QJsonArray &
     }
     ref.error = QStringLiteral("no message carries a '%1' attachment").arg(manifestName);
     return ref;
+}
+
+UpdateChecker::ReleasePick UpdateChecker::findRelease(const QJsonArray &messages,
+                                                      const QString &manifestName,
+                                                      bool allowTextReleases)
+{
+    ReleasePick pick;
+
+    // 1. A published manifest always wins: it is the strict form, it can be
+    //    signed, and publish.mjs keeps exactly one of those messages around.
+    const ManifestRef manifest = findManifestMessage(messages, manifestName);
+    if (manifest.found) {
+        pick.found = true;
+        pick.fromManifest = true;
+        pick.manifestUrl = manifest.manifestUrl;
+        pick.message = manifest.message;
+        return pick;
+    }
+
+    if (!allowTextReleases) {
+        pick.error = QStringLiteral("this channel is signature-protected, so it needs a "
+                                    "manifest.json attachment instead of a text message");
+        return pick;
+    }
+
+    // 2. Otherwise the best ordinary message: highest version wins, and among
+    //    equal versions the newest message (a re-posted link beats the old one).
+    QString bestVersion;
+    qulonglong bestId = 0;
+    QString problem;
+    for (const QJsonValue &value : messages) {
+        const QJsonObject message = value.toObject();
+        QJsonObject release;
+        QString error;
+        if (!parseMessageRelease(message, &release, &error)) {
+            if (!error.isEmpty() && problem.isEmpty())
+                problem = error;
+            continue;
+        }
+        const QString version = release.value(QStringLiteral("version")).toString();
+        bool idOk = false;
+        const qulonglong id = message.value(QStringLiteral("id")).toString().toULongLong(&idOk);
+        const int order = bestVersion.isEmpty() ? 1 : compareVersions(version, bestVersion);
+        if (order > 0 || (order == 0 && (!pick.found || id > bestId))) {
+            bestVersion = version;
+            bestId = idOk ? id : 0;
+            pick.found = true;
+            pick.fromManifest = false;
+            pick.manifest = release;
+            pick.message = message;
+        }
+    }
+    if (!pick.found && !problem.isEmpty())
+        pick.error = problem;
+    return pick;
+}
+
+bool UpdateChecker::parseMessageRelease(const QJsonObject &message, QJsonObject *manifest,
+                                       QString *error)
+{
+    const auto reject = [error](const QString &text) {
+        if (error)
+            *error = text;
+        return false;
+    };
+    if (error)
+        error->clear();
+    if (manifest)
+        *manifest = QJsonObject();
+    if (!manifest)
+        return false;
+
+    // Markdown emphasis and backticks are formatting, not content: the same
+    // message has to parse whether it was typed **v2.0.1** or `v2.0.1`.
+    QString text = message.value(QStringLiteral("content")).toString();
+    if (text.trimmed().isEmpty())
+        return reject({});
+    text.remove(QLatin1Char('`'));
+    text.remove(QStringLiteral("**"));
+    text.remove(QStringLiteral("__"));
+    text.remove(QStringLiteral("~~"));
+
+    // ---- the download link ------------------------------------------------
+    static const QRegularExpression urlPattern(
+        QStringLiteral("https?://[^\\s<>()\\[\\]\"']+"),
+        QRegularExpression::CaseInsensitiveOption);
+    struct Candidate
+    {
+        QString url;
+        int score = 0;
+    };
+    Candidate bestUrl;
+    static const QStringList fileHosts{
+        QStringLiteral("pcloud"), QStringLiteral("dropbox"), QStringLiteral("google"), // drive.google
+        QStringLiteral("drive.google"), QStringLiteral("1drv.ms"), QStringLiteral("onedrive"),
+        QStringLiteral("mega.nz"), QStringLiteral("mediafire"), QStringLiteral("catbox.moe"),
+        QStringLiteral("litter.catbox"), QStringLiteral("transfer.sh"), QStringLiteral("file.io"),
+        QStringLiteral("githubusercontent"), QStringLiteral("github.com"), QStringLiteral("amazonaws"),
+        QStringLiteral("r2.dev"), QStringLiteral("backblazeb2"), QStringLiteral("sourceforge"),
+        QStringLiteral("pixeldrain"), QStringLiteral("gofile.io"), QStringLiteral("krakenfiles"),
+        QStringLiteral("storage.googleapis"), QStringLiteral("files."), QStringLiteral("dl.")
+    };
+    static const QStringList notDownloads{QStringLiteral(".png"), QStringLiteral(".jpg"),
+                                         QStringLiteral(".jpeg"), QStringLiteral(".gif"),
+                                         QStringLiteral(".webp"), QStringLiteral(".mp4"),
+                                         QStringLiteral("tenor.com"), QStringLiteral("giphy.com"),
+                                         QStringLiteral("discord.gg")};
+    for (const auto &match : urlPattern.globalMatch(text)) {
+        const QString url = match.captured(0);
+        const QString lower = url.toLower();
+        const QString path = lower.section(QLatin1Char('?'), 0, 0);
+
+        bool skip = false;
+        for (const QString &bad : notDownloads) {
+            if (lower.contains(bad)) {
+                skip = true;
+                break;
+            }
+        }
+        if (skip)
+            continue;
+
+        int score = 0;
+        if (path.endsWith(QLatin1String(".exe")))
+            score += 100;
+        for (const QString &host : fileHosts) {
+            if (lower.contains(host)) {
+                score += 60;
+                break;
+            }
+        }
+        // A line that is nothing but the link reads as "this is the download".
+        for (const QString &line : text.split(QLatin1Char('\n'))) {
+            if (line.trimmed() == url) {
+                score += 25;
+                break;
+            }
+        }
+        if (lower.contains(QLatin1String("download")))
+            score += 15;
+        if (score > bestUrl.score)
+            bestUrl = { url, score };
+    }
+    if (bestUrl.url.isEmpty())
+        return reject(QStringLiteral("the message has no download link"));
+    if (!bestUrl.url.startsWith(QLatin1String("https://"), Qt::CaseInsensitive))
+        return reject(QStringLiteral("the download link must start with https://"));
+    if (!isHttpsUrl(bestUrl.url))
+        return reject(QStringLiteral("the download link is not a usable https address"));
+
+    // ---- the version -----------------------------------------------------
+    QString version;
+    static const QRegularExpression explicitV(
+        QStringLiteral("\\bv(\\d+\\.\\d+(?:\\.\\d+){0,2})\\b"),
+        QRegularExpression::CaseInsensitiveOption);
+    static const QRegularExpression labelled(
+        QStringLiteral("(?:version|ver\\.?|bsi(?:\\s*customizer)?)\\s*[:=\\-]?\\s*v?"
+                       "(\\d+\\.\\d+(?:\\.\\d+){0,2})\\b"),
+        QRegularExpression::CaseInsensitiveOption);
+    static const QRegularExpression bareVersion(
+        QStringLiteral("^\\s*v?(\\d+\\.\\d+(?:\\.\\d+){0,2})\\s*$"));
+    const auto firstMatch = [&text](const QRegularExpression &pattern) {
+        const auto match = pattern.match(text);
+        return match.hasMatch() ? match.captured(1) : QString();
+    };
+    version = firstMatch(explicitV);
+    if (version.isEmpty())
+        version = firstMatch(labelled);
+    if (version.isEmpty()) {
+        for (const QString &line : text.split(QLatin1Char('\n'))) {
+            const auto match = bareVersion.match(line);
+            if (match.hasMatch()) {
+                version = match.captured(1);
+                break;
+            }
+        }
+    }
+    if (version.isEmpty())
+        return reject(QStringLiteral("the message does not name a version (write v2.0.1)"));
+
+    // ---- optional pinning: sha256 / size ---------------------------------
+    QString sha256;
+    static const QRegularExpression shaPattern(
+        QStringLiteral("(?:sha-?256|sha|hash)\\s*[:=]\\s*([0-9a-fA-F]{64})\\b"),
+        QRegularExpression::CaseInsensitiveOption);
+    static const QRegularExpression shaBare(QStringLiteral("\\b([0-9a-fA-F]{64})\\b"));
+    const auto shaMatch = shaPattern.match(text);
+    if (shaMatch.hasMatch())
+        sha256 = shaMatch.captured(1).toLower();
+    else {
+        const auto bare = shaBare.match(text);
+        if (bare.hasMatch())
+            sha256 = bare.captured(1).toLower();
+    }
+    qint64 size = 0;
+    static const QRegularExpression sizePattern(
+        QStringLiteral("(?:size|bytes)\\s*[:=]\\s*([0-9]{3,12})\\b"),
+        QRegularExpression::CaseInsensitiveOption);
+    const auto sizeMatch = sizePattern.match(text);
+    if (sizeMatch.hasMatch())
+        size = sizeMatch.captured(1).toLongLong();
+
+    // ---- notes: what is left once the bookkeeping is removed -------------
+    QString notes = text;
+    notes.remove(bestUrl.url);
+    // Any other link (a video, a chat message) is not release notes.
+    notes.remove(urlPattern);
+    notes.remove(shaPattern);
+    if (!sha256.isEmpty())
+        notes.remove(sha256, Qt::CaseInsensitive); // the bare-hash form
+    if (size > 0)
+        notes.remove(sizePattern);
+    const auto versionMatch = explicitV.match(notes);
+    if (versionMatch.hasMatch())
+        notes.remove(versionMatch.captured(0));
+    static const QRegularExpression productLine(
+        QStringLiteral("^bsi(\\s*customizer)?$"), QRegularExpression::CaseInsensitiveOption);
+    QStringList kept;
+    for (const QString &line : notes.split(QLatin1Char('\n'))) {
+        const QString trimmed = line.trimmed();
+        if (trimmed.isEmpty() && kept.isEmpty())
+            continue; // no leading blank lines
+        if (productLine.match(trimmed).hasMatch())
+            continue; // what is left of "BSI Customizer v2.0.1"
+        static const QRegularExpression labelLine(
+            QStringLiteral("^(download|link|url|get|file|mirror)\\s*:?\\s*$"),
+            QRegularExpression::CaseInsensitiveOption);
+        if (labelLine.match(trimmed).hasMatch())
+            continue; // the word before the link we already removed
+        kept << trimmed;
+    }
+    while (!kept.isEmpty() && kept.last().isEmpty())
+        kept.removeLast();
+    QString cleaned;
+    for (const QString &line : kept) {
+        if (line.isEmpty() && !cleaned.isEmpty() && cleaned.endsWith(QLatin1Char('\n')))
+            continue; // collapse runs of blank lines
+        cleaned += line + QLatin1Char('\n');
+    }
+    notes = cleaned.trimmed().left(4000);
+
+    // ---- the file name the download is saved under -----------------------
+    QString file = QUrl(bestUrl.url).fileName();
+    if (!file.endsWith(QLatin1String(".exe"), Qt::CaseInsensitive))
+        file = QStringLiteral("BSI-Customizer-%1-win64.exe").arg(version);
+
+    QJsonObject release{
+        { QStringLiteral("schema"), 1 },
+        { QStringLiteral("version"), version },
+        { QStringLiteral("file"), file },
+        { QStringLiteral("url"), bestUrl.url },
+        { QStringLiteral("messageId"), message.value(QStringLiteral("id")).toString() },
+        { QStringLiteral("source"), QStringLiteral("discord message") },
+    };
+    if (!sha256.isEmpty())
+        release.insert(QStringLiteral("sha256"), sha256);
+    if (size > 0)
+        release.insert(QStringLiteral("size"), double(size));
+    if (!notes.isEmpty())
+        release.insert(QStringLiteral("notes"), notes);
+    *manifest = release;
+    return true;
+}
+
+QString UpdateChecker::trust() const
+{
+    if (!m_available)
+        return {};
+    if (!m_config.hmacKey.isEmpty() && !m_pinnedRelease)
+        return QStringLiteral("unverified");
+    if (m_pinnedRelease)
+        return m_config.hmacKey.isEmpty() ? QStringLiteral("pinned") : QStringLiteral("signed");
+    return QStringLiteral("first-use");
+}
+
+// What this PC learned about a version the first time it downloaded it. A
+// message that carries no SHA-256 cannot be checked before the download, so the
+// result is remembered: if the same version ever downloads different bytes,
+// that is a changed upload, not an update.
+QString UpdateChecker::pinnedHash(const QString &version) const
+{
+    if (version.isEmpty())
+        return {};
+    return QSettings().value(QStringLiteral("updates/pinned/%1").arg(version)).toString();
+}
+
+void UpdateChecker::storePinnedHash(const QString &version, const QString &hash) const
+{
+    if (version.isEmpty() || hash.isEmpty())
+        return;
+    QSettings().setValue(QStringLiteral("updates/pinned/%1").arg(version), hash);
 }
 
 QString UpdateChecker::attachmentUrl(const QJsonObject &message, const QString &fileName)

@@ -354,6 +354,10 @@ int runUpdateCommand(const QStringList &arguments)
                 { QStringLiteral("size"), checker.downloadSize() },
                 { QStringLiteral("released"), checker.releasedAt() },
                 { QStringLiteral("mandatory"), checker.mandatory() },
+                { QStringLiteral("trust"), checker.trust() },
+                { QStringLiteral("url"), checker.downloadUrl().isEmpty()
+                                            ? QString()
+                                            : checker.downloadUrl() },
                 { QStringLiteral("notes"), checker.releaseNotes() },
             };
             if (!wantDownload) {
@@ -408,8 +412,19 @@ int runUpdateCommand(const QStringList &arguments)
         line(QStringLiteral("  Result: you are on the newest build (%1).")
                  .arg(checker.currentVersion()));
     } else if (exitCode == 3) {
-        line(QStringLiteral("  Result: version %1 is available (%2, %3).")
-                 .arg(checker.latestVersion(), checker.fileName(), checker.downloadSize()));
+        line(QStringLiteral("  Result: version %1 is available (%2%3).")
+                 .arg(checker.latestVersion(), checker.fileName(),
+                      checker.downloadSize().isEmpty()
+                          ? QString()
+                          : QStringLiteral(", %1").arg(checker.downloadSize())));
+        const QString trust = checker.trust();
+        line(QStringLiteral("  Trust: %1")
+                 .arg(trust == QLatin1String("signed")
+                          ? QStringLiteral("a signed manifest")
+                          : trust == QLatin1String("pinned")
+                                ? QStringLiteral("pinned to the SHA-256 in the release")
+                                : QStringLiteral("no SHA-256 in the release message - the "
+                                                 "fingerprint is recorded on first download")));
         if (!checker.releaseNotes().trimmed().isEmpty()) {
             line(QStringLiteral("  Notes:"));
             for (const QString &noteLine : checker.releaseNotes().split(QLatin1Char('\n')))

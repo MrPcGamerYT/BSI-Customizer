@@ -4714,6 +4714,132 @@ Window {
                   &pageDetail).isEmpty()
                   && pageDetail.contains(QLatin1String("no https download link")),
               "a page without a link says so instead of downloading garbage");
+
+        // ---- posting a build is just a message -------------------------
+        // "Write the version, paste the pCloud link, send it in the private
+        // channel": no tool, no manifest. The message is the release.
+        const auto msg = [](const QString &id, const QString &content) {
+            return QJsonObject{
+                { QStringLiteral("id"), id },
+                { QStringLiteral("content"), content },
+                { QStringLiteral("attachments"), QJsonArray{} },
+            };
+        };
+        QJsonObject release;
+        QString releaseError;
+        const QString plain = QStringLiteral(
+            "BSI Customizer v2.0.1\n"
+            "https://u.pcloud.link/publink/show?code=XZ123\n"
+            "\n"
+            "Fixed the About editor.");
+        check(UpdateChecker::parseMessageRelease(msg(QStringLiteral("10"), plain), &release,
+                                                 &releaseError),
+              QStringLiteral("a plain version + pCloud link message is a release (%1)")
+                  .arg(releaseError));
+        check(release.value(QStringLiteral("version")).toString() == QLatin1String("2.0.1")
+                  && release.value(QStringLiteral("url")).toString()
+                         == QLatin1String("https://u.pcloud.link/publink/show?code=XZ123"),
+              "the version and the link are read out of the message");
+        check(release.value(QStringLiteral("notes")).toString() == QLatin1String("Fixed the About editor."),
+              QStringLiteral("the remaining text becomes the release notes (%1)")
+                  .arg(release.value(QStringLiteral("notes")).toString()));
+        check(release.value(QStringLiteral("file")).toString()
+                  == QLatin1String("BSI-Customizer-2.0.1-win64.exe"),
+              "a link without an .exe name still yields a sane file name");
+        check(release.value(QStringLiteral("sha256")).toString().isEmpty(),
+              "a message without a hash is still accepted (first-use trust)");
+
+        // The absolute minimum the user asked for: a version line and a link.
+        const auto twoLines = [](const QString &a, const QString &b) {
+            return a + QLatin1Char('\n') + b;
+        };
+        check(UpdateChecker::parseMessageRelease(
+                  msg(QStringLiteral("11"),
+                      twoLines(QStringLiteral("v2.0.2"),
+                               QStringLiteral("https://example.com/files/BSI.exe"))),
+                  &release, &releaseError),
+              QStringLiteral("just \"v2.0.2\" and a link is enough (%1)").arg(releaseError));
+        check(release.value(QStringLiteral("file")).toString() == QLatin1String("BSI.exe"),
+              "an .exe link keeps its own file name");
+
+        // Markdown, a hash, a size and a stray non-download link.
+        const QString rich = QStringLiteral(
+            "**BSI Customizer v2.0.3**\n"
+            "https://youtu.be/dQw4w9WgXcQ\n"
+            "download: https://p-def2.pcloud.com/cfZ/BSI-Customizer-2.0.3-win64.exe?download=1\n"
+            "sha256: 4de96eb5f3d5260c89e2dc2f21c2076be68ba4511e8399ce695bdf542a8354ac\n"
+            "size: 30000000\n"
+            "Smaller download, faster start.");
+        check(UpdateChecker::parseMessageRelease(msg(QStringLiteral("12"), rich), &release,
+                                                 &releaseError),
+              QStringLiteral("a formatted message parses too (%1)").arg(releaseError));
+        check(release.value(QStringLiteral("url")).toString()
+                  == QLatin1String("https://p-def2.pcloud.com/cfZ/"
+                                   "BSI-Customizer-2.0.3-win64.exe?download=1"),
+              QStringLiteral("the .exe link wins over a YouTube link (%1)")
+                  .arg(release.value(QStringLiteral("url")).toString()));
+        check(release.value(QStringLiteral("sha256")).toString()
+                  == QLatin1String("4de96eb5f3d5260c89e2dc2f21c2076be68ba4511e8399ce695bdf542a8354ac")
+                  && qint64(release.value(QStringLiteral("size")).toDouble(0)) == 30000000,
+              "sha256: and size: lines pin the release");
+        check(!release.value(QStringLiteral("notes")).toString().contains(QLatin1String("sha256"))
+                  && release.value(QStringLiteral("notes")).toString()
+                         .contains(QLatin1String("Smaller download")),
+              QStringLiteral("the notes keep the prose and drop the bookkeeping (%1)")
+                  .arg(release.value(QStringLiteral("notes")).toString()));
+
+        // Things that are not announcements.
+        const auto notRelease = [&msg](const QString &content, const QString &why) {
+            QJsonObject out;
+            QString error;
+            check(!UpdateChecker::parseMessageRelease(msg(QStringLiteral("13"), content), &out,
+                                                      &error)
+                      && !error.isEmpty(),
+                  QStringLiteral("%1 is not a release (%2)").arg(why, error));
+        };
+        notRelease(QStringLiteral("hey, did you see this? https://example.com/x.exe"), "a chat line");
+        notRelease(QStringLiteral("v2.0.4 is coming soon"), "a version with no link");
+        notRelease(QStringLiteral("v2.0.5\nhttp://example.com/BSI.exe"), "an http link");
+        notRelease(QStringLiteral("<:cat:1> https://tenor.com/view/cat-gif-1"), "a gif");
+
+        // Which message in the channel counts.
+        const QJsonArray channel{
+            msg(QStringLiteral("20"), QStringLiteral("v2.0.4\nhttps://u.pcloud.link/publink/show?code=NEW")),
+            msg(QStringLiteral("19"), QStringLiteral("v2.0.3\nhttps://u.pcloud.link/publink/show?code=OLD")),
+            msg(QStringLiteral("18"), QStringLiteral("hello")),
+        };
+        const auto picked = UpdateChecker::findRelease(channel, QStringLiteral("manifest.json"), true);
+        check(picked.found && !picked.fromManifest
+                  && picked.manifest.value(QStringLiteral("version")).toString()
+                         == QLatin1String("2.0.4"),
+              "the highest version in the channel is the release");
+        const QJsonArray rePosted{
+            msg(QStringLiteral("31"), QStringLiteral("v2.0.4\nhttps://u.pcloud.link/publink/show?code=FIXED")),
+            msg(QStringLiteral("30"), QStringLiteral("v2.0.4\nhttps://u.pcloud.link/publink/show?code=OLD")),
+        };
+        const auto newest = UpdateChecker::findRelease(rePosted, QStringLiteral("manifest.json"), true);
+        check(newest.found && newest.manifest.value(QStringLiteral("url")).toString()
+                                  .endsWith(QLatin1String("FIXED")),
+              "re-posting the same version with a fixed link replaces the old one");
+        check(!UpdateChecker::findRelease(channel, QStringLiteral("manifest.json"), false).found,
+              "a signature-protected channel refuses text releases");
+        // A manifest attachment outranks a text message in the same channel.
+        const QJsonArray withManifest{
+            msg(QStringLiteral("41"), QStringLiteral("v2.0.9\nhttps://u.pcloud.link/publink/show?code=X")),
+            QJsonObject{
+                { QStringLiteral("id"), QStringLiteral("40") },
+                { QStringLiteral("content"), QStringLiteral("latest build") },
+                { QStringLiteral("attachments"),
+                  QJsonArray{ QJsonObject{
+                      { QStringLiteral("filename"), QStringLiteral("manifest.json") },
+                      { QStringLiteral("url"),
+                        QStringLiteral("https://cdn.discordapp.com/attachments/1/2/manifest.json") } } } },
+            },
+        };
+        const auto manifestWins = UpdateChecker::findRelease(withManifest,
+                                                             QStringLiteral("manifest.json"), true);
+        check(manifestWins.found && manifestWins.fromManifest,
+              "a published manifest wins over a text announcement");
     }
 
 

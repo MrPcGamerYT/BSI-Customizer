@@ -21,6 +21,23 @@ Item {
             + "</svg>");
     }
 
+    // What "trust" means, in one sentence the user can act on. A manifest
+    // attachment (publish.mjs) can be signed and always carries a hash; a
+    // plain "version + link" message cannot, so its fingerprint is recorded
+    // on this PC the first time it downloads.
+    function trustText(tr) {
+        if (tr === "signed")
+            return qsTr("Release: signed manifest — the file is checked against the SHA-256 " +
+                        "the publisher signed.");
+        if (tr === "pinned")
+            return qsTr("Release: hash-pinned — the download is checked against the SHA-256 in " +
+                        "the release.");
+        if (tr === "first-use")
+            return qsTr("Release: no SHA-256 yet — the fingerprint is recorded the first time " +
+                        "this build downloads, so the same version cannot change later.");
+        return "";
+    }
+
     Flickable {
         anchors.fill: parent
         contentHeight: content.implicitHeight + 48
@@ -124,7 +141,7 @@ Item {
                         }
                         Item { Layout.fillWidth: true }
                         Text {
-                            text: qsTr("delivered through the Discord releases bot")
+                            text: qsTr("read from the Discord releases channel")
                             color: Theme.textDim
                             font.pixelSize: 10
                             font.italic: true
@@ -153,6 +170,15 @@ Item {
                             font.pixelSize: 12
                             font.weight: Font.DemiBold
                         }
+                    }
+
+                    Text {
+                        Layout.fillWidth: true
+                        visible: updates.available && updates.trust.length > 0
+                        text: page.trustText(updates.trust)
+                        color: updates.trust === "first-use" ? Theme.warn : Theme.textDim
+                        font.pixelSize: 11
+                        wrapMode: Text.Wrap
                     }
 
                     Text {
@@ -218,6 +244,17 @@ Item {
                             font.pixelSize: 12
                             font.family: "Consolas"
                         }
+                    }
+
+                    Text {
+                        Layout.fillWidth: true
+                        visible: updates.configured && !updates.available
+                        text: qsTr("To publish a build, post its version and download link in the " +
+                                   "channel, for example:  BSI Customizer v2.0.2  +  the pCloud link. " +
+                                   "Nothing else to run — every copy reads it.")
+                        color: Theme.textDim
+                        font.pixelSize: 10
+                        wrapMode: Text.Wrap
                     }
 
                     ToggleSwitch {
