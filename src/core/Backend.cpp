@@ -44,9 +44,15 @@ Backend::Backend(SettingsManager *settings, QObject *parent)
         m_qmlThemeAvailable = false;
         m_svgs.clear();
         m_resources.clear();
+        m_resourcesIncludeBinary = true;
         emit exePathChanged();
         emit themeChanged();
         emit svgsChanged();
+        // The Resources tab reads entry offsets out of this list: keeping it on
+        // screen after the target changed made every preview read the new file
+        // at the old file's offsets, which looks like "the pictures do not
+        // show" on whichever build was selected second.
+        emit resourcesChanged();
     });
 }
 
@@ -962,6 +968,11 @@ int Backend::scanResources(bool includeBinary)
         doLog(QStringLiteral("Resources: EXE not found."), QStringLiteral("red"));
     } else {
         m_resources = EmbeddedResources::list(data, includeBinary);
+        if (m_resources.isEmpty()) {
+            doLog(QStringLiteral("Resources: no Qt resource pool could be read from this file. "
+                                 "Check that it is BlueStacks' HD-Player.exe and that the player "
+                                 "is not running."), QStringLiteral("red"));
+        }
         int text = 0, pictures = 0;
         for (const auto &entry : m_resources) {
             if (entry.text) ++text;
@@ -983,12 +994,42 @@ QString Backend::resourcePreviewAt(int index, int maxSide) const
 {
     if (index < 0 || index >= m_resources.size()) return {};
     const EmbeddedResources::Entry &entry = m_resources.at(index);
-    if (entry.kind != EmbeddedResources::Kind::Image && entry.kind != EmbeddedResources::Kind::Svg)
-        return {};
+    // Not filtered by the listed kind: a build may carry the picture under a
+    // name the extension table does not know (or with no extension at all),
+    // and the bytes are a better judge than the file name.
     const QByteArray bytes = EmbeddedResources::readEntry(m_settings->exePath(), entry.entryOff,
                                                           entry.flags);
     if (bytes.isEmpty()) return {};
-    return EmbeddedResources::previewDataUrl(bytes, entry.format, maxSide);
+    const QString dataUrl = EmbeddedResources::previewDataUrl(bytes, entry.format, maxSide);
+    if (!dataUrl.isEmpty()) return dataUrl;
+    // Second chance through a real file: the SVG plugin sniffs the suffix, and
+    // QML rejects a data: URL it cannot type. Same bytes, same element.
+    return EmbeddedResources::previewFileUrl(bytes, entry.format);
+}
+
+// Why the preview looks the way it does, for the line under it. Empty when the
+// entry has a picture (or nothing worth saying), a sentence when it does not.
+QString Backend::resourcePreviewNote(int index) const
+{
+    if (index < 0 || index >= m_resources.size()) return {};
+    const EmbeddedResources::Entry &entry = m_resources.at(index);
+    const bool picture = entry.kind == EmbeddedResources::Kind::Image
+        || entry.kind == EmbeddedResources::Kind::Svg;
+    if (!picture && !entry.text) return {};
+    const QByteArray bytes = EmbeddedResources::readEntry(m_settings->exePath(), entry.entryOff,
+                                                          entry.flags);
+    if (bytes.isEmpty()) {
+        return QStringLiteral("This entry cannot be read back from the EXE (%1 stored bytes), so "
+                              "there is nothing to preview.").arg(entry.stored);
+    }
+    if (!picture) return {};
+    if (!EmbeddedResources::previewDataUrl(bytes, entry.format, 64).isEmpty()
+        || !EmbeddedResources::previewFileUrl(bytes, entry.format).isEmpty()) {
+        return {};
+    }
+    return QStringLiteral("No picture preview for this entry: the %1 bytes stored under “%2” are "
+                          "not an image this build can decode. The file can still be extracted "
+                          "or replaced.").arg(bytes.size()).arg(entry.format);
 }
 
 QString Backend::resourceTextAt(int index) const
@@ -1399,6 +1440,7 @@ QVariantMap Backend::aboutPageState()
             { QStringLiteral("id"), link.id },
             { QStringLiteral("name"), link.name },
             { QStringLiteral("url"), link.url },
+            { QStringLiteral("label"), link.label },
             { QStringLiteral("hidden"), link.hidden },
         };
     }
@@ -1423,6 +1465,7 @@ QVariantMap Backend::applyAboutPage(const QString &text, const QVariantList &lin
         link.id = map.value(QStringLiteral("id")).toString();
         link.name = map.value(QStringLiteral("name")).toString();
         link.url = map.value(QStringLiteral("url")).toString();
+        link.label = map.value(QStringLiteral("label")).toString();
         link.hidden = map.value(QStringLiteral("hidden")).toBool();
         if (!link.id.isEmpty()) config.links << link;
     }

@@ -15,6 +15,9 @@ Thumbs.db
 
 # Sign-in secrets (see auth.example.json / docs/AUTH.md) - never commit
 auth.json
+# Discord release-bot credentials and the last published message id
+updater-bot/config.json
+updater-bot/.state.json
 
 # Python bytecode
 __pycache__/

@@ -15,7 +15,11 @@
     "If Discord answers invalid_client with an empty secret, either enable the Public",
     "Client flag for the application (Developer Portal -> OAuth2) or set the secret.",
     "The whole file can also be baked into the build from the ZLP_AUTH_JSON secret",
-    "(or passed as the ZLP_AUTH_JSON env blob) - see _embed below."
+    "(or passed as the ZLP_AUTH_JSON env blob) - see _embed below.",
+    "The optional `updater` object below makes the app self-update from a",
+    "Discord releases channel (the repository is private, so GitHub Releases",
+    "cannot be read by a shipped EXE). See docs/UPDATER.md; leave it empty",
+    "and the app simply has no self-updater."
   ],
   "discord": {
     "clientId": "",
@@ -28,7 +32,10 @@
     "guildId": "",
     "requiredTier": "",
     "roles": {
-      "PUT_A_ROLE_ID_HERE": { "tier": "Dev", "label": "Dev" }
+      "PUT_A_ROLE_ID_HERE": {
+        "tier": "Dev",
+        "label": "Dev"
+      }
     },
     "inviteUrl": ""
   },
@@ -62,6 +69,22 @@
       "same blob and wins over any file. Precedence: per-field BSIC_DISCORD_*",
       "env vars > ZLP_AUTH_JSON blob > BSIC_AUTH_FILE > auth.json next to the",
       "EXE > auth.json in app data > the build-time embedded blob."
+    ],
+    "updater": [
+      "BSIC_UPDATE_CHANNEL_ID",
+      "BSIC_UPDATE_TOKEN  (view-channel + read-history only)",
+      "BSIC_UPDATE_API  (default https://discord.com/api/v10)",
+      "BSIC_UPDATE_MANIFEST  (default manifest.json)",
+      "BSIC_UPDATE_HMAC_KEY  (optional manifest signature)",
+      "BSI_NO_UPDATER=1 disables the updater entirely"
     ]
+  },
+  "updater": {
+    "apiBase": "https://discord.com/api/v10",
+    "channelId": "",
+    "botToken": "",
+    "manifest": "manifest.json",
+    "hmacKey": "",
+    "enabled": true
   }
 }

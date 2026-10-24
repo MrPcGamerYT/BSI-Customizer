@@ -25,6 +25,7 @@ Item {
     property int selectedIndex: -1
     property string selectedPath: ""
     property string preview: ""
+    property string previewNote: ""    // why there is no picture, when there is none
     property string status: ""
     property string filterText: ""
     property int kindFilter: 0          // 0 all, 1 pictures, 2 svg, 3 code, 4 binary
@@ -61,8 +62,13 @@ Item {
         return backend.resourceInfos[page.selectedIndex];
     }
     readonly property bool hasSelection: page.selected !== null
+    // A row is a picture when the list says so *or* when the bytes produce a
+    // preview: older players carry entries whose name does not tell what they
+    // hold, and those must still show the picture.
     readonly property bool isPicture: page.hasSelection
-                                      && (page.selected.kind === "image" || page.selected.kind === "svg")
+                                      && (page.selected.kind === "image"
+                                          || page.selected.kind === "svg"
+                                          || page.preview !== "")
     readonly property bool isCode: page.hasSelection && page.selected.text
 
     // Bytes the editor's text would take inside the EXE, BOM included: rule 1.
@@ -109,14 +115,17 @@ Item {
         page.codeLoaded = false;
         page.code = "";
         page.preview = "";
+        page.previewNote = "";
         page.selectedIndex = index;
         page.selectedPath = index >= 0 && index < backend.resourceInfos.length
                 ? backend.resourceInfos[index].path : "";
         if (index < 0 || index >= backend.resourceInfos.length)
             return;
         const row = backend.resourceInfos[index];
-        if (row.kind === "image" || row.kind === "svg")
-            page.preview = backend.resourcePreviewAt(index, 1024);
+        // Asked for every row, not only the ones the list typed as pictures:
+        // the engine decides from the bytes.
+        page.preview = backend.resourcePreviewAt(index, 1024);
+        page.previewNote = page.preview === "" ? backend.resourcePreviewNote(index) : "";
         if (row.text) {
             page.code = backend.resourceTextAt(index);
             page.codeLoaded = true;
@@ -165,8 +174,21 @@ Item {
         }
     }
 
+    // A list belongs to one EXE. The backend drops it when the path changes,
+    // and the tab fills itself again instead of sitting empty (or, worse,
+    // showing rows whose offsets belong to the previous file).
+    function autoScan() {
+        if (backend.exePath === "" || backend.resourceInfos.length > 0)
+            return;
+        page.rescan();
+    }
+
+    Component.onCompleted: page.autoScan()
+    onVisibleChanged: if (visible) page.autoScan()
+
     Connections {
         target: backend
+        function onExePathChanged() { page.autoScan() }
         function onResourcesChanged() {
             if (page.selectedPath === "") {
                 page.select(-1);
@@ -291,9 +313,7 @@ Item {
                     id: resourceRow
                     required property var modelData
                     // one preview request per visible row, not one per binding
-                    readonly property string thumb: modelData.kind === "image"
-                                                    || modelData.kind === "svg"
-                                                    ? backend.resourcePreviewAt(modelData.index, 64) : ""
+                    readonly property string thumb: backend.resourcePreviewAt(modelData.index, 64)
                     width: resourceList.width
                     height: 54
                     radius: 8
@@ -460,7 +480,10 @@ Item {
                             width: parent.width - 40
                             horizontalAlignment: Text.AlignHCenter
                             wrapMode: Text.Wrap
-                            text: qsTr("This picture could not be decoded here, but it can still be replaced.")
+                            text: page.previewNote !== ""
+                                  ? page.previewNote
+                                  : qsTr("This picture could not be decoded here, but it can "
+                                         + "still be replaced.")
                             color: Theme.textDim
                             font.pixelSize: 11
                         }

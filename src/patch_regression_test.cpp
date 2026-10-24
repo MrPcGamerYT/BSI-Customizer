@@ -20,6 +20,7 @@
 #include "core/SettingsManager.h"
 #include "core/VersionResource.h"
 #include "core/ThemeEngine.h"
+#include "core/UpdateChecker.h"
 #include "core/ZlibUtils.h"
 #include "core/X64Prologue.h"
 
@@ -30,8 +31,10 @@
 #include <QBuffer>
 #include <QDataStream>
 #include <QFile>
+#include <QUrl>
 #include <QFileInfo>
 #include <QImage>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QLibraryInfo>
@@ -4021,6 +4024,33 @@ Window {
         check(patched.contains(QLatin1String("onLinkActivated: Qt.openUrlExternally(\"https://t.me/mrpcgamer\")"))
                   && patched.count(QLatin1String("// BSI CUSTOMIZER: about handler")) == 2,
               "rows without a stock handler get one, and it is tagged so the undo removes it");
+
+        // The address and the words that print it are two fields: a row can
+        // open https://t.me/mrpcgamer and still print "Join the channel".
+        AboutPatcher::Config named = config;
+        named.links[0].label = QStringLiteral("Join the channel");
+        check(AboutPatcher::apply(aboutPath, true, named).ok,
+              "a link's displayed text can be set separately from its address");
+        patched = resourceText(read(aboutPath), r, QStringLiteral("PlrAboutSetting.qml"));
+        check(patched.contains(QLatin1String("Telegram - <a href=\\\"https://t.me/mrpcgamer\\\">Join the channel</a>")),
+              "the row prints the edited text while the href stays the edited address");
+        auto namedState = AboutPatcher::analyze(read(aboutPath));
+        check(namedState.applied && namedState.config.links.size() == 3
+                  && namedState.config.links.value(0).label == QStringLiteral("Join the channel")
+                  && namedState.config.links.value(0).url == QStringLiteral("https://t.me/mrpcgamer"),
+              "the displayed text and the address both read back, independently");
+        // A row whose text is left empty keeps printing the address, the way
+        // the stock page does, and reading that back changes nothing.
+        AboutPatcher::Config plain = config;
+        plain.links[2].label = QString();
+        check(AboutPatcher::apply(aboutPath, true, plain).ok,
+              "a row without an edited text still applies");
+        patched = resourceText(read(aboutPath), r, QStringLiteral("PlrAboutSetting.qml"));
+        check(patched.contains(QLatin1String("Channel - <a href=\\\"https://youtube.com/@MrPcGamer\\\">youtube.com/@MrPcGamer</a>")),
+              "an empty display text falls back to printing the address");
+        const auto plainState = AboutPatcher::analyze(read(aboutPath));
+        check(plainState.config.links.value(2).label == QStringLiteral("youtube.com/@MrPcGamer"),
+              "that fallback is what the editor is then prefilled with");
         check(patched.contains(QLatin1String("Important links"))
                   && patched.contains(QLatin1String("About and other info"))
                   && patched.count(QLatin1String("visible: true /* BSI CUSTOMIZER: about shown:")) == 2,
@@ -4180,6 +4210,29 @@ Window {
         const QString preview = EmbeddedImages::previewDataUrl(logo, QStringLiteral("png"), 64);
         check(preview.startsWith(QLatin1String("data:image/png;base64,")) && preview.size() > 40,
               "the list gets a renderable preview of the embedded picture");
+
+        // The same picture through a real file, for the builds where QML will
+        // not take a data: URL. The suffix comes from the entry's own format.
+        const QString previewFile = EmbeddedImages::previewFileUrl(logo, QStringLiteral("png"));
+        check(previewFile.startsWith(QLatin1String("file://"))
+                  && previewFile.endsWith(QLatin1String(".png"))
+                  && QFileInfo(QUrl(previewFile).toLocalFile()).size() == logo.size(),
+              "a picture also previews through a temp file when a data URL is refused");
+
+        // Older players carry pictures under names that do not say what they
+        // hold: the bytes decide, not the extension.
+        const QByteArray svgIcon =
+            "<svg width=\"16\" height=\"16\" xmlns=\"http://www.w3.org/2000/svg\">"
+            "<rect width=\"16\" height=\"16\" fill=\"#123456\"/></svg>";
+        const QString svgPreview = EmbeddedImages::previewDataUrl(svgIcon, QStringLiteral("dat"), 64);
+        check(svgPreview.startsWith(QLatin1String("data:image/svg+xml;base64,")),
+              "markup stored under another name still previews as SVG");
+        const QString svgFile = EmbeddedImages::previewFileUrl(svgIcon, QStringLiteral("bin"));
+        check(svgFile.endsWith(QLatin1String(".svg")),
+              "the temp-file fallback names SVG by what the bytes are, not by the entry name");
+        check(EmbeddedImages::previewDataUrl(QByteArray("not a picture"), QStringLiteral("png"), 64).isEmpty()
+                  && EmbeddedImages::previewFileUrl(QByteArray(), QStringLiteral("png")).isEmpty(),
+              "an unreadable entry reports no preview instead of inventing one");
 
         const QString exePath = temp.filePath(QStringLiteral("images.exe"));
         const QString newLogo = temp.filePath(QStringLiteral("new-logo.png"));
@@ -4415,6 +4468,380 @@ Window {
         check(again.ok && read(exePath).size() == r.f.bytes.size(),
               QStringLiteral("the relocated entry stays editable (%1)").arg(again.msg));
     }
+
+    // ------------------------------------------------------------------
+    // Self-update through the Discord releases bot (docs/UPDATER.md)
+    //
+    // Everything the updater decides before a single byte reaches the disk is
+    // a pure function, so it is checked here against fixed vectors - including
+    // one signature produced by updater-bot/publish.mjs, which keeps the Node
+    // and C++ implementations of the signed text in sync.
+    // ------------------------------------------------------------------
+    std::printf("[updater] manifest validation, version order, signature, file checks\n");
+    {
+        check(UpdateChecker::compareVersions(QStringLiteral("2.0.1"), QStringLiteral("2.0.0")) > 0,
+              "2.0.1 is newer than 2.0.0");
+        check(UpdateChecker::compareVersions(QStringLiteral("2.0.0"), QStringLiteral("2.0.0")) == 0,
+              "the same version compares equal");
+        check(UpdateChecker::compareVersions(QStringLiteral("v2.0.1"), QStringLiteral("2.0.1")) == 0,
+              "a leading v is packaging, not a version difference");
+        check(UpdateChecker::compareVersions(QStringLiteral("2.0"), QStringLiteral("2.0.0")) == 0,
+              "2.0 and 2.0.0 are the same build");
+        check(UpdateChecker::compareVersions(QStringLiteral("2.0.10"), QStringLiteral("2.0.9")) > 0,
+              "2.0.10 is newer than 2.0.9 (numeric, not textual)");
+        check(UpdateChecker::compareVersions(QStringLiteral("2.0.1-beta"), QStringLiteral("2.0.1")) < 0,
+              "a pre-release sorts before its release");
+        check(UpdateChecker::compareVersions(QStringLiteral("1.9.9"), QStringLiteral("2.0.0")) < 0,
+              "a major bump wins");
+        check(UpdateChecker::normalizedVersion(QStringLiteral("  v2.0.1 ")) == QLatin1String("2.0.1"),
+              "normalizedVersion trims and drops the v");
+
+        const QByteArray sha = QByteArrayLiteral(
+            "4de96eb5f3d5260c89e2dc2f21c2076be68ba4511e8399ce695bdf542a8354ac");
+        QJsonObject good{
+            { QStringLiteral("schema"), 1 },
+            { QStringLiteral("app"), QStringLiteral("BSI Customizer") },
+            { QStringLiteral("version"), QStringLiteral("v2.0.1") },
+            { QStringLiteral("file"), QStringLiteral("BSI-Customizer-2.0.1-win64.exe") },
+            { QStringLiteral("size"), 1200000 },
+            { QStringLiteral("sha256"), QString::fromLatin1(sha) },
+            { QStringLiteral("notes"), QStringLiteral("Fixes the About editor.") },
+        };
+        QString manifestError;
+        const QJsonObject parsed = UpdateChecker::parseManifest(
+            QJsonDocument(good).toJson(QJsonDocument::Compact), &manifestError);
+        check(!parsed.isEmpty()
+                  && parsed.value(QStringLiteral("version")).toString() == QLatin1String("2.0.1"),
+              QStringLiteral("a valid manifest parses and its version is normalized (%1)").arg(manifestError));
+        check(parsed.value(QStringLiteral("sha256")).toString().toLower() == QString::fromLatin1(sha),
+              "the SHA-256 from the manifest survives parsing");
+
+        const auto rejected = [](const QJsonObject &manifest, const QString &why) {
+            QString error;
+            const QJsonObject out = UpdateChecker::parseManifest(
+                QJsonDocument(manifest).toJson(QJsonDocument::Compact), &error);
+            check(out.isEmpty() && !error.isEmpty(),
+                  QStringLiteral("%1 is refused (%2)").arg(why, error));
+        };
+        QJsonObject bad = good;
+        bad.insert(QStringLiteral("schema"), 2);
+        rejected(bad, "a future schema");
+        bad = good;
+        bad.remove(QStringLiteral("sha256"));
+        rejected(bad, "a manifest without a SHA-256");
+        bad = good;
+        bad.insert(QStringLiteral("sha256"), QStringLiteral("abc"));
+        rejected(bad, "a truncated SHA-256");
+        bad = good;
+        bad.insert(QStringLiteral("file"), QStringLiteral("..\\evil.exe"));
+        rejected(bad, "a file name with a path");
+        bad = good;
+        bad.insert(QStringLiteral("file"), QStringLiteral("notes.txt"));
+        rejected(bad, "a file that is not an .exe");
+        bad = good;
+        bad.insert(QStringLiteral("version"), QStringLiteral("latest"));
+        rejected(bad, "a version that is not a number");
+        bad = good;
+        bad.insert(QStringLiteral("size"), 0);
+        rejected(bad, "a zero size");
+
+        const QJsonObject newest{
+            { QStringLiteral("id"), QStringLiteral("222") },
+            { QStringLiteral("attachments"),
+              QJsonArray{ QJsonObject{
+                  { QStringLiteral("id"), QStringLiteral("9") },
+                  { QStringLiteral("filename"), QStringLiteral("BSI-Customizer-2.0.1-win64.exe") },
+                  { QStringLiteral("url"), QStringLiteral("https://cdn.discordapp.com/a/x.exe") },
+                  { QStringLiteral("size"), 1200000 } } } },
+        };
+        const QJsonObject older{
+            { QStringLiteral("id"), QStringLiteral("111") },
+            { QStringLiteral("attachments"),
+              QJsonArray{
+                  QJsonObject{
+                      { QStringLiteral("id"), QStringLiteral("1") },
+                      { QStringLiteral("filename"), QStringLiteral("manifest.json") },
+                      { QStringLiteral("url"), QStringLiteral("https://cdn.discordapp.com/a/m.json") } },
+                  QJsonObject{
+                      { QStringLiteral("id"), QStringLiteral("2") },
+                      { QStringLiteral("filename"), QStringLiteral("BSI-Customizer-2.0.1-win64.exe") },
+                      { QStringLiteral("url"), QStringLiteral("https://cdn.discordapp.com/a/x.exe") } } } },
+        };
+        const auto found = UpdateChecker::findManifestMessage(
+            QJsonArray{ newest, older }, QStringLiteral("manifest.json"));
+        check(found.found && found.messageId == QLatin1String("111")
+                  && found.manifestUrl.endsWith(QLatin1String("/m.json")),
+              "the newest message with a manifest.json attachment is the release");
+        check(!UpdateChecker::findManifestMessage(QJsonArray{ newest },
+                                                  QStringLiteral("manifest.json")).found,
+              "a channel with only the EXE and no manifest is refused");
+        check(UpdateChecker::attachmentUrl(older, QStringLiteral("bsi-customizer-2.0.1-WIN64.exe"))
+                  == QLatin1String("https://cdn.discordapp.com/a/x.exe"),
+              "the EXE attachment is found case-insensitively by its manifest name");
+
+        check(UpdateChecker::signedManifestText(parsed)
+                  == QByteArrayLiteral("bsi-update-v1\n2.0.1\nBSI-Customizer-2.0.1-win64.exe\n"
+                                       "1200000\n4de96eb5f3d5260c89e2dc2f21c2076be68ba4511e8399ce"
+                                       "695bdf542a8354ac\n"),
+              "the signed manifest text is version/file/size/sha256, one per line");
+        const QString key = QStringLiteral("test-key-2026");
+        const QString expectedSignature = QStringLiteral("fBbRNx4qNHcswibUpxO656TM0B7ehswUBDQD+e5Bgd4=");
+        check(UpdateChecker::manifestSignature(parsed, key) == expectedSignature,
+              "the C++ signature matches the one publish.mjs computes");
+        QJsonObject signedManifest = parsed;
+        signedManifest.insert(QStringLiteral("signature"), expectedSignature);
+        QString signatureError;
+        check(UpdateChecker::verifyManifestSignature(signedManifest, key, &signatureError),
+              "a correctly signed manifest verifies");
+        QJsonObject tampered = signedManifest;
+        tampered.insert(QStringLiteral("size"), 1200001);
+        check(!UpdateChecker::verifyManifestSignature(tampered, key, &signatureError)
+                  && signatureError.contains(QLatin1String("signature")),
+              "changing one field of a signed manifest breaks the signature");
+        check(!UpdateChecker::verifyManifestSignature(parsed, key, &signatureError),
+              "an unsigned manifest is refused when a key is configured");
+        check(UpdateChecker::verifyManifestSignature(parsed, QString(), &signatureError),
+              "without a key the channel itself is the trust boundary");
+
+        QByteArray pe(0x400, '\0');
+        pe[0] = 'M';
+        pe[1] = 'Z';
+        const auto put16 = [&pe](int off, int value) {
+            pe[off] = char(value & 0xff);
+            pe[off + 1] = char((value >> 8) & 0xff);
+        };
+        const auto put32 = [&pe](int off, quint32 value) {
+            for (int i = 0; i < 4; ++i)
+                pe[off + i] = char((value >> (8 * i)) & 0xff);
+        };
+        const quint32 peOffset = 0x80;
+        put32(0x3c, peOffset);
+        pe[peOffset] = 'P';
+        pe[peOffset + 1] = 'E';
+        put16(peOffset + 4, 0x8664); // machine: x86-64
+        put16(peOffset + 24, 0x20b); // optional header: PE32+
+        const QString pePath = temp.filePath(QStringLiteral("fake-portable.exe"));
+        check(write(pePath, pe), "write a minimal 64-bit PE for the updater checks");
+        const QString peHash = UpdateChecker::fileSha256(pePath);
+        check(peHash == QString::fromLatin1(
+                            QCryptographicHash::hash(pe, QCryptographicHash::Sha256).toHex()),
+              "fileSha256 hashes the whole file");
+        QString stageError;
+        check(UpdateChecker::verifyStagedFile(pePath, pe.size(), peHash, &stageError),
+              QStringLiteral("a download that matches size + SHA-256 + PE verifies (%1)")
+                  .arg(stageError));
+        check(!UpdateChecker::verifyStagedFile(pePath, pe.size() + 1, peHash, &stageError)
+                  && stageError.contains(QLatin1String("size mismatch")),
+              "a truncated download is refused");
+        check(!UpdateChecker::verifyStagedFile(pePath, pe.size(),
+                                               QString(64, QLatin1Char('0')), &stageError)
+                  && stageError.contains(QLatin1String("SHA-256")),
+              "a download whose bytes changed is refused");
+        const QString notPe = temp.filePath(QStringLiteral("not-a-program.exe"));
+        write(notPe, QByteArrayLiteral("MZ but nothing else after it"));
+        check(!UpdateChecker::looksLikeExecutable(notPe, &stageError),
+              QStringLiteral("a file that only starts with MZ is refused (%1)").arg(stageError));
+        QByteArray wrongMachine = pe;
+        wrongMachine[peOffset + 4] = char(0x4c);
+        wrongMachine[peOffset + 5] = char(0x01); // 0x014c = i386
+        const QString i386Path = temp.filePath(QStringLiteral("thirty-two-bit.exe"));
+        write(i386Path, wrongMachine);
+        check(!UpdateChecker::looksLikeExecutable(i386Path, &stageError)
+                  && stageError.contains(QLatin1String("64-bit")),
+              "a 32-bit program is refused before it can replace a 64-bit build");
+
+        check(UpdateChecker::describeHttpError(401, "{}").contains(QLatin1String("token")),
+              "401 names the token");
+        check(UpdateChecker::describeHttpError(403, "{}").contains(QLatin1String("View Channel")),
+              "403 names the missing channel permissions");
+        check(UpdateChecker::describeHttpError(404, "{}").contains(QLatin1String("channelId")),
+              "404 names the channel id");
+        check(UpdateChecker::describeHttpError(429, "{\"retry_after\": 12.5}")
+                  .contains(QLatin1String("rate-limiting")),
+              "429 explains the rate limit");
+        check(UpdateChecker::describeHttpError(500, "{\"message\": \"boom\"}")
+                  .contains(QLatin1String("boom")),
+              "a Discord message is passed through for diagnosis");
+        check(UpdateChecker::readableSize(1200000) == QLatin1String("1.14 MB"),
+              QStringLiteral("readableSize formats a download (%1)")
+                  .arg(UpdateChecker::readableSize(1200000)));
+
+        // A 30 MB EXE cannot ride on a Discord message (10 MB per file on an
+        // unboosted server), so the manifest may name a `url`. Hosts like
+        // pCloud answer that URL with a web page, and the page carries the real
+        // download link - resolved here without guessing.
+        const QUrl pcloudPage(QStringLiteral("https://u.pcloud.link/publink/show?code=XZ123"));
+        const QByteArray pcloudHtml =
+            "<html><script>var publinkData={\"code\":\"XZ123\",\"downloadlink\":"
+            "\"https:\\/\\/p-def2.pcloud.com\\/cfZabc\\/BSI-Customizer-2.0.1-win64.exe"
+            "?download=1\",\"size\":30000000}</script></html>";
+        check(UpdateChecker::looksLikeHtml(pcloudHtml), "a share page is recognised as HTML");
+        check(UpdateChecker::looksLikeHtml(QByteArrayLiteral("\xEF\xBB\xBF  <!DOCTYPE html>")),
+              "a BOM and leading spaces do not hide an HTML page");
+        check(!UpdateChecker::looksLikeHtml(pe), "a real program is not mistaken for a page");
+        check(UpdateChecker::resolveDownloadLink(pcloudHtml, pcloudPage)
+                  == QLatin1String("https://p-def2.pcloud.com/cfZabc/"
+                                   "BSI-Customizer-2.0.1-win64.exe?download=1"),
+              QStringLiteral("the pCloud page's escaped download link is unescaped (%1)")
+                  .arg(UpdateChecker::resolveDownloadLink(pcloudHtml, pcloudPage)));
+        QString pageDetail;
+        check(UpdateChecker::resolveDownloadLink(
+                  QByteArrayLiteral("<html>{\"downloadlink\":\"http:\\/\\/p-def2.pcloud.com"
+                                    "\\/x.exe\"}</html>"),
+                  pcloudPage, &pageDetail).isEmpty()
+                  && pageDetail.contains(QLatin1String("pCloud")),
+              "an http-only download link is refused with a pCloud-specific hint");
+        check(UpdateChecker::resolveDownloadLink(
+                  QByteArrayLiteral("<html><a href=\"/download/file.exe?token=1\">Download</a>"
+                                    "</html>"),
+                  pcloudPage)
+                  == QLatin1String("https://u.pcloud.link/download/file.exe?token=1"),
+              "a relative download button resolves against the page");
+        check(UpdateChecker::resolveDownloadLink(
+                  QByteArrayLiteral("<html><a href=\"https://cdn.example.com/BSI.exe\">get</a>"
+                                    "</html>"),
+                  pcloudPage)
+                  == QLatin1String("https://cdn.example.com/BSI.exe"),
+              "an absolute download button works on any host");
+        check(UpdateChecker::resolveDownloadLink(
+                  QByteArrayLiteral("nothing but https://files.example.org/BSI-Customizer.exe?x=1 "
+                                    "in here"),
+                  pcloudPage)
+                  == QLatin1String("https://files.example.org/BSI-Customizer.exe?x=1"),
+              "a bare .exe link in the page source is the last resort");
+        check(UpdateChecker::resolveDownloadLink(
+                  QByteArrayLiteral("<html><body>nothing here</body></html>"), pcloudPage,
+                  &pageDetail).isEmpty()
+                  && pageDetail.contains(QLatin1String("no https download link")),
+              "a page without a link says so instead of downloading garbage");
+
+        // ---- posting a build is just a message -------------------------
+        // "Write the version, paste the pCloud link, send it in the private
+        // channel": no tool, no manifest. The message is the release.
+        const auto msg = [](const QString &id, const QString &content) {
+            return QJsonObject{
+                { QStringLiteral("id"), id },
+                { QStringLiteral("content"), content },
+                { QStringLiteral("attachments"), QJsonArray{} },
+            };
+        };
+        QJsonObject release;
+        QString releaseError;
+        const QString plain = QStringLiteral(
+            "BSI Customizer v2.0.1\n"
+            "https://u.pcloud.link/publink/show?code=XZ123\n"
+            "\n"
+            "Fixed the About editor.");
+        check(UpdateChecker::parseMessageRelease(msg(QStringLiteral("10"), plain), &release,
+                                                 &releaseError),
+              QStringLiteral("a plain version + pCloud link message is a release (%1)")
+                  .arg(releaseError));
+        check(release.value(QStringLiteral("version")).toString() == QLatin1String("2.0.1")
+                  && release.value(QStringLiteral("url")).toString()
+                         == QLatin1String("https://u.pcloud.link/publink/show?code=XZ123"),
+              "the version and the link are read out of the message");
+        check(release.value(QStringLiteral("notes")).toString() == QLatin1String("Fixed the About editor."),
+              QStringLiteral("the remaining text becomes the release notes (%1)")
+                  .arg(release.value(QStringLiteral("notes")).toString()));
+        check(release.value(QStringLiteral("file")).toString()
+                  == QLatin1String("BSI-Customizer-2.0.1-win64.exe"),
+              "a link without an .exe name still yields a sane file name");
+        check(release.value(QStringLiteral("sha256")).toString().isEmpty(),
+              "a message without a hash is still accepted (first-use trust)");
+
+        // The absolute minimum the user asked for: a version line and a link.
+        const auto twoLines = [](const QString &a, const QString &b) {
+            return a + QLatin1Char('\n') + b;
+        };
+        check(UpdateChecker::parseMessageRelease(
+                  msg(QStringLiteral("11"),
+                      twoLines(QStringLiteral("v2.0.2"),
+                               QStringLiteral("https://example.com/files/BSI.exe"))),
+                  &release, &releaseError),
+              QStringLiteral("just \"v2.0.2\" and a link is enough (%1)").arg(releaseError));
+        check(release.value(QStringLiteral("file")).toString() == QLatin1String("BSI.exe"),
+              "an .exe link keeps its own file name");
+
+        // Markdown, a hash, a size and a stray non-download link.
+        const QString rich = QStringLiteral(
+            "**BSI Customizer v2.0.3**\n"
+            "https://youtu.be/dQw4w9WgXcQ\n"
+            "download: https://p-def2.pcloud.com/cfZ/BSI-Customizer-2.0.3-win64.exe?download=1\n"
+            "sha256: 4de96eb5f3d5260c89e2dc2f21c2076be68ba4511e8399ce695bdf542a8354ac\n"
+            "size: 30000000\n"
+            "Smaller download, faster start.");
+        check(UpdateChecker::parseMessageRelease(msg(QStringLiteral("12"), rich), &release,
+                                                 &releaseError),
+              QStringLiteral("a formatted message parses too (%1)").arg(releaseError));
+        check(release.value(QStringLiteral("url")).toString()
+                  == QLatin1String("https://p-def2.pcloud.com/cfZ/"
+                                   "BSI-Customizer-2.0.3-win64.exe?download=1"),
+              QStringLiteral("the .exe link wins over a YouTube link (%1)")
+                  .arg(release.value(QStringLiteral("url")).toString()));
+        check(release.value(QStringLiteral("sha256")).toString()
+                  == QLatin1String("4de96eb5f3d5260c89e2dc2f21c2076be68ba4511e8399ce695bdf542a8354ac")
+                  && qint64(release.value(QStringLiteral("size")).toDouble(0)) == 30000000,
+              "sha256: and size: lines pin the release");
+        check(!release.value(QStringLiteral("notes")).toString().contains(QLatin1String("sha256"))
+                  && release.value(QStringLiteral("notes")).toString()
+                         .contains(QLatin1String("Smaller download")),
+              QStringLiteral("the notes keep the prose and drop the bookkeeping (%1)")
+                  .arg(release.value(QStringLiteral("notes")).toString()));
+
+        // Things that are not announcements.
+        const auto notRelease = [&msg](const QString &content, const QString &why) {
+            QJsonObject out;
+            QString error;
+            check(!UpdateChecker::parseMessageRelease(msg(QStringLiteral("13"), content), &out,
+                                                      &error)
+                      && !error.isEmpty(),
+                  QStringLiteral("%1 is not a release (%2)").arg(why, error));
+        };
+        notRelease(QStringLiteral("hey, did you see this? https://example.com/x.exe"), "a chat line");
+        notRelease(QStringLiteral("v2.0.4 is coming soon"), "a version with no link");
+        notRelease(QStringLiteral("v2.0.5\nhttp://example.com/BSI.exe"), "an http link");
+        notRelease(QStringLiteral("<:cat:1> https://tenor.com/view/cat-gif-1"), "a gif");
+
+        // Which message in the channel counts.
+        const QJsonArray channel{
+            msg(QStringLiteral("20"), QStringLiteral("v2.0.4\nhttps://u.pcloud.link/publink/show?code=NEW")),
+            msg(QStringLiteral("19"), QStringLiteral("v2.0.3\nhttps://u.pcloud.link/publink/show?code=OLD")),
+            msg(QStringLiteral("18"), QStringLiteral("hello")),
+        };
+        const auto picked = UpdateChecker::findRelease(channel, QStringLiteral("manifest.json"), true);
+        check(picked.found && !picked.fromManifest
+                  && picked.manifest.value(QStringLiteral("version")).toString()
+                         == QLatin1String("2.0.4"),
+              "the highest version in the channel is the release");
+        const QJsonArray rePosted{
+            msg(QStringLiteral("31"), QStringLiteral("v2.0.4\nhttps://u.pcloud.link/publink/show?code=FIXED")),
+            msg(QStringLiteral("30"), QStringLiteral("v2.0.4\nhttps://u.pcloud.link/publink/show?code=OLD")),
+        };
+        const auto newest = UpdateChecker::findRelease(rePosted, QStringLiteral("manifest.json"), true);
+        check(newest.found && newest.manifest.value(QStringLiteral("url")).toString()
+                                  .endsWith(QLatin1String("FIXED")),
+              "re-posting the same version with a fixed link replaces the old one");
+        check(!UpdateChecker::findRelease(channel, QStringLiteral("manifest.json"), false).found,
+              "a signature-protected channel refuses text releases");
+        // A manifest attachment outranks a text message in the same channel.
+        const QJsonArray withManifest{
+            msg(QStringLiteral("41"), QStringLiteral("v2.0.9\nhttps://u.pcloud.link/publink/show?code=X")),
+            QJsonObject{
+                { QStringLiteral("id"), QStringLiteral("40") },
+                { QStringLiteral("content"), QStringLiteral("latest build") },
+                { QStringLiteral("attachments"),
+                  QJsonArray{ QJsonObject{
+                      { QStringLiteral("filename"), QStringLiteral("manifest.json") },
+                      { QStringLiteral("url"),
+                        QStringLiteral("https://cdn.discordapp.com/attachments/1/2/manifest.json") } } } },
+            },
+        };
+        const auto manifestWins = UpdateChecker::findRelease(withManifest,
+                                                             QStringLiteral("manifest.json"), true);
+        check(manifestWins.found && manifestWins.fromManifest,
+              "a published manifest wins over a text announcement");
+    }
+
 
     return failures;
 }

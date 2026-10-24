@@ -400,6 +400,16 @@ ApplicationWindow {
             Layout.fillHeight: true
             spacing: 0
 
+            // Self-update strip: only takes space while an update is being
+            // offered, downloaded or installed (see UpdateBanner.qml).
+            UpdateBanner {
+                Layout.fillWidth: true
+                Layout.leftMargin: 12
+                Layout.rightMargin: 12
+                Layout.topMargin: visible ? 10 : 0
+                Layout.preferredHeight: visible ? implicitHeight : 0
+            }
+
             StackLayout {
                 id: pages
                 Layout.fillWidth: true

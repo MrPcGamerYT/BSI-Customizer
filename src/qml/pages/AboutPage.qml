@@ -21,6 +21,23 @@ Item {
             + "</svg>");
     }
 
+    // What "trust" means, in one sentence the user can act on. A manifest
+    // attachment (publish.mjs) can be signed and always carries a hash; a
+    // plain "version + link" message cannot, so its fingerprint is recorded
+    // on this PC the first time it downloads.
+    function trustText(tr) {
+        if (tr === "signed")
+            return qsTr("Release: signed manifest — the file is checked against the SHA-256 " +
+                        "the publisher signed.");
+        if (tr === "pinned")
+            return qsTr("Release: hash-pinned — the download is checked against the SHA-256 in " +
+                        "the release.");
+        if (tr === "first-use")
+            return qsTr("Release: no SHA-256 yet — the fingerprint is recorded the first time " +
+                        "this build downloads, so the same version cannot change later.");
+        return "";
+    }
+
     Flickable {
         anchors.fill: parent
         contentHeight: content.implicitHeight + 48
@@ -95,6 +112,158 @@ Item {
                             color: Theme.textDim
                             font.pixelSize: 12
                         }
+                    }
+                }
+            }
+
+            // ---------------- updates card ----------------
+            //
+            // The self-updater's home. The strip under the title bar only
+            // appears when there is something to install; everything else
+            // (why a check failed, which channel is used, the switch that
+            // turns the startup check off) lives here.
+            Card {
+                Layout.fillWidth: true
+                pad: 18
+
+                ColumnLayout {
+                    anchors.fill: parent
+                    spacing: 10
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 8
+                        Text {
+                            text: qsTr("Updates")
+                            color: Theme.text
+                            font.pixelSize: 15
+                            font.weight: Font.Bold
+                        }
+                        Item { Layout.fillWidth: true }
+                        Text {
+                            text: qsTr("read from the Discord releases channel")
+                            color: Theme.textDim
+                            font.pixelSize: 10
+                            font.italic: true
+                        }
+                    }
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 8
+                        Text {
+                            text: qsTr("Installed")
+                            color: Theme.textDim
+                            font.pixelSize: 12
+                        }
+                        Text {
+                            text: updates.currentVersion
+                            color: Theme.text
+                            font.pixelSize: 12
+                            font.family: "Consolas"
+                        }
+                        Item { Layout.fillWidth: true }
+                        Text {
+                            visible: updates.available
+                            text: qsTr("Newest: %1").arg(updates.latestVersion)
+                            color: Theme.accentText
+                            font.pixelSize: 12
+                            font.weight: Font.DemiBold
+                        }
+                    }
+
+                    Text {
+                        Layout.fillWidth: true
+                        visible: updates.available && updates.trust.length > 0
+                        text: page.trustText(updates.trust)
+                        color: updates.trust === "first-use" ? Theme.warn : Theme.textDim
+                        font.pixelSize: 11
+                        wrapMode: Text.Wrap
+                    }
+
+                    Text {
+                        Layout.fillWidth: true
+                        visible: updates.note.length > 0
+                        text: updates.note
+                        color: updates.noteKind === "bad" ? Theme.danger
+                             : updates.noteKind === "warn" ? Theme.warn
+                             : updates.noteKind === "good" ? Theme.green
+                             : Theme.textDim
+                        font.pixelSize: 12
+                        wrapMode: Text.Wrap
+                    }
+
+                    Text {
+                        Layout.fillWidth: true
+                        // Only when the status line above is not already this text.
+                        visible: !updates.configured && updates.note !== updates.setupHint
+                        text: updates.setupHint
+                        color: Theme.textDim
+                        font.pixelSize: 11
+                        wrapMode: Text.Wrap
+                    }
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 8
+
+                        ActionButton {
+                            text: updates.checking ? qsTr("Checking…") : qsTr("Check now")
+                            enabled: updates.configured && !updates.busy
+                            onClicked: updates.check()
+                        }
+                        ActionButton {
+                            visible: updates.available && !updates.readyToInstall
+                            text: qsTr("Download %1").arg(updates.latestVersion)
+                            accent: true
+                            enabled: !updates.busy && !backend.busy
+                            onClicked: updates.download()
+                        }
+                        ActionButton {
+                            visible: updates.skipped
+                            text: qsTr("Offer %1 again").arg(updates.latestVersion)
+                            onClicked: updates.unskip()
+                        }
+                        ActionButton {
+                            visible: updates.readyToInstall
+                            text: qsTr("Install and restart")
+                            accent: true
+                            enabled: !backend.busy
+                            onClicked: updates.apply()
+                        }
+                        ActionButton {
+                            visible: updates.readyToInstall
+                            text: qsTr("Show the downloaded file")
+                            onClicked: updates.showStagedFile()
+                        }
+                        Item { Layout.fillWidth: true }
+                        Text {
+                            visible: updates.busy
+                            text: Math.round(updates.progress * 100) + "%"
+                            color: Theme.textDim
+                            font.pixelSize: 12
+                            font.family: "Consolas"
+                        }
+                    }
+
+                    Text {
+                        Layout.fillWidth: true
+                        visible: updates.configured && !updates.available
+                        text: qsTr("To publish a build, post its version and download link in the " +
+                                   "channel, for example:  BSI Customizer v2.0.2  +  the pCloud link. " +
+                                   "Nothing else to run — every copy reads it.")
+                        color: Theme.textDim
+                        font.pixelSize: 10
+                        wrapMode: Text.Wrap
+                    }
+
+                    ToggleSwitch {
+                        Layout.fillWidth: true
+                        label: qsTr("Check for updates when the app starts")
+                        description: qsTr("One request to the Discord channel a few seconds after " +
+                                          "the window opens; nothing is downloaded until you say so.")
+                        checked: updates.autoCheck
+                        onToggled: updates.autoCheck = !updates.autoCheck
                     }
                 }
             }

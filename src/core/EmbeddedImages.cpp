@@ -14,6 +14,8 @@
 #include <QRegularExpression>
 #include <QSet>
 #include <QStringList>
+#include <QTemporaryDir>
+#include <QUrl>
 
 #include <algorithm>
 
@@ -231,13 +233,36 @@ QByteArray readEntry(const QString &exePath, qint64 entryOff, quint16 flags, qin
     return bytes.size() <= limit ? bytes : QByteArray();
 }
 
+namespace {
+
+// SVG arrives as plain markup in every build seen so far, but a pool may name
+// the same markup differently (`.dat`, no extension at all). The bytes decide,
+// never the file name: an entry the list called "binary" still gets a preview.
+bool looksLikeSvg(const QByteArray &bytes)
+{
+    return bytes.left(4096).toLower().contains("<svg");
+}
+
+bool looksLikeGzip(const QByteArray &bytes)
+{
+    return bytes.size() > 18 && bytes.startsWith(QByteArray::fromHex("1f8b"));
+}
+
+} // namespace
+
 QString previewDataUrl(const QByteArray &bytes, const QString &family, int maxSide)
 {
-    if (bytes.isEmpty() || bytes.size() > kMaxImage) return {};
-    if (family == QLatin1String("svg")) {
-        if (!bytes.contains("<svg")) return {};
+    if (bytes.isEmpty() || bytes.size() > kMaxImage || looksLikeGzip(bytes)) return {};
+    QString format = family.toLower();
+    // The extension is a hint, not the truth: a build may name the same markup
+    // differently, and an entry with no extension must still preview.
+    if (format != QLatin1String("svg") && looksLikeSvg(bytes))
+        format = QStringLiteral("svg");
+    if (format == QLatin1String("svg")) {
         // QML renders SVG data URLs itself; base64 keeps the markup intact
         // whatever quotes or whitespace it contains.
+        if (!bytes.contains("<svg"))
+            return {}; // a fragment without a root element cannot be drawn
         return QStringLiteral("data:image/svg+xml;base64,")
             + QString::fromLatin1(bytes.toBase64());
     }
@@ -256,6 +281,39 @@ QString previewDataUrl(const QByteArray &bytes, const QString &family, int maxSi
     QBuffer encoded(&png);
     if (!encoded.open(QIODevice::WriteOnly) || !picture.save(&encoded, "PNG")) return {};
     return QStringLiteral("data:image/png;base64,") + QString::fromLatin1(png.toBase64());
+}
+
+QString previewFileUrl(const QByteArray &bytes, const QString &family)
+{
+    if (bytes.isEmpty() || bytes.size() > kMaxImage) return {};
+    // A data: URL carries no extension, and picture plugins decide what they
+    // can read from the suffix as much as from the bytes. Writing the entry
+    // into the session's temp folder under its own extension gives QML the
+    // same thing the player gets from its resource: a file with a name.
+    static QTemporaryDir directory;
+    if (!directory.isValid()) return {};
+    QString suffix = family.toLower();
+    if (suffix == QLatin1String("jpeg") || suffix == QLatin1String("jpe"))
+        suffix = QStringLiteral("jpg");
+    if (suffix != QLatin1String("svg") && looksLikeSvg(bytes))
+        suffix = QStringLiteral("svg");
+    if (suffix.isEmpty()) suffix = QStringLiteral("bin");
+    // Enough of a key to keep two entries apart without hashing 32 MB: the
+    // length plus the first page of bytes.
+    quint32 key = quint32(bytes.size());
+    const int sample = int(qMin<qsizetype>(bytes.size(), 4096));
+    for (int i = 0; i < sample; ++i)
+        key = key * 16777619u ^ quint8(bytes.at(i));
+    const QString name = QStringLiteral("bsi-%1.%2")
+                             .arg(QString::number(key, 16))
+                             .arg(suffix);
+    const QString path = directory.filePath(name);
+    if (!QFileInfo::exists(path) || QFileInfo(path).size() != bytes.size()) {
+        QFile out(path);
+        if (!out.open(QIODevice::WriteOnly) || out.write(bytes) != bytes.size()) return {};
+        out.close();
+    }
+    return QUrl::fromLocalFile(path).toString();
 }
 
 Result replace(const QString &exePath, const QString &path, const QString &newImagePath)

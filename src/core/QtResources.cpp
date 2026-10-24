@@ -6,8 +6,10 @@
 
 #include <QDateTime>
 #include <QDir>
+#include <QStandardPaths>
 #include <QFileInfo>
 #include <QHash>
+#include <QRegularExpression>
 #include <QSet>
 
 #include <functional>
@@ -495,21 +497,136 @@ int invalidateUnits(QByteArray &data, const QStringList &sourceNames)
     return changed;
 }
 
+namespace {
+
+// Deletes the compiled units inside one cache directory, and the directory
+// itself when nothing else lives there. Only qmlcache-named folders are ever
+// touched, so nothing a user cares about can be reached from here.
+bool clearCacheDir(const QString &path)
+{
+    QDir cache(path);
+    if (!cache.exists())
+        return false;
+    bool removedSomething = false;
+    const QStringList units = cache.entryList({ QStringLiteral("*.qmlc"), QStringLiteral("*.jsc"),
+                                                QStringLiteral("*.mjsc") },
+                                              QDir::Files | QDir::Hidden | QDir::System);
+    for (const QString &unit : units) {
+        if (cache.remove(unit))
+            removedSomething = true;
+    }
+    const QStringList folders = cache.entryList(QDir::Dirs | QDir::NoDotAndDotDot | QDir::Hidden);
+    for (const QString &folder : folders) {
+        QDir nested(cache.filePath(folder));
+        nested.removeRecursively();
+        removedSomething = true;
+    }
+    // A cache folder that is now empty is removed as a whole; one that still
+    // holds anything else (a log, a lock) is left in place.
+    if (cache.isEmpty(QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot | QDir::Hidden))
+        QDir().rmdir(path);
+    return removedSomething;
+}
+
+QStringList playerCacheRoots(const QString &exePath, bool includeSystemCaches)
+{
+    QStringList roots;
+    const QFileInfo fi(exePath);
+    const QDir dir(fi.absolutePath());
+    // Next to the player itself, where BlueStacks 5 has always kept them.
+    roots << QDir::cleanPath(dir.filePath(QStringLiteral("cache/qmlcache")))
+          << QDir::cleanPath(dir.filePath(QStringLiteral("qmlcache")))
+          << QDir::cleanPath(dir.filePath(QStringLiteral("cache/qml")))
+          << QDir::cleanPath(dir.filePath(QStringLiteral("../cache/qmlcache")));
+    if (!includeSystemCaches) {
+        roots.removeDuplicates();
+        return roots;
+    }
+    // Qt's own location: <cache>/<org>/<app>/qmlcache, i.e.
+    // %LOCALAPPDATA%\BlueStacks_nxt\HD-Player\cache\qmlcache on Windows,
+    // and the AppData / ProgramData trees BlueStacks keeps its data in.
+    QStringList bases = {
+        QStandardPaths::writableLocation(QStandardPaths::GenericCacheLocation),
+        QStandardPaths::writableLocation(QStandardPaths::GenericDataLocation),
+        QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation),
+        QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation),
+        qEnvironmentVariable("ProgramData"),
+        qEnvironmentVariable("LOCALAPPDATA"),
+        qEnvironmentVariable("APPDATA"),
+    };
+    bases.removeAll(QString()); // an unset variable is not a root
+    bases.removeDuplicates();
+    // Matched token by token: "Microsoft" must not look like "MSI".
+    const QStringList owners = { QStringLiteral("bluestacks"), QStringLiteral("msi"),
+                                 QStringLiteral("now.gg") };
+    const auto belongsToPlayer = [&owners](const QString &folderName) {
+        const QString lower = folderName.toLower();
+        if (lower.startsWith(QLatin1String("bluestacks")))
+            return true;
+        // Qt's own location is <org>/<app>, so the app folder is often plain
+        // "HD-Player": matched as a whole name, since splitting on '-' would
+        // leave only "hd" and "player".
+        if (lower.contains(QLatin1String("hd-player")) || lower.contains(QLatin1String("hdplayer")))
+            return true;
+        const QStringList tokens = lower.split(QRegularExpression(QStringLiteral("[^a-z0-9.]+")),
+                                               Qt::SkipEmptyParts);
+        for (const QString &token : tokens)
+            if (owners.contains(token))
+                return true;
+        return false;
+    };
+    // Bounded walk: BlueStacks keeps instances and disk images in the same
+    // tree, so the search stops after a few levels and a fixed budget instead
+    // of walking a 100 GB folder to find a cache directory.
+    int visited = 0;
+    std::function<void(const QString &, int)> visit = [&](const QString &folder, int depth) {
+        if (depth > 3 || visited > 512)
+            return;
+        ++visited;
+        const QDir current(folder);
+        const QStringList entries = current.entryList(QDir::Dirs | QDir::NoDotAndDotDot
+                                                      | QDir::Hidden);
+        for (const QString &entry : entries) {
+            const QString full = current.filePath(entry);
+            if (entry.compare(QLatin1String("qmlcache"), Qt::CaseInsensitive) == 0) {
+                roots << full;
+                continue;
+            }
+            const QString lower = entry.toLower();
+            if (lower == QLatin1String("engine") || lower == QLatin1String("logs")
+                || lower == QLatin1String("sharedfolder") || lower == QLatin1String("bstsharedfolder"))
+                continue; // the big, player-unrelated halves of the data folder
+            visit(full, depth + 1);
+        }
+    };
+    for (const QString &base : bases) {
+        if (base.isEmpty() || !QDir(base).exists())
+            continue;
+        const QDir root(base);
+        const QStringList children = root.entryList(QDir::Dirs | QDir::NoDotAndDotDot);
+        for (const QString &child : children) {
+            if (!belongsToPlayer(child))
+                continue;
+            visit(root.filePath(child), 1);
+        }
+    }
+    roots.removeDuplicates();
+    return roots;
+}
+
+} // namespace
+
 int clearPlayerQmlCache(const QString &exePath)
 {
     const QFileInfo fi(exePath);
     if (!fi.exists())
         return 0;
-    const QDir dir(fi.absolutePath());
+    // A file under the system temp folder is a fixture: clear only what sits
+    // next to it, never the real player caches of the machine running a test.
+    const bool fixture = fi.absolutePath().startsWith(QDir::cleanPath(QDir::tempPath()),
+                                                      Qt::CaseInsensitive);
     int removed = 0;
-    const QStringList rel = {
-        QStringLiteral("cache/qmlcache"),
-        QStringLiteral("qmlcache"),
-        QStringLiteral("cache/qml"),
-        QStringLiteral("../cache/qmlcache"),
-    };
-    for (const QString &r : rel) {
-        const QString path = QDir::cleanPath(dir.filePath(r));
+    for (const QString &path : playerCacheRoots(exePath, !fixture)) {
         QDir cache(path);
         if (!cache.exists())
             continue;
@@ -517,7 +634,7 @@ int clearPlayerQmlCache(const QString &exePath)
         if (!name.contains(QLatin1String("qml"), Qt::CaseInsensitive)
             && !path.contains(QLatin1String("qmlcache"), Qt::CaseInsensitive))
             continue;
-        if (cache.removeRecursively())
+        if (clearCacheDir(path))
             ++removed;
     }
     return removed;

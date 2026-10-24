@@ -27,6 +27,7 @@
 #include "core/SysInfo.h"
 #include "core/ThemeEngine.h"
 #include "core/ThemeManager.h"
+#include "core/UpdateChecker.h"
 
 // Last, so none of the windows.h macros (min/max/interface/...) leak into the
 // Qt or project headers above.
@@ -40,6 +41,7 @@ int runThemeRuntimeTest(const QStringList &args);
 int runGradientRuntimeTest(const QStringList &args);
 // Implemented in cli.cpp
 int runRpcIdCli(const QStringList &args);
+int runUpdateCli(const QStringList &args);
 
 namespace {
 
@@ -152,6 +154,17 @@ int main(int argc, char *argv[])
         return 0;
     }
 
+    // Self-update probe: reads the Discord releases channel the same way the
+    // window does, so the bot/channel setup can be verified without a GUI.
+    //   BSI-Customizer.exe --check-updates [--json] [--timeout 25]
+    const int updatesAt = args.indexOf(QStringLiteral("--check-updates"));
+    if (updatesAt >= 0) {
+        ensureConsoleOutput();
+        const int code = runUpdateCli(args.mid(updatesAt + 1));
+        std::fflush(stdout);
+        return code;
+    }
+
     // Packaging-only smoke mode: instantiate the real UI without changing
     // the user's preferences or requiring a Qt SDK/development tools.
     const bool deploymentTest = args.contains(QStringLiteral("--deployment-test"));
@@ -179,6 +192,11 @@ int main(int argc, char *argv[])
     // QML is only the UX side of it.
     AuthManager auth;
     backend.setAuthManager(&auth);
+    // Self-update through the Discord releases bot (docs/UPDATER.md). Nothing
+    // network-facing happens until check() - or the delayed startup check once
+    // an updater config is present.
+    UpdateChecker updates;
+    QObject::connect(&updates, &UpdateChecker::restartRequested, &app, &QGuiApplication::quit);
 
     QQmlApplicationEngine engine;
     QStringList deploymentErrors;
@@ -198,6 +216,7 @@ int main(int argc, char *argv[])
     engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
     engine.rootContext()->setContextProperty(QStringLiteral("sysinfo"), &sysinfo);
     engine.rootContext()->setContextProperty(QStringLiteral("auth"), &auth);
+    engine.rootContext()->setContextProperty(QStringLiteral("updates"), &updates);
 
     const QUrl mainUrl(QStringLiteral("qrc:/qt/qml/BSICustomizer/src/qml/Main.qml"));
     engine.load(mainUrl);

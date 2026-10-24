@@ -43,6 +43,12 @@ QByteArray readEntry(const QString &exePath, qint64 entryOff, quint16 flags,
 // Empty when the bytes are not a picture Qt can decode.
 QString previewDataUrl(const QByteArray &bytes, const QString &family, int maxSide);
 
+// The same preview as a file:// URL, used when the data: URL cannot be built
+// or when QML refuses it. The bytes are written once per payload into the
+// session temp folder with the entry's own extension, because picture plugins
+// (SVG in particular) read the suffix as well as the bytes.
+QString previewFileUrl(const QByteArray &bytes, const QString &family);
+
 // The format the first bytes prove: png, jpg, gif, bmp, webp, ico or svg.
 // Empty for formats without a signature (TGA) and for unknown data.
 QString sniffFormat(const QByteArray &bytes);

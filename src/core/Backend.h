@@ -152,6 +152,8 @@ public:
     // already has, or refused.
     Q_INVOKABLE int scanResources(bool includeBinary);
     Q_INVOKABLE QString resourcePreviewAt(int index, int maxSide) const;
+    // Empty when the preview is a picture; a sentence when it is not.
+    Q_INVOKABLE QString resourcePreviewNote(int index) const;
     Q_INVOKABLE QString resourceTextAt(int index) const;
     Q_INVOKABLE QVariantMap resourceBudgetAt(int index);
     // The payload size `text` would take in that entry (compressed when the

@@ -75,7 +75,7 @@ Item {
             // wants the opposite flag. Passing it straight through hid every
             // row the user kept and showed the ones they unticked.
             out.push({ id: item.linkId, name: item.linkName, url: item.linkUrl,
-                       hidden: !item.linkHidden });
+                       label: item.linkLabel, hidden: !item.linkHidden });
         }
         return out;
     }
@@ -662,7 +662,8 @@ Item {
                             Layout.fillWidth: true
                             spacing: 8
                             Text {
-                                text: qsTr("Links — name and address, untick “Show” to remove one")
+                                text: qsTr("Links — the words before the link, the text it prints "
+                                           + "and the address it opens; untick “Show” to remove one")
                                 color: Theme.textDim
                                 font.pixelSize: 11
                                 font.weight: Font.DemiBold
@@ -673,6 +674,38 @@ Item {
                                 text: page.about.supported ? qsTr("No stock link rows in this player")
                                                            : qsTr("Select HD-Player.exe first")
                                 color: Theme.warn
+                                font.pixelSize: 10
+                            }
+                        }
+
+                        // Column headings: the displayed text and the address
+                        // are two different fields, and it must be obvious.
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 8
+                            visible: page.aboutLinks.length > 0
+                            Text {
+                                text: qsTr("Show")
+                                Layout.preferredWidth: 62
+                                color: Theme.textDim
+                                font.pixelSize: 10
+                            }
+                            Text {
+                                text: qsTr("Name")
+                                Layout.preferredWidth: 190
+                                color: Theme.textDim
+                                font.pixelSize: 10
+                            }
+                            Text {
+                                text: qsTr("Text shown in the row")
+                                Layout.preferredWidth: 190
+                                color: Theme.textDim
+                                font.pixelSize: 10
+                            }
+                            Text {
+                                text: qsTr("Address it opens")
+                                Layout.fillWidth: true
+                                color: Theme.textDim
                                 font.pixelSize: 10
                             }
                         }
@@ -689,6 +722,9 @@ Item {
                                 // Read back by collectLinks() when Apply is pressed.
                                 property string linkId: modelData.id
                                 property alias linkName: linkNameField.text
+                                // What the anchor prints is its own field: the
+                                // address it opens is edited next to it.
+                                property alias linkLabel: linkLabelField.text
                                 property alias linkUrl: linkUrlField.text
                                 property alias linkHidden: linkShow.checked
 
@@ -714,6 +750,21 @@ Item {
                                         radius: 8
                                         border.width: 1
                                         border.color: linkNameField.activeFocus ? Theme.accent : Theme.border
+                                    }
+                                }
+                                TextField {
+                                    id: linkLabelField
+                                    Layout.preferredWidth: 190
+                                    text: modelData.label !== undefined ? modelData.label : ""
+                                    placeholderText: qsTr("text it prints")
+                                    color: Theme.text
+                                    placeholderTextColor: Theme.textDim
+                                    font.pixelSize: 12
+                                    background: Rectangle {
+                                        color: Theme.raised
+                                        radius: 8
+                                        border.width: 1
+                                        border.color: linkLabelField.activeFocus ? Theme.accent : Theme.border
                                     }
                                 }
                                 TextField {

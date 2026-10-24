@@ -122,9 +122,13 @@ starts with exactly what that build prints — nothing is retyped:
 * the **About text** — the copyright/Terms-of-use sentence, markup flattened to
   the words the page shows;
 * one row per stock link (**Support email**, **Support**, **Website**), each
-  with the name it prints and the address it opens. The address is taken from
-  the row's own handler (`Qt.openUrlExternally(…)`) or, for rows that open a
-  mail client, from the address the row prints;
+  with three separate fields: the **name** the row starts with, the **text the
+  row prints** for the link itself, and the **address it opens**. The address is
+  taken from the row's own handler (`Qt.openUrlExternally(…)`) or, for rows that
+  open a mail client, from the address the row prints. The printed text and the
+  address are independent — a row can open `https://example.com/join` and still
+  print `Join the channel`; leave the text empty and the row prints the address
+  the way the stock page does;
 * a **Show** tick per row, so a single stock link can be hidden while the
   others stay.
 
@@ -139,6 +143,15 @@ page left exactly as the build draws it, and the cards says which build drew
 them hidden. **Diagnose** prints what the editor found on the selected EXE —
 the page, its current text, every row and the reason if the card refuses — so
 nothing has to be guessed.
+
+Applying writes every copy of the page the file carries, then reads the page
+back **from the file on disk** — a write that does not read back is undone and
+reported instead of being called a success. The player's QML caches are cleared
+too, both next to `HD-Player.exe` and in the places Qt itself uses
+(`%LOCALAPPDATA%\…\qmlcache`, `<ProgramData>\BlueStacks_nxt\…`), because a
+compiled unit from an earlier launch otherwise keeps painting the old page.
+Closing the player window does not stop BlueStacks: quit it from the tray icon
+before the new page can be compiled.
 
 One apply keeps the page and its layout exactly as it is (logo, version banner,
 section headings) and only changes what it says: your text replaces the
@@ -174,6 +187,15 @@ Images tabs are gone: both live here, with the whole pool beside them.
 - **Pictures** get a thumbnail in the list and a large preview; **Extract…**
   saves the selected entry exactly as stored and **Extract All** writes the
   whole pool to `embedded_resources\` next to the EXE, keeping its folders.
+  What a row holds is decided from its **bytes**, not from its name: a build
+  that stores an icon under an unfamiliar or missing extension still gets its
+  picture. When QML will not take a `data:` URL the same bytes are handed to it
+  as a temp file with the right suffix (which is how the SVG plugin is loaded on
+  the older players), and an entry that genuinely is not a picture says so
+  under the preview instead of leaving an empty box.
+- The list belongs to one EXE: selecting another `HD-Player.exe` drops it and
+  the tab scans itself again, so a preview can never be read from the previous
+  file at the new file's coordinates.
 - **Code** — QML, JS, SVG, JSON, XML, CSS, HTML and text — opens in the editor
   as the source the player actually loads, and **Save code** writes it back.
   Editing QML also invalidates its compiled `.qmlc` companion and the player's
@@ -388,6 +410,51 @@ same `.rpcid-bak` backup, so **Undo** restores it. It does not rename the
 Discord application itself, which must still be changed in the Discord
 Developer Portal. `--rpcid selftest` runs the complete engine self-test, the
 same one CI runs.
+
+## Self-update through Discord
+
+The repository is private, so GitHub Releases cannot be the update channel: a
+shipped EXE has no public endpoint to ask, and a GitHub token cannot travel
+inside the file. The updater therefore uses a **Discord server**: the publisher
+(`updater-bot/publish.mjs`) uploads the portable EXE plus a small
+`manifest.json` to one channel, and the app reads the newest manifest with a
+**read-only bot token** limited to that channel.
+
+- **Publishing is a message.** Post the version and the download link in a
+  private channel (`BSI Customizer v2.0.2` + the pCloud link) and every copy
+  picks it up — no tool, no bot process, nothing to run. A `manifest.json`
+  attachment (what `updater-bot/publish.mjs` writes) is the strict alternative
+  and takes precedence when present.
+- `UpdateChecker` (`src/core/UpdateChecker.{h,cpp}`) checks a few seconds after
+  the window opens (switchable on the About page) and shows a strip under the
+  title bar when a newer `version` is announced: **What's new** / **Update now**
+  / **Later**.
+- The download is written to `%TEMP%` and verified before anything is replaced:
+  exact byte size, SHA-256 and a 64-bit PE check. Any mismatch deletes the file.
+- **Install and restart** hands the swap to a hidden PowerShell helper that
+  waits for the app to exit, copies the verified EXE over it, starts it again
+  and deletes itself. Nothing outside `%TEMP%` is touched before that.
+- The manifest can be HMAC-SHA256 signed (`updater.hmacKey`), in which case an
+  unsigned manifest is refused.
+- `url` lets the EXE live on any https host (pCloud, Drive, S3) when it is
+  larger than the server's 10 MB upload limit. Landing pages such as pCloud's
+  share links are followed to the real download link, and the publisher
+  verifies the hosted file's size + SHA-256 before it posts anything.
+- Configuration is the `updater` object of the same `auth.json` the sign-in gate
+  uses, so one `ZLP_AUTH_JSON` secret configures both. `BSI_NO_UPDATER=1`
+  disables it.
+
+Full setup (bot permissions, channel, secrets, publishing, troubleshooting):
+[`docs/UPDATER.md`](docs/UPDATER.md) and
+[`updater-bot/README.md`](updater-bot/README.md).
+
+Verify a channel without opening the window:
+
+```powershell
+.\BSI-Customizer.exe --check-updates --json
+# 0 = up to date, 3 = update available, 4 = downloaded and verified (--download),
+# 1 = error, 2 = no updater config
+```
 
 ## Build and verify
 

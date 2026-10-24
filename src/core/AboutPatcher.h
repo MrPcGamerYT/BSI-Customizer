@@ -22,6 +22,11 @@ struct Link
     QString id;     // the row's id in the QML (iSupportEmailText, ...)
     QString name;   // the words before the link ("Support email")
     QString url;    // where the link opens
+    // The words the anchor itself prints. The address and the text are two
+    // independent things: a row can open https://example.com/join and still
+    // print "Join the channel". Empty means "print the address the way the
+    // stock page does", which is also what an older config file implies.
+    QString label;
     bool hidden = false;
 };
 

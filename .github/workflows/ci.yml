@@ -19,6 +19,8 @@ concurrency:
 
 env:
   QT_VERSION: "6.8.3"
+  # The self-test must stay offline: the updater is disabled here on purpose.
+  BSI_NO_UPDATER: "1"
 
 jobs:
   build-windows:
