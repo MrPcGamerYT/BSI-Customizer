@@ -1791,8 +1791,13 @@ int runPatchRegressionTests()
         // out of the patch byte-for-byte, which a compressed record would hide.
         QSet<QString> raw;
         raw.insert(QStringLiteral("i18n.de-DE.qm"));
-        auto r = resourcesBytes({ qMakePair(QStringLiteral("i18n.de-DE.qm"), german),
-                                  qMakePair(QStringLiteral("PlrTopbar.qml"), topbar.toUtf8()) },
+        // The QML comes first and the table is packed straight behind it, so the
+        // record has no slack - on a real player every slot is exactly full too.
+        // Hiding a label therefore always relocates the record, which is the
+        // path that has to update the tree node: a node left behind keeps the
+        // player's copy of the old QML and the label never goes away.
+        auto r = resourcesBytes({ qMakePair(QStringLiteral("PlrTopbar.qml"), topbar.toUtf8()),
+                                  qMakePair(QStringLiteral("i18n.de-DE.qm"), german) },
                                 false, raw);
         addRegistration(r, false);
         const QString path = temp.filePath(QStringLiteral("titlebar-removals.exe"));
@@ -1809,9 +1814,13 @@ int runPatchRegressionTests()
         const QByteArray after = read(path);
         check(after.contains(german),
               "the UTF-16 string 'version' in the translator table is untouched");
-        const QString text = resourceText(after, r, QStringLiteral("PlrTopbar.qml"));
-        check(text.contains(QStringLiteral("visible: false // BSI CUSTOMIZER: titlebar hide")),
+        const QByteArray qmlAfter = resourceText(after, r, QStringLiteral("PlrTopbar.qml")).toUtf8();
+        check(be32(after, r.nodes.value(QStringLiteral("PlrTopbar.qml")) + 10)
+                  != quint32(r.entries.value(QStringLiteral("PlrTopbar.qml")) - r.f.payloads),
+              "the grown record was moved, and the tree node follows it");
+        check(qmlAfter.contains("visible: false // BSI CUSTOMIZER: titlebar hide"),
               "the version Text element gains a visible: false member");
+        const QString text = QString::fromUtf8(qmlAfter);
         check(text.contains(QStringLiteral("text: plrBackend.version")),
               "its text binding is left alone, so the player still builds the label it hides");
         check(text.count(QStringLiteral("BSI CUSTOMIZER: titlebar hide")) == 1
