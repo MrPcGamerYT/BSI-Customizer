@@ -204,6 +204,14 @@ public:
     Q_INVOKABLE void showStagedFile();
     /** Path of the helper's log, so a failed swap can be explained. */
     Q_INVOKABLE QString helperLogPath() const;
+    /**
+     * The reason the restart helper gave when its last run failed, or an empty
+     * string. The helper starts the old build again after a failure, so this is
+     * what the app shows on that next start - once per log.
+     */
+    Q_INVOKABLE QString helperFailure() const;
+    /** Open that log in the system's text editor. */
+    Q_INVOKABLE void showHelperLog();
     /** What the last check received, one line per message (for --explain). */
     QString channelReport() const;
 
@@ -212,6 +220,15 @@ public:
     static QString normalizedVersion(const QString &version);
     /** -1 / 0 / 1. Numeric parts compare as numbers, a pre-release sorts first. */
     static int compareVersions(const QString &a, const QString &b);
+    /**
+     * True when the file is a setup program, judged by its own bytes (Inno
+     * Setup, NSIS, a 7-Zip SFX, a WiX bundle) rather than by its name. The
+     * publisher picks the name, and a setup that is not recognized gets copied
+     * over the running app, which leaves a program that only installs.
+     */
+    static bool looksLikeInstaller(const QString &path);
+    /** True when an installer's uninstaller sits next to `exePath`. */
+    static bool isInstalledCopy(const QString &exePath);
     /** Validate a schema-1 manifest; returns it (or an empty object + error). */
     static QJsonObject parseManifest(const QByteArray &json, QString *error);
     /** Newest message carrying an attachment called `manifestName`. */

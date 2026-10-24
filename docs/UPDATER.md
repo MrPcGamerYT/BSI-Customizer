@@ -115,14 +115,32 @@ present.
    - the file is a 64-bit Windows program (`MZ`, `PE\0\0`, machine `0x8664`,
      PE32+ optional header).
    Any mismatch deletes the file and nothing is installed.
-6. **Install and restart** writes a hidden PowerShell helper that waits for the
-   app's PID to exit, copies the verified EXE over the running one with retries,
-   starts it again and deletes itself. A log ends up in
-   `%TEMP%\BSI-Customizer-update\apply-update.log` if the copy never succeeds.
-7. The app cannot overwrite itself when it is not allowed to (for example an
-   install under `Program Files` without rights): the write test fails *before*
-   anything is replaced and the UI says so, offering *Show the downloaded file*
-   for a manual copy.
+6. **Install and restart.** A release is shipped as a setup program, and the
+   updater decides that from the **file itself** (Inno Setup's `Inno Setup Setup
+   Data` / `InnoSetupLdr` markers, NSIS, a 7-Zip SFX, a WiX bundle) - not only
+   from its name, which the publisher chooses. A setup is started with
+   `/VERYSILENT /CLOSEAPPLICATIONS`: it waits for this process, replaces the
+   installed files and starts the new build, and the running EXE is never
+   overwritten by hand.
+
+   Anything else is only replaced in place when the app is a loose copy (a
+   folder with no `unins000.exe` next to it and not the portable build's
+   temporary extraction). That path writes a hidden PowerShell helper which
+   waits for the PID, waits until the program file can be opened **with no
+   sharing at all**, then copies with retries; if the overwrite keeps failing it
+   renames the old file aside and moves the new one in. On final failure it
+   **starts the old build again** and leaves
+   `%TEMP%\BSI-Customizer-update\apply-update.log` behind, which the app shows
+   on that next start (with the last Windows error) under *The last update could
+   not be installed*.
+7. The app never does the wrong thing with the wrong file:
+   * an **installed** copy is updated by its setup, never by overwriting the
+     program file (that would leave the uninstaller describing a file that is no
+     longer there);
+   * the **portable** build runs from a temporary folder, so there is no file to
+     replace - it points at the release page instead;
+   * a directory it cannot write to is refused *before* anything is replaced,
+     offering *Show the downloaded file* for a manual copy.
 
 Nothing is written outside `%TEMP%` until the user presses **Install and
 restart**, and the running EXE is only touched by the helper after the app has
@@ -602,6 +620,9 @@ message (an `.exe` link on its own line always wins).
 | `The link opened a web page instead of the file` | the `url` is a share/landing page with no download link on it (pCloud folder link, password-protected link). Use a **direct link**, or a link whose page offers Download |
 | pCloud `7005` / `7006` in the browser | that link hit its traffic/download limit — create a new link and republish |
 | `Windows does not let this app write to …` | install lives under `Program Files`; run the app as administrator |
+| `the file could not be replaced` in `apply-update.log` | another copy of the app was still holding the file; the log now says which Windows error it was, and the app comes back with that reason |
+| `This copy was installed by the setup program …` | the download was not an installer; use the `-setup.exe` from the release page |
+| `This is the portable build running from a temporary folder …` | download the setup from the release page; a portable copy has no install to update |
 | nothing in the UI at all | `--check-updates` — if that is happy, the app is already current |
 | portal: `Private application cannot have a default authorization link` | *Installation* tab → **Install Link = None** → Save; then turn *Public Bot* off |
 
