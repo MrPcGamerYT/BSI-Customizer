@@ -588,6 +588,32 @@ Item {
                             }
                         }
 
+                        // What the tool actually read out of the player, verbatim. A build
+                        // whose page cannot be parsed shows its own first lines here instead
+                        // of an empty card, so "it does not read" becomes a readable fact.
+                        Rectangle {
+                            Layout.fillWidth: true
+                            visible: page.about.source !== "" && !page.about.supported
+                            implicitHeight: aboutSource.implicitHeight + 16
+                            radius: 8
+                            color: Theme.raised
+                            border.width: 1
+                            border.color: Theme.warn
+
+                            Text {
+                                id: aboutSource
+                                anchors.fill: parent
+                                anchors.margins: 8
+                                text: page.about.source
+                                color: Theme.textDim
+                                font.pixelSize: 10
+                                font.family: "Consolas"
+                                wrapMode: Text.Wrap
+                                maximumLineCount: 8
+                                elide: Text.ElideRight
+                            }
+                        }
+
                         // ---- the sections the MSI build hides -----------------
                         // On MSI 5 both sections are bound to `oem !== "msi5"`, so they are
                         // drawn hidden and the links cannot be seen or used. This button is

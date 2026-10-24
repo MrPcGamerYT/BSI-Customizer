@@ -889,10 +889,60 @@ void UpdateChecker::installNow()
     }
 }
 
+bool UpdateChecker::stagedIsInstaller() const
+{
+    if (m_stagedFile.isEmpty())
+        return false;
+    // The manifest may say so outright; the file name is the second signal, and
+    // it is the one that works for a release message that only carries a link.
+    const QJsonValue flag = m_latest.value(QStringLiteral("installer"));
+    if (flag.isBool() && flag.toBool())
+        return true;
+    const QString name = QFileInfo(m_stagedFile).fileName().toLower();
+    return name.contains(QLatin1String("setup")) || name.contains(QLatin1String("installer"))
+           || name.contains(QLatin1String("-install-"));
+}
+
+void UpdateChecker::runInstaller()
+{
+    // The setup waits for this process to exit (/CLOSEAPPLICATIONS), replaces the
+    // installed files and starts the new build. There is nothing left to do here
+    // but quit, so the swap helper is not involved at all.
+    const QString program = m_stagedFile;
+    const QFileInfo info(program);
+    const QStringList args{ QStringLiteral("/VERYSILENT"),
+                            QStringLiteral("/SUPPRESSMSGBOXES"),
+                            QStringLiteral("/NOCANCEL"),
+                            QStringLiteral("/NORESTART"),
+                            QStringLiteral("/CLOSEAPPLICATIONS"),
+                            QStringLiteral("/FORCECLOSEAPPLICATIONS") };
+    if (!QProcess::startDetached(program, args, info.absolutePath())) {
+        fail(QStringLiteral("The installer was downloaded and verified, but Windows would not start "
+                            "it. Use 'Show the downloaded file' and run %1 by hand.")
+                 .arg(info.fileName()));
+        return;
+    }
+    m_installed = true;
+    setState(QStringLiteral("applying"),
+             QStringLiteral("Installing version %1... The app closes and the new build starts "
+                            "when the setup is done.").arg(latestVersion()),
+             QStringLiteral("good"));
+    emit restartRequested();
+}
+
 void UpdateChecker::apply()
 {
     if (m_stagedFile.isEmpty() || !QFileInfo::exists(m_stagedFile)) {
         fail(QStringLiteral("The update file is missing from the temp folder - download it again."));
+        return;
+    }
+
+    // A setup program is the update. Running it is the whole transaction: it
+    // waits for this process, writes the installed copy and starts it again.
+    // Overwriting the running EXE with a setup would ship a program that only
+    // ever asks to install itself.
+    if (stagedIsInstaller()) {
+        runInstaller();
         return;
     }
 

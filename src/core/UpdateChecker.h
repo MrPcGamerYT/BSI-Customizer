@@ -179,6 +179,13 @@ public:
     bool installedPending() const { return m_installed; }
 
     // ---- commands (QML + CLI) -------------------------------------------
+    /**
+     * True when the verified download is a setup program rather than another
+     * copy of this EXE. A released build is shipped as an installer, so the
+     * update is "run it", not "overwrite the running file": replacing this EXE
+     * with a setup would leave a program that asks to install on every start.
+     */
+    bool stagedIsInstaller() const;
     /** Ask the releases channel for the newest manifest (no-op while busy). */
     Q_INVOKABLE void check();
     /** Stream the announced EXE into %TEMP% and verify it. */
@@ -267,6 +274,8 @@ public:
                                        QString *detail = nullptr);
     /** SHA-256 of a whole file, lower-case hex ("" on failure). */
     static QString fileSha256(const QString &path);
+    /** Hand the staged installer to Windows and quit; emits restartRequested(). */
+    void runInstaller();
     /** Size + hash + PE check of the downloaded file. */
     static bool verifyStagedFile(const QString &path, qint64 expectedSize,
                                  const QString &expectedSha256, QString *error);

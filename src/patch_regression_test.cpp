@@ -4583,6 +4583,125 @@ Window {
               QStringLiteral("the relocated entry stays editable (%1)").arg(again.msg));
     }
 
+    std::printf("[resources] a build whose pools cannot be mapped is scanned by its bytes\n");
+    {
+        // The SVG tab has always worked on every player because it never asks
+        // the resource tree where the pictures are. This is the same idea for
+        // every picture kind: a blob counts when the four bytes in front of it
+        // are its own size, which is exactly the shape a raw payload has. The
+        // fixture below has no qRegisterResourceData call at all, so the pool
+        // walk finds nothing - what the tab lists has to come from the scan.
+        const QByteArray logo = QByteArray::fromHex(
+            "89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c4890000000d4944"
+            "415478da63f8cfc0f01f00050001ff56c72f0d0000000049454e44ae426082");
+        const QByteArray star = QByteArray(
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\">"
+            "<path fill=\"#ffffff\" d=\"M0 0h16v16H0z\"/></svg>");
+        QSet<QString> raw;
+        raw.insert(QStringLiteral("icons/star.svg"));
+        raw.insert(QStringLiteral("images/logo.png"));
+        auto r = resourcesBytes({ { QStringLiteral("icons/star.svg"), star },
+                                  { QStringLiteral("images/logo.png"), logo } },
+                                false, raw);
+        // No addRegistration() on purpose: this image registers nothing.
+        const auto entries = EmbeddedResources::list(r.f.bytes, true);
+        const auto find = [&entries](const QString &format) {
+            for (const auto &entry : entries)
+                if (entry.format == format) return entry;
+            return EmbeddedResources::Entry();
+        };
+        const auto svgEntry = find(QStringLiteral("svg"));
+        const auto pngEntry = find(QStringLiteral("png"));
+        check(entries.size() == 2 && svgEntry.scanned && pngEntry.scanned,
+              QStringLiteral("both pictures are found without a resource tree (%1)").arg(entries.size()));
+        check(svgEntry.kind == EmbeddedResources::Kind::Svg && svgEntry.text
+                  && svgEntry.width == 16 && svgEntry.height == 16,
+              "the scanned SVG is listed as code with its viewport size");
+        check(pngEntry.kind == EmbeddedResources::Kind::Image && pngEntry.width == 1
+                  && pngEntry.height == 1,
+              "the scanned PNG is listed as a picture with its pixel size");
+        check(svgEntry.stored == star.size() && svgEntry.entryOff >= 4
+                  && ByteUtils::be32(r.f.bytes, svgEntry.entryOff) == quint32(star.size()),
+              "the scanned row points at the real record, not at a byte in the middle of one");
+
+        const QString scannedPath = temp.filePath(QStringLiteral("scanned-resources.exe"));
+        write(scannedPath, r.f.bytes);
+        check(EmbeddedResources::readEntry(scannedPath, pngEntry.entryOff, pngEntry.flags) == logo,
+              "the scanned record reads back as the picture it holds");
+
+        const auto room = EmbeddedResources::budget(r.f.bytes, pngEntry.entryOff, pngEntry.leaf, true);
+        check(room.known && room.capacity == pngEntry.stored && room.used == pngEntry.stored,
+              QStringLiteral("a scanned record is measured as its own slot (%1)").arg(room.detail));
+
+        // Same size in, same size out: the record is rewritten in place and the
+        // EXE does not change size, which is the rule the whole tab is built on.
+        const auto rewritten = EmbeddedResources::replaceBytes(scannedPath, pngEntry.path, logo);
+        check(rewritten.ok && read(scannedPath).size() == r.f.bytes.size(),
+              QStringLiteral("a scanned picture is replaced in place (%1)").arg(rewritten.msg));
+        check(read(scannedPath).mid(int(pngEntry.entryOff) + 4, logo.size()) == logo,
+              "the replacement is on disk at the same offset");
+
+        const auto tooBig = EmbeddedResources::replaceBytes(
+            scannedPath, pngEntry.path, QByteArray(logo.size() + 1, '\x89'));
+        check(!tooBig.ok && tooBig.msg.contains(QLatin1String("grow")),
+              QStringLiteral("growing a scanned record is refused (%1)").arg(tooBig.msg));
+
+        const auto svgEdit = EmbeddedResources::replaceText(
+            scannedPath, svgEntry.path,
+            QStringLiteral("<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\">"
+                           "<path fill=\"#112233\" d=\"M0 0h16v16H0z\"/></svg>"));
+        check(svgEdit.ok && read(scannedPath).size() == r.f.bytes.size(),
+              QStringLiteral("scanned SVG markup is editable in place (%1)").arg(svgEdit.msg));
+        check(read(scannedPath).mid(int(svgEntry.entryOff) + 4, star.size())
+                  .contains("#112233"),
+              "the edited markup is what the record holds now");
+    }
+
+    std::printf("[about] the page is still read when the resource tree is not walkable\n");
+    {
+        // The editor used to be empty on a build whose pools this tool cannot
+        // map: findDocs() came back with nothing and analyze() stopped there,
+        // even though the page is sitting in the file. The page is now found by
+        // the object name it always carries and the record that holds it, so
+        // the card is filled and the text is readable - which also shows what
+        // the tool read when the structured parse is not what it expected.
+        QString page = QStringLiteral(
+            "/*\r\n"
+            " * Copyright (C) 2020-2021 BlueStack Systems, Inc.\r\n"
+            " */\r\n"
+            "import QtQuick 2.15\r\n"
+            "Item {\r\n"
+            "    objectName: \"aboutSettings\"\r\n"
+            "    UiColumnLayout {\r\n"
+            "        UiScrollView {\r\n"
+            "            UiColumnLayout {\r\n"
+            "                id: iContentLayout\r\n"
+            "                UiTextUrl {\r\n"
+            "                    id: iTermsOfUseText\r\n"
+            "                    text: qsTranslate(\"QObject\", \"\u00a92011 through 2026 now.gg, Inc. All rights reserved. By using BlueStacks you agree to our \") + \"<a href=\\\"javascript:void(0)\\\">\" + qsTranslate(\"QObject\", \"Terms of use\") + \"</a>\"\r\n"
+            "                    onLinkActivated: uiBackend.openHelpArticle(\"terms_of_use\")\r\n"
+            "                }\r\n"
+            "            }\r\n"
+            "        }\r\n"
+            "    }\r\n"
+            "}\r\n");
+        page += QStringLiteral("/* ") + QString(4200, QLatin1Char('x')) + QStringLiteral(" */\r\n");
+        auto r = resourcesBytes({ { QStringLiteral("PlrAboutSetting.qml"), page.toUtf8() } });
+        // No addRegistration(): nothing tells the pool walk where the tree is.
+        const auto state = AboutPatcher::analyze(r.f.bytes);
+        check(state.supported && state.scanned,
+              QStringLiteral("the page is found by its own text (%1)").arg(state.detail));
+        check(state.config.text.contains(QLatin1String("2011 through 2026"))
+                  && state.config.text.contains(QLatin1String("Terms of use")),
+              QStringLiteral("the editable text is the sentence the page prints (%1)")
+                  .arg(state.config.text.left(80)));
+        check(state.source.startsWith(QLatin1String("/*"))
+                  && state.source.contains(QLatin1String("objectName: \"aboutSettings\"")),
+              "the card can show the source it actually read");
+        check(state.detail.contains(QLatin1String("scanning")),
+              QStringLiteral("the card says the page was found by scanning (%1)").arg(state.detail));
+    }
+
     // ------------------------------------------------------------------
     // Self-update through the Discord releases bot (docs/UPDATER.md)
     //

@@ -1064,7 +1064,7 @@ QVariantMap Backend::resourceBudgetAt(int index)
     const QByteArray data = readExe();
     if (data.isEmpty())
         return result(false, QStringLiteral("Cannot read the selected EXE."), QStringLiteral("red"));
-    const auto room = EmbeddedResources::budget(data, entry.entryOff, entry.leaf);
+    const auto room = EmbeddedResources::budget(data, entry.entryOff, entry.leaf, entry.scanned);
     // The editor needs to know whether a UTF-8 BOM is part of the record it
     // has to stay inside.
     bool bom = false;
@@ -1426,6 +1426,8 @@ QVariantMap Backend::aboutPageState()
         { QStringLiteral("links"), QVariantList() },
         { QStringLiteral("showSections"), true },
         { QStringLiteral("sectionsHidden"), false },
+        { QStringLiteral("source"), QString() },
+        { QStringLiteral("scanned"), false },
     };
     const QString path = m_settings->exePath();
     if (path.isEmpty() || !QFileInfo::exists(path)) return map;
@@ -1442,6 +1444,11 @@ QVariantMap Backend::aboutPageState()
     map[QStringLiteral("text")] = state.config.text;
     map[QStringLiteral("showSections")] = state.config.showSections;
     map[QStringLiteral("sectionsHidden")] = state.sectionsHidden;
+    map[QStringLiteral("scanned")] = state.scanned;
+    // The editor shows what it read. Handing the whole page over would copy
+    // ~14 KB into QML for a hint, so the first lines are enough to tell a
+    // readable page from a mis-decoded one.
+    map[QStringLiteral("source")] = state.source.left(600);
     QVariantList links;
     for (const auto &link : state.config.links) {
         links << QVariantMap {
