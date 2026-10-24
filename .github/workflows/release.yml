@@ -50,6 +50,9 @@ jobs:
     timeout-minutes: 60
     permissions:
       contents: write
+      # The build step republishes a failure as a PR comment: the job log of a
+      # failed run is not readable from this account's API.
+      pull-requests: write
     defaults:
       run:
         shell: pwsh
@@ -132,8 +135,52 @@ jobs:
         run: cmake -S . -B build -A x64 -DCMAKE_BUILD_TYPE=Release -DBSI_TEST_QT5_REFERENCE=ON -DBSI_BUILD_PORTABLE=ON
 
       # Also bundles the runtime and runs the portable-EXE smoke tests.
+      #
+      # A failure here has to say why. This account cannot read a failed job's
+      # log back through the API (the blob-storage redirect answers EOF), but
+      # check-run annotations and PR comments are readable - so the compiler
+      # errors, or when there is none the tail of the output (which is where a
+      # packaging or smoke-test failure prints its reason), are republished.
       - name: Build and verify single portable EXE
-        run: cmake --build build --config Release --parallel
+        run: |
+          $log = Join-Path $env:RUNNER_TEMP 'release-build.log'
+          cmake --build build --config Release --parallel 2>&1 | Tee-Object -FilePath $log
+          if ($LASTEXITCODE -eq 0) { exit 0 }
+
+          $pattern = ': (error|fatal error) [A-Z]+[0-9]+'
+          $hits = Select-String -Path $log -Pattern $pattern -Context 0, 1
+          $count = 0
+          foreach ($hit in $hits) {
+            if ($count -ge 40) { break }
+            $text = $hit.Line.Trim()
+            if ($hit.Context.PostContext.Count -gt 0) {
+              $text += ' ' + ($hit.Context.PostContext -join ' ')
+            }
+            $text = $text -replace '%', '%25' -replace "`r", ' ' -replace "`n", ' '
+            if ($text.Length -gt 400) { $text = $text.Substring(0, 400) }
+            Write-Host "::error::$text"
+            $count++
+          }
+          if ($count -eq 0) {
+            Write-Host '::error::the build, the packaging or the smoke test failed without a compiler error line'
+          }
+          # The last lines are the only place a smoke test says what it
+          # rejected, and the annotations above are capped, so the tail is put
+          # where a reviewer can read all of it.
+          $tail = (Get-Content -LiteralPath $log -Tail 120) -join "`n"
+          $fence = '```'
+          $body = "The build or the one-file smoke test failed. Last 120 lines of the build log:`n`n$fence`ntext`n$tail`n$fence`n"
+          $file = Join-Path $env:RUNNER_TEMP 'failure.md'
+          $body | Out-File -FilePath $file -Encoding utf8
+          if ($env:GITHUB_EVENT_NAME -eq 'pull_request') {
+            gh pr comment $env:PR_NUMBER --body-file $file 2>&1 | Out-Null
+          }
+          $summary = $env:GITHUB_STEP_SUMMARY
+          if ($summary) { $body | Out-File -FilePath $summary -Encoding utf8 -Append }
+          exit 1
+        env:
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          GH_TOKEN: ${{ github.token }}
 
       - name: Verify application administrator manifest
         run: ./scripts/Test-Manifest.ps1 -ExecutablePath build/Release/BSI-Customizer.exe

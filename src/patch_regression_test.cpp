@@ -4757,6 +4757,11 @@ Window {
         table += record(QStringLiteral("Important links"), 6);
         table += record(QStringLiteral("Support email"), 6);
         table += record(row(QStringLiteral("support@bluestacks.com")), 3);
+        // Every row on a real player has three records - the name, the anchor
+        // that prints the address and the address the anchor opens - and the
+        // e-mail row is no exception. A fixture that left the address out made
+        // the row look like it had no target at all.
+        table += record(QStringLiteral("support@bluestacks.com"), 4);
         table += record(QStringLiteral("Support"), 6);
         table += record(row(QStringLiteral("support.bluestacks.com")), 3);
         table += record(QStringLiteral("http://support.bluestacks.com"), 4);
@@ -4795,6 +4800,14 @@ Window {
         check(stock.config.links.size() == 2,
               QStringLiteral("both link rows are found by structure (%1)")
                   .arg(stock.config.links.size()));
+        // The rows have the shape a real player has: a name, the words the
+        // anchor prints and the address it opens. Without this the fixture can
+        // pass while testing a page the player never ships.
+        bool complete = !stock.config.links.isEmpty();
+        for (const auto &link : stock.config.links)
+            complete = complete && !link.name.isEmpty() && !link.label.isEmpty()
+                       && !link.url.isEmpty();
+        check(complete, QStringLiteral("every row has a name, printed words and an address"));
         check(!stock.config.links.isEmpty()
                   && stock.config.links.at(0).name == QLatin1String("Support email")
                   && stock.config.links.at(0).id == QLatin1String("row0"),
@@ -4811,7 +4824,9 @@ Window {
         // The row's position is its id on the compiled path.
         support.id = QStringLiteral("row1");
         support.name = QStringLiteral("Support");
-        support.url = QStringLiteral("https://example.com/help");
+        // The e-mail row's address record holds 23 characters on the players we
+        // have, so the test uses an address that fits it.
+        support.url = QStringLiteral("https://example.com");
         config.links << support;
         const auto applied = AboutPatcher::apply(path, true, config);
         check(applied.ok, QStringLiteral("the compiled page is patched (%1)").arg(applied.msg));
@@ -4821,10 +4836,10 @@ Window {
         check(after.contains(utf16(config.text)),
               "the About sentence the window prints is the edited one");
         check(!after.contains(utf16(copyright)), "the stock sentence is gone from the compiled page");
-        check(after.contains(utf16(QStringLiteral("https://example.com/help")))
+        check(after.contains(utf16(QStringLiteral("https://example.com")))
                   && !after.contains(utf16(QStringLiteral("http://support.bluestacks.com"))),
               "the link the row opens is the edited address");
-        check(after.contains(utf16(QStringLiteral("example.com/help"))),
+        check(after.contains(utf16(QStringLiteral(">example.com</a>"))),
               "and the row prints the edited address as well");
         check(!after.contains(utf16(QStringLiteral("Check for updates"))),
               "the update button prints nothing, so it cannot offer a download");
@@ -4888,7 +4903,7 @@ Window {
         AboutPatcher::Link only;
         only.id = QStringLiteral("row0");
         only.name = QStringLiteral("Help");
-        only.url = QStringLiteral("https://example.com/help");
+        only.url = QStringLiteral("https://example.com");
         one.links << only;
         const auto singly = AboutPatcher::apply(path, true, one);
         check(singly.ok, QStringLiteral("a single-row config applies (%1)").arg(singly.msg));
@@ -4916,8 +4931,11 @@ Window {
                              "address %2)")
                   .arg(limited.config.links.at(1).nameMax)
                   .arg(limited.config.links.at(1).urlMax));
+        // Row 0 is the one that is shown: a hidden row's name travels in its
+        // anchor's href, which has room to spare, so the tight record is the
+        // name of a row the page actually prints.
         AboutPatcher::Config wide = limited.config;
-        wide.links[1].name = QString(limited.config.links.at(1).nameMax + 1, QLatin1Char('n'));
+        wide.links[0].name = QString(limited.config.links.at(0).nameMax + 1, QLatin1Char('n'));
         const QByteArray beforeWide = read(path);
         const auto refuseName = AboutPatcher::apply(path, true, wide);
         check(!refuseName.ok && refuseName.msg.contains(QLatin1String("holds")),
@@ -4935,8 +4953,8 @@ Window {
         AboutPatcher::Config stockConfig;
         const auto restored = AboutPatcher::apply(path, false, stockConfig);
         check(restored.ok, QStringLiteral("the stock page comes back (%1)").arg(restored.msg));
-        const QByteArray back = read(path);
-        check(back.mid(tableAt, table.size()) == table,
+        const QByteArray restoredBytes = read(path);
+        check(restoredBytes.mid(tableAt, table.size()) == table,
               "every compiled string is put back byte for byte from the backup");
     }
 

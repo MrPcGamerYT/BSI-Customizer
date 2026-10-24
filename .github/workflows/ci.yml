@@ -140,5 +140,29 @@ jobs:
 
           $passed = Select-String -Path $log -Pattern 'ALL TESTS PASSED' -Quiet
           if ($p.ExitCode -ne 0 -or -not $passed) {
+            # A failed job's log cannot be read back through the API on this
+            # account, so the lines that explain the failure are republished as
+            # annotations, which can.
+            $lines = @()
+            foreach ($file in @($log, $err)) {
+              if (Test-Path -LiteralPath $file) {
+                $lines += Get-Content -LiteralPath $file | Where-Object { $_ -match 'FAIL|failed|Failure' }
+              }
+            }
+            $count = 0
+            foreach ($line in $lines) {
+              if ($count -ge 40) { break }
+              $clean = $line.Trim() -replace '%', '%25' -replace "`r", ' '
+              if ($clean.Length -gt 400) { $clean = $clean.Substring(0, 400) }
+              Write-Host "::error::$clean"
+              $count++
+            }
+            if ($count -eq 0) {
+              foreach ($line in (Get-Content -LiteralPath $log -Tail 30)) {
+                $clean = $line -replace '%', '%25' -replace "`r", ' '
+                if ($clean.Length -gt 400) { $clean = $clean.Substring(0, 400) }
+                Write-Host "::error::$clean"
+              }
+            }
             throw "self-test failed (exit code $($p.ExitCode))"
           }
