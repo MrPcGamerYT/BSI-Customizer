@@ -1428,6 +1428,11 @@ QVariantMap Backend::aboutPageState()
         { QStringLiteral("sectionsHidden"), false },
         { QStringLiteral("source"), QString() },
         { QStringLiteral("scanned"), false },
+        // The words the compiled copy of the page prints - what the window
+        // actually shows. Shown in the About card so the editor can prove it
+        // found the page that is on screen.
+        { QStringLiteral("compiledPage"), false },
+        { QStringLiteral("strings"), QVariantList() },
     };
     const QString path = m_settings->exePath();
     if (path.isEmpty() || !QFileInfo::exists(path)) return map;
@@ -1446,9 +1451,18 @@ QVariantMap Backend::aboutPageState()
     map[QStringLiteral("sectionsHidden")] = state.sectionsHidden;
     map[QStringLiteral("scanned")] = state.scanned;
     // The editor shows what it read. Handing the whole page over would copy
-    // ~14 KB into QML for a hint, so the first lines are enough to tell a
-    // readable page from a mis-decoded one.
-    map[QStringLiteral("source")] = state.source.left(600);
+    // ~14 KB into QML for a hint; this is enough to tell a readable page from a
+    // mis-decoded one (and to copy out when a build reports something odd).
+    map[QStringLiteral("source")] = state.source.left(2000);
+    map[QStringLiteral("compiledPage")] = state.compiledPage;
+    QVariantList strings;
+    for (const auto &entry : state.table)
+        strings << QVariantMap {
+            { QStringLiteral("index"), entry.index },
+            { QStringLiteral("text"), entry.text },
+            { QStringLiteral("max"), entry.maxChars },
+        };
+    map[QStringLiteral("strings")] = strings;
     QVariantList links;
     for (const auto &link : state.config.links) {
         links << QVariantMap {

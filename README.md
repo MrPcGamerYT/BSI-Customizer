@@ -124,6 +124,14 @@ clean-up — title-bar buttons hidden, sidebar buttons visible — is recognised
 the button reads **Update clean-up** and writes the missing sidebar half (and
 brings the strip back) without restoring first.
 
+The two title-bar labels — the player **version** and the engine label next to
+it (**N32**, **P64**) — are hidden without adding a single byte: the label's own
+`text:` binding is emptied instead of a `visible: false` member being added. A
+player record has a fixed size and the file has no free space to move it into,
+so a growing edit used to end in "needs N bytes but its record only holds M";
+an edit that only ever gets shorter cannot. The element, its bindings and its
+place in the layout stay, so nothing the player reads is changed.
+
 **Ads / UI Removal** nulls the selected ad/UI strings so those elements never
 render. Back, Home, Recent, the title-bar logo and fullscreen are not removal
 rows: the clean-up above is the only thing that hides navigation, and it keeps
@@ -157,6 +165,21 @@ them hidden. **Diagnose** prints what the editor found on the selected EXE —
 the page, its current text, every row and the reason if the card refuses — so
 nothing has to be guessed.
 
+A BlueStacks player carries the page **twice**: `PlrAboutSetting.qml` as text,
+and a compiled copy of the same page that the window actually loads. The text
+the page prints — the headings, every row's words and address, the copyright
+sentence, the update button's caption — is a UTF-16LE record of that compiled
+unit's string table, and editing only the `.qml` reaches a copy nothing
+displays (which is exactly what "it patches but the page never changes" looks
+like). The card therefore reads that table too, lists its words, and rewrites
+them **in place**: each record has a fixed slot, so a replacement is written
+inside it and the rest is padded — the file never grows and no offset moves.
+A text longer than its slot is refused with the length that fits, never
+truncated. The About sentence is the one literal the player prints in front of
+its "Terms of use" anchor, so the editor's text replaces the words and keeps
+(or clears) that anchor, which is how the field can show the whole sentence the
+page prints while the record only holds the part before the link.
+
 Applying writes every copy of the page the file carries, then reads the page
 back **from the file on disk** — a write that does not read back is undone and
 reported instead of being called a success. The player's QML caches are cleared
@@ -174,7 +197,8 @@ left in it, using `Qt.openUrlExternally` — a bare e-mail address becomes a
 opens something. Rows ticked off, plus the stock QQ row, are hidden. The
 **Check for updates** button is disabled by hiding it together with its
 "More info" and incompatible-version rows, so nothing on the page points at
-BlueStacks updates any more. Press **Restore stock About** to restore the
+BlueStacks updates any more; on the compiled copy its caption is cleared the
+same way. Press **Restore stock About** to restore the
 untouched page byte-for-byte.
 
 Both tools work on the Qt 5 and Qt 6 players: BlueStacks 5.22 and the older
