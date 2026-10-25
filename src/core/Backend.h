@@ -181,7 +181,8 @@ public:
     Q_INVOKABLE QVariantMap integrityRestore();
 
     // ---- boot video ----
-    Q_INVOKABLE QVariantMap bootPatch();
+    Q_INVOKABLE QVariantMap bootPatch(int holdMs = 3000);
+    Q_INVOKABLE QVariantMap purgePlayerCache();
 
     // ---- extras ----
     Q_INVOKABLE QVariantMap applyRemovals(const QStringList &names);

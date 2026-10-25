@@ -21,6 +21,24 @@ ApplicationWindow {
     title: qsTr("BlueStacks 5 / MSI 5 — BSI Customizer")
     color: Theme.window
 
+    Dialog {
+        id: purgeCacheDialog
+        anchors.centerIn: parent
+        title: qsTr("Purge HD-Player cache?")
+        modal: true
+        standardButtons: Dialog.Ok | Dialog.Cancel
+        contentItem: Label {
+            text: qsTr("Close all emulator instances first. This removes only HD-Player cache folders in AppData. Settings, installed apps and emulator disks are kept.")
+            wrapMode: Text.Wrap
+            width: 390
+            implicitWidth: 390
+        }
+        onAccepted: {
+            const r = backend.purgePlayerCache();
+            toast.show(r.msg || qsTr("Cache purge finished."));
+        }
+    }
+
     // ---- probes used by the C++ --selftest (do not remove) ----
     property color testProbe: Theme.window
     property color testProbeAccent: Theme.accent
@@ -287,6 +305,15 @@ ApplicationWindow {
                 }
 
                 Item { Layout.fillHeight: true }
+
+                ActionButton {
+                    Layout.fillWidth: true
+                    text: qsTr("Purge Cache")
+                    enabled: !backend.busy
+                    onClicked: purgeCacheDialog.open()
+                    ToolTip.visible: hovered
+                    ToolTip.text: qsTr("Clear HD-Player caches in AppData without deleting emulator data")
+                }
 
                 // ---- the signed-in account, pinned at the bottom ----
                 Rectangle {

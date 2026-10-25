@@ -308,6 +308,16 @@ jobs:
           retention-days: 1
           compression-level: 0
 
+      - name: Upload tested installer
+        if: ${{ !startsWith(github.ref, 'refs/tags/') && !inputs.publish_release }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: BSI-Customizer-${{ steps.meta.outputs.version }}-setup-${{ github.run_id }}
+          path: build/artifacts/${{ steps.meta.outputs.setup_name }}
+          if-no-files-found: error
+          retention-days: 3
+          compression-level: 0
+
       # Publish directly from the same Windows job that built and tested the
       # executable. A cross-job upload/download through Actions artifacts can
       # fail before publishing when the repository artifact quota is full.

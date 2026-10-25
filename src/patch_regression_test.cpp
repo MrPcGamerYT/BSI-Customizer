@@ -1,5 +1,6 @@
 #include "core/Backend.h"
 #include "core/BootVideoPatcher.h"
+#include "core/PlayerCache.h"
 #include "core/BsDetector.h"
 #include "core/EmbeddedImages.h"
 #include "core/EmbeddedResources.h"
@@ -2932,33 +2933,150 @@ Window {
         if (!outcome.ok) std::printf("    %s\n", qPrintable(outcome.msg));
         check(outcome.ok, "PlrBootProgressBar works without a stock BootVideo.qml or an import in the boot file");
         const auto modified = resourceText(read(path), r, QStringLiteral("PlrBootProgressBar.qml"));
-        check(modified.contains(QLatin1String("import QtMultimedia 5.15 as BsiMedia"))
-                  && modified.contains(QLatin1String("sourceComponent:Component{BsiMedia.Video")),
-              "media support is obtained from another validated file in the same resource pool");
+        check(modified.contains(QLatin1String("bsiBootVideoLoader"))
+                  && modified.contains(QUrl::fromLocalFile(QDir(folder).filePath(QStringLiteral("Assets/BootVideo.qml"))).toString(QUrl::FullyEncoded)),
+              "the controller loads an external QML player, never an MP4 or a hard QtMultimedia import");
         // A tiny, explicitly synthetic QtMultimedia API validates the generated
         // QML/argument flow without playing media or running extracted user QML.
         const auto imports = QDir(folder).filePath(QStringLiteral("imports/QtMultimedia")); QDir().mkpath(imports);
         write(QDir(imports).filePath(QStringLiteral("qmldir")), "module QtMultimedia\nVideo 5.15 Video.qml\nMediaPlayer 5.15 MediaPlayer.qml\nVideoOutput 5.15 VideoOutput.qml\n");
-        write(QDir(imports).filePath(QStringLiteral("Video.qml")), "import QtQuick\nItem{property url source;property int loops;property int fillMode;property bool started:false;function play(){started=true}}\n");
+        write(QDir(imports).filePath(QStringLiteral("Video.qml")), "import QtQuick\nItem{property url source;property int loops;property int fillMode;property bool muted:false;property bool autoPlay:false;property bool started:false;function play(){started=true}}\n");
         write(QDir(imports).filePath(QStringLiteral("MediaPlayer.qml")), "import QtQuick\nQtObject{enum Loops{Infinite=1}}\n");
         write(QDir(imports).filePath(QStringLiteral("VideoOutput.qml")), "import QtQuick\nQtObject{enum FillMode{PreserveAspectCrop=1}}\n");
         QQmlEngine engine; engine.addImportPath(QDir(folder).filePath(QStringLiteral("imports")));
         QQmlComponent component(&engine); component.setData(modified.toUtf8(), QUrl::fromLocalFile(QDir(folder).filePath(QStringLiteral("PlrBootProgressBar.qml"))));
         std::unique_ptr<QObject> object(component.create());
         if (!object) std::printf("    %s\n", qPrintable(component.errorString()));
-        check(bool(object), "injected boot Video QML compiles against the expected multimedia API");
+        QCoreApplication::processEvents();
+        check(bool(object), "external boot player QML compiles with the synthetic multimedia API");
         if (object) {
             const auto video = object->findChild<QObject *>(QStringLiteral("bsiBootVideo"));
             check(video && video->property("started").toBool()
                       && video->property("source").toUrl() == QUrl::fromLocalFile(QDir(folder).filePath(QStringLiteral("Assets/Promo.mp4"))),
-                  "the inline video starts and receives the installation-relative media URL");
+                  "the Qt5 fallback starts and receives the installation-relative media URL");
         }
         check(BootVideoPatcher::patch(path).ok && read(path + QStringLiteral(".bak")) == r.f.bytes,
               "real-name boot repatching keeps one loader and preserves the original backup");
         const auto twice = resourceText(read(path), r, QStringLiteral("PlrBootProgressBar.qml"));
-        check(twice.count(QLatin1String("objectName:\"bsiBootVideo\"")) == 1,
+        check(twice.count(QLatin1String("objectName:\"bsiBootVideoLoader\"")) == 1,
               "repatching does not duplicate the custom video component");
     }
+    std::printf("[boot-script] adaptive player, hold, recovery and refusal paths\n");
+    {
+        const QString boot = QStringLiteral("import QtQuick\nItem{Image{id:iBootImage;visible:true}Text{id:iBootLoadingText;visible:false}function fSetBootPromotion(){iBootImage.visible=true;iBootLoadingText.visible=false}}\n");
+        const QString host = QStringLiteral("import QtQuick\nItem{property bool pIsBootComplete:false;property bool pShowAndroidAd:false;Component{id:iBootProgressComponent;Item{}}Component{id:iGlContainerComponent;Rectangle{color:'#000000'}}Loader{id:iBootLoader;sourceComponent:pIsBootComplete || pShowAndroidAd ? iGlContainerComponent : iBootProgressComponent}}\n");
+        const auto r = resources({{QStringLiteral("boot.qml"),boot},{QStringLiteral("plr.qml"),host}}, true);
+        const auto folder = temp.filePath(QStringLiteral("adaptive boot ' & unicode Ω")); QDir().mkpath(folder);
+        const auto path = QDir(folder).filePath(QStringLiteral("HD-Player.exe")); write(path,r.f.bytes);
+        check(!BootVideoPatcher::patch(path,-1).ok && read(path)==r.f.bytes,
+              "invalid boot holds refuse without changing the executable");
+        const auto applied=BootVideoPatcher::patch(path,3000);
+        if(!applied.ok) std::printf("    %s\n",qPrintable(applied.msg));
+        check(applied.ok,"external adaptive player does not require an existing multimedia import");
+        auto text=resourceText(read(path),r,QStringLiteral("plr.qml"));
+        check(text.contains(QLatin1String("interval:3000")) && text.contains(QLatin1String("pIsBootComplete&&pBootVideoDone")),
+              "the Android loader is held only after boot completion while ads retain their bypass");
+        const auto player=read(QDir(folder).filePath(QStringLiteral("Assets/BootVideo.qml")));
+        check(player.contains("import QtMultimedia;") && player.contains("import QtMultimedia 5.15;") && player.contains("import QtWebEngine;")
+                  && player.contains("JSON.stringify") && player.contains("Qt.resolvedUrl(\"Promo.mp4\")"),
+              "external player tries Qt6, Qt5 and WebEngine and quotes media URLs safely");
+        check(BootVideoPatcher::patch(path,4500).ok,"boot hold can be updated on a repatch");
+        text=resourceText(read(path),r,QStringLiteral("plr.qml"));
+        check(text.count(QLatin1String("id:bvDone"))==1 && text.contains(QLatin1String("interval:4500")),
+              "repatching updates the existing timer without duplicating it");
+        check(BootVideoPatcher::patch(path,0).ok,"zero hold restores immediate Android handoff");
+        text=resourceText(read(path),r,QStringLiteral("plr.qml"));
+        check(!text.contains(QLatin1String("pBootVideoDone")) && !text.contains(QLatin1String("bvDone"))
+                  && text.contains(QLatin1String("sourceComponent:pIsBootComplete||pShowAndroidAd?")),
+              "disabling hold removes both timer and state");
+        check(read(path+QStringLiteral(".bak"))==r.f.bytes,"all repatches preserve the first original backup");
+        // Validate dynamic Qt6 and WebEngine creation against deliberately
+        // synthetic APIs. Never load a real codec or extracted player QML.
+        const auto mediaImports=QDir(folder).filePath(QStringLiteral("qt6Imports/QtMultimedia")); QDir().mkpath(mediaImports);
+        write(QDir(mediaImports).filePath(QStringLiteral("qmldir")),"module QtMultimedia\nMediaPlayer 5.15 MediaPlayer.qml\nVideoOutput 5.15 VideoOutput.qml\nAudioOutput 5.15 AudioOutput.qml\n");
+        write(QDir(mediaImports).filePath(QStringLiteral("MediaPlayer.qml")),"import QtQuick\nQtObject{enum Loops{Infinite=1}property url source;property int loops;property var videoOutput;property var audioOutput;property bool started:false;function play(){started=true}}\n");
+        write(QDir(mediaImports).filePath(QStringLiteral("VideoOutput.qml")),"import QtQuick\nItem{enum FillMode{PreserveAspectCrop=1}property int fillMode}\n");
+        write(QDir(mediaImports).filePath(QStringLiteral("AudioOutput.qml")),"import QtQuick\nQtObject{property bool muted:false}\n");
+        {
+            QQmlEngine engine; engine.addImportPath(QDir(folder).filePath(QStringLiteral("qt6Imports")));
+            QQmlComponent component(&engine,QUrl::fromLocalFile(QDir(folder).filePath(QStringLiteral("Assets/BootVideo.qml"))));
+            std::unique_ptr<QObject> object(component.create());
+            if(!object) std::printf("    %s\n",qPrintable(component.errorString()));
+            const auto video=object ? object->findChild<QObject *>(QStringLiteral("bsiBootVideo")) : nullptr;
+            check(video && video->property("started").toBool()
+                      && video->property("source").toUrl()==QUrl::fromLocalFile(QDir(folder).filePath(QStringLiteral("Assets/Promo.mp4"))),
+                  "the Qt6 adaptive branch compiles, starts and handles quoted Unicode installation paths");
+        }
+        const auto webImports=QDir(folder).filePath(QStringLiteral("webImports"));
+        QDir().mkpath(QDir(webImports).filePath(QStringLiteral("QtMultimedia")));
+        QDir().mkpath(QDir(webImports).filePath(QStringLiteral("QtWebEngine")));
+        write(QDir(webImports).filePath(QStringLiteral("QtMultimedia/qmldir")),"module QtMultimedia\n");
+        write(QDir(webImports).filePath(QStringLiteral("QtWebEngine/qmldir")),"module QtWebEngine\nWebEngineView 1.0 WebEngineView.qml\n");
+        write(QDir(webImports).filePath(QStringLiteral("QtWebEngine/WebEngineView.qml")),"import QtQuick\nItem{objectName:'bsiWebBootVideo';property url url}\n");
+        {
+            QQmlEngine engine; engine.addImportPath(webImports);
+            QQmlComponent component(&engine,QUrl::fromLocalFile(QDir(folder).filePath(QStringLiteral("Assets/BootVideo.qml"))));
+            std::unique_ptr<QObject> object(component.create());
+            const auto web=object ? object->findChild<QObject *>(QStringLiteral("bsiWebBootVideo")) : nullptr;
+            check(web && web->property("url").toUrl().scheme()==QLatin1String("data"),
+                  "missing multimedia APIs fall back to a WebEngine data-URL player");
+        }
+        // A previously forced stub can only recover from a uniquely linked
+        // original resource in the backup; it never guesses missing UI source.
+        const auto stub=resources({{QStringLiteral("boot.qml"),QStringLiteral("import QtQuick\nItem{function fSetBootPromotion(a,b,c){}}\n")},{QStringLiteral("plr.qml"),host}},true);
+        const auto stubPath=QDir(folder).filePath(QStringLiteral("stub.exe")); write(stubPath,stub.f.bytes);
+        check(!BootVideoPatcher::patch(stubPath).ok && read(stubPath)==stub.f.bytes,
+              "a forced boot stub with no original backup is a non-writing error");
+        write(stubPath+QStringLiteral(".bak"),r.f.bytes);
+        check(BootVideoPatcher::patch(stubPath).ok && resourceText(read(stubPath),stub,QStringLiteral("boot.qml")).contains(QLatin1String("iBootImage")),
+              "a linked backup repairs the boot stub without discarding unrelated executable edits");
+    }
+
+    std::printf("[player-cache] exact AppData cache scope and symlink isolation\n");
+    {
+        const auto base=temp.filePath(QStringLiteral("appdata"));
+        const auto root=QDir(base).filePath(QStringLiteral("HD-Player"));
+        QDir().mkpath(QDir(root).filePath(QStringLiteral("cache/qmlcache")));
+        QDir().mkpath(QDir(root).filePath(QStringLiteral("GPUCache")));
+        QDir().mkpath(QDir(root).filePath(QStringLiteral("Engine")));
+        write(QDir(root).filePath(QStringLiteral("cache/qmlcache/unit.qmlc")),"cached");
+        write(QDir(root).filePath(QStringLiteral("GPUCache/shader")),"cached");
+        write(QDir(root).filePath(QStringLiteral("settings.json")),"keep settings");
+        write(QDir(root).filePath(QStringLiteral("Engine/Data.vhdx")),"keep virtual disk");
+        QDir().mkpath(QDir(base).filePath(QStringLiteral("Unrelated/cache")));
+        write(QDir(base).filePath(QStringLiteral("Unrelated/cache/keep")),"keep");
+        const auto purged=PlayerCache::purge({base,base,QString()});
+        check(purged.ok && purged.removed==2 && !QFileInfo::exists(QDir(root).filePath(QStringLiteral("cache")))
+                  && !QFileInfo::exists(QDir(root).filePath(QStringLiteral("GPUCache"))),
+              "manual purge removes only recognized HD-Player cache directories and deduplicates roots");
+        check(read(QDir(root).filePath(QStringLiteral("settings.json")))=="keep settings"
+                  && read(QDir(root).filePath(QStringLiteral("Engine/Data.vhdx")))=="keep virtual disk"
+                  && read(QDir(base).filePath(QStringLiteral("Unrelated/cache/keep")))=="keep",
+              "cache purge preserves settings, virtual disks and unrelated application caches");
+        check(PlayerCache::purge({base}).ok && PlayerCache::purge({base}).removed==0,
+              "purging an already clean cache is an idempotent success");
+        const auto outside=temp.filePath(QStringLiteral("outside-cache")); QDir().mkpath(outside);
+        write(QDir(outside).filePath(QStringLiteral("keep")),"untouched");
+        const auto link=QDir(root).filePath(QStringLiteral("qmlcache"));
+#ifdef Q_OS_WIN
+        const bool linked = QProcess::execute(QStringLiteral("cmd.exe"),
+            {QStringLiteral("/c"),QStringLiteral("mklink"),QStringLiteral("/J"),QDir::toNativeSeparators(link),QDir::toNativeSeparators(outside)}) == 0;
+#else
+        const bool linked = QFile::link(outside,link);
+#endif
+        check(linked, "the cache-isolation fixture creates a directory link/junction");
+        if(linked) {
+            const auto blocked=PlayerCache::purge({base});
+            check(!blocked.ok && read(QDir(outside).filePath(QStringLiteral("keep")))=="untouched",
+                  "a linked cache is refused without traversing or deleting its target");
+#ifdef Q_OS_WIN
+            QDir().rmdir(link);
+#else
+            QFile::remove(link);
+#endif
+        }
+    }
+
 #ifdef BSI_EXE_TEST_FILE
     {
         std::printf("[hdplayer-reference] file parsing and disposable copies only; no uploaded code is executed\n");

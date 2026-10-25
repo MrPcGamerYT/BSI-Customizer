@@ -2,6 +2,7 @@
 
 #include "AuthManager.h"
 #include "BootVideoPatcher.h"
+#include "PlayerCache.h"
 #include "BsDetector.h"
 #include "ExtrasPatcher.h"
 #include "IntegrityPatcher.h"
@@ -1380,13 +1381,27 @@ QVariantMap Backend::integrityRestore()
 
 // -------------------------------------------------------------- boot video
 
-QVariantMap Backend::bootPatch()
+QVariantMap Backend::bootPatch(int holdMs)
 {
     if (actionsLocked()) return lockedMap();
     if (!m_backgroundWorker)
-        return runBackground([=](Backend &worker) { return worker.bootPatch(); });
-    const auto r = BootVideoPatcher::patch(m_settings->exePath());
+        return runBackground([=](Backend &worker) { return worker.bootPatch(holdMs); });
+    const auto r = BootVideoPatcher::patch(m_settings->exePath(), holdMs);
     return result(r.ok, r.msg, QStringLiteral("green"));
+}
+
+QVariantMap Backend::purgePlayerCache()
+{
+    if (actionsLocked()) return lockedMap();
+    if (!m_backgroundWorker)
+        return runBackground([](Backend &worker) { return worker.purgePlayerCache(); });
+    if (BsDetector::isProcessRunning(QStringLiteral("HD-Player.exe")))
+        return result(false, QStringLiteral("Close all HD-Player / BlueStacks instances before purging caches."), QStringLiteral("red"));
+    const QStringList roots = { qEnvironmentVariable("LOCALAPPDATA"), qEnvironmentVariable("APPDATA") };
+    if (roots[0].isEmpty() && roots[1].isEmpty())
+        return result(false, QStringLiteral("Windows AppData locations are unavailable; nothing was deleted."), QStringLiteral("red"));
+    const auto r = PlayerCache::purge(roots);
+    return result(r.ok, r.msg, r.ok ? QStringLiteral("green") : QStringLiteral("orange"));
 }
 
 // ------------------------------------------------------------------ extras

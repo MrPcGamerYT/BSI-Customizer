@@ -10,6 +10,6 @@ namespace BootVideoPatcher {
 
 struct Result { bool ok = false; QString msg; };
 
-Result patch(const QString &exePath);
+Result patch(const QString &exePath, int holdMs = 3000);
 
 } // namespace BootVideoPatcher

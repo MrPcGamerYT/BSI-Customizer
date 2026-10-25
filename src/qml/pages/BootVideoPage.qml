@@ -73,10 +73,16 @@ Item {
                         wrapMode: Text.Wrap
                         color: Theme.textDim
                         font.pixelSize: 12
-                        text: qsTr("The patcher updates the boot player's media source. Validated QML resources "
+                        text: qsTr("The patcher preserves the loading UI and installs an adaptive Qt 6 / Qt 5 / WebEngine player in Assets/BootVideo.qml when needed. Validated QML resources "
                                    + "can grow into mapped PE storage, and their caches are refreshed. "
                                    + "Close BlueStacks first. The original .bak is preserved.")
                     }
+                }
+
+                RowLayout {
+                    Label { text: qsTr("Boot hold after ready (ms)"); color: Theme.text }
+                    SpinBox { id: bootHold; from: 0; to: 15000; value: 3000; stepSize: 500; editable: true }
+                    Label { text: qsTr("0 disables the extra delay"); color: Theme.textDim }
                 }
 
                 RowLayout {
@@ -95,7 +101,7 @@ Item {
                         text: qsTr("Patch Boot Video")
                         onClicked: {
                             backend.exePath = bootPath.text;
-                            const r = backend.bootPatch();
+                            const r = backend.bootPatch(bootHold.value);
                             page.state = r.msg || "?";
                             page.stateColorName = r.ok ? "green" : "red";
                         }

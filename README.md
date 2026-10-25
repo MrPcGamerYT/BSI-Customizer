@@ -403,7 +403,38 @@ and checks actual pixels; it never executes QML extracted from the user's EXE.
 
 ## Boot video and integrity
 
-Boot patching uses the selected installation's `Assets/Promo.mp4`, not a drive-root URL. Registered QML resources are discovered by structure and controller content rather than only a fixed filename; raw and zlib source records are supported. When multiple controller variants coexist, a unique reference from the host's boot Component is used where available. MSI/BlueStacks `PlrBootProgressBar.qml` resources are supported; QtMultimedia imports can be discovered in another validated QML file in the same resource pool, so a stock `BootVideo.qml` is not required. It updates an existing `Video`/`MediaPlayer` resource when available; an inline QtMultimedia fallback is used only when an existing resource already imports that module. A QML `Loader` is never pointed directly at an MP4. Minified/multiline boot objects are handled by bounded object/property parsing. Validated compressed resources can grow into mapped read-only PE storage, and their resource timestamps/compiled caches are refreshed. Unknown players and unverified resource mappings remain non-writing errors.
+Boot patching uses the selected installation's `Assets/Promo.mp4`. Adapted from
+Nova's supplied script, the fallback writes `Assets/BootVideo.qml` and tries Qt 6
+Multimedia, Qt 5 Multimedia, then a WebEngine HTML video. Playback is muted,
+looping and cropped to fill the boot background. The emulator must supply one
+of those modules and an MP4 codec; the patch does not install codecs or modify
+its Qt DLLs. A working stock Video/MediaPlayer resource is reused when available.
+
+The original loading/progress UI remains in place. **Boot hold after ready**
+defaults to 3000 ms (0–15000); zero restores immediate handoff on supported boot
+hosts. Legacy forced GL-container video experiments are repaired only when
+uniquely recognized, and an old empty boot stub requires a uniquely linked
+original resource in `.bak`. Unknown hosts are never guessed. The status reports
+when an extra hold cannot be applied. You can replace `Promo.mp4` later without
+patching again. Close all emulator instances before patching.
+
+Resource discovery, safe mapped growth, verified EXE writes and original-backup
+preservation remain in use; the script's heuristic timestamp/zero-padding writes
+are not used. An external player is written atomically and rolled back if the
+EXE write fails. No QML is executed while inspecting a target executable.
+
+### Purge Cache
+
+The bottom sidebar **Purge Cache** button asks for confirmation and requires
+HD-Player to be closed. It clears only recognized cache directories beneath
+exact `HD-Player` application roots in `%LOCALAPPDATA%` / `%APPDATA%`, including
+known BlueStacks/MSI/now.gg owner folders. It does **not** delete settings,
+installed Android apps, emulator disks, cookies or unrelated application caches.
+Links/junctions are never traversed. Locked/skipped directories are reported
+rather than silently claiming success. The next emulator launch rebuilds caches.
+
+The About page also credits **Nova — @nova_xis20** alongside the existing authors.
+
 
 Integrity patching follows `E8 ???????? 84 C0 74 ??` in `.text`, with bounded RIP-relative references to the verify/fail messages when disambiguation is needed. Natural NOP sequences are not counted as clean candidates. Already-applied patches are verified by a message reference or matching backup evidence. Only the two JZ bytes are NOPed; dry-run is read-only, the first backup is preserved, and writes/restores are verified rather than truncating/deleting the EXE first. Close BlueStacks yourself before patching; the tool does not forcibly terminate your sessions. Full-backup restoration also rolls back theme/boot edits made after that backup.
 

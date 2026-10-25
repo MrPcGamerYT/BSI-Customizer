@@ -75,6 +75,9 @@ After a successful build:
   Actions storage allowance, including when using a self-hosted runner. If an
   upload fails on your self-hosted PC, the EXE remains under `build/artifacts/`
   inside that runner's checkout.
+- Test builds also upload a separate **setup** artifact containing the tested
+  `BSI-Customizer-<version>-setup.exe` installer (three-day retention). Choose
+  this artifact when testing installation, shortcuts or installed-app updates.
 - A published GitHub Release exposes the **`.exe` directly** as its download.
 
 Set the `project(... VERSION ...)` value in `CMakeLists.txt` before pushing a
