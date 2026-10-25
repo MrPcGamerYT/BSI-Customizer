@@ -7,12 +7,12 @@
 #include "QtResources.h"
 #include "ThemeEngine.h"
 
+#include <QDateTime>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QHash>
 #include <QMutex>
-#include <QMutexLocker>
 #include <QTemporaryDir>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -2171,6 +2171,15 @@ bool mightCarryPage(const QString &path)
     return false;
 }
 
+// One remembered answer: which file carried the page for this selected file,
+// as of the size and timestamp it had when the answer was found.
+struct PageHostCacheEntry
+{
+    qint64 size = -1;
+    qint64 mtime = 0;
+    QString host;
+};
+
 // Does this file carry the page at all? The full analyze() decides, not the byte
 // search above: a file that merely mentions "PlrAboutSetting.qml" (a crash dump,
 // a log, another page's import) is not the page, and picking it would write into
@@ -2199,14 +2208,13 @@ QString findPageHost(const QString &selectedPath)
     // The card asks for this every time it is opened and the folder can hold a
     // hundred DLLs, so an answer is remembered until the selected file changes.
     // A cached answer is only used while the file it names still exists.
-    struct Cached { qint64 size = -1; qint64 mtime = 0; QString host; };
     static QMutex mutex;
-    static QHash<QString, Cached> cache;
+    static QHash<QString, PageHostCacheEntry> cache;
     const QString key = selected.absoluteFilePath();
     const qint64 mtime = selected.lastModified().toMSecsSinceEpoch();
     const auto remember = [&](const QString &host) {
         QMutexLocker<QMutex> lock(&mutex);
-        cache.insert(key, Cached { selected.size(), mtime, host });
+        cache.insert(key, PageHostCacheEntry { selected.size(), mtime, host });
         return host;
     };
     {
@@ -2424,11 +2432,6 @@ State analyze(const QByteArray &image)
 
 namespace {
 
-// Rewrites every copy of the page the file carries, not just the first one: a
-// player that embeds the same QML twice (a second pool, an alias) would
-// otherwise keep loading the untouched copy and the patch would look like it
-// did nothing. Copies are re-located after each write, so a copy that had to be
-// moved into free space is followed instead of being patched at a stale offset.
 // Write a page back into the record it was read from. There is no resource tree
 // node here, so the record is edited where it sits: the body is written inside
 // the room the stock record already has and the rest of that room is zeroed, so
@@ -2493,6 +2496,11 @@ bool replaceScannedDoc(QByteArray &image, const Doc &doc, const QByteArray &body
     return true;
 }
 
+// Rewrites every copy of the page the file carries, not just the first one: a
+// player that embeds the same QML twice (a second pool, an alias) would
+// otherwise keep loading the untouched copy and the patch would look like it
+// did nothing. Copies are re-located after each write, so a copy that had to be
+// moved into free space is followed instead of being patched at a stale offset.
 bool rewritePage(QByteArray &changed, bool enabled, const Config &config,
                  int *patched, QString *error)
 {
