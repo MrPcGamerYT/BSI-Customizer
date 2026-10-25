@@ -4077,6 +4077,13 @@ Window {
     {
         const QString about = aboutPageFixture();
         auto r = resources({ { QStringLiteral("PlrAboutSetting.qml"), about } }, true, {});
+        // The edited page is longer than the record it sits in - it carries the
+        // tags that undo it and the config line - and this tool never grows the
+        // file, so the record has to move into space the file already has, the
+        // way it moves into the zero run of an MSI player. The fixture is filled
+        // with 0xa5 so that nothing is free by accident: the cave is punched on
+        // purpose, and the move is part of what these checks prove.
+        r.f.bytes.replace(0x10000, 0x4000, QByteArray(0x4000, '\0'));
         addRegistration(r, false);
         // A Qt-compiled player carries a QV4 unit for this page next to its
         // source, and that unit wins even with an empty disk cache. The header
