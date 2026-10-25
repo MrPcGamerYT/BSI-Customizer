@@ -48,6 +48,9 @@ with tempfile.TemporaryDirectory() as directory:
         component.setData(qml.encode(), QUrl.fromLocalFile(str(Path(directory) / "test.qml")))
         obj = component.create()
         assert obj is not None, [e.toString() for e in component.errors()]
+        # QML may collect an unparented mock while another component is being
+        # created; the Python variable alone does not root QML-owned objects.
+        QQmlEngine.setObjectOwnership(obj, QQmlEngine.ObjectOwnership.CppOwnership)
         return obj
 
     backend = create('''import QtQuick
