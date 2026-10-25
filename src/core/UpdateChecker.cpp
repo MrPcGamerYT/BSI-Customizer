@@ -981,6 +981,13 @@ bool UpdateChecker::stagedIsInstaller() const
            || name.contains(QLatin1String("-install-"));
 }
 
+namespace {
+// Defined with the rest of the Windows code near the end of the file, but used
+// here first: the update path lives here, the platform plumbing lives there.
+bool startInstallerProcess(const QString &program, const QStringList &arguments,
+                           const QString &workingDirectory, QString *error);
+} // namespace
+
 void UpdateChecker::runInstaller()
 {
     // The setup waits for this process to exit (/CLOSEAPPLICATIONS), replaces the
