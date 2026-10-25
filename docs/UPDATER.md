@@ -147,6 +147,14 @@ present.
    ends with the new version on screen instead of nothing. When Windows refuses
    to start the setup, the message carries its own error text and code.
 
+   The same decision can be asked for a file on disk, without a channel:
+   `BSI-Customizer.exe --check-updates --verify-file <file> [--json]` prints
+   the header it read, whether the file is a setup, whether Windows can run it
+   and whether it could replace this copy, then `VERDICT: the updater would
+   keep/delete this file` (exit code 0/1). The release workflow runs it on the
+   installer it just built, so a setup the app would refuse fails the pull
+   request instead of the users.
+
    > **Before 2.5.2 the updater could not install at all.** The verifier wanted
    > a 64-bit header from Inno's 32-bit setup stub, so every finished download
    > was deleted at 100% with "not a 64-bit Windows program", and the silent
