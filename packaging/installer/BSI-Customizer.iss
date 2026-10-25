@@ -6,7 +6,7 @@
 ; single-file build CI already tested.
 ;
 ; Built by .github/workflows/release.yml:
-;   ISCC.exe /DAppVersion=2.5.2 /DSourceExe=<exe> /DOutputDir=<dir> BSI-Customizer.iss
+;   ISCC.exe /DAppVersion=2.6.0 /DSourceExe=<exe> /DOutputDir=<dir> BSI-Customizer.iss
 ;
 ; Nothing here is required to run the app: the installed EXE is still portable,
 ; a copy of it runs from anywhere.
@@ -76,9 +76,13 @@ Name: "{autodesktop}\BSI Customizer"; Filename: "{app}\BSI-Customizer.exe"; Task
 ;     skipped when Setup runs silent;
 ;   * the second runs only when Setup runs silent, so the updated build comes
 ;     back by itself after the update.
-; The app manifest requires administrator rights. Launch with Setup's elevated
-; token: runasoriginaluser would use CreateProcess without elevation and fail
-; with error 740 for both the wizard and silent-update paths.
+;
+; BOTH use runascurrentuser, and that is not a detail: the app's manifest says
+; requireAdministrator, so starting it with the unelevated token fails with
+; "CreateProcess failed; code 740. The requested operation requires elevation."
+; - the error dialog a manual install used to end with (an entry that has
+; postinstall otherwise runs as the original, non-elevated user). The app is
+; administrator-only by design, so it starts with Setup's own token.
 Filename: "{app}\BSI-Customizer.exe"; Description: "{cm:LaunchProgram,BSI Customizer}"; Flags: nowait postinstall skipifsilent runascurrentuser
 Filename: "{app}\BSI-Customizer.exe"; Description: "{cm:LaunchProgram,BSI Customizer}"; Flags: nowait skipifnotsilent runascurrentuser
 

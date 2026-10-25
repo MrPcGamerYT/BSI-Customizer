@@ -158,15 +158,17 @@ starts with exactly what that build prints — nothing is retyped:
 
 Some pages gate both sections with a binding such as
 `visible: uiBackend.oem !== "msi5"`, which is false on every MSI install, so
-those sections are drawn hidden there. The patch always switches both sections
-on by default — that is what makes the edited text and the links visible at
-all, and it is the only value that is correct on both the MSI and the
-BlueStacks builds (where the binding is already true). The toggle is still
-there as **Sections shown — switch back to stock** for anyone who wants the
-page left exactly as the build draws it, and the cards says which build drew
-them hidden. **Diagnose** prints what the editor found on the selected EXE —
-the page, its current text, every row and the reason if the card refuses — so
-nothing has to be guessed.
+those sections are drawn hidden there — and the thin separator line drawn
+*between* the two sections carries the same check, which is why it is the whole
+page that is scanned for it and not just the two blocks. The patch always
+switches all of them on by default: that is what makes the edited text and the
+links visible at all, and `true` is the only value that is correct on both the
+MSI and the BlueStacks builds (where the binding is already true). The toggle is
+still there as **Sections shown — switch back to stock** for anyone who wants the
+page left exactly as the build draws it, and the card says which build drew them
+hidden. **Diagnose** prints what the editor found on the selected EXE — the page,
+its current text, every row and the reason if the card refuses — so nothing has
+to be guessed.
 
 A BlueStacks player carries the page **twice**: `PlrAboutSetting.qml` as text,
 and a compiled copy of the same page that the window actually loads. Every word
@@ -195,6 +197,42 @@ intact. The name it had is kept in the hidden anchor's `href` — on a player th
 carries no `.qml`, that is the only copy of it left — so showing the row again
 gives back its name, its words and its address.
 
+A page built with the Qt QML compiler also carries a **compiled copy** of the
+page itself (a `qv4cdata` unit), and a compiled unit takes precedence over the
+`.qml` source even when the disk cache is empty - which is why a row hidden in
+the source still painted its dash, and why the update button could only ever be
+blanked instead of removed. Applying therefore switches that unit's format
+version off, so the player compiles the edited source instead; restoring puts the
+version back from the backup. On a build whose page exists *only* as compiled
+code the unit is left alone (switching it off would leave no page at all), and
+the string edits below are what it gets.
+
+A player that keeps its QML out of `HD-Player.exe` - a small launcher with the
+page in a DLL beside it, as newer MSI builds do - is handled too: the file that
+carries the page is located next to the selected EXE and that is the file that is
+read and written, so "not embedded in this player" only appears when nothing in
+the folder has the page.
+
+A build whose resource registration this tool cannot follow - the MSI 5.12
+player is one, and it writes no `qres` header at all - is not "not embedded" any
+more: the page's record is located by its own words, and the resource tree is
+then asked to map it. A page found that way is a **normal resource** - it is
+rewritten through its node, its timestamp is refreshed so the player recompiles
+it, and when the edited page is longer than the room its record has (the MSI
+record is full to the last byte) the record is built in **free space the file
+already has** and the tree node is re-pointed at it. The file still cannot grow
+by a single byte, and the pool's own payloads are excluded from that free space,
+so a long run of zeros inside, say, a silent WAV is never mistaken for a cave. A
+record that no tree maps is still read, and written back in place inside the
+room it already has, with Apply saying exactly how many bytes are missing when
+it does not fit.
+
+Two more rules keep that page inside its budget. The About line is only
+rewritten when it does not already print what it should - a field the user left
+alone is not re-tagged - and the OEM check the MSI build uses to hide both
+bottom sections is replaced by `true/*msi5*/`, which is **shorter** than the
+expression it replaces and puts the check back byte for byte on restore.
+
 Every replacement is written **inside its own record**: the count is updated and
 the rest of the slot is padded, so the file never grows and no offset moves. A
 text longer than its slot is refused with the length that fits, never truncated,
@@ -222,11 +260,13 @@ prints and the address you left in it. In the compiled copy the address record
 holds the address and the anchor holds the words — never the other way round, so
 editing the address really changes where the row goes. Rows ticked off, a row
 left without an address, any stock row the list does not name, and the stock QQ
-row are hidden. The **Check for updates** button is disabled by hiding
-it together with its "More info" and incompatible-version rows, so nothing on
-the page points at BlueStacks updates any more; on the compiled copy its caption
-is cleared the same way. Press **Restore stock About** to restore the untouched
-page byte-for-byte.
+row are hidden - in the source with `visible: false`, so nothing of them is left
+(no name, no address, and no " - " in front of where the link was). The
+**Check for updates** button is removed together with its "More info" and
+incompatible-version rows, so nothing on the page points at BlueStacks updates
+any more; on a page that exists only as compiled code its caption is cleared
+instead, which is all a string edit can do there. Press **Restore stock About**
+to restore the untouched page byte-for-byte.
 
 Both tools work on the Qt 5 and Qt 6 players: BlueStacks 5.22 and the older
 5.10 build, plus the MSI App Player 5.9 and the current MSI build. The

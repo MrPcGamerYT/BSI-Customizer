@@ -39,7 +39,7 @@ Follow-up changes below include the independently applied installer elevation fi
 
 Also observed: the tag is `v2.5.3` while `CMakeLists.txt` declares `2.5.2`.
 That can affect the updater's version comparison. The follow-up build declares
-`2.5.4` so it has a distinct update identity.
+`2.6.1` so it has a distinct update identity.
 
 ## Implemented first step
 
@@ -86,7 +86,7 @@ The full Qt application and Windows self-test were **not run locally**: this
 sandbox has no Qt development SDK or CMake installation. The existing Windows CI
 build/self-test remains necessary before merging or releasing.
 
-## Resources follow-up (2.5.4)
+## Resources follow-up (2.6.1)
 
 - Removed all completion/visibility/path-change scan triggers. Only **Scan
   Resources** starts a user scan. Successful resource writes still refresh their
@@ -118,3 +118,12 @@ syntax checking as a passing runtime test. New C++ regression cases cover the
 metadata/thumbnail snapshot, targeted notifications, x86 installer verification
 and refusal to copy over the app with a same-architecture installer. These need
 the Windows build/self-test before release.
+
+## Test-branch integration note
+
+During testing, main advanced to `a193f43` (PR #55, version 2.6.0). It was
+merged into this branch without switching branches. The next build identity is
+therefore 2.6.1. Manual scans and metadata-only filtering are unchanged. The
+installer keeps PE validation: valid x86 loaders pass, but merely adding an Inno
+marker to a contradictory or truncated executable does not bypass verification.
+The CLI installer verdict now calls the actual staged-file verifier.

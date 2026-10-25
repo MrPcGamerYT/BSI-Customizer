@@ -552,10 +552,11 @@ Item {
                                     wrapMode: Text.Wrap
                                     text: qsTr("Everything below is read from the About page itself: "
                                                + "the sentence it prints and every link with its name "
-                                               + "and address. Edit them, hide the ones you do not "
+                                               + "and address. Edit them, untick the ones you do not "
                                                + "want and apply — the page keeps its layout, logo and "
-                                               + "version and the “Check for updates” button stays "
-                                               + "disabled.")
+                                               + "version, a hidden link leaves nothing behind (not even "
+                                               + "its dash) and the “Check for updates” button is "
+                                               + "removed.")
                                     color: Theme.textDim
                                     font.pixelSize: 11
                                 }
@@ -949,7 +950,7 @@ Item {
                                       ? qsTr("Applied. Edit any field and press Update to change it.")
                                       : (page.about.supported
                                          ? qsTr("Ready — the text and links above are what the page "
-                                                + "prints now; the update button will be disabled.")
+                                                + "prints now; the update button will be removed.")
                                          : (page.about.detail || qsTr("Unavailable")))
                                 color: page.about.applied ? Theme.green
                                        : (page.about.supported ? Theme.textDim : Theme.warn)

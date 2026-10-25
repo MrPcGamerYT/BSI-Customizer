@@ -486,13 +486,18 @@ int runUpdateCli(const QStringList &arguments)
         QString error;
         UpdateChecker::PeInfo pe;
         const bool readable = UpdateChecker::readPeInfo(file.absoluteFilePath(), &pe, &error);
-        const bool runnable = UpdateChecker::looksLikeExecutable(file.absoluteFilePath(), &error);
         const bool installer = UpdateChecker::looksLikeInstaller(file.absoluteFilePath());
-        const bool replaceable = UpdateChecker::canReplaceThisProgram(file.absoluteFilePath(), &error);
+        const bool runnable = UpdateChecker::looksLikeExecutable(file.absoluteFilePath(), &error);
+        const bool replaceable = !installer
+            && UpdateChecker::canReplaceThisProgram(file.absoluteFilePath(), &error);
+        // The verdict must use the download path itself, not installer markers
+        // or an independent approximation that can accept a broken header.
+        QString verificationError;
+        const bool accepted = UpdateChecker::verifyStagedFile(file.absoluteFilePath(), 0, {}, &verificationError);
 
         if (json) {
             QJsonObject result{
-                { QStringLiteral("ok"), runnable },
+                { QStringLiteral("ok"), accepted },
                 { QStringLiteral("file"), file.absoluteFilePath() },
                 { QStringLiteral("size"), double(file.size()) },
                 { QStringLiteral("readable"), readable },
@@ -501,11 +506,11 @@ int runUpdateCli(const QStringList &arguments)
                 { QStringLiteral("installer"), installer },
                 { QStringLiteral("runnable"), runnable },
                 { QStringLiteral("canReplace"), replaceable },
-                { QStringLiteral("error"), runnable ? QString() : error },
+                { QStringLiteral("error"), accepted ? QString() : verificationError },
             };
             line(QStringLiteral("%1").arg(QString::fromUtf8(
                 QJsonDocument(result).toJson(QJsonDocument::Compact))));
-            return runnable ? 0 : 1;
+            return accepted ? 0 : 1;
         }
 
         line(QStringLiteral("file:    %1").arg(file.absoluteFilePath()));
@@ -519,11 +524,11 @@ int runUpdateCli(const QStringList &arguments)
         line(QStringLiteral("setup:   %1").arg(installer ? QStringLiteral("yes") : QStringLiteral("no")));
         line(QStringLiteral("runs:    %1").arg(runnable ? QStringLiteral("yes") : QStringLiteral("no")));
         line(QStringLiteral("replace: %1").arg(replaceable ? QStringLiteral("yes") : QStringLiteral("no")));
-        if (!runnable)
-            line(QStringLiteral("reason:  %1").arg(error));
-        line(runnable ? QStringLiteral("VERDICT: the updater would keep this file")
+        if (!accepted)
+            line(QStringLiteral("reason:  %1").arg(verificationError));
+        line(accepted ? QStringLiteral("VERDICT: the updater would keep this file")
                       : QStringLiteral("VERDICT: the updater would delete this file"));
-        return runnable ? 0 : 1;
+        return accepted ? 0 : 1;
     }
     return runUpdateCommand(arguments);
 }

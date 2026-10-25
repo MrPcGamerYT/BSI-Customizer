@@ -2347,10 +2347,15 @@ bool UpdateChecker::looksLikeExecutable(const QString &path, QString *error)
 
 bool UpdateChecker::canReplaceThisProgram(const QString &path, QString *error)
 {
-    // A setup is launched, never used as a copy-over replacement—even when
-    // its stub happens to match this application's architecture.
+    // A setup is not a candidate for replacing the running EXE at all, so it is
+    // not measured against it either: it is started and installs the new copy.
+    // This is checked *before* the PE header is read, because Inno's loader is
+    // a 32-bit x86 program whatever it installs - reading that header here is
+    // what produced the "machine 0x014c" refusal on a perfectly good setup.
     if (looksLikeInstaller(path)) {
-        if (error) *error = QStringLiteral("it is a setup program; run it to install the update");
+        if (error)
+            *error = QStringLiteral("it is a setup program, which is run rather than copied over "
+                                    "this program");
         return false;
     }
     PeInfo info;
@@ -2410,6 +2415,10 @@ bool UpdateChecker::verifyStagedFile(const QString &path, qint64 expectedSize,
                               .arg(expectedSha256.left(12), actual.left(12)));
         }
     }
+    // Inno's x86 / PE32 loader is runnable on an x64 PC. Use that check,
+    // not the application's stricter copy-over architecture requirement.
+    // Installer markers are not executable validation: corrupted/truncated
+    // files containing "Inno Setup" must still fail the PE/header checks.
     QString peError;
     if (!looksLikeExecutable(path, &peError))
         return reject(peError);

@@ -124,6 +124,12 @@ present.
    program". The architecture of the *app* is only asked about where it matters:
    replacing a loose copy in place (`canReplaceThisProgram`), which a setup
    never does.
+
+   Installer detection decides **how to apply** a verified file, not whether it
+   is valid. A setup still needs a readable, runnable PE header; x86 / PE32 is
+   accepted on x64 Windows through WoW64, while a truncated or contradictory
+   header is refused even if the file contains an `Inno Setup` marker. The
+   stricter same-as-app architecture check applies only to copy-over updates.
 6. **Install and restart.** A release is shipped as a setup program, and the
    updater decides that from the **file itself** (Inno Setup's `Inno Setup Setup
    Data` / `InnoSetupLdr` markers, NSIS, a 7-Zip SFX, a WiX bundle) - not only
@@ -143,11 +149,17 @@ present.
    prompt. The setup is given `/VERYSILENT /SUPPRESSMSGBOXES /NOCANCEL
    /NORESTART /CLOSEAPPLICATIONS /FORCECLOSEAPPLICATIONS
    /LOG=<temp>\setup.log`, and its `[Run]` section starts the new build again
-   **when Setup is silent** (`skipifnotsilent runascurrentuser`), so an update
-   ends with the new version on screen instead of nothing. Both launch entries
-   use Setup's elevated token: the application's manifest requires administrator
-   rights, and launching it as the original unelevated user fails with error 740. When Windows refuses
-   to start the setup, the message carries its own error text and code.
+   **when Setup is silent** (`skipifnotsilent`), so an update ends with the new
+   version on screen instead of nothing. When Windows refuses to start the
+   setup, the message carries its own error text and code.
+
+   Both `[Run]` entries carry `runascurrentuser`. That is not cosmetic: the app
+   requests `requireAdministrator` in its manifest, so an entry that runs with
+   the original, non-elevated token fails with **"CreateProcess failed; code
+   740. The requested operation requires elevation."** - the dialog a manual
+   install used to end with (an entry with `postinstall` runs as the original
+   user unless told otherwise). The app is administrator-only by design, so it
+   starts with Setup's own token.
 
    The same decision can be asked for a file on disk, without a channel:
    `BSI-Customizer.exe --check-updates --verify-file <file> [--json]` prints
@@ -155,7 +167,8 @@ present.
    and whether it could replace this copy, then `VERDICT: the updater would
    keep/delete this file` (exit code 0/1). The release workflow runs it on the
    installer it just built, so a setup the app would refuse fails the pull
-   request instead of the users.
+   request instead of the users. The CLI verdict calls the download verifier
+   itself; identifying a file as an installer cannot override a failed check.
 
    > **Before 2.5.2 the updater could not install at all.** The verifier wanted
    > a 64-bit header from Inno's 32-bit setup stub, so every finished download
@@ -170,7 +183,7 @@ present.
    > [Releases](https://github.com/MrPcGamerYT/BSI-Customizer/releases/latest)
    > manually once, then open the installed Start menu shortcut rather than an
    > older loose EXE. The code in an already-running 2.5.0 cannot repair itself
-   > when it deletes every update. Build 2.5.4 also fixes the elevated relaunch
+   > when it deletes every update. Build 2.6.1 also fixes the elevated relaunch
    > for both interactive and silent installs, and prevents even a same-CPU
    > setup from ever being used as a copy-over replacement. Size, SHA-256 and PE
    > validation remain enforced; installer markers are not a validation bypass.
