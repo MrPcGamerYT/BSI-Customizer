@@ -88,6 +88,25 @@ void check(bool ok, const QString &message)
 {
     check(ok, qPrintable(message));
 }
+
+// A byte comparison that fails says nothing about where: show the first lines
+// that differ so one CI annotation is enough to diagnose it.
+QString firstDifference(const QString &expected, const QString &actual)
+{
+    const QStringList left = expected.split(QLatin1Char('\n'));
+    const QStringList right = actual.split(QLatin1Char('\n'));
+    QStringList lines;
+    for (int i = 0; i < left.size() || i < right.size(); ++i) {
+        const QString a = i < left.size() ? left.at(i) : QStringLiteral("<end of file>");
+        const QString b = i < right.size() ? right.at(i) : QStringLiteral("<end of file>");
+        if (a == b) continue;
+        lines << QStringLiteral("line %1 differs\n  expected: %2\n  actual:   %3")
+                     .arg(i + 1).arg(a.left(240)).arg(b.left(240));
+        if (lines.size() == 3) break;
+    }
+    return lines.isEmpty() ? QStringLiteral("the documents differ only in length")
+                           : lines.join(QLatin1Char('\n'));
+}
 // The job log of a *passing* Windows run is not retrievable either, so the few
 // numbers that prove what was really exercised are published as annotations.
 void ciNotice(const QString &message)
@@ -2516,8 +2535,13 @@ Window {
         const auto earlierTitlebarState = LayoutPatcher::analyze(read(earlierTitlebarPath), id);
         check(earlierTitlebarState.supported && earlierTitlebarState.applied && earlierTitlebarState.needsUpdate,
               "an older title-bar helper offers an in-place Update");
-        check(LayoutPatcher::apply(earlierTitlebarPath, id, true).ok
-                  && resourceText(read(earlierTitlebarPath), earlierTitlebar, QStringLiteral("PlrSidebar.qml")) == patchedSidebar,
+        const auto titlebarUpgrade = LayoutPatcher::apply(earlierTitlebarPath, id, true);
+        const QString upgradedTitlebar =
+            resourceText(read(earlierTitlebarPath), earlierTitlebar, QStringLiteral("PlrSidebar.qml"));
+        if (!titlebarUpgrade.ok || upgradedTitlebar != patchedSidebar)
+            std::printf("    apply: %s\n    %s\n", qPrintable(titlebarUpgrade.msg),
+                        qPrintable(firstDifference(patchedSidebar, upgradedTitlebar)));
+        check(titlebarUpgrade.ok && upgradedTitlebar == patchedSidebar,
               "Update installs the current helper without moving the sidebar twice");
         check(LayoutPatcher::apply(earlierTitlebarPath, id, false).ok
                   && resourceText(read(earlierTitlebarPath), earlierTitlebar, QStringLiteral("PlrSidebar.qml")) == sidebar
@@ -2623,8 +2647,13 @@ Window {
         const auto oldState = LayoutPatcher::analyze(read(oldSinglePath), id);
         check(oldState.supported && oldState.applied && oldState.needsUpdate,
               "earlier single-owner title bars offer an in-place overflow/popup update");
-        check(LayoutPatcher::apply(oldSinglePath, id, true).ok
-                  && resourceText(read(oldSinglePath), oldSingle, QStringLiteral("PlrSidebar.qml")) == patchedSidebar
+        const auto singleUpgrade = LayoutPatcher::apply(oldSinglePath, id, true);
+        const QString upgradedSingle =
+            resourceText(read(oldSinglePath), oldSingle, QStringLiteral("PlrSidebar.qml"));
+        if (!singleUpgrade.ok || upgradedSingle != patchedSidebar)
+            std::printf("    apply: %s\n    %s\n", qPrintable(singleUpgrade.msg),
+                        qPrintable(firstDifference(patchedSidebar, upgradedSingle)));
+        check(singleUpgrade.ok && upgradedSingle == patchedSidebar
                   && !LayoutPatcher::analyze(read(oldSinglePath), id).needsUpdate,
               "Update adds smart overflow and anchored panels without changing the existing title bar");
         check(LayoutPatcher::apply(oldSinglePath, id, false).ok
@@ -2652,7 +2681,7 @@ Window {
               "the row starts with the title bar's own navigation, which is never hidden");
         check(patchedSidebar.contains(QLatin1String("true /* BSI CUSTOMIZER: settings in the row */"))
                   && patchedSidebar.contains(
-                      QLatin1String("// BSI CUSTOMIZER: hidden row buttons=iBackBtn,iHomeBtn,iRecentBtn"))
+                      QLatin1String("// BSI CUSTOMIZER: hidden row buttons=iBackBtn,iHomeBtn,iRecentBtn,iSettingsBtn"))
                   && patchedSidebar.contains(QLatin1String("iSettingsBtn.visible = false")),
               "Settings joins the row as a normal button and its own strip button steps aside");
         check(patchedPlr.contains(QLatin1String("anchors.leftMargin: parent.pBSISidebarX")),

@@ -1875,6 +1875,20 @@ bool sidebarOrderEdits(const QString &qml, const QString &masked, bool enabled, 
         return true;
     }
 
+    // An older patch centred the row inside the title bar. The update lands on
+    // the current shape instead of leaving the old anchor behind.
+    const auto centre = [&](QList<Edit> &list) {
+        QmlText::Binding binding;
+        if (!directBinding(masked, stripObject.open, stripObject.end,
+                           QStringLiteral("anchors.centerIn"), &binding)) return true;
+        if (qml.mid(binding.valueBegin, binding.valueEnd - binding.valueBegin) != QLatin1String("parent"))
+            return true;
+        addEdit(list, binding.nameBegin, binding.valueEnd - binding.nameBegin,
+                QStringLiteral("anchors.left: parent.left"));
+        return true;
+    };
+    if (!centre(edits)) return false;
+
     const QString nl = lineEnding(qml);
     if (!haveStripMarker) {
         addEdit(edits, qml.lastIndexOf(QLatin1Char('\n'), strip.first().begin) + 1, 0,
