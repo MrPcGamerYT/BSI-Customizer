@@ -170,3 +170,14 @@ jobs:
             }
             throw "self-test failed (exit code $($p.ExitCode))"
           }
+
+      # A failing job's log cannot be read back through the API on this account,
+      # and the annotations only carry the lines that mention failure. The whole
+      # log is published as an artifact so the run can be read afterwards.
+      - name: Upload self-test log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: selftest-log
+          path: ${{ runner.temp }}/selftest.log
+          if-no-files-found: ignore
