@@ -6,6 +6,8 @@ QT_QPA_PLATFORM=offscreen python3 tests/resources_page_runtime_test.py
 import os
 import shutil
 import tempfile
+import sys
+import traceback
 from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -14,6 +16,16 @@ from PySide6.QtCore import QObject, QUrl
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtQml import QQmlComponent, QQmlEngine
 from PySide6.QtTest import QTest
+
+# GitHub job-log downloads are unavailable in this environment. Surface the
+# complete assertion/QML diagnostic as check annotations as well as stderr.
+if os.environ.get("GITHUB_ACTIONS"):
+    def report_failure(kind, value, trace):
+        for line in "".join(traceback.format_exception(kind, value, trace)).splitlines():
+            escaped = line.replace("%", "%25").replace("\r", "%0D")
+            print(f"::error file=tests/resources_page_runtime_test.py::{escaped}", flush=True)
+        sys.__excepthook__(kind, value, trace)
+    sys.excepthook = report_failure
 
 app = QGuiApplication([])
 source = Path(__file__).resolve().parents[1] / "src/qml"
