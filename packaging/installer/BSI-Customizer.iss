@@ -6,7 +6,7 @@
 ; single-file build CI already tested.
 ;
 ; Built by .github/workflows/release.yml:
-;   ISCC.exe /DAppVersion=2.5.2 /DSourceExe=<exe> /DOutputDir=<dir> BSI-Customizer.iss
+;   ISCC.exe /DAppVersion=2.6.0 /DSourceExe=<exe> /DOutputDir=<dir> BSI-Customizer.iss
 ;
 ; Nothing here is required to run the app: the installed EXE is still portable,
 ; a copy of it runs from anywhere.
@@ -75,11 +75,16 @@ Name: "{autodesktop}\BSI Customizer"; Filename: "{app}\BSI-Customizer.exe"; Task
 ;   * the first entry is the normal "Launch BSI Customizer" checkbox and is
 ;     skipped when Setup runs silent;
 ;   * the second runs only when Setup runs silent, so the updated build comes
-;     back by itself after the update. It carries runasoriginaluser because an
-;     entry without postinstall otherwise inherits Setup's elevation: the app
-;     would come back running as administrator, which it never does normally.
-Filename: "{app}\BSI-Customizer.exe"; Description: "{cm:LaunchProgram,BSI Customizer}"; Flags: nowait postinstall skipifsilent
-Filename: "{app}\BSI-Customizer.exe"; Description: "{cm:LaunchProgram,BSI Customizer}"; Flags: nowait skipifnotsilent runasoriginaluser
+;     back by itself after the update.
+;
+; BOTH use runascurrentuser, and that is not a detail: the app's manifest says
+; requireAdministrator, so starting it with the unelevated token fails with
+; "CreateProcess failed; code 740. The requested operation requires elevation."
+; - the error dialog a manual install used to end with (an entry that has
+; postinstall otherwise runs as the original, non-elevated user). The app is
+; administrator-only by design, so it starts with Setup's own token.
+Filename: "{app}\BSI-Customizer.exe"; Description: "{cm:LaunchProgram,BSI Customizer}"; Flags: nowait postinstall skipifsilent runascurrentuser
+Filename: "{app}\BSI-Customizer.exe"; Description: "{cm:LaunchProgram,BSI Customizer}"; Flags: nowait skipifnotsilent runascurrentuser
 
 [UninstallDelete]
 ; Leftovers of a patch: the backup the tool keeps next to HD-Player.exe is not

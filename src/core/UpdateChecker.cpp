@@ -2347,6 +2347,17 @@ bool UpdateChecker::looksLikeExecutable(const QString &path, QString *error)
 
 bool UpdateChecker::canReplaceThisProgram(const QString &path, QString *error)
 {
+    // A setup is not a candidate for replacing the running EXE at all, so it is
+    // not measured against it either: it is started and installs the new copy.
+    // This is checked *before* the PE header is read, because Inno's loader is
+    // a 32-bit x86 program whatever it installs - reading that header here is
+    // what produced the "machine 0x014c" refusal on a perfectly good setup.
+    if (looksLikeInstaller(path)) {
+        if (error)
+            *error = QStringLiteral("it is a setup program, which is run rather than copied over "
+                                    "this program");
+        return false;
+    }
     PeInfo info;
     if (!readPeInfo(path, &info, error)) return false;
     if (info.isDll) {
@@ -2403,6 +2414,19 @@ bool UpdateChecker::verifyStagedFile(const QString &path, qint64 expectedSize,
             return reject(QStringLiteral("SHA-256 mismatch: expected %1..., got %2...")
                               .arg(expectedSha256.left(12), actual.left(12)));
         }
+    }
+    // A setup is judged as a setup, never by the processor its loader names.
+    // Inno's own loader is a 32-bit x86 program even when it installs a 64-bit
+    // one, and a build of Inno whose header this check cannot make sense of
+    // must not turn a good download into "a processor this PC cannot run" -
+    // that is exactly the message that deleted every finished download before
+    // 2.5.2. Only a file that would *replace* this EXE is asked about its
+    // architecture, and a setup never replaces it: it is run.
+    if (looksLikeInstaller(path)) {
+        QFile probe(path);
+        if (!probe.open(QIODevice::ReadOnly) || probe.read(2) != QByteArrayLiteral("MZ"))
+            return reject(QStringLiteral("the installer has no MZ header"));
+        return true;
     }
     QString peError;
     if (!looksLikeExecutable(path, &peError))

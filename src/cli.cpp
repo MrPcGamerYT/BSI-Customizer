@@ -486,9 +486,17 @@ int runUpdateCli(const QStringList &arguments)
         QString error;
         UpdateChecker::PeInfo pe;
         const bool readable = UpdateChecker::readPeInfo(file.absoluteFilePath(), &pe, &error);
-        const bool runnable = UpdateChecker::looksLikeExecutable(file.absoluteFilePath(), &error);
         const bool installer = UpdateChecker::looksLikeInstaller(file.absoluteFilePath());
-        const bool replaceable = UpdateChecker::canReplaceThisProgram(file.absoluteFilePath(), &error);
+        // A setup is run, not re-executed in place, so its own header is never
+        // asked about: Inno's loader is 32-bit whatever it installs, and asking
+        // "would this PC run it" about that stub is what made a perfectly good
+        // release setup print `runs: no` and exit 1.
+        const bool runnable = installer
+            || UpdateChecker::looksLikeExecutable(file.absoluteFilePath(), &error);
+        // Copying a running program over itself needs the same architecture;
+        // a setup is started instead, so it is not measured against it either.
+        const bool replaceable = !installer
+            && UpdateChecker::canReplaceThisProgram(file.absoluteFilePath(), &error);
 
         if (json) {
             QJsonObject result{

@@ -124,6 +124,14 @@ present.
    program". The architecture of the *app* is only asked about where it matters:
    replacing a loose copy in place (`canReplaceThisProgram`), which a setup
    never does.
+
+   A finished download that identifies itself as a setup (the markers below) is
+   therefore checked for its size, its SHA-256 and an `MZ` header **only**: its
+   PE header is not read at all. That header belongs to Inno's loader, not to
+   this app, and a loader this code cannot make sense of must never turn a good
+   download into a refusal - which is what produced the "machine 0x014c"
+   message. A setup is also refused by `canReplaceThisProgram` with "it is a
+   setup program", so no path can ever copy one over the running EXE.
 6. **Install and restart.** A release is shipped as a setup program, and the
    updater decides that from the **file itself** (Inno Setup's `Inno Setup Setup
    Data` / `InnoSetupLdr` markers, NSIS, a 7-Zip SFX, a WiX bundle) - not only
@@ -143,9 +151,17 @@ present.
    prompt. The setup is given `/VERYSILENT /SUPPRESSMSGBOXES /NOCANCEL
    /NORESTART /CLOSEAPPLICATIONS /FORCECLOSEAPPLICATIONS
    /LOG=<temp>\setup.log`, and its `[Run]` section starts the new build again
-   **when Setup is silent** (`skipifnotsilent runasoriginaluser`), so an update
-   ends with the new version on screen instead of nothing. When Windows refuses
-   to start the setup, the message carries its own error text and code.
+   **when Setup is silent** (`skipifnotsilent`), so an update ends with the new
+   version on screen instead of nothing. When Windows refuses to start the
+   setup, the message carries its own error text and code.
+
+   Both `[Run]` entries carry `runascurrentuser`. That is not cosmetic: the app
+   requests `requireAdministrator` in its manifest, so an entry that runs with
+   the original, non-elevated token fails with **"CreateProcess failed; code
+   740. The requested operation requires elevation."** - the dialog a manual
+   install used to end with (an entry with `postinstall` runs as the original
+   user unless told otherwise). The app is administrator-only by design, so it
+   starts with Setup's own token.
 
    The same decision can be asked for a file on disk, without a channel:
    `BSI-Customizer.exe --check-updates --verify-file <file> [--json]` prints
@@ -153,7 +169,10 @@ present.
    and whether it could replace this copy, then `VERDICT: the updater would
    keep/delete this file` (exit code 0/1). The release workflow runs it on the
    installer it just built, so a setup the app would refuse fails the pull
-   request instead of the users.
+   request instead of the users. A setup counts as **runnable** by definition:
+   it is started, never re-executed in place, so the processor its own 32-bit
+   loader names is not asked about — that question is what printed
+   `runs: no` and exited 1 on a perfectly good release setup.
 
    > **Before 2.5.2 the updater could not install at all.** The verifier wanted
    > a 64-bit header from Inno's 32-bit setup stub, so every finished download

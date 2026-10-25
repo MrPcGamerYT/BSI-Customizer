@@ -817,6 +817,93 @@ void checkNativeMaxOnly(const QByteArray &data, double hi)
 
 } // namespace
 
+// The stock About page exactly as the players store it, shared by the tests
+// that need a page the editor recognises as one.
+static QString aboutPageFixture()
+{
+    return QStringLiteral(
+        "import QtQuick 2.15\r\n"
+        "import QtQuick.Layouts 1.15\r\n"
+        "Item {\r\n"
+        "    objectName: \"aboutSettings\"\r\n"
+        "    UiColumnLayout {\r\n"
+        "        anchors.fill: parent\r\n"
+        "        UiScrollView {\r\n"
+        "            id: iScrollView\r\n"
+        "            contentHeight: iContentLayout.height + 10\r\n"
+        "            UiColumnLayout {\r\n"
+        "                id: iContentLayout\r\n"
+        "                width: 548\r\n"
+        "                spacing: 16\r\n"
+        "                UiRowLayout {\r\n"
+        "                    Layout.fillWidth: true\r\n"
+        "                    UiImage { asset: \"BlueStacks5Beta\" }\r\n"
+        "                    Text { text: qsTranslate(\"QObject\", \"%1\").arg(uiBackend.productName) }\r\n"
+        "                }\r\n"
+        "                UiColumnLayout {\r\n"
+        "                    Layout.fillWidth: true\r\n"
+        "                    spacing: 2\r\n"
+        "                    UiTextUrl {\r\n"
+        "                        text: pUpdateVersion + \" available . <a href=\\\"javascript:void(0)\\\">More info</a>\"\r\n"
+        "                        visible: pUpdateAvailable\r\n"
+        "                        onLinkActivated: Qt.openUrlExternally(pMoreInfoURL)\r\n"
+        "                    }\r\n"
+        "                    UiButton {\r\n"
+        "                        Layout.preferredWidth: 124\r\n"
+        "                        text: pUpdateAvailable ? \"Download Update\" : \"Check for updates\"\r\n"
+        "                        visible: !iLoader.visible\r\n"
+        "                        onClicked: plrBackend.checkForUpdate()\r\n"
+        "                    }\r\n"
+        "                }\r\n"
+        "                UiColumnLayout {\r\n"
+        "                    Layout.fillWidth: true\r\n"
+        "                    visible: uiBackend.oem !== \"msi5\"\r\n"
+        "                    Text { text: qsTranslate(\"QObject\", \"Important links\") }\r\n"
+        "                    UiColumnLayout {\r\n"
+        "                        Layout.fillWidth: true\r\n"
+        "                        UiTextUrl {\r\n"
+        "                            id: iSupportEmailText\r\n"
+        "                            text: \"Support email - <a href=\\\"javascript:void(0)\\\">support@bluestacks.com</a>\"\r\n"
+        "                        }\r\n"
+        "                        UiTextUrl {\r\n"
+        "                            id: iSupportText\r\n"
+        "                            text: \"Support - <a href=\\\"javascript:void(0)\\\">support.bluestacks.com</a>\"\r\n"
+        "                        }\r\n"
+        "                        UiTextUrl {\r\n"
+        "                            id: iWebsiteText\r\n"
+        "                            text: \"Website - <a href=\\\"javascript:void(0)\\\">www.bluestacks.com</a>\"\r\n"
+        "                            onLinkActivated: Qt.openUrlExternally(\"http://www.bluestacks.com\")\r\n"
+        "                        }\r\n"
+        "                    }\r\n"
+        "                    UiRowLayout {\r\n"
+        "                        visible: uiBackend.oem === \"nxt_cn\"\r\n"
+        "                        Text { text: \"联系我们:\" }\r\n"
+        "                        UiRowLayout {\r\n"
+        "                            UiButton { text: \"QQ群\"; onClicked: Qt.openUrlExternally(\"https://jq.qq.com/?_wv=1027&k=6x617Pxu\") }\r\n"
+        "                        }\r\n"
+        "                    }\r\n"
+        "                }\r\n"
+        "                Rectangle {\r\n"
+        "                    Layout.preferredHeight: 1\r\n"
+        "                    color: UiTheme.colors.seperator\r\n"
+        "                    visible: uiBackend.oem !== \"msi5\"\r\n"
+        "                }\r\n"
+        "                UiColumnLayout {\r\n"
+        "                    Layout.fillWidth: true\r\n"
+        "                    visible: uiBackend.oem !== \"msi5\"\r\n"
+        "                    Text { text: qsTranslate(\"QObject\", \"About and other info\") }\r\n"
+        "                    UiTextUrl {\r\n"
+        "                        id: iTermsOfUseText\r\n"
+        "                        text: qsTranslate(\"QObject\", \"Copyright 2026. By using it you agree to the \") + \"<a href=\\\"javascript:void(0)\\\">\" + qsTranslate(\"QObject\", \"Terms of use\") + \"</a>\"\r\n"
+        "                        onLinkActivated: uiBackend.openHelpArticle(\"terms_of_use\")\r\n"
+        "                    }\r\n"
+        "                }\r\n"
+        "            }\r\n"
+        "        }\r\n"
+        "    }\r\n"
+        "}\r\n");
+}
+
 int runPatchRegressionTests()
 {
     failures = 0;
@@ -3988,90 +4075,31 @@ Window {
 
     std::printf("[about] Settings About page offers every stock link and the About text\n");
     {
-        const QString about = QStringLiteral(
-            "import QtQuick 2.15\r\n"
-            "import QtQuick.Layouts 1.15\r\n"
-            "Item {\r\n"
-            "    objectName: \"aboutSettings\"\r\n"
-            "    UiColumnLayout {\r\n"
-            "        anchors.fill: parent\r\n"
-            "        UiScrollView {\r\n"
-            "            id: iScrollView\r\n"
-            "            contentHeight: iContentLayout.height + 10\r\n"
-            "            UiColumnLayout {\r\n"
-            "                id: iContentLayout\r\n"
-            "                width: 548\r\n"
-            "                spacing: 16\r\n"
-            "                UiRowLayout {\r\n"
-            "                    Layout.fillWidth: true\r\n"
-            "                    UiImage { asset: \"BlueStacks5Beta\" }\r\n"
-            "                    Text { text: qsTranslate(\"QObject\", \"%1\").arg(uiBackend.productName) }\r\n"
-            "                }\r\n"
-            "                UiColumnLayout {\r\n"
-            "                    Layout.fillWidth: true\r\n"
-            "                    spacing: 2\r\n"
-            "                    UiTextUrl {\r\n"
-            "                        text: pUpdateVersion + \" available . <a href=\\\"javascript:void(0)\\\">More info</a>\"\r\n"
-            "                        visible: pUpdateAvailable\r\n"
-            "                        onLinkActivated: Qt.openUrlExternally(pMoreInfoURL)\r\n"
-            "                    }\r\n"
-            "                    UiButton {\r\n"
-            "                        Layout.preferredWidth: 124\r\n"
-            "                        text: pUpdateAvailable ? \"Download Update\" : \"Check for updates\"\r\n"
-            "                        visible: !iLoader.visible\r\n"
-            "                        onClicked: plrBackend.checkForUpdate()\r\n"
-            "                    }\r\n"
-            "                }\r\n"
-            "                UiColumnLayout {\r\n"
-            "                    Layout.fillWidth: true\r\n"
-            "                    visible: uiBackend.oem !== \"msi5\"\r\n"
-            "                    Text { text: qsTranslate(\"QObject\", \"Important links\") }\r\n"
-            "                    UiColumnLayout {\r\n"
-            "                        Layout.fillWidth: true\r\n"
-            "                        UiTextUrl {\r\n"
-            "                            id: iSupportEmailText\r\n"
-            "                            text: \"Support email - <a href=\\\"javascript:void(0)\\\">support@bluestacks.com</a>\"\r\n"
-            "                        }\r\n"
-            "                        UiTextUrl {\r\n"
-            "                            id: iSupportText\r\n"
-            "                            text: \"Support - <a href=\\\"javascript:void(0)\\\">support.bluestacks.com</a>\"\r\n"
-            "                        }\r\n"
-            "                        UiTextUrl {\r\n"
-            "                            id: iWebsiteText\r\n"
-            "                            text: \"Website - <a href=\\\"javascript:void(0)\\\">www.bluestacks.com</a>\"\r\n"
-            "                            onLinkActivated: Qt.openUrlExternally(\"http://www.bluestacks.com\")\r\n"
-            "                        }\r\n"
-            "                    }\r\n"
-            "                    UiRowLayout {\r\n"
-            "                        visible: uiBackend.oem === \"nxt_cn\"\r\n"
-            "                        Text { text: \"联系我们:\" }\r\n"
-            "                        UiRowLayout {\r\n"
-            "                            UiButton { text: \"QQ群\"; onClicked: Qt.openUrlExternally(\"https://jq.qq.com/?_wv=1027&k=6x617Pxu\") }\r\n"
-            "                        }\r\n"
-            "                    }\r\n"
-            "                }\r\n"
-            "                Rectangle {\r\n"
-            "                    Layout.preferredHeight: 1\r\n"
-            "                    color: UiTheme.colors.seperator\r\n"
-            "                    visible: uiBackend.oem !== \"msi5\"\r\n"
-            "                }\r\n"
-            "                UiColumnLayout {\r\n"
-            "                    Layout.fillWidth: true\r\n"
-            "                    visible: uiBackend.oem !== \"msi5\"\r\n"
-            "                    Text { text: qsTranslate(\"QObject\", \"About and other info\") }\r\n"
-            "                    UiTextUrl {\r\n"
-            "                        id: iTermsOfUseText\r\n"
-            "                        text: qsTranslate(\"QObject\", \"Copyright 2026. By using it you agree to the \") + \"<a href=\\\"javascript:void(0)\\\">\" + qsTranslate(\"QObject\", \"Terms of use\") + \"</a>\"\r\n"
-            "                        onLinkActivated: uiBackend.openHelpArticle(\"terms_of_use\")\r\n"
-            "                    }\r\n"
-            "                }\r\n"
-            "            }\r\n"
-            "        }\r\n"
-            "    }\r\n"
-            "}\r\n");
+        const QString about = aboutPageFixture();
         auto r = resources({ { QStringLiteral("PlrAboutSetting.qml"), about } }, true, {});
         addRegistration(r, false);
-        const QByteArray original = r.f.bytes;
+        // A Qt-compiled player carries a QV4 unit for this page next to its
+        // source, and that unit wins even with an empty disk cache. The header
+        // is magic / format version / Qt version / unit size, and the page's own
+        // words live inside the unit, which is how the patcher finds it.
+        QByteArray original = r.f.bytes;
+        {
+            QByteArray unit(248, '\0');
+            unit.replace(0, 8, QByteArray("qv4cdata", 8));
+            const auto putUnit32 = [&unit](int at, quint32 value) {
+                for (int i = 0; i < 4; ++i) unit[at + i] = char((value >> (8 * i)) & 0xff);
+            };
+            QByteArray words;
+            for (const QChar ch : QStringLiteral("About and other info")) {
+                words.append(char(ch.unicode() & 0xff));
+                words.append(char((ch.unicode() >> 8) & 0xff));
+            }
+            putUnit32(8, 41);          // QML unit format version (Qt 5.15)
+            putUnit32(12, 0x00050f04); // Qt 5.15.4
+            putUnit32(24, quint32(248 + words.size()));
+            unit += words;
+            original += unit;
+        }
         const auto stock = AboutPatcher::analyze(original);
         check(stock.supported && !stock.applied, "the stock About page is recognized");
         check(stock.sectionsHidden && stock.config.showSections,
@@ -4121,6 +4149,19 @@ Window {
         config.links[2].url = QStringLiteral("https://youtube.com/@MrPcGamer");
         const auto applied = AboutPatcher::apply(aboutPath, true, config);
         check(applied.ok, QStringLiteral("the About page is updated (%1)").arg(applied.msg));
+        // The unit is located by its magic: rewriting the page resource can move
+        // it, so a fixed offset would be a trap.
+        const auto unitVersion = [](const QByteArray &bytes) {
+            const int at = int(bytes.indexOf(QByteArray("qv4cdata", 8)));
+            if (at < 0) return -1;
+            const auto byteAt = [&bytes, at](int i) {
+                return quint32(static_cast<unsigned char>(bytes.at(at + i)));
+            };
+            return int(byteAt(8) | (byteAt(9) << 8) | (byteAt(10) << 16) | (byteAt(11) << 24));
+        };
+        check(unitVersion(read(aboutPath)) == 0,
+              "the player's compiled copy of the page is switched off, so the edited source - with "
+              "the rows and the update button really gone - is what the window runs");
         QString patched = resourceText(read(aboutPath), r, QStringLiteral("PlrAboutSetting.qml"));
         if (!patched.contains(QLatin1String("t.me/mrpcgamer"))) {
             // Only a failing run needs this, and a failing Windows run is
@@ -4168,8 +4209,10 @@ Window {
               "that fallback is what the editor is then prefilled with");
         check(patched.contains(QLatin1String("Important links"))
                   && patched.contains(QLatin1String("About and other info"))
-                  && patched.count(QLatin1String("visible: true /* BSI CUSTOMIZER: about shown:")) == 2,
-              "the page keeps its layout and the hidden MSI sections are switched back on");
+                  && patched.count(QLatin1String("visible: true/*msi5*/")) == 3
+                  && !patched.contains(QLatin1String("uiBackend.oem !== \"msi5\"")),
+              "the page keeps its layout, and every MSI visibility check - both sections and the "
+              "separator drawn between them - is switched on");
         auto state = AboutPatcher::analyze(read(aboutPath));
         check(state.applied && !state.sectionsHidden && state.config.links.size() == 3
                   && state.config.links.value(1).url == QStringLiteral("https://discord.gg/example"),
@@ -4193,21 +4236,32 @@ Window {
         // The sections can also be left exactly as the build draws them.
         AboutPatcher::Config gated = perLink;
         gated.showSections = false;
-        check(AboutPatcher::apply(aboutPath, true, gated).ok
-                  && !resourceText(read(aboutPath), r, QStringLiteral("PlrAboutSetting.qml"))
-                          .contains(QLatin1String("BSI CUSTOMIZER: about shown:"))
-                  && resourceText(read(aboutPath), r, QStringLiteral("PlrAboutSetting.qml"))
-                         .contains(QLatin1String("visible: uiBackend.oem !== \"msi5\"")),
-              "the sections can be left hidden on the builds that hide them");
+        const bool gatedOk = AboutPatcher::apply(aboutPath, true, gated).ok;
+        const QString gatedPage = resourceText(read(aboutPath), r, QStringLiteral("PlrAboutSetting.qml"));
+        check(gatedOk && !gatedPage.contains(QLatin1String("visible: true/*msi5*/"))
+                  && gatedPage.count(QLatin1String("visible: uiBackend.oem !== \"msi5\"")) == 3,
+              "the sections can be left hidden on the builds that hide them, and the check the "
+              "build ships is left alone");
+        check(!gatedOk || AboutPatcher::analyze(read(aboutPath)).sectionsHidden,
+              "a page that keeps the build's own check reads back as hidden");
 
         check(AboutPatcher::apply(aboutPath, true, config).ok
                   && resourceText(read(aboutPath), r, QStringLiteral("PlrAboutSetting.qml"))
                          .count(QLatin1String("BSI CUSTOMIZER: about-config ")) == 1,
               "applying different content updates the same page instead of stacking edits");
+        check(resourceText(read(aboutPath), r, QStringLiteral("PlrAboutSetting.qml"))
+                      .count(QLatin1String("visible: true/*msi5*/")) == 3,
+              "the sections the stock page hides are switched on again after the page was left "
+              "with its own check");
+        check(!AboutPatcher::analyze(read(aboutPath)).sectionsHidden,
+              "and the card no longer reports them as hidden, so a second apply is not an edit");
         const auto restored = AboutPatcher::apply(aboutPath, false, {});
         check(restored.ok, QStringLiteral("the stock About page restores (%1)").arg(restored.msg));
         check(resourceText(read(aboutPath), r, QStringLiteral("PlrAboutSetting.qml")) == about,
               "restoring the About page is byte-for-byte identical to stock");
+        check(unitVersion(read(aboutPath)) == 41,
+              "and the player's compiled copy is switched back on, so a restored page is the page "
+              "the player shipped");
 
         // The values prefill hands the editors can be applied unchanged: the
         // page then shows the same words through the custom rows, the e-mail
@@ -4218,10 +4272,17 @@ Window {
         const auto prefilledText = resourceText(read(prefillPath), r,
                                                 QStringLiteral("PlrAboutSetting.qml"));
         check(prefilled.ok
-                  && prefilledText.contains(QLatin1String("Copyright 2026. By using it you agree to the Terms of use"))
+                  // The About line already prints the prefilled text, so it is
+                  // not rewritten: every rewrite spends room, and on a player
+                  // whose record is full there is none to spend. The stock
+                  // expression is what stays in the file.
+                  && !prefilledText.contains(QLatin1String("BSI CUSTOMIZER: about text:"))
+                  && prefilledText.contains(QLatin1String("qsTranslate(\"QObject\", \"Copyright 2026. By using it you agree to the \")"))
                   && prefilledText.contains(QLatin1String("Website - <a href=\\\"http://www.bluestacks.com\\\">www.bluestacks.com</a>"))
                   && prefilledText.contains(QLatin1String("Support email - <a href=\\\"mailto:support@bluestacks.com\\\">support@bluestacks.com</a>")),
-              QStringLiteral("the prefilled stock values can be applied unchanged (%1)").arg(prefilled.msg));
+              QStringLiteral("the prefilled stock values apply unchanged, and the About line that "
+                             "already says what it should is left as the player wrote it (%1)")
+                  .arg(prefilled.msg));
         const auto prefilledState = AboutPatcher::analyze(read(prefillPath));
         check(prefilledState.config.links.value(0).url
                   == QStringLiteral("mailto:support@bluestacks.com"),
@@ -4231,8 +4292,7 @@ Window {
         // where they are already visible), so applying the prefilled values
         // carries that Unhide step with it. Turning the toggle off keeps the
         // build's own binding - that is the check above.
-        check(prefilledText.count(QLatin1String("visible: true /* BSI CUSTOMIZER: about shown:"))
-                  == 2,
+        check(prefilledText.count(QLatin1String("visible: true/*msi5*/")) == 3,
               "the prefilled values carry the Unhide step the editor offers by default");
         check(AboutPatcher::apply(prefillPath, true, stock.config).msg
                   == QStringLiteral("This About page content is already applied."),
@@ -4774,6 +4834,21 @@ Window {
         // compiled code, which is the build this test is about.
         auto r = resourcesBytes({}, false, {});
         QByteArray compiled = r.f.bytes;
+        // A player built with Qt's QML compiler carries a QV4 unit for the page,
+        // and that unit wins over the .qml source even with an empty disk cache.
+        // The unit header (magic, format version, Qt version, unit size) is what
+        // the patcher switches off so the edited source is what runs.
+        {
+            QByteArray unit(248, '\0');
+            unit.replace(0, 8, QByteArray("qv4cdata", 8));
+            const auto putUnit32 = [&unit](int at, quint32 value) {
+                for (int i = 0; i < 4; ++i) unit[at + i] = char((value >> (8 * i)) & 0xff);
+            };
+            putUnit32(8, 41);          // QML unit format version (Qt 5.15)
+            putUnit32(12, 0x00050f04); // Qt 5.15.4
+            putUnit32(24, quint32(248 + table.size()));
+            compiled += unit;
+        }
         const int tableAt = compiled.size();
         compiled += table;
         compiled += QByteArray(0x200, '\0');
@@ -4843,6 +4918,16 @@ Window {
               "and the row prints the edited address as well");
         check(!after.contains(utf16(QStringLiteral("Check for updates"))),
               "the update button prints nothing, so it cannot offer a download");
+        // This build keeps the page only as compiled code: there is no source to
+        // compile instead, so its unit is deliberately left alone - switching it
+        // off would leave the player with no page at all.
+        {
+            const int at = int(after.indexOf(QByteArray("qv4cdata", 8)));
+            check(at >= 0 && after.mid(at + 8, 4) == QByteArray("\x29\0\0\0", 4),
+                  "a page that exists only as compiled code keeps its unit, so the page still loads");
+        }
+        check(after.mid(tableAt, table.size()) == table,
+              "and the compiled strings are still written, for a build that has no source to compile");
 
         const auto reread = AboutPatcher::analyze(after);
         check(reread.compiledPage && reread.config.text == config.text,
@@ -4865,9 +4950,15 @@ Window {
         const auto afterHide = AboutPatcher::analyze(read(path));
         check(afterHide.config.links.size() == 2 && afterHide.config.links.at(1).hidden,
               QStringLiteral("the hidden row reads back as hidden and keeps its place"));
-        check(read(path).contains(utf16(QStringLiteral(" - <a href=\"hidden:Support\"> </a>"))),
-              "a hidden row prints nothing: its anchor shows a blank and points at its own name, "
-              "which is the only copy of that name left once the row is blank");
+        // A hidden row has to leave no trace of the link on the page: the
+        // anchor is still there (so the row can be found and switched back on)
+        // but nothing is printed - no words, and no " - " either. That dash is
+        // not part of the link, so blanking only the label left a lone "-" on
+        // every hidden row.
+        check(read(path).contains(utf16(QStringLiteral("<a href=\"hidden:Support\"></a>"))),
+              "a hidden row's anchor prints nothing at all and points at its own name");
+        check(!read(path).contains(utf16(QStringLiteral(" - <a href=\"hidden:"))),
+              "and no dash is left in front of it");
         check(afterHide.config.links.at(1).name == QLatin1String("Support"),
               QStringLiteral("so hiding does not lose the name (%1)")
                   .arg(afterHide.config.links.at(1).name));
@@ -4956,6 +5047,141 @@ Window {
         const QByteArray restoredBytes = read(path);
         check(restoredBytes.mid(tableAt, table.size()) == table,
               "every compiled string is put back byte for byte from the backup");
+    }
+
+    std::printf("[about] the page is found in whichever file carries it\n");
+    {
+        // A newer player ships a small HD-Player.exe (a launcher) and keeps its
+        // QML in a DLL beside it. Searching only the selected EXE reported
+        // "PlrAboutSetting.qml is not embedded in this player" on a build the
+        // tool can edit perfectly well - the page was one file over.
+        const QString dirPath = temp.filePath(QStringLiteral("player-folder"));
+        QDir().mkpath(dirPath);
+        const QString stubPath = dirPath + QStringLiteral("/HD-Player.exe");
+        write(stubPath, QByteArray("MZ") + QByteArray(8192, '\0'));
+        auto payload = resourcesBytes({ { QStringLiteral("PlrAboutSetting.qml"),
+                                         aboutPageFixture().toUtf8() } });
+        addRegistration(payload, false);
+        const QString dllPath = dirPath + QStringLiteral("/BstkUi.dll");
+        write(dllPath, payload.f.bytes);
+
+        check(QFileInfo(AboutPatcher::findPageHost(stubPath)).fileName()
+                  == QLatin1String("BstkUi.dll"),
+              QStringLiteral("the file that carries the page is found next to the launcher (%1)")
+                  .arg(AboutPatcher::findPageHost(stubPath)));
+        const auto state = AboutPatcher::analyze(read(AboutPatcher::findPageHost(stubPath)));
+        check(state.supported,
+              QStringLiteral("and the page in that file is recognised (%1)").arg(state.detail));
+        AboutPatcher::Config cfg = state.config;
+        cfg.text = QStringLiteral("Edited through the launcher");
+        const auto applied = AboutPatcher::apply(stubPath, true, cfg);
+        check(applied.ok, QStringLiteral("applying it to the launcher edits the file that has "
+                                         "the page (%1)").arg(applied.msg));
+        check(resourceText(read(dllPath), payload, QStringLiteral("PlrAboutSetting.qml"))
+                  .contains(QLatin1String("Edited through the launcher")),
+              "the edit landed in the DLL, not in the launcher that has no page");
+
+        // Nothing carries the page: say so, and do not touch anything.
+        const QString emptyDir = temp.filePath(QStringLiteral("no-page"));
+        QDir().mkpath(emptyDir);
+        const QString lonely = emptyDir + QStringLiteral("/HD-Player.exe");
+        write(lonely, QByteArray("MZ") + QByteArray(2048, '\0'));
+        check(AboutPatcher::findPageHost(lonely).isEmpty(),
+              "a folder with no page in it reports no host");
+        check(!AboutPatcher::apply(lonely, true, cfg).ok,
+              "and applying refuses instead of writing into the wrong file");
+    }
+
+    std::printf("[about] a page record is found and edited even when the resource tree has no entry\n");
+    {
+        // The tree is walkable but names other files: the byte scan has to get
+        // its turn, otherwise a build that stores the page as a compressed
+        // record is reported as "not embedded" - the message an MSI 5.12 build
+        // shows even though it carries the page.
+        QString page = aboutPageFixture();
+        // The record's decoded size has to be believable, and the extra comment
+        // also gives the record spare room to work with.
+        while (page.size() < 5200)
+            page += QStringLiteral("// padding, so the record has room above its size rule\n");
+        const auto be32 = [](quint32 v) {
+            QByteArray out(4, '\0');
+            out[0] = char((v >> 24) & 0xff);
+            out[1] = char((v >> 16) & 0xff);
+            out[2] = char((v >> 8) & 0xff);
+            out[3] = char(v & 0xff);
+            return out;
+        };
+        // A record is (size)(decoded size)(zlib stream): the four bytes directly
+        // in front of the stream are what qUncompress reads as the decoded size,
+        // so the size field counts that prefix plus the stream. The room behind
+        // the stream is the player's padding; a record with none cannot be
+        // edited at all, and this is where the spare room is modelled.
+        const QByteArray packed = qCompress(page.toUtf8(), 9);
+        const QByteArray stream = packed.mid(4);
+        const int spare = 1024;
+        QByteArray record;
+        record += be32(quint32(4 + stream.size() + spare));
+        record += packed;
+        record += QByteArray(spare, '\0');
+        auto r = resourcesBytes({ { QStringLiteral("SomeOther.qml"), QByteArray("Item { }") } });
+        addRegistration(r, false);
+        QByteArray image = r.f.bytes;
+        image += record;
+        image += QByteArray(256, '\0');
+
+        const auto state = AboutPatcher::analyze(image);
+        check(state.supported,
+              QStringLiteral("the page is found by its bytes when the tree has no entry for it (%1)")
+                  .arg(state.detail));
+        check(state.scanned && state.sourceEditable,
+              "and it is reported as read from the file, and as editable, because its record was found");
+
+        const QString recordPath = temp.filePath(QStringLiteral("about-record.exe"));
+        write(recordPath, image);
+        AboutPatcher::Config wanted = state.config;
+        wanted.text = QStringLiteral("Edited inside the record");
+        wanted.links[0].hidden = true;
+        const auto wrote = AboutPatcher::apply(recordPath, true, wanted);
+        check(wrote.ok, QStringLiteral("the page is written into the record it was read from (%1)")
+                            .arg(wrote.msg));
+        check(read(recordPath).size() == image.size(),
+              "the file does not grow by a single byte");
+        const auto edited = AboutPatcher::analyze(read(recordPath));
+        check(edited.supported && edited.applied && edited.config.text == wanted.text,
+              QStringLiteral("and what the record says now is the edited page (%1)")
+                  .arg(edited.config.text.left(60)));
+        check(edited.config.links.value(0).hidden,
+              "the row that was hidden reads back as hidden");
+
+        const auto undone = AboutPatcher::apply(recordPath, false, {});
+        check(undone.ok, QStringLiteral("the stock page goes back into the same record (%1)")
+                             .arg(undone.msg));
+        const auto restored = AboutPatcher::analyze(read(recordPath));
+        check(restored.supported && !restored.applied
+                  && restored.config.text == state.config.text,
+              QStringLiteral("and it says what the stock page said (%1)")
+                  .arg(restored.config.text.left(60)));
+        check(read(recordPath).size() == image.size(), "still without growing the file");
+
+        // A record with no spare room cannot take the edit, and that has to be
+        // said instead of writing a longer file: this is the hard limit.
+        QByteArray tight;
+        tight += be32(quint32(4 + stream.size()));
+        tight += packed;
+        QByteArray tightImage = r.f.bytes;
+        tightImage += tight;
+        tightImage += QByteArray(256, '\0');
+        const QString tightPath = temp.filePath(QStringLiteral("about-record-tight.exe"));
+        write(tightPath, tightImage);
+        // A text long enough that the edited page cannot compress smaller than
+        // the stock one: this is the case where no amount of care helps.
+        AboutPatcher::Config big = state.config;
+        big.text = QString(400, QLatin1Char('Q'));
+        const auto refused = AboutPatcher::apply(tightPath, true, big);
+        check(!refused.ok && refused.msg.contains(QLatin1String("room")),
+              QStringLiteral("a record with no spare room is refused with its sizes (%1)")
+                  .arg(refused.msg));
+        check(read(tightPath) == tightImage, "and that file is left exactly as it was");
     }
 
     // ------------------------------------------------------------------
@@ -5276,6 +5502,37 @@ Window {
                   && stageError.contains(QLatin1String("x86")),
               QStringLiteral("but it is refused before it can replace a 64-bit build (%1)")
                   .arg(stageError));
+
+        // A setup is judged as a setup, not as a program to copy over this one.
+        // Its loader is x86 whatever it installs, and a header this code cannot
+        // make sense of must never turn a finished download into "a processor
+        // this PC cannot run" - that message deleted every download at 100%
+        // before 2.5.2, and the processor in the setup is not the app's.
+        {
+            QByteArray setupImage = i386Image;
+            setupImage[peOffset + 24] = char(0x0b);
+            setupImage[peOffset + 25] = char(0x02); // x86 machine, PE32+ header: not a startable program
+            QByteArray marker;
+            for (const char *c = "Inno Setup Setup Data (6.2.2)"; *c; ++c) {
+                marker.append(*c);
+                marker.append('\0');
+            }
+            setupImage.replace(512, marker.size(), marker);
+            const QString setupPath = temp.filePath(QStringLiteral("setup-odd-header.exe"));
+            write(setupPath, setupImage);
+            check(UpdateChecker::looksLikeInstaller(setupPath),
+                  "a setup is still recognized by its own markers when its header is odd");
+            check(!UpdateChecker::looksLikeExecutable(setupPath, &stageError),
+                  "and that header is not one a program may be started from");
+            const QString setupHash = UpdateChecker::fileSha256(setupPath);
+            check(UpdateChecker::verifyStagedFile(setupPath, setupImage.size(), setupHash, &stageError),
+                  QStringLiteral("yet the finished setup download is kept: the processor in its "
+                                 "loader is not the app's (%1)").arg(stageError));
+            check(!UpdateChecker::canReplaceThisProgram(setupPath, &stageError)
+                      && stageError.contains(QLatin1String("setup")),
+                  QStringLiteral("a setup is run, never copied over the running program (%1)")
+                      .arg(stageError));
+        }
 
         check(UpdateChecker::describeHttpError(401, "{}").contains(QLatin1String("token")),
               "401 names the token");

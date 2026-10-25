@@ -11,9 +11,12 @@
 // row (its name and its target) - and applying it rewrites exactly those
 // values: each link can be renamed, re-pointed or hidden, and the sections the
 // MSI build hides (visible: uiBackend.oem !== "msi5") can be switched back on.
-// The "Check for updates" button is always hidden. Every edit is tagged, so
-// turning the option off writes the stock document back byte-for-byte without
-// needing the .bak.
+// The "Check for updates" button is removed, not disabled, on a build whose page
+// runs from its source: the player's compiled copy of the page is switched off
+// so the edited source is what the window compiles. A build that carries only
+// that compiled copy keeps its string edits, which is all such a build allows.
+// Every edit is tagged, so turning the option off writes the stock document back
+// byte-for-byte without needing the .bak.
 namespace AboutPatcher {
 
 // One stock link row of the About page ("Support email", "Support", "Website").
@@ -81,6 +84,12 @@ struct State
     // page is only recognizable as compiled code reports supported and can have
     // its strings rewritten, but there is no .qml to edit.
     bool qmlEditable = false;
+    // True when the page source itself parsed and can be rewritten. It differs
+    // from qmlEditable on a build whose page was found by scanning rather than
+    // through a resource tree: there is no tree node to write through, but the
+    // record that holds the page was located, so the edited source can be
+    // written back in place as long as it fits the room it already has.
+    bool sourceEditable = false;
 };
 
 struct Result
@@ -90,6 +99,18 @@ struct Result
 };
 
 State analyze(const QByteArray &image);
+/**
+ * The file that actually carries the About page, given the player EXE that was
+ * selected: that file itself when the page is in it, otherwise a file next to
+ * it that has the page.
+ *
+ * Newer players keep the window's QML out of the EXE: the file the user picks
+ * (HD-Player.exe) is then a small launcher and the page lives in a DLL or an
+ * .rcc beside it, so every search inside the EXE came back "not embedded in
+ * this player" on a build the tool can in fact edit. Empty when nothing in the
+ * folder carries the page.
+ */
+QString findPageHost(const QString &selectedPath);
 Result apply(const QString &exePath, bool enabled, const Config &config);
 
 // Everything analyze() concluded about one file, printed for the command line
