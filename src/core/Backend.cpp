@@ -8,6 +8,7 @@
 #include "AboutPatcher.h"
 #include "LayoutPatcher.h"
 #include "RpcIdPatcher.h"
+#include "QtResources.h"
 #include "SettingsManager.h"
 #include "ThemeEngine.h"
 #include "ThemePresets.h"
@@ -44,6 +45,8 @@ Backend::Backend(SettingsManager *settings, QObject *parent)
         m_qmlThemeAvailable = false;
         m_svgs.clear();
         m_resources.clear();
+        m_resourceInfos.clear();
+        ++m_resourceRevision;
         m_resourcesIncludeBinary = true;
         emit exePathChanged();
         emit themeChanged();
@@ -75,6 +78,8 @@ void Backend::copyPatchState(const Backend &source)
     m_hexQmlColors = source.m_hexQmlColors;
     m_svgs = source.m_svgs;
     m_resources = source.m_resources;
+    m_resourceInfos = source.m_resourceInfos;
+    m_resourceRevision = source.m_resourceRevision;
     m_resourcesIncludeBinary = source.m_resourcesIncludeBinary;
     m_installs = source.m_installs;
 }
@@ -130,16 +135,19 @@ QVariantMap Backend::runBackground(const std::function<QVariantMap(Backend &)> &
         m_settings->m_fpsAutoDetect = settings->m_fpsAutoDetect;
         emit m_settings->fpsAutoDetectChanged();
     }
+    const bool resourcesUpdated = m_resourceRevision != worker->m_resourceRevision;
     copyPatchState(*worker);
     delete worker;
     delete job;
     emit themeChanged();
     emit gradientTargetsChanged();
     emit svgsChanged();
-    emit resourcesChanged();
     emit installsChanged();
     m_busy = false;
     emit busyChanged();
+    // Selection handlers may measure the new row's budget. Publish only after
+    // releasing the busy guard, otherwise that read is refused as "busy".
+    if (resourcesUpdated) emit resourcesChanged();
     return response;
 }
 
@@ -922,9 +930,16 @@ int Backend::scanSvgs()
 
 // --------------------------------------------------------- embedded resources
 
-QVariantList Backend::resourceInfos() const
+void Backend::rebuildResourceInfos(const QByteArray &image)
 {
     QVariantList out;
+    out.reserve(m_resources.size());
+    // Thumbnails are prepared only during the explicit worker scan. Filtering
+    // and scrolling must not call synchronous file/decode functions on the GUI.
+    // Bound the metadata cache; very large artwork gets a format badge instead.
+    qsizetype thumbnailBytes = 0;
+    constexpr qsizetype maxThumbnail = 128 * 1024;
+    constexpr qsizetype maxThumbnails = 8 * 1024 * 1024;
     for (int i = 0; i < m_resources.size(); ++i) {
         const EmbeddedResources::Entry &entry = m_resources.at(i);
         QString kind = QStringLiteral("binary");
@@ -934,7 +949,20 @@ QVariantList Backend::resourceInfos() const
         case EmbeddedResources::Kind::Text: kind = QStringLiteral("text"); break;
         case EmbeddedResources::Kind::Binary: kind = QStringLiteral("binary"); break;
         }
-        out << QVariantMap { { "index", i },
+        QString thumbnail;
+        if ((entry.kind == EmbeddedResources::Kind::Image || entry.kind == EmbeddedResources::Kind::Svg)
+            && entry.size > 0 && entry.size <= 4 * 1024 * 1024
+            && thumbnailBytes < maxThumbnails) {
+            const auto bytes = QtResources::readFile(image, { entry.leaf, entry.entryOff, entry.flags },
+                                                      4 * 1024 * 1024);
+            const auto preview = EmbeddedResources::previewDataUrl(bytes, entry.format, 64);
+            const qsizetype cost = preview.size() * qsizetype(sizeof(QChar));
+            if (cost <= maxThumbnail && thumbnailBytes + cost <= maxThumbnails) {
+                thumbnail = preview;
+                thumbnailBytes += cost;
+            }
+        }
+        out << QVariantMap { { "index", i }, { "thumbnail", thumbnail },
                              { "path", entry.path },
                              { "name", entry.leaf },
                              { "folder", entry.folder },
@@ -948,7 +976,7 @@ QVariantList Backend::resourceInfos() const
                              { "height", entry.height },
                              { "entryOff", entry.entryOff } };
     }
-    return out;
+    m_resourceInfos = out;
 }
 
 int Backend::scanResources(bool includeBinary)
@@ -994,6 +1022,8 @@ int Backend::scanResources(bool includeBinary)
                   .arg(QFileInfo(m_settings->exePath()).fileName()),
               QStringLiteral("blue"));
     }
+    rebuildResourceInfos(data);
+    ++m_resourceRevision;
     emit resourcesChanged();
     return m_resources.size();
 }

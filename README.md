@@ -4,6 +4,9 @@
 
 Qt Quick desktop customizer for BlueStacks / MSI App Player on Windows.
 
+Search/scan performance findings, benchmarks and the optimization roadmap:
+[performance review](docs/PERFORMANCE.md).
+
 ## Sign-in gate (Discord only)
 
 This is a private dev tool: the app opens on the Premium-Optimizer-style
@@ -241,10 +244,14 @@ resource pools — QML, JavaScript, SVG markup, PNG/JPEG/BMP/GIF/ICO/WEBP/TGA
 art, JSON/XML/CSS/HTML, compiled caches and everything else. The SVG and
 Images tabs are gone: both live here, with the whole pool beside them.
 
-- **Scan Resources** walks every resource pool the EXE registers (plus the main
-  QML pool) and lists each entry with its path, format, size and, for pictures,
-  its pixel dimensions. Filter by name or by kind (Pictures / SVG / Code /
-  Binary).
+- **Scan Resources** is manual: opening the tab, starting the app and selecting
+  another EXE never launch a scan. Click the button to walk every resource pool
+  the EXE registers (plus the main QML pool) and list each entry with its path,
+  format, size and, for pictures, its pixel dimensions. Filter by name or by kind (Pictures / SVG / Code /
+  Binary). Search is case-insensitive across paths, names and formats; all words
+  must match, and quotes keep a phrase together. Slashes and Windows backslashes
+  are equivalent. Filtering uses cached metadata and thumbnails, not EXE reads,
+  and never changes the selected entry or discards unsaved code.
 - **Pictures** get a thumbnail in the list and a large preview; **Extract…**
   saves the selected entry exactly as stored and **Extract All** writes the
   whole pool to `embedded_resources\` next to the EXE, keeping its folders.
@@ -255,8 +262,8 @@ Images tabs are gone: both live here, with the whole pool beside them.
   the older players), and an entry that genuinely is not a picture says so
   under the preview instead of leaving an empty box.
 - The list belongs to one EXE: selecting another `HD-Player.exe` drops it and
-  the tab scans itself again, so a preview can never be read from the previous
-  file at the new file's coordinates.
+  the selection and thumbnails are cleared. Click **Scan Resources** again;
+  previews never use the previous file's offsets on the new target.
 - **Code** — QML, JS, SVG, JSON, XML, CSS, HTML and text — opens in the editor
   as the source the player actually loads, and **Save code** writes it back.
   Editing QML also invalidates its compiled `.qmlc` companion and the player's

@@ -143,8 +143,10 @@ present.
    prompt. The setup is given `/VERYSILENT /SUPPRESSMSGBOXES /NOCANCEL
    /NORESTART /CLOSEAPPLICATIONS /FORCECLOSEAPPLICATIONS
    /LOG=<temp>\setup.log`, and its `[Run]` section starts the new build again
-   **when Setup is silent** (`skipifnotsilent runasoriginaluser`), so an update
-   ends with the new version on screen instead of nothing. When Windows refuses
+   **when Setup is silent** (`skipifnotsilent runascurrentuser`), so an update
+   ends with the new version on screen instead of nothing. Both launch entries
+   use Setup's elevated token: the application's manifest requires administrator
+   rights, and launching it as the original unelevated user fails with error 740. When Windows refuses
    to start the setup, the message carries its own error text and code.
 
    The same decision can be asked for a file on disk, without a channel:
@@ -161,6 +163,17 @@ present.
    > install had no launch step. A copy of 2.5.1 or older has to be replaced by
    > running the `-setup.exe` from the release page **once**; from 2.5.2 on,
    > updates install and restart by themselves.
+
+   > **Screenshot showing Installed 2.5.0 and machine `0x014c`:** that is the
+   > old updater rejecting the installer's x86 loader, not a bad 64-bit app.
+   > Download and run the latest `BSI-Customizer-<version>-setup.exe` from
+   > [Releases](https://github.com/MrPcGamerYT/BSI-Customizer/releases/latest)
+   > manually once, then open the installed Start menu shortcut rather than an
+   > older loose EXE. The code in an already-running 2.5.0 cannot repair itself
+   > when it deletes every update. Build 2.5.4 also fixes the elevated relaunch
+   > for both interactive and silent installs, and prevents even a same-CPU
+   > setup from ever being used as a copy-over replacement. Size, SHA-256 and PE
+   > validation remain enforced; installer markers are not a validation bypass.
 
    Anything else is only replaced in place when the app is a loose copy (a
    folder with no `unins000.exe` next to it and not the portable build's

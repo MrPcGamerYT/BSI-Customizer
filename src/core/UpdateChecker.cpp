@@ -2347,6 +2347,12 @@ bool UpdateChecker::looksLikeExecutable(const QString &path, QString *error)
 
 bool UpdateChecker::canReplaceThisProgram(const QString &path, QString *error)
 {
+    // A setup is launched, never used as a copy-over replacement—even when
+    // its stub happens to match this application's architecture.
+    if (looksLikeInstaller(path)) {
+        if (error) *error = QStringLiteral("it is a setup program; run it to install the update");
+        return false;
+    }
     PeInfo info;
     if (!readPeInfo(path, &info, error)) return false;
     if (info.isDll) {

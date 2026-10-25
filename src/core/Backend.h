@@ -93,7 +93,7 @@ public:
     QVariantList gradientTargets() const;
 
     QVariantList svgInfos() const;
-    QVariantList resourceInfos() const;
+    QVariantList resourceInfos() const { return m_resourceInfos; }
     QVariantList installs() const { return m_installs; }
     QVariantList removalNames() const;
 
@@ -251,6 +251,10 @@ private:
 
     QList<SvgBlob> m_svgs;
     QList<EmbeddedResources::Entry> m_resources;
+    // Built once by the scan worker, not by each QML property access/filter.
+    QVariantList m_resourceInfos;
+    quint64 m_resourceRevision = 0;
+    void rebuildResourceInfos(const QByteArray &image);
     bool m_resourcesIncludeBinary = true; // the list on screen keeps binary entries
     QVariantList m_installs;
 };

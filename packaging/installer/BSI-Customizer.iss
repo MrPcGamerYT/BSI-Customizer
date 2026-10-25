@@ -75,11 +75,12 @@ Name: "{autodesktop}\BSI Customizer"; Filename: "{app}\BSI-Customizer.exe"; Task
 ;   * the first entry is the normal "Launch BSI Customizer" checkbox and is
 ;     skipped when Setup runs silent;
 ;   * the second runs only when Setup runs silent, so the updated build comes
-;     back by itself after the update. It carries runasoriginaluser because an
-;     entry without postinstall otherwise inherits Setup's elevation: the app
-;     would come back running as administrator, which it never does normally.
-Filename: "{app}\BSI-Customizer.exe"; Description: "{cm:LaunchProgram,BSI Customizer}"; Flags: nowait postinstall skipifsilent
-Filename: "{app}\BSI-Customizer.exe"; Description: "{cm:LaunchProgram,BSI Customizer}"; Flags: nowait skipifnotsilent runasoriginaluser
+;     back by itself after the update.
+; The app manifest requires administrator rights. Launch with Setup's elevated
+; token: runasoriginaluser would use CreateProcess without elevation and fail
+; with error 740 for both the wizard and silent-update paths.
+Filename: "{app}\BSI-Customizer.exe"; Description: "{cm:LaunchProgram,BSI Customizer}"; Flags: nowait postinstall skipifsilent runascurrentuser
+Filename: "{app}\BSI-Customizer.exe"; Description: "{cm:LaunchProgram,BSI Customizer}"; Flags: nowait skipifnotsilent runascurrentuser
 
 [UninstallDelete]
 ; Leftovers of a patch: the backup the tool keeps next to HD-Player.exe is not

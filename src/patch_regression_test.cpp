@@ -4403,6 +4403,43 @@ Window {
                                    { QStringLiteral("cache/panel.qmlc"), QByteArray("qv4cdata\0\0\0\0", 12) } });
         addRegistration(r, false);
 
+        // The QML-facing list is a scan snapshot, including thumbnails. A
+        // metadata query/filter must never re-read or decode the backing EXE.
+        {
+            const QString cachedPath = temp.filePath(QStringLiteral("resource-snapshot.exe"));
+            write(cachedPath, r.f.bytes);
+            SettingsManager settings(nullptr, false);
+            settings.setFpsAutoDetect(false);
+            settings.setExePath(cachedPath);
+            Backend backend(&settings);
+            int notifications = 0;
+            bool notificationsIdle = true;
+            QObject::connect(&backend, &Backend::resourcesChanged, [&] {
+                ++notifications;
+                notificationsIdle = notificationsIdle && !backend.busy();
+            });
+            check(backend.resourceInfos().isEmpty(), "selecting a target does not scan Resources");
+            check(backend.scanResources(true) == 4, "explicit Resources scan publishes the entire snapshot");
+            check(notificationsIdle, "Resources publishes after releasing the busy guard so budget reads are allowed");
+            const auto snapshot = backend.resourceInfos();
+            bool pngThumb = false, svgThumb = false;
+            for (const auto &value : snapshot) {
+                const auto row = value.toMap();
+                if (row.value(QStringLiteral("path")).toString() == QStringLiteral("images/logo.png"))
+                    pngThumb = row.value(QStringLiteral("thumbnail")).toString().startsWith(QLatin1String("data:image/png"));
+                if (row.value(QStringLiteral("path")).toString() == QStringLiteral("icons/star.svg"))
+                    svgThumb = row.value(QStringLiteral("thumbnail")).toString().startsWith(QLatin1String("data:image/svg"));
+            }
+            check(pngThumb && svgThumb, "scan worker prepares PNG and SVG thumbnails before publishing rows");
+            const int before = notifications;
+            backend.rpcidNames(cachedPath); // unrelated worker completion
+            check(notifications == before, "unrelated operations do not reload the Resources editor");
+            QFile::remove(cachedPath);
+            check(backend.resourceInfos() == snapshot, "metadata reads use the snapshot, not disk I/O");
+            settings.setExePath(temp.filePath(QStringLiteral("different-player.exe")));
+            check(backend.resourceInfos().isEmpty(), "a target change drops cached rows and thumbnails without a scan");
+        }
+
         const auto entries = EmbeddedResources::list(r.f.bytes, true);
         const auto find = [&entries](const QString &path) {
             for (const auto &entry : entries)
@@ -5070,6 +5107,13 @@ Window {
                   QStringLiteral("the downloaded setup is executable, not deleted (%1)").arg(peError));
             check(!UpdateChecker::canReplaceThisProgram(setup, &peError),
                   QStringLiteral("but it is never copied over the running program (%1)").arg(peError));
+            const auto setupBytes = read(setup);
+            const auto setupHash = QString::fromLatin1(QCryptographicHash::hash(setupBytes, QCryptographicHash::Sha256).toHex());
+            check(UpdateChecker::verifyStagedFile(setup, setupBytes.size(), setupHash, &peError),
+                  "the download verifier keeps an x86 installer instead of rejecting machine 0x014c");
+            check(!UpdateChecker::verifyStagedFile(setup, setupBytes.size() + 1, setupHash, &peError)
+                      && !UpdateChecker::verifyStagedFile(setup, setupBytes.size(), QString(64, QLatin1Char('0')), &peError),
+                  "accepting x86 installers never bypasses size or SHA-256 verification");
 
             const QString portable = temp.filePath(QStringLiteral("release-portable.exe"));
             write(portable, peImage(0x8664, true, false));
@@ -5079,6 +5123,15 @@ Window {
             check(UpdateChecker::canReplaceThisProgram(portable, &peError),
                   QStringLiteral("a 64-bit build may replace this 64-bit program (%1)").arg(peError));
 #endif
+            QByteArray sameArchSetup = peImage(0x8664, true, false);
+            sameArchSetup.replace(1024, 12, QByteArray("NullsoftInst"));
+            const QString x64Setup = temp.filePath(QStringLiteral("same-arch-setup.exe"));
+            write(x64Setup, sameArchSetup);
+            check(UpdateChecker::looksLikeInstaller(x64Setup)
+                      && UpdateChecker::looksLikeExecutable(x64Setup, &peError)
+                      && !UpdateChecker::canReplaceThisProgram(x64Setup, &peError)
+                      && peError.contains(QLatin1String("setup program")),
+                  "even a same-architecture setup is launched, never copied over the app");
 
             const QString library = temp.filePath(QStringLiteral("release.dll"));
             write(library, peImage(0x8664, true, true));
