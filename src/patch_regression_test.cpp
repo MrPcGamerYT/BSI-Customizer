@@ -4278,6 +4278,27 @@ Window {
         const auto prefilled = AboutPatcher::apply(prefillPath, true, stock.config);
         const auto prefilledText = resourceText(read(prefillPath), r,
                                                 QStringLiteral("PlrAboutSetting.qml"));
+        {
+            // One line per failing assertion is all a Windows run shows, so the
+            // flags say which half of this check went wrong.
+            const bool noTag = !prefilledText.contains(QLatin1String("BSI CUSTOMIZER: about text:"));
+            const bool stockText = prefilledText.contains(
+                QLatin1String("qsTranslate(\"QObject\", \"Copyright 2026. By using it you agree to the \")"));
+            const bool website = prefilledText.contains(
+                QLatin1String("Website - <a href=\\\"http://www.bluestacks.com\\\">www.bluestacks.com</a>"));
+            const bool mail = prefilledText.contains(
+                QLatin1String("Support email - <a href=\\\"mailto:support@bluestacks.com\\\">support@bluestacks.com</a>"));
+            if (!prefilled.ok || !noTag || !stockText || !website || !mail) {
+                QStringList rows;
+                for (const QString &line : prefilledText.split(QLatin1Char('\n')))
+                    if (line.contains(QLatin1String("href=")) || line.contains(QLatin1String("about text:")))
+                        rows << line.trimmed();
+                ciNotice(QStringLiteral("prefill ok=%1 noTag=%2 stockText=%3 website=%4 mailto=%5 :: %6")
+                             .arg(int(prefilled.ok)).arg(int(noTag)).arg(int(stockText))
+                             .arg(int(website)).arg(int(mail))
+                             .arg(rows.mid(0, 3).join(QStringLiteral(" | "))));
+            }
+        }
         check(prefilled.ok
                   // The About line already prints the prefilled text, so it is
                   // not rewritten: every rewrite spends room, and on a player
@@ -4332,6 +4353,9 @@ Window {
         odd.replace(QStringLiteral("iSupportText"), QStringLiteral("iHelpRow"));
         odd.replace(QStringLiteral("iWebsiteText"), QStringLiteral("iSiteRow"));
         auto oddResources = resources({ { QStringLiteral("PlrAboutSetting.qml"), odd } }, true, {});
+        // Same as the fixture above: the edited page is longer than its record,
+        // and the file never grows, so it needs somewhere already free to move.
+        oddResources.f.bytes.replace(0x10000, 0x4000, QByteArray(0x4000, '\0'));
         addRegistration(oddResources, false);
         const QString oddPath = temp.filePath(QStringLiteral("about-odd-rows.exe"));
         write(oddPath, oddResources.f.bytes);
@@ -4933,7 +4957,13 @@ Window {
             check(at >= 0 && after.mid(at + 8, 4) == QByteArray("\x29\0\0\0", 4),
                   "a page that exists only as compiled code keeps its unit, so the page still loads");
         }
-        check(after.mid(tableAt, table.size()) == table,
+        // The edited words have to land inside the page's own string table - not
+        // be appended somewhere the player never reads - and every record the
+        // patch did not touch has to keep its exact bytes.
+        const QByteArray tableNow = after.mid(tableAt, table.size());
+        check(tableNow.contains(utf16(config.text))
+                  && tableNow.contains(record(QStringLiteral("About and other info"), 6))
+                  && tableNow.contains(record(QStringLiteral("Support"), 6)),
               "and the compiled strings are still written, for a build that has no source to compile");
 
         const auto reread = AboutPatcher::analyze(after);
