@@ -3002,6 +3002,7 @@ Window {
             QQmlComponent component(&engine,QUrl::fromLocalFile(QDir(folder).filePath(QStringLiteral("Assets/BootVideo.qml"))));
             std::unique_ptr<QObject> object(component.create());
             if(!object) std::printf("    %s\n",qPrintable(component.errorString()));
+            QCoreApplication::processEvents();
             const auto video=object ? object->findChild<QObject *>(QStringLiteral("bsiBootVideo")) : nullptr;
             check(video && video->property("started").toBool()
                       && video->property("source").toUrl()==QUrl::fromLocalFile(QDir(folder).filePath(QStringLiteral("Assets/Promo.mp4"))),
