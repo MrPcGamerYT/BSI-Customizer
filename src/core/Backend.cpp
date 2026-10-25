@@ -1439,7 +1439,21 @@ QVariantMap Backend::aboutPageState()
     };
     const QString path = m_settings->exePath();
     if (path.isEmpty() || !QFileInfo::exists(path)) return map;
-    QFile file(path);
+    // A player that keeps its QML out of HD-Player.exe (a small launcher plus a
+    // DLL or .rcc beside it) has the page in that other file. The card reads
+    // whichever file carries it, so it does not report "not embedded" on a
+    // build the tool can edit.
+    const QString host = AboutPatcher::findPageHost(path);
+    map[QStringLiteral("hostFile")] = host;
+    map[QStringLiteral("hostName")] = host.isEmpty() ? QString() : QFileInfo(host).fileName();
+    if (host.isEmpty()) {
+        map[QStringLiteral("detail")] =
+            QStringLiteral("%1 does not carry the About page, and no file next to it does either. "
+                           "Select the player's own HD-Player.exe, or run Diagnose on this one.")
+                .arg(QFileInfo(path).fileName());
+        return map;
+    }
+    QFile file(host);
     if (!file.open(QIODevice::ReadOnly)) {
         map[QStringLiteral("detail")] = QStringLiteral("Cannot read the selected EXE.");
         return map;
@@ -1459,6 +1473,11 @@ QVariantMap Backend::aboutPageState()
     map[QStringLiteral("source")] = state.source.left(2000);
     map[QStringLiteral("compiledPage")] = state.compiledPage;
     map[QStringLiteral("textMax")] = state.textMax;
+    if (QFileInfo(host).absoluteFilePath() != QFileInfo(path).absoluteFilePath())
+        map[QStringLiteral("detail")] =
+            QStringLiteral("%1 (the page lives in %2 next to it, and that is the file this edits; "
+                           "%3 itself carries none).")
+                .arg(state.detail, QFileInfo(host).fileName(), QFileInfo(path).fileName());
     QVariantList strings;
     for (const auto &entry : state.table)
         strings << QVariantMap {

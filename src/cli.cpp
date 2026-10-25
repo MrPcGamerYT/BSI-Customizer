@@ -488,7 +488,10 @@ int runUpdateCli(const QStringList &arguments)
         const bool readable = UpdateChecker::readPeInfo(file.absoluteFilePath(), &pe, &error);
         const bool runnable = UpdateChecker::looksLikeExecutable(file.absoluteFilePath(), &error);
         const bool installer = UpdateChecker::looksLikeInstaller(file.absoluteFilePath());
-        const bool replaceable = UpdateChecker::canReplaceThisProgram(file.absoluteFilePath(), &error);
+        // A setup is run, not copied over this program, so its architecture is
+        // never asked about - Inno's loader is x86 whatever it installs.
+        const bool replaceable = !installer
+            && UpdateChecker::canReplaceThisProgram(file.absoluteFilePath(), &error);
 
         if (json) {
             QJsonObject result{

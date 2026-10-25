@@ -192,6 +192,30 @@ intact. The name it had is kept in the hidden anchor's `href` — on a player th
 carries no `.qml`, that is the only copy of it left — so showing the row again
 gives back its name, its words and its address.
 
+A page built with the Qt QML compiler also carries a **compiled copy** of the
+page itself (a `qv4cdata` unit), and a compiled unit takes precedence over the
+`.qml` source even when the disk cache is empty - which is why a row hidden in
+the source still painted its dash, and why the update button could only ever be
+blanked instead of removed. Applying therefore switches that unit's format
+version off, so the player compiles the edited source instead; restoring puts the
+version back from the backup. On a build whose page exists *only* as compiled
+code the unit is left alone (switching it off would leave no page at all), and
+the string edits below are what it gets.
+
+A player that keeps its QML out of `HD-Player.exe` - a small launcher with the
+page in a DLL beside it, as newer MSI builds do - is handled too: the file that
+carries the page is located next to the selected EXE and that is the file that is
+read and written, so "not embedded in this player" only appears when nothing in
+the folder has the page.
+
+A page that is present only as a compressed record (no resource tree this tool
+can walk, which is what a build reports as "not embedded") is read straight from
+the record by the page's own words, and written back into the very same record:
+the edited source is compressed again, and it is accepted only when it fits the
+room the stock record already has - the file never grows, so nothing else moves.
+When it does not fit, Apply says by how much and writes nothing; hiding a row or
+shortening the text is what frees room.
+
 Every replacement is written **inside its own record**: the count is updated and
 the rest of the slot is padded, so the file never grows and no offset moves. A
 text longer than its slot is refused with the length that fits, never truncated,
@@ -219,11 +243,13 @@ prints and the address you left in it. In the compiled copy the address record
 holds the address and the anchor holds the words — never the other way round, so
 editing the address really changes where the row goes. Rows ticked off, a row
 left without an address, any stock row the list does not name, and the stock QQ
-row are hidden. The **Check for updates** button is disabled by hiding
-it together with its "More info" and incompatible-version rows, so nothing on
-the page points at BlueStacks updates any more; on the compiled copy its caption
-is cleared the same way. Press **Restore stock About** to restore the untouched
-page byte-for-byte.
+row are hidden - in the source with `visible: false`, so nothing of them is left
+(no name, no address, and no " - " in front of where the link was). The
+**Check for updates** button is removed together with its "More info" and
+incompatible-version rows, so nothing on the page points at BlueStacks updates
+any more; on a page that exists only as compiled code its caption is cleared
+instead, which is all a string edit can do there. Press **Restore stock About**
+to restore the untouched page byte-for-byte.
 
 Both tools work on the Qt 5 and Qt 6 players: BlueStacks 5.22 and the older
 5.10 build, plus the MSI App Player 5.9 and the current MSI build. The
