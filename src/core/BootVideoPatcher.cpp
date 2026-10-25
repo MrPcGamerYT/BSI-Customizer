@@ -200,17 +200,23 @@ QString stripHeaderComment(const QString &text)
 // still has them - so the file is read as bytes, the way the player reads it.
 enum class Kind { Other, Player, Controller, ForcedStub };
 
+// Minified builds write `id:iBootImage`, the readable ones `id: iBootImage`.
+bool hasId(const QString &qml, const QString &id)
+{
+    return qml.contains(QStringLiteral("id: ") + id) || qml.contains(QStringLiteral("id:") + id);
+}
+
 bool isPlayerWindow(const QString &qml)
 {
     return qml.contains(QLatin1String("ApplicationWindow"))
-        && qml.contains(QLatin1String("id: iAppwin"))
-        && qml.contains(QLatin1String("id: iBootLoader"))
+        && hasId(qml, QStringLiteral("iAppwin"))
+        && hasId(qml, QStringLiteral("iBootLoader"))
         && qml.contains(QLatin1String("iBootProgressComponent"));
 }
 
 bool isBootScreen(const QString &qml)
 {
-    return qml.contains(QLatin1String("id: iBootImage"))
+    return hasId(qml, QStringLiteral("iBootImage"))
         && qml.contains(QLatin1String("bootBackgroundImage"))
         && qml.contains(QLatin1String("fSetBootPromotion"));
 }
@@ -440,22 +446,26 @@ QString patchController(const QString &source, const QString &url, QString *erro
         }
     } else {
         // Right above the loading text, which is where the build draws the
-        // boot screen's own content.
+        // boot screen's own content. A minified boot screen has everything on
+        // one line, and then the loader goes just inside the root object so the
+        // file keeps a single root.
+        const auto all = objects(qml);
+        if (all.isEmpty()) {
+            if (error) *error = QStringLiteral("The boot screen has no QML object to attach the video to.");
+            return QString();
+        }
+        const int rootBody = all.first().body;
+        const QString nl = lineEnding(qml);
         int at = -1;
-        for (const auto &object : objects(qml)) if (object.id == QLatin1String("iBootLoadingText")) { at = object.begin; break; }
-        if (at >= 0) {
-            const int lineStart = qml.lastIndexOf(QLatin1Char('\n'), at - 1) + 1;
+        for (const auto &object : all) if (object.id == QLatin1String("iBootLoadingText")) { at = object.begin; break; }
+        const int lineStart = at > rootBody ? qml.lastIndexOf(QLatin1Char('\n'), at - 1) + 1 : -1;
+        if (lineStart > rootBody) {
             QString indent;
             for (int i = lineStart; i < qml.size() && (qml[i] == QLatin1Char(' ') || qml[i] == QLatin1Char('\t')); ++i)
                 indent += qml[i];
-            qml.insert(lineStart, indent + loader + lineEnding(qml));
+            qml.insert(lineStart, indent + loader + nl);
         } else {
-            const auto all = objects(qml);
-            if (all.isEmpty()) {
-                if (error) *error = QStringLiteral("The boot screen has no QML object to attach the video to.");
-                return QString();
-            }
-            qml.insert(all.first().body, loader);
+            qml.insert(rootBody, nl + QStringLiteral("    ") + loader);
         }
     }
     // The stock artwork, the promotion button and the grid are painted over the
@@ -664,7 +674,7 @@ Result patch(const QString &exePath, const Options &options)
         if (changed && !writeStream(data, players.first(), player, QStringLiteral("boot window"),
                                     options.cacheBust, &error))
             return { false, error };
-        holding = changed;
+        holding = changed && options.holdMs > 0;
     }
     const QString bootSource = patchController(controller.text, url, &error);
     if (bootSource.isEmpty()) return { false, error };

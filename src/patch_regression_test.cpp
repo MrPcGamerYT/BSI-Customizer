@@ -828,7 +828,7 @@ void checkNativeMaxOnly(const QByteArray &data, double hi)
 static QString aboutPageFixture()
 {
     return QStringLiteral(
-        "import QtQuick\r\n"
+        "import QtQuick 2.15\r\n"
         "import QtQuick.Layouts 1.15\r\n"
         "Item {\r\n"
         "    objectName: \"aboutSettings\"\r\n"
@@ -1380,7 +1380,7 @@ int runPatchRegressionTests()
             "QtObject{property QtObject gradients:QtObject{property Gradient gradientCard:"
             "Gradient{GradientStop{position:0;color:'#111111'}GradientStop{position:1;color:'#222222'}}}}\r\n");
         const QString markedSidebar = QString(QChar(0xFEFF)) + QStringLiteral(
-            "import QtQuick\r\n"
+            "import QtQuick 2.15\r\n"
             "Rectangle {\r\n"
             "    objectName: \"sidebar\"\r\n"
             "    width: 64\r\n"
@@ -1416,7 +1416,7 @@ int runPatchRegressionTests()
         // the surfaces beside them have to be discoverable there as well.
         const QString palette = QStringLiteral("import QtQuick\nQtObject{property QtObject gradients:QtObject{property Gradient gradientButton:Gradient{orientation:Gradient.Horizontal;GradientStop{position:0;color:'#ff0000'}GradientStop{position:1;color:'#0000ff'}}}}\n");
         const QString sidebar = QStringLiteral(
-            "import QtQuick\r\n"
+            "import QtQuick 2.15\r\n"
             "Rectangle {\r\n"
             "    objectName: \"sidebar\"\r\n"
             "    width: 64\r\n"
@@ -1451,7 +1451,7 @@ int runPatchRegressionTests()
         // surfaces that actually paint the theme survive it, and a Qt 5 player is
         // pointed at the hex method's control instead of an unusable QML list.
         const QString palette = QStringLiteral(
-            "import QtQuick\r\n"
+            "import QtQuick 2.15\r\n"
             "QtObject{property QtObject colors:QtObject{property color primary70:'#232642' property color primary10:'#101218'}"
             "property QtObject gradients:QtObject{property Gradient gradientUnused:Gradient{orientation:Gradient.Horizontal;"
             "GradientStop{position:0;color:'#ff0000'}GradientStop{position:1;color:'#00ff00'}}"
@@ -1542,7 +1542,7 @@ int runPatchRegressionTests()
     std::printf("[gradients] player-window chrome instances, title bar scope, Qt5 unit invalidation, QML gate\n");
     {
         const QString host = QStringLiteral(
-            "import QtQuick\r\n"
+            "import QtQuick 2.15\r\n"
             "Item {\r\n"
             "    PlrTopbar {\r\n"
             "        id: iTopbar\r\n"
@@ -1558,14 +1558,14 @@ int runPatchRegressionTests()
             "    }\r\n"
             "}\r\n");
         const QString typeSidebar = QStringLiteral(
-            "import QtQuick\r\n"
+            "import QtQuick 2.15\r\n"
             "Rectangle {\r\n"
             "    id: iSidebar\r\n"
             "    objectName: \"sidebar\"\r\n"
             "    color: \"#112233\"\r\n"
             "}\r\n");
         const QString typeTopbar = QStringLiteral(
-            "import QtQuick\r\n"
+            "import QtQuick 2.15\r\n"
             "Rectangle {\r\n"
             "    objectName: \"topbar\"\r\n"
             "    color: \"#112233\"\r\n"
@@ -1727,7 +1727,7 @@ int runPatchRegressionTests()
         // background has to become a first-class surface, while the transparent
         // content pane and the decorative fade divider stay untouched.
         const QString settings = QStringLiteral(
-            "import QtQuick\r\n"
+            "import QtQuick 2.15\r\n"
             "import QtQuick.Window 2.15\r\n"
             "Window {\r\n"
             "    id: iSettingsWindow\r\n"
@@ -1808,7 +1808,7 @@ int runPatchRegressionTests()
         // disable the owning PlrSidebarElement too, so the element leaves
         // pSidebarItems and the column closes up - the fix "by qml".
         const QString sidebar = QStringLiteral(
-            "import QtQuick\r\n"
+            "import QtQuick 2.15\r\n"
             "Rectangle {\r\n"
             "    id: iSidebar\r\n"
             "    property list<QtObject> pAllSidebarItems: [\r\n"
@@ -1861,7 +1861,7 @@ int runPatchRegressionTests()
         // in PlrTopbar.qml instead: the same two Text elements exist in 5.9,
         // 5.10 and the current build.
         const QString topbar = QStringLiteral(
-            "import QtQuick\r\n"
+            "import QtQuick 2.15\r\n"
             "UiRowLayout {\r\n"
             "    UiRowLayout{\r\n"
             "        Text {\r\n"
@@ -1959,7 +1959,7 @@ int runPatchRegressionTests()
         // document level: toggling the option off writes every edited QML file
         // back byte-for-byte, so the change needs no backup restore to undo.
         const QString sidebar = QStringLiteral(
-            "import QtQuick\r\n"
+            "import QtQuick 2.15\r\n"
             "Rectangle {\r\n"
             "    id: iSidebar\r\n"
             "    property int pSidebarElementSize: 32\r\n"
@@ -2052,7 +2052,7 @@ int runPatchRegressionTests()
             "    function fGetPopupTopPoint(elementId) { return iSidebar.mapToGlobal(0, 0).y }\r\n"
             "}\r\n");
         const QString topbar = QStringLiteral(
-            "import QtQuick\r\n"
+            "import QtQuick 2.15\r\n"
             "Rectangle {\r\n"
             "    id: iTopbar\r\n"
             "    property list<QtObject> pNonFixedTopbarItems: [\r\n"
@@ -2091,7 +2091,7 @@ int runPatchRegressionTests()
         // Current player: the sidebar is a sibling of the title bar inside the
         // main content rectangle.
         const QString anchoredPlr = QStringLiteral(
-            "import QtQuick\r\n"
+            "import QtQuick 2.15\r\n"
             "Rectangle {\r\n"
             "    id: iAppwin\r\n"
             "    property int pSidebarWidth: 32\r\n"
@@ -2120,7 +2120,7 @@ int runPatchRegressionTests()
         // Old 5.10/5.12 player: a column root, the title bar and a row layout
         // are siblings, and the sidebar is an item of that row layout.
         const QString legacyPlr = QStringLiteral(
-            "import QtQuick\r\n"
+            "import QtQuick 2.15\r\n"
             "Rectangle {\r\n"
             "    id: iAppwin\r\n"
             "    property int pSidebarWidth: 32\r\n"
@@ -2688,7 +2688,7 @@ Window {
         // smart helper ("does not have the supported button strip, overflow
         // logic and popup anchors"). ----
         const QString plainSidebar = QStringLiteral(
-            "import QtQuick\r\n"
+            "import QtQuick 2.15\r\n"
             "Rectangle {\r\n"
             "    id: iSidebar\r\n"
             "    property int pSidebarElementSize: 32\r\n"
@@ -2832,7 +2832,7 @@ Window {
         // so the existing expression has to be wrapped and unwrapped, not
         // replaced. This is the shape real 5.10.150 uses.
         const QString boundTopbar = QStringLiteral(
-            "import QtQuick\r\n"
+            "import QtQuick 2.15\r\n"
             "Rectangle {\r\n"
             "    id: iTopbar\r\n"
             "    property list<QtObject> pNonFixedTopbarItems: [\r\n"
@@ -2941,8 +2941,8 @@ Window {
         const QString path = QDir(folder).filePath(QStringLiteral("HD-Player.exe")); write(path, image);
 
         const auto result = BootVideoPatcher::patch(path);
-        if (!result.ok) std::printf("    %s\n", qPrintable(result.msg));
-        check(result.ok, "a boot screen is found by its content, not by a fixed resource name");
+        check(result.ok, QStringLiteral("a boot screen is found by its content, not by a fixed resource name: %1")
+                             .arg(result.msg));
         const auto patched = read(path);
         check(patched.size() == image.size(), "the patched player is exactly as large as the original");
         const auto qml = resourceText(patched, r, QStringLiteral("RenamedStartup.qml"));
@@ -2951,7 +2951,8 @@ Window {
               "the boot screen is pointed at the video player the tool writes next to the EXE");
         check(patched.mid(leftover, image.size() - leftover) == image.mid(leftover),
               "a record the tree does not point at is never rewritten");
-        check(BootVideoPatcher::patch(path).ok, "the patched player accepts a second pass");
+        const auto again = BootVideoPatcher::patch(path);
+        check(again.ok, QStringLiteral("the patched player accepts a second pass: %1").arg(again.msg));
 
         auto twice = resources({ { QStringLiteral("BootOne.qml"), controller },
                                  { QStringLiteral("BootTwo.qml"), controller },
@@ -3011,8 +3012,8 @@ Window {
         const auto path = QDir(folder).filePath(QStringLiteral("HD-Player.exe")); write(path, r.f.bytes);
 
         const auto outcome = BootVideoPatcher::patch(path);
-        if (!outcome.ok) std::printf("    %s\n", qPrintable(outcome.msg));
-        check(outcome.ok, "a stock boot screen is patched without a BootVideo.qml in the resource pool");
+        check(outcome.ok, QStringLiteral("a stock boot screen is patched without a BootVideo.qml in the "
+                                         "resource pool: %1").arg(outcome.msg));
         const auto patched = read(path);
         check(patched.size() == r.f.bytes.size(), "the EXE does not grow");
         check(read(path + QStringLiteral(".bak")) == r.f.bytes, "the untouched original is preserved as .bak");
@@ -3047,14 +3048,16 @@ Window {
               "the rewritten boot screen is valid QML");
 
         BootVideoPatcher::Options plain; plain.holdMs = 0;
-        check(BootVideoPatcher::patch(path, plain).ok, "the hold can be switched off again");
+        const auto off = BootVideoPatcher::patch(path, plain);
+        check(off.ok, QStringLiteral("the hold can be switched off again: %1").arg(off.msg));
         const auto reverted = read(path);
         const auto plainPlayer = resourceText(reverted, r, QStringLiteral("plr.qml"));
         check(!plainPlayer.contains(QLatin1String("pBootVideoDone"))
                   && plainPlayer.contains(QLatin1String("sourceComponent: pIsBootComplete || pShowAndroidAd"))
                   && reverted.size() == r.f.bytes.size(),
               "switching the hold off restores the stock boot swap");
-        check(BootVideoPatcher::patch(path).ok, "the boot video can be patched again afterwards");
+        const auto again = BootVideoPatcher::patch(path);
+        check(again.ok, QStringLiteral("the boot video can be patched again afterwards: %1").arg(again.msg));
         const auto twice = resourceText(read(path), r, QStringLiteral("PlrBootProgressBar.qml"));
         check(twice.count(QLatin1String("bsiBootLoader")) == 1, "a repatch does not stack a second player");
     }
@@ -3093,9 +3096,8 @@ Window {
         const auto path = QDir(folder).filePath(QStringLiteral("HD-Player.exe")); write(path, r.f.bytes);
 
         const auto outcome = BootVideoPatcher::patch(path);
-        if (!outcome.ok) std::printf("    %s\n", qPrintable(outcome.msg));
-        check(outcome.ok && read(path).size() == r.f.bytes.size(),
-              "a build that unloads its boot loader is patched in place");
+        check(outcome.ok, QStringLiteral("a build that unloads its boot loader is patched: %1").arg(outcome.msg));
+        check(read(path).size() == r.f.bytes.size(), "a build that unloads its boot loader is patched in place");
         const auto player = resourceText(read(path), r, QStringLiteral("plr.qml"));
         check(player.contains(QLatin1String("pIsBootComplete = true\r\n        iBootLoader.visible = true\r\n"
                                             "        bvHold.restart()"))
@@ -3103,8 +3105,9 @@ Window {
                   && !player.contains(QLatin1String("iBootLoader.sourceComponent = undefined\r\n        pIsBootComplete")),
               "the unload is deferred to a timer so the video stays on screen");
         BootVideoPatcher::Options plain; plain.holdMs = 0;
-        check(BootVideoPatcher::patch(path, plain).ok
-                  && !resourceText(read(path), r, QStringLiteral("plr.qml")).contains(QLatin1String("bvHold")),
+        const auto off = BootVideoPatcher::patch(path, plain);
+        check(off.ok, QStringLiteral("the legacy hold can be switched off: %1").arg(off.msg));
+        check(!resourceText(read(path), r, QStringLiteral("plr.qml")).contains(QLatin1String("bvHold")),
               "switching the hold off puts the legacy unload back");
     }
 
@@ -3272,10 +3275,12 @@ Window {
         const QString folder = temp.filePath(QStringLiteral("boot test with spaces")); QDir().mkpath(folder);
         const QString path = QDir(folder).filePath(QStringLiteral("HD-Player.exe")); write(path, r.f.bytes);
         const auto patch = BootVideoPatcher::patch(path);
-        if (!patch.ok) std::printf("    %s\n", qPrintable(patch.msg));
-        check(patch.ok && read(path).size() == r.f.bytes.size(),
-              "the boot screen is rewritten inside the space its record already has");
-        const auto qml = resourceText(read(path), r, QStringLiteral("Boot.qml"));
+        check(patch.ok, QStringLiteral("boot patch on a one-line pool: %1").arg(patch.msg));
+        const auto patched = read(path);
+        check(patched.size() == r.f.bytes.size(),
+              QStringLiteral("the boot screen is rewritten inside the space its record already has "
+                             "(%1 bytes written, %2 before)").arg(patched.size()).arg(r.f.bytes.size()));
+        const auto qml = resourceText(patched, r, QStringLiteral("Boot.qml"));
         const auto expected = QUrl::fromLocalFile(QDir(folder).filePath(QStringLiteral("Assets/BootVideo.qml")));
         check(qml.contains(QStringLiteral("source:\"%1\"").arg(expected.toString(QUrl::FullyEncoded))),
               "the boot screen loads a QML player, never the MP4 itself");
@@ -3287,7 +3292,9 @@ Window {
               "the player is written next to the EXE and resolves the video beside itself");
         check(patch.msg.contains(QLatin1String("Promo.mp4")),
               "the report names the file the user has to supply");
-        check(BootVideoPatcher::patch(path).ok && read(path + QStringLiteral(".bak")) == r.f.bytes,
+        const auto repatch = BootVideoPatcher::patch(path);
+        check(repatch.ok, QStringLiteral("boot repatch on a pool without a player window: %1").arg(repatch.msg));
+        check(read(path + QStringLiteral(".bak")) == r.f.bytes,
               "boot repatch is idempotent and preserves the first backup");
     }
     {
