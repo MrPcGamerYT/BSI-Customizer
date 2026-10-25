@@ -45,10 +45,36 @@ Keep `scripts/`, `packaging/portable/`, `cmake/` (`Qt5FpsReference.cmake`,
 license files: these are build dependencies, not loose files users need
 alongside the final EXE.
 
-Use **Actions → Single EXE Release → Run workflow**. After a successful build:
+Use **Actions → Single EXE Release → Run workflow**, select the source branch,
+leave **publish_release** unchecked for a test build, and select the runner:
+
+- **windows-latest** uses GitHub's hosted Windows runner. On private repositories,
+  this is subject to the account's included minutes, spending limits and payment
+  status. A workflow change cannot bypass a billing restriction.
+- **self-hosted** uses a Windows x64 PC that you register under **Repository
+  Settings → Actions → Runners → New self-hosted runner**. Follow GitHub's
+  registration commands on that PC; keep the runner online while building.
+  This avoids hosted-runner charges, but uses your PC's CPU, disk and internet.
+  Install Visual Studio 2022 C++ build tools (including the Windows SDK), CMake,
+  PowerShell 7, Git, Python 3 and 7-Zip first. Inno Setup 6 is recommended;
+  otherwise the workflow needs Chocolatey and permission to install it.
+  The workflow downloads Qt itself. Run only trusted code on this PC; automatic
+  PR builds cannot select this runner. Nothing here registers a PC automatically.
+
+The updated workflow must first exist on the repository's default branch for
+new manual-run inputs to appear in GitHub's UI. Until then, PR builds exercise
+this branch's workflow automatically on the hosted runner. Do not publish a
+release or change repository visibility just to obtain a test EXE.
+
+After a successful build:
 
 - The Actions artifact download is wrapped in a ZIP by GitHub's artifact service;
-  it contains **one EXE**, not a folder of dependencies.
+  it contains **one EXE**, not a folder of dependencies. Find it under
+  **Artifacts** at the bottom of the run's summary. Test artifacts expire after
+  **one day**; download promptly. Artifact uploads still depend on the account's
+  Actions storage allowance, including when using a self-hosted runner. If an
+  upload fails on your self-hosted PC, the EXE remains under `build/artifacts/`
+  inside that runner's checkout.
 - A published GitHub Release exposes the **`.exe` directly** as its download.
 
 Set the `project(... VERSION ...)` value in `CMakeLists.txt` before pushing a

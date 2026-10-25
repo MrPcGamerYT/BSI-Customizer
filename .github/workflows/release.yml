@@ -12,6 +12,13 @@ on:
   pull_request:
   workflow_dispatch:
     inputs:
+      runner:
+        description: 'Windows runner (self-hosted requires your registered Windows x64 PC)'
+        type: choice
+        options:
+          - windows-latest
+          - self-hosted
+        default: windows-latest
       version:
         # Type the version here when running manually: the whole run (built
         # EXE name, BSI_VERSION inside the binary, tag and release) follows it,
@@ -46,7 +53,9 @@ env:
 jobs:
   build-windows:
     name: Build & self-test (Windows x64)
-    runs-on: windows-latest
+    # Only an explicit manual run can select a self-hosted PC. PR code always
+    # uses an isolated hosted runner, never a contributor-controlled local job.
+    runs-on: ${{ inputs.runner == 'self-hosted' && fromJSON('["self-hosted", "Windows", "X64"]') || 'windows-latest' }}
     timeout-minutes: 60
     permissions:
       contents: write
@@ -286,6 +295,18 @@ jobs:
           }
           "### Updater check" >> $env:GITHUB_STEP_SUMMARY
           "The updater accepts **$env:SETUP_NAME** (printed verdict above)." >> $env:GITHUB_STEP_SUMMARY
+
+      # Test builds need a downloadable EXE too, without creating a tag or
+      # publishing a release. Keep retention short to limit storage usage.
+      - name: Upload tested portable EXE
+        if: ${{ !startsWith(github.ref, 'refs/tags/') && !inputs.publish_release }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: BSI-Customizer-${{ steps.meta.outputs.version }}-win64-${{ github.run_id }}
+          path: build/artifacts/${{ steps.meta.outputs.exe_name }}
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
 
       # Publish directly from the same Windows job that built and tested the
       # executable. A cross-job upload/download through Actions artifacts can
