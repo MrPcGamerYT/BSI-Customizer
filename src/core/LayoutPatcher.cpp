@@ -1385,8 +1385,10 @@ bool findButtonStrip(const QString &qml, const QString &masked, const QmlText::O
 
 const QString kOrderMarkerPrefix = QStringLiteral("// BSI CUSTOMIZER: order ");
 const QString kHiddenRowMarker = QStringLiteral("// BSI CUSTOMIZER: hidden row buttons=");
-const QString kButtonHiddenTag = QStringLiteral(" // BSI CUSTOMIZER: hidden button");
-const QString kSettingsFlipTag = QStringLiteral(" // BSI CUSTOMIZER: settings in the row");
+// Block comments, not line comments: a build may put several members on one
+// line, and a line comment would swallow everything after the value.
+const QString kButtonHiddenTag = QStringLiteral(" /* BSI CUSTOMIZER: hidden button */");
+const QString kSettingsFlipTag = QStringLiteral(" /* BSI CUSTOMIZER: settings in the row */");
 
 // What the UI asks for: one key per button of the row, and the ones to hide.
 struct RowRequest
@@ -1648,10 +1650,15 @@ bool setObjectVisible(const QString &qml, bool visible, const QmlText::Object &o
         const bool owned = qml.mid(binding.valueEnd, kButtonHiddenTag.size()) == kButtonHiddenTag;
         if (visible) {
             if (owned) {
-                const int lineStart = qml.lastIndexOf(QLatin1Char('\n'), binding.nameBegin);
-                if (lineStart < 0) return false;
-                addEdit(edits, lineStart, binding.valueEnd + kButtonHiddenTag.size() - lineStart,
-                        QString());
+                // The member took a line of its own: take the indentation and
+                // the line break with it, wherever the object put them.
+                int begin = binding.nameBegin;
+                while (begin > 0 && (qml.at(begin - 1) == QLatin1Char(' ')
+                                     || qml.at(begin - 1) == QLatin1Char('\t'))) --begin;
+                int end = binding.valueEnd + kButtonHiddenTag.size();
+                if (qml.mid(end, 2) == QLatin1String("\r\n")) end += 2;
+                else if (end < qml.size() && qml.at(end) == QLatin1Char('\n')) end += 1;
+                addEdit(edits, begin, end - begin, QString());
                 return true;
             }
             const QString prefix = kHiddenPrefix + QLatin1Char('(');
@@ -1666,10 +1673,17 @@ bool setObjectVisible(const QString &qml, bool visible, const QmlText::Object &o
         return true;
     }
     if (!visible) {
+        // A member with no value terminator would swallow the rest of a
+        // single-line declaration, so it always gets a line of its own.
+        int at = object.open + 1;
+        if (qml.mid(at, 2) == QLatin1String("\r\n")) at += 2;
+        else if (at < qml.size() && qml.at(at) == QLatin1Char('\n')) at += 1;
+        else if (at < qml.size() && qml.at(at) == QLatin1Char('\r')) at += 1;
         const int nlAt = qml.indexOf(QLatin1Char('\n'), object.open);
-        const QString indent = nlAt > 0 ? lineIndentAt(qml, nlAt + 1) : QStringLiteral("    ");
-        addEdit(edits, object.open + 1, 0,
-                QLatin1Char('\n') + indent + member + QStringLiteral(": false") + kButtonHiddenTag);
+        const QString indent = (nlAt > 0 && nlAt < object.end) ? lineIndentAt(qml, nlAt + 1)
+                                                              : QStringLiteral("    ");
+        addEdit(edits, at, 0, indent + member + QStringLiteral(": false") + kButtonHiddenTag
+                                + lineEnding(qml));
     }
     return true;
 }

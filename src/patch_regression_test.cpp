@@ -2650,7 +2650,7 @@ Window {
                                                              QStringLiteral("recent") })
                   && defaultRows.buttons.first().canHide == false,
               "the row starts with the title bar's own navigation, which is never hidden");
-        check(patchedSidebar.contains(QLatin1String("true // BSI CUSTOMIZER: settings in the row"))
+        check(patchedSidebar.contains(QLatin1String("true /* BSI CUSTOMIZER: settings in the row */"))
                   && patchedSidebar.contains(
                       QLatin1String("// BSI CUSTOMIZER: hidden row buttons=iBackBtn,iHomeBtn,iRecentBtn"))
                   && patchedSidebar.contains(QLatin1String("iSettingsBtn.visible = false")),
@@ -2678,7 +2678,7 @@ Window {
             if (button.key == QLatin1String("sound")) soundHidden = button.hidden;
         check(soundHidden
                   && resourceText(read(path), r, QStringLiteral("PlrSidebar.qml"))
-                         .contains(QLatin1String("pVisible: false // BSI CUSTOMIZER: hidden button")),
+                         .contains(QLatin1String("pVisible: false /* BSI CUSTOMIZER: hidden button */")),
               "an unticked button keeps its place in the source and is switched off");
         check(LayoutPatcher::applyOrder(path, {}, {}).ok,
               "an empty order restores the default row");
