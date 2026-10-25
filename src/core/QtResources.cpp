@@ -644,8 +644,9 @@ bool invalidateThemeCacheResources(QByteArray &data, const Link &link, QString *
 {
     for (const auto &cache : link.themeCaches) {
         if (cache.second != 0 && cache.second != 1) {
-            *error = QStringLiteral("Unsupported compression in the embedded theme cache. "
-                                    "No file was written.");
+            if (error)
+                *error = QStringLiteral("Unsupported compression in the embedded theme cache. "
+                                        "No file was written.");
             return false;
         }
         const quint32 size = be32(data, cache.first);

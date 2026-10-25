@@ -190,14 +190,13 @@ bool findDocs(const QByteArray &image, const QString &name, QList<Doc> *out, QSt
     }
     if (out && !out->isEmpty()) return true;
 
-    // Some builds register their resources in a way this tool cannot enumerate
-    // (an MSI 5.12 player has no `qres` header and no call site it recognises),
-    // so the pool is invisible even though the page is in a perfectly normal
-    // resource tree. The record is found by its own bytes, and then the tree is
-    // searched for the node that maps that record: a page found this way is a
-    // real resource, not a blind scan - it can be rewritten through its node,
-    // moved into free space when the new text is longer, and its timestamp can
-    // be refreshed so the player recompiles it.
+    // Some builds register their resources in a way this tool cannot follow (an
+    // MSI 5.12 player writes no `qres` header at all), so the pool is invisible
+    // even though the page is in a perfectly normal resource tree. The record is
+    // found by its own bytes, and the tree is then searched for the node that
+    // maps it: a page found this way is a real resource, not a blind scan - it
+    // can be rewritten through its node, moved into free space when the new text
+    // is longer, and its timestamp can be refreshed so the player recompiles it.
     if (name == QLatin1String("PlrAboutSetting.qml")) {
         Doc found;
         if (docFromBytes(image, name, &found)) {
@@ -301,14 +300,14 @@ bool findDocByBytes(const QByteArray &image, Doc *out, qint64 from)
 
 // The page as a resource, even when the pool that holds it cannot be listed.
 //
-// An MSI 5.12 player registers its Qt resources in a shape registeredPools()
-// does not recognise, so nothing in the tree is enumerated - yet the tree is
-// there, and the page's record is a perfectly ordinary compressed resource. So
-// the record is located by its bytes and the tree is then asked to map it. A
-// page that maps this way is a normal resource: it can be written through its
-// node, moved into free space when the new text is longer, and its timestamp
-// can be refreshed. A page that does not map is still usable - it is written in
-// place, inside the room its record already has.
+// An MSI 5.12 player's resource registration is one registeredPools() does not
+// follow, so nothing in the tree is enumerated - yet the tree is there, and the
+// page's record is a perfectly ordinary compressed resource. So the record is
+// located by its bytes and the tree is then asked to map it. A page that maps
+// this way is a normal resource: it can be written through its node, moved into
+// free space when the new text is longer, and its timestamp can be refreshed. A
+// page that does not map is still usable - it is written in place, inside the
+// room its record already has.
 //
 // The scan starts at `from` and skips records the tree does not map, because a
 // page that was moved to free space leaves its old record behind (nothing else
@@ -1423,6 +1422,20 @@ bool taggedAfter(const QString &qml, int valueBegin, const QString &marker,
     return true;
 }
 
+// `true` with a trailing comment is still `true`: the patch's own form is
+// `true/*msi5*/`, and a page this tool has already switched on must not be
+// reported as hidden - otherwise every check after a patch re-applies it.
+bool valueIsTrue(const QString &value)
+{
+    QString text = value.trimmed();
+    if (text.startsWith(QLatin1String("true")) && text.size() > 4) {
+        const QChar next = text.at(4);
+        if (next.isSpace() || next == QLatin1Char('/'))
+            text = QStringLiteral("true");
+    }
+    return text == QLatin1String("true");
+}
+
 // Hide one object: wrap an existing `visible` binding, or add a plain false
 // member when the stock object has none.
 bool hideObject(const QString &qml, const QmlText::Object &object, QList<Edit> &edits)
@@ -1473,7 +1486,11 @@ bool forceShown(const QString &qml, const QmlText::Object &object, QList<Edit> &
     if (!directBinding(masked, object.open, object.end, QStringLiteral("visible"), &visible))
         return false; // no binding: the section is already visible
     const QString value = qml.mid(visible.valueBegin, visible.valueEnd - visible.valueBegin);
-    if (value == QLatin1String("true")) return false;
+    // Already on - including the page-wide form this tool writes
+    // (`true/*msi5*/`), which the gate pass has just put there. Wrapping that in
+    // a second tag would both grow the page and hide the marker the restore
+    // looks for.
+    if (valueIsTrue(value)) return false;
     addEdit(edits, visible.valueBegin, visible.valueEnd - visible.valueBegin,
             tagged(QStringLiteral("true"), value, kShownTag));
     return true;
@@ -1486,6 +1503,8 @@ bool restoreShown(const QString &qml, const QmlText::Object &object, QList<Edit>
     if (!directBinding(masked, object.open, object.end, QStringLiteral("visible"), &visible))
         return false;
     const QString value = qml.mid(visible.valueBegin, visible.valueEnd - visible.valueBegin);
+    // Only a `true` this tool wrote is put back (its marker is found after the
+    // value); a `true` that no marker follows belongs to the build.
     if (value != QLatin1String("true")) return false;
     QString original;
     int tagEnd = -1;
@@ -1884,8 +1903,7 @@ bool hidesItself(const QString &masked, const QmlText::Object &object)
     QmlText::Binding visible;
     if (!directBinding(masked, object.open, object.end, QStringLiteral("visible"), &visible))
         return false;
-    return masked.mid(visible.valueBegin, visible.valueEnd - visible.valueBegin).trimmed()
-        != QLatin1String("true");
+    return !valueIsTrue(masked.mid(visible.valueBegin, visible.valueEnd - visible.valueBegin));
 }
 
 // The stock link rows, in the order the page lays them out. A build may have
@@ -2664,12 +2682,24 @@ bool rewritePage(QByteArray &changed, bool enabled, const Config &config,
     *patched = 0;
     for (int pass = 0; pass < 8; ++pass) {
         QList<Doc> docs;
-        if (!findDocs(changed, QStringLiteral("PlrAboutSetting.qml"), &docs, error)) {
-            // No usable tree: the page may still be there as a record that was
-            // found by scanning. It is written in place, within its own room.
-            Doc scanned;
-            if (!findDocByBytes(changed, &scanned)) return false;
-            docs << scanned;
+        QString whyNot;
+        const bool walked = findDocs(changed, QStringLiteral("PlrAboutSetting.qml"), &docs, &whyNot);
+        if (!walked || docs.isEmpty()) {
+            // No pool holds the page, or the pool that does cannot be
+            // enumerated. The record is found by its own bytes and the tree is
+            // asked to map it: a page that maps is written through its node,
+            // which is what lets a longer page move into free space instead of
+            // being refused. Only a record no tree maps is written blind, in
+            // place.
+            Doc found;
+            if (docFromBytes(changed, QStringLiteral("PlrAboutSetting.qml"), &found)) {
+                docs << found;
+            } else if (findDocByBytes(changed, &found)) {
+                docs << found;
+            } else {
+                if (error && error->isEmpty()) *error = whyNot;
+                return false;
+            }
         }
         const Doc *next = nullptr;
         for (const auto &doc : docs) {

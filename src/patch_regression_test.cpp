@@ -4236,12 +4236,14 @@ Window {
         // The sections can also be left exactly as the build draws them.
         AboutPatcher::Config gated = perLink;
         gated.showSections = false;
-        check(AboutPatcher::apply(aboutPath, true, gated).ok
-                  && !resourceText(read(aboutPath), r, QStringLiteral("PlrAboutSetting.qml"))
-                          .contains(QLatin1String("BSI CUSTOMIZER: about shown:"))
-                  && resourceText(read(aboutPath), r, QStringLiteral("PlrAboutSetting.qml"))
-                         .contains(QLatin1String("visible: uiBackend.oem !== \"msi5\"")),
-              "the sections can be left hidden on the builds that hide them");
+        const bool gatedOk = AboutPatcher::apply(aboutPath, true, gated).ok;
+        const QString gatedPage = resourceText(read(aboutPath), r, QStringLiteral("PlrAboutSetting.qml"));
+        check(gatedOk && !gatedPage.contains(QLatin1String("visible: true/*msi5*/"))
+                  && gatedPage.count(QLatin1String("visible: uiBackend.oem !== \"msi5\"")) == 3,
+              "the sections can be left hidden on the builds that hide them, and the check the "
+              "build ships is left alone");
+        check(!gatedOk || AboutPatcher::analyze(read(aboutPath)).sectionsHidden,
+              "a page that keeps the build's own check reads back as hidden");
 
         check(AboutPatcher::apply(aboutPath, true, config).ok
                   && resourceText(read(aboutPath), r, QStringLiteral("PlrAboutSetting.qml"))
@@ -4251,6 +4253,8 @@ Window {
                       .count(QLatin1String("visible: true/*msi5*/")) == 3,
               "the sections the stock page hides are switched on again after the page was left "
               "with its own check");
+        check(!AboutPatcher::analyze(read(aboutPath)).sectionsHidden,
+              "and the card no longer reports them as hidden, so a second apply is not an edit");
         const auto restored = AboutPatcher::apply(aboutPath, false, {});
         check(restored.ok, QStringLiteral("the stock About page restores (%1)").arg(restored.msg));
         check(resourceText(read(aboutPath), r, QStringLiteral("PlrAboutSetting.qml")) == about,

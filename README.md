@@ -210,19 +210,19 @@ carries the page is located next to the selected EXE and that is the file that i
 read and written, so "not embedded in this player" only appears when nothing in
 the folder has the page.
 
-A build that registers its Qt resources in a shape this tool cannot enumerate
-(an MSI 5.12 player writes no `qres` header and no registration call it
-recognises) is not "not embedded" any more: the page's record is located by its
-own words, and the resource tree is then asked to map it. A page found that way
-is a **normal resource** - it is rewritten through its node, its timestamp is
-refreshed so the player recompiles it, and when the edited page is longer than
-the room its record has (the MSI record is full to the last byte) the record is
-built in **free space the file already has** and the tree node is re-pointed at
-it. The file still cannot grow by a single byte, and the pool's own payloads are
-excluded from that free space, so a long run of zeros inside, say, a silent WAV
-is never mistaken for a cave. A record that no tree maps is still read, and
-written back in place inside the room it already has, with Apply saying exactly
-how many bytes are missing when it does not fit.
+A build whose resource registration this tool cannot follow - the MSI 5.12
+player is one, and it writes no `qres` header at all - is not "not embedded" any
+more: the page's record is located by its own words, and the resource tree is
+then asked to map it. A page found that way is a **normal resource** - it is
+rewritten through its node, its timestamp is refreshed so the player recompiles
+it, and when the edited page is longer than the room its record has (the MSI
+record is full to the last byte) the record is built in **free space the file
+already has** and the tree node is re-pointed at it. The file still cannot grow
+by a single byte, and the pool's own payloads are excluded from that free space,
+so a long run of zeros inside, say, a silent WAV is never mistaken for a cave. A
+record that no tree maps is still read, and written back in place inside the
+room it already has, with Apply saying exactly how many bytes are missing when
+it does not fit.
 
 Two more rules keep that page inside its budget. The About line is only
 rewritten when it does not already print what it should - a field the user left
