@@ -3,6 +3,14 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("QSG_RHI_BACKEND", "software")
 import re
+import subprocess
+import sys
+
+# Isolate composite module/type caches and Qt engine teardown per provider.
+if len(sys.argv) == 1:
+    for provider in ("qt6", "qt5", "web"):
+        subprocess.run([sys.executable, "-X", "faulthandler", "-u", __file__, provider], check=True)
+    sys.exit(0)
 import tempfile
 from pathlib import Path
 from PySide6.QtCore import QObject, QUrl, qInstallMessageHandler
@@ -20,7 +28,7 @@ def log(kind, context, message):
     messages.append(message)
 qInstallMessageHandler(log)
 
-for provider in ("qt6", "qt5", "web"):
+for provider in (sys.argv[1],):
     with tempfile.TemporaryDirectory(prefix="boot ' & Ω ") as tmp:
         directory = Path(tmp)
         imports = directory / "imports"
@@ -71,5 +79,6 @@ for provider in ("qt6", "qt5", "web"):
         print(f"PASS: adaptive boot player {provider}", flush=True)
         import shiboken6
         shiboken6.delete(obj)
+        shiboken6.delete(component)
         shiboken6.delete(engine)
         messages.clear()
