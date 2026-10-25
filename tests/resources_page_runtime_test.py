@@ -43,14 +43,24 @@ with tempfile.TemporaryDirectory() as directory:
     errors = []
     engine.warnings.connect(lambda warnings: errors.extend(w.toString() for w in warnings))
 
+    # Retain the components as well as their instances. Destroying a local
+    # QQmlComponent can invalidate the creation context of a QML-defined mock
+    # even after the instance has been assigned CppOwnership.
+    components = []
+    instances = []
+
     def create(qml):
         component = QQmlComponent(engine)
+        component.setParent(engine)
+        components.append(component)
         component.setData(qml.encode(), QUrl.fromLocalFile(str(Path(directory) / "test.qml")))
         obj = component.create()
         assert obj is not None, [e.toString() for e in component.errors()]
         # QML may collect an unparented mock while another component is being
         # created; the Python variable alone does not root QML-owned objects.
         QQmlEngine.setObjectOwnership(obj, QQmlEngine.ObjectOwnership.CppOwnership)
+        obj.setParent(engine)
+        instances.append(obj)
         return obj
 
     backend = create('''import QtQuick
