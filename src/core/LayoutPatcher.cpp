@@ -1563,7 +1563,7 @@ QString buttonLabel(const QString &key)
 QList<ButtonSlot> stripSlots(const QString &qml, const QString &masked, const QmlText::Object &strip,
                              const QStringList &skip = QStringList())
 {
-    QList<ButtonSlot> slots;
+    QList<ButtonSlot> entries;
     for (const auto &child : childrenOf(masked, strip)) {
         ButtonSlot slot;
         slot.begin = child.nameBegin;
@@ -1574,15 +1574,15 @@ QList<ButtonSlot> stripSlots(const QString &qml, const QString &masked, const Qm
         if (fixedButtonKeys().contains(slot.id)) slot.key = fixedButtonKeys().value(slot.id);
         else if (type == QLatin1String("Repeater")) slot.key = QStringLiteral("repeater");
         if (slot.key.isEmpty() || skip.contains(slot.key)) continue;
-        slots << slot;
+        entries << slot;
     }
-    return slots;
+    return entries;
 }
 
 // The pAllSidebarItems entries the Repeater renders, in declaration order.
 QList<ButtonSlot> itemSlots(const QString &qml, const QString &masked)
 {
-    QList<ButtonSlot> slots;
+    QList<ButtonSlot> entries;
     for (const auto &element : QmlText::objects(masked, QStringLiteral("PlrSidebarElement"))) {
         ButtonSlot slot;
         slot.begin = element.nameBegin;
@@ -1604,32 +1604,32 @@ QList<ButtonSlot> itemSlots(const QString &qml, const QString &masked)
             && qml.mid(repeaterOnly.valueBegin, repeaterOnly.valueEnd - repeaterOnly.valueBegin)
                    .trimmed().startsWith(QLatin1String("false")))
             continue;
-        slots << slot;
+        entries << slot;
     }
-    return slots;
+    return entries;
 }
 
-QStringList slotKeys(const QList<ButtonSlot> &slots)
+QStringList slotKeys(const QList<ButtonSlot> &entries)
 {
     QStringList keys;
-    for (const auto &slot : slots) keys << slot.key;
+    for (const auto &slot : entries) keys << slot.key;
     return keys;
 }
 
 // Give every slot the text of the slot that belongs in its place. Only whole
 // objects move, so commas, line breaks and indentation stay untouched.
-bool permuteSlots(const QString &qml, const QList<ButtonSlot> &slots, const QStringList &wanted,
+bool permuteSlots(const QString &qml, const QList<ButtonSlot> &entries, const QStringList &wanted,
                   QList<Edit> &edits)
 {
-    if (wanted.size() != slots.size()) return false;
-    const QStringList current = slotKeys(slots);
+    if (wanted.size() != entries.size()) return false;
+    const QStringList current = slotKeys(entries);
     QList<QString> texts;
-    for (const auto &slot : slots) texts << qml.mid(slot.begin, slot.end - slot.begin);
-    for (int i = 0; i < slots.size(); ++i) {
+    for (const auto &slot : entries) texts << qml.mid(slot.begin, slot.end - slot.begin);
+    for (int i = 0; i < entries.size(); ++i) {
         const int source = int(current.indexOf(wanted.at(i)));
         if (source < 0) return false;
         if (source == i) continue;
-        addEdit(edits, slots.at(i).begin, slots.at(i).end - slots.at(i).begin, texts.at(source));
+        addEdit(edits, entries.at(i).begin, entries.at(i).end - entries.at(i).begin, texts.at(source));
     }
     return true;
 }
@@ -1924,12 +1924,12 @@ bool sidebarVisibilityEdits(const QString &qml, const QString &masked, bool enab
 // The title bar's own Back/Home/Recent, in the order they are declared.
 QList<ButtonSlot> topbarSlots(const QString &qml, const QString &masked)
 {
-    QList<ButtonSlot> slots;
+    QList<ButtonSlot> entries;
     QmlText::Object row;
     for (const auto &object : QmlText::objects(masked, QStringLiteral("Rectangle"))) {
         if (row.nameBegin < 0 || object.nameBegin < row.nameBegin) row = object;
     }
-    if (row.nameBegin < 0) return slots;
+    if (row.nameBegin < 0) return entries;
     for (const auto &object : QmlText::objects(masked, QStringLiteral("UiRowLayout"))) {
         QString id;
         if (objectId(qml, masked, object, &id) && id == QLatin1String("iTopbarRow")) row = object;
@@ -1941,12 +1941,12 @@ QList<ButtonSlot> topbarSlots(const QString &qml, const QString &masked)
         if (key != QLatin1String("back") && key != QLatin1String("home")
             && key != QLatin1String("recent")) continue;
         if (object.nameBegin <= row.open || object.end > row.end) continue;
-        slots << ButtonSlot { key, id, object.nameBegin, object.end, object };
+        entries << ButtonSlot { key, id, object.nameBegin, object.end, object };
     }
-    std::sort(slots.begin(), slots.end(), [](const ButtonSlot &a, const ButtonSlot &b) {
+    std::sort(entries.begin(), entries.end(), [](const ButtonSlot &a, const ButtonSlot &b) {
         return a.begin < b.begin;
     });
-    return slots;
+    return entries;
 }
 
 // PlrTopbar.qml: the title bar's own Back/Home/Recent in the requested order.
@@ -1955,8 +1955,8 @@ QList<ButtonSlot> topbarSlots(const QString &qml, const QString &masked)
 bool topbarOrderEdits(const QString &qml, const QString &masked, bool enabled,
                       const QStringList &requested, QList<Edit> &edits)
 {
-    const QList<ButtonSlot> slots = topbarSlots(qml, masked);
-    if (slots.size() < 2) {
+    const QList<ButtonSlot> entries = topbarSlots(qml, masked);
+    if (entries.size() < 2) {
         if (!enabled) removeOrderMarker(qml, QStringLiteral("topbar"), edits);
         return true;
     }
@@ -1964,21 +1964,21 @@ bool topbarOrderEdits(const QString &qml, const QString &masked, bool enabled,
     QStringList stock;
     const bool haveMarker = orderMarker(qml, QStringLiteral("topbar"), &stock, nullptr, nullptr);
     if (!enabled) {
-        if (haveMarker && stock.size() == slots.size()) permuteSlots(qml, slots, stock, edits);
+        if (haveMarker && stock.size() == entries.size()) permuteSlots(qml, entries, stock, edits);
         removeOrderMarker(qml, QStringLiteral("topbar"), edits);
         return true;
     }
     if (!haveMarker) {
-        addEdit(edits, qml.lastIndexOf(QLatin1Char('\n'), slots.first().begin) + 1, 0,
-                orderMarkerLine(QStringLiteral("topbar"), slotKeys(slots), lineEnding(qml),
-                                lineIndentAt(qml, slots.first().begin)));
+        addEdit(edits, qml.lastIndexOf(QLatin1Char('\n'), entries.first().begin) + 1, 0,
+                orderMarkerLine(QStringLiteral("topbar"), slotKeys(entries), lineEnding(qml),
+                                lineIndentAt(qml, entries.first().begin)));
     }
     QStringList wanted;
     for (const QString &key : requested.isEmpty() ? defaultButtonOrder() : requested)
-        if (slotKeys(slots).contains(key) && !wanted.contains(key)) wanted << key;
-    for (const QString &key : slotKeys(slots))
+        if (slotKeys(entries).contains(key) && !wanted.contains(key)) wanted << key;
+    for (const QString &key : slotKeys(entries))
         if (!wanted.contains(key)) wanted << key;
-    if (wanted != slotKeys(slots) && !permuteSlots(qml, slots, wanted, edits)) return false;
+    if (wanted != slotKeys(entries) && !permuteSlots(qml, entries, wanted, edits)) return false;
     return true;
 }
 
