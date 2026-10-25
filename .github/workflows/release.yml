@@ -258,6 +258,35 @@ jobs:
           "File: **$env:SETUP_NAME** ($([math]::Round((Get-Item $setup).Length / 1MB, 1)) MB)" >> $env:GITHUB_STEP_SUMMARY
           "SHA-256: ``$sha``" >> $env:GITHUB_STEP_SUMMARY
 
+      # The one thing reading the source cannot stand in for: the bytes Inno
+      # Setup actually produced. The updater verifies a finished download with
+      # this same code, and 2.5.1 shipped a setup the app itself deleted at
+      # 100% ("not a 64-bit program") because the check asked a 32-bit setup
+      # stub for the app's machine. A setup the updater would refuse now fails
+      # here - on the pull request, before a tag can publish it.
+      - name: The updater accepts the installer it just built
+        env:
+          QT_QPA_PLATFORM: offscreen
+          SETUP_NAME: ${{ steps.meta.outputs.setup_name }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = (Resolve-Path 'build/Release/BSI-Customizer.exe').Path
+          $setup = (Resolve-Path (Join-Path 'build/artifacts' $env:SETUP_NAME)).Path
+          $log = Join-Path $env:RUNNER_TEMP 'verify-update.log'
+          $process = Start-Process -FilePath $exe `
+              -ArgumentList '--check-updates', '--verify-file', $setup `
+              -Wait -PassThru -NoNewWindow -RedirectStandardOutput $log
+          Get-Content $log -ErrorAction SilentlyContinue
+          if ($process.ExitCode -ne 0 -or -not (Select-String -Path $log -Pattern 'VERDICT: the updater would keep this file' -Quiet)) {
+            Get-Content $log -ErrorAction SilentlyContinue | ForEach-Object {
+              if ($_.Length -gt 400) { $_ = $_.Substring(0, 400) }
+              Write-Host "::error::$($_ -replace '%', '%25')"
+            }
+            throw "The updater would refuse the installer it just built (exit $($process.ExitCode))"
+          }
+          "### Updater check" >> $env:GITHUB_STEP_SUMMARY
+          "The updater accepts **$env:SETUP_NAME** (printed verdict above)." >> $env:GITHUB_STEP_SUMMARY
+
       # Publish directly from the same Windows job that built and tested the
       # executable. A cross-job upload/download through Actions artifacts can
       # fail before publishing when the repository artifact quota is full.

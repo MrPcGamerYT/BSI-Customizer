@@ -461,5 +461,69 @@ int runUpdateCommand(const QStringList &arguments)
 
 int runUpdateCli(const QStringList &arguments)
 {
+    // Check a file on disk the way the download path checks a finished
+    // download, without a Discord channel:
+    //   BSI-Customizer.exe --check-updates --verify-file <path> [--json]
+    //
+    // The release workflow runs this on the installer it just built. That is
+    // the one thing reading the source cannot stand in for: the bytes Inno
+    // Setup actually produced. 2.5.1 shipped a setup the app itself deleted at
+    // 100%, because the verifier wanted the app's machine from a 32-bit stub.
+    const int verifyAt = arguments.indexOf(QStringLiteral("--verify-file"));
+    if (verifyAt >= 0) {
+        const QString path = verifyAt + 1 < arguments.size() ? arguments.at(verifyAt + 1) : QString();
+        const bool json = arguments.contains(QStringLiteral("--json"));
+        if (path.isEmpty()) {
+            line(QStringLiteral("error: --verify-file needs the path of a downloaded file"));
+            return 2;
+        }
+        const QFileInfo file(path);
+        if (!file.exists() || !file.isFile()) {
+            line(QStringLiteral("error: no such file: %1").arg(path));
+            return 1;
+        }
+
+        QString error;
+        UpdateChecker::PeInfo pe;
+        const bool readable = UpdateChecker::readPeInfo(file.absoluteFilePath(), &pe, &error);
+        const bool runnable = UpdateChecker::looksLikeExecutable(file.absoluteFilePath(), &error);
+        const bool installer = UpdateChecker::looksLikeInstaller(file.absoluteFilePath());
+        const bool replaceable = UpdateChecker::canReplaceThisProgram(file.absoluteFilePath(), &error);
+
+        if (json) {
+            QJsonObject result{
+                { QStringLiteral("ok"), runnable },
+                { QStringLiteral("file"), file.absoluteFilePath() },
+                { QStringLiteral("size"), double(file.size()) },
+                { QStringLiteral("readable"), readable },
+                { QStringLiteral("machine"), readable ? pe.machineName() : QString() },
+                { QStringLiteral("pe32Plus"), readable ? pe.pe32Plus : false },
+                { QStringLiteral("installer"), installer },
+                { QStringLiteral("runnable"), runnable },
+                { QStringLiteral("canReplace"), replaceable },
+                { QStringLiteral("error"), runnable ? QString() : error },
+            };
+            line(QStringLiteral("%1").arg(QString::fromUtf8(
+                QJsonDocument(result).toJson(QJsonDocument::Compact))));
+            return runnable ? 0 : 1;
+        }
+
+        line(QStringLiteral("file:    %1").arg(file.absoluteFilePath()));
+        line(QStringLiteral("size:    %1 bytes").arg(file.size()));
+        if (readable) {
+            line(QStringLiteral("header:  %1, %2 optional header, %3")
+                     .arg(pe.machineName(),
+                          pe.pe32Plus ? QStringLiteral("PE32+") : QStringLiteral("PE32"),
+                          pe.isDll ? QStringLiteral("a library") : QStringLiteral("a program")));
+        }
+        line(QStringLiteral("setup:   %1").arg(installer ? QStringLiteral("yes") : QStringLiteral("no")));
+        line(QStringLiteral("runs:    %1").arg(runnable ? QStringLiteral("yes") : QStringLiteral("no")));
+        line(QStringLiteral("replace: %1").arg(replaceable ? QStringLiteral("yes") : QStringLiteral("no")));
+        if (!runnable)
+            line(QStringLiteral("reason:  %1").arg(error));
+        line(runnable ? QStringLiteral("VERDICT: the updater would keep this file")
+                      : QStringLiteral("VERDICT: the updater would delete this file"));
+        return runnable ? 0 : 1;
+    }
     return runUpdateCommand(arguments);
 }
