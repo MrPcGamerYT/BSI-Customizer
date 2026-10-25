@@ -72,6 +72,10 @@ int failures = 0;
 void check(bool ok, const char *message)
 {
     std::printf("  %s  %s\n", ok ? "PASS" : "FAIL", message);
+    // stdout is a file when CI redirects it, so it is block-buffered: a run that
+    // dies stops leaving its last lines behind in the buffer, and the log then
+    // ends somewhere before the statement that killed it.
+    std::fflush(stdout);
     if (!ok) {
         ++failures;
         // Windows CI runs expose the job log only as annotations, so surface each
