@@ -189,6 +189,10 @@ public:
     Q_INVOKABLE QVariantMap applyRemovals(const QStringList &names);
     Q_INVOKABLE QVariantList layoutTweaks();
     Q_INVOKABLE QVariantMap applyLayoutTweak(const QString &id, bool enabled);
+    // The buttons of the title-bar row, in display order, and the editor that
+    // moves them.
+    Q_INVOKABLE QVariantMap sidebarButtonRows();
+    Q_INVOKABLE QVariantMap applySidebarOrder(const QStringList &order, const QStringList &hidden);
     Q_INVOKABLE QVariantMap aboutPageState();
     Q_INVOKABLE QVariantMap applyAboutPage(const QString &text, const QVariantList &links,
                                            bool showSections, bool enabled);

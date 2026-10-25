@@ -8,6 +8,7 @@
 #include "ThemeEngine.h"
 
 #include <QFile>
+#include <QHash>
 #include <QMap>
 #include <QRegularExpression>
 #include <QSet>
@@ -246,12 +247,17 @@ QString legacyTitlebarOverlay(const QString &nl, bool settingsHandler)
 // declared after the top bar). Clearing old anchors is essential on Qt 5 too.
 QString titlebarOverlay(const QString &nl)
 {
+    // The host starts where the title bar's own Back/Home/Recent end, so the
+    // moved buttons continue that row instead of floating in its middle. The
+    // position comes from PlrTopbar.qml (pBSISidebarX) because those buttons
+    // live in that component.
     const QStringList lines {
         QStringLiteral("        Item {"),
         QStringLiteral("            ") + kOverlayMarker,
         QStringLiteral("            id: ") + kOverlayId,
         QStringLiteral("            anchors.fill: parent"),
-        QStringLiteral("            anchors.leftMargin: Math.min(144, parent.width / 4)"),
+        QStringLiteral("            anchors.leftMargin: parent.pBSISidebarX"),
+        // Keep clear of the window controls and icons that live on the right.
         QStringLiteral("            anchors.rightMargin: Math.min(144, parent.width / 4)"),
         QStringLiteral("            function fMountSidebar() {"),
         QStringLiteral("                iSidebar.anchors.top = undefined"),
@@ -1365,6 +1371,659 @@ bool findButtonStrip(const QString &qml, const QString &masked, const QmlText::O
     return true;
 }
 
+// ---------------------------------------------------------------------------
+// Button order and per-button visibility
+// ---------------------------------------------------------------------------
+//
+// The moved row *is* the sidebar's own button strip: its direct children are
+// the buttons in display order, and the Repeater among them renders the
+// pAllSidebarItems entries (Fullscreen, Sound, Files / APK, ...). So "move a
+// button" means moving one declaration - never rewriting its contents - and
+// "hide a button" means switching the member that decides its visibility. The
+// stock order is recorded in a comment before the first move, so turning the
+// option off puts every declaration back where it was.
+
+const QString kOrderMarkerPrefix = QStringLiteral("// BSI CUSTOMIZER: order ");
+const QString kHiddenRowMarker = QStringLiteral("// BSI CUSTOMIZER: hidden row buttons=");
+const QString kButtonHiddenTag = QStringLiteral(" // BSI CUSTOMIZER: hidden button");
+const QString kSettingsFlipTag = QStringLiteral(" // BSI CUSTOMIZER: settings in the row");
+
+// What the UI asks for: one key per button of the row, and the ones to hide.
+struct RowRequest
+{
+    QStringList order;
+    QSet<QString> hidden;
+};
+
+QString lineIndentAt(const QString &qml, int pos)
+{
+    int start = qml.lastIndexOf(QLatin1Char('\n'), qMax(0, pos - 1)) + 1;
+    if (start > pos) start = 0;
+    QString indent;
+    for (int i = start; i < qml.size() && (qml.at(i) == QLatin1Char(' ') || qml.at(i) == QLatin1Char('\t')); ++i)
+        indent += qml.at(i);
+    return indent;
+}
+
+// The `// BSI CUSTOMIZER: order <scope>=a,b,c` line this tool writes.
+bool orderMarker(const QString &qml, const QString &scope, QStringList *keys, int *lineBegin, int *lineEnd)
+{
+    const QString prefix = kOrderMarkerPrefix + scope + QLatin1Char('=');
+    const int at = qml.indexOf(prefix);
+    if (at < 0) return false;
+    int stop = qml.indexOf(QLatin1Char('\n'), at);
+    if (stop < 0) stop = qml.size();
+    const QString list = qml.mid(at + prefix.size(), stop - at - prefix.size()).trimmed();
+    if (keys) *keys = list.isEmpty() ? QStringList() : list.split(QLatin1Char(','), Qt::SkipEmptyParts);
+    if (lineBegin) *lineBegin = qml.lastIndexOf(QLatin1Char('\n'), at) + 1;
+    if (lineEnd) *lineEnd = qMin(stop + 1, qml.size());
+    return true;
+}
+
+QString orderMarkerLine(const QString &scope, const QStringList &keys, const QString &nl, const QString &indent)
+{
+    return indent + kOrderMarkerPrefix + scope + QLatin1Char('=') + keys.join(QLatin1Char(',')) + nl;
+}
+
+// Every direct child object of `parent`, in source order, whatever its type.
+QList<QmlText::Object> childrenOf(const QString &masked, const QmlText::Object &parent)
+{
+    QList<QmlText::Object> children;
+    int i = parent.open + 1;
+    const int limit = parent.end - 1;
+    while (i < limit) {
+        const QChar c = masked.at(i);
+        if (!c.isLetter() && c != QLatin1Char('_')) { ++i; continue; }
+        const QChar previous = masked.at(i - 1);
+        if (previous.isLetterOrNumber() || previous == QLatin1Char('_') || previous == QLatin1Char('.')) {
+            ++i;
+            continue;
+        }
+        int nameEnd = i;
+        while (nameEnd < limit && (masked.at(nameEnd).isLetterOrNumber()
+                                   || masked.at(nameEnd) == QLatin1Char('_')
+                                   || masked.at(nameEnd) == QLatin1Char('.'))) ++nameEnd;
+        int open = nameEnd;
+        while (open < limit && masked.at(open).isSpace()) ++open;
+        if (open >= limit || masked.at(open) != QLatin1Char('{')) { i = nameEnd; continue; }
+        // A handler such as `onClicked: { ... }` also opens a block; only a
+        // type name followed by `{` declares a child object.
+        if (masked.mid(i, open - i).contains(QLatin1Char(':'))) { ++i; continue; }
+        int depth = 0;
+        int end = open;
+        for (; end < limit + 1; ++end) {
+            if (masked.at(end) == QLatin1Char('{')) ++depth;
+            else if (masked.at(end) == QLatin1Char('}') && --depth == 0) { ++end; break; }
+        }
+        if (depth != 0) return children;
+        children << QmlText::Object { i, open, end };
+        i = end;
+    }
+    return children;
+}
+
+QString objectType(const QString &masked, const QmlText::Object &object)
+{
+    return masked.mid(object.nameBegin, object.open - object.nameBegin).trimmed()
+        .section(QLatin1Char('.'), -1);
+}
+
+bool objectId(const QString &qml, const QString &masked, const QmlText::Object &object, QString *id)
+{
+    QmlText::Binding binding;
+    if (!directBinding(masked, object.open, object.end, QStringLiteral("id"), &binding)) return false;
+    *id = qml.mid(binding.valueBegin, binding.valueEnd - binding.valueBegin).trimmed();
+    return true;
+}
+
+struct ButtonSlot
+{
+    QString key;
+    QString id;        // the object's own id, empty for a Repeater
+    int begin = -1;    // first character of the object's type name
+    int end = -1;      // one past its closing '}'
+    QmlText::Object object;
+};
+
+// Display keys of the buttons the strip names explicitly.
+const QHash<QString, QString> &fixedButtonKeys()
+{
+    static const QHash<QString, QString> keys {
+        { QStringLiteral("iBackBtn"), QStringLiteral("back") },
+        { QStringLiteral("iHomeBtn"), QStringLiteral("home") },
+        { QStringLiteral("iRecentBtn"), QStringLiteral("recent") },
+        { QStringLiteral("iSettingsBtn"), QStringLiteral("settings") },
+        { QStringLiteral("iDiscordBtn"), QStringLiteral("discord") },
+        { QStringLiteral("iChatBtn"), QStringLiteral("chat") },
+        { QStringLiteral("iKebabMenuBtn"), QStringLiteral("more") },
+    };
+    return keys;
+}
+
+// pFullscreen -> fullscreen, pInstallApk -> installapk, "screen" -> screen.
+QString elementKey(const QString &qml, const QString &masked, const QmlText::Object &element)
+{
+    QmlText::Binding binding;
+    if (!directBinding(masked, element.open, element.end, QStringLiteral("pElementId"), &binding))
+        return QString();
+    QString value = qml.mid(binding.valueBegin, binding.valueEnd - binding.valueBegin).trimmed();
+    if (value.startsWith(QLatin1Char('"')) || value.startsWith(QLatin1Char('\'')))
+        value = value.mid(1);
+    if (value.endsWith(QLatin1Char('"')) || value.endsWith(QLatin1Char('\'')))
+        value.chop(1);
+    if (value.startsWith(QLatin1Char('p')) && value.size() > 1) value = value.mid(1);
+    return value.toLower();
+}
+
+const QHash<QString, QString> &buttonLabels()
+{
+    static const QHash<QString, QString> labels {
+        { QStringLiteral("back"), QStringLiteral("Back") },
+        { QStringLiteral("home"), QStringLiteral("Home") },
+        { QStringLiteral("recent"), QStringLiteral("Recent apps") },
+        { QStringLiteral("fullscreen"), QStringLiteral("Fullscreen") },
+        { QStringLiteral("volume"), QStringLiteral("Sound") },
+        { QStringLiteral("installapk"), QStringLiteral("Files / APK") },
+        { QStringLiteral("settings"), QStringLiteral("Settings") },
+        { QStringLiteral("lockcursor"), QStringLiteral("Lock mouse cursor") },
+        { QStringLiteral("gamecontrol"), QStringLiteral("Game controls") },
+        { QStringLiteral("imapabort"), QStringLiteral("Gamepad (R3)") },
+        { QStringLiteral("macro"), QStringLiteral("Macro") },
+        { QStringLiteral("sync"), QStringLiteral("Sync operations") },
+        { QStringLiteral("memorytrim"), QStringLiteral("Trim memory") },
+        { QStringLiteral("screenshot"), QStringLiteral("Screenshot") },
+        { QStringLiteral("screenrecord"), QStringLiteral("Screen recording") },
+        { QStringLiteral("livestream"), QStringLiteral("Play together") },
+        { QStringLiteral("mediafolder"), QStringLiteral("Media gallery") },
+        { QStringLiteral("airplanemode"), QStringLiteral("Airplane mode") },
+        { QStringLiteral("rotate"), QStringLiteral("Rotate") },
+        { QStringLiteral("shake"), QStringLiteral("Shake") },
+        { QStringLiteral("setlocation"), QStringLiteral("Set location") },
+        { QStringLiteral("mim"), QStringLiteral("Multi-instance manager") },
+        { QStringLiteral("ecomode"), QStringLiteral("Eco mode") },
+        { QStringLiteral("sidepanel"), QStringLiteral("Side panel") },
+        { QStringLiteral("chat"), QStringLiteral("Ana AI") },
+        { QStringLiteral("discord"), QStringLiteral("Discord") },
+        { QStringLiteral("more"), QStringLiteral("More (overflow menu)") },
+    };
+    return labels;
+}
+
+QString buttonLabel(const QString &key)
+{
+    if (buttonLabels().contains(key)) return buttonLabels().value(key);
+    QString pretty = key;
+    pretty.replace(QLatin1Char('_'), QLatin1Char(' '));
+    if (!pretty.isEmpty()) pretty[0] = pretty.at(0).toUpper();
+    return pretty;
+}
+
+// The strip's children that are buttons. The Repeater stands for every entry
+// of pAllSidebarItems it renders; spacers and anything else are left alone.
+QList<ButtonSlot> stripSlots(const QString &qml, const QString &masked, const QmlText::Object &strip,
+                             const QStringList &skip = QStringList())
+{
+    QList<ButtonSlot> slots;
+    for (const auto &child : childrenOf(masked, strip)) {
+        ButtonSlot slot;
+        slot.begin = child.nameBegin;
+        slot.end = child.end;
+        slot.object = child;
+        objectId(qml, masked, child, &slot.id);
+        const QString type = objectType(masked, child);
+        if (fixedButtonKeys().contains(slot.id)) slot.key = fixedButtonKeys().value(slot.id);
+        else if (type == QLatin1String("Repeater")) slot.key = QStringLiteral("repeater");
+        if (slot.key.isEmpty() || skip.contains(slot.key)) continue;
+        slots << slot;
+    }
+    return slots;
+}
+
+// The pAllSidebarItems entries the Repeater renders, in declaration order.
+QList<ButtonSlot> itemSlots(const QString &qml, const QString &masked)
+{
+    QList<ButtonSlot> slots;
+    for (const auto &element : QmlText::objects(masked, QStringLiteral("PlrSidebarElement"))) {
+        ButtonSlot slot;
+        slot.begin = element.nameBegin;
+        slot.end = element.end;
+        slot.object = element;
+        slot.key = elementKey(qml, masked, element);
+        if (slot.key.isEmpty()) continue;
+        // Back/Home/Recent/Settings have their own buttons in the strip, so
+        // stock keeps them out of the Repeater. A build that spells the member
+        // with the older typo is read the same way.
+        QmlText::Binding repeaterOnly;
+        bool bound = false;
+        for (const auto &member : { QStringLiteral("pShowViaRepeaterOnly"),
+                                    QStringLiteral("pShowViaRepaterOnly") }) {
+            bound = directBinding(masked, element.open, element.end, member, &repeaterOnly);
+            if (bound) break;
+        }
+        if (bound
+            && qml.mid(repeaterOnly.valueBegin, repeaterOnly.valueEnd - repeaterOnly.valueBegin)
+                   .trimmed().startsWith(QLatin1String("false")))
+            continue;
+        slots << slot;
+    }
+    return slots;
+}
+
+QStringList slotKeys(const QList<ButtonSlot> &slots)
+{
+    QStringList keys;
+    for (const auto &slot : slots) keys << slot.key;
+    return keys;
+}
+
+// Give every slot the text of the slot that belongs in its place. Only whole
+// objects move, so commas, line breaks and indentation stay untouched.
+bool permuteSlots(const QString &qml, const QList<ButtonSlot> &slots, const QStringList &wanted,
+                  QList<Edit> &edits)
+{
+    if (wanted.size() != slots.size()) return false;
+    const QStringList current = slotKeys(slots);
+    QList<QString> texts;
+    for (const auto &slot : slots) texts << qml.mid(slot.begin, slot.end - slot.begin);
+    for (int i = 0; i < slots.size(); ++i) {
+        const int source = int(current.indexOf(wanted.at(i)));
+        if (source < 0) return false;
+        if (source == i) continue;
+        addEdit(edits, slots.at(i).begin, slots.at(i).end - slots.at(i).begin, texts.at(source));
+    }
+    return true;
+}
+
+// Show or hide one object through `member`. A member the file already binds is
+// wrapped, so no duplicate binding is introduced and the original expression
+// comes back verbatim; a missing one is added on its own line, tagged so a
+// later run knows it is ours and can take it away again.
+bool setObjectVisible(const QString &qml, bool visible, const QmlText::Object &object,
+                      const QString &member, QList<Edit> &edits)
+{
+    const QString masked = QmlText::mask(qml);
+    QmlText::Binding binding;
+    if (directBinding(masked, object.open, object.end, member, &binding)) {
+        const QString value = qml.mid(binding.valueBegin, binding.valueEnd - binding.valueBegin);
+        const bool owned = qml.mid(binding.valueEnd, kButtonHiddenTag.size()) == kButtonHiddenTag;
+        if (visible) {
+            if (owned) {
+                const int lineStart = qml.lastIndexOf(QLatin1Char('\n'), binding.nameBegin);
+                if (lineStart < 0) return false;
+                addEdit(edits, lineStart, binding.valueEnd + kButtonHiddenTag.size() - lineStart,
+                        QString());
+                return true;
+            }
+            const QString prefix = kHiddenPrefix + QLatin1Char('(');
+            if (value.startsWith(prefix) && value.endsWith(QLatin1Char(')')))
+                addEdit(edits, binding.valueBegin, binding.valueEnd - binding.valueBegin,
+                        value.mid(int(prefix.size()), value.size() - int(prefix.size()) - 1));
+            return true;
+        }
+        if (owned || value.startsWith(kHiddenPrefix)) return true; // already off
+        addEdit(edits, binding.valueBegin, binding.valueEnd - binding.valueBegin,
+                kHiddenPrefix + QLatin1Char('(') + value + QLatin1Char(')'));
+        return true;
+    }
+    if (!visible) {
+        const int nlAt = qml.indexOf(QLatin1Char('\n'), object.open);
+        const QString indent = nlAt > 0 ? lineIndentAt(qml, nlAt + 1) : QStringLiteral("    ");
+        addEdit(edits, object.open + 1, 0,
+                QLatin1Char('\n') + indent + member + QStringLiteral(": false") + kButtonHiddenTag);
+    }
+    return true;
+}
+
+// Whether `member` is currently switched off for this object.
+bool objectHidden(const QString &qml, const QString &masked, const QmlText::Object &object,
+                  const QString &member)
+{
+    QmlText::Binding binding;
+    if (!directBinding(masked, object.open, object.end, member, &binding)) return false;
+    return qml.mid(binding.valueBegin, binding.valueEnd - binding.valueBegin).trimmed()
+        .startsWith(QLatin1String("false"));
+}
+
+void removeOrderMarker(const QString &qml, const QString &scope, QList<Edit> &edits)
+{
+    int begin = -1, end = -1;
+    if (!orderMarker(qml, scope, nullptr, &begin, &end)) return;
+    addEdit(edits, begin, end - begin, QString());
+}
+
+// The order the first tap on "apply" produces: the title bar's own navigation
+// first (it is already there), then the buttons the user reaches for, then
+// everything else in the stock order.
+QStringList defaultButtonOrder()
+{
+    return { QStringLiteral("back"), QStringLiteral("home"), QStringLiteral("recent"),
+             QStringLiteral("fullscreen"), QStringLiteral("volume"), QStringLiteral("installapk"),
+             QStringLiteral("settings") };
+}
+
+// A request names one key per button of the whole row. The strip's own
+// children and the Repeater's entries move independently, so it is split into
+// those two sequences: the Repeater takes the place of its first entry, and
+// every key the request leaves out keeps its stock place behind the rest.
+void splitOrder(const QList<ButtonSlot> &strip, const QList<ButtonSlot> &items,
+                const QStringList &requested, QStringList *stripOrder, QStringList *itemOrder)
+{
+    const QStringList stripKeys = slotKeys(strip);
+    const QStringList itemKeys = slotKeys(items);
+    QStringList wantedStrip;
+    QStringList wantedItems;
+    bool repeaterPlaced = !stripKeys.contains(QStringLiteral("repeater"));
+    for (const QString &key : requested) {
+        if (itemKeys.contains(key)) {
+            if (!wantedItems.contains(key)) wantedItems << key;
+            if (!repeaterPlaced) {
+                wantedStrip << QStringLiteral("repeater");
+                repeaterPlaced = true;
+            }
+        } else if (key != QLatin1String("repeater") && stripKeys.contains(key)) {
+            if (!wantedStrip.contains(key)) wantedStrip << key;
+        }
+    }
+    for (const QString &key : stripKeys)
+        if (!wantedStrip.contains(key)) wantedStrip << key;
+    for (const QString &key : itemKeys)
+        if (!wantedItems.contains(key)) wantedItems << key;
+    *stripOrder = wantedStrip;
+    *itemOrder = wantedItems;
+}
+
+// fResetSidebar() gives the sidebar's own buttons their visibility on every
+// resize, so a `visible:` binding declared on them would not survive. The ones
+// that have to step aside are switched off at the end of that function, in one
+// generated block that a later run replaces or removes verbatim.
+bool hiddenRowEdits(const QString &qml, const QString &masked, const QStringList &ids, QList<Edit> &edits)
+{
+    const QString nl = lineEnding(qml);
+    const int existing = qml.indexOf(kHiddenRowMarker);
+    int lineStart = -1, lineEnd = -1;
+    if (existing >= 0) {
+        lineStart = qml.lastIndexOf(QLatin1Char('\n'), existing) + 1;
+        const int firstNl = qml.indexOf(QLatin1Char('\n'), existing);
+        const int secondNl = firstNl < 0 ? -1 : qml.indexOf(QLatin1Char('\n'), firstNl + 1);
+        if (firstNl < 0 || secondNl < 0) return false;
+        lineEnd = secondNl + 1;
+    }
+    QStringList unique;
+    for (const QString &id : ids)
+        if (!id.isEmpty() && !unique.contains(id)) unique << id;
+    if (unique.isEmpty()) {
+        if (lineStart >= 0) addEdit(edits, lineStart, lineEnd - lineStart, QString());
+        return true;
+    }
+    int bodyBegin = 0, bodyEnd = 0;
+    if (!functionSpan(masked, QStringLiteral("fResetSidebar"), &bodyBegin, &bodyEnd)) return true;
+    const int bodyNl = qml.indexOf(QLatin1Char('\n'), bodyBegin);
+    QString indent = QStringLiteral("        ");
+    if (bodyNl > 0 && bodyNl < bodyEnd) indent = lineIndentAt(qml, bodyNl + 1);
+    QString statements;
+    for (const QString &id : unique) {
+        if (!statements.isEmpty()) statements += QStringLiteral("; ");
+        statements += id + QStringLiteral(".visible = false");
+    }
+    const QString block = indent + kHiddenRowMarker + unique.join(QLatin1Char(',')) + nl
+        + indent + statements + nl;
+    if (lineStart >= 0) {
+        addEdit(edits, lineStart, lineEnd - lineStart, block);
+        return true;
+    }
+    addEdit(edits, qml.lastIndexOf(QLatin1Char('\n'), bodyEnd - 1) + 1, 0, block);
+    return true;
+}
+
+// pSettings already carries a Repeater entry that stock keeps out of the row
+// (`pShowViaRepeaterOnly: false`) because the strip has a dedicated Settings
+// button. That button can only sit before or after the whole Repeater, so the
+// entry is switched on instead and Settings can take any place among the
+// other buttons; the dedicated button steps aside while this is active.
+// Whether the Settings entry is currently rendered through the Repeater.
+bool settingsInRow(const QString &qml, const QString &masked)
+{
+    for (const auto &element : QmlText::objects(masked, QStringLiteral("PlrSidebarElement"))) {
+        if (elementKey(qml, masked, element) != QLatin1String("settings")) continue;
+        QmlText::Binding binding;
+        bool bound = false;
+        for (const auto &member : { QStringLiteral("pShowViaRepeaterOnly"),
+                                    QStringLiteral("pShowViaRepaterOnly") }) {
+            bound = directBinding(masked, element.open, element.end, member, &binding);
+            if (bound) break;
+        }
+        if (!bound) return true; // no member: stock already renders it through the Repeater
+        return qml.mid(binding.valueBegin, binding.valueEnd - binding.valueBegin).trimmed()
+            .startsWith(QLatin1String("true"));
+    }
+    return false;
+}
+
+bool settingsFlipEdits(const QString &qml, const QString &masked, bool enabled, QList<Edit> &edits)
+{
+    for (const auto &element : QmlText::objects(masked, QStringLiteral("PlrSidebarElement"))) {
+        if (elementKey(qml, masked, element) != QLatin1String("settings")) continue;
+        QmlText::Binding binding;
+        bool bound = false;
+        for (const auto &member : { QStringLiteral("pShowViaRepeaterOnly"),
+                                    QStringLiteral("pShowViaRepaterOnly") }) {
+            bound = directBinding(masked, element.open, element.end, member, &binding);
+            if (bound) break;
+        }
+        if (!bound) return true; // no member: stock already renders it through the Repeater
+        const QString value = qml.mid(binding.valueBegin, binding.valueEnd - binding.valueBegin).trimmed();
+        const bool owned = qml.mid(binding.valueEnd, kSettingsFlipTag.size() + 2)
+                               .contains(kSettingsFlipTag);
+        const bool flipped = value.startsWith(QLatin1String("true"));
+        if (enabled && !flipped) {
+            addEdit(edits, binding.valueBegin, binding.valueEnd - binding.valueBegin,
+                    QStringLiteral("true") + kSettingsFlipTag);
+        } else if (!enabled && owned) {
+            addEdit(edits, binding.valueBegin, binding.valueEnd - binding.valueBegin
+                        + kSettingsFlipTag.size(), QStringLiteral("false"));
+        }
+        return true;
+    }
+    return true;
+}
+
+// PlrSidebar.qml: the strip's own buttons and the Repeater entries in the
+// requested order, with the requested ones hidden.
+bool sidebarOrderEdits(const QString &qml, const QString &masked, bool enabled, bool flipped,
+                       const RowRequest &request, QList<Edit> &edits)
+{
+    QmlText::Object root;
+    if (!findSidebarRoot(qml, masked, &root, false)) return false;
+    QmlText::Object stripObject;
+    if (!findButtonStrip(qml, masked, root, &stripObject)) return false;
+
+    const QList<ButtonSlot> allStrip = stripSlots(qml, masked, stripObject);
+    const QList<ButtonSlot> items = itemSlots(qml, masked);
+
+    // The dedicated Settings button is hidden while the entry is in the row,
+    // so it takes no place in the order.
+    QList<ButtonSlot> strip;
+    for (const auto &slot : allStrip)
+        if (!(flipped && slot.key == QLatin1String("settings"))) strip << slot;
+    if (strip.isEmpty()) return false;
+
+    QStringList stockStrip, stockItems;
+    const bool haveStripMarker = orderMarker(qml, QStringLiteral("strip"), &stockStrip, nullptr, nullptr);
+    const bool haveItemsMarker = orderMarker(qml, QStringLiteral("items"), &stockItems, nullptr, nullptr);
+
+    if (!enabled) {
+        if (haveStripMarker && stockStrip.size() == strip.size())
+            permuteSlots(qml, strip, stockStrip, edits);
+        if (haveItemsMarker && stockItems.size() == items.size())
+            permuteSlots(qml, items, stockItems, edits);
+        removeOrderMarker(qml, QStringLiteral("strip"), edits);
+        removeOrderMarker(qml, QStringLiteral("items"), edits);
+        return true;
+    }
+
+    const QString nl = lineEnding(qml);
+    if (!haveStripMarker) {
+        addEdit(edits, qml.lastIndexOf(QLatin1Char('\n'), strip.first().begin) + 1, 0,
+                orderMarkerLine(QStringLiteral("strip"), slotKeys(strip), nl,
+                                lineIndentAt(qml, strip.first().begin)));
+    }
+    if (!haveItemsMarker && !items.isEmpty()) {
+        int at = qml.indexOf(QStringLiteral("pAllSidebarItems"));
+        at = at < 0 ? items.first().begin : qml.lastIndexOf(QLatin1Char('\n'), at) + 1;
+        addEdit(edits, at, 0, orderMarkerLine(QStringLiteral("items"), slotKeys(items), nl,
+                                              lineIndentAt(qml, at)));
+    }
+
+    QStringList wantedStrip, wantedItems;
+    splitOrder(strip, items, request.order.isEmpty() ? defaultButtonOrder() : request.order,
+               &wantedStrip, &wantedItems);
+    if (wantedStrip != slotKeys(strip) && !permuteSlots(qml, strip, wantedStrip, edits)) return false;
+    if (wantedItems != slotKeys(items) && !permuteSlots(qml, items, wantedItems, edits)) return false;
+    return true;
+}
+
+// PlrSidebar.qml, second pass: which buttons the row does not show. Runs after
+// the order, so the declarations hidden here are the ones that ended up in the
+// row and not the ones that were there before the move.
+bool sidebarVisibilityEdits(const QString &qml, const QString &masked, bool enabled, bool flipped,
+                            const RowRequest &request, QList<Edit> &edits)
+{
+    QmlText::Object root;
+    if (!findSidebarRoot(qml, masked, &root, false)) return false;
+    QmlText::Object strip;
+    if (!findButtonStrip(qml, masked, root, &strip)) return false;
+    const QList<ButtonSlot> allStrip = stripSlots(qml, masked, strip);
+    const QList<ButtonSlot> items = itemSlots(qml, masked);
+
+    if (!enabled) {
+        hiddenRowEdits(qml, masked, QStringList(), edits);
+        for (const auto &slot : items)
+            if (!setObjectVisible(qml, true, slot.object, QStringLiteral("pVisible"), edits))
+                return false;
+        return true;
+    }
+
+    // The title bar already shows Back/Home/Recent, so the strip's own copies
+    // would be duplicates of the same three buttons.
+    QStringList hiddenIds;
+    for (const auto &slot : allStrip) {
+        const bool duplicate = slot.key == QLatin1String("back") || slot.key == QLatin1String("home")
+            || slot.key == QLatin1String("recent");
+        const bool wanted = request.hidden.contains(slot.key)
+            || (flipped && slot.key == QLatin1String("settings"));
+        if (duplicate || wanted) hiddenIds << slot.id;
+    }
+    if (!hiddenRowEdits(qml, masked, hiddenIds, edits)) return false;
+    for (const auto &slot : items)
+        if (!setObjectVisible(qml, !request.hidden.contains(slot.key), slot.object,
+                              QStringLiteral("pVisible"), edits))
+            return false;
+    return true;
+}
+
+// The title bar's own Back/Home/Recent, in the order they are declared.
+QList<ButtonSlot> topbarSlots(const QString &qml, const QString &masked)
+{
+    QList<ButtonSlot> slots;
+    QmlText::Object row;
+    for (const auto &object : QmlText::objects(masked, QStringLiteral("Rectangle"))) {
+        if (row.nameBegin < 0 || object.nameBegin < row.nameBegin) row = object;
+    }
+    if (row.nameBegin < 0) return slots;
+    for (const auto &object : QmlText::objects(masked, QStringLiteral("UiRowLayout"))) {
+        QString id;
+        if (objectId(qml, masked, object, &id) && id == QLatin1String("iTopbarRow")) row = object;
+    }
+    for (const auto &object : QmlText::objects(masked, QStringLiteral("UiImageButton"))) {
+        QString id;
+        if (!objectId(qml, masked, object, &id) || !fixedButtonKeys().contains(id)) continue;
+        const QString key = fixedButtonKeys().value(id);
+        if (key != QLatin1String("back") && key != QLatin1String("home")
+            && key != QLatin1String("recent")) continue;
+        if (object.nameBegin <= row.open || object.end > row.end) continue;
+        slots << ButtonSlot { key, id, object.nameBegin, object.end, object };
+    }
+    std::sort(slots.begin(), slots.end(), [](const ButtonSlot &a, const ButtonSlot &b) {
+        return a.begin < b.begin;
+    });
+    return slots;
+}
+
+// PlrTopbar.qml: the title bar's own Back/Home/Recent in the requested order.
+// They stay in the row they already live in; the width manager above them
+// re-lays that row out on its own.
+bool topbarOrderEdits(const QString &qml, const QString &masked, bool enabled,
+                      const QStringList &requested, QList<Edit> &edits)
+{
+    const QList<ButtonSlot> slots = topbarSlots(qml, masked);
+    if (slots.size() < 2) {
+        if (!enabled) removeOrderMarker(qml, QStringLiteral("topbar"), edits);
+        return true;
+    }
+
+    QStringList stock;
+    const bool haveMarker = orderMarker(qml, QStringLiteral("topbar"), &stock, nullptr, nullptr);
+    if (!enabled) {
+        if (haveMarker && stock.size() == slots.size()) permuteSlots(qml, slots, stock, edits);
+        removeOrderMarker(qml, QStringLiteral("topbar"), edits);
+        return true;
+    }
+    if (!haveMarker) {
+        addEdit(edits, qml.lastIndexOf(QLatin1Char('\n'), slots.first().begin) + 1, 0,
+                orderMarkerLine(QStringLiteral("topbar"), slotKeys(slots), lineEnding(qml),
+                                lineIndentAt(qml, slots.first().begin)));
+    }
+    QStringList wanted;
+    for (const QString &key : requested.isEmpty() ? defaultButtonOrder() : requested)
+        if (slotKeys(slots).contains(key) && !wanted.contains(key)) wanted << key;
+    for (const QString &key : slotKeys(slots))
+        if (!wanted.contains(key)) wanted << key;
+    if (wanted != slotKeys(slots) && !permuteSlots(qml, slots, wanted, edits)) return false;
+    return true;
+}
+
+// The title bar has to know where its own Back/Home/Recent end, so the moved
+// row can start right there. The expression only names the buttons this build
+// has.
+bool topbarPositionEdits(const QString &qml, const QString &masked, bool enabled, QList<Edit> &edits)
+{
+    const QString nl = lineEnding(qml);
+    if (!enabled) {
+        const QRegularExpression marker(QStringLiteral(
+            "(\\r?\\n)[ \\t]*property real pBSISidebarX:[^\\r\\n]*// BSI CUSTOMIZER: sidebar row position"));
+        const auto match = marker.match(qml);
+        if (!match.hasMatch()) return true; // never added
+        addEdit(edits, int(match.capturedStart()), int(match.capturedLength()), QString());
+        return true;
+    }
+    if (qml.contains(QLatin1String("pBSISidebarX"))) return true; // already there
+    QmlText::Object root;
+    for (const auto &object : QmlText::objects(masked, QStringLiteral("Rectangle"))) {
+        if (root.nameBegin < 0 || object.nameBegin < root.nameBegin) root = object;
+    }
+    if (root.nameBegin < 0) {
+        for (const auto &object : QmlText::objects(masked, QStringLiteral("Item"))) {
+            if (root.nameBegin < 0 || object.nameBegin < root.nameBegin) root = object;
+        }
+    }
+    if (root.nameBegin < 0) return false;
+    QStringList terms;
+    for (const auto &object : QmlText::objects(masked, QStringLiteral("UiImageButton"))) {
+        QString id;
+        if (!objectId(qml, masked, object, &id)) continue;
+        if (id != QLatin1String("iBackBtn") && id != QLatin1String("iHomeBtn")
+            && id != QLatin1String("iRecentBtn")) continue;
+        terms << QStringLiteral("%1.x + %1.width").arg(id);
+    }
+    const QString expression = terms.isEmpty()
+        ? QStringLiteral("44")
+        : QStringLiteral("Math.max(%1) + 10").arg(terms.join(QStringLiteral(", ")));
+    addEdit(edits, root.open + 1, 0,
+            nl + QStringLiteral("    property real pBSISidebarX: ") + expression
+                + QStringLiteral(" // BSI CUSTOMIZER: sidebar row position"));
+    return true;
+}
+
 // Turn the vertical button strip into a centered horizontal row (and back).
 // This is the whole title-bar move: only the strip's own layout is rewritten.
 // `stockOverflowOnly` records that the build keeps its own overflow code.
@@ -1415,12 +2074,21 @@ bool sidebarRowEdits(QString &qml, bool enabled, QList<Edit> &edits, bool stockO
         } else if (type == QLatin1String("Column")) {
             addEdit(edits, strip.nameBegin, int(type.size()), QStringLiteral("Row"));
         }
-        // Centre the row inside the title bar instead of filling the old strip.
+        // The row starts at the left edge of its title-bar host (the host itself
+        // begins after Back/Home/Recent), not in the middle of the bar. An older
+        // patch centred it; that shape is accepted and moved to the same place.
         QmlText::Binding fill;
         if (directBinding(masked, strip.open, strip.end, QStringLiteral("anchors.fill"), &fill)
             && qml.mid(fill.valueBegin, fill.valueEnd - fill.valueBegin) == QLatin1String("parent")) {
             addEdit(edits, fill.nameBegin, fill.valueEnd - fill.nameBegin,
-                    QStringLiteral("anchors.centerIn: parent"));
+                    QStringLiteral("anchors.left: parent.left"));
+        } else {
+            QmlText::Binding centre;
+            if (directBinding(masked, strip.open, strip.end, QStringLiteral("anchors.centerIn"), &centre)
+                && qml.mid(centre.valueBegin, centre.valueEnd - centre.valueBegin) == QLatin1String("parent")) {
+                addEdit(edits, centre.nameBegin, centre.valueEnd - centre.nameBegin,
+                        QStringLiteral("anchors.left: parent.left"));
+            }
         }
         // Suppress the row inside the original (now zero-width) sidebar until
         // it is mounted into the title-bar host, which has a real width.
@@ -1432,11 +2100,19 @@ bool sidebarRowEdits(QString &qml, bool enabled, QList<Edit> &edits, bool stockO
         } else if (type == QLatin1String("Row")) {
             addEdit(edits, strip.nameBegin, int(type.size()), QStringLiteral("Column"));
         }
-        QmlText::Binding center;
-        if (directBinding(masked, strip.open, strip.end, QStringLiteral("anchors.centerIn"), &center)
-            && qml.mid(center.valueBegin, center.valueEnd - center.valueBegin) == QLatin1String("parent")) {
-            addEdit(edits, center.nameBegin, center.valueEnd - center.nameBegin,
+        QmlText::Binding left;
+        if (directBinding(masked, strip.open, strip.end, QStringLiteral("anchors.left"), &left)
+            && qml.mid(left.valueBegin, left.valueEnd - left.valueBegin) == QLatin1String("parent.left")) {
+            addEdit(edits, left.nameBegin, left.valueEnd - left.nameBegin,
                     QStringLiteral("anchors.fill: parent"));
+        } else {
+            // Older patches centred the strip instead of aligning it left.
+            QmlText::Binding centre;
+            if (directBinding(masked, strip.open, strip.end, QStringLiteral("anchors.centerIn"), &centre)
+                && qml.mid(centre.valueBegin, centre.valueEnd - centre.valueBegin) == QLatin1String("parent")) {
+                addEdit(edits, centre.nameBegin, centre.valueEnd - centre.nameBegin,
+                        QStringLiteral("anchors.fill: parent"));
+            }
         }
         int at = qml.indexOf(kRowHidden + kNoSmartMarker, strip.open);
         int length = kRowHidden.size() + kNoSmartMarker.size();
@@ -1549,6 +2225,10 @@ bool sidebarEdits(QString &qml, bool enabled, QList<Edit> &edits)
 bool topbarEdits(QString &qml, bool enabled, QList<Edit> &edits)
 {
     const QString masked = QmlText::mask(qml);
+    // Where the moved row starts: right after the title bar's own buttons.
+    if (!topbarPositionEdits(qml, masked, enabled, edits)) return false;
+    // Their order follows the same request as the rest of the row.
+    if (enabled && !topbarOrderEdits(qml, masked, enabled, QStringList(), edits)) return false;
     // The sidebar toggle has nothing left to toggle, and leaving it live would
     // still resize the window by pSidebarWidth on click, so it is hidden.
     // Builds that do not carry the toggle (or name its id differently) are not
@@ -1630,12 +2310,14 @@ bool topbarEdits(QString &qml, bool enabled, QList<Edit> &edits)
                 handled.insert(wanted.first);
                 continue;
             }
+            // The title bar keeps its own Back/Home/Recent: they are the first
+            // three buttons of the row the sidebar continues. An older patch
+            // (which centred the moved copies over them) switched these off,
+            // and that is undone here in either direction.
             const QString current = qml.mid(visible.valueBegin, visible.valueEnd - visible.valueBegin);
-            const QString from = enabled ? QStringLiteral("true") : QStringLiteral("false");
-            if (current == from) {
+            if (current == QLatin1String("false"))
                 addEdit(edits, visible.valueBegin, visible.valueEnd - visible.valueBegin,
-                        enabled ? QStringLiteral("false") : QStringLiteral("true"));
-            }
+                        QStringLiteral("true"));
             handled.insert(wanted.first);
         }
     }
@@ -1692,6 +2374,68 @@ bool collectSidebarEdits(QString &qml, bool enabled, SidebarLayout, QList<Edit> 
 bool collectTopbarEdits(QString &qml, bool enabled, SidebarLayout, QList<Edit> &edits)
 {
     return topbarEdits(qml, enabled, edits);
+}
+
+// The row's order and hidden buttons. Three passes over one document, each on
+// the text the previous one produced: Settings joins (or leaves) the row, the
+// declarations move, and only then are the buttons the player's own code shows
+// again switched off - a moved button must be the one that gets hidden.
+bool rowOrderDoc(QString &qml, const QString &name, bool enabled, const RowRequest &request)
+{
+    if (name == QLatin1String("PlrTopbar.qml")) {
+        QList<Edit> edits;
+        if (!topbarOrderEdits(qml, QmlText::mask(qml), enabled, request.order, edits)) return false;
+        return applyEdits(qml, edits);
+    }
+    if (name != QLatin1String("PlrSidebar.qml")) return true;
+    const auto pass = [&](QList<Edit> &edits) { return applyEdits(qml, edits); };
+    QList<Edit> edits;
+    if (!enabled) {
+        // Restore the declarations first - the recorded order still has the
+        // Settings entry the row was using - then the flip that put it there.
+        const bool flipped = settingsInRow(qml, QmlText::mask(qml));
+        if (!sidebarOrderEdits(qml, QmlText::mask(qml), false, flipped, request, edits)) return false;
+        if (!pass(edits)) return false;
+        edits.clear();
+        if (!sidebarVisibilityEdits(qml, QmlText::mask(qml), false, false, request, edits)) return false;
+        if (!pass(edits)) return false;
+        edits.clear();
+        if (!settingsFlipEdits(qml, QmlText::mask(qml), false, edits)) return false;
+        return pass(edits);
+    }
+    if (!settingsFlipEdits(qml, QmlText::mask(qml), true, edits)) return false;
+    if (!pass(edits)) return false;
+    edits.clear();
+    const bool flipped = settingsInRow(qml, QmlText::mask(qml));
+    if (!sidebarOrderEdits(qml, QmlText::mask(qml), true, flipped, request, edits)) return false;
+    if (!pass(edits)) return false;
+    edits.clear();
+    if (!sidebarVisibilityEdits(qml, QmlText::mask(qml), true, flipped, request, edits)) return false;
+    return pass(edits);
+}
+
+// Both files are read from `changed`, so this always works on the current text.
+// `strict` is for the explicit order editor: a player whose declarations are
+// not in the expected shape is then refused instead of silently left alone,
+// while the layout pass itself keeps working on such a build.
+bool writeRowOrder(QByteArray &changed, bool enabled, const RowRequest &request, QString *error,
+                   bool strict = false)
+{
+    for (const auto &name : { QStringLiteral("PlrSidebar.qml"), QStringLiteral("PlrTopbar.qml") }) {
+        Doc doc;
+        if (!findDoc(changed, name, &doc, error)) return false;
+        if (!rowOrderDoc(doc.qml, name, enabled, request)) {
+            if (!strict) continue;
+            if (error)
+                *error = QStringLiteral("%1 does not declare the buttons of the row in the "
+                                        "expected shape; no file was written.").arg(name);
+            return false;
+        }
+        const QByteArray header = doc.bom ? QByteArray::fromHex("efbbbf") : QByteArray();
+        if (!QtResources::replaceResource(changed, doc.file.entryOff, doc.link,
+                                          header + doc.qml.toUtf8(), error)) return false;
+    }
+    return true;
 }
 
 // ------------------------------------------------- clean player UI helpers
@@ -2459,15 +3203,129 @@ Snapshot inspect(const QByteArray &image)
 
 } // namespace
 
+RowState buttonRows(const QByteArray &image)
+{
+    RowState state;
+    if (image.isEmpty()) {
+        state.detail = QStringLiteral("Select the HD-Player.exe path first.");
+        return state;
+    }
+    Doc topbar;
+    Doc sidebar;
+    QString error;
+    if (!findDoc(image, QStringLiteral("PlrTopbar.qml"), &topbar, &error)
+        || !findDoc(image, QStringLiteral("PlrSidebar.qml"), &sidebar, &error)) {
+        state.detail = error;
+        return state;
+    }
+    const QString topMasked = QmlText::mask(topbar.qml);
+    const QString sideMasked = QmlText::mask(sidebar.qml);
+    QmlText::Object root;
+    QmlText::Object strip;
+    if (!findSidebarRoot(sidebar.qml, sideMasked, &root, false)
+        || !findButtonStrip(sidebar.qml, sideMasked, root, &strip)) {
+        state.detail = QStringLiteral("This player's sidebar does not declare a movable button strip.");
+        return state;
+    }
+
+    // The buttons fResetSidebar() switches off are listed in the block the
+    // move writes; a missing block means nothing has been hidden there.
+    QStringList hiddenIds;
+    const int markerAt = sidebar.qml.indexOf(kHiddenRowMarker);
+    if (markerAt >= 0) {
+        int stop = sidebar.qml.indexOf(QLatin1Char('\n'), markerAt);
+        if (stop < 0) stop = sidebar.qml.size();
+        const QString list = sidebar.qml.mid(markerAt + kHiddenRowMarker.size(),
+                                             stop - markerAt - kHiddenRowMarker.size()).trimmed();
+        if (!list.isEmpty()) hiddenIds = list.split(QLatin1Char(','), Qt::SkipEmptyParts);
+    }
+
+    for (const auto &slot : topbarSlots(topbar.qml, topMasked)) {
+        RowButton button;
+        button.key = slot.key;
+        button.label = buttonLabel(slot.key);
+        button.canHide = false; // the title bar keeps its own navigation
+        state.buttons << button;
+    }
+    const bool flipped = settingsInRow(sidebar.qml, sideMasked);
+    const QList<ButtonSlot> items = itemSlots(sidebar.qml, sideMasked);
+    for (const auto &slot : stripSlots(sidebar.qml, sideMasked, strip)) {
+        if (slot.key == QLatin1String("repeater")) {
+            for (const auto &item : items) {
+                RowButton button;
+                button.key = item.key;
+                button.label = buttonLabel(item.key);
+                button.hidden = objectHidden(sidebar.qml, sideMasked, item.object,
+                                             QStringLiteral("pVisible"));
+                state.buttons << button;
+            }
+            continue;
+        }
+        // The strip's own Back/Home/Recent are the title bar's duplicates.
+        if (slot.key == QLatin1String("back") || slot.key == QLatin1String("home")
+            || slot.key == QLatin1String("recent")) continue;
+        if (flipped && slot.key == QLatin1String("settings")) continue; // the entry is in the row
+        RowButton button;
+        button.key = slot.key;
+        button.label = buttonLabel(slot.key);
+        button.hidden = hiddenIds.contains(slot.id);
+        state.buttons << button;
+    }
+
+    const State shape = analyze(image, kSidebarToTitlebar);
+    state.supported = shape.supported;
+    state.applied = shape.applied;
+    if (!state.supported) state.detail = shape.detail;
+    else if (!state.applied)
+        state.detail = QStringLiteral("Apply the title-bar layout first; the order belongs to it.");
+    return state;
+}
+
+Result applyOrder(const QString &exePath, const QStringList &order, const QStringList &hidden)
+{
+    const auto refuse = [&](const QString &message) { return Result { false, message }; };
+    if (BsDetector::isProcessRunning(QStringLiteral("HD-Player.exe")))
+        return refuse(QStringLiteral("Close all BlueStacks instances before changing the layout."));
+    QFile file(exePath);
+    if (!file.open(QIODevice::ReadOnly)) return refuse(QStringLiteral("Cannot read the selected EXE."));
+    const QByteArray original = file.readAll();
+    file.close();
+    if (!analyze(original, kSidebarToTitlebar).applied)
+        return refuse(QStringLiteral("Apply the title-bar layout first; the button order belongs to it."));
+
+    RowRequest request;
+    request.order = order;
+    for (const QString &key : hidden) request.hidden.insert(key);
+    QByteArray changed = original;
+    QString error;
+    if (!writeRowOrder(changed, true, request, &error, true)) return refuse(error);
+    if (changed == original)
+        return { true, QStringLiteral("The row already has that order.") };
+    const Snapshot after = inspect(changed);
+    if (after.shape.layout == SidebarLayout::None || !after.shape.patched
+        || !after.shape.editable)
+        return refuse(QStringLiteral("The reordered row did not pass verification; no file was written."));
+    if (!ThemeEngine::backup(exePath))
+        return refuse(QStringLiteral("Could not preserve the original backup; no EXE was written."));
+    if (!PatchFile::writeVerified(exePath, original, changed, &error)) return refuse(error);
+    const int caches = QtResources::clearPlayerQmlCache(exePath);
+    QString msg = QStringLiteral("Button order saved. Restart BlueStacks to see the new row.");
+    if (caches > 0) msg += QStringLiteral(" Cleared the player QML disk cache.");
+    return { true, msg };
+}
+
 QList<Tweak> tweaks()
 {
     return {
         { kSidebarToTitlebar,
           QStringLiteral("Sidebar buttons to the top bar"),
-          QStringLiteral("Moves the original sidebar buttons into a centered top-bar row. All "
-                         "visible buttons stay shown until they no longer fit; extras then go "
-                         "into the three-dot menu. Every popup panel opens directly beneath its "
-                         "own button. Turn this off and apply to restore the stock sidebar.") },
+          QStringLiteral("Moves the original sidebar buttons into a top-bar row that starts "
+                         "right after the title bar's own Back, Home and Recent buttons. The "
+                         "row opens with Fullscreen, Sound, Files / APK and Settings; the order "
+                         "and the buttons it shows can be changed in \"Top-bar button order\". "
+                         "Buttons stay shown until they no longer fit; extras then go into the "
+                         "three-dot menu, and every popup opens beneath its own button. Turn "
+                         "this off and apply to restore the stock sidebar.") },
         { kCleanUi,
           QStringLiteral("Clean player UI (one click)"),
           QStringLiteral("Hides every extra button in one apply. Title bar: help, menu/settings, "
@@ -2662,6 +3520,10 @@ Result apply(const QString &exePath, const QString &id, bool enabled)
             if (!QtResources::replaceResource(changed, doc.file.entryOff, doc.link,
                                               header + doc.qml.toUtf8(), &error)) return refuse(error);
         }
+        // The row gets its default order in the same write: the title bar's own
+        // Back/Home/Recent, then Fullscreen, Sound, Files / APK and Settings.
+        QString orderError;
+        if (!writeRowOrder(changed, enabled, RowRequest(), &orderError)) return refuse(orderError);
     }
     // The sidebar option is verified on PlrSidebar.qml alone; the title-bar
     // option still has to prove the complete layout on all three files.
