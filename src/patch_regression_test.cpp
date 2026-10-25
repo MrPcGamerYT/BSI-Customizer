@@ -4281,20 +4281,22 @@ Window {
         {
             // One line per failing assertion is all a Windows run shows, so the
             // flags say which half of this check went wrong.
-            const bool noTag = !prefilledText.contains(QLatin1String("BSI CUSTOMIZER: about text:"));
+            // The three rewritten rows carry the tag; the About line does not,
+            // because it already prints the prefilled text.
+            const bool tagsOk = prefilledText.count(QLatin1String("BSI CUSTOMIZER: about text:")) == 3;
             const bool stockText = prefilledText.contains(
                 QLatin1String("qsTranslate(\"QObject\", \"Copyright 2026. By using it you agree to the \")"));
             const bool website = prefilledText.contains(
                 QLatin1String("Website - <a href=\\\"http://www.bluestacks.com\\\">www.bluestacks.com</a>"));
             const bool mail = prefilledText.contains(
                 QLatin1String("Support email - <a href=\\\"mailto:support@bluestacks.com\\\">support@bluestacks.com</a>"));
-            if (!prefilled.ok || !noTag || !stockText || !website || !mail) {
+            if (!prefilled.ok || !tagsOk || !stockText || !website || !mail) {
                 QStringList rows;
                 for (const QString &line : prefilledText.split(QLatin1Char('\n')))
                     if (line.contains(QLatin1String("href=")) || line.contains(QLatin1String("about text:")))
                         rows << line.trimmed();
-                ciNotice(QStringLiteral("prefill ok=%1 noTag=%2 stockText=%3 website=%4 mailto=%5 :: %6")
-                             .arg(int(prefilled.ok)).arg(int(noTag)).arg(int(stockText))
+                ciNotice(QStringLiteral("prefill ok=%1 tags=%2 stockText=%3 website=%4 mailto=%5 :: %6")
+                             .arg(int(prefilled.ok)).arg(int(tagsOk)).arg(int(stockText))
                              .arg(int(website)).arg(int(mail))
                              .arg(rows.mid(0, 3).join(QStringLiteral(" | "))));
             }
@@ -4303,8 +4305,9 @@ Window {
                   // The About line already prints the prefilled text, so it is
                   // not rewritten: every rewrite spends room, and on a player
                   // whose record is full there is none to spend. The stock
-                  // expression is what stays in the file.
-                  && !prefilledText.contains(QLatin1String("BSI CUSTOMIZER: about text:"))
+                  // expression stays, and only the three rewritten rows carry a
+                  // tag - each one holds the words it replaced.
+                  && prefilledText.count(QLatin1String("BSI CUSTOMIZER: about text:")) == 3
                   && prefilledText.contains(QLatin1String("qsTranslate(\"QObject\", \"Copyright 2026. By using it you agree to the \")"))
                   && prefilledText.contains(QLatin1String("Website - <a href=\\\"http://www.bluestacks.com\\\">www.bluestacks.com</a>"))
                   && prefilledText.contains(QLatin1String("Support email - <a href=\\\"mailto:support@bluestacks.com\\\">support@bluestacks.com</a>")),
