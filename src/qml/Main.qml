@@ -278,43 +278,43 @@ ApplicationWindow {
                         id: navColumn
                         width: navScroll.width
                         spacing: 3
-                Item { Layout.preferredHeight: 10 }
+                        Item { Layout.preferredHeight: 10 }
 
-                Repeater {
-                    model: [
-                        { header: true,  label: qsTr("CUSTOMIZE") },
-                        { page: 0, label: qsTr("Dashboard"),   icon: Icons.dashboard },
-                        { page: 1, label: qsTr("Theme"),       icon: Icons.theme },
-                        { page: 2, label: qsTr("Resources"),   icon: Icons.images },
-                        { header: true,  label: qsTr("TUNE") },
-                        { page: 3, label: qsTr("FPS"),         icon: Icons.fps },
-                        { page: 4, label: qsTr("Integrity"),   icon: Icons.integrity },
-                        { page: 5, label: qsTr("Boot Video"),  icon: Icons.boot },
-                        { header: true,  label: qsTr("TOOLS") },
-                        { page: 6, label: qsTr("UI"),          icon: Icons.extras },
-                        { page: 7, label: qsTr("Discord RPC"), icon: Icons.discord },
-                        { header: true,  label: qsTr("APP") },
-                        { page: 8, label: qsTr("Appearance"),  icon: Icons.appearance },
-                        { page: 9, label: qsTr("About"),       icon: Icons.about }
-                    ]
-                    delegate: Loader {
-                        required property var modelData
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: modelData.header ? 30 : 42
-                        sourceComponent: modelData.header ? navHeader : navButton
+                        Repeater {
+                            model: [
+                                { header: true,  label: qsTr("CUSTOMIZE") },
+                                { page: 0, label: qsTr("Dashboard"),   icon: Icons.dashboard },
+                                { page: 1, label: qsTr("Theme"),       icon: Icons.theme },
+                                { page: 2, label: qsTr("Resources"),   icon: Icons.images },
+                                { header: true,  label: qsTr("TUNE") },
+                                { page: 3, label: qsTr("FPS"),         icon: Icons.fps },
+                                { page: 4, label: qsTr("Integrity"),   icon: Icons.integrity },
+                                { page: 5, label: qsTr("Boot Video"),  icon: Icons.boot },
+                                { header: true,  label: qsTr("TOOLS") },
+                                { page: 6, label: qsTr("UI"),          icon: Icons.extras },
+                                { page: 7, label: qsTr("Discord RPC"), icon: Icons.discord },
+                                { header: true,  label: qsTr("APP") },
+                                { page: 8, label: qsTr("Appearance"),  icon: Icons.appearance },
+                                { page: 9, label: qsTr("About"),       icon: Icons.about }
+                            ]
+                            delegate: Loader {
+                                required property var modelData
+                                Layout.fillWidth: true
+                                Layout.preferredHeight: modelData.header ? 30 : 42
+                                sourceComponent: modelData.header ? navHeader : navButton
 
-                        onLoaded: {
-                            if (modelData.header) {
-                                item.labelText = modelData.label;
-                            } else {
-                                item.label = modelData.label;
-                                item.iconPath = modelData.icon;
-                                item.active = Qt.binding(() => pages.currentIndex === modelData.page);
-                                item.clicked.connect(() => pages.currentIndex = modelData.page);
+                                onLoaded: {
+                                    if (modelData.header) {
+                                        item.labelText = modelData.label;
+                                    } else {
+                                        item.label = modelData.label;
+                                        item.iconPath = modelData.icon;
+                                        item.active = Qt.binding(() => pages.currentIndex === modelData.page);
+                                        item.clicked.connect(() => pages.currentIndex = modelData.page);
+                                    }
+                                }
                             }
                         }
-                    }
-                }
 
 
                     }

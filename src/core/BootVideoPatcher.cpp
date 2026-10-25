@@ -204,7 +204,7 @@ Item {
     Component.onCompleted: {
         var u = Qt.resolvedUrl("Promo.mp4").toString()
         var src = JSON.stringify(u)
-        var q6 = 'import QtQuick 2.15;import QtMultimedia;Item{anchors.fill:parent;VideoOutput{id:v;anchors.fill:parent;fillMode:VideoOutput.PreserveAspectCrop}MediaPlayer{objectName:"bsiBootVideo";id:m;source:'+src+';loops:MediaPlayer.Infinite;videoOutput:v;audioOutput:AudioOutput{muted:true};Component.onCompleted:play()}}'
+        var q6 = 'import QtQuick 2.15;import QtMultimedia;Item{anchors.fill:parent;VideoOutput{id:v;anchors.fill:parent;fillMode:VideoOutput.PreserveAspectCrop}MediaPlayer{objectName:"bsiBootVideo";id:m;source:'+src+';loops:MediaPlayer.Infinite;videoOutput:v;audioOutput:AudioOutput{muted:true} Component.onCompleted:play()}}'
         try { Qt.createQmlObject(q6, root, "promo6"); return } catch(e) {}
         var q5 = 'import QtQuick 2.15;import QtMultimedia 5.15;Video{objectName:"bsiBootVideo";anchors.fill:parent;source:'+src+';fillMode:VideoOutput.PreserveAspectCrop;loops:MediaPlayer.Infinite;muted:true;autoPlay:true;Component.onCompleted:play()}'
         try { Qt.createQmlObject(q5, root, "promo5"); return } catch(e) {}
