@@ -208,7 +208,8 @@ Item {
         try { Qt.createQmlObject(q6, root, "promo6"); return } catch(e) {}
         var q5 = 'import QtQuick 2.15;import QtMultimedia 5.15;Video{objectName:"bsiBootVideo";anchors.fill:parent;source:'+src+';fillMode:VideoOutput.PreserveAspectCrop;loops:MediaPlayer.Infinite;muted:true;autoPlay:true;Component.onCompleted:play()}'
         try { Qt.createQmlObject(q5, root, "promo5"); return } catch(e) {}
-        var html = '<html><body style="margin:0;background:#000;overflow:hidden"><video src="'+u+'" autoplay muted loop playsinline style="width:100%;height:100%;object-fit:cover"></video></body></html>'
+        var safe = u.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;")
+        var html = '<html><body style="margin:0;background:#000;overflow:hidden"><video src="'+safe+'" autoplay muted loop playsinline style="width:100%;height:100%;object-fit:cover"></video></body></html>'
         var du = 'data:text/html;charset=utf-8,' + encodeURIComponent(html)
         var web = 'import QtQuick 2.15;import QtWebEngine;WebEngineView{anchors.fill:parent;url:'+JSON.stringify(du)+'}'
         try { Qt.createQmlObject(web, root, "promoWeb") }
@@ -406,6 +407,10 @@ Result patch(const QString &exePath, int holdMs)
     visible(boot, QStringLiteral("iBootImage"), false);
     visible(boot, QStringLiteral("iBootLoadingText"), true);
     assignments(boot);
+    for (const auto &name : {QStringLiteral("pBootImageButtonVisible"), QStringLiteral("pBootGridVisible")}) {
+        const auto roots = objects(boot);
+        if (!roots.isEmpty()) property(boot, roots.first(), name, QStringLiteral("false"), false);
+    }
     QString error;
     if (!QtResources::replaceResource(data, controller.entry, controller.link, boot.toUtf8(), &error)) return { false, error };
     bool holdApplied = false;

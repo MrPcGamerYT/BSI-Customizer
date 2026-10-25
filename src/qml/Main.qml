@@ -25,13 +25,12 @@ ApplicationWindow {
         id: purgeCacheDialog
         anchors.centerIn: parent
         title: qsTr("Purge HD-Player cache?")
+        width: 440
         modal: true
         standardButtons: Dialog.Ok | Dialog.Cancel
         contentItem: Label {
             text: qsTr("Close all emulator instances first. This removes only HD-Player cache folders in AppData. Settings, installed apps and emulator disks are kept.")
             wrapMode: Text.Wrap
-            width: 390
-            implicitWidth: 390
         }
         onAccepted: {
             const r = backend.purgePlayerCache();
@@ -266,6 +265,19 @@ ApplicationWindow {
                 anchors.margins: 6
                 spacing: 3
 
+                Flickable {
+                    id: navScroll
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    contentWidth: width
+                    contentHeight: navColumn.implicitHeight
+                    clip: true
+                    boundsBehavior: Flickable.StopAtBounds
+                    ScrollBar.vertical: ScrollBar {}
+                    ColumnLayout {
+                        id: navColumn
+                        width: navScroll.width
+                        spacing: 3
                 Item { Layout.preferredHeight: 10 }
 
                 Repeater {
@@ -304,7 +316,9 @@ ApplicationWindow {
                     }
                 }
 
-                Item { Layout.fillHeight: true }
+
+                    }
+                }
 
                 ActionButton {
                     Layout.fillWidth: true

@@ -59,7 +59,7 @@ with tempfile.TemporaryDirectory() as directory:
         # QML may collect an unparented mock while another component is being
         # created; the Python variable alone does not root QML-owned objects.
         QQmlEngine.setObjectOwnership(obj, QQmlEngine.ObjectOwnership.CppOwnership)
-        obj.setParent(engine)
+        QObject.setParent(obj, engine)
         instances.append(obj)
         return obj
 
