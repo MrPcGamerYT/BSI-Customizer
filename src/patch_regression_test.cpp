@@ -3002,7 +3002,7 @@ Window {
             "    Loader { id: iBootLoader; anchors.fill: parent\r\n"
             "        sourceComponent: pIsBootComplete || pShowAndroidAd ? iGlContainerComponent : iBootProgressComponent }\r\n"
             "}\r\n");
-        const auto r = resources({ { QStringLiteral("PlrBootProgressBar.qml"), boot },
+        auto r = resources({ { QStringLiteral("PlrBootProgressBar.qml"), boot },
                                    { QStringLiteral("plr.qml"), host },
                                    { QStringLiteral("Other.qml"), QStringLiteral("import QtQuick; QtObject {}") } },
                                  false, {}, 256);
@@ -3086,7 +3086,7 @@ Window {
             "        pIsBootComplete = true\r\n"
             "    }\r\n"
             "}\r\n");
-        const auto r = resources({ { QStringLiteral("PlrBootProgressBar.qml"), boot },
+        auto r = resources({ { QStringLiteral("PlrBootProgressBar.qml"), boot },
                                    { QStringLiteral("plr.qml"), host } }, false, {}, 256);
         addRegistration(r, false);
         const auto folder = temp.filePath(QStringLiteral("legacy boot")); QDir().mkpath(folder);
