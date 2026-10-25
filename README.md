@@ -155,15 +155,17 @@ starts with exactly what that build prints — nothing is retyped:
 
 Some pages gate both sections with a binding such as
 `visible: uiBackend.oem !== "msi5"`, which is false on every MSI install, so
-those sections are drawn hidden there. The patch always switches both sections
-on by default — that is what makes the edited text and the links visible at
-all, and it is the only value that is correct on both the MSI and the
-BlueStacks builds (where the binding is already true). The toggle is still
-there as **Sections shown — switch back to stock** for anyone who wants the
-page left exactly as the build draws it, and the cards says which build drew
-them hidden. **Diagnose** prints what the editor found on the selected EXE —
-the page, its current text, every row and the reason if the card refuses — so
-nothing has to be guessed.
+those sections are drawn hidden there — and the thin separator line drawn
+*between* the two sections carries the same check, which is why it is the whole
+page that is scanned for it and not just the two blocks. The patch always
+switches all of them on by default: that is what makes the edited text and the
+links visible at all, and `true` is the only value that is correct on both the
+MSI and the BlueStacks builds (where the binding is already true). The toggle is
+still there as **Sections shown — switch back to stock** for anyone who wants the
+page left exactly as the build draws it, and the card says which build drew them
+hidden. **Diagnose** prints what the editor found on the selected EXE — the page,
+its current text, every row and the reason if the card refuses — so nothing has
+to be guessed.
 
 A BlueStacks player carries the page **twice**: `PlrAboutSetting.qml` as text,
 and a compiled copy of the same page that the window actually loads. Every word
@@ -208,13 +210,25 @@ carries the page is located next to the selected EXE and that is the file that i
 read and written, so "not embedded in this player" only appears when nothing in
 the folder has the page.
 
-A page that is present only as a compressed record (no resource tree this tool
-can walk, which is what a build reports as "not embedded") is read straight from
-the record by the page's own words, and written back into the very same record:
-the edited source is compressed again, and it is accepted only when it fits the
-room the stock record already has - the file never grows, so nothing else moves.
-When it does not fit, Apply says by how much and writes nothing; hiding a row or
-shortening the text is what frees room.
+A build that registers its Qt resources in a shape this tool cannot enumerate
+(an MSI 5.12 player writes no `qres` header and no registration call it
+recognises) is not "not embedded" any more: the page's record is located by its
+own words, and the resource tree is then asked to map it. A page found that way
+is a **normal resource** - it is rewritten through its node, its timestamp is
+refreshed so the player recompiles it, and when the edited page is longer than
+the room its record has (the MSI record is full to the last byte) the record is
+built in **free space the file already has** and the tree node is re-pointed at
+it. The file still cannot grow by a single byte, and the pool's own payloads are
+excluded from that free space, so a long run of zeros inside, say, a silent WAV
+is never mistaken for a cave. A record that no tree maps is still read, and
+written back in place inside the room it already has, with Apply saying exactly
+how many bytes are missing when it does not fit.
+
+Two more rules keep that page inside its budget. The About line is only
+rewritten when it does not already print what it should - a field the user left
+alone is not re-tagged - and the OEM check the MSI build uses to hide both
+bottom sections is replaced by `true/*msi5*/`, which is **shorter** than the
+expression it replaces and puts the check back byte for byte on restore.
 
 Every replacement is written **inside its own record**: the count is updated and
 the rest of the slot is padded, so the file never grows and no offset moves. A

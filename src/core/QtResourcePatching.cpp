@@ -196,6 +196,15 @@ qint64 findFreeSpace(const QByteArray &data, const Link &link, qint64 need, QStr
         if (file.entryOff < 0 || !inRange(data, file.entryOff, 4)) continue;
         blocked << qMakePair(file.entryOff, file.entryOff + 4 + qint64(be32(data, file.entryOff)));
     }
+    // The pool the link itself points into, walked through the tree rather than
+    // through the registrations: a build whose pool is registered in a shape
+    // this tool cannot enumerate still owns every payload in that pool, and a
+    // long run of zeros inside one of them (a .wav full of silence, a padded
+    // blob) is data, not free space.
+    for (const auto &file : filesInPool(data, link)) {
+        if (file.entryOff < 0 || !inRange(data, file.entryOff, 4)) continue;
+        blocked << qMakePair(file.entryOff, file.entryOff + 4 + qint64(be32(data, file.entryOff)));
+    }
 
     const QByteArray probe(int(qMin<qint64>(need, 64)), '\0');
     const QByteArray wanted(int(need), '\0');

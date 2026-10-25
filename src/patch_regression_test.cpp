@@ -4209,8 +4209,10 @@ Window {
               "that fallback is what the editor is then prefilled with");
         check(patched.contains(QLatin1String("Important links"))
                   && patched.contains(QLatin1String("About and other info"))
-                  && patched.count(QLatin1String("visible: true /* BSI CUSTOMIZER: about shown:")) == 2,
-              "the page keeps its layout and the hidden MSI sections are switched back on");
+                  && patched.count(QLatin1String("visible: true/*msi5*/")) == 3
+                  && !patched.contains(QLatin1String("uiBackend.oem !== \"msi5\"")),
+              "the page keeps its layout, and every MSI visibility check - both sections and the "
+              "separator drawn between them - is switched on");
         auto state = AboutPatcher::analyze(read(aboutPath));
         check(state.applied && !state.sectionsHidden && state.config.links.size() == 3
                   && state.config.links.value(1).url == QStringLiteral("https://discord.gg/example"),
@@ -4245,6 +4247,10 @@ Window {
                   && resourceText(read(aboutPath), r, QStringLiteral("PlrAboutSetting.qml"))
                          .count(QLatin1String("BSI CUSTOMIZER: about-config ")) == 1,
               "applying different content updates the same page instead of stacking edits");
+        check(resourceText(read(aboutPath), r, QStringLiteral("PlrAboutSetting.qml"))
+                      .count(QLatin1String("visible: true/*msi5*/")) == 3,
+              "the sections the stock page hides are switched on again after the page was left "
+              "with its own check");
         const auto restored = AboutPatcher::apply(aboutPath, false, {});
         check(restored.ok, QStringLiteral("the stock About page restores (%1)").arg(restored.msg));
         check(resourceText(read(aboutPath), r, QStringLiteral("PlrAboutSetting.qml")) == about,
@@ -4262,10 +4268,17 @@ Window {
         const auto prefilledText = resourceText(read(prefillPath), r,
                                                 QStringLiteral("PlrAboutSetting.qml"));
         check(prefilled.ok
-                  && prefilledText.contains(QLatin1String("Copyright 2026. By using it you agree to the Terms of use"))
+                  // The About line already prints the prefilled text, so it is
+                  // not rewritten: every rewrite spends room, and on a player
+                  // whose record is full there is none to spend. The stock
+                  // expression is what stays in the file.
+                  && !prefilledText.contains(QLatin1String("BSI CUSTOMIZER: about text:"))
+                  && prefilledText.contains(QLatin1String("qsTranslate(\"QObject\", \"Copyright 2026. By using it you agree to the \")"))
                   && prefilledText.contains(QLatin1String("Website - <a href=\\\"http://www.bluestacks.com\\\">www.bluestacks.com</a>"))
                   && prefilledText.contains(QLatin1String("Support email - <a href=\\\"mailto:support@bluestacks.com\\\">support@bluestacks.com</a>")),
-              QStringLiteral("the prefilled stock values can be applied unchanged (%1)").arg(prefilled.msg));
+              QStringLiteral("the prefilled stock values apply unchanged, and the About line that "
+                             "already says what it should is left as the player wrote it (%1)")
+                  .arg(prefilled.msg));
         const auto prefilledState = AboutPatcher::analyze(read(prefillPath));
         check(prefilledState.config.links.value(0).url
                   == QStringLiteral("mailto:support@bluestacks.com"),
@@ -4275,8 +4288,7 @@ Window {
         // where they are already visible), so applying the prefilled values
         // carries that Unhide step with it. Turning the toggle off keeps the
         // build's own binding - that is the check above.
-        check(prefilledText.count(QLatin1String("visible: true /* BSI CUSTOMIZER: about shown:"))
-                  == 2,
+        check(prefilledText.count(QLatin1String("visible: true/*msi5*/")) == 3,
               "the prefilled values carry the Unhide step the editor offers by default");
         check(AboutPatcher::apply(prefillPath, true, stock.config).msg
                   == QStringLiteral("This About page content is already applied."),

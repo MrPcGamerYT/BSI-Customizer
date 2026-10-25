@@ -2349,6 +2349,9 @@ bool UpdateChecker::canReplaceThisProgram(const QString &path, QString *error)
 {
     // A setup is not a candidate for replacing the running EXE at all, so it is
     // not measured against it either: it is started and installs the new copy.
+    // This is checked *before* the PE header is read, because Inno's loader is
+    // a 32-bit x86 program whatever it installs - reading that header here is
+    // what produced the "machine 0x014c" refusal on a perfectly good setup.
     if (looksLikeInstaller(path)) {
         if (error)
             *error = QStringLiteral("it is a setup program, which is run rather than copied over "

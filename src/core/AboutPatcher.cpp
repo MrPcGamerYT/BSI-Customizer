@@ -36,9 +36,19 @@ const QString kHiddenLine = QStringLiteral(
 const QString kHiddenInline = QStringLiteral(
     "visible: false /* BSI CUSTOMIZER: about hidden */");
 // BlueStacks hides the whole "Important links" and "About and other info"
-// blocks on MSI builds (`visible: uiBackend.oem !== "msi5"`). The custom page
-// must show them there too, so their binding is switched to `true` while the
-// patch is applied and restored from the tag afterwards.
+// blocks on MSI builds (`visible: uiBackend.oem !== "msi5"`), and the MSI
+// player is exactly the build this tool is used on. The patch switches those
+// bindings to `true`, so the sections are drawn - whatever the OEM name is.
+//
+// The binding is rewritten as a whole-page text pass rather than through the
+// object tree, because the separator line *between* the two sections carries
+// the same check and is nobody's parent object; a block-only edit would show
+// the headings with no line above them. `true/*msi5*/` is deliberately shorter
+// than the expression it replaces: the MSI page lives in a record with no room
+// to spare, and every byte this patch adds has to come from somewhere.
+const QString kOemGate = QStringLiteral("uiBackend.oem !== \"msi5\"");
+const QString kOemGateTag = QStringLiteral("/*msi5*/");
+const QString kOemGateShown = QStringLiteral("true") + kOemGateTag;
 const QString kShownTag = QStringLiteral(" /* BSI CUSTOMIZER: about shown:");
 const QString kTextTag = QStringLiteral(" /* BSI CUSTOMIZER: about text:");
 const QString kHandlerTag = QStringLiteral(" /* BSI CUSTOMIZER: about handler:");
@@ -65,6 +75,59 @@ QString lineEnding(const QString &qml)
     return qml.contains(QLatin1String("\r\n")) ? QStringLiteral("\r\n") : QStringLiteral("\n");
 }
 
+// Big-endian UTF-16: rcc stores every resource *name* that way, and that name
+// is in the clear even when the file it names is compressed - which is the only
+// thing a cheap search can see on a build whose page is a compressed record.
+QByteArray wideBytesBe(const QString &text)
+{
+    QByteArray needle;
+    needle.reserve(int(text.size()) * 2);
+    for (const QChar ch : text) {
+        needle.append(char((ch.unicode() >> 8) & 0xff));
+        needle.append(char(ch.unicode() & 0xff));
+    }
+    return needle;
+}
+
+// How many places still carry the MSI visibility check. It is the whole answer
+// to "will the two bottom sections be drawn on this player": the check is false
+// on every MSI install, so a page that still has it shows neither section.
+int oemGates(const QString &qml)
+{
+    int count = 0;
+    for (int at = qml.indexOf(kOemGate); at >= 0; at = qml.indexOf(kOemGate, at + 1))
+        ++count;
+    return count;
+}
+
+// Switch every MSI visibility check on, and say how many were switched. The
+// stock expression is written by the player's own QML, so it is matched as
+// text: it sits on a plain `visible:` member, on two different objects, and on
+// the separator between them.
+int showOemGates(QString &qml)
+{
+    int changed = 0;
+    for (int at = qml.indexOf(kOemGate); at >= 0; at = qml.indexOf(kOemGate, at + 1)) {
+        qml.replace(at, kOemGate.size(), kOemGateShown);
+        ++changed;
+        at += kOemGateShown.size() - 1;
+    }
+    return changed;
+}
+
+// Put the check back, byte for byte. Undo is exact because the marker says
+// exactly which expression was replaced.
+int restoreOemGates(QString &qml)
+{
+    int changed = 0;
+    for (int at = qml.indexOf(kOemGateShown); at >= 0; at = qml.indexOf(kOemGateShown, at + 1)) {
+        qml.replace(at, kOemGateShown.size(), kOemGate);
+        ++changed;
+        at += kOemGate.size() - 1;
+    }
+    return changed;
+}
+
 struct Doc
 {
     QtResources::File file;
@@ -80,6 +143,13 @@ struct Doc
     quint32 recordRoom = 0; // bytes of body the record has room for
     bool compressed = false; // the body is a zlib stream with sizes in front
 };
+
+// Defined below: the same page, found by its own bytes when no pool the tool
+// can enumerate holds it.
+bool findDocByBytes(const QByteArray &image, Doc *out, qint64 from = 0);
+// The page found by its bytes and then mapped through the resource tree, when
+// the tree that holds it cannot be enumerated.
+bool docFromBytes(const QByteArray &image, const QString &name, Doc *out);
 
 bool findDocs(const QByteArray &image, const QString &name, QList<Doc> *out, QString *error)
 {
@@ -119,6 +189,22 @@ bool findDocs(const QByteArray &image, const QString &name, QList<Doc> *out, QSt
         if (out) *out << Doc { file, link, qml, bom };
     }
     if (out && !out->isEmpty()) return true;
+
+    // Some builds register their resources in a way this tool cannot enumerate
+    // (an MSI 5.12 player has no `qres` header and no call site it recognises),
+    // so the pool is invisible even though the page is in a perfectly normal
+    // resource tree. The record is found by its own bytes, and then the tree is
+    // searched for the node that maps that record: a page found this way is a
+    // real resource, not a blind scan - it can be rewritten through its node,
+    // moved into free space when the new text is longer, and its timestamp can
+    // be refreshed so the player recompiles it.
+    if (name == QLatin1String("PlrAboutSetting.qml")) {
+        Doc found;
+        if (docFromBytes(image, name, &found)) {
+            if (out) *out << found;
+            return true;
+        }
+    }
     if (error) *error = QStringLiteral("%1 is not embedded in this player.").arg(name);
     return false;
 }
@@ -128,7 +214,7 @@ bool findDocs(const QByteArray &image, const QString &name, QList<Doc> *out, QSt
 // is not consulted at all, so a build whose pools this tool cannot map still
 // gets a filled editor instead of an empty card - the same idea as the SVGs
 // that have always been found by their markup.
-bool findDocByBytes(const QByteArray &image, Doc *out)
+bool findDocByBytes(const QByteArray &image, Doc *out, qint64 from)
 {
     const auto isPage = [](const QString &qml) {
         return qml.contains(QLatin1String("objectName")) && qml.contains(QLatin1String("aboutSettings"));
@@ -157,7 +243,8 @@ bool findDocByBytes(const QByteArray &image, Doc *out)
                || head.startsWith(QByteArray::fromHex("efbbbf"));
     };
     for (const auto &needle : needles) {
-        for (qsizetype at = image.indexOf(needle); at >= 0; at = image.indexOf(needle, at + 1)) {
+        for (qsizetype at = image.indexOf(needle, qsizetype(qMax<qint64>(0, from))); at >= 0;
+             at = image.indexOf(needle, at + 1)) {
             const qsizetype lowest = qMax<qsizetype>(4, at - 1024 * 1024);
             for (qsizetype record = at - 4; record >= lowest; --record) {
                 const quint32 size = ByteUtils::be32(image, record);
@@ -180,7 +267,8 @@ bool findDocByBytes(const QByteArray &image, Doc *out)
     //    say "record of N bytes holding M bytes of text". Only those are
     //    decompressed, and only until the page turns up.
     int attempts = 0;
-    for (qsizetype at = image.indexOf(QByteArray::fromHex("78")); at >= 0; at = image.indexOf(QByteArray::fromHex("78"), at + 1)) {
+    for (qsizetype at = image.indexOf(QByteArray::fromHex("78"), qsizetype(qMax<qint64>(0, from)));
+         at >= 0; at = image.indexOf(QByteArray::fromHex("78"), at + 1)) {
         if (attempts >= 4000) break;
         if (at < 8 || at + 2 > image.size()) continue;
         const int zlibFlag = quint8(image.at(int(at) + 1));
@@ -209,6 +297,59 @@ bool findDocByBytes(const QByteArray &image, Doc *out)
         }
     }
     return false;
+}
+
+// The page as a resource, even when the pool that holds it cannot be listed.
+//
+// An MSI 5.12 player registers its Qt resources in a shape registeredPools()
+// does not recognise, so nothing in the tree is enumerated - yet the tree is
+// there, and the page's record is a perfectly ordinary compressed resource. So
+// the record is located by its bytes and the tree is then asked to map it. A
+// page that maps this way is a normal resource: it can be written through its
+// node, moved into free space when the new text is longer, and its timestamp
+// can be refreshed. A page that does not map is still usable - it is written in
+// place, inside the room its record already has.
+//
+// The scan starts at `from` and skips records the tree does not map, because a
+// page that was moved to free space leaves its old record behind (nothing else
+// owns those bytes, so they are never erased): the copy the tree points at is
+// the one the player loads, and it is the one every later pass must find.
+bool docFromBytes(const QByteArray &image, const QString &name, Doc *out)
+{
+    // The scan decompresses every stream that could be the page, so it is not
+    // run on a file that cannot be one: the resource *name* is stored in the
+    // clear even when the file it names is compressed, and a raw page always
+    // carries its object name.
+    if (!image.contains(QByteArrayLiteral("aboutSettings"))
+        && !image.contains(wideBytesBe(name)))
+        return false;
+
+    Doc fallback;
+    bool haveFallback = false;
+    qint64 from = 0;
+    for (int tries = 0; tries < 8; ++tries) {
+        Doc candidate;
+        if (!findDocByBytes(image, &candidate, from)) break;
+        const auto link = QtResources::findLink(image, candidate.recordAt, name);
+        if (link.found && !link.ambiguous) {
+            candidate.file.name = name;
+            candidate.file.entryOff = candidate.recordAt;
+            candidate.file.flags = candidate.compressed ? quint16(1) : quint16(0);
+            candidate.file.path = name;
+            candidate.link = link;
+            candidate.scanned = false;
+            *out = candidate;
+            return true;
+        }
+        if (!haveFallback) {
+            fallback = candidate;
+            haveFallback = true;
+        }
+        from = candidate.recordAt + 4;
+    }
+    if (!haveFallback) return false;
+    *out = fallback;
+    return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -975,14 +1116,14 @@ bool findDoc(const QByteArray &image, const QString &name, Doc *out, QString *er
     QList<Doc> docs;
     if (!findDocs(image, name, &docs, error)) {
         // Nothing came out of the tree: the page may still be there.
-        if (findDocByBytes(image, out)) return true;
+        if (docFromBytes(image, name, out)) return true;
         return false;
     }
     if (docs.isEmpty()) {
         // The tree was walkable but holds no page: the build may keep it as a
         // compressed source record (or the tree belongs to another pool), so
         // the bytes still get their turn before "not embedded" is reported.
-        if (findDocByBytes(image, out)) return true;
+        if (docFromBytes(image, name, out)) return true;
         if (error) *error = QStringLiteral("%1 is not embedded in this player.").arg(name);
         return false;
     }
@@ -2013,17 +2154,23 @@ bool planEnable(const QString &qml, const Config &config, QList<Edit> &edits, QS
     }
 
     // ---- the About text --------------------------------------------------
-    if (hasText) {
-        const QString literal = QLatin1Char('"') + escapeQml(escapeHtml(config.text))
-            + QLatin1Char('"');
+    if (!hasText) {
+        hideObject(qml, anchors.aboutText, edits);
+    } else {
+        // A value that already prints what it should is left as it is: on the
+        // MSI page the record is full to the last byte, and every rewrite pays
+        // for its own tag, so the line the user did not touch is not touched.
         const QString original = qml.mid(anchors.aboutTextBinding.valueBegin,
                                          anchors.aboutTextBinding.valueEnd
                                              - anchors.aboutTextBinding.valueBegin);
-        addEdit(edits, anchors.aboutTextBinding.valueBegin,
-                anchors.aboutTextBinding.valueEnd - anchors.aboutTextBinding.valueBegin,
-                tagged(literal, original, kTextTag));
-    } else {
-        hideObject(qml, anchors.aboutText, edits);
+        const QString printed = htmlToPlain(renderedText(original)).trimmed();
+        if (printed != config.text) {
+            const QString literal = QLatin1Char('"') + escapeQml(escapeHtml(config.text))
+                + QLatin1Char('"');
+            addEdit(edits, anchors.aboutTextBinding.valueBegin,
+                    anchors.aboutTextBinding.valueEnd - anchors.aboutTextBinding.valueBegin,
+                    tagged(literal, original, kTextTag));
+        }
     }
 
     // ---- the stock links: rename, re-point or hide each one --------------
@@ -2147,6 +2294,7 @@ bool mightCarryPage(const QString &path)
     const QList<QByteArray> needles {
         QByteArrayLiteral("PlrAboutSetting.qml"),
         wideBytes(QStringLiteral("PlrAboutSetting.qml")),
+        wideBytesBe(QStringLiteral("PlrAboutSetting.qml")),
         QByteArrayLiteral("aboutSettings"),
         QByteArrayLiteral("About and other info"),
         wideBytes(QStringLiteral("About and other info")),
@@ -2423,10 +2571,19 @@ State analyze(const QByteArray &image)
                                        "slot, so the file never grows and nothing moves.")
                             .arg(layout.records.size());
     }
-    if (state.scanned && state.supported)
-        state.detail += QStringLiteral(" The page was read by scanning the file because the "
-                                       "resource tree could not be walked, so it can be viewed "
-                                       "but not rewritten on this build.");
+    if (state.scanned && state.supported) {
+        // The record was found by its own bytes, so its room is known exactly:
+        // the edited page is accepted only while it compresses into that room.
+        const int room = doc.recordRoom > 4 ? int(doc.recordRoom) - 4 : 0;
+        const int used = doc.compressed
+            ? int(qCompress(doc.qml.toUtf8(), 9).size()) - 4 : doc.qml.toUtf8().size();
+        state.detail += QStringLiteral(" The page was found by scanning the file because the "
+                                       "resource tree could not be walked, so it is rewritten in the "
+                                       "room its record already has: %1 of %2 bytes are used, and a "
+                                       "change that needs more is refused instead of growing the "
+                                       "file.")
+                            .arg(used).arg(room);
+    }
     return state;
 }
 
@@ -2526,6 +2683,10 @@ bool rewritePage(QByteArray &changed, bool enabled, const Config &config,
                 const bool tagged = readConfig(doc.qml, &current, nullptr);
                 needsWork = !tagged || !sameConfig(normalized(current), config);
             }
+            // A page this tool patched before the sections were switched on is
+            // "already applied" by its tag, but it still hides both sections on
+            // an MSI player - that is work, not a finished patch.
+            if (enabled && config.showSections && oemGates(doc.qml) > 0) needsWork = true;
             if (needsWork) {
                 next = &doc;
                 break;
@@ -2537,7 +2698,9 @@ bool rewritePage(QByteArray &changed, bool enabled, const Config &config,
         if (enabled) {
             if (doc.qml.contains(kConfigBegin)) {
                 // Re-applying with different content: back to the stock page
-                // first, then plan the new content against it.
+                // first, then plan the new content against it. The visibility
+                // check the patch switched off is part of "stock".
+                restoreOemGates(doc.qml);
                 if (!planDisable(doc.qml, edits, error) || !applyEdits(doc.qml, edits)) {
                     if (error && error->isEmpty())
                         *error = QStringLiteral("Cannot safely update the previous About page edit; "
@@ -2546,6 +2709,10 @@ bool rewritePage(QByteArray &changed, bool enabled, const Config &config,
                 }
                 edits.clear();
             }
+            // The two bottom sections are hidden on MSI by the page's own
+            // `oem` test, so the patch switches that test off - for the blocks
+            // and for the separator between them, which carries it too.
+            if (config.showSections) showOemGates(doc.qml);
             if (!planEnable(doc.qml, config, edits, error)) {
                 if (error && error->isEmpty())
                     *error = QStringLiteral("The About page is not a supported shape; no file was written.");
@@ -2558,6 +2725,9 @@ bool rewritePage(QByteArray &changed, bool enabled, const Config &config,
                 return false;
             }
         } else {
+            // Restoring is restoring: the section checks go back on, so the
+            // page is the one the player shipped.
+            restoreOemGates(doc.qml);
             if (!planDisable(doc.qml, edits, error) || !applyEdits(doc.qml, edits)) {
                 if (error && error->isEmpty())
                     *error = QStringLiteral("Cannot safely restore the stock About page; "
@@ -2566,10 +2736,40 @@ bool rewritePage(QByteArray &changed, bool enabled, const Config &config,
             }
         }
         const QByteArray header = doc.bom ? QByteArray::fromHex("efbbbf") : QByteArray();
-        const bool written = doc.scanned
-            ? replaceScannedDoc(changed, doc, header + doc.qml.toUtf8(), error)
-            : QtResources::replaceResource(changed, doc.file.entryOff, doc.link,
-                                           header + doc.qml.toUtf8(), error);
+        const QByteArray body = header + doc.qml.toUtf8();
+        bool written = false;
+        if (doc.scanned) {
+            // No tree node was found for this record, so it can only be written
+            // where it already sits, inside its own room.
+            written = replaceScannedDoc(changed, doc, body, error);
+        } else {
+            // A page mapped by the tree is rewritten in place first. When the
+            // new text is longer than the room the record has - which is every
+            // change to an MSI page: its record is full - the record is built in
+            // space the file already has and the node is re-pointed at it. The
+            // file does not grow and nothing else moves.
+            QString why;
+            QByteArray once = changed;
+            if (QtResources::replaceResource(once, doc.file.entryOff, doc.link, body, &why,
+                                             nullptr, false)) {
+                changed = once;
+                written = true;
+            } else {
+                const qint64 need = 4 + qint64(qCompress(body, 9).size());
+                QString space;
+                const qint64 destination = QtResources::findFreeSpace(changed, doc.link, need, &space);
+                if (destination >= 0) {
+                    once = changed;
+                    why.clear();
+                    if (QtResources::replaceResource(once, doc.file.entryOff, doc.link, body, &why,
+                                                     nullptr, false, destination)) {
+                        changed = once;
+                        written = true;
+                    }
+                }
+                if (!written && error) *error = space.isEmpty() ? why : space;
+            }
+        }
         if (!written) return false;
         ++*patched;
     }
@@ -2653,7 +2853,10 @@ Result apply(const QString &selectedPath, bool enabled, const Config &rawConfig)
         if (unit.version != 0) anyUnitOn = true;
     const bool unitsPending = enabled && before.sourceEditable && anyUnitOn;
 
-    if (enabled && before.applied && tableEdits.isEmpty()
+    // A page that still carries the MSI visibility check is not "done", however
+    // many tags it has: on that player the two bottom sections are invisible.
+    const bool gatesPending = enabled && config.showSections && before.sectionsHidden;
+    if (enabled && before.applied && tableEdits.isEmpty() && !gatesPending
         && (layout.valid() || sameConfig(before.config, config)) && !unitsPending)
         return { true, QStringLiteral("This About page content is already applied.") };
     if (!enabled && !before.applied && !tablePatched && (!anyUnitOn || !before.qmlEditable))
@@ -2811,6 +3014,10 @@ Result apply(const QString &selectedPath, bool enabled, const Config &rawConfig)
                    .arg(unitsOff);
     if (unitsBack > 0)
         msg += QStringLiteral(" The player's own compiled copy of the page was switched back on.");
+    // The two bottom sections are invisible on MSI because the page tests the
+    // OEM name, and that is what this line is about.
+    if (enabled && config.showSections && before.sectionsHidden)
+        msg += QStringLiteral(" The two sections this build hides on MSI players (\"Important links\" and \"About and other info\", plus the line between them) are switched on - the page's own OEM check, which is false there, no longer hides them.");
     // Closing the player window does not stop BlueStacks - the page is compiled
     // when the Settings window is built, so an instance that is still running
     // keeps showing the old one no matter what the file says.

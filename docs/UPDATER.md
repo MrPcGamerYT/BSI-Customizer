@@ -169,7 +169,10 @@ present.
    and whether it could replace this copy, then `VERDICT: the updater would
    keep/delete this file` (exit code 0/1). The release workflow runs it on the
    installer it just built, so a setup the app would refuse fails the pull
-   request instead of the users.
+   request instead of the users. A setup counts as **runnable** by definition:
+   it is started, never re-executed in place, so the processor its own 32-bit
+   loader names is not asked about — that question is what printed
+   `runs: no` and exited 1 on a perfectly good release setup.
 
    > **Before 2.5.2 the updater could not install at all.** The verifier wanted
    > a 64-bit header from Inno's 32-bit setup stub, so every finished download
