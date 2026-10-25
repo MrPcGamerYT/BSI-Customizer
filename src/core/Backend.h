@@ -181,7 +181,9 @@ public:
     Q_INVOKABLE QVariantMap integrityRestore();
 
     // ---- boot video ----
-    Q_INVOKABLE QVariantMap bootPatch();
+    // holdMs keeps the boot screen, and so the video, on screen this long after
+    // the player reports that boot has finished. 0 leaves the timing alone.
+    Q_INVOKABLE QVariantMap bootPatch(int holdMs);
 
     // ---- extras ----
     Q_INVOKABLE QVariantMap applyRemovals(const QStringList &names);

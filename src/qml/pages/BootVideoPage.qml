@@ -73,10 +73,32 @@ Item {
                         wrapMode: Text.Wrap
                         color: Theme.textDim
                         font.pixelSize: 12
-                        text: qsTr("The patcher updates the boot player's media source. Validated QML resources "
-                                   + "can grow into mapped PE storage, and their caches are refreshed. "
-                                   + "Close BlueStacks first. The original .bak is preserved.")
+                        text: qsTr("The patcher writes a small player next to HD-Player.exe and points the "
+                                   + "player's own boot screen at it, so your video is tried with Qt6, Qt5 "
+                                   + "and WebEngine media at run time. The EXE itself never grows. Close "
+                                   + "BlueStacks first; the original .bak is preserved.")
                     }
+                }
+
+                Stepper {
+                    id: bootHold
+                    Layout.fillWidth: true
+                    label: qsTr("Hold the video on screen after boot")
+                    value: 3000
+                    from: 0
+                    to: 10000
+                    step: 500
+                }
+
+                Text {
+                    Layout.fillWidth: true
+                    wrapMode: Text.Wrap
+                    color: Theme.textDim
+                    font.pixelSize: 12
+                    text: bootHold.value > 0
+                          ? qsTr("The player keeps its boot screen, and so the video, on screen for "
+                                 + bootHold.value + " ms after boot finishes.")
+                          : qsTr("0 ms: the player hides its boot screen as soon as boot finishes.")
                 }
 
                 RowLayout {
@@ -95,7 +117,7 @@ Item {
                         text: qsTr("Patch Boot Video")
                         onClicked: {
                             backend.exePath = bootPath.text;
-                            const r = backend.bootPatch();
+                            const r = backend.bootPatch(bootHold.value);
                             page.state = r.msg || "?";
                             page.stateColorName = r.ok ? "green" : "red";
                         }
