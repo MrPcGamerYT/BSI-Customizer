@@ -3550,13 +3550,9 @@ Result apply(const QString &exePath, const QString &id, bool enabled)
                                               header + doc.qml.toUtf8(), &error)) return refuse(error);
         }
         // The row gets its default order in the same write: the title bar's own
-        // Back/Home/Recent, then Fullscreen, Sound, Files / APK and Settings. An
-        // Update only refreshes the helper - re-running the order passes would
-        // also reset an order the user chose in the editor.
-        if (!upgrade && !repair) {
-            QString orderError;
-            if (!writeRowOrder(changed, enabled, RowRequest(), &orderError)) return refuse(orderError);
-        }
+        // Back/Home/Recent, then Fullscreen, Sound, Files / APK and Settings.
+        QString orderError;
+        if (!writeRowOrder(changed, enabled, RowRequest(), &orderError)) return refuse(orderError);
     }
     // The sidebar option is verified on PlrSidebar.qml alone; the title-bar
     // option still has to prove the complete layout on all three files.
