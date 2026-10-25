@@ -345,7 +345,7 @@ struct ResourceFixture {
 // Same fixture, but the payloads are bytes: pictures cannot survive a round
 // trip through QString the way QML text can.
 ResourceFixture resourcesBytes(const QList<QPair<QString, QByteArray>> &sources, bool dense = false,
-                               const QSet<QString> &rawNames = {})
+                               const QSet<QString> &rawNames = {}, int recordSlack = 0)
 {
     ResourceFixture r;
     r.f.bytes = peFile();
@@ -359,7 +359,9 @@ ResourceFixture resourcesBytes(const QList<QPair<QString, QByteArray>> &sources,
         const auto bytes = record(source.second, !rawNames.contains(source.first));
         r.entries[source.first] = cursor;
         r.f.bytes.replace(cursor, bytes.size(), bytes);
-        cursor += bytes.size();
+        // Left-over zeros are the slack a real pool has behind each record; the
+        // dense fixture deliberately has none so growth cannot hide there.
+        cursor += bytes.size() + recordSlack;
     }
     auto ordered = sources;
     std::sort(ordered.begin(), ordered.end(), [](const auto &a, const auto &b) { return resourceHash(a.first) < resourceHash(b.first); });
@@ -381,13 +383,13 @@ ResourceFixture resourcesBytes(const QList<QPair<QString, QByteArray>> &sources,
 }
 
 ResourceFixture resources(const QList<QPair<QString, QString>> &sources, bool dense = false,
-                          const QSet<QString> &rawNames = {})
+                          const QSet<QString> &rawNames = {}, int recordSlack = 0)
 {
     QList<QPair<QString, QByteArray>> payloads;
     payloads.reserve(sources.size());
     for (const auto &source : sources)
         payloads << qMakePair(source.first, source.second.toUtf8());
-    return resourcesBytes(payloads, dense, rawNames);
+    return resourcesBytes(payloads, dense, rawNames, recordSlack);
 }
 
 // rcc writes one node per path component: "images" is a directory node owning
@@ -2897,72 +2899,218 @@ Window {
               "an unsupported player is left untouched");
     }
 
-    std::printf("[boot-discovery] renamed/raw controllers and the host's selected component\n");
+    std::printf("[boot-discovery] renamed controllers, leftover records and refusals\n");
     {
-        const QString controller = QStringLiteral("import QtQuick\nItem{Image{id:iBootImage}Text{id:iBootLoadingText}"
-            "function fSetBootPromotion(){iBootImage.visible=true;}}\n");
-        const QString host = QStringLiteral("import QtQuick\nItem{Component{id:iBootProgressComponent;RenamedStartup{}}Loader{id:iBootLoader}}\n");
+        // The player stores both files under names of its own choosing, and this
+        // tool has to find them by what they say. The boot screen also carries
+        // the licence banner the real builds put in front of every QML file.
+        const QString controller = QStringLiteral(
+            "/*\r\n * Copyright (C) 2020-2021 BlueStack Systems, Inc.\r\n */\r\n"
+            "import QtQuick\r\n"
+            "Item {\r\n"
+            "    width: 320; height: 200\r\n"
+            "    property bool bootBackgroundImage: true\r\n"
+            "    Image { id: iBootImage; objectName: 'bootImage'; visible: true }\r\n"
+            "    Text { id: iBootLoadingText; objectName: 'loadingText' }\r\n"
+            "    function fSetBootPromotion() { iBootImage.visible = true }\r\n"
+            "}\r\n");
+        const QString host = QStringLiteral(
+            "/* (C) BlueStack Systems - the ApplicationWindow of the player */\r\n"
+            "import QtQuick\r\n"
+            "Item {\r\n"
+            "    id: iAppwin\r\n"
+            "    property bool pIsBootComplete: false\r\n"
+            "    property bool pShowAndroidAd: false\r\n"
+            "    Component { id: iBootProgressComponent; RenamedStartup {} }\r\n"
+            "    Component { id: iGlContainerComponent; Rectangle { color: '#000000' } }\r\n"
+            "    Loader { id: iBootLoader; anchors.fill: parent\r\n"
+            "        sourceComponent: pIsBootComplete || pShowAndroidAd ? iGlContainerComponent : iBootProgressComponent }\r\n"
+            "}\r\n");
         auto r = resources({ { QStringLiteral("RenamedStartup.qml"), controller },
-                             { QStringLiteral("UnusedPortrait.qml"), controller },
                              { QStringLiteral("Shell.qml"), host },
-                             { QStringLiteral("MediaSupport.qml"), QStringLiteral("import QtQuick\nimport QtMultimedia 5.15\nItem{}") } },
-                           true, { QStringLiteral("RenamedStartup.qml"), QStringLiteral("MediaSupport.qml") });
+                             { QStringLiteral("Other.qml"), QStringLiteral("import QtQuick; QtObject {}") } },
+                           false, {}, 256);
         addRegistration(r, false);
-        const QString path = temp.filePath(QStringLiteral("renamed-boot.exe")); write(path, r.f.bytes);
+        // A record an earlier patch left behind: valid QML, no tree node, so the
+        // player never reads it and neither may this tool.
+        QByteArray image = r.f.bytes;
+        const qint64 leftover = image.size();
+        image += record(controller.toUtf8());
+        image += QByteArray(64, '\0');
+        const auto folder = temp.filePath(QStringLiteral("renamed boot")); QDir().mkpath(folder);
+        const QString path = QDir(folder).filePath(QStringLiteral("HD-Player.exe")); write(path, image);
+
         const auto result = BootVideoPatcher::patch(path);
-        if (!result.ok) std::printf("    %s\n", qPrintable(result.msg));
-        check(result.ok, "boot discovery does not depend on a fixed boot filename or zlib storage");
-        check(resourceText(read(path), r, QStringLiteral("RenamedStartup.qml")).contains(QLatin1String("bsiBootVideo"))
-                  && resourceText(read(path), r, QStringLiteral("UnusedPortrait.qml")) == controller,
-              "the host's boot Component selects one of several valid controller variants");
-        check(BootVideoPatcher::patch(path).ok, "raw renamed boot resources support repeated patching");
-        const qint64 node = r.nodes[QStringLiteral("RenamedStartup.qml")];
-        check(be16(read(path), node + 4) == 0, "raw-resource rewrites preserve the node's storage flags");
+        check(result.ok, QStringLiteral("a boot screen is found by its content, not by a fixed resource name: %1")
+                             .arg(result.msg));
+        const auto patched = read(path);
+        check(patched.size() == image.size(), "the patched player is exactly as large as the original");
+        const auto qml = resourceText(patched, r, QStringLiteral("RenamedStartup.qml"));
+        check(qml.contains(QLatin1String("objectName:\"bsiBootLoader\""))
+                  && qml.contains(QLatin1String("BootVideo.qml")),
+              "the boot screen is pointed at the video player the tool writes next to the EXE");
+        check(patched.mid(leftover, image.size() - leftover) == image.mid(leftover),
+              "a record the tree does not point at is never rewritten");
+        const auto again = BootVideoPatcher::patch(path);
+        check(again.ok, QStringLiteral("the patched player accepts a second pass: %1").arg(again.msg));
+
+        auto twice = resources({ { QStringLiteral("BootOne.qml"), controller },
+                                 { QStringLiteral("BootTwo.qml"), controller },
+                                 { QStringLiteral("Shell.qml"), host } }, true);
+        addRegistration(twice, false);
+        const QString ambiguousPath = temp.filePath(QStringLiteral("two-boots.exe"));
+        write(ambiguousPath, twice.f.bytes);
+        const auto refused = BootVideoPatcher::patch(ambiguousPath);
+        check(!refused.ok && refused.msg.contains(QLatin1String("boot screen"))
+                  && read(ambiguousPath) == twice.f.bytes,
+              "two registered boot screens are refused instead of guessing");
+
+        auto none = resources({ { QStringLiteral("Shell.qml"), host },
+                                { QStringLiteral("Other.qml"), QStringLiteral("import QtQuick; QtObject {}") } }, true);
+        addRegistration(none, false);
+        const QString nonePath = temp.filePath(QStringLiteral("no-boot.exe"));
+        write(nonePath, none.f.bytes);
+        check(!BootVideoPatcher::patch(nonePath).ok && read(nonePath) == none.f.bytes,
+              "a player without a boot screen is refused and left untouched");
     }
 
-    std::printf("[boot-msi] actual component name and multimedia import from a sibling resource\n");
+    std::printf("[boot-hold] the boot screen plays the user's video and is held on screen\n");
     {
-        const QString boot = QStringLiteral("import QtQuick\nItem{width:320;height:200;property bool bootBackgroundImage:true;"
-            "property bool pBootImageButtonVisible:true;property bool pBootGridVisible:true;"
-            "Image{id:iBootImage;objectName:'bootImage';visible:true}"
-            "Text{id:iBootLoadingText;objectName:'loadingText';visible:false}"
-            "function fSetBootPromotion(){iBootImage.visible=true;pBootGridVisible=true;iBootLoadingText.visible=false}}\n");
-        const auto r = resources({ { QStringLiteral("PlrBootProgressBar.qml"), boot },
-                                   { QStringLiteral("Notification.qml"), QStringLiteral("import QtQuick\nimport QtMultimedia 5.15\nItem{}\n") },
-                                   { QStringLiteral("Other.qml"), QStringLiteral("import QtQuick; QtObject {}") } }, true);
+        // The shape every current build has: the host swaps the boot screen for
+        // the black GL container the moment boot reports complete.
+        const QString boot = QStringLiteral(
+            "/*\r\n * Copyright (C) 2020-2021 BlueStack Systems, Inc.\r\n */\r\n"
+            "import QtQuick\r\n"
+            "Item {\r\n"
+            "    width: 320; height: 200\r\n"
+            "    property bool bootBackgroundImage: true\r\n"
+            "    property bool pBootImageButtonVisible: true\r\n"
+            "    property bool pBootGridVisible: true\r\n"
+            "    Image { id: iBootImage; objectName: 'bootImage'; visible: true }\r\n"
+            "    Text { id: iBootLoadingText; objectName: 'loadingText'; visible: false }\r\n"
+            "    function fSetBootPromotion() { iBootImage.visible = true; pBootGridVisible = true;"
+            " iBootLoadingText.visible = false }\r\n"
+            "}\r\n");
+        const QString host = QStringLiteral(
+            "/* (C) BlueStack Systems - the ApplicationWindow of the player */\r\n"
+            "import QtQuick\r\n"
+            "Item {\r\n"
+            "    id: iAppwin\r\n"
+            "    property bool pIsBootComplete: false\r\n"
+            "    property bool pShowAndroidAd: false\r\n"
+            "    Component { id: iBootProgressComponent; PlrBootProgressBar {} }\r\n"
+            "    Component { id: iGlContainerComponent; Rectangle { color: '#000000' } }\r\n"
+            "    Loader { id: iBootLoader; anchors.fill: parent\r\n"
+            "        sourceComponent: pIsBootComplete || pShowAndroidAd ? iGlContainerComponent : iBootProgressComponent }\r\n"
+            "}\r\n");
+        auto r = resources({ { QStringLiteral("PlrBootProgressBar.qml"), boot },
+                                   { QStringLiteral("plr.qml"), host },
+                                   { QStringLiteral("Other.qml"), QStringLiteral("import QtQuick; QtObject {}") } },
+                                 false, {}, 256);
+        addRegistration(r, false);
         const auto folder = temp.filePath(QStringLiteral("msi boot with spaces")); QDir().mkpath(folder);
         const auto path = QDir(folder).filePath(QStringLiteral("HD-Player.exe")); write(path, r.f.bytes);
+
         const auto outcome = BootVideoPatcher::patch(path);
-        if (!outcome.ok) std::printf("    %s\n", qPrintable(outcome.msg));
-        check(outcome.ok, "PlrBootProgressBar works without a stock BootVideo.qml or an import in the boot file");
-        const auto modified = resourceText(read(path), r, QStringLiteral("PlrBootProgressBar.qml"));
-        check(modified.contains(QLatin1String("import QtMultimedia 5.15 as BsiMedia"))
-                  && modified.contains(QLatin1String("sourceComponent:Component{BsiMedia.Video")),
-              "media support is obtained from another validated file in the same resource pool");
-        // A tiny, explicitly synthetic QtMultimedia API validates the generated
-        // QML/argument flow without playing media or running extracted user QML.
-        const auto imports = QDir(folder).filePath(QStringLiteral("imports/QtMultimedia")); QDir().mkpath(imports);
-        write(QDir(imports).filePath(QStringLiteral("qmldir")), "module QtMultimedia\nVideo 5.15 Video.qml\nMediaPlayer 5.15 MediaPlayer.qml\nVideoOutput 5.15 VideoOutput.qml\n");
-        write(QDir(imports).filePath(QStringLiteral("Video.qml")), "import QtQuick\nItem{property url source;property int loops;property int fillMode;property bool started:false;function play(){started=true}}\n");
-        write(QDir(imports).filePath(QStringLiteral("MediaPlayer.qml")), "import QtQuick\nQtObject{enum Loops{Infinite=1}}\n");
-        write(QDir(imports).filePath(QStringLiteral("VideoOutput.qml")), "import QtQuick\nQtObject{enum FillMode{PreserveAspectCrop=1}}\n");
-        QQmlEngine engine; engine.addImportPath(QDir(folder).filePath(QStringLiteral("imports")));
-        QQmlComponent component(&engine); component.setData(modified.toUtf8(), QUrl::fromLocalFile(QDir(folder).filePath(QStringLiteral("PlrBootProgressBar.qml"))));
-        std::unique_ptr<QObject> object(component.create());
-        if (!object) std::printf("    %s\n", qPrintable(component.errorString()));
-        check(bool(object), "injected boot Video QML compiles against the expected multimedia API");
-        if (object) {
-            const auto video = object->findChild<QObject *>(QStringLiteral("bsiBootVideo"));
-            check(video && video->property("started").toBool()
-                      && video->property("source").toUrl() == QUrl::fromLocalFile(QDir(folder).filePath(QStringLiteral("Assets/Promo.mp4"))),
-                  "the inline video starts and receives the installation-relative media URL");
-        }
-        check(BootVideoPatcher::patch(path).ok && read(path + QStringLiteral(".bak")) == r.f.bytes,
-              "real-name boot repatching keeps one loader and preserves the original backup");
+        check(outcome.ok, QStringLiteral("a stock boot screen is patched without a BootVideo.qml in the "
+                                         "resource pool: %1").arg(outcome.msg));
+        const auto patched = read(path);
+        check(patched.size() == r.f.bytes.size(), "the EXE does not grow");
+        check(read(path + QStringLiteral(".bak")) == r.f.bytes, "the untouched original is preserved as .bak");
+
+        const auto qml = resourceText(patched, r, QStringLiteral("PlrBootProgressBar.qml"));
+        const auto url = QUrl::fromLocalFile(QDir(folder).filePath(QStringLiteral("Assets/BootVideo.qml")));
+        check(qml.contains(QStringLiteral("Loader{id:pv;objectName:\"bsiBootLoader\";z:-1;anchors.fill:parent;"
+                                           "source:\"%1\"}").arg(url.toString(QUrl::FullyEncoded))),
+              "the boot screen loads the external player by file URL");
+        check(qml.contains(QLatin1String("Image { id: iBootImage; objectName: 'bootImage'; visible: false }"))
+                  && qml.contains(QLatin1String("iBootImage.visible = false"))
+                  && qml.contains(QLatin1String("iBootLoadingText.visible = true")),
+              "the stock artwork is hidden while the loading text stays");
+        check(!qml.contains(QLatin1String("QtMultimedia")) && !qml.contains(QLatin1String("BsiMedia")),
+              "no media import is added to the player's own QML");
+
+        const auto video = read(QDir(folder).filePath(QStringLiteral("Assets/BootVideo.qml")));
+        check(video.contains("QtMultimedia") && video.contains("QtMultimedia 5.15")
+                  && video.contains("QtWebEngine") && video.contains("Qt.resolvedUrl(\"Promo.mp4\")"),
+              "the external player tries Qt6, Qt5 and WebEngine video at run time");
+        const auto player = resourceText(patched, r, QStringLiteral("plr.qml"));
+        check(player.contains(QLatin1String("property bool pBootVideoDone: false"))
+                  && player.contains(QLatin1String("Timer{id:bvDone;interval:3000;running:pIsBootComplete&&!pBootVideoDone"))
+                  && player.contains(QLatin1String("((pIsBootComplete&&pBootVideoDone)||pShowAndroidAd)")),
+              "the host keeps the boot screen, and so the video, for the hold time");
+        QQmlEngine engine;
+        QQmlComponent component(&engine);
+        component.setData(qml.toUtf8(), QUrl::fromLocalFile(QDir(folder).filePath(QStringLiteral("PlrBootProgressBar.qml"))));
+        if (component.status() != QQmlComponent::Ready)
+            std::printf("    %s\n", qPrintable(component.errorString()));
+        check(component.status() == QQmlComponent::Ready,
+              "the rewritten boot screen is valid QML");
+
+        BootVideoPatcher::Options plain; plain.holdMs = 0;
+        const auto off = BootVideoPatcher::patch(path, plain);
+        check(off.ok, QStringLiteral("the hold can be switched off again: %1").arg(off.msg));
+        const auto reverted = read(path);
+        const auto plainPlayer = resourceText(reverted, r, QStringLiteral("plr.qml"));
+        check(!plainPlayer.contains(QLatin1String("pBootVideoDone"))
+                  && plainPlayer.contains(QLatin1String("sourceComponent: pIsBootComplete || pShowAndroidAd"))
+                  && reverted.size() == r.f.bytes.size(),
+              "switching the hold off restores the stock boot swap");
+        const auto again = BootVideoPatcher::patch(path);
+        check(again.ok, QStringLiteral("the boot video can be patched again afterwards: %1").arg(again.msg));
         const auto twice = resourceText(read(path), r, QStringLiteral("PlrBootProgressBar.qml"));
-        check(twice.count(QLatin1String("objectName:\"bsiBootVideo\"")) == 1,
-              "repatching does not duplicate the custom video component");
+        check(twice.count(QLatin1String("bsiBootLoader")) == 1, "a repatch does not stack a second player");
     }
+
+    std::printf("[boot-legacy] the older boot loader is unloaded, not swapped\n");
+    {
+        // 5.9 / 5.10 shape: boot ends by unloading the loader outright, so the
+        // hold has to defer that unload instead of rewiring a binding.
+        const QString boot = QStringLiteral(
+            "/*\r\n * Copyright (C) 2020-2021 BlueStack Systems, Inc.\r\n */\r\n"
+            "import QtQuick\r\n"
+            "Item {\r\n"
+            "    property bool bootBackgroundImage: true\r\n"
+            "    Image { id: iBootImage; visible: true }\r\n"
+            "    Text { id: iBootLoadingText }\r\n"
+            "    function fSetBootPromotion() { iBootImage.visible = true }\r\n"
+            "}\r\n");
+        const QString host = QStringLiteral(
+            "/* (C) BlueStack Systems - the ApplicationWindow of the player */\r\n"
+            "import QtQuick\r\n"
+            "Item {\r\n"
+            "    id: iAppwin\r\n"
+            "    property bool pIsBootComplete: false\r\n"
+            "    Component { id: iBootProgressComponent; PlrBootProgressBar {} }\r\n"
+            "    Loader { id: iBootLoader; anchors.fill: parent; visible: !pIsBootComplete }\r\n"
+            "    function fUiHideBootProgressBar() {\r\n"
+            "        iBootLoader.item.fBootComplete()\r\n"
+            "        iBootLoader.sourceComponent = undefined\r\n"
+            "        pIsBootComplete = true\r\n"
+            "    }\r\n"
+            "}\r\n");
+        auto r = resources({ { QStringLiteral("PlrBootProgressBar.qml"), boot },
+                                   { QStringLiteral("plr.qml"), host } }, false, {}, 256);
+        addRegistration(r, false);
+        const auto folder = temp.filePath(QStringLiteral("legacy boot")); QDir().mkpath(folder);
+        const auto path = QDir(folder).filePath(QStringLiteral("HD-Player.exe")); write(path, r.f.bytes);
+
+        const auto outcome = BootVideoPatcher::patch(path);
+        check(outcome.ok, QStringLiteral("a build that unloads its boot loader is patched: %1").arg(outcome.msg));
+        check(read(path).size() == r.f.bytes.size(), "a build that unloads its boot loader is patched in place");
+        const auto player = resourceText(read(path), r, QStringLiteral("plr.qml"));
+        check(player.contains(QLatin1String("pIsBootComplete = true\r\n        iBootLoader.visible = true\r\n"
+                                            "        bvHold.restart()"))
+                  && player.contains(QLatin1String("Timer{id:bvHold;interval:3000;onTriggered:{"))
+                  && !player.contains(QLatin1String("iBootLoader.sourceComponent = undefined\r\n        pIsBootComplete")),
+              "the unload is deferred to a timer so the video stays on screen");
+        BootVideoPatcher::Options plain; plain.holdMs = 0;
+        const auto off = BootVideoPatcher::patch(path, plain);
+        check(off.ok, QStringLiteral("the legacy hold can be switched off: %1").arg(off.msg));
+        check(!resourceText(read(path), r, QStringLiteral("plr.qml")).contains(QLatin1String("bvHold")),
+              "switching the hold off puts the legacy unload back");
+    }
+
 #ifdef BSI_EXE_TEST_FILE
     {
         std::printf("[hdplayer-reference] file parsing and disposable copies only; no uploaded code is executed\n");
@@ -3109,41 +3257,44 @@ Window {
               "Qt actually loads colors relocated into the appended PE section");
     }
     {
-        const QString boot = QStringLiteral("import QtQuick\nItem{width:320;height:200;property bool bootBackgroundImage:true;"
+        // The player's own pool still carries the file the old design edited.
+        // Nothing in it may be touched now: the tool writes its own player next
+        // to the EXE and points the boot screen at that.
+        const QString boot = QStringLiteral(
+            "/*\r\n * Copyright (C) 2020-2021 BlueStack Systems, Inc.\r\n */\r\n"
+            "import QtQuick\r\n"
+            "Item{width:320;height:200;property bool bootBackgroundImage:true;"
             "property bool pBootImageButtonVisible:true;property bool pBootGridVisible:true;"
             "Image{id:iBootImage;objectName:'bootImage';visible:true}"
             "Text{id:iBootLoadingText;objectName:'loadingText';visible:false}"
-            "Loader{id:pv;source:'BootVideo.qml'}"
-            "function fSetBootPromotion(){iBootImage.visible=true;pBootGridVisible=true;iBootLoadingText.visible=false}}\n");
+            "function fSetBootPromotion(){iBootImage.visible=true;pBootGridVisible=true;iBootLoadingText.visible=false}}\r\n");
         const QString video = QStringLiteral("import QtQuick\nMediaPlayer { source:'x';objectName:'mediaPlayer' }\n");
         const auto r = resources({ { QStringLiteral("Boot.qml"), boot }, { QStringLiteral("BootVideo.qml"), video },
-                                  { QStringLiteral("Other.qml"), QStringLiteral("import QtQuick; QtObject {}") } }, true);
+                                  { QStringLiteral("Other.qml"), QStringLiteral("import QtQuick; QtObject {}") } },
+                                false, {}, 256);
         const QString folder = temp.filePath(QStringLiteral("boot test with spaces")); QDir().mkpath(folder);
         const QString path = QDir(folder).filePath(QStringLiteral("HD-Player.exe")); write(path, r.f.bytes);
         const auto patch = BootVideoPatcher::patch(path);
-        if (!patch.ok) std::printf("    %s\n", qPrintable(patch.msg));
-        check(patch.ok && PeUtils::sections(read(path)).size() > 1, "boot media URL can grow beyond its original compressed slot");
-        const auto qml = resourceText(read(path), r, QStringLiteral("Boot.qml"));
-        const auto media = resourceText(read(path), r, QStringLiteral("BootVideo.qml"));
-        const auto expected = QUrl::fromLocalFile(QDir(folder).filePath(QStringLiteral("Assets/Promo.mp4")));
-        check(media.contains(expected.toString(QUrl::FullyEncoded)) && !media.contains(QLatin1String("file:///Promo.mp4")),
-              "boot player uses the selected installation's Assets/Promo.mp4 URL");
-        check(qml.contains(QLatin1String("source:'BootVideo.qml'")), "a QML Loader still loads QML, never the MP4 itself");
-        write(QDir(folder).filePath(QStringLiteral("Boot.qml")), qml.toUtf8());
-        write(QDir(folder).filePath(QStringLiteral("BootVideo.qml")), media.toUtf8());
-        write(QDir(folder).filePath(QStringLiteral("MediaPlayer.qml")), "import QtQuick\nItem{property url source}\n");
-        QQmlEngine engine;
-        QQmlComponent component(&engine, QUrl::fromLocalFile(QDir(folder).filePath(QStringLiteral("Boot.qml"))));
-        std::unique_ptr<QObject> object(component.create());
-        if (!object) std::printf("    %s\n", qPrintable(component.errorString()));
-        check(bool(object), "modified boot QML compiles with the stock-player API (no media codec is executed)");
-        if (object) {
-            const auto image = object->findChild<QObject *>(QStringLiteral("bootImage"));
-            const auto player = object->findChild<QObject *>(QStringLiteral("mediaPlayer"));
-            check(image && !image->property("visible").toBool() && player && player->property("source").toUrl() == expected,
-                  "boot image is hidden and the existing player's source is the custom video");
-        }
-        check(BootVideoPatcher::patch(path).ok && read(path + QStringLiteral(".bak")) == r.f.bytes,
+        check(patch.ok, QStringLiteral("boot patch on a one-line pool: %1").arg(patch.msg));
+        const auto patched = read(path);
+        check(patched.size() == r.f.bytes.size(),
+              QStringLiteral("the boot screen is rewritten inside the space its record already has "
+                             "(%1 bytes written, %2 before)").arg(patched.size()).arg(r.f.bytes.size()));
+        const auto qml = resourceText(patched, r, QStringLiteral("Boot.qml"));
+        const auto expected = QUrl::fromLocalFile(QDir(folder).filePath(QStringLiteral("Assets/BootVideo.qml")));
+        check(qml.contains(QStringLiteral("source:\"%1\"").arg(expected.toString(QUrl::FullyEncoded))),
+              "the boot screen loads a QML player, never the MP4 itself");
+        check(resourceText(read(path), r, QStringLiteral("BootVideo.qml")) == video,
+              "an unrelated stock BootVideo.qml in the pool is left alone");
+        check(!QFile::exists(QDir(folder).filePath(QStringLiteral("Assets/Promo.mp4")))
+                  && read(QDir(folder).filePath(QStringLiteral("Assets/BootVideo.qml")))
+                         .contains("Qt.resolvedUrl(\"Promo.mp4\")"),
+              "the player is written next to the EXE and resolves the video beside itself");
+        check(patch.msg.contains(QLatin1String("Promo.mp4")),
+              "the report names the file the user has to supply");
+        const auto repatch = BootVideoPatcher::patch(path);
+        check(repatch.ok, QStringLiteral("boot repatch on a pool without a player window: %1").arg(repatch.msg));
+        check(read(path + QStringLiteral(".bak")) == r.f.bytes,
               "boot repatch is idempotent and preserves the first backup");
     }
     {
@@ -3849,7 +4000,7 @@ Window {
     std::printf("[layout] one-click clean-up hides the extra title-bar and sidebar buttons\n");
     {
         const QString cleanPlr = QStringLiteral(
-            "import QtQuick 2.15\r\n"
+            "import QtQuick\r\n"
             "Rectangle {\r\n"
             "    id: iAppwin\r\n"
             "    property int pSidebarWidth: 32\r\n"
@@ -3861,7 +4012,7 @@ Window {
             "    }\r\n"
             "}\r\n");
         const QString cleanSidebar = QStringLiteral(
-            "import QtQuick 2.15\r\n"
+            "import QtQuick\r\n"
             "Rectangle {\r\n"
             "    id: iSidebar\r\n"
             "    UiColumnLayout {\r\n"
@@ -3891,7 +4042,7 @@ Window {
             "    ]\r\n"
             "}\r\n");
         const QString cleanTopbar = QStringLiteral(
-            "import QtQuick 2.15\r\n"
+            "import QtQuick\r\n"
             "Rectangle {\r\n"
             "    id: iTopbar\r\n"
             "    property list<QtObject> pNonFixedTopbarItems: [\r\n"
@@ -3978,7 +4129,7 @@ Window {
         // and the whole sidebar strip. It is reported as an update and the
         // missing half is written without restoring first.
         const QString legacyPlr = QStringLiteral(
-            "import QtQuick 2.15\r\n"
+            "import QtQuick\r\n"
             "Rectangle {\r\n"
             "    id: iAppwin\r\n"
             "    property int pSidebarWidth: 32\r\n"
@@ -4019,7 +4170,7 @@ Window {
         // Layout.preferredWidth and the top bar re-asserts `visible` from a
         // ListModel instead of PlrTopbarElement objects.
         const QString oldPlr = QStringLiteral(
-            "import QtQuick 2.15\r\n"
+            "import QtQuick\r\n"
             "Rectangle {\r\n"
             "    id: iAppwin\r\n"
             "    RowLayout {\r\n"
@@ -4032,7 +4183,7 @@ Window {
             "    }\r\n"
             "}\r\n");
         const QString oldTopbar = QStringLiteral(
-            "import QtQuick 2.15\r\n"
+            "import QtQuick\r\n"
             "Rectangle {\r\n"
             "    id: iRoot\r\n"
             "    ListModel { id: iTopbarItems }\r\n"
@@ -4768,7 +4919,7 @@ Window {
             "/*\r\n"
             " * Copyright (C) 2020-2021 BlueStack Systems, Inc.\r\n"
             " */\r\n"
-            "import QtQuick 2.15\r\n"
+            "import QtQuick\r\n"
             "Item {\r\n"
             "    objectName: \"aboutSettings\"\r\n"
             "    UiColumnLayout {\r\n"
