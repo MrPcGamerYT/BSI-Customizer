@@ -21,6 +21,19 @@
 #include <QTimer>
 #include <QUrl>
 
+#ifdef Q_OS_WIN
+// Last, after all the Qt headers: these two only keep windows.h from dragging in
+// winsock.h (Qt uses winsock2) and from defining min/max as macros.
+#  ifndef NOMINMAX
+#    define NOMINMAX
+#  endif
+#  ifndef WIN32_LEAN_AND_MEAN
+#    define WIN32_LEAN_AND_MEAN
+#  endif
+#  include <windows.h>
+#  include <shellapi.h>  // ShellExecuteExW, SHELLEXECUTEINFOW
+#endif
+
 #ifndef BSI_VERSION
 #  define BSI_VERSION "0.0.0"
 #endif
@@ -670,7 +683,16 @@ void UpdateChecker::beginDownload(const QString &urlText)
     }
 
     m_downloadUrl = source;
-    const QString target = stagingDirectory() + QLatin1Char('/') + QFileInfo(fileName).fileName();
+    // Windows starts a program by its extension. A release published as
+    // "BSI-Customizer-2.5.2-setup" (no suffix) would download, verify and then
+    // be refused by CreateProcess - so the staged copy is always named like a
+    // program, whatever the manifest calls it.
+    QString stagedName = QFileInfo(fileName).fileName();
+    if (stagedName.isEmpty())
+        stagedName = QStringLiteral("BSI-Customizer-%1-setup").arg(latestVersion());
+    if (!stagedName.endsWith(QLatin1String(".exe"), Qt::CaseInsensitive))
+        stagedName += QStringLiteral(".exe");
+    const QString target = stagingDirectory() + QLatin1Char('/') + stagedName;
     if (!m_stagedFile.isEmpty() && m_stagedFile != target && QFileInfo::exists(m_stagedFile))
         QFile::remove(m_stagedFile);
     m_stagedFile.clear();
@@ -828,6 +850,12 @@ void UpdateChecker::finishDownload()
         }
     }
 
+    // The file came from the internet: Windows records that in an alternate
+    // data stream, and SmartScreen / application-control policies refuse to
+    // start what it marks. A program this tool fetched and verified itself is
+    // not untrusted, so the mark is removed before it can block the install.
+    clearMarkOfTheWeb(target);
+
     m_stagedFile = target;
     setProgress(1);
     setState(QStringLiteral("ready"),
@@ -956,20 +984,58 @@ bool UpdateChecker::stagedIsInstaller() const
 void UpdateChecker::runInstaller()
 {
     // The setup waits for this process to exit (/CLOSEAPPLICATIONS), replaces the
-    // installed files and starts the new build. There is nothing left to do here
-    // but quit, so the swap helper is not involved at all.
+    // installed files and starts the new build (its [Run] entry, see the .iss).
+    // There is nothing left to do here but quit, so the swap helper is not
+    // involved at all.
     const QString program = m_stagedFile;
     const QFileInfo info(program);
+    if (info.suffix().compare(QLatin1String("exe"), Qt::CaseInsensitive) != 0) {
+        // CreateProcess does not add an extension; a staged file without .exe
+        // is the one case where "not executable" is literally true.
+        fail(QStringLiteral("The downloaded file is named %1 and Windows only starts a program "
+                            "with an .exe name. Download the update again.")
+                 .arg(info.fileName()));
+        return;
+    }
+    // Whatever the download inherited from the network is not wanted here: the
+    // file was verified by this program, and the mark of the web is what can
+    // stop it being started.
+    clearMarkOfTheWeb(program);
+
+    // The setup logs what it did, so a silent install that fails leaves a
+    // reason instead of an app that simply never comes back. The argument is
+    // built without embedded quotes: QProcess quotes the whole token, which is
+    // how Inno's command line parser expects a path with spaces.
+    const QString setupLog = stagingDirectory() + QStringLiteral("/setup.log");
+    QFile::remove(setupLog);
     const QStringList args{ QStringLiteral("/VERYSILENT"),
                             QStringLiteral("/SUPPRESSMSGBOXES"),
                             QStringLiteral("/NOCANCEL"),
                             QStringLiteral("/NORESTART"),
                             QStringLiteral("/CLOSEAPPLICATIONS"),
-                            QStringLiteral("/FORCECLOSEAPPLICATIONS") };
-    if (!QProcess::startDetached(program, args, info.absolutePath())) {
-        fail(QStringLiteral("The installer was downloaded and verified, but Windows would not start "
-                            "it. Use 'Show the downloaded file' and run %1 by hand.")
-                 .arg(info.fileName()));
+                            QStringLiteral("/FORCECLOSEAPPLICATIONS"),
+                            QStringLiteral("/LOG=") + setupLog };
+
+    // Written before the launch, so the next start can say what was attempted
+    // even if the setup never gets far enough to write a line of its own. The
+    // log is started afresh: an earlier helper failure describes a copy of the
+    // program that this setup is about to replace, and showing it again after a
+    // successful update would invent a problem that is already gone.
+    {
+        QFile log(helperLogPath());
+        if (log.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+            log.write(QStringLiteral("%1 update: starting the setup %2, which logs to %3\n")
+                          .arg(QDateTime::currentDateTime().toString(Qt::ISODate),
+                               info.fileName(), setupLog)
+                          .toUtf8());
+        }
+    }
+
+    QString why;
+    if (!startInstallerProcess(program, args, info.absolutePath(), &why)) {
+        fail(QStringLiteral("The setup downloaded and verified, but Windows would not start it: "
+                            "%1. Use 'Show the downloaded file' and run %2 by hand.")
+                 .arg(why, info.fileName()));
         return;
     }
     m_installed = true;
@@ -1026,6 +1092,19 @@ void UpdateChecker::apply()
                             "setup, not by overwriting itself. The downloaded file %1 is not an "
                             "installer - open the release page and run the -setup.exe from there.")
                  .arg(QFileInfo(m_stagedFile).fileName()));
+        return;
+    }
+
+    // Only now is the download going to *become* this program, so this is where
+    // its architecture matters: a build for another processor (or a library)
+    // cannot replace a program that is already running. A setup is exempt -
+    // it is run, not copied over anything - and Inno's setup stub is 32-bit.
+    QString replaceError;
+    if (!canReplaceThisProgram(m_stagedFile, &replaceError)) {
+        fail(QStringLiteral("This update cannot replace the program: %1. Use 'Show the "
+                            "downloaded file' and run it by hand, or download %2 from the "
+                            "release page.")
+                 .arg(replaceError, latestVersion()));
         return;
     }
 
@@ -2033,7 +2112,145 @@ QString UpdateChecker::fileSha256(const QString &path)
     return QString::fromLatin1(hash.result().toHex());
 }
 
-bool UpdateChecker::looksLikeExecutable(const QString &path, QString *error)
+namespace {
+
+#ifdef Q_OS_WIN
+// The text Windows itself gives for an error code. QProcess::startDetached
+// answers true/false with no reason, which is how "the installer would not
+// start" became a dead end: the code is what says whether it was blocked by a
+// policy (5/1260), whether the file is not a program (193), or the path is
+// wrong (2/3).
+QString win32ErrorText(DWORD code)
+{
+    wchar_t *buffer = nullptr;
+    const DWORD length = ::FormatMessageW(FORMAT_MESSAGE_ALLOCATE_BUFFER
+                                              | FORMAT_MESSAGE_FROM_SYSTEM
+                                              | FORMAT_MESSAGE_IGNORE_INSERTS,
+                                          nullptr, code, 0,
+                                          reinterpret_cast<wchar_t *>(&buffer), 0, nullptr);
+    QString text;
+    if (length > 0 && buffer)
+        text = QString::fromWCharArray(buffer, int(length)).trimmed();
+    if (buffer)
+        ::LocalFree(buffer);
+    text.replace(QLatin1Char('\r'), QLatin1Char(' '));
+    text.replace(QLatin1Char('\n'), QLatin1Char(' '));
+    while (text.contains(QLatin1String("  "))) text.replace(QLatin1String("  "), QLatin1String(" "));
+    if (text.isEmpty())
+        return QStringLiteral("error %1").arg(code);
+    return QStringLiteral("%1 (error %2)").arg(text.trimmed()).arg(code);
+}
+
+QString quoteArgument(const QString &argument)
+{
+    if (!argument.contains(QLatin1Char(' ')) && !argument.contains(QLatin1Char('\t')))
+        return argument;
+    return QLatin1Char('"') + argument + QLatin1Char('"');
+}
+#endif
+
+// Start the setup and tell the caller what Windows said when it will not.
+//
+// QProcess is tried first (it is CreateProcess, which is what a program that
+// has already decided to run something wants); when it fails, the shell is
+// asked instead - the same path Explorer takes - and its error code is turned
+// into a sentence. A silent "would not start" is what made this look like a
+// broken download when the file was fine.
+bool startInstallerProcess(const QString &program, const QStringList &arguments,
+                           const QString &workingDirectory, QString *error)
+{
+    if (QProcess::startDetached(program, arguments, workingDirectory)) return true;
+#ifdef Q_OS_WIN
+    QStringList quoted;
+    quoted.reserve(arguments.size());
+    for (const QString &argument : arguments)
+        quoted << quoteArgument(argument);
+    const QString parameters = quoted.join(QLatin1Char(' '));
+    SHELLEXECUTEINFOW info = {};
+    info.cbSize = sizeof(info);
+    info.fMask = SEE_MASK_NOASYNC | SEE_MASK_FLAG_NO_UI;
+    info.lpFile = reinterpret_cast<const wchar_t *>(program.utf16());
+    info.lpParameters = parameters.isEmpty()
+                            ? nullptr
+                            : reinterpret_cast<const wchar_t *>(parameters.utf16());
+    info.lpDirectory = workingDirectory.isEmpty()
+                           ? nullptr
+                           : reinterpret_cast<const wchar_t *>(workingDirectory.utf16());
+    info.nShow = SW_SHOWNORMAL;
+    if (::ShellExecuteExW(&info)) return true;
+    if (error) *error = win32ErrorText(::GetLastError());
+    return false;
+#else
+    if (error) *error = QStringLiteral("the system refused to start it");
+    return false;
+#endif
+}
+
+// IMAGE_FILE_MACHINE_*: the processors Windows can start a program on. A
+// 64-bit Windows runs x86 binaries through WoW64, which is how every Inno
+// Setup installer works - including the ones this project publishes.
+constexpr quint16 kMachineI386 = 0x014c;
+constexpr quint16 kMachineAmd64 = 0x8664;
+constexpr quint16 kMachineArm64 = 0xaa64;
+constexpr quint16 kMachineArmNt = 0x01c4;
+
+constexpr quint16 kOptionalPe32 = 0x010b;
+constexpr quint16 kOptionalPe32Plus = 0x020b;
+constexpr quint16 kFileDll = 0x2000;
+
+quint32 leField(const QByteArray &data, int offset, int bytes)
+{
+    quint32 value = 0;
+    for (int i = 0; i < bytes; ++i)
+        value |= quint32(static_cast<unsigned char>(data.at(offset + i))) << (8 * i);
+    return value;
+}
+
+// The processor this copy of the program was built for. Replacing the running
+// program with a build for another processor is never right, however runnable
+// that other build would be on its own.
+quint16 thisAppMachine()
+{
+#if defined(_M_ARM64) || defined(__aarch64__)
+    return kMachineArm64;
+#elif defined(_M_X64) || defined(__x86_64__)
+    return kMachineAmd64;
+#else
+    return kMachineI386;
+#endif
+}
+
+} // namespace
+
+QString UpdateChecker::PeInfo::machineName() const
+{
+    switch (machine) {
+    case kMachineI386: return QStringLiteral("x86");
+    case kMachineAmd64: return QStringLiteral("x64");
+    case kMachineArm64: return QStringLiteral("ARM64");
+    case kMachineArmNt: return QStringLiteral("ARM");
+    default: return QStringLiteral("0x%1").arg(machine, 4, 16, QLatin1Char('0'));
+    }
+}
+
+bool UpdateChecker::PeInfo::runnableHere() const
+{
+    // This program is built for one processor; the PC is at least that. x64
+    // Windows runs x86 through WoW64, so both are startable. ARM64 images are
+    // not startable on an x86 PC, and vice versa.
+#if defined(_M_ARM64) || defined(__aarch64__)
+    return machine == kMachineArm64 || machine == kMachineI386 || machine == kMachineArmNt;
+#else
+    return machine == kMachineAmd64 || machine == kMachineI386 || machine == kMachineArmNt;
+#endif
+}
+
+bool UpdateChecker::PeInfo::sameArchitectureAsApp() const
+{
+    return machine == thisAppMachine();
+}
+
+bool UpdateChecker::readPeInfo(const QString &path, PeInfo *info, QString *error)
 {
     const auto reject = [error](const QString &text) {
         if (error)
@@ -2042,36 +2259,119 @@ bool UpdateChecker::looksLikeExecutable(const QString &path, QString *error)
     };
     QFile file(path);
     if (!file.open(QIODevice::ReadOnly))
-        return reject(QStringLiteral("the downloaded file cannot be opened"));
+        return reject(QStringLiteral("it cannot be opened"));
+    const qint64 fileSize = file.size();
     const QByteArray head = file.read(4096);
     if (head.size() < 0x40 || !head.startsWith("MZ"))
         return reject(QStringLiteral("it is not a Windows program (no MZ header)"));
 
-    const auto littleEndian = [](const QByteArray &data, int offset, int bytes) {
-        quint32 value = 0;
-        for (int i = 0; i < bytes; ++i)
-            value |= quint32(static_cast<unsigned char>(data.at(offset + i))) << (8 * i);
-        return value;
-    };
-
-    const qint64 peOffset = qint64(littleEndian(head, 0x3c, 4));
-    if (peOffset < 0x40 || peOffset + 0x60 > file.size())
+    const qint64 peOffset = qint64(leField(head, 0x3c, 4));
+    // The signature, the 20-byte file header and a complete optional header:
+    // 224 bytes for PE32, 240 for PE32+. Everything the loader reads has to fit
+    // in what is read here, or a good program would look like a broken one.
+    constexpr qint64 kPeHeaderSpan = 0x18 + 240;
+    if (peOffset < 0x40 || peOffset + kPeHeaderSpan > fileSize)
         return reject(QStringLiteral("its PE header offset is outside the file"));
     if (!file.seek(peOffset))
         return reject(QStringLiteral("its PE header cannot be read"));
-    const QByteArray coff = file.read(0x60);
-    if (coff.size() < 0x60)
+    const QByteArray coff = file.read(kPeHeaderSpan);
+    if (coff.size() < 0x18)
         return reject(QStringLiteral("its PE header is truncated"));
     if (!coff.startsWith(QByteArrayLiteral("PE\0\0")))
         return reject(QStringLiteral("it has no PE signature"));
-    const quint32 machine = littleEndian(coff, 4, 2);
-    if (machine != 0x8664)
-        return reject(QStringLiteral("it is not a 64-bit x86 Windows program (machine 0x%1)")
-                          .arg(machine, 4, 16, QLatin1Char('0')));
-    const quint32 optionalMagic = littleEndian(coff, 24, 2);
-    if (optionalMagic != 0x20b)
-        return reject(QStringLiteral("its optional header is not PE32+"));
+
+    PeInfo parsed;
+    parsed.machine = quint16(leField(coff, 4, 2));
+    parsed.isDll = (leField(coff, 22, 2) & kFileDll) != 0;
+    parsed.size = fileSize;
+    const quint32 optionalSize = leField(coff, 20, 2);
+    const quint16 optionalMagic = quint16(leField(coff, 24, 2));
+    if (optionalMagic != kOptionalPe32 && optionalMagic != kOptionalPe32Plus)
+        return reject(QStringLiteral("its optional header is not a program header"));
+    parsed.pe32Plus = optionalMagic == kOptionalPe32Plus;
+
+    // The optional header has to be big enough to hold the fields a loader
+    // reads, and it has to be the form that goes with the processor: PE32 with
+    // x86/ARM, PE32+ with x64/ARM64.
+    const quint32 needed = parsed.pe32Plus ? 112 : 96;
+    if (optionalSize < needed || coff.size() < qsizetype(24 + needed))
+        return reject(QStringLiteral("its optional header is too small to be a program"));
+    switch (parsed.machine) {
+    case kMachineAmd64:
+    case kMachineArm64:
+        if (!parsed.pe32Plus)
+            return reject(QStringLiteral("its header says %1 but its optional header is 32-bit")
+                              .arg(parsed.machineName()));
+        break;
+    case kMachineI386:
+    case kMachineArmNt:
+        if (parsed.pe32Plus)
+            return reject(QStringLiteral("its header says %1 but its optional header is 64-bit")
+                              .arg(parsed.machineName()));
+        break;
+    default:
+        return reject(QStringLiteral("it is built for a processor Windows cannot run it on "
+                                     "(machine 0x%1)")
+                          .arg(parsed.machine, 4, 16, QLatin1Char('0')));
+    }
+    parsed.subsystem = quint16(leField(coff, 24 + 68, 2));
+    if (info)
+        *info = parsed;
     return true;
+}
+
+bool UpdateChecker::looksLikeExecutable(const QString &path, QString *error)
+{
+    PeInfo info;
+    if (!readPeInfo(path, &info, error)) return false;
+    if (info.isDll) {
+        if (error)
+            *error = QStringLiteral("it is a library, not a program");
+        return false;
+    }
+    if (!info.runnableHere()) {
+        if (error)
+            *error = QStringLiteral("it is built for %1, and this PC cannot run that")
+                         .arg(info.machineName());
+        return false;
+    }
+    return true;
+}
+
+bool UpdateChecker::canReplaceThisProgram(const QString &path, QString *error)
+{
+    PeInfo info;
+    if (!readPeInfo(path, &info, error)) return false;
+    if (info.isDll) {
+        if (error)
+            *error = QStringLiteral("the download is a library, not a program");
+        return false;
+    }
+    if (!info.sameArchitectureAsApp()) {
+        if (error)
+            *error = QStringLiteral("the download is built for %1 while this program is %2, so it "
+                                    "cannot replace it")
+                         .arg(info.machineName(),
+                              PeInfo { thisAppMachine(), false, 0, false, 0 }.machineName());
+        return false;
+    }
+    return true;
+}
+
+void UpdateChecker::clearMarkOfTheWeb(const QString &path)
+{
+#ifdef Q_OS_WIN
+    // "Downloaded from the internet" is an alternate data stream, not a flag in
+    // the file. Deleting it is what makes the setup start without SmartScreen
+    // stepping in - and what stops an application-control policy from refusing
+    // a file this program fetched itself.
+    const QString zone = path + QStringLiteral(":Zone.Identifier");
+    ::DeleteFileW(reinterpret_cast<const wchar_t *>(zone.utf16()));
+    // Nothing to check: the stream exists only when the file came from a
+    // browser or a mail client, and its absence is the state we want.
+#else
+    Q_UNUSED(path);
+#endif
 }
 
 bool UpdateChecker::verifyStagedFile(const QString &path, qint64 expectedSize,

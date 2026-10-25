@@ -5030,6 +5030,90 @@ Window {
                   "an uninstaller next to the program marks an installed copy");
         }
 
+        // A setup is a Windows program, and the processor written in it is not
+        // the one in the app: Inno Setup's own loader is always 32-bit x86 even
+        // when it installs a 64-bit program. Requiring the app's machine meant
+        // every published setup was verified, then deleted as "not executable"
+        // after the download had reached 100%.
+        {
+            const auto peImage = [](quint16 machine, bool pe32Plus, bool dll) {
+                QByteArray image(4096, '\0');
+                image[0] = 'M';
+                image[1] = 'Z';
+                const int peOffset = 0x80;
+                image[0x3c] = char(peOffset);
+                image[peOffset] = 'P';
+                image[peOffset + 1] = 'E';
+                const auto put16 = [&image, peOffset](int at, quint16 value) {
+                    image[peOffset + at] = char(value & 0xff);
+                    image[peOffset + at + 1] = char((value >> 8) & 0xff);
+                };
+                put16(4, machine);                            // Machine
+                put16(6, 3);                                  // NumberOfSections
+                put16(20, pe32Plus ? 240 : 224);              // SizeOfOptionalHeader
+                put16(22, quint16(dll ? 0x2022 : 0x0022));    // Characteristics
+                put16(24, pe32Plus ? 0x020b : 0x010b);        // optional header magic
+                put16(24 + 68, 2);                            // Subsystem: GUI
+                return image;
+            };
+
+            const QString setup = temp.filePath(QStringLiteral("release-setup.exe"));
+            write(setup, peImage(0x014c, false, false));
+            UpdateChecker::PeInfo setupInfo;
+            QString peError;
+            check(UpdateChecker::readPeInfo(setup, &setupInfo, &peError),
+                  QStringLiteral("the 32-bit setup header is read (%1)").arg(peError));
+            check(setupInfo.machine == 0x014c && !setupInfo.pe32Plus,
+                  "Inno's loader is x86 / PE32, whatever the app it installs is");
+            check(setupInfo.runnableHere(), "this PC can start a 32-bit program");
+            check(UpdateChecker::looksLikeExecutable(setup, &peError),
+                  QStringLiteral("the downloaded setup is executable, not deleted (%1)").arg(peError));
+            check(!UpdateChecker::canReplaceThisProgram(setup, &peError),
+                  QStringLiteral("but it is never copied over the running program (%1)").arg(peError));
+
+            const QString portable = temp.filePath(QStringLiteral("release-portable.exe"));
+            write(portable, peImage(0x8664, true, false));
+            check(UpdateChecker::looksLikeExecutable(portable, &peError),
+                  QStringLiteral("the 64-bit portable build is executable (%1)").arg(peError));
+#if defined(_M_X64) || (defined(__x86_64__) && !defined(__aarch64__))
+            check(UpdateChecker::canReplaceThisProgram(portable, &peError),
+                  QStringLiteral("a 64-bit build may replace this 64-bit program (%1)").arg(peError));
+#endif
+
+            const QString library = temp.filePath(QStringLiteral("release.dll"));
+            write(library, peImage(0x8664, true, true));
+            check(!UpdateChecker::looksLikeExecutable(library, &peError)
+                      && !UpdateChecker::canReplaceThisProgram(library, &peError),
+                  QStringLiteral("a DLL is a program file but never an update (%1)").arg(peError));
+
+#if !defined(_M_ARM64) && !defined(__aarch64__)
+            const QString arm = temp.filePath(QStringLiteral("release-arm64.exe"));
+            write(arm, peImage(0xaa64, true, false));
+            check(!UpdateChecker::looksLikeExecutable(arm, &peError),
+                  QStringLiteral("an ARM64 build is not offered to an x64 PC (%1)").arg(peError));
+#endif
+
+            // A header that contradicts itself, and the shape of a broken download.
+            const QString mismatch = temp.filePath(QStringLiteral("release-mismatch.exe"));
+            QByteArray corrupt = peImage(0x8664, true, false);
+            corrupt[0x80 + 24] = char(0x0b);
+            corrupt[0x80 + 25] = char(0x00);
+            write(mismatch, corrupt);
+            check(!UpdateChecker::looksLikeExecutable(mismatch, &peError),
+                  QStringLiteral("a header claiming x64 with a 32-bit optional header is refused (%1)")
+                      .arg(peError));
+
+            const QString page = temp.filePath(QStringLiteral("release-page.exe"));
+            write(page, QByteArray("<!DOCTYPE html><html><body>link expired</body></html>"));
+            check(!UpdateChecker::looksLikeExecutable(page, &peError),
+                  QStringLiteral("an HTML page saved as .exe is refused (%1)").arg(peError));
+
+            const QString shortFile = temp.filePath(QStringLiteral("release-short.exe"));
+            write(shortFile, peImage(0x014c, false, false).left(0x90));
+            check(!UpdateChecker::looksLikeExecutable(shortFile, &peError),
+                  QStringLiteral("a download cut off inside its header is refused (%1)").arg(peError));
+        }
+
         const QByteArray sha = QByteArrayLiteral(
             "4de96eb5f3d5260c89e2dc2f21c2076be68ba4511e8399ce695bdf542a8354ac");
         QJsonObject good{
@@ -5152,8 +5236,9 @@ Window {
         put32(0x3c, peOffset);
         pe[peOffset] = 'P';
         pe[peOffset + 1] = 'E';
-        put16(peOffset + 4, 0x8664); // machine: x86-64
-        put16(peOffset + 24, 0x20b); // optional header: PE32+
+        put16(peOffset + 4, 0x8664);  // machine: x86-64
+        put16(peOffset + 20, 240);    // SizeOfOptionalHeader: a full PE32+ header
+        put16(peOffset + 24, 0x20b);  // optional header: PE32+
         const QString pePath = temp.filePath(QStringLiteral("fake-portable.exe"));
         check(write(pePath, pe), "write a minimal 64-bit PE for the updater checks");
         const QString peHash = UpdateChecker::fileSha256(pePath);
@@ -5175,14 +5260,22 @@ Window {
         write(notPe, QByteArrayLiteral("MZ but nothing else after it"));
         check(!UpdateChecker::looksLikeExecutable(notPe, &stageError),
               QStringLiteral("a file that only starts with MZ is refused (%1)").arg(stageError));
-        QByteArray wrongMachine = pe;
-        wrongMachine[peOffset + 4] = char(0x4c);
-        wrongMachine[peOffset + 5] = char(0x01); // 0x014c = i386
+        // A real 32-bit program: x86 machine, PE32 optional header. It is a
+        // program Windows can start (that is what Inno's setup stub is), so it
+        // passes the download check - but it may never replace this 64-bit one.
+        QByteArray i386Image = pe;
+        i386Image[peOffset + 4] = char(0x4c);
+        i386Image[peOffset + 5] = char(0x01); // 0x014c = i386
+        i386Image[peOffset + 24] = char(0x0b);
+        i386Image[peOffset + 25] = char(0x01); // PE32
         const QString i386Path = temp.filePath(QStringLiteral("thirty-two-bit.exe"));
-        write(i386Path, wrongMachine);
-        check(!UpdateChecker::looksLikeExecutable(i386Path, &stageError)
-                  && stageError.contains(QLatin1String("64-bit")),
-              "a 32-bit program is refused before it can replace a 64-bit build");
+        write(i386Path, i386Image);
+        check(UpdateChecker::looksLikeExecutable(i386Path, &stageError),
+              QStringLiteral("a 32-bit program is a program this PC can start (%1)").arg(stageError));
+        check(!UpdateChecker::canReplaceThisProgram(i386Path, &stageError)
+                  && stageError.contains(QLatin1String("x86")),
+              QStringLiteral("but it is refused before it can replace a 64-bit build (%1)")
+                  .arg(stageError));
 
         check(UpdateChecker::describeHttpError(401, "{}").contains(QLatin1String("token")),
               "401 names the token");

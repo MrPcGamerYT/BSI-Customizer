@@ -112,16 +112,47 @@ present.
    it goes, then verifies:
    - byte size equals the manifest `size`,
    - SHA-256 equals the manifest `sha256`,
-   - the file is a 64-bit Windows program (`MZ`, `PE\0\0`, machine `0x8664`,
-     PE32+ optional header).
+   - the file is a Windows program `MZ`, `PE\0\0`, a real optional header, and
+     a processor **this PC can run** (x64 natively, x86 through WoW64, ARM64 on
+     an ARM64 build), and is not a DLL.
    Any mismatch deletes the file and nothing is installed.
+
+   The processor in the setup is **not** the processor in the app: Inno Setup's
+   loader is always 32-bit x86 even when it installs a 64-bit program. Asking
+   for `0x8664` here rejected every setup this project publishes - the download
+   finished at 100%, was verified, and was then deleted with "not a 64-bit
+   program". The architecture of the *app* is only asked about where it matters:
+   replacing a loose copy in place (`canReplaceThisProgram`), which a setup
+   never does.
 6. **Install and restart.** A release is shipped as a setup program, and the
    updater decides that from the **file itself** (Inno Setup's `Inno Setup Setup
    Data` / `InnoSetupLdr` markers, NSIS, a 7-Zip SFX, a WiX bundle) - not only
    from its name, which the publisher chooses. A setup is started with
    `/VERYSILENT /CLOSEAPPLICATIONS`: it waits for this process, replaces the
    installed files and starts the new build, and the running EXE is never
-   overwritten by hand.
+   overwritten by hand. The staged copy is always given an `.exe` name (Windows
+   starts a program by its extension, not by its contents), and the Mark of the
+   Web the download carries is removed, because SmartScreen and
+   application-control policies refuse a file that came from the internet
+   without a browser's say-so.
+
+   Elevation is why starting the setup is more than one call: the install is
+   per-machine, so `CreateProcess` (what `QProcess::startDetached` uses) refuses
+   with `ERROR_ELEVATION_REQUIRED` whenever the app is not already elevated. The
+   shell is then asked instead - the path Explorer takes - and it shows the UAC
+   prompt. The setup is given `/VERYSILENT /SUPPRESSMSGBOXES /NOCANCEL
+   /NORESTART /CLOSEAPPLICATIONS /FORCECLOSEAPPLICATIONS
+   /LOG=<temp>\setup.log`, and its `[Run]` section starts the new build again
+   **when Setup is silent** (`skipifnotsilent runasoriginaluser`), so an update
+   ends with the new version on screen instead of nothing. When Windows refuses
+   to start the setup, the message carries its own error text and code.
+
+   > **Before 2.5.2 the updater could not install at all.** The verifier wanted
+   > a 64-bit header from Inno's 32-bit setup stub, so every finished download
+   > was deleted at 100% with "not a 64-bit Windows program", and the silent
+   > install had no launch step. A copy of 2.5.1 or older has to be replaced by
+   > running the `-setup.exe` from the release page **once**; from 2.5.2 on,
+   > updates install and restart by themselves.
 
    Anything else is only replaced in place when the app is a loose copy (a
    folder with no `unins000.exe` next to it and not the portable build's
