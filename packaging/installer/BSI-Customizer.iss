@@ -6,7 +6,7 @@
 ; single-file build CI already tested.
 ;
 ; Built by .github/workflows/release.yml:
-;   ISCC.exe /DAppVersion=2.5.1 /DSourceExe=<exe> /DOutputDir=<dir> BSI-Customizer.iss
+;   ISCC.exe /DAppVersion=2.5.2 /DSourceExe=<exe> /DOutputDir=<dir> BSI-Customizer.iss
 ;
 ; Nothing here is required to run the app: the installed EXE is still portable,
 ; a copy of it runs from anywhere.
@@ -69,7 +69,17 @@ Name: "{group}\{cm:UninstallProgram,BSI Customizer}"; Filename: "{uninstallexe}"
 Name: "{autodesktop}\BSI Customizer"; Filename: "{app}\BSI-Customizer.exe"; Tasks: desktopicon
 
 [Run]
+; Two entries, because the self-update installs silently and the wizard's
+; "Launch" checkbox does not exist then. A silent install used to finish with
+; the app gone and no new window, which looks exactly like a broken update:
+;   * the first entry is the normal "Launch BSI Customizer" checkbox and is
+;     skipped when Setup runs silent;
+;   * the second runs only when Setup runs silent, so the updated build comes
+;     back by itself after the update. It carries runasoriginaluser because an
+;     entry without postinstall otherwise inherits Setup's elevation: the app
+;     would come back running as administrator, which it never does normally.
 Filename: "{app}\BSI-Customizer.exe"; Description: "{cm:LaunchProgram,BSI Customizer}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\BSI-Customizer.exe"; Description: "{cm:LaunchProgram,BSI Customizer}"; Flags: nowait skipifnotsilent runasoriginaluser
 
 [UninstallDelete]
 ; Leftovers of a patch: the backup the tool keeps next to HD-Player.exe is not

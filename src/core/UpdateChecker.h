@@ -293,11 +293,52 @@ public:
     static QString fileSha256(const QString &path);
     /** Hand the staged installer to Windows and quit; emits restartRequested(). */
     void runInstaller();
-    /** Size + hash + PE check of the downloaded file. */
+    /**
+     * What a Windows program's own header says about it.
+     *
+     * A program and the installer that carries it need not be built for the
+     * same processor: Inno Setup's setup stub is **always** 32-bit x86, even
+     * when it installs a 64-bit application. Judging a download against this
+     * program's own architecture therefore rejected every setup this project
+     * publishes - the file arrived, then was deleted with "it is not a 64-bit
+     * x86 Windows program". The two questions are now asked separately: can
+     * Windows run this at all, and may it replace this program.
+     */
+    struct PeInfo
+    {
+        quint16 machine = 0;   // IMAGE_FILE_MACHINE_*
+        bool pe32Plus = false; // PE32+ optional header, not PE32
+        quint16 subsystem = 0; // 2 = GUI, 3 = console
+        bool isDll = false;
+        qint64 size = 0;
+        /** "x86", "x64", "ARM64", or the raw machine number. */
+        QString machineName() const;
+        /** A program this PC can start: x64 natively, x86 through WoW64. */
+        bool runnableHere() const;
+        /** Built for the same processor as the running application. */
+        bool sameArchitectureAsApp() const;
+    };
+    /** Read and validate the PE header. False + `error` when it is not a program. */
+    static bool readPeInfo(const QString &path, PeInfo *info, QString *error);
+    /** Size + hash + "Windows can run the thing that was downloaded". */
     static bool verifyStagedFile(const QString &path, qint64 expectedSize,
                                  const QString &expectedSha256, QString *error);
-    /** MZ / PE\0\0 / machine 0x8664 / any subsystem. */
+    /** MZ / PE\0\0 / a processor this PC can run / not a DLL. */
     static bool looksLikeExecutable(const QString &path, QString *error);
+    /**
+     * True when the download may be copied over this program: the same
+     * processor architecture, not a library, not a setup. An installed copy is
+     * never replaced this way - it is updated by its setup.
+     */
+    static bool canReplaceThisProgram(const QString &path, QString *error);
+    /**
+     * Remove the Mark of the Web a download carries (the Zone.Identifier
+     * stream). A file downloaded from the internet and then run without a
+     * browser's say-so is exactly what SmartScreen and application-control
+     * policies block, which is how an update that downloaded correctly can
+     * still refuse to start.
+     */
+    static void clearMarkOfTheWeb(const QString &path);
     /** Turn an HTTP status into one actionable sentence. */
     static QString describeHttpError(int status, const QByteArray &body);
     static QString readableSize(qint64 bytes);
