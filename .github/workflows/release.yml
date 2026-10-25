@@ -41,7 +41,9 @@ permissions:
 
 concurrency:
   group: single-exe-${{ github.event_name }}-${{ github.ref }}
-  cancel-in-progress: false
+  # Superseded test builds should not block the latest installer. Never cancel
+  # a tag release or an explicitly requested manual publication.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && !inputs.publish_release) }}
 
 env:
   QT_VERSION: "6.8.3"
