@@ -1544,6 +1544,7 @@ const QHash<QString, QString> &buttonLabels()
         { QStringLiteral("mim"), QStringLiteral("Multi-instance manager") },
         { QStringLiteral("ecomode"), QStringLiteral("Eco mode") },
         { QStringLiteral("sidepanel"), QStringLiteral("Side panel") },
+        { QStringLiteral("cltdatamode"), QStringLiteral("AIGames Collect Data Mode") },
         { QStringLiteral("chat"), QStringLiteral("Ana AI") },
         { QStringLiteral("discord"), QStringLiteral("Discord") },
         { QStringLiteral("more"), QStringLiteral("More (overflow menu)") },
