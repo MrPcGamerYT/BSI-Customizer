@@ -2538,11 +2538,12 @@ Window {
         const auto titlebarUpgrade = LayoutPatcher::apply(earlierTitlebarPath, id, true);
         const QString upgradedTitlebar =
             resourceText(read(earlierTitlebarPath), earlierTitlebar, QStringLiteral("PlrSidebar.qml"));
-        if (!titlebarUpgrade.ok || upgradedTitlebar != patchedSidebar)
-            std::printf("    apply: %s\n    %s\n", qPrintable(titlebarUpgrade.msg),
-                        qPrintable(firstDifference(patchedSidebar, upgradedTitlebar)));
         check(titlebarUpgrade.ok && upgradedTitlebar == patchedSidebar,
-              "Update installs the current helper without moving the sidebar twice");
+              QStringLiteral("Update installs the current helper without moving the sidebar twice%1")
+                  .arg(titlebarUpgrade.ok && upgradedTitlebar == patchedSidebar
+                           ? QString()
+                           : QStringLiteral("\napply: %1\n%2").arg(titlebarUpgrade.msg,
+                                 firstDifference(patchedSidebar, upgradedTitlebar))));
         check(LayoutPatcher::apply(earlierTitlebarPath, id, false).ok
                   && resourceText(read(earlierTitlebarPath), earlierTitlebar, QStringLiteral("PlrSidebar.qml")) == sidebar
                   && resourceText(read(earlierTitlebarPath), earlierTitlebar, QStringLiteral("plr.qml")) == anchoredPlr,
@@ -2650,12 +2651,14 @@ Window {
         const auto singleUpgrade = LayoutPatcher::apply(oldSinglePath, id, true);
         const QString upgradedSingle =
             resourceText(read(oldSinglePath), oldSingle, QStringLiteral("PlrSidebar.qml"));
-        if (!singleUpgrade.ok || upgradedSingle != patchedSidebar)
-            std::printf("    apply: %s\n    %s\n", qPrintable(singleUpgrade.msg),
-                        qPrintable(firstDifference(patchedSidebar, upgradedSingle)));
-        check(singleUpgrade.ok && upgradedSingle == patchedSidebar
-                  && !LayoutPatcher::analyze(read(oldSinglePath), id).needsUpdate,
-              "Update adds smart overflow and anchored panels without changing the existing title bar");
+        const bool singleDone =
+            singleUpgrade.ok && upgradedSingle == patchedSidebar
+            && !LayoutPatcher::analyze(read(oldSinglePath), id).needsUpdate;
+        check(singleDone,
+              QStringLiteral("Update adds smart overflow and anchored panels without changing the existing title bar%1")
+                  .arg(singleDone ? QString()
+                                  : QStringLiteral("\napply: %1\n%2").arg(singleUpgrade.msg,
+                                        firstDifference(patchedSidebar, upgradedSingle))));
         check(LayoutPatcher::apply(oldSinglePath, id, false).ok
                   && resourceText(read(oldSinglePath), oldSingle, QStringLiteral("PlrSidebar.qml")) == sidebar,
               "an updated earlier title bar still restores the stock sidebar byte-for-byte");
