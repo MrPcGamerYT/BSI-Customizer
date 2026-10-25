@@ -13,7 +13,7 @@ from pathlib import Path
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("QSG_RHI_BACKEND", "software")
 from PySide6.QtCore import QObject, QUrl
-from PySide6.QtGui import QGuiApplication
+from PySide6.QtGui import QGuiApplication, QWindow
 from PySide6.QtQml import QQmlComponent, QQmlEngine
 from PySide6.QtTest import QTest
 
@@ -59,7 +59,11 @@ with tempfile.TemporaryDirectory() as directory:
         # QML may collect an unparented mock while another component is being
         # created; the Python variable alone does not root QML-owned objects.
         QQmlEngine.setObjectOwnership(obj, QQmlEngine.ObjectOwnership.CppOwnership)
-        QObject.setParent(obj, engine)
+        # QWindow's parent must itself be a QWindow. Bypassing that API via
+        # QObject.setParent corrupts Qt's window-parent assumptions. Retain the
+        # top-level window in instances instead; only plain mocks get a parent.
+        if not isinstance(obj, QWindow):
+            obj.setParent(engine)
         instances.append(obj)
         return obj
 
