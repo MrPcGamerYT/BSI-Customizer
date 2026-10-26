@@ -559,6 +559,7 @@ struct SidebarControls
     QList<Fixed> unmodelledButtons; // budgeted but without a menu entry (e.g. Discord in 5.22)
     QStringList pinnedButtons; // always-present controls (e.g. Collapse in 5.10)
     bool horizontal = false;
+    int resetBegin = -1;
     int resetEnd = -1;
 };
 
@@ -645,6 +646,7 @@ bool sidebarControls(const QString &qml, const QString &masked, SidebarControls 
     int resetBegin = 0, resetEnd = 0;
     if (!functionSpan(masked, QStringLiteral("fResetSidebar"), &resetBegin, &resetEnd)
         || resetBegin <= controls.root.open || resetEnd >= controls.root.end) return false;
+    controls.resetBegin = resetBegin;
     controls.resetEnd = resetEnd;
 
     const auto member = [&](const QString &name) {
@@ -1266,8 +1268,12 @@ bool responsiveEdits(QString &qml, bool enabled, bool autoInstalled, QList<Edit>
             addEdit(edits, controls.repeater.open + 1, 0,
                     nl + QStringLiteral("        id: ") + kRepeaterId
                        + QStringLiteral(" // BSI CUSTOMIZER: repeater id"));
-        addEdit(edits, controls.resetEnd, 0,
-                nl + QStringLiteral("        ") + kResponsiveCall + nl + QStringLiteral("    "));
+        // One line of its own, just before the function's closing brace, so
+        // the stock indentation stays exactly as it was and taking the line
+        // away again restores the document byte for byte.
+        const int braceLine = qml.lastIndexOf(QLatin1Char('\n'), controls.resetEnd - 1) + 1;
+        if (braceLine <= controls.resetBegin || braceLine > controls.resetEnd) return false;
+        addEdit(edits, braceLine, 0, QStringLiteral("        ") + kResponsiveCall + nl);
         addEdit(edits, controls.root.end - 1, 0, responsiveHelper(controls, autoInstalled, nl));
     } else {
         if (!applied || !qml.contains(kResponsiveEnd)) return false;
@@ -1276,11 +1282,22 @@ bool responsiveEdits(QString &qml, bool enabled, bool autoInstalled, QList<Edit>
         if (begin < 0 || end < begin || end >= controls.root.end
             || qml.count(kResponsiveBegin) != 1 || qml.count(kResponsiveEnd) != 1) return false;
         addEdit(edits, begin, end + 4 + kResponsiveEnd.size() + nl.size() - begin, QString());
-        const QString call = nl + QStringLiteral("        ") + kResponsiveCall + nl + QStringLiteral("    ");
-        const int at = qml.indexOf(call, controls.root.open);
-        if (at < 0 || at + call.size() > controls.resetEnd || qml.count(kResponsiveCall) != 1)
+        // The whole line the call sits on. An earlier release added it in
+        // front of the closing brace and left a whitespace-only line above
+        // it; that line came from the same edit and goes with it.
+        const int callAt = qml.indexOf(kResponsiveCall, controls.resetBegin);
+        if (callAt < 0 || callAt > controls.resetEnd || qml.count(kResponsiveCall) != 1)
             return false;
-        addEdit(edits, at, call.size(), QString());
+        const int eol = qml.indexOf(QLatin1Char('\n'), callAt);
+        if (eol < 0) return false;
+        int callLine = qml.lastIndexOf(QLatin1Char('\n'), callAt) + 1;
+        const int callEnd = eol + 1;
+        const int prevNl = qml.lastIndexOf(QLatin1Char('\n'), callLine - 1);
+        if (prevNl > controls.resetBegin) {
+            const int prevLine = qml.lastIndexOf(QLatin1Char('\n'), prevNl - 1) + 1;
+            if (qml.mid(prevLine, prevNl - prevLine).trimmed().isEmpty()) callLine = prevLine;
+        }
+        addEdit(edits, callLine, callEnd - callLine, QString());
         for (const auto &tag : { QStringLiteral("        id: ") + kLayoutId
                                     + QStringLiteral(" // BSI CUSTOMIZER: layout id"),
                                  QStringLiteral("        id: ") + kRepeaterId
@@ -1786,7 +1803,14 @@ bool hiddenRowEdits(const QString &qml, const QString &masked, const QStringList
         addEdit(edits, lineStart, lineEnd - lineStart, block);
         return true;
     }
-    addEdit(edits, qml.lastIndexOf(QLatin1Char('\n'), bodyEnd - 1) + 1, 0, block);
+    // Before the responsive call when the file has one: the overflow budget
+    // has to be recomputed after the buttons this block switches off, and a
+    // repaired helper then writes the same text as a fresh one.
+    int insertAt = qml.lastIndexOf(QLatin1Char('\n'), bodyEnd - 1) + 1;
+    const int callAt = qml.indexOf(kResponsiveCall, bodyBegin);
+    if (callAt > 0 && callAt < bodyEnd)
+        insertAt = qml.lastIndexOf(QLatin1Char('\n'), callAt) + 1;
+    addEdit(edits, insertAt, 0, block);
     return true;
 }
 
