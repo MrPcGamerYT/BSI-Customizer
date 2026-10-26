@@ -2404,7 +2404,7 @@ Window {
         }
         Rectangle { id: iKebabMenuBtn; objectName: "threeDots"; x: iSidebar.pVisibleSidebarElementsCount * 32; width: 32; height: 32 }
         Rectangle { id: iCollapseBtn; visible: false; width: 32; height: 32 }
-        Rectangle { id: iSettingsBtn; width: 32; height: 32 }
+        Rectangle { id: iSettingsBtn; objectName: "settingsGear"; width: 32; height: 32 }
         Rectangle { id: iBackBtn; width: 32; height: 32 }
         Rectangle { id: iHomeBtn; width: 32; height: 32 }
         Rectangle { id: iRecentBtn; width: 32; height: 32 }
@@ -2496,6 +2496,24 @@ Window {
                     QCoreApplication::processEvents();
                     check(!dots->isVisible() && sound->isVisible(),
                           "resizing larger restores every fitting button and hides the three dots again");
+                    // The order editor untick writes the row's hidden list.
+                    // The player's own fResetSidebar switches the Settings
+                    // gear back on line by line, so a helper that assigns
+                    // visibility without reading that list undoes the hide -
+                    // the row then carried the strip's gear *and* the model
+                    // entry the move adds, i.e. two Settings buttons.
+                    auto *gear = window->findChild<QQuickItem *>(QStringLiteral("settingsGear"));
+                    bar->setProperty("pBSIHiddenButtons", QStringLiteral("|iSettingsBtn|"));
+                    QMetaObject::invokeMethod(bar, "fBSIUpdateOverflow");
+                    QCoreApplication::processEvents();
+                    check(gear && !gear->isVisible() && !dots->isVisible()
+                              && bar->property("pVisibleSidebarElementsCount").toInt() == 6,
+                          "a button unticked in the order editor stays off when the row recomputes");
+                    bar->setProperty("pBSIHiddenButtons", QString());
+                    QMetaObject::invokeMethod(bar, "fBSIUpdateOverflow");
+                    QCoreApplication::processEvents();
+                    check(gear && gear->isVisible() && !dots->isVisible(),
+                          "clearing the hidden list brings that button back with the row");
                 } else check(false, "the responsive QML exposes its panel, buttons and three-dot menu");
             }
         }
@@ -2511,6 +2529,12 @@ Window {
         // version marker upgrades it in place without changing the ownership
         // of an independently selected stock-sidebar option.
         const auto olderResponsive = [](QString qml) {
+            qml.replace(QStringLiteral("// BSI CUSTOMIZER: responsive sidebar begin [titlebar] [v3]"),
+                        QStringLiteral("// BSI CUSTOMIZER: responsive sidebar begin [titlebar]"));
+            qml.replace(QStringLiteral("// BSI CUSTOMIZER: responsive sidebar begin [v3]"),
+                        QStringLiteral("// BSI CUSTOMIZER: responsive sidebar begin"));
+            // The release before this one wrote the marker without the hidden
+            // list; both shapes are older helpers that must upgrade in place.
             qml.replace(QStringLiteral("// BSI CUSTOMIZER: responsive sidebar begin [titlebar] [v2]"),
                         QStringLiteral("// BSI CUSTOMIZER: responsive sidebar begin [titlebar]"));
             qml.replace(QStringLiteral("// BSI CUSTOMIZER: responsive sidebar begin [v2]"),
@@ -2588,7 +2612,7 @@ Window {
         const auto manualUpgrade = LayoutPatcher::apply(earlierManualPath, id, true);
         const auto manualMoved = resourceText(read(earlierManualPath), earlierManual, QStringLiteral("PlrSidebar.qml"));
         check(manualState.needsUpdate && manualUpgrade.ok
-                  && manualMoved.contains(QLatin1String("responsive sidebar begin [v2]"))
+                  && manualMoved.contains(QLatin1String("responsive sidebar begin [v3]"))
                   && !manualMoved.contains(QLatin1String("responsive sidebar begin [titlebar]"))
                   && manualMoved.contains(QLatin1String("var available = iSidebar.width - (iBSISidebarLayout.leftPadding")),
               "an older manual helper is updated for horizontal space without becoming title-bar-owned");
@@ -3061,7 +3085,8 @@ Window {
                   && fixedQml.contains(QLatin1String("items[i].pShowViaRepeaterOnly"))
                   && fixedQml.contains(QLatin1String("elementId: pRecent"))
                   && fixedQml.contains(QLatin1String("fixed[n].allowed && !fixed[n].button.visible"))
-                  && fixedQml.contains(QLatin1String("var unmodelled = [{ button: iDiscordBtn, allowed: (iAppwin.pIsBootComplete) }]")),
+                  && fixedQml.contains(QLatin1String("var unmodelled = [{ button: iDiscordBtn, allowed: "
+                                                     "(iAppwin.pIsBootComplete) && pBSIHiddenButtons.indexOf(\"|iDiscordBtn|\") < 0 }]")),
               "modelled fixed buttons overflow only when eligible; unmodelled Discord stays visible and budgeted");
         check(LayoutPatcher::apply(filteredPath, id, false).ok
                   && resourceText(read(filteredPath), filtered, QStringLiteral("PlrSidebar.qml")) == filteredSidebar,

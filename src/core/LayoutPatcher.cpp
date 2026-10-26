@@ -30,7 +30,10 @@ const QString kResponsiveEnd = QStringLiteral("// BSI CUSTOMIZER: responsive sid
 const QString kResponsiveAuto = QStringLiteral(" [titlebar]");
 // Distinguish this helper from earlier responsive patches, which did not keep
 // unmodelled controls such as Discord accessible when space became tight.
-const QString kResponsiveCurrent = QStringLiteral(" [v2]");
+// v3: the helper reads the row's hidden buttons (a button the user unticked
+// stays hidden instead of being re-shown by the overflow budget) and places
+// every popup inside the screen its trigger is on.
+const QString kResponsiveCurrent = QStringLiteral(" [v3]");
 const QString kResponsiveCall = QStringLiteral("fBSIUpdateOverflow() /* BSI CUSTOMIZER: smart overflow */");
 const QString kPopupOriginal = QStringLiteral(" // BSI CUSTOMIZER: popup original:");
 const QString kMenuOriginal = QStringLiteral(" /* BSI CUSTOMIZER: overflow menu original:");
@@ -1154,18 +1157,34 @@ QString responsiveHelper(const SidebarControls &controls, bool autoInstalled, co
     const QString axis = controls.horizontal ? QStringLiteral("width") : QStringLiteral("height");
     const QString startPad = controls.horizontal ? QStringLiteral("leftPadding") : QStringLiteral("topPadding");
     const QString endPad = controls.horizontal ? QStringLiteral("rightPadding") : QStringLiteral("bottomPadding");
+    // A button the user unticked in the order editor is written into the
+    // row's hidden list. Every budget below has to read that list, otherwise
+    // this helper shows the button again on the very next reset and the tick
+    // looks like it does nothing.
+    const auto notHidden = [](const QString &id) {
+        return QStringLiteral(" && pBSIHiddenButtons.indexOf(\"|") + id + QStringLiteral("|\") < 0");
+    };
     QStringList fixed, unmodelled;
     for (const auto &button : controls.fixedButtons)
         fixed << QStringLiteral("{ button: ") + button.id + QStringLiteral(", allowed: (")
-                 + button.allowed + QStringLiteral("), elementId: ") + button.elementId
+                 + button.allowed + QLatin1Char(')') + notHidden(button.id)
+                 + QStringLiteral(", elementId: ") + button.elementId
                  + QStringLiteral(" }");
     for (const auto &button : controls.unmodelledButtons)
         unmodelled << QStringLiteral("{ button: ") + button.id + QStringLiteral(", allowed: (")
-                      + button.allowed + QStringLiteral(") }");
+                      + button.allowed + QLatin1Char(')') + notHidden(button.id)
+                      + QStringLiteral(" }");
+    // `pVisible` is the player's own flag; a build without it treats every
+    // entry as shown, so only an explicit false is skipped. An unticked entry
+    // must leave the model as well: those are the items that no longer exist.
+    const QString itemAt = controls.allItemsName + QStringLiteral("[i]");
+    const QString visibleItem = itemAt + QStringLiteral(".pIsFeatureEnable && ") + itemAt
+        + QStringLiteral(".pVisible !== false && ") + itemAt + QLatin1Char('.');
     const QString rebuild = controls.allItemsName.isEmpty() ? QString() :
         QStringLiteral("        var enabledItems = []") + nl
         + QStringLiteral("        for (var i = 0; i < ") + controls.allItemsName + QStringLiteral(".length; ++i)") + nl
-        + QStringLiteral("            if (") + controls.allItemsName + QStringLiteral("[i].pIsFeatureEnable)") + nl
+        + QStringLiteral("            if (") + visibleItem + controls.repeatFlag
+        + QLatin1Char(')') + nl
         + QStringLiteral("                enabledItems.push(") + controls.allItemsName + QStringLiteral("[i])") + nl
         + QStringLiteral("        var changed = enabledItems.length !== ") + controls.itemsName
         + QStringLiteral(".length") + nl
@@ -1175,13 +1194,14 @@ QString responsiveHelper(const SidebarControls &controls, bool autoInstalled, co
     const QStringList lines {
         QStringLiteral("    ") + kResponsiveBegin + (autoInstalled ? kResponsiveAuto : QString())
             + kResponsiveCurrent,
+        QStringLiteral("    property string pBSIHiddenButtons: \"\" // BSI CUSTOMIZER: hidden row buttons"),
         QStringLiteral("    function fBSIUpdateOverflow() {"),
         QStringLiteral("        var slot = pSidebarElementSize"),
         QStringLiteral("        if (slot <= 0) return"),
         rebuild + QStringLiteral("        var items = ") + controls.itemsName,
         QStringLiteral("        var count = 0"),
         QStringLiteral("        for (var i = 0; i < items.length; ++i)"),
-        QStringLiteral("            if (items[i].pIsFeatureEnable && items[i].")
+        QStringLiteral("            if (items[i].pIsFeatureEnable && items[i].pVisible !== false && items[i].")
             + controls.repeatFlag + QStringLiteral(") ++count"),
         QStringLiteral("        var gap = Math.max(0, ") + controls.layoutId + QStringLiteral(".spacing || 0)"),
         QStringLiteral("        var available = iSidebar.") + axis + QStringLiteral(" - (")
@@ -1208,7 +1228,7 @@ QString responsiveHelper(const SidebarControls &controls, bool autoInstalled, co
         QStringLiteral("        var toShow = Math.min(count, remaining)"),
         QStringLiteral("        var cutoff = -1"),
         QStringLiteral("        for (var i = 0; i < items.length && toShow > 0; ++i) {"),
-        QStringLiteral("            if (items[i].pIsFeatureEnable && items[i].")
+        QStringLiteral("            if (items[i].pIsFeatureEnable && items[i].pVisible !== false && items[i].")
             + controls.repeatFlag + QStringLiteral(") {"),
         QStringLiteral("                cutoff = i"),
         QStringLiteral("                --toShow"),
@@ -1219,6 +1239,10 @@ QString responsiveHelper(const SidebarControls &controls, bool autoInstalled, co
         QStringLiteral("    }"),
         QStringLiteral("    function fBSIInOverflow(item) {"),
         QStringLiteral("        if (!item.pIsFeatureEnable) return false"),
+        // Unticked entries are not in pSidebarItems any more, so the model
+        // lookup below would fall through to "show it" and put a hidden
+        // button in the three-dot menu.
+        QStringLiteral("        if (item.pVisible === false) return false"),
         QStringLiteral("        if (!item.") + controls.repeatFlag + QStringLiteral(") {"),
         QStringLiteral("            var fixed = [") + fixed.join(QStringLiteral(", ")) + QLatin1Char(']'),
         QStringLiteral("            for (var n = 0; n < fixed.length; ++n)"),
@@ -1256,9 +1280,13 @@ QString responsiveHelper(const SidebarControls &controls, bool autoInstalled, co
         QStringLiteral("            var fixed = [") + fixed.join(QStringLiteral(", ")) + QStringLiteral("]"),
         QStringLiteral("            for (var n = 0; n < fixed.length; ++n) {"),
         QStringLiteral("                if (fixed[n].elementId === lookupId || fixed[n].elementId === elementId) {"),
-        QStringLiteral("                    if (fixed[n].button && fixed[n].button.visible)"),
+        // Settings keeps a strip button that the row switches off, while the
+        // visible Settings button lives in the Repeater. A hidden match must
+        // not stop the search, or that panel opens under the three dots.
+        QStringLiteral("                    if (fixed[n].button && fixed[n].button.visible) {"),
         QStringLiteral("                        button = fixed[n].button"),
-        QStringLiteral("                    break"),
+        QStringLiteral("                        break"),
+        QStringLiteral("                    }"),
         QStringLiteral("                }"),
         QStringLiteral("            }"),
         // Then unmodelled buttons (Discord/AI on builds that ship them) and
@@ -1292,23 +1320,32 @@ QString responsiveHelper(const SidebarControls &controls, bool autoInstalled, co
         QStringLiteral("            }"),
         QStringLiteral("        }"),
         QStringLiteral("        if (!button || !button.visible) button = iKebabMenuBtn"),
+        QStringLiteral("        var shadow = popup.shadowThickness || 0"),
         QStringLiteral("        var bottom = button.mapToGlobal(button.width / 2, button.height)"),
         QStringLiteral("        var top = button.mapToGlobal(button.width / 2, 0)"),
-        QStringLiteral("        var shadow = popup.shadowThickness || 0"),
-        QStringLiteral("        var bounds = popup.screen ? popup.screen.availableGeometry : null"),
+        // The popup is a window of its own whose screen follows a transient
+        // parent that may never have been set - it then sits on the primary
+        // screen, and clamping to that screen's geometry parks the panel on
+        // the border of the monitor the player is really on.
+        QStringLiteral("        var scr = iAppwin.screen ? iAppwin.screen : popup.screen"),
+        QStringLiteral("        var bounds = scr ? scr.availableGeometry : null"),
         QStringLiteral("        if (!bounds || bounds.width <= 0)"),
         QStringLiteral("            bounds = Qt.rect(iAppwin.x, iAppwin.y, iAppwin.width, iAppwin.height)"),
-        QStringLiteral("        var left = bounds.x, right = bounds.x + bounds.width"),
-        QStringLiteral("        var upper = bounds.y, lower = bounds.y + bounds.height"),
-        QStringLiteral("        var x = bottom.x - popup.width / 2"),
-        // Place the popup's visible top edge flush with the bottom of its
-        // trigger. Account for the popup shadow so the panel opens directly
-        // below the button rather than floating away from it.
-        QStringLiteral("        var y = bottom.y - shadow"),
-        QStringLiteral("        if (y + popup.height > lower && top.y - 6 + shadow - popup.height >= upper)"),
-        QStringLiteral("            y = top.y - 6 + shadow - popup.height"),
-        QStringLiteral("        return Qt.point(Math.max(left, Math.min(x, right - popup.width)),"),
-        QStringLiteral("                        Math.max(upper, Math.min(y, lower - popup.height)))"),
+        // Two pixels of air, and everything is measured on the popup's visible
+        // content: the window adds the shadow on all four sides.
+        QStringLiteral("        var margin = 2"),
+        QStringLiteral("        var left = bounds.x + margin, right = bounds.x + bounds.width - margin"),
+        QStringLiteral("        var upper = bounds.y + margin, lower = bounds.y + bounds.height - margin"),
+        QStringLiteral("        var w = Math.max(0, popup.width - 2 * shadow)"),
+        QStringLiteral("        var h = Math.max(0, popup.height - 2 * shadow)"),
+        QStringLiteral("        var x = Math.max(left, Math.min(bottom.x - w / 2, right - w))"),
+        // The panel's visible top edge sits flush with the bottom of its
+        // trigger; when it does not fit below, it opens above the trigger
+        // instead, and only then is it pushed inside the screen.
+        QStringLiteral("        var y = bottom.y"),
+        QStringLiteral("        if (y + h > lower && top.y - 6 - h >= upper) y = top.y - 6 - h"),
+        QStringLiteral("        y = Math.max(upper, Math.min(y, lower - h))"),
+        QStringLiteral("        return Qt.point(x - shadow, y - shadow)"),
         QStringLiteral("    }"),
         QStringLiteral("    ") + kResponsiveEnd
     };
@@ -1852,7 +1889,8 @@ void splitOrder(const QList<ButtonSlot> &strip, const QList<ButtonSlot> &items,
 // resize, so a `visible:` binding declared on them would not survive. The ones
 // that have to step aside are switched off at the end of that function, in one
 // generated block that a later run replaces or removes verbatim.
-bool hiddenRowEdits(const QString &qml, const QString &masked, const QStringList &ids, QList<Edit> &edits)
+bool hiddenRowEdits(const QString &qml, const QString &masked, const QStringList &ids, QList<Edit> &edits,
+                    bool helperAware = false)
 {
     const QString nl = lineEnding(qml);
     const int existing = qml.indexOf(kHiddenRowMarker);
@@ -1877,6 +1915,14 @@ bool hiddenRowEdits(const QString &qml, const QString &masked, const QStringList
     QString indent = QStringLiteral("        ");
     if (bodyNl > 0 && bodyNl < bodyEnd) indent = lineIndentAt(qml, bodyNl + 1);
     QString statements;
+    // The responsive helper gives every fixed button a visibility of its own
+    // on each reset, so hiding one there needs a list the helper can read.
+    // Only written when that helper is present - an older player has no such
+    // property and would fail on the assignment.
+    if (helperAware) {
+        statements = QStringLiteral("pBSIHiddenButtons = \"|")
+            + unique.join(QLatin1Char('|')) + QStringLiteral("|\"");
+    }
     for (const QString &id : unique) {
         if (!statements.isEmpty()) statements += QStringLiteral("; ");
         statements += id + QStringLiteral(".visible = false");
@@ -1924,6 +1970,22 @@ bool settingsInRow(const QString &qml, const QString &masked)
 
 bool settingsFlipEdits(const QString &qml, const QString &masked, bool enabled, QList<Edit> &edits)
 {
+    if (enabled) {
+        // Settings only leaves the strip when the Repeater takes over. A strip
+        // with no Repeater would render the entry nowhere, and the row would
+        // lose its Settings button instead of gaining a movable one.
+        QmlText::Object root, strip;
+        bool repeater = false;
+        if (findSidebarRoot(qml, masked, &root, false)
+            && findButtonStrip(qml, masked, root, &strip)) {
+            for (const auto &child : childrenOf(masked, strip))
+                if (objectType(masked, child) == QLatin1String("Repeater")) {
+                    repeater = true;
+                    break;
+                }
+        }
+        if (!repeater) return true;
+    }
     for (const auto &element : QmlText::objects(masked, QStringLiteral("PlrSidebarElement"))) {
         if (elementKey(qml, masked, element) != QLatin1String("settings")) continue;
         QmlText::Binding binding;
@@ -2035,7 +2097,9 @@ bool sidebarVisibilityEdits(const QString &qml, const QString &masked, bool enab
             || (flipped && slot.key == QLatin1String("settings"));
         if (wanted) hiddenIds << slot.id;
     }
-    if (!hiddenRowEdits(qml, masked, hiddenIds, edits)) return false;
+    // Only the current helper knows the list; an older one has no such
+    // property and would fail on the assignment at runtime.
+    if (!hiddenRowEdits(qml, masked, hiddenIds, edits, hasCurrentResponsiveHelper(qml))) return false;
     for (const auto &slot : items)
         if (!setObjectVisible(qml, !request.hidden.contains(slot.key), slot.object,
                               QStringLiteral("pVisible"), edits))
@@ -3369,10 +3433,16 @@ RowState buttonRows(const QByteArray &image)
 
     const State shape = analyze(image, kSidebarToTitlebar);
     state.supported = shape.supported;
-    state.applied = shape.applied;
+    // A row written by an earlier release keeps its own hidden-button code:
+    // the tick would be written but the helper in the EXE would not read it.
+    // Offer the Update instead of a list whose changes cannot take effect.
+    state.applied = shape.applied && !shape.needsUpdate;
     if (!state.supported) state.detail = shape.detail;
-    else if (!state.applied)
+    else if (!shape.applied)
         state.detail = QStringLiteral("Apply the title-bar layout first; the order belongs to it.");
+    else if (shape.needsUpdate)
+        state.detail = QStringLiteral("Press Update on the title-bar layout first: the row in this "
+                                      "EXE is from an earlier version and cannot be reordered yet.");
     return state;
 }
 
@@ -3385,8 +3455,15 @@ Result applyOrder(const QString &exePath, const QStringList &order, const QStrin
     if (!file.open(QIODevice::ReadOnly)) return refuse(QStringLiteral("Cannot read the selected EXE."));
     const QByteArray original = file.readAll();
     file.close();
-    if (!analyze(original, kSidebarToTitlebar).applied)
+    const State current = analyze(original, kSidebarToTitlebar);
+    if (!current.applied)
         return refuse(QStringLiteral("Apply the title-bar layout first; the button order belongs to it."));
+    // The row's hidden buttons live in a list the current overflow helper
+    // reads. An older helper has no such list, so the order would be written
+    // but the tick would not stick until the layout itself is updated.
+    if (current.needsUpdate)
+        return refuse(QStringLiteral("Update the title-bar layout first, then change the order: "
+                                     "the row this version writes is newer than the one in the EXE."));
 
     RowRequest request;
     request.order = order;
