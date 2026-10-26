@@ -362,14 +362,26 @@ Result patch(const QString &exePath, int holdMs)
         }
     }
     if (controllers.size() != 1 || players.size() > 1)
-        return { false, QStringLiteral("Found %1 linked boot controller(s) and %2 stock player(s), but no unique supported boot layout. No EXE was written; an unrecognized version cannot be patched by guessing.").arg(controllers.size()).arg(players.size()) };
+        return { false, QStringLiteral("Found %1 linked boot screen/controller(s) and %2 stock player(s), but no unique supported boot layout. No EXE was written; an unrecognized version cannot be patched by guessing.").arg(controllers.size()).arg(players.size()) };
     const auto controller = controllers.first();
     QString boot = controller.text;
     const QString movie = QDir(QFileInfo(exePath).absolutePath()).filePath(QStringLiteral("Assets/Promo.mp4"));
     const QString url = QLatin1Char('"') + QUrl::fromLocalFile(movie).toString(QUrl::FullyEncoded) + QLatin1Char('"');
     QByteArray data = original;
     bool reusedPlayer = false;
-    if (players.size() == 1) {
+    bool stockReferenced = false;
+    const QRegularExpression stockSource(QStringLiteral("\\bsource\\s*:\\s*['\"]([^'\"]*BootVideo\\.qml)['\"]"));
+    for (const auto &object : objects(boot)) {
+        if (object.type != QLatin1String("Loader")) continue;
+        const auto match = stockSource.match(boot.mid(object.begin, object.end-object.begin));
+        if (!match.hasMatch()) continue;
+        const QUrl source(match.captured(1));
+        if (source.scheme().isEmpty() || source.scheme() == QLatin1String("qrc")) stockReferenced = true;
+    }
+    // An unrelated embedded BootVideo.qml is not a stock player in use. In
+    // particular, never reinterpret our external file:// loader as a reference
+    // to that embedded file when repatching.
+    if (players.size() == 1 && stockReferenced) {
         auto player = players.first();
         for (const auto &object : objects(player.text)) {
             if (object.type == QLatin1String("Video") || object.type == QLatin1String("MediaPlayer")) {
@@ -399,7 +411,7 @@ Result patch(const QString &exePath, int holdMs)
         const QString helperPath = QDir(QFileInfo(exePath).absolutePath()).filePath(QStringLiteral("Assets/BootVideo.qml"));
         const QString helperUrl = QLatin1Char('"') + QUrl::fromLocalFile(helperPath).toString(QUrl::FullyEncoded) + QLatin1Char('"');
         const QString id = loaders.isEmpty() || loaders.first().id.isEmpty() ? QStringLiteral("pv") : loaders.first().id;
-        const QString loader = QStringLiteral("Loader{id:%1;objectName:\"bsiBootVideoLoader\";z:-1;anchors.fill:parent;source:%2}").arg(id, helperUrl);
+        const QString loader = QStringLiteral("Loader{id:%1;objectName:\"bsiBootLoader\";z:-1;anchors.fill:parent;source:%2}").arg(id, helperUrl);
         if (!loaders.isEmpty()) boot.replace(loaders.first().begin, loaders.first().end-loaders.first().begin, loader);
         else {
             const auto all = objects(boot);

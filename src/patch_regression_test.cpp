@@ -3018,7 +3018,7 @@ Window {
         if (!outcome.ok) std::printf("    %s\n", qPrintable(outcome.msg));
         check(outcome.ok, "PlrBootProgressBar works without a stock BootVideo.qml or an import in the boot file");
         const auto modified = resourceText(read(path), r, QStringLiteral("PlrBootProgressBar.qml"));
-        check(modified.contains(QLatin1String("bsiBootVideoLoader"))
+        check(modified.contains(QLatin1String("bsiBootLoader"))
                   && modified.contains(QUrl::fromLocalFile(QDir(folder).filePath(QStringLiteral("Assets/BootVideo.qml"))).toString(QUrl::FullyEncoded)),
               "the controller loads an external QML player, never an MP4 or a hard QtMultimedia import");
         // A tiny, explicitly synthetic QtMultimedia API validates the generated
@@ -3043,7 +3043,7 @@ Window {
         check(BootVideoPatcher::patch(path).ok && read(path + QStringLiteral(".bak")) == r.f.bytes,
               "real-name boot repatching keeps one loader and preserves the original backup");
         const auto twice = resourceText(read(path), r, QStringLiteral("PlrBootProgressBar.qml"));
-        check(twice.count(QLatin1String("objectName:\"bsiBootVideoLoader\"")) == 1,
+        check(twice.count(QLatin1String("objectName:\"bsiBootLoader\"")) == 1,
               "repatching does not duplicate the custom video component");
     }
     std::printf("[boot-script] adaptive player, hold, recovery and refusal paths\n");

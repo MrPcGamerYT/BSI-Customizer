@@ -139,7 +139,7 @@ static DWORD WINAPI worker(void *module) {
 }
 BOOL WINAPI DllMain(HINSTANCE module,DWORD reason,LPVOID) {
     if(reason==DLL_PROCESS_ATTACH) {
-        DisableThreadLibraryCalls(module);
+        // Keep CRT thread notifications: this proxy uses the static CRT (/MT).
         wchar_t host[32768];const DWORD n=GetModuleFileNameW(nullptr,host,32768);
         if(!n||n==32768)return TRUE;
         const wchar_t *base=host;for(const wchar_t *p=host;*p;++p)if(*p==L'\\'||*p==L'/')base=p+1;
