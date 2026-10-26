@@ -347,6 +347,51 @@ bool findDoc(const QByteArray &image, const QString &name, Doc *out, QString *er
     return false;
 }
 
+// Writes `doc` back through its own tree node without growing the EXE when the
+// file has room for it. The record first goes into the space the entry already
+// owns; when the patched text is longer than that - which every title-bar patch
+// is - the record is built in a verified zero gap inside the same PE section and
+// the node is re-pointed at it, so no offset moves. The gap is taken with a
+// little slack so the next order or visibility change still fits in place
+// instead of hunting for a second cave. Only a file with no suitable gap falls
+// back to the mapped storage the tool has always added, which keeps builds that
+// patch today unchanged.
+bool writeDoc(QByteArray &image, const Doc &doc, QString *error)
+{
+    const QByteArray header = doc.bom ? QByteArray::fromHex("efbbbf") : QByteArray();
+    const QByteArray body = header + doc.qml.toUtf8();
+    const auto inPlace = [&](bool growth, qint64 destination, QString *why) {
+        QByteArray once = image;
+        if (!QtResources::replaceResource(once, doc.file.entryOff, doc.link, body, why,
+                                          nullptr, growth, destination))
+            return false;
+        image = once;
+        return true;
+    };
+    QString why;
+    if (inPlace(/*allowGrowth=*/false, -1, &why)) return true;
+
+    // The payload the writer is about to build, so the gap is measured exactly:
+    // a compressed entry is refused unless the zlib stream fits.
+    const qint64 payload = doc.link.compression == 1 ? qint64(qCompress(body, 9).size())
+                                                    : qint64(body.size());
+    QString space;
+    for (const qint64 slack : { qint64(0x100), qint64(0) }) {
+        const qint64 destination = QtResources::findFreeSpace(image, doc.link, 4 + payload + slack,
+                                                             &space);
+        if (destination < 0) continue;
+        why.clear();
+        if (inPlace(/*allowGrowth=*/false, destination, &why)) return true;
+        // A gap that the writer then rejects (it must still be empty and inside
+        // the section) is not retried: the next candidate is the plain size.
+    }
+    // No gap: keep the previous behaviour rather than refusing an edit that
+    // worked before, so a packed pool still gets its patch.
+    if (inPlace(/*allowGrowth=*/true, -1, &why)) return true;
+    if (error) *error = space.isEmpty() ? why : space;
+    return false;
+}
+
 bool applyEdits(QString &qml, QList<Edit> edits)
 {
     std::sort(edits.begin(), edits.end(), [](const Edit &a, const Edit &b) { return a.begin > b.begin; });
@@ -2484,9 +2529,7 @@ bool writeRowOrder(QByteArray &changed, bool enabled, const RowRequest &request,
                                         "expected shape; no file was written.").arg(name);
             return false;
         }
-        const QByteArray header = doc.bom ? QByteArray::fromHex("efbbbf") : QByteArray();
-        if (!QtResources::replaceResource(changed, doc.file.entryOff, doc.link,
-                                          header + doc.qml.toUtf8(), error)) return false;
+        if (!writeDoc(changed, doc, error)) return false;
     }
     return true;
 }
@@ -3043,9 +3086,7 @@ Result applyCleanUi(const QString &exePath, bool enabled)
         if (!applyEdits(doc.qml, edits))
             return refuse(QStringLiteral("Clean-UI edits in %1 overlap; no file was written.")
                               .arg(role.name));
-        const QByteArray header = doc.bom ? QByteArray::fromHex("efbbbf") : QByteArray();
-        if (!QtResources::replaceResource(changed, doc.file.entryOff, doc.link,
-                                          header + doc.qml.toUtf8(), &error))
+        if (!writeDoc(changed, doc, &error))
             return refuse(error);
         changedAny = true;
     }
@@ -3373,9 +3414,10 @@ QList<Tweak> tweaks()
     return {
         { kSidebarToTitlebar,
           QStringLiteral("Sidebar buttons to the top bar"),
-          QStringLiteral("Moves the original sidebar buttons into a top-bar row that starts "
-                         "right after the title bar's own Back, Home and Recent buttons. The "
-                         "row opens with Fullscreen, Sound, Files / APK and Settings; the order "
+          QStringLiteral("Moves the original sidebar buttons into a row centred in the title "
+                         "bar, exactly where the stock buttons sit. The title bar's own Back, "
+                         "Home and Recent step aside so the row is the only copy. It opens "
+                         "with Fullscreen, Sound, Files / APK and Settings; the order "
                          "and the buttons it shows can be changed in \"Top-bar button order\". "
                          "Buttons stay shown until they no longer fit; extras then go into the "
                          "three-dot menu, and every popup opens beneath its own button. Turn "
@@ -3517,9 +3559,7 @@ Result apply(const QString &exePath, const QString &id, bool enabled)
         if (!responsiveEdits(doc.qml, enabled, false, edits) || !applyEdits(doc.qml, edits))
             return refuse(QStringLiteral("The sidebar's overflow/popup QML is not a supported shape; "
                                          "no file was written."));
-        const QByteArray header = doc.bom ? QByteArray::fromHex("efbbbf") : QByteArray();
-        if (!QtResources::replaceResource(changed, doc.file.entryOff, doc.link,
-                                          header + doc.qml.toUtf8(), &error)) return refuse(error);
+        if (!writeDoc(changed, doc, &error)) return refuse(error);
     } else {
         const Snapshot before = inspect(original);
         if (before.shape.layout == SidebarLayout::None || !before.shape.editable)
@@ -3576,9 +3616,7 @@ Result apply(const QString &exePath, const QString &id, bool enabled)
                           .arg(role.name));
             if (!applyEdits(doc.qml, edits))
                 return refuse(QStringLiteral("Layout edits in %1 overlap; no file was written.").arg(role.name));
-            const QByteArray header = doc.bom ? QByteArray::fromHex("efbbbf") : QByteArray();
-            if (!QtResources::replaceResource(changed, doc.file.entryOff, doc.link,
-                                              header + doc.qml.toUtf8(), &error)) return refuse(error);
+            if (!writeDoc(changed, doc, &error)) return refuse(error);
         }
         // The row gets its default order in the same write: Back, Home and
         // Recent first, then Fullscreen, Sound, Files / APK and Settings.

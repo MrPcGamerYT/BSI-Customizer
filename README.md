@@ -113,6 +113,14 @@ visibility - for the strip's own buttons, which the player's resize handler
 re-shows, that happens in one tagged block at the end of `fResetSidebar()` that
 a later run replaces or removes verbatim.
 
+The patched document is always longer than the record it replaces, so the
+record is built in a gap **the file already has** - a run of zero bytes inside
+the same data section that no resource owns - and the resource tree node is
+re-pointed at it. Nothing is appended and no section changes size, so
+`HD-Player.exe` keeps its exact size; the gap is taken with a little slack, so
+the next order or visibility change still fits in place. Only an image with no
+usable gap falls back to the mapped storage older versions always added.
+
 If you used an earlier version of the title-bar tweak, close BlueStacks,
 keep the option checked, and click **Update** to upgrade the old layout.
 Restart BlueStacks afterward. Actual windowed-popup behavior still needs

@@ -2834,6 +2834,34 @@ Window {
         const auto restored = LayoutPatcher::analyze(read(path), id);
         check(restored.supported && !restored.applied, "the restored player reports stock again");
 
+        // The patched text is always longer than the record it replaces. When
+        // the file has a gap - every real player has one, and this fixture gets
+        // exactly one punched into an otherwise solid image - the record is
+        // built there and the tree node re-pointed, so the EXE keeps its size
+        // instead of gaining a section the way an append would.
+        auto gapped = resources({ { QStringLiteral("plr.qml"), anchoredPlr },
+                                  { QStringLiteral("PlrSidebar.qml"), sidebar },
+                                  { QStringLiteral("PlrTopbar.qml"), topbar } }, true, {});
+        addRegistration(gapped, false);
+        gapped.f.bytes.replace(0x10000, 0x4000, QByteArray(0x4000, '\0'));
+        const qint64 gappedSize = qint64(gapped.f.bytes.size());
+        const QString gappedPath = temp.filePath(QStringLiteral("layout-gap.exe"));
+        write(gappedPath, gapped.f.bytes);
+        const auto gapApplied = LayoutPatcher::apply(gappedPath, id, true);
+        if (!gapApplied.ok) std::printf("    %s\n", qPrintable(gapApplied.msg));
+        check(gapApplied.ok && QFileInfo(gappedPath).size() == gappedSize
+                  && resourceText(read(gappedPath), gapped, QStringLiteral("PlrSidebar.qml"))
+                         .contains(QLatin1String("anchors.centerIn: parent")),
+              "the title-bar patch writes its longer records into a gap the file already has, "
+              "so the EXE keeps its size instead of growing a section");
+        check(LayoutPatcher::apply(gappedPath, id, false).ok
+                  && QFileInfo(gappedPath).size() == gappedSize
+                  && resourceText(read(gappedPath), gapped, QStringLiteral("plr.qml")) == anchoredPlr
+                  && resourceText(read(gappedPath), gapped, QStringLiteral("PlrSidebar.qml")) == sidebar
+                  && resourceText(read(gappedPath), gapped, QStringLiteral("PlrTopbar.qml")) == topbar,
+              "restoring the layout keeps every record in the same gap and restores the stock "
+              "documents byte-for-byte without touching the file size");
+
         // ---- a build that spells the palette, the sidebar width and the
         // Android-frame inset differently, and has no sidebar toggle. Both
         // layout options used to report "Unavailable" together because the
