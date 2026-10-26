@@ -72,9 +72,11 @@ The buttons stay visible until the available width runs out; only then does a
 three-dot overflow button replace the buttons that don't fit. Sound, controls,
 and other button panels open directly beneath the button that launched them
 (or beneath the three dots when opened from overflow), staying inside the
-visible screen. There is no separate option for responsive overflow or
-panel placement - that behavior is built into the title-bar move and applied
-automatically. Untick and apply to restore the stock sidebar.
+visible screen of the monitor the player window is on - the panel is clamped by
+its own visible edge, not by the popup window's shadow area. There is no
+separate option for responsive overflow or panel placement - that behavior is
+built into the title-bar move and applied automatically. Untick and apply to
+restore the stock sidebar.
 
 The tweak recognizes the player's sidebar by its **structure** (the instance
 that carries the stock sidebar width, the sidebar component and its button
@@ -111,7 +113,10 @@ keeps its bindings and its line breaks, so turning the layout off restores the
 stock document byte-for-byte. Hiding one switches the member that decides its
 visibility - for the strip's own buttons, which the player's resize handler
 re-shows, that happens in one tagged block at the end of `fResetSidebar()` that
-a later run replaces or removes verbatim.
+a later run replaces or removes verbatim. The row's own space calculation reads
+the same list, so an unticked button stays unticked when the window is resized;
+Settings is one of these buttons, with a single copy in the row that can be
+moved and unticked like any other.
 
 The patched document is always longer than the record it replaces, so the
 record is built in a gap **the file already has** - a run of zero bytes inside
