@@ -772,6 +772,15 @@ bool sidebarControls(const QString &qml, const QString &masked, SidebarControls 
                                               QStringLiteral("pAllSidebarItems"), &allItems)
         && directChild(masked, controls.root.open, allItems.nameBegin);
     const auto elements = QmlText::objects(masked, QStringLiteral("PlrSidebarElement"));
+    // Moving Settings into the Repeater is this tool's own edit. It must not
+    // change how the player's buttons are classified, or an Update would write
+    // a different overflow helper than a fresh apply.
+    const auto stockRepeatFlag = [&](const QmlText::Binding &repeat) {
+        const QString value = qml.mid(repeat.valueBegin, repeat.valueEnd - repeat.valueBegin);
+        if (value == QLatin1String("false")) return true;
+        return value == QLatin1String("true")
+            && qml.mid(repeat.valueEnd, kSettingsFlipTag.size()) == kSettingsFlipTag;
+    };
     const auto menuModelId = [&](const QString &button) -> QString {
         if (!hasAllItems) return {};
         QString found;
@@ -788,7 +797,7 @@ bool sidebarControls(const QString &qml, const QString &masked, SidebarControls 
                 || !directChild(masked, element.open, id.nameBegin)
                 || !QmlText::binding(masked, element.open, element.end, controls.repeatFlag, &repeat)
                 || !directChild(masked, element.open, repeat.nameBegin)
-                || qml.mid(repeat.valueBegin, repeat.valueEnd - repeat.valueBegin) != QLatin1String("false"))
+                || !stockRepeatFlag(repeat))
                 continue;
             const QString modelId = qml.mid(id.valueBegin, id.valueEnd - id.valueBegin);
             if (!QRegularExpression(QStringLiteral("^[_a-zA-Z][_a-zA-Z0-9]*$"))
