@@ -2681,9 +2681,21 @@ Window {
             // occurrence that follows it - other members may be centred too.
             const int centredAt = leftSidebar.indexOf(QLatin1String("anchors.centerIn: parent"),
                                                       leftSidebar.indexOf(QLatin1String("UiRowLayout")));
+            // Round 57 hid the navigation in the same two-line block a fresh
+            // apply writes, with the three ids added. Only that block's code
+            // line may change: the player's own `iSettingsBtn.visible = false`
+            // earlier in fResetSidebar is stock text and has to survive.
+            const QString markerText = QStringLiteral("// BSI CUSTOMIZER: hidden row buttons=");
+            const int markerAt = leftSidebar.indexOf(markerText);
+            const int blockNl = markerAt < 0 ? -1 : leftSidebar.indexOf(QLatin1Char('\n'), markerAt);
+            const int blockStart = blockNl < 0 ? -1 : blockNl + 1;
+            const int blockEnd = blockStart < 0 ? -1 : leftSidebar.indexOf(QLatin1Char('\n'), blockStart);
+            const QString settingsLine = QStringLiteral("iSettingsBtn.visible = false");
+            const int settingsAt = blockEnd < 0 ? -1 : leftSidebar.indexOf(settingsLine, blockStart);
+            const bool legacyBlock = settingsAt > blockStart && settingsAt < blockEnd
+                && settingsAt + settingsLine.size() <= blockEnd;
             check(leftPlr.contains(centredMargin) && leftTopbar.count(QStringLiteral("pVisible: false")) == 3
-                      && centredAt > 0
-                      && leftSidebar.contains(QStringLiteral("hidden row buttons=iSettingsBtn")),
+                      && centredAt > 0 && legacyBlock,
                   "the centred fixtures contain what the left-anchored shape is built from");
             leftPlr.replace(centredMargin, QStringLiteral("            anchors.leftMargin: parent.pBSISidebarX"));
             leftTopbar.replace(QStringLiteral("pVisible: false"), QStringLiteral("pVisible: true"));
@@ -2694,11 +2706,14 @@ Window {
             if (centredAt > 0)
                 leftSidebar.replace(centredAt, int(QLatin1String("anchors.centerIn: parent").size()),
                                     QStringLiteral("anchors.left: parent.left"));
-            leftSidebar.replace(QStringLiteral("hidden row buttons=iSettingsBtn"),
-                                QStringLiteral("hidden row buttons=iBackBtn,iHomeBtn,iRecentBtn,iSettingsBtn"));
-            leftSidebar.replace(QStringLiteral("iSettingsBtn.visible = false"),
-                                QStringLiteral("iBackBtn.visible = false; iHomeBtn.visible = false; "
-                                               "iRecentBtn.visible = false; iSettingsBtn.visible = false"));
+            if (legacyBlock) {
+                // The code line first: the marker sits above it and keeps its offset.
+                leftSidebar.replace(settingsAt, int(settingsLine.size()),
+                                    QStringLiteral("iBackBtn.visible = false; iHomeBtn.visible = false; "
+                                                   "iRecentBtn.visible = false; iSettingsBtn.visible = false"));
+                leftSidebar.replace(markerAt, int(markerText.size()),
+                                    markerText + QStringLiteral("iBackBtn,iHomeBtn,iRecentBtn,"));
+            }
             auto earlierLeft = resources({ { QStringLiteral("plr.qml"), leftPlr },
                                            { QStringLiteral("PlrSidebar.qml"), leftSidebar },
                                            { QStringLiteral("PlrTopbar.qml"), leftTopbar } }, true, {});
