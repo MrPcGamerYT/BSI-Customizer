@@ -80,6 +80,11 @@ const QString kAxisHandler = QStringLiteral(" // BSI CUSTOMIZER: sidebar axis ha
 // Marks a sidebar whose own overflow code was kept because it does not carry
 // the kebab/Repeater/popup model the smart helper needs. The title-bar move
 // itself does not depend on that model, so the button can still be offered.
+// Tags appended to a binding this tool added or changed. They are block
+// comments so they can sit inside a single-line declaration without eating
+// the rest of it, and they tell a later run which value is ours.
+const QString kButtonHiddenTag = QStringLiteral(" /* BSI CUSTOMIZER: hidden button */");
+const QString kSettingsFlipTag = QStringLiteral(" /* BSI CUSTOMIZER: settings in the row */");
 const QString kNoSmartMarker = QStringLiteral(" // BSI CUSTOMIZER: stock overflow only");
 
 // ---------------------------------------------------------- clean player UI
@@ -1413,8 +1418,6 @@ const QString kOrderMarkerPrefix = QStringLiteral("// BSI CUSTOMIZER: order ");
 const QString kHiddenRowMarker = QStringLiteral("// BSI CUSTOMIZER: hidden row buttons=");
 // Block comments, not line comments: a build may put several members on one
 // line, and a line comment would swallow everything after the value.
-const QString kButtonHiddenTag = QStringLiteral(" /* BSI CUSTOMIZER: hidden button */");
-const QString kSettingsFlipTag = QStringLiteral(" /* BSI CUSTOMIZER: settings in the row */");
 
 // What the UI asks for: one key per button of the row, and the ones to hide.
 struct RowRequest
