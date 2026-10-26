@@ -21,11 +21,21 @@ struct Config {
     std::string label1,url1,label2,url2;
 };
 inline std::string activity(const Config &c, unsigned index, unsigned long pid, std::int64_t start, unsigned nonce) {
-    std::string a="{\"state\":"+quote(c.state)+",\"details\":"+quote(c.details.empty()?"":c.details[index%c.details.size()]);
+    std::string a="{\"type\":0";
+    if(!c.state.empty()) a+=",\"state\":"+quote(c.state);
+    const std::string detail=c.details.empty()?"":c.details[index%c.details.size()];
+    if(!detail.empty()) a+=",\"details\":"+quote(detail);
     if(c.timestamp) a+=",\"timestamps\":{\"start\":"+std::to_string(start)+"}";
     if(!c.largeImage.empty()||!c.smallImage.empty()) {
-        a+=",\"assets\":{\"large_image\":"+quote(c.largeImage)+",\"large_text\":"+quote(c.largeText)
-            +",\"small_image\":"+quote(c.smallImage)+",\"small_text\":"+quote(c.smallText)+"}";
+        std::string assets;
+        const auto field=[&](const char *key,const std::string &value) {
+            if(value.empty()) return;
+            if(!assets.empty()) assets+=",";
+            assets+=quote(key)+":"+quote(value);
+        };
+        if(!c.largeImage.empty()){field("large_image",c.largeImage);field("large_text",c.largeText);}
+        if(!c.smallImage.empty()){field("small_image",c.smallImage);field("small_text",c.smallText);}
+        a+=",\"assets\":{"+assets+"}";
     }
     std::string buttons;
     if(!c.label1.empty()&&!c.url1.empty()) buttons="{\"label\":"+quote(c.label1)+",\"url\":"+quote(c.url1)+"}";

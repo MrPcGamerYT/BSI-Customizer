@@ -49,7 +49,7 @@ FWD(DWORD,VerLanguageNameA,(DWORD a,LPSTR b,DWORD c),(a,b,c))
 FWD(DWORD,VerLanguageNameW,(DWORD a,LPWSTR b,DWORD c),(a,b,c))
 
 static std::wstring value(const std::wstring &path,const wchar_t *key,const wchar_t *fallback=L"") {
-    wchar_t text[8192];GetPrivateProfileStringW(L"RPC",key,fallback,text,8192,path.c_str());return text;
+    wchar_t text[32768];GetPrivateProfileStringW(L"RPC",key,fallback,text,32768,path.c_str());return text;
 }
 static std::string utf8Hex(const std::wstring &path,const wchar_t *key) {
     const auto encoded=value(path,key);std::string result;

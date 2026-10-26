@@ -12,5 +12,10 @@ int main() {
     a=activity(c,0,123,456,8);
     assert(a.find("timestamps")==std::string::npos);
     assert(a.find("buttons")!=std::string::npos);
+    Config empty;
+    const auto minimal=activity(empty,0,123,456,9);
+    assert(minimal.find("\"state\"")==std::string::npos);
+    assert(minimal.find("\"details\"")==std::string::npos);
+    assert(minimal.find("\"assets\"")==std::string::npos);
     std::cout<<"PASS: RPC payload escaping, rotation, timestamps and buttons\n";
 }

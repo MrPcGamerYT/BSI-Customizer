@@ -103,6 +103,8 @@ bool isOurProxy(const QByteArray &d,QString *error) {
 bool validate(const QVariantMap &s,QString *error) {
     const auto fail=[&](const QString &msg){if(error)*error=msg;return false;};
     const auto id=s.value(QStringLiteral("AppId")).toString();
+    bool validNumber=false;const auto numericId=id.toULongLong(&validNumber);
+    if(!validNumber||numericId==0)return fail(QStringLiteral("Application ID must be a nonzero unsigned 64-bit Discord ID."));
     if(!QRegularExpression(QStringLiteral("^[1-9][0-9]{16,19}$")).match(id).hasMatch())return fail(QStringLiteral("Application ID must contain 17–20 digits and cannot start with zero."));
     const int interval=s.value(QStringLiteral("Interval"),5).toInt();if(interval<5||interval>60)return fail(QStringLiteral("Rotation interval must be 5–60 seconds."));
     const auto rows=details(s);if(rows.size()>10)return fail(QStringLiteral("Use at most ten rotating detail lines."));
