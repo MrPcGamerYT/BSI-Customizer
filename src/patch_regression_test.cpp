@@ -2269,10 +2269,12 @@ int runPatchRegressionTests()
         check(QmlText::objects(QmlText::mask(patchedPlr), QStringLiteral("PlrSidebar")).size() == 1
                   && patchedPlr.contains(QStringLiteral("iSidebar.parent = iSidebarTitlebar")),
               "one original sidebar owns the controls, backend connections and animations");
-        check(patchedPlr.contains(QStringLiteral("anchors.leftMargin: parent.pBSISidebarX"))
+        check(patchedPlr.contains(
+                  QStringLiteral("anchors.leftMargin: Math.min(144, parent.width / 4)"))
                   && patchedPlr.contains(
-                      QStringLiteral("anchors.rightMargin: Math.min(144, parent.width / 4)")),
-              "the moved row starts where the title bar's own buttons end instead of covering them");
+                      QStringLiteral("anchors.rightMargin: Math.min(144, parent.width / 4)"))
+                  && !patchedPlr.contains(QLatin1String("pBSISidebarX")),
+              "the moved row keeps the same margins on both sides, so it stays in the middle");
 
         // Execute the actual injected mount QML, not a reimplementation. The
         // original sidebar is deliberately declared AFTER its host, as in plr.
@@ -2286,8 +2288,7 @@ int runPatchRegressionTests()
         const QString mountSource = QStringLiteral(
             "import QtQuick 2.15\n"
             "Item { id: scene; width: 1000; height: 600\n"
-            " Rectangle { id: iTopbar; width: parent.width; height: 32\n"
-            "  property real pBSISidebarX: 144\n")
+            " Rectangle { id: iTopbar; width: parent.width; height: 32\n")
             + hostQml + QStringLiteral(
             "\n }\n"
             " Rectangle { id: iSidebar; objectName: 'movedSidebar'; width: 0\n"
@@ -2324,9 +2325,9 @@ int runPatchRegressionTests()
         const auto patchedSidebar = resourceText(read(path), r, QStringLiteral("PlrSidebar.qml"));
         check(patchedSidebar.contains(QLatin1String("UiRowLayout"))
                   && !patchedSidebar.contains(QLatin1String("UiColumnLayout"))
-                  && patchedSidebar.contains(QLatin1String("anchors.left: parent.left"))
+                  && patchedSidebar.contains(QLatin1String("anchors.centerIn: parent"))
                   && !patchedSidebar.contains(QLatin1String("anchors.fill: parent")),
-              "the button column becomes a row that starts at the left edge of its title-bar host");
+              "the button column becomes a row centred in the title bar, as it was before");
         check(patchedSidebar.contains(QLatin1String("visible: iSidebar.width > 0")),
               "the zero-width original hides its row instead of painting outside the strip");
         check(patchedSidebar.contains(QLatin1String("onWidthChanged"))
@@ -2502,9 +2503,9 @@ Window {
         check(patchedTopbar.count(QStringLiteral("visible: false")) == 1
                   && !patchedTopbar.contains(QLatin1String("iBackBtn.visible: false")),
               "the show-sidebar button is disabled without touching the toggled Back entry");
-        check(patchedTopbar.count(QStringLiteral("pVisible: false")) == 0
-                  && patchedTopbar.count(QStringLiteral("pVisible: true")) == 3,
-              "the title bar keeps its own Back/Home/Recent; the moved row continues after them");
+        check(patchedTopbar.count(QStringLiteral("pVisible: false")) == 3
+                  && patchedTopbar.count(QStringLiteral("pVisible: true")) == 0,
+              "the title bar's own Back/Home/Recent step aside so the moved row is the only copy");
         // An older responsive helper was shipped before the fixed-button
         // model relationship and unmodelled Discord were accounted for. The
         // version marker upgrades it in place without changing the ownership
@@ -2667,6 +2668,84 @@ Window {
         check(LayoutPatcher::apply(oldSinglePath, id, false).ok
                   && resourceText(read(oldSinglePath), oldSingle, QStringLiteral("PlrSidebar.qml")) == sidebar,
               "an updated earlier title bar still restores the stock sidebar byte-for-byte");
+        // A release of this tool started the row right after the title bar's
+        // own navigation instead of centring it. That shape offers Update, and
+        // the update writes exactly the centred row a fresh apply produces.
+        {
+            QString leftPlr = patchedPlr;
+            QString leftTopbar = patchedTopbar;
+            QString leftSidebar = patchedSidebar;
+            const QString centredMargin =
+                QStringLiteral("            anchors.leftMargin: Math.min(144, parent.width / 4)");
+            // The strip is the first UiRowLayout, so its own anchor is the
+            // occurrence that follows it - other members may be centred too.
+            const int centredAt = leftSidebar.indexOf(QLatin1String("anchors.centerIn: parent"),
+                                                      leftSidebar.indexOf(QLatin1String("UiRowLayout")));
+            // Round 57 hid the navigation in the same two-line block a fresh
+            // apply writes, with the three ids added. Only that block's code
+            // line may change: the player's own `iSettingsBtn.visible = false`
+            // earlier in fResetSidebar is stock text and has to survive.
+            const QString markerText = QStringLiteral("// BSI CUSTOMIZER: hidden row buttons=");
+            const int markerAt = leftSidebar.indexOf(markerText);
+            const int blockNl = markerAt < 0 ? -1 : leftSidebar.indexOf(QLatin1Char('\n'), markerAt);
+            const int blockStart = blockNl < 0 ? -1 : blockNl + 1;
+            const int blockEnd = blockStart < 0 ? -1 : leftSidebar.indexOf(QLatin1Char('\n'), blockStart);
+            const QString settingsLine = QStringLiteral("iSettingsBtn.visible = false");
+            const int settingsAt = blockEnd < 0 ? -1 : leftSidebar.indexOf(settingsLine, blockStart);
+            const bool legacyBlock = settingsAt > blockStart && settingsAt < blockEnd
+                && settingsAt + settingsLine.size() <= blockEnd;
+            check(leftPlr.contains(centredMargin) && leftTopbar.count(QStringLiteral("pVisible: false")) == 3
+                      && centredAt > 0 && legacyBlock,
+                  "the centred fixtures contain what the left-anchored shape is built from");
+            leftPlr.replace(centredMargin, QStringLiteral("            anchors.leftMargin: parent.pBSISidebarX"));
+            leftTopbar.replace(QStringLiteral("pVisible: false"), QStringLiteral("pVisible: true"));
+            const int itemsAt = leftTopbar.indexOf(QStringLiteral("    property list<QtObject> pNonFixedTopbarItems"));
+            if (itemsAt > 0)
+                leftTopbar.insert(itemsAt, QStringLiteral("    property real pBSISidebarX: 144"
+                                                          " // BSI CUSTOMIZER: sidebar row position\r\n"));
+            if (centredAt > 0)
+                leftSidebar.replace(centredAt, int(QLatin1String("anchors.centerIn: parent").size()),
+                                    QStringLiteral("anchors.left: parent.left"));
+            if (legacyBlock) {
+                // The code line first: the marker sits above it and keeps its offset.
+                leftSidebar.replace(settingsAt, int(settingsLine.size()),
+                                    QStringLiteral("iBackBtn.visible = false; iHomeBtn.visible = false; "
+                                                   "iRecentBtn.visible = false; iSettingsBtn.visible = false"));
+                leftSidebar.replace(markerAt, int(markerText.size()),
+                                    markerText + QStringLiteral("iBackBtn,iHomeBtn,iRecentBtn,"));
+            }
+            auto earlierLeft = resources({ { QStringLiteral("plr.qml"), leftPlr },
+                                           { QStringLiteral("PlrSidebar.qml"), leftSidebar },
+                                           { QStringLiteral("PlrTopbar.qml"), leftTopbar } }, true, {});
+            addRegistration(earlierLeft, false);
+            const QString leftPath = temp.filePath(QStringLiteral("layout-left-anchored.exe"));
+            write(leftPath, earlierLeft.f.bytes);
+            const auto leftState = LayoutPatcher::analyze(read(leftPath), id);
+            check(leftState.supported && leftState.applied && leftState.needsUpdate,
+                  "a row that starts after the navigation offers an Update to centre it");
+            const auto leftUpgrade = LayoutPatcher::apply(leftPath, id, true);
+            const QString leftPlrNow = resourceText(read(leftPath), earlierLeft, QStringLiteral("plr.qml"));
+            const QString leftSidebarNow =
+                resourceText(read(leftPath), earlierLeft, QStringLiteral("PlrSidebar.qml"));
+            const QString leftTopbarNow =
+                resourceText(read(leftPath), earlierLeft, QStringLiteral("PlrTopbar.qml"));
+            check(leftUpgrade.ok && leftPlrNow == patchedPlr && leftSidebarNow == patchedSidebar
+                      && leftTopbarNow == patchedTopbar,
+                  QStringLiteral("Update centres that row and drops the anchor helper%1")
+                      .arg(leftUpgrade.ok ? (leftPlrNow == patchedPlr && leftSidebarNow == patchedSidebar
+                                                 && leftTopbarNow == patchedTopbar
+                                             ? QString()
+                                             : QStringLiteral(" -- plr %1 -- sidebar %2 -- topbar %3")
+                                                   .arg(firstDifference(patchedPlr, leftPlrNow),
+                                                        firstDifference(patchedSidebar, leftSidebarNow),
+                                                        firstDifference(patchedTopbar, leftTopbarNow)))
+                                         : QStringLiteral(" -- apply: %1").arg(leftUpgrade.msg)));
+            check(LayoutPatcher::apply(leftPath, id, false).ok
+                      && resourceText(read(leftPath), earlierLeft, QStringLiteral("plr.qml")) == anchoredPlr
+                      && resourceText(read(leftPath), earlierLeft, QStringLiteral("PlrSidebar.qml")) == sidebar
+                      && resourceText(read(leftPath), earlierLeft, QStringLiteral("PlrTopbar.qml")) == topbar,
+                  "the centred update still restores every original document exactly");
+        }
         const QByteArray afterFirst = read(path);
         const auto again = LayoutPatcher::apply(path, id, true);
         check(again.ok && read(path) == afterFirst
@@ -2675,9 +2754,10 @@ Window {
         const auto patchedState = LayoutPatcher::analyze(read(path), id);
         check(patchedState.supported && patchedState.applied, "the patched player reports the tweak as applied");
         // ---- the row's button order and the buttons it leaves out ----
-        // The default row continues the title bar: its own Back/Home/Recent,
-        // then the sidebar buttons, with Settings taking a normal place among
-        // them instead of sitting after the whole row.
+        // The default row is the sidebar's own strip, centred in the title
+        // bar: Back, Home and Recent first, then the player's buttons, with
+        // Settings taking a normal place among them instead of sitting after
+        // the whole row.
         const auto defaultRows = LayoutPatcher::buttonRows(read(path));
         QStringList defaultKeys;
         for (const auto &button : defaultRows.buttons) defaultKeys << button.key;
@@ -2686,7 +2766,7 @@ Window {
                                                              QStringLiteral("home"),
                                                              QStringLiteral("recent") })
                   && defaultRows.buttons.first().canHide == false,
-              "the row starts with the title bar's own navigation, which is never hidden");
+              "the row starts with Back/Home/Recent, which can be moved but never hidden");
         const auto hiddenRowBlock = [](const QString &qml) {
             const int at = qml.indexOf(QLatin1String("// BSI CUSTOMIZER: hidden row buttons="));
             if (at < 0) return QString();
@@ -2695,10 +2775,16 @@ Window {
         };
         const QString settingsBlock = hiddenRowBlock(patchedSidebar);
         QStringList settingsMissing;
-        for (const auto &id : { QStringLiteral("iSettingsBtn"), QStringLiteral("iBackBtn"),
-                                QStringLiteral("iHomeBtn"), QStringLiteral("iRecentBtn") }) {
+        for (const auto &id : { QStringLiteral("iSettingsBtn") }) {
             if (!settingsBlock.contains(QStringLiteral("%1.visible = false").arg(id)))
                 settingsMissing << id;
+        }
+        // The row is the only copy of the navigation now, so the strip's own
+        // Back/Home/Recent must not be switched off with it.
+        for (const auto &id : { QStringLiteral("iBackBtn"), QStringLiteral("iHomeBtn"),
+                                QStringLiteral("iRecentBtn") }) {
+            if (settingsBlock.contains(QStringLiteral("%1.visible = false").arg(id)))
+                settingsMissing << QStringLiteral("hides ") + id;
         }
         check(patchedSidebar.contains(QLatin1String("true /* BSI CUSTOMIZER: settings in the row */"))
                   && settingsBlock.contains(QLatin1String("hidden row buttons="))
@@ -2709,8 +2795,9 @@ Window {
                            : QStringLiteral(" -- block [%1] missing [%2]")
                                  .arg(settingsBlock.simplified().left(220),
                                       settingsMissing.join(QLatin1Char(',')))));
-        check(patchedPlr.contains(QLatin1String("anchors.leftMargin: parent.pBSISidebarX")),
-              "the row is told where the title bar's own buttons end");
+        check(!patchedPlr.contains(QLatin1String("pBSISidebarX"))
+                  && !patchedTopbar.contains(QLatin1String("pBSISidebarX")),
+              "no anchor helper is left behind for the centred row");
 
         const auto reorder = LayoutPatcher::applyOrder(
             path, { QStringLiteral("recent"), QStringLiteral("home"), QStringLiteral("back"),
@@ -2761,6 +2848,34 @@ Window {
               "the restore writes every edited document back byte-for-byte");
         const auto restored = LayoutPatcher::analyze(read(path), id);
         check(restored.supported && !restored.applied, "the restored player reports stock again");
+
+        // The patched text is always longer than the record it replaces. When
+        // the file has a gap - every real player has one, and this fixture gets
+        // exactly one punched into an otherwise solid image - the record is
+        // built there and the tree node re-pointed, so the EXE keeps its size
+        // instead of gaining a section the way an append would.
+        auto gapped = resources({ { QStringLiteral("plr.qml"), anchoredPlr },
+                                  { QStringLiteral("PlrSidebar.qml"), sidebar },
+                                  { QStringLiteral("PlrTopbar.qml"), topbar } }, true, {});
+        addRegistration(gapped, false);
+        gapped.f.bytes.replace(0x10000, 0x4000, QByteArray(0x4000, '\0'));
+        const qint64 gappedSize = qint64(gapped.f.bytes.size());
+        const QString gappedPath = temp.filePath(QStringLiteral("layout-gap.exe"));
+        write(gappedPath, gapped.f.bytes);
+        const auto gapApplied = LayoutPatcher::apply(gappedPath, id, true);
+        if (!gapApplied.ok) std::printf("    %s\n", qPrintable(gapApplied.msg));
+        check(gapApplied.ok && QFileInfo(gappedPath).size() == gappedSize
+                  && resourceText(read(gappedPath), gapped, QStringLiteral("PlrSidebar.qml"))
+                         .contains(QLatin1String("anchors.centerIn: parent")),
+              "the title-bar patch writes its longer records into a gap the file already has, "
+              "so the EXE keeps its size instead of growing a section");
+        check(LayoutPatcher::apply(gappedPath, id, false).ok
+                  && QFileInfo(gappedPath).size() == gappedSize
+                  && resourceText(read(gappedPath), gapped, QStringLiteral("plr.qml")) == anchoredPlr
+                  && resourceText(read(gappedPath), gapped, QStringLiteral("PlrSidebar.qml")) == sidebar
+                  && resourceText(read(gappedPath), gapped, QStringLiteral("PlrTopbar.qml")) == topbar,
+              "restoring the layout keeps every record in the same gap and restores the stock "
+              "documents byte-for-byte without touching the file size");
 
         // ---- a build that spells the palette, the sidebar width and the
         // Android-frame inset differently, and has no sidebar toggle. Both
@@ -2844,12 +2959,12 @@ Window {
         const QString plainPatched = resourceText(read(plainPath), plain, QStringLiteral("PlrSidebar.qml"));
         check(plainApplied.ok
                   && plainPatched.contains(QLatin1String("UiRowLayout"))
-                  && plainPatched.contains(QLatin1String("anchors.left: parent.left"))
+                  && plainPatched.contains(QLatin1String("anchors.centerIn: parent"))
                   && plainPatched.contains(QLatin1String("visible: iSidebar.width > 0"))
                   && plainPatched.contains(QLatin1String("stock overflow only"))
                   && plainPatched.contains(QLatin1String("var availableHeight = iSidebar.width"))
                   && plainPatched.contains(QLatin1String("onWidthChanged")),
-              "the strip becomes a left-aligned row and keeps the build's own overflow code");
+              "the strip becomes a centred row and keeps the build's own overflow code");
         const auto plainState = LayoutPatcher::analyze(read(plainPath), id);
         check(plainState.supported && plainState.applied && !plainState.needsUpdate,
               "the patched plain build reports applied without asking for an upgrade");

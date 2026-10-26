@@ -92,8 +92,10 @@ Item {
     // EXE may have been patched or restored from another tab meanwhile).
     function refreshButtonRows() {
         const state = backend.sidebarButtonRows();
-        page.buttonRows = state.buttons || [];
         page.buttonOrderReady = !!(state.supported && state.applied);
+        // Without the layout there is no row to order, so the card shows the
+        // reason instead of a list left over from before the restore.
+        page.buttonRows = page.buttonOrderReady ? (state.buttons || []) : [];
         page.buttonOrderDetail = state.detail || "";
         page.buttonOrderDirty = false;
     }
@@ -156,6 +158,17 @@ Item {
         target: backend
         function onExePathChanged() {
             page.reloadAll();
+        }
+        // A layout write happens in a worker; when it is done the row of
+        // buttons has changed (or the title-bar move was reverted), so the
+        // order card follows without asking the user to reopen the tab.
+        function onBusyChanged() {
+            if (backend.busy)
+                return;
+            // Only the two card states that depend on the file: the About
+            // editor keeps whatever the user has typed.
+            page.refreshLayout();
+            page.refreshButtonRows();
         }
     }
 
@@ -283,6 +296,7 @@ Item {
                                                      && !page.cleanTweak.needsUpdate);
                                     const result = backend.applyLayoutTweak("clean-player-ui", target);
                                     page.refreshLayout();
+                                    page.refreshButtonRows();
                                     if (result && result.msg)
                                         page.notify(result.msg);
                                 }
@@ -465,10 +479,11 @@ Item {
                         Text {
                             Layout.fillWidth: true
                             wrapMode: Text.Wrap
-                            text: qsTr("The row the sidebar becomes starts right after the title bar's own "
-                                       + "Back, Home and Recent buttons. Move any button up or down, or "
-                                       + "untick it to leave it out. Only the buttons shown here exist in "
-                                       + "this player.")
+                            text: qsTr("The row the sidebar becomes sits in the middle of the title bar, "
+                                       + "exactly like before the order could be changed. Move any button "
+                                       + "up or down, including Back, Home and Recent, or untick it to "
+                                       + "leave it out. Only the buttons shown here exist in this player "
+                                       + "and the list follows the layout automatically.")
                             color: Theme.textDim
                             font.pixelSize: 11
                         }
@@ -511,8 +526,10 @@ Item {
                                     color: Theme.textDim
                                     font.pixelSize: 10
                                 }
+                                // Every row can be moved - Back, Home and Recent
+                                // included; only the tick is limited to the
+                                // buttons that may be left out.
                                 ActionButton {
-                                    visible: modelData.canHide
                                     implicitHeight: 24
                                     implicitWidth: 26
                                     text: "\u2191"
@@ -520,7 +537,6 @@ Item {
                                     onClicked: page.moveButtonRow(index, -1)
                                 }
                                 ActionButton {
-                                    visible: modelData.canHide
                                     implicitHeight: 24
                                     implicitWidth: 26
                                     text: "\u2193"

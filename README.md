@@ -61,12 +61,13 @@ The original `.bak` is preserved. Theme edits are made against the current EXE, 
 
 ## Sidebar buttons in the title bar
 
-The layout tweak moves the **original sidebar** into a title-bar host that starts
-right after the title bar's own **Back, Home and Recent** buttons, instead of
-creating a second set of controls. This keeps button state, animations, and popup
-ownership attached to the same instance used by the player. The host follows
-window resizing, and the row continues to the right for as long as the buttons
-fit.
+The layout tweak moves the **original sidebar** into a host in the middle of the
+title bar, instead of creating a second set of controls. This keeps button state,
+animations, and popup ownership attached to the same instance used by the player.
+The host keeps the same margin on both sides and follows window resizing, so the
+row stays centred exactly as it always has; the title bar's own Back/Home/Recent
+step aside while the row is shown, because the row carries the sidebar's own
+copies of those three buttons.
 The buttons stay visible until the available width runs out; only then does a
 three-dot overflow button replace the buttons that don't fit. Sound, controls,
 and other button panels open directly beneath the button that launched them
@@ -92,18 +93,18 @@ reason instead of being written blindly.
 
 ### Choosing which buttons the row shows, and in what order
 
-The first apply already puts the row in a sensible order: the title bar's own
-Back, Home and Recent (they stay where they are), then **Fullscreen, Sound,
-Files / APK and Settings**, then the rest of the sidebar buttons in the order
-the player declares them.
+The first apply already puts the row in a sensible order: **Back, Home and
+Recent**, then **Fullscreen, Sound, Files / APK and Settings**, then the rest of
+the sidebar buttons in the order the player declares them.
 
 The **Top-bar button order** card below the layout option lists every button the
-player really has - the strip's own buttons and the entries its Repeater renders
-- as one numbered row. **Up/down** move a button, the tick leaves it out of the
-row, and **Apply order** writes the result. **Reset to default** puts the order
-above back. Buttons the title bar itself shows (its Back, Home and Recent) are
-marked *always shown*: they can be moved but not hidden, because the tool never
-removes them.
+player really has - the strip's own buttons, including Back, Home and Recent, and
+the entries its Repeater renders - as one numbered row. **Up/down** move a
+button, the tick leaves it out of the row, and **Apply order** writes the result.
+**Reset to default** puts the order above back. Back, Home and Recent are marked
+*always shown*: they can be moved but not hidden, because the tool never removes
+the player's navigation. The card follows the layout by itself: applying or
+restoring the title-bar move refreshes it, so it never shows a stale row.
 
 Moving a button moves its **declaration**, not its contents: the declaration
 keeps its bindings and its line breaks, so turning the layout off restores the
@@ -111,6 +112,14 @@ stock document byte-for-byte. Hiding one switches the member that decides its
 visibility - for the strip's own buttons, which the player's resize handler
 re-shows, that happens in one tagged block at the end of `fResetSidebar()` that
 a later run replaces or removes verbatim.
+
+The patched document is always longer than the record it replaces, so the
+record is built in a gap **the file already has** - a run of zero bytes inside
+the same data section that no resource owns - and the resource tree node is
+re-pointed at it. Nothing is appended and no section changes size, so
+`HD-Player.exe` keeps its exact size; the gap is taken with a little slack, so
+the next order or visibility change still fits in place. Only an image with no
+usable gap falls back to the mapped storage older versions always added.
 
 If you used an earlier version of the title-bar tweak, close BlueStacks,
 keep the option checked, and click **Update** to upgrade the old layout.

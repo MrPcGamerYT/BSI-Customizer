@@ -252,17 +252,15 @@ QString legacyTitlebarOverlay(const QString &nl, bool settingsHandler)
 // declared after the top bar). Clearing old anchors is essential on Qt 5 too.
 QString titlebarOverlay(const QString &nl)
 {
-    // The host starts where the title bar's own Back/Home/Recent end, so the
-    // moved buttons continue that row instead of floating in its middle. The
-    // position comes from PlrTopbar.qml (pBSISidebarX) because those buttons
-    // live in that component.
+    // The host spans the title bar and keeps clear of its ends, so the moved
+    // buttons sit in the middle of the bar - the same look the layout had
+    // before the row could be reordered.
     const QStringList lines {
         QStringLiteral("        Item {"),
         QStringLiteral("            ") + kOverlayMarker,
         QStringLiteral("            id: ") + kOverlayId,
         QStringLiteral("            anchors.fill: parent"),
-        QStringLiteral("            anchors.leftMargin: parent.pBSISidebarX"),
-        // Keep clear of the window controls and icons that live on the right.
+        QStringLiteral("            anchors.leftMargin: Math.min(144, parent.width / 4)"),
         QStringLiteral("            anchors.rightMargin: Math.min(144, parent.width / 4)"),
         QStringLiteral("            function fMountSidebar() {"),
         QStringLiteral("                iSidebar.anchors.top = undefined"),
@@ -279,6 +277,17 @@ QString titlebarOverlay(const QString &nl)
         QStringLiteral("        }")
     };
     return nl + lines.join(nl);
+}
+
+// The host an earlier release wrote: the row started right after the title
+// bar's own navigation instead of in the middle of the bar. Only removal and
+// the upgrade still need this exact text.
+QString titlebarOverlayLeftAnchored(const QString &nl)
+{
+    QString text = titlebarOverlay(nl);
+    text.replace(QStringLiteral("            anchors.leftMargin: Math.min(144, parent.width / 4)"),
+                 QStringLiteral("            anchors.leftMargin: parent.pBSISidebarX"));
+    return text;
 }
 
 bool hasOverlay(const QString &qml)
@@ -335,6 +344,51 @@ bool findDoc(const QByteArray &image, const QString &name, Doc *out, QString *er
         return true;
     }
     if (error) *error = QStringLiteral("%1 is not embedded in this player.").arg(name);
+    return false;
+}
+
+// Writes `doc` back through its own tree node without growing the EXE when the
+// file has room for it. The record first goes into the space the entry already
+// owns; when the patched text is longer than that - which every title-bar patch
+// is - the record is built in a verified zero gap inside the same PE section and
+// the node is re-pointed at it, so no offset moves. The gap is taken with a
+// little slack so the next order or visibility change still fits in place
+// instead of hunting for a second cave. Only a file with no suitable gap falls
+// back to the mapped storage the tool has always added, which keeps builds that
+// patch today unchanged.
+bool writeDoc(QByteArray &image, const Doc &doc, QString *error)
+{
+    const QByteArray header = doc.bom ? QByteArray::fromHex("efbbbf") : QByteArray();
+    const QByteArray body = header + doc.qml.toUtf8();
+    const auto inPlace = [&](bool growth, qint64 destination, QString *why) {
+        QByteArray once = image;
+        if (!QtResources::replaceResource(once, doc.file.entryOff, doc.link, body, why,
+                                          nullptr, growth, destination))
+            return false;
+        image = once;
+        return true;
+    };
+    QString why;
+    if (inPlace(/*allowGrowth=*/false, -1, &why)) return true;
+
+    // The payload the writer is about to build, so the gap is measured exactly:
+    // a compressed entry is refused unless the zlib stream fits.
+    const qint64 payload = doc.link.compression == 1 ? qint64(qCompress(body, 9).size())
+                                                    : qint64(body.size());
+    QString space;
+    for (const qint64 slack : { qint64(0x100), qint64(0) }) {
+        const qint64 destination = QtResources::findFreeSpace(image, doc.link, 4 + payload + slack,
+                                                             &space);
+        if (destination < 0) continue;
+        why.clear();
+        if (inPlace(/*allowGrowth=*/false, destination, &why)) return true;
+        // A gap that the writer then rejects (it must still be empty and inside
+        // the section) is not retried: the next candidate is the plain size.
+    }
+    // No gap: keep the previous behaviour rather than refusing an edit that
+    // worked before, so a packed pool still gets its patch.
+    if (inPlace(/*allowGrowth=*/true, -1, &why)) return true;
+    if (error) *error = space.isEmpty() ? why : space;
     return false;
 }
 
@@ -464,12 +518,30 @@ bool plrEdits(QString &qml, bool enabled, SidebarLayout layout, QList<Edit> &edi
                                 legacy ? instances : QmlText::objects(masked, QStringLiteral("Item")),
                                 &overlayInstance)) return false;
         const QString instanceText = qml.mid(original.open, original.end - original.open);
-        const QString overlay = legacy
-            ? legacyTitlebarOverlay(lineEnding(qml), instanceText.contains(QLatin1String("onSidebarSettingClicked")))
-            : titlebarOverlay(lineEnding(qml));
-        const int at = topbars.first().end - 1 - overlay.size();
-        if (at < 0 || qml.mid(at, overlay.size()) != overlay) return false;
-        addEdit(edits, at, overlay.size(), QString());
+        const QString nl = lineEnding(qml);
+        // Every host this tool has written, newest first. An older one is
+        // removed with the exact text it was written with, so the file goes
+        // back to its stock bytes - and an update replaces it with the
+        // current shape because the enable pass runs again afterwards.
+        QStringList hosts;
+        if (legacy) {
+            hosts << legacyTitlebarOverlay(nl, instanceText.contains(QLatin1String("onSidebarSettingClicked")))
+                  << legacyTitlebarOverlay(nl, !instanceText.contains(QLatin1String("onSidebarSettingClicked")));
+        } else {
+            hosts << titlebarOverlay(nl) << titlebarOverlayLeftAnchored(nl);
+        }
+        int at = -1;
+        QString overlay;
+        for (const QString &candidate : hosts) {
+            const int pos = topbars.first().end - 1 - int(candidate.size());
+            if (pos >= 0 && qml.mid(pos, int(candidate.size())) == candidate) {
+                at = pos;
+                overlay = candidate;
+                break;
+            }
+        }
+        if (at < 0) return false;
+        addEdit(edits, at, int(overlay.size()), QString());
         QmlText::Binding width;
         if (!directBinding(masked, original.open, original.end, widthName, &width)) return false;
         if (qml.mid(width.valueBegin, width.valueEnd - width.valueBegin) != QLatin1String("0"))
@@ -1912,20 +1984,6 @@ bool sidebarOrderEdits(const QString &qml, const QString &masked, bool enabled, 
         return true;
     }
 
-    // An older patch centred the row inside the title bar. The update lands on
-    // the current shape instead of leaving the old anchor behind.
-    const auto centre = [&](QList<Edit> &list) {
-        QmlText::Binding binding;
-        if (!directBinding(masked, stripObject.open, stripObject.end,
-                           QStringLiteral("anchors.centerIn"), &binding)) return true;
-        if (qml.mid(binding.valueBegin, binding.valueEnd - binding.valueBegin) != QLatin1String("parent"))
-            return true;
-        addEdit(list, binding.nameBegin, binding.valueEnd - binding.nameBegin,
-                QStringLiteral("anchors.left: parent.left"));
-        return true;
-    };
-    if (!centre(edits)) return false;
-
     const QString nl = lineEnding(qml);
     if (!haveStripMarker) {
         addEdit(edits, qml.lastIndexOf(QLatin1Char('\n'), strip.first().begin) + 1, 0,
@@ -1968,15 +2026,14 @@ bool sidebarVisibilityEdits(const QString &qml, const QString &masked, bool enab
         return true;
     }
 
-    // The title bar already shows Back/Home/Recent, so the strip's own copies
-    // would be duplicates of the same three buttons.
+    // The row carries the sidebar's own Back/Home/Recent (the title bar's
+    // copies step aside instead), so only what the user unticked is switched
+    // off here.
     QStringList hiddenIds;
     for (const auto &slot : allStrip) {
-        const bool duplicate = slot.key == QLatin1String("back") || slot.key == QLatin1String("home")
-            || slot.key == QLatin1String("recent");
         const bool wanted = request.hidden.contains(slot.key)
             || (flipped && slot.key == QLatin1String("settings"));
-        if (duplicate || wanted) hiddenIds << slot.id;
+        if (wanted) hiddenIds << slot.id;
     }
     if (!hiddenRowEdits(qml, masked, hiddenIds, edits)) return false;
     for (const auto &slot : items)
@@ -2047,45 +2104,19 @@ bool topbarOrderEdits(const QString &qml, const QString &masked, bool enabled,
     return true;
 }
 
-// The title bar has to know where its own Back/Home/Recent end, so the moved
-// row can start right there. The expression only names the buttons this build
-// has.
+// A release of this tool asked the title bar where its own navigation ended
+// and started the moved row there. The row is centred again, so the property
+// that release added is only ever taken away - an already patched player is
+// cleaned up instead of carrying it along.
 bool topbarPositionEdits(const QString &qml, const QString &masked, bool enabled, QList<Edit> &edits)
 {
-    const QString nl = lineEnding(qml);
-    if (!enabled) {
-        const QRegularExpression marker(QStringLiteral(
-            "(\\r?\\n)[ \\t]*property real pBSISidebarX:[^\\r\\n]*// BSI CUSTOMIZER: sidebar row position"));
-        const auto match = marker.match(qml);
-        if (!match.hasMatch()) return true; // never added
-        addEdit(edits, int(match.capturedStart()), int(match.capturedLength()), QString());
-        return true;
-    }
-    if (qml.contains(QLatin1String("pBSISidebarX"))) return true; // already there
-    QmlText::Object root;
-    for (const auto &object : QmlText::objects(masked, QStringLiteral("Rectangle"))) {
-        if (root.nameBegin < 0 || object.nameBegin < root.nameBegin) root = object;
-    }
-    if (root.nameBegin < 0) {
-        for (const auto &object : QmlText::objects(masked, QStringLiteral("Item"))) {
-            if (root.nameBegin < 0 || object.nameBegin < root.nameBegin) root = object;
-        }
-    }
-    if (root.nameBegin < 0) return false;
-    QStringList terms;
-    for (const auto &object : QmlText::objects(masked, QStringLiteral("UiImageButton"))) {
-        QString id;
-        if (!objectId(qml, masked, object, &id)) continue;
-        if (id != QLatin1String("iBackBtn") && id != QLatin1String("iHomeBtn")
-            && id != QLatin1String("iRecentBtn")) continue;
-        terms << QStringLiteral("%1.x + %1.width").arg(id);
-    }
-    const QString expression = terms.isEmpty()
-        ? QStringLiteral("44")
-        : QStringLiteral("Math.max(%1) + 10").arg(terms.join(QStringLiteral(", ")));
-    addEdit(edits, root.open + 1, 0,
-            nl + QStringLiteral("    property real pBSISidebarX: ") + expression
-                + QStringLiteral(" // BSI CUSTOMIZER: sidebar row position"));
+    Q_UNUSED(masked)
+    if (enabled) return true;
+    const QRegularExpression marker(QStringLiteral(
+        "(\\r?\\n)[ \\t]*property real pBSISidebarX:[^\\r\\n]*// BSI CUSTOMIZER: sidebar row position"));
+    const auto match = marker.match(qml);
+    if (!match.hasMatch()) return true; // never added
+    addEdit(edits, int(match.capturedStart()), int(match.capturedLength()), QString());
     return true;
 }
 
@@ -2139,20 +2170,21 @@ bool sidebarRowEdits(QString &qml, bool enabled, QList<Edit> &edits, bool stockO
         } else if (type == QLatin1String("Column")) {
             addEdit(edits, strip.nameBegin, int(type.size()), QStringLiteral("Row"));
         }
-        // The row starts at the left edge of its title-bar host (the host itself
-        // begins after Back/Home/Recent), not in the middle of the bar. An older
-        // patch centred it; that shape is accepted and moved to the same place.
+        // The row sits in the middle of the title bar, exactly as it did before
+        // its buttons could be reordered. A release of this tool that started
+        // it right after Back/Home/Recent left `anchors.left` behind; that
+        // shape is read as well and lands on the centred one.
         QmlText::Binding fill;
         if (directBinding(masked, strip.open, strip.end, QStringLiteral("anchors.fill"), &fill)
             && qml.mid(fill.valueBegin, fill.valueEnd - fill.valueBegin) == QLatin1String("parent")) {
             addEdit(edits, fill.nameBegin, fill.valueEnd - fill.nameBegin,
-                    QStringLiteral("anchors.left: parent.left"));
+                    QStringLiteral("anchors.centerIn: parent"));
         } else {
-            QmlText::Binding centre;
-            if (directBinding(masked, strip.open, strip.end, QStringLiteral("anchors.centerIn"), &centre)
-                && qml.mid(centre.valueBegin, centre.valueEnd - centre.valueBegin) == QLatin1String("parent")) {
-                addEdit(edits, centre.nameBegin, centre.valueEnd - centre.nameBegin,
-                        QStringLiteral("anchors.left: parent.left"));
+            QmlText::Binding left;
+            if (directBinding(masked, strip.open, strip.end, QStringLiteral("anchors.left"), &left)
+                && qml.mid(left.valueBegin, left.valueEnd - left.valueBegin) == QLatin1String("parent.left")) {
+                addEdit(edits, left.nameBegin, left.valueEnd - left.nameBegin,
+                        QStringLiteral("anchors.centerIn: parent"));
             }
         }
         // Suppress the row inside the original (now zero-width) sidebar until
@@ -2165,17 +2197,17 @@ bool sidebarRowEdits(QString &qml, bool enabled, QList<Edit> &edits, bool stockO
         } else if (type == QLatin1String("Row")) {
             addEdit(edits, strip.nameBegin, int(type.size()), QStringLiteral("Column"));
         }
-        QmlText::Binding left;
-        if (directBinding(masked, strip.open, strip.end, QStringLiteral("anchors.left"), &left)
-            && qml.mid(left.valueBegin, left.valueEnd - left.valueBegin) == QLatin1String("parent.left")) {
-            addEdit(edits, left.nameBegin, left.valueEnd - left.nameBegin,
+        QmlText::Binding centre;
+        if (directBinding(masked, strip.open, strip.end, QStringLiteral("anchors.centerIn"), &centre)
+            && qml.mid(centre.valueBegin, centre.valueEnd - centre.valueBegin) == QLatin1String("parent")) {
+            addEdit(edits, centre.nameBegin, centre.valueEnd - centre.nameBegin,
                     QStringLiteral("anchors.fill: parent"));
         } else {
-            // Older patches centred the strip instead of aligning it left.
-            QmlText::Binding centre;
-            if (directBinding(masked, strip.open, strip.end, QStringLiteral("anchors.centerIn"), &centre)
-                && qml.mid(centre.valueBegin, centre.valueEnd - centre.valueBegin) == QLatin1String("parent")) {
-                addEdit(edits, centre.nameBegin, centre.valueEnd - centre.nameBegin,
+            // A release that left-aligned the row restored the same way.
+            QmlText::Binding left;
+            if (directBinding(masked, strip.open, strip.end, QStringLiteral("anchors.left"), &left)
+                && qml.mid(left.valueBegin, left.valueEnd - left.valueBegin) == QLatin1String("parent.left")) {
+                addEdit(edits, left.nameBegin, left.valueEnd - left.nameBegin,
                         QStringLiteral("anchors.fill: parent"));
             }
         }
@@ -2290,10 +2322,8 @@ bool sidebarEdits(QString &qml, bool enabled, QList<Edit> &edits)
 bool topbarEdits(QString &qml, bool enabled, QList<Edit> &edits)
 {
     const QString masked = QmlText::mask(qml);
-    // Where the moved row starts: right after the title bar's own buttons.
+    // Drop the anchor helper of an earlier release; the row is centred now.
     if (!topbarPositionEdits(qml, masked, enabled, edits)) return false;
-    // Their order follows the same request as the rest of the row.
-    if (enabled && !topbarOrderEdits(qml, masked, enabled, QStringList(), edits)) return false;
     // The sidebar toggle has nothing left to toggle, and leaving it live would
     // still resize the window by pSidebarWidth on click, so it is hidden.
     // Builds that do not carry the toggle (or name its id differently) are not
@@ -2356,10 +2386,12 @@ bool topbarEdits(QString &qml, bool enabled, QList<Edit> &edits)
     }
     // The title bar's own Back/Home/Recent live in pNonFixedTopbarItems and
     // are toggled imperatively; switching their element's pVisible off is the
-    // one hook that survives the width manager. The moved sidebar row carries
-    // its own copies centered, so the duplicates step aside. A build that has
-    // renamed, removed or re-bound one of these entries keeps working: only
-    // the entries that are still in the expected stock state are edited.
+    // one hook that survives the width manager. The moved row carries the
+    // sidebar's own copies centred, so a second, title-bar one would show the
+    // same button twice: the title bar's steps aside while the row is in
+    // place. A build that has renamed, removed or re-bound one of these
+    // entries keeps working: only the entries still in the expected stock
+    // state are edited, and both directions check that state first.
     const QList<QPair<QString, QString>> duplicates {
         { QStringLiteral("iBackBtn.visible"), QStringLiteral("pVisible") },
         { QStringLiteral("iHomeBtn.visible"), QStringLiteral("pVisible") },
@@ -2375,14 +2407,11 @@ bool topbarEdits(QString &qml, bool enabled, QList<Edit> &edits)
                 handled.insert(wanted.first);
                 continue;
             }
-            // The title bar keeps its own Back/Home/Recent: they are the first
-            // three buttons of the row the sidebar continues. An older patch
-            // (which centred the moved copies over them) switched these off,
-            // and that is undone here in either direction.
             const QString current = qml.mid(visible.valueBegin, visible.valueEnd - visible.valueBegin);
-            if (current == QLatin1String("false"))
+            const QString stock = enabled ? QStringLiteral("true") : QStringLiteral("false");
+            if (current == stock)
                 addEdit(edits, visible.valueBegin, visible.valueEnd - visible.valueBegin,
-                        QStringLiteral("true"));
+                        enabled ? QStringLiteral("false") : QStringLiteral("true"));
             handled.insert(wanted.first);
         }
     }
@@ -2448,8 +2477,12 @@ bool collectTopbarEdits(QString &qml, bool enabled, SidebarLayout, QList<Edit> &
 bool rowOrderDoc(QString &qml, const QString &name, bool enabled, const RowRequest &request)
 {
     if (name == QLatin1String("PlrTopbar.qml")) {
+        // The row is made of the sidebar's own buttons; the title bar's
+        // Back/Home/Recent only step aside while it is shown. A release that
+        // could reorder those three wrote a marker for them: its recorded
+        // stock order is put back and the marker removed, in both directions.
         QList<Edit> edits;
-        if (!topbarOrderEdits(qml, QmlText::mask(qml), enabled, request.order, edits)) return false;
+        if (!topbarOrderEdits(qml, QmlText::mask(qml), false, QStringList(), edits)) return false;
         return applyEdits(qml, edits);
     }
     if (name != QLatin1String("PlrSidebar.qml")) return true;
@@ -2496,9 +2529,7 @@ bool writeRowOrder(QByteArray &changed, bool enabled, const RowRequest &request,
                                         "expected shape; no file was written.").arg(name);
             return false;
         }
-        const QByteArray header = doc.bom ? QByteArray::fromHex("efbbbf") : QByteArray();
-        if (!QtResources::replaceResource(changed, doc.file.entryOff, doc.link,
-                                          header + doc.qml.toUtf8(), error)) return false;
+        if (!writeDoc(changed, doc, error)) return false;
     }
     return true;
 }
@@ -3055,9 +3086,7 @@ Result applyCleanUi(const QString &exePath, bool enabled)
         if (!applyEdits(doc.qml, edits))
             return refuse(QStringLiteral("Clean-UI edits in %1 overlap; no file was written.")
                               .arg(role.name));
-        const QByteArray header = doc.bom ? QByteArray::fromHex("efbbbf") : QByteArray();
-        if (!QtResources::replaceResource(changed, doc.file.entryOff, doc.link,
-                                          header + doc.qml.toUtf8(), &error))
+        if (!writeDoc(changed, doc, &error))
             return refuse(error);
         changedAny = true;
     }
@@ -3097,6 +3126,7 @@ struct Shape
     bool responsiveCurrent = false;
     bool installedByTitlebar = false;
     bool stockOverflowOnly = false; // moved strip keeps the player's own overflow code
+    bool leftAnchoredRow = false; // an earlier release started the row after the navigation
     bool editable = false;
     QString detail;
 };
@@ -3124,6 +3154,10 @@ Snapshot inspect(const QByteArray &image)
     snapshot.shape.responsiveCurrent = hasCurrentResponsiveHelper(snapshot.sidebar.qml);
     snapshot.shape.installedByTitlebar = snapshot.sidebar.qml.contains(kResponsiveBegin + kResponsiveAuto);
     snapshot.shape.stockOverflowOnly = snapshot.sidebar.qml.contains(kNoSmartMarker);
+    // An earlier release anchored the host to the title bar's navigation and
+    // told the strip to start at its left edge. That shape is centred again by
+    // the same Update that refreshes the responsive helper.
+    snapshot.shape.leftAnchoredRow = snapshot.plr.qml.contains(QLatin1String("parent.pBSISidebarX"));
     const QString &qml = snapshot.plr.qml;
     const QString masked = QmlText::mask(qml);
     const auto instances = QmlText::objects(masked, QStringLiteral("PlrSidebar"));
@@ -3283,7 +3317,6 @@ RowState buttonRows(const QByteArray &image)
         state.detail = error;
         return state;
     }
-    const QString topMasked = QmlText::mask(topbar.qml);
     const QString sideMasked = QmlText::mask(sidebar.qml);
     QmlText::Object root;
     QmlText::Object strip;
@@ -3305,13 +3338,8 @@ RowState buttonRows(const QByteArray &image)
         if (!list.isEmpty()) hiddenIds = list.split(QLatin1Char(','), Qt::SkipEmptyParts);
     }
 
-    for (const auto &slot : topbarSlots(topbar.qml, topMasked)) {
-        RowButton button;
-        button.key = slot.key;
-        button.label = buttonLabel(slot.key);
-        button.canHide = false; // the title bar keeps its own navigation
-        state.buttons << button;
-    }
+    // The row is the strip itself, in its declared order: the Repeater stands
+    // for the model entries it renders, every other child is one button.
     const bool flipped = settingsInRow(sidebar.qml, sideMasked);
     const QList<ButtonSlot> items = itemSlots(sidebar.qml, sideMasked);
     for (const auto &slot : stripSlots(sidebar.qml, sideMasked, strip)) {
@@ -3326,14 +3354,16 @@ RowState buttonRows(const QByteArray &image)
             }
             continue;
         }
-        // The strip's own Back/Home/Recent are the title bar's duplicates.
-        if (slot.key == QLatin1String("back") || slot.key == QLatin1String("home")
-            || slot.key == QLatin1String("recent")) continue;
         if (flipped && slot.key == QLatin1String("settings")) continue; // the entry is in the row
         RowButton button;
         button.key = slot.key;
         button.label = buttonLabel(slot.key);
         button.hidden = hiddenIds.contains(slot.id);
+        // The player's navigation is never taken out of the row: with the
+        // title bar's own copies stepped aside these are the only Back/Home/
+        // Recent left.
+        button.canHide = slot.key != QLatin1String("back") && slot.key != QLatin1String("home")
+            && slot.key != QLatin1String("recent");
         state.buttons << button;
     }
 
@@ -3384,9 +3414,10 @@ QList<Tweak> tweaks()
     return {
         { kSidebarToTitlebar,
           QStringLiteral("Sidebar buttons to the top bar"),
-          QStringLiteral("Moves the original sidebar buttons into a top-bar row that starts "
-                         "right after the title bar's own Back, Home and Recent buttons. The "
-                         "row opens with Fullscreen, Sound, Files / APK and Settings; the order "
+          QStringLiteral("Moves the original sidebar buttons into a row centred in the title "
+                         "bar, exactly where the stock buttons sit. The title bar's own Back, "
+                         "Home and Recent step aside so the row is the only copy. It opens "
+                         "with Fullscreen, Sound, Files / APK and Settings; the order "
                          "and the buttons it shows can be changed in \"Top-bar button order\". "
                          "Buttons stay shown until they no longer fit; extras then go into the "
                          "three-dot menu, and every popup opens beneath its own button. Turn "
@@ -3470,9 +3501,11 @@ State analyze(const QByteArray &image, const QString &id)
     // A build without the kebab/overflow model is not an older patch: its
     // stock overflow stays in charge, so it must never offer Update forever.
     state.needsUpdate = state.applied
-        && (snapshot.shape.legacyOverlay
+        && (snapshot.shape.legacyOverlay || snapshot.shape.leftAnchoredRow
             || (!snapshot.shape.responsiveCurrent && !snapshot.shape.stockOverflowOnly));
     state.detail = snapshot.shape.legacyOverlay ? QStringLiteral("Older layout applied. Press Update to repair it.")
+                  : snapshot.shape.leftAnchoredRow ? QStringLiteral("An older row started after the title bar's "
+                                                                    "buttons. Press Update to centre it.")
                   : state.needsUpdate ? QStringLiteral("Press Update for smart overflow and panels beneath buttons.")
                   : state.applied ? (snapshot.shape.stockOverflowOnly
                                          ? QStringLiteral("Applied. This build keeps its own overflow menu.")
@@ -3526,14 +3559,16 @@ Result apply(const QString &exePath, const QString &id, bool enabled)
         if (!responsiveEdits(doc.qml, enabled, false, edits) || !applyEdits(doc.qml, edits))
             return refuse(QStringLiteral("The sidebar's overflow/popup QML is not a supported shape; "
                                          "no file was written."));
-        const QByteArray header = doc.bom ? QByteArray::fromHex("efbbbf") : QByteArray();
-        if (!QtResources::replaceResource(changed, doc.file.entryOff, doc.link,
-                                          header + doc.qml.toUtf8(), &error)) return refuse(error);
+        if (!writeDoc(changed, doc, &error)) return refuse(error);
     } else {
         const Snapshot before = inspect(original);
         if (before.shape.layout == SidebarLayout::None || !before.shape.editable)
             return refuse(before.shape.detail);
-        const bool upgrade = enabled && before.shape.patched && before.shape.legacyOverlay;
+        // A row that starts after the navigation is upgraded in place, exactly
+        // like the duplicate-instance layout: every document is normalized to
+        // its stock text first, then the current patch is written.
+        const bool upgrade = enabled && before.shape.patched
+            && (before.shape.legacyOverlay || before.shape.leftAnchoredRow);
         const bool repair = enabled && before.shape.patched && !before.shape.responsiveCurrent
             && !before.shape.stockOverflowOnly && !upgrade;
         if (before.shape.patched == enabled && !upgrade && !repair)
@@ -3581,12 +3616,10 @@ Result apply(const QString &exePath, const QString &id, bool enabled)
                           .arg(role.name));
             if (!applyEdits(doc.qml, edits))
                 return refuse(QStringLiteral("Layout edits in %1 overlap; no file was written.").arg(role.name));
-            const QByteArray header = doc.bom ? QByteArray::fromHex("efbbbf") : QByteArray();
-            if (!QtResources::replaceResource(changed, doc.file.entryOff, doc.link,
-                                              header + doc.qml.toUtf8(), &error)) return refuse(error);
+            if (!writeDoc(changed, doc, &error)) return refuse(error);
         }
-        // The row gets its default order in the same write: the title bar's own
-        // Back/Home/Recent, then Fullscreen, Sound, Files / APK and Settings.
+        // The row gets its default order in the same write: Back, Home and
+        // Recent first, then Fullscreen, Sound, Files / APK and Settings.
         QString orderError;
         if (!writeRowOrder(changed, enabled, RowRequest(), &orderError)) return refuse(orderError);
     }
