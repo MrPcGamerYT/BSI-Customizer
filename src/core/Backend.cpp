@@ -1409,6 +1409,35 @@ QVariantList Backend::layoutTweaks()
     return out;
 }
 
+QVariantMap Backend::sidebarButtonRows()
+{
+    const auto state = LayoutPatcher::buttonRows(readExe());
+    QVariantList buttons;
+    for (const auto &button : state.buttons) {
+        buttons << QVariantMap {
+            { QStringLiteral("key"), button.key },
+            { QStringLiteral("label"), button.label.isEmpty() ? button.key : button.label },
+            { QStringLiteral("hidden"), button.hidden },
+            { QStringLiteral("canHide"), button.canHide },
+        };
+    }
+    return QVariantMap {
+        { QStringLiteral("supported"), state.supported },
+        { QStringLiteral("applied"), state.applied },
+        { QStringLiteral("detail"), state.detail },
+        { QStringLiteral("buttons"), buttons },
+    };
+}
+
+QVariantMap Backend::applySidebarOrder(const QStringList &order, const QStringList &hidden)
+{
+    if (actionsLocked()) return lockedMap();
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) { return worker.applySidebarOrder(order, hidden); });
+    const auto r = LayoutPatcher::applyOrder(m_settings->exePath(), order, hidden);
+    return result(r.ok, r.msg, r.ok ? QStringLiteral("green") : QStringLiteral("red"));
+}
+
 QVariantMap Backend::applyLayoutTweak(const QString &id, bool enabled)
 {
     if (actionsLocked()) return lockedMap();

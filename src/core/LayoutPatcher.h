@@ -28,8 +28,33 @@ struct State
     QString detail;         // why not supported, when applicable
 };
 
+// One button of the row the title-bar layout produces, in the order it is
+// shown. `canHide` is false for the title bar's own Back/Home/Recent, which
+// the user asked to keep.
+struct RowButton
+{
+    QString key;
+    QString label;
+    bool hidden = false;
+    bool canHide = true;
+};
+
+struct RowState
+{
+    bool supported = false;
+    bool applied = false;
+    QString detail;
+    QList<RowButton> buttons;
+};
+
 QList<Tweak> tweaks();
 State analyze(const QByteArray &image, const QString &id);
 Result apply(const QString &exePath, const QString &id, bool enabled);
+// The row's current order and hidden buttons, read from the player itself.
+RowState buttonRows(const QByteArray &image);
+// Reorders and hides buttons of the row. An empty `order` restores the default
+// (title bar navigation, Fullscreen, Sound, Files / APK, Settings, then the
+// rest in the player's own order).
+Result applyOrder(const QString &exePath, const QStringList &order, const QStringList &hidden);
 
 } // namespace LayoutPatcher
