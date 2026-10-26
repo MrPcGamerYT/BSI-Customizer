@@ -2288,8 +2288,7 @@ int runPatchRegressionTests()
         const QString mountSource = QStringLiteral(
             "import QtQuick 2.15\n"
             "Item { id: scene; width: 1000; height: 600\n"
-            " Rectangle { id: iTopbar; width: parent.width; height: 32\n"
-            "  property real pBSISidebarX: 144\n")
+            " Rectangle { id: iTopbar; width: parent.width; height: 32\n")
             + hostQml + QStringLiteral(
             "\n }\n"
             " Rectangle { id: iSidebar; objectName: 'movedSidebar'; width: 0\n"

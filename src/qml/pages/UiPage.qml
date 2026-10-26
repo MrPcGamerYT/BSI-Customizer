@@ -526,8 +526,10 @@ Item {
                                     color: Theme.textDim
                                     font.pixelSize: 10
                                 }
+                                // Every row can be moved - Back, Home and Recent
+                                // included; only the tick is limited to the
+                                // buttons that may be left out.
                                 ActionButton {
-                                    visible: modelData.canHide
                                     implicitHeight: 24
                                     implicitWidth: 26
                                     text: "\u2191"
@@ -535,7 +537,6 @@ Item {
                                     onClicked: page.moveButtonRow(index, -1)
                                 }
                                 ActionButton {
-                                    visible: modelData.canHide
                                     implicitHeight: 24
                                     implicitWidth: 26
                                     text: "\u2193"
