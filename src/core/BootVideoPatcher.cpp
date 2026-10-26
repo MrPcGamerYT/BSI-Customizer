@@ -2,6 +2,7 @@
 #include "ByteUtils.h"
 #include "BsDetector.h"
 #include "PatchFile.h"
+#include "PeUtils.h"
 #include "QtResources.h"
 #include "ThemeEngine.h"
 #include "ZlibUtils.h"
@@ -318,6 +319,8 @@ Result patch(const QString &exePath, int holdMs)
     QFile file(exePath);
     if (!file.open(QIODevice::ReadOnly)) return { false, QStringLiteral("Cannot read HD-Player.exe.") };
     const QByteArray original = file.readAll(); file.close();
+    if (PeUtils::sections(original).isEmpty())
+        return {false, QStringLiteral("This file is not a player executable; nothing was written.")};
     auto candidates = streams(original);
     for (auto &stream : candidates) {
         if (!bootStub(stream.text)) continue;

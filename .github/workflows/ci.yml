@@ -181,6 +181,10 @@ jobs:
           Get-Content $err -ErrorAction SilentlyContinue
 
           $passed = Select-String -Path $log -Pattern 'ALL TESTS PASSED' -Quiet
+          # A run that never printed its summary died before the end (a crash,
+          # an abort), and then the lines that mention "fail" say nothing about
+          # where it stopped: the tail of the log is what has to be published.
+          $summarised = Select-String -Path $log -Pattern 'SELF-TEST FAILED|ALL TESTS PASSED' -Quiet
           if ($p.ExitCode -ne 0 -or -not $passed) {
             # A failed job's log cannot be read back through the API on this
             # account, so the lines that explain the failure are republished as
@@ -199,7 +203,7 @@ jobs:
               Write-Host "::error::$clean"
               $count++
             }
-            if ($count -eq 0) {
+            if ($count -eq 0 -or -not $summarised) {
               foreach ($line in (Get-Content -LiteralPath $log -Tail 30)) {
                 $clean = $line -replace '%', '%25' -replace "`r", ' '
                 if ($clean.Length -gt 400) { $clean = $clean.Substring(0, 400) }
@@ -208,3 +212,14 @@ jobs:
             }
             throw "self-test failed (exit code $($p.ExitCode))"
           }
+
+      # A failing job's log cannot be read back through the API on this account,
+      # and the annotations only carry the lines that mention failure. The whole
+      # log is published as an artifact so the run can be read afterwards.
+      - name: Upload self-test log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: selftest-log
+          path: ${{ runner.temp }}/selftest.log
+          if-no-files-found: ignore

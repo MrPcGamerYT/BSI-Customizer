@@ -258,7 +258,7 @@ target_link_libraries(BSICustomizer PRIVATE
 # alongside the customizer: deployment is explicit, into a selected HD-Player.
 if(WIN32 AND MSVC AND CMAKE_SIZEOF_VOID_P EQUAL 8)
     add_library(BsiGifRpcProxy SHARED plugins/gif-rpc/proxy.cpp plugins/gif-rpc/version.def)
-    set_target_properties(BsiGifRpcProxy PROPERTIES OUTPUT_NAME version PREFIX ""
+    set_target_properties(BsiGifRpcProxy PROPERTIES AUTOMOC OFF AUTOUIC OFF AUTORCC OFF OUTPUT_NAME version PREFIX ""
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/gif-rpc"
         MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
     target_compile_features(BsiGifRpcProxy PRIVATE cxx_std_17)

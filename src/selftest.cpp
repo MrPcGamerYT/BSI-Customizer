@@ -1517,9 +1517,10 @@ int runSelfTest()
         }
 
         const auto r = BootVideoPatcher::patch(exePath);
-        check(!r.ok, "unregistered raw boot blobs are not treated as a verified Qt resource");
+        check(!r.ok && r.msg.contains(QLatin1String("not a player executable")),
+              "a blob that is not a PE is refused before anything is written");
         QFile f(exePath); f.open(QIODevice::ReadOnly);
-        check(f.readAll() == data, "unsupported boot layouts are left unchanged");
+        check(f.readAll() == data, "the refused file is left unchanged");
     }
 
     // ------------------------------------------------------------------

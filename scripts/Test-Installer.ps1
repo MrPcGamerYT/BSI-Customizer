@@ -1,4 +1,4 @@
-param([Parameter(Mandatory=$true)][string]$SetupPath)
+param([Parameter(Mandatory=$true)][string]$SetupPath, [Parameter(Mandatory=$true)][string]$SourceExe)
 $ErrorActionPreference = 'Stop'
 $setup = (Resolve-Path -LiteralPath $SetupPath).Path
 $root = Join-Path $env:RUNNER_TEMP ('BSI-setup-test-' + [guid]::NewGuid().ToString('N'))
@@ -12,6 +12,9 @@ if (-not $p.WaitForExit(180000)) { $p.Kill(); throw "Setup timed out; log: $log"
 if ($p.ExitCode -notin @(0,3010)) { Get-Content $log -Tail 50; throw "Setup failed with exit $($p.ExitCode)" }
 $exe = Join-Path $dest 'BSI-Customizer.exe'
 if (-not (Test-Path $exe)) { throw 'Setup did not install BSI-Customizer.exe' }
+if ((Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash -ne (Get-FileHash -LiteralPath $SourceExe -Algorithm SHA256).Hash) {
+    throw 'The installed EXE differs from the verified build artifact'
+}
 & "$PSScriptRoot/Test-Manifest.ps1" -ExecutablePath $exe
 if (-not (Test-Path (Join-Path $dest 'unins000.exe'))) { throw 'Setup did not install its uninstaller' }
 # Exercise an in-place upgrade, preserving the AppId and existing installation.

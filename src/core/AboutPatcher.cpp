@@ -1114,15 +1114,18 @@ bool findDoc(const QByteArray &image, const QString &name, Doc *out, QString *er
 {
     QList<Doc> docs;
     if (!findDocs(image, name, &docs, error)) {
-        // Nothing came out of the tree: the page may still be there.
+        // Nothing came out of the tree: the page may still be there as a record
+        // the tree can map, or as one it cannot - in which case it is written in
+        // place, inside the room it already has.
         if (docFromBytes(image, name, out)) return true;
-        return false;
+        return findDocByBytes(image, out);
     }
     if (docs.isEmpty()) {
         // The tree was walkable but holds no page: the build may keep it as a
         // compressed source record (or the tree belongs to another pool), so
         // the bytes still get their turn before "not embedded" is reported.
         if (docFromBytes(image, name, out)) return true;
+        if (findDocByBytes(image, out)) return true;
         if (error) *error = QStringLiteral("%1 is not embedded in this player.").arg(name);
         return false;
     }
