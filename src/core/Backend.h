@@ -183,6 +183,9 @@ public:
     // ---- boot video ----
     Q_INVOKABLE QVariantMap bootPatch(int holdMs = 3000);
     Q_INVOKABLE QVariantMap purgePlayerCache();
+    Q_INVOKABLE QVariantMap gifRpcInspect(const QString &path);
+    Q_INVOKABLE QVariantMap gifRpcApply(const QString &path, const QVariantMap &settings, bool replaceExisting = false);
+    Q_INVOKABLE QVariantMap gifRpcRestore(const QString &path);
 
     // ---- extras ----
     Q_INVOKABLE QVariantMap applyRemovals(const QStringList &names);

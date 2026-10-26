@@ -3,6 +3,7 @@
 #include "AuthManager.h"
 #include "BootVideoPatcher.h"
 #include "PlayerCache.h"
+#include "GifRpc.h"
 #include "BsDetector.h"
 #include "ExtrasPatcher.h"
 #include "IntegrityPatcher.h"
@@ -1402,6 +1403,29 @@ QVariantMap Backend::purgePlayerCache()
         return result(false, QStringLiteral("Windows AppData locations are unavailable; nothing was deleted."), QStringLiteral("red"));
     const auto r = PlayerCache::purge(roots);
     return result(r.ok, r.msg, r.ok ? QStringLiteral("green") : QStringLiteral("orange"));
+}
+
+QVariantMap Backend::gifRpcInspect(const QString &path)
+{
+    return GifRpc::inspect(path);
+}
+QVariantMap Backend::gifRpcApply(const QString &path, const QVariantMap &settings, bool replaceExisting)
+{
+    if (actionsLocked()) return lockedMap();
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) { return worker.gifRpcApply(path, settings, replaceExisting); });
+    const auto r = GifRpc::apply(path, settings, replaceExisting);
+    doLog(r.value(QStringLiteral("msg")).toString(), r.value(QStringLiteral("ok")).toBool() ? QStringLiteral("green") : QStringLiteral("red"));
+    return r;
+}
+QVariantMap Backend::gifRpcRestore(const QString &path)
+{
+    if (actionsLocked()) return lockedMap();
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) { return worker.gifRpcRestore(path); });
+    const auto r = GifRpc::restore(path);
+    doLog(r.value(QStringLiteral("msg")).toString(), r.value(QStringLiteral("ok")).toBool() ? QStringLiteral("green") : QStringLiteral("red"));
+    return r;
 }
 
 // ------------------------------------------------------------------ extras

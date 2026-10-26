@@ -1,6 +1,8 @@
 #include "core/Backend.h"
 #include "core/BootVideoPatcher.h"
 #include "core/PlayerCache.h"
+#include "core/GifRpc.h"
+#include "../plugins/gif-rpc/RpcPayload.h"
 #include "core/BsDetector.h"
 #include "core/EmbeddedImages.h"
 #include "core/EmbeddedResources.h"
@@ -3031,6 +3033,72 @@ Window {
         write(stubPath+QStringLiteral(".bak"),r.f.bytes);
         check(BootVideoPatcher::patch(stubPath).ok && resourceText(read(stubPath),stub,QStringLiteral("boot.qml")).contains(QLatin1String("iBootImage")),
               "a linked backup repairs the boot stub without discarding unrelated executable edits");
+    }
+
+    std::printf("[gif-rpc] clean proxy validation, JSON escaping, configuration and restore\n");
+    {
+        GifRpcPayload::Config payload;
+        payload.state="quotes \" \\ \n unicode";payload.details={"one","two"};payload.timestamp=true;
+        payload.label1="YouTube";payload.url1="https://youtube.com/@nova_xis20";
+        payload.largeImage="https://example.org/presence.gif";
+        const auto text=GifRpcPayload::activity(payload,1,123,456,7);
+        QJsonParseError parse;
+        const auto json=QJsonDocument::fromJson(QByteArray::fromStdString(text),&parse);
+        const auto activity=json.object().value(QStringLiteral("args")).toObject().value(QStringLiteral("activity")).toObject();
+        check(parse.error==QJsonParseError::NoError && activity.value(QStringLiteral("state")).toString().toStdString()==payload.state
+                  && activity.value(QStringLiteral("details")).toString()==QLatin1String("two"),
+              "GIF RPC serializes real Discord IPC JSON, escaping strings and rotating details");
+        QVariantMap config={{QStringLiteral("AppId"),QStringLiteral("1542174289523122330")},
+            {QStringLiteral("State"),QStringLiteral("Nova Ω")},{QStringLiteral("Details"),QStringLiteral("one\ntwo")},
+            {QStringLiteral("Enabled"),true},{QStringLiteral("Interval"),5},{QStringLiteral("Timestamp"),true}};
+        QString error;
+        check(GifRpc::validate(config,&error),"valid RPC-only configuration is accepted");
+        auto invalid=config;invalid[QStringLiteral("AppId")]=QStringLiteral("not an id");
+        check(!GifRpc::validate(invalid,&error),"GIF RPC rejects invalid application IDs");
+        invalid=config;invalid[QStringLiteral("LargeImage")]=QStringLiteral("file:///C:/Windows/version.dll");
+        check(!GifRpc::validate(invalid,&error),"GIF RPC refuses local/executable image URL schemes");
+        invalid=config;invalid[QStringLiteral("Button1Label")]=QStringLiteral("missing URL");
+        check(!GifRpc::validate(invalid,&error),"GIF RPC validates paired button labels and HTTPS URLs");
+#ifdef Q_OS_WIN
+        const auto bytes=GifRpc::bundledProxy();
+        check(GifRpc::isOurProxy(bytes,&error),QStringLiteral("embedded RPC-only DLL has a valid x64 PE/DLL header, schema and all forwarding exports: %1").arg(error));
+        check(!GifRpc::isOurProxy(bytes.left(128),&error),"truncated RPC DLLs are refused");
+        const auto folder=temp.filePath(QStringLiteral("gif-rpc-install"));QDir().mkpath(folder);
+        const auto exe=QDir(folder).filePath(QStringLiteral("HD-Player.exe"));write(exe,peFile());
+        const auto dll=QDir(folder).filePath(QStringLiteral("version.dll"));
+        const auto ini=QDir(folder).filePath(QStringLiteral("bsi-gif-rpc.ini"));
+        auto installed=GifRpc::apply(exe,config);
+        check(installed.value(QStringLiteral("ok")).toBool(),installed.value(QStringLiteral("msg")).toString());
+        const auto inspected=GifRpc::inspect(exe);
+        check(inspected.value(QStringLiteral("installed")).toBool()
+                  && inspected.value(QStringLiteral("settings")).toMap().value(QStringLiteral("State")).toString()==QLatin1String("Nova Ω"),
+              "installed RPC settings round-trip Unicode without binary string-slot patching");
+        // Loading only OUR verified payload in the customizer test process must
+        // forward version APIs without starting RPC (host is not HD-Player).
+        HMODULE proxy=LoadLibraryW(reinterpret_cast<LPCWSTR>(dll.utf16()));
+        check(proxy!=nullptr,"our validated proxy loads without a Discord SDK dependency");
+        if(proxy) {
+            using Schema=const char *(*)();const auto schema=reinterpret_cast<Schema>(GetProcAddress(proxy,"BsiGifRpcSchema"));
+            using Size=DWORD (WINAPI*)(LPCWSTR,LPDWORD);
+            const auto size=reinterpret_cast<Size>(GetProcAddress(proxy,"GetFileVersionInfoSizeW"));
+            wchar_t windows[MAX_PATH];GetSystemDirectoryW(windows,MAX_PATH);
+            const QString kernel=QDir(QString::fromWCharArray(windows)).filePath(QStringLiteral("kernel32.dll"));DWORD handle=0;
+            check(schema&&QByteArray(schema())=="BSI_GIF_RPC_PROXY_V1"&&size&&size(reinterpret_cast<LPCWSTR>(kernel.utf16()),&handle)>0,
+                  "proxy schema and actual System32 version API forwarding work");
+            FreeLibrary(proxy);
+        }
+        check(GifRpc::restore(exe).value(QStringLiteral("ok")).toBool()&&!QFileInfo::exists(dll),
+              "removing a new RPC deployment does not delete saved settings or unrelated files");
+        const QByteArray original=peFile();write(dll,original);
+        const auto beforeIni=read(ini);
+        check(!GifRpc::apply(exe,config).value(QStringLiteral("ok")).toBool()&&read(dll)==original&&read(ini)==beforeIni,
+              "a third-party app-local version.dll cannot be overwritten implicitly");
+        check(GifRpc::apply(exe,config,true).value(QStringLiteral("ok")).toBool()
+                  && read(dll+QStringLiteral(".bsi-gif-rpc.bak"))==original,
+              "explicit replacement preserves and verifies the original DLL backup");
+        check(GifRpc::restore(exe).value(QStringLiteral("ok")).toBool()&&read(dll)==original,
+              "RPC restore recovers the original app-local DLL byte for byte");
+#endif
     }
 
     std::printf("[player-cache] exact AppData cache scope and symlink isolation\n");

@@ -298,6 +298,9 @@ jobs:
           "### Updater check" >> $env:GITHUB_STEP_SUMMARY
           "The updater accepts **$env:SETUP_NAME** (printed verdict above)." >> $env:GITHUB_STEP_SUMMARY
 
+      - name: Install, upgrade and uninstall the actual setup
+        run: ./scripts/Test-Installer.ps1 -SetupPath "build/artifacts/${{ steps.meta.outputs.setup_name }}"
+
       # Test builds need a downloadable EXE too, without creating a tag or
       # publishing a release. Keep retention short to limit storage usage.
       - name: Upload tested portable EXE

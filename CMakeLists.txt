@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.21)
 
-project(BSICustomizer VERSION 2.6.2 LANGUAGES CXX)
+project(BSICustomizer VERSION 2.6.3 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -55,6 +55,8 @@ qt_add_executable(BSICustomizer
     src/core/RpcIdPatcher.cpp
     src/core/VersionResource.h
     src/core/VersionResource.cpp
+    src/core/GifRpc.h
+    src/core/GifRpc.cpp
     src/core/PlayerCache.h
     src/core/PlayerCache.cpp
     src/core/BootVideoPatcher.h
@@ -223,6 +225,7 @@ qt_add_qml_module(BSICustomizer
         src/qml/pages/IntegrityPage.qml
         src/qml/pages/BootVideoPage.qml
         src/qml/pages/UiPage.qml
+        src/qml/pages/GifRpcPage.qml
         src/qml/pages/RpcidPage.qml
         src/qml/pages/AppearancePage.qml
         src/qml/pages/AboutPage.qml
@@ -250,6 +253,23 @@ target_link_libraries(BSICustomizer PRIVATE
     Qt6::QuickControls2
     Qt6::Svg
 )
+
+# Embed our clean, RPC-only proxy in the inner EXE. Never put version.dll
+# alongside the customizer: deployment is explicit, into a selected HD-Player.
+if(WIN32 AND MSVC AND CMAKE_SIZEOF_VOID_P EQUAL 8)
+    add_library(BsiGifRpcProxy SHARED plugins/gif-rpc/proxy.cpp plugins/gif-rpc/version.def)
+    set_target_properties(BsiGifRpcProxy PROPERTIES OUTPUT_NAME version PREFIX ""
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/gif-rpc"
+        MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+    target_compile_features(BsiGifRpcProxy PRIVATE cxx_std_17)
+    set(_gif_rc "${CMAKE_CURRENT_BINARY_DIR}/gif-rpc-payload-$<CONFIG>.rc")
+    add_custom_command(OUTPUT "${_gif_rc}"
+        COMMAND ${CMAKE_COMMAND} "-DDLL=$<TARGET_FILE:BsiGifRpcProxy>" "-DOUTPUT=${_gif_rc}"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/EmbedGifRpc.cmake"
+        DEPENDS BsiGifRpcProxy "$<TARGET_FILE:BsiGifRpcProxy>" cmake/EmbedGifRpc.cmake VERBATIM)
+    target_sources(BSICustomizer PRIVATE "${_gif_rc}")
+    add_dependencies(BSICustomizer BsiGifRpcProxy)
+endif()
 
 install(TARGETS BSICustomizer RUNTIME DESTINATION bin)
 # Discord Rich Presence discovery/patching is compiled into the application,
