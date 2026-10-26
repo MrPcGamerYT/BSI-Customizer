@@ -2677,8 +2677,12 @@ Window {
             QString leftSidebar = patchedSidebar;
             const QString centredMargin =
                 QStringLiteral("            anchors.leftMargin: Math.min(144, parent.width / 4)");
+            // The strip is the first UiRowLayout, so its own anchor is the
+            // occurrence that follows it - other members may be centred too.
+            const int centredAt = leftSidebar.indexOf(QLatin1String("anchors.centerIn: parent"),
+                                                      leftSidebar.indexOf(QLatin1String("UiRowLayout")));
             check(leftPlr.contains(centredMargin) && leftTopbar.count(QStringLiteral("pVisible: false")) == 3
-                      && leftSidebar.count(QStringLiteral("anchors.centerIn: parent")) == 1
+                      && centredAt > 0
                       && leftSidebar.contains(QStringLiteral("hidden row buttons=iSettingsBtn")),
                   "the centred fixtures contain what the left-anchored shape is built from");
             leftPlr.replace(centredMargin, QStringLiteral("            anchors.leftMargin: parent.pBSISidebarX"));
@@ -2687,8 +2691,9 @@ Window {
             if (itemsAt > 0)
                 leftTopbar.insert(itemsAt, QStringLiteral("    property real pBSISidebarX: 144"
                                                           " // BSI CUSTOMIZER: sidebar row position\r\n"));
-            leftSidebar.replace(QStringLiteral("anchors.centerIn: parent"),
-                                QStringLiteral("anchors.left: parent.left"));
+            if (centredAt > 0)
+                leftSidebar.replace(centredAt, int(QLatin1String("anchors.centerIn: parent").size()),
+                                    QStringLiteral("anchors.left: parent.left"));
             leftSidebar.replace(QStringLiteral("hidden row buttons=iSettingsBtn"),
                                 QStringLiteral("hidden row buttons=iBackBtn,iHomeBtn,iRecentBtn,iSettingsBtn"));
             leftSidebar.replace(QStringLiteral("iSettingsBtn.visible = false"),
