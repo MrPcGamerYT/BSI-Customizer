@@ -91,6 +91,7 @@ void check(bool ok, const QString &message)
 
 // A byte comparison that fails says nothing about where: show the first lines
 // that differ so one CI annotation is enough to diagnose it.
+// One line, because a GitHub annotation stops at the first line break.
 QString firstDifference(const QString &expected, const QString &actual)
 {
     const QStringList left = expected.split(QLatin1Char('\n'));
@@ -100,12 +101,16 @@ QString firstDifference(const QString &expected, const QString &actual)
         const QString a = i < left.size() ? left.at(i) : QStringLiteral("<end of file>");
         const QString b = i < right.size() ? right.at(i) : QStringLiteral("<end of file>");
         if (a == b) continue;
-        lines << QStringLiteral("line %1 differs\n  expected: %2\n  actual:   %3")
-                     .arg(i + 1).arg(a.left(240)).arg(b.left(240));
+        QString shown = a.trimmed();
+        QString got = b.trimmed();
+        lines << QStringLiteral("line %1 expected [%2] got [%3]")
+                     .arg(i + 1).arg(shown.left(150), got.left(150));
         if (lines.size() == 3) break;
     }
-    return lines.isEmpty() ? QStringLiteral("the documents differ only in length")
-                           : lines.join(QLatin1Char('\n'));
+    if (lines.isEmpty())
+        return QStringLiteral("no line differs: lengths %1 vs %2").arg(expected.size()).arg(actual.size());
+    return QStringLiteral("sizes %1 vs %2: ").arg(expected.size()).arg(actual.size())
+        + lines.join(QLatin1String(" || "));
 }
 // The job log of a *passing* Windows run is not retrievable either, so the few
 // numbers that prove what was really exercised are published as annotations.
@@ -2542,7 +2547,7 @@ Window {
               QStringLiteral("Update installs the current helper without moving the sidebar twice%1")
                   .arg(titlebarUpgrade.ok && upgradedTitlebar == patchedSidebar
                            ? QString()
-                           : QStringLiteral("\napply: %1\n%2").arg(titlebarUpgrade.msg,
+                           : QStringLiteral(" -- apply: %1 -- %2").arg(titlebarUpgrade.msg,
                                  firstDifference(patchedSidebar, upgradedTitlebar))));
         check(LayoutPatcher::apply(earlierTitlebarPath, id, false).ok
                   && resourceText(read(earlierTitlebarPath), earlierTitlebar, QStringLiteral("PlrSidebar.qml")) == sidebar
@@ -2657,7 +2662,7 @@ Window {
         check(singleDone,
               QStringLiteral("Update adds smart overflow and anchored panels without changing the existing title bar%1")
                   .arg(singleDone ? QString()
-                                  : QStringLiteral("\napply: %1\n%2").arg(singleUpgrade.msg,
+                                  : QStringLiteral(" -- apply: %1 -- %2").arg(singleUpgrade.msg,
                                         firstDifference(patchedSidebar, upgradedSingle))));
         check(LayoutPatcher::apply(oldSinglePath, id, false).ok
                   && resourceText(read(oldSinglePath), oldSingle, QStringLiteral("PlrSidebar.qml")) == sidebar,
@@ -2682,11 +2687,28 @@ Window {
                                                              QStringLiteral("recent") })
                   && defaultRows.buttons.first().canHide == false,
               "the row starts with the title bar's own navigation, which is never hidden");
+        const auto hiddenRowBlock = [](const QString &qml) {
+            const int at = qml.indexOf(QLatin1String("// BSI CUSTOMIZER: hidden row buttons="));
+            if (at < 0) return QString();
+            const int end = qml.indexOf(QLatin1Char('\n'), qml.indexOf(QLatin1Char('\n'), at) + 1);
+            return end < 0 ? qml.mid(at) : qml.mid(at, end - at);
+        };
+        const QString settingsBlock = hiddenRowBlock(patchedSidebar);
+        QStringList settingsMissing;
+        for (const auto &id : { QStringLiteral("iSettingsBtn"), QStringLiteral("iBackBtn"),
+                                QStringLiteral("iHomeBtn"), QStringLiteral("iRecentBtn") }) {
+            if (!settingsBlock.contains(QStringLiteral("%1.visible = false").arg(id)))
+                settingsMissing << id;
+        }
         check(patchedSidebar.contains(QLatin1String("true /* BSI CUSTOMIZER: settings in the row */"))
-                  && patchedSidebar.contains(
-                      QLatin1String("// BSI CUSTOMIZER: hidden row buttons=iBackBtn,iHomeBtn,iRecentBtn,iSettingsBtn"))
-                  && patchedSidebar.contains(QLatin1String("iSettingsBtn.visible = false")),
-              "Settings joins the row as a normal button and its own strip button steps aside");
+                  && settingsBlock.contains(QLatin1String("hidden row buttons="))
+                  && settingsMissing.isEmpty(),
+              QStringLiteral("Settings joins the row as a normal button and its own strip button steps aside%1")
+                  .arg(settingsMissing.isEmpty()
+                           ? QString()
+                           : QStringLiteral(" -- block [%1] missing [%2]")
+                                 .arg(settingsBlock.simplified().left(220),
+                                      settingsMissing.join(QLatin1Char(',')))));
         check(patchedPlr.contains(QLatin1String("anchors.leftMargin: parent.pBSISidebarX")),
               "the row is told where the title bar's own buttons end");
 
