@@ -59,7 +59,8 @@ normally. To capture a failure:
 Send the exact error and the relevant log tail (remove personal paths if needed).
 A "setup fails" description alone does not identify the original failure.
 
-The workflow tests actual install, installed-file SHA-256, administrator
+On disposable GitHub-hosted Windows runners only (never a self-hosted user PC),
+the workflow tests actual install, installed-file SHA-256, administrator
 manifest, reinstall/upgrade and uninstall, rather than only verifying the
 installer's PE header. This does not substitute for interactive/UAC testing on
 the user's Windows configuration.

@@ -1,5 +1,8 @@
 param([Parameter(Mandatory=$true)][string]$SetupPath, [Parameter(Mandatory=$true)][string]$SourceExe)
 $ErrorActionPreference = 'Stop'
+if ($env:GITHUB_ACTIONS -ne 'true' -or $env:BSI_DISPOSABLE_INSTALL_TEST -ne '1') {
+    throw 'Installer lifecycle tests are restricted to explicitly marked disposable hosted CI machines; they must not overwrite a user installation registration.'
+}
 $setup = (Resolve-Path -LiteralPath $SetupPath).Path
 $root = Join-Path $env:RUNNER_TEMP ('BSI-setup-test-' + [guid]::NewGuid().ToString('N'))
 $dest = Join-Path $root 'installed'

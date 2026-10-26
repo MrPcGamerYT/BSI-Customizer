@@ -36,6 +36,8 @@ jobs:
             -fsanitize=address,undefined -fno-omit-frame-pointer \
             tests/rpc_scan_optimization_test.cpp src/core/RpcIdScan.cpp -o /tmp/rpc-scan-test
           /tmp/rpc-scan-test
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -fno-omit-frame-pointer tests/gif_rpc_payload_test.cpp -o /tmp/gif-rpc-payload-test
+          /tmp/gif-rpc-payload-test
 
   resources-ui-regression:
     name: Resources manual scan and search (Qt 6.8)

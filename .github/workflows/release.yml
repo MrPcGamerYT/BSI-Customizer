@@ -299,7 +299,16 @@ jobs:
           "The updater accepts **$env:SETUP_NAME** (printed verdict above)." >> $env:GITHUB_STEP_SUMMARY
 
       - name: Install, upgrade and uninstall the actual setup
-        run: ./scripts/Test-Installer.ps1 -SetupPath "build/artifacts/${{ steps.meta.outputs.setup_name }}" -SourceExe "build/artifacts/${{ steps.meta.outputs.exe_name }}"
+        if: ${{ runner.environment == 'github-hosted' }}
+        env:
+          BSI_DISPOSABLE_INSTALL_TEST: '1'
+        run: |
+          try {
+            ./scripts/Test-Installer.ps1 -SetupPath "build/artifacts/${{ steps.meta.outputs.setup_name }}" -SourceExe "build/artifacts/${{ steps.meta.outputs.exe_name }}"
+          } catch {
+            Write-Host "::error::$($_.Exception.Message -replace '%', '%25')"
+            throw
+          }
 
       # Test builds need a downloadable EXE too, without creating a tag or
       # publishing a release. Keep retention short to limit storage usage.
