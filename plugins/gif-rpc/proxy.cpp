@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <ctime>
+#include <cwchar>
 #include "RpcPayload.h"
 
 // Marker + explicit export identify OUR app-local payload. No other version.dll

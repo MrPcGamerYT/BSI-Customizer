@@ -3154,7 +3154,7 @@ Window {
         check(installed.value(QStringLiteral("ok")).toBool(),installed.value(QStringLiteral("msg")).toString());
         const auto inspected=GifRpc::inspect(exe);
         check(inspected.value(QStringLiteral("installed")).toBool()
-                  && inspected.value(QStringLiteral("settings")).toMap().value(QStringLiteral("State")).toString()==QLatin1String("Nova Ω"),
+                  && inspected.value(QStringLiteral("settings")).toMap().value(QStringLiteral("State")).toString()==QStringLiteral("Nova Ω"),
               "installed RPC settings round-trip Unicode without binary string-slot patching");
         // Loading only OUR verified payload in the customizer test process must
         // forward version APIs without starting RPC (host is not HD-Player).
