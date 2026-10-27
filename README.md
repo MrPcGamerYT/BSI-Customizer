@@ -640,7 +640,27 @@ For an unsupported real EXE, collect a read-only diagnostic report:
 .\BSI-Customizer.exe --theme-probe "C:\Program Files\BlueStacks_nxt\HD-Player.exe"
 ```
 
-**No EXE upload is needed.** With BSI Customizer **2.6.4 or newer** installed,
+**No EXE upload is needed.** If you cannot update the customizer, download
+[`scripts/Collect-Theme-Layout.ps1`](scripts/Collect-Theme-Layout.ps1) and run it
+with the built-in Windows PowerShell (5.1+):
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File "$env:USERPROFILE\Downloads\Collect-Theme-Layout.ps1"
+```
+
+Adjust the script path if it was downloaded elsewhere. `-ExecutionPolicy Bypass`
+applies only to that process; it does not change the system policy. No admin
+rights, customizer update or third-party tools are needed. The script reads
+MSI App Player's PE metadata and bounded resource-table hex excerpts, then
+creates a new `%TEMP%\BSI-theme-layout-<id>.txt` and opens it in Notepad. It
+never loads or runs the emulator, patches files, or uploads anything. Review
+the local path and partial resource/code excerpts before sharing. Only the
+small report is needed; its contents can also be pasted into chat. Candidate
+tables are not verified mappings and do not authorize patching. For another
+installation, pass `-PlayerPath "C:\path\to\HD-Player.exe"`. This fallback
+has been syntax-checked; Windows execution still needs verification.
+
+With BSI Customizer **2.6.4 or newer** installed,
 right-click [`scripts/Collect-Theme-Probe.cmd`](scripts/Collect-Theme-Probe.cmd)
 and choose **Run as administrator**. Its default target is MSI App Player at
 `C:\Program Files\BlueStacks_msi5\HD-Player.exe`. It opens a small text report
