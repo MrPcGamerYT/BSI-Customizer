@@ -640,6 +640,25 @@ For an unsupported real EXE, collect a read-only diagnostic report:
 .\BSI-Customizer.exe --theme-probe "C:\Program Files\BlueStacks_nxt\HD-Player.exe"
 ```
 
+**No EXE upload is needed.** With BSI Customizer **2.6.4 or newer** installed,
+right-click [`scripts/Collect-Theme-Probe.cmd`](scripts/Collect-Theme-Probe.cmd)
+and choose **Run as administrator**. Its default target is MSI App Player at
+`C:\Program Files\BlueStacks_msi5\HD-Player.exe`. It opens a small text report
+in Notepad and saves it, alongside any errors, in `%TEMP%\BSI-theme-probe`.
+You can upload just those text files or paste their contents into the issue/chat.
+The script never uploads anything, modifies the emulator or runs a patch.
+Review local paths and resource previews before sharing. Existing reports in
+that report folder are overwritten when the script runs again.
+
+For other install locations, pass the emulator path and optionally the customizer
+path as quoted arguments to the script. The report should begin with
+`report format: 2 (escaped binary previews)`. Earlier builds could stop midway
+through a nearby compressed image's preview, because its NUL byte truncated
+C-string output. Version 2.6.4 escapes binary previews and writes the entire
+UTF-8 report, with regression coverage for the real redirected CLI. This fixes
+**diagnostic collection**, not an unverified theme-resource mapping; patching
+still refuses an unvalidated resource tree.
+
 ## Third-party notices
 
 The restricted x64 prologue decoder uses [HDE64 from MinHook v1.3.4](src/third_party/hde64/README.md), under its BSD license. The notice below is included in the README shipped with binary releases. CMake builds and installations also include `THIRD-PARTY-NOTICES.txt`.

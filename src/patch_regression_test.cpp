@@ -920,6 +920,47 @@ int runPatchRegressionTests()
     check(temp.isValid(), "regression temp directory available");
     if (!temp.isValid())
         return failures;
+    std::printf("[theme-probe] binary previews must not truncate diagnostics\n");
+    {
+        auto f = fixture(2, QStringLiteral("#112233"));
+        // Reproduce a filename marker beside a compressed image/binary stream.
+        // The real user's report stopped at the NUL following its first byte.
+        const QByteArray binary = QByteArray::fromHex("0100504e470d0a097f5cff") + QByteArray(512, '\0');
+        f.bytes += utf16be(QStringLiteral("UiThemeObject.qml"));
+        f.bytes += qCompress(binary, 9);
+        const QString path = temp.filePath(QStringLiteral("binary-preview.exe"));
+        check(write(path, f.bytes), "write binary-preview diagnostic fixture");
+        const QString report = ThemeEngine::probeReport(path);
+        check(report.contains(QStringLiteral("\\x01\\x00PNG\\x0d\\x0a\\x09\\x7f\\\\\\xff")),
+              "probe escapes NUL, newlines, other controls, backslash and high bytes");
+        check(!report.contains(QChar(0)) && report.contains(QStringLiteral("[4]"))
+                  && report.contains(QStringLiteral("qrc mapping"))
+                  && report.contains(QStringLiteral("[6] patch feasibility"))
+                  && report.endsWith(QStringLiteral("Probe complete.\n")),
+              "probe includes final detection, resource mapping and feasibility after binary preview");
+        const QByteArray text = report.toUtf8();
+        check(size_t(text.size()) == std::strlen(text.constData()),
+              "diagnostic text remains safe for C-string consumers");
+        QProcess probe;
+        auto env = QProcessEnvironment::systemEnvironment();
+        env.insert(QStringLiteral("QT_QPA_PLATFORM"), QStringLiteral("offscreen"));
+#ifdef Q_OS_WIN
+        env.insert(QStringLiteral("__COMPAT_LAYER"), QStringLiteral("RUNASINVOKER"));
+#endif
+        probe.setProcessEnvironment(env);
+        probe.start(QCoreApplication::applicationFilePath(), { QStringLiteral("--theme-probe"), path });
+        const bool finished = probe.waitForStarted(10000) && probe.waitForFinished(30000);
+        if (!finished) {
+            probe.kill();
+            probe.waitForFinished();
+        }
+        const QByteArray stdoutText = probe.readAllStandardOutput().replace("\r\n", "\n");
+        check(finished && probe.exitStatus() == QProcess::NormalExit && probe.exitCode() == 0
+                  && stdoutText == text,
+              "actual theme-probe command exports the entire UTF-8 report through redirected stdout");
+        check(read(path) == f.bytes && !QFileInfo::exists(path + QStringLiteral(".bak")),
+              "collecting theme diagnostics never changes or backs up the emulator file");
+    }
     std::printf("[theme-runtime] real Qt resources, disk caches and restarts\n");
     QByteArray diskUnit;
     for (const int version : { 1, 2, 3 }) {

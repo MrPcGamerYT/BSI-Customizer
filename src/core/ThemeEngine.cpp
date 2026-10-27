@@ -1857,6 +1857,7 @@ QString ThemeEngine::probeReport(const QString &exePath)
 
     line(QStringLiteral("BSI Customizer theme probe"));
     line(QStringLiteral("=========================="));
+    line(QStringLiteral("report format: 2 (escaped binary previews)"));
     line(QStringLiteral("file: %1").arg(exePath));
 
     QFile f(exePath);
@@ -2015,8 +2016,18 @@ QString ThemeEngine::probeReport(const QString &exePath)
         line(QStringLiteral("    layout C [zlib] (no header, size unknown): %1").arg(verdictC));
         if (!qb.isEmpty()) {
             line(QStringLiteral("      content: %1").arg(looksLikeTheme(QString::fromLatin1(qb))));
-            const QString preview = QString::fromLatin1(qb).left(160).replace(QLatin1Char('\n'),
-                                                                              QLatin1Char(' '));
+            // A nearby stream can be image/binary data, not QML. Never put
+            // its raw control bytes into the text report: an embedded NUL
+            // used to truncate printf("%s") before the actual mapping results.
+            QString preview;
+            for (const unsigned char ch : qb.left(160)) {
+                if (ch >= 0x20 && ch <= 0x7e && ch != '\\')
+                    preview += QLatin1Char(char(ch));
+                else if (ch == '\\')
+                    preview += QStringLiteral("\\\\");
+                else
+                    preview += QStringLiteral("\\x%1").arg(ch, 2, 16, QLatin1Char('0'));
+            }
             line(QStringLiteral("      preview: %1").arg(preview));
         }
         line();

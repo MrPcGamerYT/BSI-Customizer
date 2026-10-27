@@ -127,8 +127,10 @@ int main(int argc, char *argv[])
             return 2;
         }
         const QString report = ThemeEngine::probeReport(target);
-        std::printf("%s", qPrintable(report));
-        std::fflush(stdout);
+        const QByteArray utf8 = report.toUtf8();
+        if (std::fwrite(utf8.constData(), 1, size_t(utf8.size()), stdout) != size_t(utf8.size())
+            || std::fflush(stdout) != 0)
+            return 2;
         return report.contains(QLatin1String("*** NOT FOUND ***"))
                    || report.contains(QLatin1String("*** ZERO ENTRIES ***"))
                ? 1
