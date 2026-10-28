@@ -703,16 +703,23 @@ Status status(const QString &confPath)
             && !plan.hosts && !plan.gpu;
         if (inPlace) state.already << option.id;
     }
-    // The hosts file and the GPU preference are not configuration values, so
-    // their own record decides whether their switch is already in place.
-    if (state.hostsInstalled && !state.already.contains(QStringLiteral("hosts")))
-        state.already << QStringLiteral("hosts");
-    state.pendingChanges = configChanges(record, confPath).size() + (state.hostsInstalled ? 1 : 0);
-    for (const auto &product : cloudProducts())
+    // The hosts file, the GPU preference and the two cloud folders are not
+    // configuration values, so their own state decides whether their switch is
+    // already in place.
+    const auto markDone = [&](const QString &id) {
+        if (!state.already.contains(id)) state.already << id;
+    };
+    if (state.hostsInstalled) markDone(QStringLiteral("hosts"));
+    for (const auto &product : cloudProducts()) {
         state.cloud << QVariantMap { { QStringLiteral("id"), product.id },
                                      { QStringLiteral("name"), product.name },
                                      { QStringLiteral("path"), QDir::toNativeSeparators(product.path) },
                                      { QStringLiteral("moved"), product.moved } };
+        if (!product.moved) continue;
+        markDone(product.id == QLatin1String("x") ? QStringLiteral("removex")
+                                                  : QStringLiteral("removeservices"));
+    }
+    state.pendingChanges = configChanges(record, confPath).size() + (state.hostsInstalled ? 1 : 0);
     state.detail = state.applied
         ? QStringLiteral("Debloat changes are recorded for this installation.")
         : QStringLiteral("Ready.");
