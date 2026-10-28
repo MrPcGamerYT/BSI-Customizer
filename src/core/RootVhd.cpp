@@ -253,7 +253,7 @@ QVariantMap withJournal(const QString &imagePath, Change change)
     auto inner = RootDisk::openImage(QFile::encodeName(imagePath).toStdString(), &why);
     if (!inner) return failure(QString::fromStdString(why));
     if (!inner->writable())
-        return failure(QStringLiteral("The image is read-only; run the tool as administrator."));
+        return failure(QStringLiteral("The image file could not be opened for writing. Use Enable editing to clear its Windows Read-only attribute, or close BlueStacks and check the file permissions."));
 
     auto *journal = new Journalled(std::move(inner), imagePath);
     Journalled *record = journal;                 // the volume owns it from here
@@ -413,7 +413,7 @@ QVariantMap extractEngineArchive(const QString &archivePath)
 
 QVariantMap info(const QString &imagePath)
 {
-    if (imagePath.isEmpty()) return failure(QStringLiteral("Choose the Root.vhd of an engine first."));
+    if (imagePath.isEmpty()) return failure(QStringLiteral("Choose a VHD or VHDX image first."));
     if (!QFileInfo::exists(imagePath))
         return failure(QStringLiteral("“%1” does not exist.").arg(QDir::toNativeSeparators(imagePath)));
     std::string why;
@@ -439,6 +439,55 @@ QVariantMap info(const QString &imagePath)
              { QStringLiteral("inodes"), int(volume->inodeCount()) },
              { QStringLiteral("freeInodes"), int(volume->freeInodes()) },
              { QStringLiteral("undo"), hasUndo(imagePath) } };
+}
+
+QVariantMap enableWriteAccess(const QString &imagePath)
+{
+    if (imagePath.isEmpty())
+        return failure(QStringLiteral("Choose a VHD or VHDX image first."));
+    if (!QFileInfo::exists(imagePath))
+        return failure(QStringLiteral("The disk image no longer exists."));
+#ifndef Q_OS_WIN
+    Q_UNUSED(imagePath);
+    return failure(QStringLiteral("Enabling a Windows read-only VHD is supported only on Windows."));
+#else
+    const QFileDevice::Permissions original = QFile::permissions(imagePath);
+    if (original == QFileDevice::Permissions())
+        return failure(QStringLiteral("Could not read the file permissions. Check the path and access rights."));
+
+    // Qt maps WriteOwner to clearing FILE_ATTRIBUTE_READONLY on Windows. Only
+    // do this after an explicit click; browsing an image must not change it.
+    const QFileDevice::Permissions writablePermissions = original | QFileDevice::WriteOwner;
+    if (writablePermissions != original && !QFile::setPermissions(imagePath, writablePermissions))
+        return failure(QStringLiteral("Windows could not clear the file's Read-only attribute. Check the file permissions and close BlueStacks if it is using this image."));
+
+    auto restorePermissions = [&]() {
+        return writablePermissions == original || QFile::setPermissions(imagePath, original);
+    };
+
+    std::string why;
+    auto image = RootDisk::openImage(QFile::encodeName(imagePath).toStdString(), &why);
+    if (!image || !image->writable()) {
+        const bool restored = restorePermissions();
+        QString message = QStringLiteral("Windows still denies write access. Close BlueStacks if it is running, then check that your account has Modify permission for this file and its folder.");
+        if (!restored)
+            message += QStringLiteral(" The original file permissions could not be restored automatically.");
+        return failure(message);
+    }
+    auto volume = RootDisk::Volume::mount(std::move(image), &why);
+    if (!volume || !volume->writable()) {
+        const QString reason = volume
+            ? QString::fromStdString(volume->readOnlyReason())
+            : QString::fromStdString(why);
+        const bool restored = restorePermissions();
+        QString message = QStringLiteral("The image was not made writable: %1").arg(reason);
+        if (!restored)
+            message += QStringLiteral(" The original file permissions could not be restored automatically.");
+        return failure(message);
+    }
+    return { { QStringLiteral("ok"), true },
+             { QStringLiteral("msg"), QStringLiteral("Editing enabled. The Windows Read-only attribute was cleared; file contents were not changed.") } };
+#endif
 }
 
 QVariantMap listing(const QString &imagePath, const QString &innerPath)

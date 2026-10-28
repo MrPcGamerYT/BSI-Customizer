@@ -32,6 +32,9 @@ QVariantMap extractEngineArchive(const QString &archivePath);
 
 // What the image is, and whether it can be written.
 QVariantMap info(const QString &imagePath);
+// Clears the Windows read-only attribute only after an explicit user request,
+// then verifies that both the VHD and ext4 volume can be written.
+QVariantMap enableWriteAccess(const QString &imagePath);
 // { ok, path, parent, entries: [{name, path, dir, size, mtime, mode}] }
 QVariantMap listing(const QString &imagePath, const QString &innerPath);
 // Every entry anywhere in the image whose name contains `query`, so a package

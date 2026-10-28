@@ -171,6 +171,7 @@ public:
     bool flush() override { return std::fflush(m_file) == 0; }
     std::string kind() const override { return m_dynamic ? "dynamic VHD" : "fixed VHD"; }
     bool writable() const override { return !m_readOnly; }
+    ~VhdImage() override { if (m_file) std::fclose(m_file); }
 
 private:
     VhdImage(std::FILE *file, bool readOnly)
@@ -206,9 +207,11 @@ private:
 std::unique_ptr<VhdImage> VhdImage::open(std::FILE *file, std::uint64_t fileSize, bool readOnly,
                                          std::string *error)
 {
+    std::unique_ptr<VhdImage> image;
     auto fail = [&](const std::string &why) -> std::unique_ptr<VhdImage> {
         if (error) *error = why;
-        std::fclose(file);
+        if (image) image.reset();
+        else std::fclose(file);
         return nullptr;
     };
     if (fileSize < 1024) return fail("The image is too small to be a VHD.");
@@ -226,7 +229,7 @@ std::unique_ptr<VhdImage> VhdImage::open(std::FILE *file, std::uint64_t fileSize
     const std::uint32_t diskType = std::uint32_t(be32toh_(footer.data() + 60));
     if (diskSize == 0) return fail("The VHD reports a zero size.");
 
-    auto image = std::unique_ptr<VhdImage>(new VhdImage(file, readOnly));
+    image.reset(new VhdImage(file, readOnly));
     image->m_footer = footer;
     image->m_footerOffset = fileSize - 512;
     image->m_diskSize = diskSize;
@@ -363,6 +366,399 @@ bool VhdImage::write(std::uint64_t offset, const void *buffer, std::size_t lengt
     return true;
 }
 
+// ---- VHDX ----------------------------------------------------------------
+
+constexpr std::uint64_t kVhdxMiB = 1024ull * 1024ull;
+constexpr std::uint32_t kVhdxFullyPresent = 6;
+constexpr std::uint64_t kVhdxOffsetMask = 0xFFFFFFFFFFF00000ull;
+
+std::uint32_t vhdxCrc32c(const std::uint8_t *data, std::size_t length)
+{
+    return crc32c(0xFFFFFFFFu, data, length) ^ 0xFFFFFFFFu;
+}
+
+bool vhdxChecksumValid(std::vector<std::uint8_t> bytes, std::size_t checksumOffset)
+{
+    if (checksumOffset + 4 > bytes.size()) return false;
+    const std::uint32_t expected = le32(bytes.data() + checksumOffset);
+    put32(bytes.data() + checksumOffset, 0);
+    return vhdxCrc32c(bytes.data(), bytes.size()) == expected;
+}
+
+bool rangeWithin(std::uint64_t offset, std::uint64_t length, std::uint64_t limit)
+{
+    return offset <= limit && length <= limit - offset;
+}
+
+bool rangesOverlap(std::uint64_t a, std::uint64_t alen, std::uint64_t b, std::uint64_t blen)
+{
+    return a < b + blen && b < a + alen;
+}
+
+class VhdxImage final : public Image
+{
+public:
+    static std::unique_ptr<VhdxImage> open(std::FILE *file, std::uint64_t fileSize,
+                                           bool readOnly, std::string *error);
+    std::uint64_t size() const override { return m_diskSize; }
+    bool read(std::uint64_t offset, void *buffer, std::size_t length) override;
+    bool write(std::uint64_t offset, const void *buffer, std::size_t length) override;
+    bool flush() override { return std::fflush(m_file) == 0; }
+    std::string kind() const override { return m_fixed ? "fixed VHDX" : "dynamic VHDX"; }
+    bool writable() const override { return !m_readOnly; }
+    ~VhdxImage() override { if (m_file) std::fclose(m_file); }
+
+private:
+    VhdxImage(std::FILE *file, bool readOnly, std::uint64_t fileSize)
+        : m_file(file), m_readOnly(readOnly), m_fileSize(fileSize) {}
+    bool fileRead(std::uint64_t offset, void *buffer, std::size_t length)
+    {
+        return rangeWithin(offset, length, m_fileSize) && seekFile(m_file, offset)
+            && std::fread(buffer, 1, length, m_file) == length;
+    }
+    bool fileWrite(std::uint64_t offset, const void *buffer, std::size_t length)
+    {
+        if (m_readOnly || offset > std::numeric_limits<std::uint64_t>::max() - length
+            || !seekFile(m_file, offset)) return false;
+        return std::fwrite(buffer, 1, length, m_file) == length;
+    }
+    bool allocateBlock(std::uint64_t blockIndex);
+    std::uint64_t batIndex(std::uint64_t blockIndex) const
+    {
+        return blockIndex + blockIndex / m_chunkRatio;
+    }
+    bool payloadOffset(std::uint64_t blockIndex, std::uint64_t *offset) const
+    {
+        const std::uint64_t entryIndex = batIndex(blockIndex);
+        if (entryIndex >= m_bat.size()) return false;
+        const std::uint64_t entry = m_bat[std::size_t(entryIndex)];
+        if ((entry & 7u) != kVhdxFullyPresent) return false;
+        *offset = entry & kVhdxOffsetMask;
+        return true;
+    }
+
+    std::FILE *m_file = nullptr;
+    bool m_readOnly = true;
+    bool m_fixed = false;
+    std::uint64_t m_fileSize = 0;
+    std::uint64_t m_diskSize = 0;
+    std::uint64_t m_batOffset = 0;
+    std::uint64_t m_metadataOffset = 0;
+    std::uint64_t m_logOffset = 0;
+    std::uint64_t m_logLength = 0;
+    std::uint32_t m_blockSize = 0;
+    std::uint32_t m_sectorSize = 0;
+    std::uint64_t m_chunkRatio = 0;
+    std::vector<std::uint64_t> m_bat;
+};
+
+std::unique_ptr<VhdxImage> VhdxImage::open(std::FILE *file, std::uint64_t fileSize,
+                                           bool readOnly, std::string *error)
+{
+    std::unique_ptr<VhdxImage> image;
+    auto fail = [&](const std::string &why) -> std::unique_ptr<VhdxImage> {
+        if (error) *error = why;
+        if (image) image.reset();
+        else std::fclose(file);
+        return nullptr;
+    };
+    if (fileSize < kVhdxMiB || !seekFile(file, 0))
+        return fail("The VHDX file is smaller than its required header section.");
+    std::uint8_t identifier[8] = {};
+    if (std::fread(identifier, 1, sizeof(identifier), file) != sizeof(identifier)
+        || std::memcmp(identifier, "vhdxfile", 8) != 0)
+        return fail("The VHDX file identifier is missing.");
+
+    std::vector<std::uint8_t> headers[2] = { std::vector<std::uint8_t>(4096),
+                                             std::vector<std::uint8_t>(4096) };
+    bool headerValid[2] = {};
+    for (int i = 0; i < 2; ++i) {
+        const std::uint64_t at = (i == 0 ? 64ull : 128ull) * 1024;
+        headerValid[i] = seekFile(file, at)
+            && std::fread(headers[i].data(), 1, headers[i].size(), file) == headers[i].size()
+            && std::memcmp(headers[i].data(), "head", 4) == 0
+            && vhdxChecksumValid(headers[i], 4);
+    }
+    if (!headerValid[0] && !headerValid[1])
+        return fail("Both VHDX headers are invalid or have bad CRC-32C checksums.");
+    const int currentHeader = !headerValid[0] ? 1
+        : (!headerValid[1] ? 0
+           : (le64(headers[1].data() + 8) > le64(headers[0].data() + 8) ? 1 : 0));
+    const auto &header = headers[currentHeader];
+    if (le16(header.data() + 64) != 0 || le16(header.data() + 66) != 1)
+        return fail("This VHDX uses an unsupported log or file-format version.");
+    for (int i = 48; i < 64; ++i) {
+        if (header[std::size_t(i)] != 0)
+            return fail("This VHDX has a non-empty log. Open and safely shut down the virtual disk in Windows before editing it.");
+    }
+    const std::uint64_t logLength = le32(header.data() + 68);
+    const std::uint64_t logOffset = le64(header.data() + 72);
+    if (logLength == 0 || logLength % kVhdxMiB != 0 || logOffset < kVhdxMiB
+        || logOffset % kVhdxMiB != 0 || !rangeWithin(logOffset, logLength, fileSize))
+        return fail("The VHDX log area has invalid bounds.");
+
+    // The two 64-KiB region tables are independently checksummed. Use the
+    // first valid copy, or the second if the first one is damaged.
+    std::vector<std::uint8_t> regionTable(64 * 1024);
+    bool regionValid = false;
+    for (std::uint64_t at : { 192ull * 1024, 256ull * 1024 }) {
+        std::vector<std::uint8_t> candidate(64 * 1024);
+        if (seekFile(file, at) && std::fread(candidate.data(), 1, candidate.size(), file)
+                == candidate.size()
+            && std::memcmp(candidate.data(), "regi", 4) == 0
+            && vhdxChecksumValid(candidate, 4)) {
+            regionTable.swap(candidate);
+            regionValid = true;
+            break;
+        }
+    }
+    if (!regionValid) return fail("Both VHDX region tables are invalid or have bad CRC-32C checksums.");
+    const std::uint32_t regionCount = le32(regionTable.data() + 8);
+    if (regionCount > 2047 || 16ull + std::uint64_t(regionCount) * 32 > regionTable.size())
+        return fail("The VHDX region table has an invalid entry count.");
+
+    static const std::uint8_t batGuid[16] = {
+        0x66, 0x77, 0xC2, 0x2D, 0x23, 0xF6, 0x00, 0x42,
+        0x9D, 0x64, 0x11, 0x5E, 0x9B, 0xFD, 0x4A, 0x08
+    };
+    static const std::uint8_t metadataGuid[16] = {
+        0x06, 0xA2, 0x7C, 0x8B, 0x90, 0x47, 0x9A, 0x4B,
+        0xB8, 0xFE, 0x57, 0x5F, 0x05, 0x0F, 0x88, 0x6E
+    };
+    std::uint64_t batOffset = 0, batLength = 0, metadataOffset = 0, metadataLength = 0;
+    for (std::uint32_t i = 0; i < regionCount; ++i) {
+        const std::uint8_t *entry = regionTable.data() + 16 + std::size_t(i) * 32;
+        const std::uint64_t offset = le64(entry + 16);
+        const std::uint64_t length = le32(entry + 24);
+        const std::uint32_t required = le32(entry + 28);
+        if (required > 1 || offset < kVhdxMiB || offset % kVhdxMiB != 0
+            || length == 0 || length % kVhdxMiB != 0
+            || !rangeWithin(offset, length, fileSize))
+            return fail("A VHDX region has invalid alignment or bounds.");
+        if (std::memcmp(entry, batGuid, sizeof(batGuid)) == 0) {
+            batOffset = offset;
+            batLength = length;
+        } else if (std::memcmp(entry, metadataGuid, sizeof(metadataGuid)) == 0) {
+            metadataOffset = offset;
+            metadataLength = length;
+        } else if (required) {
+            return fail("This VHDX requires a region type that BSI Customizer does not support.");
+        }
+    }
+    if (batOffset == 0 || metadataOffset == 0)
+        return fail("The VHDX is missing its BAT or metadata region.");
+    if (rangesOverlap(batOffset, batLength, metadataOffset, metadataLength)
+        || rangesOverlap(batOffset, batLength, logOffset, logLength)
+        || rangesOverlap(metadataOffset, metadataLength, logOffset, logLength))
+        return fail("The VHDX metadata, BAT, and log regions overlap.");
+
+    std::vector<std::uint8_t> metadataHeader(32);
+    if (!seekFile(file, metadataOffset)
+        || std::fread(metadataHeader.data(), 1, metadataHeader.size(), file) != metadataHeader.size()
+        || std::memcmp(metadataHeader.data(), "metadata", 8) != 0)
+        return fail("The VHDX metadata table is missing or unreadable.");
+    const std::uint32_t metadataCount = le16(metadataHeader.data() + 10);
+    if (metadataCount > 2047 || 32ull + std::uint64_t(metadataCount) * 32 > metadataLength)
+        return fail("The VHDX metadata table has an invalid entry count.");
+    std::vector<std::uint8_t> metadataTable(32 + std::size_t(metadataCount) * 32);
+    if (!seekFile(file, metadataOffset)
+        || std::fread(metadataTable.data(), 1, metadataTable.size(), file) != metadataTable.size())
+        return fail("The VHDX metadata entries could not be read.");
+
+    static const std::uint8_t fileParamsGuid[16] = {
+        0x37, 0x67, 0xA1, 0xCA, 0x36, 0xFA, 0x43, 0x4D,
+        0xB3, 0xB6, 0x33, 0xF0, 0xAA, 0x44, 0xE7, 0x6B
+    };
+    static const std::uint8_t virtualSizeGuid[16] = {
+        0x24, 0x42, 0xA5, 0x2F, 0x1B, 0xCD, 0x76, 0x48,
+        0xB2, 0x11, 0x5D, 0xBE, 0xD8, 0x3B, 0xF4, 0xB8
+    };
+    static const std::uint8_t logicalSectorGuid[16] = {
+        0x1D, 0xBF, 0x41, 0x81, 0x6F, 0xA9, 0x09, 0x47,
+        0xBA, 0x47, 0xF2, 0x33, 0xA8, 0xFA, 0xAB, 0x5F
+    };
+    static const std::uint8_t parentLocatorGuid[16] = {
+        0x2D, 0x5F, 0xD3, 0xA8, 0x0B, 0xB3, 0x4D, 0x45,
+        0xAB, 0xF7, 0xD3, 0xD8, 0x48, 0x34, 0xAB, 0x0C
+    };
+    std::uint32_t blockSize = 0, sectorSize = 0, fileFlags = 0;
+    std::uint64_t diskSize = 0;
+    bool hasFileParams = false, hasDiskSize = false, hasLogicalSector = false;
+    for (std::uint32_t i = 0; i < metadataCount; ++i) {
+        const std::uint8_t *entry = metadataTable.data() + 32 + std::size_t(i) * 32;
+        const std::uint32_t itemOffset = le32(entry + 16);
+        const std::uint32_t itemLength = le32(entry + 20);
+        const std::uint32_t itemFlags = le32(entry + 24);
+        if (itemOffset < 64 * 1024 || itemOffset > metadataLength
+            || itemLength > metadataLength - itemOffset || (itemFlags & ~7u) != 0)
+            return fail("A VHDX metadata item has invalid bounds or flags.");
+        std::uint8_t value[8] = {};
+        bool knownItem = false;
+        if (std::memcmp(entry, fileParamsGuid, 16) == 0) {
+            knownItem = true;
+            if (itemLength < 8 || !seekFile(file, metadataOffset + itemOffset)
+                || std::fread(value, 1, 8, file) != 8)
+                return fail("The VHDX file parameters are missing or truncated.");
+            blockSize = le32(value);
+            fileFlags = le32(value + 4);
+            hasFileParams = true;
+        } else if (std::memcmp(entry, virtualSizeGuid, 16) == 0) {
+            knownItem = true;
+            if (itemLength < 8 || !seekFile(file, metadataOffset + itemOffset)
+                || std::fread(value, 1, 8, file) != 8)
+                return fail("The VHDX virtual disk size is missing or truncated.");
+            diskSize = le64(value);
+            hasDiskSize = true;
+        } else if (std::memcmp(entry, logicalSectorGuid, 16) == 0) {
+            knownItem = true;
+            if (itemLength < 4 || !seekFile(file, metadataOffset + itemOffset)
+                || std::fread(value, 1, 4, file) != 4)
+                return fail("The VHDX logical sector size is missing or truncated.");
+            sectorSize = le32(value);
+            hasLogicalSector = true;
+        } else if (std::memcmp(entry, parentLocatorGuid, 16) == 0) {
+            return fail("Differencing VHDX files with a parent locator cannot be edited directly. Open the base image instead.");
+        } else if (!knownItem && (itemFlags & 4u) != 0) {
+            return fail("This VHDX requires a metadata item that BSI Customizer does not support.");
+        }
+    }
+    if (!hasFileParams || !hasDiskSize || !hasLogicalSector || diskSize == 0
+        || (sectorSize != 512 && sectorSize != 4096)
+        || blockSize < kVhdxMiB || blockSize > 256u * 1024u * 1024u
+        || (blockSize & (blockSize - 1)) != 0 || diskSize % sectorSize != 0
+        || (fileFlags & ~3u) != 0)
+        return fail("The VHDX virtual disk parameters are invalid or unsupported.");
+    if (fileFlags & 2u)
+        return fail("Differencing VHDX files with a parent cannot be edited directly. Open the base image instead.");
+
+    image.reset(new VhdxImage(file, readOnly, fileSize));
+    image->m_fixed = (fileFlags & 1u) != 0;
+    image->m_diskSize = diskSize;
+    image->m_blockSize = blockSize;
+    image->m_sectorSize = sectorSize;
+    image->m_batOffset = batOffset;
+    image->m_metadataOffset = metadataOffset;
+    image->m_logOffset = logOffset;
+    image->m_logLength = logLength;
+    image->m_chunkRatio = (std::uint64_t(1) << 23) * sectorSize / blockSize;
+    if (image->m_chunkRatio == 0)
+        return fail("The VHDX block size and sector size produce an invalid BAT layout.");
+
+    const std::uint64_t blockCount = (diskSize + blockSize - 1) / blockSize;
+    const std::uint64_t chunkCount = (blockCount + image->m_chunkRatio - 1) / image->m_chunkRatio;
+    if (blockCount > 0x1000000 || chunkCount > 0x1000000
+        || blockCount + chunkCount > batLength / 8)
+        return fail("The VHDX BAT region is too small for the virtual disk.");
+    const std::uint64_t entryCount = blockCount + chunkCount;
+    std::vector<std::uint8_t> batBytes(std::size_t(entryCount * 8));
+    if (!seekFile(file, batOffset)
+        || std::fread(batBytes.data(), 1, batBytes.size(), file) != batBytes.size())
+        return fail("The VHDX block allocation table could not be read.");
+    image->m_bat.resize(std::size_t(entryCount));
+    for (std::uint64_t i = 0; i < entryCount; ++i)
+        image->m_bat[std::size_t(i)] = le64(batBytes.data() + std::size_t(i * 8));
+
+    for (std::uint64_t i = 0; i < blockCount; ++i) {
+        const std::uint64_t entry = image->m_bat[std::size_t(image->batIndex(i))];
+        const std::uint64_t state = entry & 7u;
+        if ((entry & 0x00000000000FFFF8ull) != 0)
+            return fail("The VHDX BAT contains nonzero reserved bits.");
+        const std::uint64_t validLength = std::min<std::uint64_t>(blockSize, diskSize - i * blockSize);
+        if (state == kVhdxFullyPresent) {
+            const std::uint64_t payload = entry & kVhdxOffsetMask;
+            if (payload < kVhdxMiB || payload % kVhdxMiB != 0
+                || !rangeWithin(payload, validLength, fileSize)
+                || rangesOverlap(payload, validLength, batOffset, batLength)
+                || rangesOverlap(payload, validLength, metadataOffset, metadataLength)
+                || rangesOverlap(payload, validLength, logOffset, logLength))
+                return fail("A VHDX payload block has invalid alignment or overlaps metadata.");
+        } else if (state == 7) {
+            return fail("Partially present VHDX blocks require a parent image, which is not supported for editing.");
+        } else if (state > 3) {
+            return fail("The VHDX BAT contains an unsupported payload-block state.");
+        } else if (image->m_fixed) {
+            return fail("A fixed VHDX is missing a required payload block.");
+        }
+    }
+    return image;
+}
+
+bool VhdxImage::read(std::uint64_t offset, void *buffer, std::size_t length)
+{
+    if (offset > m_diskSize || std::uint64_t(length) > m_diskSize - offset) return false;
+    auto *out = static_cast<std::uint8_t *>(buffer);
+    while (length > 0) {
+        const std::uint64_t blockIndex = offset / m_blockSize;
+        const std::uint64_t withinBlock = offset % m_blockSize;
+        const std::size_t chunk = std::size_t(std::min<std::uint64_t>(
+            length, m_blockSize - withinBlock));
+        const std::uint64_t entry = m_bat[std::size_t(batIndex(blockIndex))];
+        const std::uint64_t state = entry & 7u;
+        if (state == kVhdxFullyPresent) {
+            const std::uint64_t payload = entry & kVhdxOffsetMask;
+            if (!fileRead(payload + withinBlock, out, chunk)) return false;
+        } else {
+            // Without a parent, NOT_PRESENT, UNDEFINED, ZERO and UNMAPPED all
+            // contribute zeroes to the virtual disk.
+            if (state > 3) return false;
+            std::memset(out, 0, chunk);
+        }
+        offset += chunk;
+        out += chunk;
+        length -= chunk;
+    }
+    return true;
+}
+
+bool VhdxImage::allocateBlock(std::uint64_t blockIndex)
+{
+    const std::uint64_t batAt = batIndex(blockIndex);
+    if (m_readOnly || blockIndex >= (m_diskSize + m_blockSize - 1) / m_blockSize
+        || batAt >= m_bat.size() || (m_bat[std::size_t(batAt)] & 7u) == kVhdxFullyPresent)
+        return false;
+    if (m_fileSize > std::numeric_limits<std::uint64_t>::max() - kVhdxMiB)
+        return false;
+    const std::uint64_t payload = (m_fileSize + kVhdxMiB - 1) & ~(kVhdxMiB - 1);
+    if (payload > kVhdxOffsetMask || m_blockSize > std::numeric_limits<std::uint64_t>::max() - payload)
+        return false;
+    const std::uint64_t end = payload + m_blockSize;
+    if (end == 0) return false;
+    const std::uint8_t zero = 0;
+    // A seek/write of the final byte extends the host file; filesystems may
+    // keep the unused portions sparse, which is appropriate for dynamic VHDX.
+    if (!fileWrite(end - 1, &zero, 1)) return false;
+    m_fileSize = end;
+    m_bat[std::size_t(batAt)] = payload | kVhdxFullyPresent;
+    std::uint8_t encoded[8];
+    const std::uint64_t entryOffset = m_batOffset + batAt * 8;
+    for (int i = 0; i < 8; ++i)
+        encoded[i] = std::uint8_t(m_bat[std::size_t(batAt)] >> (i * 8));
+    if (!fileWrite(entryOffset, encoded, sizeof(encoded))) return false;
+    return true;
+}
+
+bool VhdxImage::write(std::uint64_t offset, const void *buffer, std::size_t length)
+{
+    if (m_readOnly || offset > m_diskSize || std::uint64_t(length) > m_diskSize - offset)
+        return false;
+    const auto *in = static_cast<const std::uint8_t *>(buffer);
+    while (length > 0) {
+        const std::uint64_t blockIndex = offset / m_blockSize;
+        const std::uint64_t withinBlock = offset % m_blockSize;
+        const std::size_t chunk = std::size_t(std::min<std::uint64_t>(
+            length, m_blockSize - withinBlock));
+        std::uint64_t payload = 0;
+        if (!payloadOffset(blockIndex, &payload)) {
+            if (!allocateBlock(blockIndex) || !payloadOffset(blockIndex, &payload)) return false;
+        }
+        if (!fileWrite(payload + withinBlock, in, chunk)) return false;
+        offset += chunk;
+        in += chunk;
+        length -= chunk;
+    }
+    return true;
+}
+
 // ---- superblock / descriptor accessors -----------------------------------
 
 constexpr std::uint32_t kMagic = 0xEF53;
@@ -420,6 +816,18 @@ std::unique_ptr<Image> openImage(const std::string &path, std::string *error)
     if (length == 0) {
         std::fclose(file);
         if (error) *error = "The image is empty.";
+        return nullptr;
+    }
+
+    // VHDX has a file signature at byte zero and redundant, checksummed
+    // headers. Do not fall back to raw if a VHDX is malformed.
+    std::uint8_t signature[8] = {};
+    if (seekFile(file, 0) && std::fread(signature, 1, sizeof(signature), file) == sizeof(signature)
+        && std::memcmp(signature, "vhdxfile", 8) == 0) {
+        std::string why;
+        if (auto image = VhdxImage::open(file, length, readOnly, &why))
+            return image;
+        if (error) *error = why;
         return nullptr;
     }
 
@@ -700,7 +1108,7 @@ std::unique_ptr<Volume> Volume::mount(std::unique_ptr<Image> image, std::string 
 
     volume->m_writable = volume->m_image->writable() && volume->m_readOnlyReason.empty();
     if (!volume->m_image->writable() && volume->m_readOnlyReason.empty())
-        volume->m_readOnlyReason = "The file is read-only; run the tool as administrator.";
+        volume->m_readOnlyReason = "The image file could not be opened for writing. It may have the Windows Read-only attribute, be in use by BlueStacks, or lack Modify permission. Use Enable editing or close BlueStacks and check the file permissions.";
     return volume;
 }
 

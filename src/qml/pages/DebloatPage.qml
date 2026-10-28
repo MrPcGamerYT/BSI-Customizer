@@ -294,7 +294,7 @@ Item {
     function openImage() {
         if (page.imagePath.length === 0) {
             page.imageOk = false;
-            page.imageMsg = qsTr("Choose a Root.vhd or the BlueStacks engine package.");
+            page.imageMsg = qsTr("Choose a Root.vhd, VHDX image, or BlueStacks engine package.");
             return;
         }
         page.imageBusy = true;
@@ -758,8 +758,9 @@ Item {
                                     Layout.fillWidth: true
                                     wrapMode: Text.Wrap
                                     text: qsTr("Root.vhd is the Android system disk inside the "
-                                               + "engine folder. Close BlueStacks before editing "
-                                               + "it: the player reads it while it runs.")
+                                               + "engine folder. You can also open standalone VHDX "
+                                               + "images. Close BlueStacks before editing a disk "
+                                               + "that the player may be using.")
                                     color: Theme.textDim
                                     font.pixelSize: 10
                                 }
@@ -772,7 +773,7 @@ Item {
                         }
                         PathRow {
                             Layout.fillWidth: true
-                            label: qsTr("Root.vhd")
+                            label: qsTr("Root.vhd / VHDX")
                             showLoad: true
                             readOnly: page.imageBusy
                             text: page.imagePath
@@ -816,6 +817,19 @@ Item {
                         writable: !!page.imageInfo.writable
                         readOnlyReason: page.imageInfo.reason || ""
                         onNotify: (message) => page.notify(message)
+                        onEnableWriteRequested: {
+                            page.imageBusy = true;
+                            const result = backend.rootvhdEnableWrite(page.imagePath);
+                            page.imageBusy = false;
+                            if (result && result.ok) {
+                                page.openImage();
+                                page.notify(result.msg || qsTr("Editing enabled."));
+                            } else {
+                                page.notify(result && result.msg
+                                            ? result.msg
+                                            : qsTr("Windows could not enable write access."));
+                            }
+                        }
                     }
                 }
 
@@ -850,7 +864,7 @@ Item {
                                   + (page.engineFolders.length > 0
                                      ? page.engineFolders.join("  ·  ")
                                      : qsTr("none — choose the engine package EXE above, or browse "
-                                            + "to a Root.vhd file"))
+                                            + "to a Root.vhd or VHDX image"))
                             color: Theme.textDim
                             font.pixelSize: 10
                         }

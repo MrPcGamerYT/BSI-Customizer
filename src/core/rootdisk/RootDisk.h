@@ -1,6 +1,6 @@
 #pragma once
 
-// RootDisk — a byte-level view of a BlueStacks disk image (VHD / VHDX-less raw)
+// RootDisk — a byte-level view of a BlueStacks disk image (VHD, VHDX or raw)
 // and of the ext4 filesystem inside it.
 //
 // This is the engine behind the hardcode debloat: it opens Root.vhd the way a
@@ -31,12 +31,13 @@ struct Image
     virtual bool read(std::uint64_t offset, void *buffer, std::size_t length) = 0;
     virtual bool write(std::uint64_t offset, const void *buffer, std::size_t length) = 0;
     virtual bool flush() = 0;
-    // "fixed VHD", "dynamic VHD" or "raw image"
+    // "fixed/dynamic VHD", "fixed/dynamic VHDX" or "raw image"
     virtual std::string kind() const = 0;
     virtual bool writable() const = 0;
 };
 
-// Opens a `.vhd` (footer `conectix`, fixed or dynamic) or a raw image.
+// Opens fixed/dynamic VHD and VHDX images or a raw image. VHDX logs and
+// differencing images are refused rather than interpreted incompletely.
 std::unique_ptr<Image> openImage(const std::string &path, std::string *error);
 
 // ---------------------------------------------------------------------------
