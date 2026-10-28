@@ -1297,6 +1297,119 @@ void checkRootDisk()
     }
 #endif
 
+#ifdef BSI_ROOT_VHDX_FIXED_FIXTURE
+    {
+        const QString fixedFixture = QString::fromUtf8(BSI_ROOT_VHDX_FIXED_FIXTURE);
+        const QString fixedWork = temp.filePath(QStringLiteral("Root-fixed-test.vhdx"));
+        const bool copiedFixed = QFile::copy(fixedFixture, fixedWork);
+        check(copiedFixed, "the synthetic fixed-VHDX fixture is copied before testing");
+        if (copiedFixed) {
+            const auto info = RootVhd::info(fixedWork);
+            check(info.value(QStringLiteral("ok")).toBool()
+                      && info.value(QStringLiteral("kind")).toString() == QStringLiteral("fixed VHDX")
+                      && info.value(QStringLiteral("writable")).toBool(),
+                  "the fixed VHDX reader mounts its ext4 volume as writable");
+            std::string fixedError;
+            auto image = RootDisk::openImage(QFile::encodeName(fixedWork).toStdString(),
+                                              &fixedError);
+            std::vector<std::uint8_t> pattern(512, 0x5A), readBack(512);
+            const bool fixedWrite = image && image->kind() == "fixed VHDX"
+                && image->write(1024 * 1024 + 512, pattern.data(), pattern.size())
+                && image->flush()
+                && image->read(1024 * 1024 + 512, readBack.data(), readBack.size())
+                && readBack == pattern;
+            check(fixedWrite, "fixed VHDX payload blocks can be edited in place");
+        }
+    }
+#endif
+
+#ifdef BSI_ROOT_VHDX_FIXTURE
+    {
+        const QString vhdxFixture = QString::fromUtf8(BSI_ROOT_VHDX_FIXTURE);
+        const QString vhdxWork = temp.filePath(QStringLiteral("Root-test.vhdx"));
+        const bool copiedVhdx = QFile::copy(vhdxFixture, vhdxWork);
+        check(copiedVhdx, "the synthetic VHDX fixture is copied before testing");
+        if (copiedVhdx) {
+            const auto info = RootVhd::info(vhdxWork);
+            check(info.value(QStringLiteral("ok")).toBool()
+                      && info.value(QStringLiteral("kind")).toString() == QStringLiteral("dynamic VHDX")
+                      && info.value(QStringLiteral("writable")).toBool(),
+                  "the VHDX reader mounts its ext4 volume as writable");
+            const auto rootBefore = RootVhd::listing(vhdxWork, QStringLiteral("/"));
+            check(rootBefore.value(QStringLiteral("ok")).toBool(),
+                  "the file manager lists the VHDX ext4 root directory");
+
+            std::string vhdxError;
+            auto image = RootDisk::openImage(QFile::encodeName(vhdxWork).toStdString(), &vhdxError);
+            check(image && image->kind() == "dynamic VHDX"
+                      && image->size() == 4097ull * 1024 * 1024,
+                  "the VHDX wrapper exposes its virtual size and dynamic type");
+            if (image) {
+                std::vector<std::uint8_t> sparse(512, 0xFF);
+                check(image->read(1024 * 1024, sparse.data(), sparse.size())
+                          && std::all_of(sparse.begin(), sparse.end(),
+                                         [](std::uint8_t value) { return value == 0; }),
+                      "unallocated VHDX blocks read as zeroes");
+                std::vector<std::uint8_t> pattern(512);
+                for (std::size_t i = 0; i < pattern.size(); ++i)
+                    pattern[i] = std::uint8_t(i ^ 0xA5);
+                const bool wroteSparse = image->write(1024 * 1024 + 512,
+                                                       pattern.data(), pattern.size())
+                    && image->flush();
+                check(wroteSparse, "writing into a sparse VHDX block allocates and stores it");
+                const std::uint64_t afterFirstChunk = 4096ull * 1024 * 1024 + 64;
+                std::vector<std::uint8_t> chunkPattern(512, 0x37);
+                const bool wroteAfterChunk = image->write(afterFirstChunk,
+                                                           chunkPattern.data(),
+                                                           chunkPattern.size())
+                    && image->flush();
+                check(wroteAfterChunk,
+                      "VHDX BAT chunk interleaving is followed across a bitmap boundary");
+                image.reset();
+                auto reopened = RootDisk::openImage(QFile::encodeName(vhdxWork).toStdString(),
+                                                    &vhdxError);
+                std::vector<std::uint8_t> readBack(pattern.size()), chunkReadBack(chunkPattern.size());
+                check(reopened && reopened->read(1024 * 1024 + 512,
+                                                  readBack.data(), readBack.size())
+                          && readBack == pattern,
+                      "the allocated VHDX block persists after closing and reopening");
+                check(reopened && reopened->read(afterFirstChunk, chunkReadBack.data(),
+                                                  chunkReadBack.size())
+                          && chunkReadBack == chunkPattern,
+                      "the payload after a VHDX BAT chunk boundary persists on reopen");
+                reopened.reset();
+            }
+
+            const QString localFile = temp.filePath(QStringLiteral("vhdx-added.txt"));
+            {
+                QFile file(localFile);
+                file.open(QIODevice::WriteOnly);
+                file.write("VHDX journal write\n");
+            }
+            const auto added = RootVhd::addFile(vhdxWork, QStringLiteral("/"), localFile);
+            check(added.value(QStringLiteral("ok")).toBool(),
+                  "the journalled file manager writes a file into VHDX ext4");
+            const auto rootAfterAdd = RootVhd::listing(vhdxWork, QStringLiteral("/"));
+            bool foundAdded = false;
+            for (const QVariant &entry : rootAfterAdd.value(QStringLiteral("entries")).toList())
+                foundAdded = foundAdded
+                    || entry.toMap().value(QStringLiteral("name")).toString()
+                           == QStringLiteral("vhdx-added.txt");
+            check(foundAdded, "the VHDX file manager can read back the newly added file");
+            const auto undone = RootVhd::undo(vhdxWork);
+            check(undone.value(QStringLiteral("ok")).toBool(),
+                  "journalled VHDX edits can be undone");
+            const auto rootAfterUndo = RootVhd::listing(vhdxWork, QStringLiteral("/"));
+            bool stillFoundAdded = false;
+            for (const QVariant &entry : rootAfterUndo.value(QStringLiteral("entries")).toList())
+                stillFoundAdded = stillFoundAdded
+                    || entry.toMap().value(QStringLiteral("name")).toString()
+                           == QStringLiteral("vhdx-added.txt");
+            check(!stillFoundAdded, "undo removes the added file from the VHDX filesystem");
+        }
+    }
+#endif
+
 #ifdef BSI_ROOT_7Z_FIXTURE
     // Opening a plain archive and a synthetic SFX both exercises the bundled
     // decoder: no WinRAR/7-Zip installation is part of the test machine.

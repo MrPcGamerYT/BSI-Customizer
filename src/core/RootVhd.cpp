@@ -413,7 +413,7 @@ QVariantMap extractEngineArchive(const QString &archivePath)
 
 QVariantMap info(const QString &imagePath)
 {
-    if (imagePath.isEmpty()) return failure(QStringLiteral("Choose the Root.vhd of an engine first."));
+    if (imagePath.isEmpty()) return failure(QStringLiteral("Choose a VHD or VHDX image first."));
     if (!QFileInfo::exists(imagePath))
         return failure(QStringLiteral("“%1” does not exist.").arg(QDir::toNativeSeparators(imagePath)));
     std::string why;
@@ -444,9 +444,9 @@ QVariantMap info(const QString &imagePath)
 QVariantMap enableWriteAccess(const QString &imagePath)
 {
     if (imagePath.isEmpty())
-        return failure(QStringLiteral("Choose a Root.vhd image first."));
+        return failure(QStringLiteral("Choose a VHD or VHDX image first."));
     if (!QFileInfo::exists(imagePath))
-        return failure(QStringLiteral("The Root.vhd file no longer exists."));
+        return failure(QStringLiteral("The disk image no longer exists."));
 #ifndef Q_OS_WIN
     Q_UNUSED(imagePath);
     return failure(QStringLiteral("Enabling a Windows read-only VHD is supported only on Windows."));

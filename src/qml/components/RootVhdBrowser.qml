@@ -877,7 +877,7 @@ Item {
                                                         : browser.viewRows.length) === 0
                             text: {
                                 if (!browser.open)
-                                    return qsTr("Point the tool at an engine's Root.vhd to browse it.");
+                                    return qsTr("Choose a Root.vhd or VHDX image to browse it.");
                                 if (browser.searching)
                                     return qsTr("Nothing in the image matches “%1”.").arg(browser.searchText);
                                 if (browser.filterText.length > 0)
