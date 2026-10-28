@@ -1481,6 +1481,15 @@ QString Backend::rootvhdFind()
     return RootVhd::findImage(m_settings->exePath());
 }
 
+QVariantMap Backend::rootvhdOpenEngineArchive(const QString &archive)
+{
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) {
+            return worker.rootvhdOpenEngineArchive(archive);
+        });
+    return RootVhd::extractEngineArchive(archive);
+}
+
 QVariantMap Backend::rootvhdInfo(const QString &image)
 {
     if (!m_backgroundWorker)
@@ -1493,6 +1502,13 @@ QVariantMap Backend::rootvhdList(const QString &image, const QString &innerPath)
     if (!m_backgroundWorker)
         return runBackground([=](Backend &worker) { return worker.rootvhdList(image, innerPath); });
     return RootVhd::listing(image, innerPath);
+}
+
+QVariantMap Backend::rootvhdSearch(const QString &image, const QString &query)
+{
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) { return worker.rootvhdSearch(image, query); });
+    return RootVhd::search(image, query);
 }
 
 QVariantMap Backend::rootvhdExtract(const QString &image, const QString &innerPath,
@@ -1516,6 +1532,17 @@ QVariantMap Backend::rootvhdAdd(const QString &image, const QString &innerDir,
     return RootVhd::addFile(image, innerDir, localFile);
 }
 
+QVariantMap Backend::rootvhdReplace(const QString &image, const QString &innerPath,
+                                    const QString &localFile)
+{
+    if (actionsLocked()) return lockedMap();
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) {
+            return worker.rootvhdReplace(image, innerPath, localFile);
+        });
+    return RootVhd::replaceFile(image, innerPath, localFile);
+}
+
 QVariantMap Backend::rootvhdAddFolder(const QString &image, const QString &innerDir,
                                       const QString &localDir)
 {
@@ -1525,6 +1552,17 @@ QVariantMap Backend::rootvhdAddFolder(const QString &image, const QString &inner
             return worker.rootvhdAddFolder(image, innerDir, localDir);
         });
     return RootVhd::addFolder(image, innerDir, localDir);
+}
+
+QVariantMap Backend::rootvhdAddPath(const QString &image, const QString &innerDir,
+                                    const QString &localPath)
+{
+    if (actionsLocked()) return lockedMap();
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) {
+            return worker.rootvhdAddPath(image, innerDir, localPath);
+        });
+    return RootVhd::addPath(image, innerDir, localPath);
 }
 
 QVariantMap Backend::rootvhdMkdir(const QString &image, const QString &innerDir, const QString &name)

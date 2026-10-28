@@ -530,15 +530,15 @@ ADB port, with a private adb server that is stopped again afterwards. Nothing is
 downloaded, and no root/Magisk is involved. Use the **Hardcode** half when you
 want the file itself gone from the image.
 
-* **Preinstalled apps** — a reviewed list: `gg.now.ads.service`,
-  `com.uncube.gamevantage`, `com.bluestacks.appmart`, `com.bluestacks.appfinder`,
-  and optionally the Android Easter egg, the print spooler and the system
-  tracing UI. Each is removed for Android user 0 (`pm uninstall --user 0`), or,
-  when the package belongs to the system partition, disabled instead
-  (`pm disable-user --user 0`). Both fail harmlessly on a package the instance
-  does not have, and the scan only shows what is really installed. Packages
-  BlueStacks needs are never touched, and anything else it ships is listed
-  read-only so you can see it.
+* **Every installed app** — Scan reads the full `pm list packages --user 0`
+  result and shows every package actually installed in that instance. The
+  reviewed suggestions (`gg.now.ads.service`, `com.uncube.gamevantage`,
+  `com.bluestacks.appmart` and `com.bluestacks.appfinder`) get friendly names
+  and are prechecked. Other packages are visible and selectable too, but are
+  unchecked and labelled as unreviewed: removing a system package can break
+  Android or BlueStacks. Removal is for Android user 0 (`pm uninstall --user 0`),
+  with `pm disable-user --user 0` as a fallback for packages on the system
+  partition. The tool verifies that each selected package is installed first.
 * **Undo** — the package, the action used and the instance it was done in are
   recorded first. **Undo in this instance** reinstalls with
   `cmd package install-existing --user 0` (or re-enables the package) and
@@ -560,19 +560,41 @@ cleaned independently and why the undo record is kept per instance.
 ### 2 · Hardcode debloat (Root.vhd)
 
 `Root.vhd` is the engine's Android system disk: an ext4 filesystem inside a VHD,
-in `<ProgramData>\BlueStacks_*\Engine\<arch>\Root.vhd`. This half opens it in
-place and gives you a file manager over it — a path bar, **Up**, the folder
-listing with sizes, **Open**, **Save** (extract), **Add file**, **Add folder**,
-**New folder**, **Delete** and **Undo**. Writes are real writes: the bytes of
-the image change, and the next boot of an instance that uses the engine sees
-them.
+in `<ProgramData>\BlueStacks_*\Engine\<arch>\Root.vhd`. The ext4/VHD reader
+and writer and a 7-Zip SDK decoder are built into BSI Customizer; no external
+filesystem or archive utility needs to be installed. **Find** locates an
+installed image. You can also select the BlueStacks engine package EXE or a
+plain `.7z` file directly: the app extracts only `Root.vhd` into its private
+working cache, leaves the package unchanged, and opens that image. This half
+then gives you a **two-pane file manager** over it, the way a 7-Zip window
+works:
+
+* the **folder tree** on the left, expandable level by level, with the folder
+  you are in highlighted;
+* the **listing** on the right — name, size, folders before files, sorted by
+  name or size with one click on the column header;
+* a **path bar** with Up and clickable breadcrumbs, and **Refresh**;
+* **Add file**, **Add folder** (a whole tree, structure included), **New
+  folder**, **Replace** (swap the contents of an existing file while keeping
+  its path in Root.vhd), **Save** (extract a file or folder anywhere on this
+  PC), and **Delete** — a file goes at once, a folder asks first because
+  everything under it goes with it. Adding a duplicate name is refused; use
+  Replace explicitly instead;
+* **drag and drop** from Explorer straight into the open folder;
+* **filter this folder** as you type, or **Search everywhere** to find a name
+  anywhere in the image (it walks the folders itself, and says when it stops
+  at its result cap).
+
+Writes are real writes: the bytes of the image change, and the next boot of an
+instance that uses the engine sees them.
 
 What it supports is checked before it is mounted, and anything outside that is
 refused with a reason instead of guessed at:
 
 * **VHD:** fixed and dynamic disks, and a plain raw image. The footer decides
-  which, the BAT of a dynamic disk is followed, and a partition table (MBR or
-  GPT) is walked to find the filesystem.
+  which, the BAT of a dynamic disk is followed, and MBR, extended-MBR and GPT
+  partition tables are walked to find the filesystem. File offsets are 64-bit,
+  including for engine images larger than 2 GiB.
 * **ext4:** 1 KiB–64 KiB blocks, extent trees, 32-bit and 64-bit, metadata
   checksums (`metadata_csum`) recomputed exactly as the kernel does, sparse
   superblocks and flex groups.
@@ -602,10 +624,12 @@ Two things worth knowing before you write:
   your way back, and the tool never writes without one.
 
 The engine files themselves are not downloaded by this tool. If the installation
-has no engine folder yet, download the engine package from BlueStacks, open it
-with WinRAR (it is a self-extracting archive) and point the **Root.vhd** field at
-the `Root.vhd` inside the `Pie64` folder; the page offers the same link it was
-built against.
+has no engine folder yet, download the engine package from BlueStacks and select
+the package EXE directly in the **Root.vhd** path row. The built-in 7-Zip SDK
+reader finds the appended archive and extracts only `Root.vhd` into the tool's
+private working cache; no WinRAR/7-Zip installation or manual extraction is
+needed, and the downloaded package is left untouched. The image browser edits
+the extracted working copy, so use that `Root.vhd` when you install the engine.
 
 The Debloat feature set follows
 [Jordan231111/Bluestacks-Debloat](https://github.com/Jordan231111/Bluestacks-Debloat)

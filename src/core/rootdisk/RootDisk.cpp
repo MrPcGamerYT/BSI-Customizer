@@ -4,6 +4,10 @@
 #include <cstdio>
 #include <cstring>
 #include <map>
+#include <limits>
+#ifndef _WIN32
+#include <sys/types.h>
+#endif
 
 namespace RootDisk {
 
@@ -16,6 +20,42 @@ std::uint32_t le32(const std::uint8_t *p)
 {
     return std::uint32_t(p[0]) | (std::uint32_t(p[1]) << 8) | (std::uint32_t(p[2]) << 16)
         | (std::uint32_t(p[3]) << 24);
+}
+std::uint64_t le64(const std::uint8_t *p)
+{
+    return std::uint64_t(le32(p)) | (std::uint64_t(le32(p + 4)) << 32);
+}
+
+bool seekFile(std::FILE *file, std::uint64_t offset)
+{
+#ifdef _WIN32
+    if (offset > std::uint64_t(std::numeric_limits<__int64>::max())) return false;
+    return _fseeki64(file, static_cast<__int64>(offset), SEEK_SET) == 0;
+#else
+    if (offset > std::uint64_t(std::numeric_limits<off_t>::max())) return false;
+    return fseeko(file, static_cast<off_t>(offset), SEEK_SET) == 0;
+#endif
+}
+
+bool seekFileEnd(std::FILE *file)
+{
+#ifdef _WIN32
+    return _fseeki64(file, 0, SEEK_END) == 0;
+#else
+    return fseeko(file, 0, SEEK_END) == 0;
+#endif
+}
+
+bool fileLength(std::FILE *file, std::uint64_t *length)
+{
+#ifdef _WIN32
+    const __int64 result = _ftelli64(file);
+#else
+    const off_t result = ftello(file);
+#endif
+    if (result < 0) return false;
+    *length = std::uint64_t(result);
+    return true;
 }
 std::uint64_t be32toh_(const std::uint8_t *p)
 {
@@ -90,15 +130,15 @@ public:
 
     bool read(std::uint64_t offset, void *buffer, std::size_t length) override
     {
-        if (offset + length > m_size) return false;
-        if (std::fseek(m_file, long(offset), SEEK_SET) != 0) return false;
+        if (offset > m_size || std::uint64_t(length) > m_size - offset) return false;
+        if (!seekFile(m_file, offset)) return false;
         return std::fread(buffer, 1, length, m_file) == length;
     }
 
     bool write(std::uint64_t offset, const void *buffer, std::size_t length) override
     {
-        if (offset + length > m_size) return false;
-        if (std::fseek(m_file, long(offset), SEEK_SET) != 0) return false;
+        if (offset > m_size || std::uint64_t(length) > m_size - offset) return false;
+        if (!seekFile(m_file, offset)) return false;
         return std::fwrite(buffer, 1, length, m_file) == length;
     }
 
@@ -138,13 +178,13 @@ private:
 
     bool fileRead(std::uint64_t offset, void *buffer, std::size_t length)
     {
-        if (std::fseek(m_file, long(offset), SEEK_SET) != 0) return false;
+        if (!seekFile(m_file, offset)) return false;
         return std::fread(buffer, 1, length, m_file) == length;
     }
     bool fileWrite(std::uint64_t offset, const void *buffer, std::size_t length)
     {
         if (m_readOnly) return false;
-        if (std::fseek(m_file, long(offset), SEEK_SET) != 0) return false;
+        if (!seekFile(m_file, offset)) return false;
         return std::fwrite(buffer, 1, length, m_file) == length;
     }
     bool writeFooter(std::uint64_t at);
@@ -174,7 +214,7 @@ std::unique_ptr<VhdImage> VhdImage::open(std::FILE *file, std::uint64_t fileSize
     if (fileSize < 1024) return fail("The image is too small to be a VHD.");
 
     std::vector<std::uint8_t> footer(512);
-    if (std::fseek(file, long(fileSize - 512), SEEK_SET) != 0
+    if (!seekFile(file, fileSize - 512)
         || std::fread(footer.data(), 1, 512, file) != 512)
         return fail("The end of the image could not be read.");
     if (std::memcmp(footer.data(), "conectix", 8) != 0) {
@@ -203,7 +243,7 @@ std::unique_ptr<VhdImage> VhdImage::open(std::FILE *file, std::uint64_t fileSize
     image->m_dynamic = true;
     const std::uint64_t headerOffset = be64toh_(footer.data() + 16);
     std::vector<std::uint8_t> header(1024);
-    if (std::fseek(file, long(headerOffset), SEEK_SET) != 0
+    if (!seekFile(file, headerOffset)
         || std::fread(header.data(), 1, 1024, file) != 1024)
         return fail("The dynamic VHD header could not be read.");
     if (std::memcmp(header.data(), "cxsparse", 8) != 0)
@@ -220,7 +260,7 @@ std::unique_ptr<VhdImage> VhdImage::open(std::FILE *file, std::uint64_t fileSize
     image->m_bitmapOffset = (image->m_bitmapOffset + 511) & ~std::uint64_t(511);
 
     std::vector<std::uint8_t> bat(image->m_maxEntries * 4);
-    if (std::fseek(file, long(image->m_tableOffset), SEEK_SET) != 0
+    if (!seekFile(file, image->m_tableOffset)
         || std::fread(bat.data(), 1, bat.size(), file) != bat.size())
         return fail("The VHD block table could not be read.");
     image->m_bat.resize(image->m_maxEntries);
@@ -371,14 +411,13 @@ std::unique_ptr<Image> openImage(const std::string &path, std::string *error)
         if (error) *error = "The image could not be opened: " + path;
         return nullptr;
     }
-    if (std::fseek(file, 0, SEEK_END) != 0) {
+    std::uint64_t length = 0;
+    if (!seekFileEnd(file) || !fileLength(file, &length) || !seekFile(file, 0)) {
         std::fclose(file);
         if (error) *error = "The image size could not be read.";
         return nullptr;
     }
-    const long length = std::ftell(file);
-    std::fseek(file, 0, SEEK_SET);
-    if (length <= 0) {
+    if (length == 0) {
         std::fclose(file);
         if (error) *error = "The image is empty.";
         return nullptr;
@@ -388,22 +427,22 @@ std::unique_ptr<Image> openImage(const std::string &path, std::string *error)
     bool vhd = false;
     if (length > 512) {
         std::uint8_t cookie[8] = {};
-        if (std::fseek(file, length - 512, SEEK_SET) == 0 && std::fread(cookie, 1, 8, file) == 8)
+        if (seekFile(file, length - 512) && std::fread(cookie, 1, 8, file) == 8)
             vhd = std::memcmp(cookie, "conectix", 8) == 0;
-        if (!vhd && std::fseek(file, 0, SEEK_SET) == 0 && std::fread(cookie, 1, 8, file) == 8)
+        if (!vhd && seekFile(file, 0) && std::fread(cookie, 1, 8, file) == 8)
             vhd = std::memcmp(cookie, "conectix", 8) == 0;
-        std::fseek(file, 0, SEEK_SET);
+        seekFile(file, 0);
     }
     if (vhd) {
         std::string why;
-        if (auto image = VhdImage::open(file, std::uint64_t(length), readOnly, &why))
+        if (auto image = VhdImage::open(file, length, readOnly, &why))
             return image;
         if (why != "not a VHD") {
             if (error) *error = why;
             return nullptr;
         }
     }
-    return std::unique_ptr<Image>(new FileImage(file, std::uint64_t(length)));
+    return std::unique_ptr<Image>(new FileImage(file, length));
 }
 
 std::string joinPath(const std::string &base, const std::string &name)
@@ -447,26 +486,133 @@ std::unique_ptr<Volume> Volume::mount(std::unique_ptr<Image> image, std::string 
     std::uint64_t offset = 0;
     std::uint8_t boot[512] = {};
     bool found = false;
-    // A partition table: probe each partition for the ext4 magic.
-    if (image->read(0, boot, 512) && boot[510] == 0x55 && boot[511] == 0xAA) {
+    const auto probeExt4 = [&](std::uint64_t start) {
+        if (start > image->size() || image->size() - start < 2048 + 0x3A)
+            return false;
+        std::uint8_t magic[2] = {};
+        return image->read(start + 1024 + 0x38, magic, sizeof(magic))
+            && le16(magic) == kMagic;
+    };
+    const auto acceptPartition = [&](std::uint64_t start) {
+        if (!found && probeExt4(start)) {
+            offset = start;
+            found = true;
+        }
+    };
+
+    // MBR primary partitions. BlueStacks images can use either a conventional
+    // MBR or GPT; probing the superblock itself avoids trusting a partition
+    // type byte that may be stale in vendor-built images.
+    if (image->read(0, boot, sizeof(boot)) && boot[510] == 0x55 && boot[511] == 0xAA) {
+        std::vector<std::uint64_t> extended;
         for (int index = 0; index < 4 && !found; ++index) {
             const std::uint8_t *entry = boot + 446 + index * 16;
-            if (entry[4] == 0 || entry[4] == 0xEE) continue;   // empty / GPT protective
+            const std::uint8_t type = entry[4];
             const std::uint64_t start = std::uint64_t(le32(entry + 8)) * 512;
-            std::uint8_t magic[2] = {};
-            if (image->read(start + 1024 + 0x38, magic, 2) && le16(magic) == kMagic) {
-                offset = start;
-                found = true;
+            if (type == 0x05 || type == 0x0F || type == 0x85)
+                extended.push_back(start);
+            else if (type != 0 && type != 0xEE)
+                acceptPartition(start);
+        }
+
+        // Logical partitions in an extended MBR partition. The EBR chain is
+        // bounded and visited-set protected so malformed tables cannot loop.
+        for (const std::uint64_t base : extended) {
+            std::uint64_t ebr = base;
+            std::vector<std::uint64_t> seen;
+            for (int n = 0; n < 128 && !found && ebr < image->size(); ++n) {
+                if (std::find(seen.begin(), seen.end(), ebr) != seen.end()) break;
+                seen.push_back(ebr);
+                std::uint8_t sector[512] = {};
+                if (!image->read(ebr, sector, sizeof(sector))
+                    || sector[510] != 0x55 || sector[511] != 0xAA)
+                    break;
+                const std::uint8_t *logical = sector + 446;
+                if (logical[4] != 0)
+                    acceptPartition(ebr + std::uint64_t(le32(logical + 8)) * 512);
+                const std::uint8_t *next = sector + 462;
+                if (next[4] == 0 || le32(next + 8) == 0) break;
+                ebr = base + std::uint64_t(le32(next + 8)) * 512;
             }
         }
     }
-    if (!found) {
-        std::uint8_t magic[2] = {};
-        if (!image->read(1024 + 0x38, magic, 2) || le16(magic) != kMagic)
-            return fail("No ext4 filesystem was found: neither a partition nor the start of the "
-                        "image carries one.");
-        offset = 0;
+
+    // GPT: header at LBA 1, partition array normally at LBA 2. We accept the
+    // standard 512-byte logical-sector layout used by VHDs and validate all
+    // offsets/counts against the virtual disk before reading them.
+    if (!found && image->read(512, boot, sizeof(boot))
+        && std::memcmp(boot, "EFI PART", 8) == 0) {
+        const std::uint64_t entriesLba = le64(boot + 72);
+        const std::uint32_t entryCount = le32(boot + 80);
+        const std::uint32_t entrySize = le32(boot + 84);
+        if (entryCount > 0 && entrySize >= 128 && entrySize <= 4096
+            && entriesLba <= image->size() / 512) {
+            const std::uint32_t count = std::min(entryCount, 4096u);
+            const std::uint64_t arrayStart = entriesLba * 512;
+            for (std::uint32_t i = 0; i < count && !found; ++i) {
+                const std::uint64_t at = arrayStart + std::uint64_t(i) * entrySize;
+                if (at < arrayStart) break;
+                if (at > image->size() || image->size() - at < entrySize) break;
+                std::vector<std::uint8_t> entry(entrySize);
+                if (!image->read(at, entry.data(), entry.size())) break;
+                bool empty = true;
+                for (int j = 0; j < 16; ++j) empty = empty && entry[j] == 0;
+                if (empty) continue;
+                const std::uint64_t firstLba = le64(entry.data() + 32);
+                if (firstLba > image->size() / 512) continue;
+                acceptPartition(firstLba * 512);
+            }
+        }
     }
+
+    if (!found)
+        acceptPartition(0);
+
+    // A few vendor images omit a usable partition map while leaving the ext4
+    // volume at a sector-aligned offset. Scan the first 64 MiB sequentially
+    // (rather than issuing millions of random reads) for the ext4 superblock
+    // magic and validate candidates at 512-byte boundaries.
+    if (!found) {
+        constexpr std::uint64_t kMagicOffset = 1024 + 0x38;
+        constexpr std::uint64_t kProbeLimit = 64ull * 1024 * 1024;
+        constexpr std::size_t kChunk = 4u * 1024 * 1024;
+        const std::uint64_t limit = std::min(image->size(), kProbeLimit);
+        std::vector<std::uint8_t> bytes(kChunk + 1);
+        std::uint64_t readAt = 0;
+        std::uint8_t carry = 0;
+        bool haveCarry = false;
+        while (!found && readAt < limit) {
+            const std::size_t count = std::size_t(std::min<std::uint64_t>(kChunk, limit - readAt));
+            std::uint64_t base = readAt;
+            std::size_t searchable = count;
+            if (haveCarry) {
+                bytes[0] = carry;
+                if (!image->read(readAt, bytes.data() + 1, count)) break;
+                base = readAt - 1;
+                searchable = count + 1;
+            } else if (!image->read(readAt, bytes.data(), count)) {
+                break;
+            }
+            for (std::size_t i = 0; i + 1 < searchable; ++i) {
+                if (bytes[i] != 0x53 || bytes[i + 1] != 0xEF) continue;
+                const std::uint64_t magicAt = base + i;
+                if (magicAt < kMagicOffset) continue;
+                const std::uint64_t candidate = magicAt - kMagicOffset;
+                if ((candidate % 512) == 0)
+                    acceptPartition(candidate);
+                if (found) break;
+            }
+            carry = bytes[haveCarry ? count : count - 1];
+            haveCarry = true;
+            readAt += count;
+        }
+    }
+
+    if (!found)
+        return fail("No ext4 filesystem was found in this disk image. The editor checks the "
+                    "image itself, MBR, extended-MBR and GPT partitions, plus sector-aligned "
+                    "volumes in the first 64 MiB. Select a Root.vhd or engine package, not the "
+                    "BlueStacks setup installer.");
 
     auto volume = std::unique_ptr<Volume>(new Volume());
     volume->m_image = std::move(image);

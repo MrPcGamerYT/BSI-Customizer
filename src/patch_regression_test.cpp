@@ -21,6 +21,7 @@
 #include "core/QtResources.h"
 #include "core/QtResourceRegistration.h"
 #include "core/RootVhd.h"
+#include "core/SevenZipArchive.h"
 #include "core/RpcIdPatcher.h"
 #include "core/RpcIdScan.h"
 #include "core/SettingsManager.h"
@@ -1004,6 +1005,12 @@ void checkAndroid()
               "a disabled package is enabled again");
         check(Android::listCommand().contains(QLatin1String("--user 0")),
               "the package list asked for is the one the remove step is verified against");
+        const QStringList installed = Android::installedPackagesFromOutput(
+            QStringLiteral("package:com.android.systemui\npackage:org.example.game\n"
+                           "package:com.android.systemui\nnot-a-package\n"));
+        check(installed == (QStringList { QStringLiteral("com.android.systemui"),
+                                          QStringLiteral("org.example.game") }),
+              "the live debloater parses all installed packages, deduplicates and sorts them");
 
         const QStringList wipe = Android::downloadWipeCommands();
         bool removes = false, recreates = false;
@@ -1261,6 +1268,89 @@ void checkRootDisk()
     }();
     check(pristine.size() > 512, "the working copy really is a disk image");
 
+#ifdef BSI_ROOT_7Z_FIXTURE
+    // Opening a plain archive and a synthetic SFX both exercises the bundled
+    // decoder: no WinRAR/7-Zip installation is part of the test machine.
+    const auto extractedArchive = SevenZipArchive::extractRootVhd(
+        QString::fromUtf8(BSI_ROOT_7Z_FIXTURE), temp.filePath(QStringLiteral("archive-cache")));
+    check(extractedArchive.value(QStringLiteral("ok")).toBool(),
+          "the built-in decoder extracts Root.vhd from a plain 7z package");
+    if (extractedArchive.value(QStringLiteral("ok")).toBool())
+        check(read(extractedArchive.value(QStringLiteral("path")).toString()) == pristine,
+              "the plain-archive Root.vhd is byte-identical to the source fixture");
+
+    QFile archiveFixture(QString::fromUtf8(BSI_ROOT_7Z_FIXTURE));
+    QByteArray archiveBytes;
+    if (archiveFixture.open(QIODevice::ReadOnly)) archiveBytes = archiveFixture.readAll();
+    const QString sfxPath = temp.filePath(QStringLiteral("engine-package.exe"));
+    check(write(sfxPath, QByteArray("MZ synthetic SFX stub\r\n") + archiveBytes),
+          "write a synthetic engine self-extractor around the 7z fixture");
+    const auto extractedSfx = SevenZipArchive::extractRootVhd(
+        sfxPath, temp.filePath(QStringLiteral("sfx-cache")));
+    check(extractedSfx.value(QStringLiteral("ok")).toBool(),
+          "the built-in decoder finds and extracts Root.vhd inside an EXE");
+    if (extractedSfx.value(QStringLiteral("ok")).toBool())
+        check(read(extractedSfx.value(QStringLiteral("path")).toString()) == pristine,
+              "the SFX Root.vhd is byte-identical to the source fixture");
+#endif
+
+    // Some engine images are GPT-partitioned rather than raw ext4 or MBR. Put
+    // the fixture behind a minimal GPT partition and verify mount locates it.
+    {
+        constexpr int partitionOffset = 1024 * 1024;
+        constexpr int filesystemBytes = 256 * 1024;
+        QByteArray gpt(partitionOffset + filesystemBytes, '\0');
+        gpt.replace(partitionOffset, filesystemBytes, pristine.left(filesystemBytes));
+        auto put32 = [&gpt](int at, quint32 value) {
+            for (int i = 0; i < 4; ++i) gpt[at + i] = char((value >> (8 * i)) & 0xff);
+        };
+        auto put64 = [&gpt](int at, quint64 value) {
+            for (int i = 0; i < 8; ++i) gpt[at + i] = char((value >> (8 * i)) & 0xff);
+        };
+        gpt[510] = char(0x55); gpt[511] = char(0xaa);
+        gpt[446 + 4] = char(0xee);
+        put32(446 + 8, 1);
+        gpt.replace(512, 8, QByteArray("EFI PART", 8));
+        put32(512 + 8, 0x00010000);
+        put32(512 + 12, 92);
+        put64(512 + 24, 1);
+        put64(512 + 32, quint64(gpt.size() / 512) - 1);
+        put64(512 + 40, 34);
+        put64(512 + 48, quint64(gpt.size() / 512) - 34);
+        put64(512 + 72, 2);
+        put32(512 + 80, 128);
+        put32(512 + 84, 128);
+        // A non-zero partition type GUID and the starting/ending LBAs.
+        gpt[1024] = char(0x28);
+        put64(1024 + 32, partitionOffset / 512);
+        put64(1024 + 40, (partitionOffset + filesystemBytes) / 512 - 1);
+        gpt[510] = char(0x55); gpt[511] = char(0xaa);
+        const QString gptPath = temp.filePath(QStringLiteral("gpt-root.img"));
+        check(write(gptPath, gpt), "write a synthetic GPT-partitioned image");
+        std::string gptError;
+        auto gptImage = RootDisk::openImage(QFile::encodeName(gptPath).toStdString(), &gptError);
+        auto gptVolume = RootDisk::Volume::mount(std::move(gptImage), &gptError);
+        check(gptVolume != nullptr, "ext4 mounts from a GPT partition");
+        if (gptVolume)
+            check(gptVolume->list("/", &gptError).inode != 0,
+                  "the filesystem inside the GPT partition can be browsed");
+
+        // Also cover vendor images whose ext4 starts at a sector-aligned
+        // offset but whose partition map is absent or unusable.
+        QByteArray unlabelled(partitionOffset + filesystemBytes, '\0');
+        unlabelled.replace(partitionOffset, filesystemBytes, pristine.left(filesystemBytes));
+        const QString unlabelledPath = temp.filePath(QStringLiteral("offset-root.img"));
+        check(write(unlabelledPath, unlabelled), "write an ext4 image with no partition map");
+        std::string offsetError;
+        auto offsetImage = RootDisk::openImage(QFile::encodeName(unlabelledPath).toStdString(),
+                                               &offsetError);
+        auto offsetVolume = RootDisk::Volume::mount(std::move(offsetImage), &offsetError);
+        check(offsetVolume != nullptr, "the bounded signature scan finds an unlabelled ext4 volume");
+        if (offsetVolume)
+            check(offsetVolume->list("/", &offsetError).inode != 0,
+                  "the unlabelled ext4 volume can be browsed");
+    }
+
     // ---- the engine ----
     {
         std::string error;
@@ -1317,29 +1407,99 @@ void checkRootDisk()
         check(afterAdd.value(QStringLiteral("entries")).toList().size() == entries + 1,
               "the folder lists one entry more");
         check(RootVhd::hasUndo(work), "the write left an undo record behind");
+        const auto duplicate = RootVhd::addFile(work, QStringLiteral("/"), added);
+        check(!duplicate.value(QStringLiteral("ok")).toBool()
+                  && duplicate.value(QStringLiteral("msg")).toString().contains(QLatin1String("Replace")),
+              "Add refuses an existing name and directs the user to Replace");
+
+        const QString replacementPath = temp.filePath(QStringLiteral("replacement.bin"));
+        const QByteArray replacementBytes("new bytes replace the old contents\n");
+        {
+            QFile replacement(replacementPath);
+            replacement.open(QIODevice::WriteOnly);
+            replacement.write(replacementBytes);
+        }
+        const auto replaced = RootVhd::replaceFile(work, QStringLiteral("/added.txt"),
+                                                   replacementPath);
+        check(replaced.value(QStringLiteral("ok")).toBool(),
+              "an existing image file can be replaced from a differently named local file");
 
         const QString out = temp.filePath(QStringLiteral("out.txt"));
         const auto extract = RootVhd::extract(work, QStringLiteral("/added.txt"), out);
-        check(extract.value(QStringLiteral("ok")).toBool(), "the file is extracted again");
+        check(extract.value(QStringLiteral("ok")).toBool(), "the replacement can be extracted");
         {
             QFile file(out);
             file.open(QIODevice::ReadOnly);
-            check(file.readAll() == "added by the regression test\n",
-                  "the extracted file is the one that was added");
+            check(file.readAll() == replacementBytes,
+                  "Replace keeps the image path and writes the selected local file's bytes");
         }
 
         const auto mkdir = RootVhd::makeFolder(work, QStringLiteral("/"), QStringLiteral("debloat"));
         check(mkdir.value(QStringLiteral("ok")).toBool(), "a folder is created in the image");
-        const auto inside = RootVhd::listing(work, QStringLiteral("/debloat"));
-        check(inside.value(QStringLiteral("ok")).toBool()
-                  && inside.value(QStringLiteral("entries")).toList().isEmpty(),
-              "the new folder is empty and can be opened");
 
+        // Adding at the image root builds "/name", not "//name": cleanPath keeps
+        // a double leading slash on Windows, and the path then does not resolve.
+        const QString treeRoot = temp.filePath(QStringLiteral("tree"));
+        QDir().mkpath(treeRoot + QStringLiteral("/nested"));
+        {
+            QFile file(treeRoot + QStringLiteral("/nested/leaf.txt"));
+            file.open(QIODevice::WriteOnly);
+            file.write("a leaf\n");
+            QFile top(treeRoot + QStringLiteral("/top.txt"));
+            top.open(QIODevice::WriteOnly);
+            top.write("top\n");
+        }
+        const auto addTree = RootVhd::addFolder(work, QStringLiteral("/"), treeRoot);
+        check(addTree.value(QStringLiteral("ok")).toBool(),
+              "a folder tree is added at the image root");
+        const auto nested = RootVhd::listing(work, QStringLiteral("/tree/nested"));
+        check(nested.value(QStringLiteral("ok")).toBool()
+                  && nested.value(QStringLiteral("entries")).toList().size() == 1,
+              "the tree keeps its structure, sub-folder included");
+
+        // A file and a folder are both accepted by one addPath call.
+        const QString pathFile = temp.filePath(QStringLiteral("path-added.txt"));
+        {
+            QFile file(pathFile);
+            file.open(QIODevice::WriteOnly);
+            file.write("added through addPath\\n");
+        }
+        const auto addPathFile = RootVhd::addPath(work, QStringLiteral("/"), pathFile);
+        check(addPathFile.value(QStringLiteral("ok")).toBool(), "addPath takes a file");
+        const auto addPathDir = RootVhd::addPath(work, QStringLiteral("/debloat"), treeRoot);
+        check(addPathDir.value(QStringLiteral("ok")).toBool(), "addPath takes a folder");
+
+        // Search walks the whole image, not just the open folder.
+        const auto search = RootVhd::search(work, QStringLiteral("leaf"));
+        bool foundLeaf = false;
+        for (const auto &value : search.value(QStringLiteral("entries")).toList()) {
+            const QString path = value.toMap().value(QStringLiteral("path")).toString();
+            if (path == QLatin1String("/tree/nested/leaf.txt")) foundLeaf = true;
+        }
+        check(search.value(QStringLiteral("ok")).toBool() && foundLeaf,
+              "search finds a file by name anywhere in the image");
+        const auto noMatch = RootVhd::search(work, QStringLiteral("zzz-nothing-zzz"));
+        check(noMatch.value(QStringLiteral("ok")).toBool()
+                  && noMatch.value(QStringLiteral("entries")).toList().isEmpty(),
+              "a search with no match says so instead of failing");
+        const auto inside = RootVhd::listing(work, QStringLiteral("/debloat"));
+        bool hasCopiedTree = false;
+        for (const auto &value : inside.value(QStringLiteral("entries")).toList())
+            if (value.toMap().value(QStringLiteral("name")).toString() == QLatin1String("tree"))
+                hasCopiedTree = true;
+        check(inside.value(QStringLiteral("ok")).toBool() && hasCopiedTree,
+              "the folder added by addPath is in the folder it was told to go to");
+
+        const int beforeRemove =
+            RootVhd::listing(work, QStringLiteral("/")).value(QStringLiteral("entries")).toList().size();
         const auto remove = RootVhd::remove(work, QStringLiteral("/added.txt"));
         check(remove.value(QStringLiteral("ok")).toBool(), "a file is removed from the image");
         check(RootVhd::listing(work, QStringLiteral("/")).value(QStringLiteral("entries")).toList().size()
-                  == entries + 1,
-              "the folder is back to its old size plus the new folder");
+                  == beforeRemove - 1,
+              "the folder lists one entry fewer after the delete");
+        const auto removePathFile = RootVhd::remove(work, QStringLiteral("/path-added.txt"));
+        check(removePathFile.value(QStringLiteral("ok")).toBool(),
+              "a file added through addPath can be deleted");
         const auto refused = RootVhd::remove(work, QStringLiteral("/not-there.txt"));
         check(!refused.value(QStringLiteral("ok")).toBool(),
               "removing something that is not there is refused, not guessed at");
@@ -1360,6 +1520,14 @@ void checkRootDisk()
         check(reopened.value(QStringLiteral("ok")).toBool()
                   && reopened.value(QStringLiteral("entries")).toList().size() == originalEntries,
               "the restored image opens again and holds its original entries");
+        // The folder added at the root and everything below it are gone again:
+        // the inode table, the bitmaps and the group counts all went back.
+        const auto gone = RootVhd::listing(work, QStringLiteral("/tree"));
+        check(!gone.value(QStringLiteral("ok")).toBool(),
+              "the folder tree added during the test is gone after the undo");
+        const auto goneFile = RootVhd::listing(work, QStringLiteral("/debloat"));
+        check(!goneFile.value(QStringLiteral("ok")).toBool(),
+              "the folder created during the test is gone after the undo");
     }
 
     // ---- refusals ----

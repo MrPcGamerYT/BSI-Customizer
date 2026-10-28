@@ -62,6 +62,7 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 
 [Files]
 Source: "{#SourceExe}"; DestDir: "{app}"; DestName: "BSI-Customizer.exe"; Flags: ignoreversion
+Source: "..\..\src\third_party\7zip\LICENSE.txt"; DestDir: "{app}\licenses\7zip"; DestName: "LICENSE.txt"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\BSI Customizer"; Filename: "{app}\BSI-Customizer.exe"

@@ -48,6 +48,9 @@ QString appLabel(const QString &package);
 // A package name safe to interpolate into a shell command: letters, digits,
 // dots, underscores; at least two segments. Everything else is refused.
 bool validPackage(const QString &package);
+// Parses `pm list packages --user 0` output into the complete sorted unique
+// package set; exposed so the parser can be regression-tested without a device.
+QStringList installedPackagesFromOutput(const QString &output);
 
 // ---- commands (pure, so they can be tested without a device) ----
 QString listCommand();                                   // packages installed for user 0

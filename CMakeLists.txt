@@ -1,9 +1,38 @@
 cmake_minimum_required(VERSION 3.21)
 
-project(BSICustomizer VERSION 2.7.0 LANGUAGES CXX)
+project(BSICustomizer VERSION 2.7.0 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_C_STANDARD 99)
+set(CMAKE_C_STANDARD_REQUIRED ON)
+
+# Public-domain 7-Zip SDK decoder: used in-process to open the self-extracting
+# BlueStacks engine package and extract Root.vhd without requiring a separate
+# archive utility to be installed.
+add_library(bsi_7z STATIC
+    src/third_party/7zip/C/7zAlloc.c
+    src/third_party/7zip/C/7zArcIn.c
+    src/third_party/7zip/C/7zBuf.c
+    src/third_party/7zip/C/7zBuf2.c
+    src/third_party/7zip/C/7zCrc.c
+    src/third_party/7zip/C/7zCrcOpt.c
+    src/third_party/7zip/C/7zDec.c
+    src/third_party/7zip/C/7zFile.c
+    src/third_party/7zip/C/7zStream.c
+    src/third_party/7zip/C/Bcj2.c
+    src/third_party/7zip/C/Bra.c
+    src/third_party/7zip/C/Bra86.c
+    src/third_party/7zip/C/BraIA64.c
+    src/third_party/7zip/C/CpuArch.c
+    src/third_party/7zip/C/Delta.c
+    src/third_party/7zip/C/Lzma2Dec.c
+    src/third_party/7zip/C/LzmaDec.c
+    src/third_party/7zip/C/Ppmd7.c
+    src/third_party/7zip/C/Ppmd7Dec.c
+)
+target_include_directories(bsi_7z PUBLIC src/third_party/7zip/C)
+target_compile_definitions(bsi_7z PRIVATE Z7_EXTRACT_ONLY Z7_PPMD_SUPPORT)
 
 find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Network Qml Quick QuickControls2 Svg)
 
@@ -81,6 +110,8 @@ qt_add_executable(BSICustomizer
     src/core/rootdisk/RootDiskWrite.cpp
     src/core/RootVhd.h
     src/core/RootVhd.cpp
+    src/core/SevenZipArchive.h
+    src/core/SevenZipArchive.cpp
     src/core/BsDetector.h
     src/core/BsDetector.cpp
     src/core/Backend.h
@@ -146,6 +177,7 @@ set_target_properties(BSICustomizer PROPERTIES
 target_compile_definitions(BSICustomizer PRIVATE
     BSI_VERSION="${PROJECT_VERSION}"
 )
+target_link_libraries(BSICustomizer PRIVATE bsi_7z)
 
 # ---------------------------------------------------------------------------
 # Optional build-time auth embed ("zip auth json"): the whole auth.json blob
@@ -196,6 +228,10 @@ if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/root-256k.vhd")
     file(TO_CMAKE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/root-256k.vhd" _bsi_root_vhd)
     target_compile_definitions(BSICustomizer PRIVATE BSI_ROOT_VHD_FIXTURE="${_bsi_root_vhd}")
 endif()
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/root-256k.7z")
+    file(TO_CMAKE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/root-256k.7z" _bsi_root_7z)
+    target_compile_definitions(BSICustomizer PRIVATE BSI_ROOT_7Z_FIXTURE="${_bsi_root_7z}")
+endif()
 
 # Optional user-supplied diagnostic input. It is read as data and only disposable
 # copies are patched by --selftest; its executable code/QML is never run.
@@ -230,6 +266,7 @@ qt_add_qml_module(BSICustomizer
         src/qml/components/ChoiceChips.qml
         src/qml/components/Toast.qml
         src/qml/components/PathRow.qml
+        src/qml/components/RootVhdBrowser.qml
         src/qml/components/ColorField.qml
         src/qml/components/GradientEditor.qml
         src/qml/components/LogPanel.qml

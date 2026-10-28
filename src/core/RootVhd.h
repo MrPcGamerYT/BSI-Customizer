@@ -26,17 +26,27 @@ namespace RootVhd {
 QStringList engineFolders(const QString &exePath);
 // The Root.vhd of this installation, or an empty string.
 QString findImage(const QString &exePath);
+// Extract Root.vhd from a selected 7z/7-Zip SFX engine package into the
+// application's private cache. No archive utility is needed at runtime.
+QVariantMap extractEngineArchive(const QString &archivePath);
 
 // What the image is, and whether it can be written.
 QVariantMap info(const QString &imagePath);
 // { ok, path, parent, entries: [{name, path, dir, size, mtime, mode}] }
 QVariantMap listing(const QString &imagePath, const QString &innerPath);
+// Every entry anywhere in the image whose name contains `query`, so a package
+// folder or an .apk can be found without walking the tree by hand.
+QVariantMap search(const QString &imagePath, const QString &query, int limit = 500);
 // Writes one file out; `localPath` is a file path for a file, a folder for a folder.
 QVariantMap extract(const QString &imagePath, const QString &innerPath, const QString &localPath);
-// Local file to `innerDir` (keeping its name), or replacing the same name there.
+// Add a local file to `innerDir` (keeping its name); refuses duplicate names.
 QVariantMap addFile(const QString &imagePath, const QString &innerDir, const QString &localFile);
+// Replace the bytes of an existing regular file while keeping its in-image name/path.
+QVariantMap replaceFile(const QString &imagePath, const QString &innerPath, const QString &localFile);
 // A whole folder tree, recreated inside the image.
 QVariantMap addFolder(const QString &imagePath, const QString &innerDir, const QString &localDir);
+// Whatever the path is — a file or a folder tree — added to `innerDir`.
+QVariantMap addPath(const QString &imagePath, const QString &innerDir, const QString &localPath);
 QVariantMap makeFolder(const QString &imagePath, const QString &innerDir, const QString &name);
 QVariantMap remove(const QString &imagePath, const QString &innerPath);
 
