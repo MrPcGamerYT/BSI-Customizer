@@ -35,6 +35,15 @@ QString stamp()
     return QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd-HHmmss-zzz"));
 }
 
+// "base" + "/" + "name", with the root handled so the result never starts
+// with two slashes (which QDir::cleanPath keeps on Windows, as a UNC path).
+QString joinInner(const QString &base, const QString &name)
+{
+    if (base.isEmpty() || base == QLatin1String("/"))
+        return QLatin1Char('/') + name;
+    return base + QLatin1Char('/') + name;
+}
+
 QVariantMap failure(const QString &message)
 {
     return { { QStringLiteral("ok"), false }, { QStringLiteral("msg"), message } };
@@ -397,6 +406,66 @@ QVariantMap listing(const QString &imagePath, const QString &innerPath)
              { QStringLiteral("undo"), hasUndo(imagePath) } };
 }
 
+QVariantMap search(const QString &imagePath, const QString &query, int limit)
+{
+    const QString needle = query.trimmed();
+    if (needle.isEmpty()) return failure(QStringLiteral("Type something to search for."));
+
+    std::string why;
+    auto image = RootDisk::openImage(QFile::encodeName(imagePath).toStdString(), &why);
+    if (!image) return failure(QString::fromStdString(why));
+    auto volume = RootDisk::Volume::mount(std::move(image), &why);
+    if (!volume) return failure(QString::fromStdString(why));
+
+    QVariantList matches;
+    // Breadth first, with hard caps: an image with an unexpectedly deep tree or
+    // a symlink loop must end, not spin.
+    QStringList queue { QStringLiteral("/") };
+    qint64 scanned = 0;
+    bool truncated = false;
+    const int maxMatches = qBound(1, limit, 5000);
+    while (!queue.isEmpty() && !truncated) {
+        const QString path = queue.takeFirst();
+        std::string listError;
+        const RootDisk::Listing listing = volume->list(path.toStdString(), &listError);
+        if (listing.inode == 0) continue;
+        for (const auto &entry : listing.entries) {
+            if (++scanned > 400000) {
+                truncated = true;
+                break;
+            }
+            const QString name = QString::fromStdString(entry.name);
+            const QString child = joinInner(path, name);
+            if (name.contains(needle, Qt::CaseInsensitive)) {
+                if (matches.size() >= maxMatches) {
+                    truncated = true;
+                    break;
+                }
+                const RootDisk::Stat info = volume->stat(entry.inode, nullptr);
+                matches << QVariantMap {
+                    { QStringLiteral("name"), name },
+                    { QStringLiteral("path"), child },
+                    { QStringLiteral("dir"), entry.dir },
+                    { QStringLiteral("size"), double(info.size) },
+                    { QStringLiteral("parent"),
+                      path.isEmpty() ? QStringLiteral("/") : path },
+                };
+            }
+            // Only real folders are walked: a symlink is never followed.
+            if (entry.dir) queue.append(child);
+        }
+    }
+
+    return { { QStringLiteral("ok"), true },
+             { QStringLiteral("entries"), matches },
+             { QStringLiteral("truncated"), truncated },
+             { QStringLiteral("msg"),
+               truncated
+                   ? QStringLiteral("Showing the first %1 matches; narrow the search.")
+                         .arg(matches.size())
+                   : QStringLiteral("%1 match(es).").arg(matches.size()) } };
+}
+
 QVariantMap extract(const QString &imagePath, const QString &innerPath, const QString &localPath)
 {
     std::string why;
@@ -555,11 +624,11 @@ QVariantMap addFolder(const QString &imagePath, const QString &innerDir, const Q
             const std::uint32_t base = volume.resolve(innerDir.toStdString(), error);
             if (base == 0) return false;
             if (!volume.makeDir(base, source.fileName().toStdString(), 0755, error)) return false;
-            const QString root = innerDir + QLatin1Char('/') + source.fileName();
+            const QString root = joinInner(innerDir, source.fileName());
             for (const Item &item : items) {
                 // Every item names its parent by path, so the tree is walked
                 // once and resolved as it goes.
-                const QString full = root + QLatin1Char('/') + item.relative;
+                const QString full = joinInner(root, item.relative);
                 const QString parentPath = full.left(full.lastIndexOf(QLatin1Char('/')));
                 const std::uint32_t parent = volume.resolve(parentPath.toStdString(), error);
                 if (parent == 0) return false;
@@ -589,6 +658,15 @@ QVariantMap addFolder(const QString &imagePath, const QString &innerDir, const Q
              { QStringLiteral("msg"), QStringLiteral("Added “%1” (%2 item(s)).")
                                           .arg(source.fileName())
                                           .arg(items.size()) } };
+}
+
+QVariantMap addPath(const QString &imagePath, const QString &innerDir, const QString &localPath)
+{
+    const QFileInfo info(localPath);
+    if (info.isDir()) return addFolder(imagePath, innerDir, localPath);
+    if (!info.exists())
+        return failure(QStringLiteral("“%1” does not exist.").arg(QDir::toNativeSeparators(localPath)));
+    return addFile(imagePath, innerDir, localPath);
 }
 
 QVariantMap makeFolder(const QString &imagePath, const QString &innerDir, const QString &name)

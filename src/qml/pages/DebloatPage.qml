@@ -33,6 +33,9 @@ Item {
     property string lastMsg: ""
     property bool lastOk: true
     property bool running: false
+    // The switch set is the older half of this page: it stays, but folded away,
+    // so the tab reads as the two things it is for.
+    property bool showSwitches: false
 
     // ---- live ADB ----
     property var androidRecord: ({ recorded: false, removed: [], downloads: [], appData: [] })
@@ -50,8 +53,6 @@ Item {
     // ---- Root.vhd ----
     property string imagePath: ""
     property var imageInfo: ({ ok: false, msg: "", writable: false, description: "", kind: "" })
-    property var imageEntries: []
-    property string imageDir: "/"
     property string imageMsg: ""
     property bool imageOk: true
     property bool imageBusy: false
@@ -301,131 +302,6 @@ Item {
         page.imageOk = !!(info && info.ok);
         page.imageOpen = page.imageOk;
         page.imageMsg = (info && info.msg) ? info.msg : "";
-        page.imageDir = "/";
-        if (page.imageOpen)
-            page.listImage("/");
-        else
-            page.imageEntries = [];
-    }
-
-    function listImage(path) {
-        if (!page.imageOpen)
-            return;
-        page.imageBusy = true;
-        const listing = backend.rootvhdList(page.imagePath, path);
-        page.imageBusy = false;
-        if (!listing || !listing.ok) {
-            page.imageOk = false;
-            page.imageMsg = (listing && listing.msg) ? listing.msg : qsTr("The folder could not be read.");
-            return;
-        }
-        page.imageOk = true;
-        page.imageDir = listing.path || path;
-        page.imageEntries = listing.entries || [];
-        page.imageInfo = Object.assign({}, page.imageInfo, { writable: listing.writable,
-                                                             undo: listing.undo });
-    }
-
-    function openEntry(entry) {
-        if (entry.dir)
-            page.listImage(entry.path);
-    }
-
-    function goUp() {
-        if (page.imageDir === "/" || page.imageDir.length === 0)
-            return;
-        const parts = page.imageDir.split("/");
-        parts.pop();
-        const parent = parts.join("/");
-        page.listImage(parent.length === 0 ? "/" : parent);
-    }
-
-    function crumbs() {
-        const list = [{ name: "/", path: "/" }];
-        const parts = page.imageDir.split("/").filter(function (p) { return p.length > 0; });
-        let built = "";
-        for (let i = 0; i < parts.length; i++) {
-            built += "/" + parts[i];
-            list.push({ name: parts[i], path: built });
-        }
-        return list;
-    }
-
-    function sizeText(bytes) {
-        if (bytes < 1024)
-            return bytes + " B";
-        if (bytes < 1024 * 1024)
-            return (bytes / 1024).toFixed(1) + " KB";
-        if (bytes < 1024 * 1024 * 1024)
-            return (bytes / (1024 * 1024)).toFixed(1) + " MB";
-        return (bytes / (1024 * 1024 * 1024)).toFixed(2) + " GB";
-    }
-
-    function addFile(localPath) {
-        page.imageBusy = true;
-        const result = backend.rootvhdAdd(page.imagePath, page.imageDir, localPath);
-        page.imageBusy = false;
-        page.imageOk = !!(result && result.ok);
-        page.imageMsg = (result && result.msg) ? result.msg : "";
-        page.listImage(page.imageDir);
-        if (page.imageMsg.length > 0)
-            page.notify(page.imageMsg);
-    }
-
-    function addFolder(localDir) {
-        page.imageBusy = true;
-        const result = backend.rootvhdAddFolder(page.imagePath, page.imageDir, localDir);
-        page.imageBusy = false;
-        page.imageOk = !!(result && result.ok);
-        page.imageMsg = (result && result.msg) ? result.msg : "";
-        page.listImage(page.imageDir);
-        if (page.imageMsg.length > 0)
-            page.notify(page.imageMsg);
-    }
-
-    function extractEntry(entry, localPath) {
-        page.imageBusy = true;
-        const result = backend.rootvhdExtract(page.imagePath, entry.path, localPath);
-        page.imageBusy = false;
-        page.imageOk = !!(result && result.ok);
-        page.imageMsg = (result && result.msg) ? result.msg : "";
-        if (page.imageMsg.length > 0)
-            page.notify(page.imageMsg);
-    }
-
-    function removeEntry(entry) {
-        page.imageBusy = true;
-        const result = backend.rootvhdRemove(page.imagePath, entry.path);
-        page.imageBusy = false;
-        page.imageOk = !!(result && result.ok);
-        page.imageMsg = (result && result.msg) ? result.msg : "";
-        page.listImage(page.imageDir);
-        if (page.imageMsg.length > 0)
-            page.notify(page.imageMsg);
-    }
-
-    function undoImage() {
-        page.imageBusy = true;
-        const result = backend.rootvhdUndo(page.imagePath);
-        page.imageBusy = false;
-        page.imageOk = !!(result && result.ok);
-        page.imageMsg = (result && result.msg) ? result.msg : "";
-        page.listImage(page.imageDir);
-        if (page.imageMsg.length > 0)
-            page.notify(page.imageMsg);
-    }
-
-    function makeImageFolder(name) {
-        if (!name || name.length === 0)
-            return;
-        page.imageBusy = true;
-        const result = backend.rootvhdMkdir(page.imagePath, page.imageDir, name);
-        page.imageBusy = false;
-        page.imageOk = !!(result && result.ok);
-        page.imageMsg = (result && result.msg) ? result.msg : "";
-        page.listImage(page.imageDir);
-        if (page.imageMsg.length > 0)
-            page.notify(page.imageMsg);
     }
 
     Component.onCompleted: {
@@ -440,36 +316,6 @@ Item {
         function onConfPathChanged() { page.refresh(); }
     }
 
-    // ---- dialogs ----
-    FileDialog {
-        id: addFileDialog
-        title: qsTr("Add a file to the image")
-        nameFilters: ["All files (*)"]
-        onAccepted: page.addFile(backend.localFilePath(selectedFile))
-    }
-
-    FolderDialog {
-        id: addFolderDialog
-        title: qsTr("Add a folder to the image")
-        onAccepted: page.addFolder(backend.localFilePath(selectedFolder))
-    }
-
-    FileDialog {
-        id: extractFileDialog
-        title: qsTr("Save this file from the image as")
-        fileMode: FileDialog.SaveFile
-        currentFile: page.pendingEntry ? page.pendingEntry.name : ""
-        nameFilters: ["All files (*)"]
-        onAccepted: page.extractEntry(page.pendingEntry, backend.localFilePath(selectedFile))
-    }
-
-    FolderDialog {
-        id: extractFolderDialog
-        title: qsTr("Save this folder from the image into")
-        onAccepted: page.extractEntry(page.pendingEntry, backend.localFilePath(selectedFolder))
-    }
-
-    property var pendingEntry: null
     readonly property string engineUrl: "https://ak-build.bluestacks.com/public/app-player/windows/msi5/5.21.151.6303/4aa785df8f4801455294736aa16b0e8c/Android/Pie64/Pie64.exe?oem=msi5"
 
     ScrollView {
@@ -935,144 +781,19 @@ Item {
                     }
                 }
 
+                // The file manager itself: folder tree, listing, search and
+                // drag-and-drop, all against the image.
                 Card {
                     Layout.fillWidth: true
-                    pad: 14
-                    ColumnLayout {
+                    Layout.preferredHeight: 560
+                    pad: 12
+                    RootVhdBrowser {
                         anchors.fill: parent
-                        spacing: 10
-
-                        RowLayout {
-                            Layout.fillWidth: true
-                            spacing: 8
-                            ActionButton {
-                                text: qsTr("Up")
-                                enabled: page.imageOpen && !page.imageBusy && page.imageDir !== "/"
-                                onClicked: page.goUp()
-                            }
-                            Repeater {
-                                model: page.crumbs()
-                                delegate: ActionButton {
-                                    required property var modelData
-                                    text: modelData.name
-                                    enabled: !page.imageBusy && modelData.path !== page.imageDir
-                                    onClicked: page.listImage(modelData.path)
-                                }
-                            }
-                            Item { Layout.fillWidth: true }
-                            ActionButton {
-                                text: qsTr("Add file")
-                                enabled: page.imageOpen && page.imageInfo.writable && !page.imageBusy
-                                onClicked: addFileDialog.open()
-                            }
-                            ActionButton {
-                                text: qsTr("Add folder")
-                                enabled: page.imageOpen && page.imageInfo.writable && !page.imageBusy
-                                onClicked: addFolderDialog.open()
-                            }
-                            ActionButton {
-                                text: qsTr("New folder")
-                                enabled: page.imageOpen && page.imageInfo.writable && !page.imageBusy
-                                onClicked: newFolderPopup.open()
-                            }
-                            ActionButton {
-                                text: qsTr("Undo")
-                                enabled: page.imageOpen && page.imageInfo.writable && !page.imageBusy
-                                         && page.imageInfo.undo
-                                onClicked: page.undoImage()
-                            }
-                        }
-
-                        Rectangle {
-                            Layout.fillWidth: true
-                            implicitHeight: 1
-                            color: Theme.border
-                        }
-
-                        // ---- the file list ----
-                        Text {
-                            Layout.fillWidth: true
-                            wrapMode: Text.Wrap
-                            visible: page.imageOpen && page.imageEntries.length === 0 && !page.imageBusy
-                            text: qsTr("This folder is empty. Add a file or a folder, or remove "
-                                       + "what is here.")
-                            color: Theme.textDim
-                            font.pixelSize: 11
-                        }
-
-                        ColumnLayout {
-                            Layout.fillWidth: true
-                            spacing: 2
-                            Repeater {
-                                model: page.imageEntries
-                                delegate: Rectangle {
-                                    required property var modelData
-                                    Layout.fillWidth: true
-                                    implicitHeight: 34
-                                    radius: 8
-                                    color: rowMouse.containsMouse ? Qt.rgba(1, 1, 1, 0.04) : "transparent"
-                                    RowLayout {
-                                        anchors.fill: parent
-                                        anchors.leftMargin: 8
-                                        anchors.rightMargin: 6
-                                        spacing: 8
-                                        Text {
-                                            text: modelData.dir ? "\uD83D\uDCC1" : "\uD83D\uDCC4"
-                                            font.pixelSize: 13
-                                        }
-                                        Text {
-                                            Layout.fillWidth: true
-                                            elide: Text.ElideMiddle
-                                            text: modelData.name
-                                            color: Theme.text
-                                            font.pixelSize: 12
-                                        }
-                                        Text {
-                                            Layout.preferredWidth: 80
-                                            horizontalAlignment: Text.AlignRight
-                                            text: modelData.dir ? qsTr("folder") : page.sizeText(modelData.size)
-                                            color: Theme.textDim
-                                            font.pixelSize: 10
-                                        }
-                                        ActionButton {
-                                            text: qsTr("Open")
-                                            visible: modelData.dir
-                                            enabled: !page.imageBusy
-                                            onClicked: page.openEntry(modelData)
-                                        }
-                                        ActionButton {
-                                            text: qsTr("Save")
-                                            visible: !modelData.dir
-                                            enabled: !page.imageBusy
-                                            onClicked: {
-                                                page.pendingEntry = modelData;
-                                                extractFileDialog.open();
-                                            }
-                                        }
-                                        ActionButton {
-                                            text: qsTr("Save")
-                                            visible: modelData.dir
-                                            enabled: !page.imageBusy
-                                            onClicked: {
-                                                page.pendingEntry = modelData;
-                                                extractFolderDialog.open();
-                                            }
-                                        }
-                                        ActionButton {
-                                            text: qsTr("Delete")
-                                            enabled: !page.imageBusy && page.imageInfo.writable
-                                            onClicked: page.removeEntry(modelData)
-                                        }
-                                    }
-                                    MouseArea {
-                                        id: rowMouse
-                                        anchors.fill: parent
-                                        z: -1
-                                        hoverEnabled: true
-                                    }
-                                }
-                            }
-                        }
+                        imagePath: page.imagePath
+                        active: page.imageOpen
+                        writable: !!page.imageInfo.writable
+                        readOnlyReason: page.imageInfo.reason || ""
+                        onNotify: (message) => page.notify(message)
                     }
                 }
 
@@ -1124,7 +845,7 @@ Item {
             }
 
             // =================================================================
-            // settings switches
+            // settings switches (folded away)
             // =================================================================
             Card {
                 Layout.fillWidth: true
@@ -1132,26 +853,54 @@ Item {
                 ColumnLayout {
                     anchors.fill: parent
                     spacing: 10
+
+                    // The disclosure row: the switches only take space when asked
+                    // for, so the two choices above stay the page.
                     RowLayout {
                         Layout.fillWidth: true
+                        spacing: 10
+                        Text {
+                            text: page.showSwitches ? "▾" : "▸"
+                            color: Theme.accent
+                            font.pixelSize: 13
+                        }
                         ColumnLayout {
                             Layout.fillWidth: true
                             spacing: 2
                             Text {
-                                text: qsTr("Settings switches (bluestacks.conf, hosts, companions)")
+                                text: qsTr("Settings switches — ads, telemetry, cloud, hosts, tuning")
                                 color: Theme.text
-                                font.pixelSize: 15
-                                font.weight: Font.Bold
+                                font.pixelSize: 13
+                                font.weight: Font.DemiBold
                             }
                             Text {
                                 Layout.fillWidth: true
                                 wrapMode: Text.Wrap
-                                text: qsTr("The ads, telemetry, cloud and tuning switches, with the "
-                                           + "same undo record. Close BlueStacks before applying.")
+                                text: page.showSwitches
+                                      ? qsTr("Close BlueStacks before applying; every value is "
+                                             + "recorded so Restore puts it back.")
+                                      : qsTr("Separate from the two debloaters: these edit "
+                                             + "bluestacks.conf, the hosts file and the companions.")
                                 color: Theme.textDim
                                 font.pixelSize: 10
                             }
                         }
+                        ActionButton {
+                            text: page.showSwitches ? qsTr("Hide") : qsTr("Show")
+                            onClicked: page.showSwitches = !page.showSwitches
+                        }
+                    }
+
+                    // everything below only exists once the row is opened
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 10
+                        visible: page.showSwitches
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 8
+                        Item { Layout.fillWidth: true }
                         ActionButton { text: qsTr("Select all"); enabled: page.ready && !page.running; onClicked: page.selectAll() }
                         ActionButton { text: qsTr("Clear"); enabled: page.ready && !page.running; onClicked: page.clearAll() }
                     }
@@ -1259,6 +1008,7 @@ Item {
                             onClicked: page.applySelection()
                         }
                     }
+                    }
                 }
             }
 
@@ -1266,50 +1016,4 @@ Item {
         }
     }
 
-    // ---- new folder name ----
-    Popup {
-        id: newFolderPopup
-        modal: true
-        anchors.centerIn: parent
-        width: 320
-        padding: 16
-        background: Rectangle {
-            color: Theme.card
-            radius: 12
-            border.width: 1
-            border.color: Theme.border
-        }
-        ColumnLayout {
-            anchors.fill: parent
-            spacing: 10
-            Text {
-                text: qsTr("New folder in %1").arg(page.imageDir)
-                color: Theme.text
-                font.pixelSize: 13
-                font.weight: Font.DemiBold
-            }
-            TextField {
-                id: folderName
-                Layout.fillWidth: true
-                placeholderText: qsTr("folder name")
-                color: Theme.text
-            }
-            RowLayout {
-                Layout.fillWidth: true
-                Item { Layout.fillWidth: true }
-                ActionButton { text: qsTr("Cancel"); onClicked: newFolderPopup.close() }
-                ActionButton {
-                    accent: true
-                    text: qsTr("Create")
-                    enabled: folderName.text.trim().length > 0
-                    onClicked: {
-                        page.makeImageFolder(folderName.text.trim());
-                        folderName.text = "";
-                        newFolderPopup.close();
-                    }
-                }
-            }
-        }
-        onOpened: folderName.forceActiveFocus()
-    }
 }

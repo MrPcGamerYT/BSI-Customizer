@@ -561,11 +561,25 @@ cleaned independently and why the undo record is kept per instance.
 
 `Root.vhd` is the engine's Android system disk: an ext4 filesystem inside a VHD,
 in `<ProgramData>\BlueStacks_*\Engine\<arch>\Root.vhd`. This half opens it in
-place and gives you a file manager over it — a path bar, **Up**, the folder
-listing with sizes, **Open**, **Save** (extract), **Add file**, **Add folder**,
-**New folder**, **Delete** and **Undo**. Writes are real writes: the bytes of
-the image change, and the next boot of an instance that uses the engine sees
-them.
+place and gives you a **two-pane file manager** over it, the way a 7-Zip window
+works:
+
+* the **folder tree** on the left, expandable level by level, with the folder
+  you are in highlighted;
+* the **listing** on the right — name, size, folders before files, sorted by
+  name or size with one click on the column header;
+* a **path bar** with Up and clickable breadcrumbs, and **Refresh**;
+* **Add file**, **Add folder** (a whole tree, structure included), **New
+  folder**, **Save** (extract a file or a folder anywhere on this PC), and
+  **Delete** — a file goes at once, a folder asks first because everything
+  under it goes with it;
+* **drag and drop** from Explorer straight into the open folder;
+* **filter this folder** as you type, or **Search everywhere** to find a name
+  anywhere in the image (it walks the folders itself, and says when it stops
+  at its result cap).
+
+Writes are real writes: the bytes of the image change, and the next boot of an
+instance that uses the engine sees them.
 
 What it supports is checked before it is mounted, and anything outside that is
 refused with a reason instead of guessed at:

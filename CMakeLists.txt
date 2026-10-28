@@ -230,6 +230,7 @@ qt_add_qml_module(BSICustomizer
         src/qml/components/ChoiceChips.qml
         src/qml/components/Toast.qml
         src/qml/components/PathRow.qml
+        src/qml/components/RootVhdBrowser.qml
         src/qml/components/ColorField.qml
         src/qml/components/GradientEditor.qml
         src/qml/components/LogPanel.qml

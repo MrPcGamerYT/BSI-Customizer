@@ -1330,16 +1330,63 @@ void checkRootDisk()
 
         const auto mkdir = RootVhd::makeFolder(work, QStringLiteral("/"), QStringLiteral("debloat"));
         check(mkdir.value(QStringLiteral("ok")).toBool(), "a folder is created in the image");
-        const auto inside = RootVhd::listing(work, QStringLiteral("/debloat"));
-        check(inside.value(QStringLiteral("ok")).toBool()
-                  && inside.value(QStringLiteral("entries")).toList().isEmpty(),
-              "the new folder is empty and can be opened");
 
+        // Adding at the image root builds "/name", not "//name": cleanPath keeps
+        // a double leading slash on Windows, and the path then does not resolve.
+        const QString treeRoot = temp.filePath(QStringLiteral("tree"));
+        QDir().mkpath(treeRoot + QStringLiteral("/nested"));
+        {
+            QFile file(treeRoot + QStringLiteral("/nested/leaf.txt"));
+            file.open(QIODevice::WriteOnly);
+            file.write("a leaf\n");
+            QFile top(treeRoot + QStringLiteral("/top.txt"));
+            top.open(QIODevice::WriteOnly);
+            top.write("top\n");
+        }
+        const auto addTree = RootVhd::addFolder(work, QStringLiteral("/"), treeRoot);
+        check(addTree.value(QStringLiteral("ok")).toBool(),
+              "a folder tree is added at the image root");
+        const auto nested = RootVhd::listing(work, QStringLiteral("/tree/nested"));
+        check(nested.value(QStringLiteral("ok")).toBool()
+                  && nested.value(QStringLiteral("entries")).toList().size() == 1,
+              "the tree keeps its structure, sub-folder included");
+
+        // The same path, added as "whatever this is": a file and a folder are
+        // both accepted by one call.
+        const auto addPathFile = RootVhd::addPath(work, QStringLiteral("/"),
+                                                  temp.filePath(QStringLiteral("added.txt")));
+        check(addPathFile.value(QStringLiteral("ok")).toBool(), "addPath takes a file");
+        const auto addPathDir = RootVhd::addPath(work, QStringLiteral("/debloat"), treeRoot);
+        check(addPathDir.value(QStringLiteral("ok")).toBool(), "addPath takes a folder");
+
+        // Search walks the whole image, not just the open folder.
+        const auto search = RootVhd::search(work, QStringLiteral("leaf"));
+        bool foundLeaf = false;
+        for (const auto &value : search.value(QStringLiteral("entries")).toList()) {
+            const QString path = value.toMap().value(QStringLiteral("path")).toString();
+            if (path == QLatin1String("/tree/nested/leaf.txt")) foundLeaf = true;
+        }
+        check(search.value(QStringLiteral("ok")).toBool() && foundLeaf,
+              "search finds a file by name anywhere in the image");
+        const auto noMatch = RootVhd::search(work, QStringLiteral("zzz-nothing-zzz"));
+        check(noMatch.value(QStringLiteral("ok")).toBool()
+                  && noMatch.value(QStringLiteral("entries")).toList().isEmpty(),
+              "a search with no match says so instead of failing");
+        const auto inside = RootVhd::listing(work, QStringLiteral("/debloat"));
+        bool hasCopiedTree = false;
+        for (const auto &value : inside.value(QStringLiteral("entries")).toList())
+            if (value.toMap().value(QStringLiteral("name")).toString() == QLatin1String("tree"))
+                hasCopiedTree = true;
+        check(inside.value(QStringLiteral("ok")).toBool() && hasCopiedTree,
+              "the folder added by addPath is in the folder it was told to go to");
+
+        const int beforeRemove =
+            RootVhd::listing(work, QStringLiteral("/")).value(QStringLiteral("entries")).toList().size();
         const auto remove = RootVhd::remove(work, QStringLiteral("/added.txt"));
         check(remove.value(QStringLiteral("ok")).toBool(), "a file is removed from the image");
         check(RootVhd::listing(work, QStringLiteral("/")).value(QStringLiteral("entries")).toList().size()
-                  == entries + 1,
-              "the folder is back to its old size plus the new folder");
+                  == beforeRemove - 1,
+              "the folder lists one entry fewer after the delete");
         const auto refused = RootVhd::remove(work, QStringLiteral("/not-there.txt"));
         check(!refused.value(QStringLiteral("ok")).toBool(),
               "removing something that is not there is refused, not guessed at");
@@ -1360,6 +1407,14 @@ void checkRootDisk()
         check(reopened.value(QStringLiteral("ok")).toBool()
                   && reopened.value(QStringLiteral("entries")).toList().size() == originalEntries,
               "the restored image opens again and holds its original entries");
+        // The folder added at the root and everything below it are gone again:
+        // the inode table, the bitmaps and the group counts all went back.
+        const auto gone = RootVhd::listing(work, QStringLiteral("/tree"));
+        check(!gone.value(QStringLiteral("ok")).toBool(),
+              "the folder tree added during the test is gone after the undo");
+        const auto goneFile = RootVhd::listing(work, QStringLiteral("/debloat"));
+        check(!goneFile.value(QStringLiteral("ok")).toBool(),
+              "the folder created during the test is gone after the undo");
     }
 
     // ---- refusals ----

@@ -1495,6 +1495,13 @@ QVariantMap Backend::rootvhdList(const QString &image, const QString &innerPath)
     return RootVhd::listing(image, innerPath);
 }
 
+QVariantMap Backend::rootvhdSearch(const QString &image, const QString &query)
+{
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) { return worker.rootvhdSearch(image, query); });
+    return RootVhd::search(image, query);
+}
+
 QVariantMap Backend::rootvhdExtract(const QString &image, const QString &innerPath,
                                     const QString &localPath)
 {
@@ -1525,6 +1532,17 @@ QVariantMap Backend::rootvhdAddFolder(const QString &image, const QString &inner
             return worker.rootvhdAddFolder(image, innerDir, localDir);
         });
     return RootVhd::addFolder(image, innerDir, localDir);
+}
+
+QVariantMap Backend::rootvhdAddPath(const QString &image, const QString &innerDir,
+                                    const QString &localPath)
+{
+    if (actionsLocked()) return lockedMap();
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) {
+            return worker.rootvhdAddPath(image, innerDir, localPath);
+        });
+    return RootVhd::addPath(image, innerDir, localPath);
 }
 
 QVariantMap Backend::rootvhdMkdir(const QString &image, const QString &innerDir, const QString &name)
