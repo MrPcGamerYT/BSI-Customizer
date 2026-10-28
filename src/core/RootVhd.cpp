@@ -45,6 +45,24 @@ QString native(const std::string &path)
     return QDir::toNativeSeparators(QString::fromStdString(path));
 }
 
+// The undo record an image already has, or an empty string. A session keeps
+// exactly one, so Undo goes back to how the image was before the tool started
+// editing it, not merely before the last click.
+QString manifestFor(const QString &imagePath)
+{
+    const QDir dir(stateDir());
+    const QString target = QFileInfo(imagePath).absoluteFilePath();
+    QString found;
+    for (const QString &name : dir.entryList({ QStringLiteral("*.json") }, QDir::Files, QDir::Name)) {
+        QFile file(dir.filePath(name));
+        if (!file.open(QIODevice::ReadOnly)) continue;
+        const QJsonObject object = QJsonDocument::fromJson(file.readAll()).object();
+        if (object.value(QStringLiteral("image")).toString() == target)
+            found = dir.filePath(name);
+    }
+    return found;
+}
+
 // ---- the block journal ---------------------------------------------------
 
 /**
@@ -53,8 +71,10 @@ QString native(const std::string &path)
  * image the journal belongs to and the order of the ranges, so Undo can put
  * them back in reverse and leave every other byte untouched.
  *
- * commit() is what makes the record real: a change that failed half way calls
- * abort() instead and leaves nothing behind.
+ * A record belongs to the image, not to one click: the next change appends to
+ * it, so a whole session is undone at once. commit() is what makes the change
+ * real; a change that fails half way calls rollback(), which puts back only the
+ * ranges this change added and leaves the earlier record alone.
  */
 class Journalled final : public RootDisk::Image
 {
@@ -89,6 +109,10 @@ private:
     QString m_manifestPath;
     std::FILE *m_data = nullptr;
     QJsonArray m_ranges;
+    // Where this change starts inside the record: the ranges before it belong
+    // to changes that succeeded and stay undoable.
+    int m_firstRange = 0;
+    bool m_continued = false;    // appended to a record that already existed
     bool m_committed = false;
 };
 
@@ -97,11 +121,37 @@ bool Journalled::openJournal()
     if (m_data) return true;
     const QString folder = stateDir();
     if (!QDir().mkpath(folder)) return false;
+
+    // Continue the record this image already has, if there is one.
+    const QString existing = manifestFor(m_imagePath);
+    if (!existing.isEmpty()) {
+        QJsonObject object;
+        {
+            QFile manifest(existing);
+            if (manifest.open(QIODevice::ReadOnly))
+                object = QJsonDocument::fromJson(manifest.readAll()).object();
+        }
+        const QString bin = object.value(QStringLiteral("journal")).toString();
+        if (!bin.isEmpty() && QFileInfo::exists(bin)) {
+            if (std::FILE *file = std::fopen(QFile::encodeName(bin).constData(), "r+b")) {
+                m_data = file;
+                m_journalPath = bin;
+                m_manifestPath = existing;
+                m_ranges = object.value(QStringLiteral("ranges")).toArray();
+                m_continued = true;
+                m_firstRange = m_ranges.size();
+                return true;
+            }
+        }
+    }
+
     const QString base = stamp() + QLatin1Char('-')
         + QFileInfo(m_imagePath).fileName();
     m_journalPath = QDir(folder).filePath(base + QStringLiteral(".bin"));
     m_manifestPath = QDir(folder).filePath(base + QStringLiteral(".json"));
     m_data = std::fopen(QFile::encodeName(m_journalPath).constData(), "wb+");
+    m_continued = false;
+    m_firstRange = 0;
     return m_data != nullptr;
 }
 
@@ -129,7 +179,9 @@ bool Journalled::rollback()
 {
     if (m_data) {
         std::fflush(m_data);
-        for (int i = m_ranges.size() - 1; i >= 0; --i) {
+        // Only this change's ranges go back; the ones before it belong to
+        // changes that succeeded and stay on the image.
+        for (int i = m_ranges.size() - 1; i >= m_firstRange; --i) {
             const QJsonObject range = m_ranges.at(i).toObject();
             const auto offset = std::uint64_t(range.value(QStringLiteral("offset")).toDouble());
             const auto length = std::size_t(range.value(QStringLiteral("length")).toDouble());
@@ -140,7 +192,10 @@ bool Journalled::rollback()
             if (!m_inner->write(offset, original.data(), length)) return false;
         }
         m_inner->flush();
-        m_ranges = QJsonArray();
+        QJsonArray kept;
+        for (int i = 0; i < m_firstRange && i < m_ranges.size(); ++i)
+            kept.append(m_ranges.at(i));
+        m_ranges = kept;
     }
     abort();
     return true;
@@ -148,8 +203,8 @@ bool Journalled::rollback()
 
 bool Journalled::commit()
 {
+    if (!m_data) return true;                 // this change wrote nothing
     if (m_ranges.isEmpty()) return true;
-    if (!m_data) return false;
     std::fflush(m_data);
     std::fclose(m_data);
     m_data = nullptr;
@@ -173,6 +228,9 @@ void Journalled::abort()
         std::fclose(m_data);
         m_data = nullptr;
     }
+    // A record that was already there before this change holds earlier
+    // changes that are still applied: it is never deleted from here.
+    if (m_continued) return;
     if (!m_journalPath.isEmpty()) QFile::remove(m_journalPath);
     if (!m_manifestPath.isEmpty()) QFile::remove(m_manifestPath);
 }
@@ -573,33 +631,21 @@ QVariantMap remove(const QString &imagePath, const QString &innerPath)
 
 bool hasUndo(const QString &imagePath)
 {
-    const QDir dir(stateDir());
-    const QString target = QFileInfo(imagePath).absoluteFilePath();
-    for (const QString &name : dir.entryList({ QStringLiteral("*.json") }, QDir::Files, QDir::Name)) {
-        QFile file(dir.filePath(name));
-        if (!file.open(QIODevice::ReadOnly)) continue;
-        const QJsonObject object = QJsonDocument::fromJson(file.readAll()).object();
-        if (object.value(QStringLiteral("image")).toString() == target) return true;
-    }
-    return false;
+    return !manifestFor(imagePath).isEmpty();
 }
 
 QVariantMap undo(const QString &imagePath)
 {
-    const QDir dir(stateDir());
-    const QString target = QFileInfo(imagePath).absoluteFilePath();
-    QString manifestPath;
-    QJsonObject manifest;
-    for (const QString &name : dir.entryList({ QStringLiteral("*.json") }, QDir::Files, QDir::Name)) {
-        QFile file(dir.filePath(name));
-        if (!file.open(QIODevice::ReadOnly)) continue;
-        const QJsonObject object = QJsonDocument::fromJson(file.readAll()).object();
-        if (object.value(QStringLiteral("image")).toString() != target) continue;
-        manifestPath = dir.filePath(name);
-        manifest = object;
-    }
+    const QString manifestPath = manifestFor(imagePath);
     if (manifestPath.isEmpty())
         return failure(QStringLiteral("There is nothing to undo for this image."));
+    QJsonObject manifest;
+    {
+        QFile file(manifestPath);
+        if (!file.open(QIODevice::ReadOnly))
+            return failure(QStringLiteral("The undo record could not be read."));
+        manifest = QJsonDocument::fromJson(file.readAll()).object();
+    }
 
     const QString bin = manifest.value(QStringLiteral("journal")).toString();
     QFile data(bin);
@@ -632,7 +678,7 @@ QVariantMap undo(const QString &imagePath)
     QFile::remove(bin);
     return { { QStringLiteral("ok"), true },
              { QStringLiteral("msg"), QStringLiteral("Undone: the image is back to how it was before "
-                                                     "the last change.") } };
+                                                     "this tool changed it.") } };
 }
 
 QVariantMap discardUndo(const QString &imagePath)
