@@ -18,6 +18,7 @@ Item {
     property string readOnlyReason: ""
 
     signal notify(string message)
+    signal enableWriteRequested()
 
     property string currentDir: "/"
     property var entries: []
@@ -914,16 +915,28 @@ Item {
         }
 
         // ---- status ----
-        Text {
+        RowLayout {
             Layout.fillWidth: true
-            wrapMode: Text.Wrap
+            spacing: 10
             visible: browser.status.length > 0 || (browser.open && browser.readOnlyReason.length > 0)
-            text: browser.status.length > 0
-                  ? browser.status
-                  : qsTr("Read-only: %1").arg(browser.readOnlyReason)
-            color: browser.status.length > 0 ? (browser.ok ? Theme.textDim : Theme.danger)
-                                             : Theme.warn
-            font.pixelSize: 10
+
+            Text {
+                Layout.fillWidth: true
+                wrapMode: Text.Wrap
+                text: browser.status.length > 0
+                      ? browser.status
+                      : qsTr("Read-only: %1").arg(browser.readOnlyReason)
+                color: browser.status.length > 0 ? (browser.ok ? Theme.textDim : Theme.danger)
+                                                 : Theme.warn
+                font.pixelSize: 10
+            }
+
+            ActionButton {
+                visible: browser.open && !browser.writable && browser.readOnlyReason.length > 0
+                text: qsTr("Enable editing")
+                enabled: !browser.busy
+                onClicked: browser.enableWriteRequested()
+            }
         }
     }
 

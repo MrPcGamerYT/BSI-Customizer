@@ -816,6 +816,19 @@ Item {
                         writable: !!page.imageInfo.writable
                         readOnlyReason: page.imageInfo.reason || ""
                         onNotify: (message) => page.notify(message)
+                        onEnableWriteRequested: {
+                            page.imageBusy = true;
+                            const result = backend.rootvhdEnableWrite(page.imagePath);
+                            page.imageBusy = false;
+                            if (result && result.ok) {
+                                page.openImage();
+                                page.notify(result.msg || qsTr("Editing enabled."));
+                            } else {
+                                page.notify(result && result.msg
+                                            ? result.msg
+                                            : qsTr("Windows could not enable write access."));
+                            }
+                        }
                     }
                 }
 

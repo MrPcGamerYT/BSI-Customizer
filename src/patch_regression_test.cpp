@@ -1268,6 +1268,35 @@ void checkRootDisk()
     }();
     check(pristine.size() > 512, "the working copy really is a disk image");
 
+#ifdef Q_OS_WIN
+    // BlueStacks images may carry the Windows Read-only attribute. Verify the
+    // explicit recovery action clears it and reopens the ext4 volume writable.
+    const QString readOnlyCopy = temp.filePath(QStringLiteral("Root-readonly.vhd"));
+    const bool copiedReadOnly = QFile::copy(fixture, readOnlyCopy);
+    check(copiedReadOnly, "a separate copy is available for the Windows read-only test");
+    if (copiedReadOnly) {
+        const QFileDevice::Permissions originalPermissions = QFile::permissions(readOnlyCopy);
+        const QFileDevice::Permissions readOnlyPermissions =
+            originalPermissions & ~(QFileDevice::WriteOwner | QFileDevice::WriteUser
+                                    | QFileDevice::WriteGroup | QFileDevice::WriteOther);
+        const bool markedReadOnly = QFile::setPermissions(readOnlyCopy, readOnlyPermissions);
+        check(markedReadOnly, "the test image can be marked read-only on Windows");
+        if (markedReadOnly) {
+            const auto beforeEnable = RootVhd::info(readOnlyCopy);
+            check(beforeEnable.value(QStringLiteral("ok")).toBool()
+                      && !beforeEnable.value(QStringLiteral("writable")).toBool(),
+                  "a read-only host file is reported as not writable before user action");
+            const auto enabled = RootVhd::enableWriteAccess(readOnlyCopy);
+            check(enabled.value(QStringLiteral("ok")).toBool(),
+                  "Enable editing clears the Windows read-only attribute when safe");
+            const auto afterEnable = RootVhd::info(readOnlyCopy);
+            check(afterEnable.value(QStringLiteral("writable")).toBool(),
+                  "the image reopens as writable after enabling editing");
+        }
+        QFile::setPermissions(readOnlyCopy, originalPermissions | QFileDevice::WriteOwner);
+    }
+#endif
+
 #ifdef BSI_ROOT_7Z_FIXTURE
     // Opening a plain archive and a synthetic SFX both exercises the bundled
     // decoder: no WinRAR/7-Zip installation is part of the test machine.

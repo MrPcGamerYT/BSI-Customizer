@@ -589,6 +589,13 @@ works:
   anywhere in the image (it walks the folders itself, and says when it stops
   at its result cap).
 
+If Windows marks the image file itself read-only, the browser offers **Enable
+editing**. This explicitly clears the Windows Read-only attribute only
+ after you click it, then verifies that the VHD and ext4 volume can be written;
+ it does not change the image contents. If Windows still denies access, close
+ BlueStacks if it is using the image and check Modify permissions. Elevation
+ alone does not override an open-file lock or every permission policy.
+
 Writes are real writes: the bytes of the image change, and the next boot of an
 instance that uses the engine sees them.
 

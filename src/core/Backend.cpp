@@ -1497,6 +1497,13 @@ QVariantMap Backend::rootvhdInfo(const QString &image)
     return RootVhd::info(image);
 }
 
+QVariantMap Backend::rootvhdEnableWrite(const QString &image)
+{
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) { return worker.rootvhdEnableWrite(image); });
+    return RootVhd::enableWriteAccess(image);
+}
+
 QVariantMap Backend::rootvhdList(const QString &image, const QString &innerPath)
 {
     if (!m_backgroundWorker)

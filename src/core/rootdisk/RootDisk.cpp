@@ -700,7 +700,7 @@ std::unique_ptr<Volume> Volume::mount(std::unique_ptr<Image> image, std::string 
 
     volume->m_writable = volume->m_image->writable() && volume->m_readOnlyReason.empty();
     if (!volume->m_image->writable() && volume->m_readOnlyReason.empty())
-        volume->m_readOnlyReason = "The file is read-only; run the tool as administrator.";
+        volume->m_readOnlyReason = "The image file could not be opened for writing. It may have the Windows Read-only attribute, be in use by BlueStacks, or lack Modify permission. Use Enable editing or close BlueStacks and check the file permissions.";
     return volume;
 }
 
