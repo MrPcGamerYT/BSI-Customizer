@@ -395,6 +395,18 @@ bool rangesOverlap(std::uint64_t a, std::uint64_t alen, std::uint64_t b, std::ui
     return a < b + blen && b < a + alen;
 }
 
+std::string vhdxGuidBytes(const std::uint8_t *guid)
+{
+    static constexpr char hex[] = "0123456789abcdef";
+    std::string result;
+    result.reserve(32);
+    for (int i = 0; i < 16; ++i) {
+        result.push_back(hex[guid[i] >> 4]);
+        result.push_back(hex[guid[i] & 0x0F]);
+    }
+    return result;
+}
+
 class VhdxImage final : public Image
 {
 public:
@@ -542,7 +554,8 @@ std::unique_ptr<VhdxImage> VhdxImage::open(std::FILE *file, std::uint64_t fileSi
             metadataOffset = offset;
             metadataLength = length;
         } else if (required) {
-            return fail("This VHDX requires a region type that BSI Customizer does not support.");
+            return fail("This VHDX requires an unsupported region GUID (on-disk bytes: "
+                        + vhdxGuidBytes(entry) + ").");
         }
     }
     if (batOffset == 0 || metadataOffset == 0)
@@ -577,11 +590,19 @@ std::unique_ptr<VhdxImage> VhdxImage::open(std::FILE *file, std::uint64_t fileSi
         0x1D, 0xBF, 0x41, 0x81, 0x6F, 0xA9, 0x09, 0x47,
         0xBA, 0x47, 0xF2, 0x33, 0xA8, 0xFA, 0xAB, 0x5F
     };
+    static const std::uint8_t physicalSectorGuid[16] = {
+        0xC7, 0x48, 0xA3, 0xCD, 0x5D, 0x44, 0x71, 0x44,
+        0x9C, 0xC9, 0xE9, 0x88, 0x52, 0x51, 0xC5, 0x56
+    };
+    static const std::uint8_t virtualDiskIdGuid[16] = {
+        0xAB, 0x12, 0xCA, 0xBE, 0xE6, 0xB2, 0x23, 0x45,
+        0x93, 0xEF, 0xC3, 0x09, 0xE0, 0x00, 0xC7, 0x46
+    };
     static const std::uint8_t parentLocatorGuid[16] = {
         0x2D, 0x5F, 0xD3, 0xA8, 0x0B, 0xB3, 0x4D, 0x45,
         0xAB, 0xF7, 0xD3, 0xD8, 0x48, 0x34, 0xAB, 0x0C
     };
-    std::uint32_t blockSize = 0, sectorSize = 0, fileFlags = 0;
+    std::uint32_t blockSize = 0, sectorSize = 0, physicalSectorSize = 0, fileFlags = 0;
     std::uint64_t diskSize = 0;
     bool hasFileParams = false, hasDiskSize = false, hasLogicalSector = false;
     for (std::uint32_t i = 0; i < metadataCount; ++i) {
@@ -592,7 +613,7 @@ std::unique_ptr<VhdxImage> VhdxImage::open(std::FILE *file, std::uint64_t fileSi
         if (itemOffset < 64 * 1024 || itemOffset > metadataLength
             || itemLength > metadataLength - itemOffset || (itemFlags & ~7u) != 0)
             return fail("A VHDX metadata item has invalid bounds or flags.");
-        std::uint8_t value[8] = {};
+        std::uint8_t value[16] = {};
         bool knownItem = false;
         if (std::memcmp(entry, fileParamsGuid, 16) == 0) {
             knownItem = true;
@@ -616,14 +637,29 @@ std::unique_ptr<VhdxImage> VhdxImage::open(std::FILE *file, std::uint64_t fileSi
                 return fail("The VHDX logical sector size is missing or truncated.");
             sectorSize = le32(value);
             hasLogicalSector = true;
+        } else if (std::memcmp(entry, physicalSectorGuid, 16) == 0) {
+            knownItem = true;
+            if (itemLength < 4 || !seekFile(file, metadataOffset + itemOffset)
+                || std::fread(value, 1, 4, file) != 4)
+                return fail("The VHDX physical sector size is missing or truncated.");
+            physicalSectorSize = le32(value);
+        } else if (std::memcmp(entry, virtualDiskIdGuid, 16) == 0) {
+            knownItem = true;
+            if (itemLength < 16 || !seekFile(file, metadataOffset + itemOffset)
+                || std::fread(value, 1, 16, file) != 16)
+                return fail("The VHDX virtual disk identifier is missing or truncated.");
         } else if (std::memcmp(entry, parentLocatorGuid, 16) == 0) {
             return fail("Differencing VHDX files with a parent locator cannot be edited directly. Open the base image instead.");
         } else if (!knownItem && (itemFlags & 4u) != 0) {
-            return fail("This VHDX requires a metadata item that BSI Customizer does not support.");
+            return fail("This VHDX requires an unsupported metadata GUID (on-disk bytes: "
+                        + vhdxGuidBytes(entry) + ").");
         }
     }
     if (!hasFileParams || !hasDiskSize || !hasLogicalSector || diskSize == 0
         || (sectorSize != 512 && sectorSize != 4096)
+        || (physicalSectorSize != 0
+            && ((physicalSectorSize != 512 && physicalSectorSize != 4096)
+                || physicalSectorSize < sectorSize))
         || blockSize < kVhdxMiB || blockSize > 256u * 1024u * 1024u
         || (blockSize & (blockSize - 1)) != 0 || diskSize % sectorSize != 0
         || (fileFlags & ~3u) != 0)

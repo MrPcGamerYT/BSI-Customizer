@@ -1290,8 +1290,18 @@ void checkRootDisk()
             check(enabled.value(QStringLiteral("ok")).toBool(),
                   "Enable editing clears the Windows read-only attribute when safe");
             const auto afterEnable = RootVhd::info(readOnlyCopy);
-            check(afterEnable.value(QStringLiteral("writable")).toBool(),
+            const bool writable = afterEnable.value(QStringLiteral("writable")).toBool();
+            check(writable,
                   "the image reopens as writable after enabling editing");
+            if (writable) {
+                const auto created = RootVhd::makeFolder(readOnlyCopy, QStringLiteral("/"),
+                                                         QStringLiteral("readonly-test"));
+                check(created.value(QStringLiteral("ok")).toBool(),
+                      "a Windows read-only VHD becomes editable after enabling write access");
+                const auto undone = RootVhd::undo(readOnlyCopy);
+                check(undone.value(QStringLiteral("ok")).toBool(),
+                      "the read-only VHD edit can be undone after the host attribute is cleared");
+            }
         }
         QFile::setPermissions(readOnlyCopy, originalPermissions | QFileDevice::WriteOwner);
     }
@@ -1330,6 +1340,32 @@ void checkRootDisk()
         const bool copiedVhdx = QFile::copy(vhdxFixture, vhdxWork);
         check(copiedVhdx, "the synthetic VHDX fixture is copied before testing");
         if (copiedVhdx) {
+            // Standard required metadata (including physical sector size and
+            // virtual disk ID) must open; an unknown required GUID must be
+            // refused with its identifier so unsupported formats are visible.
+            const QString unknownMetadata = temp.filePath(QStringLiteral("Root-unknown-metadata.vhdx"));
+            if (QFile::copy(vhdxFixture, unknownMetadata)) {
+                QFile metadataFile(unknownMetadata);
+                if (metadataFile.open(QIODevice::ReadWrite)
+                    && metadataFile.seek(2 * 1024 * 1024 + 32 + 4 * 32)) {
+                    QByteArray guid = metadataFile.read(16);
+                    if (guid.size() == 16) {
+                        guid[0] = char(guid[0] ^ 1);
+                        metadataFile.seek(2 * 1024 * 1024 + 32 + 4 * 32);
+                        metadataFile.write(guid);
+                    }
+                }
+                metadataFile.close();
+                std::string unsupportedError;
+                auto unsupported = RootDisk::openImage(
+                    QFile::encodeName(unknownMetadata).toStdString(), &unsupportedError);
+                check(!unsupported
+                          && unsupportedError.find("unsupported metadata GUID") != std::string::npos,
+                      "unknown required VHDX metadata is refused with its GUID reported");
+            } else {
+                check(false, "a copy is available for the unknown-metadata refusal test");
+            }
+
             const auto info = RootVhd::info(vhdxWork);
             check(info.value(QStringLiteral("ok")).toBool()
                       && info.value(QStringLiteral("kind")).toString() == QStringLiteral("dynamic VHDX")

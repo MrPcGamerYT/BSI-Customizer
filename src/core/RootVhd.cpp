@@ -19,7 +19,15 @@
 #include <cstring>
 #include <functional>
 #include <memory>
+#include <string>
 #include <vector>
+
+#ifdef Q_OS_WIN
+#  ifndef NOMINMAX
+#    define NOMINMAX
+#  endif
+#  include <windows.h>
+#endif
 
 namespace RootVhd {
 
@@ -451,27 +459,63 @@ QVariantMap enableWriteAccess(const QString &imagePath)
     Q_UNUSED(imagePath);
     return failure(QStringLiteral("Enabling a Windows read-only VHD is supported only on Windows."));
 #else
-    const QFileDevice::Permissions original = QFile::permissions(imagePath);
-    if (original == QFileDevice::Permissions())
-        return failure(QStringLiteral("Could not read the file permissions. Check the path and access rights."));
+    const QString nativePath = QDir::toNativeSeparators(imagePath);
+    const std::wstring path = nativePath.toStdWString();
+    const DWORD originalAttributes = GetFileAttributesW(path.c_str());
+    if (originalAttributes == INVALID_FILE_ATTRIBUTES)
+        return failure(QStringLiteral("Windows could not inspect the image file (error %1). Check the path and folder access.")
+                           .arg(qulonglong(GetLastError())));
 
-    // Qt maps WriteOwner to clearing FILE_ATTRIBUTE_READONLY on Windows. Only
-    // do this after an explicit click; browsing an image must not change it.
-    const QFileDevice::Permissions writablePermissions = original | QFileDevice::WriteOwner;
-    if (writablePermissions != original && !QFile::setPermissions(imagePath, writablePermissions))
-        return failure(QStringLiteral("Windows could not clear the file's Read-only attribute. Check the file permissions and close BlueStacks if it is using this image."));
+    const bool hadReadOnlyAttribute = (originalAttributes & FILE_ATTRIBUTE_READONLY) != 0;
+    if (hadReadOnlyAttribute) {
+        DWORD writableAttributes = originalAttributes & ~FILE_ATTRIBUTE_READONLY;
+        if (writableAttributes == 0)
+            writableAttributes = FILE_ATTRIBUTE_NORMAL;
+        if (!SetFileAttributesW(path.c_str(), writableAttributes))
+            return failure(QStringLiteral("Windows could not clear the image's Read-only attribute (error %1).")
+                               .arg(qulonglong(GetLastError())));
+    }
 
-    auto restorePermissions = [&]() {
-        return writablePermissions == original || QFile::setPermissions(imagePath, original);
+    auto restoreAttributes = [&]() {
+        return !hadReadOnlyAttribute || SetFileAttributesW(path.c_str(), originalAttributes) != 0;
     };
+
+    // Probe with the exact native access this file manager needs. Share-mode
+    // conflicts identify an open/locked image separately from an ACL denial;
+    // merely being elevated cannot override either condition.
+    HANDLE probe = CreateFileW(path.c_str(), GENERIC_READ | GENERIC_WRITE,
+                               FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                               nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (probe == INVALID_HANDLE_VALUE) {
+        const DWORD openError = GetLastError();
+        const bool restored = restoreAttributes();
+        QString message;
+        if (openError == ERROR_SHARING_VIOLATION || openError == ERROR_LOCK_VIOLATION) {
+            message = QStringLiteral("Windows reports that another program has this image open without write sharing (error %1). Fully close BlueStacks and try again.")
+                          .arg(qulonglong(openError));
+        } else if (openError == ERROR_ACCESS_DENIED) {
+            message = QStringLiteral("Windows returned Access denied (error %1). The Read-only attribute was cleared if present, but your account or a security policy still blocks Modify access; check the file and folder Security permissions.")
+                          .arg(qulonglong(openError));
+        } else {
+            message = QStringLiteral("Windows could not open the image for writing (error %1). Check its permissions and whether another program is using it.")
+                          .arg(qulonglong(openError));
+        }
+        if (!restored)
+            message += QStringLiteral(" The original Read-only attribute could not be restored automatically.");
+        return failure(message);
+    }
+    CloseHandle(probe);
 
     std::string why;
     auto image = RootDisk::openImage(QFile::encodeName(imagePath).toStdString(), &why);
     if (!image || !image->writable()) {
-        const bool restored = restorePermissions();
-        QString message = QStringLiteral("Windows still denies write access. Close BlueStacks if it is running, then check that your account has Modify permission for this file and its folder.");
+        const bool restored = restoreAttributes();
+        QString message = image
+            ? QStringLiteral("Windows allowed the native write-open, but BSI Customizer's file open fell back to read-only. This may be a path-encoding or file-sharing mismatch; restart BSI Customizer and close other programs using the image.")
+            : QStringLiteral("Windows allowed the native write-open, but BSI Customizer could not parse/reopen the image: %1")
+                  .arg(QString::fromStdString(why));
         if (!restored)
-            message += QStringLiteral(" The original file permissions could not be restored automatically.");
+            message += QStringLiteral(" The original Read-only attribute could not be restored automatically.");
         return failure(message);
     }
     auto volume = RootDisk::Volume::mount(std::move(image), &why);
@@ -479,14 +523,17 @@ QVariantMap enableWriteAccess(const QString &imagePath)
         const QString reason = volume
             ? QString::fromStdString(volume->readOnlyReason())
             : QString::fromStdString(why);
-        const bool restored = restorePermissions();
+        const bool restored = restoreAttributes();
         QString message = QStringLiteral("The image was not made writable: %1").arg(reason);
         if (!restored)
-            message += QStringLiteral(" The original file permissions could not be restored automatically.");
+            message += QStringLiteral(" The original Read-only attribute could not be restored automatically.");
         return failure(message);
     }
+    const QString successMessage = hadReadOnlyAttribute
+        ? QStringLiteral("Editing enabled. The Windows Read-only attribute was cleared; file contents were not changed.")
+        : QStringLiteral("Editing enabled. Windows confirmed write access; file contents were not changed.");
     return { { QStringLiteral("ok"), true },
-             { QStringLiteral("msg"), QStringLiteral("Editing enabled. The Windows Read-only attribute was cleared; file contents were not changed.") } };
+             { QStringLiteral("msg"), successMessage } };
 #endif
 }
 

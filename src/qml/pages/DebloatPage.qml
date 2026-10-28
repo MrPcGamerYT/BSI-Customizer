@@ -825,9 +825,12 @@ Item {
                                 page.openImage();
                                 page.notify(result.msg || qsTr("Editing enabled."));
                             } else {
-                                page.notify(result && result.msg
-                                            ? result.msg
-                                            : qsTr("Windows could not enable write access."));
+                                const detail = result && result.msg
+                                               ? result.msg
+                                               : qsTr("Windows could not enable write access.");
+                                page.imageMsg = detail;
+                                page.imageOk = false;
+                                page.notify(qsTr("Could not enable editing. See the image details for the Windows error."));
                             }
                         }
                     }
