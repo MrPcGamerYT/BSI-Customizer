@@ -395,6 +395,18 @@ bool rangesOverlap(std::uint64_t a, std::uint64_t alen, std::uint64_t b, std::ui
     return a < b + blen && b < a + alen;
 }
 
+std::string vhdxGuidBytes(const std::uint8_t *guid)
+{
+    static constexpr char hex[] = "0123456789abcdef";
+    std::string result;
+    result.reserve(32);
+    for (int i = 0; i < 16; ++i) {
+        result.push_back(hex[guid[i] >> 4]);
+        result.push_back(hex[guid[i] & 0x0F]);
+    }
+    return result;
+}
+
 class VhdxImage final : public Image
 {
 public:
@@ -542,7 +554,8 @@ std::unique_ptr<VhdxImage> VhdxImage::open(std::FILE *file, std::uint64_t fileSi
             metadataOffset = offset;
             metadataLength = length;
         } else if (required) {
-            return fail("This VHDX requires a region type that BSI Customizer does not support.");
+            return fail("This VHDX requires an unsupported region GUID (on-disk bytes: "
+                        + vhdxGuidBytes(entry) + ").");
         }
     }
     if (batOffset == 0 || metadataOffset == 0)
@@ -638,7 +651,8 @@ std::unique_ptr<VhdxImage> VhdxImage::open(std::FILE *file, std::uint64_t fileSi
         } else if (std::memcmp(entry, parentLocatorGuid, 16) == 0) {
             return fail("Differencing VHDX files with a parent locator cannot be edited directly. Open the base image instead.");
         } else if (!knownItem && (itemFlags & 4u) != 0) {
-            return fail("This VHDX requires a metadata item that BSI Customizer does not support.");
+            return fail("This VHDX requires an unsupported metadata GUID (on-disk bytes: "
+                        + vhdxGuidBytes(entry) + ").");
         }
     }
     if (!hasFileParams || !hasDiskSize || !hasLogicalSector || diskSize == 0

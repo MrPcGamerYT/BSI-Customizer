@@ -464,7 +464,7 @@ QVariantMap enableWriteAccess(const QString &imagePath)
     const DWORD originalAttributes = GetFileAttributesW(path.c_str());
     if (originalAttributes == INVALID_FILE_ATTRIBUTES)
         return failure(QStringLiteral("Windows could not inspect the image file (error %1). Check the path and folder access.")
-                           .arg(GetLastError()));
+                           .arg(qulonglong(GetLastError())));
 
     const bool hadReadOnlyAttribute = (originalAttributes & FILE_ATTRIBUTE_READONLY) != 0;
     if (hadReadOnlyAttribute) {
@@ -473,7 +473,7 @@ QVariantMap enableWriteAccess(const QString &imagePath)
             writableAttributes = FILE_ATTRIBUTE_NORMAL;
         if (!SetFileAttributesW(path.c_str(), writableAttributes))
             return failure(QStringLiteral("Windows could not clear the image's Read-only attribute (error %1).")
-                               .arg(GetLastError()));
+                               .arg(qulonglong(GetLastError())));
     }
 
     auto restoreAttributes = [&]() {
@@ -492,13 +492,13 @@ QVariantMap enableWriteAccess(const QString &imagePath)
         QString message;
         if (openError == ERROR_SHARING_VIOLATION || openError == ERROR_LOCK_VIOLATION) {
             message = QStringLiteral("Windows reports that another program has this image open without write sharing (error %1). Fully close BlueStacks and try again.")
-                          .arg(openError);
+                          .arg(qulonglong(openError));
         } else if (openError == ERROR_ACCESS_DENIED) {
             message = QStringLiteral("Windows returned Access denied (error %1). The Read-only attribute was cleared if present, but your account or a security policy still blocks Modify access; check the file and folder Security permissions.")
-                          .arg(openError);
+                          .arg(qulonglong(openError));
         } else {
             message = QStringLiteral("Windows could not open the image for writing (error %1). Check its permissions and whether another program is using it.")
-                          .arg(openError);
+                          .arg(qulonglong(openError));
         }
         if (!restored)
             message += QStringLiteral(" The original Read-only attribute could not be restored automatically.");
@@ -510,7 +510,10 @@ QVariantMap enableWriteAccess(const QString &imagePath)
     auto image = RootDisk::openImage(QFile::encodeName(imagePath).toStdString(), &why);
     if (!image || !image->writable()) {
         const bool restored = restoreAttributes();
-        QString message = QStringLiteral("Windows allowed a native write-open, but BSI Customizer could not reopen the image writable. Close other programs using it and retry.");
+        QString message = image
+            ? QStringLiteral("Windows allowed the native write-open, but BSI Customizer's file open fell back to read-only. This may be a path-encoding or file-sharing mismatch; restart BSI Customizer and close other programs using the image.")
+            : QStringLiteral("Windows allowed the native write-open, but BSI Customizer could not parse/reopen the image: %1")
+                  .arg(QString::fromStdString(why));
         if (!restored)
             message += QStringLiteral(" The original Read-only attribute could not be restored automatically.");
         return failure(message);
@@ -526,8 +529,11 @@ QVariantMap enableWriteAccess(const QString &imagePath)
             message += QStringLiteral(" The original Read-only attribute could not be restored automatically.");
         return failure(message);
     }
+    const QString successMessage = hadReadOnlyAttribute
+        ? QStringLiteral("Editing enabled. The Windows Read-only attribute was cleared; file contents were not changed.")
+        : QStringLiteral("Editing enabled. Windows confirmed write access; file contents were not changed.");
     return { { QStringLiteral("ok"), true },
-             { QStringLiteral("msg"), QStringLiteral("Editing enabled. The Windows Read-only attribute was cleared; file contents were not changed.") } };
+             { QStringLiteral("msg"), successMessage } };
 #endif
 }
 
