@@ -68,6 +68,14 @@ qt_add_executable(BSICustomizer
     src/core/LayoutPatcher.cpp
     src/core/AboutPatcher.h
     src/core/AboutPatcher.cpp
+    src/core/DebloatConfig.h
+    src/core/DebloatConfig.cpp
+    src/core/DebloatPatcher.h
+    src/core/DebloatPatcher.cpp
+    src/core/AdbClient.h
+    src/core/AdbClient.cpp
+    src/core/AndroidCleanup.h
+    src/core/AndroidCleanup.cpp
     src/core/BsDetector.h
     src/core/BsDetector.cpp
     src/core/Backend.h
@@ -220,6 +228,7 @@ qt_add_qml_module(BSICustomizer
         src/qml/pages/IntegrityPage.qml
         src/qml/pages/BootVideoPage.qml
         src/qml/pages/UiPage.qml
+        src/qml/pages/DebloatPage.qml
         src/qml/pages/RpcidPage.qml
         src/qml/pages/AppearancePage.qml
         src/qml/pages/AboutPage.qml

@@ -1,11 +1,14 @@
 #include "Backend.h"
 
+#include "AdbClient.h"
+#include "AndroidCleanup.h"
 #include "AuthManager.h"
 #include "BootVideoPatcher.h"
 #include "BsDetector.h"
 #include "ExtrasPatcher.h"
 #include "IntegrityPatcher.h"
 #include "AboutPatcher.h"
+#include "DebloatPatcher.h"
 #include "LayoutPatcher.h"
 #include "RpcIdPatcher.h"
 #include "SettingsManager.h"
@@ -1362,6 +1365,119 @@ QVariantMap Backend::bootPatch(int holdMs)
 }
 
 // ------------------------------------------------------------------ extras
+
+// ---------------------------------------------------------------------------
+// BlueStacks Debloat
+// ---------------------------------------------------------------------------
+
+QVariantList Backend::debloatOptions()
+{
+    QVariantList list;
+    for (const auto &option : Debloat::options())
+        list << QVariantMap { { QStringLiteral("id"), option.id },
+                              { QStringLiteral("group"), option.group },
+                              { QStringLiteral("label"), option.label },
+                              { QStringLiteral("hint"), option.hint },
+                              { QStringLiteral("needsInstance"), option.needsInstance } };
+    return list;
+}
+
+QVariantMap Backend::debloatState()
+{
+    const Debloat::Status state = Debloat::status(m_settings->confPath());
+    QVariantList cloud;
+    for (const auto &entry : state.cloud) cloud << entry;
+    return { { QStringLiteral("supported"), state.supported },
+             { QStringLiteral("applied"), state.applied },
+             { QStringLiteral("conf"), state.conf },
+             { QStringLiteral("detail"), state.detail },
+             { QStringLiteral("instances"), state.instances },
+             { QStringLiteral("instance"), state.instance },
+             { QStringLiteral("already"), state.already },
+             { QStringLiteral("hostsInstalled"), state.hostsInstalled },
+             { QStringLiteral("cloud"), cloud },
+             { QStringLiteral("anyCloudMoved"), state.anyCloudMoved },
+             { QStringLiteral("recorded"), state.anyRecord },
+             { QStringLiteral("pendingChanges"), state.pendingChanges },
+             { QStringLiteral("backups"), Debloat::backups().size() } };
+}
+
+QVariantMap Backend::debloatApply(const QStringList &optionIds, const QString &instance)
+{
+    if (actionsLocked()) return lockedMap();
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) { return worker.debloatApply(optionIds, instance); });
+    if (optionIds.isEmpty())
+        return result(false, QStringLiteral("Select at least one option."), QStringLiteral("orange"));
+    Debloat::Request request;
+    request.options = optionIds;
+    request.instance = instance;
+    const auto reply = Debloat::apply(m_settings->confPath(), m_settings->exePath(), request);
+    return result(reply.value(QStringLiteral("ok")).toBool(),
+                  reply.value(QStringLiteral("msg")).toString(), QStringLiteral("green"));
+}
+
+QVariantMap Backend::debloatRestore()
+{
+    if (actionsLocked()) return lockedMap();
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) { return worker.debloatRestore(); });
+    const auto reply = Debloat::restore(m_settings->confPath(), m_settings->exePath());
+    // The Android apps and guest storage are part of the same undo record. If
+    // the instance is not running, its part says so and keeps its record; the
+    // configuration restore above is never held back by that.
+    const QVariantMap android = Android::isEmpty(Android::loadRecord())
+        ? QVariantMap()
+        : Android::restore(m_settings->exePath(), m_settings->confPath(), QString());
+    QString message = reply.value(QStringLiteral("msg")).toString();
+    if (!android.isEmpty()) {
+        message += QLatin1Char(' ') + android.value(QStringLiteral("msg")).toString();
+        const bool ok = reply.value(QStringLiteral("ok")).toBool()
+            && android.value(QStringLiteral("ok")).toBool();
+        return result(ok, message, ok ? QStringLiteral("green") : QStringLiteral("red"));
+    }
+    return result(reply.value(QStringLiteral("ok")).toBool(), message, QStringLiteral("green"));
+}
+
+// ---------------------------------------------------------------------------
+// Android — the inside of the instance, through its own ADB
+// ---------------------------------------------------------------------------
+
+QVariantMap Backend::androidState()
+{
+    return Android::state();
+}
+
+QVariantMap Backend::androidScan(const QString &instance)
+{
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) { return worker.androidScan(instance); });
+    return Android::scan(m_settings->exePath(), m_settings->confPath(), instance);
+}
+
+QVariantMap Backend::androidApply(const QStringList &packages, bool wipeDownloads, bool keepCopy,
+                                  bool clearAppData, const QString &instance)
+{
+    if (actionsLocked()) return lockedMap();
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) {
+            return worker.androidApply(packages, wipeDownloads, keepCopy, clearAppData, instance);
+        });
+    Android::Request request;
+    request.packages = packages;
+    request.wipeDownloads = wipeDownloads;
+    request.keepCopy = keepCopy;
+    request.clearAppData = clearAppData;
+    return Android::apply(m_settings->exePath(), m_settings->confPath(), instance, request);
+}
+
+QVariantMap Backend::androidRestore(const QString &instance)
+{
+    if (actionsLocked()) return lockedMap();
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) { return worker.androidRestore(instance); });
+    return Android::restore(m_settings->exePath(), m_settings->confPath(), instance);
+}
 
 QVariantMap Backend::applyRemovals(const QStringList &names)
 {

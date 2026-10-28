@@ -5,6 +5,10 @@
 #include "core/EmbeddedResources.h"
 #include "core/ExtrasPatcher.h"
 #include "core/AboutPatcher.h"
+#include "core/AndroidCleanup.h"
+#include "core/AdbClient.h"
+#include "core/DebloatConfig.h"
+#include "core/DebloatPatcher.h"
 #include "core/IntegrityPatcher.h"
 #include "core/LayoutPatcher.h"
 #include "core/QmlText.h"
@@ -932,6 +936,303 @@ static QString aboutPageFixture()
         "        }\r\n"
         "    }\r\n"
         "}\r\n");
+}
+
+// ---- BlueStacks Debloat -------------------------------------------------
+// The tab edits a file BlueStacks owns and rewrites itself, so the tests pin
+// the two properties that make it safe: every byte outside a changed value
+// survives, and a plan never invents a setting the build does not declare.
+void checkAndroid()
+{
+    std::printf("[android] reviewed apps, commands and the undo record\n");
+    {
+        const auto &rules = Android::appRules();
+        check(rules.size() >= 5, "the reviewed app list is populated");
+        bool allValid = true, unique = true, anyRecommended = false;
+        QStringList names;
+        for (const auto &rule : rules) {
+            if (!Android::validPackage(rule.package)) allValid = false;
+            if (names.contains(rule.package)) unique = false;
+            names << rule.package;
+            if (rule.recommended) anyRecommended = true;
+            if (rule.label.isEmpty() || rule.note.isEmpty()) allValid = false;
+        }
+        check(allValid, "every reviewed package and its label are well formed");
+        check(unique, "no package is on the reviewed list twice");
+        check(anyRecommended, "the deceptive apps are the ones pre-ticked");
+        check(Android::knownPackages() == names, "the lookup list is the reviewed list");
+        check(Android::appLabel(QStringLiteral("gg.now.ads.service")).contains(QLatin1String("now.gg")),
+              "a package is described by its label, not by its identifier");
+        // Root.vhd is deliberately absent from this module: the system image is
+        // shared and read-only, so nothing here addresses a file on disk.
+        check(!Android::recordPath().isEmpty()
+                  && Android::recordPath().endsWith(QLatin1String("/debloat/android.json")),
+              "the undo record sits next to the configuration record");
+    }
+    {
+        // A package name is interpolated into a shell command, so only the
+        // shape Android itself allows gets through.
+        check(Android::validPackage(QStringLiteral("com.android.egg")),
+              "a normal package name is accepted");
+        check(!Android::validPackage(QString()),
+              "an empty package is refused");
+        check(!Android::validPackage(QStringLiteral("com.android.egg; rm -rf /sdcard")),
+              "a package carrying a second command is refused");
+        check(!Android::validPackage(QStringLiteral("com.android.egg && reboot")),
+              "a package carrying a shell operator is refused");
+        check(!Android::validPackage(QStringLiteral("$(reboot)")),
+              "a package carrying command substitution is refused");
+        check(!Android::validPackage(QStringLiteral("no_dots")),
+              "a name without a package segment is refused");
+        check(!Android::validPackage(QStringLiteral("../etc/passwd")),
+              "a path is not a package name");
+
+        const QString pkg = QStringLiteral("com.android.traceur");
+        check(Android::uninstallCommand(pkg)
+                  == QLatin1String("pm uninstall --user 0 com.android.traceur"),
+              "uninstall targets user 0 only, so the system image is never written");
+        check(Android::disableCommand(pkg).contains(QLatin1String("disable-user"))
+                  && Android::disableCommand(pkg).endsWith(pkg),
+              "the fallback for a system package disables it instead");
+        check(Android::installExistingCommand(pkg).startsWith(QLatin1String("cmd package install-existing"))
+                  && Android::installExistingCommand(pkg).endsWith(pkg),
+              "restore reinstalls the package the player shipped");
+        check(Android::enableCommand(pkg).startsWith(QLatin1String("pm enable"))
+                  && Android::enableCommand(pkg).endsWith(pkg),
+              "a disabled package is enabled again");
+        check(Android::listCommand().contains(QLatin1String("--user 0")),
+              "the package list asked for is the one the remove step is verified against");
+
+        const QStringList wipe = Android::downloadWipeCommands();
+        bool removes = false, recreates = false;
+        for (const QString &command : wipe) {
+            if (command.contains(QLatin1String("rm -rf /sdcard/Download"))) removes = true;
+            if (command.contains(QLatin1String("mkdir -p /sdcard/Download"))) recreates = true;
+        }
+        check(removes && recreates,
+              "the whole Download folder goes, then comes back empty, so nothing is left behind");
+        const QStringList appData = Android::appDataWipeCommands();
+        bool data = false, obb = false;
+        for (const QString &command : appData) {
+            if (command.contains(QLatin1String("/sdcard/Android/data"))) data = true;
+            if (command.contains(QLatin1String("/sdcard/Android/obb"))) obb = true;
+        }
+        check(data && obb, "clearing app data covers both the data and the obb folders");
+        check(Android::copyLimitBytes() > 0, "the automatic copy has a size ceiling");
+    }
+    {
+        // ---- the instance's ADB port, from the configuration it publishes ----
+        QTemporaryDir temp;
+        check(temp.isValid(), "a temporary folder holds the fake bluestacks.conf");
+        const QString current = temp.filePath(QStringLiteral("current.conf"));
+        const QString legacy = temp.filePath(QStringLiteral("legacy.conf"));
+        const QString none = temp.filePath(QStringLiteral("none.conf"));
+        const auto write = [](const QString &path, const QByteArray &bytes) {
+            QFile file(path);
+            if (!file.open(QIODevice::WriteOnly)) return false;
+            file.write(bytes);
+            file.close();
+            return true;
+        };
+        check(write(current, "bst.instance.Pie64.status.adb_port=\"5565\"\r\n"
+                             "bst.instance.Nougat32.status.adb_port=\"5567\"\r\n"),
+              "the fixture publishes two instance ports");
+        check(write(legacy, "bst.instance.Pie64.adb_port=\"5575\"\n"),
+              "the fixture uses the older key as well");
+        check(write(none, "bst.instance.Pie64.cpus=\"4\"\n"),
+              "the fixture without a port is written");
+        check(Adb::instancePort(current, QStringLiteral("Pie64")) == 5565,
+              "the running instance's published port is the one used");
+        check(Adb::instancePort(current, QStringLiteral("Nougat32")) == 5567,
+              "each instance has its own port");
+        check(Adb::instancePort(legacy, QStringLiteral("Pie64")) == 5575,
+              "the older key spelling is understood");
+        check(Adb::instancePort(none, QStringLiteral("Pie64")) == 0,
+              "an instance without a published port is reported as such, never guessed");
+        check(Adb::instancePort(temp.filePath(QStringLiteral("missing.conf")),
+                                QStringLiteral("Pie64")) == 0,
+              "a missing configuration is not an error, just no port");
+        check(Adb::findAdb(temp.filePath(QStringLiteral("HD-Player.exe"))).isEmpty(),
+              "a folder without the player's adb reports no adb instead of inventing one");
+    }
+    {
+        // ---- the undo record survives a round trip, per instance ----
+        Android::Record record;
+        check(Android::isEmpty(record), "a fresh record is empty");
+        record.removed << Android::RemovedApp { QStringLiteral("gg.now.ads.service"),
+                                                QStringLiteral("uninstall"),
+                                                QStringLiteral("Pie64") };
+        record.removed << Android::RemovedApp { QStringLiteral("com.android.egg"),
+                                                QStringLiteral("disable"),
+                                                QStringLiteral("Nougat32") };
+        record.downloads << Android::WipedFolder { QStringLiteral("Pie64"),
+                                                   { QStringLiteral("apps"), QStringLiteral("game.apk") },
+                                                   QStringLiteral("C:/backups/download-1") };
+        record.appData << QStringLiteral("Pie64");
+        check(!Android::isEmpty(record), "a record with work in it is not empty");
+        const auto back = Android::recordFromJson(Android::recordToJson(record));
+        check(back.removed.size() == 2 && back.removed.first().instance == QLatin1String("Pie64")
+                  && back.removed.last().action == QLatin1String("disable"),
+              "each removed app keeps the instance it was removed from");
+        check(back.downloads.size() == 1 && back.downloads.first().entries.size() == 2
+                  && back.downloads.first().entries.first() == QLatin1String("apps"),
+              "what was in the Download folder, and where its copy is, is kept");
+        check(back.downloads.first().backup == QLatin1String("C:/backups/download-1"),
+              "the copy on this PC is part of the record");
+        check(back.appData == (QStringList { QStringLiteral("Pie64") }),
+              "the instances whose app data was cleared are kept");
+        check(Android::isEmpty(Android::recordFromJson(QByteArray("not json"))),
+              "a damaged record reads as empty instead of pretending to have work");
+    }
+}
+
+void checkDebloat()
+{
+    std::printf("[debloat] config values, hosts block and cloud folders\n");
+    {
+        const QByteArray config =
+            "\xEF\xBB\xBF" "bst.enable_programmatic_ads=\"1\"\r\n"
+            "bst.feature.usage_stats=\"true\"\r\n"
+            "bst.instance.Pie64.cpus=\"4\"\r\n"
+            "bst.instance.Pie64.enable_high_fps=\"0\"\r\n"
+            "bst.instance.Pie64.max_fps=\"60\"\r\n"
+            "bst.instance.Pie64.enable_vsync=\"1\"\r\n"
+            "bst.enable_adb_access=\"0\"\r\n"
+            "# a comment the player keeps\r\n"
+            "bst.not_a_switch=raw value\r\n";
+        const auto file = DebloatConfig::File::parse(config);
+        check(file.isValid(), "bluestacks.conf is parsed with its BOM, quotes and CRLF kept");
+        check(file.value(QStringLiteral("bst.enable_programmatic_ads")) == QLatin1String("1"),
+              "a quoted flag reads back without its quotes");
+        check(file.instances() == (QStringList { QStringLiteral("Pie64") }),
+              "the instance names are read from the settings that declare them");
+
+        Debloat::Request request;
+        request.options = { QStringLiteral("ads"), QStringLiteral("telemetry"),
+                            QStringLiteral("downloads") };
+        const auto plan = Debloat::planFor(config, request);
+        check(plan.ok && plan.changes.size() == 2,
+              "only the two declared flags in this fixture change; undeclared keys are skipped");
+        bool skippedMissing = false;
+        for (const auto &entry : plan.skipped)
+            if (entry.startsWith(QLatin1String("bst.enable_boot_banner"))) skippedMissing = true;
+        check(skippedMissing, "a setting this build does not declare is reported, never created");
+
+        QMap<QString, QString> wanted;
+        for (const auto &change : plan.changes) wanted.insert(change.key, change.after);
+        QByteArray edited;
+        QString editError;
+        check(DebloatConfig::File::parse(config).applyEdits(wanted, &edited, &editError),
+              "the planned values are written into the bytes the player owns");
+        check(edited.contains("bst.enable_programmatic_ads=\"0\""),
+              "the ad flag is written as the same quoted zero the player uses");
+        check(edited.contains("bst.feature.usage_stats=\"false\""),
+              "a flag spelled true becomes false, not 0");
+        // Everything the plan did not touch has to survive byte for byte; the
+        // comparison stays in bytes so a text round trip cannot hide a change.
+        QByteArray stripped = edited;
+        stripped.replace("bst.enable_programmatic_ads=\"0\"",
+                         "bst.enable_programmatic_ads=\"1\"");
+        stripped.replace("bst.feature.usage_stats=\"false\"",
+                         "bst.feature.usage_stats=\"true\"");
+        check(stripped == config,
+              "the edited document is the original plus exactly the changed values");
+
+        Debloat::Request tuning;
+        tuning.options = { QStringLiteral("highfps") };
+        tuning.instance = QStringLiteral("Pie64");
+        const auto tuned = Debloat::planFor(config, tuning);
+        bool fps = false, limit = false, vsync = false;
+        for (const auto &change : tuned.changes) {
+            if (change.key == QLatin1String("bst.instance.Pie64.enable_high_fps")) fps = true;
+            if (change.key == QLatin1String("bst.instance.Pie64.max_fps")) limit = true;
+            if (change.key == QLatin1String("bst.instance.Pie64.enable_vsync")) vsync = true;
+        }
+        check(fps && limit && vsync && tuned.changes.size() == 3,
+              "high frame-rate mode writes the instance's own three settings");
+        // It is the player's setting: the binary patch on the FPS page is a
+        // separate edit and must not be implied here.
+        check(!tuned.changes.isEmpty() && !config.contains("max_fps=\"120\""),
+              "no unrelated FPS value is invented");
+    }
+    {
+        // A value the player spells differently is left alone instead of being
+        // forced into a shape it would not understand.
+        const QByteArray odd = "bst.enable_smart_downloads=\"2\"\n";
+        Debloat::Request request;
+        request.options = { QStringLiteral("downloads") };
+        const auto plan = Debloat::planFor(odd, request);
+        check(plan.ok && plan.changes.isEmpty() && plan.skipped.size() == 2,
+              "an unexpected value is reported and left untouched (the feature key is missing)");
+    }
+    {
+        // ---- hosts file ----
+        const QByteArray hosts = "127.0.0.1 localhost\r\n10.0.0.5 internal.example\r\n";
+        QByteArray withBlock, removed;
+        QString error;
+        check(Debloat::hostsEdits(hosts, true, &withBlock, &error),
+              "the ad domains are added to a clean hosts file");
+        check(withBlock.startsWith(hosts),
+              "the existing hosts content is untouched, byte for byte");
+        check(withBlock.contains("0.0.0.0 ads.bluestacks.com")
+                  && withBlock.contains("0.0.0.0 adsdk.bluestacks.com")
+                  && withBlock.contains(Debloat::hostsStartMarker().toUtf8()),
+              "exactly the two BlueStacks ad domains are blocked");
+        check(!withBlock.contains("googleads") && !withBlock.contains("doubleclick"),
+              "no Google or game domain is blocked");
+        QByteArray again;
+        check(Debloat::hostsEdits(withBlock, true, &again, &error) && again == withBlock,
+              "applying the block twice does not stack a second copy");
+        check(Debloat::hostsEdits(withBlock, false, &removed, &error) && removed == hosts,
+              "removing the block restores the original hosts file exactly");
+        QByteArray untouched;
+        check(Debloat::hostsEdits(hosts, false, &untouched, &error) && untouched == hosts,
+              "removing a block that is not there changes nothing");
+        // A half-deleted block is refused, never repaired by guesswork.
+        const QByteArray broken = hosts + Debloat::hostsStartMarker().toUtf8()
+            + "\r\n0.0.0.0 ads.bluestacks.com\r\n";
+        QByteArray out;
+        check(!Debloat::hostsEdits(broken, true, &out, &error),
+              "an incomplete block is refused instead of rewritten");
+        QByteArray utf16;
+        check(!Debloat::hostsEdits(QByteArray("\xff\xfe" "1\x00"), true, &utf16, &error),
+              "a UTF-16 hosts file is refused so its encoding cannot be damaged");
+    }
+    {
+        // ---- cloud companions ----
+        QTemporaryDir temp;
+        check(temp.isValid(), "a temporary folder holds the fake cloud installs");
+        const QString rootA = temp.filePath(QStringLiteral("a"));
+        const QString rootB = temp.filePath(QStringLiteral("b"));
+        QDir().mkpath(rootA + QStringLiteral("/BlueStacks X"));
+        QDir().mkpath(rootB + QStringLiteral("/Programs/bluestacks-services"));
+        QFile x(rootA + QStringLiteral("/BlueStacks X/BlueStacks X.exe"));
+        x.open(QIODevice::WriteOnly);
+        x.write("x");
+        x.close();
+        QFile services(rootB + QStringLiteral("/Programs/bluestacks-services/BlueStacksServices.exe"));
+        services.open(QIODevice::WriteOnly);
+        services.write("s");
+        services.close();
+        const auto found = Debloat::cloudProductsAt({ rootA, rootB });
+        check(found.size() == 2 && !found.first().moved,
+              "both cloud companions are found and reported as installed");
+        // The park name is what makes the move reversible in one rename: no
+        // delete, no registry edit, no change on another volume.
+        const QString parked = Debloat::cloudParkedPath(rootA + QStringLiteral("/BlueStacks X"));
+        check(parked.endsWith(QLatin1String("BlueStacks X.bsi-disabled"))
+                  && QFileInfo(parked).absolutePath() == QDir(rootA).absolutePath(),
+              "a removed companion is parked next to itself, on the same drive");
+        check(QDir().rename(rootA + QStringLiteral("/BlueStacks X"), parked),
+              "parking the folder is a single rename");
+        const auto afterMove = Debloat::cloudProductsAt({ rootA });
+        check(afterMove.size() == 1 && afterMove.first().moved && afterMove.first().id == QLatin1String("x"),
+              "a parked companion is still reported, flagged as moved");
+        check(QDir().rename(parked, rootA + QStringLiteral("/BlueStacks X")),
+              "restore renames the folder back");
+        check(!Debloat::cloudProductsAt({ temp.filePath(QStringLiteral("empty")) }).size(),
+              "a folder without the companion executable is not treated as an install");
+    }
 }
 
 int runPatchRegressionTests()
@@ -6321,6 +6622,9 @@ Window {
               "a published manifest wins over a text announcement");
     }
 
+
+    checkDebloat();
+    checkAndroid();
 
     return failures;
 }
