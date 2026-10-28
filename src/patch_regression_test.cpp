@@ -1293,6 +1293,7 @@ void checkRootDisk()
     }
 
     // ---- the file manager: add, list, delete ----
+    int originalEntries = 0;                  // the root folder as the image shipped it
     {
         const auto info = RootVhd::info(work);
         check(info.value(QStringLiteral("ok")).toBool(), "RootVhd::info opens the image");
@@ -1300,7 +1301,8 @@ void checkRootDisk()
 
         const auto before = RootVhd::listing(work, QStringLiteral("/"));
         check(before.value(QStringLiteral("ok")).toBool(), "the root folder is listed");
-        int entries = before.value(QStringLiteral("entries")).toList().size();
+        const int entries = before.value(QStringLiteral("entries")).toList().size();
+        originalEntries = entries;
         check(entries >= 2, "the listing carries the folder's entries");
 
         const QString added = temp.filePath(QStringLiteral("added.txt"));
@@ -1356,7 +1358,7 @@ void checkRootDisk()
         check(!RootVhd::hasUndo(work), "the undo record is gone once it has been replayed");
         const auto reopened = RootVhd::listing(work, QStringLiteral("/"));
         check(reopened.value(QStringLiteral("ok")).toBool()
-                  && reopened.value(QStringLiteral("entries")).toList().size() == 2,
+                  && reopened.value(QStringLiteral("entries")).toList().size() == originalEntries,
               "the restored image opens again and holds its original entries");
     }
 
