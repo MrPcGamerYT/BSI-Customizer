@@ -119,7 +119,7 @@ for at in (192 * 1024, 256 * 1024):
 
 metadata = bytearray(MiB)
 metadata[:8] = b'metadata'
-put_le16(metadata, 10, 4)
+put_le16(metadata, 10, 5)
 items = [
     ('3767a1ca36fa434db3b633f0aa44e76b', 64 * 1024, 8, 6,
      struct.pack('<II', MiB, 0)),
@@ -127,8 +127,10 @@ items = [
      struct.pack('<Q', 4097 * MiB)),
     ('1dbf41816fa90947ba47f233a8faab5f', 64 * 1024 + 16, 4, 6,
      struct.pack('<I', 512)),
-    ('cda348c7445d44719cc9e9885251c556', 64 * 1024 + 20, 4, 2,
+    ('c748a3cd5d4471449cc9e9885251c556', 64 * 1024 + 20, 4, 6,
      struct.pack('<I', 512)),
+    ('ab12cabee6b2234593efc309e000c746', 64 * 1024 + 24, 16, 6,
+     bytes.fromhex('00112233445566778899aabbccddeeff')),
 ]
 for index, (guid, offset, length, flags, value) in enumerate(items):
     entry = 32 + index * 32
