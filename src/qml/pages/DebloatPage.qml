@@ -408,9 +408,9 @@ Item {
                                      + "folder inside a running instance. Nothing on disk is "
                                      + "edited; every app can be put back.") },
                         { title: qsTr("2 · Hardcode debloat (Root.vhd)"), icon: "\u26C1",
-                          text: qsTr("Open the engine's Root.vhd like a 7-Zip window: see every "
-                                     + "folder and file, add files or folders, delete them. "
-                                     + "Journalled, so one Undo puts it back.") }
+                          text: qsTr("Open Root.vhd in a full file manager: add files and folders, "
+                                     + "replace file contents, extract, and delete files or folders. "
+                                     + "One Undo restores the original image.") }
                     ]
                     delegate: Rectangle {
                         required property var modelData

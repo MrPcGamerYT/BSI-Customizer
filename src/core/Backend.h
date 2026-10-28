@@ -230,6 +230,8 @@ public:
                                            const QString &localPath);
     Q_INVOKABLE QVariantMap rootvhdAdd(const QString &image, const QString &innerDir,
                                        const QString &localFile);
+    Q_INVOKABLE QVariantMap rootvhdReplace(const QString &image, const QString &innerPath,
+                                           const QString &localFile);
     Q_INVOKABLE QVariantMap rootvhdAddFolder(const QString &image, const QString &innerDir,
                                              const QString &localDir);
     // A file or a whole folder tree, whichever the path turns out to be.

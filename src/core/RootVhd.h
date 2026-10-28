@@ -39,8 +39,10 @@ QVariantMap listing(const QString &imagePath, const QString &innerPath);
 QVariantMap search(const QString &imagePath, const QString &query, int limit = 500);
 // Writes one file out; `localPath` is a file path for a file, a folder for a folder.
 QVariantMap extract(const QString &imagePath, const QString &innerPath, const QString &localPath);
-// Local file to `innerDir` (keeping its name), or replacing the same name there.
+// Add a local file to `innerDir` (keeping its name); refuses duplicate names.
 QVariantMap addFile(const QString &imagePath, const QString &innerDir, const QString &localFile);
+// Replace the bytes of an existing regular file while keeping its in-image name/path.
+QVariantMap replaceFile(const QString &imagePath, const QString &innerPath, const QString &localFile);
 // A whole folder tree, recreated inside the image.
 QVariantMap addFolder(const QString &imagePath, const QString &innerDir, const QString &localDir);
 // Whatever the path is — a file or a folder tree — added to `innerDir`.

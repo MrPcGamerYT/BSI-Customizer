@@ -575,9 +575,11 @@ works:
   name or size with one click on the column header;
 * a **path bar** with Up and clickable breadcrumbs, and **Refresh**;
 * **Add file**, **Add folder** (a whole tree, structure included), **New
-  folder**, **Save** (extract a file or a folder anywhere on this PC), and
-  **Delete** — a file goes at once, a folder asks first because everything
-  under it goes with it;
+  folder**, **Replace** (swap the contents of an existing file while keeping
+  its path in Root.vhd), **Save** (extract a file or folder anywhere on this
+  PC), and **Delete** — a file goes at once, a folder asks first because
+  everything under it goes with it. Adding a duplicate name is refused; use
+  Replace explicitly instead;
 * **drag and drop** from Explorer straight into the open folder;
 * **filter this folder** as you type, or **Search everywhere** to find a name
   anywhere in the image (it walks the folders itself, and says when it stops

@@ -573,6 +573,14 @@ QVariantMap addFile(const QString &imagePath, const QString &innerDir, const QSt
         [&](RootDisk::Volume &volume, std::string *error) {
             const std::uint32_t dir = volume.resolve(innerDir.toStdString(), error);
             if (dir == 0) return false;
+            const auto current = volume.list(dir, error);
+            for (const auto &entry : current.entries) {
+                if (entry.name == name) {
+                    if (error) *error = "“" + name.toStdString()
+                        + "” already exists. Use Replace to change its contents.";
+                    return false;
+                }
+            }
             return volume.putFile(dir, name.toStdString(), data, 0644, error);
         });
     if (!done.value(QStringLiteral("ok")).toBool()) return done;
@@ -581,6 +589,48 @@ QVariantMap addFile(const QString &imagePath, const QString &innerDir, const QSt
                                           .arg(name)
                                           .arg(QLocale().formattedDataSize(size))
                                           .arg(innerDir) } };
+}
+
+QVariantMap replaceFile(const QString &imagePath, const QString &innerPath,
+                        const QString &localFile)
+{
+    const QFileInfo localInfo(localFile);
+    if (!localInfo.isFile())
+        return failure(QStringLiteral("Choose a replacement file that exists."));
+    if (localInfo.canonicalFilePath() == QFileInfo(imagePath).canonicalFilePath())
+        return failure(QStringLiteral("The image cannot be used as its own replacement file."));
+    QFile file(localFile);
+    if (!file.open(QIODevice::ReadOnly))
+        return failure(QStringLiteral("“%1” could not be read.").arg(QDir::toNativeSeparators(localFile)));
+    const qint64 size = file.size();
+    if (size > qint64(2) * 1024 * 1024 * 1024)
+        return failure(QStringLiteral("“%1” is larger than the 2 GB replacement limit.")
+                           .arg(localInfo.fileName()));
+    const QByteArray bytes = file.readAll();
+    file.close();
+    std::vector<std::uint8_t> data(std::size_t(bytes.size()));
+    std::memcpy(data.data(), bytes.constData(), std::size_t(bytes.size()));
+
+    const QString innerName = QFileInfo(innerPath).fileName();
+    const QString parentPath = QFileInfo(innerPath).path();
+    const QVariantMap done = withJournal(
+        imagePath,
+        [&](RootDisk::Volume &volume, std::string *error) {
+            const std::uint32_t inode = volume.resolve(innerPath.toStdString(), error);
+            if (inode == 0) return false;
+            if (!volume.stat(inode, error).regular()) {
+                if (error) *error = "Only an existing regular file can be replaced.";
+                return false;
+            }
+            const std::uint32_t parent = volume.resolve(parentPath.toStdString(), error);
+            if (parent == 0) return false;
+            return volume.putFile(parent, innerName.toStdString(), data, 0644, error);
+        });
+    if (!done.value(QStringLiteral("ok")).toBool()) return done;
+    return { { QStringLiteral("ok"), true },
+             { QStringLiteral("msg"), QStringLiteral("Replaced %1 with %2 (%3).")
+                                          .arg(innerPath, localInfo.fileName(),
+                                               QLocale().formattedDataSize(size)) } };
 }
 
 QVariantMap addFolder(const QString &imagePath, const QString &innerDir, const QString &localDir)

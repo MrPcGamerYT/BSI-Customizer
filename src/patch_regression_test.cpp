@@ -1407,15 +1407,31 @@ void checkRootDisk()
         check(afterAdd.value(QStringLiteral("entries")).toList().size() == entries + 1,
               "the folder lists one entry more");
         check(RootVhd::hasUndo(work), "the write left an undo record behind");
+        const auto duplicate = RootVhd::addFile(work, QStringLiteral("/"), added);
+        check(!duplicate.value(QStringLiteral("ok")).toBool()
+                  && duplicate.value(QStringLiteral("msg")).toString().contains(QLatin1String("Replace")),
+              "Add refuses an existing name and directs the user to Replace");
+
+        const QString replacementPath = temp.filePath(QStringLiteral("replacement.bin"));
+        const QByteArray replacementBytes("new bytes replace the old contents\n");
+        {
+            QFile replacement(replacementPath);
+            replacement.open(QIODevice::WriteOnly);
+            replacement.write(replacementBytes);
+        }
+        const auto replaced = RootVhd::replaceFile(work, QStringLiteral("/added.txt"),
+                                                   replacementPath);
+        check(replaced.value(QStringLiteral("ok")).toBool(),
+              "an existing image file can be replaced from a differently named local file");
 
         const QString out = temp.filePath(QStringLiteral("out.txt"));
         const auto extract = RootVhd::extract(work, QStringLiteral("/added.txt"), out);
-        check(extract.value(QStringLiteral("ok")).toBool(), "the file is extracted again");
+        check(extract.value(QStringLiteral("ok")).toBool(), "the replacement can be extracted");
         {
             QFile file(out);
             file.open(QIODevice::ReadOnly);
-            check(file.readAll() == "added by the regression test\n",
-                  "the extracted file is the one that was added");
+            check(file.readAll() == replacementBytes,
+                  "Replace keeps the image path and writes the selected local file's bytes");
         }
 
         const auto mkdir = RootVhd::makeFolder(work, QStringLiteral("/"), QStringLiteral("debloat"));

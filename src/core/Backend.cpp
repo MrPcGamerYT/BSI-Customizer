@@ -1532,6 +1532,17 @@ QVariantMap Backend::rootvhdAdd(const QString &image, const QString &innerDir,
     return RootVhd::addFile(image, innerDir, localFile);
 }
 
+QVariantMap Backend::rootvhdReplace(const QString &image, const QString &innerPath,
+                                    const QString &localFile)
+{
+    if (actionsLocked()) return lockedMap();
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) {
+            return worker.rootvhdReplace(image, innerPath, localFile);
+        });
+    return RootVhd::replaceFile(image, innerPath, localFile);
+}
+
 QVariantMap Backend::rootvhdAddFolder(const QString &image, const QString &innerDir,
                                       const QString &localDir)
 {

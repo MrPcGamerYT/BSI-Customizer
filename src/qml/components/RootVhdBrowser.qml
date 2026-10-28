@@ -5,9 +5,8 @@ import QtQuick.Dialogs
 import BSICustomizer
 
 // A two-pane file manager over an engine's Root.vhd: the folder tree on the
-// left, the current folder on the right, and the toolbar that adds, extracts
-// and deletes. Nothing is cached: every listing comes from the image, so what
-// is on screen is what is on disk.
+// left, the current folder on the right, and controls to add, replace, extract
+// and delete. Listings always come from the image, so the view reflects disk.
 Item {
     id: browser
 
@@ -333,6 +332,14 @@ Item {
         browser.report(result);
     }
 
+    function replaceFile(entry, localPath) {
+        if (!browser.writable || !entry || entry.dir) return;
+        browser.busy = true;
+        const result = backend.rootvhdReplace(browser.imagePath, entry.path, localPath);
+        browser.busy = false;
+        browser.report(result);
+    }
+
     function addFolder(localDir) {
         if (!browser.writable) return;
         browser.busy = true;
@@ -411,6 +418,14 @@ Item {
         title: qsTr("Add a file to this folder")
         nameFilters: ["All files (*)"]
         onAccepted: browser.addFile(backend.localFilePath(selectedFile))
+    }
+
+    FileDialog {
+        id: replaceFileDialog
+        title: qsTr("Choose replacement bytes for this image file")
+        nameFilters: ["All files (*)"]
+        onAccepted: browser.replaceFile(browser.pendingEntry,
+                                        backend.localFilePath(selectedFile))
     }
 
     FolderDialog {
@@ -694,7 +709,7 @@ Item {
                                     }
                                 }
                             }
-                            Item { Layout.preferredWidth: 158 }
+                            Item { Layout.preferredWidth: 202 }
                         }
                     }
 
@@ -742,12 +757,21 @@ Item {
                                         font.pixelSize: 10
                                     }
                                     RowLayout {
-                                        Layout.preferredWidth: 158
+                                        Layout.preferredWidth: 202
                                         spacing: 4
                                         RowButton {
                                             label: modelData.dir ? qsTr("Open") : qsTr("Show")
                                             enabled: !browser.busy
                                             onClicked: browser.openEntry(modelData)
+                                        }
+                                        RowButton {
+                                            visible: !modelData.dir
+                                            label: qsTr("Replace")
+                                            enabled: browser.writable && !browser.busy
+                                            onClicked: {
+                                                browser.pendingEntry = modelData;
+                                                replaceFileDialog.open();
+                                            }
                                         }
                                         RowButton {
                                             label: qsTr("Save")
