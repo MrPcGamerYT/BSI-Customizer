@@ -117,6 +117,7 @@ Copy-OptionalDocument (Join-Path $repo 'docs/PORTABLE.md') (Join-Path $stage 'do
 # License notices remain mandatory, independently of the optional guides.
 Copy-Required (Join-Path $repo 'LICENSE') (Join-Path $stage 'LICENSE')
 Copy-Required (Join-Path $repo 'src/third_party/hde64/LICENSE.txt') (Join-Path $stage 'licenses/HDE64.txt')
+Copy-Required (Join-Path $repo 'src/third_party/7zip/LICENSE.txt') (Join-Path $stage 'licenses/7zip/LICENSE.txt')
 $qtVersion = (& (Join-Path $qtBin 'qmake.exe') -query QT_VERSION).Trim()
 if ($LASTEXITCODE -ne 0 -or $qtVersion -notmatch '^\d+\.\d+\.\d+$') { throw 'Cannot determine the deployed Qt version' }
 # Licence/attribution collection is a CMake script, so packaging needs nothing
@@ -129,7 +130,8 @@ Invoke-Checked 'cmake' @("-DQT_VERSION=$qtVersion",
 BSI Customizer portable runtime
 
 Qt $qtVersion is dynamically linked. Full Qt licensing and third-party notices
-are in licenses/Qt. HDE64's BSD notices are in licenses/HDE64.txt.
+are in licenses/Qt. HDE64's BSD notices are in licenses/HDE64.txt. The
+bundled 7-Zip decoder's public-domain notice is in licenses/7zip/LICENSE.txt.
 Microsoft Visual C++ app-local redistributable DLLs are copyright Microsoft.
 
 To inspect this runtime or substitute ABI-compatible Qt libraries:

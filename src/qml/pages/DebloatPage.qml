@@ -294,16 +294,33 @@ Item {
     function openImage() {
         if (page.imagePath.length === 0) {
             page.imageOk = false;
-            page.imageMsg = qsTr("Point the tool at an engine's Root.vhd first.");
+            page.imageMsg = qsTr("Choose a Root.vhd or the BlueStacks engine package.");
             return;
         }
         page.imageBusy = true;
+        let sourceMessage = "";
+        const lowerPath = page.imagePath.toLowerCase();
+        if (lowerPath.endsWith(".exe") || lowerPath.endsWith(".7z")) {
+            const extracted = backend.rootvhdOpenEngineArchive(page.imagePath);
+            if (!extracted || !extracted.ok) {
+                page.imageBusy = false;
+                page.imageOk = false;
+                page.imageOpen = false;
+                page.imageMsg = extracted && extracted.msg
+                                ? extracted.msg : qsTr("The engine archive could not be opened.");
+                return;
+            }
+            page.imagePath = extracted.path;
+            sourceMessage = extracted.msg || "";
+        }
         const info = backend.rootvhdInfo(page.imagePath);
         page.imageBusy = false;
         page.imageInfo = info || ({ ok: false, msg: "" });
         page.imageOk = !!(info && info.ok);
         page.imageOpen = page.imageOk;
         page.imageMsg = (info && info.msg) ? info.msg : "";
+        if (sourceMessage.length > 0)
+            page.imageMsg = sourceMessage + " " + page.imageMsg;
     }
 
     Component.onCompleted: {
@@ -818,10 +835,11 @@ Item {
                         Text {
                             Layout.fillWidth: true
                             wrapMode: Text.Wrap
-                            text: qsTr("The engine files (including Root.vhd) come from BlueStacks' "
-                                       + "own engine package: download it, open it with WinRAR "
-                                       + "(it is a self-extracting archive), and point the Root.vhd "
-                                       + "field above at the Root.vhd inside the Pie64 folder.")
+                            text: qsTr("This tool includes its own 7-Zip archive reader. Select the "
+                                       + "engine package EXE or a .7z file in the Root.vhd field; "
+                                       + "BSI Customizer extracts Root.vhd into its private working "
+                                       + "cache and opens it. No WinRAR, 7-Zip or other extractor "
+                                       + "needs to be installed. The original package is unchanged.")
                             color: Theme.textDim
                             font.pixelSize: 10
                         }
@@ -831,8 +849,8 @@ Item {
                             text: qsTr("Engine folders seen for this installation: ")
                                   + (page.engineFolders.length > 0
                                      ? page.engineFolders.join("  ·  ")
-                                     : qsTr("none — install BlueStacks, or browse to the folder "
-                                            + "yourself"))
+                                     : qsTr("none — choose the engine package EXE above, or browse "
+                                            + "to a Root.vhd file"))
                             color: Theme.textDim
                             font.pixelSize: 10
                         }

@@ -560,14 +560,14 @@ cleaned independently and why the undo record is kept per instance.
 ### 2 · Hardcode debloat (Root.vhd)
 
 `Root.vhd` is the engine's Android system disk: an ext4 filesystem inside a VHD,
-in `<ProgramData>\BlueStacks_*\Engine\<arch>\Root.vhd`. The ext4 and VHD
-reader/writer is built into BSI Customizer; it does not shell out to e2fsprogs,
-7-Zip or another filesystem utility. The **Find** button locates an installed
-engine image, or choose the actual `Root.vhd` file in the path row. The outer
-`Pie64.exe` engine package is an installer/archive, not an ext4 disk image —
-choosing that outer EXE is why the editor reports that no ext4 filesystem is
-present. This half opens `Root.vhd` in place and gives you a **two-pane file
-manager** over it, the way a 7-Zip window works:
+in `<ProgramData>\BlueStacks_*\Engine\<arch>\Root.vhd`. The ext4/VHD reader
+and writer and a 7-Zip SDK decoder are built into BSI Customizer; no external
+filesystem or archive utility needs to be installed. **Find** locates an
+installed image. You can also select the BlueStacks engine package EXE or a
+plain `.7z` file directly: the app extracts only `Root.vhd` into its private
+working cache, leaves the package unchanged, and opens that image. This half
+then gives you a **two-pane file manager** over it, the way a 7-Zip window
+works:
 
 * the **folder tree** on the left, expandable level by level, with the folder
   you are in highlighted;
@@ -622,10 +622,12 @@ Two things worth knowing before you write:
   your way back, and the tool never writes without one.
 
 The engine files themselves are not downloaded by this tool. If the installation
-has no engine folder yet, download the engine package from BlueStacks, open it
-with WinRAR (it is a self-extracting archive) and point the **Root.vhd** field at
-the `Root.vhd` inside the `Pie64` folder; the page offers the same link it was
-built against.
+has no engine folder yet, download the engine package from BlueStacks and select
+the package EXE directly in the **Root.vhd** path row. The built-in 7-Zip SDK
+reader finds the appended archive and extracts only `Root.vhd` into the tool's
+private working cache; no WinRAR/7-Zip installation or manual extraction is
+needed, and the downloaded package is left untouched. The image browser edits
+the extracted working copy, so use that `Root.vhd` when you install the engine.
 
 The Debloat feature set follows
 [Jordan231111/Bluestacks-Debloat](https://github.com/Jordan231111/Bluestacks-Debloat)

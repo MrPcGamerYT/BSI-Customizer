@@ -26,6 +26,9 @@ namespace RootVhd {
 QStringList engineFolders(const QString &exePath);
 // The Root.vhd of this installation, or an empty string.
 QString findImage(const QString &exePath);
+// Extract Root.vhd from a selected 7z/7-Zip SFX engine package into the
+// application's private cache. No archive utility is needed at runtime.
+QVariantMap extractEngineArchive(const QString &archivePath);
 
 // What the image is, and whether it can be written.
 QVariantMap info(const QString &imagePath);

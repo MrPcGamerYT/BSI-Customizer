@@ -21,6 +21,7 @@
 #include "core/QtResources.h"
 #include "core/QtResourceRegistration.h"
 #include "core/RootVhd.h"
+#include "core/SevenZipArchive.h"
 #include "core/RpcIdPatcher.h"
 #include "core/RpcIdScan.h"
 #include "core/SettingsManager.h"
@@ -1266,6 +1267,32 @@ void checkRootDisk()
         return file.open(QIODevice::ReadOnly) ? file.readAll() : QByteArray();
     }();
     check(pristine.size() > 512, "the working copy really is a disk image");
+
+#ifdef BSI_ROOT_7Z_FIXTURE
+    // Opening a plain archive and a synthetic SFX both exercises the bundled
+    // decoder: no WinRAR/7-Zip installation is part of the test machine.
+    const auto extractedArchive = SevenZipArchive::extractRootVhd(
+        QString::fromUtf8(BSI_ROOT_7Z_FIXTURE), temp.filePath(QStringLiteral("archive-cache")));
+    check(extractedArchive.value(QStringLiteral("ok")).toBool(),
+          "the built-in decoder extracts Root.vhd from a plain 7z package");
+    if (extractedArchive.value(QStringLiteral("ok")).toBool())
+        check(read(extractedArchive.value(QStringLiteral("path")).toString()) == pristine,
+              "the plain-archive Root.vhd is byte-identical to the source fixture");
+
+    QFile archiveFixture(QString::fromUtf8(BSI_ROOT_7Z_FIXTURE));
+    QByteArray archiveBytes;
+    if (archiveFixture.open(QIODevice::ReadOnly)) archiveBytes = archiveFixture.readAll();
+    const QString sfxPath = temp.filePath(QStringLiteral("engine-package.exe"));
+    check(write(sfxPath, QByteArray("MZ synthetic SFX stub\r\n") + archiveBytes),
+          "write a synthetic engine self-extractor around the 7z fixture");
+    const auto extractedSfx = SevenZipArchive::extractRootVhd(
+        sfxPath, temp.filePath(QStringLiteral("sfx-cache")));
+    check(extractedSfx.value(QStringLiteral("ok")).toBool(),
+          "the built-in decoder finds and extracts Root.vhd inside an EXE");
+    if (extractedSfx.value(QStringLiteral("ok")).toBool())
+        check(read(extractedSfx.value(QStringLiteral("path")).toString()) == pristine,
+              "the SFX Root.vhd is byte-identical to the source fixture");
+#endif
 
     // Some engine images are GPT-partitioned rather than raw ext4 or MBR. Put
     // the fixture behind a minimal GPT partition and verify mount locates it.

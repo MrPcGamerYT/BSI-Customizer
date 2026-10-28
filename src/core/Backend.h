@@ -222,6 +222,7 @@ public:
     // ---- the hardcode debloater: Root.vhd as a file manager ----
     // Every write is journalled first, so undo() puts the image back exactly.
     Q_INVOKABLE QString rootvhdFind();
+    Q_INVOKABLE QVariantMap rootvhdOpenEngineArchive(const QString &archive);
     Q_INVOKABLE QVariantMap rootvhdInfo(const QString &image);
     Q_INVOKABLE QVariantMap rootvhdList(const QString &image, const QString &innerPath);
     Q_INVOKABLE QVariantMap rootvhdSearch(const QString &image, const QString &query);

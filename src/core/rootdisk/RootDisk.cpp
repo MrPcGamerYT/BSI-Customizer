@@ -569,9 +569,8 @@ std::unique_ptr<Volume> Volume::mount(std::unique_ptr<Image> image, std::string 
         acceptPartition(0);
     if (!found)
         return fail("No ext4 filesystem was found in this disk image. The editor checks the "
-                    "image itself and its MBR, extended-MBR and GPT partitions. Choose the "
-                    "actual Root.vhd file inside the engine package, not the package EXE or "
-                    "the outer installer.");
+                    "image itself and its MBR, extended-MBR and GPT partitions. Select an "
+                    "actual Root.vhd image; a BlueStacks setup installer is not an engine disk.");
 
     auto volume = std::unique_ptr<Volume>(new Volume());
     volume->m_image = std::move(image);

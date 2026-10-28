@@ -1481,6 +1481,15 @@ QString Backend::rootvhdFind()
     return RootVhd::findImage(m_settings->exePath());
 }
 
+QVariantMap Backend::rootvhdOpenEngineArchive(const QString &archive)
+{
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) {
+            return worker.rootvhdOpenEngineArchive(archive);
+        });
+    return RootVhd::extractEngineArchive(archive);
+}
+
 QVariantMap Backend::rootvhdInfo(const QString &image)
 {
     if (!m_backgroundWorker)

@@ -1,6 +1,7 @@
 #include "RootVhd.h"
 
 #include "rootdisk/RootDisk.h"
+#include "SevenZipArchive.h"
 
 #include <QDateTime>
 #include <QLocale>
@@ -329,6 +330,11 @@ QString findImage(const QString &exePath)
         if (QFileInfo::exists(direct)) return QDir::toNativeSeparators(direct);
     }
     return QString();
+}
+
+QVariantMap extractEngineArchive(const QString &archivePath)
+{
+    return SevenZipArchive::extractRootVhd(archivePath);
 }
 
 // ---------------------------------------------------------------------------
