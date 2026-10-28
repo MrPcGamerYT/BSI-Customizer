@@ -1128,13 +1128,14 @@ void checkDebloat()
               "the ad flag is written as the same quoted zero the player uses");
         check(edited.contains("bst.feature.usage_stats=\"false\""),
               "a flag spelled true becomes false, not 0");
-        // Everything the plan did not touch has to survive byte for byte.
-        QString stripped = QString::fromUtf8(edited);
-        stripped.replace(QStringLiteral("bst.enable_programmatic_ads=\"0\""),
-                         QStringLiteral("bst.enable_programmatic_ads=\"1\""));
-        stripped.replace(QStringLiteral("bst.feature.usage_stats=\"false\""),
-                         QStringLiteral("bst.feature.usage_stats=\"true\""));
-        check(stripped.toUtf8() == config,
+        // Everything the plan did not touch has to survive byte for byte; the
+        // comparison stays in bytes so a text round trip cannot hide a change.
+        QByteArray stripped = edited;
+        stripped.replace("bst.enable_programmatic_ads=\"0\"",
+                         "bst.enable_programmatic_ads=\"1\"");
+        stripped.replace("bst.feature.usage_stats=\"false\"",
+                         "bst.feature.usage_stats=\"true\"");
+        check(stripped == config,
               "the edited document is the original plus exactly the changed values");
 
         Debloat::Request tuning;
@@ -1220,7 +1221,7 @@ void checkDebloat()
         // delete, no registry edit, no change on another volume.
         const QString parked = Debloat::cloudParkedPath(rootA + QStringLiteral("/BlueStacks X"));
         check(parked.endsWith(QLatin1String("BlueStacks X.bsi-disabled"))
-                  && QFileInfo(parked).absolutePath() == QFileInfo(rootA).absolutePath(),
+                  && QFileInfo(parked).absolutePath() == QDir(rootA).absolutePath(),
               "a removed companion is parked next to itself, on the same drive");
         check(QDir().rename(rootA + QStringLiteral("/BlueStacks X"), parked),
               "parking the folder is a single rename");
