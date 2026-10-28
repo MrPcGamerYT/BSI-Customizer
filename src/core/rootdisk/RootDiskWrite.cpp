@@ -473,6 +473,7 @@ bool Volume::putFile(std::uint32_t dirInode, const std::string &name,
 
     std::uint32_t inode = 0;
     std::uint16_t existingMode = 0;
+    std::uint16_t existingLinks = 0;
     {
         const Listing listing = list(dirInode, nullptr);
         for (const auto &entry : listing.entries)
@@ -483,12 +484,15 @@ bool Volume::putFile(std::uint32_t dirInode, const std::string &name,
     }
     if (inode) {
         const Stat info = stat(inode, nullptr);
-        if (info.dir()) {
-            if (error) *error = "“" + name + "” is a folder.";
+        if (!info.regular()) {
+            if (error) *error = "“" + name + "” is not a regular file.";
             return false;
         }
         existingMode = std::uint16_t(info.mode & 0x0FFF);
-        // The old content goes first, so its blocks are reusable.
+        existingLinks = std::uint16_t(info.links);
+        // The old content goes first, so its blocks are reusable. For a
+        // hard-linked file this intentionally changes the shared inode's
+        // contents, just like writing through either hard link would.
         if (!freeBlocks(ownedBlocks(inode, error), error)) return false;
     }
 
@@ -560,7 +564,7 @@ bool Volume::putFile(std::uint32_t dirInode, const std::string &name,
     std::uint16_t permissions = existingMode;
     if (!inode || permissions == 0) permissions = std::uint16_t(mode ? (mode & 0x0FFF) : 0644);
     put16(raw.data() + 0x00, std::uint16_t(0x8000 | permissions));
-    put16(raw.data() + 0x1A, 1);
+    put16(raw.data() + 0x1A, existingLinks ? existingLinks : 1);
     put32(raw.data() + 0x04, std::uint32_t(data.size() & 0xFFFFFFFFu));
     put32(raw.data() + 0x6C, std::uint32_t(std::uint64_t(data.size()) >> 32));
     const std::uint64_t sectors = (std::uint64_t(blockCount) + treeBlocks) * (m_blockSize / 512);
@@ -591,6 +595,72 @@ bool Volume::putFile(std::uint32_t dirInode, const std::string &name,
     return addDirent(dirInode, &dirRaw, entry, error);
 }
 
+bool Volume::putSymlink(std::uint32_t dirInode, const std::string &name,
+                        const std::vector<std::uint8_t> &target, std::string *error)
+{
+    if (!m_writable) {
+        if (error) *error = m_readOnlyReason.empty() ? "The image is read-only." : m_readOnlyReason;
+        return false;
+    }
+    if (name.empty() || name == "." || name == ".." || name.size() > 255
+        || name.find('/') != std::string::npos || target.empty() || target.size() > 4095
+        || std::find(target.begin(), target.end(), std::uint8_t(0)) != target.end()) {
+        if (error) *error = "That symbolic link name or target is not valid.";
+        return false;
+    }
+    const Listing current = list(dirInode, error);
+    if (current.inode == 0) return false;
+    for (const auto &entry : current.entries)
+        if (entry.name == name) {
+            if (error) *error = "“" + name + "” is already there.";
+            return false;
+        }
+
+    if (target.size() > 60) {
+        // Long symlink targets use ordinary extents; create the data blocks
+        // through the already-tested file writer, then mark the inode/link.
+        if (!putFile(dirInode, name, target, 0777, error)) return false;
+        const Listing after = list(dirInode, error);
+        std::uint32_t inode = 0;
+        for (const auto &entry : after.entries)
+            if (entry.name == name) { inode = entry.inode; break; }
+        if (inode == 0) {
+            if (error) *error = "The symbolic link inode could not be reopened.";
+            return false;
+        }
+        std::vector<std::uint8_t> raw;
+        if (!loadInode(inode, &raw, error)) return false;
+        put16(raw.data() + 0x00, std::uint16_t(0xA000 | 0777));
+        if (!storeInode(inode, &raw, error)) return false;
+        return changeDirentType(dirInode, name, 7, error);
+    }
+
+    const std::uint32_t inode = allocateInode(error);
+    if (inode == 0) return false;
+    std::vector<std::uint8_t> raw(m_inodeSize, 0);
+    put16(raw.data() + 0x00, std::uint16_t(0xA000 | 0777));
+    put16(raw.data() + 0x1A, 1);
+    put32(raw.data() + 0x04, std::uint32_t(target.size()));
+    std::memcpy(raw.data() + 0x28, target.data(), target.size());
+    const std::uint32_t stamp = now();
+    put32(raw.data() + 0x08, stamp);
+    put32(raw.data() + 0x0C, stamp);
+    put32(raw.data() + 0x10, stamp);
+    if (m_inodeSize > 128) {
+        put16(raw.data() + 0x80, std::uint16_t(std::min<std::uint32_t>(32, m_inodeSize - 128)));
+        put32(raw.data() + 0x90, stamp);
+    }
+    if (!storeInode(inode, &raw, error)) return false;
+
+    std::vector<std::uint8_t> dirRaw;
+    if (!loadInode(dirInode, &dirRaw, error)) return false;
+    DirEntry entry;
+    entry.name = name;
+    entry.inode = inode;
+    entry.type = 7;
+    return addDirent(dirInode, &dirRaw, entry, error);
+}
+
 bool Volume::makeDir(std::uint32_t dirInode, const std::string &name, std::uint16_t mode,
                      std::string *error)
 {
@@ -598,7 +668,8 @@ bool Volume::makeDir(std::uint32_t dirInode, const std::string &name, std::uint1
         if (error) *error = m_readOnlyReason.empty() ? "The image is read-only." : m_readOnlyReason;
         return false;
     }
-    if (name.empty() || name == "." || name == ".." || name.find('/') != std::string::npos) {
+    if (name.empty() || name == "." || name == ".." || name.size() > 255
+        || name.find('/') != std::string::npos) {
         if (error) *error = "That is not a folder name.";
         return false;
     }
@@ -683,6 +754,12 @@ bool Volume::addDirent(std::uint32_t dirInode, std::vector<std::uint8_t> *dirRaw
 {
     const Stat info = stat(dirInode, nullptr);
     const bool indexed = (info.flags & kIndexFlag) != 0;
+    if (indexed) {
+        if (error)
+            *error = "This folder uses ext4 hash indexing. Adding or renaming entries there is "
+                     "disabled to protect the image; use a non-indexed folder instead.";
+        return false;
+    }
     const std::uint32_t generation = dirRaw->size() >= 0x68 ? le32(dirRaw->data() + 0x64) : 0;
     const std::uint32_t seed = inodeSeed(dirInode, generation);
     const std::uint32_t limit = m_blockSize - (m_hasCsum ? 12 : 0);
@@ -763,6 +840,44 @@ bool Volume::addDirent(std::uint32_t dirInode, std::vector<std::uint8_t> *dirRaw
     return storeInode(dirInode, dirRaw, error);
 }
 
+bool Volume::changeDirentType(std::uint32_t dirInode, const std::string &name,
+                              std::uint8_t type, std::string *error)
+{
+    const Stat info = stat(dirInode, error);
+    const bool indexed = (info.flags & kIndexFlag) != 0;
+    const std::uint32_t generation = [&]() {
+        std::vector<std::uint8_t> raw;
+        return loadInode(dirInode, &raw, nullptr) && raw.size() >= 0x68
+            ? le32(raw.data() + 0x64) : 0;
+    }();
+    const std::uint32_t seed = inodeSeed(dirInode, generation);
+    const std::vector<std::uint32_t> blocks = fileBlocks(dirInode, error);
+    std::vector<std::uint8_t> block(m_blockSize);
+    for (std::size_t i = 0; i < blocks.size(); ++i) {
+        if (indexed && i == 0) continue;
+        if (!readBlocks(blocks[i], block.data(), 1)) continue;
+        for (std::uint32_t offset = 0; offset + 8 <= m_blockSize;) {
+            std::uint8_t *entry = block.data() + offset;
+            const std::uint16_t length = le16(entry + 4);
+            if (length < 8 || offset + length > m_blockSize) break;
+            const std::uint8_t nameLength = entry[6];
+            if (le32(entry) && nameLength == name.size()
+                && std::memcmp(entry + 8, name.data(), nameLength) == 0) {
+                entry[7] = type;
+                sealDirBlock(&block, seed, m_hasCsum);
+                if (!writeBlocks(blocks[i], block.data(), 1)) {
+                    if (error) *error = "The directory entry type could not be updated.";
+                    return false;
+                }
+                return true;
+            }
+            offset += length;
+        }
+    }
+    if (error) *error = "“" + name + "” was not found in that folder.";
+    return false;
+}
+
 bool Volume::removeDirent(std::uint32_t dirInode, std::vector<std::uint8_t> *dirRaw,
                           const std::string &name, std::string *error)
 {
@@ -808,6 +923,215 @@ bool Volume::removeDirent(std::uint32_t dirInode, std::vector<std::uint8_t> *dir
     return false;
 }
 
+bool Volume::rename(std::uint32_t dirInode, const std::string &oldName,
+                    const std::string &newName, std::string *error)
+{
+    if (!m_writable) {
+        if (error) *error = m_readOnlyReason.empty() ? "The image is read-only." : m_readOnlyReason;
+        return false;
+    }
+    if (newName.empty() || newName == "." || newName == ".." || newName.size() > 255
+        || newName.find('/') != std::string::npos) {
+        if (error) *error = "That is not a valid new name.";
+        return false;
+    }
+    const Listing listing = list(dirInode, error);
+    if (listing.inode == 0) return false;
+    const DirEntry *source = nullptr;
+    for (const auto &entry : listing.entries) {
+        if (entry.name == oldName) source = &entry;
+        if (entry.name == newName && oldName != newName) {
+            if (error) *error = "“" + newName + "” is already in that folder.";
+            return false;
+        }
+    }
+    if (!source) {
+        if (error) *error = "“" + oldName + "” was not found in that folder.";
+        return false;
+    }
+    if (oldName == newName) return true;
+    if (source->inode < m_firstIno) {
+        if (error) *error = "A reserved inode is never renamed.";
+        return false;
+    }
+
+    // Add first, then remove the old name. The inode and all its metadata stay
+    // untouched; the caller's journal makes the two directory edits atomic.
+    std::vector<std::uint8_t> dirRaw;
+    if (!loadInode(dirInode, &dirRaw, error)) return false;
+    DirEntry renamed = *source;
+    renamed.name = newName;
+    if (!addDirent(dirInode, &dirRaw, renamed, error)) return false;
+    if (!loadInode(dirInode, &dirRaw, error)) return false;
+    return removeDirent(dirInode, &dirRaw, oldName, error);
+}
+
+bool Volume::move(std::uint32_t sourceDir, const std::string &name,
+                  std::uint32_t destinationDir, const std::string &newName,
+                  std::string *error)
+{
+    if (!m_writable) {
+        if (error) *error = m_readOnlyReason.empty() ? "The image is read-only." : m_readOnlyReason;
+        return false;
+    }
+    if (newName.empty() || newName == "." || newName == ".." || newName.size() > 255
+        || newName.find('/') != std::string::npos) {
+        if (error) *error = "That is not a valid destination name.";
+        return false;
+    }
+    if (sourceDir == destinationDir) return rename(sourceDir, name, newName, error);
+
+    const Listing sourceListing = list(sourceDir, error);
+    const Listing destinationListing = list(destinationDir, error);
+    if (sourceListing.inode == 0 || destinationListing.inode == 0) return false;
+    const DirEntry *source = nullptr;
+    for (const auto &entry : sourceListing.entries)
+        if (entry.name == name) { source = &entry; break; }
+    if (!source) {
+        if (error) *error = "“" + name + "” was not found in the source folder.";
+        return false;
+    }
+    for (const auto &entry : destinationListing.entries)
+        if (entry.name == newName) {
+            if (error) *error = "“" + newName + "” is already in the destination folder.";
+            return false;
+        }
+    if (source->inode < m_firstIno) {
+        if (error) *error = "A reserved inode is never moved.";
+        return false;
+    }
+
+    std::uint16_t sourceParentLinks = 0;
+    std::uint16_t destinationParentLinks = 0;
+    if (source->dir) {
+        std::vector<std::uint8_t> sourceParentRaw;
+        std::vector<std::uint8_t> destinationParentRaw;
+        if (!loadInode(sourceDir, &sourceParentRaw, error)
+            || !loadInode(destinationDir, &destinationParentRaw, error))
+            return false;
+        sourceParentLinks = le16(sourceParentRaw.data() + 0x1A);
+        destinationParentLinks = le16(destinationParentRaw.data() + 0x1A);
+        if (sourceParentLinks <= 2 || destinationParentLinks >= 65000) {
+            if (error) *error = "The source or destination folder's link count cannot be updated safely.";
+            return false;
+        }
+        const Stat directory = stat(source->inode, error);
+        if (directory.inode == 0) return false;
+        if (directory.flags & kIndexFlag) {
+            if (error) *error = "This folder uses ext4 hash indexing; moving it is disabled to "
+                                 "protect its directory checksum and index.";
+            return false;
+        }
+
+        // A directory cannot be moved into itself or one of its descendants.
+        // Follow each destination's on-disk ".." entry up to the root.
+        std::uint32_t ancestor = destinationDir;
+        bool reachedRoot = false;
+        for (std::uint32_t depth = 0; depth <= m_inodes; ++depth) {
+            if (ancestor == source->inode) {
+                if (error) *error = "A folder cannot be moved inside itself.";
+                return false;
+            }
+            if (ancestor == 2) {
+                reachedRoot = true;
+                break;
+            }
+            std::vector<std::uint32_t> blocks = fileBlocks(ancestor, error);
+            if (blocks.empty()) {
+                if (error && error->empty()) *error = "The destination's parent entry is unreadable.";
+                return false;
+            }
+            std::vector<std::uint8_t> block(m_blockSize);
+            if (!readBlocks(blocks.front(), block.data(), 1)) {
+                if (error) *error = "The destination's parent entry could not be read.";
+                return false;
+            }
+            std::uint32_t parent = 0;
+            for (std::uint32_t offset = 0; offset + 8 <= m_blockSize;) {
+                const std::uint8_t *entry = block.data() + offset;
+                const std::uint16_t length = le16(entry + 4);
+                const std::uint8_t nameLength = entry[6];
+                if (length < 8 || offset + length > m_blockSize) break;
+                if (le32(entry) && nameLength == 2 && entry[8] == '.' && entry[9] == '.') {
+                    parent = le32(entry);
+                    break;
+                }
+                offset += length;
+            }
+            if (parent == 0 || parent == ancestor) {
+                if (error) *error = "The destination folder has an invalid parent chain.";
+                return false;
+            }
+            ancestor = parent;
+        }
+        if (!reachedRoot) {
+            if (error) *error = "The destination folder's parent chain exceeded the safe depth.";
+            return false;
+        }
+    }
+
+    DirEntry moved = *source;
+    moved.name = newName;
+    std::vector<std::uint8_t> destinationRaw;
+    if (!loadInode(destinationDir, &destinationRaw, error)) return false;
+    if (!addDirent(destinationDir, &destinationRaw, moved, error)) return false;
+
+    std::vector<std::uint8_t> sourceRaw;
+    if (!loadInode(sourceDir, &sourceRaw, error)) return false;
+    if (!removeDirent(sourceDir, &sourceRaw, name, error)) return false;
+
+    if (source->dir) {
+        put16(sourceRaw.data() + 0x1A, std::uint16_t(sourceParentLinks - 1));
+        if (!storeInode(sourceDir, &sourceRaw, error)) return false;
+
+        if (!loadInode(destinationDir, &destinationRaw, error)) return false;
+        put16(destinationRaw.data() + 0x1A, std::uint16_t(destinationParentLinks + 1));
+        if (!storeInode(destinationDir, &destinationRaw, error)) return false;
+
+        std::vector<std::uint8_t> movedRaw;
+        if (!loadInode(source->inode, &movedRaw, error)) return false;
+        const std::uint32_t generation = movedRaw.size() >= 0x68
+            ? le32(movedRaw.data() + 0x64) : 0;
+        const std::vector<std::uint32_t> blocks = fileBlocks(source->inode, error);
+        if (blocks.empty()) {
+            if (error && error->empty()) *error = "The moved folder has no data block.";
+            return false;
+        }
+        std::vector<std::uint8_t> block(m_blockSize);
+        if (!readBlocks(blocks.front(), block.data(), 1)) {
+            if (error) *error = "The moved folder's parent entry could not be read.";
+            return false;
+        }
+        bool updated = false;
+        for (std::uint32_t offset = 0; offset + 8 <= m_blockSize;) {
+            std::uint8_t *entry = block.data() + offset;
+            const std::uint16_t length = le16(entry + 4);
+            const std::uint8_t nameLength = entry[6];
+            if (length < 8 || offset + length > m_blockSize) break;
+            if (le32(entry) && nameLength == 2 && entry[8] == '.' && entry[9] == '.') {
+                put32(entry, destinationDir);
+                updated = true;
+                break;
+            }
+            offset += length;
+        }
+        if (!updated) {
+            if (error) *error = "The moved folder's '..' entry could not be found.";
+            return false;
+        }
+        sealDirBlock(&block, inodeSeed(source->inode, generation), m_hasCsum);
+        if (!writeBlocks(blocks.front(), block.data(), 1)) {
+            if (error) *error = "The moved folder's parent entry could not be updated.";
+            return false;
+        }
+        const std::uint32_t stamp = now();
+        put32(movedRaw.data() + 0x0C, stamp);
+        put32(movedRaw.data() + 0x10, stamp);
+        if (!storeInode(source->inode, &movedRaw, error)) return false;
+    }
+    return true;
+}
+
 bool Volume::remove(std::uint32_t dirInode, const std::string &name, std::string *error)
 {
     if (!m_writable) {
@@ -837,6 +1161,21 @@ bool Volume::remove(std::uint32_t dirInode, const std::string &name, std::string
         if (inside.inode == 0) return false;
         for (const auto &child : inside.entries)
             if (!remove(target, child.name, error)) return false;
+    } else {
+        const Stat targetInfo = stat(target, error);
+        if (targetInfo.inode == 0) return false;
+        if (targetInfo.links > 1) {
+            // Unlink only this name. Other hard links still reference the
+            // inode and its data blocks; freeing either here would corrupt
+            // every other path to the same file.
+            std::vector<std::uint8_t> dirRaw;
+            if (!loadInode(dirInode, &dirRaw, error)) return false;
+            if (!removeDirent(dirInode, &dirRaw, name, error)) return false;
+            std::vector<std::uint8_t> targetRaw;
+            if (!loadInode(target, &targetRaw, error)) return false;
+            put16(targetRaw.data() + 0x1A, std::uint16_t(targetInfo.links - 1));
+            return storeInode(target, &targetRaw, error);
+        }
     }
 
     if (!freeBlocks(ownedBlocks(target, error), error)) return false;

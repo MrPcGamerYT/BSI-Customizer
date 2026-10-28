@@ -1009,6 +1009,20 @@ std::vector<std::uint8_t> Volume::readFile(std::uint32_t inode, std::string *err
 {
     const Stat info = stat(inode, error);
     std::vector<std::uint8_t> data;
+    if (!info.regular() && !info.symlink()) {
+        if (error) *error = "Only regular files and symbolic-link targets can be read.";
+        return data;
+    }
+    if (info.symlink() && info.blocks == 0) {
+        if (info.size > 60) {
+            if (error) *error = "The inline symbolic-link target is larger than ext4 allows.";
+            return data;
+        }
+        std::vector<std::uint8_t> raw;
+        if (!loadInode(inode, &raw, error) || raw.size() < 0x28 + info.size) return data;
+        data.assign(raw.begin() + 0x28, raw.begin() + 0x28 + std::size_t(info.size));
+        return data;
+    }
     if (info.size == 0) return data;
     std::vector<std::uint32_t> blocks = fileBlocks(inode, error);
     const std::uint64_t needed = (info.size + m_blockSize - 1) / m_blockSize;

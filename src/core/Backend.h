@@ -239,6 +239,12 @@ public:
                                            const QString &localPath);
     Q_INVOKABLE QVariantMap rootvhdMkdir(const QString &image, const QString &innerDir,
                                          const QString &name);
+    Q_INVOKABLE QVariantMap rootvhdRename(const QString &image, const QString &innerPath,
+                                          const QString &newName);
+    Q_INVOKABLE QVariantMap rootvhdMove(const QString &image, const QString &innerPath,
+                                        const QString &destinationDir);
+    Q_INVOKABLE QVariantMap rootvhdCopy(const QString &image, const QString &innerPath,
+                                        const QString &destinationDir, const QString &newName);
     Q_INVOKABLE QVariantMap rootvhdRemove(const QString &image, const QString &innerPath);
     Q_INVOKABLE QVariantMap rootvhdUndo(const QString &image);
     Q_INVOKABLE QVariantMap rootvhdDiscardUndo(const QString &image);

@@ -1573,6 +1573,39 @@ QVariantMap Backend::rootvhdMkdir(const QString &image, const QString &innerDir,
     return RootVhd::makeFolder(image, innerDir, name);
 }
 
+QVariantMap Backend::rootvhdRename(const QString &image, const QString &innerPath,
+                                   const QString &newName)
+{
+    if (actionsLocked()) return lockedMap();
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) {
+            return worker.rootvhdRename(image, innerPath, newName);
+        });
+    return RootVhd::rename(image, innerPath, newName);
+}
+
+QVariantMap Backend::rootvhdMove(const QString &image, const QString &innerPath,
+                                 const QString &destinationDir)
+{
+    if (actionsLocked()) return lockedMap();
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) {
+            return worker.rootvhdMove(image, innerPath, destinationDir);
+        });
+    return RootVhd::move(image, innerPath, destinationDir);
+}
+
+QVariantMap Backend::rootvhdCopy(const QString &image, const QString &innerPath,
+                                 const QString &destinationDir, const QString &newName)
+{
+    if (actionsLocked()) return lockedMap();
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) {
+            return worker.rootvhdCopy(image, innerPath, destinationDir, newName);
+        });
+    return RootVhd::copy(image, innerPath, destinationDir, newName);
+}
+
 QVariantMap Backend::rootvhdRemove(const QString &image, const QString &innerPath)
 {
     if (actionsLocked()) return lockedMap();

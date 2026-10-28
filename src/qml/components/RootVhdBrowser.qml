@@ -5,8 +5,8 @@ import QtQuick.Dialogs
 import BSICustomizer
 
 // A two-pane file manager over an engine's Root.vhd: the folder tree on the
-// left, the current folder on the right, and controls to add, replace, extract
-// and delete. Listings always come from the image, so the view reflects disk.
+// left, the current folder on the right, and controls to add, rename, copy,
+// move, replace, extract and delete. Listings always come from the image.
 Item {
     id: browser
 
@@ -36,6 +36,9 @@ Item {
     property int folderCount: 0
     property int fileCount: 0
     property var pendingEntry: null
+    property string renameText: ""
+    property string destinationText: "/"
+    property string copyNameText: ""
 
     // The tree: children per path, what is expanded, and the flattened rows the
     // tree paints. Everything is replaced, never mutated, so bindings rerun.
@@ -352,6 +355,32 @@ Item {
         if (!browser.writable) return;
         browser.busy = true;
         const result = backend.rootvhdMkdir(browser.imagePath, browser.currentDir, name);
+        browser.busy = false;
+        browser.report(result);
+    }
+
+    function renameEntry(entry, newName) {
+        if (!browser.writable || !entry || !newName || newName.trim().length === 0) return;
+        browser.busy = true;
+        const result = backend.rootvhdRename(browser.imagePath, entry.path, newName.trim());
+        browser.busy = false;
+        browser.report(result);
+    }
+
+    function moveEntry(entry, destinationDir) {
+        if (!browser.writable || !entry || !destinationDir || destinationDir.trim().length === 0) return;
+        browser.busy = true;
+        const result = backend.rootvhdMove(browser.imagePath, entry.path, destinationDir.trim());
+        browser.busy = false;
+        browser.report(result);
+    }
+
+    function copyEntry(entry, destinationDir, newName) {
+        if (!browser.writable || !entry || !destinationDir || destinationDir.trim().length === 0
+                || !newName || newName.trim().length === 0) return;
+        browser.busy = true;
+        const result = backend.rootvhdCopy(browser.imagePath, entry.path,
+                                           destinationDir.trim(), newName.trim());
         browser.busy = false;
         browser.report(result);
     }
@@ -709,7 +738,7 @@ Item {
                                     }
                                 }
                             }
-                            Item { Layout.preferredWidth: 202 }
+                            Item { Layout.preferredWidth: 350 }
                         }
                     }
 
@@ -738,7 +767,7 @@ Item {
                                     anchors.rightMargin: 6
                                     spacing: 8
                                     Text {
-                                        text: modelData.dir ? "📁" : "📄"
+                                        text: modelData.dir ? "📁" : modelData.symlink ? "🔗" : "📄"
                                         font.pixelSize: 11
                                     }
                                     Text {
@@ -757,7 +786,7 @@ Item {
                                         font.pixelSize: 10
                                     }
                                     RowLayout {
-                                        Layout.preferredWidth: 202
+                                        Layout.preferredWidth: 350
                                         spacing: 4
                                         RowButton {
                                             label: modelData.dir ? qsTr("Open") : qsTr("Show")
@@ -765,7 +794,36 @@ Item {
                                             onClicked: browser.openEntry(modelData)
                                         }
                                         RowButton {
-                                            visible: !modelData.dir
+                                            label: qsTr("Rename")
+                                            enabled: browser.writable && !browser.busy
+                                            onClicked: {
+                                                browser.pendingEntry = modelData;
+                                                browser.renameText = modelData.name;
+                                                renamePopup.open();
+                                            }
+                                        }
+                                        RowButton {
+                                            label: qsTr("Move")
+                                            enabled: browser.writable && !browser.busy
+                                            onClicked: {
+                                                browser.pendingEntry = modelData;
+                                                browser.destinationText = browser.currentDir;
+                                                movePopup.open();
+                                            }
+                                        }
+                                        RowButton {
+                                            visible: !modelData.symlink
+                                            label: qsTr("Copy")
+                                            enabled: browser.writable && !browser.busy
+                                            onClicked: {
+                                                browser.pendingEntry = modelData;
+                                                browser.destinationText = browser.currentDir;
+                                                browser.copyNameText = modelData.name;
+                                                copyPopup.open();
+                                            }
+                                        }
+                                        RowButton {
+                                            visible: !modelData.dir && !modelData.symlink
                                             label: qsTr("Replace")
                                             enabled: browser.writable && !browser.busy
                                             onClicked: {
@@ -774,7 +832,7 @@ Item {
                                             }
                                         }
                                         RowButton {
-                                            label: qsTr("Save")
+                                            label: modelData.symlink ? qsTr("Save target") : qsTr("Save")
                                             enabled: !browser.busy
                                             onClicked: {
                                                 browser.pendingEntry = modelData;
@@ -866,6 +924,196 @@ Item {
             color: browser.status.length > 0 ? (browser.ok ? Theme.textDim : Theme.danger)
                                              : Theme.warn
             font.pixelSize: 10
+        }
+    }
+
+    // ---- copy a file or folder within the image ----
+    Popup {
+        id: copyPopup
+        modal: true
+        anchors.centerIn: parent
+        width: 400
+        padding: 16
+        background: Rectangle {
+            color: Theme.card
+            radius: 12
+            border.width: 1
+            border.color: Theme.border
+        }
+        ColumnLayout {
+            anchors.fill: parent
+            spacing: 10
+            Text {
+                text: qsTr("Copy within Root.vhd")
+                color: Theme.text
+                font.pixelSize: 13
+                font.weight: Font.DemiBold
+            }
+            Text {
+                Layout.fillWidth: true
+                wrapMode: Text.Wrap
+                text: qsTr("Choose a destination folder and name. File permission bits and folder structure are copied.")
+                color: Theme.textDim
+                font.pixelSize: 11
+            }
+            TextField {
+                id: copyNameField
+                Layout.fillWidth: true
+                text: browser.copyNameText
+                placeholderText: qsTr("Copy name")
+                selectByMouse: true
+                onTextChanged: browser.copyNameText = text
+            }
+            TextField {
+                id: copyDestinationField
+                Layout.fillWidth: true
+                text: browser.destinationText
+                placeholderText: "/system/app"
+                selectByMouse: true
+                onTextChanged: browser.destinationText = text
+                onAccepted: {
+                    const entry = browser.pendingEntry;
+                    copyPopup.close();
+                    if (entry) browser.copyEntry(entry, browser.destinationText, browser.copyNameText);
+                }
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                Item { Layout.fillWidth: true }
+                ActionButton { text: qsTr("Cancel"); onClicked: copyPopup.close() }
+                ActionButton {
+                    accent: true
+                    text: qsTr("Copy")
+                    enabled: browser.destinationText.trim().length > 0
+                             && browser.copyNameText.trim().length > 0
+                    onClicked: {
+                        const entry = browser.pendingEntry;
+                        copyPopup.close();
+                        if (entry) browser.copyEntry(entry, browser.destinationText, browser.copyNameText);
+                    }
+                }
+            }
+        }
+        onOpened: {
+            copyNameField.forceActiveFocus();
+            copyNameField.selectAll();
+        }
+    }
+
+    // ---- move a file or folder within the image ----
+    Popup {
+        id: movePopup
+        modal: true
+        anchors.centerIn: parent
+        width: 400
+        padding: 16
+        background: Rectangle {
+            color: Theme.card
+            radius: 12
+            border.width: 1
+            border.color: Theme.border
+        }
+        ColumnLayout {
+            anchors.fill: parent
+            spacing: 10
+            Text {
+                text: qsTr("Move within Root.vhd")
+                color: Theme.text
+                font.pixelSize: 13
+                font.weight: Font.DemiBold
+            }
+            Text {
+                Layout.fillWidth: true
+                wrapMode: Text.Wrap
+                text: qsTr("Enter the destination folder's image path. The item keeps its name and metadata.")
+                color: Theme.textDim
+                font.pixelSize: 11
+            }
+            TextField {
+                id: moveDestinationField
+                Layout.fillWidth: true
+                text: browser.destinationText
+                placeholderText: "/system/app"
+                selectByMouse: true
+                onTextChanged: browser.destinationText = text
+                onAccepted: {
+                    const entry = browser.pendingEntry;
+                    movePopup.close();
+                    if (entry) browser.moveEntry(entry, browser.destinationText);
+                }
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                Item { Layout.fillWidth: true }
+                ActionButton { text: qsTr("Cancel"); onClicked: movePopup.close() }
+                ActionButton {
+                    accent: true
+                    text: qsTr("Move")
+                    enabled: browser.destinationText.trim().length > 0
+                    onClicked: {
+                        const entry = browser.pendingEntry;
+                        movePopup.close();
+                        if (entry) browser.moveEntry(entry, browser.destinationText);
+                    }
+                }
+            }
+        }
+        onOpened: moveDestinationField.forceActiveFocus()
+    }
+
+    // ---- rename a file or folder ----
+    Popup {
+        id: renamePopup
+        modal: true
+        anchors.centerIn: parent
+        width: 360
+        padding: 16
+        background: Rectangle {
+            color: Theme.card
+            radius: 12
+            border.width: 1
+            border.color: Theme.border
+        }
+        ColumnLayout {
+            anchors.fill: parent
+            spacing: 10
+            Text {
+                text: qsTr("Rename item")
+                color: Theme.text
+                font.pixelSize: 13
+                font.weight: Font.DemiBold
+            }
+            TextField {
+                id: renameNameField
+                Layout.fillWidth: true
+                text: browser.renameText
+                selectByMouse: true
+                onTextChanged: browser.renameText = text
+                onAccepted: {
+                    const entry = browser.pendingEntry;
+                    renamePopup.close();
+                    if (entry) browser.renameEntry(entry, browser.renameText);
+                }
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                Item { Layout.fillWidth: true }
+                ActionButton { text: qsTr("Cancel"); onClicked: renamePopup.close() }
+                ActionButton {
+                    accent: true
+                    text: qsTr("Rename")
+                    enabled: browser.renameText.trim().length > 0
+                    onClicked: {
+                        const entry = browser.pendingEntry;
+                        renamePopup.close();
+                        if (entry) browser.renameEntry(entry, browser.renameText);
+                    }
+                }
+            }
+        }
+        onOpened: {
+            renameNameField.forceActiveFocus();
+            renameNameField.selectAll();
         }
     }
 
