@@ -1290,8 +1290,18 @@ void checkRootDisk()
             check(enabled.value(QStringLiteral("ok")).toBool(),
                   "Enable editing clears the Windows read-only attribute when safe");
             const auto afterEnable = RootVhd::info(readOnlyCopy);
-            check(afterEnable.value(QStringLiteral("writable")).toBool(),
+            const bool writable = afterEnable.value(QStringLiteral("writable")).toBool();
+            check(writable,
                   "the image reopens as writable after enabling editing");
+            if (writable) {
+                const auto created = RootVhd::makeFolder(readOnlyCopy, QStringLiteral("/"),
+                                                         QStringLiteral("readonly-test"));
+                check(created.value(QStringLiteral("ok")).toBool(),
+                      "a Windows read-only VHD becomes editable after enabling write access");
+                const auto undone = RootVhd::undo(readOnlyCopy);
+                check(undone.value(QStringLiteral("ok")).toBool(),
+                      "the read-only VHD edit can be undone after the host attribute is cleared");
+            }
         }
         QFile::setPermissions(readOnlyCopy, originalPermissions | QFileDevice::WriteOwner);
     }
