@@ -1457,10 +1457,14 @@ void checkRootDisk()
                   && nested.value(QStringLiteral("entries")).toList().size() == 1,
               "the tree keeps its structure, sub-folder included");
 
-        // The same path, added as "whatever this is": a file and a folder are
-        // both accepted by one call.
-        const auto addPathFile = RootVhd::addPath(work, QStringLiteral("/"),
-                                                  temp.filePath(QStringLiteral("added.txt")));
+        // A file and a folder are both accepted by one addPath call.
+        const QString pathFile = temp.filePath(QStringLiteral("path-added.txt"));
+        {
+            QFile file(pathFile);
+            file.open(QIODevice::WriteOnly);
+            file.write("added through addPath\\n");
+        }
+        const auto addPathFile = RootVhd::addPath(work, QStringLiteral("/"), pathFile);
         check(addPathFile.value(QStringLiteral("ok")).toBool(), "addPath takes a file");
         const auto addPathDir = RootVhd::addPath(work, QStringLiteral("/debloat"), treeRoot);
         check(addPathDir.value(QStringLiteral("ok")).toBool(), "addPath takes a folder");
@@ -1493,6 +1497,9 @@ void checkRootDisk()
         check(RootVhd::listing(work, QStringLiteral("/")).value(QStringLiteral("entries")).toList().size()
                   == beforeRemove - 1,
               "the folder lists one entry fewer after the delete");
+        const auto removePathFile = RootVhd::remove(work, QStringLiteral("/path-added.txt"));
+        check(removePathFile.value(QStringLiteral("ok")).toBool(),
+              "a file added through addPath can be deleted");
         const auto refused = RootVhd::remove(work, QStringLiteral("/not-there.txt"));
         check(!refused.value(QStringLiteral("ok")).toBool(),
               "removing something that is not there is refused, not guessed at");
