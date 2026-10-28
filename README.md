@@ -530,15 +530,15 @@ ADB port, with a private adb server that is stopped again afterwards. Nothing is
 downloaded, and no root/Magisk is involved. Use the **Hardcode** half when you
 want the file itself gone from the image.
 
-* **Preinstalled apps** — a reviewed list: `gg.now.ads.service`,
-  `com.uncube.gamevantage`, `com.bluestacks.appmart`, `com.bluestacks.appfinder`,
-  and optionally the Android Easter egg, the print spooler and the system
-  tracing UI. Each is removed for Android user 0 (`pm uninstall --user 0`), or,
-  when the package belongs to the system partition, disabled instead
-  (`pm disable-user --user 0`). Both fail harmlessly on a package the instance
-  does not have, and the scan only shows what is really installed. Packages
-  BlueStacks needs are never touched, and anything else it ships is listed
-  read-only so you can see it.
+* **Every installed app** — Scan reads the full `pm list packages --user 0`
+  result and shows every package actually installed in that instance. The
+  reviewed suggestions (`gg.now.ads.service`, `com.uncube.gamevantage`,
+  `com.bluestacks.appmart` and `com.bluestacks.appfinder`) get friendly names
+  and are prechecked. Other packages are visible and selectable too, but are
+  unchecked and labelled as unreviewed: removing a system package can break
+  Android or BlueStacks. Removal is for Android user 0 (`pm uninstall --user 0`),
+  with `pm disable-user --user 0` as a fallback for packages on the system
+  partition. The tool verifies that each selected package is installed first.
 * **Undo** — the package, the action used and the instance it was done in are
   recorded first. **Undo in this instance** reinstalls with
   `cmd package install-existing --user 0` (or re-enables the package) and
@@ -560,9 +560,14 @@ cleaned independently and why the undo record is kept per instance.
 ### 2 · Hardcode debloat (Root.vhd)
 
 `Root.vhd` is the engine's Android system disk: an ext4 filesystem inside a VHD,
-in `<ProgramData>\BlueStacks_*\Engine\<arch>\Root.vhd`. This half opens it in
-place and gives you a **two-pane file manager** over it, the way a 7-Zip window
-works:
+in `<ProgramData>\BlueStacks_*\Engine\<arch>\Root.vhd`. The ext4 and VHD
+reader/writer is built into BSI Customizer; it does not shell out to e2fsprogs,
+7-Zip or another filesystem utility. The **Find** button locates an installed
+engine image, or choose the actual `Root.vhd` file in the path row. The outer
+`Pie64.exe` engine package is an installer/archive, not an ext4 disk image —
+choosing that outer EXE is why the editor reports that no ext4 filesystem is
+present. This half opens `Root.vhd` in place and gives you a **two-pane file
+manager** over it, the way a 7-Zip window works:
 
 * the **folder tree** on the left, expandable level by level, with the folder
   you are in highlighted;
@@ -585,8 +590,9 @@ What it supports is checked before it is mounted, and anything outside that is
 refused with a reason instead of guessed at:
 
 * **VHD:** fixed and dynamic disks, and a plain raw image. The footer decides
-  which, the BAT of a dynamic disk is followed, and a partition table (MBR or
-  GPT) is walked to find the filesystem.
+  which, the BAT of a dynamic disk is followed, and MBR, extended-MBR and GPT
+  partition tables are walked to find the filesystem. File offsets are 64-bit,
+  including for engine images larger than 2 GiB.
 * **ext4:** 1 KiB–64 KiB blocks, extent trees, 32-bit and 64-bit, metadata
   checksums (`metadata_csum`) recomputed exactly as the kernel does, sparse
   superblocks and flex groups.

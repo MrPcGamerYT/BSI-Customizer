@@ -8,6 +8,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QMap>
 #include <QRegularExpression>
 #include <QSaveFile>
 #include <QStandardPaths>
@@ -175,6 +176,21 @@ bool validPackage(const QString &package)
     static const QRegularExpression shape(
         QStringLiteral("^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z0-9_]+)+$"));
     return shape.match(package).hasMatch();
+}
+
+QStringList installedPackagesFromOutput(const QString &output)
+{
+    QStringList packages;
+    for (const QString &line : output.split(QLatin1Char('\n'))) {
+        const QString trimmed = line.trimmed();
+        if (!trimmed.startsWith(QLatin1String("package:")))
+            continue;
+        const QString package = trimmed.mid(8).trimmed();
+        if (validPackage(package) && !packages.contains(package))
+            packages << package;
+    }
+    packages.sort(Qt::CaseInsensitive);
+    return packages;
 }
 
 // ---------------------------------------------------------------------------
@@ -379,35 +395,42 @@ QVariantMap scan(const QString &exePath, const QString &confPath, const QString 
         if (entry.instance == instance)
             recorded << entry.package;
 
-    QVariantList apps;
-    for (const auto &rule : appRules()) {
-        apps << QVariantMap { { QStringLiteral("package"), rule.package },
-                              { QStringLiteral("label"), rule.label },
-                              { QStringLiteral("note"), rule.note },
-                              { QStringLiteral("recommended"), rule.recommended },
-                              { QStringLiteral("installed"),
-                                hasPackage(listed.out, rule.package) },
-                              { QStringLiteral("recorded"),
-                                recorded.contains(rule.package) } };
-    }
+    // Show every package installed for Android user 0. The reviewed list gets
+    // useful labels and the safe-by-default recommendation; every other app is
+    // still visible and can be selected deliberately by the user.
+    QMap<QString, AppRule> reviewed;
+    for (const auto &rule : appRules())
+        reviewed.insert(rule.package, rule);
+    const QStringList installedPackages = installedPackagesFromOutput(listed.out);
 
-    // Everything BlueStacks ships that is not on the reviewed list, shown so
-    // the user can see it and never removed in one click.
-    QStringList others;
-    const QStringList known = knownPackages();
-    for (const QString &line : listed.out.split(QLatin1Char('\n'))) {
-        const QString name = line.trimmed();
-        if (!name.startsWith(QLatin1String("package:")))
-            continue;
-        const QString package = name.mid(8);
-        if (known.contains(package))
-            continue;
-        if (package.startsWith(QLatin1String("com.bluestacks"))
-            || package.startsWith(QLatin1String("com.uncube"))
-            || package.startsWith(QLatin1String("gg.now")))
-            others << package;
+    QVariantList apps;
+    for (const QString &package : installedPackages) {
+        const bool isReviewed = reviewed.contains(package);
+        const AppRule rule = reviewed.value(package);
+        apps << QVariantMap { { QStringLiteral("package"), package },
+                              { QStringLiteral("label"), isReviewed ? rule.label : package },
+                              { QStringLiteral("note"), isReviewed ? rule.note
+                                  : QStringLiteral("Not on the reviewed list. Removing this app may "
+                                                   "break Android or BlueStacks.") },
+                              { QStringLiteral("recommended"), isReviewed && rule.recommended },
+                              { QStringLiteral("debloatable"), true },
+                              { QStringLiteral("installed"), true },
+                              { QStringLiteral("recorded"), recorded.contains(package) } };
     }
-    others.sort();
+    // Keep removed-by-this-tool entries on screen, even though Android no
+    // longer reports them as installed. The Undo action can put them back.
+    for (const QString &package : recorded) {
+        if (installedPackages.contains(package)) continue;
+        const bool isReviewed = reviewed.contains(package);
+        const AppRule rule = reviewed.value(package);
+        apps << QVariantMap { { QStringLiteral("package"), package },
+                              { QStringLiteral("label"), isReviewed ? rule.label : package },
+                              { QStringLiteral("note"), isReviewed ? rule.note : QString() },
+                              { QStringLiteral("recommended"), false },
+                              { QStringLiteral("debloatable"), false },
+                              { QStringLiteral("installed"), false },
+                              { QStringLiteral("recorded"), true } };
+    }
 
     const QStringList entries = entriesFrom(client->shell(downloadListCommand(), 20000).out);
     QVariantList entryList;
@@ -425,7 +448,8 @@ QVariantMap scan(const QString &exePath, const QString &confPath, const QString 
     return { { QStringLiteral("ok"), true },
              { QStringLiteral("msg"), QStringLiteral("Connected to “%1”.").arg(instance) },
              { QStringLiteral("apps"), apps },
-             { QStringLiteral("others"), others },
+             { QStringLiteral("others"), QStringList() },
+             { QStringLiteral("installedCount"), installedPackages.size() },
              { QStringLiteral("download"), QVariantMap { { QStringLiteral("entries"), entryList },
                                                          { QStringLiteral("bytes"), bytes },
                                                          { QStringLiteral("size"), readableSize(bytes) } } },
@@ -443,9 +467,6 @@ QVariantMap apply(const QString &exePath, const QString &confPath, const QString
     for (const QString &package : request.packages) {
         if (!validPackage(package))
             return failure(QStringLiteral("“%1” is not a package name; nothing was changed.")
-                               .arg(package));
-        if (!knownPackages().contains(package))
-            return failure(QStringLiteral("“%1” is not on the reviewed list; nothing was changed.")
                                .arg(package));
         if (!wanted.contains(package))
             wanted << package;

@@ -1004,6 +1004,12 @@ void checkAndroid()
               "a disabled package is enabled again");
         check(Android::listCommand().contains(QLatin1String("--user 0")),
               "the package list asked for is the one the remove step is verified against");
+        const QStringList installed = Android::installedPackagesFromOutput(
+            QStringLiteral("package:com.android.systemui\npackage:org.example.game\n"
+                           "package:com.android.systemui\nnot-a-package\n"));
+        check(installed == (QStringList { QStringLiteral("com.android.systemui"),
+                                          QStringLiteral("org.example.game") }),
+              "the live debloater parses all installed packages, deduplicates and sorts them");
 
         const QStringList wipe = Android::downloadWipeCommands();
         bool removes = false, recreates = false;
@@ -1260,6 +1266,48 @@ void checkRootDisk()
         return file.open(QIODevice::ReadOnly) ? file.readAll() : QByteArray();
     }();
     check(pristine.size() > 512, "the working copy really is a disk image");
+
+    // Some engine images are GPT-partitioned rather than raw ext4 or MBR. Put
+    // the fixture behind a minimal GPT partition and verify mount locates it.
+    {
+        constexpr int partitionOffset = 1024 * 1024;
+        constexpr int filesystemBytes = 256 * 1024;
+        QByteArray gpt(partitionOffset + filesystemBytes, '\0');
+        gpt.replace(partitionOffset, filesystemBytes, pristine.left(filesystemBytes));
+        auto put32 = [&gpt](int at, quint32 value) {
+            for (int i = 0; i < 4; ++i) gpt[at + i] = char((value >> (8 * i)) & 0xff);
+        };
+        auto put64 = [&gpt](int at, quint64 value) {
+            for (int i = 0; i < 8; ++i) gpt[at + i] = char((value >> (8 * i)) & 0xff);
+        };
+        gpt[510] = char(0x55); gpt[511] = char(0xaa);
+        gpt[446 + 4] = char(0xee);
+        put32(446 + 8, 1);
+        gpt.replace(512, 8, QByteArray("EFI PART", 8));
+        put32(512 + 8, 0x00010000);
+        put32(512 + 12, 92);
+        put64(512 + 24, 1);
+        put64(512 + 32, quint64(gpt.size() / 512) - 1);
+        put64(512 + 40, 34);
+        put64(512 + 48, quint64(gpt.size() / 512) - 34);
+        put64(512 + 72, 2);
+        put32(512 + 80, 128);
+        put32(512 + 84, 128);
+        // A non-zero partition type GUID and the starting/ending LBAs.
+        gpt[1024] = char(0x28);
+        put64(1024 + 32, partitionOffset / 512);
+        put64(1024 + 40, (partitionOffset + filesystemBytes) / 512 - 1);
+        gpt[510] = char(0x55); gpt[511] = char(0xaa);
+        const QString gptPath = temp.filePath(QStringLiteral("gpt-root.img"));
+        check(write(gptPath, gpt), "write a synthetic GPT-partitioned image");
+        std::string gptError;
+        auto gptImage = RootDisk::openImage(QFile::encodeName(gptPath).toStdString(), &gptError);
+        auto gptVolume = RootDisk::Volume::mount(std::move(gptImage), &gptError);
+        check(gptVolume != nullptr, "ext4 mounts from a GPT partition");
+        if (gptVolume)
+            check(gptVolume->list("/", &gptError).inode != 0,
+                  "the filesystem inside the GPT partition can be browsed");
+    }
 
     // ---- the engine ----
     {

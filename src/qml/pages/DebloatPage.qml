@@ -194,7 +194,8 @@ Item {
             list.push({ package: app.package, label: app.label, note: app.note,
                         recommended: app.recommended, installed: app.installed,
                         recorded: app.recorded,
-                        checked: app.installed && !app.recorded && app.recommended });
+                        checked: app.installed && !app.recorded && app.recommended,
+                        debloatable: app.debloatable !== false });
         }
         page.androidApps = list;
         page.androidOthers = result.others || [];
@@ -224,7 +225,8 @@ Item {
         const row = list[index];
         list[index] = { package: row.package, label: row.label, note: row.note,
                         recommended: row.recommended, installed: row.installed,
-                        recorded: row.recorded, checked: !row.checked };
+                        recorded: row.recorded, checked: !row.checked,
+                        debloatable: row.debloatable };
         page.androidApps = list;
     }
 
@@ -482,9 +484,10 @@ Item {
                                     Layout.fillWidth: true
                                     wrapMode: Text.Wrap
                                     text: qsTr("Talks to the instance through the player's own "
-                                               + "HD-Adb.exe. Turn on “Enable Android debugging "
-                                               + "(ADB)” below, start the instance, leave it on the "
-                                               + "home screen, then scan.")
+                                               + "HD-Adb.exe. Scan lists every installed package; "
+                                               + "the reviewed debloat suggestions are prechecked, "
+                                               + "and other installed apps can be selected too. "
+                                               + "Turn on ADB below and start the instance first.")
                                     color: Theme.textDim
                                     font.pixelSize: 10
                                 }
@@ -545,7 +548,7 @@ Item {
                                             id: appTick
                                             checked: modelData.checked
                                             enabled: !page.androidBusy && modelData.installed
-                                                     && !modelData.recorded
+                                                     && modelData.debloatable && !modelData.recorded
                                             padding: 0
                                             implicitWidth: 18
                                             implicitHeight: 18
@@ -610,8 +613,10 @@ Item {
                             Text {
                                 Layout.fillWidth: true
                                 wrapMode: Text.Wrap
-                                text: qsTr("%1 app(s) ticked. Removal is per user, so the system "
-                                           + "image is never written.").arg(page.tickedApps())
+                                text: qsTr("%1 of %2 installed app(s) selected. Only the reviewed "
+                                           + "suggestions are prechecked; removing system packages "
+                                           + "can break Android. Changes are per user and undoable.")
+                                      .arg(page.tickedApps()).arg(page.androidApps.filter(a => a.installed).length)
                                 color: Theme.textDim
                                 font.pixelSize: 10
                             }
@@ -626,8 +631,8 @@ Item {
                             Layout.fillWidth: true
                             wrapMode: Text.Wrap
                             visible: (page.androidOthers || []).length > 0
-                            text: qsTr("Left alone, because BlueStacks needs them: ")
-                                  + (page.androidOthers || []).join(", ")
+                            text: qsTr("All installed packages are shown above, including apps "
+                                      + "that are not on the reviewed suggestion list.")
                             color: Theme.textDim
                             font.pixelSize: 10
                         }
