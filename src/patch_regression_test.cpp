@@ -5,6 +5,8 @@
 #include "core/EmbeddedResources.h"
 #include "core/ExtrasPatcher.h"
 #include "core/AboutPatcher.h"
+#include "core/DebloatConfig.h"
+#include "core/DebloatPatcher.h"
 #include "core/IntegrityPatcher.h"
 #include "core/LayoutPatcher.h"
 #include "core/QmlText.h"
@@ -932,6 +934,158 @@ static QString aboutPageFixture()
         "        }\r\n"
         "    }\r\n"
         "}\r\n");
+}
+
+// ---- BlueStacks Debloat -------------------------------------------------
+// The tab edits a file BlueStacks owns and rewrites itself, so the tests pin
+// the two properties that make it safe: every byte outside a changed value
+// survives, and a plan never invents a setting the build does not declare.
+void checkDebloat()
+{
+    std::printf("[debloat] config values, hosts block and cloud folders\n");
+    {
+        const QByteArray config =
+            "\xEF\xBB\xBF" "bst.enable_programmatic_ads=\"1\"\r\n"
+            "bst.feature.usage_stats=\"true\"\r\n"
+            "bst.instance.Pie64.cpus=\"4\"\r\n"
+            "bst.instance.Pie64.enable_high_fps=\"0\"\r\n"
+            "bst.instance.Pie64.max_fps=\"60\"\r\n"
+            "bst.instance.Pie64.enable_vsync=\"1\"\r\n"
+            "bst.enable_adb_access=\"0\"\r\n"
+            "# a comment the player keeps\r\n"
+            "bst.not_a_switch=raw value\r\n";
+        const auto file = DebloatConfig::File::parse(config);
+        check(file.isValid(), "bluestacks.conf is parsed with its BOM, quotes and CRLF kept");
+        check(file.value(QStringLiteral("bst.enable_programmatic_ads")) == QLatin1String("1"),
+              "a quoted flag reads back without its quotes");
+        check(file.instances() == (QStringList { QStringLiteral("Pie64") }),
+              "the instance names are read from the settings that declare them");
+
+        Debloat::Request request;
+        request.options = { QStringLiteral("ads"), QStringLiteral("telemetry"),
+                            QStringLiteral("downloads") };
+        const auto plan = Debloat::planFor(config, request);
+        check(plan.ok && plan.changes.size() == 2,
+              "only the two declared flags in this fixture change; undeclared keys are skipped");
+        bool skippedMissing = false;
+        for (const auto &entry : plan.skipped)
+            if (entry.startsWith(QLatin1String("bst.enable_boot_banner"))) skippedMissing = true;
+        check(skippedMissing, "a setting this build does not declare is reported, never created");
+
+        QMap<QString, QString> wanted;
+        for (const auto &change : plan.changes) wanted.insert(change.key, change.after);
+        QByteArray edited;
+        QString editError;
+        check(DebloatConfig::File::parse(config).applyEdits(wanted, &edited, &editError),
+              "the planned values are written into the bytes the player owns");
+        check(edited.contains("bst.enable_programmatic_ads=\"0\""),
+              "the ad flag is written as the same quoted zero the player uses");
+        check(edited.contains("bst.feature.usage_stats=\"false\""),
+              "a flag spelled true becomes false, not 0");
+        // Everything the plan did not touch has to survive byte for byte.
+        QString stripped = QString::fromUtf8(edited);
+        stripped.replace(QStringLiteral("bst.enable_programmatic_ads=\"0\""),
+                         QStringLiteral("bst.enable_programmatic_ads=\"1\""));
+        stripped.replace(QStringLiteral("bst.feature.usage_stats=\"false\""),
+                         QStringLiteral("bst.feature.usage_stats=\"true\""));
+        check(stripped.toUtf8() == config,
+              "the edited document is the original plus exactly the changed values");
+
+        Debloat::Request tuning;
+        tuning.options = { QStringLiteral("highfps") };
+        tuning.instance = QStringLiteral("Pie64");
+        const auto tuned = Debloat::planFor(config, tuning);
+        bool fps = false, limit = false, vsync = false;
+        for (const auto &change : tuned.changes) {
+            if (change.key == QLatin1String("bst.instance.Pie64.enable_high_fps")) fps = true;
+            if (change.key == QLatin1String("bst.instance.Pie64.max_fps")) limit = true;
+            if (change.key == QLatin1String("bst.instance.Pie64.enable_vsync")) vsync = true;
+        }
+        check(fps && limit && vsync && tuned.changes.size() == 3,
+              "high frame-rate mode writes the instance's own three settings");
+        // It is the player's setting: the binary patch on the FPS page is a
+        // separate edit and must not be implied here.
+        check(!tuned.changes.isEmpty() && !config.contains("max_fps=\"120\""),
+              "no unrelated FPS value is invented");
+    }
+    {
+        // A value the player spells differently is left alone instead of being
+        // forced into a shape it would not understand.
+        const QByteArray odd = "bst.enable_smart_downloads=\"2\"\n";
+        Debloat::Request request;
+        request.options = { QStringLiteral("downloads") };
+        const auto plan = Debloat::planFor(odd, request);
+        check(plan.ok && plan.changes.isEmpty() && plan.skipped.size() == 2,
+              "an unexpected value is reported and left untouched (the feature key is missing)");
+    }
+    {
+        // ---- hosts file ----
+        const QByteArray hosts = "127.0.0.1 localhost\r\n10.0.0.5 internal.example\r\n";
+        QByteArray withBlock, removed;
+        QString error;
+        check(Debloat::hostsEdits(hosts, true, &withBlock, &error),
+              "the ad domains are added to a clean hosts file");
+        check(withBlock.startsWith(hosts),
+              "the existing hosts content is untouched, byte for byte");
+        check(withBlock.contains("0.0.0.0 ads.bluestacks.com")
+                  && withBlock.contains("0.0.0.0 adsdk.bluestacks.com")
+                  && withBlock.contains(Debloat::hostsStartMarker().toUtf8()),
+              "exactly the two BlueStacks ad domains are blocked");
+        check(!withBlock.contains("googleads") && !withBlock.contains("doubleclick"),
+              "no Google or game domain is blocked");
+        QByteArray again;
+        check(Debloat::hostsEdits(withBlock, true, &again, &error) && again == withBlock,
+              "applying the block twice does not stack a second copy");
+        check(Debloat::hostsEdits(withBlock, false, &removed, &error) && removed == hosts,
+              "removing the block restores the original hosts file exactly");
+        QByteArray untouched;
+        check(Debloat::hostsEdits(hosts, false, &untouched, &error) && untouched == hosts,
+              "removing a block that is not there changes nothing");
+        // A half-deleted block is refused, never repaired by guesswork.
+        const QByteArray broken = hosts + Debloat::hostsStartMarker().toUtf8()
+            + "\r\n0.0.0.0 ads.bluestacks.com\r\n";
+        QByteArray out;
+        check(!Debloat::hostsEdits(broken, true, &out, &error),
+              "an incomplete block is refused instead of rewritten");
+        QByteArray utf16;
+        check(!Debloat::hostsEdits(QByteArray("\xff\xfe1\x00"), true, &utf16, &error),
+              "a UTF-16 hosts file is refused so its encoding cannot be damaged");
+    }
+    {
+        // ---- cloud companions ----
+        QTemporaryDir temp;
+        check(temp.isValid(), "a temporary folder holds the fake cloud installs");
+        const QString rootA = temp.filePath(QStringLiteral("a"));
+        const QString rootB = temp.filePath(QStringLiteral("b"));
+        QDir().mkpath(rootA + QStringLiteral("/BlueStacks X"));
+        QDir().mkpath(rootB + QStringLiteral("/Programs/bluestacks-services"));
+        QFile x(rootA + QStringLiteral("/BlueStacks X/BlueStacks X.exe"));
+        x.open(QIODevice::WriteOnly);
+        x.write("x");
+        x.close();
+        QFile services(rootB + QStringLiteral("/Programs/bluestacks-services/BlueStacksServices.exe"));
+        services.open(QIODevice::WriteOnly);
+        services.write("s");
+        services.close();
+        const auto found = Debloat::cloudProductsAt({ rootA, rootB });
+        check(found.size() == 2 && !found.first().moved,
+              "both cloud companions are found and reported as installed");
+        // The park name is what makes the move reversible in one rename: no
+        // delete, no registry edit, no change on another volume.
+        const QString parked = Debloat::cloudParkedPath(rootA + QStringLiteral("/BlueStacks X"));
+        check(parked.endsWith(QLatin1String("BlueStacks X.bsi-disabled"))
+                  && QFileInfo(parked).absolutePath() == QFileInfo(rootA).absolutePath(),
+              "a removed companion is parked next to itself, on the same drive");
+        check(QDir().rename(rootA + QStringLiteral("/BlueStacks X"), parked),
+              "parking the folder is a single rename");
+        const auto afterMove = Debloat::cloudProductsAt({ rootA });
+        check(afterMove.size() == 1 && afterMove.first().moved && afterMove.first().id == QLatin1String("x"),
+              "a parked companion is still reported, flagged as moved");
+        check(QDir().rename(parked, rootA + QStringLiteral("/BlueStacks X")),
+              "restore renames the folder back");
+        check(!Debloat::cloudProductsAt({ temp.filePath(QStringLiteral("empty")) }).size(),
+              "a folder without the companion executable is not treated as an install");
+    }
 }
 
 int runPatchRegressionTests()
@@ -6321,6 +6475,8 @@ Window {
               "a published manifest wins over a text announcement");
     }
 
+
+    checkDebloat();
 
     return failures;
 }

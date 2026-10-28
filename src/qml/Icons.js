@@ -48,6 +48,11 @@ var boot = "<path d='m22 8-6 4 6 4z'/>"
 var extras = "<path d='M12 3v18'/><path d='M3 12h18'/>"
            + "<path d='m5.6 5.6 12.8 12.8'/><path d='m18.4 5.6-12.8 12.8'/>";
 
+// Broom: the debloat tab. A slanted handle with a swept brush head.
+var debloat = "<path d='m14.5 2.5 7 7'/><path d='M12.5 4.5 19.5 11.5'/>"
+            + "<path d='M11 6 6.6 10.4a2 2 0 0 0-.4 2.3l1.7 3.4a4 4 0 0 0 1.8 1.8l3.4 1.7"
+            + "a2 2 0 0 0 2.3-.4L20 15'/><path d='m4 21 3.6-3.6'/>";
+
 var appearance = theme;
 
 var settings = "<circle cx='12' cy='12' r='3'/>"

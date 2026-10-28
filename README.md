@@ -4,6 +4,11 @@
 
 Qt Quick desktop customizer for BlueStacks / MSI App Player on Windows.
 
+Tabs: **Dashboard**, **Theme**, **Resources**, **FPS**, **Integrity**, **Boot
+Video**, **UI** (clean-up, title-bar row and button order, removals, About page),
+**Debloat** (ads, telemetry, cloud/AI, hosts block, BlueStacks X and Services),
+**Discord RPC**, **Appearance**, **About**.
+
 ## Sign-in gate (Discord only)
 
 This is a private dev tool: the app opens on the Premium-Optimizer-style
@@ -460,6 +465,51 @@ A per-DLL `.bak` supports restoring the original. Unsupported setter code and ba
 The patcher decodes complete supported x64 entry instructions instead of requiring one exact five-byte prologue. It supports common MSVC/MinGW stack-save/frame variants, relocates RIP-relative operands, and preserves CET landing instructions. Compiler entry jumps are followed only when their destination is a verified PE runtime-function entry; unknown third-party detours are not overwritten.
 
 If Analyze reports a **recognized partial FPS patch**, keep the matching clean `.bak` and click **Patch FPS**. Both setters are rebuilt together; no unknown setter is silently skipped. If a build is still unsupported, the selectable State message includes the exact setter, RVA and entry bytes. Copy that message and provide the affected DLL and `.bak` for diagnosis—do not delete the backup to bypass the safety check.
+
+## Debloat tab
+
+BlueStacks Debloat's switch set, built into this tool: nothing is downloaded and
+no second program is started. The **Debloat** page edits what the player
+already owns and keeps one undo record for everything it writes.
+
+| Card | What it does |
+|---|---|
+| **Don't want these** | Turns off the ad controls, the usage/statistics reporting, Smart Downloads, and the cloud / nowBux / AI features the player itself declares. |
+| **Tuning switches** | Android debugging, silent notifications for one instance, the dedicated-GPU preference, and the player's own high-frame-rate mode. |
+| **System switches** | The ad-domain block in the Windows hosts file, and moving BlueStacks X / Store or the separate Services companion aside. |
+| **Cloud companions** | What was found, where it is, and whether it is installed or already parked. |
+| **Apply / Restore everything** | Writes the ticked switches, or puts every recorded value back. |
+
+Only settings **this build already declares** are written. A key the player does
+not have is skipped and listed in the result instead of being created: an
+invented key is deleted by BlueStacks again on its next exit, and a missing key
+means that build has no such feature. Values keep the shape the player uses —
+`"1"` becomes `"0"` and `"true"` becomes `"false"` — and a value that is
+spelled any other way is reported and left alone.
+
+`bluestacks.conf` is never regenerated: only the bytes of a value that really
+changes are replaced, so key order, quoting, spacing, comments and line endings
+all survive, and Restore writes the previous text back exactly. BlueStacks
+rewrites this file from memory when it exits, which is why Apply asks you to
+close it first. Three full copies are kept under the application data folder as
+well, next to the per-key undo record.
+
+The hosts block is delimited by two marker lines and replaces only itself, so
+applying it twice cannot stack copies, removing it restores the original file
+byte-for-byte, and a block with a missing marker is refused rather than
+repaired. It blocks exactly `ads.bluestacks.com` and `adsdk.bluestacks.com` —
+no Google, Play Store or game host is touched. Rewarded in-game ads can stop
+working.
+
+BlueStacks X / Store and BlueStacks Services are **renamed** to
+`<folder>.bsi-disabled` on their own drive, never deleted: the local player, its
+disks, its instances and the Multi-instance Manager stay where they are, and
+Restore renames the folder back. A link, a folder holding something else, or a
+park name that already exists is refused.
+
+The high-FPS switch here is the player's own setting; the **FPS** page is the
+separate edit that raises the ceiling inside the player binary. Neither one
+guarantees a frame rate — the game and the GPU decide that.
 
 ## Discord Rich Presence ID utility
 

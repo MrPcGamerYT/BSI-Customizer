@@ -6,6 +6,7 @@
 #include "ExtrasPatcher.h"
 #include "IntegrityPatcher.h"
 #include "AboutPatcher.h"
+#include "DebloatPatcher.h"
 #include "LayoutPatcher.h"
 #include "RpcIdPatcher.h"
 #include "SettingsManager.h"
@@ -1362,6 +1363,67 @@ QVariantMap Backend::bootPatch(int holdMs)
 }
 
 // ------------------------------------------------------------------ extras
+
+// ---------------------------------------------------------------------------
+// BlueStacks Debloat
+// ---------------------------------------------------------------------------
+
+QVariantList Backend::debloatOptions()
+{
+    QVariantList list;
+    for (const auto &option : Debloat::options())
+        list << QVariantMap { { QStringLiteral("id"), option.id },
+                              { QStringLiteral("group"), option.group },
+                              { QStringLiteral("label"), option.label },
+                              { QStringLiteral("hint"), option.hint },
+                              { QStringLiteral("needsInstance"), option.needsInstance } };
+    return list;
+}
+
+QVariantMap Backend::debloatState()
+{
+    const Debloat::Status state = Debloat::status(m_settings->confPath());
+    QVariantList cloud;
+    for (const auto &entry : state.cloud) cloud << entry;
+    return { { QStringLiteral("supported"), state.supported },
+             { QStringLiteral("applied"), state.applied },
+             { QStringLiteral("conf"), state.conf },
+             { QStringLiteral("detail"), state.detail },
+             { QStringLiteral("instances"), state.instances },
+             { QStringLiteral("instance"), state.instance },
+             { QStringLiteral("already"), state.already },
+             { QStringLiteral("hostsInstalled"), state.hostsInstalled },
+             { QStringLiteral("cloud"), cloud },
+             { QStringLiteral("anyCloudMoved"), state.anyCloudMoved },
+             { QStringLiteral("recorded"), state.anyRecord },
+             { QStringLiteral("pendingChanges"), state.pendingChanges },
+             { QStringLiteral("backups"), Debloat::backups().size() } };
+}
+
+QVariantMap Backend::debloatApply(const QStringList &optionIds, const QString &instance)
+{
+    if (actionsLocked()) return lockedMap();
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) { return worker.debloatApply(optionIds, instance); });
+    if (optionIds.isEmpty())
+        return result(false, QStringLiteral("Select at least one option."), QStringLiteral("orange"));
+    Debloat::Request request;
+    request.options = optionIds;
+    request.instance = instance;
+    const auto reply = Debloat::apply(m_settings->confPath(), m_settings->exePath(), request);
+    return result(reply.value(QStringLiteral("ok")).toBool(),
+                  reply.value(QStringLiteral("msg")).toString(), QStringLiteral("green"));
+}
+
+QVariantMap Backend::debloatRestore()
+{
+    if (actionsLocked()) return lockedMap();
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) { return worker.debloatRestore(); });
+    const auto reply = Debloat::restore(m_settings->confPath(), m_settings->exePath());
+    return result(reply.value(QStringLiteral("ok")).toBool(),
+                  reply.value(QStringLiteral("msg")).toString(), QStringLiteral("green"));
+}
 
 QVariantMap Backend::applyRemovals(const QStringList &names)
 {

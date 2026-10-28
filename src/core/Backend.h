@@ -201,6 +201,14 @@ public:
     Q_INVOKABLE QString aboutPageReport();
     Q_INVOKABLE QVariantMap restoreBackup(const QString &path);
 
+    // ---- BlueStacks Debloat (config, hosts, cloud companions) ----
+    // The switch list with this installation's current state, the instance
+    // names bluestacks.conf declares, and the cloud folders that were found.
+    Q_INVOKABLE QVariantMap debloatState();
+    Q_INVOKABLE QVariantList debloatOptions();
+    Q_INVOKABLE QVariantMap debloatApply(const QStringList &optionIds, const QString &instance);
+    Q_INVOKABLE QVariantMap debloatRestore();
+
     // ---- Discord Rich Presence ID utility ----
     Q_INVOKABLE QVariantMap rpcidFind(const QString &path, bool noNetwork = true);
     Q_INVOKABLE QVariantMap rpcidReplace(const QString &path, const QString &newId,
