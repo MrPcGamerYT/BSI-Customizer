@@ -1194,7 +1194,7 @@ void checkDebloat()
         check(!Debloat::hostsEdits(broken, true, &out, &error),
               "an incomplete block is refused instead of rewritten");
         QByteArray utf16;
-        check(!Debloat::hostsEdits(QByteArray("\xff\xfe1\x00"), true, &utf16, &error),
+        check(!Debloat::hostsEdits(QByteArray("\xff\xfe" "1\x00"), true, &utf16, &error),
               "a UTF-16 hosts file is refused so its encoding cannot be damaged");
     }
     {
