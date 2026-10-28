@@ -509,6 +509,28 @@ Item {
                 }
             }
 
+            // ---- nothing to talk to yet ----
+            Rectangle {
+                Layout.fillWidth: true
+                visible: !page.ready
+                implicitHeight: notice.implicitHeight + 20
+                radius: 12
+                color: Qt.rgba(255 / 255, 196 / 255, 92 / 255, 0.10)
+                border.width: 1
+                border.color: Qt.rgba(255 / 255, 196 / 255, 92 / 255, 0.45)
+                Text {
+                    id: notice
+                    anchors.fill: parent
+                    anchors.margins: 10
+                    wrapMode: Text.Wrap
+                    text: qsTr("BlueStacks is not set up yet: point the tool at HD-Player.exe on the "
+                               + "Dashboard. The switch half needs that installation; the Root.vhd "
+                               + "half works on any image you open yourself.")
+                    color: Theme.warn
+                    font.pixelSize: 11
+                }
+            }
+
             // ---- the two main choices ----
             RowLayout {
                 Layout.fillWidth: true
