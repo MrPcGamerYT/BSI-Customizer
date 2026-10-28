@@ -558,6 +558,12 @@ Item {
                                     font.pixelSize: 15
                                     font.weight: Font.Bold
                                 }
+                                ActionButton {
+                                    accent: page.mode !== index
+                                    enabled: page.mode !== index
+                                    text: page.mode === index ? qsTr("Opened") : qsTr("Open")
+                                    onClicked: page.mode = index
+                                }
                             }
                             Text {
                                 Layout.fillWidth: true
@@ -568,7 +574,9 @@ Item {
                             }
                         }
                         MouseArea {
+                            // Behind the card's own buttons, so they win the click.
                             anchors.fill: parent
+                            z: -1
                             cursorShape: Qt.PointingHandCursor
                             onClicked: page.mode = index
                         }
