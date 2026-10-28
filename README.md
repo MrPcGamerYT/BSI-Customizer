@@ -478,6 +478,7 @@ already owns and keeps one undo record for everything it writes.
 | **Tuning switches** | Android debugging, silent notifications for one instance, the dedicated-GPU preference, and the player's own high-frame-rate mode. |
 | **System switches** | The ad-domain block in the Windows hosts file, and moving BlueStacks X / Store or the separate Services companion aside. |
 | **Cloud companions** | What was found, where it is, and whether it is installed or already parked. |
+| **Android apps and storage** | Removes the preinstalled apps from a running instance and empties the guest's `/sdcard/Download`, with its own undo record. |
 | **Apply / Restore everything** | Writes the ticked switches, or puts every recorded value back. |
 
 Only settings **this build already declares** are written. A key the player does
@@ -510,6 +511,52 @@ park name that already exists is refused.
 The high-FPS switch here is the player's own setting; the **FPS** page is the
 separate edit that raises the ceiling inside the player binary. Neither one
 guarantees a frame rate — the game and the GPU decide that.
+
+### Android apps and storage
+
+**`Root.vhd` is not edited, on purpose.** It is the shared Android system image
+— an ext4 filesystem inside a VHD that every instance cloned from the same base
+boots from, that the player attaches read-only, and that the next player update
+replaces. Writing into it while the player runs would corrupt the image for
+every instance using it, and the write would not survive an update anyway. What
+actually makes a preinstalled app disappear is the package state inside the
+running instance, so that is what this section changes — through the player's
+own `HD-Adb.exe`, on the instance's published ADB port, with a private adb
+server that is stopped again afterwards. Nothing is downloaded, and no
+root/Magisk is involved.
+
+* **Preinstalled apps** — a reviewed list: `gg.now.ads.service`,
+  `com.uncube.gamevantage`, `com.bluestacks.appmart`, `com.bluestacks.appfinder`,
+  and optionally the Android Easter egg, the print spooler and the system
+  tracing UI. Each is removed for Android user 0 (`pm uninstall --user 0`), or,
+  when the package belongs to the system partition, disabled instead
+  (`pm disable-user --user 0`). Both fail harmlessly on a package the instance
+  does not have, and the scan only shows what is really installed. Packages
+  BlueStacks needs are never touched, and anything else it ships is listed
+  read-only so you can see it.
+* **Undo** — the package, the action used and the instance it was done in are
+  recorded first. **Undo in this instance** reinstalls with
+  `cmd package install-existing --user 0` (or re-enables the package) and
+  verifies against the package list rather than trusting the reply.
+* **Guest storage** — `/sdcard/Download` is deleted *completely* and recreated
+  empty, so no file, no hidden file and no `apps` sub-folder is left behind.
+  Tick **Keep a copy on this PC first** and the folder is pulled into the
+  application data folder before anything is deleted; if that copy fails,
+  nothing is deleted. Copies above 4 GB are refused instead of filling the
+  system drive. **Also clear app data** empties `/sdcard/Android/data` and
+  `/sdcard/Android/obb` as well — that signs every app out and erases downloaded
+  game assets.
+
+The instance must be **running** with *Enable Android debugging (ADB)* on; the
+ADB port comes from `bluestacks.conf`, so it is never guessed. The guest storage
+lives in the instance's own `Data.vhdx`, which is why two instances can be
+cleaned independently and why the undo record is kept per instance.
+
+The Debloat feature set follows
+[Jordan231111/Bluestacks-Debloat](https://github.com/Jordan231111/Bluestacks-Debloat)
+(CC BY-NC-ND 4.0); the switch lists, the hosts domains, the reviewed package list
+and the cloud-companion handling are derived from it and were reimplemented
+natively here. Its root/Magisk parts are deliberately not included.
 
 ## Discord Rich Presence ID utility
 

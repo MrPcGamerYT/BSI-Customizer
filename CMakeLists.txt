@@ -72,6 +72,10 @@ qt_add_executable(BSICustomizer
     src/core/DebloatConfig.cpp
     src/core/DebloatPatcher.h
     src/core/DebloatPatcher.cpp
+    src/core/AdbClient.h
+    src/core/AdbClient.cpp
+    src/core/AndroidCleanup.h
+    src/core/AndroidCleanup.cpp
     src/core/BsDetector.h
     src/core/BsDetector.cpp
     src/core/Backend.h

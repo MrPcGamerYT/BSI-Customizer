@@ -5,6 +5,8 @@
 #include "core/EmbeddedResources.h"
 #include "core/ExtrasPatcher.h"
 #include "core/AboutPatcher.h"
+#include "core/AndroidCleanup.h"
+#include "core/AdbClient.h"
 #include "core/DebloatConfig.h"
 #include "core/DebloatPatcher.h"
 #include "core/IntegrityPatcher.h"
@@ -940,6 +942,150 @@ static QString aboutPageFixture()
 // The tab edits a file BlueStacks owns and rewrites itself, so the tests pin
 // the two properties that make it safe: every byte outside a changed value
 // survives, and a plan never invents a setting the build does not declare.
+void checkAndroid()
+{
+    std::printf("[android] reviewed apps, commands and the undo record\n");
+    {
+        const auto &rules = Android::appRules();
+        check(rules.size() >= 5, "the reviewed app list is populated");
+        bool allValid = true, unique = true, anyRecommended = false;
+        QStringList names;
+        for (const auto &rule : rules) {
+            if (!Android::validPackage(rule.package)) allValid = false;
+            if (names.contains(rule.package)) unique = false;
+            names << rule.package;
+            if (rule.recommended) anyRecommended = true;
+            if (rule.label.isEmpty() || rule.note.isEmpty()) allValid = false;
+        }
+        check(allValid, "every reviewed package and its label are well formed");
+        check(unique, "no package is on the reviewed list twice");
+        check(anyRecommended, "the deceptive apps are the ones pre-ticked");
+        check(Android::knownPackages() == names, "the lookup list is the reviewed list");
+        check(Android::appLabel(QStringLiteral("gg.now.ads.service")).contains(QLatin1String("now.gg")),
+              "a package is described by its label, not by its identifier");
+        // Root.vhd is deliberately absent from this module: the system image is
+        // shared and read-only, so nothing here addresses a file on disk.
+        check(!Android::recordPath().isEmpty()
+                  && Android::recordPath().endsWith(QLatin1String("/debloat/android.json")),
+              "the undo record sits next to the configuration record");
+    }
+    {
+        // A package name is interpolated into a shell command, so only the
+        // shape Android itself allows gets through.
+        check(Android::validPackage(QStringLiteral("com.android.egg")),
+              "a normal package name is accepted");
+        check(!Android::validPackage(QString()),
+              "an empty package is refused");
+        check(!Android::validPackage(QStringLiteral("com.android.egg; rm -rf /sdcard")),
+              "a package carrying a second command is refused");
+        check(!Android::validPackage(QStringLiteral("com.android.egg && reboot")),
+              "a package carrying a shell operator is refused");
+        check(!Android::validPackage(QStringLiteral("$(reboot)")),
+              "a package carrying command substitution is refused");
+        check(!Android::validPackage(QStringLiteral("no_dots")),
+              "a name without a package segment is refused");
+        check(!Android::validPackage(QStringLiteral("../etc/passwd")),
+              "a path is not a package name");
+
+        const QString pkg = QStringLiteral("com.android.traceur");
+        check(Android::uninstallCommand(pkg)
+                  == QLatin1String("pm uninstall --user 0 com.android.traceur"),
+              "uninstall targets user 0 only, so the system image is never written");
+        check(Android::disableCommand(pkg).contains(QLatin1String("disable-user"))
+                  && Android::disableCommand(pkg).endsWith(pkg),
+              "the fallback for a system package disables it instead");
+        check(Android::installExistingCommand(pkg).startsWith(QLatin1String("cmd package install-existing"))
+                  && Android::installExistingCommand(pkg).endsWith(pkg),
+              "restore reinstalls the package the player shipped");
+        check(Android::enableCommand(pkg).startsWith(QLatin1String("pm enable"))
+                  && Android::enableCommand(pkg).endsWith(pkg),
+              "a disabled package is enabled again");
+        check(Android::listCommand().contains(QLatin1String("--user 0")),
+              "the package list asked for is the one the remove step is verified against");
+
+        const QStringList wipe = Android::downloadWipeCommands();
+        bool removes = false, recreates = false;
+        for (const QString &command : wipe) {
+            if (command.contains(QLatin1String("rm -rf /sdcard/Download"))) removes = true;
+            if (command.contains(QLatin1String("mkdir -p /sdcard/Download"))) recreates = true;
+        }
+        check(removes && recreates,
+              "the whole Download folder goes, then comes back empty, so nothing is left behind");
+        const QStringList appData = Android::appDataWipeCommands();
+        bool data = false, obb = false;
+        for (const QString &command : appData) {
+            if (command.contains(QLatin1String("/sdcard/Android/data"))) data = true;
+            if (command.contains(QLatin1String("/sdcard/Android/obb"))) obb = true;
+        }
+        check(data && obb, "clearing app data covers both the data and the obb folders");
+        check(Android::copyLimitBytes() > 0, "the automatic copy has a size ceiling");
+    }
+    {
+        // ---- the instance's ADB port, from the configuration it publishes ----
+        QTemporaryDir temp;
+        check(temp.isValid(), "a temporary folder holds the fake bluestacks.conf");
+        const QString current = temp.filePath(QStringLiteral("current.conf"));
+        const QString legacy = temp.filePath(QStringLiteral("legacy.conf"));
+        const QString none = temp.filePath(QStringLiteral("none.conf"));
+        const auto write = [](const QString &path, const QByteArray &bytes) {
+            QFile file(path);
+            if (!file.open(QIODevice::WriteOnly)) return false;
+            file.write(bytes);
+            file.close();
+            return true;
+        };
+        check(write(current, "bst.instance.Pie64.status.adb_port=\"5565\"\r\n"
+                             "bst.instance.Nougat32.status.adb_port=\"5567\"\r\n"),
+              "the fixture publishes two instance ports");
+        check(write(legacy, "bst.instance.Pie64.adb_port=\"5575\"\n"),
+              "the fixture uses the older key as well");
+        check(write(none, "bst.instance.Pie64.cpus=\"4\"\n"),
+              "the fixture without a port is written");
+        check(Adb::instancePort(current, QStringLiteral("Pie64")) == 5565,
+              "the running instance's published port is the one used");
+        check(Adb::instancePort(current, QStringLiteral("Nougat32")) == 5567,
+              "each instance has its own port");
+        check(Adb::instancePort(legacy, QStringLiteral("Pie64")) == 5575,
+              "the older key spelling is understood");
+        check(Adb::instancePort(none, QStringLiteral("Pie64")) == 0,
+              "an instance without a published port is reported as such, never guessed");
+        check(Adb::instancePort(temp.filePath(QStringLiteral("missing.conf")),
+                                QStringLiteral("Pie64")) == 0,
+              "a missing configuration is not an error, just no port");
+        check(Adb::findAdb(temp.filePath(QStringLiteral("HD-Player.exe"))).isEmpty(),
+              "a folder without the player's adb reports no adb instead of inventing one");
+    }
+    {
+        // ---- the undo record survives a round trip, per instance ----
+        Android::Record record;
+        check(Android::isEmpty(record), "a fresh record is empty");
+        record.removed << Android::RemovedApp { QStringLiteral("gg.now.ads.service"),
+                                                QStringLiteral("uninstall"),
+                                                QStringLiteral("Pie64") };
+        record.removed << Android::RemovedApp { QStringLiteral("com.android.egg"),
+                                                QStringLiteral("disable"),
+                                                QStringLiteral("Nougat32") };
+        record.downloads << Android::WipedFolder { QStringLiteral("Pie64"),
+                                                   { QStringLiteral("apps"), QStringLiteral("game.apk") },
+                                                   QStringLiteral("C:/backups/download-1") };
+        record.appData << QStringLiteral("Pie64");
+        check(!Android::isEmpty(record), "a record with work in it is not empty");
+        const auto back = Android::recordFromJson(Android::recordToJson(record));
+        check(back.removed.size() == 2 && back.removed.first().instance == QLatin1String("Pie64")
+                  && back.removed.last().action == QLatin1String("disable"),
+              "each removed app keeps the instance it was removed from");
+        check(back.downloads.size() == 1 && back.downloads.first().entries.size() == 2
+                  && back.downloads.first().entries.first() == QLatin1String("apps"),
+              "what was in the Download folder, and where its copy is, is kept");
+        check(back.downloads.first().backup == QLatin1String("C:/backups/download-1"),
+              "the copy on this PC is part of the record");
+        check(back.appData == (QStringList { QStringLiteral("Pie64") }),
+              "the instances whose app data was cleared are kept");
+        check(Android::isEmpty(Android::recordFromJson(QByteArray("not json"))),
+              "a damaged record reads as empty instead of pretending to have work");
+    }
+}
+
 void checkDebloat()
 {
     std::printf("[debloat] config values, hosts block and cloud folders\n");
@@ -6477,6 +6623,7 @@ Window {
 
 
     checkDebloat();
+    checkAndroid();
 
     return failures;
 }

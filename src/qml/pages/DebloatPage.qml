@@ -26,6 +26,19 @@ Item {
     // Applying writes files: the card stays inert while the engine works.
     property bool running: false
 
+    // ---- inside the instance (the player's own adb) ----
+    property var androidRecord: ({ recorded: false, removed: [], downloads: [], appData: [] })
+    property var androidApps: []
+    property var androidOthers: []
+    property var downloadInfo: ({ entries: [], size: "" })
+    property var appDataInfo: []
+    property bool androidScanned: false
+    property bool androidBusy: false
+    property bool androidOk: true
+    property string androidMsg: ""
+    property bool keepCopy: true
+    property bool clearAppData: false
+
     function refresh() {
         page.state = backend.debloatState();
         page.ready = !!page.state.supported;
@@ -47,6 +60,7 @@ Item {
             });
         }
         page.rows = next;
+        page.refreshAndroid();
     }
 
     function countChecked() {
@@ -117,6 +131,118 @@ Item {
             page.notify(page.lastMsg);
     }
 
+    // ---- inside the instance ----
+    function refreshAndroid() {
+        page.androidRecord = backend.androidState();
+    }
+
+    function scanAndroid(silent) {
+        if (page.instance.length === 0) {
+            page.notify(qsTr("Choose an Android instance first."));
+            return;
+        }
+        page.androidBusy = true;
+        const result = backend.androidScan(page.instance);
+        page.androidBusy = false;
+        if (!result || !result.ok) {
+            if (!silent) {
+                page.androidOk = false;
+                page.androidMsg = (result && result.msg) ? result.msg : qsTr("The instance did not answer.");
+                page.androidApps = [];
+                page.androidScanned = false;
+                page.notify(page.androidMsg);
+            }
+            return;
+        }
+        const apps = result.apps || [];
+        const rows = [];
+        for (let i = 0; i < apps.length; i++) {
+            const app = apps[i];
+            rows.push({ package: app.package, label: app.label, note: app.note,
+                        recommended: app.recommended, installed: app.installed,
+                        recorded: app.recorded,
+                        // The deceptive ones start ticked; nothing else does.
+                        checked: app.installed && !app.recorded && app.recommended });
+        }
+        page.androidApps = rows;
+        page.androidOthers = result.others || [];
+        page.downloadInfo = result.download || ({ entries: [], size: "" });
+        page.appDataInfo = result.appData || [];
+        page.androidScanned = true;
+        if (!silent) {
+            page.androidOk = true;
+            page.androidMsg = result.msg || "";
+            page.notify(page.androidMsg);
+        }
+        page.refreshAndroid();
+    }
+
+    function tickedApps() {
+        let n = 0;
+        for (let i = 0; i < page.androidApps.length; i++)
+            if (page.androidApps[i].checked)
+                n++;
+        return n;
+    }
+
+    function toggleAndroidApp(index) {
+        const rows = page.androidApps.slice();
+        if (index < 0 || index >= rows.length)
+            return;
+        const row = rows[index];
+        rows[index] = { package: row.package, label: row.label, note: row.note,
+                        recommended: row.recommended, installed: row.installed,
+                        recorded: row.recorded, checked: !row.checked };
+        page.androidApps = rows;
+    }
+
+    function removeAndroidApps() {
+        const packages = [];
+        for (let i = 0; i < page.androidApps.length; i++)
+            if (page.androidApps[i].checked)
+                packages.push(page.androidApps[i].package);
+        if (packages.length === 0) {
+            page.notify(qsTr("Tick at least one installed app first."));
+            return;
+        }
+        page.androidBusy = true;
+        const result = backend.androidApply(packages, false, false, false, page.instance);
+        page.androidBusy = false;
+        page.androidOk = !!(result && result.ok);
+        page.androidMsg = (result && result.msg) ? result.msg : "";
+        if (page.androidScanned)
+            page.scanAndroid(true);
+        page.refreshAndroid();
+        if (page.androidMsg.length > 0)
+            page.notify(page.androidMsg);
+    }
+
+    function cleanAndroidStorage(wipe, keep, appData) {
+        page.androidBusy = true;
+        const result = backend.androidApply([], wipe, keep, appData, page.instance);
+        page.androidBusy = false;
+        page.androidOk = !!(result && result.ok);
+        page.androidMsg = (result && result.msg) ? result.msg : "";
+        if (page.androidScanned)
+            page.scanAndroid(true);
+        page.refreshAndroid();
+        if (page.androidMsg.length > 0)
+            page.notify(page.androidMsg);
+    }
+
+    function restoreAndroidApps() {
+        page.androidBusy = true;
+        const result = backend.androidRestore(page.instance);
+        page.androidBusy = false;
+        page.androidOk = !!(result && result.ok);
+        page.androidMsg = (result && result.msg) ? result.msg : "";
+        if (page.androidScanned)
+            page.scanAndroid(true);
+        page.refreshAndroid();
+        if (page.androidMsg.length > 0)
+            page.notify(page.androidMsg);
+    }
+
     function groupRows(group) {
         const list = [];
         for (let i = 0; i < page.rows.length; i++)
@@ -163,7 +289,9 @@ Item {
                         Layout.fillWidth: true
                         wrapMode: Text.Wrap
                         text: qsTr("Turns off the ads, telemetry, cloud and AI features the player "
-                                   + "itself exposes, with one undo record for everything it writes.")
+                                   + "itself exposes, removes the preinstalled Android apps and wipes "
+                                   + "the guest's Download folder, with one undo record for everything "
+                                   + "it writes.")
                         color: Theme.textDim
                         font.pixelSize: 12
                     }
@@ -345,6 +473,244 @@ Item {
                 }
             }
 
+            // ---- inside the instance ----
+            // Installed apps and the guest's own storage are not in Root.vhd:
+            // that image is shared and read-only. They are changed through the
+            // instance's own ADB, with the same undo record as everything else.
+            Card {
+                Layout.fillWidth: true
+                pad: 14
+                ColumnLayout {
+                    anchors.fill: parent
+                    spacing: 8
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 10
+                        ColumnLayout {
+                            Layout.fillWidth: true
+                            spacing: 2
+                            Text {
+                                text: qsTr("Android apps and storage")
+                                color: Theme.text
+                                font.pixelSize: 15
+                                font.weight: Font.Bold
+                            }
+                            Text {
+                                Layout.fillWidth: true
+                                wrapMode: Text.Wrap
+                                text: qsTr("Installed apps live in the instance's own Android disk "
+                                           + "— not in Root.vhd, the shared read-only system image that "
+                                           + "every clone boots from and every player update replaces. "
+                                           + "This section removes them through the player's own adb "
+                                           + "while the instance runs, and puts them back from the "
+                                           + "record.")
+                                color: Theme.textDim
+                                font.pixelSize: 10
+                            }
+                        }
+                        ActionButton {
+                            text: page.androidBusy ? qsTr("Working…") : qsTr("Scan apps")
+                            enabled: page.ready && !page.androidBusy && page.instance.length > 0
+                            onClicked: page.scanAndroid(false)
+                        }
+                        ActionButton {
+                            text: qsTr("Undo in this instance")
+                            enabled: page.ready && !page.androidBusy && page.instance.length > 0
+                                     && (page.androidRecord.removed || []).length > 0
+                            onClicked: page.restoreAndroidApps()
+                        }
+                    }
+                    Text {
+                        Layout.fillWidth: true
+                        wrapMode: Text.Wrap
+                        visible: page.androidMsg.length > 0
+                        text: page.androidMsg
+                        color: page.androidOk ? (page.androidScanned ? Theme.textDim : Theme.warn)
+                                              : Theme.danger
+                        font.pixelSize: 10
+                    }
+                    GridLayout {
+                        Layout.fillWidth: true
+                        columns: 2
+                        columnSpacing: 10
+                        rowSpacing: 8
+                        visible: page.androidApps.length > 0
+                        Repeater {
+                            model: page.androidApps
+                            delegate: Rectangle {
+                                required property var modelData
+                                required property int index
+                                Layout.fillWidth: true
+                                implicitHeight: appRow.implicitHeight + 20
+                                radius: 10
+                                color: modelData.checked ? Qt.rgba(6 / 255, 182 / 255, 212 / 255, 0.09)
+                                                         : Qt.rgba(1, 1, 1, 0.02)
+                                border.width: 1
+                                border.color: modelData.checked ? Qt.rgba(6 / 255, 182 / 255, 212 / 255, 0.45)
+                                                                : Theme.border
+                                RowLayout {
+                                    id: appRow
+                                    anchors.fill: parent
+                                    anchors.margins: 10
+                                    spacing: 10
+                                    CheckBox {
+                                        id: appTick
+                                        checked: modelData.checked
+                                        enabled: page.ready && !page.androidBusy
+                                                 && modelData.installed && !modelData.recorded
+                                        padding: 0
+                                        implicitWidth: 18
+                                        implicitHeight: 18
+                                        indicator: Rectangle {
+                                            implicitWidth: 18
+                                            implicitHeight: 18
+                                            radius: 5
+                                            color: appTick.checked ? Theme.accent : "transparent"
+                                            border.width: 1
+                                            border.color: appTick.checked ? Theme.accent : Theme.border
+                                            Text {
+                                                anchors.centerIn: parent
+                                                visible: appTick.checked
+                                                text: "\u2713"
+                                                color: "#04121c"
+                                                font.pixelSize: 11
+                                                font.weight: Font.Bold
+                                            }
+                                        }
+                                        onToggled: page.toggleAndroidApp(index)
+                                    }
+                                    ColumnLayout {
+                                        Layout.fillWidth: true
+                                        spacing: 2
+                                        Text {
+                                            Layout.fillWidth: true
+                                            wrapMode: Text.Wrap
+                                            text: modelData.label
+                                            color: modelData.installed && !modelData.recorded
+                                                   ? Theme.text : Theme.textDim
+                                            font.pixelSize: 12
+                                            font.weight: Font.DemiBold
+                                        }
+                                        Text {
+                                            Layout.fillWidth: true
+                                            wrapMode: Text.Wrap
+                                            text: modelData.note
+                                            color: Theme.textDim
+                                            font.pixelSize: 10
+                                        }
+                                        Text {
+                                            Layout.fillWidth: true
+                                            wrapMode: Text.Wrap
+                                            text: modelData.recorded ? qsTr("Removed by this tool — "
+                                                                           + "Undo in this instance puts "
+                                                                           + "it back.")
+                                                  : modelData.installed ? qsTr("Installed") + " · "
+                                                                           + modelData.package
+                                                  : qsTr("Not installed") + " · " + modelData.package
+                                            color: modelData.recorded ? Theme.warn
+                                                   : modelData.installed ? Theme.green : Theme.textDim
+                                            font.pixelSize: 10
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 10
+                        visible: page.androidApps.length > 0
+                        Text {
+                            Layout.fillWidth: true
+                            wrapMode: Text.Wrap
+                            text: qsTr("%1 app(s) ticked. Removal is per user, so the system image is "
+                                       + "never written and the instance still boots.").arg(page.tickedApps())
+                            color: Theme.textDim
+                            font.pixelSize: 10
+                        }
+                        ActionButton {
+                            accent: true
+                            text: qsTr("Remove ticked apps")
+                            enabled: page.ready && !page.androidBusy && page.tickedApps() > 0
+                            onClicked: page.removeAndroidApps()
+                        }
+                    }
+                    Text {
+                        Layout.fillWidth: true
+                        wrapMode: Text.Wrap
+                        visible: (page.androidOthers || []).length > 0
+                        text: qsTr("Also installed in Android, left alone because they are part of "
+                                   + "how BlueStacks works: ") + (page.androidOthers || []).join(", ")
+                        color: Theme.textDim
+                        font.pixelSize: 10
+                    }
+
+                    // ---- guest storage ----
+                    Rectangle {
+                        Layout.fillWidth: true
+                        implicitHeight: 1
+                        color: Theme.border
+                    }
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 14
+                        CheckBox {
+                            id: wipeDownloads
+                            text: qsTr("Empty /sdcard/Download")
+                            checked: true
+                            palette.text: Theme.text
+                        }
+                        CheckBox {
+                            id: keepCopyBox
+                            text: qsTr("Keep a copy on this PC first")
+                            checked: page.keepCopy
+                            enabled: wipeDownloads.checked
+                            palette.text: Theme.textDim
+                            onToggled: page.keepCopy = checked
+                        }
+                        CheckBox {
+                            id: clearAppDataBox
+                            text: qsTr("Also clear app data (Android/data, Android/obb)")
+                            checked: false
+                            palette.text: Theme.textDim
+                            onToggled: page.clearAppData = checked
+                        }
+                        Item { Layout.fillWidth: true }
+                        ActionButton {
+                            text: page.androidBusy ? qsTr("Working…") : qsTr("Clean guest storage")
+                            enabled: page.ready && !page.androidBusy && page.instance.length > 0
+                                     && (wipeDownloads.checked || clearAppDataBox.checked)
+                            onClicked: page.cleanAndroidStorage(wipeDownloads.checked,
+                                                                keepCopyBox.checked,
+                                                                clearAppDataBox.checked)
+                        }
+                    }
+                    Text {
+                        Layout.fillWidth: true
+                        wrapMode: Text.Wrap
+                        visible: page.androidScanned
+                        text: qsTr("Download folder: %1 item(s), %2.")
+                                  .arg((page.downloadInfo.entries || []).length)
+                                  .arg(page.downloadInfo.size || qsTr("unknown size"))
+                              + qsTr(" App data: %1 in Android/data, %2 in Android/obb.")
+                                    .arg((page.appDataInfo[0] || {}).count || 0)
+                                    .arg((page.appDataInfo[1] || {}).count || 0)
+                        color: Theme.textDim
+                        font.pixelSize: 10
+                    }
+                    Text {
+                        Layout.fillWidth: true
+                        wrapMode: Text.Wrap
+                        text: qsTr("The Download folder is deleted completely and recreated empty, so no "
+                                   + "file, hidden file or “apps” sub-folder is left behind. Clearing app "
+                                   + "data signs every app out and erases downloaded game assets. The "
+                                   + "instance must be running with Android debugging on.")
+                        color: Theme.textDim
+                        font.pixelSize: 10
+                    }
+                }
+            }
+
             // ---- cloud companions ----
             Card {
                 Layout.fillWidth: true
@@ -419,7 +785,9 @@ Item {
                             Layout.fillWidth: true
                             wrapMode: Text.Wrap
                             text: qsTr("Close BlueStacks before applying: it rewrites bluestacks.conf "
-                                       + "from memory when it exits. Selected: %1")
+                                       + "from memory when it exits. Restore also puts the Android "
+                                       + "apps back, so the instance has to be running for that "
+                                       + "part. Selected: %1")
                                   .arg(page.countChecked())
                             color: Theme.textDim
                             font.pixelSize: 12
@@ -427,7 +795,8 @@ Item {
                         ActionButton {
                             text: page.running ? qsTr("Working…") : qsTr("Restore everything")
                             enabled: page.ready && !page.running && (page.state.recorded
-                                                                      || page.state.anyCloudMoved)
+                                                                      || page.state.anyCloudMoved
+                                                                      || page.androidRecord.recorded)
                             onClicked: page.restoreAll()
                         }
                         ActionButton {
