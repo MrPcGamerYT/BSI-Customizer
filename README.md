@@ -6,7 +6,8 @@ Qt Quick desktop customizer for BlueStacks / MSI App Player on Windows.
 
 Tabs: **Dashboard**, **Theme**, **Resources**, **FPS**, **Integrity**, **Boot
 Video**, **UI** (clean-up, title-bar row and button order, removals, About page),
-**Debloat** (ads, telemetry, cloud/AI, hosts block, BlueStacks X and Services),
+**Debloat** (live ADB debloat, hardcode debloat of `Root.vhd`, and the
+ads/telemetry/cloud/hosts/companion switches),
 **Discord RPC**, **Appearance**, **About**.
 
 ## Sign-in gate (Discord only)
@@ -472,13 +473,21 @@ BlueStacks Debloat's switch set, built into this tool: nothing is downloaded and
 no second program is started. The **Debloat** page edits what the player
 already owns and keeps one undo record for everything it writes.
 
+The page opens on **two main choices**:
+
+| Choice | What it does |
+|---|---|
+| **1 · Live ADB debloat** | Removes the preinstalled apps from a running instance and empties the guest's `/sdcard/Download`. Nothing on disk is edited, and every app can be put back. |
+| **2 · Hardcode debloat (Root.vhd)** | Opens the engine's `Root.vhd` like a 7-Zip window: browse every folder and file, extract, add files and folders, delete them. Every write is journalled, so one **Undo** puts the image back. |
+
+Below them, one card holds the switch set:
+
 | Card | What it does |
 |---|---|
 | **Don't want these** | Turns off the ad controls, the usage/statistics reporting, Smart Downloads, and the cloud / nowBux / AI features the player itself declares. |
 | **Tuning switches** | Android debugging, silent notifications for one instance, the dedicated-GPU preference, and the player's own high-frame-rate mode. |
 | **System switches** | The ad-domain block in the Windows hosts file, and moving BlueStacks X / Store or the separate Services companion aside. |
 | **Cloud companions** | What was found, where it is, and whether it is installed or already parked. |
-| **Android apps and storage** | Removes the preinstalled apps from a running instance and empties the guest's `/sdcard/Download`, with its own undo record. |
 | **Apply / Restore everything** | Writes the ticked switches, or puts every recorded value back. |
 
 Only settings **this build already declares** are written. A key the player does
@@ -512,18 +521,14 @@ The high-FPS switch here is the player's own setting; the **FPS** page is the
 separate edit that raises the ceiling inside the player binary. Neither one
 guarantees a frame rate — the game and the GPU decide that.
 
-### Android apps and storage
+### 1 · Live ADB debloat
 
-**`Root.vhd` is not edited, on purpose.** It is the shared Android system image
-— an ext4 filesystem inside a VHD that every instance cloned from the same base
-boots from, that the player attaches read-only, and that the next player update
-replaces. Writing into it while the player runs would corrupt the image for
-every instance using it, and the write would not survive an update anyway. What
-actually makes a preinstalled app disappear is the package state inside the
-running instance, so that is what this section changes — through the player's
-own `HD-Adb.exe`, on the instance's published ADB port, with a private adb
-server that is stopped again afterwards. Nothing is downloaded, and no
-root/Magisk is involved.
+This half never touches `Root.vhd`. What makes a preinstalled app disappear
+here is the package state inside the running instance, so that is what it
+changes — through the player's own `HD-Adb.exe`, on the instance's published
+ADB port, with a private adb server that is stopped again afterwards. Nothing is
+downloaded, and no root/Magisk is involved. Use the **Hardcode** half when you
+want the file itself gone from the image.
 
 * **Preinstalled apps** — a reviewed list: `gg.now.ads.service`,
   `com.uncube.gamevantage`, `com.bluestacks.appmart`, `com.bluestacks.appfinder`,
@@ -551,6 +556,56 @@ The instance must be **running** with *Enable Android debugging (ADB)* on; the
 ADB port comes from `bluestacks.conf`, so it is never guessed. The guest storage
 lives in the instance's own `Data.vhdx`, which is why two instances can be
 cleaned independently and why the undo record is kept per instance.
+
+### 2 · Hardcode debloat (Root.vhd)
+
+`Root.vhd` is the engine's Android system disk: an ext4 filesystem inside a VHD,
+in `<ProgramData>\BlueStacks_*\Engine\<arch>\Root.vhd`. This half opens it in
+place and gives you a file manager over it — a path bar, **Up**, the folder
+listing with sizes, **Open**, **Save** (extract), **Add file**, **Add folder**,
+**New folder**, **Delete** and **Undo**. Writes are real writes: the bytes of
+the image change, and the next boot of an instance that uses the engine sees
+them.
+
+What it supports is checked before it is mounted, and anything outside that is
+refused with a reason instead of guessed at:
+
+* **VHD:** fixed and dynamic disks, and a plain raw image. The footer decides
+  which, the BAT of a dynamic disk is followed, and a partition table (MBR or
+  GPT) is walked to find the filesystem.
+* **ext4:** 1 KiB–64 KiB blocks, extent trees, 32-bit and 64-bit, metadata
+  checksums (`metadata_csum`) recomputed exactly as the kernel does, sparse
+  superblocks and flex groups.
+* **Refused read-only:** a filesystem with a dirty journal or a failed
+  validation, and features the engine does not implement — indexed (htree)
+  folders, `meta_bg`, `bigalloc`, inline data and encrypted names. The page
+  shows *read-only* and the reason instead of offering buttons that would damage
+  the image.
+
+Every change is a block journal first: the original bytes of each 512-byte
+sector the edit is about to touch are saved to the application data folder
+(`…/rootvhd/<stamp>-Root.vhd.bin` plus a `.json` manifest) *before* the image is
+written, and the record only becomes real once the write succeeded. **Undo**
+replays the ranges in reverse and leaves every other byte alone, so the image
+comes back byte for byte — the regression suite proves exactly that on a real
+256 KiB ext4-in-a-VHD fixture (`tests/fixtures/root-256k.vhd`, regenerated by
+`scripts/make-test-image.sh`, checked with `e2fsck`).
+
+Two things worth knowing before you write:
+
+* **Close BlueStacks.** The player keeps the image open and reads it while it
+  runs; a write from here while it is running is not seen by the running
+  instance and can be overwritten when it exits.
+* **The image is shared.** Instances cloned from the same engine boot from this
+  one file, so a change here is a change for all of them, and a BlueStacks
+  engine update downloads a fresh `Root.vhd` and replaces it. The journal is
+  your way back, and the tool never writes without one.
+
+The engine files themselves are not downloaded by this tool. If the installation
+has no engine folder yet, download the engine package from BlueStacks, open it
+with WinRAR (it is a self-extracting archive) and point the **Root.vhd** field at
+the `Root.vhd` inside the `Pie64` folder; the page offers the same link it was
+built against.
 
 The Debloat feature set follows
 [Jordan231111/Bluestacks-Debloat](https://github.com/Jordan231111/Bluestacks-Debloat)
