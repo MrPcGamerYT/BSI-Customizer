@@ -575,12 +575,16 @@ works:
   name or size with one click on the column header;
 * a **path bar** with Up and clickable breadcrumbs, and **Refresh**;
 * **Add file**, **Add folder** (a whole tree, structure included), **New
-  folder**, **Replace** (swap the contents of an existing file while keeping
-  its path in Root.vhd), **Save** (extract a file or folder anywhere on this
-  PC), and **Delete** — a file goes at once, a folder asks first because
-  everything under it goes with it. Adding a duplicate name is refused; use
-  Replace explicitly instead;
+  folder**, **Rename**, **Copy** or **Move** items within the image, **Replace**
+  (swap the contents of an existing file while keeping its path in Root.vhd),
+  **Save** (extract a file or folder anywhere on this PC), and **Delete** — a
+  file goes at once, a folder asks first because everything under it goes with
+  it. Copy keeps the folder tree, ownership, permission bits and modification
+  times; Move keeps the in-image inode and metadata. Adding a duplicate name is refused; use Replace
+  explicitly instead;
 * **drag and drop** from Explorer straight into the open folder;
+* symbolic links are shown with a link icon; **Copy** preserves the link, while
+  **Save target** writes its target path as text instead of following it;
 * **filter this folder** as you type, or **Search everywhere** to find a name
   anywhere in the image (it walks the folders itself, and says when it stops
   at its result cap).
@@ -598,11 +602,12 @@ refused with a reason instead of guessed at:
 * **ext4:** 1 KiB–64 KiB blocks, extent trees, 32-bit and 64-bit, metadata
   checksums (`metadata_csum`) recomputed exactly as the kernel does, sparse
   superblocks and flex groups.
-* **Refused read-only:** a filesystem with a dirty journal or a failed
-  validation, and features the engine does not implement — indexed (htree)
-  folders, `meta_bg`, `bigalloc`, inline data and encrypted names. The page
-  shows *read-only* and the reason instead of offering buttons that would damage
-  the image.
+* **Refused read-only:** a filesystem with a dirty journal or failed
+  validation, or unsupported volume-wide features such as `meta_bg`,
+  `bigalloc`, inline data and encrypted names. Indexed (htree) folders can be
+  browsed and existing files can be replaced or deleted; adding or renaming
+  entries in those folders is refused because the hash index is not rebuilt.
+  This is an intentional safety limit, not full DiskGenius parity.
 
 Every change is a block journal first: the original bytes of each 512-byte
 sector the edit is about to touch are saved to the application data folder

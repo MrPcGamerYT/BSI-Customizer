@@ -280,6 +280,76 @@ QVariantMap withJournal(const QString &imagePath, Change change)
              { QStringLiteral("msg"), QStringLiteral("Done.") } };
 }
 
+bool copyEntry(RootDisk::Volume &volume, std::uint32_t sourceInode,
+               std::uint32_t destinationDir, const std::string &newName,
+               std::uint64_t *copiedBytes, std::uint32_t *itemCount,
+               unsigned depth, std::string *error)
+{
+    constexpr std::uint64_t maxFileBytes = 512ull * 1024 * 1024;
+    constexpr std::uint64_t maxCopyBytes = 2ull * 1024 * 1024 * 1024;
+    constexpr std::uint32_t maxItems = 100000;
+    constexpr unsigned maxDepth = 128;
+    if (depth > maxDepth || ++*itemCount > maxItems) {
+        if (error) *error = "The copy exceeds the safe folder depth or item limit.";
+        return false;
+    }
+
+    const RootDisk::Stat source = volume.stat(sourceInode, error);
+    if (source.inode == 0) return false;
+    if (source.dir()) {
+        if (!volume.makeDir(destinationDir, newName, std::uint16_t(source.mode & 0x0FFF),
+                            error, source.uid, source.gid, source.mtime))
+            return false;
+        const RootDisk::Listing destination = volume.list(destinationDir, error);
+        std::uint32_t copiedDir = 0;
+        for (const auto &entry : destination.entries)
+            if (entry.name == newName) { copiedDir = entry.inode; break; }
+        if (copiedDir == 0) {
+            if (error) *error = "The copied folder could not be reopened.";
+            return false;
+        }
+        const RootDisk::Listing children = volume.list(sourceInode, error);
+        if (children.inode == 0) return false;
+        for (const auto &child : children.entries)
+            if (!copyEntry(volume, child.inode, copiedDir, child.name,
+                           copiedBytes, itemCount, depth + 1, error))
+                return false;
+        return true;
+    }
+    if (source.symlink()) {
+        std::vector<std::uint8_t> target = volume.readFile(sourceInode, error);
+        if (target.size() != source.size) {
+            if (error && error->empty()) *error = "The symbolic-link target could not be read completely.";
+            return false;
+        }
+        if (source.size > maxCopyBytes - *copiedBytes
+            || !volume.putSymlink(destinationDir, newName, target, error,
+                                  source.uid, source.gid, source.mtime))
+            return false;
+        *copiedBytes += source.size;
+        return true;
+    }
+    if (!source.regular()) {
+        if (error) *error = "This item is not a regular file or folder, so it cannot be copied.";
+        return false;
+    }
+    if (source.size > maxFileBytes || source.size > maxCopyBytes - *copiedBytes) {
+        if (error) *error = "The copy exceeds the 512 MB per-file or 2 GB total safe limit.";
+        return false;
+    }
+    std::vector<std::uint8_t> bytes = volume.readFile(sourceInode, error);
+    if (bytes.size() != source.size) {
+        if (error && error->empty()) *error = "A source file could not be read completely.";
+        return false;
+    }
+    if (!volume.putFile(destinationDir, newName, bytes,
+                        std::uint16_t(source.mode & 0x0FFF), error,
+                        source.uid, source.gid, source.mtime))
+        return false;
+    *copiedBytes += source.size;
+    return true;
+}
+
 } // namespace
 
 // ---------------------------------------------------------------------------
@@ -395,8 +465,12 @@ QVariantMap listing(const QString &imagePath, const QString &innerPath)
               QDir::cleanPath(QString::fromStdString(RootDisk::joinPath(path.empty() ? "/" : path,
                                                                         entry.name))) },
             { QStringLiteral("dir"), entry.dir },
+            { QStringLiteral("symlink"), info.symlink() },
             { QStringLiteral("size"), double(info.size) },
             { QStringLiteral("mode"), int(info.mode & 0x0FFF) },
+            { QStringLiteral("uid"), info.uid },
+            { QStringLiteral("gid"), info.gid },
+            { QStringLiteral("links"), info.links },
             { QStringLiteral("mtime"), double(info.mtime) },
         };
     }
@@ -636,6 +710,8 @@ QVariantMap replaceFile(const QString &imagePath, const QString &innerPath,
 QVariantMap addFolder(const QString &imagePath, const QString &innerDir, const QString &localDir)
 {
     const QFileInfo source(localDir);
+    if (source.isSymLink())
+        return failure(QStringLiteral("Import the real folder, not a symbolic-link shortcut."));
     if (!source.isDir())
         return failure(QStringLiteral("“%1” is not a folder.").arg(QDir::toNativeSeparators(localDir)));
 
@@ -655,6 +731,11 @@ QVariantMap addFolder(const QString &imagePath, const QString &innerDir, const Q
         const auto entries = dir.entryInfoList(QDir::Files | QDir::Dirs | QDir::NoDotAndDotDot,
                                                QDir::Name | QDir::DirsFirst);
         for (const QFileInfo &entry : entries) {
+            if (entry.isSymLink()) {
+                walkError = QStringLiteral("“%1” is a symbolic link. Symbolic links are not imported from host folders.")
+                                .arg(entry.fileName());
+                return false;
+            }
             const QString rel = relative.isEmpty() ? entry.fileName()
                                                    : relative + QLatin1Char('/') + entry.fileName();
             if (entry.isDir()) {
@@ -737,6 +818,99 @@ QVariantMap makeFolder(const QString &imagePath, const QString &innerDir, const 
     if (!done.value(QStringLiteral("ok")).toBool()) return done;
     return { { QStringLiteral("ok"), true },
              { QStringLiteral("msg"), QStringLiteral("Created “%1” in %2.").arg(name, innerDir) } };
+}
+
+QVariantMap rename(const QString &imagePath, const QString &innerPath, const QString &newName)
+{
+    if (innerPath.isEmpty() || innerPath == QLatin1String("/"))
+        return failure(QStringLiteral("The image root cannot be renamed."));
+    if (newName.contains(QLatin1Char('/')) || newName.contains(QLatin1Char('\\')))
+        return failure(QStringLiteral("Enter a name, not a path."));
+    const QFileInfo inner(innerPath);
+    const QString oldName = inner.fileName();
+    const QString parent = inner.path();
+    const QVariantMap done = withJournal(
+        imagePath,
+        [&](RootDisk::Volume &volume, std::string *error) {
+            const std::uint32_t dir = volume.resolve(parent.toStdString(), error);
+            if (dir == 0) return false;
+            return volume.rename(dir, oldName.toStdString(), newName.toStdString(), error);
+        });
+    if (!done.value(QStringLiteral("ok")).toBool()) return done;
+    return { { QStringLiteral("ok"), true },
+             { QStringLiteral("msg"), QStringLiteral("Renamed “%1” to “%2”.")
+                                          .arg(innerPath, newName) } };
+}
+
+QVariantMap move(const QString &imagePath, const QString &innerPath,
+                 const QString &destinationDir)
+{
+    const QString sourcePath = QDir::cleanPath(innerPath);
+    const QString destination = QDir::cleanPath(destinationDir);
+    if (sourcePath.isEmpty() || sourcePath == QLatin1String("/"))
+        return failure(QStringLiteral("The image root cannot be moved."));
+    if (destination == sourcePath || destination.startsWith(sourcePath + QLatin1Char('/')))
+        return failure(QStringLiteral("A folder cannot be moved into itself or one of its descendants."));
+
+    const QFileInfo source(sourcePath);
+    const QString name = source.fileName();
+    const QString sourceParent = source.path();
+    const QVariantMap done = withJournal(
+        imagePath,
+        [&](RootDisk::Volume &volume, std::string *error) {
+            const std::uint32_t from = volume.resolve(sourceParent.toStdString(), error);
+            if (from == 0) return false;
+            const std::uint32_t to = volume.resolve(destination.toStdString(), error);
+            if (to == 0) return false;
+            return volume.move(from, name.toStdString(), to, name.toStdString(), error);
+        });
+    if (!done.value(QStringLiteral("ok")).toBool()) return done;
+    return { { QStringLiteral("ok"), true },
+             { QStringLiteral("msg"), QStringLiteral("Moved “%1” to %2.").arg(sourcePath, destination) } };
+}
+
+QVariantMap copy(const QString &imagePath, const QString &innerPath,
+                 const QString &destinationDir, const QString &newName)
+{
+    const QString sourcePath = QDir::cleanPath(innerPath);
+    const QString destination = QDir::cleanPath(destinationDir);
+    if (sourcePath.isEmpty() || sourcePath == QLatin1String("/"))
+        return failure(QStringLiteral("The image root cannot be copied as an item."));
+    if (destination == sourcePath || destination.startsWith(sourcePath + QLatin1Char('/')))
+        return failure(QStringLiteral("A folder cannot be copied inside itself or one of its descendants."));
+
+    const QFileInfo source(sourcePath);
+    const QString name = newName.trimmed().isEmpty() ? source.fileName() : newName.trimmed();
+    if (name.isEmpty() || name == QLatin1String(".") || name == QLatin1String("..")
+        || name.contains(QLatin1Char('/')) || name.contains(QLatin1Char('\\')))
+        return failure(QStringLiteral("Enter a valid single name for the copy."));
+    std::uint64_t copiedBytes = 0;
+    std::uint32_t itemCount = 0;
+    const QVariantMap done = withJournal(
+        imagePath,
+        [&](RootDisk::Volume &volume, std::string *error) {
+            const std::uint32_t inode = volume.resolve(sourcePath.toStdString(), error);
+            if (inode == 0) return false;
+            const std::uint32_t destinationInode = volume.resolve(destination.toStdString(), error);
+            if (destinationInode == 0) return false;
+            const RootDisk::Listing existing = volume.list(destinationInode, error);
+            if (existing.inode == 0) return false;
+            for (const auto &entry : existing.entries)
+                if (entry.name == name) {
+                    if (error) *error = "“" + name.toStdString()
+                        + "” already exists in the destination folder.";
+                    return false;
+                }
+            if (!copyEntry(volume, inode, destinationInode, name.toStdString(),
+                           &copiedBytes, &itemCount, 0, error))
+                return false;
+            return true;
+        });
+    if (!done.value(QStringLiteral("ok")).toBool()) return done;
+    return { { QStringLiteral("ok"), true },
+             { QStringLiteral("msg"), QStringLiteral("Copied %1 item(s), %2.")
+                                          .arg(itemCount)
+                                          .arg(QLocale().formattedDataSize(qint64(copiedBytes))) } };
 }
 
 QVariantMap remove(const QString &imagePath, const QString &innerPath)

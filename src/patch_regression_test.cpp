@@ -1382,6 +1382,50 @@ void checkRootDisk()
         }
     }
 
+    // ---- symbolic links (fast inline and extent-backed) ----
+    {
+        const QString symlinkImage = temp.filePath(QStringLiteral("symlink.vhd"));
+        check(QFile::copy(fixture, symlinkImage), "a copy of the ext4 fixture is made for symlink tests");
+        const std::vector<std::uint8_t> shortTarget { 's', 'y', 's', '/', 'b', 'i', 'n' };
+        std::string error;
+        auto image = RootDisk::openImage(QFile::encodeName(symlinkImage).toStdString(), &error);
+        auto volume = image ? RootDisk::Volume::mount(std::move(image), &error) : nullptr;
+        check(volume != nullptr, "the symlink test image mounts");
+        if (volume) {
+            const auto root = volume->resolve("/", &error);
+            check(volume->putSymlink(root, "fast-link", shortTarget, &error),
+                  "a short symbolic link is created inline");
+            const auto fastInode = volume->resolve("/fast-link", &error);
+            const auto fastStat = volume->stat(fastInode, &error);
+            check(fastStat.symlink() && volume->readFile(fastInode, &error) == shortTarget,
+                  "reading a short symbolic link returns its target, not block pointers");
+
+            const QByteArray longTarget(100, 'x');
+            const std::vector<std::uint8_t> longBytes(longTarget.begin(), longTarget.end());
+            check(volume->putSymlink(root, "long-link", longBytes, &error),
+                  "a long symbolic link is stored using extents");
+            const auto longInode = volume->resolve("/long-link", &error);
+            check(volume->stat(longInode, &error).symlink()
+                      && volume->readFile(longInode, &error) == longBytes,
+                  "an extent-backed symbolic link returns its full target");
+            check(volume->makeDir(root, "links-copy", 0755, &error),
+                  "a destination folder is created for symbolic-link copy tests");
+        }
+        const auto copiedLink = RootVhd::copy(symlinkImage, QStringLiteral("/fast-link"),
+                                               QStringLiteral("/links-copy"));
+        check(copiedLink.value(QStringLiteral("ok")).toBool(),
+              "symbolic links can be copied without dereferencing their target");
+        const QString linkTargetFile = temp.filePath(QStringLiteral("link-target.txt"));
+        const auto linkExtract = RootVhd::extract(symlinkImage,
+                                                  QStringLiteral("/links-copy/fast-link"),
+                                                  linkTargetFile);
+        QFile linkTarget(linkTargetFile);
+        linkTarget.open(QIODevice::ReadOnly);
+        check(linkExtract.value(QStringLiteral("ok")).toBool()
+                  && linkTarget.readAll() == QByteArray("sys/bin"),
+              "saving a symbolic link writes its target text");
+    }
+
     // ---- the file manager: add, list, delete ----
     int originalEntries = 0;                  // the root folder as the image shipped it
     {
@@ -1412,6 +1456,15 @@ void checkRootDisk()
                   && duplicate.value(QStringLiteral("msg")).toString().contains(QLatin1String("Replace")),
               "Add refuses an existing name and directs the user to Replace");
 
+        const auto renamed = RootVhd::rename(work, QStringLiteral("/added.txt"),
+                                              QStringLiteral("renamed.txt"));
+        check(renamed.value(QStringLiteral("ok")).toBool(),
+              "a file can be renamed without changing its contents");
+        const auto collision = RootVhd::rename(work, QStringLiteral("/renamed.txt"),
+                                                QStringLiteral("hello.txt"));
+        check(!collision.value(QStringLiteral("ok")).toBool(),
+              "rename refuses to overwrite an existing entry");
+
         const QString replacementPath = temp.filePath(QStringLiteral("replacement.bin"));
         const QByteArray replacementBytes("new bytes replace the old contents\n");
         {
@@ -1419,13 +1472,13 @@ void checkRootDisk()
             replacement.open(QIODevice::WriteOnly);
             replacement.write(replacementBytes);
         }
-        const auto replaced = RootVhd::replaceFile(work, QStringLiteral("/added.txt"),
+        const auto replaced = RootVhd::replaceFile(work, QStringLiteral("/renamed.txt"),
                                                    replacementPath);
         check(replaced.value(QStringLiteral("ok")).toBool(),
               "an existing image file can be replaced from a differently named local file");
 
         const QString out = temp.filePath(QStringLiteral("out.txt"));
-        const auto extract = RootVhd::extract(work, QStringLiteral("/added.txt"), out);
+        const auto extract = RootVhd::extract(work, QStringLiteral("/renamed.txt"), out);
         check(extract.value(QStringLiteral("ok")).toBool(), "the replacement can be extracted");
         {
             QFile file(out);
@@ -1456,6 +1509,64 @@ void checkRootDisk()
         check(nested.value(QStringLiteral("ok")).toBool()
                   && nested.value(QStringLiteral("entries")).toList().size() == 1,
               "the tree keeps its structure, sub-folder included");
+        const auto moveTree = RootVhd::move(work, QStringLiteral("/tree"),
+                                            QStringLiteral("/debloat"));
+        check(moveTree.value(QStringLiteral("ok")).toBool()
+                  && RootVhd::listing(work, QStringLiteral("/debloat/tree/nested"))
+                         .value(QStringLiteral("ok")).toBool(),
+              "a folder tree can be moved within the image without losing its children");
+        const auto cycleMove = RootVhd::move(work, QStringLiteral("/debloat/tree"),
+                                             QStringLiteral("/debloat/tree/nested"));
+        check(!cycleMove.value(QStringLiteral("ok")).toBool(),
+              "a folder cannot be moved into one of its own descendants");
+        const auto moveTreeBack = RootVhd::move(work, QStringLiteral("/debloat/tree"),
+                                                QStringLiteral("/"));
+        check(moveTreeBack.value(QStringLiteral("ok")).toBool()
+                  && RootVhd::listing(work, QStringLiteral("/tree/nested"))
+                         .value(QStringLiteral("ok")).toBool(),
+              "a moved folder can be moved back to its original parent");
+        const auto copyTree = RootVhd::copy(work, QStringLiteral("/tree"),
+                                            QStringLiteral("/debloat"));
+        const auto copiedNested = RootVhd::listing(work, QStringLiteral("/debloat/tree/nested"));
+        check(copyTree.value(QStringLiteral("ok")).toBool()
+                  && copiedNested.value(QStringLiteral("ok")).toBool(),
+              "a folder tree can be copied within the image");
+        const QVariantMap sourceLeafInfo = RootVhd::listing(work, QStringLiteral("/tree/nested"))
+                                               .value(QStringLiteral("entries")).toList().value(0).toMap();
+        const QVariantMap copiedLeafInfo = copiedNested.value(QStringLiteral("entries"))
+                                               .toList().value(0).toMap();
+        check(copiedLeafInfo.value(QStringLiteral("mode")) == sourceLeafInfo.value(QStringLiteral("mode"))
+                  && copiedLeafInfo.value(QStringLiteral("uid")) == sourceLeafInfo.value(QStringLiteral("uid"))
+                  && copiedLeafInfo.value(QStringLiteral("gid")) == sourceLeafInfo.value(QStringLiteral("gid"))
+                  && copiedLeafInfo.value(QStringLiteral("mtime")) == sourceLeafInfo.value(QStringLiteral("mtime")),
+              "a folder copy retains file permissions, owner, group, and modification time");
+        const QString copiedLeaf = temp.filePath(QStringLiteral("copied-leaf.txt"));
+        const auto copyExtract = RootVhd::extract(work, QStringLiteral("/debloat/tree/nested/leaf.txt"),
+                                                  copiedLeaf);
+        QFile copiedLeafFile(copiedLeaf);
+        copiedLeafFile.open(QIODevice::ReadOnly);
+        check(copyExtract.value(QStringLiteral("ok")).toBool()
+                  && copiedLeafFile.readAll() == QByteArray("a leaf\n"),
+              "a copied tree contains the original file bytes");
+        const auto removeCopiedTree = RootVhd::remove(work, QStringLiteral("/debloat/tree"));
+        check(removeCopiedTree.value(QStringLiteral("ok")).toBool(),
+              "the copied folder tree can be removed recursively");
+        const auto copyRenamedFile = RootVhd::copy(work, QStringLiteral("/renamed.txt"),
+                                                   QStringLiteral("/debloat"),
+                                                   QStringLiteral("renamed-copy.txt"));
+        const QString copiedFilePath = temp.filePath(QStringLiteral("renamed-copy.txt"));
+        const auto copyFileExtract = RootVhd::extract(work,
+                                                      QStringLiteral("/debloat/renamed-copy.txt"),
+                                                      copiedFilePath);
+        QFile copiedFile(copiedFilePath);
+        copiedFile.open(QIODevice::ReadOnly);
+        check(copyRenamedFile.value(QStringLiteral("ok")).toBool()
+                  && copyFileExtract.value(QStringLiteral("ok")).toBool()
+                  && copiedFile.readAll() == replacementBytes,
+              "a file can be copied under a new name with its bytes intact");
+        check(RootVhd::remove(work, QStringLiteral("/debloat/renamed-copy.txt"))
+                  .value(QStringLiteral("ok")).toBool(),
+              "the copied file can be removed independently");
 
         // A file and a folder are both accepted by one addPath call.
         const QString pathFile = temp.filePath(QStringLiteral("path-added.txt"));
@@ -1478,6 +1589,10 @@ void checkRootDisk()
         }
         check(search.value(QStringLiteral("ok")).toBool() && foundLeaf,
               "search finds a file by name anywhere in the image");
+        const auto removeTree = RootVhd::remove(work, QStringLiteral("/tree"));
+        check(removeTree.value(QStringLiteral("ok")).toBool()
+                  && !RootVhd::listing(work, QStringLiteral("/tree")).value(QStringLiteral("ok")).toBool(),
+              "deleting a folder removes its nested files and subfolders");
         const auto noMatch = RootVhd::search(work, QStringLiteral("zzz-nothing-zzz"));
         check(noMatch.value(QStringLiteral("ok")).toBool()
                   && noMatch.value(QStringLiteral("entries")).toList().isEmpty(),
@@ -1492,7 +1607,7 @@ void checkRootDisk()
 
         const int beforeRemove =
             RootVhd::listing(work, QStringLiteral("/")).value(QStringLiteral("entries")).toList().size();
-        const auto remove = RootVhd::remove(work, QStringLiteral("/added.txt"));
+        const auto remove = RootVhd::remove(work, QStringLiteral("/renamed.txt"));
         check(remove.value(QStringLiteral("ok")).toBool(), "a file is removed from the image");
         check(RootVhd::listing(work, QStringLiteral("/")).value(QStringLiteral("entries")).toList().size()
                   == beforeRemove - 1,

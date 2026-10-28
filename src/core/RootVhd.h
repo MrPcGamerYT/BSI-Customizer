@@ -48,6 +48,11 @@ QVariantMap addFolder(const QString &imagePath, const QString &innerDir, const Q
 // Whatever the path is — a file or a folder tree — added to `innerDir`.
 QVariantMap addPath(const QString &imagePath, const QString &innerDir, const QString &localPath);
 QVariantMap makeFolder(const QString &imagePath, const QString &innerDir, const QString &name);
+QVariantMap rename(const QString &imagePath, const QString &innerPath, const QString &newName);
+QVariantMap move(const QString &imagePath, const QString &innerPath,
+                 const QString &destinationDir);
+QVariantMap copy(const QString &imagePath, const QString &innerPath,
+                 const QString &destinationDir, const QString &newName = QString());
 QVariantMap remove(const QString &imagePath, const QString &innerPath);
 
 // The block journal: what the editor changed last, and how to put it back.

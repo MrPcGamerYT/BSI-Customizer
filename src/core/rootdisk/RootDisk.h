@@ -106,15 +106,28 @@ public:
     // Resolves "system/bin/" to an inode; empty path is the root.
     std::uint32_t resolve(const std::string &path, std::string *error);
 
-    // Reads a regular file. `limit` caps the size the caller asked for.
+    // Reads a regular file or returns a symlink's target bytes.
     std::vector<std::uint8_t> readFile(std::uint32_t inode, std::string *error);
 
     // ---- writes ----
     // Creates a file, or replaces one that already exists (its blocks are
     // reallocated and its entry is kept, so links and permissions survive).
     bool putFile(std::uint32_t dirInode, const std::string &name,
-                 const std::vector<std::uint8_t> &data, std::uint16_t mode, std::string *error);
-    bool makeDir(std::uint32_t dirInode, const std::string &name, std::uint16_t mode, std::string *error);
+                 const std::vector<std::uint8_t> &data, std::uint16_t mode, std::string *error,
+                 std::uint32_t uid = 0, std::uint32_t gid = 0, std::uint32_t mtime = 0);
+    bool putSymlink(std::uint32_t dirInode, const std::string &name,
+                    const std::vector<std::uint8_t> &target, std::string *error,
+                    std::uint32_t uid = 0, std::uint32_t gid = 0, std::uint32_t mtime = 0);
+    bool makeDir(std::uint32_t dirInode, const std::string &name, std::uint16_t mode,
+                 std::string *error, std::uint32_t uid = 0, std::uint32_t gid = 0,
+                 std::uint32_t mtime = 0);
+    // Renames one entry without changing its inode or file contents.
+    bool rename(std::uint32_t dirInode, const std::string &oldName,
+                const std::string &newName, std::string *error);
+    // Moves one entry between directories without copying its inode or contents.
+    bool move(std::uint32_t sourceDir, const std::string &name,
+              std::uint32_t destinationDir, const std::string &newName,
+              std::string *error);
     // Removes a file, or a folder and everything below it.
     bool remove(std::uint32_t dirInode, const std::string &name, std::string *error);
 
@@ -146,6 +159,8 @@ private:
                    const DirEntry &entry, std::string *error);
     bool removeDirent(std::uint32_t dirInode, std::vector<std::uint8_t> *dirRaw,
                       const std::string &name, std::string *error);
+    bool changeDirentType(std::uint32_t dirInode, const std::string &name,
+                          std::uint8_t type, std::string *error);
     bool writeTimes(bool created);
 
     std::uint32_t crc() const;
