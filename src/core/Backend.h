@@ -219,6 +219,26 @@ public:
                                          const QString &instance);
     Q_INVOKABLE QVariantMap androidRestore(const QString &instance);
 
+    // ---- the hardcode debloater: Root.vhd as a file manager ----
+    // Every write is journalled first, so undo() puts the image back exactly.
+    Q_INVOKABLE QString rootvhdFind();
+    Q_INVOKABLE QVariantMap rootvhdInfo(const QString &image);
+    Q_INVOKABLE QVariantMap rootvhdList(const QString &image, const QString &innerPath);
+    Q_INVOKABLE QVariantMap rootvhdExtract(const QString &image, const QString &innerPath,
+                                           const QString &localPath);
+    Q_INVOKABLE QVariantMap rootvhdAdd(const QString &image, const QString &innerDir,
+                                       const QString &localFile);
+    Q_INVOKABLE QVariantMap rootvhdAddFolder(const QString &image, const QString &innerDir,
+                                             const QString &localDir);
+    Q_INVOKABLE QVariantMap rootvhdMkdir(const QString &image, const QString &innerDir,
+                                         const QString &name);
+    Q_INVOKABLE QVariantMap rootvhdRemove(const QString &image, const QString &innerPath);
+    Q_INVOKABLE QVariantMap rootvhdUndo(const QString &image);
+    Q_INVOKABLE QVariantMap rootvhdDiscardUndo(const QString &image);
+    // Engine folders found for this installation, so the page can say where
+    // Root.vhd would be before the user picks one.
+    Q_INVOKABLE QStringList rootvhdEngineFolders();
+
     // ---- Discord Rich Presence ID utility ----
     Q_INVOKABLE QVariantMap rpcidFind(const QString &path, bool noNetwork = true);
     Q_INVOKABLE QVariantMap rpcidReplace(const QString &path, const QString &newId,

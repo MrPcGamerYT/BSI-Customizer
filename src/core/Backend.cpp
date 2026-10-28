@@ -10,6 +10,7 @@
 #include "AboutPatcher.h"
 #include "DebloatPatcher.h"
 #include "LayoutPatcher.h"
+#include "RootVhd.h"
 #include "RpcIdPatcher.h"
 #include "SettingsManager.h"
 #include "ThemeEngine.h"
@@ -1469,6 +1470,97 @@ QVariantMap Backend::androidApply(const QStringList &packages, bool wipeDownload
     request.keepCopy = keepCopy;
     request.clearAppData = clearAppData;
     return Android::apply(m_settings->exePath(), m_settings->confPath(), instance, request);
+}
+
+// ---------------------------------------------------------------------------
+// the hardcode debloater (Root.vhd)
+// ---------------------------------------------------------------------------
+
+QString Backend::rootvhdFind()
+{
+    return RootVhd::findImage(m_settings->exePath());
+}
+
+QVariantMap Backend::rootvhdInfo(const QString &image)
+{
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) { return worker.rootvhdInfo(image); });
+    return RootVhd::info(image);
+}
+
+QVariantMap Backend::rootvhdList(const QString &image, const QString &innerPath)
+{
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) { return worker.rootvhdList(image, innerPath); });
+    return RootVhd::listing(image, innerPath);
+}
+
+QVariantMap Backend::rootvhdExtract(const QString &image, const QString &innerPath,
+                                    const QString &localPath)
+{
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) {
+            return worker.rootvhdExtract(image, innerPath, localPath);
+        });
+    return RootVhd::extract(image, innerPath, localPath);
+}
+
+QVariantMap Backend::rootvhdAdd(const QString &image, const QString &innerDir,
+                                const QString &localFile)
+{
+    if (actionsLocked()) return lockedMap();
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) {
+            return worker.rootvhdAdd(image, innerDir, localFile);
+        });
+    return RootVhd::addFile(image, innerDir, localFile);
+}
+
+QVariantMap Backend::rootvhdAddFolder(const QString &image, const QString &innerDir,
+                                      const QString &localDir)
+{
+    if (actionsLocked()) return lockedMap();
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) {
+            return worker.rootvhdAddFolder(image, innerDir, localDir);
+        });
+    return RootVhd::addFolder(image, innerDir, localDir);
+}
+
+QVariantMap Backend::rootvhdMkdir(const QString &image, const QString &innerDir, const QString &name)
+{
+    if (actionsLocked()) return lockedMap();
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) { return worker.rootvhdMkdir(image, innerDir, name); });
+    return RootVhd::makeFolder(image, innerDir, name);
+}
+
+QVariantMap Backend::rootvhdRemove(const QString &image, const QString &innerPath)
+{
+    if (actionsLocked()) return lockedMap();
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) { return worker.rootvhdRemove(image, innerPath); });
+    return RootVhd::remove(image, innerPath);
+}
+
+QVariantMap Backend::rootvhdUndo(const QString &image)
+{
+    if (actionsLocked()) return lockedMap();
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) { return worker.rootvhdUndo(image); });
+    return RootVhd::undo(image);
+}
+
+QVariantMap Backend::rootvhdDiscardUndo(const QString &image)
+{
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) { return worker.rootvhdDiscardUndo(image); });
+    return RootVhd::discardUndo(image);
+}
+
+QStringList Backend::rootvhdEngineFolders()
+{
+    return RootVhd::engineFolders(m_settings->exePath());
 }
 
 QVariantMap Backend::androidRestore(const QString &instance)

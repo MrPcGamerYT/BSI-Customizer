@@ -6,6 +6,7 @@
 #include "core/ExtrasPatcher.h"
 #include "core/AboutPatcher.h"
 #include "core/AndroidCleanup.h"
+#include "core/rootdisk/RootDisk.h"
 #include "core/AdbClient.h"
 #include "core/DebloatConfig.h"
 #include "core/DebloatPatcher.h"
@@ -19,6 +20,7 @@
 #include "core/PeUtils.h"
 #include "core/QtResources.h"
 #include "core/QtResourceRegistration.h"
+#include "core/RootVhd.h"
 #include "core/RpcIdPatcher.h"
 #include "core/RpcIdScan.h"
 #include "core/SettingsManager.h"
@@ -1233,6 +1235,148 @@ void checkDebloat()
         check(!Debloat::cloudProductsAt({ temp.filePath(QStringLiteral("empty")) }).size(),
               "a folder without the companion executable is not treated as an install");
     }
+}
+
+// The hardcode debloater: open a real VHD, read the ext4 inside it, write
+// files and folders into it, delete them again, and prove one Undo puts the
+// image back byte for byte.
+void checkRootDisk()
+{
+    std::printf("[rootdisk] Root.vhd as a file manager\n");
+#ifdef BSI_ROOT_VHD_FIXTURE
+    const QString fixture = QString::fromUtf8(BSI_ROOT_VHD_FIXTURE);
+    check(QFileInfo::exists(fixture), "the Root.vhd fixture is in the tree");
+    if (!QFileInfo::exists(fixture))
+        return;
+
+    QTemporaryDir temp;
+    check(temp.isValid(), "a scratch folder is available for the image");
+    if (!temp.isValid())
+        return;
+    const QString work = temp.filePath(QStringLiteral("Root.vhd"));
+    check(QFile::copy(fixture, work), "the fixture is copied so the tree is never written to");
+    const QByteArray pristine = [&work] {
+        QFile file(work);
+        return file.open(QIODevice::ReadOnly) ? file.readAll() : QByteArray();
+    }();
+    check(pristine.size() > 512, "the working copy really is a disk image");
+
+    // ---- the engine ----
+    {
+        std::string error;
+        auto image = RootDisk::openImage(QFile::encodeName(work).toStdString(), &error);
+        check(image != nullptr, "the VHD opens");
+        if (image) {
+            check(image->kind() == "fixed VHD",
+                  "the footer is recognised as a fixed (not dynamic) disk");
+            auto volume = RootDisk::Volume::mount(std::move(image), &error);
+            check(volume != nullptr, "the ext4 inside the VHD mounts");
+            if (volume) {
+                check(volume->writable(), "a clean filesystem is writable");
+                check(volume->blockSize() == 1024, "the 1 KiB block size is read from the superblock");
+
+                const RootDisk::Listing root = volume->list("/", &error);
+                bool hasHello = false;
+                for (const auto &entry : root.entries)
+                    if (entry.name == "hello.txt") hasHello = true;
+                check(root.inode != 0 && hasHello, "the root folder lists the file that is in it");
+                check(root.inode != 0 && root.entries.size() >= 2,
+                      "the root folder lists more than one entry");
+
+                const std::uint32_t file = volume->resolve("/hello.txt", &error);
+                check(file != 0, "/hello.txt resolves to an inode");
+                const auto data = volume->readFile(file, &error);
+                check(std::string(data.begin(), data.end()) == "hello world\n",
+                      "the file reads back with its bytes intact");
+            }
+        }
+    }
+
+    // ---- the file manager: add, list, delete ----
+    {
+        const auto info = RootVhd::info(work);
+        check(info.value(QStringLiteral("ok")).toBool(), "RootVhd::info opens the image");
+        check(info.value(QStringLiteral("writable")).toBool(), "RootVhd reports it writable");
+
+        const auto before = RootVhd::listing(work, QStringLiteral("/"));
+        check(before.value(QStringLiteral("ok")).toBool(), "the root folder is listed");
+        int entries = before.value(QStringLiteral("entries")).toList().size();
+        check(entries >= 2, "the listing carries the folder's entries");
+
+        const QString added = temp.filePath(QStringLiteral("added.txt"));
+        {
+            QFile file(added);
+            file.open(QIODevice::WriteOnly);
+            file.write("added by the regression test\n");
+        }
+        const auto add = RootVhd::addFile(work, QStringLiteral("/"), added);
+        check(add.value(QStringLiteral("ok")).toBool(), "a local file is written into the image");
+        const auto afterAdd = RootVhd::listing(work, QStringLiteral("/"));
+        check(afterAdd.value(QStringLiteral("entries")).toList().size() == entries + 1,
+              "the folder lists one entry more");
+        check(RootVhd::hasUndo(work), "the write left an undo record behind");
+
+        const QString out = temp.filePath(QStringLiteral("out.txt"));
+        const auto extract = RootVhd::extract(work, QStringLiteral("/added.txt"), out);
+        check(extract.value(QStringLiteral("ok")).toBool(), "the file is extracted again");
+        {
+            QFile file(out);
+            file.open(QIODevice::ReadOnly);
+            check(file.readAll() == "added by the regression test\n",
+                  "the extracted file is the one that was added");
+        }
+
+        const auto mkdir = RootVhd::makeFolder(work, QStringLiteral("/"), QStringLiteral("debloat"));
+        check(mkdir.value(QStringLiteral("ok")).toBool(), "a folder is created in the image");
+        const auto inside = RootVhd::listing(work, QStringLiteral("/debloat"));
+        check(inside.value(QStringLiteral("ok")).toBool()
+                  && inside.value(QStringLiteral("entries")).toList().isEmpty(),
+              "the new folder is empty and can be opened");
+
+        const auto remove = RootVhd::remove(work, QStringLiteral("/added.txt"));
+        check(remove.value(QStringLiteral("ok")).toBool(), "a file is removed from the image");
+        check(RootVhd::listing(work, QStringLiteral("/")).value(QStringLiteral("entries")).toList().size()
+                  == entries + 1,
+              "the folder is back to its old size plus the new folder");
+        const auto refused = RootVhd::remove(work, QStringLiteral("/not-there.txt"));
+        check(!refused.value(QStringLiteral("ok")).toBool(),
+              "removing something that is not there is refused, not guessed at");
+    }
+
+    // ---- undo ----
+    {
+        check(RootVhd::hasUndo(work), "the image still has an undo record");
+        const auto undone = RootVhd::undo(work);
+        check(undone.value(QStringLiteral("ok")).toBool(), "undo runs");
+        QFile file(work);
+        file.open(QIODevice::ReadOnly);
+        const QByteArray restored = file.readAll();
+        file.close();
+        check(restored == pristine, "undo restores the image byte for byte");
+        check(!RootVhd::hasUndo(work), "the undo record is gone once it has been replayed");
+        const auto reopened = RootVhd::listing(work, QStringLiteral("/"));
+        check(reopened.value(QStringLiteral("ok")).toBool()
+                  && reopened.value(QStringLiteral("entries")).toList().size() == 2,
+              "the restored image opens again and holds its original entries");
+    }
+
+    // ---- refusals ----
+    {
+        const auto missing = RootVhd::info(temp.filePath(QStringLiteral("nope.vhd")));
+        check(!missing.value(QStringLiteral("ok")).toBool(), "a missing image is refused");
+        const QString junk = temp.filePath(QStringLiteral("junk.vhd"));
+        {
+            QFile file(junk);
+            file.open(QIODevice::WriteOnly);
+            file.write(QByteArray(4096, 'x'));
+        }
+        const auto bad = RootVhd::info(junk);
+        check(!bad.value(QStringLiteral("ok")).toBool(), "a file with no ext4 in it is refused");
+        check(RootVhd::findImage(QString()).isEmpty(), "no installation means no engine folder guess");
+    }
+#else
+    check(true, "no Root.vhd fixture in this checkout; the file manager is not exercised");
+#endif
 }
 
 int runPatchRegressionTests()
@@ -6625,6 +6769,7 @@ Window {
 
     checkDebloat();
     checkAndroid();
+    checkRootDisk();
 
     return failures;
 }
