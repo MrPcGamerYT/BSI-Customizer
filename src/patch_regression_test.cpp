@@ -1527,10 +1527,19 @@ void checkRootDisk()
               "a moved folder can be moved back to its original parent");
         const auto copyTree = RootVhd::copy(work, QStringLiteral("/tree"),
                                             QStringLiteral("/debloat"));
+        const auto copiedNested = RootVhd::listing(work, QStringLiteral("/debloat/tree/nested"));
         check(copyTree.value(QStringLiteral("ok")).toBool()
-                  && RootVhd::listing(work, QStringLiteral("/debloat/tree/nested"))
-                         .value(QStringLiteral("ok")).toBool(),
+                  && copiedNested.value(QStringLiteral("ok")).toBool(),
               "a folder tree can be copied within the image");
+        const QVariantMap sourceLeafInfo = RootVhd::listing(work, QStringLiteral("/tree/nested"))
+                                               .value(QStringLiteral("entries")).toList().value(0).toMap();
+        const QVariantMap copiedLeafInfo = copiedNested.value(QStringLiteral("entries"))
+                                               .toList().value(0).toMap();
+        check(copiedLeafInfo.value(QStringLiteral("mode")) == sourceLeafInfo.value(QStringLiteral("mode"))
+                  && copiedLeafInfo.value(QStringLiteral("uid")) == sourceLeafInfo.value(QStringLiteral("uid"))
+                  && copiedLeafInfo.value(QStringLiteral("gid")) == sourceLeafInfo.value(QStringLiteral("gid"))
+                  && copiedLeafInfo.value(QStringLiteral("mtime")) == sourceLeafInfo.value(QStringLiteral("mtime")),
+              "a folder copy retains file permissions, owner, group, and modification time");
         const QString copiedLeaf = temp.filePath(QStringLiteral("copied-leaf.txt"));
         const auto copyExtract = RootVhd::extract(work, QStringLiteral("/debloat/tree/nested/leaf.txt"),
                                                   copiedLeaf);

@@ -579,8 +579,8 @@ works:
   (swap the contents of an existing file while keeping its path in Root.vhd),
   **Save** (extract a file or folder anywhere on this PC), and **Delete** — a
   file goes at once, a folder asks first because everything under it goes with
-  it. Copy keeps the folder tree and file permission bits; Move keeps the
-  in-image inode and metadata. Adding a duplicate name is refused; use Replace
+  it. Copy keeps the folder tree, ownership, permission bits and modification
+  times; Move keeps the in-image inode and metadata. Adding a duplicate name is refused; use Replace
   explicitly instead;
 * **drag and drop** from Explorer straight into the open folder;
 * symbolic links are shown with a link icon; **Copy** preserves the link, while

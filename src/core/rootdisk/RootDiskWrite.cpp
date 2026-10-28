@@ -459,7 +459,8 @@ std::vector<std::uint32_t> Volume::ownedBlocks(std::uint32_t inode, std::string 
 }
 
 bool Volume::putFile(std::uint32_t dirInode, const std::string &name,
-                     const std::vector<std::uint8_t> &data, std::uint16_t mode, std::string *error)
+                     const std::vector<std::uint8_t> &data, std::uint16_t mode, std::string *error,
+                     std::uint32_t uid, std::uint32_t gid, std::uint32_t mtime)
 {
     if (!m_writable) {
         if (error) *error = m_readOnlyReason.empty() ? "The image is read-only." : m_readOnlyReason;
@@ -474,6 +475,7 @@ bool Volume::putFile(std::uint32_t dirInode, const std::string &name,
     std::uint32_t inode = 0;
     std::uint16_t existingMode = 0;
     std::uint16_t existingLinks = 0;
+    bool existingFile = false;
     {
         const Listing listing = list(dirInode, nullptr);
         for (const auto &entry : listing.entries)
@@ -483,6 +485,7 @@ bool Volume::putFile(std::uint32_t dirInode, const std::string &name,
             }
     }
     if (inode) {
+        existingFile = true;
         const Stat info = stat(inode, nullptr);
         if (!info.regular()) {
             if (error) *error = "“" + name + "” is not a regular file.";
@@ -564,6 +567,12 @@ bool Volume::putFile(std::uint32_t dirInode, const std::string &name,
     std::uint16_t permissions = existingMode;
     if (!inode || permissions == 0) permissions = std::uint16_t(mode ? (mode & 0x0FFF) : 0644);
     put16(raw.data() + 0x00, std::uint16_t(0x8000 | permissions));
+    if (!existingFile) {
+        put16(raw.data() + 0x02, std::uint16_t(uid & 0xFFFF));
+        put16(raw.data() + 0x18, std::uint16_t(gid & 0xFFFF));
+        put16(raw.data() + 0x78, std::uint16_t(uid >> 16));
+        put16(raw.data() + 0x7A, std::uint16_t(gid >> 16));
+    }
     put16(raw.data() + 0x1A, existingLinks ? existingLinks : 1);
     put32(raw.data() + 0x04, std::uint32_t(data.size() & 0xFFFFFFFFu));
     put32(raw.data() + 0x6C, std::uint32_t(std::uint64_t(data.size()) >> 32));
@@ -573,7 +582,7 @@ bool Volume::putFile(std::uint32_t dirInode, const std::string &name,
     put32(raw.data() + 0x20, kExtentsFlag);
     const std::uint32_t stamp = now();
     put32(raw.data() + 0x0C, stamp);
-    put32(raw.data() + 0x10, stamp);
+    put32(raw.data() + 0x10, mtime && !existingFile ? mtime : stamp);
     put32(raw.data() + 0x14, 0);
     if (m_inodeSize > 128) {
         if (le16(raw.data() + 0x80) == 0)
@@ -596,7 +605,8 @@ bool Volume::putFile(std::uint32_t dirInode, const std::string &name,
 }
 
 bool Volume::putSymlink(std::uint32_t dirInode, const std::string &name,
-                        const std::vector<std::uint8_t> &target, std::string *error)
+                        const std::vector<std::uint8_t> &target, std::string *error,
+                        std::uint32_t uid, std::uint32_t gid, std::uint32_t mtime)
 {
     if (!m_writable) {
         if (error) *error = m_readOnlyReason.empty() ? "The image is read-only." : m_readOnlyReason;
@@ -619,7 +629,7 @@ bool Volume::putSymlink(std::uint32_t dirInode, const std::string &name,
     if (target.size() > 60) {
         // Long symlink targets use ordinary extents; create the data blocks
         // through the already-tested file writer, then mark the inode/link.
-        if (!putFile(dirInode, name, target, 0777, error)) return false;
+        if (!putFile(dirInode, name, target, 0777, error, uid, gid, mtime)) return false;
         const Listing after = list(dirInode, error);
         std::uint32_t inode = 0;
         for (const auto &entry : after.entries)
@@ -639,13 +649,17 @@ bool Volume::putSymlink(std::uint32_t dirInode, const std::string &name,
     if (inode == 0) return false;
     std::vector<std::uint8_t> raw(m_inodeSize, 0);
     put16(raw.data() + 0x00, std::uint16_t(0xA000 | 0777));
+    put16(raw.data() + 0x02, std::uint16_t(uid & 0xFFFF));
+    put16(raw.data() + 0x18, std::uint16_t(gid & 0xFFFF));
+    put16(raw.data() + 0x78, std::uint16_t(uid >> 16));
+    put16(raw.data() + 0x7A, std::uint16_t(gid >> 16));
     put16(raw.data() + 0x1A, 1);
     put32(raw.data() + 0x04, std::uint32_t(target.size()));
     std::memcpy(raw.data() + 0x28, target.data(), target.size());
     const std::uint32_t stamp = now();
-    put32(raw.data() + 0x08, stamp);
+    put32(raw.data() + 0x08, mtime ? mtime : stamp);
     put32(raw.data() + 0x0C, stamp);
-    put32(raw.data() + 0x10, stamp);
+    put32(raw.data() + 0x10, mtime ? mtime : stamp);
     if (m_inodeSize > 128) {
         put16(raw.data() + 0x80, std::uint16_t(std::min<std::uint32_t>(32, m_inodeSize - 128)));
         put32(raw.data() + 0x90, stamp);
@@ -662,7 +676,8 @@ bool Volume::putSymlink(std::uint32_t dirInode, const std::string &name,
 }
 
 bool Volume::makeDir(std::uint32_t dirInode, const std::string &name, std::uint16_t mode,
-                     std::string *error)
+                     std::string *error, std::uint32_t uid, std::uint32_t gid,
+                     std::uint32_t mtime)
 {
     if (!m_writable) {
         if (error) *error = m_readOnlyReason.empty() ? "The image is read-only." : m_readOnlyReason;
@@ -709,13 +724,17 @@ bool Volume::makeDir(std::uint32_t dirInode, const std::string &name, std::uint1
     const std::vector<Run> runs { { 0, 1, blocks[0] } };
     buildInlineExtents(raw.data() + 0x28, runs, 0, 0);
     put16(raw.data() + 0x00, std::uint16_t(kInodeDir | (mode ? (mode & 0x0FFF) : 0755)));
+    put16(raw.data() + 0x02, std::uint16_t(uid & 0xFFFF));
+    put16(raw.data() + 0x18, std::uint16_t(gid & 0xFFFF));
+    put16(raw.data() + 0x78, std::uint16_t(uid >> 16));
+    put16(raw.data() + 0x7A, std::uint16_t(gid >> 16));
     put16(raw.data() + 0x1A, 2);
     put32(raw.data() + 0x04, m_blockSize);
     put32(raw.data() + 0x1C, m_blockSize / 512);
     put32(raw.data() + 0x20, kExtentsFlag);
     const std::uint32_t stamp = now();
     put32(raw.data() + 0x0C, stamp);
-    put32(raw.data() + 0x10, stamp);
+    put32(raw.data() + 0x10, mtime ? mtime : stamp);
     if (m_inodeSize > 128) {
         put16(raw.data() + 0x80, std::uint16_t(std::min<std::uint32_t>(32, m_inodeSize - 128)));
         put32(raw.data() + 0x90, stamp);

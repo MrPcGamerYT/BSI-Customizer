@@ -113,10 +113,14 @@ public:
     // Creates a file, or replaces one that already exists (its blocks are
     // reallocated and its entry is kept, so links and permissions survive).
     bool putFile(std::uint32_t dirInode, const std::string &name,
-                 const std::vector<std::uint8_t> &data, std::uint16_t mode, std::string *error);
+                 const std::vector<std::uint8_t> &data, std::uint16_t mode, std::string *error,
+                 std::uint32_t uid = 0, std::uint32_t gid = 0, std::uint32_t mtime = 0);
     bool putSymlink(std::uint32_t dirInode, const std::string &name,
-                    const std::vector<std::uint8_t> &target, std::string *error);
-    bool makeDir(std::uint32_t dirInode, const std::string &name, std::uint16_t mode, std::string *error);
+                    const std::vector<std::uint8_t> &target, std::string *error,
+                    std::uint32_t uid = 0, std::uint32_t gid = 0, std::uint32_t mtime = 0);
+    bool makeDir(std::uint32_t dirInode, const std::string &name, std::uint16_t mode,
+                 std::string *error, std::uint32_t uid = 0, std::uint32_t gid = 0,
+                 std::uint32_t mtime = 0);
     // Renames one entry without changing its inode or file contents.
     bool rename(std::uint32_t dirInode, const std::string &oldName,
                 const std::string &newName, std::string *error);

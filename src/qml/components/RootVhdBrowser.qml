@@ -952,7 +952,7 @@ Item {
             Text {
                 Layout.fillWidth: true
                 wrapMode: Text.Wrap
-                text: qsTr("Choose a destination folder and name. File permission bits and folder structure are copied.")
+                text: qsTr("Choose a destination folder and name. Folder structure, ownership, permissions, and modification times are preserved.")
                 color: Theme.textDim
                 font.pixelSize: 11
             }

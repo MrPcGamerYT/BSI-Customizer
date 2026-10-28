@@ -297,7 +297,8 @@ bool copyEntry(RootDisk::Volume &volume, std::uint32_t sourceInode,
     const RootDisk::Stat source = volume.stat(sourceInode, error);
     if (source.inode == 0) return false;
     if (source.dir()) {
-        if (!volume.makeDir(destinationDir, newName, std::uint16_t(source.mode & 0x0FFF), error))
+        if (!volume.makeDir(destinationDir, newName, std::uint16_t(source.mode & 0x0FFF),
+                            error, source.uid, source.gid, source.mtime))
             return false;
         const RootDisk::Listing destination = volume.list(destinationDir, error);
         std::uint32_t copiedDir = 0;
@@ -322,7 +323,8 @@ bool copyEntry(RootDisk::Volume &volume, std::uint32_t sourceInode,
             return false;
         }
         if (source.size > maxCopyBytes - *copiedBytes
-            || !volume.putSymlink(destinationDir, newName, target, error))
+            || !volume.putSymlink(destinationDir, newName, target, error,
+                                  source.uid, source.gid, source.mtime))
             return false;
         *copiedBytes += source.size;
         return true;
@@ -341,7 +343,8 @@ bool copyEntry(RootDisk::Volume &volume, std::uint32_t sourceInode,
         return false;
     }
     if (!volume.putFile(destinationDir, newName, bytes,
-                        std::uint16_t(source.mode & 0x0FFF), error))
+                        std::uint16_t(source.mode & 0x0FFF), error,
+                        source.uid, source.gid, source.mtime))
         return false;
     *copiedBytes += source.size;
     return true;
@@ -465,6 +468,9 @@ QVariantMap listing(const QString &imagePath, const QString &innerPath)
             { QStringLiteral("symlink"), info.symlink() },
             { QStringLiteral("size"), double(info.size) },
             { QStringLiteral("mode"), int(info.mode & 0x0FFF) },
+            { QStringLiteral("uid"), info.uid },
+            { QStringLiteral("gid"), info.gid },
+            { QStringLiteral("links"), info.links },
             { QStringLiteral("mtime"), double(info.mtime) },
         };
     }
