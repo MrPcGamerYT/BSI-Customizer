@@ -567,10 +567,52 @@ std::unique_ptr<Volume> Volume::mount(std::unique_ptr<Image> image, std::string 
 
     if (!found)
         acceptPartition(0);
+
+    // A few vendor images omit a usable partition map while leaving the ext4
+    // volume at a sector-aligned offset. Scan the first 64 MiB sequentially
+    // (rather than issuing millions of random reads) for the ext4 superblock
+    // magic and validate candidates at 512-byte boundaries.
+    if (!found) {
+        constexpr std::uint64_t kMagicOffset = 1024 + 0x38;
+        constexpr std::uint64_t kProbeLimit = 64ull * 1024 * 1024;
+        constexpr std::size_t kChunk = 4u * 1024 * 1024;
+        const std::uint64_t limit = std::min(image->size(), kProbeLimit);
+        std::vector<std::uint8_t> bytes(kChunk + 1);
+        std::uint64_t readAt = 0;
+        std::uint8_t carry = 0;
+        bool haveCarry = false;
+        while (!found && readAt < limit) {
+            const std::size_t count = std::size_t(std::min<std::uint64_t>(kChunk, limit - readAt));
+            std::uint64_t base = readAt;
+            std::size_t searchable = count;
+            if (haveCarry) {
+                bytes[0] = carry;
+                if (!image->read(readAt, bytes.data() + 1, count)) break;
+                base = readAt - 1;
+                searchable = count + 1;
+            } else if (!image->read(readAt, bytes.data(), count)) {
+                break;
+            }
+            for (std::size_t i = 0; i + 1 < searchable; ++i) {
+                if (bytes[i] != 0x53 || bytes[i + 1] != 0xEF) continue;
+                const std::uint64_t magicAt = base + i;
+                if (magicAt < kMagicOffset) continue;
+                const std::uint64_t candidate = magicAt - kMagicOffset;
+                if ((candidate % 512) == 0)
+                    acceptPartition(candidate);
+                if (found) break;
+            }
+            carry = bytes[haveCarry ? count : count - 1];
+            haveCarry = true;
+            readAt += count;
+        }
+    }
+
     if (!found)
         return fail("No ext4 filesystem was found in this disk image. The editor checks the "
-                    "image itself and its MBR, extended-MBR and GPT partitions. Select an "
-                    "actual Root.vhd image; a BlueStacks setup installer is not an engine disk.");
+                    "image itself, MBR, extended-MBR and GPT partitions, plus sector-aligned "
+                    "volumes in the first 64 MiB. Select a Root.vhd or engine package, not the "
+                    "BlueStacks setup installer.");
 
     auto volume = std::unique_ptr<Volume>(new Volume());
     volume->m_image = std::move(image);

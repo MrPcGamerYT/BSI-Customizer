@@ -1334,6 +1334,21 @@ void checkRootDisk()
         if (gptVolume)
             check(gptVolume->list("/", &gptError).inode != 0,
                   "the filesystem inside the GPT partition can be browsed");
+
+        // Also cover vendor images whose ext4 starts at a sector-aligned
+        // offset but whose partition map is absent or unusable.
+        QByteArray unlabelled(partitionOffset + filesystemBytes, '\0');
+        unlabelled.replace(partitionOffset, filesystemBytes, pristine.left(filesystemBytes));
+        const QString unlabelledPath = temp.filePath(QStringLiteral("offset-root.img"));
+        check(write(unlabelledPath, unlabelled), "write an ext4 image with no partition map");
+        std::string offsetError;
+        auto offsetImage = RootDisk::openImage(QFile::encodeName(unlabelledPath).toStdString(),
+                                               &offsetError);
+        auto offsetVolume = RootDisk::Volume::mount(std::move(offsetImage), &offsetError);
+        check(offsetVolume != nullptr, "the bounded signature scan finds an unlabelled ext4 volume");
+        if (offsetVolume)
+            check(offsetVolume->list("/", &offsetError).inode != 0,
+                  "the unlabelled ext4 volume can be browsed");
     }
 
     // ---- the engine ----
