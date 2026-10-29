@@ -899,6 +899,17 @@ Item {
                             color: page.imageInfo.writable ? Theme.green : Theme.warn
                             font.pixelSize: 10
                         }
+                        Text {
+                            Layout.fillWidth: true
+                            wrapMode: Text.Wrap
+                            visible: page.imageOpen
+                                     && page.imagePath.toLowerCase().endsWith("data.vhdx")
+                            text: qsTr("This is a BlueStacks Data.vhdx containing instance data, "
+                                       + "not the shared engine Root.vhd. Back it up and fully exit "
+                                       + "BlueStacks before editing; a dirty ext4 journal stays read-only.")
+                            color: Theme.warn
+                            font.pixelSize: 10
+                        }
                     }
                 }
 

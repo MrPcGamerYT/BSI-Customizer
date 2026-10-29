@@ -1591,6 +1591,13 @@ int runSelfTest()
         check(AuthManager::pkceChallenge(verifier) == QString::fromLatin1(expected),
               "PKCE challenge is S256 of the verifier");
         check(AuthManager::randomHex(16).length() == 32, "state is 16 hex bytes");
+        const QString invalidClientHelp = AuthManager::mapDiscordTokenError(
+            400, QByteArrayLiteral("{\"error\":\"invalid_client\"}"),
+            QStringLiteral("http://127.0.0.1:43713/auth/discord/callback"),
+            QStringLiteral("identify guilds.members.read"));
+        check(invalidClientHelp.contains(QStringLiteral("Public Client"))
+                  && !invalidClientHelp.contains(QStringLiteral("ZLP_AUTH_JSON")),
+              "invalid_client guidance points to public PKCE setup, not embedding a client secret");
 
         // ---- readCode (callback URL and bare code) ----
         QString code, state;
