@@ -1416,6 +1416,50 @@ void checkRootDisk()
                 reopened.reset();
             }
 
+#ifdef Q_OS_WIN
+            // Exercise the exact recovery path on a VHDX, including a Unicode
+            // filename: the Windows probe and the engine's read/write handle
+            // must resolve to the same file before an edit is allowed.
+            const QString unicodeReadOnlyVhdx = temp.filePath(QStringLiteral("Root-\u8def\u5f84.vhdx"));
+            const bool copiedReadOnlyVhdx = QFile::copy(vhdxFixture, unicodeReadOnlyVhdx);
+            check(copiedReadOnlyVhdx,
+                  "a separate Unicode-named VHDX copy is available for the Windows read-only test");
+            if (copiedReadOnlyVhdx) {
+                const QFileDevice::Permissions originalVhdxPermissions =
+                    QFile::permissions(unicodeReadOnlyVhdx);
+                const QFileDevice::Permissions readOnlyVhdxPermissions =
+                    originalVhdxPermissions & ~(QFileDevice::WriteOwner | QFileDevice::WriteUser
+                                                | QFileDevice::WriteGroup | QFileDevice::WriteOther);
+                const bool markedVhdxReadOnly =
+                    QFile::setPermissions(unicodeReadOnlyVhdx, readOnlyVhdxPermissions);
+                check(markedVhdxReadOnly, "the VHDX test copy can be marked read-only on Windows");
+                if (markedVhdxReadOnly) {
+                    const auto beforeVhdxEnable = RootVhd::info(unicodeReadOnlyVhdx);
+                    check(beforeVhdxEnable.value(QStringLiteral("ok")).toBool()
+                              && !beforeVhdxEnable.value(QStringLiteral("writable")).toBool(),
+                          "a read-only VHDX is reported as not writable before user action");
+                    const auto enableVhdx = RootVhd::enableWriteAccess(unicodeReadOnlyVhdx);
+                    check(enableVhdx.value(QStringLiteral("ok")).toBool(),
+                          "Enable editing clears the Windows Read-only attribute on a VHDX");
+                    const auto afterVhdxEnable = RootVhd::info(unicodeReadOnlyVhdx);
+                    const bool vhdxWritable = afterVhdxEnable.value(QStringLiteral("writable")).toBool();
+                    check(vhdxWritable,
+                          "a Unicode-named VHDX reopens writable after enabling editing");
+                    if (vhdxWritable) {
+                        const auto created = RootVhd::makeFolder(unicodeReadOnlyVhdx,
+                                                                  QStringLiteral("/"),
+                                                                  QStringLiteral("readonly-vhdx-test"));
+                        check(created.value(QStringLiteral("ok")).toBool(),
+                              "the read-only VHDX accepts an actual folder edit after enabling access");
+                        const auto undone = RootVhd::undo(unicodeReadOnlyVhdx);
+                        check(undone.value(QStringLiteral("ok")).toBool(),
+                              "the VHDX edit can be undone after clearing the host Read-only attribute");
+                    }
+                }
+                QFile::setPermissions(unicodeReadOnlyVhdx, originalVhdxPermissions);
+            }
+#endif
+
             const QString localFile = temp.filePath(QStringLiteral("vhdx-added.txt"));
             {
                 QFile file(localFile);

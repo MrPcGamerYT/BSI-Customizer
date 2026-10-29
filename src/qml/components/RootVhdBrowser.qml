@@ -202,18 +202,27 @@ Item {
 
     // ---- the tree ---------------------------------------------------------
 
-    function loadTree(path) {
+    function loadTree(path, forceRefresh) {
         if (!browser.active || browser.imagePath.length === 0)
             return;
         const listing = backend.rootvhdList(browser.imagePath, path);
-        if (!listing || !listing.ok) return;
+        if (!listing || !listing.ok) {
+            if (forceRefresh && browser.treeChildren[path] !== undefined) {
+                const cleared = Object.assign({}, browser.treeChildren);
+                cleared[path] = [];
+                browser.treeChildren = cleared;
+                browser.rebuildTree();
+            }
+            return;
+        }
         const dirs = [];
         const found = listing.entries || [];
         for (let i = 0; i < found.length; ++i)
             if (found[i].dir)
                 dirs.push({ name: found[i].name, path: found[i].path });
         const previous = browser.treeChildren[path];
-        if (previous !== undefined && JSON.stringify(previous) === JSON.stringify(dirs))
+        if (!forceRefresh && previous !== undefined
+            && JSON.stringify(previous) === JSON.stringify(dirs))
             return;
         const next = Object.assign({}, browser.treeChildren);
         next[path] = dirs;
@@ -221,15 +230,21 @@ Item {
         browser.rebuildTree();
     }
 
-    // Every level of the path, so the tree can show where the listing is.
+    // Refresh the visible tree on every navigation, including when returning
+    // from a nested folder. The main listing was already live, but cached
+    // sidebar children could otherwise keep showing a pre-edit snapshot.
     function loadAncestors(path) {
-        browser.loadTree("/");
+        const paths = Object.keys(browser.treeChildren);
         const parts = path.split("/").filter(function (part) { return part.length > 0; });
         let built = "";
+        if (paths.indexOf("/") < 0) paths.push("/");
         for (let i = 0; i < parts.length; ++i) {
             built += "/" + parts[i];
-            browser.loadTree(built);
+            if (paths.indexOf(built) < 0) paths.push(built);
         }
+        for (let i = 0; i < paths.length; ++i)
+            browser.loadTree(paths[i], true);
+        browser.rebuildTree();
     }
 
     function toggleTree(path) {

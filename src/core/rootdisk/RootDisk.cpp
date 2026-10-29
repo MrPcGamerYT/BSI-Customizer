@@ -831,16 +831,12 @@ constexpr std::uint16_t kInodeReg = 0x8000;
 // image
 // ---------------------------------------------------------------------------
 
-std::unique_ptr<Image> openImage(const std::string &path, std::string *error)
+namespace {
+
+std::unique_ptr<Image> openImageFile(std::FILE *file, bool readOnly, std::string *error)
 {
-    std::FILE *file = std::fopen(path.c_str(), "r+b");
-    bool readOnly = false;
     if (!file) {
-        file = std::fopen(path.c_str(), "rb");
-        readOnly = true;
-    }
-    if (!file) {
-        if (error) *error = "The image could not be opened: " + path;
+        if (error) *error = "The image could not be opened for reading.";
         return nullptr;
     }
     std::uint64_t length = 0;
@@ -888,6 +884,44 @@ std::unique_ptr<Image> openImage(const std::string &path, std::string *error)
     }
     return std::unique_ptr<Image>(new FileImage(file, length));
 }
+
+} // namespace
+
+std::unique_ptr<Image> openImage(const std::string &path, std::string *error)
+{
+    std::FILE *file = std::fopen(path.c_str(), "r+b");
+    bool readOnly = false;
+    if (!file) {
+        file = std::fopen(path.c_str(), "rb");
+        readOnly = true;
+    }
+    if (!file) {
+        if (error) *error = "The image could not be opened: " + path;
+        return nullptr;
+    }
+    return openImageFile(file, readOnly, error);
+}
+
+#ifdef _WIN32
+std::unique_ptr<Image> openImage(const std::wstring &path, std::string *error)
+{
+    // Qt can hand the engine a perfectly valid Unicode path which the narrow
+    // CRT fopen() cannot represent on Windows. Use the native UTF-16 API for
+    // user-selected image paths so the write probe and the actual file open
+    // address the same file.
+    std::FILE *file = _wfopen(path.c_str(), L"r+b");
+    bool readOnly = false;
+    if (!file) {
+        file = _wfopen(path.c_str(), L"rb");
+        readOnly = true;
+    }
+    if (!file) {
+        if (error) *error = "Windows could not open the image path for reading or writing.";
+        return nullptr;
+    }
+    return openImageFile(file, readOnly, error);
+}
+#endif
 
 std::string joinPath(const std::string &base, const std::string &name)
 {
