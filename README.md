@@ -6,8 +6,8 @@ Qt Quick desktop customizer for BlueStacks / MSI App Player on Windows.
 
 Tabs: **Dashboard**, **Theme**, **Resources**, **FPS**, **Integrity**, **Boot
 Video**, **UI** (clean-up, title-bar row and button order, removals, About page),
-**Debloat** (live ADB debloat, hardcode debloat of `Root.vhd`, and the
-ads/telemetry/cloud/hosts/companion switches),
+**Debloat** (live ADB debloat, the Deep Engine Image Debloater for `Root.vhd`
+and VHDX, and the ads/telemetry/cloud/hosts/companion switches),
 **Discord RPC**, **Appearance**, **About**.
 
 ## Sign-in gate (Discord only)
@@ -478,7 +478,7 @@ The page opens on **two main choices**:
 | Choice | What it does |
 |---|---|
 | **1 · Live ADB debloat** | Removes the preinstalled apps from a running instance and empties the guest's `/sdcard/Download`. Nothing on disk is edited, and every app can be put back. |
-| **2 · Hardcode debloat (Root.vhd)** | Opens the engine's `Root.vhd` like a 7-Zip window: browse every folder and file, extract, add files and folders, delete them. Every write is journalled, so one **Undo** puts the image back. |
+| **2 · Deep Engine Image Debloater** | Opens the engine's `Root.vhd` or a supported VHDX like a 7-Zip window: browse every folder and file, extract, add files and folders, delete them. Every write is journalled, so one **Undo** puts the image back. |
 
 Below them, one card holds the switch set:
 
@@ -527,11 +527,13 @@ This half never touches `Root.vhd`. What makes a preinstalled app disappear
 here is the package state inside the running instance, so that is what it
 changes — through the player's own `HD-Adb.exe`, on the instance's published
 ADB port, with a private adb server that is stopped again afterwards. Nothing is
-downloaded, and no root/Magisk is involved. Use the **Hardcode** half when you
-want the file itself gone from the image.
+downloaded, and no root/Magisk is involved. Use the **Deep Engine Image Debloater**
+when you want the file itself gone from the image.
 
 * **Every installed app** — Scan reads the full `pm list packages --user 0`
-  result and shows every package actually installed in that instance. The
+  result and shows every package actually installed in that instance. Search by
+  label or package name, then use **Select installed** for bulk selection or
+  choose apps individually. The
   reviewed suggestions (`gg.now.ads.service`, `com.uncube.gamevantage`,
   `com.bluestacks.appmart` and `com.bluestacks.appfinder`) get friendly names
   and are prechecked. Other packages are visible and selectable too, but are
@@ -557,7 +559,7 @@ ADB port comes from `bluestacks.conf`, so it is never guessed. The guest storage
 lives in the instance's own `Data.vhdx`, which is why two instances can be
 cleaned independently and why the undo record is kept per instance.
 
-### 2 · Hardcode debloat (Root.vhd)
+### 2 · Deep Engine Image Debloater
 
 `Root.vhd` is the engine's Android system disk: an ext4 filesystem inside a VHD,
 in `<ProgramData>\BlueStacks_*\Engine\<arch>\Root.vhd`. The browser also accepts

@@ -39,6 +39,10 @@ struct Image
 // Opens fixed/dynamic VHD and VHDX images or a raw image. VHDX logs and
 // differencing images are refused rather than interpreted incompletely.
 std::unique_ptr<Image> openImage(const std::string &path, std::string *error);
+#ifdef _WIN32
+// Native UTF-16 overload for user-selected paths on Windows.
+std::unique_ptr<Image> openImage(const std::wstring &path, std::string *error);
+#endif
 
 // ---------------------------------------------------------------------------
 // ext4

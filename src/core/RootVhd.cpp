@@ -63,6 +63,46 @@ QString native(const std::string &path)
     return QDir::toNativeSeparators(QString::fromStdString(path));
 }
 
+#ifdef Q_OS_WIN
+QString windowsErrorDetail(DWORD code)
+{
+    wchar_t *systemMessage = nullptr;
+    const DWORD length = FormatMessageW(FORMAT_MESSAGE_ALLOCATE_BUFFER
+                                            | FORMAT_MESSAGE_FROM_SYSTEM
+                                            | FORMAT_MESSAGE_IGNORE_INSERTS,
+                                        nullptr, code,
+                                        MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+                                        reinterpret_cast<LPWSTR>(&systemMessage), 0, nullptr);
+    QString detail = length > 0 ? QString::fromWCharArray(systemMessage, int(length)).trimmed()
+                                : QStringLiteral("No additional Windows description is available.");
+    if (systemMessage) LocalFree(systemMessage);
+    return QStringLiteral("Windows error %1: %2").arg(qulonglong(code)).arg(detail);
+}
+#endif
+
+std::unique_ptr<RootDisk::Image> openDiskImage(const QString &path, std::string *error)
+{
+#ifdef Q_OS_WIN
+    return RootDisk::openImage(QDir::toNativeSeparators(path).toStdWString(), error);
+#else
+    return RootDisk::openImage(QFile::encodeName(path).toStdString(), error);
+#endif
+}
+
+std::FILE *openNativeFile(const QString &path, const char *mode)
+{
+#ifdef Q_OS_WIN
+    const std::wstring nativePath = QDir::toNativeSeparators(path).toStdWString();
+    std::wstring wideMode;
+    for (const char *character = mode; character && *character; ++character)
+        wideMode.push_back(wchar_t(*character));
+    return _wfopen(nativePath.c_str(), wideMode.c_str());
+#else
+    const QByteArray encodedPath = QFile::encodeName(path);
+    return std::fopen(encodedPath.constData(), mode);
+#endif
+}
+
 // The undo record an image already has, or an empty string. A session keeps
 // exactly one, so Undo goes back to how the image was before the tool started
 // editing it, not merely before the last click.
@@ -151,7 +191,7 @@ bool Journalled::openJournal()
         }
         const QString bin = object.value(QStringLiteral("journal")).toString();
         if (!bin.isEmpty() && QFileInfo::exists(bin)) {
-            if (std::FILE *file = std::fopen(QFile::encodeName(bin).constData(), "r+b")) {
+            if (std::FILE *file = openNativeFile(bin, "r+b")) {
                 m_data = file;
                 m_journalPath = bin;
                 m_manifestPath = existing;
@@ -167,7 +207,7 @@ bool Journalled::openJournal()
         + QFileInfo(m_imagePath).fileName();
     m_journalPath = QDir(folder).filePath(base + QStringLiteral(".bin"));
     m_manifestPath = QDir(folder).filePath(base + QStringLiteral(".json"));
-    m_data = std::fopen(QFile::encodeName(m_journalPath).constData(), "wb+");
+    m_data = openNativeFile(m_journalPath, "wb+");
     m_continued = false;
     m_firstRange = 0;
     return m_data != nullptr;
@@ -258,7 +298,7 @@ template <typename Change>
 QVariantMap withJournal(const QString &imagePath, Change change)
 {
     std::string why;
-    auto inner = RootDisk::openImage(QFile::encodeName(imagePath).toStdString(), &why);
+    auto inner = openDiskImage(imagePath, &why);
     if (!inner) return failure(QString::fromStdString(why));
     if (!inner->writable())
         return failure(QStringLiteral("The image file could not be opened for writing. Use Enable editing to clear its Windows Read-only attribute, or close BlueStacks and check the file permissions."));
@@ -425,7 +465,7 @@ QVariantMap info(const QString &imagePath)
     if (!QFileInfo::exists(imagePath))
         return failure(QStringLiteral("“%1” does not exist.").arg(QDir::toNativeSeparators(imagePath)));
     std::string why;
-    auto image = RootDisk::openImage(QFile::encodeName(imagePath).toStdString(), &why);
+    auto image = openDiskImage(imagePath, &why);
     if (!image) return failure(QString::fromStdString(why));
     const QString kind = QString::fromStdString(image->kind());
     auto volume = RootDisk::Volume::mount(std::move(image), &why);
@@ -463,8 +503,8 @@ QVariantMap enableWriteAccess(const QString &imagePath)
     const std::wstring path = nativePath.toStdWString();
     const DWORD originalAttributes = GetFileAttributesW(path.c_str());
     if (originalAttributes == INVALID_FILE_ATTRIBUTES)
-        return failure(QStringLiteral("Windows could not inspect the image file (error %1). Check the path and folder access.")
-                           .arg(qulonglong(GetLastError())));
+        return failure(QStringLiteral("Windows could not inspect the image file. %1 Check the path and folder access.")
+                           .arg(windowsErrorDetail(GetLastError())));
 
     const bool hadReadOnlyAttribute = (originalAttributes & FILE_ATTRIBUTE_READONLY) != 0;
     if (hadReadOnlyAttribute) {
@@ -472,8 +512,8 @@ QVariantMap enableWriteAccess(const QString &imagePath)
         if (writableAttributes == 0)
             writableAttributes = FILE_ATTRIBUTE_NORMAL;
         if (!SetFileAttributesW(path.c_str(), writableAttributes))
-            return failure(QStringLiteral("Windows could not clear the image's Read-only attribute (error %1).")
-                               .arg(qulonglong(GetLastError())));
+            return failure(QStringLiteral("Windows could not clear the image's Read-only attribute. %1")
+                               .arg(windowsErrorDetail(GetLastError())));
     }
 
     auto restoreAttributes = [&]() {
@@ -491,14 +531,14 @@ QVariantMap enableWriteAccess(const QString &imagePath)
         const bool restored = restoreAttributes();
         QString message;
         if (openError == ERROR_SHARING_VIOLATION || openError == ERROR_LOCK_VIOLATION) {
-            message = QStringLiteral("Windows reports that another program has this image open without write sharing (error %1). Fully close BlueStacks and try again.")
-                          .arg(qulonglong(openError));
+            message = QStringLiteral("Windows reports that another program has this image open without write sharing. %1 Fully close BlueStacks and try again.")
+                          .arg(windowsErrorDetail(openError));
         } else if (openError == ERROR_ACCESS_DENIED) {
-            message = QStringLiteral("Windows returned Access denied (error %1). The Read-only attribute was cleared if present, but your account or a security policy still blocks Modify access; check the file and folder Security permissions.")
-                          .arg(qulonglong(openError));
+            message = QStringLiteral("Windows denied write access. %1 The Read-only attribute was cleared if present, but your account or a security policy still blocks Modify access; check the file and folder Security permissions.")
+                          .arg(windowsErrorDetail(openError));
         } else {
-            message = QStringLiteral("Windows could not open the image for writing (error %1). Check its permissions and whether another program is using it.")
-                          .arg(qulonglong(openError));
+            message = QStringLiteral("Windows could not open the image for writing. %1 Check its permissions and whether another program is using it.")
+                          .arg(windowsErrorDetail(openError));
         }
         if (!restored)
             message += QStringLiteral(" The original Read-only attribute could not be restored automatically.");
@@ -507,7 +547,7 @@ QVariantMap enableWriteAccess(const QString &imagePath)
     CloseHandle(probe);
 
     std::string why;
-    auto image = RootDisk::openImage(QFile::encodeName(imagePath).toStdString(), &why);
+    auto image = openDiskImage(imagePath, &why);
     if (!image || !image->writable()) {
         const bool restored = restoreAttributes();
         QString message = image
@@ -540,7 +580,7 @@ QVariantMap enableWriteAccess(const QString &imagePath)
 QVariantMap listing(const QString &imagePath, const QString &innerPath)
 {
     std::string why;
-    auto image = RootDisk::openImage(QFile::encodeName(imagePath).toStdString(), &why);
+    auto image = openDiskImage(imagePath, &why);
     if (!image) return failure(QString::fromStdString(why));
     auto volume = RootDisk::Volume::mount(std::move(image), &why);
     if (!volume) return failure(QString::fromStdString(why));
@@ -588,7 +628,7 @@ QVariantMap search(const QString &imagePath, const QString &query, int limit)
     if (needle.isEmpty()) return failure(QStringLiteral("Type something to search for."));
 
     std::string why;
-    auto image = RootDisk::openImage(QFile::encodeName(imagePath).toStdString(), &why);
+    auto image = openDiskImage(imagePath, &why);
     if (!image) return failure(QString::fromStdString(why));
     auto volume = RootDisk::Volume::mount(std::move(image), &why);
     if (!volume) return failure(QString::fromStdString(why));
@@ -645,7 +685,7 @@ QVariantMap search(const QString &imagePath, const QString &query, int limit)
 QVariantMap extract(const QString &imagePath, const QString &innerPath, const QString &localPath)
 {
     std::string why;
-    auto image = RootDisk::openImage(QFile::encodeName(imagePath).toStdString(), &why);
+    auto image = openDiskImage(imagePath, &why);
     if (!image) return failure(QString::fromStdString(why));
     auto volume = RootDisk::Volume::mount(std::move(image), &why);
     if (!volume) return failure(QString::fromStdString(why));
@@ -1058,7 +1098,7 @@ QVariantMap undo(const QString &imagePath)
                            .arg(QDir::toNativeSeparators(bin)));
 
     std::string why;
-    auto image = RootDisk::openImage(QFile::encodeName(imagePath).toStdString(), &why);
+    auto image = openDiskImage(imagePath, &why);
     if (!image) return failure(QString::fromStdString(why));
     if (!image->writable()) return failure(QStringLiteral("The image is read-only."));
 

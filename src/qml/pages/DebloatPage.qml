@@ -8,7 +8,7 @@ import BSICustomizer
 //
 //  * **Live ADB** talks to a running instance through the player's own adb and
 //    removes preinstalled apps and the guest's Download folder there.
-//  * **Hardcode (Root.vhd)** opens the engine's Android system image in place,
+//  * **Deep Engine Image Debloater** opens the engine's Android system image in place,
 //    like a 7-Zip window: browse, extract, add, delete — with every write
 //    journalled first, so one Undo puts the image back.
 //
@@ -18,6 +18,34 @@ Item {
     id: page
 
     signal notify(string message)
+
+    property string imageWriteError: ""
+
+    Dialog {
+        id: imageWriteErrorDialog
+        parent: Overlay.overlay
+        modal: true
+        focus: true
+        title: qsTr("Could not enable image editing")
+        width: Math.min(600, parent ? parent.width - 32 : 600)
+        height: Math.min(360, parent ? parent.height - 32 : 360)
+        x: parent ? Math.round((parent.width - width) / 2) : 0
+        y: parent ? Math.round((parent.height - height) / 2) : 0
+        padding: 18
+        standardButtons: Dialog.Ok
+        background: Rectangle { color: Theme.card; border.color: Theme.border; radius: 12 }
+        contentItem: ScrollView {
+            clip: true
+            contentWidth: availableWidth
+            Text {
+                width: imageWriteErrorDialog.width - 44
+                text: page.imageWriteError
+                color: Theme.text
+                wrapMode: Text.WordWrap
+                font.pixelSize: 12
+            }
+        }
+    }
 
     // 0 = live ADB, 1 = Root.vhd, 2 = settings
     property int mode: 0
@@ -44,6 +72,7 @@ Item {
     property var downloadInfo: ({ entries: [], size: "" })
     property var appDataInfo: []
     property bool androidScanned: false
+    property string androidSearch: ""
     property bool androidBusy: false
     property bool androidOk: true
     property string androidMsg: ""
@@ -198,6 +227,8 @@ Item {
                         debloatable: app.debloatable !== false });
         }
         page.androidApps = list;
+        page.androidSearch = "";
+        androidAppSearch.text = "";
         page.androidOthers = result.others || [];
         page.downloadInfo = result.download || ({ entries: [], size: "" });
         page.appDataInfo = result.appData || [];
@@ -210,12 +241,42 @@ Item {
         page.refreshAndroid();
     }
 
+    function filteredAndroidApps() {
+        const needle = page.androidSearch.trim().toLowerCase();
+        const matches = [];
+        for (let i = 0; i < page.androidApps.length; ++i) {
+            const app = page.androidApps[i];
+            const text = (app.label + " " + app.package + " " + app.note).toLowerCase();
+            if (needle.length === 0 || text.indexOf(needle) >= 0)
+                matches.push(Object.assign({ sourceIndex: i }, app));
+        }
+        return matches;
+    }
+
     function tickedApps() {
         let n = 0;
         for (let i = 0; i < page.androidApps.length; i++)
             if (page.androidApps[i].checked)
                 n++;
         return n;
+    }
+
+    function selectInstalledAndroidApps() {
+        const list = page.androidApps.slice();
+        for (let i = 0; i < list.length; ++i) {
+            const app = list[i];
+            if (app.installed && app.debloatable && !app.recorded)
+                list[i] = Object.assign({}, app, { checked: true });
+        }
+        page.androidApps = list;
+    }
+
+    function clearAndroidSelection() {
+        const list = page.androidApps.slice();
+        for (let i = 0; i < list.length; ++i)
+            if (list[i].checked)
+                list[i] = Object.assign({}, list[i], { checked: false });
+        page.androidApps = list;
     }
 
     function toggleAndroidApp(index) {
@@ -358,7 +419,7 @@ Item {
                     Layout.fillWidth: true
                     spacing: 4
                     Text {
-                        text: qsTr("BlueStacks Debloat")
+                        text: qsTr("Deep Engine Image Debloater")
                         color: Theme.text
                         font.pixelSize: 24
                         font.weight: Font.Bold
@@ -367,7 +428,8 @@ Item {
                         Layout.fillWidth: true
                         wrapMode: Text.Wrap
                         text: qsTr("Two ways to clean an instance. Live ADB removes apps from a "
-                                   + "running instance; Hardcode edits the engine's Root.vhd itself.")
+                                   + "running instance; Deep Engine Image Debloater edits the "
+                                   + "engine's Root.vhd or VHDX directly.")
                         color: Theme.textDim
                         font.pixelSize: 12
                     }
@@ -407,7 +469,7 @@ Item {
                           text: qsTr("Remove the preinstalled apps and wipe the guest's Download "
                                      + "folder inside a running instance. Nothing on disk is "
                                      + "edited; every app can be put back.") },
-                        { title: qsTr("2 · Hardcode debloat (Root.vhd)"), icon: "\u26C1",
+                        { title: qsTr("2 · Deep Engine Image Debloater"), icon: "\u26C1",
                           text: qsTr("Open Root.vhd in a file manager: add, rename, copy, move, "
                                      + "replace, extract, and delete files or folders. Changes are "
                                      + "journalled so Undo restores the original image.") }
@@ -536,6 +598,38 @@ Item {
                             color: page.androidOk ? Theme.textDim : Theme.danger
                             font.pixelSize: 10
                         }
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 8
+                            visible: page.androidApps.length > 0
+                            TextField {
+                                id: androidAppSearch
+                                Layout.fillWidth: true
+                                placeholderText: qsTr("Search installed apps or package names…")
+                                color: Theme.text
+                                placeholderTextColor: Theme.textDim
+                                font.pixelSize: 12
+                                selectByMouse: true
+                                text: page.androidSearch
+                                onTextChanged: page.androidSearch = text
+                                background: Rectangle {
+                                    color: Theme.raised
+                                    radius: 8
+                                    border.width: 1
+                                    border.color: androidAppSearch.activeFocus ? Theme.accent : Theme.border
+                                }
+                            }
+                            ActionButton {
+                                text: qsTr("Select installed")
+                                enabled: !page.androidBusy
+                                onClicked: page.selectInstalledAndroidApps()
+                            }
+                            ActionButton {
+                                text: qsTr("Clear")
+                                enabled: !page.androidBusy && page.tickedApps() > 0
+                                onClicked: page.clearAndroidSelection()
+                            }
+                        }
                         GridLayout {
                             Layout.fillWidth: true
                             columns: 2
@@ -543,7 +637,7 @@ Item {
                             rowSpacing: 8
                             visible: page.androidApps.length > 0
                             Repeater {
-                                model: page.androidApps
+                                model: page.filteredAndroidApps()
                                 delegate: Rectangle {
                                     required property var modelData
                                     required property int index
@@ -585,7 +679,7 @@ Item {
                                                     font.weight: Font.Bold
                                                 }
                                             }
-                                            onToggled: page.toggleAndroidApp(index)
+                                            onToggled: page.toggleAndroidApp(modelData.sourceIndex)
                                         }
                                         ColumnLayout {
                                             Layout.fillWidth: true
@@ -830,7 +924,9 @@ Item {
                                                : qsTr("Windows could not enable write access.");
                                 page.imageMsg = detail;
                                 page.imageOk = false;
-                                page.notify(qsTr("Could not enable editing. See the image details for the Windows error."));
+                                page.imageWriteError = detail;
+                                imageWriteErrorDialog.open();
+                                page.notify(qsTr("Editing could not be enabled. The Windows error details are open."));
                             }
                         }
                     }
