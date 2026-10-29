@@ -1450,10 +1450,12 @@ void checkRootDisk()
                                                                   QStringLiteral("/"),
                                                                   QStringLiteral("readonly-vhdx-test"));
                         check(created.value(QStringLiteral("ok")).toBool(),
-                              "the read-only VHDX accepts an actual folder edit after enabling access");
+                              QStringLiteral("the read-only VHDX accepts an actual folder edit after enabling access: %1")
+                                  .arg(created.value(QStringLiteral("msg")).toString()));
                         const auto undone = RootVhd::undo(unicodeReadOnlyVhdx);
                         check(undone.value(QStringLiteral("ok")).toBool(),
-                              "the VHDX edit can be undone after clearing the host Read-only attribute");
+                              QStringLiteral("the VHDX edit can be undone after clearing the host Read-only attribute: %1")
+                                  .arg(undone.value(QStringLiteral("msg")).toString()));
                     }
                 }
                 QFile::setPermissions(unicodeReadOnlyVhdx, originalVhdxPermissions);
