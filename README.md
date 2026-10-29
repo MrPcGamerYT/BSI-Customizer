@@ -13,19 +13,17 @@ and VHDX, and the ads/telemetry/cloud/hosts/companion switches),
 ## Sign-in gate (Discord only)
 
 This is a private dev tool: the app opens on the Premium-Optimizer-style
-sign-in card with **one option - Continue with Discord**. Access follows
-either a dev allowlist of Discord user IDs (`discord.allowUsers`) or a
-**Discord server role gate** (`discord.guildId` + `discord.roles` +
-`discord.requiredTier`, checked live with the `guilds.members.read` scope);
-a rejected sign-in shows the account's Discord ID on the result page so it
-can be added. The flow is Discord OAuth2 with
-PKCE + a `127.0.0.1:43713` loopback callback (paste-the-link fallback), and a
-successful sign-in writes an HMAC-signed machine-bound session that only
-earns a one-click "Welcome back" continue on the next launch. The gate is
-enforced in C++ (`AuthManager` + `Backend` guards), not only in the UI.
-The whole `auth.json` can also be baked into the EXE at build time from the
-`ZLP_AUTH_JSON` repository secret (the Actions workflows pass it through), so
-releases sign in with no sidecar config file.
+sign-in card with **one option - Continue with Discord**. When a Discord
+server role gate is configured (`discord.guildId` + `discord.roles` +
+`discord.requiredTier`), Discord's current membership and role are checked on
+every sign-in and every app launch; a local allowlist is only used when no role
+gate is configured. The flow is OAuth2 PKCE with a `127.0.0.1:43713` loopback
+callback (paste-the-link fallback). The saved identity is never enough to open
+the app: Windows DPAPI protects the refresh token, which is refreshed and
+validated against Discord before the gate opens. The gate is enforced in C++
+(`AuthManager` + `Backend` guards), not only in the UI. Release builds require
+an embedded server-role policy and ignore local auth-file/environment overrides;
+see [docs/AUTH.md](docs/AUTH.md) for the security limits of a client-side gate.
 Setup: [docs/AUTH.md](docs/AUTH.md) and `auth.example.json`.
 
 ## Download: installer (and the single EXE next to it)
