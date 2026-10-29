@@ -89,6 +89,20 @@ std::unique_ptr<RootDisk::Image> openDiskImage(const QString &path, std::string 
 #endif
 }
 
+std::FILE *openNativeFile(const QString &path, const char *mode)
+{
+#ifdef Q_OS_WIN
+    const std::wstring nativePath = QDir::toNativeSeparators(path).toStdWString();
+    std::wstring wideMode;
+    for (const char *character = mode; character && *character; ++character)
+        wideMode.push_back(wchar_t(*character));
+    return _wfopen(nativePath.c_str(), wideMode.c_str());
+#else
+    const QByteArray encodedPath = QFile::encodeName(path);
+    return std::fopen(encodedPath.constData(), mode);
+#endif
+}
+
 // The undo record an image already has, or an empty string. A session keeps
 // exactly one, so Undo goes back to how the image was before the tool started
 // editing it, not merely before the last click.
@@ -177,7 +191,7 @@ bool Journalled::openJournal()
         }
         const QString bin = object.value(QStringLiteral("journal")).toString();
         if (!bin.isEmpty() && QFileInfo::exists(bin)) {
-            if (std::FILE *file = std::fopen(QFile::encodeName(bin).constData(), "r+b")) {
+            if (std::FILE *file = openNativeFile(bin, "r+b")) {
                 m_data = file;
                 m_journalPath = bin;
                 m_manifestPath = existing;
@@ -193,7 +207,7 @@ bool Journalled::openJournal()
         + QFileInfo(m_imagePath).fileName();
     m_journalPath = QDir(folder).filePath(base + QStringLiteral(".bin"));
     m_manifestPath = QDir(folder).filePath(base + QStringLiteral(".json"));
-    m_data = std::fopen(QFile::encodeName(m_journalPath).constData(), "wb+");
+    m_data = openNativeFile(m_journalPath, "wb+");
     m_continued = false;
     m_firstRange = 0;
     return m_data != nullptr;
