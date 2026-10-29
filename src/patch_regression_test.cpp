@@ -1446,6 +1446,22 @@ void checkRootDisk()
                     check(vhdxWritable,
                           "a Unicode-named VHDX reopens writable after enabling editing");
                     if (vhdxWritable) {
+                        std::string directWriteError;
+                        auto directWriteImage = RootDisk::openImage(
+                            QDir::toNativeSeparators(unicodeReadOnlyVhdx).toStdWString(),
+                            &directWriteError);
+                        std::vector<std::uint8_t> sectorBefore(512), sectorAfter(512);
+                        const bool readBefore = directWriteImage
+                            && directWriteImage->read(0, sectorBefore.data(), sectorBefore.size());
+                        const bool directWrite = readBefore
+                            && directWriteImage->write(0, sectorBefore.data(), sectorBefore.size())
+                            && directWriteImage->flush()
+                            && directWriteImage->read(0, sectorAfter.data(), sectorAfter.size())
+                            && sectorBefore == sectorAfter;
+                        check(directWrite,
+                              QStringLiteral("the writable VHDX accepts a direct sector write: %1")
+                                  .arg(QString::fromStdString(directWriteError)));
+                        directWriteImage.reset();
                         const auto created = RootVhd::makeFolder(unicodeReadOnlyVhdx,
                                                                   QStringLiteral("/"),
                                                                   QStringLiteral("readonly-vhdx-test"));
