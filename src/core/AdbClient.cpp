@@ -53,6 +53,11 @@ QString findAdb(const QString &exePath)
 #endif
 }
 
+QString remoteShellCommand(const QString &command)
+{
+    return QStringLiteral("%1; echo \"BSI-EXIT:$?\"").arg(command);
+}
+
 quint16 instancePort(const QString &confPath, const QString &instance)
 {
     QFile file(confPath);
@@ -198,9 +203,10 @@ Output Client::shell(const QString &command, int timeoutMs) const
     QProcess proc;
     proc.setProcessEnvironment(env);
     proc.setProcessChannelMode(QProcess::SeparateChannels);
+    // Pass one shell command argument. Older BlueStacks HD-Adb builds join
+    // argv differently and turn `sh -c (command)` into invalid shell syntax.
     proc.start(m_adb, QStringList{QStringLiteral("-s"), m_serial, QStringLiteral("shell"),
-                                  QStringLiteral("sh"), QStringLiteral("-c"),
-                                  QStringLiteral("(%1); echo \"BSI-EXIT:$?\"").arg(command)});
+                                  remoteShellCommand(command)});
     if (!proc.waitForStarted(timeoutMs)) {
         result.error = QStringLiteral("HD-Adb.exe did not start.");
         return result;
