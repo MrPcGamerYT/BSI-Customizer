@@ -157,6 +157,9 @@ public:
      */
     static bool tierForRoles(const Config &config, const QStringList &memberRoles,
                              QString *tier = nullptr, QString *roleId = nullptr);
+    /** Human-safe guidance for OAuth token endpoint failures (public for self-test). */
+    static QString mapDiscordTokenError(int status, const QByteArray &body,
+                                        const QString &redirectUri, const QString &scope);
 
 signals:
     void authorizedChanged();
@@ -215,8 +218,6 @@ private:
     void setAuthorized(bool on);
 
     QString callbackPage(bool success, const QString &title, const QString &detail) const;
-    static QString mapDiscordTokenError(int status, const QByteArray &body,
-                                        const QString &redirectUri, const QString &scope);
     static QString avatarUrlFor(const QVariantMap &user);
     bool allowlisted(const QString &id) const;
 

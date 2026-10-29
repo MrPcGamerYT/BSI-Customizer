@@ -561,9 +561,13 @@ cleaned independently and why the undo record is kept per instance.
 
 `Root.vhd` is the engine's Android system disk: an ext4 filesystem inside a VHD,
 in `<ProgramData>\BlueStacks_*\Engine\<arch>\Root.vhd`. The browser also accepts
-standalone fixed and dynamic VHDX images. Its ext4/VHD/VHDX reader and writer
-and a 7-Zip SDK decoder are built into BSI Customizer; no external
-filesystem or archive utility needs to be installed. **Find** locates an
+standalone fixed and dynamic VHDX images. A `Data.vhdx` is different: it holds
+instance-specific user/app data, not the shared engine system disk. Back it up
+and fully exit BlueStacks before editing. Dirty ext4 journals remain read-only
+until BlueStacks shuts that image down cleanly and the browser is rechecked.
+Its ext4/VHD/VHDX reader, writer and 7-Zip SDK decoder are built into BSI
+Customizer; no external filesystem or archive utility needs to be installed.
+**Find** locates an
 installed image. You can also select the BlueStacks engine package EXE or a
 plain `.7z` file directly: the app extracts only `Root.vhd` into its private
 working cache, leaves the package unchanged, and opens that image. This half

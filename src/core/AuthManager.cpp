@@ -680,12 +680,12 @@ QString AuthManager::mapDiscordTokenError(int status, const QByteArray &body,
                                 "button once more.");
     if (containsText(desc, QStringLiteral("invalid_client")))
         return QStringLiteral(
-            "Discord rejected the application credentials (invalid_client). Check that the "
-            "client id is the numeric Application ID from the Discord Developer Portal. If "
-            "discord.clientSecret is empty, Discord only accepts a secret-less PKCE exchange "
-            "when the application has the Public Client flag enabled (Developer Portal -> "
-            "OAuth2); otherwise put the current Client Secret into the ZLP_AUTH_JSON secret as "
-            "discord.clientSecret and re-run the build.");
+            "Discord rejected the application credentials (invalid_client). Check that "
+            "discord.clientId is the numeric Application ID from the Developer Portal. This "
+            "desktop release uses PKCE and does not embed a client secret: in Developer Portal "
+            "-> OAuth2, enable and save Public Client, then retry Discord sign-in. If Discord "
+            "requires a confidential client, it needs a server-side token exchange; do not put "
+            "the client secret into a distributed EXE.");
     if (containsText(desc, QStringLiteral("code_verifier"))
         || containsText(desc, QStringLiteral("code verifier"))
         || containsText(desc, QStringLiteral("pkce"))
