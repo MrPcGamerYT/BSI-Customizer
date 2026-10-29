@@ -24,17 +24,13 @@
  *  - a loopback listener on 127.0.0.1:<redirectPort> catches the browser
  *    redirect (path /auth/discord/callback) and a branded result page is shown;
  *    when the port cannot be opened the card falls back to paste-the-link;
- *  - access is granted by either of the two dev gates below (OR), so the same
- *    auth.json works for a user-ID allowlist and for a Discord server role:
- *      * discord.allowUsers - explicit Discord user IDs, or
- *      * discord.guildId + discord.roles + discord.requiredTier - the signed-in
- *        user must be a member of that guild and hold one of the listed roles
- *        whose "tier" matches requiredTier (checked live through
- *        GET /users/@me/guilds/{guildId}/member with the guilds.members.read
- *        scope, the same gate Premium-Optimizer uses);
- *  - a successful sign-in writes an HMAC-signed, machine-bound session which
- *    only earns a one-click "Welcome back" continue on the next launch - a
- *    saved session is never an automatic login.
+ *  - when a Discord server role gate is configured, it is authoritative and
+ *    is checked live on every sign-in and every app launch; the allowlist is
+ *    used only when no role gate is configured;
+ *  - a successful sign-in stores the identity in a signed, machine-bound
+ *    envelope and the OAuth refresh token using Windows DPAPI. The saved
+ *    identity never opens the gate by itself: Discord is refreshed and the
+ *    current guild role is fetched before access is granted.
  *
  * Configuration (see docs/AUTH.md and auth.example.json):
  *   auth.json next to the EXE (or $BSIC_AUTH_FILE), with env overrides
@@ -96,10 +92,13 @@ public:
     struct DiscordProfile {
         bool ok = false;
         QVariantMap identity;
+        QString refreshToken;
         QString message;
     };
 
     explicit AuthManager(QObject *parent = nullptr);
+    /** Test/embedding overload with an isolated session directory. */
+    AuthManager(const QString &sessionDataDir, QObject *parent = nullptr);
 
     /** Load auth.json + env overrides. Exposed like FalcoForge's loadAuthConfig. */
     static Config loadConfig();
@@ -136,7 +135,7 @@ public:
     /** Paste-the-link fallback: finish with a pasted redirect URL or code. */
     Q_INVOKABLE QVariantMap completeManual(const QString &urlOrCode);
     Q_INVOKABLE void cancelDiscord();
-    /** One-click continue over the saved session (re-checks the gate). */
+    /** Refresh saved Discord auth and check current access; never trusts cached roles. */
     Q_INVOKABLE bool continueSaved();
     /** "Use a different account": drop the saved session, stay on the card. */
     Q_INVOKABLE void forgetSaved();
@@ -202,15 +201,14 @@ private:
     HttpAnswer httpGet(const QString &url, const QString &bearer = QString());
     HttpAnswer httpPostForm(const QString &url, const QByteArray &form);
 
-    /** Full exchange: code -> token -> /users/@me -> allowlist or role check. */
+    /** Full exchange: code -> token -> /users/@me -> current role/allowlist check. */
     DiscordProfile completeDiscord(const QString &urlOrCode);
     void finishHandoff(const DiscordProfile &profile);
 
     /** GET /users/@me/guilds/{guildId}/member and match discord.roles. */
     GuildRoleAnswer checkGuildRole(const QString &accessToken);
-    /** True when a saved role-based session still satisfies the current config. */
-    bool savedRoleStillGranted(const QVariantMap &identity) const;
-
+    /** Refresh the saved Discord credential and re-check access; fail closed. */
+    bool recheckSavedSession(bool interactiveIfCredentialMissing);
     void setNote(const QString &text, const QString &kind);
     void setProgress(qreal value, bool indeterminate);
     void setBusy(bool busy);

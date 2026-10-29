@@ -183,15 +183,36 @@ target_link_libraries(BSICustomizer PRIVATE bsi_7z)
 # Optional build-time auth embed ("zip auth json"): the whole auth.json blob
 # comes from the ZLP_AUTH_JSON repository secret (BSIC_AUTH_JSON accepted as
 # an alias) and is baked into the EXE as :/bsic_auth/auth.json, so released
-# builds sign in with no sidecar file. At runtime an auth.json next to the
-# EXE - or a ZLP_AUTH_JSON env blob - still overrides it. No secret -> the
-# build simply carries no embed and the file/env paths work as before.
+# builds sign in with no sidecar file. Production release builds can require
+# this embed and treat it as authoritative, so a local auth.json or environment
+# override cannot replace the role policy. Development builds may omit it.
 # ---------------------------------------------------------------------------
+option(BSI_REQUIRE_EMBEDDED_AUTH
+    "Fail closed unless Discord authorization config is embedded in this build" OFF)
 set(BSI_AUTH_EMBED_DIR "${CMAKE_BINARY_DIR}/generated")
 set(BSI_AUTH_EMBED_JSON "${BSI_AUTH_EMBED_DIR}/auth.json")
 set(BSI_AUTH_BLOB "$ENV{ZLP_AUTH_JSON}")
 if(BSI_AUTH_BLOB STREQUAL "")
     set(BSI_AUTH_BLOB "$ENV{BSIC_AUTH_JSON}")
+endif()
+if(BSI_REQUIRE_EMBEDDED_AUTH AND BSI_AUTH_BLOB STREQUAL "")
+    message(FATAL_ERROR "This build requires ZLP_AUTH_JSON (or BSIC_AUTH_JSON) so the authorization policy cannot be replaced by a local auth.json file.")
+endif()
+if(BSI_REQUIRE_EMBEDDED_AUTH)
+    string(JSON BSI_AUTH_DISCORD_TYPE ERROR_VARIABLE BSI_AUTH_PARSE_ERROR
+        TYPE "${BSI_AUTH_BLOB}" discord)
+    if(NOT BSI_AUTH_PARSE_ERROR STREQUAL "NOTFOUND"
+       OR NOT BSI_AUTH_DISCORD_TYPE STREQUAL "OBJECT")
+        message(FATAL_ERROR "ZLP_AUTH_JSON must be plain JSON with a discord object in a release build.")
+    endif()
+    string(JSON BSI_AUTH_CLIENT_SECRET ERROR_VARIABLE BSI_AUTH_JSON_ERROR
+        GET "${BSI_AUTH_BLOB}" discord clientSecret)
+    if(BSI_AUTH_JSON_ERROR STREQUAL "NOTFOUND" AND NOT BSI_AUTH_CLIENT_SECRET STREQUAL "")
+        message(FATAL_ERROR "Do not embed a Discord OAuth client secret in a desktop EXE. Configure the Discord app as a public PKCE client and leave discord.clientSecret empty.")
+    endif()
+endif()
+if(BSI_REQUIRE_EMBEDDED_AUTH)
+    target_compile_definitions(BSICustomizer PRIVATE BSI_ENFORCE_EMBEDDED_AUTH=1)
 endif()
 if(NOT BSI_AUTH_BLOB STREQUAL "")
     file(MAKE_DIRECTORY "${BSI_AUTH_EMBED_DIR}")
@@ -313,6 +334,9 @@ target_link_libraries(BSICustomizer PRIVATE
     Qt6::QuickControls2
     Qt6::Svg
 )
+if(WIN32)
+    target_link_libraries(BSICustomizer PRIVATE Crypt32)
+endif()
 
 install(TARGETS BSICustomizer RUNTIME DESTINATION bin)
 # Discord Rich Presence discovery/patching is compiled into the application,

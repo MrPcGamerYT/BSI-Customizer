@@ -13,9 +13,10 @@
  *    the machine;
  *  - the envelope carries this PC's machine id, so editing or copying the file
  *    to another computer invalidates it;
- *  - a saved session is NEVER an automatic login (the same rule FalcoForge
- *    follows): it only earns the one-click "Welcome back - Continue as …"
- *    strip, and the continue re-checks the allowlist before the gate opens.
+ *  - a saved identity alone never opens the gate; AuthManager must refresh the
+ *    Discord credential and re-check the current allowlist/role on every launch;
+ *  - the OAuth refresh token is stored separately using the operating system's
+ *    per-user credential protection (DPAPI on Windows), never as plaintext.
  *
  * The store has no network knowledge and no Qt event-loop needs: AuthManager
  * owns the flow, this class owns the bytes on disk.
@@ -44,7 +45,12 @@ public:
 
     /** Write the identity into the signed session envelope. */
     bool saveIdentity(const QVariantMap &identity, QString *error = nullptr);
-    /** Remove the session file and forget the in-memory copy. */
+    /** Save/read the OAuth refresh token using OS-backed user encryption. */
+    bool saveRefreshToken(const QString &token, QString *error = nullptr);
+    QString refreshToken(QString *error = nullptr) const;
+    bool hasRefreshToken() const;
+    void clearRefreshToken();
+    /** Remove both the session identity and protected refresh credential. */
     void clear();
     /** Re-read the session file (returns true when a valid session is loaded). */
     bool reload();
@@ -62,6 +68,7 @@ private:
     QString m_dataDir;
     QString m_sessionFile;
     QString m_secretFile;
+    QString m_refreshTokenFile;
     mutable QByteArray m_secret;
     QVariantMap m_identity;
     QString m_signedInAt;
