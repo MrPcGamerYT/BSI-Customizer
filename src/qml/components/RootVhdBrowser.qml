@@ -632,27 +632,43 @@ Item {
                     delegate: Rectangle {
                         required property var modelData
                         width: treeView.width - 12
-                        height: 24
-                        x: modelData.depth * 11
+                        height: 26
                         radius: 6
                         color: modelData.path === browser.currentDir
                                ? Qt.rgba(6 / 255, 182 / 255, 212 / 255, 0.16)
                                : (treeHover.hovered ? Qt.rgba(1, 1, 1, 0.05) : "transparent")
+
+                        // Keep each tree node on its own ListView row. Indent
+                        // the node contents (not the delegate itself), so deep
+                        // folders never run off the pane or look like siblings.
+                        MouseArea {
+                            anchors.fill: parent
+                            onClicked: {
+                                browser.loadFolder(modelData.path);
+                                if (!modelData.expanded)
+                                    browser.expandTree(modelData.path);
+                            }
+                        }
                         RowLayout {
                             anchors.fill: parent
-                            anchors.leftMargin: 3
+                            anchors.leftMargin: 5 + modelData.depth * 18
                             anchors.rightMargin: 4
-                            spacing: 2
+                            spacing: 3
+
                             Text {
-                                Layout.preferredWidth: 10
+                                Layout.preferredWidth: 12
+                                horizontalAlignment: Text.AlignHCenter
                                 text: modelData.expanded ? "▾" : "▸"
                                 color: Theme.textDim
-                                font.pixelSize: 9
+                                font.pixelSize: 10
                                 MouseArea {
                                     anchors.fill: parent
-                                    anchors.margins: -4
+                                    anchors.margins: -3
                                     cursorShape: Qt.PointingHandCursor
-                                    onClicked: browser.toggleTree(modelData.path)
+                                    onClicked: {
+                                        mouse.accepted = true;
+                                        browser.toggleTree(modelData.path);
+                                    }
                                 }
                             }
                             Text {
@@ -665,14 +681,6 @@ Item {
                             }
                         }
                         HoverHandler { id: treeHover }
-                        MouseArea {
-                            anchors.fill: parent
-                            onClicked: {
-                                browser.loadFolder(modelData.path);
-                                if (!modelData.expanded)
-                                    browser.expandTree(modelData.path);
-                            }
-                        }
                     }
                 }
 
@@ -948,7 +956,8 @@ Item {
 
             ActionButton {
                 visible: browser.open && !browser.writable && browser.readOnlyReason.length > 0
-                text: qsTr("Enable editing")
+                text: browser.readOnlyReason.toLowerCase().indexOf("journal") >= 0
+                      ? qsTr("Recheck after clean shutdown") : qsTr("Enable editing")
                 enabled: !browser.busy
                 onClicked: browser.enableWriteRequested()
             }

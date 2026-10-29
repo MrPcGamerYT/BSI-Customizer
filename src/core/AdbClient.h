@@ -27,6 +27,11 @@ QString findAdb(const QString &exePath);
 // (`bst.instance.<name>.status.adb_port`, or the older `adb_port`).
 quint16 instancePort(const QString &confPath, const QString &instance);
 
+// Single-command form passed as one argv item to older HD-Adb shell clients.
+// Appends an exit marker without nested `sh -c`/parentheses, which some of
+// BlueStacks' bundled adb versions split incorrectly on the remote side.
+QString remoteShellCommand(const QString &command);
+
 class Client
 {
 public:

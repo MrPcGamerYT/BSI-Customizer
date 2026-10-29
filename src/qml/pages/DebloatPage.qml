@@ -20,13 +20,16 @@ Item {
     signal notify(string message)
 
     property string imageWriteError: ""
+    property bool imageNeedsFilesystemRecovery: false
 
     Dialog {
         id: imageWriteErrorDialog
         parent: Overlay.overlay
         modal: true
         focus: true
-        title: qsTr("Could not enable image editing")
+        title: page.imageNeedsFilesystemRecovery
+               ? qsTr("Image kept read-only for filesystem safety")
+               : qsTr("Could not enable image editing")
         width: Math.min(600, parent ? parent.width - 32 : 600)
         height: Math.min(360, parent ? parent.height - 32 : 360)
         x: parent ? Math.round((parent.width - width) / 2) : 0
@@ -353,6 +356,7 @@ Item {
     }
 
     function openImage() {
+        page.imageNeedsFilesystemRecovery = false;
         if (page.imagePath.length === 0) {
             page.imageOk = false;
             page.imageMsg = qsTr("Choose a Root.vhd, VHDX image, or BlueStacks engine package.");
@@ -925,8 +929,13 @@ Item {
                                 page.imageMsg = detail;
                                 page.imageOk = false;
                                 page.imageWriteError = detail;
+                                const normalized = detail.toLowerCase();
+                                page.imageNeedsFilesystemRecovery = normalized.indexOf("journal replay") >= 0
+                                        || normalized.indexOf("marked unclean") >= 0;
                                 imageWriteErrorDialog.open();
-                                page.notify(qsTr("Editing could not be enabled. The Windows error details are open."));
+                                page.notify(page.imageNeedsFilesystemRecovery
+                                            ? qsTr("The ext4 journal needs a clean shutdown before editing.")
+                                            : qsTr("Editing could not be enabled. The Windows error details are open."));
                             }
                         }
                     }

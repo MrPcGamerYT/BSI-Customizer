@@ -564,7 +564,11 @@ QVariantMap enableWriteAccess(const QString &imagePath)
             ? QString::fromStdString(volume->readOnlyReason())
             : QString::fromStdString(why);
         const bool restored = restoreAttributes();
-        QString message = QStringLiteral("The image was not made writable: %1").arg(reason);
+        QString message = volume
+            ? QStringLiteral("Windows write access was available, but the filesystem remains read-only for safety: %1")
+                  .arg(reason)
+            : QStringLiteral("Windows write access was available, but the image could not be mounted safely: %1")
+                  .arg(reason);
         if (!restored)
             message += QStringLiteral(" The original Read-only attribute could not be restored automatically.");
         return failure(message);

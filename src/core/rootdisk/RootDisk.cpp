@@ -1172,9 +1172,10 @@ std::unique_ptr<Volume> Volume::mount(std::unique_ptr<Image> image, std::string 
     const std::uint16_t state = le16(sb + 0x3A);
     volume->m_superDirty = (state & 0x1) == 0 || (volume->m_incompat & kIncompatRecover) != 0;
     if (volume->m_superDirty && volume->m_readOnlyReason.empty())
-        volume->m_readOnlyReason = "The filesystem was not cleanly unmounted (or its journal holds "
-                                   "work). Start BlueStacks once and shut the instance down "
-                                   "cleanly before editing the image.";
+        volume->m_readOnlyReason = "The ext4 filesystem is marked unclean or requests journal replay. "
+                                   "Editing stays disabled to protect pending filesystem changes. "
+                                   "Start this image in BlueStacks, shut the player down cleanly, "
+                                   "then recheck it. Do not clear the filesystem flag manually.";
 
     volume->m_writable = volume->m_image->writable() && volume->m_readOnlyReason.empty();
     if (!volume->m_image->writable() && volume->m_readOnlyReason.empty())

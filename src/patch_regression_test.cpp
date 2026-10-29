@@ -1005,6 +1005,10 @@ void checkAndroid()
               "a disabled package is enabled again");
         check(Android::listCommand().contains(QLatin1String("--user 0")),
               "the package list asked for is the one the remove step is verified against");
+        check(Adb::remoteShellCommand(Android::listCommand())
+                  == QLatin1String("pm list packages --user 0; echo \"BSI-EXIT:$?\"")
+                  && !Adb::remoteShellCommand(Android::listCommand()).contains(QLatin1Char('(')),
+              "HD-Adb receives one unwrapped shell command and an exit marker, not unsupported nested sh syntax");
         const QStringList installed = Android::installedPackagesFromOutput(
             QStringLiteral("package:com.android.systemui\npackage:org.example.game\n"
                            "package:com.android.systemui\nnot-a-package\n"));
