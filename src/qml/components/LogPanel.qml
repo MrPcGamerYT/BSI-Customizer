@@ -8,12 +8,13 @@ Rectangle {
 
     // Main.qml binds the panel height to this, so a collapsed log hands its
     // ~110 px back to whatever page is on screen.
-    property bool collapsed: false
+    property bool collapsed: true
 
     color: Theme.sidebar
 
     function append(msg, colorName) {
         logModel.append({ msg: msg, col: colorName || "gray" });
+        if (colorName === "red") panel.collapsed = false;
         if (logModel.count > 400)
             logModel.remove(0);
         view.positionViewAtEnd();
@@ -38,7 +39,7 @@ Rectangle {
             spacing: 8
 
             Text {
-                text: qsTr("LOG")
+                text: qsTr("ACTIVITY LOG")
                 color: Theme.accentText
                 font.pixelSize: 11
                 font.weight: Font.Bold

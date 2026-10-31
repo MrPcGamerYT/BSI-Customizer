@@ -28,10 +28,15 @@ Item {
     // the last Apply/Restore answer, kept on the card (a toast can be missed)
     property string aboutMsg: ""
 
+    // Delegate roots add properties beyond QQuickItem. Mark those lookups as
+    // dynamic rather than treating a generic itemAt() result as a typed row.
+    function removalItem(index: int): var { return removalList.itemAtIndex(index); }
+    function linkItem(index: int): var { return linkRepeater.itemAt(index); }
+
     function recountChecked() {
         let n = 0;
         for (let i = 0; i < removalList.count; i++) {
-            const it = removalList.itemAtIndex(i);
+            const it = page.removalItem(i);
             if (it !== null && it.checked)
                 n++;
         }
@@ -83,7 +88,7 @@ Item {
     function collectLinks() {
         const out = [];
         for (let i = 0; i < linkRepeater.count; i++) {
-            const item = linkRepeater.itemAt(i);
+            const item = page.linkItem(i);
             if (!item)
                 continue;
             // The checkbox says “Show”, so a ticked row is visible: the engine
@@ -443,7 +448,7 @@ Item {
                                 onClicked: {
                                     const on = page.checkedCount < removalList.count;
                                     for (let i = 0; i < removalList.count; i++) {
-                                        const it = removalList.itemAtIndex(i);
+                                        const it = page.removalItem(i);
                                         if (it !== null)
                                             it.checked = on;
                                     }
@@ -461,7 +466,7 @@ Item {
                                 onClicked: {
                                     const names = [];
                                     for (let i = 0; i < removalList.count; i++) {
-                                        const it = removalList.itemAtIndex(i);
+                                        const it = page.removalItem(i);
                                         if (it !== null && it.checked)
                                             names.push(removalList.model.get(i).name);
                                     }

@@ -25,9 +25,9 @@ with tempfile.TemporaryDirectory() as directory:
             entries.append(f"{path.stem} 1.0 {path.relative_to(module).as_posix()}")
     (module / "qmldir").write_text("\n".join(entries))
     report = Path(directory) / "lint.json"
-    files = [source / "pages" / name for name in (
-        "WorkspacePage.qml", "ThemePage.qml", "GifRpcPage.qml", "BootVideoPage.qml")]
-    files += [source / "components/ThemePreview.qml", source / "Main.qml", source / "pages/ResourcesPage.qml"]
+    # Lint every production screen and shared component, not just the entry
+    # point: importing a component alone does not check all of its bindings.
+    files = sorted(source.rglob("*.qml"))
     result = subprocess.run([str(linter), "-I", directory, "-I", QLibraryInfo.path(QLibraryInfo.QmlImportsPath),
                              "--unqualified", "info", "--unused-imports", "info",
                              "--json", str(report), *map(str, files)], capture_output=True, text=True)
@@ -35,4 +35,4 @@ with tempfile.TemporaryDirectory() as directory:
     failures = [(Path(f["filename"]).name, w) for f in data["files"]
                 for w in f.get("warnings", []) if w["type"] in ("warning", "error")]
     assert result.returncode == 0 and not failures, (result.stdout, result.stderr, failures)
-print("PASS: real Qt 6.8 type metadata; app entry point, Resources, Workspace, Theme, preview, Boot and GIF RPC QML")
+print("PASS: real Qt 6.8 type metadata; studio shell, dashboard, login, shared controls and existing editor QML")

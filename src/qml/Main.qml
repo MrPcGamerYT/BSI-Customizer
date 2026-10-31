@@ -1,5 +1,4 @@
 import QtQuick
-import QtQuick.Effects
 import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import QtQuick.Window
@@ -10,8 +9,8 @@ ApplicationWindow {
     onClosing: (close) => { if (backend.busy) close.accepted = false; }
 
     id: window
-    width: 1180
-    height: 760
+    width: 1240
+    height: 780
     minimumWidth: 980
     minimumHeight: 640
     visible: true
@@ -20,6 +19,17 @@ ApplicationWindow {
     flags: Qt.Window | Qt.FramelessWindowHint
     title: qsTr("BlueStacks 5 / MSI 5 — BSI Customizer")
     color: Theme.window
+    font.family: "Segoe UI"
+    font.pixelSize: 13
+    palette.window: Theme.window
+    palette.windowText: Theme.text
+    palette.text: Theme.text
+    palette.base: Theme.cardLow
+    palette.button: Theme.card
+    palette.buttonText: Theme.text
+    palette.highlight: Theme.accent
+    palette.highlightedText: Theme.primaryText
+    palette.placeholderText: Theme.textDim
 
     Dialog {
         id: purgeCacheDialog
@@ -44,199 +54,61 @@ ApplicationWindow {
 
     property bool booted: false
 
-    // ------------------------------------------------------------------
-    // Painted background — the FalcoForge .bg layer: gradient field,
-    // drifting orbs and a faint grid. No image is needed to start the app.
-    // ------------------------------------------------------------------
-    Item {
-        anchors.fill: parent
+    // The studio shell uses the existing page stack and live context objects.
+    readonly property var pageNames: [qsTr("Overview"), qsTr("Theme studio"), qsTr("Resource explorer"),
+        qsTr("Performance"), qsTr("Integrity & safety"), qsTr("Boot experience"), qsTr("Player interface"),
+        qsTr("Discord presence"), qsTr("Appearance"), qsTr("About BSI"), qsTr("Animated presence"), qsTr("Patch workspace")]
 
-        Rectangle {
-            anchors.fill: parent
-            color: Theme.window
-        }
-        Image {
-            source: "img/orb-cyan.png"
-            width: 420; height: 420
-            x: parent.width - width + 80
-            y: -120
-            opacity: 0.55
-            smooth: true
-        }
-        Image {
-            source: "img/orb-blue.png"
-            width: 360; height: 360
-            x: -60
-            y: parent.height - height + 120
-            opacity: 0.55
-            smooth: true
-        }
-        Image {
-            source: "img/orb-green.png"
-            width: 260; height: 260
-            x: parent.width * 0.56
-            y: parent.height * 0.42
-            opacity: 0.5
-            smooth: true
-        }
-        Image {
-            source: "img/orb-violet.png"
-            width: 220; height: 220
-            x: parent.width * 0.88 - width
-            y: parent.height * 0.62
-            opacity: 0.5
-            smooth: true
-        }
-        Canvas {
-            id: gridLines
-            anchors.fill: parent
-            onPaint: {
-                const ctx = getContext("2d");
-                ctx.clearRect(0, 0, width, height);
-                ctx.strokeStyle = "rgba(64, 200, 240, 0.045)";
-                ctx.lineWidth = 1;
-                for (let x = 0; x < width; x += 44) {
-                    ctx.beginPath();
-                    ctx.moveTo(x + 0.5, 0);
-                    ctx.lineTo(x + 0.5, height);
-                    ctx.stroke();
-                }
-                for (let y = 0; y < height; y += 44) {
-                    ctx.beginPath();
-                    ctx.moveTo(0, y + 0.5);
-                    ctx.lineTo(width, y + 0.5);
-                    ctx.stroke();
-                }
-            }
-            onWidthChanged: requestPaint()
-            onHeightChanged: requestPaint()
-            Component.onCompleted: requestPaint()
-        }
-    }
-
-    // ------------------------------------------------------------------
-    // Topbar — FalcoForge .topbar: brand left, status dot + plan pill +
-    // the window control box at the far edge. The whole strip drags the
-    // frameless window.
-    // ------------------------------------------------------------------
     Rectangle {
         id: topbar
         anchors.top: parent.top
         anchors.left: parent.left
         anchors.right: parent.right
-        height: 48
-        gradient: Gradient {
-            GradientStop { position: 0; color: "#061120" }
-            GradientStop { position: 1; color: "#030a14" }
-        }
+        height: 64
+        color: Theme.topbar
+        Rectangle { anchors.bottom: parent.bottom; width: parent.width; height: 1; color: Theme.border }
 
-        Rectangle {
-            anchors.bottom: parent.bottom
-            width: parent.width
-            height: 1
-            color: Theme.neonFaint
-        }
-
-        RowLayout {
-            anchors.fill: parent
-            anchors.rightMargin: 0
-            spacing: 0
-
-            Row {
-                Layout.leftMargin: 14
-                spacing: 10
-
-                Rectangle {
-                    width: 32; height: 32; radius: 8
-                    anchors.verticalCenter: parent.verticalCenter
-                    color: "#0a1a2c"
-                    border.width: 1
-                    border.color: Theme.neonFaint
-                    clip: true
-
-                    Image {
-                        anchors.fill: parent
-                        anchors.margins: 2
-                        source: "img/app-icon.png"
-                        sourceSize: Qt.size(28, 28)
-                        smooth: true
-                    }
-                }
-                Column {
-                    anchors.verticalCenter: parent.verticalCenter
-                    Text {
-                        text: qsTr("BSI Customizer")
-                        color: Theme.text
-                        font.pixelSize: 14
-                        font.weight: Font.Bold
-                    }
-                    Text {
-                        text: qsTr("BlueStacks 5 / MSI 5 toolkit — dev build")
-                        color: Theme.textDim
-                        font.pixelSize: 11
-                    }
-                }
-            }
-
-            Item { Layout.fillWidth: true }
-
-            Rectangle {
-                id: titleDot
-                Layout.preferredWidth: 8
-                Layout.preferredHeight: 8
-                radius: 4
-                color: auth.authorized ? "#4dffd9" : "#ffc45c"
-            }
-
-            Rectangle {
-                Layout.leftMargin: 10
-                Layout.preferredHeight: 26
-                Layout.preferredWidth: planLabel.implicitWidth + 24
-                radius: 13
-                color: "transparent"
-                border.width: 1
-                border.color: auth.authorized ? Qt.rgba(77 / 255, 255 / 255, 217 / 255, 0.5)
-                                              : Theme.neonFaint
-
-                Text {
-                    id: planLabel
-                    anchors.centerIn: parent
-                    text: auth.authorized ? qsTr("Dev access") : qsTr("Locked")
-                    color: auth.authorized ? Theme.green : Theme.textDim
-                    font.pixelSize: 12
-                    font.weight: Font.DemiBold
-                }
-            }
-
-            WinControls {
-                Layout.leftMargin: 8
-                appWindow: window
-            }
-        }
-
-        // Drag the frameless window from the strip; double-click toggles max.
         MouseArea {
             anchors.fill: parent
-            anchors.rightMargin: 146
-            property real lastClick: 0
-            onPressed: {
-                const now = Date.now();
-                if (now - lastClick < 320) {
-                    if (window.visibility === Window.Maximized)
-                        window.showNormal();
-                    else
-                        window.showMaximized();
-                }
-                lastClick = now;
-                window.startSystemMove();
+            anchors.rightMargin: 350
+            onPressed: window.startSystemMove()
+            onDoubleClicked: {
+                if (window.visibility === Window.Maximized) window.showNormal();
+                else window.showMaximized();
             }
+        }
+        RowLayout {
+            anchors.fill: parent
+            spacing: 16
+            Item {
+                Layout.preferredWidth: 224
+                Layout.fillHeight: true
+                Row {
+                    anchors.centerIn: parent
+                    spacing: 10
+                    Rectangle {
+                        width: 33; height: 35; radius: 10
+                        color: Theme.accent
+                        Text { anchors.centerIn: parent; text: "bi"; color: Theme.primaryText; font.pixelSize: 23; font.weight: Font.Bold; font.letterSpacing: -2 }
+                    }
+                    Column {
+                        anchors.verticalCenter: parent.verticalCenter
+                        spacing: 4
+                        Text { text: qsTr("BSI Customizer"); color: Theme.text; font.pixelSize: 18; font.weight: Font.DemiBold }
+                        Text { text: qsTr("YOUR PLAYER. YOUR PERSONALITY."); color: Theme.textDim; font.pixelSize: 8; font.letterSpacing: 1 }
+                    }
+                }
+            }
+            Text { text: qsTr("Workspace"); color: Theme.textDim; font.pixelSize: 11 }
+            Text { text: "/"; color: Theme.textDim; font.pixelSize: 11 }
+            Text { Layout.fillWidth: true; text: window.pageNames[pages.currentIndex]; color: Theme.text; font.pixelSize: 11; elide: Text.ElideRight }
+            Rectangle { width: 6; height: 6; radius: 3; color: auth.authorized ? Theme.ok : Theme.warn }
+            Text { text: auth.authorized ? qsTr("DEV ACCESS") : qsTr("SIGN IN REQUIRED"); color: Theme.textDim; font.pixelSize: 9; font.letterSpacing: 1 }
+            ActionButton { text: qsTr("Appearance"); implicitHeight: 30; onClicked: pages.currentIndex = 8 }
+            WinControls { appWindow: window; barHeight: 64 }
         }
     }
 
-    // ------------------------------------------------------------------
-    // Sidebar — grouped the way the toolbox groups its menu, with the
-    // signed-in account pinned at the bottom.
-    // ------------------------------------------------------------------
     RowLayout {
         id: shell
         anchors.top: topbar.bottom
@@ -247,24 +119,33 @@ ApplicationWindow {
 
         Rectangle {
             Layout.fillHeight: true
-            Layout.preferredWidth: 268
-            gradient: Gradient {
-                GradientStop { position: 0; color: "#050e1a" }
-                GradientStop { position: 1; color: "#020710" }
-            }
-
-            Rectangle {
-                anchors.right: parent.right
-                width: 1
-                height: parent.height
-                color: Theme.neonFaint
-            }
-
+            Layout.preferredWidth: 224
+            objectName: "studioSidebar"
+            color: Theme.sidebar
+            Rectangle { anchors.right: parent.right; width: 1; height: parent.height; color: Theme.border }
             ColumnLayout {
                 anchors.fill: parent
-                anchors.margins: 6
-                spacing: 3
-
+                anchors.margins: 12
+                spacing: 8
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 53
+                    Layout.topMargin: 6
+                    Layout.bottomMargin: 8
+                    radius: 8
+                    color: Theme.card
+                    border.color: Theme.border
+                    RowLayout {
+                        anchors.fill: parent; anchors.margins: 11; spacing: 9
+                        Image { source: Icons.icon(Icons.extras, Theme.accent); sourceSize: Qt.size(18,18); Layout.preferredWidth: 18; Layout.preferredHeight: 18 }
+                        ColumnLayout {
+                            Layout.fillWidth: true; spacing: 4
+                            Text { text: qsTr("Personal workspace"); color: Theme.text; font.pixelSize: 11; font.weight: Font.DemiBold }
+                            Text { Layout.fillWidth: true; text: backend.exePath ? qsTr("Player selected") : qsTr("Choose a player to begin"); color: Theme.textDim; font.pixelSize: 9; elide: Text.ElideRight }
+                        }
+                        Rectangle { width: 5; height: 5; radius: 3; color: backend.exePath ? Theme.ok : Theme.textDim }
+                    }
+                }
                 Flickable {
                     id: navScroll
                     Layout.fillWidth: true
@@ -277,38 +158,34 @@ ApplicationWindow {
                     ColumnLayout {
                         id: navColumn
                         width: navScroll.width
-                        spacing: 3
-                        Item { Layout.preferredHeight: 10 }
-
+                        spacing: 2
                         Repeater {
                             model: [
-                                { header: true,  label: qsTr("CUSTOMIZE") },
-                                { page: 0, label: qsTr("Dashboard"),   icon: Icons.dashboard },
-                                { page: 1, label: qsTr("Theme"),       icon: Icons.theme },
-                                { page: 2, label: qsTr("Resources"),   icon: Icons.images },
-                                { header: true,  label: qsTr("TUNE") },
-                                { page: 3, label: qsTr("FPS"),         icon: Icons.fps },
-                                { page: 4, label: qsTr("Integrity"),   icon: Icons.integrity },
-                                { page: 5, label: qsTr("Boot Video"),  icon: Icons.boot },
-                                { header: true,  label: qsTr("TOOLS") },
-                                { page: 6, label: qsTr("UI"),          icon: Icons.extras },
-                                { page: 7, label: qsTr("Discord RPC"), icon: Icons.discord },
-                                { page: 10, label: qsTr("GIF RPC"), icon: Icons.discord },
-                                { page: 11, label: qsTr("Workspace"), icon: Icons.extras },
-                                { header: true,  label: qsTr("APP") },
-                                { page: 8, label: qsTr("Appearance"),  icon: Icons.appearance },
-                                { page: 9, label: qsTr("About"),       icon: Icons.about }
+                                { header: true, label: qsTr("WORKSPACE") },
+                                { page: 0, label: qsTr("Overview"), icon: Icons.dashboard },
+                                { header: true, label: qsTr("CUSTOMIZATION") },
+                                { page: 1, label: qsTr("Theme studio"), icon: Icons.theme },
+                                { page: 2, label: qsTr("Resource explorer"), icon: Icons.images },
+                                { page: 3, label: qsTr("Performance"), icon: Icons.fps },
+                                { page: 5, label: qsTr("Boot experience"), icon: Icons.boot },
+                                { page: 6, label: qsTr("Player interface"), icon: Icons.extras },
+                                { header: true, label: qsTr("TOOLBOX") },
+                                { page: 4, label: qsTr("Integrity & safety"), icon: Icons.integrity },
+                                { page: 7, label: qsTr("Discord presence"), icon: Icons.discord },
+                                { page: 10, label: qsTr("Animated presence"), icon: Icons.discord },
+                                { page: 11, label: qsTr("Patch workspace"), icon: Icons.extras },
+                                { header: true, label: qsTr("APPLICATION") },
+                                { page: 8, label: qsTr("Appearance"), icon: Icons.appearance },
+                                { page: 9, label: qsTr("About BSI"), icon: Icons.about }
                             ]
                             delegate: Loader {
                                 required property var modelData
                                 Layout.fillWidth: true
-                                Layout.preferredHeight: modelData.header ? 30 : 42
+                                Layout.preferredHeight: modelData.header ? 25 : 36
                                 sourceComponent: modelData.header ? navHeader : navButton
-
                                 onLoaded: {
-                                    if (modelData.header) {
-                                        item.labelText = modelData.label;
-                                    } else {
+                                    if (modelData.header) item.labelText = modelData.label;
+                                    else {
                                         item.label = modelData.label;
                                         item.iconPath = modelData.icon;
                                         item.active = Qt.binding(() => pages.currentIndex === modelData.page);
@@ -317,171 +194,72 @@ ApplicationWindow {
                                 }
                             }
                         }
-
-
                     }
                 }
-
                 ActionButton {
                     Layout.fillWidth: true
-                    text: qsTr("Purge Cache")
+                    text: qsTr("Purge player cache")
                     enabled: !backend.busy
                     onClicked: purgeCacheDialog.open()
                     ToolTip.visible: hovered
                     ToolTip.text: qsTr("Clear HD-Player caches in AppData without deleting emulator data")
                 }
-
-                // ---- the signed-in account, pinned at the bottom ----
                 Rectangle {
                     visible: auth.authorized
                     Layout.fillWidth: true
-                    Layout.preferredHeight: 64
-                    Layout.bottomMargin: 6
-                    radius: 12
-                    color: Qt.rgba(1, 1, 1, 0.02)
-                    border.width: 1
-                    border.color: Theme.neonFaint
-
+                    Layout.preferredHeight: 57
+                    color: "transparent"
+                    Rectangle { anchors.top: parent.top; width: parent.width; height: 1; color: Theme.border }
                     RowLayout {
-                        anchors.fill: parent
-                        anchors.margins: 10
-                        spacing: 10
-
+                        anchors.fill: parent; anchors.topMargin: 9; spacing: 8
                         Rectangle {
-                            Layout.preferredWidth: 38
-                            Layout.preferredHeight: 38
-                            radius: width / 2
-                            color: "#0a1a2c"
-                            border.width: 1
-                            border.color: Qt.rgba(56 / 255, 225 / 255, 255 / 255, 0.5)
-
-                            Text {
-                                anchors.centerIn: parent
-                                visible: accountAvatar.status !== Image.Ready
-                                text: {
-                                    const name = auth.user.DisplayName || auth.user.Username || "?";
-                                    return name.charAt(0).toUpperCase();
-                                }
-                                color: Theme.neon
-                                font.pixelSize: 14
-                                font.weight: Font.Bold
-                            }
-                            Image {
-                                id: accountAvatar
-                                anchors.fill: parent
-                                anchors.margins: 1
-                                source: auth.user.AvatarUrl || ""
-                                fillMode: Image.PreserveAspectCrop
-                                asynchronous: true
-                                smooth: true
-                                layer.enabled: true
-                                layer.effect: MultiEffect {
-                                    maskEnabled: true
-                                    maskSource: accountAvatarMask
-                                }
-                            }
-                            Rectangle {
-                                id: accountAvatarMask
-                                width: accountAvatar.width
-                                height: accountAvatar.height
-                                radius: width / 2
-                                color: "white"
-                                antialiasing: true
-                                visible: false
-                                layer.enabled: true
-                            }
+                            width: 30; height: 30; radius: 9; color: Theme.accentSoft
+                            Text { anchors.centerIn: parent; text: (auth.user.DisplayName || auth.user.Username || "?").charAt(0).toUpperCase(); textFormat: Text.PlainText; color: Theme.accentText; font.pixelSize: 13 }
                         }
-
                         ColumnLayout {
-                            Layout.fillWidth: true
-                            spacing: 2
-                            Text {
-                                Layout.fillWidth: true
-                                text: auth.user.DisplayName || auth.user.Username || qsTr("Signed in")
-                                color: Theme.text
-                                font.pixelSize: 13
-                                font.weight: Font.DemiBold
-                                elide: Text.ElideRight
-                            }
-                            Text {
-                                text: qsTr("Dev access")
-                                color: Theme.green
-                                font.pixelSize: 11
-                            }
+                            Layout.fillWidth: true; spacing: 3
+                            Text { Layout.fillWidth: true; text: auth.user.DisplayName || auth.user.Username || qsTr("Signed in"); textFormat: Text.PlainText; color: Theme.text; font.pixelSize: 11; elide: Text.ElideRight }
+                            Text { text: qsTr("Authenticated workspace"); color: Theme.textDim; font.pixelSize: 9 }
                         }
-
-                        Rectangle {
-                            Layout.preferredWidth: 62
-                            Layout.preferredHeight: 28
-                            radius: 8
-                            color: signOutArea.containsMouse ? Qt.rgba(1, 111 / 255, 131 / 255, 0.12) : "transparent"
-                            border.width: 1
-                            border.color: Theme.border
-
-                            Text {
-                                anchors.centerIn: parent
-                                text: qsTr("Sign out")
-                                color: signOutArea.containsMouse ? Theme.danger : Theme.textDim
-                                font.pixelSize: 11
-                            }
-                            MouseArea {
-                                id: signOutArea
-                                anchors.fill: parent
-                                hoverEnabled: true
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: auth.signOut()
-                            }
-                        }
+                        ActionButton { text: qsTr("Sign out"); enabled: !backend.busy; implicitHeight: 27; onClicked: auth.signOut() }
                     }
                 }
             }
         }
 
-        // ---------------- content ----------------
         ColumnLayout {
             Layout.fillWidth: true
             Layout.fillHeight: true
             spacing: 0
-
-            // Self-update strip: only takes space while an update is being
-            // offered, downloaded or installed (see UpdateBanner.qml).
             UpdateBanner {
                 Layout.fillWidth: true
-                Layout.leftMargin: 12
-                Layout.rightMargin: 12
+                Layout.leftMargin: 24
+                Layout.rightMargin: 24
                 Layout.topMargin: visible ? 10 : 0
                 Layout.preferredHeight: visible ? implicitHeight : 0
             }
-
             StackLayout {
                 id: pages
+                objectName: "studioPageStack"
                 Layout.fillWidth: true
                 Layout.fillHeight: true
-
-                DashboardPage {}
+                DashboardPage { onNavigate: (index) => pages.currentIndex = index }
                 ThemePage {}
                 ResourcesPage {}
                 FpsPage {}
                 IntegrityPage {}
                 BootVideoPage {}
-                UiPage {
-                    onNotify: (msg) => toast.show(msg)
-                }
+                UiPage { onNotify: (msg) => toast.show(msg) }
                 RpcidPage {}
-                AppearancePage {
-                    onNotify: (msg) => toast.show(msg)
-                }
-                AboutPage {
-                    onNotify: (msg) => toast.show(msg)
-                }
+                AppearancePage { onNotify: (msg) => toast.show(msg) }
+                AboutPage { onNotify: (msg) => toast.show(msg) }
                 GifRpcPage {}
                 WorkspacePage { onNavigate: (index) => pages.currentIndex = index }
             }
-
             LogPanel {
                 id: logPanel
                 Layout.fillWidth: true
-                Layout.preferredHeight: logPanel.collapsed ? 42 : 150
+                Layout.preferredHeight: logPanel.collapsed ? 40 : 150
                 Behavior on Layout.preferredHeight { NumberAnimation { duration: 140 } }
             }
         }
@@ -584,11 +362,11 @@ ApplicationWindow {
             Text {
                 id: headerLabel
                 anchors.left: parent.left
-                anchors.leftMargin: 16
+                anchors.leftMargin: 12
                 anchors.verticalCenter: parent.verticalCenter
                 color: Theme.textDim
-                font.pixelSize: 11
-                font.weight: Font.Bold
+                font.pixelSize: 9
+                font.weight: Font.DemiBold
                 font.letterSpacing: 1.2
                 opacity: 0.8
             }
@@ -626,7 +404,7 @@ ApplicationWindow {
         visible: backend.busy
         padding: 24
         background: Rectangle {
-            color: "#0a1a2c"
+            color: Theme.card
             radius: 16
             border.color: Theme.neonFaint
         }

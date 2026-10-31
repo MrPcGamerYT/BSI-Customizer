@@ -317,6 +317,20 @@ int runSelfTest()
         check(root != nullptr, "Main.qml loaded without errors");
 
         if (root) {
+            QObject *stack = root->findChild<QObject *>(QStringLiteral("studioPageStack"));
+            QObject *dashboard = root->findChild<QObject *>(QStringLiteral("studioDashboard"));
+            check(stack && stack->property("count").toInt() == 12,
+                  "studio shell retains all twelve real application pages");
+            check(root->findChild<QObject *>(QStringLiteral("studioSidebar")) != nullptr,
+                  "studio navigation sidebar is present");
+            const auto resourceCount = backend.resourceInfos().size();
+            const bool navigated = dashboard && QMetaObject::invokeMethod(dashboard, "navigate", Q_ARG(int, 2));
+            check(navigated && stack && stack->property("currentIndex").toInt() == 2,
+                  "dashboard toolkit navigation opens the real Resources page");
+            QCoreApplication::processEvents();
+            check(backend.resourceInfos().size() == resourceCount,
+                  "opening Resources through studio navigation preserves resource results");
+            if (stack) stack->setProperty("currentIndex", 0);
             const QColor bgDefault = root->property("testProbe").value<QColor>();
             themes.setTheme(ThemeManager::Light);
             const QColor bgLight = root->property("testProbe").value<QColor>();

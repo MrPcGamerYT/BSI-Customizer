@@ -5,17 +5,8 @@ import QtQuick.Layouts
 import QtQuick.Window
 import BSICustomizer
 
-// ---------------------------------------------------------------------------
-// LoginGate — the Premium-Optimizer (FalcoForge) sign-in card, one to one:
-// the same window row with the brand dot, the same login plate (app mark,
-// heading, subtitle), the same "Welcome back" resume card with its one-click
-// Continue, the same gate-option rows, progress bar, note line, paste-the-link
-// fallback and foot line. The ONLY difference this build needs: one way in -
-// Discord - because this tool is private dev software (docs/AUTH.md).
-//
-// This card is UX only. AuthManager is the authority; Backend refuses its
-// actions until the Discord sign-in is verified (same rule as FalcoForge).
-// ---------------------------------------------------------------------------
+// The studio sign-in surface retains the existing Discord resume/manual flows.
+// AuthManager, not this visual gate, remains the authorization authority.
 Item {
     id: gate
 
@@ -40,32 +31,7 @@ Item {
         auth.completeManual(link);
     }
 
-    // ---- painted background: gradient field + two glow spots (the .login-gate
-    //      surface in the FalcoForge stylesheet) ----
-    Rectangle {
-        anchors.fill: parent
-        gradient: Gradient {
-            GradientStop { position: 0.00; color: "#030a16" }
-            GradientStop { position: 0.52; color: "#071224" }
-            GradientStop { position: 1.00; color: "#030a16" }
-        }
-    }
-    Image {
-        source: "img/orb-cyan.png"
-        width: 760; height: 760
-        x: gate.width * 0.24 - width / 2
-        y: gate.height * 0.12 - height / 2
-        opacity: 0.32
-        smooth: true
-    }
-    Image {
-        source: "img/orb-blue.png"
-        width: 760; height: 760
-        x: gate.width * 0.78 - width / 2
-        y: gate.height * 0.84 - height / 2
-        opacity: 0.32
-        smooth: true
-    }
+    Rectangle { anchors.fill: parent; color: Theme.window }
 
     // ---- the window row (FalcoForge .login-window-row) ----
     Rectangle {
@@ -74,7 +40,7 @@ Item {
         anchors.left: parent.left
         anchors.right: parent.right
         height: 48
-        color: "#030a14"
+        color: Theme.topbar
         border.width: 1
         border.color: Theme.neonFaint
 
@@ -148,12 +114,8 @@ Item {
             height: cardColumn.implicitHeight + 44
             radius: 14
             border.width: 1
-            border.color: Qt.rgba(56 / 255, 225 / 255, 255 / 255, 0.4)
-            gradient: Gradient {
-                GradientStop { position: 0.00; color: "#0a1a2c" }
-                GradientStop { position: 0.55; color: "#050f1d" }
-                GradientStop { position: 1.00; color: "#030a14" }
-            }
+            border.color: Theme.border
+            color: Theme.card
 
             ColumnLayout {
                 id: cardColumn
@@ -170,7 +132,7 @@ Item {
                         Layout.preferredWidth: 58
                         Layout.preferredHeight: 58
                         radius: 14
-                        color: "#0a1a2c"
+                        color: Theme.raised
                         border.width: 1
                         border.color: Theme.neonFaint
 
@@ -215,12 +177,8 @@ Item {
                     implicitHeight: resumeColumn.implicitHeight + 32
                     radius: 16
                     border.width: 1
-                    border.color: Qt.rgba(61 / 255, 240 / 255, 192 / 255, 0.42)
-                    gradient: Gradient {
-                        GradientStop { position: 0.00; color: "#0d223c" }
-                        GradientStop { position: 0.55; color: "#0a1c33" }
-                        GradientStop { position: 1.00; color: "#08162a" }
-                    }
+                    border.color: Theme.border
+                    color: Theme.cardLow
 
                     ColumnLayout {
                         id: resumeColumn
@@ -234,11 +192,7 @@ Item {
 
                             Rectangle {
                                 width: 32; height: 32; radius: 10
-                                gradient: Gradient {
-                                    orientation: Gradient.Horizontal
-                                    GradientStop { position: 0; color: Qt.rgba(61 / 255, 240 / 255, 192 / 255, 0.22) }
-                                    GradientStop { position: 1; color: Qt.rgba(56 / 255, 225 / 255, 255 / 255, 0.18) }
-                                }
+                                color: Theme.accentSoft
                                 border.width: 1
                                 border.color: Qt.rgba(61 / 255, 240 / 255, 192 / 255, 0.3)
 
@@ -253,14 +207,14 @@ Item {
                                 spacing: 2
                                 Text {
                                     text: qsTr("Welcome back!")
-                                    color: "#e8fff6"
+                                    color: Theme.text
                                     font.pixelSize: 15
                                     font.weight: Font.ExtraBold
                                 }
                                 Text {
                                     Layout.fillWidth: true
                                     text: qsTr("We found your previous sign-in on this PC")
-                                    color: Qt.rgba(147 / 255, 180 / 255, 210 / 255, 0.8)
+                                    color: Theme.textDim
                                     font.pixelSize: 12
                                     elide: Text.ElideRight
                                 }
@@ -277,7 +231,7 @@ Item {
                                 Layout.preferredWidth: 48
                                 Layout.preferredHeight: 48
                                 radius: width / 2
-                                color: "#0a1a2c"
+                                color: Theme.raised
                                 border.width: 2
                                 border.color: Qt.rgba(61 / 255, 240 / 255, 192 / 255, 0.45)
 
@@ -289,7 +243,7 @@ Item {
                                                 || auth.savedUser.Username || "?";
                                         return name.charAt(0).toUpperCase();
                                     }
-                                    color: "#9dffe4"
+                                    color: Theme.accentText
                                     font.pixelSize: 18
                                     font.weight: Font.Bold
                                 }
@@ -325,7 +279,7 @@ Item {
                                 Text {
                                     Layout.fillWidth: true
                                     text: auth.savedUser.DisplayName || auth.savedUser.Username || qsTr("Signed in")
-                                    color: "#f0f8ff"
+                                    color: Theme.text
                                     font.pixelSize: 15
                                     font.weight: Font.ExtraBold
                                     elide: Text.ElideRight
@@ -333,7 +287,7 @@ Item {
                                 Text {
                                     Layout.fillWidth: true
                                     text: auth.savedMeta
-                                    color: Qt.rgba(147 / 255, 180 / 255, 210 / 255, 0.85)
+                                    color: Theme.textDim
                                     font.pixelSize: 12
                                     wrapMode: Text.WordWrap
                                 }
@@ -350,7 +304,7 @@ Item {
                                         id: methodLabel
                                         anchors.centerIn: parent
                                         text: qsTr("Discord")
-                                        color: "#c2c8ff"
+                                        color: Theme.purple
                                         font.pixelSize: 11
                                         font.letterSpacing: 0.2
                                     }
@@ -360,18 +314,13 @@ Item {
 
                         Item { Layout.preferredHeight: 14 }
 
-                        // Continue as … (the neon gradient action)
+                        // Continue using the existing verified-session flow.
                         Rectangle {
                             id: resumeGo
                             Layout.fillWidth: true
                             Layout.preferredHeight: 46
                             radius: 12
-                            gradient: Gradient {
-                                orientation: Gradient.Horizontal
-                                GradientStop { position: 0.00; color: "#3df0c0" }
-                                GradientStop { position: 0.55; color: "#23e3ff" }
-                                GradientStop { position: 1.00; color: "#4f8cff" }
-                            }
+                            color: Theme.accent
 
                             Row {
                                 anchors.centerIn: parent
@@ -385,7 +334,7 @@ Item {
                                     Text {
                                         anchors.centerIn: parent
                                         text: "\u2192"
-                                        color: "#04131c"
+                                        color: Theme.primaryText
                                         font.pixelSize: 14
                                         font.weight: Font.Black
                                     }
@@ -399,7 +348,7 @@ Item {
                                                 ? qsTr("Continue as %1…").arg(name.slice(0, 24))
                                                 : qsTr("Continue as %1").arg(name);
                                     }
-                                    color: "#04131c"
+                                    color: Theme.primaryText
                                     font.pixelSize: 15
                                     font.weight: Font.ExtraBold
                                 }
@@ -544,11 +493,7 @@ Item {
                         id: barFill
                         height: parent.height
                         radius: 2
-                        gradient: Gradient {
-                            orientation: Gradient.Horizontal
-                            GradientStop { position: 0; color: "#22d3ee" }
-                            GradientStop { position: 1; color: "#4dffd9" }
-                        }
+                        color: Theme.accent
                         width: auth.progressIndeterminate
                                ? barTrack.width * 0.3
                                : Math.max(barTrack.width * auth.progress, auth.progress > 0 ? 12 : 0)
@@ -563,8 +508,8 @@ Item {
                 Text {
                     Layout.fillWidth: true
                     text: auth.note
-                    color: auth.noteKind === "bad" ? "#ffc0cb"
-                         : auth.noteKind === "good" ? "#9dffe4"
+                    color: auth.noteKind === "bad" ? Theme.danger
+                         : auth.noteKind === "good" ? Theme.accentText
                          : Theme.textDim
                     font.pixelSize: 13
                     wrapMode: Text.WordWrap
@@ -578,7 +523,7 @@ Item {
                     Layout.fillWidth: true
                     implicitHeight: manualColumn.implicitHeight + 24
                     radius: 8
-                    color: Qt.rgba(2 / 255, 9 / 255, 18 / 255, 0.7)
+                    color: Theme.cardLow
                     border.width: 1
                     border.color: Qt.rgba(23 / 255, 126 / 255, 207 / 255, 0.55)
 
@@ -608,7 +553,7 @@ Item {
                                 selectByMouse: true
                                 background: Rectangle {
                                     radius: 8
-                                    color: "#050e1a"
+                                    color: Theme.cardLow
                                     border.width: 1
                                     border.color: callbackInput.activeFocus ? Theme.neonSoft
                                                                            : Qt.rgba(56 / 255, 225 / 255, 255 / 255, 0.2)
@@ -619,16 +564,11 @@ Item {
                                 Layout.preferredWidth: 72
                                 Layout.preferredHeight: 40
                                 radius: 8
-                                gradient: Gradient {
-                                    orientation: Gradient.Horizontal
-                                    GradientStop { position: 0; color: "#06b6d4" }
-                                    GradientStop { position: 0.55; color: "#22d3ee" }
-                                    GradientStop { position: 1; color: "#67e8f9" }
-                                }
+                                color: Theme.accent
                                 Text {
                                     anchors.centerIn: parent
                                     text: qsTr("Finish")
-                                    color: "#04202b"
+                                    color: Theme.primaryText
                                     font.pixelSize: 13
                                     font.weight: Font.Bold
                                 }
