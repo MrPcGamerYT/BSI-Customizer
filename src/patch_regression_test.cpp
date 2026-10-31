@@ -1011,8 +1011,9 @@ int runPatchRegressionTests()
                                                         { { QStringLiteral("primary100"), color } });
             if (!patched.ok)
                 std::printf("    patch error: %s\n", qPrintable(patched.msg));
-            check(patched.ok, "patch works without running another theme changer first");
+            check(patched.ok, QStringLiteral("patch works without running another theme changer first (rcc %1): %2").arg(version).arg(patched.msg));
             const auto after = read(path);
+            check(after.size() == before.size(), "ordinary palette edits use verified existing storage without PE growth");
             check(after.mid(f.neighbor, 4 + be32(f.bytes, f.neighbor))
                       == f.bytes.mid(f.neighbor, 4 + be32(f.bytes, f.neighbor)),
                   "next resource's zero-prefixed length header is preserved");

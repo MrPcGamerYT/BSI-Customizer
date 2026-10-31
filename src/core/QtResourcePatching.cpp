@@ -326,8 +326,14 @@ bool replaceResource(QByteArray &data, qint64 entry, const Link &snapshot,
                               .arg(record.size())
                               .arg(end - entry));
         } else {
-            destination = appendStorage(changed, record.size(), error);
+            // Prefer verified existing data-section storage. Growing first
+            // needlessly rejects otherwise supported images whose section
+            // headers cannot be extended, and changes their size unnecessarily.
+            destination = findFreeSpace(changed, link, record.size(), error);
+            if (destination < 0)
+                destination = appendStorage(changed, record.size(), error);
             if (destination < 0) return false;
+            if (error) error->clear();
         }
         const qint64 rva = PeUtils::rawToRva(PeUtils::sections(changed), destination);
         if (rva < 0) return refuse(QStringLiteral("New resource offset is not mapped by a PE section."));
