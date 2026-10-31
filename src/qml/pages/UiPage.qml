@@ -55,13 +55,27 @@ Item {
                                       state: qsTr("Select the HD-Player.exe path first.") });
     }
 
+    property string lastProfileAbout: JSON.stringify((backend.customizationProfile || {}).about || {})
+    Connections {
+        target: backend
+        function onCustomizationProfileChanged() {
+            const a = (backend.customizationProfile || {}).about || {};
+            const value = JSON.stringify(a); if (value === page.lastProfileAbout) return;
+            page.lastProfileAbout = value;
+            if (a.text !== undefined) aboutText.text = a.text;
+            if (a.showSections !== undefined) page.showSectionsWanted = !!a.showSections;
+            if (a.links !== undefined) page.aboutLinks = a.links;
+        }
+    }
     function refreshAbout(loadFields) {
         const state = backend.aboutPageState();
         page.about = state;
         if (loadFields) {
             page.aboutLinks = state.links || [];
-            aboutText.text = state.text || "";
-            page.showSectionsWanted = state.showSections !== false;
+            const staged = (backend.customizationProfile || {}).about || {};
+            aboutText.text = staged.text !== undefined ? staged.text : (state.text || "");
+            if (staged.links !== undefined) page.aboutLinks = staged.links;
+            page.showSectionsWanted = staged.showSections !== undefined ? !!staged.showSections : state.showSections !== false;
         }
     }
 
@@ -665,6 +679,10 @@ Item {
                             color: Theme.textDim
                             font.pixelSize: 11
                             font.weight: Font.DemiBold
+                        }
+                        ActionButton {
+                            text: qsTr("Save About settings to profile")
+                            onClicked: { const r = backend.workspace("profile-section", {section: "about", value: {text: aboutText.text, showSections: page.showSectionsWanted, links: page.collectLinks()}}); page.aboutMsg = r.msg || ""; }
                         }
                         TextArea {
                             id: aboutText

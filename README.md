@@ -268,9 +268,11 @@ any more; on a page that exists only as compiled code its caption is cleared
 instead, which is all a string edit can do there. Press **Restore stock About**
 to restore the untouched page byte-for-byte.
 
-Both tools work on the Qt 5 and Qt 6 players: BlueStacks 5.22 and the older
-5.10 build, plus the MSI App Player 5.9 and the current MSI build. The
-clean-up understands both shapes the player uses to re-assert button
+The analyzers support Qt 5 and Qt 6 page layouts found in BlueStacks 5.22,
+the older 5.10 build and MSI App Player 5.9. Compatibility is checked against
+the selected EXE, not assumed for every current MSI/BlueStacks build; an
+unverified active resource mapping stays read-only. The clean-up understands
+both shapes the player uses to re-assert button
 visibility (`PlrTopbarElement.pVisible` and the MSI 5.9
 `iTopbarItems.append({ "id" : …, "visible" : … })` list) and both sidebar
 shapes (an explicit `pIsFeatureEnable` binding, or none — the tool adds one
@@ -291,7 +293,10 @@ Images tabs are gone: both live here, with the whole pool beside them.
   Binary). Search is case-insensitive across paths, names and formats; all words
   must match, and quotes keep a phrase together. Slashes and Windows backslashes
   are equivalent. Filtering uses cached metadata and thumbnails, not EXE reads,
-  and never changes the selected entry or discards unsaved code.
+  and never changes the selected entry or discards unsaved code. The Fonts and
+  Modified kind filters use cached metadata; Modified compares against an
+  existing `.bak` during the manual scan. Add `min:10kb max:2mb` to bound decoded
+  sizes (bytes, `kb`, `mb`, and decimals are supported).
 - **Pictures** get a thumbnail in the list and a large preview; **Extract…**
   saves the selected entry exactly as stored and **Extract All** writes the
   whole pool to `embedded_resources\` next to the EXE, keeping its folders.
@@ -308,31 +313,44 @@ Images tabs are gone: both live here, with the whole pool beside them.
   as the source the player actually loads, and **Save code** writes it back.
   Editing QML also invalidates its compiled `.qmlc` companion and the player's
   QML disk cache, so the new source is what runs.
-- **Binary** entries (compiled caches, fonts) are listed and can be extracted
-  or replaced with a file of the same kind.
-- **Replace with file…** validates a picture first (its real format is sniffed
-  from the bytes and has to match the entry) and verifies the rewrite before
-  the EXE is replaced on disk. The original stays as `HD-Player.exe.bak` and
-  nothing is written while HD-Player.exe runs.
+- **Binary** entries (including fonts and compiled caches) can be extracted.
+  Raw compiled `.qmlc`/`.jsc` cache replacement is refused: edit the source
+  instead so its cache can be invalidated safely. Other replacements remain
+  subject to verified mapping and format checks.
+- **Replace with file…** validates a picture's real byte format against the
+  original image family and verifies the rewritten resource before committing.
+  The original stays as `HD-Player.exe.bak`; close HD-Player before writing.
 
-**Two hard limits, checked before anything is written.**
+**Verified storage, not a universal force-replace switch.** A replacement may
+have more decoded bytes than the original when its encoded record still fits
+verified storage. The writer uses the existing slot or a validated, mapped
+unused range, protects registered resource pools, PE directories and executable
+sections, updates known aliases and reads the result back through the tree.
+The ordinary Resources path never grows the EXE. Unsupported layouts or lack
+of verified space are refused before writing; arbitrary zero bytes are not
+assumed to be free space. The resource editor's decoded size/slot meter is
+advisory: Dry Run checks the actual encoded output and complete mapping.
 
-1. *The embedded file never grows.* An edit or replacement that decodes to more
-   bytes than the entry already holds is refused outright — no save, no backup,
-   no change to the EXE.
-2. *HD-Player.exe never grows.* The record has to fit the space the entry
-   already owns. Because the shipped pools are packed without padding, that is
-   usually too tight for a recompressed edit, so the writer looks for an empty
-   gap inside the same PE section, builds the record there and re-points the
-   resource tree node at it. Every other payload is blocked out of the search,
-   the file size is asserted again after the rewrite, and the new record is read
-   back through the tree before the EXE on disk is touched. Nothing is ever
-   appended and no section changes size. Only when there is no gap left is the
-   edit refused, with the exact byte counts.
+## Customization Workspace (2.7)
 
-The meter under the editor shows both numbers live as you type — the entry's
-slot (`used / available`) and the file size (`file N of M bytes`) — and turns
-red the moment the embedded file would grow.
+The new **Workspace** page brings together compatibility/capacity inspection,
+text diagnostic export, portable Theme/Boot/About/GIF RPC profiles, mock theme
+preview, image/video preparation and guided single-EXE patch batches. Resources
+remain **manual-scan only**. Importing a profile only stages settings; it never
+deploys sidecars or reuses old resource offsets.
+
+For EXE edits: inspect → queue palette/resources → **Dry Run** → review the
+fingerprint and operations → confirm **Apply**. Workspace batches retain
+original hashes and recovery snapshots in the application's AppData
+`patch-history` directory. Restore requires the exact canonical target and
+recorded post-patch hash; emulator updates invalidate stale plans. Original
+editor writes retain their existing `.bak` behavior and are not retroactively
+added to Workspace history.
+
+See [Workspace features and limits](docs/CUSTOMIZATION-WORKSPACE.md) for the
+18-feature checklist, safety boundaries and validation status. This is not a
+promise that an unknown MSI/BlueStacks resource layout can be patched. Export
+Diagnostics when mapping is unverified; do not force Hex as a workaround.
 
 Restart BlueStacks after a replacement; the player reads these resources at
 startup.

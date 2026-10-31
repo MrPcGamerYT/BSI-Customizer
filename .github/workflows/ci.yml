@@ -59,6 +59,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libgl1 libegl1 libxkbcommon0 libdbus-1-3
           python -m pip install PySide6==6.8.3
+      - name: Type-check Workspace and Theme QML against real Qt metadata
+        run: python tests/workspace_qml_lint_test.py
       - name: Exercise adaptive boot player against synthetic Qt6, Qt5 and WebEngine APIs
         run: python tests/run_qt_runtime_test.py tests/boot_player_runtime_test.py
       - name: Load the real Resources page with a counting backend
@@ -83,6 +85,7 @@ jobs:
           host: windows
           target: desktop
           arch: win64_msvc2022_64
+          modules: qtmultimedia
           cache: true
 
       - name: Configure

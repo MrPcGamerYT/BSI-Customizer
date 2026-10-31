@@ -21,6 +21,29 @@ Item {
         url1.text = s.Button1Url || ""; button2.text = s.Button2Label || ""; url2.text = s.Button2Url || "";
         rpcEnabled.checked = s.Enabled; timestamp.checked = s.Timestamp; rotation.value = s.Interval || 5;
     }
+    function configuration() {
+        return {AppId: appId.text.trim(), State: stateField.text, Details: detailField.text,
+                LargeImage: largeImage.text.trim(), LargeText: largeText.text,
+                SmallImage: smallImage.text.trim(), SmallText: smallText.text,
+                Button1Label: button1.text, Button1Url: url1.text.trim(),
+                Button2Label: button2.text, Button2Url: url2.text.trim(),
+                Enabled: rpcEnabled.checked, Timestamp: timestamp.checked, Interval: rotation.value};
+    }
+    property string lastProfileRpc: JSON.stringify((backend.customizationProfile || {}).gifRpc || {})
+    Connections {
+        target: backend
+        function onCustomizationProfileChanged() {
+            const s = (backend.customizationProfile || {}).gifRpc || {};
+            const value = JSON.stringify(s); if (value === page.lastProfileRpc) return;
+            page.lastProfileRpc = value;
+            appId.text = s.AppId || ""; stateField.text = s.State || ""; detailField.text = s.Details || "";
+            largeImage.text = s.LargeImage || ""; largeText.text = s.LargeText || "";
+            smallImage.text = s.SmallImage || ""; smallText.text = s.SmallText || "";
+            button1.text = s.Button1Label || ""; url1.text = s.Button1Url || "";
+            button2.text = s.Button2Label || ""; url2.text = s.Button2Url || "";
+            rpcEnabled.checked = s.Enabled !== false; timestamp.checked = !!s.Timestamp; rotation.value = s.Interval || 5;
+        }
+    }
     ScrollView {
         anchors.fill: parent
         contentWidth: availableWidth
@@ -39,6 +62,7 @@ Item {
                 ColumnLayout {
                     anchors.fill: parent; spacing: 12
                     PathRow { id: target; Layout.fillWidth: true; label: qsTr("HD-Player.exe"); text: backend.exePath; onLoad: page.checkFiles() }
+                    ActionButton { text: qsTr("Save settings to profile"); enabled: !backend.busy; onClicked: page.show(backend.workspace("profile-section", {section: "gifRpc", value: page.configuration()})) }
                     ActionButton { text: qsTr("Check DLL / Load settings"); enabled: !backend.busy; onClicked: page.checkFiles() }
                     Label { text: qsTr("Application ID (your Discord application)"); color: Theme.text }
                     TextField { id: appId; Layout.fillWidth: true; placeholderText: "17–20 digit application ID"; maximumLength: 20; selectByMouse: true }

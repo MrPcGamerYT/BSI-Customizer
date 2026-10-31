@@ -65,6 +65,10 @@
 #  include <windows.h>
 #endif
 
+#define BSI_WORKSPACE_INTEGRATED
+#include "../tests/workspace_core_test.cpp"
+#undef BSI_WORKSPACE_INTEGRATED
+
 using namespace ByteUtils;
 
 // Implemented in cli.cpp: the scriptable Rich Presence/name command line.
@@ -915,7 +919,7 @@ static QString aboutPageFixture()
 
 int runPatchRegressionTests()
 {
-    failures = 0;
+    failures = WorkspaceTests::run();
     QTemporaryDir temp;
     check(temp.isValid(), "regression temp directory available");
     if (!temp.isValid())
@@ -4896,13 +4900,16 @@ Window {
 
         const QString exePath = temp.filePath(QStringLiteral("resources.exe"));
         write(exePath, original);
-        const auto refusedText = EmbeddedResources::replaceText(exePath, qmlEntry.path, longer);
-        check(!refusedText.ok && refusedText.msg.contains(QLatin1String("never made bigger"))
-                  && read(exePath) == original,
-              QStringLiteral("a QML edit that grows the embedded file is refused outright (%1)")
-                  .arg(refusedText.msg));
-        check(!QFileInfo::exists(exePath + QStringLiteral(".bak")),
-              "a refused edit does not even create a backup: the EXE was never opened for writing");
+        const auto grownText = EmbeddedResources::replaceText(exePath, qmlEntry.path, longer);
+        check(grownText.ok && read(exePath).size() == originalSize,
+              QStringLiteral("larger decoded QML fits verified storage without EXE growth (%1)").arg(grownText.msg));
+        write(exePath, original); QFile::remove(exePath + QStringLiteral(".bak"));
+        QString huge; huge.reserve(400000);
+        for (int i = 0; i < 400000; ++i) { seed = seed * 1103515245u + 12345u; huge += QChar(ushort('a' + (seed >> 16) % 26)); }
+        const auto refusedText = EmbeddedResources::replaceText(exePath, qmlEntry.path, qmlSource + huge);
+        check(!refusedText.ok && read(exePath) == original,
+              QStringLiteral("oversized payload without verified storage is refused (%1)").arg(refusedText.msg));
+        check(!QFileInfo::exists(exePath + QStringLiteral(".bak")), "refused growth does not create a backup");
 
         const QString shorter = QStringLiteral("import QtQuick\nItem { width: 10 }\n");
         const auto saved = EmbeddedResources::replaceText(exePath, qmlEntry.path, shorter);
@@ -4934,10 +4941,11 @@ Window {
         write(biggerPng, widerPng);
         const auto refusedPicture = EmbeddedResources::replacePicture(
             exePath, pngEntry.path, biggerPng);
-        check(!refusedPicture.ok && read(exePath) == afterSave,
-              QStringLiteral("a bigger picture is refused, not grown into the file (%1)")
+        check(refusedPicture.ok && read(exePath).size() == afterSave.size(),
+              QStringLiteral("a larger picture uses verified storage without growing the EXE (%1)")
                   .arg(refusedPicture.msg));
 
+        write(exePath, afterSave); // isolate the next case from the image relocation
         const auto refusedBinary = EmbeddedResources::replaceBytes(
             exePath, cacheEntry.path, QByteArray(4096, char(0x42)));
         check(!refusedBinary.ok && read(exePath) == afterSave,

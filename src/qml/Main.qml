@@ -294,6 +294,7 @@ ApplicationWindow {
                                 { page: 6, label: qsTr("UI"),          icon: Icons.extras },
                                 { page: 7, label: qsTr("Discord RPC"), icon: Icons.discord },
                                 { page: 10, label: qsTr("GIF RPC"), icon: Icons.discord },
+                                { page: 11, label: qsTr("Workspace"), icon: Icons.extras },
                                 { header: true,  label: qsTr("APP") },
                                 { page: 8, label: qsTr("Appearance"),  icon: Icons.appearance },
                                 { page: 9, label: qsTr("About"),       icon: Icons.about }
@@ -474,6 +475,7 @@ ApplicationWindow {
                     onNotify: (msg) => toast.show(msg)
                 }
                 GifRpcPage {}
+                WorkspacePage { onNavigate: (index) => pages.currentIndex = index }
             }
 
             LogPanel {

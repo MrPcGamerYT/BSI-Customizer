@@ -31,6 +31,22 @@ assert.equal(context.filter(prepared, 'sidebar', 0)[0], rows[0]);
 assert.equal(rows[0].index, 17); // no filtered-position/EXE-offset mixup
 assert.equal(Object.hasOwn(rows[0], 'searchText'), false); // metadata is not mutated
 
+const sizes = context.prepare([
+    {index: 1, path: 'fonts/ui.ttf', format: 'TTF', kind: 'binary', size: 4096, modified: true},
+    {index: 2, path: 'icons/logo.png', format: 'PNG', kind: 'image', size: 512, modified: false},
+    {index: 3, path: 'ui/panel.qml', format: 'QML', kind: 'text', text: true, size: 2048, modified: true},
+]);
+const matches = (query, kind = 0) => Array.from(context.filter(sizes, query, kind), r => r.index);
+assert.deepEqual(matches('min:1kb max:4kb'), [1,3]);
+assert.deepEqual(matches('max:0.5kb'), [2]);
+assert.deepEqual(matches('min:1mb'), []);
+assert.deepEqual(matches(''), [1,2,3]);
+assert.deepEqual(matches('', 5), [1]);
+assert.deepEqual(matches('', 6), [1,3]);
+assert.deepEqual(matches('panel min:1kb', 6), [3]);
+assert.deepEqual(matches('min:4kb max:1kb'), []);
+assert.deepEqual(matches('min:invalid'), []);
+
 const large = Array.from({ length: 20000 }, (_, index) => ({
     index, path: `ui/file_${index}.qml`, name: `file_${index}.qml`, format: 'QML', kind: 'text', text: true,
 }));

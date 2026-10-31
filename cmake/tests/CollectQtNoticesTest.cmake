@@ -28,7 +28,7 @@ function(expect message)
 endfunction()
 
 file(REMOVE_RECURSE "${WORK_DIR}")
-set(modules qtbase qtdeclarative qtsvg qtimageformats qtshadertools)
+set(modules qtbase qtdeclarative qtsvg qtimageformats qtshadertools qtmultimedia)
 set(version 9.9.9)
 
 foreach(module IN LISTS modules)
@@ -97,7 +97,8 @@ string(FIND "${notices}" "\"Id\": \"t\"" found)
 expect("attribution files outside src/ are ignored" found EQUAL -1)
 string(REGEX MATCHALL "\"sha256\": \"[0-9a-f]+\"" hashes "${sources}")
 list(LENGTH hashes hash_count)
-expect("every module archive is hashed" hash_count EQUAL 5)
+list(LENGTH modules module_count)
+expect("every module archive is hashed" hash_count EQUAL module_count)
 
 # A referenced licence that is not in the archive must fail loudly instead of
 # shipping an incomplete notice file.

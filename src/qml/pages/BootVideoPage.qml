@@ -9,6 +9,15 @@ Item {
     property string state: qsTr("Not patched yet")
     property string stateColorName: "gray"
 
+    property string lastProfileBoot: JSON.stringify((backend.customizationProfile || {}).boot || {})
+    Connections {
+        target: backend
+        function onCustomizationProfileChanged() {
+            const b = (backend.customizationProfile || {}).boot || {};
+            const value = JSON.stringify(b);
+            if (value !== page.lastProfileBoot) { page.lastProfileBoot = value; bootHold.value = b.holdMs === undefined ? 3000 : b.holdMs; }
+        }
+    }
     ColumnLayout {
         anchors.fill: parent
         anchors.margins: 24
@@ -83,6 +92,7 @@ Item {
                     Label { text: qsTr("Boot hold after ready (ms)"); color: Theme.text }
                     SpinBox { id: bootHold; from: 0; to: 15000; value: 3000; stepSize: 500; editable: true }
                     Label { text: qsTr("0 disables the extra delay"); color: Theme.textDim }
+                    ActionButton { text: qsTr("Save to profile"); onClicked: { const r = backend.workspace("profile-section", {section: "boot", value: {holdMs: bootHold.value}}); page.state = r.msg || ""; } }
                 }
 
                 RowLayout {

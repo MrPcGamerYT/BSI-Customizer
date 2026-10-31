@@ -13,13 +13,8 @@ import "../ResourceSearch.js" as ResourceSearch
 //   * everything else (compiled caches, fonts)     - listed, extracted and
 //                                                    replaceable with a file
 //
-// SIZE RULES - both are hard, and the engine checks them again on save:
-//   1. the embedded file itself never grows: a replacement or edit that needs
-//      more bytes than the entry already has is refused outright;
-//   2. HD-Player.exe never grows either: the compressed payload has to fit the
-//      space the entry already owns, or a verified empty gap inside the same
-//      file, which the writer re-points the resource at. Nothing is appended.
-// The meter below shows both numbers before the click.
+// Decoded size may grow; encoded payload must fit verified mapped storage.
+// Scans are always explicit.
 Item {
     id: page
 
@@ -37,7 +32,7 @@ Item {
     property int needed: 0              // payload bytes the editor's text would take
     property bool measuring: false
 
-    readonly property var kinds: [qsTr("All"), qsTr("Pictures"), qsTr("SVG"), qsTr("Code"), qsTr("Binary")]
+    readonly property var kinds: [qsTr("All"), qsTr("Pictures"), qsTr("SVG"), qsTr("Code"), qsTr("Binary"), qsTr("Fonts"), qsTr("Modified vs .bak")]
 
     // One stable snapshot per scan/path change; repeatedly reading the C++
     // QVariantList property used to rebuild every map on each filter/selection.
@@ -69,7 +64,7 @@ Item {
     // engine looks for free space inside the same file and only refuses when
     // there is none. The button stays available so a fit that needs moving is
     // still savable.
-    readonly property bool fits: page.hasSelection && page.room.known && !page.fileGrows
+    readonly property bool fits: page.hasSelection && page.room.known
     readonly property bool needsMove: page.room.known && page.needed > page.room.capacity
     readonly property string budgetText: {
         if (!page.hasSelection)
@@ -81,7 +76,7 @@ Item {
         const what = page.selected.compressed ? qsTr("compressed") : qsTr("raw");
         var text = qsTr("%1 %2 of %3 bytes").arg(what).arg(page.needed).arg(page.room.capacity);
         if (page.needsMove)
-            text += qsTr(" · moved to free space");
+            text += qsTr(" · relocation required; checked before writing");
         else
             text += qsTr(" · %1 free").arg(page.room.capacity - page.needed);
         if (page.isCode)
@@ -245,7 +240,7 @@ Item {
                 id: filterField
                 objectName: "resourceSearchField"
                 Layout.preferredWidth: 280
-                placeholderText: qsTr("Search path, name or format…")
+                placeholderText: qsTr("Search path / format… min:10kb max:2mb")
                 color: Theme.text
                 placeholderTextColor: Theme.textDim
                 font.pixelSize: 12
@@ -441,13 +436,7 @@ Item {
                             onClicked: page.saveCode()
 
                             ToolTip.visible: hovered && page.isCode && !page.fits
-                            ToolTip.text: page.fileGrows
-                                          ? qsTr("This edit makes the embedded file bigger (%1 bytes, "
-                                                 + "it has %2). An embedded file is never made bigger, "
-                                                 + "so nothing is saved.")
-                                                .arg(page.fileBytes).arg(page.selected.size)
-                                          : qsTr("The size of this entry's slot could not be measured, "
-                                                 + "so saving is disabled.")
+                            ToolTip.text: qsTr("The resource mapping or storage capacity could not be verified. Saving is disabled.")
                         }
                     }
 
@@ -589,7 +578,7 @@ Item {
                     Text {
                         Layout.fillWidth: true
                         wrapMode: Text.Wrap
-                        text: qsTr("Two hard limits: the embedded file is never made bigger, and "
+                        text: qsTr("Larger decoded files are allowed when their encoded payload fits verified storage. "
                                    + "HD-Player.exe never changes size. A payload that outgrows its slot "
                                    + "is moved into empty space inside the same file and the resource is "
                                    + "re-pointed at it; if there is none, the edit is refused instead of "

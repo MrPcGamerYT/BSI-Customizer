@@ -24,11 +24,14 @@ class AuthManager;
 class Backend : public QObject
 {
     Q_OBJECT
+    Q_PROPERTY(QVariantMap customizationProfile READ customizationProfile NOTIFY customizationProfileChanged)
+    Q_PROPERTY(QVariantList workspaceOperations READ workspaceOperations NOTIFY workspaceChanged)
     Q_PROPERTY(bool busy READ busy NOTIFY busyChanged)
     Q_PROPERTY(QString exePath READ exePath WRITE setExePath NOTIFY exePathChanged)
     Q_PROPERTY(QString dllPath READ dllPath WRITE setDllPath NOTIFY dllPathChanged)
     Q_PROPERTY(QString confPath READ confPath WRITE setConfPath NOTIFY confPathChanged)
 
+    Q_PROPERTY(bool themeWritable READ themeWritable NOTIFY themeChanged)
     Q_PROPERTY(bool themeFound READ themeFound NOTIFY themeChanged)
     Q_PROPERTY(bool qmlThemeAvailable READ qmlThemeAvailable NOTIFY themeChanged)
     Q_PROPERTY(QString themeMode READ themeMode NOTIFY themeChanged)
@@ -52,6 +55,9 @@ public:
     explicit Backend(SettingsManager *settings, QObject *parent = nullptr);
 
     bool busy() const { return m_busy; }
+    QVariantMap customizationProfile() const { return m_customizationProfile; }
+    QVariantList workspaceOperations() const { return m_workspaceOperations; }
+    Q_INVOKABLE QVariantMap workspace(const QString &action, const QVariantMap &options);
 
     // ---- sign-in gate (the Premium-Optimizer rule: the renderer is not the
     //      gate) ----
@@ -67,6 +73,7 @@ public:
     QString confPath() const;
     void setConfPath(const QString &p);
 
+    bool themeWritable() const { return m_themeInfo.found && !m_themeInfo.ambiguous && (m_themeInfo.mode != QLatin1String("zlib") || m_themeInfo.hasQrcNode || m_themeInfo.headerBytes != 8); }
     bool themeFound() const { return m_themeInfo.found; }
     // Qt 6 players use the QML (new) method. Older Qt 5 / MSI 5 builds hide it
     // and use Hex (old); both expose the same per-surface gradient editor for
@@ -147,7 +154,7 @@ public:
     // ---- embedded resources (every file in the Qt resource pools) ----
     // One list for QML, SVG, pictures and the rest. Text entries are shown as
     // code and edited in place; pictures are previewed and replaced. A write is
-    // refused when it would grow the embedded file, and the EXE never grows by
+    // bounded by encoded storage capacity, and the EXE never grows by
     // a single byte: an oversized payload is rebuilt in free space the file
     // already has, or refused.
     Q_INVOKABLE int scanResources(bool includeBinary);
@@ -160,9 +167,8 @@ public:
     // entry is compressed), so the editor can show the budget before saving.
     // No EXE read: the entry's compression flag and BOM are all it needs.
     Q_INVOKABLE int resourcePayloadSize(int index, const QString &text, bool bom) const;
-    // Bytes the editor's text occupies once decoded (UTF-8, BOM included). The
-    // embedded file is never made bigger, so this is the number the page checks
-    // against the entry's original size before allowing a save.
+    // Decoded UTF-8 size, BOM included. Storage capacity is measured separately;
+    // a larger decoded resource is permitted when verified payload storage fits.
     Q_INVOKABLE int resourceTextSize(const QString &text, bool bom) const;
     Q_INVOKABLE QVariantMap saveResourceText(int index, const QString &text);
     Q_INVOKABLE QVariantMap replaceResourceWithFile(int index, const QString &filePath);
@@ -213,6 +219,8 @@ public:
                                          bool dryRun = false);
 
 signals:
+    void customizationProfileChanged();
+    void workspaceChanged();
     void busyChanged();
     void exePathChanged();
     void dllPathChanged();
@@ -237,6 +245,11 @@ private:
     QByteArray readExe();
     void noteThemeFileState();     // remember the EXE mtime/size we loaded from
 
+    QVariantMap m_customizationProfile;
+    QVariantList m_workspaceOperations;
+    QString m_workspaceHash;
+    QByteArray m_themeFileHash;
+    QByteArray m_resourceFileHash;
     AuthManager *m_auth = nullptr;
     SettingsManager *m_settings;
     ThemeInfo m_themeInfo;

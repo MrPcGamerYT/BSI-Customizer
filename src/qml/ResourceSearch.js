@@ -23,6 +23,15 @@ function filter(index, query, kind) {
     const tokens = normalize(query).match(/"[^"]+"|\S+/g) || [];
     for (let i = 0; i < tokens.length; ++i)
         terms.push(tokens[i].replace(/^"|"$/g, ""));
+    let min = 0, max = -1;
+    const words = [];
+    for (const term of terms) {
+        const range = /^(min|max):([0-9]+(?:\.[0-9]+)?)(b|kb|mb)?$/.exec(term);
+        if (!range) { words.push(term); continue; }
+        const scale = range[3] === "mb" ? 1048576 : (range[3] === "kb" ? 1024 : 1);
+        const value = +range[2] * scale;
+        if (range[1] === "min") min = Math.max(min, value); else max = max < 0 ? value : Math.min(max, value);
+    }
     const out = [];
     for (let i = 0; i < index.length; ++i) {
         const item = index[i];
@@ -31,9 +40,12 @@ function filter(index, query, kind) {
         if (kind === 2 && row.kind !== "svg") continue;
         if (kind === 3 && !row.text) continue;
         if (kind === 4 && row.kind !== "binary") continue;
+        if (kind === 5 && !/^(ttf|otf|woff|woff2)$/i.test(row.format || "")) continue;
+        if (kind === 6 && !row.modified) continue;
+        if ((min > 0 && row.size < min) || (max >= 0 && row.size > max)) continue;
         let matches = true;
-        for (let t = 0; t < terms.length; ++t) {
-            if (item.text.indexOf(terms[t]) < 0) { matches = false; break; }
+        for (let t = 0; t < words.length; ++t) {
+            if (item.text.indexOf(words[t]) < 0) { matches = false; break; }
         }
         if (matches) out.push(row); // preserve the backend index, not the filtered position
     }

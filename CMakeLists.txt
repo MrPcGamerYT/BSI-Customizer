@@ -1,11 +1,11 @@
 cmake_minimum_required(VERSION 3.21)
 
-project(BSICustomizer VERSION 2.6.4 LANGUAGES CXX)
+project(BSICustomizer VERSION 2.7.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Network Qml Quick QuickControls2 Svg)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Network Qml Quick QuickControls2 Svg Multimedia)
 
 qt_standard_project_setup(REQUIRES 6.5)
 
@@ -74,6 +74,8 @@ qt_add_executable(BSICustomizer
     src/core/AboutPatcher.cpp
     src/core/BsDetector.h
     src/core/BsDetector.cpp
+    src/core/CustomizationWorkspace.h
+    src/core/CustomizationWorkspace.cpp
     src/core/Backend.h
     src/core/Backend.cpp
     src/core/AuthManager.h
@@ -216,6 +218,7 @@ qt_add_qml_module(BSICustomizer
         src/qml/components/Toast.qml
         src/qml/components/PathRow.qml
         src/qml/components/ColorField.qml
+        src/qml/components/ThemePreview.qml
         src/qml/components/GradientEditor.qml
         src/qml/components/LogPanel.qml
         src/qml/pages/DashboardPage.qml
@@ -226,6 +229,7 @@ qt_add_qml_module(BSICustomizer
         src/qml/pages/BootVideoPage.qml
         src/qml/pages/UiPage.qml
         src/qml/pages/GifRpcPage.qml
+        src/qml/pages/WorkspacePage.qml
         src/qml/pages/RpcidPage.qml
         src/qml/pages/AppearancePage.qml
         src/qml/pages/AboutPage.qml
@@ -251,7 +255,7 @@ target_link_libraries(BSICustomizer PRIVATE
     Qt6::Qml
     Qt6::Quick
     Qt6::QuickControls2
-    Qt6::Svg
+    Qt6::Svg Qt6::Multimedia
 )
 
 # Embed our clean, RPC-only proxy in the inner EXE. Never put version.dll

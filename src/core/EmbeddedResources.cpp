@@ -542,9 +542,10 @@ qint64 payloadSizeFor(const QByteArray &bytes, quint16 flags)
     return qCompress(bytes, 9).size();
 }
 
-Result replaceBytes(const QString &exePath, const QString &path, const QByteArray &bytes)
+Result replaceBytes(const QString &exePath, const QString &path, const QByteArray &bytes, QByteArray *preparedImage)
 {
-    if (BsDetector::isProcessRunning(QStringLiteral("HD-Player.exe")))
+    if (preparedImage) preparedImage->clear();
+    if (!preparedImage && BsDetector::isProcessRunning(QStringLiteral("HD-Player.exe")))
         return { false, QStringLiteral("Close all BlueStacks instances before changing an embedded file.") };
     if (bytes.isEmpty())
         return { false, QStringLiteral("An empty file would break the player; nothing was written.") };
@@ -560,6 +561,10 @@ Result replaceBytes(const QString &exePath, const QString &path, const QByteArra
     Entry entry;
     QString error;
     if (!locate(original, path, &entry, &error)) return { false, error };
+    if (entry.format == QLatin1String("qmlc") || entry.format == QLatin1String("jsc"))
+        return { false, QStringLiteral("Compiled caches are read-only. Edit their source; matching caches are invalidated by the verified writer.") };
+    if ((entry.kind == Kind::Image || entry.kind == Kind::Svg)
+        && !samePictureFamily(entry.format, bytes, entry.path, &error)) return { false, error };
 
     if (entry.scanned) {
         // No tree node owns this record, so it is only ever rewritten in place:
@@ -582,6 +587,7 @@ Result replaceBytes(const QString &exePath, const QString &path, const QByteArra
         if (changed.size() != original.size()
             || changed.mid(int(entry.entryOff) + 4, int(bytes.size())) != bytes)
             return { false, QStringLiteral("The rewrite did not read back correctly; the EXE was not changed.") };
+        if (preparedImage) { *preparedImage = changed; return { true, QStringLiteral("Replacement verified in memory; no files changed.") }; }
         if (!ThemeEngine::backup(exePath))
             return { false, QStringLiteral("Could not preserve the original backup; no EXE was written.") };
         if (!PatchFile::writeVerified(exePath, original, changed, &error)) return { false, error };
@@ -596,20 +602,8 @@ Result replaceBytes(const QString &exePath, const QString &path, const QByteArra
         return { false, QStringLiteral("The %1 resource mapping is ambiguous; no file was written.")
                             .arg(entry.leaf) };
 
-    // HARD RULE 1 - the embedded file itself never grows. A replacement or an
-    // edit that needs more bytes than the entry already decodes to is refused
-    // outright: the player's resource layout is packed, so a bigger file is
-    // what breaks it but there is no need to find out.
-    if (entry.size > 0 && bytes.size() > entry.size) {
-        return { false, QStringLiteral("%1 would grow from %2 to %3 bytes. An embedded file is never "
-                                       "made bigger, so nothing was written - shorten it by at least "
-                                       "%4 bytes and try again.")
-                            .arg(entry.leaf)
-                            .arg(entry.size)
-                            .arg(bytes.size())
-                            .arg(bytes.size() - entry.size) };
-    }
-
+    // Decoded size is not storage capacity. A larger decoded resource is
+    // allowed when its payload fits verified storage; the EXE still cannot grow.
     // HARD RULE 2 - the EXE itself never grows. The record has to fit the space
     // this entry already owns (its record plus the zero padding behind it), or
     // be moved into free space the file already contains, which the writer
@@ -653,6 +647,7 @@ Result replaceBytes(const QString &exePath, const QString &path, const QByteArra
         || QtResources::readFile(changed, { entry.leaf, newEntry, entry.flags }, kMaxEntry) != bytes)
         return { false, QStringLiteral("The rewritten resource did not read back correctly; the EXE was "
                                        "not changed.") };
+    if (preparedImage) { *preparedImage = changed; return { true, QStringLiteral("Replacement verified in memory; no files changed.") }; }
     if (!ThemeEngine::backup(exePath))
         return { false, QStringLiteral("Could not preserve the original backup; no EXE was written.") };
     if (!PatchFile::writeVerified(exePath, original, changed, &error)) return { false, error };
