@@ -29,6 +29,8 @@
 
 #include <QCoreApplication>
 #include <QCryptographicHash>
+#include <QElapsedTimer>
+#include <QThread>
 #include <QColor>
 #include <QDir>
 #include <QBuffer>
@@ -321,6 +323,45 @@ Fixture fixture(int version, const QString &color, const QByteArray &compiled = 
     }
     return f;
 }
+// Opt in only fixtures whose runtime consumer is explicitly given these bases.
+// Unanchored fixtures still exercise inference and genuine ambiguity refusal.
+void declarePoolBases(Fixture &f)
+{
+    const qint64 header = 0x1100;
+    f.bytes.replace(header, 4, "qres");
+    putBe32(f.bytes, header + 4, quint32(f.version));
+    putBe32(f.bytes, header + 8, quint32(f.tree - header));
+    putBe32(f.bytes, header + 12, quint32(f.payloads - header));
+    putBe32(f.bytes, header + 16, quint32(f.names - header));
+}
+
+int bootRuntimeInChild(const QString &qml, const QString &imports,
+                       const QString &provider, const QUrl &media)
+{
+    QProcess process;
+    auto env = QProcessEnvironment::systemEnvironment();
+    env.insert(QStringLiteral("QT_QPA_PLATFORM"), QStringLiteral("offscreen"));
+    env.insert(QStringLiteral("QT_QUICK_BACKEND"), QStringLiteral("software"));
+    env.insert(QStringLiteral("QML_DISABLE_DISK_CACHE"), QStringLiteral("1"));
+    process.setProcessEnvironment(env);
+    process.start(QCoreApplication::applicationFilePath(), {
+        QStringLiteral("--boot-runtime-test"), qml, imports, provider,
+        media.toString(QUrl::FullyEncoded)
+    });
+    if (!process.waitForStarted(10000) || !process.waitForFinished(30000)) {
+        process.kill();
+        process.waitForFinished();
+        std::printf("    boot runtime child: %s\n", qPrintable(process.errorString()));
+        return -1;
+    }
+    if (process.exitStatus() != QProcess::NormalExit || process.exitCode() != 0) {
+        std::printf("    boot runtime %s: %s\n%s\n", qPrintable(provider),
+                    process.readAllStandardOutput().constData(),
+                    process.readAllStandardError().constData());
+    }
+    return process.exitStatus() == QProcess::NormalExit ? process.exitCode() : -1;
+}
+
 bool loadInQt(const QString &path, const Fixture &f, const QString &cache, const QString &expected)
 {
     QProcess process;
@@ -924,6 +965,41 @@ static QString aboutPageFixture()
         "}\r\n");
 }
 
+// Internal self-test subprocess: only the synthetic provider fixture is loaded.
+// Like the theme runtime probe, this runs before the application UI is created.
+int runBootPlayerRuntimeTest(const QStringList &args)
+{
+    const int at = args.indexOf(QStringLiteral("--boot-runtime-test"));
+    if (at < 0 || args.size() != at + 5) return 3;
+    const QString provider = args.at(at + 3);
+    if (provider != QLatin1String("qt5") && provider != QLatin1String("qt6")
+        && provider != QLatin1String("web")) return 3;
+    QQmlEngine engine;
+    engine.addImportPath(args.at(at + 2));
+    QQmlComponent component(&engine, QUrl::fromLocalFile(args.at(at + 1)));
+    std::unique_ptr<QObject> object(component.create());
+    if (!object) {
+        std::fprintf(stderr, "Boot fixture compile error: %s\n", qPrintable(component.errorString()));
+        return 2;
+    }
+    // The controller's Loader can complete asynchronously. Keep assertions on
+    // the actual generated player rather than assuming one event pump suffices.
+    QElapsedTimer timer;
+    timer.start();
+    do {
+        QCoreApplication::processEvents();
+        const bool web = provider == QLatin1String("web");
+        const auto player = object->findChild<QObject *>(web
+            ? QStringLiteral("bsiWebBootVideo") : QStringLiteral("bsiBootVideo"));
+        if (player && (web ? player->property("url").toUrl().scheme() == QLatin1String("data")
+                          : player->property("started").toBool()
+                            && player->property("source").toUrl() == QUrl(args.at(at + 4)))) return 0;
+        QThread::msleep(10);
+    } while (timer.elapsed() < 5000);
+    std::fprintf(stderr, "Boot fixture %s did not start with its expected URL\n", qPrintable(provider));
+    return 1;
+}
+
 int runPatchRegressionTests()
 {
     failures = WorkspaceTests::run();
@@ -979,12 +1055,7 @@ int runPatchRegressionTests()
         // The runtime child is explicitly given these bases. Represent that
         // same ground truth in the PE, rather than asking detection to invent
         // a base from the retained orphan after a verified relocation.
-        const qint64 header = 0x1100;
-        f.bytes.replace(header, 4, "qres");
-        putBe32(f.bytes, header + 4, quint32(version));
-        putBe32(f.bytes, header + 8, quint32(f.tree - header));
-        putBe32(f.bytes, header + 12, quint32(f.payloads - header));
-        putBe32(f.bytes, header + 16, quint32(f.names - header));
+        declarePoolBases(f);
         const QString path = temp.filePath(QStringLiteral("resource%1.exe").arg(version));
         const QString cache = temp.filePath(QStringLiteral("qmlcache%1").arg(version));
         check(write(path, f.bytes), "write untouched resource fixture");
@@ -1043,7 +1114,8 @@ int runPatchRegressionTests()
         // Precompiled resource units normally have a zero source timestamp,
         // which means source mtime checks alone cannot invalidate them.
         std::fill(diskUnit.begin() + 16, diskUnit.begin() + 24, '\0');
-        const auto f = fixture(2, QStringLiteral("#556677"), diskUnit);
+        auto f = fixture(2, QStringLiteral("#556677"), diskUnit);
+        declarePoolBases(f);
         const QString path = temp.filePath(QStringLiteral("compiled.exe"));
         const QString cache = temp.filePath(QStringLiteral("embedded-cache"));
         write(path, f.bytes);
@@ -1052,6 +1124,7 @@ int runPatchRegressionTests()
         const auto info = ThemeEngine::detectTheme(f.bytes, QStringLiteral("qml"));
         const auto r = ThemeEngine::patchTheme(path, info, ThemeEngine::parseQmlEntries(info.qml),
                                               { { QStringLiteral("primary100"), QStringLiteral("#cf50ab") } });
+        if (!r.ok) std::printf("    compiled theme patch: %s\n", qPrintable(r.msg));
         check(r.ok, "patch source and invalidate only its compiled theme unit");
         const QByteArray after = read(path);
         const auto unitPos = after.indexOf(QByteArray("qv4cdata\0", 8));
@@ -3090,18 +3163,17 @@ Window {
         write(QDir(imports).filePath(QStringLiteral("Video.qml")), "import QtQuick\nItem{property url source;property int loops;property int fillMode;property bool muted:false;property bool autoPlay:false;property bool started:false;function play(){started=true}}\n");
         write(QDir(imports).filePath(QStringLiteral("MediaPlayer.qml")), "import QtQuick\nQtObject{enum Loops{Infinite=1}}\n");
         write(QDir(imports).filePath(QStringLiteral("VideoOutput.qml")), "import QtQuick\nQtObject{enum FillMode{PreserveAspectCrop=1}}\n");
-        QQmlEngine engine; engine.addImportPath(QDir(folder).filePath(QStringLiteral("imports")));
-        QQmlComponent component(&engine); component.setData(modified.toUtf8(), QUrl::fromLocalFile(QDir(folder).filePath(QStringLiteral("PlrBootProgressBar.qml"))));
-        std::unique_ptr<QObject> object(component.create());
-        if (!object) std::printf("    %s\n", qPrintable(component.errorString()));
-        QCoreApplication::processEvents();
-        check(bool(object), "external boot player QML compiles with the synthetic multimedia API");
-        if (object) {
-            const auto video = object->findChild<QObject *>(QStringLiteral("bsiBootVideo"));
-            check(video && video->property("started").toBool()
-                      && video->property("source").toUrl() == QUrl::fromLocalFile(QDir(folder).filePath(QStringLiteral("Assets/Promo.mp4"))),
-                  "the Qt5 fallback starts and receives the installation-relative media URL");
-        }
+        const auto controller = QDir(folder).filePath(QStringLiteral("PlrBootProgressBar.qml"));
+        check(write(controller, modified.toUtf8()), "write generated boot controller fixture");
+        // QML module/type registrations outlive engines. A new process per
+        // provider prevents earlier real/fake QtMultimedia imports leaking in.
+        const int qt5Result = bootRuntimeInChild(controller,
+            QDir(folder).filePath(QStringLiteral("imports")), QStringLiteral("qt5"),
+            QUrl::fromLocalFile(QDir(folder).filePath(QStringLiteral("Assets/Promo.mp4"))));
+        check(qt5Result == 0 || qt5Result == 1,
+              "external boot player QML compiles with the synthetic multimedia API");
+        check(qt5Result == 0,
+              "the Qt5 fallback starts and receives the installation-relative media URL");
         check(BootVideoPatcher::patch(path).ok && read(path + QStringLiteral(".bak")) == r.f.bytes,
               "real-name boot repatching keeps one loader and preserves the original backup");
         const auto twice = resourceText(read(path), r, QStringLiteral("PlrBootProgressBar.qml"));
@@ -3144,31 +3216,19 @@ Window {
         write(QDir(mediaImports).filePath(QStringLiteral("MediaPlayer.qml")),"import QtQuick\nQtObject{enum Loops{Infinite=1}property url source;property int loops;property var videoOutput;property var audioOutput;property bool started:false;function play(){started=true}}\n");
         write(QDir(mediaImports).filePath(QStringLiteral("VideoOutput.qml")),"import QtQuick\nItem{enum FillMode{PreserveAspectCrop=1}property int fillMode}\n");
         write(QDir(mediaImports).filePath(QStringLiteral("AudioOutput.qml")),"import QtQuick\nQtObject{property bool muted:false}\n");
-        {
-            QQmlEngine engine; engine.addImportPath(QDir(folder).filePath(QStringLiteral("qt6Imports")));
-            QQmlComponent component(&engine,QUrl::fromLocalFile(QDir(folder).filePath(QStringLiteral("Assets/BootVideo.qml"))));
-            std::unique_ptr<QObject> object(component.create());
-            if(!object) std::printf("    %s\n",qPrintable(component.errorString()));
-            QCoreApplication::processEvents();
-            const auto video=object ? object->findChild<QObject *>(QStringLiteral("bsiBootVideo")) : nullptr;
-            check(video && video->property("started").toBool()
-                      && video->property("source").toUrl()==QUrl::fromLocalFile(QDir(folder).filePath(QStringLiteral("Assets/Promo.mp4"))),
-                  "the Qt6 adaptive branch compiles, starts and handles quoted Unicode installation paths");
-        }
+        check(bootRuntimeInChild(QDir(folder).filePath(QStringLiteral("Assets/BootVideo.qml")),
+                  QDir(folder).filePath(QStringLiteral("qt6Imports")), QStringLiteral("qt6"),
+                  QUrl::fromLocalFile(QDir(folder).filePath(QStringLiteral("Assets/Promo.mp4")))) == 0,
+              "the Qt6 adaptive branch compiles, starts and handles quoted Unicode installation paths");
         const auto webImports=QDir(folder).filePath(QStringLiteral("webImports"));
         QDir().mkpath(QDir(webImports).filePath(QStringLiteral("QtMultimedia")));
         QDir().mkpath(QDir(webImports).filePath(QStringLiteral("QtWebEngine")));
         write(QDir(webImports).filePath(QStringLiteral("QtMultimedia/qmldir")),"module QtMultimedia\n");
         write(QDir(webImports).filePath(QStringLiteral("QtWebEngine/qmldir")),"module QtWebEngine\nWebEngineView 1.0 WebEngineView.qml\n");
         write(QDir(webImports).filePath(QStringLiteral("QtWebEngine/WebEngineView.qml")),"import QtQuick\nItem{objectName:'bsiWebBootVideo';property url url}\n");
-        {
-            QQmlEngine engine; engine.addImportPath(webImports);
-            QQmlComponent component(&engine,QUrl::fromLocalFile(QDir(folder).filePath(QStringLiteral("Assets/BootVideo.qml"))));
-            std::unique_ptr<QObject> object(component.create());
-            const auto web=object ? object->findChild<QObject *>(QStringLiteral("bsiWebBootVideo")) : nullptr;
-            check(web && web->property("url").toUrl().scheme()==QLatin1String("data"),
-                  "missing multimedia APIs fall back to a WebEngine data-URL player");
-        }
+        check(bootRuntimeInChild(QDir(folder).filePath(QStringLiteral("Assets/BootVideo.qml")),
+                  webImports, QStringLiteral("web"), QUrl()) == 0,
+              "missing multimedia APIs fall back to a WebEngine data-URL player");
         // A previously forced stub can only recover from a uniquely linked
         // original resource in the backup; it never guesses missing UI source.
         const auto stub=resources({{QStringLiteral("boot.qml"),QStringLiteral("import QtQuick\nItem{function fSetBootPromotion(a,b,c){}}\n")},{QStringLiteral("plr.qml"),host}},true);

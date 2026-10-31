@@ -234,8 +234,13 @@ qint64 findFreeSpace(const QByteArray &data, const Link &link, qint64 need, QStr
         blocked << qMakePair(raw, raw + qint64(size));
     }
     for (const auto &pool : registeredPools(data)) {
-        // Conservatively reserve the space between array bases in the same
-        // section. Empty names/tree words must never be mistaken for payload gaps.
+        // The selected pool already has fully validated, exact metadata bounds
+        // in link.reserved. Reserving its tree through the section end would
+        // also hide legitimate free storage after that tree.
+        if (pool.tree == link.treeOff && pool.names == link.nameBaseRaw
+            && pool.dataRva == link.dataBaseRva) continue;
+        // Conservatively reserve other pools whose exact metadata bounds were
+        // not validated by this link. Their zero-prefixed words are not caves.
         const auto *treeSection = PeUtils::sectionForRaw(sections, pool.tree);
         const auto *namesSection = PeUtils::sectionForRaw(sections, pool.names);
         const qint64 poolData = PeUtils::rvaToRaw(sections, quint32(pool.dataRva));

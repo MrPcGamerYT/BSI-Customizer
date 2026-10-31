@@ -38,6 +38,8 @@
 // Implemented in selftest.cpp
 int runSelfTest();
 int runThemeRuntimeTest(const QStringList &args);
+// Implemented in patch_regression_test.cpp (isolated synthetic QML provider).
+int runBootPlayerRuntimeTest(const QStringList &args);
 int runGradientRuntimeTest(const QStringList &args);
 // Implemented in cli.cpp
 int runRpcIdCli(const QStringList &args);
@@ -95,6 +97,10 @@ int main(int argc, char *argv[])
     if (args.contains(QStringLiteral("--theme-runtime-test"))) {
         ensureConsoleOutput();
         return runThemeRuntimeTest(args);
+    }
+    if (args.contains(QStringLiteral("--boot-runtime-test"))) {
+        ensureConsoleOutput();
+        return runBootPlayerRuntimeTest(args);
     }
     if (args.contains(QStringLiteral("--selftest"))) {
         ensureConsoleOutput();

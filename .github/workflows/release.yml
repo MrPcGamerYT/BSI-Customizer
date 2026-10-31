@@ -200,6 +200,7 @@ jobs:
         run: ./scripts/Test-Manifest.ps1 -ExecutablePath build/Release/BSI-Customizer.exe
 
       - name: Run all engine tests including real Qt 5 and Qt 6 DLLs
+        id: selftest
         env:
           QT_QPA_PLATFORM: offscreen
           __COMPAT_LAYER: RUNASINVOKER
@@ -215,6 +216,41 @@ jobs:
           if ($process.ExitCode -ne 0 -or -not (Select-String -Path $log -Pattern 'ALL TESTS PASSED' -Quiet)) {
             throw "Self-tests failed (exit $($process.ExitCode))"
           }
+
+      # GitHub caps error annotations per step. Preserve the complete assertion
+      # list separately, including on branch-push runs, without bypassing gates.
+      - name: Report complete native test failures
+        if: ${{ failure() && steps.selftest.outcome == 'failure' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BUILD_BRANCH: ${{ github.head_ref || github.ref_name }}
+          BUILD_SHA: ${{ github.sha }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          $log = Join-Path $env:RUNNER_TEMP 'bsi-selftest.log'
+          $err = Join-Path $env:RUNNER_TEMP 'bsi-selftest.err'
+          $lines = @(Get-Content -LiteralPath $log -ErrorAction SilentlyContinue)
+          $failed = @($lines | Where-Object { $_ -match '^\s*FAIL\b' })
+          # All assertions first; context follows so annotation limits cannot
+          # hide later failures. Test fixtures contain no user credentials.
+          $assertions = $failed -join "`n"
+          $context = ($lines | Where-Object { $_ -notmatch '^\s*(PASS\b|::)' }) -join "`n"
+          $stderr = (Get-Content -LiteralPath $err -ErrorAction SilentlyContinue) -join "`n"
+          if ($assertions.Length -gt 30000) { $assertions = $assertions.Substring(0,30000) + "`n[assertions truncated]" }
+          if ($context.Length -gt 20000) { $context = $context.Substring(0,20000) + "`n[context truncated]" }
+          if ($stderr.Length -gt 10000) { $stderr = $stderr.Substring($stderr.Length - 10000) }
+          $fence = '```'
+          $body = "Native self-tests failed for $env:BUILD_SHA. [Workflow run]($env:RUN_URL). Failed assertions: $($failed.Count).`n`n$fence`n$assertions`n$fence`n`nContext:`n$fence`n$context`n$fence`n`nStderr (last 10k characters):`n$fence`n$stderr`n$fence"
+          $file = Join-Path $env:RUNNER_TEMP 'native-test-failure.md'
+          $body | Out-File -FilePath $file -Encoding utf8
+          $body | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+          $pr = gh pr list --head $env:BUILD_BRANCH --state open --json number --jq '.[0].number'
+          if ($LASTEXITCODE -eq 0 -and $pr) {
+            gh pr comment $pr --body-file $file
+            if ($LASTEXITCODE -ne 0) { Write-Warning 'Could not post native failure report; see job summary.' }
+          }
+          # Reporting is best-effort; the original failed test step stays red.
+          exit 0
 
       - name: Record the one-file artifact
         id: artifact
