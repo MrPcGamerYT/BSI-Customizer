@@ -1,0 +1,143 @@
+# Chromium workspace — BSI Customizer 3.0.1
+
+The user-supplied `gemini-code-1793470243134.html` is the visual reference.
+Original concept credit **@Floatz4Ever** is retained. This integration uses
+system fonts, local CSS/JS and real BSI engine calls, not its Python bridge,
+placeholder "EXE found" state, or a replacement login provider.
+
+## Architecture and current status
+
+```
+Unchanged native LoginGate.qml + AuthManager (Discord PKCE/session/access rules)
+                                  |
+                         authorized native shell
+                                  |
+Local Qt WebEngine / Chromium HTML + JS <-- Qt WebChannel --> WebBridge
+                                                              |
+                                        existing Backend / native engines
+```
+
+This is an **opt-in integrated implementation**, not a verified replacement release.
+The native UI remains the default. Build with `BSI_CHROMIUM_UI=ON`, then run
+`BSI-Customizer.exe --web-ui`. `--native-ui` takes precedence if both flags are
+present. A build without Chromium explicitly rejects `--web-ui`.
+
+Implemented HTML flows now merge all 12 tool areas with their existing engines:
+
+- Overview, detected installations/instances and native activity.
+- Theme Auto/QML/Hex loading, individual staging/deselection, presets, legacy
+  preview, dry run, toggle SVG recoloring and per-surface gradient controls.
+- Explicit **Scan Resources**, the original search semantics (quoted phrases,
+  min/max sizes, kind/font/modified filters), pagination, text/raster inspection,
+  cached encoded-size measurement, native save/replace/extract and bulk extract.
+- FPS detect/analyze/patch/restore and auto-detection preferences; native integrity
+  check/patch/restore; boot patch/cache purge and staged boot profile settings.
+- Player removals, supported layout tweaks, About text/link/visibility editing,
+  About report and profile-section staging.
+- Offline Discord application ID find/status/replace/dry run/undo and Windows
+  Explorer/Task Manager version-resource name editing.
+- Animated presence settings, explicit proxy inspection/install/restore, profile
+  staging and IPC diagnostics (without pretending config means connection).
+- Portable profile import/export, EXE inspection/diagnostics, resource replacement
+  queueing and original/replacement inspection, theme queueing, native Dry Run,
+  hash-bound batch Apply, journal history/restore, image preparation and MP4
+  metadata inspection.
+- Dark/Light/System theme/accent, target paths, installation selection, backup
+  restore, auto-update preference, download/verified apply and helper diagnostics.
+
+The full original QML editors remain accessible **inside the same window** as a
+compatibility option, not as placeholder pages. Qt Multimedia video playback /
+actual decoder checks still use that native editor; the HTML workspace currently
+exposes the metadata inspector rather than serving arbitrary local media files
+into Chromium. Native login and the existing update banner remain reused.
+
+The merge does not alter the patch engines, AuthManager or SessionStore. Source
+and UI-contract coverage is not Windows runtime certification. Native build,
+authenticated C++/WebChannel end-to-end tests, real patch regressions and a complete
+Chromium deployment audit remain required before making this the default release.
+See [tool-to-engine mapping](CHROMIUM-MERGE-MAP.md).
+
+## Invariants
+
+- The renderer never receives `AuthManager`, auth configuration, PKCE material,
+  session-signing keys or updater credentials. No generic reflection, shell,
+  Python interpreter, localhost HTTP server or arbitrary backend evaluation API.
+- Every bridge command and file dialog is authorized again in C++. Backend's
+  existing checks remain in place. A saved session alone never unlocks the UI.
+- Resource navigation and snapshots do **not** scan. Only the explicit native
+  `scanResources` command, called by **Scan Resources**, initiates a scan.
+- Busy/re-entrant bridge calls are refused. Backend validation, backups, encoded
+  capacity checks and file conflict/process checks remain authoritative.
+- Engine refusal maps are errors, not successful UI toasts. Edited source is
+  rendered as text, never inserted as executable HTML. Preview images are raster
+  data URLs. No external fonts/CDN or player-supplied script is executed.
+- Chromium's request interceptor permits only bundled UI/WebChannel resources
+  and image data. The native OAuth browser handoff/updater network logic is not
+  routed through or changed by this policy.
+- The default web profile owns its request interceptor. Native lifetime and
+  operation guards must be preserved when adding adapters.
+
+## Build and deployment
+
+Use the project's supported Qt 6 toolchain, plus **WebEngineQuick and WebChannel**
+(Qt installer modules `qtwebengine qtwebchannel`, and their dependencies).
+The separate Windows workflow installs Qt 6.8.3 and `qtpositioning` as well.
+
+```powershell
+cmake -S . -B build-web -A x64 -DBSI_CHROMIUM_UI=ON
+cmake --build build-web --config Release --parallel
+.\build-web\Release\BSI-Customizer.exe --web-ui
+```
+
+A Chromium desktop app is **not just its inner EXE**: deploy the matching
+`QtWebEngineProcess`, Chromium `.pak`/ICU data, locales, plugins and QML imports.
+Use `windeployqt --release --qmldir src` on the built binary. The opt-in
+workflow tests this full deployment with the Qt SDK removed from `PATH`.
+Do not reuse a native-only bundle or remove helpers to reduce its size. Do not
+turn off Chromium sandboxing to hide deployment/startup failures. Test elevated
+Windows launch (the existing manifest), helper startup and a clean machine before
+changing the production default. A portable outer EXE would still need to unpack
+the complete runtime. Include Qt WebEngine/Chromium third-party notices in any
+future distribution; the existing native-only release is not replaced here.
+
+## Verification
+
+The optional shell source lives under `src/chromium/ChromiumMain.qml`, with a
+resource alias preserving its runtime URL under `src/qml`. This keeps WebEngine
+imports out of the existing native-only packager's `src/qml` scan. Chromium builds
+scan `src` to deploy both QML frontends. The QML metadata test checks both paths.
+
+- `node tests/chromium_ui_test.cjs`: Playwright browser tests with an explicit
+  test-only transport double. Covers all 12 routes, offline lock, scan behavior,
+  pagination/search, safe text rendering, command arguments, refused operations,
+  About visibility inversion, RPC/GIF settings, boot profile staging, gradients,
+  profile import, hash-bound batch apply, failed-dry-run revocation and sign-out. Requires `playwright`; optional `BSI_PLAYWRIGHT` specifies its
+  module path. This does **not** certify C++ integration or patching a real EXE.
+- `node tests/chromium_contract_test.mjs`: checks bridge-command guard-test coverage,
+  search equivalence to the existing QML implementation and embedded UI assets.
+- `python tests/workspace_qml_lint_test.py`: checks all QML, including the new
+  shell, against real Qt metadata using the existing PySide test toolchain.
+- A Chromium-enabled native build adds `--web-bridge-test`: every bridge command,
+  snapshot and file selection must remain locked without verified auth; isolated
+  temporary settings, no test login bypass.
+- `--chromium-runtime-test`: loads real packaged HTML/CSS/JS/WebChannel assets in
+  Chromium with **no AuthManager, Backend or privileged endpoint constructed**.
+  Confirms renderer operation and offline-only controls. It cannot patch files.
+- `.github/workflows/chromium.yml` separately builds/tests Chromium on Windows;
+  it does not publish a release or embed credentials. Authenticated bridge/editor
+  E2E tests and actual patcher regressions remain required before promotion.
+
+Local browser tests and Qt metadata lint can pass without a C++ SDK. Do not report
+that as a Windows native build, successful sign-in or real executable patch test.
+
+## Future backends
+
+`transport.js` is a versioned adapter boundary: `snapshot`, `invoke`, signals and
+file selection. C++ `WebBridge` owns the explicit command allowlist and delegates
+to current engines. Further backends can implement this protocol, but **must not**
+move access decisions into JavaScript or silently downgrade native validation.
+No additional language/backend has been implemented in this initial migration.
+
+For visual review only, serve `src/web` locally and select **View design preview**.
+The persistent banner and disabled native buttons make clear that a normal
+browser has neither a login session nor access to the native backend.

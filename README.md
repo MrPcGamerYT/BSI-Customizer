@@ -1,8 +1,10 @@
-# BSI Customizer
+# BSI Customizer 3.0.1
 
 [![CI](https://github.com/MrPcGamerYT/BSI-Customizer/actions/workflows/ci.yml/badge.svg)](https://github.com/MrPcGamerYT/BSI-Customizer/actions/workflows/ci.yml)
 
-Qt Quick desktop customizer for BlueStacks / MSI App Player on Windows.
+Windows desktop customizer for BlueStacks / MSI App Player. Version **3.0.1** integrates the Chromium workspace with the existing C++ engines and Discord login.
+
+For the new interface, use the **Chromium workspace** build workflow or configure with `-DBSI_CHROMIUM_UI=ON` and launch with `--web-ui`. Native compatibility builds remain available; this version label does not imply a verified Windows build or a published release.
 
 Search/scan performance findings, benchmarks and the optimization roadmap:
 [performance review](docs/PERFORMANCE.md).
@@ -793,3 +795,11 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 A diagnostic EXE can be supplied with `-DBSI_EXE_TEST_FILE=<absolute-path>`. In GitHub CI, a user-supplied `HD-Player.exe` at the repository root is also recognized as optional diagnostic input. Self-tests only read it and patch disposable copies; they do not execute its native code or QML. The probe records its SHA-256 so results from different installations/builds are not confused. Diagnostic input is not a runtime dependency of the portable EXE.
 
 Compatibility is version-adaptive, not a guarantee for every past/future build: FPS detours currently support Windows x64 Qt 5/Qt 6 setters, and boot rewriting requires a recognizable boot-controller/media API with a validated resource mapping. Unknown architectures, ambiguous runtime selection and unrecognized resource layouts are refused instead of reporting a false success. Integrity behavior is not changed by these detection improvements.
+
+### Opt-in Chromium workspace
+
+A staged Qt WebEngine + WebChannel interface based on the supplied mint/glass
+concept is available with `-DBSI_CHROMIUM_UI=ON` and `--web-ui`. It reuses the
+existing native Discord login and C++ engines; the native UI remains the default,
+and full native editors remain accessible during migration. See
+[Chromium migration status, build requirements and verification](docs/CHROMIUM-UI.md).

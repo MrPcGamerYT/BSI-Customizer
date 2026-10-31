@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' qrc:; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'">
+<title>BSI Customizer — Chromium workspace</title>
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="styles.css">
+<script defer src="qrc:///qtwebchannel/qwebchannel.js"></script>
+<script defer src="transport.js"></script>
+<script defer src="resource-search.js"></script>
+<script defer src="editors.js"></script>
+<script defer src="app.js"></script>
+</head>
+<body>
+<div id="connection"><div class="connection-card"><div class="mark"></div><h1>Your player.<br>Your personality.</h1><p id="connection-message">Connecting to the BSI Customizer desktop runtime…</p><button class="btn pri" id="preview-button" hidden>View design preview</button><p>Visual concept: @Floatz4Ever · BSI desktop integration</p></div></div>
+<div id="stage"><div class="app">
+<aside class="spine"><div class="mark" title="BSI Customizer"></div><nav class="icons" id="spine" aria-label="Workspace pages"></nav><div class="spine-bottom">UI by @Floatz4Ever</div></aside>
+<div class="workspace">
+<header class="topbar"><div class="title"><b>BSI Customizer</b><span>Chromium interface · C++ engines</span></div><nav class="commandbar" id="cmd" aria-label="Quick navigation"></nav><div class="session" id="session"></div></header>
+<div class="progress"><i></i></div>
+<main class="canvas" id="canvas"><section id="hero"></section><section id="main"></section><section id="tele"></section><section id="stats"></section><section id="act"></section></main>
+</div><div id="toast" role="status" aria-live="polite"></div>
+</div></div>
+<div id="preview-note" hidden>DESIGN PREVIEW ONLY · No login session or native backend · All file operations disabled</div>
+</body>
+</html>

@@ -28,6 +28,7 @@ with tempfile.TemporaryDirectory() as directory:
     # Lint every production screen and shared component, not just the entry
     # point: importing a component alone does not check all of its bindings.
     files = sorted(source.rglob("*.qml"))
+    files.append(source.parent / "chromium/ChromiumMain.qml")
     result = subprocess.run([str(linter), "-I", directory, "-I", QLibraryInfo.path(QLibraryInfo.QmlImportsPath),
                              "--unqualified", "info", "--unused-imports", "info",
                              "--json", str(report), *map(str, files)], capture_output=True, text=True)

@@ -1,0 +1,78 @@
+name: Chromium workspace (opt-in)
+
+# Separate from the production release: verifies the migration without
+# replacing a release or adding an untested Chromium bundle to main.
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'src/chromium/**'
+      - 'src/web/**'
+      - 'src/main.cpp'
+      - 'CMakeLists.txt'
+      - 'tests/chromium_ui_test.cjs'
+      - 'tests/chromium_contract_test.mjs'
+      - '.github/workflows/chromium.yml'
+permissions:
+  contents: read
+concurrency:
+  group: chromium-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --prefix .cache/web-test --no-package-lock --no-audit --no-fund playwright@1.58.2
+      - run: .cache/web-test/node_modules/.bin/playwright install --with-deps chromium
+      - run: node tests/chromium_contract_test.mjs
+      - run: node tests/chromium_ui_test.cjs
+        env:
+          BSI_PLAYWRIGHT: ../.cache/web-test/node_modules/playwright
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    env:
+      BSI_NO_UPDATER: '1'
+    steps:
+      - uses: actions/checkout@v5
+      - uses: jurplel/install-qt-action@v4.3.1
+        with:
+          version: '6.8.3'
+          host: windows
+          target: desktop
+          arch: win64_msvc2022_64
+          modules: qtmultimedia qtwebengine qtwebchannel qtpositioning
+          cache: true
+      - name: Configure opt-in Chromium build
+        run: cmake -S . -B build-web -A x64 -DBSI_CHROMIUM_UI=ON -DBSI_TEST_QT5_REFERENCE=OFF
+      - name: Build
+        run: cmake --build build-web --config Release --parallel
+      - name: Native bridge must reject every command without sign-in
+        shell: pwsh
+        run: |
+          $p = Start-Process build-web/Release/BSI-Customizer.exe -ArgumentList '--web-bridge-test' -PassThru -Wait -NoNewWindow
+          if ($p.ExitCode -ne 0) { throw "Bridge guard test failed: $($p.ExitCode)" }
+      - name: Deploy complete Chromium runtime
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force stage | Out-Null
+          Copy-Item build-web/Release/BSI-Customizer.exe stage/
+          windeployqt --release --qmldir src --compiler-runtime --dir stage stage/BSI-Customizer.exe
+          if ($LASTEXITCODE -ne 0) { throw 'windeployqt failed' }
+          @('[Paths]', 'Prefix=.', 'Plugins=.', 'QmlImports=qml') | Set-Content stage/qt.conf
+      - name: Verify deployed Chromium without the Qt SDK on PATH
+        shell: pwsh
+        run: |
+          $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
+          $env:QT_PLUGIN_PATH = ''
+          $env:QML_IMPORT_PATH = ''
+          $env:QML2_IMPORT_PATH = ''
+          $p = Start-Process stage/BSI-Customizer.exe -ArgumentList '--chromium-runtime-test' -PassThru
+          if (-not $p.WaitForExit(45000)) { $p.Kill(); throw 'Chromium test timed out' }
+          if ($p.ExitCode -ne 0) { throw "Chromium deployment test failed: $($p.ExitCode)" }
+      # No release, push, installer replacement or credential embed here.

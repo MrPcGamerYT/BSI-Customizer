@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.21)
 
-project(BSICustomizer VERSION 2.7.0 LANGUAGES CXX)
+project(BSICustomizer VERSION 3.0.1 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -8,6 +8,15 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Network Qml Quick QuickControls2 Svg Multimedia)
 
 qt_standard_project_setup(REQUIRES 6.5)
+
+# Staged UI migration: keep native builds/deployment unchanged unless requested.
+# Qt WebEngine ships Chromium helpers, locales and .pak data; it is not a
+# system-browser/localhost service and needs a complete Qt deployment.
+option(BSI_CHROMIUM_UI "Build the opt-in Chromium desktop workspace" OFF)
+if(BSI_CHROMIUM_UI)
+    find_package(Qt6 6.5 REQUIRED COMPONENTS WebEngineQuick WebChannel)
+endif()
+
 
 # Mark Theme.qml as a QML singleton (must happen BEFORE qt_add_qml_module)
 set_source_files_properties(src/qml/Theme.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
@@ -273,6 +282,26 @@ if(WIN32 AND MSVC AND CMAKE_SIZEOF_VOID_P EQUAL 8)
         DEPENDS BsiGifRpcProxy "$<TARGET_FILE:BsiGifRpcProxy>" cmake/EmbedGifRpc.cmake VERBATIM)
     target_sources(BSICustomizer PRIVATE "${_gif_rc}")
     add_dependencies(BSICustomizer BsiGifRpcProxy)
+endif()
+
+if(BSI_CHROMIUM_UI)
+    target_sources(BSICustomizer PRIVATE
+        src/chromium/WebBridge.h src/chromium/WebBridge.cpp
+        src/chromium/LocalContentPolicy.h src/chromium/LocalContentPolicy.cpp
+        src/chromium/ChromiumTests.cpp)
+    target_include_directories(BSICustomizer PRIVATE src)
+    target_compile_definitions(BSICustomizer PRIVATE BSI_CHROMIUM_UI=1)
+    target_link_libraries(BSICustomizer PRIVATE Qt6::WebEngineQuick Qt6::WebChannel)
+    # Keep optional WebEngine imports outside the native-only qmldir scanned by
+    # the existing production packager, but retain the runtime URL/relative pages.
+    set_source_files_properties(src/chromium/ChromiumMain.qml PROPERTIES
+        QT_RESOURCE_ALIAS "src/qml/ChromiumMain.qml")
+    qt_add_resources(BSICustomizer "bsi_chromium_qml"
+        PREFIX "/qt/qml/BSICustomizer"
+        FILES src/chromium/ChromiumMain.qml)
+    qt_add_resources(BSICustomizer "bsi_chromium_assets"
+        PREFIX "/bsi-web" BASE "src/web"
+        FILES src/web/index.html src/web/styles.css src/web/transport.js src/web/resource-search.js src/web/editors.js src/web/app.js)
 endif()
 
 install(TARGETS BSICustomizer RUNTIME DESTINATION bin)

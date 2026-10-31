@@ -29,6 +29,16 @@
 #include "core/ThemeManager.h"
 #include "core/UpdateChecker.h"
 
+#ifdef BSI_CHROMIUM_UI
+#include <QtWebEngineQuick/qtwebenginequickglobal.h>
+#include <QQuickWebEngineProfile>
+#include "chromium/LocalContentPolicy.h"
+#include "chromium/WebBridge.h"
+int runWebBridgeAccessTest();
+int runChromiumRuntimeTest(QCoreApplication &app);
+#endif
+
+
 // Last, so none of the windows.h macros (min/max/interface/...) leak into the
 // Qt or project headers above.
 #ifdef Q_OS_WIN
@@ -76,6 +86,9 @@ void ensureConsoleOutput()
 
 int main(int argc, char *argv[])
 {
+#ifdef BSI_CHROMIUM_UI
+    QtWebEngineQuick::initialize();
+#endif
     QGuiApplication app(argc, argv);
     QCoreApplication::setOrganizationName(QStringLiteral("MrPcGamerYT"));
     QCoreApplication::setApplicationName(QStringLiteral("BSI Customizer"));
@@ -173,6 +186,17 @@ int main(int argc, char *argv[])
         return code;
     }
 
+#ifdef BSI_CHROMIUM_UI
+    if (args.contains(QStringLiteral("--web-bridge-test"))) {
+        ensureConsoleOutput();
+        return runWebBridgeAccessTest();
+    }
+    if (args.contains(QStringLiteral("--chromium-runtime-test"))) {
+        ensureConsoleOutput();
+        return runChromiumRuntimeTest(app);
+    }
+#endif
+
     // Packaging-only smoke mode: instantiate the real UI without changing
     // the user's preferences or requiring a Qt SDK/development tools.
     const bool deploymentTest = args.contains(QStringLiteral("--deployment-test"));
@@ -206,6 +230,21 @@ int main(int argc, char *argv[])
     UpdateChecker updates;
     QObject::connect(&updates, &UpdateChecker::restartRequested, &app, &QGuiApplication::quit);
 
+#ifdef BSI_CHROMIUM_UI
+    const bool chromiumUi = args.contains(QStringLiteral("--web-ui"))
+        && !args.contains(QStringLiteral("--native-ui"));
+    if (chromiumUi) {
+        auto *profile = QQuickWebEngineProfile::defaultProfile();
+        profile->setUrlRequestInterceptor(new LocalContentPolicy(profile));
+    }
+    WebBridge webBridge(backend, auth, settings, themes, updates);
+#else
+    if (args.contains(QStringLiteral("--web-ui"))) {
+        std::fprintf(stderr, "Chromium UI is not compiled in. Reconfigure with -DBSI_CHROMIUM_UI=ON.\n");
+        return 2;
+    }
+#endif
+
     QQmlApplicationEngine engine;
     QStringList deploymentErrors;
     // Collect QML diagnostics so a failed load can report WHY the root object
@@ -226,7 +265,14 @@ int main(int argc, char *argv[])
     engine.rootContext()->setContextProperty(QStringLiteral("auth"), &auth);
     engine.rootContext()->setContextProperty(QStringLiteral("updates"), &updates);
 
+#ifdef BSI_CHROMIUM_UI
+    engine.rootContext()->setContextProperty(QStringLiteral("webBridge"), &webBridge);
+    const QUrl mainUrl(chromiumUi
+        ? QStringLiteral("qrc:/qt/qml/BSICustomizer/src/qml/ChromiumMain.qml")
+        : QStringLiteral("qrc:/qt/qml/BSICustomizer/src/qml/Main.qml"));
+#else
     const QUrl mainUrl(QStringLiteral("qrc:/qt/qml/BSICustomizer/src/qml/Main.qml"));
+#endif
     engine.load(mainUrl);
     if (engine.rootObjects().isEmpty()) {
         // Print through both CRT streams (Qt's handler may not reach the
