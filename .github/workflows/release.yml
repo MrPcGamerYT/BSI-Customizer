@@ -7,7 +7,9 @@ name: Single EXE Release
 # not consume the repository's Actions artifact-storage quota.
 on:
   push:
-    branches: [main]
+    # This development branch produces test artifacts only. Publishing below
+    # remains restricted to tags or an explicit publish_release dispatch.
+    branches: [main, arena/3f309c3c-bsi-customizer]
     tags: ['v*']
   pull_request:
   workflow_dispatch:

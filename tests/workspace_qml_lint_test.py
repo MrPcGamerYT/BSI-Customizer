@@ -1,4 +1,4 @@
-"""Type-check real workspace/theme QML against Qt 6.8 metadata, without a GUI.
+"""Type-check the app entry point and editor QML against Qt 6.8 metadata.
 
 Uses the PySide6 test toolchain only, never the emulator or a mocked Qt module.
 Runtime desktop testing is separate; context-property accesses are untyped by
@@ -27,7 +27,7 @@ with tempfile.TemporaryDirectory() as directory:
     report = Path(directory) / "lint.json"
     files = [source / "pages" / name for name in (
         "WorkspacePage.qml", "ThemePage.qml", "GifRpcPage.qml", "BootVideoPage.qml")]
-    files += [source / "components/ThemePreview.qml"]
+    files += [source / "components/ThemePreview.qml", source / "Main.qml", source / "pages/ResourcesPage.qml"]
     result = subprocess.run([str(linter), "-I", directory, "-I", QLibraryInfo.path(QLibraryInfo.QmlImportsPath),
                              "--unqualified", "info", "--unused-imports", "info",
                              "--json", str(report), *map(str, files)], capture_output=True, text=True)
@@ -35,4 +35,4 @@ with tempfile.TemporaryDirectory() as directory:
     failures = [(Path(f["filename"]).name, w) for f in data["files"]
                 for w in f.get("warnings", []) if w["type"] in ("warning", "error")]
     assert result.returncode == 0 and not failures, (result.stdout, result.stderr, failures)
-print("PASS: real Qt 6.8 type metadata; workspace, theme, mock preview, boot and GIF RPC QML")
+print("PASS: real Qt 6.8 type metadata; app entry point, Resources, Workspace, Theme, preview, Boot and GIF RPC QML")
