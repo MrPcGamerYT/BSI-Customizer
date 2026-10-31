@@ -976,6 +976,10 @@ int runBootPlayerRuntimeTest(const QStringList &args)
         && provider != QLatin1String("web")) return 3;
     QQmlEngine engine;
     engine.addImportPath(args.at(at + 2));
+    QObject::connect(&engine, &QQmlEngine::warnings, [](const QList<QQmlError> &warnings) {
+        for (const auto &warning : warnings)
+            std::fprintf(stderr, "Boot fixture QML: %s\n", qPrintable(warning.toString()));
+    });
     QQmlComponent component(&engine, QUrl::fromLocalFile(args.at(at + 1)));
     std::unique_ptr<QObject> object(component.create());
     if (!object) {
@@ -3223,7 +3227,13 @@ Window {
         const auto webImports=QDir(folder).filePath(QStringLiteral("webImports"));
         QDir().mkpath(QDir(webImports).filePath(QStringLiteral("QtMultimedia")));
         QDir().mkpath(QDir(webImports).filePath(QStringLiteral("QtWebEngine")));
-        write(QDir(webImports).filePath(QStringLiteral("QtMultimedia/qmldir")),"module QtMultimedia\n");
+        // An empty qmldir can fall through to the SDK's real multimedia
+        // module. Export explicitly unavailable types so both imports are
+        // deterministically refused without loading real codecs.
+        write(QDir(webImports).filePath(QStringLiteral("QtMultimedia/qmldir")),
+              "module QtMultimedia\nMediaPlayer 5.15 Unavailable.qml\nVideo 5.15 Unavailable.qml\n");
+        write(QDir(webImports).filePath(QStringLiteral("QtMultimedia/Unavailable.qml")),
+              "import QtQuick\nMissingSyntheticMultimediaApi {}\n");
         write(QDir(webImports).filePath(QStringLiteral("QtWebEngine/qmldir")),"module QtWebEngine\nWebEngineView 1.0 WebEngineView.qml\n");
         write(QDir(webImports).filePath(QStringLiteral("QtWebEngine/WebEngineView.qml")),"import QtQuick\nItem{objectName:'bsiWebBootVideo';property url url}\n");
         check(bootRuntimeInChild(QDir(folder).filePath(QStringLiteral("Assets/BootVideo.qml")),
@@ -5172,10 +5182,24 @@ Window {
         check(read(scannedPath).mid(int(pngEntry.entryOff) + 4, logo.size()) == logo,
               "the replacement is on disk at the same offset");
 
-        const auto tooBig = EmbeddedResources::replaceBytes(
-            scannedPath, pngEntry.path, QByteArray(logo.size() + 1, '\x89'));
-        check(!tooBig.ok && tooBig.msg.contains(QLatin1String("grow")),
-              QStringLiteral("growing a scanned record is refused (%1)").arg(tooBig.msg));
+        // Reach the scanned-record size guard with a real PNG, rather than
+        // random bytes that correctly fail picture validation first.
+        QImage largerImage(32, 32, QImage::Format_ARGB32);
+        for (int y = 0; y < largerImage.height(); ++y)
+            for (int x = 0; x < largerImage.width(); ++x)
+                largerImage.setPixelColor(x, y, QColor((x * 37) % 256, (y * 53) % 256, (x * y) % 256));
+        QByteArray largerPng;
+        QBuffer largerBuffer(&largerPng);
+        largerBuffer.open(QIODevice::WriteOnly);
+        const bool encoded = largerImage.save(&largerBuffer, "PNG");
+        largerBuffer.close();
+        check(encoded && largerPng.size() > logo.size(),
+              "scanned-record overflow fixture is a valid larger PNG");
+        const auto beforeRefusal = read(scannedPath);
+        const auto tooBig = EmbeddedResources::replaceBytes(scannedPath, pngEntry.path, largerPng);
+        check(!tooBig.ok && tooBig.msg.contains(QLatin1String("grow"))
+                  && read(scannedPath) == beforeRefusal,
+              QStringLiteral("growing a scanned record is refused without writes (%1)").arg(tooBig.msg));
 
         const auto svgEdit = EmbeddedResources::replaceText(
             scannedPath, svgEntry.path,

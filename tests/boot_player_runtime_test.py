@@ -47,6 +47,13 @@ for provider in (sys.argv[1],):
                 "VideoOutput": 'import QtQuick\nQtObject{enum FillMode{PreserveAspectCrop=1}}',
                 "Video": 'import QtQuick\nItem{property url source;property int loops;property int fillMode;property bool muted;property bool autoPlay;property bool started:false;function play(){started=true}}',
             }
+        elif provider == "web":
+            # Empty qmldir files can fall through to the real SDK module.
+            # Explicitly unavailable types keep this a codec-free fallback test.
+            files = {
+                "MediaPlayer": 'import QtQuick\nMissingSyntheticMultimediaApi {}',
+                "Video": 'import QtQuick\nMissingSyntheticMultimediaApi {}',
+            }
         (media / "qmldir").write_text("module QtMultimedia\n" + "\n".join(f"{name} 5.15 {name}.qml" for name in files))
         for name, content in files.items():
             (media / f"{name}.qml").write_text(content)
