@@ -45,7 +45,7 @@ concurrency:
   group: single-exe-${{ github.event_name }}-${{ github.ref }}
   # Superseded test builds should not block the latest installer. Never cancel
   # a tag release or an explicitly requested manual publication.
-  cancel-in-progress: ${{ github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && !inputs.publish_release) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref == 'refs/heads/arena/3f309c3c-bsi-customizer') || (github.event_name == 'workflow_dispatch' && !inputs.publish_release) }}
 
 env:
   QT_VERSION: "6.8.3"
