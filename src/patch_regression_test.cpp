@@ -975,7 +975,16 @@ int runPatchRegressionTests()
     std::printf("[theme-runtime] real Qt resources, disk caches and restarts\n");
     QByteArray diskUnit;
     for (const int version : { 1, 2, 3 }) {
-        const auto f = fixture(version, QStringLiteral("#112233"));
+        auto f = fixture(version, QStringLiteral("#112233"));
+        // The runtime child is explicitly given these bases. Represent that
+        // same ground truth in the PE, rather than asking detection to invent
+        // a base from the retained orphan after a verified relocation.
+        const qint64 header = 0x1100;
+        f.bytes.replace(header, 4, "qres");
+        putBe32(f.bytes, header + 4, quint32(version));
+        putBe32(f.bytes, header + 8, quint32(f.tree - header));
+        putBe32(f.bytes, header + 12, quint32(f.payloads - header));
+        putBe32(f.bytes, header + 16, quint32(f.names - header));
         const QString path = temp.filePath(QStringLiteral("resource%1.exe").arg(version));
         const QString cache = temp.filePath(QStringLiteral("qmlcache%1").arg(version));
         check(write(path, f.bytes), "write untouched resource fixture");
