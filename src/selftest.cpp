@@ -323,6 +323,21 @@ int runSelfTest()
                   "studio shell retains all twelve real application pages");
             check(root->findChild<QObject *>(QStringLiteral("studioSidebar")) != nullptr,
                   "studio navigation sidebar is present");
+            QObject *instanceFlow = root->findChild<QObject *>(QStringLiteral("studioInstanceFlow"));
+            const QVariantList fixtureInstances {
+                QVariantMap {{QStringLiteral("display"), QStringLiteral("UI fixture A")}},
+                QVariantMap {{QStringLiteral("display"), QStringLiteral("UI fixture B")}}
+            };
+            if (dashboard) dashboard->setProperty("instances", fixtureInstances);
+            QCoreApplication::processEvents();
+            if (instanceFlow) QMetaObject::invokeMethod(instanceFlow, "forceLayout");
+            check(instanceFlow && instanceFlow->property("implicitHeight").toReal() > 0,
+                  "dashboard Flow derives a nonzero height from instance chips");
+            if (dashboard) dashboard->setProperty("instances", QVariantList {});
+            QCoreApplication::processEvents();
+            if (instanceFlow) QMetaObject::invokeMethod(instanceFlow, "forceLayout");
+            check(instanceFlow && instanceFlow->property("implicitHeight").toReal() == 0,
+                  "dashboard Flow releases its height when instance chips are removed");
             const auto resourceCount = backend.resourceInfos().size();
             const bool navigated = dashboard && QMetaObject::invokeMethod(dashboard, "navigate", Q_ARG(int, 2));
             check(navigated && stack && stack->property("currentIndex").toInt() == 2,

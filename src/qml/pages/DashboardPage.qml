@@ -254,8 +254,10 @@ Item {
                     PathRow { Layout.fillWidth: true; label: qsTr("HD-Player.exe"); text: backend.exePath; onLoad: backend.exePath = text }
                     PathRow { Layout.fillWidth: true; label: qsTr("FPS slider DLL"); text: backend.dllPath; onLoad: { settings.fpsAutoDetect = false; backend.dllPath = text; } }
                     Flow {
+                        objectName: "studioInstanceFlow"
                         Layout.fillWidth: true
-                        implicitHeight: childrenRect.height
+                        // Flow computes its own read-only implicit size as its
+                        // instance chips wrap. Let ColumnLayout consume it.
                         spacing: 7
                         Repeater {
                             model: dashPage.instances
