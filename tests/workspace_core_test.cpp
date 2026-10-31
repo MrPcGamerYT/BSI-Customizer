@@ -21,7 +21,16 @@ namespace WorkspaceTests {
 namespace W = CustomizationWorkspace;
 namespace {
 int failures = 0;
-void check(bool yes, const char *msg) { std::printf("%s: %s\n", yes ? "PASS" : "FAIL", msg); if (!yes) ++failures; }
+void check(bool yes, const char *msg)
+{
+    std::printf("%s: %s\n", yes ? "PASS" : "FAIL", msg);
+    if (!yes) {
+        ++failures;
+        if (qEnvironmentVariableIsSet("GITHUB_ACTIONS"))
+            std::printf("::error file=tests/workspace_core_test.cpp::%s\n", msg);
+    }
+    std::fflush(stdout); // Keep the last assertion visible if a native test crashes.
+}
 bool write(const QString &p, const QByteArray &b) { QFile f(p); return f.open(QIODevice::WriteOnly) && f.write(b) == b.size(); }
 QByteArray read(const QString &p) { QFile f(p); return f.open(QIODevice::ReadOnly) ? f.readAll() : QByteArray{}; }
 quint32 hash(const QString &s) { quint32 h = 0; for (const auto c : s) { h = (h << 4) + c.unicode(); h ^= (h & 0xf0000000) >> 23; h &= 0xfffffff; } return h; }
@@ -50,6 +59,7 @@ QByteArray fixture()
 }
 int run()
 {
+    failures = 0;
     QTemporaryDir temp; check(temp.isValid(),"isolated test directory");
     const auto original=fixture(); const QString exe=temp.filePath(QStringLiteral("HD-Player.exe")); write(exe,original);
     auto inspection=W::inspect(exe,{{"primary100","#abcdef"}});
