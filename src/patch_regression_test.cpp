@@ -112,6 +112,13 @@ bool write(const QString &path, const QByteArray &bytes)
     QFile file(path);
     return file.open(QIODevice::WriteOnly) && file.write(bytes) == bytes.size();
 }
+QByteArray utf16be(const QString &text)
+{
+    QByteArray bytes(text.size() * 2, '\0');
+    for (qsizetype i = 0; i < text.size(); ++i)
+        putBe16(bytes, i * 2, text.at(i).unicode());
+    return bytes;
+}
 QByteArray peFile()
 {
     QByteArray data(0x20000, '\0');
