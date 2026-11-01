@@ -68,7 +68,7 @@ console.log('PASS: native recovery shell retains its 13 original feature editors
 assert.ok(read('.github/workflows/release.yml').includes('-DBSI_CHROMIUM_UI=ON'));
 assert.ok(read('scripts/Build-SingleExe.ps1').includes("src/chromium"));
 assert.ok(read('scripts/Test-SingleExe.ps1').includes('--chromium-runtime-test'));
-assert.ok(read('src/web/app.js').includes("['Debloat & Android'"));
+assert.ok(read('src/web/app.js').includes("['Debloat / Android / Root.vhd'"));
 for (const operation of ['sidebar-read','sidebar-apply','debloat-read','debloat-apply','debloat-restore','android-read','android-scan','android-apply','android-restore','disk-find','disk-archive','disk-info','disk-enable','disk-list','disk-search','disk-extract','disk-add','disk-add-folder','disk-replace','disk-mkdir','disk-rename','disk-move','disk-copy','disk-remove','disk-undo','disk-discard']) {
   assert.ok(bridge.includes('"'+operation+'"'), 'Missing original engine adapter: '+operation);
   assert.ok(read('src/web/maintenance.js').includes("'"+operation+"'"), 'Missing HTML workflow: '+operation);
@@ -84,3 +84,8 @@ assert.ok(bridge.includes('text("sha256")!=report.value("sha256")'), 'Follow-up 
 assert.ok(!read('src/web/index.html').includes('Floatz'));
 assert.ok(read('src/core/BinaryInspector.cpp').includes('resources.size()>=4096'));
 console.log('PASS: read-only Binary Lab asset, stale-source guard, bounded resource traversal and new-file-only exports.');
+
+const webApp=read('src/web/app.js');
+for(const label of ['Dashboard','Color studio','Resources','Performance','Integrity & safety','Boot experience','Player interface','Discord presence','Settings','About & updates','Animated presence','Patch workspace','Debloat / Android / Root.vhd'])
+  assert.ok(webApp.includes("['"+label+"'"),'Original section name retained: '+label);
+console.log('PASS: all 13 original native section names retained alongside Binary Lab.');

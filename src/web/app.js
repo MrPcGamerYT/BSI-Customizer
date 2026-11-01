@@ -5,19 +5,19 @@
   const $ = s => document.querySelector(s);
   const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const pages = [
-    ['Overview', 'Dashboard', 'Customize your emulator.', 'Detailed player patchers, binary inspection and reversible Android maintenance.'],
-    ['Theme studio', 'Colors', 'Color studio', 'Load the real player palette, stage edits, then apply.'],
-    ['Resource explorer', 'Resources', 'Inside your player.', 'Explicit scans only. Inspect, edit and extract embedded resources.'],
+    ['Dashboard', 'Dashboard', 'Customize your emulator.', 'Detailed player patchers, binary inspection and reversible Android maintenance.'],
+    ['Color studio', 'Colors', 'Color studio', 'Load the real player palette, stage edits, then apply.'],
+    ['Resources', 'Resources', 'Inside your player.', 'Explicit scans only. Inspect, edit and extract embedded resources.'],
     ['Performance', 'FPS', 'More room to perform.', 'The same native FPS detection, analysis and patch engines.'],
     ['Integrity & safety', 'Integrity', 'Inspect before you change.', 'Native integrity checks, patching and restore.'],
     ['Boot experience', 'Boot', 'Make an entrance.', 'Adaptive Qt6/Qt5/WebEngine boot video, timing, cache cleanup and backup recovery.'],
     ['Player interface', 'Interface', 'Less noise. More you.', 'Removals, layout tweaks and editable player About text and links.'],
     ['Discord presence', 'Presence', 'Your player, represented.', 'Keep the existing Rich Presence ID and version-resource utilities.'],
-    ['Appearance', 'Settings', 'Your workspace.', 'App appearance and target paths. These are not player theme colors.'],
-    ['About BSI', 'About', 'Built around your player.', 'Chromium presentation. C++ patch engines. Existing login and update verification.'],
+    ['Settings', 'Settings', 'Your workspace.', 'App appearance and target paths. These are not player theme colors.'],
+    ['About & updates', 'About', 'Built around your player.', 'Chromium presentation. C++ patch engines. Existing login and update verification.'],
     ['Animated presence', 'Animated', 'Bring presence to life.', 'Configure the existing native GIF RPC plugin and restore flow.'],
     ['Patch workspace', 'Workspace', 'One deliberate change.', 'Portable profiles, queued changes, dry runs and recoverable batch apply.'],
-    ['Debloat & Android', 'Debloat', 'Android & engine maintenance', 'Configuration tuning, live ADB packages, storage cleanup and journalled disk editing.'],
+    ['Debloat / Android / Root.vhd', 'Debloat', 'Android & engine maintenance', 'Configuration tuning, live ADB packages, storage cleanup and journalled disk editing.'],
     ['Binary Lab', 'Binary Lab', 'Inside the executable', 'PE sections, imports, exports, Win32 resources, strings and raw bytes. Read-only until you export.']
   ];
   const toolGuides = {

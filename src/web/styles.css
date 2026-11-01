@@ -265,3 +265,4 @@ body[data-light="true"] .spine{background:rgba(245,247,250,.7)}
 
 .app{background-color:color-mix(in srgb,var(--bg0) 91%,transparent)}.orbs{opacity:.2}.icon:hover{color:var(--t)}
 #tele .btn{width:100%;min-width:0;white-space:normal;overflow-wrap:anywhere;font-size:9px;line-height:1.6;padding:8px}#tele .button-grid{grid-template-columns:minmax(0,1fr)}
+.icon span{font-size:10.5px;line-height:1.45}
