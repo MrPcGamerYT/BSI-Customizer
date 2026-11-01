@@ -33,6 +33,13 @@ Item {
     property bool buttonOrderReady: false
     property bool buttonOrderDirty: false
     property string buttonOrderDetail: ""
+    property int currentSection: 0
+    property int aboutPreviewRevision: 0
+
+    readonly property var previewLinks: {
+        const revision = page.aboutPreviewRevision;
+        return page.collectLinks().filter(link => !link.hidden && (link.label || link.name || link.url));
+    }
 
     // Delegate roots add properties beyond QQuickItem. Mark those lookups as
     // dynamic rather than treating a generic itemAt() result as a typed row.
@@ -255,8 +262,20 @@ Item {
                     onLoad: backend.exePath = text
                 }
 
+                TabBar {
+                    id: uiSections
+                    objectName: "playerUiSections"
+                    Layout.fillWidth: true
+                    currentIndex: page.currentSection
+                    onCurrentIndexChanged: page.currentSection = currentIndex
+                    TabButton { text: qsTr("Layout & clean-up") }
+                    TabButton { text: qsTr("About preview & editor") }
+                    TabButton { text: qsTr("Remove items") }
+                }
+
                 // ---------------- one-click clean-up ----------------
                 Card {
+                    visible: page.currentSection === 0
                     Layout.fillWidth: true
                     pad: 14
 
@@ -348,6 +367,7 @@ Item {
 
                 // ---------------- player layout (QML) ----------------
                 Card {
+                    visible: page.currentSection === 0
                     Layout.fillWidth: true
                     pad: 14
 
@@ -482,6 +502,7 @@ Item {
                 }
 
                 Card {
+                    visible: page.currentSection === 0
                     Layout.fillWidth: true
                     pad: 14
 
@@ -615,6 +636,7 @@ Item {
                 }
 
                 Card {
+                    visible: page.currentSection === 2
                     Layout.fillWidth: true
                     // A scroll view gives its content unbounded height, so the
                     // removal list gets its own fixed box and scrolls inside it
@@ -753,6 +775,7 @@ Item {
 
                 // ---------------- Settings → About ----------------
                 Card {
+                    visible: page.currentSection === 1
                     Layout.fillWidth: true
                     pad: 18
 
@@ -896,22 +919,105 @@ Item {
                             text: qsTr("Save About settings to profile")
                             onClicked: { const r = backend.workspace("profile-section", {section: "about", value: {text: aboutText.text, showSections: page.showSectionsWanted, links: page.collectLinks()}}); page.aboutMsg = r.msg || ""; }
                         }
-                        TextArea {
-                            id: aboutText
+                        RowLayout {
                             Layout.fillWidth: true
-                            Layout.preferredHeight: 96
-                            wrapMode: TextArea.Wrap
-                            selectByMouse: true
-                            placeholderText: qsTr("e.g. Modded by Mr.Pc Gamer — join the channel for "
-                                                  + "new builds, themes and tools.")
-                            color: Theme.text
-                            placeholderTextColor: Theme.textDim
-                            font.pixelSize: 12
-                            background: Rectangle {
-                                color: Theme.raised
-                                radius: 8
+                            Layout.preferredHeight: 210
+                            spacing: 10
+
+                            TextArea {
+                                id: aboutText
+                                Layout.fillWidth: true
+                                Layout.fillHeight: true
+                                wrapMode: TextArea.Wrap
+                                selectByMouse: true
+                                placeholderText: qsTr("Edit the text shown by the player's About page…")
+                                color: Theme.text
+                                placeholderTextColor: Theme.textDim
+                                font.family: "Consolas"
+                                font.pixelSize: 12
+                                onTextChanged: page.aboutPreviewRevision++
+                                background: Rectangle {
+                                    color: Theme.raised
+                                    radius: 8
+                                    border.width: 1
+                                    border.color: aboutText.activeFocus ? Theme.accent : Theme.border
+                                }
+                            }
+
+                            Rectangle {
+                                Layout.preferredWidth: 300
+                                Layout.fillHeight: true
+                                radius: 10
+                                color: Theme.cardLow
                                 border.width: 1
-                                border.color: aboutText.activeFocus ? Theme.accent : Theme.border
+                                border.color: Theme.border
+                                clip: true
+
+                                ColumnLayout {
+                                    anchors.fill: parent
+                                    anchors.margins: 12
+                                    spacing: 8
+
+                                    RowLayout {
+                                        Layout.fillWidth: true
+                                        spacing: 8
+                                        Rectangle {
+                                            Layout.preferredWidth: 28; Layout.preferredHeight: 28
+                                            radius: 8; color: Theme.accentSoft
+                                            Text { anchors.centerIn: parent; text: "B"; color: Theme.accentText; font.pixelSize: 16; font.weight: Font.Bold }
+                                        }
+                                        ColumnLayout {
+                                            Layout.fillWidth: true
+                                            spacing: 1
+                                            Text { text: qsTr("BlueStacks · About"); color: Theme.text; font.pixelSize: 11; font.weight: Font.DemiBold }
+                                            Text { text: qsTr("Live preview · text only"); color: Theme.textDim; font.pixelSize: 9 }
+                                        }
+                                    }
+
+                                    Rectangle { Layout.fillWidth: true; height: 1; color: Theme.hairline }
+
+                                    Text {
+                                        Layout.fillWidth: true
+                                        Layout.fillHeight: true
+                                        text: aboutText.text || qsTr("Your About text will appear here.")
+                                        color: Theme.soft
+                                        font.pixelSize: 11
+                                        wrapMode: Text.Wrap
+                                        verticalAlignment: Text.AlignTop
+                                    }
+
+                                    Text {
+                                        Layout.fillWidth: true
+                                        visible: !page.showSectionsWanted
+                                        text: qsTr("About links are currently set to remain hidden.")
+                                        color: Theme.warn
+                                        font.pixelSize: 9
+                                        wrapMode: Text.Wrap
+                                    }
+
+                                    ColumnLayout {
+                                        Layout.fillWidth: true
+                                        visible: page.showSectionsWanted
+                                        spacing: 4
+                                        Repeater {
+                                            model: page.previewLinks
+                                            delegate: Text {
+                                                required property var modelData
+                                                Layout.fillWidth: true
+                                                text: "•  " + (modelData.label || modelData.name || modelData.url || qsTr("Link"))
+                                                color: Theme.accentText
+                                                font.pixelSize: 9
+                                                elide: Text.ElideRight
+                                            }
+                                        }
+                                        Text {
+                                            visible: page.previewLinks.length === 0
+                                            text: qsTr("No visible links selected")
+                                            color: Theme.textDim
+                                            font.pixelSize: 9
+                                        }
+                                    }
+                                }
                             }
                         }
                         // A TextEdit has no maximumLength (only a single-line
@@ -1015,6 +1121,7 @@ Item {
                                         text: qsTr("Show")
                                         checked: !modelData.hidden
                                         font.pixelSize: 11
+                                        onToggled: page.aboutPreviewRevision++
                                         palette.windowText: Theme.text
                                         palette.buttonText: Theme.text
                                         property bool checkedToggle: checked
@@ -1028,6 +1135,7 @@ Item {
                                         maximumLength: modelData.nameMax > 0 ? modelData.nameMax
                                                                              : 32767
                                         text: modelData.name
+                                        onTextEdited: page.aboutPreviewRevision++
                                         placeholderText: qsTr("Support email")
                                         color: Theme.text
                                         placeholderTextColor: Theme.textDim
@@ -1045,6 +1153,7 @@ Item {
                                         maximumLength: modelData.labelMax > 0 ? modelData.labelMax
                                                                               : 32767
                                         text: modelData.label !== undefined ? modelData.label : ""
+                                        onTextEdited: page.aboutPreviewRevision++
                                         placeholderText: qsTr("text it prints")
                                         color: Theme.text
                                         placeholderTextColor: Theme.textDim
@@ -1061,6 +1170,7 @@ Item {
                                         Layout.fillWidth: true
                                         maximumLength: modelData.urlMax > 0 ? modelData.urlMax : 32767
                                         text: modelData.url
+                                        onTextEdited: page.aboutPreviewRevision++
                                         placeholderText: qsTr("https://… or name@site.com")
                                         color: Theme.text
                                         placeholderTextColor: Theme.textDim

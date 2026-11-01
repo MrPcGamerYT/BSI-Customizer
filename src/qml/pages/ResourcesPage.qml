@@ -32,7 +32,7 @@ Item {
     property int needed: 0              // payload bytes the editor's text would take
     property bool measuring: false
 
-    readonly property var kinds: [qsTr("All"), qsTr("Pictures"), qsTr("SVG"), qsTr("Code"), qsTr("Binary"), qsTr("Fonts"), qsTr("Modified vs .bak")]
+    readonly property var kinds: [qsTr("All files"), qsTr("Images"), qsTr("SVG"), qsTr("Text / code"), qsTr("Binary"), qsTr("Fonts"), qsTr("Modified vs backup")]
 
     // One stable snapshot per scan/path change; repeatedly reading the C++
     // QVariantList property used to rebuild every map on each filter/selection.
@@ -134,12 +134,19 @@ Item {
     }
 
     function rescan() {
+        // Every explicit scan starts from the complete list. Do not leave an old
+        // search or type filter active and make a successful scan look partial.
+        filterField.text = "";
+        searchTimer.stop();
+        page.filterText = "";
+        page.kindFilter = 0;
+        page.select(-1);
         page.status = "";
         const count = backend.scanResources(true);
         page.status = backend.exePath === ""
                 ? qsTr("Select HD-Player.exe first.")
-                : qsTr("%1 embedded file(s) listed.").arg(count);
-        // resourcesChanged restores the selected path once, after the scan.
+                : qsTr("%1 embedded file(s) found; showing all supported entries.").arg(count);
+        // resourcesChanged restores the selected path only for scans triggered elsewhere.
     }
 
     function saveCode() {
@@ -239,11 +246,13 @@ Item {
             TextField {
                 id: filterField
                 objectName: "resourceSearchField"
-                Layout.preferredWidth: 280
-                placeholderText: qsTr("Search path / format… min:10kb max:2mb")
+                Layout.fillWidth: true
+                Layout.minimumWidth: 180
+                placeholderText: qsTr("Search every path / format… min:10kb max:2mb")
                 color: Theme.text
                 placeholderTextColor: Theme.textDim
                 font.pixelSize: 12
+                selectByMouse: true
                 onTextChanged: searchTimer.restart()
                 onAccepted: { searchTimer.stop(); page.filterText = text; }
                 background: Rectangle {
@@ -254,23 +263,47 @@ Item {
                 }
             }
 
-            ChoiceChips {
+            Text { text: qsTr("Show"); color: Theme.textDim; font.pixelSize: 11 }
+            ComboBox {
+                id: resourceKindPicker
+                objectName: "resourceKindPicker"
+                Layout.preferredWidth: 190
+                Layout.minimumWidth: 160
                 model: page.kinds
                 currentIndex: page.kindFilter
-                onSelected: (index) => page.kindFilter = index
+                displayText: page.kinds[page.kindFilter] || qsTr("All files")
+                onActivated: (index) => page.kindFilter = index
+                contentItem: Text {
+                    leftPadding: 10
+                    rightPadding: 26
+                    text: resourceKindPicker.displayText
+                    color: Theme.text
+                    font.pixelSize: 11
+                    verticalAlignment: Text.AlignVCenter
+                    elide: Text.ElideRight
+                }
+                background: Rectangle {
+                    radius: 8
+                    color: Theme.raised
+                    border.color: resourceKindPicker.activeFocus ? Theme.accent : Theme.border
+                }
             }
-
-            Item { Layout.fillWidth: true }
-
             Text {
-                Layout.fillWidth: true
-                Layout.maximumWidth: 420
+                Layout.minimumWidth: 130
                 horizontalAlignment: Text.AlignRight
-                text: page.status
+                text: qsTr("%1 shown / %2 detected").arg(page.rows.length).arg(page.allRows.length)
                 color: Theme.textDim
-                font.pixelSize: 11
-                elide: Text.ElideRight
+                font.pixelSize: 10
             }
+        }
+
+        Text {
+            Layout.fillWidth: true
+            visible: page.status.length > 0
+            text: page.status
+            color: Theme.textDim
+            font.pixelSize: 10
+            elide: Text.ElideRight
         }
 
         RowLayout {
