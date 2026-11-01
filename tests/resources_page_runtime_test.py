@@ -106,9 +106,13 @@ Window {
     QTest.qWait(100)
     assert backend.property("scans") == 0, "tab/path changes must not scan"
 
-    rows = [dict(index=i, path=f"ui/file_{i}.qml", name=f"file_{i}.qml", folder="ui",
-                 format="QML", kind="text", text=True, size=1024, stored=1024,
-                 compressed=False, width=0, height=0, thumbnail="") for i in range(12000)]
+    rows = []
+    for i in range(12000):
+        kind = "image" if i == 11998 else "svg" if i == 11997 else "binary" if i == 11999 else "text"
+        fmt = "PNG" if kind == "image" else "SVG" if kind == "svg" else "BIN" if kind == "binary" else "QML"
+        rows.append(dict(index=i, path=f"ui/file_{i}.{fmt.lower()}", name=f"file_{i}.{fmt.lower()}", folder="ui",
+                         format=fmt, kind=kind, text=kind in ("text", "svg"), size=1024, stored=1024,
+                         compressed=False, width=0, height=0, thumbnail=""))
     backend.setProperty("resourceInfos", rows)
     backend.resourcesChanged.emit()
     QTest.qWait(150)
@@ -118,13 +122,22 @@ Window {
     from PySide6.QtCore import QMetaObject
     QMetaObject.invokeMethod(window, "scan")
     assert backend.property("scans") == 1, "button path must scan exactly once"
+    assert len(page.property("rows").toVariant()) == 12000, "All files must include text, SVG, image and opaque binary rows"
+    picker = window.findChild(QObject, "resourceKindPicker")
+    assert picker is not None and picker.property("currentIndex") == 0, "All files is the visible default filter"
+    page.setProperty("kindFilter", 1)
+    assert {row["index"] for row in page.property("rows").toVariant()} == {11997, 11998}, "Images includes SVG and raster images"
+    page.setProperty("kindFilter", 4)
+    assert [row["index"] for row in page.property("rows").toVariant()] == [11999], "Binary filter retains opaque resources"
+    page.setProperty("kindFilter", 0)
+    assert len(page.property("rows").toVariant()) == 12000, "All files restores every detected kind"
     QMetaObject.invokeMethod(window, "selectFirst")
     page.setProperty("code", "my unsaved edits")
     page.setProperty("codeDirty", True)
     reads, budgets = backend.property("reads"), backend.property("budgets")
     field = window.findChild(QObject, "resourceSearchField")
     assert field is not None
-    field.setProperty("text", "file_11999.qml")
+    field.setProperty("text", "file_11999.bin")
     QTest.qWait(300)
     found = page.property("rows").toVariant()
     assert len(found) == 1 and found[0]["index"] == 11999, found[:2]
@@ -137,12 +150,19 @@ Window {
     field.setProperty("text", "")
     QTest.qWait(300)
     assert len(page.property("rows").toVariant()) == 12000
+    page.setProperty("kindFilter", 4)
+    field.setProperty("text", "file_11999.bin")
+    QTest.qWait(300)
+    QMetaObject.invokeMethod(window, "scan")
+    assert backend.property("scans") == 2
+    assert page.property("kindFilter") == 0 and page.property("filterText") == ""
+    assert field.property("text") == "" and len(page.property("rows").toVariant()) == 12000, "rescan resets to the complete All files view"
     backend.setProperty("resourceInfos", [])
     backend.setProperty("exePath", "third-player.exe")
     backend.resourcesChanged.emit()
     QTest.qWait(100)
     assert page.property("selectedIndex") == -1 and page.property("code") == ""
-    assert backend.property("scans") == 1, "changing target must still require manual scan"
+    assert backend.property("scans") == 2, "changing target must still require manual scan"
     assert not errors, errors
     # As with the boot-provider fixtures, release Python wrappers and drain
     # Qt's DeferredDelete events before destroying composite QML type caches.

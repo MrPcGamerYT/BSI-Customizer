@@ -349,8 +349,10 @@ Item {
         // The engine of this installation first: <ProgramData>/BlueStacks*/Engine/*/Root.vhd
         const found = backend.rootvhdFind();
         page.engineFolders = backend.rootvhdEngineFolders();
-        if (found && found.length > 0)
+        if (found && found.length > 0) {
             page.imagePath = found;
+            page.mode = 1;
+        }
         if (page.imagePath.length > 0)
             page.openImage();
     }
@@ -362,6 +364,7 @@ Item {
             page.imageMsg = qsTr("Choose a Root.vhd, VHDX image, or BlueStacks engine package.");
             return;
         }
+        page.mode = 1;
         page.imageBusy = true;
         let sourceMessage = "";
         const lowerPath = page.imagePath.toLowerCase();
@@ -383,6 +386,8 @@ Item {
         page.imageInfo = info || ({ ok: false, msg: "" });
         page.imageOk = !!(info && info.ok);
         page.imageOpen = page.imageOk;
+        if (page.imageOk)
+            page.mode = 1;
         page.imageMsg = (info && info.msg) ? info.msg : "";
         if (sourceMessage.length > 0)
             page.imageMsg = sourceMessage + " " + page.imageMsg;
@@ -462,79 +467,15 @@ Item {
                 }
             }
 
-            // ---- the two main choices ----
-            RowLayout {
+            // The two workflows are direct, visible tabs instead of large choice cards.
+            TabBar {
+                id: debloatTabs
+                objectName: "debloatModeTabs"
                 Layout.fillWidth: true
-                spacing: 14
-
-                Repeater {
-                    model: [
-                        { title: qsTr("1 · Live ADB debloat"), icon: "\u26A1",
-                          text: qsTr("Remove the preinstalled apps and wipe the guest's Download "
-                                     + "folder inside a running instance. Nothing on disk is "
-                                     + "edited; every app can be put back.") },
-                        { title: qsTr("2 · Deep Engine Image Debloater"), icon: "\u26C1",
-                          text: qsTr("Open Root.vhd in a file manager: add, rename, copy, move, "
-                                     + "replace, extract, and delete files or folders. Changes are "
-                                     + "journalled so Undo restores the original image.") }
-                    ]
-                    delegate: Rectangle {
-                        required property var modelData
-                        required property int index
-                        Layout.fillWidth: true
-                        implicitHeight: choice.implicitHeight + 28
-                        radius: 14
-                        color: page.mode === index
-                               ? Qt.rgba(6 / 255, 182 / 255, 212 / 255, 0.10)
-                               : Qt.rgba(1, 1, 1, 0.02)
-                        border.width: page.mode === index ? 2 : 1
-                        border.color: page.mode === index ? Qt.rgba(6 / 255, 182 / 255, 212 / 255, 0.6)
-                                                          : Theme.border
-                        ColumnLayout {
-                            id: choice
-                            anchors.fill: parent
-                            anchors.margins: 14
-                            spacing: 6
-                            RowLayout {
-                                Layout.fillWidth: true
-                                spacing: 8
-                                Text {
-                                    text: modelData.icon
-                                    color: Theme.accent
-                                    font.pixelSize: 18
-                                }
-                                Text {
-                                    Layout.fillWidth: true
-                                    wrapMode: Text.Wrap
-                                    text: modelData.title
-                                    color: Theme.text
-                                    font.pixelSize: 15
-                                    font.weight: Font.Bold
-                                }
-                                ActionButton {
-                                    accent: page.mode !== index
-                                    enabled: page.mode !== index
-                                    text: page.mode === index ? qsTr("Opened") : qsTr("Open")
-                                    onClicked: page.mode = index
-                                }
-                            }
-                            Text {
-                                Layout.fillWidth: true
-                                wrapMode: Text.Wrap
-                                text: modelData.text
-                                color: Theme.textDim
-                                font.pixelSize: 11
-                            }
-                        }
-                        MouseArea {
-                            // Behind the card's own buttons, so they win the click.
-                            anchors.fill: parent
-                            z: -1
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: page.mode = index
-                        }
-                    }
-                }
+                currentIndex: page.mode
+                onCurrentIndexChanged: page.mode = currentIndex
+                TabButton { text: qsTr("Live ADB apps") }
+                TabButton { text: qsTr("Root disk file manager") }
             }
 
             // =================================================================
@@ -917,7 +858,7 @@ Item {
                 // drag-and-drop, all against the image.
                 Card {
                     Layout.fillWidth: true
-                    Layout.preferredHeight: 560
+                    Layout.preferredHeight: Math.max(500, Math.min(680, page.height * 0.72))
                     pad: 12
                     RootVhdBrowser {
                         anchors.fill: parent
@@ -954,6 +895,7 @@ Item {
 
                 // ---- how to get the engine files ----
                 Card {
+                    visible: page.engineFolders.length === 0
                     Layout.fillWidth: true
                     pad: 14
                     ColumnLayout {

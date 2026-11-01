@@ -57,17 +57,17 @@ ApplicationWindow {
     // ONE production shell. Every page below is the original QML editor;
     // no HTML command adapter, parallel form state or native-editor switch.
     readonly property var featurePages: [
-        { label: qsTr("Dashboard"), icon: Icons.dashboard },
-        { label: qsTr("Color studio"), icon: Icons.theme },
-        { label: qsTr("Resources"), icon: Icons.images },
-        { label: qsTr("Performance"), icon: Icons.fps },
-        { label: qsTr("Integrity & safety"), icon: Icons.integrity },
-        { label: qsTr("Boot experience"), icon: Icons.boot },
-        { label: qsTr("Player interface"), icon: Icons.extras },
-        { label: qsTr("Discord presence"), icon: Icons.discord },
-        { label: qsTr("Animated presence"), icon: Icons.discord },
-        { label: qsTr("Patch workspace"), icon: Icons.extras },
-        { label: qsTr("Debloat / Android / Root.vhd"), icon: Icons.debloat }
+        { label: qsTr("Dashboard"), section: qsTr("HOME"), icon: Icons.dashboard },
+        { label: qsTr("Color studio"), section: qsTr("CUSTOMIZE"), icon: Icons.theme },
+        { label: qsTr("Resources"), section: qsTr("CUSTOMIZE"), icon: Icons.images },
+        { label: qsTr("Performance"), section: qsTr("CUSTOMIZE"), icon: Icons.fps },
+        { label: qsTr("Integrity & safety"), section: qsTr("CUSTOMIZE"), icon: Icons.integrity },
+        { label: qsTr("Boot experience"), section: qsTr("CUSTOMIZE"), icon: Icons.boot },
+        { label: qsTr("Player interface"), section: qsTr("CUSTOMIZE"), icon: Icons.extras },
+        { label: qsTr("Discord presence"), section: qsTr("TOOLS"), icon: Icons.discord },
+        { label: qsTr("Animated presence"), section: qsTr("TOOLS"), icon: Icons.discord },
+        { label: qsTr("Patch workspace"), section: qsTr("TOOLS"), icon: Icons.extras },
+        { label: qsTr("Debloat & disk manager"), section: qsTr("TOOLS"), icon: Icons.debloat }
     ]
     readonly property var pageNames: featurePages.map(p => p.label)
     property alias currentPage: pages.currentIndex
@@ -91,51 +91,110 @@ ApplicationWindow {
         id: rail
         objectName: "studioSidebar"
         anchors.left: parent.left; anchors.top: parent.top; anchors.bottom: parent.bottom
-        width: 76
-        color: Theme.dark ? "#55030a08" : "#55ffffff"
+        width: 218
+        color: Theme.sidebar
         visible: auth.authorized
         Rectangle { anchors.right: parent.right; height: parent.height; width: 1; color: Theme.border }
-        Image { anchors.top: parent.top; anchors.topMargin: 20; anchors.horizontalCenter: parent.horizontalCenter; width: 38; height: 38; source: "img/app-icon.png" }
+
+        RowLayout {
+            anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top
+            anchors.leftMargin: 16; anchors.rightMargin: 12; anchors.topMargin: 18
+            spacing: 10
+            Image { Layout.preferredWidth: 36; Layout.preferredHeight: 36; source: "img/app-icon.png" }
+            ColumnLayout {
+                Layout.fillWidth: true
+                spacing: 1
+                Text { text: qsTr("BSI Customizer"); color: Theme.text; font.family: Theme.headingFont; font.pixelSize: 12; font.weight: Font.Bold; elide: Text.ElideRight }
+                Text { text: qsTr("BlueStacks tools"); color: Theme.textDim; font.pixelSize: 9 }
+            }
+        }
+
         ScrollView {
-            anchors.top: parent.top; anchors.topMargin: 86
-            anchors.bottom: railFooter.top; anchors.bottomMargin: 14
+            anchors.top: parent.top; anchors.topMargin: 72
+            anchors.bottom: railFooter.top; anchors.bottomMargin: 10
             anchors.left: parent.left; anchors.right: parent.right
+            anchors.leftMargin: 8; anchors.rightMargin: 8
             contentWidth: availableWidth
             clip: true
             ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
             ColumnLayout {
-                width: rail.width
-                spacing: 5
+                width: parent.width
+                spacing: 3
                 Repeater {
                     model: window.featurePages
-                    delegate: AbstractButton {
-                        id: railButton
+                    delegate: ColumnLayout {
+                        id: navEntry
                         required property var modelData
                         required property int index
-                        objectName: "featureNav" + index
-                        Layout.alignment: Qt.AlignHCenter
-                        implicitWidth: 44; implicitHeight: 42
-                        enabled: !backend.busy
-                        Accessible.name: modelData.label
-                        ToolTip.visible: hovered
-                        ToolTip.text: modelData.label
-                        background: Rectangle {
-                            radius: 12
-                            color: pages.currentIndex === railButton.index ? Qt.alpha(Theme.accent, 0.14) : railButton.hovered ? Qt.alpha(Theme.text, 0.06) : "transparent"
-                            border.color: pages.currentIndex === railButton.index || railButton.activeFocus ? Qt.alpha(Theme.accent, 0.35) : "transparent"
-                            Rectangle { visible: pages.currentIndex === railButton.index; width: 2; height: 20; radius: 1; x: -16; anchors.verticalCenter: parent.verticalCenter; color: Theme.accent }
+                        Layout.fillWidth: true
+                        spacing: 2
+
+                        Text {
+                            Layout.fillWidth: true
+                            Layout.leftMargin: 10
+                            Layout.topMargin: navEntry.index === 0 ? 4 : 12
+                            visible: navEntry.index === 0
+                                     || window.featurePages[navEntry.index - 1].section !== navEntry.modelData.section
+                            text: navEntry.modelData.section
+                            color: Theme.textDim
+                            font.pixelSize: 9
+                            font.weight: Font.Bold
+                            font.letterSpacing: 1.1
                         }
-                        contentItem: Image {
-                            source: Icons.icon(railButton.modelData.icon, pages.currentIndex === railButton.index ? Theme.text : Theme.textDim)
-                            sourceSize: Qt.size(19,19)
-                            fillMode: Image.Pad
+
+                        AbstractButton {
+                            id: railButton
+                            objectName: "featureNav" + navEntry.index
+                            Layout.fillWidth: true
+                            implicitHeight: 38
+                            enabled: !backend.busy
+                            Accessible.name: navEntry.modelData.label
+                            background: Rectangle {
+                                radius: 9
+                                color: pages.currentIndex === navEntry.index ? Theme.accentSoft
+                                       : railButton.hovered ? Qt.alpha(Theme.text, 0.055) : "transparent"
+                                border.color: pages.currentIndex === navEntry.index || railButton.activeFocus
+                                              ? Theme.borderStrong : "transparent"
+                                Rectangle {
+                                    visible: pages.currentIndex === navEntry.index
+                                    width: 3; height: 20; radius: 1.5
+                                    anchors.left: parent.left; anchors.leftMargin: 1
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    color: Theme.accent
+                                }
+                            }
+                            contentItem: RowLayout {
+                                spacing: 10
+                                Image {
+                                    Layout.leftMargin: 8
+                                    Layout.preferredWidth: 18; Layout.preferredHeight: 18
+                                    source: Icons.icon(navEntry.modelData.icon,
+                                                       pages.currentIndex === navEntry.index ? Theme.accentText : Theme.textDim)
+                                    sourceSize: Qt.size(18, 18)
+                                    fillMode: Image.Pad
+                                }
+                                Text {
+                                    Layout.fillWidth: true
+                                    text: navEntry.modelData.label
+                                    color: pages.currentIndex === navEntry.index ? Theme.text : Theme.soft
+                                    font.pixelSize: 11
+                                    font.weight: pages.currentIndex === navEntry.index ? Font.DemiBold : Font.Medium
+                                    elide: Text.ElideRight
+                                }
+                            }
+                            onClicked: window.navigatePage(navEntry.index)
                         }
-                        onClicked: window.navigatePage(index)
                     }
                 }
             }
         }
-        Text { id: railFooter; anchors.bottom: parent.bottom; anchors.bottomMargin: 18; anchors.horizontalCenter: parent.horizontalCenter; text: "BSI 3.0.1"; color: Theme.textDim; font.pixelSize: 8; font.letterSpacing: 1 }
+        Text {
+            id: railFooter
+            anchors.left: parent.left; anchors.bottom: parent.bottom
+            anchors.leftMargin: 18; anchors.bottomMargin: 16
+            text: qsTr("BSI 3.0.1")
+            color: Theme.textDim; font.pixelSize: 9; font.letterSpacing: 1
+        }
     }
 
     Item {
@@ -156,27 +215,6 @@ ApplicationWindow {
                 Layout.fillWidth: true; spacing: 4
                 Text { text: qsTr("BSI Customizer"); color: Theme.text; font.family: Theme.headingFont; font.pixelSize: 16; font.weight: Font.Bold }
                 Text { text: qsTr("Premium emulator control center"); color: Theme.textDim; font.pixelSize: 10 }
-            }
-            Rectangle {
-                visible: window.width > 1380
-                implicitWidth: quickNav.implicitWidth + 10; implicitHeight: 42
-                radius: 13; color: Qt.alpha(Theme.window, 0.5); border.color: Theme.border
-                RowLayout {
-                    id: quickNav
-                    anchors.centerIn: parent; spacing: 3
-                    Repeater {
-                        model: [0, 1, 6, 7, 10]
-                        delegate: AbstractButton {
-                            id: quickButton
-                            required property int modelData
-                            implicitWidth: quickLabel.implicitWidth + 22; implicitHeight: 32
-                            enabled: !backend.busy
-                            background: Rectangle { radius: 9; color: pages.currentIndex === quickButton.modelData ? Qt.alpha(Theme.accent, 0.12) : "transparent"; border.color: pages.currentIndex === quickButton.modelData || quickButton.activeFocus ? Theme.neonSoft : "transparent" }
-                            contentItem: Text { id: quickLabel; text: window.featurePages[quickButton.modelData].label; color: pages.currentIndex === quickButton.modelData ? Theme.text : Theme.textDim; font.pixelSize: 10; font.weight: Font.DemiBold; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
-                            onClicked: window.navigatePage(modelData)
-                        }
-                    }
-                }
             }
             ComboBox {
                 id: targetPicker
