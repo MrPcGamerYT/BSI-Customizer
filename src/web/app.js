@@ -281,10 +281,15 @@
     cancelAnimationFrame(videoFrame);
     videoFrame=requestAnimationFrame(() => {
       if(!transport || !state.authorized) {videoGeometry='';return;}
-      const host=$('#video-host'), rect=host?.getBoundingClientRect();
+      const host=$('#video-host'), rect=host?.getBoundingClientRect(), pane=$('#main')?.getBoundingClientRect();
       const animating=$('#main')?.getAnimations().some(a=>a.playState==='running');
-      const visible=!!rect && rect.bottom>0 && rect.top<innerHeight && !document.querySelector('dialog[open]') && !animating && !document.body.classList.contains('minimizing') && !document.body.classList.contains('closing');
-      const geometry={action:'geometry',visible,x:rect?.x||0,y:rect?.y||0,width:rect?.width||0,height:rect?.height||0};
+      // Native pixels must obey the HTML scroller's clipping, not cover its
+      // header/footer when the preview scrolls partly out of view.
+      const clipX=Math.max(rect?.left||0,pane?.left||0,0), clipY=Math.max(rect?.top||0,pane?.top||0,0);
+      const clipWidth=Math.max(0,Math.min(rect?.right||0,pane?.right||0,innerWidth)-clipX);
+      const clipHeight=Math.max(0,Math.min(rect?.bottom||0,pane?.bottom||0,innerHeight)-clipY);
+      const visible=!!rect && clipWidth>0 && clipHeight>0 && !document.querySelector('dialog[open]') && !animating && !document.body.classList.contains('minimizing') && !document.body.classList.contains('closing');
+      const geometry={action:'geometry',visible,x:rect?.x||0,y:rect?.y||0,width:rect?.width||0,height:rect?.height||0,clipX,clipY,clipWidth,clipHeight};
       const key=JSON.stringify(geometry);
       if(key!==videoGeometry) {videoGeometry=key; transport.invoke('videoControl',geometry).catch(()=>{videoGeometry='';});}
       if(animating) syncVideo();

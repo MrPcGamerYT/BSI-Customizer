@@ -23,7 +23,7 @@ ApplicationWindow {
     property bool booted: false
     property int nativePage: -1
     signal retryBrowser()
-    property var videoRect: ({x:0, y:0, width:0, height:0, visible:false})
+    property var videoRect: ({x:0, y:0, width:0, height:0, clipX:0, clipY:0, clipWidth:0, clipHeight:0, visible:false})
     property bool videoCrop: true
     // Only the video pixels are native. All controls and layout stay in HTML;
     // this is the original Qt Multimedia decoder, not a different HTML codec.
@@ -116,16 +116,23 @@ ApplicationWindow {
                 settings.pluginsEnabled: false
                 clip: true
                 onVisibleChanged: if (!visible) bootPreview.pause()
-                VideoOutput {
-                    id: bootVideoPixels
+                Item {
                     z: 10
-                    x: window.videoRect.x; y: window.videoRect.y
-                    width: Math.max(0, window.videoRect.width)
-                    height: Math.max(0, window.videoRect.height)
+                    x: window.videoRect.clipX; y: window.videoRect.clipY
+                    width: Math.max(0, window.videoRect.clipWidth)
+                    height: Math.max(0, window.videoRect.clipHeight)
+                    clip: true
                     visible: auth.authorized && window.nativePage < 0 && !backend.busy && !window.browserFailure && window.videoRect.visible
-                    fillMode: window.videoCrop ? VideoOutput.PreserveAspectCrop : VideoOutput.PreserveAspectFit
-                    Component.onCompleted: bootPreview.videoOutput = bootVideoPixels
-                    Component.onDestruction: { if (bootPreview) { bootPreview.pause(); bootPreview.videoOutput = null; } }
+                    VideoOutput {
+                        id: bootVideoPixels
+                        x: window.videoRect.x - parent.x
+                        y: window.videoRect.y - parent.y
+                        width: Math.max(0, window.videoRect.width)
+                        height: Math.max(0, window.videoRect.height)
+                        fillMode: window.videoCrop ? VideoOutput.PreserveAspectCrop : VideoOutput.PreserveAspectFit
+                        Component.onCompleted: bootPreview.videoOutput = bootVideoPixels
+                        Component.onDestruction: { if (bootPreview) { bootPreview.pause(); bootPreview.videoOutput = null; } }
+                    }
                 }
                 Connections {
                     target: window
@@ -212,7 +219,7 @@ ApplicationWindow {
                 window.booted = true;
                 backend.detectInstalls();
             }
-            if (!auth.authorized) { bootPreview.stop(); bootPreview.source = ""; window.videoRect = ({x:0,y:0,width:0,height:0,visible:false}); folderDialog.close(); fileDialog.close(); window.nativePage = -1; }
+            if (!auth.authorized) { bootPreview.stop(); bootPreview.source = ""; window.videoRect = ({x:0,y:0,width:0,height:0,clipX:0,clipY:0,clipWidth:0,clipHeight:0,visible:false}); folderDialog.close(); fileDialog.close(); window.nativePage = -1; }
             // Do not destroy WebEngineView inside a WebChannel invocation
             // (e.g. sign-out). Let the native call and signal delivery unwind.
             Qt.callLater(function() {

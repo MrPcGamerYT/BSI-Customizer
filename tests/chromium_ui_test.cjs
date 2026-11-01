@@ -291,6 +291,10 @@ const server = http.createServer((req, res) => {
     await page.evaluate(()=>{window.__nextFile='C:\\fixture\\boot.mp4';});
     await click('video-inspect');
     assert.equal(await page.locator('#video-host').count(),1);
+    await page.locator('#video-host').scrollIntoViewIfNeeded();
+    await page.waitForFunction(()=>__calls.some(c=>c.method==='videoControl'&&c.args.action==='geometry'&&c.args.visible));
+    const viewport=await page.evaluate(()=>__calls.findLast(c=>c.method==='videoControl'&&c.args.action==='geometry'&&c.args.visible).args);
+    assert.ok(viewport.clipHeight>0&&viewport.clipHeight<=viewport.height,'Native video obeys HTML viewport clipping');
     await click('video-play');
     assert.ok(await page.evaluate(()=>__calls.some(c=>c.method==='videoControl'&&c.args.action==='play')));
     assert.ok((await page.locator('#video-status').innerText()).includes('Qt decoder status fixture'));

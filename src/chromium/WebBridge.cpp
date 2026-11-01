@@ -282,7 +282,7 @@ QVariantMap WebBridge::invoke(const QString &method, const QVariantMap &args)
         const QString action = text("action");
         if (action == QLatin1String("geometry")) {
             QVariantMap rect{{"visible", args.value("visible").toBool()}};
-            for (const auto *key : {"x", "y", "width", "height"}) {
+            for (const auto *key : {"x", "y", "width", "height", "clipX", "clipY", "clipWidth", "clipHeight"}) {
                 bool ok = false;
                 const double coordinate = args.value(QLatin1String(key)).toDouble(&ok);
                 if (!ok || !std::isfinite(coordinate)) return failure(QStringLiteral("Invalid preview geometry."));
