@@ -10,9 +10,10 @@ namespace {
 QString hx(quint64 n) { return QStringLiteral("0x%1").arg(n, 0, 16).toUpper(); }
 QString cstr(const QByteArray &d, qint64 at) {
     if (!inRange(d, at, 1)) return {};
-    const auto end = d.indexOf('\0', at);
-    if (end < at || end - at > 1024) return {};
-    return QString::fromLatin1(d.mid(at, end-at));
+    const auto bytes=d.mid(at,qMin(qint64(1025),qint64(d.size())-at));
+    const auto end=bytes.indexOf('\0');
+    if (end<0 || end>1024) return {};
+    return QString::fromLatin1(bytes.left(end));
 }
 QVariantMap fail(const QString &s) { return {{"ok",false},{"error",s}}; }
 }
@@ -78,7 +79,7 @@ QVariantMap inspect(const QByteArray &d) {
     } else if (ed.first) warnings << "Unmapped export directory.";
     const auto rd=dir(2); const qint64 root=raw(rd.first,rd.second);
     if (rd.first && root>=0) {
-        QSet<quint32> visited; int nodes=0;
+        QSet<quint32> visited; int nodes=0, entriesRead=0;
         const auto resourceRange=[&](quint32 rel,qint64 length) { return quint64(rel)+quint64(length)<=rd.second && inRange(d,root+rel,length); };
         std::function<void(quint32,int,QString)> walk=[&](quint32 rel,int depth,QString path) {
             if (depth>4 || visited.contains(rel) || ++nodes>16384 || resources.size()>=4096 || !resourceRange(rel,16)) {
@@ -88,7 +89,8 @@ QVariantMap inspect(const QByteArray &d) {
             visited.insert(rel);
             const int count=le16(d,root+rel+12)+le16(d,root+rel+14);
             if (!resourceRange(rel+16,qint64(count)*8)) return;
-            for (int i=0;i<count && resources.size()<4096;++i) {
+            for (int i=0;i<count && resources.size()<4096 && entriesRead<16384;++i) {
+                ++entriesRead;
                 const qint64 entry=root+rel+16+i*8;
                 const quint32 id=le32(d,entry), target=le32(d,entry+4); QString name;
                 if (id&0x80000000) {
@@ -108,7 +110,7 @@ QVariantMap inspect(const QByteArray &d) {
             }
         };
         walk(0,0,{});
-        if (resources.size()>=4096 || nodes>16384) warnings << "Win32 resource traversal reached its display budget.";
+        if (resources.size()>=4096 || nodes>16384 || entriesRead>=16384) warnings << "Win32 resource traversal reached its display budget.";
     } else if (rd.first) warnings << "Unmapped Win32 resource directory.";
     const quint16 machine=PeUtils::machine(d);
     return {{"ok",true},{"size",d.size()},{"sha256",QString::fromLatin1(QCryptographicHash::hash(d,QCryptographicHash::Sha256).toHex())},
