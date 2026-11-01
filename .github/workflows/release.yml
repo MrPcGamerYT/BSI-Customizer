@@ -138,10 +138,11 @@ jobs:
           target: desktop
           arch: win64_msvc2022_64
           modules: qtmultimedia qtwebengine qtwebchannel qtpositioning
-          documentation: true
-          doc-modules: qtwebengine
-          doc-archives: qtwebengine
           cache: true
+
+      - name: Install matching Chromium license documentation
+        shell: pwsh
+        run: ./scripts/Install-WebEngineNotices.ps1 -QtPrefix $env:QT_ROOT_DIR -Version '6.8.3'
 
       - name: Configure application and one-file package
         env:

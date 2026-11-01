@@ -115,6 +115,7 @@ ApplicationWindow {
                 settings.javascriptCanOpenWindows: false
                 settings.pluginsEnabled: false
                 clip: true
+                onVisibleChanged: if (!visible) bootPreview.pause()
                 VideoOutput {
                     id: bootVideoPixels
                     z: 10
@@ -124,7 +125,7 @@ ApplicationWindow {
                     visible: auth.authorized && window.nativePage < 0 && !backend.busy && !window.browserFailure && window.videoRect.visible
                     fillMode: window.videoCrop ? VideoOutput.PreserveAspectCrop : VideoOutput.PreserveAspectFit
                     Component.onCompleted: bootPreview.videoOutput = bootVideoPixels
-                    Component.onDestruction: { bootPreview.pause(); bootPreview.videoOutput = null; }
+                    Component.onDestruction: { if (bootPreview) { bootPreview.pause(); bootPreview.videoOutput = null; } }
                 }
                 Connections {
                     target: window
