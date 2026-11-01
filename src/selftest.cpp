@@ -320,8 +320,8 @@ int runSelfTest()
         if (root) {
             QObject *stack = root->findChild<QObject *>(QStringLiteral("studioPageStack"));
             QObject *dashboard = root->findChild<QObject *>(QStringLiteral("studioDashboard"));
-            check(stack && stack->property("count").toInt() == 12,
-                  "studio shell retains all twelve real application pages");
+            check(stack && stack->property("count").toInt() == 13,
+                  "studio shell retains all thirteen application pages including Debloat");
             check(root->findChild<QObject *>(QStringLiteral("studioSidebar")) != nullptr,
                   "studio navigation sidebar is present");
             QObject *instanceFlow = root->findChild<QObject *>(QStringLiteral("studioInstanceFlow"));
