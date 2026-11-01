@@ -9,7 +9,7 @@ Set-StrictMode -Version Latest
 trap {
     $message = ($_.Exception.Message + "`n" + $_.ScriptStackTrace).Replace('%','%25').Replace("`r",'%0D').Replace("`n",'%0A')
     Write-Host "::error::$message"
-    throw
+    throw $_.Exception
 }
 if ($Version -notmatch '^\d+\.\d+\.\d+$') { throw 'Invalid Qt version' }
 # Qt's normal docs/source repository excludes WebEngine. Resolve the exact
@@ -52,8 +52,23 @@ if ($selected.Count -lt 500 -or -not $selected.ContainsKey('chromium/LICENSE')) 
 # multi-gigabyte source archive or unrelated source payload is downloaded/run.
 function Read-Blobs([string[]]$Hashes, [Collections.Generic.Dictionary[string,string]]$Texts) {
     $Hashes = @($Hashes | Sort-Object -Unique)
-    $Hashes | & git "--git-dir=$repository" -c fetch.negotiationAlgorithm=noop fetch --no-write-fetch-head --no-tags --filter=blob:none origin --stdin | Out-Host
-    if ($LASTEXITCODE -ne 0) { throw 'Could not fetch source notice blobs' }
+    # PowerShell's Windows native pipeline writes CRLF; Git's --stdin
+    # refspec parser expects LF. Write the protocol explicitly on both OSes.
+    $fetchInfo = [Diagnostics.ProcessStartInfo]::new()
+    $fetchInfo.FileName = 'git'; $fetchInfo.UseShellExecute = $false
+    $fetchInfo.RedirectStandardInput = $true; $fetchInfo.RedirectStandardOutput = $true; $fetchInfo.RedirectStandardError = $true
+    $fetchInfo.StandardInputEncoding = [Text.UTF8Encoding]::new($false)
+    foreach ($argument in @("--git-dir=$repository", '-c', 'fetch.negotiationAlgorithm=noop', 'fetch', '--no-write-fetch-head', '--no-tags', '--filter=blob:none', 'origin', '--stdin')) { $fetchInfo.ArgumentList.Add($argument) }
+    $fetch = [Diagnostics.Process]::new(); $fetch.StartInfo = $fetchInfo
+    try {
+        if (-not $fetch.Start()) { throw 'Could not start source notice fetch' }
+        $fetchOut = $fetch.StandardOutput.ReadToEndAsync(); $fetchErr = $fetch.StandardError.ReadToEndAsync()
+        $fetch.StandardInput.Write(($Hashes -join "`n") + "`n"); $fetch.StandardInput.Close()
+        if (-not $fetch.WaitForExit(180000)) { $fetch.Kill($true); throw 'Source notice fetch timed out' }
+        $null = $fetchOut.GetAwaiter().GetResult()
+        $fetchMessage = $fetchErr.GetAwaiter().GetResult()
+        if ($fetch.ExitCode -ne 0) { throw "Could not fetch source notice blobs: $fetchMessage" }
+    } finally { $fetch.Dispose() }
     $info = [Diagnostics.ProcessStartInfo]::new()
     $info.FileName = 'git'; $info.UseShellExecute = $false
     $info.RedirectStandardInput = $true; $info.RedirectStandardOutput = $true; $info.RedirectStandardError = $true
