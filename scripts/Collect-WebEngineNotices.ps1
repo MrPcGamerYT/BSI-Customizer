@@ -71,6 +71,7 @@ function Read-Blobs([string[]]$Hashes, [Collections.Generic.Dictionary[string,st
     } finally { $fetch.Dispose() }
     $info = [Diagnostics.ProcessStartInfo]::new()
     $info.FileName = 'git'; $info.UseShellExecute = $false
+    $info.StandardInputEncoding = [Text.UTF8Encoding]::new($false)
     $info.RedirectStandardInput = $true; $info.RedirectStandardOutput = $true; $info.RedirectStandardError = $true
     foreach ($argument in @("--git-dir=$repository", 'cat-file', '--batch')) { $info.ArgumentList.Add($argument) }
     $process = [Diagnostics.Process]::new(); $process.StartInfo = $info
