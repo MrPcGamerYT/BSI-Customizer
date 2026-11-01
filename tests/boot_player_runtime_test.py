@@ -13,7 +13,7 @@ if len(sys.argv) == 1:
     sys.exit(0)
 import tempfile
 from pathlib import Path
-from PySide6.QtCore import QObject, QUrl, qInstallMessageHandler
+from PySide6.QtCore import QObject, QUrl, QCoreApplication, QEvent, qInstallMessageHandler
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtQml import QQmlEngine, QQmlComponent
 from PySide6.QtTest import QTest
@@ -83,9 +83,21 @@ for provider in (sys.argv[1],):
                 escaped = line.replace("%", "%25").replace("\n", "%0A").replace("\r", "%0D")
                 print(f"::error::{escaped}", flush=True)
             raise
-        print(f"PASS: adaptive boot player {provider}", flush=True)
-        import shiboken6
-        shiboken6.delete(obj)
-        shiboken6.delete(component)
-        shiboken6.delete(engine)
+        # Release wrappers before their engine and let Qt process DeferredDelete.
+        # Direct shiboken6.delete(engine) can invalidate live composite type/JS
+        # wrappers during QQmlEngine teardown (PySide 6.8, Linux).
+        player = None
+        obj.deleteLater()
+        obj = None
+        QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+        component.deleteLater()
+        component = None
+        QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+        engine.collectGarbage()
+        engine.clearComponentCache()
+        engine.deleteLater()
+        engine = None
+        QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+        QTest.qWait(1)
         messages.clear()
+        print(f"PASS: adaptive boot player {provider} (including teardown)", flush=True)

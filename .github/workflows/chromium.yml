@@ -3,6 +3,8 @@ name: Chromium workspace (opt-in)
 # Separate from the production release: verifies the migration without
 # replacing a release or adding an untested Chromium bundle to main.
 on:
+  push:
+    branches: [arena/3f309c3c-bsi-customizer]
   workflow_dispatch:
   pull_request:
     paths:
@@ -49,7 +51,7 @@ jobs:
           modules: qtmultimedia qtwebengine qtwebchannel qtpositioning
           cache: true
       - name: Configure opt-in Chromium build
-        run: cmake -S . -B build-web -A x64 -DBSI_CHROMIUM_UI=ON -DBSI_TEST_QT5_REFERENCE=OFF
+        run: cmake -S . -B build-web -A x64 -DBSI_CHROMIUM_UI=ON -DBSI_TEST_QT5_REFERENCE=OFF -DBSI_BUILD_PORTABLE=OFF
       - name: Build
         run: cmake --build build-web --config Release --parallel
       - name: Native bridge must reject every command without sign-in
@@ -75,4 +77,11 @@ jobs:
           $p = Start-Process stage/BSI-Customizer.exe -ArgumentList '--chromium-runtime-test' -PassThru
           if (-not $p.WaitForExit(45000)) { $p.Kill(); throw 'Chromium test timed out' }
           if ($p.ExitCode -ne 0) { throw "Chromium deployment test failed: $($p.ExitCode)" }
-      # No release, push, installer replacement or credential embed here.
+      - name: Upload verified test bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: BSI-Customizer-3.0.1-Chromium-Windows-test
+          path: stage/
+          retention-days: 3
+          if-no-files-found: error
+      # Test artifact only; no release, installer replacement or credential embed.
