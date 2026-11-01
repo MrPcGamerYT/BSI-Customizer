@@ -29,7 +29,7 @@ Item {
             const row = profileLinkRepeater.itemAt(i);
             if (!row) continue;
             links.push({
-                kind: row.modelData.kind,
+                kind: settings.aboutLinks[i].kind,
                 title: row.titleInput.text.trim(),
                 url: row.urlInput.text.trim()
             });
@@ -53,7 +53,7 @@ Item {
 
     function resetProfile() {
         settings.aboutDeveloperName = qsTr("Mr.Pc Gamer & Romulos");
-        settings.aboutTagline = qsTr("Building tools for BlueStacks players");
+        settings.aboutTagline = qsTr("BlueStacks tools · with contributor Nova");
         settings.aboutLinks = [
             { kind: "github", title: qsTr("Open-source project"), url: "https://github.com/MrPcGamerYT/BSI-Customizer" },
             { kind: "discord", title: qsTr("Community Discord"), url: "https://discord.gg/5qkKPRZkWa" },

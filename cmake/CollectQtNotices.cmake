@@ -14,7 +14,10 @@
 
 cmake_minimum_required(VERSION 3.21)
 
-set(BSI_QT_NOTICE_MODULES qtbase qtdeclarative qtsvg qtimageformats qtshadertools)
+set(BSI_QT_NOTICE_MODULES qtbase qtdeclarative qtsvg qtimageformats qtshadertools qtmultimedia)
+if(BSI_WITH_WEBENGINE)
+    list(APPEND BSI_QT_NOTICE_MODULES qtwebengine qtwebchannel qtpositioning qtserialport)
+endif()
 set(BSI_MAX_ARCHIVE_BYTES 536870912)   # 512 MiB per module archive
 set(BSI_MAX_NOTICE_BYTES 4194304)      # 4 MiB per licence text
 
@@ -105,8 +108,14 @@ foreach(module IN LISTS BSI_QT_NOTICE_MODULES)
     set(work "${CACHE_DIR}/extract/${module}")
     file(REMOVE_RECURSE "${work}")
     file(MAKE_DIRECTORY "${work}")
+    set(notice_patterns "*/LICENSES/*")
+    # libarchive treats an unmatched pattern as an extraction failure. Some
+    # modules (e.g. WebChannel) have SPDX texts but no third-party attribution.
+    if(listing MATCHES "/qt_attribution[.]json(\n|$)")
+        list(APPEND notice_patterns "*/qt_attribution.json")
+    endif()
     file(ARCHIVE_EXTRACT INPUT "${archive}" DESTINATION "${work}"
-        PATTERNS "*/LICENSES/*" "*/qt_attribution.json")
+        PATTERNS ${notice_patterns})
 
     file(GLOB roots RELATIVE "${work}" "${work}/*")
     list(LENGTH roots root_count)

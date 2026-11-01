@@ -1,8 +1,16 @@
-# BSI Customizer
+# BSI Customizer 3.0.1
+
+> **3.0.1 HTML UI:** the normal Windows build uses the actual animated HTML/glass frontend with all 13 BSI feature areas connected to the original native engines. No `--web-ui` flag or editor switching is needed. See [the feature/verification map](docs/UNIFIED-UI.md).
+
 
 [![CI](https://github.com/MrPcGamerYT/BSI-Customizer/actions/workflows/ci.yml/badge.svg)](https://github.com/MrPcGamerYT/BSI-Customizer/actions/workflows/ci.yml)
 
-Qt Quick desktop customizer for BlueStacks / MSI App Player on Windows.
+Windows desktop customizer for BlueStacks / MSI App Player. Version **3.0.1** integrates the Chromium workspace with the existing C++ engines and Discord login.
+
+Use the standard portable or installer build for the animated interface; both now include Chromium. `--native-ui` is an emergency compatibility fallback, not the normal editing flow. Browser-only previews cannot patch files or bypass Discord authorization. This version label does not imply a published release.
+
+Search/scan performance findings, benchmarks and the optimization roadmap:
+[performance review](docs/PERFORMANCE.md).
 
 Tabs: **Dashboard**, **Theme**, **Resources**, **FPS**, **Integrity**, **Boot
 Video**, **UI** (clean-up, title-bar row and button order, removals, About page),
@@ -307,9 +315,11 @@ any more; on a page that exists only as compiled code its caption is cleared
 instead, which is all a string edit can do there. Press **Restore stock About**
 to restore the untouched page byte-for-byte.
 
-Both tools work on the Qt 5 and Qt 6 players: BlueStacks 5.22 and the older
-5.10 build, plus the MSI App Player 5.9 and the current MSI build. The
-clean-up understands both shapes the player uses to re-assert button
+The analyzers support Qt 5 and Qt 6 page layouts found in BlueStacks 5.22,
+the older 5.10 build and MSI App Player 5.9. Compatibility is checked against
+the selected EXE, not assumed for every current MSI/BlueStacks build; an
+unverified active resource mapping stays read-only. The clean-up understands
+both shapes the player uses to re-assert button
 visibility (`PlrTopbarElement.pVisible` and the MSI 5.9
 `iTopbarItems.append({ "id" : …, "visible" : … })` list) and both sidebar
 shapes (an explicit `pIsFeatureEnable` binding, or none — the tool adds one
@@ -323,10 +333,17 @@ resource pools — QML, JavaScript, SVG markup, PNG/JPEG/BMP/GIF/ICO/WEBP/TGA
 art, JSON/XML/CSS/HTML, compiled caches and everything else. The SVG and
 Images tabs are gone: both live here, with the whole pool beside them.
 
-- **Scan Resources** walks every resource pool the EXE registers (plus the main
-  QML pool) and lists each entry with its path, format, size and, for pictures,
-  its pixel dimensions. Filter by name or by kind (Pictures / SVG / Code /
-  Binary).
+- **Scan Resources** is manual: opening the tab, starting the app and selecting
+  another EXE never launch a scan. Click the button to walk every resource pool
+  the EXE registers (plus the main QML pool) and list each entry with its path,
+  format, size and, for pictures, its pixel dimensions. Filter by name or by kind (Pictures / SVG / Code /
+  Binary). Search is case-insensitive across paths, names and formats; all words
+  must match, and quotes keep a phrase together. Slashes and Windows backslashes
+  are equivalent. Filtering uses cached metadata and thumbnails, not EXE reads,
+  and never changes the selected entry or discards unsaved code. The Fonts and
+  Modified kind filters use cached metadata; Modified compares against an
+  existing `.bak` during the manual scan. Add `min:10kb max:2mb` to bound decoded
+  sizes (bytes, `kb`, `mb`, and decimals are supported).
 - **Pictures** get a thumbnail in the list and a large preview; **Extract…**
   saves the selected entry exactly as stored and **Extract All** writes the
   whole pool to `embedded_resources\` next to the EXE, keeping its folders.
@@ -337,37 +354,50 @@ Images tabs are gone: both live here, with the whole pool beside them.
   the older players), and an entry that genuinely is not a picture says so
   under the preview instead of leaving an empty box.
 - The list belongs to one EXE: selecting another `HD-Player.exe` drops it and
-  the tab scans itself again, so a preview can never be read from the previous
-  file at the new file's coordinates.
+  the selection and thumbnails are cleared. Click **Scan Resources** again;
+  previews never use the previous file's offsets on the new target.
 - **Code** — QML, JS, SVG, JSON, XML, CSS, HTML and text — opens in the editor
   as the source the player actually loads, and **Save code** writes it back.
   Editing QML also invalidates its compiled `.qmlc` companion and the player's
   QML disk cache, so the new source is what runs.
-- **Binary** entries (compiled caches, fonts) are listed and can be extracted
-  or replaced with a file of the same kind.
-- **Replace with file…** validates a picture first (its real format is sniffed
-  from the bytes and has to match the entry) and verifies the rewrite before
-  the EXE is replaced on disk. The original stays as `HD-Player.exe.bak` and
-  nothing is written while HD-Player.exe runs.
+- **Binary** entries (including fonts and compiled caches) can be extracted.
+  Raw compiled `.qmlc`/`.jsc` cache replacement is refused: edit the source
+  instead so its cache can be invalidated safely. Other replacements remain
+  subject to verified mapping and format checks.
+- **Replace with file…** validates a picture's real byte format against the
+  original image family and verifies the rewritten resource before committing.
+  The original stays as `HD-Player.exe.bak`; close HD-Player before writing.
 
-**Two hard limits, checked before anything is written.**
+**Verified storage, not a universal force-replace switch.** A replacement may
+have more decoded bytes than the original when its encoded record still fits
+verified storage. The writer uses the existing slot or a validated, mapped
+unused range, protects registered resource pools, PE directories and executable
+sections, updates known aliases and reads the result back through the tree.
+The ordinary Resources path never grows the EXE. Unsupported layouts or lack
+of verified space are refused before writing; arbitrary zero bytes are not
+assumed to be free space. The resource editor's decoded size/slot meter is
+advisory: Dry Run checks the actual encoded output and complete mapping.
 
-1. *The embedded file never grows.* An edit or replacement that decodes to more
-   bytes than the entry already holds is refused outright — no save, no backup,
-   no change to the EXE.
-2. *HD-Player.exe never grows.* The record has to fit the space the entry
-   already owns. Because the shipped pools are packed without padding, that is
-   usually too tight for a recompressed edit, so the writer looks for an empty
-   gap inside the same PE section, builds the record there and re-points the
-   resource tree node at it. Every other payload is blocked out of the search,
-   the file size is asserted again after the rewrite, and the new record is read
-   back through the tree before the EXE on disk is touched. Nothing is ever
-   appended and no section changes size. Only when there is no gap left is the
-   edit refused, with the exact byte counts.
+## Customization Workspace (2.7)
 
-The meter under the editor shows both numbers live as you type — the entry's
-slot (`used / available`) and the file size (`file N of M bytes`) — and turns
-red the moment the embedded file would grow.
+The new **Workspace** page brings together compatibility/capacity inspection,
+text diagnostic export, portable Theme/Boot/About/GIF RPC profiles, mock theme
+preview, image/video preparation and guided single-EXE patch batches. Resources
+remain **manual-scan only**. Importing a profile only stages settings; it never
+deploys sidecars or reuses old resource offsets.
+
+For EXE edits: inspect → queue palette/resources → **Dry Run** → review the
+fingerprint and operations → confirm **Apply**. Workspace batches retain
+original hashes and recovery snapshots in the application's AppData
+`patch-history` directory. Restore requires the exact canonical target and
+recorded post-patch hash; emulator updates invalidate stale plans. Original
+editor writes retain their existing `.bak` behavior and are not retroactively
+added to Workspace history.
+
+See [Workspace features and limits](docs/CUSTOMIZATION-WORKSPACE.md) for the
+18-feature checklist, safety boundaries and validation status. This is not a
+promise that an unknown MSI/BlueStacks resource layout can be patched. Export
+Diagnostics when mapping is unverified; do not force Hex as a workaround.
 
 Restart BlueStacks after a replacement; the player reads these resources at
 startup.
@@ -438,7 +468,38 @@ and checks actual pixels; it never executes QML extracted from the user's EXE.
 
 ## Boot video and integrity
 
-Boot patching plays the selected installation's `Assets/Promo.mp4` without importing any media module into the player's own QML. The tool writes a small player, `Assets/BootVideo.qml`, next to `HD-Player.exe`; that file tries Qt6 Multimedia, then Qt5 Multimedia, then a WebEngine `<video>` at run time, each attempt inside its own `try`, so a missing module costs the video and never the boot window. The player's boot screen (`PlrBootProgressBar.qml`) is found by its content rather than by a fixed resource name and is given one `Loader` pointed at that file through a `file:///` URL; the stock artwork, the promotion banner and the promotion button are hidden, the loading text stays. The player window (`plr.qml`) is taught to keep its boot screen - and so the video - on screen for the configured hold time after boot reports complete: builds that swap components get a timer on the swap, builds that simply unload their boot loader get the unload deferred. Both files are rewritten inside the record they already occupy, so the EXE never grows; when a record is tight its licence banner is dropped to make room. Resource timestamps and the player's QML disk cache are refreshed so Qt recompiles the edited files; the first `.bak` is preserved, the write is read back and verified, and a player whose boot screen cannot be identified is refused instead of guessed. Hold `0` leaves the player's own timing alone.
+Boot patching uses the selected installation's `Assets/Promo.mp4`. Adapted from
+Nova's supplied script, the fallback writes `Assets/BootVideo.qml` and tries Qt 6
+Multimedia, Qt 5 Multimedia, then a WebEngine HTML video. Playback is muted,
+looping and cropped to fill the boot background. The emulator must supply one
+of those modules and an MP4 codec; the patch does not install codecs or modify
+its Qt DLLs. A working stock Video/MediaPlayer resource is reused when available.
+
+The original loading/progress UI remains in place. **Boot hold after ready**
+defaults to 3000 ms (0–15000); zero restores immediate handoff on supported boot
+hosts. Legacy forced GL-container video experiments are repaired only when
+uniquely recognized, and an old empty boot stub requires a uniquely linked
+original resource in `.bak`. Unknown hosts are never guessed. The status reports
+when an extra hold cannot be applied. You can replace `Promo.mp4` later without
+patching again. Close all emulator instances before patching.
+
+Resource discovery, safe mapped growth, verified EXE writes and original-backup
+preservation remain in use; the script's heuristic timestamp/zero-padding writes
+are not used. An external player is written atomically and rolled back if the
+EXE write fails. No QML is executed while inspecting a target executable.
+
+### Purge Cache
+
+The bottom sidebar **Purge Cache** button asks for confirmation and requires
+HD-Player to be closed. It clears only recognized cache directories beneath
+exact `HD-Player` application roots in `%LOCALAPPDATA%` / `%APPDATA%`, including
+known BlueStacks/MSI/now.gg owner folders. It does **not** delete settings,
+installed Android apps, emulator disks, cookies or unrelated application caches.
+Links/junctions are never traversed. Locked/skipped directories are reported
+rather than silently claiming success. The next emulator launch rebuilds caches.
+
+The About page also credits **Nova — @nova_xis20** alongside the existing authors.
+
 
 Integrity patching follows `E8 ???????? 84 C0 74 ??` in `.text`, with bounded RIP-relative references to the verify/fail messages when disambiguation is needed. Natural NOP sequences are not counted as clean candidates. Already-applied patches are verified by a message reference or matching backup evidence. Only the two JZ bytes are NOPed; dry-run is read-only, the first backup is preserved, and writes/restores are verified rather than truncating/deleting the EXE first. Close BlueStacks yourself before patching; the tool does not forcibly terminate your sessions. Full-backup restoration also rolls back theme/boot edits made after that backup.
 
@@ -843,6 +904,45 @@ For an unsupported real EXE, collect a read-only diagnostic report:
 .\BSI-Customizer.exe --theme-probe "C:\Program Files\BlueStacks_nxt\HD-Player.exe"
 ```
 
+**No EXE upload is needed.** If you cannot update the customizer, download
+[`scripts/Collect-Theme-Layout.ps1`](scripts/Collect-Theme-Layout.ps1) and run it
+with the built-in Windows PowerShell (5.1+):
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File "$env:USERPROFILE\Downloads\Collect-Theme-Layout.ps1"
+```
+
+Adjust the script path if it was downloaded elsewhere. `-ExecutionPolicy Bypass`
+applies only to that process; it does not change the system policy. No admin
+rights, customizer update or third-party tools are needed. The script reads
+MSI App Player's PE metadata and bounded resource-table hex excerpts, then
+creates a new `%TEMP%\BSI-theme-layout-<id>.txt` and opens it in Notepad. It
+never loads or runs the emulator, patches files, or uploads anything. Review
+the local path and partial resource/code excerpts before sharing. Only the
+small report is needed; its contents can also be pasted into chat. Candidate
+tables are not verified mappings and do not authorize patching. For another
+installation, pass `-PlayerPath "C:\path\to\HD-Player.exe"`. This fallback
+has been syntax-checked; Windows execution still needs verification.
+
+With BSI Customizer **2.6.4 or newer** installed,
+right-click [`scripts/Collect-Theme-Probe.cmd`](scripts/Collect-Theme-Probe.cmd)
+and choose **Run as administrator**. Its default target is MSI App Player at
+`C:\Program Files\BlueStacks_msi5\HD-Player.exe`. It opens a small text report
+in Notepad and saves it, alongside any errors, in `%TEMP%\BSI-theme-probe`.
+You can upload just those text files or paste their contents into the issue/chat.
+The script never uploads anything, modifies the emulator or runs a patch.
+Review local paths and resource previews before sharing. Existing reports in
+that report folder are overwritten when the script runs again.
+
+For other install locations, pass the emulator path and optionally the customizer
+path as quoted arguments to the script. The report should begin with
+`report format: 2 (escaped binary previews)`. Earlier builds could stop midway
+through a nearby compressed image's preview, because its NUL byte truncated
+C-string output. Version 2.6.4 escapes binary previews and writes the entire
+UTF-8 report, with regression coverage for the real redirected CLI. This fixes
+**diagnostic collection**, not an unverified theme-resource mapping; patching
+still refuses an unvalidated resource tree.
+
 ## Third-party notices
 
 The restricted x64 prologue decoder uses [HDE64 from MinHook v1.3.4](src/third_party/hde64/README.md), under its BSD license. The notice below is included in the README shipped with binary releases. CMake builds and installations also include `THIRD-PARTY-NOTICES.txt`.
@@ -936,6 +1036,17 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 </details>
 
-A diagnostic EXE can be supplied with `-DBSI_EXE_TEST_FILE=<absolute-path>`. In GitHub CI, a user-supplied `HD-Player.exe` at the repository root is also recognized as optional diagnostic input. Self-tests only read it and patch disposable copies; they do not execute its native code or QML. The probe records its SHA-256 so results from different installations/builds are not confused. Diagnostic input is not a runtime dependency of the portable EXE.
+A diagnostic EXE can be supplied with `-DBSI_EXE_TEST_FILE=<absolute-path>`. The Windows CI matrix checks the four pinned `HD-Player.exe` uploads in `MrPcGamerYT/HD-Player` as diagnostic inputs. Self-tests only read them and patch disposable copies; they do not execute their native code or QML. The probe records each SHA-256 so results from different installations/builds are not confused. Diagnostic input is not a runtime dependency of the portable EXE.
 
 Compatibility is version-adaptive, not a guarantee for every past/future build: FPS detours currently support Windows x64 Qt 5/Qt 6 setters, and boot rewriting requires a recognizable boot-controller/media API with a validated resource mapping. Unknown architectures, ambiguous runtime selection and unrecognized resource layouts are refused instead of reporting a false success. Integrity behavior is not changed by these detection improvements.
+
+### Animated HTML workspace
+
+The supplied HTML frontend is now the default (`BSI_CHROMIUM_UI=ON`). Install
+Qt WebEngine, WebChannel, Positioning, SerialPort (Positioning plugin dependency)
+and Multimedia development modules when
+building it locally. The existing Discord login and C++ engines are unchanged.
+The standard portable/installer workflows include the complete runtime.
+`--native-ui` selects the emergency recovery shell; `BSI_CHROMIUM_UI=OFF` is an
+explicit native-only developer build. See [UI/engine mapping](docs/UNIFIED-UI.md)
+and [deployment requirements and verification](docs/CHROMIUM-UI.md).

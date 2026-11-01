@@ -27,8 +27,8 @@ Popup {
                                      (parent.width - width) / 2 + dragOffsetX)) : 0
     y: parent ? Math.max(0, Math.min(Math.max(0, parent.height - height),
                                      (parent.height - height) / 2 + dragOffsetY)) : 0
-    width: Math.min(900, Math.max(660, parent ? parent.width * 0.70 : 830))
-    height: Math.min(660, Math.max(480, parent ? parent.height * 0.74 : 560))
+    width: Math.min(1100, Math.max(660, parent ? parent.width * 0.70 : 830))
+    height: Math.min(700, Math.max(480, parent ? parent.height * 0.74 : 560))
     modal: true
     focus: true
     padding: 0
@@ -79,6 +79,7 @@ Popup {
 
             Item {
                 id: dragHandle
+                objectName: "settingsPanelDragHandle"
                 Layout.fillWidth: true
                 Layout.preferredHeight: 40
 

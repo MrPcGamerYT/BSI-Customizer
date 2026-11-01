@@ -753,17 +753,30 @@ bool compilerConstant(std::uint64_t value)
 {
     if ((value & (value + 1)) == 0 || (value & (value - 1)) == 0)
         return true;
-    char buffer[17];
-    std::snprintf(buffer, sizeof(buffer), "%016llx", static_cast<unsigned long long>(value));
-    const std::string hex(buffer, 16);
-    if (hex.find("00000000") != std::string::npos || hex.find("ffffffff") != std::string::npos)
-        return true;
-    if (std::set<char>(hex.begin(), hex.end()).size() <= 3)
+    // This predicate runs for every plausible qword in a binary. Keep the
+    // same 16-digit, zero-padded hexadecimal rules without snprintf, a string
+    // allocation or up to sixteen std::set node allocations per candidate.
+    char hex[16];
+    unsigned digits = 0;
+    unsigned zeroRun = 0, fRun = 0;
+    for (int i = 0; i < 16; ++i) {
+        const unsigned digit = unsigned((value >> ((15 - i) * 4)) & 0xF);
+        hex[i] = char(digit);
+        digits |= 1u << digit;
+        zeroRun = digit == 0 ? zeroRun + 1 : 0;
+        fRun = digit == 15 ? fRun + 1 : 0;
+        if (zeroRun >= 8 || fRun >= 8)
+            return true;
+    }
+    unsigned distinct = 0;
+    for (unsigned remaining = digits; remaining; remaining &= remaining - 1)
+        ++distinct;
+    if (distinct <= 3)
         return true;
     for (const int width : { 2, 4, 8 }) {
         bool uniform = true;
         for (int i = width; i < 16 && uniform; i += width)
-            uniform = hex.compare(std::size_t(i), std::size_t(width), hex, 0, std::size_t(width)) == 0;
+            uniform = std::memcmp(hex + i, hex, std::size_t(width)) == 0;
         if (uniform)
             return true;
     }
@@ -1087,9 +1100,14 @@ SignatureMatch findSignature(std::string_view data, const Signature &sig, int mi
         const std::string_view preTail(pre.data() + pre.size() - std::size_t(n), std::size_t(n));
         const std::string_view postHead(post.data(), std::size_t(n));
         std::vector<std::int64_t> hits;
-        for (std::int64_t pos = n; pos + gap + n <= limit; ++pos) {
-            if (data.compare(std::size_t(pos - n), std::size_t(n), preTail) != 0)
-                continue;
+        // Search for the prefix using the library's optimized byte search,
+        // then verify the suffix only at actual prefix hits. Advance one byte
+        // so overlapping matches and the original 65-hit ambiguity cap remain.
+        for (std::size_t at = data.find(preTail); at != std::string_view::npos;
+             at = data.find(preTail, at + 1)) {
+            const std::int64_t pos = static_cast<std::int64_t>(at) + n;
+            if (pos + gap + n > limit)
+                break;
             if (data.compare(std::size_t(pos + gap), std::size_t(n), postHead) != 0)
                 continue;
             hits.push_back(pos);

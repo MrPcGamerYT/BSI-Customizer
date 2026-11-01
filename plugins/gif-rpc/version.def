@@ -1,0 +1,19 @@
+LIBRARY version
+EXPORTS
+    GetFileVersionInfoSizeA=BSI_GetFileVersionInfoSizeA
+    GetFileVersionInfoSizeW=BSI_GetFileVersionInfoSizeW
+    GetFileVersionInfoSizeExA=BSI_GetFileVersionInfoSizeExA
+    GetFileVersionInfoSizeExW=BSI_GetFileVersionInfoSizeExW
+    GetFileVersionInfoA=BSI_GetFileVersionInfoA
+    GetFileVersionInfoW=BSI_GetFileVersionInfoW
+    GetFileVersionInfoExA=BSI_GetFileVersionInfoExA
+    GetFileVersionInfoExW=BSI_GetFileVersionInfoExW
+    VerQueryValueA=BSI_VerQueryValueA
+    VerQueryValueW=BSI_VerQueryValueW
+    VerInstallFileA=BSI_VerInstallFileA
+    VerInstallFileW=BSI_VerInstallFileW
+    VerFindFileA=BSI_VerFindFileA
+    VerFindFileW=BSI_VerFindFileW
+    VerLanguageNameA=BSI_VerLanguageNameA
+    VerLanguageNameW=BSI_VerLanguageNameW
+    BsiGifRpcSchema

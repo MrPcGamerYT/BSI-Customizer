@@ -3,7 +3,11 @@
 #include "AdbClient.h"
 #include "AndroidCleanup.h"
 #include "AuthManager.h"
+#include "CustomizationWorkspace.h"
+#include <QCryptographicHash>
 #include "BootVideoPatcher.h"
+#include "PlayerCache.h"
+#include "GifRpc.h"
 #include "BsDetector.h"
 #include "ExtrasPatcher.h"
 #include "IntegrityPatcher.h"
@@ -12,6 +16,7 @@
 #include "LayoutPatcher.h"
 #include "RootVhd.h"
 #include "RpcIdPatcher.h"
+#include "QtResources.h"
 #include "SettingsManager.h"
 #include "ThemeEngine.h"
 #include "ThemePresets.h"
@@ -32,9 +37,12 @@ Backend::Backend(SettingsManager *settings, QObject *parent)
     : QObject(parent)
     , m_settings(settings)
 {
+    m_customizationProfile = {{"schema", "bsi.customization.profile"}, {"version", 1}, {"name", "My workspace"}, {"theme", QVariantMap{}}, {"boot", QVariantMap{{"holdMs", 3000}}}, {"gifRpc", QVariantMap{}}, {"about", QVariantMap{}}};
     connect(settings, &SettingsManager::dllPathChanged, this, &Backend::dllPathChanged);
     connect(settings, &SettingsManager::confPathChanged, this, &Backend::confPathChanged);
     connect(settings, &SettingsManager::exePathChanged, this, [this] {
+        m_workspaceOperations.clear(); m_workspaceHash.clear(); m_themeFileHash.clear(); m_resourceFileHash.clear();
+        emit workspaceChanged();
         m_themeInfo = {};
         m_themeEntries.clear();
         m_gradientTargets.clear();
@@ -48,6 +56,8 @@ Backend::Backend(SettingsManager *settings, QObject *parent)
         m_qmlThemeAvailable = false;
         m_svgs.clear();
         m_resources.clear();
+        m_resourceInfos.clear();
+        ++m_resourceRevision;
         m_resourcesIncludeBinary = true;
         emit exePathChanged();
         emit themeChanged();
@@ -64,6 +74,11 @@ Backend::Backend(SettingsManager *settings, QObject *parent)
 // Keep the existing return contract while allowing the GUI to paint and respond.
 void Backend::copyPatchState(const Backend &source)
 {
+    m_customizationProfile = source.m_customizationProfile;
+    m_workspaceOperations = source.m_workspaceOperations;
+    m_workspaceHash = source.m_workspaceHash;
+    m_themeFileHash = source.m_themeFileHash;
+    m_resourceFileHash = source.m_resourceFileHash;
     m_themeInfo = source.m_themeInfo;
     m_themeStatus = source.m_themeStatus;
     m_themeMethod = source.m_themeMethod;
@@ -79,6 +94,8 @@ void Backend::copyPatchState(const Backend &source)
     m_hexQmlColors = source.m_hexQmlColors;
     m_svgs = source.m_svgs;
     m_resources = source.m_resources;
+    m_resourceInfos = source.m_resourceInfos;
+    m_resourceRevision = source.m_resourceRevision;
     m_resourcesIncludeBinary = source.m_resourcesIncludeBinary;
     m_installs = source.m_installs;
 }
@@ -134,16 +151,22 @@ QVariantMap Backend::runBackground(const std::function<QVariantMap(Backend &)> &
         m_settings->m_fpsAutoDetect = settings->m_fpsAutoDetect;
         emit m_settings->fpsAutoDetectChanged();
     }
+    const bool resourcesUpdated = m_resourceRevision != worker->m_resourceRevision;
+    const bool profileUpdated = m_customizationProfile != worker->m_customizationProfile;
     copyPatchState(*worker);
+    if (profileUpdated) emit customizationProfileChanged();
+    emit workspaceChanged();
     delete worker;
     delete job;
     emit themeChanged();
     emit gradientTargetsChanged();
     emit svgsChanged();
-    emit resourcesChanged();
     emit installsChanged();
     m_busy = false;
     emit busyChanged();
+    // Selection handlers may measure the new row's budget. Publish only after
+    // releasing the busy guard, otherwise that read is refused as "busy".
+    if (resourcesUpdated) emit resourcesChanged();
     return response;
 }
 
@@ -353,6 +376,7 @@ void Backend::loadTheme(const QString &method)
         return;
     }
     noteThemeFileState();
+    m_themeFileHash = QCryptographicHash::hash(data, QCryptographicHash::Sha256);
     // Say exactly which file the colors come from: reading a backup, a second
     // install or the wrong profile is the other way this page can show a theme
     // BlueStacks does not have.
@@ -436,17 +460,13 @@ void Backend::loadTheme(const QString &method)
         for (const auto &target : GradientPatcher::analyze(data).targets)
             if (target.hexGradient)
                 ++hexGradientTargets;
-        m_themeStatus = QStringLiteral("Hex theme ready (%1 profile, %2 color(s) found, %3 gradient "
-                                       "surface(s)).")
-                            .arg(m_themeInfo.profile)
-                            .arg(m_hexQmlColors.size())
-                            .arg(hexGradientTargets);
-        doLog(QStringLiteral("Theme loaded (hex): %1 color(s) found.")
-                  .arg(m_hexQmlColors.size()),
-              QStringLiteral("blue"));
-        doLog(QStringLiteral("Pick a preset or tick the colors you want, then Apply Theme. Gradient "
-                             "theme paints any listed surface with stops you choose."),
-              QStringLiteral("gray"));
+        m_themeStatus = m_hexQmlColors.isEmpty()
+            ? QStringLiteral("No editable Hex colors found (%1 profile). %2 gradient surface(s) available separately. Export Diagnostics for inspection; Hex is not a bypass for an unverified QML mapping.").arg(m_themeInfo.profile).arg(hexGradientTargets)
+            : QStringLiteral("Hex theme ready (%1 profile, %2 color(s) found, %3 gradient surface(s)).")
+                .arg(m_themeInfo.profile).arg(m_hexQmlColors.size()).arg(hexGradientTargets);
+        doLog(m_themeStatus, m_hexQmlColors.isEmpty() ? QStringLiteral("orange") : QStringLiteral("blue"));
+        if (!m_hexQmlColors.isEmpty())
+            doLog(QStringLiteral("Pick a preset or tick the colors you want, then Apply Theme. Gradient theme paints any listed surface with stops you choose."), QStringLiteral("gray"));
         emit themeChanged();
         return;
     }
@@ -498,8 +518,7 @@ void Backend::loadTheme(const QString &method)
               QStringLiteral("orange"));
     }
     if (t.mode == QLatin1String("zlib") && !t.hasQrcNode) {
-        doLog(QStringLiteral("No qrc node found for UiThemeObject.qml - a theme larger than the "
-                             "current slot cannot be relocated in this EXE."),
+        doLog(QStringLiteral("Theme mapping is not verified. Resource-backed theme writing is blocked, even if the replacement appears to fit. Export Diagnostics for this build."),
               QStringLiteral("orange"));
     }
 
@@ -547,10 +566,8 @@ QVariantMap Backend::patchThemeQml()
     if (m_edits.isEmpty() && !m_themeInfo.hasQrcNode)
         return result(false, QStringLiteral("Nothing to patch - set some colors first."),
                       QStringLiteral("orange"));
-    if (themeFileChanged())
-        doLog(QStringLiteral("HD-Player.exe changed since it was loaded - patching the theme "
-                             "that is in the file now, not the one on screen."),
-              QStringLiteral("orange"));
+    if (themeFileChanged() || m_themeFileHash != QCryptographicHash::hash(readExe(), QCryptographicHash::Sha256))
+        return result(false, QStringLiteral("HD-Player.exe changed since Load. Reload and review your edits; stale offsets/settings will not be applied."), QStringLiteral("red"));
     if (BsDetector::isProcessRunning(QStringLiteral("HD-Player.exe")))
         doLog(QStringLiteral("BlueStacks is RUNNING - close it first, otherwise the write can be "
                              "blocked and the running instance keeps its old theme."),
@@ -803,6 +820,13 @@ QVariantMap Backend::applyHex()
         return result(false, QStringLiteral("Load an old (hex) theme first."),
                       QStringLiteral("orange"));
 
+    if (m_themeFileHash != QCryptographicHash::hash(readExe(), QCryptographicHash::Sha256))
+        return result(false, QStringLiteral("EXE changed since Load. Reload before applying the legacy palette."), QStringLiteral("red"));
+    for (auto &c : m_hexQmlColors) if (c.enabled && !c.color.isEmpty()) {
+        const QColor color(c.color);
+        if (!color.isValid()) return result(false, QStringLiteral("Invalid color: %1.").arg(c.name), QStringLiteral("red"));
+        c.color = color.name(color.alpha() == 255 ? QColor::HexRgb : QColor::HexArgb);
+    }
     if (BsDetector::isProcessRunning(QStringLiteral("HD-Player.exe")))
         doLog(QStringLiteral("BlueStacks is RUNNING - close it first, otherwise the write can be "
                              "blocked and the running instance keeps its old theme."),
@@ -926,9 +950,25 @@ int Backend::scanSvgs()
 
 // --------------------------------------------------------- embedded resources
 
-QVariantList Backend::resourceInfos() const
+void Backend::rebuildResourceInfos(const QByteArray &image)
 {
+    // Compare only during the explicit scan; keystroke filters never read files.
+    QByteArray backupImage; QMap<QString, QByteArray> originalRecords;
+    QFile backupFile(m_settings->exePath() + QStringLiteral(".bak"));
+    if (backupFile.open(QIODevice::ReadOnly) && backupFile.size() <= 256LL * 1024 * 1024) {
+        backupImage = backupFile.readAll();
+        for (const auto &e : EmbeddedResources::list(backupImage, true))
+            originalRecords[e.path] = QCryptographicHash::hash(backupImage.mid(e.entryOff + 4, e.stored), QCryptographicHash::Sha256);
+    }
+
     QVariantList out;
+    out.reserve(m_resources.size());
+    // Thumbnails are prepared only during the explicit worker scan. Filtering
+    // and scrolling must not call synchronous file/decode functions on the GUI.
+    // Bound the metadata cache; very large artwork gets a format badge instead.
+    qsizetype thumbnailBytes = 0;
+    constexpr qsizetype maxThumbnail = 128 * 1024;
+    constexpr qsizetype maxThumbnails = 8 * 1024 * 1024;
     for (int i = 0; i < m_resources.size(); ++i) {
         const EmbeddedResources::Entry &entry = m_resources.at(i);
         QString kind = QStringLiteral("binary");
@@ -938,8 +978,23 @@ QVariantList Backend::resourceInfos() const
         case EmbeddedResources::Kind::Text: kind = QStringLiteral("text"); break;
         case EmbeddedResources::Kind::Binary: kind = QStringLiteral("binary"); break;
         }
-        out << QVariantMap { { "index", i },
+        QString thumbnail;
+        if ((entry.kind == EmbeddedResources::Kind::Image || entry.kind == EmbeddedResources::Kind::Svg)
+            && entry.size > 0 && entry.size <= 4 * 1024 * 1024
+            && thumbnailBytes < maxThumbnails) {
+            const auto bytes = QtResources::readFile(image, { entry.leaf, entry.entryOff, entry.flags },
+                                                      4 * 1024 * 1024);
+            const auto preview = EmbeddedResources::previewDataUrl(bytes, entry.format, 64);
+            const qsizetype cost = preview.size() * qsizetype(sizeof(QChar));
+            if (cost <= maxThumbnail && thumbnailBytes + cost <= maxThumbnails) {
+                thumbnail = preview;
+                thumbnailBytes += cost;
+            }
+        }
+        out << QVariantMap { { "index", i }, { "thumbnail", thumbnail },
                              { "path", entry.path },
+                             { "modifiedKnown", originalRecords.contains(entry.path) },
+                             { "modified", originalRecords.contains(entry.path) && originalRecords.value(entry.path) != QCryptographicHash::hash(image.mid(entry.entryOff + 4, entry.stored), QCryptographicHash::Sha256) },
                              { "name", entry.leaf },
                              { "folder", entry.folder },
                              { "format", entry.format.toUpper() },
@@ -952,7 +1007,7 @@ QVariantList Backend::resourceInfos() const
                              { "height", entry.height },
                              { "entryOff", entry.entryOff } };
     }
-    return out;
+    m_resourceInfos = out;
 }
 
 int Backend::scanResources(bool includeBinary)
@@ -968,6 +1023,7 @@ int Backend::scanResources(bool includeBinary)
     m_resources.clear();
     m_resourcesIncludeBinary = includeBinary;
     const QByteArray data = readExe();
+    m_resourceFileHash = QCryptographicHash::hash(data, QCryptographicHash::Sha256);
     if (data.isEmpty()) {
         doLog(QStringLiteral("Resources: EXE not found."), QStringLiteral("red"));
     } else {
@@ -998,6 +1054,8 @@ int Backend::scanResources(bool includeBinary)
                   .arg(QFileInfo(m_settings->exePath()).fileName()),
               QStringLiteral("blue"));
     }
+    rebuildResourceInfos(data);
+    ++m_resourceRevision;
     emit resourcesChanged();
     return m_resources.size();
 }
@@ -1103,6 +1161,8 @@ QVariantMap Backend::saveResourceText(int index, const QString &text)
     if (actionsLocked()) return lockedMap();
     if (!m_backgroundWorker)
         return runBackground([=](Backend &worker) { return worker.saveResourceText(index, text); });
+    if (m_resourceFileHash != QCryptographicHash::hash(readExe(), QCryptographicHash::Sha256))
+        return result(false, QStringLiteral("EXE changed since Scan Resources. Scan manually again before replacing anything."), QStringLiteral("red"));
     if (index < 0 || index >= m_resources.size())
         return result(false, QStringLiteral("That embedded file is no longer listed; scan again."),
                       QStringLiteral("red"));
@@ -1119,6 +1179,8 @@ QVariantMap Backend::replaceResourceWithFile(int index, const QString &filePath)
         return runBackground([=](Backend &worker) {
             return worker.replaceResourceWithFile(index, filePath);
         });
+    if (m_resourceFileHash != QCryptographicHash::hash(readExe(), QCryptographicHash::Sha256))
+        return result(false, QStringLiteral("EXE changed since Scan Resources. Scan manually again before replacing anything."), QStringLiteral("red"));
     if (index < 0 || index >= m_resources.size())
         return result(false, QStringLiteral("That embedded file is no longer listed; scan again."),
                       QStringLiteral("red"));
@@ -1359,10 +1421,45 @@ QVariantMap Backend::bootPatch(int holdMs)
     if (actionsLocked()) return lockedMap();
     if (!m_backgroundWorker)
         return runBackground([=](Backend &worker) { return worker.bootPatch(holdMs); });
-    BootVideoPatcher::Options options;
-    options.holdMs = std::clamp(holdMs, 0, 60000);
-    const auto r = BootVideoPatcher::patch(m_settings->exePath(), options);
-    return result(r.ok, r.msg, r.ok ? QStringLiteral("green") : QStringLiteral("red"));
+    const auto r = BootVideoPatcher::patch(m_settings->exePath(), holdMs);
+    return result(r.ok, r.msg, QStringLiteral("green"));
+}
+
+QVariantMap Backend::purgePlayerCache()
+{
+    if (actionsLocked()) return lockedMap();
+    if (!m_backgroundWorker)
+        return runBackground([](Backend &worker) { return worker.purgePlayerCache(); });
+    if (BsDetector::isProcessRunning(QStringLiteral("HD-Player.exe")))
+        return result(false, QStringLiteral("Close all HD-Player / BlueStacks instances before purging caches."), QStringLiteral("red"));
+    const QStringList roots = { qEnvironmentVariable("LOCALAPPDATA"), qEnvironmentVariable("APPDATA") };
+    if (roots[0].isEmpty() && roots[1].isEmpty())
+        return result(false, QStringLiteral("Windows AppData locations are unavailable; nothing was deleted."), QStringLiteral("red"));
+    const auto r = PlayerCache::purge(roots);
+    return result(r.ok, r.msg, r.ok ? QStringLiteral("green") : QStringLiteral("orange"));
+}
+
+QVariantMap Backend::gifRpcInspect(const QString &path)
+{
+    return GifRpc::inspect(path);
+}
+QVariantMap Backend::gifRpcApply(const QString &path, const QVariantMap &settings, bool replaceExisting)
+{
+    if (actionsLocked()) return lockedMap();
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) { return worker.gifRpcApply(path, settings, replaceExisting); });
+    const auto r = GifRpc::apply(path, settings, replaceExisting);
+    doLog(r.value(QStringLiteral("msg")).toString(), r.value(QStringLiteral("ok")).toBool() ? QStringLiteral("green") : QStringLiteral("red"));
+    return r;
+}
+QVariantMap Backend::gifRpcRestore(const QString &path)
+{
+    if (actionsLocked()) return lockedMap();
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) { return worker.gifRpcRestore(path); });
+    const auto r = GifRpc::restore(path);
+    doLog(r.value(QStringLiteral("msg")).toString(), r.value(QStringLiteral("ok")).toBool() ? QStringLiteral("green") : QStringLiteral("red"));
+    return r;
 }
 
 // ------------------------------------------------------------------ extras
@@ -1955,4 +2052,93 @@ QVariantList Backend::removalNames() const
     for (const QString &n : ExtrasPatcher::removalNames())
         out << n;
     return out;
+}
+
+// Explicit user-triggered tools. No inspection or resource scan is performed
+// by opening the Workspace page or importing a profile.
+QVariantMap Backend::workspace(const QString &action, const QVariantMap &options)
+{
+    if (actionsLocked()) return lockedMap();
+    if (!m_backgroundWorker) return runBackground([=](Backend &w) { return w.workspace(action, options); });
+    namespace W = CustomizationWorkspace;
+    const QString path = m_settings->exePath();
+    QVariantMap edits; for (auto it = m_edits.cbegin(); it != m_edits.cend(); ++it) edits[it.key()] = it.value();
+    QVariantMap r;
+    if (action == QLatin1String("inspect")) r = W::inspect(path, edits);
+    else if (action == QLatin1String("theme-dry-run")) {
+        const auto bytes = readExe();
+        if (m_themeFileHash != QCryptographicHash::hash(bytes, QCryptographicHash::Sha256) || edits.isEmpty()) r = {{"ok", false}, {"msg", "Load the current theme and stage edits first."}};
+        else r = W::simulate(path, {QVariantMap{{"kind", "theme"}, {"edits", edits}}}, W::digest(bytes));
+    }
+    else if (action == QLatin1String("diagnostics")) r = W::exportDiagnostics(path, options.value("file").toString());
+    else if (action == QLatin1String("profile-load")) {
+        r = W::readProfile(options.value("file").toString());
+        if (r.value("ok").toBool()) {
+            m_customizationProfile = r.value("profile").toMap();
+            const auto wanted = m_customizationProfile.value("theme").toMap();
+            m_edits.clear(); for (auto &e : m_hexQmlColors) { e.enabled = false; e.color.clear(); }
+            QStringList missing;
+            for (auto it = wanted.cbegin(); it != wanted.cend(); ++it) {
+                bool present = false;
+                for (const auto &e : m_themeEntries) if (e.name == it.key()) { m_edits[it.key()] = it.value().toString(); present = true; }
+                for (auto &e : m_hexQmlColors) if (e.name == it.key()) { e.color = it.value().toString(); e.enabled = true; present = true; }
+                if (!present) missing << it.key();
+            }
+            const QString hash = m_customizationProfile.value("sourceSha256").toString();
+            if (!hash.isEmpty() && hash != W::digest(readExe())) r["msg"] = r.value("msg").toString() + QStringLiteral(" Source EXE differs: settings are portable, but old offsets are never imported.");
+            if (!missing.isEmpty()) r["msg"] = r.value("msg").toString() + QStringLiteral(" Unmatched colors (load the target theme first): ") + missing.join(QStringLiteral(", "));
+            m_workspaceOperations.clear(); m_workspaceHash.clear();
+        }
+    } else if (action == QLatin1String("profile-save") || action == QLatin1String("profile-section")) {
+        auto candidate = m_customizationProfile;
+        if (action == QLatin1String("profile-section")) candidate[options.value("section").toString()] = options.value("value");
+        else {
+            if (m_themeMethod == QLatin1String("hex")) for (const auto &e : m_hexQmlColors) if (e.enabled && !e.color.isEmpty()) edits[e.name] = e.color;
+            candidate["theme"] = edits;
+            const auto bytes = readExe();
+            if (!bytes.isEmpty()) candidate["sourceSha256"] = W::digest(bytes); else candidate.remove("sourceSha256");
+            candidate["name"] = options.value("name", candidate.value("name"));
+        }
+        r = W::validateProfile(candidate);
+        if (r.value("ok").toBool() && action == QLatin1String("profile-save")) r = W::saveProfile(options.value("file").toString(), candidate);
+        if (r.value("ok").toBool()) m_customizationProfile = candidate;
+    } else if (action == QLatin1String("clear")) {
+        m_workspaceOperations.clear(); m_workspaceHash.clear(); r = {{"ok", true}, {"msg", "Batch cleared; no files changed."}};
+    } else if (action == QLatin1String("queue-theme") || action == QLatin1String("queue-resource")) {
+        const QByteArray current = readExe(); const QString hash = W::digest(current);
+        if (current.isEmpty() || (!m_workspaceHash.isEmpty() && m_workspaceHash != hash)) r = {{"ok", false}, {"msg", "EXE changed. Clear the old batch, reload and inspect again."}};
+        else if (m_workspaceOperations.size() >= 32) r = {{"ok", false}, {"msg", "Batch limit: 32 operations."}};
+        else {
+            QVariantMap operation;
+            if (action == QLatin1String("queue-theme")) {
+                if (edits.isEmpty() || m_themeFileHash != QCryptographicHash::hash(current, QCryptographicHash::Sha256)) r = {{"ok", false}, {"msg", "Load the current QML theme and stage valid color edits first."}};
+                else operation = {{"kind", "theme"}, {"edits", edits}};
+            } else {
+                if (m_resourceFileHash != QCryptographicHash::hash(current, QCryptographicHash::Sha256))
+                    return result(false, QStringLiteral("Scan Resources manually for the current EXE before staging replacements."), QStringLiteral("red"));
+                r = W::stageResource(options.value("path").toString(), options.value("file").toString());
+                if (r.value("ok").toBool()) operation = r.value("operation").toMap();
+            }
+            if (!operation.isEmpty()) {
+                qint64 encoded = operation.value("data").toString().size();
+                for (const auto &v : m_workspaceOperations) encoded += v.toMap().value("data").toString().size();
+                if (encoded > 90LL * 1024 * 1024) return result(false, QStringLiteral("Batch replacement data exceeds the memory budget."), QStringLiteral("red"));
+                m_workspaceOperations << operation; m_workspaceHash = hash;
+                r["ok"] = true; r["msg"] = QStringLiteral("Operation queued. Dry Run will detect conflicts and verify the complete batch.");
+            }
+        }
+    } else if (action == QLatin1String("dry-run")) r = W::simulate(path, m_workspaceOperations, m_workspaceHash);
+    else if (action == QLatin1String("apply")) {
+        r = W::apply(path, m_workspaceOperations, m_workspaceHash, options.value("outputSha256").toString());
+        if (r.value("ok").toBool()) { m_workspaceOperations.clear(); m_workspaceHash.clear(); m_resources.clear(); m_resourceInfos.clear(); ++m_resourceRevision; reloadTheme(); }
+    } else if (action == QLatin1String("history")) r = {{"ok", true}, {"entries", W::history()}, {"msg", "Showing the latest 200 workspace recovery journals. Legacy page writes retain their existing .bak behavior."}};
+    else if (action == QLatin1String("restore")) {
+        r = W::restore(path, options.value("id").toString());
+        if (r.value("ok").toBool()) { m_workspaceOperations.clear(); m_workspaceHash.clear(); m_resources.clear(); m_resourceInfos.clear(); ++m_resourceRevision; reloadTheme(); }
+    } else if (action == QLatin1String("image")) r = W::prepareImage(options.value("source").toString(), options.value("file").toString(), options.value("width").toInt(), options.value("height").toInt(), options.value("crop").toBool(), options.value("quality", 95).toInt());
+    else if (action == QLatin1String("video")) r = W::inspectVideo(options.value("file").toString());
+    else if (action == QLatin1String("rpc")) r = W::rpcDiagnostics(path, m_customizationProfile.value("gifRpc").toMap());
+    else r = {{"ok", false}, {"msg", "Unknown workspace action."}};
+    doLog(r.value("msg").toString(), r.value("ok").toBool() ? QStringLiteral("blue") : QStringLiteral("red"));
+    return r;
 }

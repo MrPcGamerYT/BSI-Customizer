@@ -3,6 +3,7 @@ import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import QtQuick.Dialogs
 import BSICustomizer
+import "../ResourceSearch.js" as ResourceSearch
 
 // Every file embedded in HD-Player.exe's Qt resource pools, in one list.
 //
@@ -12,13 +13,8 @@ import BSICustomizer
 //   * everything else (compiled caches, fonts)     - listed, extracted and
 //                                                    replaceable with a file
 //
-// SIZE RULES - both are hard, and the engine checks them again on save:
-//   1. the embedded file itself never grows: a replacement or edit that needs
-//      more bytes than the entry already has is refused outright;
-//   2. HD-Player.exe never grows either: the compressed payload has to fit the
-//      space the entry already owns, or a verified empty gap inside the same
-//      file, which the writer re-points the resource at. Nothing is appended.
-// The meter below shows both numbers before the click.
+// Decoded size may grow; encoded payload must fit verified mapped storage.
+// Scans are always explicit.
 Item {
     id: page
 
@@ -26,7 +22,7 @@ Item {
     property string selectedPath: ""
     property string preview: ""
     property string previewNote: ""    // why there is no picture, when there is none
-    property string status: ""
+    property string status: qsTr("Click Scan Resources to list the selected EXE.")
     property string filterText: ""
     property int kindFilter: 0          // 0 all, 1 pictures, 2 svg, 3 code, 4 binary
     property string code: ""            // the editor's text
@@ -36,33 +32,18 @@ Item {
     property int needed: 0              // payload bytes the editor's text would take
     property bool measuring: false
 
-    readonly property var kinds: [qsTr("All"), qsTr("Pictures"), qsTr("SVG"), qsTr("Code"), qsTr("Binary")]
+    readonly property var kinds: [qsTr("All"), qsTr("Pictures"), qsTr("SVG"), qsTr("Code"), qsTr("Binary"), qsTr("Fonts"), qsTr("Modified vs .bak")]
 
-    readonly property var rows: {
-        const list = backend.resourceInfos;
-        const needle = page.filterText.toLowerCase();
-        const kind = page.kindFilter;
-        const out = [];
-        for (let i = 0; i < list.length; ++i) {
-            const row = list[i];
-            if (needle !== "" && String(row.path).toLowerCase().indexOf(needle) < 0)
-                continue;
-            // "Pictures" means every picture: the old players keep almost all of
-            // their artwork as SVG (399 of 424 files on 5.9), so filtering only
-            // raster entries made the tab look like it had found no images.
-            if (kind === 1 && row.kind !== "image" && row.kind !== "svg") continue;
-            if (kind === 2 && row.kind !== "svg") continue;
-            if (kind === 3 && !row.text) continue;
-            if (kind === 4 && row.kind !== "binary") continue;
-            out.push(row);
-        }
-        return out;
-    }
+    // One stable snapshot per scan/path change; repeatedly reading the C++
+    // QVariantList property used to rebuild every map on each filter/selection.
+    readonly property var allRows: backend.resourceInfos
+    readonly property var searchIndex: ResourceSearch.prepare(page.allRows)
+    readonly property var rows: ResourceSearch.filter(page.searchIndex, page.filterText, page.kindFilter)
 
     readonly property var selected: {
-        if (page.selectedIndex < 0 || page.selectedIndex >= backend.resourceInfos.length)
+        if (page.selectedIndex < 0 || page.selectedIndex >= page.allRows.length)
             return null;
-        return backend.resourceInfos[page.selectedIndex];
+        return page.allRows[page.selectedIndex];
     }
     readonly property bool hasSelection: page.selected !== null
     // A row is a picture when the list says so *or* when the bytes produce a
@@ -83,7 +64,7 @@ Item {
     // engine looks for free space inside the same file and only refuses when
     // there is none. The button stays available so a fit that needs moving is
     // still savable.
-    readonly property bool fits: page.hasSelection && page.room.known && !page.fileGrows
+    readonly property bool fits: page.hasSelection && page.room.known
     readonly property bool needsMove: page.room.known && page.needed > page.room.capacity
     readonly property string budgetText: {
         if (!page.hasSelection)
@@ -95,7 +76,7 @@ Item {
         const what = page.selected.compressed ? qsTr("compressed") : qsTr("raw");
         var text = qsTr("%1 %2 of %3 bytes").arg(what).arg(page.needed).arg(page.room.capacity);
         if (page.needsMove)
-            text += qsTr(" · moved to free space");
+            text += qsTr(" · relocation required; checked before writing");
         else
             text += qsTr(" · %1 free").arg(page.room.capacity - page.needed);
         if (page.isCode)
@@ -120,11 +101,11 @@ Item {
         page.preview = "";
         page.previewNote = "";
         page.selectedIndex = index;
-        page.selectedPath = index >= 0 && index < backend.resourceInfos.length
-                ? backend.resourceInfos[index].path : "";
-        if (index < 0 || index >= backend.resourceInfos.length)
+        page.selectedPath = index >= 0 && index < page.allRows.length
+                ? page.allRows[index].path : "";
+        if (index < 0 || index >= page.allRows.length)
             return;
-        const row = backend.resourceInfos[index];
+        const row = page.allRows[index];
         // Asked for every row, not only the ones the list typed as pictures:
         // the engine decides from the bytes.
         page.preview = backend.resourcePreviewAt(index, 1024);
@@ -158,14 +139,7 @@ Item {
         page.status = backend.exePath === ""
                 ? qsTr("Select HD-Player.exe first.")
                 : qsTr("%1 embedded file(s) listed.").arg(count);
-        // Keep the row the user was looking at when it survived the rescan.
-        for (var i = 0; i < backend.resourceInfos.length; ++i) {
-            if (page.selectedPath !== "" && backend.resourceInfos[i].path === page.selectedPath) {
-                page.select(i);
-                return;
-            }
-        }
-        page.select(-1);
+        // resourcesChanged restores the selected path once, after the scan.
     }
 
     function saveCode() {
@@ -177,34 +151,33 @@ Item {
         }
     }
 
-    // A list belongs to one EXE. The backend drops it when the path changes,
-    // and the tab fills itself again instead of sitting empty (or, worse,
-    // showing rows whose offsets belong to the previous file).
-    function autoScan() {
-        if (backend.exePath === "" || backend.resourceInfos.length > 0)
-            return;
-        page.rescan();
-    }
-
-    Component.onCompleted: page.autoScan()
-    onVisibleChanged: if (visible) page.autoScan()
-
+    // Scanning is manual. Opening this tab, starting the app or changing the
+    // target only clears stale selection; Scan Resources is the only scan trigger.
     Connections {
         target: backend
-        function onExePathChanged() { page.autoScan() }
+        function onExePathChanged() {
+            page.select(-1);
+            page.status = qsTr("Click Scan Resources to list the selected EXE.");
+        }
         function onResourcesChanged() {
-            if (page.selectedPath === "") {
-                page.select(-1);
-                return;
-            }
-            for (var i = 0; i < backend.resourceInfos.length; ++i) {
-                if (backend.resourceInfos[i].path === page.selectedPath) {
-                    page.select(i);
-                    return;
+            const wanted = page.selectedPath;
+            if (wanted !== "") {
+                for (let i = 0; i < page.allRows.length; ++i) {
+                    if (page.allRows[i].path === wanted) {
+                        page.select(i);
+                        return;
+                    }
                 }
             }
             page.select(-1);
         }
+    }
+
+    // Avoid destroying/recreating delegates for every key of a fast keystroke burst.
+    Timer {
+        id: searchTimer
+        interval: 150
+        onTriggered: page.filterText = filterField.text
     }
 
     // The size meter is debounced: every keystroke would otherwise compress the
@@ -230,15 +203,15 @@ Item {
             }
             Text {
                 Layout.leftMargin: 4
-                text: backend.resourceInfos.length > 0
-                      ? qsTr("%1 file(s)").arg(backend.resourceInfos.length) : ""
+                text: page.allRows.length > 0
+                      ? qsTr("%1 / %2 file(s)").arg(page.rows.length).arg(page.allRows.length) : ""
                 color: Theme.textDim
                 font.pixelSize: 12
             }
             Item { Layout.fillWidth: true }
             ActionButton {
                 text: qsTr("Extract All")
-                enabled: backend.resourceInfos.length > 0
+                enabled: page.allRows.length > 0
                 onClicked: {
                     const r = backend.extractAllResources();
                     page.status = r.msg || "";
@@ -247,6 +220,7 @@ Item {
             ActionButton {
                 accent: true
                 text: qsTr("Scan Resources")
+                enabled: !backend.busy && backend.exePath !== ""
                 onClicked: page.rescan()
             }
         }
@@ -264,12 +238,14 @@ Item {
 
             TextField {
                 id: filterField
+                objectName: "resourceSearchField"
                 Layout.preferredWidth: 280
-                placeholderText: qsTr("Filter by name…")
+                placeholderText: qsTr("Search path / format… min:10kb max:2mb")
                 color: Theme.text
                 placeholderTextColor: Theme.textDim
                 font.pixelSize: 12
-                onTextChanged: page.filterText = text
+                onTextChanged: searchTimer.restart()
+                onAccepted: { searchTimer.stop(); page.filterText = text; }
                 background: Rectangle {
                     color: Theme.raised
                     radius: 8
@@ -308,15 +284,28 @@ Item {
                 Layout.fillHeight: true
                 clip: true
                 model: page.rows
+                reuseItems: true
                 spacing: 4
                 boundsBehavior: Flickable.StopAtBounds
                 ScrollBar.vertical: ScrollBar {}
 
+                Label {
+                    anchors.centerIn: parent
+                    width: parent.width - 24
+                    visible: page.rows.length === 0
+                    text: page.allRows.length === 0
+                          ? qsTr("Click Scan Resources to load this EXE.")
+                          : qsTr("No resources match this search and kind filter.")
+                    color: Theme.textDim
+                    horizontalAlignment: Text.AlignHCenter
+                    wrapMode: Text.WordWrap
+                }
+
                 delegate: Rectangle {
                     id: resourceRow
                     required property var modelData
-                    // one preview request per visible row, not one per binding
-                    readonly property string thumb: backend.resourcePreviewAt(modelData.index, 64)
+                    // Prepared by the scan worker; never read/decode files here.
+                    readonly property string thumb: modelData.thumbnail || ""
                     width: resourceList.width
                     height: 54
                     radius: 8
@@ -447,13 +436,7 @@ Item {
                             onClicked: page.saveCode()
 
                             ToolTip.visible: hovered && page.isCode && !page.fits
-                            ToolTip.text: page.fileGrows
-                                          ? qsTr("This edit makes the embedded file bigger (%1 bytes, "
-                                                 + "it has %2). An embedded file is never made bigger, "
-                                                 + "so nothing is saved.")
-                                                .arg(page.fileBytes).arg(page.selected.size)
-                                          : qsTr("The size of this entry's slot could not be measured, "
-                                                 + "so saving is disabled.")
+                            ToolTip.text: qsTr("The resource mapping or storage capacity could not be verified. Saving is disabled.")
                         }
                     }
 
@@ -595,7 +578,7 @@ Item {
                     Text {
                         Layout.fillWidth: true
                         wrapMode: Text.Wrap
-                        text: qsTr("Two hard limits: the embedded file is never made bigger, and "
+                        text: qsTr("Larger decoded files are allowed when their encoded payload fits verified storage. "
                                    + "HD-Player.exe never changes size. A payload that outgrows its slot "
                                    + "is moved into empty space inside the same file and the resource is "
                                    + "re-pointed at it; if there is none, the edit is refused instead of "

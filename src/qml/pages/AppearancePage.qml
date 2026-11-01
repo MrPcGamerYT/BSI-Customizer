@@ -172,8 +172,8 @@ Item {
                         rowSpacing: 8
                         columnSpacing: 8
                         Repeater {
-                            model: ["#23e3ff", "#4dffd9", "#4f8cff", "#9d7bff",
-                                    "#ffc45c", "#ff6f83", "#00c2ff", "#f5d76e"]
+                            model: ["#6ce6d0", "#b7a1ff", "#78afff", "#f0a3c8",
+                                    "#e8bd7b", "#fa9a9a", "#23e3ff", "#4dffd9"]
                             delegate: Rectangle {
                                 required property string modelData
                                 Layout.fillWidth: true

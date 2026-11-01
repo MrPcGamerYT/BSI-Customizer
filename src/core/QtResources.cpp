@@ -4,7 +4,7 @@
 #include "PeUtils.h"
 #include "QtResourceRegistration.h"
 
-#include <QDateTime>
+#include <limits>
 #include <QDir>
 #include <QStandardPaths>
 #include <QFileInfo>
@@ -429,9 +429,11 @@ bool refreshTimestamp(QByteArray &data, const Link &link)
         if (!inRange(data, node + 14, 8))
             return false;
         const quint64 old = be64(data, node + 14);
-        // Millisecond granularity, strictly different even for rapid repatches.
-        const quint64 now = quint64(QDateTime::currentMSecsSinceEpoch());
-        putBe64(data, node + 14, qMax(now, old + 1));
+        // Resource mtime is a cache identity, not the patch wall clock. A
+        // deterministic monotonic tick makes repeated dry runs and commits
+        // byte-identical while still invalidating old Qt source/cache pairs.
+        if (old == std::numeric_limits<quint64>::max()) return false;
+        putBe64(data, node + 14, old + 1);
     }
     return true;
 }

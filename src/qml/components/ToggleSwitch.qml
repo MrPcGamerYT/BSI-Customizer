@@ -12,6 +12,14 @@ RowLayout {
     // Parent decides what happens (keeps `checked` bindings intact).
     signal toggled()
 
+    activeFocusOnTab: true
+    Accessible.role: Accessible.CheckBox
+    Accessible.name: control.label
+    Accessible.checkable: true
+    Accessible.checked: control.checked
+    Keys.onSpacePressed: control.toggled()
+    Keys.onReturnPressed: control.toggled()
+
     spacing: 12
 
     ColumnLayout {
@@ -38,19 +46,9 @@ RowLayout {
         Layout.preferredWidth: 46
         Layout.preferredHeight: 26
         radius: 13
-        gradient: Gradient {
-            orientation: Gradient.Horizontal
-            GradientStop {
-                position: 0
-                color: control.checked ? "#06b6d4" : Theme.raised
-            }
-            GradientStop {
-                position: 1
-                color: control.checked ? "#4dffd9" : Theme.raised
-            }
-        }
+        color: control.checked ? Theme.accent : Theme.raised
         border.width: 1
-        border.color: control.checked ? "transparent" : Theme.border
+        border.color: control.activeFocus ? Theme.accent : (control.checked ? "transparent" : Theme.border)
         Behavior on opacity { NumberAnimation { duration: 150 } }
 
         Rectangle {
@@ -60,13 +58,14 @@ RowLayout {
             radius: 9
             y: 3
             x: control.checked ? track.width - width - 4 : 4
-            color: control.checked ? "#04202b" : Theme.textDim
+            color: control.checked ? Theme.primaryText : Theme.textDim
             Behavior on x { NumberAnimation { duration: 150; easing.type: Easing.OutCubic } }
         }
 
         MouseArea {
             anchors.fill: parent
             cursorShape: Qt.PointingHandCursor
+            onPressed: control.forceActiveFocus(Qt.MouseFocusReason)
             onClicked: control.toggled()
         }
     }

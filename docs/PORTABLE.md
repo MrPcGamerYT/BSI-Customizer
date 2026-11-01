@@ -45,10 +45,39 @@ Keep `scripts/`, `packaging/portable/`, `cmake/` (`Qt5FpsReference.cmake`,
 license files: these are build dependencies, not loose files users need
 alongside the final EXE.
 
-Use **Actions → Single EXE Release → Run workflow**. After a successful build:
+Use **Actions → Single EXE Release → Run workflow**, select the source branch,
+leave **publish_release** unchecked for a test build, and select the runner:
+
+- **windows-latest** uses GitHub's hosted Windows runner. On private repositories,
+  this is subject to the account's included minutes, spending limits and payment
+  status. A workflow change cannot bypass a billing restriction.
+- **self-hosted** uses a Windows x64 PC that you register under **Repository
+  Settings → Actions → Runners → New self-hosted runner**. Follow GitHub's
+  registration commands on that PC; keep the runner online while building.
+  This avoids hosted-runner charges, but uses your PC's CPU, disk and internet.
+  Install Visual Studio 2022 C++ build tools (including the Windows SDK), CMake,
+  PowerShell 7, Git, Python 3 and 7-Zip first. Inno Setup 6 is recommended;
+  otherwise the workflow needs Chocolatey and permission to install it.
+  The workflow downloads Qt itself. Run only trusted code on this PC; automatic
+  PR builds cannot select this runner. Nothing here registers a PC automatically.
+
+The updated workflow must first exist on the repository's default branch for
+new manual-run inputs to appear in GitHub's UI. Until then, PR builds exercise
+this branch's workflow automatically on the hosted runner. Do not publish a
+release or change repository visibility just to obtain a test EXE.
+
+After a successful build:
 
 - The Actions artifact download is wrapped in a ZIP by GitHub's artifact service;
-  it contains **one EXE**, not a folder of dependencies.
+  it contains **one EXE**, not a folder of dependencies. Find it under
+  **Artifacts** at the bottom of the run's summary. Test artifacts expire after
+  **one day**; download promptly. Artifact uploads still depend on the account's
+  Actions storage allowance, including when using a self-hosted runner. If an
+  upload fails on your self-hosted PC, the EXE remains under `build/artifacts/`
+  inside that runner's checkout.
+- Test builds also upload a separate **setup** artifact containing the tested
+  `BSI-Customizer-<version>-setup.exe` installer (three-day retention). Choose
+  this artifact when testing installation, shortcuts or installed-app updates.
 - A published GitHub Release exposes the **`.exe` directly** as its download.
 
 Set the `project(... VERSION ...)` value in `CMakeLists.txt` before pushing a
@@ -62,10 +91,14 @@ SHA-256 is recorded in the workflow summary and verified before publication.
 Requires Windows x64, MSVC C++ build tools, CMake 3.21+, Qt 6 development tools
 and PowerShell 7 — no interpreter, runtime or extra tool beyond those.
 `makecab.exe` and the cabinet reader are built into Windows. The workflow uses
-Qt 6.8.3.
+Qt 6.8.3 with Multimedia, WebEngine, WebChannel, Positioning and SerialPort
+(the deployed NMEA Positioning plugin depends on it). For packaging,
+Git must also be on PATH to collect matching Chromium license/attribution
+blobs (a small partial fetch, not a checkout of Chromium source). Native-only developer builds can explicitly
+set `BSI_CHROMIUM_UI=OFF`.
 
 ```powershell
-cmake -S . -B build -A x64 -DCMAKE_BUILD_TYPE=Release -DBSI_BUILD_PORTABLE=ON
+cmake -S . -B build -A x64 -DCMAKE_BUILD_TYPE=Release -DBSI_BUILD_PORTABLE=ON -DBSI_CHROMIUM_UI=ON
 cmake --build build --config Release --parallel
 ```
 
@@ -76,7 +109,7 @@ The `BSI-Portable` target:
 - checks every staged PE import for missing Qt/CRT/non-system dependencies;
 - gathers Qt source license/attribution text with `cmake/CollectQtNotices.cmake`
   (a CMake script, verified offline by `cmake/tests/CollectQtNoticesTest.cmake`),
-  plus the app and HDE64 licenses;
+  plus matching Chromium source license/attribution notices and the app/HDE64 licenses;
 - creates one LZX cabinet and embeds it as an EXE resource in a `/MT` native
   launcher that itself depends only on Windows system DLLs;
 - verifies the administrator manifest and runs the portable smoke tests.

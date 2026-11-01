@@ -34,10 +34,15 @@ Item {
     property bool buttonOrderDirty: false
     property string buttonOrderDetail: ""
 
+    // Delegate roots add properties beyond QQuickItem. Mark those lookups as
+    // dynamic rather than treating a generic itemAt() result as a typed row.
+    function removalItem(index: int): var { return removalList.itemAtIndex(index); }
+    function linkItem(index: int): var { return linkRepeater.itemAt(index); }
+
     function recountChecked() {
         let n = 0;
         for (let i = 0; i < removalList.count; i++) {
-            const it = removalList.itemAtIndex(i);
+            const it = page.removalItem(i);
             if (it !== null && it.checked)
                 n++;
         }
@@ -61,13 +66,27 @@ Item {
                                       state: qsTr("Select the HD-Player.exe path first.") });
     }
 
+    property string lastProfileAbout: JSON.stringify((backend.customizationProfile || {}).about || {})
+    Connections {
+        target: backend
+        function onCustomizationProfileChanged() {
+            const a = (backend.customizationProfile || {}).about || {};
+            const value = JSON.stringify(a); if (value === page.lastProfileAbout) return;
+            page.lastProfileAbout = value;
+            if (a.text !== undefined) aboutText.text = a.text;
+            if (a.showSections !== undefined) page.showSectionsWanted = !!a.showSections;
+            if (a.links !== undefined) page.aboutLinks = a.links;
+        }
+    }
     function refreshAbout(loadFields) {
         const state = backend.aboutPageState();
         page.about = state;
         if (loadFields) {
             page.aboutLinks = state.links || [];
-            aboutText.text = state.text || "";
-            page.showSectionsWanted = state.showSections !== false;
+            const staged = (backend.customizationProfile || {}).about || {};
+            aboutText.text = staged.text !== undefined ? staged.text : (state.text || "");
+            if (staged.links !== undefined) page.aboutLinks = staged.links;
+            page.showSectionsWanted = staged.showSections !== undefined ? !!staged.showSections : state.showSections !== false;
         }
     }
 
@@ -75,7 +94,7 @@ Item {
     function collectLinks() {
         const out = [];
         for (let i = 0; i < linkRepeater.count; i++) {
-            const item = linkRepeater.itemAt(i);
+            const item = page.linkItem(i);
             if (!item)
                 continue;
             // The checkbox says “Show”, so a ticked row is visible: the engine
@@ -636,7 +655,7 @@ Item {
                                 onClicked: {
                                     const on = page.checkedCount < removalList.count;
                                     for (let i = 0; i < removalList.count; i++) {
-                                        const it = removalList.itemAtIndex(i);
+                                        const it = page.removalItem(i);
                                         if (it !== null)
                                             it.checked = on;
                                     }
@@ -654,7 +673,7 @@ Item {
                                 onClicked: {
                                     const names = [];
                                     for (let i = 0; i < removalList.count; i++) {
-                                        const it = removalList.itemAtIndex(i);
+                                        const it = page.removalItem(i);
                                         if (it !== null && it.checked)
                                             names.push(removalList.model.get(i).name);
                                     }
@@ -872,6 +891,10 @@ Item {
                             color: Theme.textDim
                             font.pixelSize: 11
                             font.weight: Font.DemiBold
+                        }
+                        ActionButton {
+                            text: qsTr("Save About settings to profile")
+                            onClicked: { const r = backend.workspace("profile-section", {section: "about", value: {text: aboutText.text, showSections: page.showSectionsWanted, links: page.collectLinks()}}); page.aboutMsg = r.msg || ""; }
                         }
                         TextArea {
                             id: aboutText

@@ -1,6 +1,7 @@
 #include "QtResources.h"
 #include "ByteUtils.h"
 #include "PeUtils.h"
+#include "QtResourceRegistration.h"
 #include <algorithm>
 #include <limits>
 
@@ -135,6 +136,14 @@ qint64 entrySpaceEnd(const QByteArray &data, const Link &link, qint64 entry, QSt
         if (range.first >= oldEnd) limit = qMin(limit, range.first);
         else if (range.second > oldEnd) limit = oldEnd;
     }
+    // Other registered pools can begin with zero-prefixed headers too.
+    // Their first bytes are metadata, never slack belonging to this resource.
+    for (const auto &pool : registeredPools(data)) {
+        if (pool.tree >= oldEnd) limit = qMin(limit, pool.tree);
+        if (pool.names >= oldEnd) limit = qMin(limit, pool.names);
+    }
+    for (const auto &file : registeredFiles(data))
+        if (file.entryOff >= oldEnd) limit = qMin(limit, file.entryOff);
     qint64 end = oldEnd;
     while (end < limit && data[int(end)] == '\0') ++end;
     return end;
@@ -208,7 +217,48 @@ qint64 findFreeSpace(const QByteArray &data, const Link &link, qint64 need, QStr
 
     const QByteArray probe(int(qMin<qint64>(need, 64)), '\0');
     const QByteArray wanted(int(need), '\0');
+    // Protect PE directory storage (imports, TLS, Windows resources, etc.)
+    // independently of the selected Qt pool. A zero directory field is not a cave.
+    const int pe = PeUtils::peHeaderOffset(data), opt = pe + 24;
+    const bool plus = PeUtils::isPe32Plus(data);
+    const int dirStart = plus ? 112 : 96;
+    if (pe < 0 || !inRange(data, opt, dirStart)) return fail(QStringLiteral("Invalid PE directories."));
+    const quint32 directoryCount = qMin<quint32>(le32(data, opt + (plus ? 108 : 92)), 16);
+    for (quint32 i = 0; i < directoryCount; ++i) {
+        const qint64 at = opt + dirStart + i * 8;
+        if (!inRange(data, at, 8) || at + 8 > opt + PeUtils::optionalHeaderSize(data)) return fail(QStringLiteral("Truncated PE directories."));
+        const quint32 address = le32(data, at), size = le32(data, at + 4);
+        if (!address || !size) continue;
+        const qint64 raw = i == 4 ? address : PeUtils::rvaToRaw(sections, address);
+        if (raw < 0 || !inRange(data, raw, size)) return fail(QStringLiteral("An existing PE directory cannot be bounded safely."));
+        blocked << qMakePair(raw, raw + qint64(size));
+    }
+    for (const auto &pool : registeredPools(data)) {
+        // The selected pool already has fully validated, exact metadata bounds
+        // in link.reserved. Reserving its tree through the section end would
+        // also hide legitimate free storage after that tree.
+        if (pool.tree == link.treeOff && pool.names == link.nameBaseRaw
+            && pool.dataRva == link.dataBaseRva) continue;
+        // Conservatively reserve other pools whose exact metadata bounds were
+        // not validated by this link. Their zero-prefixed words are not caves.
+        const auto *treeSection = PeUtils::sectionForRaw(sections, pool.tree);
+        const auto *namesSection = PeUtils::sectionForRaw(sections, pool.names);
+        const qint64 poolData = PeUtils::rvaToRaw(sections, quint32(pool.dataRva));
+        if (treeSection) {
+            qint64 end = qint64(treeSection->rawPtr) + treeSection->rawSize;
+            if (pool.names > pool.tree) end = qMin(end, pool.names);
+            if (poolData > pool.tree) end = qMin(end, poolData);
+            blocked << qMakePair(pool.tree, end);
+        }
+        if (namesSection) {
+            qint64 end = qint64(namesSection->rawPtr) + namesSection->rawSize;
+            if (pool.tree > pool.names) end = qMin(end, pool.tree);
+            if (poolData > pool.names) end = qMin(end, poolData);
+            blocked << qMakePair(pool.names, end);
+        }
+    }
     for (const PeSection *section : order) {
+        if (section->chars & 0x20000000u) continue;
         const qint64 begin = section->rawPtr;
         const qint64 end = qMin<qint64>(data.size(), qint64(section->rawPtr) + section->rawSize);
         if (end - begin < need) continue;
@@ -281,8 +331,14 @@ bool replaceResource(QByteArray &data, qint64 entry, const Link &snapshot,
                               .arg(record.size())
                               .arg(end - entry));
         } else {
-            destination = appendStorage(changed, record.size(), error);
+            // Prefer verified existing data-section storage. Growing first
+            // needlessly rejects otherwise supported images whose section
+            // headers cannot be extended, and changes their size unnecessarily.
+            destination = findFreeSpace(changed, link, record.size(), error);
+            if (destination < 0)
+                destination = appendStorage(changed, record.size(), error);
             if (destination < 0) return false;
+            if (error) error->clear();
         }
         const qint64 rva = PeUtils::rawToRva(PeUtils::sections(changed), destination);
         if (rva < 0) return refuse(QStringLiteral("New resource offset is not mapped by a PE section."));

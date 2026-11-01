@@ -1,0 +1,106 @@
+/* HTML controls over the original sidebar, Debloat, Android and Root.vhd
+   engines. No filesystem or binary-patching implementation is duplicated. */
+(() => {
+  'use strict';
+  window.BsiMaintenance = {
+    create({esc, button, request, chooseFile}) {
+      let fields={}, config=null, android=null, sidebar=null, disk=null, entries=[], selected=null, offset=0;
+      const value=(key, fallback='')=>fields[key] ?? fallback;
+      const btn=(label, action, primary=false, extra='')=>button(label,'editor:maint-'+action,primary,extra);
+      const field=(key,label,fallback='')=>`<label class="editor-field"><span>${esc(label)}</span><input class="inp" data-editor-field="maint:${esc(key)}" value="${esc(value(key,fallback))}"></label>`;
+      const check=(key,label,fallback=false)=>`<label class="editor-check"><input type="checkbox" data-editor-field="maint:${esc(key)}" ${value(key,fallback)?'checked':''}>${esc(label)}</label>`;
+      const actions=html=>`<div class="button-grid">${html}</div>`;
+      const card=(title,body)=>`<div class="sec editor-card"><div class="sec-h">${title}</div>${body}</div>`;
+      const call=(action,args={})=>request('maintenance',{action,...args});
+      const confirm=message=>BsiEffects.confirm(message+'\nOriginal native validation, backup and journal rules remain in force.');
+      const image=()=>String(value('image')).trim();
+      const inner=()=>String(value('directory','/')).trim()||'/';
+      async function list(path=inner()) {
+        const result=await call('disk-list',{image:image(),innerPath:path});
+        fields.directory=result.path||path; disk={...disk,...result}; entries=result.entries||[]; selected=null; offset=0;
+        return result;
+      }
+      function sidebarView() {
+        return card('Sidebar button order', `<p class="note">Uses the original titlebar/sidebar layout engine. Inspect the applied layout before staging an order.</p>${actions(btn('Inspect sidebar row','sidebar-read'))}${sidebar ? `<p class="note">${esc(sidebar.detail||'')}</p>${sidebar.supported&&sidebar.applied?`<ol class="sidebar-order">${(sidebar.buttons||[]).map((row,index)=>`<li>${check('hide:'+row.key,row.label||row.key,row.hidden)}<span>Hide</span>${btn('↑','sidebar-up',false,`data-index="${index}"`)}${btn('↓','sidebar-down',false,`data-index="${index}"`)}</li>`).join('')}</ol>${actions(btn('Apply staged order','sidebar-apply',true)+btn('Reset original order','sidebar-reset'))}`:''}`:''}`);
+      }
+      function render() {
+        return card('Debloat & Android', `<p class="note">The same native tools, inside this animated workspace. Reads/scans and all writes are explicit.</p>${field('instance','Instance name (existing bluestacks.conf instance)')}${actions(btn('Inspect configuration','debloat-read',true)+btn('Read Android undo state','android-read'))}`)
+          + card('Configuration cleanup', `${config?`<p class="note">${esc(config.state?.detail||'')}</p><div class="editor-grid">${(config.options||[]).map(o=>`<div>${check('option:'+o.id,o.label)}<p class="note">${esc(o.hint||'')}${o.needsInstance?' · requires instance name':''}</p></div>`).join('')}</div>`:'<p class="note">Inspect configuration to load the original supported option list.</p>'}${actions(btn('Apply selected cleanup','debloat-apply')+btn('Restore recorded cleanup','debloat-restore'))}`)
+          + card('Live Android / ADB', `<p class="note">Run the selected instance before scanning. Unreviewed package removals can break Android. Nothing is selected automatically.</p>${actions(btn('Scan running instance','android-scan',true))}${android?.apps?`<div class="editor-grid">${android.apps.filter(a=>a.installed&&a.debloatable).map(a=>`<div>${check('package:'+a.package,a.label||a.package)}<p class="note">${esc(a.package)} · ${esc(a.note||'')}</p></div>`).join('')}</div><p class="note">Downloads: ${esc(android.download?.size||'not measured')}</p>`:''}${check('wipeDownloads','Clear guest Downloads')}${check('keepCopy','Keep a local copy before clearing guest storage',true)}${check('clearAppData','Clear guest Android/data and obb — review before enabling')}${actions(btn('Apply reviewed selection','android-apply')+btn('Restore recorded Android changes','android-restore'))}`)
+          + card('Root.vhd / engine image', `<p class="note">Close BlueStacks before editing an image. The original engine decides writable/read-only state and performs journalled changes.</p>${field('image','Image or engine archive path')}${actions(btn('Find image','disk-find')+btn('Browse image…','disk-browse')+btn('Open engine archive…','disk-archive')+btn('Inspect image','disk-info',true)+btn('Enable write access','disk-enable'))}${disk?`<p class="note">${esc(disk.description||disk.msg||disk.reason||'')} · ${disk.writable?'Engine reports writable':'Read-only / not enabled'}</p>`:''}${field('directory','Folder in image','/')}${actions(btn('List folder','disk-list')+btn('Parent folder','disk-parent'))}${field('query','Whole-image search (explicit)')}${actions(btn('Search image','disk-search'))}<div class="disk-entries">${entries.slice(offset,offset+200).map((entry,localIndex)=>`<button class="btn${selected===offset+localIndex?' selected':''}" data-action="editor:maint-disk-select" data-index="${offset+localIndex}" title="${esc(entry.path)}">${entry.dir?'▸':'·'} ${esc(entry.name||entry.path)} <small>${esc(entry.size||0)} B</small></button>`).join('')}</div><p class="note">${entries.length ? offset+1 : 0}–${Math.min(entries.length,offset+200)} / ${entries.length}</p>${actions((offset?btn('Previous','disk-previous'):'')+(offset+200<entries.length?btn('Next','disk-next'):''))}<p class="note">Selected: ${esc(selected===null?'none':entries[selected]?.path||'none')}</p>${actions(btn('Open selected folder','disk-open')+btn('Extract selected…','disk-extract')+btn('Add file…','disk-add')+btn('Add folder tree…','disk-add-folder')+btn('Replace selected…','disk-replace'))}<div class="editor-grid">${field('name','New folder / rename / copy name')}${field('destination','Copy / move destination in image','/')}</div>${actions(btn('Create folder','disk-mkdir')+btn('Rename selected','disk-rename')+btn('Copy selected','disk-copy')+btn('Move selected','disk-move')+btn('Delete selected','disk-remove')+btn('Undo last image change','disk-undo')+btn('Discard undo journal','disk-discard'))}`);
+      }
+      async function action(name,el) {
+        if(name==='sidebar-read') { sidebar=await call(name); return sidebar; }
+        if(name==='sidebar-up'||name==='sidebar-down') {
+          const index=Number(el.dataset.index), to=index+(name==='sidebar-up'?-1:1);
+          if(sidebar&&to>=0&&to<sidebar.buttons.length) [sidebar.buttons[index],sidebar.buttons[to]]=[sidebar.buttons[to],sidebar.buttons[index]];
+          return 'Sidebar order staged. Apply explicitly to write.';
+        }
+        if(name==='sidebar-apply'||name==='sidebar-reset') {
+          if(!sidebar) throw Error('Inspect sidebar row first.');
+          if(!await confirm('Apply sidebar ordering to the selected player?')) return;
+          const rows=name==='sidebar-reset'?[]:sidebar.buttons||[];
+          const result=await call('sidebar-apply',{order:rows.map(r=>r.key),hidden:rows.filter(r=>value('hide:'+r.key,r.hidden)).map(r=>r.key)});
+          sidebar=await call('sidebar-read'); return result;
+        }
+        if(name==='debloat-read') { config=await call(name); return config; }
+        if(name==='android-read') { android=await call(name); return android; }
+        if(name==='android-scan') { android=await call(name,{instance:String(value('instance'))}); return android; }
+        if(name==='debloat-apply') {
+          const ids=(config?.options||[]).filter(o=>value('option:'+o.id,false)).map(o=>o.id);
+          if(!ids.length) throw Error('Inspect configuration and select at least one cleanup option.');
+          if(!await confirm('Apply the selected configuration cleanup?')) return;
+          const result=await call(name,{ids,instance:String(value('instance'))}); config=await call('debloat-read'); return result;
+        }
+        if(name==='debloat-restore'||name==='android-restore') {
+          if(!await confirm('Restore the recorded changes? Start the relevant instance if Android restore is needed.')) return;
+          return call(name,{instance:String(value('instance'))});
+        }
+        if(name==='android-apply') {
+          const packages=(android?.apps||[]).filter(a=>a.installed&&a.debloatable&&value('package:'+a.package,false)).map(a=>a.package);
+          if(!packages.length&&!value('wipeDownloads',false)&&!value('clearAppData',false)) throw Error('Scan and review a package or storage selection first.');
+          if(!await confirm('Remove selected packages / clear selected guest folders? Unreviewed removals can break the instance.')) return;
+          return call(name,{packages,instance:String(value('instance')),wipeDownloads:!!value('wipeDownloads',false),keepCopy:!!value('keepCopy',true),clearAppData:!!value('clearAppData',false)});
+        }
+        if(name==='disk-find') { const result=await call(name); fields.image=result.path||''; disk=null; entries=[]; selected=null; offset=0; return result; }
+        if(name==='disk-browse'||name==='disk-archive') {
+          const file=await chooseFile('disk-open'); if(!file)return;
+          fields.image=file; disk=null; entries=[]; selected=null; offset=0;
+          if(name==='disk-archive') { const result=await call(name,{file}); fields.image=result.path||file; return result; }
+          return 'Image path selected. Inspect before modifying.';
+        }
+        if(name==='disk-previous') {offset=Math.max(0,offset-200);return;}
+        if(name==='disk-next') {offset=Math.min(Math.floor((entries.length-1)/200)*200,offset+200);return;}
+        if(name==='disk-select') { selected=Number(el.dataset.index); return 'Selected '+(entries[selected]?.path||''); }
+        if(!image()) throw Error('Choose an image first.');
+        if(name==='disk-info') { disk=await call(name,{image:image()}); return disk; }
+        if(name==='disk-enable') {
+          if(!await confirm('Enable write access for this closed engine image? Dirty filesystems remain refused by the engine.')) return;
+          disk=await call(name,{image:image()}); return disk;
+        }
+        if(name==='disk-list') return list();
+        if(name==='disk-parent') return list(inner().split('/').slice(0,-1).join('/')||'/');
+        if(name==='disk-search') { const result=await call(name,{image:image(),query:String(value('query'))}); entries=result.entries||[]; selected=null; offset=0; return result; }
+        const entry=selected===null?null:entries[selected];
+        if(name==='disk-open') { if(!entry?.dir)throw Error('Select a folder.'); return list(entry.path); }
+        if(name==='disk-extract') {
+          if(!entry)throw Error('Select an entry.');
+          const file=await chooseFile(entry.dir?'disk-folder':'disk-extract'); if(!file)return;
+          return call(name,{image:image(),innerPath:entry.path,file});
+        }
+        if(!disk?.writable) throw Error('Inspect the image and enable native write access first.');
+        const entryActions=['disk-replace','disk-rename','disk-copy','disk-move','disk-remove'];
+        if(entryActions.includes(name)&&!entry)throw Error('Select an entry.');
+        let file='';
+        if(['disk-add','disk-add-folder','disk-replace'].includes(name)) { file=await chooseFile(name==='disk-add-folder'?'disk-folder':'disk-source'); if(!file)return; }
+        if(!await confirm('Run '+name+' on this image? Verify the image path and selection before continuing.'))return;
+        const result=await call(name,{image:image(),innerPath:entryActions.includes(name)?entry.path:inner(),file,name:String(value('name')),destination:String(value('destination','/'))});
+        await list(); return result;
+      }
+      return {render,sidebar:sidebarView,action,
+        input(el) { if(el.dataset.editorField?.startsWith('maint:')) { const key=el.dataset.editorField.slice(6); fields[key]=el.type==='checkbox'?el.checked:el.value; if(key==='image') {disk=null;entries=[];selected=null;offset=0;} } },
+        reset() {fields={};config=null;android=null;sidebar=null;disk=null;entries=[];selected=null;offset=0;}
+      };
+    }
+  };
+})();

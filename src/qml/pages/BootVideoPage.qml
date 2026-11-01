@@ -9,6 +9,15 @@ Item {
     property string state: qsTr("Not patched yet")
     property string stateColorName: "gray"
 
+    property string lastProfileBoot: JSON.stringify((backend.customizationProfile || {}).boot || {})
+    Connections {
+        target: backend
+        function onCustomizationProfileChanged() {
+            const b = (backend.customizationProfile || {}).boot || {};
+            const value = JSON.stringify(b);
+            if (value !== page.lastProfileBoot) { page.lastProfileBoot = value; bootHold.value = b.holdMs === undefined ? 3000 : b.holdMs; }
+        }
+    }
     ColumnLayout {
         anchors.fill: parent
         anchors.margins: 24
@@ -73,32 +82,17 @@ Item {
                         wrapMode: Text.Wrap
                         color: Theme.textDim
                         font.pixelSize: 12
-                        text: qsTr("The patcher writes a small player next to HD-Player.exe and points the "
-                                   + "player's own boot screen at it, so your video is tried with Qt6, Qt5 "
-                                   + "and WebEngine media at run time. The EXE itself never grows. Close "
-                                   + "BlueStacks first; the original .bak is preserved.")
+                        text: qsTr("The patcher preserves the loading UI and installs an adaptive Qt 6 / Qt 5 / WebEngine player in Assets/BootVideo.qml when needed. Validated QML resources "
+                                   + "can grow into mapped PE storage, and their caches are refreshed. "
+                                   + "Close BlueStacks first. The original .bak is preserved.")
                     }
                 }
 
-                Stepper {
-                    id: bootHold
-                    Layout.fillWidth: true
-                    label: qsTr("Hold the video on screen after boot")
-                    value: 3000
-                    from: 0
-                    to: 10000
-                    step: 500
-                }
-
-                Text {
-                    Layout.fillWidth: true
-                    wrapMode: Text.Wrap
-                    color: Theme.textDim
-                    font.pixelSize: 12
-                    text: bootHold.value > 0
-                          ? qsTr("The player keeps its boot screen, and so the video, on screen for "
-                                 + bootHold.value + " ms after boot finishes.")
-                          : qsTr("0 ms: the player hides its boot screen as soon as boot finishes.")
+                RowLayout {
+                    Label { text: qsTr("Boot hold after ready (ms)"); color: Theme.text }
+                    SpinBox { id: bootHold; from: 0; to: 15000; value: 3000; stepSize: 500; editable: true }
+                    Label { text: qsTr("0 disables the extra delay"); color: Theme.textDim }
+                    ActionButton { text: qsTr("Save to profile"); onClicked: { const r = backend.workspace("profile-section", {section: "boot", value: {holdMs: bootHold.value}}); page.state = r.msg || ""; } }
                 }
 
                 RowLayout {

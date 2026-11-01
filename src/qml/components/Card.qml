@@ -6,7 +6,7 @@ Rectangle {
 
     // Children declared inside Card { ... } land in `inner`.
     default property alias cardContent: inner.data
-    property real pad: 18
+    property real pad: 20
 
     // Two height rules, and they must not feed each other:
     //  * a page that sets Layout.preferredHeight / Layout.fillHeight wins, and
@@ -39,12 +39,6 @@ Rectangle {
     }
 
     color: Theme.card
-    // FalcoForge .panel: deep layered surface with one neon hairline.
-    gradient: Gradient {
-        GradientStop { position: 0.0; color: Theme.dark ? "#081524" : "#ffffff" }
-        GradientStop { position: 0.58; color: Theme.dark ? "#040b16" : "#fbfcff" }
-        GradientStop { position: 1.0; color: Theme.dark ? "#03080f" : "#f6f8fc" }
-    }
     radius: 16
     border.width: 1
     border.color: Theme.border
