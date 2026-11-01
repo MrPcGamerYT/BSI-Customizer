@@ -6,6 +6,11 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+trap {
+    $message = ($_.Exception.Message + "`n" + $_.ScriptStackTrace).Replace('%','%25').Replace("`r",'%0D').Replace("`n",'%0A')
+    Write-Host "::error::$message"
+    throw
+}
 if ($Version -notmatch '^\d+\.\d+\.\d+$') { throw 'Invalid Qt version' }
 # Qt's normal docs/source repository excludes WebEngine. Resolve the exact
 # Chromium submodule from Qt's release tag, not a moving Chromium branch.
