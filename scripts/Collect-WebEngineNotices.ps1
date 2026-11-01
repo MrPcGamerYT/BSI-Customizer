@@ -52,7 +52,7 @@ if ($selected.Count -lt 500 -or -not $selected.ContainsKey('chromium/LICENSE')) 
 # multi-gigabyte source archive or unrelated source payload is downloaded/run.
 function Read-Blobs([string[]]$Hashes) {
     $Hashes = @($Hashes | Sort-Object -Unique)
-    $Hashes | & git "--git-dir=$repository" -c fetch.negotiationAlgorithm=noop fetch --no-write-fetch-head --no-tags --filter=blob:none origin --stdin
+    $Hashes | & git "--git-dir=$repository" -c fetch.negotiationAlgorithm=noop fetch --no-write-fetch-head --no-tags --filter=blob:none origin --stdin | Out-Host
     if ($LASTEXITCODE -ne 0) { throw 'Could not fetch source notice blobs' }
     $info = [Diagnostics.ProcessStartInfo]::new()
     $info.FileName = 'git'; $info.UseShellExecute = $false
@@ -66,7 +66,7 @@ function Read-Blobs([string[]]$Hashes) {
         $errors = $process.StandardError.ReadToEndAsync()
         $process.StandardInput.Write(($Hashes -join "`n") + "`n"); $process.StandardInput.Close()
         if (-not $process.WaitForExit(120000)) { $process.Kill($true); throw 'Source notice read timed out' }
-        $copy.GetAwaiter().GetResult()
+        $null = $copy.GetAwaiter().GetResult()
         if ($process.ExitCode -ne 0) { throw "Source notice read failed: $($errors.GetAwaiter().GetResult())" }
         $bytes = $memory.ToArray(); $offset = 0
         $texts = [Collections.Generic.Dictionary[string,string]]::new()
@@ -82,10 +82,11 @@ function Read-Blobs([string[]]$Hashes) {
             if ($text.IndexOf([char]0) -ge 0) { throw 'Binary data in source notice' }
             $texts[$hash] = $text; $offset += $size + 1
         }
-        return ,$texts
+        Write-Output -NoEnumerate $texts
     } finally { $memory.Dispose(); $process.Dispose() }
 }
-$texts = Read-Blobs @($selected.Values)
+$texts = Read-Blobs -Hashes @($selected.Values)
+if ($texts -isnot [Collections.IDictionary]) { throw "Invalid notice-reader result: $($texts.GetType().FullName)" }
 # Include nonstandard license filenames referenced by vendored README metadata.
 # Some readmes describe optional, absent SDK/build/test inputs. Preserve those
 # readmes and report absent references, rather than claiming they are shipped.
