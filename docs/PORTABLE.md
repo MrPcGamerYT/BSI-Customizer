@@ -91,7 +91,8 @@ SHA-256 is recorded in the workflow summary and verified before publication.
 Requires Windows x64, MSVC C++ build tools, CMake 3.21+, Qt 6 development tools
 and PowerShell 7 — no interpreter, runtime or extra tool beyond those.
 `makecab.exe` and the cabinet reader are built into Windows. The workflow uses
-Qt 6.8.3 with Multimedia, WebEngine, WebChannel and Positioning. For packaging,
+Qt 6.8.3 with Multimedia, WebEngine, WebChannel, Positioning and SerialPort
+(the deployed NMEA Positioning plugin depends on it). For packaging,
 Git must also be on PATH to collect matching Chromium license/attribution
 blobs (a small partial fetch, not a checkout of Chromium source). Native-only developer builds can explicitly
 set `BSI_CHROMIUM_UI=OFF`.

@@ -137,7 +137,7 @@ jobs:
           host: windows
           target: desktop
           arch: win64_msvc2022_64
-          modules: qtmultimedia qtwebengine qtwebchannel qtpositioning
+          modules: qtmultimedia qtwebengine qtwebchannel qtpositioning qtserialport
           cache: true
 
       - name: Configure application and one-file package

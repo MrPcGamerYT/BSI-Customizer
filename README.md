@@ -1043,7 +1043,8 @@ Compatibility is version-adaptive, not a guarantee for every past/future build: 
 ### Animated HTML workspace
 
 The supplied HTML frontend is now the default (`BSI_CHROMIUM_UI=ON`). Install
-Qt WebEngine, WebChannel, Positioning and Multimedia development modules when
+Qt WebEngine, WebChannel, Positioning, SerialPort (Positioning plugin dependency)
+and Multimedia development modules when
 building it locally. The existing Discord login and C++ engines are unchanged.
 The standard portable/installer workflows include the complete runtime.
 `--native-ui` selects the emergency recovery shell; `BSI_CHROMIUM_UI=OFF` is an

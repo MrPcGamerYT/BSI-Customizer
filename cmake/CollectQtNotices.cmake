@@ -16,7 +16,7 @@ cmake_minimum_required(VERSION 3.21)
 
 set(BSI_QT_NOTICE_MODULES qtbase qtdeclarative qtsvg qtimageformats qtshadertools qtmultimedia)
 if(BSI_WITH_WEBENGINE)
-    list(APPEND BSI_QT_NOTICE_MODULES qtwebengine qtwebchannel qtpositioning)
+    list(APPEND BSI_QT_NOTICE_MODULES qtwebengine qtwebchannel qtpositioning qtserialport)
 endif()
 set(BSI_MAX_ARCHIVE_BYTES 536870912)   # 512 MiB per module archive
 set(BSI_MAX_NOTICE_BYTES 4194304)      # 4 MiB per licence text

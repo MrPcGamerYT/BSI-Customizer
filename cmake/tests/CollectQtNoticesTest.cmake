@@ -136,7 +136,7 @@ if(cached EQUAL 0)
 endif()
 
 # WebEngine-capable packaging adds modules that may have no attribution JSON.
-foreach(module qtwebengine qtwebchannel qtpositioning)
+foreach(module qtwebengine qtwebchannel qtpositioning qtserialport)
     set(root "${WORK_DIR}/extra/${module}-${version}")
     file(WRITE "${root}/LICENSES/LGPL-3.0-only.txt" "SPDX-only text for ${module}\n")
     execute_process(COMMAND "${CMAKE_COMMAND}" -E tar cf "${WORK_DIR}/cache/${module}-${version}.zip"
@@ -153,7 +153,7 @@ execute_process(COMMAND "${CMAKE_COMMAND}"
 expect("WebEngine modules without attribution JSON collect successfully" web_collected EQUAL 0)
 if(web_collected EQUAL 0)
     file(READ "${WORK_DIR}/web-out/QT-NOTICES.txt" web_notices)
-    foreach(module qtwebengine qtwebchannel qtpositioning)
+    foreach(module qtwebengine qtwebchannel qtpositioning qtserialport)
         string(FIND "${web_notices}" "SPDX-only text for ${module}" found)
         expect("${module}: own licence is retained without attribution files" found GREATER -1)
     endforeach()

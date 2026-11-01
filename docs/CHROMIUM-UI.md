@@ -85,7 +85,7 @@ See [tool-to-engine mapping](CHROMIUM-MERGE-MAP.md).
 
 Use the project's supported Qt 6 toolchain, plus **WebEngineQuick and WebChannel**
 (Qt installer modules `qtwebengine qtwebchannel`, and their dependencies).
-The Windows workflows install Qt 6.8.3 and `qtpositioning` as well.
+The Windows workflows install Qt 6.8.3 and `qtpositioning qtserialport` as well; the NMEA Positioning plugin needs SerialPort.
 
 ```powershell
 cmake -S . -B build-web -A x64 -DBSI_CHROMIUM_UI=ON
