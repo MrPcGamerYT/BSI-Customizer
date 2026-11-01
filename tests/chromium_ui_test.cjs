@@ -37,7 +37,10 @@ const server = http.createServer((req, res) => {
     await offline.locator('#spine [data-page="0"]').click();
     if (process.env.BSI_WEB_SCREENSHOT) await offline.screenshot({ path: process.env.BSI_WEB_SCREENSHOT });
     assert.equal(await offline.locator('#main > .matrix > .tile').count(), 4, 'Reference dashboard remains an uncluttered 2x2 matrix');
-    assert.equal(await offline.locator('#spine .icon svg').count(), 13, 'Sidebar uses line icons, not numbered placeholders');
+    assert.equal(await offline.locator('#spine .icon svg').count(), 13, 'Sidebar retains page glyphs');
+    assert.equal(await offline.locator('#spine .nav-label').count(), 13, 'Every destination is labeled');
+    assert.equal(await offline.locator('#spine .nav-group').count(), 5, 'Navigation destinations are grouped');
+    assert.equal(await offline.locator('#cmd').count(), 0, 'Duplicate quick navigation is removed');
     assert.equal(await offline.locator('.orbs i').count(), 3);
     for (const size of [{width: 1100, height: 700}, {width: 1920, height: 1080}]) {
       await offline.setViewportSize(size);
@@ -45,9 +48,8 @@ const server = http.createServer((req, res) => {
       assert.ok(visible.x >= 0 && visible.y >= 0 && visible.x + visible.width <= size.width + 1 && visible.y + visible.height <= size.height + 1);
     }
     assert.deepEqual(errors, []);
-    await offline.close();
-
-    const page = await browser.newPage({ viewport: { width: 1480, height: 920 } });
+    const page = offline;
+    await page.goto('about:blank');
     page.on('pageerror', e => errors.push(e.message));
     page.on('dialog', dialog => dialog.accept());
     await page.addInitScript(() => {
@@ -71,7 +73,7 @@ const server = http.createServer((req, res) => {
           if (method === 'setThemeEdit') colors[0].edit = args.value;
           if (method === 'scanResources') { ++state.resourceRevision; value = rows.length; }
           if (method === 'listResources') value = rows;
-          if (method === 'readResource') value = { text: 'Item { property string value: "<img src=x onerror=alert(1)>" }', preview: '', budget: { known: true, capacity: 300, msg: 'Test only' } };
+          if (method === 'readResource') value = { text: 'Item { property string value: "<img src=x onerror=alert(1)>" }', preview: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p6sAAAAASUVORK5CYII=', budget: { known: true, capacity: 300, msg: 'Test only' } };
           if (method === 'saveResource') { ++state.resourceRevision; value = { ok: true, msg: 'Test fixture acknowledged save' }; }
           if (method === 'fpsPatch') value = { ok: false, msg: 'Fixture: target is unsupported; no write' };
           if (method === 'readInterface') value = {
@@ -122,11 +124,21 @@ const server = http.createServer((req, res) => {
     await page.locator('#resource-filter').fill('fixture-23 qml');
     await page.locator('[data-resource="23"]').click();
     await page.locator('#resource-code').waitFor();
-    assert.equal(await page.locator('#resource-editor img').count(), 0, 'Resource source must not execute as HTML');
+    assert.equal(await page.locator('#resource-editor img').count(), 1, 'Text and safe preview can be displayed together');
+    assert.equal(await page.locator('#resource-image').isVisible(), true, 'Raster preview remains visible beside source text');
     await page.locator('#resource-code').fill('Item { property string value: "edited fixture" }');
     await page.locator('[data-action="saveResource"]').click();
     await page.waitForFunction(() => __calls.some(c => c.method === 'saveResource'));
     assert.equal(await page.evaluate(() => __calls.find(c => c.method === 'saveResource').args.text), 'Item { property string value: "edited fixture" }');
+    await page.locator('#resource-filter').fill('fixture-23');
+    await page.locator('#resource-kind').selectOption('2');
+    assert.equal(await page.locator('[data-resource]').count(), 0, 'A kind filter narrows the current scan');
+    await page.locator('[data-action="scanResources"]').click();
+    await page.locator('[data-resource="0"]').waitFor();
+    assert.equal(await page.locator('#resource-filter').inputValue(), '', 'A fresh scan clears stale search text');
+    assert.equal(await page.locator('#resource-kind').inputValue(), '0', 'A fresh scan returns to All files');
+    assert.equal(await page.locator('[data-resource]').count(), 100, 'All detected entries are restored after scanning');
+    assert.equal(await page.evaluate(() => __calls.filter(c => c.method === 'scanResources').length), 2);
     await page.locator('#spine [data-page="1"]').click();
     await page.locator('input.inp[data-color="0"]').fill('#ABCDEF');
     await page.locator('input.inp[data-color="0"]').press('Tab');
@@ -136,7 +148,7 @@ const server = http.createServer((req, res) => {
     await page.locator('[data-action="fpsPatch"]').click();
     await page.locator('#toast').filter({ hasText: 'unsupported; no write' }).waitFor();
     await page.locator('#spine [data-page="2"]').click();
-    assert.equal(await page.evaluate(() => __calls.filter(c => c.method === 'scanResources').length), 1, 'Returning to Resources must not scan');
+    assert.equal(await page.evaluate(() => __calls.filter(c => c.method === 'scanResources').length), 2, 'Returning to Resources must not scan');
     for (let i = 0; i < 13; ++i) {
       await page.locator(`#spine [data-page="${i}"]`).click();
       assert.ok(await page.locator('#main').innerText());
@@ -152,10 +164,13 @@ const server = http.createServer((req, res) => {
     const last = method => page.evaluate(name => __calls.filter(c => c.method === name).at(-1), method);
     await nav(6);
     await click('interface-load');
+    await page.locator('[data-interface-tab="remove"]').click();
     await edit('remove:0').check();
     await click('removals');
     assert.deepEqual((await last('applyRemovals')).args.names, ['Fixture sidebar']);
+    await page.locator('[data-interface-tab="about"]').click();
     await edit('about:text').fill('Edited About fixture');
+    await page.waitForFunction(() => document.querySelector('#interface-about-preview')?.innerText.includes('Edited About fixture'));
     await edit('link:0:show').uncheck();
     await edit('link:0:label').fill('Changed label');
     await click('about-apply');
@@ -212,6 +227,7 @@ const server = http.createServer((req, res) => {
     assert.equal((await last('updates')).args.action, 'apply');
     // Sidebar and all maintenance controls stay in the same HTML workspace.
     await nav(6);
+    await page.locator('[data-interface-tab="layout"]').click();
     await click('maint-sidebar-read');
     await page.locator('[data-action="editor:maint-sidebar-down"]').first().click();
     await edit('maint:hide:volume').check();
@@ -229,6 +245,7 @@ const server = http.createServer((req, res) => {
     maintenanceCall = await last('maintenance');
     assert.equal(maintenanceCall.args.action,'debloat-read');
     assert.deepEqual(await page.evaluate(() => __calls.findLast(c=>c.method==='maintenance'&&c.args.action==='debloat-apply').args.ids), ['fixture-ads']);
+    await page.locator('[data-maint-tab="android"]').click();
     await click('maint-android-scan');
     assert.equal((await last('maintenance')).args.instance,'Nougat32');
     await edit('maint:package:com.fixture.ad').check();
@@ -237,17 +254,19 @@ const server = http.createServer((req, res) => {
     assert.deepEqual(maintenanceCall.args.packages,['com.fixture.ad']);
     assert.equal(maintenanceCall.args.keepCopy,true);
     assert.equal(maintenanceCall.args.clearAppData,false);
+    await page.locator('[data-maint-tab="disk"]').click();
     await click('maint-disk-find');
     await click('maint-disk-info');
+    await page.locator('[data-action="editor:maint-disk-select"][data-index="0"]').click();
     await edit('maint:name').fill('new-folder');
     const writeCount=await page.evaluate(()=>__calls.filter(c=>c.method==='maintenance'&&c.args.action==='disk-mkdir').length);
-    await click('maint-disk-mkdir');
+    assert.equal(await page.locator('[data-action="editor:maint-disk-mkdir"]').isDisabled(),true,'Read-only writes are visibly disabled');
     assert.equal(await page.evaluate(()=>__calls.filter(c=>c.method==='maintenance'&&c.args.action==='disk-mkdir').length),writeCount,'Read-only guard must not dispatch a write');
     await click('maint-disk-enable');
     await click('maint-disk-list');
-    assert.equal(await page.locator('.disk-entries button').count(),200,'Bound disk DOM rows');
+    assert.equal(await page.locator('.disk-file-row').count(),200,'Bound disk DOM rows');
     await click('maint-disk-next');
-    assert.equal(await page.locator('.disk-entries button').count(),40);
+    assert.equal(await page.locator('.disk-file-row').count(),40);
     await click('maint-disk-previous');
     await page.locator('[data-action="editor:maint-disk-select"][data-index="1"]').click();
     await page.evaluate(()=>{window.__nextFile='C:\\fixture\\entry.bin';});
