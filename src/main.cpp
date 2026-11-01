@@ -22,6 +22,7 @@
 
 #include "core/AboutPatcher.h"
 #include "core/Backend.h"
+#include "core/CrashDiagnostics.h"
 #include "core/AuthManager.h"
 #include "core/SettingsManager.h"
 #include "core/SysInfo.h"
@@ -93,6 +94,7 @@ int main(int argc, char *argv[])
     QCoreApplication::setOrganizationName(QStringLiteral("MrPcGamerYT"));
     QCoreApplication::setApplicationName(QStringLiteral("BSI Customizer"));
     QCoreApplication::setApplicationVersion(QStringLiteral(BSI_VERSION));
+    installCrashDiagnostics();
 
     // Brand icon for every window/dialog the app raises (taskbar, Alt-Tab,
     // title bar). The .ico lives at the repo root; CMake maps it into the
@@ -231,8 +233,7 @@ int main(int argc, char *argv[])
     QObject::connect(&updates, &UpdateChecker::restartRequested, &app, &QGuiApplication::quit);
 
 #ifdef BSI_CHROMIUM_UI
-    const bool chromiumUi = args.contains(QStringLiteral("--web-ui"))
-        && !args.contains(QStringLiteral("--native-ui"));
+    const bool chromiumUi = !args.contains(QStringLiteral("--native-ui"));
     if (chromiumUi) {
         auto *profile = QQuickWebEngineProfile::defaultProfile();
         profile->setUrlRequestInterceptor(new LocalContentPolicy(profile));

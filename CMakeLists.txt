@@ -130,6 +130,7 @@ qt_add_executable(BSICustomizer
     src/core/CustomizationWorkspace.h
     src/core/CustomizationWorkspace.cpp
     src/core/Backend.h
+    src/core/CrashDiagnostics.cpp src/core/CrashDiagnostics.h
     src/core/Backend.cpp
     src/core/AuthManager.h
     src/core/AuthManager.cpp
@@ -391,7 +392,9 @@ if(BSI_CHROMIUM_UI)
         FILES src/chromium/ChromiumMain.qml)
     qt_add_resources(BSICustomizer "bsi_chromium_assets"
         PREFIX "/bsi-web" BASE "src/web"
-        FILES src/web/index.html src/web/styles.css src/web/transport.js src/web/resource-search.js src/web/editors.js src/web/app.js)
+        FILES src/web/index.html src/web/styles.css src/web/transport.js src/web/resource-search.js src/web/editors.js src/web/app.js src/web/icon.png
+            src/web/fonts/manrope-latin.woff2 src/web/fonts/plus-jakarta-sans-latin.woff2
+            src/web/fonts/manrope-LICENSE.txt src/web/fonts/plus-jakarta-sans-LICENSE.txt)
 endif()
 
 install(TARGETS BSICustomizer RUNTIME DESTINATION bin)

@@ -81,6 +81,16 @@ jobs:
           $p = Start-Process stage/BSI-Customizer.exe -ArgumentList '--chromium-runtime-test' -PassThru
           if (-not $p.WaitForExit(45000)) { $p.Kill(); throw 'Chromium test timed out' }
           if ($p.ExitCode -ne 0) { throw "Chromium deployment test failed: $($p.ExitCode)" }
+      - name: Verify real default application shell without SDK on PATH
+        shell: pwsh
+        run: |
+          $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
+          $env:QT_PLUGIN_PATH = ''
+          $env:QML_IMPORT_PATH = ''
+          $env:QML2_IMPORT_PATH = ''
+          $p = Start-Process stage/BSI-Customizer.exe -ArgumentList '--deployment-test' -PassThru
+          if (-not $p.WaitForExit(45000)) { $p.Kill(); throw 'Application shell test timed out' }
+          if ($p.ExitCode -ne 0) { throw "Default shell test failed: $($p.ExitCode)" }
       - name: Upload verified test bundle
         uses: actions/upload-artifact@v4
         with:

@@ -32,6 +32,20 @@ Item {
     }
 
     Rectangle { anchors.fill: parent; color: Theme.window }
+    // Same mint glass atmosphere as the supplied workspace, without moving
+    // OAuth or the saved-session flow into a browser renderer.
+    Image {
+        anchors.left: parent.left; anchors.top: parent.top
+        width: parent.width * 0.65; height: parent.height * 0.9
+        source: "img/orb-green.png"; opacity: Theme.dark ? 0.26 : 0.08
+        fillMode: Image.PreserveAspectFit
+    }
+    Image {
+        anchors.right: parent.right; anchors.bottom: parent.bottom
+        width: parent.width * 0.6; height: parent.height * 0.8
+        source: "img/orb-green.png"; opacity: Theme.dark ? 0.16 : 0.06
+        fillMode: Image.PreserveAspectFit
+    }
 
     // ---- the window row (FalcoForge .login-window-row) ----
     Rectangle {
@@ -110,9 +124,9 @@ Item {
         Rectangle {
             id: card
             anchors.centerIn: parent
-            width: Math.min(430, gate.width - 44)
+            width: Math.min(480, gate.width - 44)
             height: cardColumn.implicitHeight + 44
-            radius: 14
+            radius: 20
             border.width: 1
             border.color: Theme.border
             color: Theme.card
@@ -120,7 +134,7 @@ Item {
             ColumnLayout {
                 id: cardColumn
                 anchors.fill: parent
-                anchors.margins: 22
+                anchors.margins: 28
                 spacing: 0
 
                 // ---- head: app mark + heading ----
@@ -151,7 +165,7 @@ Item {
 
                         Text {
                             Layout.fillWidth: true
-                            text: qsTr("Welcome to BSI Customizer")
+                            text: qsTr("Make it yours.")
                             color: Theme.text
                             font.pixelSize: 17
                             font.weight: Font.Bold
@@ -159,7 +173,7 @@ Item {
                         }
                         Text {
                             Layout.fillWidth: true
-                            text: qsTr("BSI Customizer is private dev software - sign in with your Discord account to unlock it.")
+                            text: qsTr("Sign in with Discord to open your BSI workspace.")
                             color: Theme.textDim
                             font.pixelSize: 13
                             wrapMode: Text.WordWrap
@@ -455,7 +469,7 @@ Item {
                                 }
                                 Text {
                                     Layout.fillWidth: true
-                                    text: qsTr("Opens your browser - access follows your dev allowlist.")
+                                    text: qsTr("Secure browser sign-in · Discord access rules apply")
                                     color: Theme.textDim
                                     font.pixelSize: 12
                                     elide: Text.ElideRight
@@ -598,7 +612,7 @@ Item {
                     onLinkActivated: Qt.openUrlExternally(link)
                 }
                 Text {
-                    visible: auth.setupHint.length > 0
+                    visible: auth.setupHint.length > 0 && auth.setupHint !== auth.note
                     Layout.fillWidth: true
                     Layout.topMargin: 10
                     text: auth.setupHint

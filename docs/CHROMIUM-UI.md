@@ -18,9 +18,11 @@ Local Qt WebEngine / Chromium HTML + JS <-- Qt WebChannel --> WebBridge
 ```
 
 This is an **opt-in integrated implementation**, not a verified replacement release.
-The native UI remains the default. Build with `BSI_CHROMIUM_UI=ON`, then run
-`BSI-Customizer.exe --web-ui`. `--native-ui` takes precedence if both flags are
-present. A build without Chromium explicitly rejects `--web-ui`.
+In builds configured with `BSI_CHROMIUM_UI=ON`, the reference-style Chromium
+workspace opens by default on double-click. `--web-ui` remains accepted and
+`--native-ui` explicitly selects the full native interface (and takes precedence
+if both flags are present). Native-only builds are unchanged and still reject
+`--web-ui`. Discord sign-in is required before either workspace is accessible.
 
 Implemented HTML flows now merge all 12 tool areas with their existing engines:
 
@@ -161,3 +163,34 @@ Already downloaded bundles do not change when the workflow is fixed: download
 and extract the newly verified artifact, then run `BSI-Customizer.exe --web-ui`.
 This verification checks configuration and locked bridge behavior offline;
 it does not claim to have completed a real Discord OAuth sign-in.
+
+## Reference UI refresh
+
+The workspace follows the supplied `gemini-code-1793470243134.html`: mint glass
+background and orbs, line-icon rail, compact navigation, target switcher,
+two-by-two dashboard, status sidebar, and recent activity. Manrope and Plus
+Jakarta Sans are bundled locally with their OFL licenses; no Google Fonts/CDN
+requests are needed. The original prototype's Python bridge, simulated state,
+and remote dependencies are not used.
+
+The prototype's backup tile is replaced by the real Patch workspace rather
+than inventing an unsupported backup-only operation. Instance detection moved
+to Settings to keep the dashboard uncluttered. All existing editor commands,
+manual resource scans, authorization and native validation remain in place.
+
+### Crash triage and recovery
+
+Renderer termination now offers reload and native-tool recovery instead of
+leaving a blank workspace. Sign-out defers WebEngineView destruction until the
+WebChannel invocation unwinds. Bridge operations convert C++ exceptions to
+visible failures; inline resource previews above 8 MiB are refused rather than
+copied into the renderer. These changes do not promise recovery from an access
+violation or that an interrupted patch succeeded: inspect the file/backup
+before retrying any write.
+
+Windows records unhandled exception code/address in
+`%LOCALAPPDATA%/MrPcGamerYT/BSI Customizer/diagnostics/last-crash.log` when writable.
+It captures no memory dump, OAuth state or file contents and is never uploaded.
+If a crash persists, retain that log and the exact action/target/build version.
+Use `--native-ui` to compare the native shell. Real emulator-specific crashes
+still require reproduction on the affected machine.

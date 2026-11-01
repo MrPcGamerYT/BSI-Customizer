@@ -12,8 +12,8 @@ const { chromium } = require(process.env.BSI_PLAYWRIGHT || 'playwright');
 const root = path.resolve(__dirname, '../src/web');
 const server = http.createServer((req, res) => {
   const name = new URL(req.url, 'http://test').pathname.slice(1) || 'index.html';
-  if (!['index.html', 'styles.css', 'transport.js', 'editors.js', 'resource-search.js', 'app.js'].includes(name)) { res.writeHead(404).end(); return; }
-  res.setHeader('Content-Type', name.endsWith('.js') ? 'text/javascript' : name.endsWith('.css') ? 'text/css' : 'text/html');
+  if (!['index.html', 'styles.css', 'transport.js', 'editors.js', 'resource-search.js', 'app.js', 'icon.png', 'fonts/manrope-latin.woff2', 'fonts/plus-jakarta-sans-latin.woff2'].includes(name)) { res.writeHead(404).end(); return; }
+  res.setHeader('Content-Type', name.endsWith('.js') ? 'text/javascript' : name.endsWith('.css') ? 'text/css' : name.endsWith('.woff2') ? 'font/woff2' : name.endsWith('.png') ? 'image/png' : 'text/html');
   res.end(fs.readFileSync(path.join(root, name)));
 });
 (async () => {
@@ -36,6 +36,14 @@ const server = http.createServer((req, res) => {
     }
     await offline.locator('#spine [data-page="0"]').click();
     if (process.env.BSI_WEB_SCREENSHOT) await offline.screenshot({ path: process.env.BSI_WEB_SCREENSHOT });
+    assert.equal(await offline.locator('#main > .matrix > .tile').count(), 4, 'Reference dashboard remains an uncluttered 2x2 matrix');
+    assert.equal(await offline.locator('#spine .icon svg').count(), 12, 'Sidebar uses line icons, not numbered placeholders');
+    assert.equal(await offline.locator('.orbs i').count(), 3);
+    for (const size of [{width: 1100, height: 700}, {width: 1920, height: 1080}]) {
+      await offline.setViewportSize(size);
+      const visible = await offline.locator('#main > .matrix').boundingBox();
+      assert.ok(visible.x >= 0 && visible.y >= 0 && visible.x + visible.width <= size.width + 1 && visible.y + visible.height <= size.height + 1);
+    }
     assert.deepEqual(errors, []);
     await offline.close();
 

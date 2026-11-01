@@ -15,6 +15,7 @@
         }
       });
     }
+    windowAction(action) { if (['min', 'max', 'close', 'move'].includes(action)) this.remote.windowAction?.(action); }
     snapshot() { return new Promise(resolve => this.remote.snapshot(resolve)); }
     async invoke(method, args = {}) {
       const reply = await new Promise(resolve => this.remote.invoke(method, args, resolve));

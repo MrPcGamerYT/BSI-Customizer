@@ -43,3 +43,15 @@ assert.ok(workflow.includes('-DBSI_REQUIRE_EMBEDDED_AUTH=ON'));
 assert.ok(test.includes('const bool policyReady = auth.configured() && config.roleGateConfigured()'));
 assert.ok(test.includes('!AuthManager::embeddedAuthJson().isEmpty() && config.clientSecret.isEmpty()'));
 console.log('PASS: Chromium bundle embeds and verifies its locked Discord public-client policy.');
+
+const shell = read('src/chromium/ChromiumMain.qml');
+assert.ok(shell.includes('Qt.callLater(function()'), 'Unwind native calls before destroying the renderer on sign-out');
+assert.ok(shell.includes('window.browserFailure = qsTr("The display process stopped'), 'Renderer failure must expose recovery UI');
+assert.ok(shell.includes('window.retryBrowser()'), 'Renderer recovery must be retryable');
+assert.ok(bridge.includes('catch (const std::bad_alloc &)'), 'Native allocation failures must not escape bridge invocation');
+assert.ok(bridge.includes('8 * 1024 * 1024'), 'Inline resource previews must be bounded');
+for (const asset of ['icon.png', 'fonts/manrope-latin.woff2', 'fonts/plus-jakarta-sans-latin.woff2']) {
+  assert.ok(cmake.includes('src/web/' + asset), 'Missing embedded reference asset: ' + asset);
+}
+assert.ok(read('src/main.cpp').includes('const bool chromiumUi = !args.contains(QStringLiteral("--native-ui"))'));
+console.log('PASS: default reference workspace, local assets, bounded previews, exception boundary and renderer recovery guards.');

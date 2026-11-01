@@ -10,6 +10,8 @@
 #include <QScopedValueRollback>
 #include <QTimer>
 #include <cmath>
+#include <exception>
+#include <new>
 
 namespace {
 QVariantMap failure(const QString &message) { return {{"ok", false}, {"error", message}}; }
@@ -101,6 +103,7 @@ void WebBridge::publish()
 
 QVariantMap WebBridge::invoke(const QString &method, const QVariantMap &args)
 {
+    try {
     // These guards precede EVERY command, including read-only file access,
     // path/settings changes and opening a native page. JS is not the gate.
     if (!m_auth.isAuthorized()) return failure(QStringLiteral("Sign in with Discord to unlock BSI Customizer."));
@@ -153,9 +156,15 @@ QVariantMap WebBridge::invoke(const QString &method, const QVariantMap &args)
              || method == QLatin1String("replaceResource") || method == QLatin1String("extractResource")) {
         bool valid = false; const int index = args.value("index").toInt(&valid);
         if (!valid || index < 0 || index >= m_backend.resourceInfos().size()) return failure(QStringLiteral("Select a scanned resource first."));
-        if (method == QLatin1String("readResource")) value = QVariantMap{
+        if (method == QLatin1String("readResource")) {
+            // Bound the renderer payload before allocating text/base64 copies.
+            const auto info = m_backend.resourceInfos().at(index).toMap();
+            if (info.value("size").toLongLong() > 8 * 1024 * 1024)
+                return failure(QStringLiteral("This resource is too large for an inline preview. Extract it or use the full native tools."));
+            value = QVariantMap{
             {"text", m_backend.resourceTextAt(index)}, {"preview", m_backend.resourcePreviewAt(index, 640)},
             {"note", m_backend.resourcePreviewNote(index)}, {"budget", m_backend.resourceBudgetAt(index)}};
+        }
         else if (method == QLatin1String("saveResource")) value = m_backend.saveResourceText(index, text("text"));
         else if (method == QLatin1String("replaceResource")) value = m_backend.replaceResourceWithFile(index, text("path"));
         else value = m_backend.extractResource(index, text("path"));
@@ -272,6 +281,13 @@ QVariantMap WebBridge::invoke(const QString &method, const QVariantMap &args)
     else return failure(QStringLiteral("Unknown bridge command: %1").arg(method));
     // Preserve the engine's result, including a refused write; never invent success.
     return success(value);
+    } catch (const std::bad_alloc &) {
+        return failure(QStringLiteral("Not enough memory for this operation. Close other applications and try a smaller resource."));
+    } catch (const std::exception &) {
+        return failure(QStringLiteral("The native operation failed unexpectedly. No success was reported; check the target before retrying."));
+    } catch (...) {
+        return failure(QStringLiteral("The native operation could not complete. Restart before retrying."));
+    }
 }
 
 void WebBridge::requestFile(const QString &role)

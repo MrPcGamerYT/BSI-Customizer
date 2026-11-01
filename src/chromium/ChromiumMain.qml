@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls.Basic
+import QtQuick.Window
 import QtQuick.Layouts
 import QtQuick.Dialogs
 import QtWebEngine
@@ -15,10 +16,14 @@ ApplicationWindow {
     minimumWidth: 980
     minimumHeight: 640
     visible: true
+    flags: Qt.Window | Qt.FramelessWindowHint
     title: qsTr("BSI Customizer — Chromium workspace")
     color: Theme.window
     property bool booted: false
     property int nativePage: -1
+    signal retryBrowser()
+    property bool browserReady: false
+    property string browserFailure: ""
     readonly property var nativeSources: ["DashboardPage.qml", "ThemePage.qml", "ResourcesPage.qml",
         "FpsPage.qml", "IntegrityPage.qml", "BootVideoPage.qml", "UiPage.qml", "RpcidPage.qml",
         "AppearancePage.qml", "AboutPage.qml", "GifRpcPage.qml", "WorkspacePage.qml", "DebloatPage.qml"]
@@ -27,6 +32,14 @@ ApplicationWindow {
     QtObject {
         id: rpc
         WebChannel.id: "bsi"
+        function windowAction(action) {
+            if (action === "min") window.showMinimized();
+            else if (action === "max") {
+                if (window.visibility === Window.Maximized) window.showNormal();
+                else window.showMaximized();
+            } else if (action === "close") window.close();
+            else if (action === "move") window.startSystemMove();
+        }
         function snapshot() { return webBridge.snapshot(); }
         function invoke(method, args) { return webBridge.invoke(method, args); }
         function requestFile(role) { webBridge.requestFile(role); }
@@ -51,15 +64,16 @@ ApplicationWindow {
                 anchors.margins: 8
                 Button { text: qsTr("← Back to Chromium workspace"); enabled: !backend.busy; onClicked: window.nativePage = -1 }
                 Button { text: qsTr("Debloat / Root.vhd tools"); enabled: !backend.busy; onClicked: window.nativePage = 12 }
-                Label { text: qsTr("Full native editor · same session and C++ backend"); color: Theme.text; Layout.fillWidth: true }
+                Label { text: qsTr("Full native editor"); color: Theme.text; Layout.fillWidth: true }
+                WinControls { appWindow: window }
             }
         }
         Loader {
             id: browserLoader
             Layout.fillWidth: true
             Layout.fillHeight: true
-            active: auth.authorized
-            visible: window.nativePage < 0
+            active: window.browserReady
+            visible: window.nativePage < 0 && !window.browserFailure
             sourceComponent: WebEngineView {
                 id: browser
                 objectName: "chromiumWorkspace"
@@ -69,17 +83,39 @@ ApplicationWindow {
                 settings.localContentCanAccessFileUrls: false
                 settings.javascriptCanOpenWindows: false
                 settings.pluginsEnabled: false
+                Connections {
+                    target: window
+                    function onRetryBrowser() { browser.reload(); }
+                }
                 onNavigationRequested: (request) => {
                     if (request.url.toString() !== "qrc:/bsi-web/index.html")
                         request.action = WebEngineNavigationRequest.IgnoreRequest;
                 }
                 onLoadingChanged: (request) => {
                     if (request.status === WebEngineView.LoadFailedStatus)
-                        toast.show(qsTr("Chromium UI failed to load: ") + request.errorString);
+                        window.browserFailure = qsTr("The workspace could not load. You can retry or open the native tools.");
                 }
                 onRenderProcessTerminated: (status, exitCode) => {
-                    toast.show(qsTr("Chromium renderer stopped. Restart with --native-ui if this persists."));
+                    window.browserFailure = qsTr("The display process stopped (code %1). Your sign-in is still protected. Check any in-progress operation before retrying.").arg(exitCode);
                 }
+            }
+        }
+        Rectangle {
+            visible: auth.authorized && window.nativePage < 0 && !!window.browserFailure
+            Layout.fillWidth: true
+            Layout.fillHeight: true
+            color: Theme.window
+            ColumnLayout {
+                anchors.centerIn: parent
+                width: Math.min(parent.width - 48, 560)
+                spacing: 20
+                Label { text: qsTr("Let’s get you back."); font.pixelSize: 26; color: Theme.text }
+                Label { text: window.browserFailure; wrapMode: Text.WordWrap; Layout.fillWidth: true; color: Theme.textDim }
+                Button {
+                    text: qsTr("Reload workspace"); enabled: !backend.busy
+                    onClicked: { window.browserFailure = ""; window.retryBrowser(); }
+                }
+                Button { text: qsTr("Open native tools"); enabled: !backend.busy; onClicked: window.nativePage = 0 }
             }
         }
         Loader {
@@ -123,6 +159,12 @@ ApplicationWindow {
                 backend.detectInstalls();
             }
             if (!auth.authorized) { fileDialog.close(); window.nativePage = -1; }
+            // Do not destroy WebEngineView inside a WebChannel invocation
+            // (e.g. sign-out). Let the native call and signal delivery unwind.
+            Qt.callLater(function() {
+                window.browserReady = auth.authorized;
+                if (!auth.authorized) window.browserFailure = "";
+            });
         }
     }
     LoginGate { anchors.fill: parent; appWindow: window; visible: !auth.authorized; enabled: visible; z: 100 }
