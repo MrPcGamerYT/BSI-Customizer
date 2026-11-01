@@ -77,8 +77,8 @@ Item {
                         anchors.horizontalCenter: parent.horizontalCenter
                         anchors.verticalCenter: parent.verticalCenter
                         anchors.verticalCenterOffset: -16
-                        color: "#0D2038"; opacity: 0.72
-                        SequentialAnimation on opacity { loops: Animation.Infinite; NumberAnimation { to: 0.42; duration: 1700 } NumberAnimation { to: 0.72; duration: 1700 } }
+                        color: "#0D2038"
+                        SequentialAnimation on opacity { loops: Animation.Infinite; NumberAnimation { from: 0.72; to: 0.42; duration: 1700 } NumberAnimation { to: 0.72; duration: 1700 } }
                     }
                     Rectangle {
                         width: 116; height: 116; radius: 58
@@ -150,6 +150,6 @@ Item {
         title: qsTr("Choose a boot MP4")
         nameFilters: [qsTr("MP4 video (*.mp4)")]
         fileMode: FileDialog.OpenFile
-        onAccepted: page.videoPath = selectedFile.toLocalFile()
+        onAccepted: page.videoPath = backend.localFilePath(selectedFile)
     }
 }

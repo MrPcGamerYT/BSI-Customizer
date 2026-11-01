@@ -19,9 +19,8 @@ ApplicationWindow {
     minimumHeight: 640
     visible: true
     function fitToAvailableScreen() {
-        const area = window.screen ? window.screen.availableGeometry : null;
-        const bounds = area ? { x: area.x, y: area.y, width: area.width, height: area.height }
-                            : { x: 0, y: 0, width: Screen.desktopAvailableWidth, height: Screen.desktopAvailableHeight };
+        const bounds = { x: Screen.virtualX, y: Screen.virtualY,
+                         width: Screen.desktopAvailableWidth, height: Screen.desktopAvailableHeight };
         const fitted = WindowGeometry.initialGeometry(bounds);
         minimumWidth = fitted.minimumWidth;
         minimumHeight = fitted.minimumHeight;

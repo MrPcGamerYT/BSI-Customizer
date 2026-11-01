@@ -255,10 +255,10 @@ Item {
     Rectangle {
         width: Math.min(root.side * 1.12, 1120); height: width; radius: width / 2
         anchors.centerIn: parent; anchors.horizontalCenterOffset: -root.width * 0.04
-        color: "#176BC2"; opacity: 0.055
+        color: "#176BC2"
         SequentialAnimation on opacity {
             loops: Animation.Infinite
-            NumberAnimation { to: 0.10; duration: 2200; easing.type: Easing.InOutSine }
+            NumberAnimation { from: 0.055; to: 0.10; duration: 2200; easing.type: Easing.InOutSine }
             NumberAnimation { to: 0.045; duration: 2200; easing.type: Easing.InOutSine }
         }
     }
