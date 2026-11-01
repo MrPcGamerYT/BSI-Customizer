@@ -81,7 +81,10 @@ QVariantMap inspect(const QByteArray &d) {
         QSet<quint32> visited; int nodes=0;
         const auto resourceRange=[&](quint32 rel,qint64 length) { return quint64(rel)+quint64(length)<=rd.second && inRange(d,root+rel,length); };
         std::function<void(quint32,int,QString)> walk=[&](quint32 rel,int depth,QString path) {
-            if (depth>4 || visited.contains(rel) || ++nodes>16384 || resources.size()>=4096 || !resourceRange(rel,16)) return;
+            if (depth>4 || visited.contains(rel) || ++nodes>16384 || resources.size()>=4096 || !resourceRange(rel,16)) {
+                if (warnings.size()<100) warnings << "Skipped cyclic, malformed or over-budget resource directory.";
+                return;
+            }
             visited.insert(rel);
             const int count=le16(d,root+rel+12)+le16(d,root+rel+14);
             if (!resourceRange(rel+16,qint64(count)*8)) return;
@@ -99,7 +102,8 @@ QVariantMap inspect(const QByteArray &d) {
                 if (target&0x80000000) walk(target&0x7fffffff,depth+1,next);
                 else if (resourceRange(target,16)) {
                     const quint32 size=le32(d,root+target+4); const qint64 at=raw(le32(d,root+target),size);
-                    if (at>=0) resources << QVariantMap{{"index",resources.size()},{"path",next},{"offset",at},{"size",qulonglong(size)},{"codepage",le32(d,root+target+8)}};
+                    if (at<0) { if(warnings.size()<100) warnings << "Skipped unmapped Win32 resource payload."; continue; }
+                    resources << QVariantMap{{"index",resources.size()},{"path",next},{"offset",at},{"size",qulonglong(size)},{"codepage",le32(d,root+target+8)}};
                 }
             }
         };

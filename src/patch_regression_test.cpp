@@ -2057,6 +2057,15 @@ int runPatchRegressionTests()
         for(int n : {0,64,128,200,300}) check(!BinaryInspector::inspect(before.left(n)).value("ok").toBool(),"Binary Lab refuses truncated PE headers");
         auto invalid=before; putLe16(invalid,0x86,97);
         check(!BinaryInspector::inspect(invalid).value("ok").toBool(),"Binary Lab refuses excessive section counts");
+        auto withExport=before;
+        putLe32(withExport,0x98+112,0x6000); putLe32(withExport,0x98+116,0xb0);
+        putLe32(withExport,0x6010,7); putLe32(withExport,0x6014,1); putLe32(withExport,0x6018,1);
+        putLe32(withExport,0x601c,0x60a0); putLe32(withExport,0x6020,0x6080); putLe32(withExport,0x6024,0x6090);
+        withExport.replace(0x6070,12,QByteArray("exported_fn\0",12));
+        putLe32(withExport,0x6080,0x6070); putLe16(withExport,0x6090,0); putLe32(withExport,0x60a0,0x7000);
+        const auto exports=BinaryInspector::inspect(withExport).value("exports").toList();
+        check(exports.size()==1 && exports[0].toMap().value("name").toString()=="exported_fn" && exports[0].toMap().value("ordinal").toInt()==7,
+              "Binary Lab resolves named exports through name and ordinal tables");
         auto x86=before; putLe16(x86,0x84,0x14c); putLe16(x86,0x98,0x10b);
         check(BinaryInspector::inspect(x86).value("format").toString()=="PE32", "Binary Lab accepts PE32 metadata without assuming x64 exports");
     }
