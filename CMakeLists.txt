@@ -67,6 +67,8 @@ qt_add_executable(BSICustomizer
     src/core/ByteUtils.h
     src/core/PeUtils.h
     src/core/PeUtils.cpp
+    src/core/BinaryInspector.h
+    src/core/BinaryInspector.cpp
     src/core/ZlibUtils.h
     src/core/ZlibUtils.cpp
     src/core/ThemeEngine.h
@@ -396,7 +398,8 @@ if(BSI_CHROMIUM_UI)
         FILES src/chromium/ChromiumMain.qml)
     qt_add_resources(BSICustomizer "bsi_chromium_assets"
         PREFIX "/bsi-web" BASE "src/web"
-        FILES src/web/index.html src/web/styles.css src/web/transport.js src/web/resource-search.js src/web/editors.js src/web/maintenance.js src/web/effects.js src/web/app.js src/web/icon.png
+        FILES src/web/index.html src/web/styles.css src/web/transport.js src/web/resource-search.js src/web/editors.js src/web/maintenance.js
+        src/web/binary-lab.js src/web/effects.js src/web/app.js src/web/icon.png
             src/web/fonts/manrope-latin.woff2 src/web/fonts/plus-jakarta-sans-latin.woff2
             src/web/fonts/manrope-LICENSE.txt src/web/fonts/plus-jakarta-sans-LICENSE.txt)
 endif()

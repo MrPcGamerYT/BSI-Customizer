@@ -1476,6 +1476,7 @@ QVariantList Backend::debloatOptions()
                               { QStringLiteral("group"), option.group },
                               { QStringLiteral("label"), option.label },
                               { QStringLiteral("hint"), option.hint },
+                              { QStringLiteral("windowsOnly"), option.windowsOnly },
                               { QStringLiteral("needsInstance"), option.needsInstance } };
     return list;
 }

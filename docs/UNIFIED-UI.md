@@ -6,7 +6,7 @@ The Windows portable/installer workflow now builds with `BSI_CHROMIUM_UI=ON`.
 Double-clicking that build opens `ChromiumMain.qml`: the existing native Discord
 login gate followed by the **actual HTML/CSS/JavaScript workspace**. The supplied
 `gemini-code-1793470243134.html` is the presentation reference, not a Python bridge
-or a replacement EXE patcher. Its original concept credit is retained.
+or a replacement EXE patcher. The presentation now uses BSI Lab branding and named tool navigation.
 
 This supersedes the previous native-QML approximation. The HTML frontend has the
 glass shell, local Manrope/Jakarta fonts, hover/transitions, profile menu, custom
@@ -36,6 +36,7 @@ work when configured without WebEngine.
 | Build | Update preference/check/download/verified apply, trust and helper diagnostics |
 | GIF RPC | Existing proxy inspection/install/restore, configuration/profile and IPC diagnostics |
 | Workspace | Profiles, queues, hash-bound dry run/apply, journals, image preparation, MP4 inspection and Qt decoder preview |
+| Binary Lab | Explicit read-only PE sections, DLL imports, named exports, Win32 resources, bounded ASCII/UTF-16LE strings, raw hex, new-file-only section/resource/overlay and JSON exports |
 | Debloat & Android | Original config cleanup/restore, live ADB package/storage cleanup/undo, Root.vhd/VHDX/archive tools |
 
 The disk tools reuse `Backend::rootvhd*`, including read-only/dirty-journal
@@ -78,3 +79,24 @@ arguments and UI behavior; they are not authenticated C++ engine end-to-end
 certification. Native engine fixtures and Windows deployment tests remain
 separate. Real Discord OAuth and every emulator version still require target-PC
 verification. See [CHROMIUM-UI.md](CHROMIUM-UI.md) for the bridge/security design.
+
+## Binary Lab and detailed maintenance
+
+Binary Lab does not execute DLLs, patch arbitrary offsets or promise to unpack
+all protectors. Inspection is explicit and capped at 256 MiB. String scans cover
+the first 32 MiB, at most 2000 matches; UTF-16LE scanning covers ASCII-range
+characters at either byte alignment. Named exports and Win32 resource leaves
+have 4096-entry budgets; tables paginate 100 rows. Hex reads return 4096 bytes.
+Every follow-up request rechecks SHA-256 against the inspection. Exports require
+a new output filename (native `NewOnly`), never replace the inspected source,
+and extract raw bytes, not reconstructed ICO/BMP containers. Overlay bytes can
+include Authenticode certificates or packer data; signature trust is not inferred.
+Qt/qrc entries remain in the original Resource explorer, including its text
+editing, capacity checks, replacement and bulk extraction.
+
+Maintenance exposes original configuration groups, per-instance tuning, ADB
+access, dedicated GPU preference, all installed packages with reviewed labels,
+search, selection, storage warnings and restore. Selection is staging only.
+Downloads backup does not back up Android/data or obb. No new arbitrary ADB
+shell endpoint, placebo optimizer, automatic scan or blanket safe-removal claim
+is introduced.

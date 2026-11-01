@@ -6,7 +6,7 @@ name: CI
 # "Run workflow" to check work in progress.
 on:
   push:
-    branches: [main, arena/3f309c3c-bsi-customizer]
+    branches: [main, arena/158c5909-bsi-customizer]
   pull_request:
   workflow_dispatch:
 

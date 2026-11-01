@@ -412,6 +412,7 @@ QVariantMap scan(const QString &exePath, const QString &confPath, const QString 
                               { QStringLiteral("note"), isReviewed ? rule.note
                                   : QStringLiteral("Not on the reviewed list. Removing this app may "
                                                    "break Android or BlueStacks.") },
+                              { QStringLiteral("reviewed"), isReviewed },
                               { QStringLiteral("recommended"), isReviewed && rule.recommended },
                               { QStringLiteral("debloatable"), true },
                               { QStringLiteral("installed"), true },
@@ -426,6 +427,7 @@ QVariantMap scan(const QString &exePath, const QString &confPath, const QString 
         apps << QVariantMap { { QStringLiteral("package"), package },
                               { QStringLiteral("label"), isReviewed ? rule.label : package },
                               { QStringLiteral("note"), isReviewed ? rule.note : QString() },
+                              { QStringLiteral("reviewed"), isReviewed },
                               { QStringLiteral("recommended"), false },
                               { QStringLiteral("debloatable"), false },
                               { QStringLiteral("installed"), false },

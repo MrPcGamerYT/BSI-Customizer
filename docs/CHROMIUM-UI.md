@@ -1,7 +1,7 @@
 # Chromium workspace — BSI Customizer 3.0.1
 
 The user-supplied `gemini-code-1793470243134.html` is the visual reference.
-Original concept credit **@Floatz4Ever** is retained. This integration uses
+The BSI Lab presentation keeps the HTML interactions. This integration uses
 bundled local fonts, CSS/JS and real BSI engine calls, not its Python bridge,
 placeholder "EXE found" state, or a replacement login provider.
 

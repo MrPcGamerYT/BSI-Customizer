@@ -1,4 +1,5 @@
 #include "core/Backend.h"
+#include "core/BinaryInspector.h"
 #include "core/BootVideoPatcher.h"
 #include "core/PlayerCache.h"
 #include "core/GifRpc.h"
@@ -2024,6 +2025,41 @@ int runPatchRegressionTests()
     check(temp.isValid(), "regression temp directory available");
     if (!temp.isValid())
         return failures;
+    std::printf("[binary-lab] bounded read-only PE analysis and extraction metadata\n");
+    {
+        auto data=peFile();
+        data.replace(0x5000,8,"FILEDATA");
+        putLe32(data,0x98+108,16);
+        putLe32(data,0x98+128,0x4000); putLe32(data,0x98+132,88);
+        putLe16(data,0x4000+14,1); putLe32(data,0x4010,10); putLe32(data,0x4014,0x80000018);
+        putLe16(data,0x4018+14,1); putLe32(data,0x4028,77); putLe32(data,0x402c,0x80000030);
+        putLe16(data,0x4030+14,1); putLe32(data,0x4040,1033); putLe32(data,0x4044,72);
+        putLe32(data,0x4048,0x5000); putLe32(data,0x404c,8); putLe32(data,0x4050,65001);
+        data.append("TAIL");
+        const auto before=data;
+        const auto result=BinaryInspector::inspect(data);
+        check(result.value("ok").toBool() && result.value("architecture").toString()=="x64", "Binary Lab reads PE32+ identity");
+        check(result.value("sections").toList().size()==1 && result.value("overlaySize").toInt()==4,"Binary Lab maps sections and appended overlay");
+        const auto resources=result.value("resources").toList();
+        check(resources.size()==1 && resources[0].toMap().value("path").toString()=="10/77/1033"
+              && resources[0].toMap().value("offset").toInt()==0x5000 && resources[0].toMap().value("size").toInt()==8,
+              "Binary Lab traverses Win32 type/name/language to exact raw payload");
+        check(result.value("sha256").toString()==QString::fromLatin1(QCryptographicHash::hash(data,QCryptographicHash::Sha256).toHex()) && data==before,
+              "Binary Lab fingerprints source without changing bytes");
+        check(BinaryInspector::hex(data,0x5000).value("text").toString().contains("46 49 4c 45 44 41 54 41"),"Binary Lab hex view reads exact requested bytes");
+        check(!BinaryInspector::hex(data,-1).value("ok").toBool() && !BinaryInspector::hex(data,data.size()).value("ok").toBool(),"Binary Lab rejects out-of-range hex offsets");
+        check(BinaryInspector::strings(data,"filedata").value("rows").toList().size()==1,"Binary Lab string filtering is case insensitive");
+        const auto wide=QByteArray::fromHex("00480065006c006c006f00");
+        const auto found=BinaryInspector::strings(wide,"Hello").value("rows").toList();
+        check(found.size()==1 && found[0].toMap().value("offset").toInt()==1,"Binary Lab finds odd-aligned UTF-16LE strings");
+        putLe32(data,0x4044,0x80000000);
+        check(BinaryInspector::inspect(data).value("resources").toList().isEmpty(),"Binary Lab terminates cyclic resource directories");
+        for(int n : {0,64,128,200,300}) check(!BinaryInspector::inspect(before.left(n)).value("ok").toBool(),"Binary Lab refuses truncated PE headers");
+        auto invalid=before; putLe16(invalid,0x86,97);
+        check(!BinaryInspector::inspect(invalid).value("ok").toBool(),"Binary Lab refuses excessive section counts");
+        auto x86=before; putLe16(x86,0x84,0x14c); putLe16(x86,0x98,0x10b);
+        check(BinaryInspector::inspect(x86).value("format").toString()=="PE32", "Binary Lab accepts PE32 metadata without assuming x64 exports");
+    }
     std::printf("[theme-probe] binary previews must not truncate diagnostics\n");
     {
         auto f = fixture(2, QStringLiteral("#112233"));

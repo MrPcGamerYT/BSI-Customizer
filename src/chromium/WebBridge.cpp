@@ -3,6 +3,10 @@
 
 #include "core/AuthManager.h"
 #include "core/Backend.h"
+#include "core/BinaryInspector.h"
+#include <QFile>
+#include <QSaveFile>
+#include <QJsonDocument>
 #include "core/SettingsManager.h"
 #include "core/ThemeManager.h"
 #include "core/UpdateChecker.h"
@@ -295,6 +299,54 @@ QVariantMap WebBridge::invoke(const QString &method, const QVariantMap &args)
             emit videoControlRequested(action, {{"crop", args.value("crop").toBool()}});
         else return failure(QStringLiteral("Unknown preview control."));
         value = QVariantMap{{"msg", QStringLiteral("Preview control requested; emulator playback is not verified.")}};
+    } else if (method == QLatin1String("binaryLab")) {
+        const QString action=text("action");
+        if (!QStringList{"inspect","strings","hex","export"}.contains(action)) return failure("Unknown Binary Lab action.");
+        const QString path=text("path").isEmpty()?m_backend.exePath():text("path");
+        QFile file(path);
+        if (!QFileInfo(path).isFile() || !file.open(QIODevice::ReadOnly) || file.size()>BinaryInspector::FileLimit)
+            return failure("Choose a readable EXE/DLL no larger than 256 MiB.");
+        const QByteArray data=file.read(BinaryInspector::FileLimit+1);
+        if (file.error()!=QFileDevice::NoError || data.size()>BinaryInspector::FileLimit) return failure("Could not read the complete bounded file.");
+        const auto report=BinaryInspector::inspect(data);
+        if (!report.value("ok").toBool()) return failure(report.value("error").toString());
+        if (action!="inspect" && (text("sha256").isEmpty() || text("sha256")!=report.value("sha256").toString()))
+            return failure("The binary changed or has not been inspected. Inspect it again first.");
+        if (action=="inspect") value=report;
+        else if (action=="strings") {
+            if (text("query").size()>512) return failure("String query is too long.");
+            value=BinaryInspector::strings(data,text("query"));
+        } else if (action=="hex") {
+            bool valid=false; const qint64 offset=args.value("offset").toLongLong(&valid);
+            if (!valid) return failure("Invalid file offset.");
+            value=BinaryInspector::hex(data,offset);
+        } else {
+            const QString destination=text("destination");
+            if (destination.isEmpty() || QFileInfo::exists(destination) || QFileInfo(destination).isSymLink())
+                return failure("Choose a NEW output file. Binary Lab never overwrites existing files.");
+            QByteArray output;
+            const QString kind=text("kind");
+            if (kind=="report") output=QJsonDocument::fromVariant(report).toJson(QJsonDocument::Indented);
+            else {
+                qint64 offset=-1,size=0;
+                if (kind=="overlay") {offset=report.value("overlayOffset").toLongLong();size=report.value("overlaySize").toLongLong();}
+                else if (kind=="section" || kind=="resource") {
+                    bool valid=false; const int index=args.value("index").toInt(&valid);
+                    const auto rows=report.value(kind=="section"?"sections":"resources").toList();
+                    if (!valid || index<0 || index>=rows.size()) return failure("Invalid extraction selection.");
+                    const auto row=rows[index].toMap(); offset=row.value("offset").toLongLong();size=row.value("size").toLongLong();
+                } else return failure("Unsupported extraction kind.");
+                if (offset<0 || size<=0 || offset>data.size() || size>data.size()-offset) return failure("Selected bytes are absent or invalid.");
+                output=data.mid(offset,size);
+            }
+            QFile out(destination);
+            // NewOnly closes the existence-check race: never truncate a file
+            // created by another process after the earlier path check.
+            if (!out.open(QIODevice::WriteOnly | QIODevice::NewOnly)) return failure("Output already exists or cannot be created.");
+            if (out.write(output)!=output.size() || !out.flush()) { out.remove(); return failure("Export write failed; incomplete output removed."); }
+            out.close();
+            value=QVariantMap{{"ok",true},{"msg","Exported to a new file. Inspected source was not modified."},{"bytes",output.size()},{"destination",destination}};
+        }
     } else if (method == QLatin1String("maintenance")) {
         // Explicit adapters only: no reflection, script execution or generic
         // QObject access. All authorization, busy and exception guards above

@@ -12,7 +12,7 @@ const { chromium } = require(process.env.BSI_PLAYWRIGHT || 'playwright');
 const root = path.resolve(__dirname, '../src/web');
 const server = http.createServer((req, res) => {
   const name = new URL(req.url, 'http://test').pathname.slice(1) || 'index.html';
-  if (!['index.html', 'styles.css', 'transport.js', 'editors.js', 'maintenance.js', 'resource-search.js', 'effects.js', 'app.js', 'icon.png', 'fonts/manrope-latin.woff2', 'fonts/plus-jakarta-sans-latin.woff2'].includes(name)) { res.writeHead(404).end(); return; }
+  if (!['index.html', 'styles.css', 'transport.js', 'editors.js', 'maintenance.js', 'binary-lab.js', 'resource-search.js', 'effects.js', 'app.js', 'icon.png', 'fonts/manrope-latin.woff2', 'fonts/plus-jakarta-sans-latin.woff2'].includes(name)) { res.writeHead(404).end(); return; }
   res.setHeader('Content-Type', name.endsWith('.js') ? 'text/javascript' : name.endsWith('.css') ? 'text/css' : name.endsWith('.woff2') ? 'font/woff2' : name.endsWith('.png') ? 'image/png' : 'text/html');
   res.end(fs.readFileSync(path.join(root, name)));
 });
@@ -29,7 +29,7 @@ const server = http.createServer((req, res) => {
     await offline.goto(url);
     await offline.locator('#preview-button').waitFor({ state: 'visible' });
     await offline.locator('#preview-button').click();
-    for (let i = 0; i < 13; ++i) {
+    for (let i = 0; i < 14; ++i) {
       await offline.locator(`#spine [data-page="${i}"]`).click();
       assert.ok(await offline.locator('#main').innerText());
       assert.equal(await offline.locator('[data-action]:enabled').count(), 0, `Offline native action on page ${i}`);
@@ -37,7 +37,7 @@ const server = http.createServer((req, res) => {
     await offline.locator('#spine [data-page="0"]').click();
     if (process.env.BSI_WEB_SCREENSHOT) await offline.screenshot({ path: process.env.BSI_WEB_SCREENSHOT });
     assert.equal(await offline.locator('#main > .matrix > .tile').count(), 4, 'Reference dashboard remains an uncluttered 2x2 matrix');
-    assert.equal(await offline.locator('#spine .icon svg').count(), 13, 'Sidebar uses line icons, not numbered placeholders');
+    assert.equal(await offline.locator('#spine .icon svg').count(), 14, 'Sidebar uses line icons, not numbered placeholders');
     assert.equal(await offline.locator('.orbs i').count(), 3);
     for (const size of [{width: 1100, height: 700}, {width: 1920, height: 1080}]) {
       await offline.setViewportSize(size);
@@ -81,6 +81,12 @@ const server = http.createServer((req, res) => {
           if (method === 'rpcidNames') value = { ok: true, entries: [{ key: 'ProductName', value: 'Fixture', max: 40 }] };
           if (method === 'gifRpcInspect') value = { ok: true, installed: true, settings: { AppId: '12345678901234567', State: 'Loaded fixture', Enabled: true, Interval: 5 } };
           if (method === 'loadGradients') value = { targets: [{ key: 'fixture-surface', label: 'Fixture surface', supportsOrientation: true }] };
+          if (method === 'binaryLab') {
+            if(args.action==='inspect') value={ok:true,format:'PE32+',architecture:'x64',size:8192,sha256:'a'.repeat(64),entryRva:4096,sections:[{name:'.text',offset:1024,size:2048,virtualSize:2048,rva:4096,permissions:'XR-',valid:true}],imports:['KERNEL32.dll'],exports:[{name:'<img src=x onerror=alert(1)>',ordinal:1,rva:4096,offset:1024}],resources:[{path:'10/77/1033',offset:4096,size:8,codepage:65001}],overlaySize:4,overlayOffset:8188,warnings:[],note:'Fixture only'};
+            if(args.action==='strings')value={ok:true,rows:[{offset:123,encoding:'ASCII',text:'<img src=x onerror=alert(1)>'}],note:'Fixture string result'};
+            if(args.action==='hex')value={ok:true,text:'00000400  46 49 4c 45  FILE',next:args.offset+4096};
+            if(args.action==='export')value={ok:true,msg:'Fixture exported without replacing source'};
+          }
           if (method === 'maintenance') {
             value = {ok:true,msg:'Native maintenance fixture'};
             if(args.action==='sidebar-read') value={supported:true,applied:true,buttons:[{key:'capture',label:'Screenshot',hidden:false},{key:'volume',label:'Volume',hidden:false}]};
@@ -137,10 +143,11 @@ const server = http.createServer((req, res) => {
     await page.locator('#toast').filter({ hasText: 'unsupported; no write' }).waitFor();
     await page.locator('#spine [data-page="2"]').click();
     assert.equal(await page.evaluate(() => __calls.filter(c => c.method === 'scanResources').length), 1, 'Returning to Resources must not scan');
-    for (let i = 0; i < 13; ++i) {
+    for (let i = 0; i < 14; ++i) {
       await page.locator(`#spine [data-page="${i}"]`).click();
       assert.ok(await page.locator('#main').innerText());
     }
+    assert.ok(!(await page.locator('body').innerText()).includes('Floatz'), 'No removed UI branding');
     // New HTML editors must dispatch the original backend contracts rather
     // than opening a native-editor placeholder.
     const nav = async index => {
@@ -150,6 +157,25 @@ const server = http.createServer((req, res) => {
     const edit = key => page.locator(`[data-editor-field="${key}"]`);
     const click = async name => { await page.locator(`[data-action="editor:${name}"]`).click(); await page.waitForFunction(() => !document.body.dataset.confirming && !document.body.classList.contains('busy')); };
     const last = method => page.evaluate(name => __calls.filter(c => c.method === name).at(-1), method);
+    const labBefore=await page.evaluate(()=>__calls.filter(c=>c.method==='binaryLab').length);
+    await nav(13);
+    assert.equal(await page.evaluate(()=>__calls.filter(c=>c.method==='binaryLab').length),labBefore,'Binary Lab never scans on page entry');
+    await click('lab-inspect');
+    assert.ok((await page.locator('#main').innerText()).includes('PE32+'));
+    await page.locator('[data-action="editor:lab-tab"][data-tab="exports"]').click();
+    assert.equal(await page.locator('.lab-table img').count(),0,'Binary metadata is escaped, not interpreted as HTML');
+    await page.locator('[data-action="editor:lab-tab"][data-tab="strings"]').click();
+    await edit('lab:query').fill('fixture');await click('lab-strings');
+    assert.equal((await last('binaryLab')).args.query,'fixture');
+    assert.equal(await page.locator('.lab-table img').count(),0);
+    await page.locator('[data-action="editor:lab-tab"][data-tab="sections"]').click();
+    await click('lab-peek');
+    assert.equal((await last('binaryLab')).args.offset,1024);
+    assert.equal((await last('binaryLab')).args.sha256,'a'.repeat(64),'Follow-up native requests bind to inspected hash');
+    await page.evaluate(()=>window.__nextFile='C:\\fixture\\report.json');await click('lab-report');
+    assert.equal((await last('binaryLab')).args.action,'export');
+    assert.equal((await last('binaryLab')).args.kind,'report');
+    if(process.env.BSI_WEB_SCREENSHOT)await page.screenshot({path:process.env.BSI_WEB_SCREENSHOT.replace('.png','-binary.png')});
     await nav(6);
     await click('interface-load');
     await edit('remove:0').check();
@@ -316,6 +342,6 @@ const server = http.createServer((req, res) => {
     await page.locator('#connection').waitFor({ state: 'visible' });
     assert.equal(await page.locator('[data-action]:enabled').count(), 0);
     assert.deepEqual(errors, []);
-    console.log('PASS: 13 routes; picker commit/cancel, styled cancellation and reduced-motion window effects; sidebar/debloat/ADB/disk requests; Qt preview controls; offline native actions disabled; manual scans; pagination/search; safe text rendering; real request arguments; failed-engine errors; integrated About/removal/RPC/GIF/boot/gradient/workspace/updater contracts; sign-out lock. UI test transport only.');
+    console.log('PASS: 14 routes; picker commit/cancel, styled cancellation and reduced-motion window effects; sidebar/debloat/ADB/disk requests; Qt preview controls; offline native actions disabled; manual scans; pagination/search; safe text rendering; real request arguments; failed-engine errors; integrated About/removal/RPC/GIF/boot/gradient/workspace/updater contracts; sign-out lock. UI test transport only.');
   } finally { await browser.close(); }
 })().then(() => server.close()).catch(error => { console.error(error); server.close(); process.exitCode = 1; });

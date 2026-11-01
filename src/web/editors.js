@@ -6,6 +6,7 @@
     create(ctx) {
       const { esc, button, request, chooseFile, getState, getResources } = ctx;
       const maintenance = BsiMaintenance.create(ctx);
+      const binaryLab = BsiBinaryLab.create(ctx);
       let fields = {}, interfaceInfo = null, profile = {}, operations = [], plan = null;
       let history = [], gradients = [], output = {}, rpcNames = [], instances = [];
       let videoSelected = false, videoStatus = '';
@@ -62,6 +63,7 @@
         return response;
       }
       function render(page) {
+        if (page === 13) return binaryLab.render();
         if (page === 12) return maintenance.render() + result(page);
         if (page === 6) {
           const info = interfaceInfo;
@@ -74,7 +76,7 @@
           + card('Explorer / Task Manager names', `<label class="editor-field"><span>Version-resource key</span><select class="inp" data-editor-field="rpc:nameKey"><option value="">All supported name keys</option>${rpcNames.map(n => `<option value="${esc(n.key)}" ${value('rpc:nameKey') === n.key ? 'selected' : ''}>${esc(n.key)} · maximum ${esc(n.max)}</option>`).join('')}</select></label>${field('rpc:name', 'New display name')}${actions(btn('Dry run name change', 'rpc-name-dry') + btn('Apply display name', 'rpc-name'))}`) + result(page);
         if (page === 9) {
           const u = getState().updates || {};
-          return card('BSI Customizer', '<p class="native-note">Chromium presentation with your original C++ engines. Existing Discord login, access rules, backup checks and signed/pinned update verification remain native.</p><p class="note">Visual concept: @Floatz4Ever. Full native editors remain available as a compatibility fallback.</p>')
+          return card('BSI Customizer', '<p class="native-note">Chromium presentation with your original C++ engines. Existing Discord login, access rules, backup checks and signed/pinned update verification remain native.</p><p class="note">BSI Customizer: detailed native-engine tools in one HTML workspace. Recovery editors remain available only as an emergency fallback.</p>')
             + card('Updates & recovery', `<div class="editor-grid">${[['Build', u.currentVersion || getState().version || '—'], ['Updater', u.configured ? 'Configured' : 'Not configured'], ['State', u.state || 'Idle'], ['Latest', u.latestVersion || '—'], ['Trust', u.trust || '—'], ['Download', u.downloadSize || '—']].map(([k, v]) => `<div class="kv"><span>${k}</span><b>${esc(v)}</b></div>`).join('')}</div><p class="note">${esc(u.note || '')}</p>${check('updates:auto', 'Check for updates automatically', u.autoCheck !== false)}${actions(btn('Save auto-check setting', 'updates-auto') + btn('Check now', 'update-check', true) + btn('Download verified update', 'update-download') + btn('Apply & restart', 'update-apply') + btn('Cancel download', 'update-cancel') + btn(u.skipped ? 'Unskip release' : 'Skip optional release', u.skipped ? 'update-unskip' : 'update-skip') + btn('Open download page', 'update-openDownloadPage') + btn('Show staged file', 'update-showStagedFile') + btn('Read helper diagnostics', 'update-diagnostics') + btn('Open helper log', 'update-showHelperLog'))}<pre class="editor-result">${esc(u.releaseNotes || '')}</pre>`)+result(page);
         }
         if (page === 10) return card('Animated Discord presence', `<p class="native-note">The existing RPC-only version.dll is deployed by C++. Discord Desktop must be running. GIF animation and external image acceptance depend on Discord; no live connection is claimed from a saved config.</p>${actions(btn('Inspect DLL / load settings', 'gif-inspect', true) + btn('Load staged profile settings', 'profile-fields') + btn('Check Discord IPC / profile', 'gif-diagnostics'))}<div class="editor-grid">${gifFields.map(([key, label]) => field('gif:' + key, label)).join('')}</div>${area('gif:Details', 'Rotating details — one per line, maximum 10')}${field('gif:Interval', 'Rotation interval (seconds)', 5, 'number')}${check('gif:Enabled', 'Enable presence', true)}${check('gif:Timestamp', 'Show elapsed timestamp')}${check('gif:replaceExisting', 'Explicitly allow replacing an existing proxy (review inspection first)')}${actions(btn('Install / apply native plugin', 'gif-apply', true) + btn('Save settings to profile', 'gif-profile') + btn('Restore proxy / settings', 'gif-restore'))}`)+result(page);
@@ -99,7 +101,8 @@
       }
       async function action(name, el, page) {
         let response;
-        if (name.startsWith('maint-')) response = await maintenance.action(name.slice(6), el);
+        if (name.startsWith('lab-')) response = await binaryLab.action(name.slice(4), el);
+        else if (name.startsWith('maint-')) response = await maintenance.action(name.slice(6), el);
         else if (name === 'interface-load') {
           interfaceInfo = await request('readInterface');
           Object.keys(fields).filter(k => /^(about:|link:|remove:)/.test(k)).forEach(k => delete fields[k]);
@@ -210,8 +213,8 @@
       return {
         render, extra, action,
         videoStatus(message) { videoStatus=String(message).slice(0,2048); const node=document.querySelector('#video-status'); if(node)node.textContent=videoStatus; },
-        input(el) { maintenance.input(el); if (el.dataset.editorField) fields[el.dataset.editorField] = el.type === 'checkbox' ? el.checked : el.value; },
-        reset() { maintenance.reset(); videoSelected=false; videoStatus=''; fields = {}; interfaceInfo = null; profile = {}; operations = []; plan = null; history = []; gradients = []; output = {}; rpcNames = []; instances = []; imageSource = ''; comparison = null; original = null; },
+        input(el) { binaryLab.input(el); maintenance.input(el); if (el.dataset.editorField) fields[el.dataset.editorField] = el.type === 'checkbox' ? el.checked : el.value; },
+        reset() { binaryLab.reset(); maintenance.reset(); videoSelected=false; videoStatus=''; fields = {}; interfaceInfo = null; profile = {}; operations = []; plan = null; history = []; gradients = []; output = {}; rpcNames = []; instances = []; imageSource = ''; comparison = null; original = null; },
         async navigate(page) { if ([5, 10, 11].includes(page) && ctx.enabled()) await refreshWorkspace(); }
       };
     }

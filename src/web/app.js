@@ -1,26 +1,38 @@
-/* BSI Chromium workspace. Visual concept: @Floatz4Ever.
+/* BSI Customizer engine workspace.
    Native authentication and engines remain the authority; no Python bridge. */
 (() => {
   'use strict';
   const $ = s => document.querySelector(s);
   const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   const pages = [
-    ['Overview', 'Dashboard', 'Customize your emulator.', 'Precision tools for themes, removals and advanced BlueStacks tweaks.'],
+    ['Overview', 'Dashboard', 'Customize your emulator.', 'Detailed player patchers, binary inspection and reversible Android maintenance.'],
     ['Theme studio', 'Colors', 'Color studio', 'Load the real player palette, stage edits, then apply.'],
     ['Resource explorer', 'Resources', 'Inside your player.', 'Explicit scans only. Inspect, edit and extract embedded resources.'],
     ['Performance', 'FPS', 'More room to perform.', 'The same native FPS detection, analysis and patch engines.'],
     ['Integrity & safety', 'Integrity', 'Inspect before you change.', 'Native integrity checks, patching and restore.'],
-    ['Boot experience', 'Boot', 'Make an entrance.', 'Configure the native boot patch or open the complete editor.'],
+    ['Boot experience', 'Boot', 'Make an entrance.', 'Adaptive Qt6/Qt5/WebEngine boot video, timing, cache cleanup and backup recovery.'],
     ['Player interface', 'Interface', 'Less noise. More you.', 'Removals, layout tweaks and editable player About text and links.'],
     ['Discord presence', 'Presence', 'Your player, represented.', 'Keep the existing Rich Presence ID and version-resource utilities.'],
     ['Appearance', 'Settings', 'Your workspace.', 'App appearance and target paths. These are not player theme colors.'],
     ['About BSI', 'About', 'Built around your player.', 'Chromium presentation. C++ patch engines. Existing login and update verification.'],
     ['Animated presence', 'Animated', 'Bring presence to life.', 'Configure the existing native GIF RPC plugin and restore flow.'],
     ['Patch workspace', 'Workspace', 'One deliberate change.', 'Portable profiles, queued changes, dry runs and recoverable batch apply.'],
-    ['Debloat & Android', 'Debloat', 'A cleaner player.', 'Original configuration cleanup, Android ADB and journalled Root.vhd tools.']
+    ['Debloat & Android', 'Debloat', 'Android & engine maintenance', 'Configuration tuning, live ADB packages, storage cleanup and journalled disk editing.'],
+    ['Binary Lab', 'Binary Lab', 'Inside the executable', 'PE sections, imports, exports, Win32 resources, strings and raw bytes. Read-only until you export.']
   ];
+  const toolGuides = {
+    1:['Theme & gradient editor','Original Auto / QML / Hex methods, presets, individual colors, toggle recoloring, gradients and staged profile support.','Select a target and load its actual palette.','Choose colors or a preset; inspect the dry run.','Apply with the native engine; restore the EXE backup if needed.'],
+    2:['Embedded Qt file explorer','Browse code, SVGs, pictures, fonts and binary entries. Text edits and replacements retain native capacity and mapping checks.','Scan Resources explicitly; navigation never scans.','Filter by type, quoted path or min:/max: size.','Inspect, edit, replace or extract a selection; bulk extraction is below.'],
+    3:['FPS ceiling patcher','Binary ceiling patching is separate from Android performance tuning. Higher limits do not guarantee actual game FPS.','Detect the QuickTemplates2 DLL for this installation.','Analyze its supported slider exports and set a target limit.','Apply or restore using the original reversible patch engine.'],
+    4:['Integrity inspection & recovery','Keep the original inspection, supported-site validation, patch and restore workflow. Unsupported binaries are refused.','Close all emulator instances.','Inspect the selected executable before applying.','Patch only a recognized build; keep the original backup.'],
+    5:['Boot video & startup timing','Adaptive Qt6 / Qt5 / WebEngine player, muted loop/crop, boot hold, backup recovery and scoped player-cache cleanup.','Put your supported video at Assets/Promo.mp4.','Set hold duration (0–15000 ms); apply to a recognized player.','Use Workspace to inspect/preview the MP4; emulator codec support can differ.'],
+    6:['Player layout, removals & About editor','All original control removals, layout tweaks, sidebar order/visibility, About text and stock links remain here.','Inspect your EXE to discover its supported controls.','Stage only the removals, order and About fields you need.','Apply each operation explicitly; unsupported layouts stay read-only.'],
+    7:['Discord ID & Explorer-name patchers','Offline ID discovery, dry-run replacement, undo and Windows version-resource editing. This is separate from the animated RPC plugin.','Scan the actual executable and inspect candidate IDs.','Enter your 17–20 digit application ID and preview.','Apply deliberately, or restore the recorded original.'],
+    11:['Profiles, batch plans & media workbench','Original portable profiles, queued patches, hash-bound plans, journals, image preparation and native MP4 preview.','Load or create a profile and queue supported operations.','Build a dry run against the current target hash.','Apply the verified plan; inspect the journal for restoration.']
+  };
   const icons = [`<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>`, `<circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1"/>`, `<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h4"/>`, `<path d="m4 16 5-7 4 4 7-9M15 4h5v5"/>`, `<path d="m12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6zM8 12l3 3 5-6"/>`, `<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m10 9 5 3-5 3z"/>`, `<path d="M5 7h14M5 12h14M5 17h14"/><circle cx="8" cy="7" r="1.5"/><circle cx="15" cy="12" r="1.5"/>`, `<path d="M4 5h16v12H8l-4 4zM8 10h8M8 13h5"/>`, `<circle cx="12" cy="12" r="4"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2"/>`, `<circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7v1"/>`, `<path d="m12 3 2.3 5.2L20 9l-4 4 .9 5.7-4.9-2.6-4.9 2.6L8 13 4 9l5.7-.8z"/>`, `<rect x="3" y="6" width="18" height="15" rx="2"/><path d="M8 6V3h8v3M3 11h18M10 11v3h4v-3"/>`];
   icons.push(`<path d="M4 6h16M6 6l1 14h10l1-14M9 6V3h6v3M10 10v6M14 10v6"/>`);
+  icons.push(`<path d="M4 3h11l5 5v13H4zM14 3v6h6M8 12h2M13 12h3M8 16h2M13 16h3"/>`);
   const svg = i => `<svg viewBox="0 0 24 24" aria-hidden="true">${icons[i]}</svg>`;
   let transport = null, preview = false, state = {}, page = 0, pending = false;
   let palette = { entries: [], hex: [], presets: [], method: 'auto' };
@@ -82,8 +94,8 @@
   function chrome() {
     const current = pages[page];
     $('#canvas').classList.toggle('page', page !== 0);
-    $('#spine').innerHTML = pages.map((p, i) => `<button class="icon${page === i ? ' on' : ''}" data-page="${i}" title="${p[0]}" aria-label="${p[0]}" aria-current="${page === i ? 'page' : 'false'}">${svg(i)}</button>`).join('');
-    $('#cmd').innerHTML = [0, 1, 6, 12, 8].map(i => `<button class="cmditem${page === i ? ' active' : ''}" data-page="${i}"><strong>${pages[i][1]}</strong></button>`).join('');
+    $('#spine').innerHTML = [['INSPECT & BUILD',[0,2,13,11]],['PLAYER PATCHERS',[1,3,4,5,6]],['SYSTEM & PRESENCE',[12,7,10]],['APPLICATION',[8,9]]].map(([label,items])=>`<div class="nav-group">${label}</div>${items.map(i=>`<button class="icon${page===i?' on':''}" data-page="${i}" title="${pages[i][0]}" aria-label="${pages[i][0]}" aria-current="${page===i?'page':'false'}">${svg(i)}<span>${pages[i][0]}</span>${i===13?'<em>NEW</em>':''}</button>`).join('')}`).join('');
+    $('#cmd').innerHTML = [2, 13, 12].map(i => `<button class="cmditem${page === i ? ' active' : ''}" data-page="${i}"><strong>${pages[i][1]}</strong></button>`).join('');
     $('#session').className = 'session' + (state.busy || pending ? ' busy' : !state.exeFound ? ' bad' : '');
     $('#session').innerHTML = `<i></i><b>${esc(preview ? 'Design preview' : state.authorized ? 'Discord verified' : 'Sign-in required')}</b><span>${state.busy || pending ? 'WORKING' : state.exeFound ? 'READY' : 'NO TARGET'}</span><em></em>`;
     $('#hero').innerHTML = `<div class="hero"><div class="hero-main"><div class="kicker">Control center / ${esc(current[1]).toLowerCase()}</div><h1>${esc(current[2])}</h1><p>${esc(current[3])}</p><div class="hero-line"></div></div><div class="target-card"><small>Active target</small><b>${esc(targetName())}</b><div class="ready${state.exeFound ? '' : ' bad'}"><i></i>${state.exeFound ? 'HD-Player.exe detected' : 'Select your player in Settings'}</div></div></div>`;
@@ -114,13 +126,15 @@
       const commands = page === 3 ? [['Detect FPS target', 'fpsDetect'], ['Analyze FPS', 'fpsAnalyze'], ['Apply FPS limit', 'fpsPatch'], ['Restore FPS', 'fpsRestore']]
         : page === 4 ? [['Check integrity', 'integrityCheck'], ['Apply integrity patch', 'integrityPatch'], ['Restore integrity', 'integrityRestore']]
         : [['Apply boot patch', 'bootPatch'], ['Purge player cache', 'purgePlayerCache']];
-      html = panel(`<div class="sec"><div class="sec-h">${pages[page][0]}</div><p class="native-note">These commands call the existing engines directly. Close all emulator instances before changing files. Backups and validation stay in C++.</p>${page === 3 ? `<label class="lbl" for="fps-limit">FPS limit</label><input id="fps-limit" class="inp" type="number" min="1" max="10000" data-draft="fps" value="${esc(drafts.fps || '240')}">` : page === 5 ? `<label class="lbl" for="boot-hold">Boot hold (milliseconds)</label><input id="boot-hold" class="inp" type="number" min="0" max="600000" data-draft="hold" value="${esc(drafts.hold || '3000')}">` : ''}<div class="button-grid">${commands.map(([label, action]) => button(label, action)).join('')}${native(page)}</div><pre id="operation-result"></pre></div>`);
+      html = panel(`<div class="sec"><div class="sec-h">${pages[page][0]}</div><p class="native-note">These commands call the existing engines directly. Close all emulator instances before changing files. Backups and validation stay in C++.</p>${page === 3 ? `<label class="lbl" for="fps-limit">FPS limit</label><input id="fps-limit" class="inp" type="number" min="1" max="10000" data-draft="fps" value="${esc(drafts.fps || '240')}">` : page === 5 ? `<label class="lbl" for="boot-hold">Boot hold (milliseconds)</label><input id="boot-hold" class="inp" type="number" min="0" max="15000" data-draft="hold" value="${esc(drafts.hold || '3000')}">` : ''}<div class="button-grid">${commands.map(([label, action]) => button(label, action)).join('')}${native(page)}</div><pre id="operation-result"></pre></div>`);
     } else if (page === 8) {
       html = panel(`<div class="sec"><div class="sec-h">Application appearance</div><div class="tools"><select class="inp" id="appearance-mode" aria-label="App theme">${['Dark', 'Light', 'System'].map((v, i) => `<option value="${i}" ${state.appearance === i ? 'selected' : ''}>${v}</option>`).join('')}</select><input type="color" id="accent" aria-label="App accent" value="${esc(state.accent || '#9ce9c1')}">${button('Save appearance', 'appearance', true)}</div></div><div class="sec"><div class="sec-h">Native targets</div>${['exe', 'dll', 'conf'].map(role => `<label class="lbl" for="path-${role}">${{ exe: 'HD-Player.exe', dll: 'Qt5/Qt6 QuickTemplates2 DLL', conf: 'bluestacks.conf' }[role]}</label><div class="path-row"><input class="inp mono" id="path-${role}" value="${esc(state[role + 'Path'] || '')}">${button('Browse…', 'browse', false, `data-role="${role}"`)}${button('Set path', 'path', false, `data-role="${role}"`)}</div>`).join('')}<div class="button-grid">${button('Detect installations', 'detectInstalls')}${button('Restore EXE backup', 'restoreBackup')}</div>${(state.installs || []).map((install, index) => `<div class="kv"><span>${esc(install.profile || install.root)}</span>${button('Use installation', 'useInstall', false, `data-index="${index}"`)}</div>`).join('')}</div>`);
     } else {
       html = panel(editors.render(page));
     }
     $('#main').innerHTML = html;
+    const guide=toolGuides[page];
+    if(guide) $('#main .pscroll')?.insertAdjacentHTML('afterbegin',`<div class="tool-workflow"><div><span class="eyebrow">ENGINE WORKFLOW</span><h3>${esc(guide[0])}</h3><p>${esc(guide[1])}</p></div><ol>${guide.slice(2).map((step,i)=>`<li><b>0${i+1}</b><span>${esc(step)}</span></li>`).join('')}</ol></div>`);
     if (page !== 0) $('#main .pscroll')?.insertAdjacentHTML('beforeend', editors.extra(page) + (page === 8 ? editors.extra(0) : ''));
     if (page === 2) { renderResources(); renderResourceEditor(); }
     if ($('#operation-result')) $('#operation-result').textContent = operationResult;

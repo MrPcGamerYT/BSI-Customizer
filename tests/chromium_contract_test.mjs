@@ -28,7 +28,7 @@ for (const query of ['', 'file-22', '"folder 2"', 'qml min:2kb max:40kb', 'Folde
   }
 }
 const html = read('src/web/index.html'), cmake = read('CMakeLists.txt');
-for (const asset of ['styles.css', 'transport.js', 'resource-search.js', 'editors.js', 'maintenance.js', 'effects.js', 'app.js']) {
+for (const asset of ['styles.css', 'transport.js', 'resource-search.js', 'editors.js', 'maintenance.js', 'binary-lab.js', 'effects.js', 'app.js']) {
   assert.ok(html.includes(asset), 'Missing browser asset: ' + asset);
   assert.ok(cmake.includes('src/web/' + asset), 'Missing embedded desktop asset: ' + asset);
 }
@@ -77,3 +77,10 @@ assert.ok(read('src/chromium/ChromiumMain.qml').includes('MediaPlayer {'));
 assert.ok(read('src/web/editors.js').includes("'video-play'"));
 assert.ok(read('src/web/transport.js').includes('videoStatus'));
 console.log('PASS: normal HTML packaging, 13th maintenance area and original Qt decoder control contracts.');
+
+assert.ok(html.includes('binary-lab.js'));
+assert.ok(bridge.includes('QIODevice::NewOnly'), 'Binary exports must not truncate an existing file');
+assert.ok(bridge.includes('text("sha256")!=report.value("sha256")'), 'Follow-up requests must reject stale inspected data');
+assert.ok(!read('src/web/index.html').includes('Floatz'));
+assert.ok(read('src/core/BinaryInspector.cpp').includes('resources.size()>=4096'));
+console.log('PASS: read-only Binary Lab asset, stale-source guard, bounded resource traversal and new-file-only exports.');
