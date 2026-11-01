@@ -376,14 +376,14 @@ int runSelfTest()
             QCoreApplication::processEvents();
             check(backend.resourceInfos().size() == resourceCount,
                   "opening Resources through studio navigation preserves resource results");
-            // The new presentation must retain every original editor, not
-            // route some controls through a second HTML implementation.
+            // Keep every feature editor in this single QML stack; settings are
+            // hosted by the separate three-tab modal panel above.
             const char *featureObjects[] = {
                 "studioDashboard", "featureTheme", "featureResources", "featureFps",
                 "featureIntegrity", "featureBoot", "featureInterface", "featureRpc",
-                "featureSettings", "featureAbout", "featureGif", "featureWorkspace", "featureDebloat"
+                "featureGif", "featureWorkspace", "featureDebloat"
             };
-            for (int index = 0; index < 13; ++index) {
+            for (int index = 0; index < 11; ++index) {
                 const bool exists = root->findChild<QObject *>(QString::fromLatin1(featureObjects[index])) != nullptr;
                 const bool routed = QMetaObject::invokeMethod(root, "navigatePage", Q_ARG(QVariant, QVariant(index)));
                 check(exists && routed && stack && stack->property("currentIndex").toInt() == index,
@@ -391,7 +391,7 @@ int runSelfTest()
                           .arg(index).arg(QString::fromLatin1(featureObjects[index]))));
             }
             check(backend.resourceInfos().size() == resourceCount,
-                  "visiting all thirteen original features does not auto-scan Resources");
+                  "visiting all eleven feature pages does not auto-scan Resources");
             if (stack) stack->setProperty("currentIndex", 2);
             QMetaObject::invokeMethod(root, "navigatePage", Q_ARG(QVariant, QVariant(99)));
             check(stack && stack->property("currentIndex").toInt() == 2,

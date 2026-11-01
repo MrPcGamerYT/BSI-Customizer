@@ -4692,8 +4692,15 @@ Window {
                         key = target.key; resource = target.resource;
                     }
                 }
-                check(!key.isEmpty(), QStringLiteral("supplied EXE exposes the %1 gradient target").arg(label));
-                if (key.isEmpty()) continue;
+                if (key.isEmpty()) {
+                    const bool optionalThemeBinding = label == QStringLiteral("Theme gradients.gradientButton");
+                    if (optionalThemeBinding) {
+                        ciNotice(QStringLiteral("optional theme-level gradient binding is absent from this HD-Player build"));
+                        continue;
+                    }
+                    check(false, QStringLiteral("supplied EXE exposes the %1 gradient target").arg(label));
+                    continue;
+                }
                 const auto gradient = GradientPatcher::patch(path, key,
                     { true, QStringLiteral("#112244"), QStringLiteral("#8844cc"), true });
                 if (!gradient.ok) std::printf("    Gradient %s: %s\n", qPrintable(label), qPrintable(gradient.message));
