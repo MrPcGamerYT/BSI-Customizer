@@ -65,9 +65,15 @@ if (Test-Path -LiteralPath (Join-Path $stage 'Qt6WebEngineCore.dll')) {
     Invoke-Checked $deploy @('--release', '--no-compiler-runtime', '--qmldir',
         (Join-Path $repo 'src/chromium'), '--dir', $stage,
         (Join-Path $stage 'BSI-Customizer.exe'))
+    # Official Windows Qt embeds ICU data in WebEngineCore; Linux/custom
+    # SDKs may ship icudtl.dat separately. Do not reject a valid embedded build.
+    if ((Test-Path -LiteralPath (Join-Path $QtPrefix 'resources/icudtl.dat')) -and
+        -not (Test-Path -LiteralPath (Join-Path $stage 'resources/icudtl.dat'))) {
+        throw 'Missing external ICU data required by this Qt SDK'
+    }
     foreach ($relative in @('QtWebEngineProcess.exe', 'qml/QtWebEngine/qmldir',
                             'qml/QtWebChannel/qmldir', 'resources/qtwebengine_resources.pak',
-                            'resources/icudtl.dat', 'translations/qtwebengine_locales/en-US.pak')) {
+                            'translations/qtwebengine_locales/en-US.pak')) {
         if (-not (Test-Path -LiteralPath (Join-Path $stage $relative))) {
             throw "Incomplete animated UI runtime: $relative"
         }
