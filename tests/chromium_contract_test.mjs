@@ -34,3 +34,12 @@ for (const asset of ['styles.css', 'transport.js', 'resource-search.js', 'editor
 }
 assert.ok(!read('src/web/app.js').includes('This page has not yet been reimplemented'), 'Do not replace old tools with placeholder pages');
 console.log(`PASS: ${new Set(commands).size} bridge commands covered by native locked-access test; manual scan dispatch; search/filter equivalence; embedded asset coverage.`);
+
+// Downloadable bundles must receive the same locked sign-in policy as native
+// releases; a renderer/bridge-only smoke test cannot detect a missing client ID.
+const workflow = read('.github/workflows/chromium.yml');
+assert.ok(workflow.includes('ZLP_AUTH_JSON: ${{ secrets.ZLP_AUTH_JSON || secrets.BSIC_AUTH_JSON }}'));
+assert.ok(workflow.includes('-DBSI_REQUIRE_EMBEDDED_AUTH=ON'));
+assert.ok(test.includes('const bool policyReady = auth.configured() && config.roleGateConfigured()'));
+assert.ok(test.includes('!AuthManager::embeddedAuthJson().isEmpty() && config.clientSecret.isEmpty()'));
+console.log('PASS: Chromium bundle embeds and verifies its locked Discord public-client policy.');

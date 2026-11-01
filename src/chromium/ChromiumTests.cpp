@@ -38,6 +38,18 @@ int runWebBridgeAccessTest()
     QObject::connect(&bridge, &WebBridge::nativeToolRequested, [&] { ++nativeSignals; });
     const auto state = bridge.snapshot();
     bool ok = !auth.isAuthorized() && state.size() == 2 && !state.value("authorized").toBool();
+#ifdef BSI_ENFORCE_EMBEDDED_AUTH
+    // A downloadable Chromium bundle must be sign-in ready without a sidecar
+    // auth.json or configure-time environment surviving on the user's PC.
+    const auto config = AuthManager::loadConfig();
+    const bool policyReady = auth.configured() && config.roleGateConfigured()
+        && config.sourceFile.contains(QStringLiteral("embedded"))
+        && !AuthManager::embeddedAuthJson().isEmpty() && config.clientSecret.isEmpty();
+    if (!policyReady) {
+        std::fprintf(stderr, "FAIL: Chromium bundle is missing a valid embedded Discord sign-in policy\n");
+        ok = false;
+    }
+#endif
     const char *commands[] = {
         "aboutPageReport", "applyAboutPage", "applyGradient", "applyLayoutTweak", "applyPreset",
         "applyRemovals", "applyTheme", "bootPatch", "checkUpdates", "detectInstalls",

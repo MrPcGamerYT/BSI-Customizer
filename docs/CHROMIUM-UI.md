@@ -141,3 +141,23 @@ No additional language/backend has been implemented in this initial migration.
 For visual review only, serve `src/web` locally and select **View design preview**.
 The persistent banner and disabled native buttons make clear that a normal
 browser has neither a login session nor access to the native backend.
+
+## Discord sign-in in downloadable test bundles
+
+The Chromium Actions workflow uses the same `ZLP_AUTH_JSON` repository secret
+(`BSIC_AUTH_JSON` alias) as the native release. It configures
+`BSI_REQUIRE_EMBEDDED_AUTH=ON`, embeds the public-client/server-role policy,
+and verifies the loaded embedded configuration before uploading a test bundle.
+A missing configuration now fails the build instead of producing a download
+that shows “Discord sign-in is not configured yet”. Fork PR builds without
+access to this secret cannot produce this sign-in-ready artifact.
+
+Do not put an OAuth client secret, bot token, or user session into this blob.
+Desktop Discord sign-in uses public-client PKCE. The guild/role authorization
+checks remain enabled, and local sidecar/environment policy overrides are
+rejected for these bundles just as they are for native releases.
+
+Already downloaded bundles do not change when the workflow is fixed: download
+and extract the newly verified artifact, then run `BSI-Customizer.exe --web-ui`.
+This verification checks configuration and locked bridge behavior offline;
+it does not claim to have completed a real Discord OAuth sign-in.

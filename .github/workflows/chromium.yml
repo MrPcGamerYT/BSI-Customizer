@@ -51,10 +51,14 @@ jobs:
           modules: qtmultimedia qtwebengine qtwebchannel qtpositioning
           cache: true
       - name: Configure opt-in Chromium build
-        run: cmake -S . -B build-web -A x64 -DBSI_CHROMIUM_UI=ON -DBSI_TEST_QT5_REFERENCE=OFF -DBSI_BUILD_PORTABLE=OFF
+        env:
+          # Same public-client / server-role policy as the native release.
+          # Never upload an apparently usable bundle with sign-in unconfigured.
+          ZLP_AUTH_JSON: ${{ secrets.ZLP_AUTH_JSON || secrets.BSIC_AUTH_JSON }}
+        run: cmake -S . -B build-web -A x64 -DBSI_CHROMIUM_UI=ON -DBSI_TEST_QT5_REFERENCE=OFF -DBSI_BUILD_PORTABLE=OFF -DBSI_REQUIRE_EMBEDDED_AUTH=ON
       - name: Build
         run: cmake --build build-web --config Release --parallel
-      - name: Native bridge must reject every command without sign-in
+      - name: Verify embedded sign-in policy and reject commands without sign-in
         shell: pwsh
         run: |
           $p = Start-Process build-web/Release/BSI-Customizer.exe -ArgumentList '--web-bridge-test' -PassThru -Wait -NoNewWindow
@@ -84,4 +88,6 @@ jobs:
           path: stage/
           retention-days: 3
           if-no-files-found: error
-      # Test artifact only; no release, installer replacement or credential embed.
+      # Test artifact only; no release or installer replacement. Only the
+      # desktop public-client authorization policy is embedded, never OAuth
+      # client secrets, bot tokens, or user sessions.
