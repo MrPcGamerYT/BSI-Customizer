@@ -50,7 +50,7 @@ foreach ($line in (Invoke-Git @('ls-tree', '-r', '--format=%(objectname) %(path)
 if ($selected.Count -lt 500 -or -not $selected.ContainsKey('chromium/LICENSE')) { throw 'Incomplete Chromium source index' }
 # Request only notice/readme blobs in one batch. No checkout, scripts, compiler,
 # multi-gigabyte source archive or unrelated source payload is downloaded/run.
-function Read-Blobs([string[]]$Hashes) {
+function Read-Blobs([string[]]$Hashes, [Collections.Generic.Dictionary[string,string]]$Texts) {
     $Hashes = @($Hashes | Sort-Object -Unique)
     $Hashes | & git "--git-dir=$repository" -c fetch.negotiationAlgorithm=noop fetch --no-write-fetch-head --no-tags --filter=blob:none origin --stdin | Out-Host
     if ($LASTEXITCODE -ne 0) { throw 'Could not fetch source notice blobs' }
@@ -69,7 +69,6 @@ function Read-Blobs([string[]]$Hashes) {
         $null = $copy.GetAwaiter().GetResult()
         if ($process.ExitCode -ne 0) { throw "Source notice read failed: $($errors.GetAwaiter().GetResult())" }
         $bytes = $memory.ToArray(); $offset = 0
-        $texts = [Collections.Generic.Dictionary[string,string]]::new()
         foreach ($hash in $Hashes) {
             $start = $offset
             while ($offset -lt $bytes.Length -and $bytes[$offset] -ne 10) { ++$offset }
@@ -82,11 +81,11 @@ function Read-Blobs([string[]]$Hashes) {
             if ($text.IndexOf([char]0) -ge 0) { throw 'Binary data in source notice' }
             $texts[$hash] = $text; $offset += $size + 1
         }
-        Write-Output -NoEnumerate $texts
     } finally { $memory.Dispose(); $process.Dispose() }
 }
-$texts = Read-Blobs -Hashes @($selected.Values)
-if ($texts -isnot [Collections.IDictionary]) { throw "Invalid notice-reader result: $($texts.GetType().FullName)" }
+$texts = [Collections.Generic.Dictionary[string,string]]::new()
+$null = Read-Blobs -Hashes @($selected.Values) -Texts $texts
+if ($texts.Count -lt 500) { throw "Incomplete notice-reader result: $($texts.Count) blobs" }
 # Include nonstandard license filenames referenced by vendored README metadata.
 # Some readmes describe optional, absent SDK/build/test inputs. Preserve those
 # readmes and report absent references, rather than claiming they are shipped.
@@ -110,8 +109,7 @@ foreach ($path in @($selected.Keys)) {
 }
 $extra = @($selected.Values | Where-Object { -not $texts.ContainsKey($_) } | Sort-Object -Unique)
 if ($extra.Count) {
-    $more = Read-Blobs $extra
-    foreach ($hash in $more.Keys) { $texts[$hash] = $more[$hash] }
+    $null = Read-Blobs -Hashes $extra -Texts $texts
 }
 $output = Join-Path $OutputDirectory 'CHROMIUM-NOTICES.txt'
 $writer = [IO.StreamWriter]::new($output, $false, [Text.UTF8Encoding]::new($false))
