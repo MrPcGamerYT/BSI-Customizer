@@ -92,8 +92,8 @@ Requires Windows x64, MSVC C++ build tools, CMake 3.21+, Qt 6 development tools
 and PowerShell 7 — no interpreter, runtime or extra tool beyond those.
 `makecab.exe` and the cabinet reader are built into Windows. The workflow uses
 Qt 6.8.3 with Multimedia, WebEngine, WebChannel and Positioning. For packaging,
-install the matching Qt WebEngine documentation too: its generated Chromium
-third-party notices are mandatory. Native-only developer builds can explicitly
+Git must also be on PATH to collect matching Chromium license/attribution
+blobs (a small partial fetch, not a checkout of Chromium source). Native-only developer builds can explicitly
 set `BSI_CHROMIUM_UI=OFF`.
 
 ```powershell
@@ -108,7 +108,7 @@ The `BSI-Portable` target:
 - checks every staged PE import for missing Qt/CRT/non-system dependencies;
 - gathers Qt source license/attribution text with `cmake/CollectQtNotices.cmake`
   (a CMake script, verified offline by `cmake/tests/CollectQtNoticesTest.cmake`),
-  plus matching generated Chromium third-party notice pages and the app/HDE64 licenses;
+  plus matching Chromium source license/attribution notices and the app/HDE64 licenses;
 - creates one LZX cabinet and embeds it as an EXE resource in a `/MT` native
   launcher that itself depends only on Windows system DLLs;
 - verifies the administrator manifest and runs the portable smoke tests.

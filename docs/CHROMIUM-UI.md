@@ -100,9 +100,11 @@ helper/resources/locales, and launches the packed renderer with the SDK removed
 from PATH. The dedicated Chromium workflow also tests its full deployment.
 Do not reuse a native-only payload or strip helpers to reduce size. Do not turn
 off sandboxing to hide deployment/startup failures. The portable outer EXE must
-unpack the matching runtime. The workflows install the matching WebEngine docs
-and bundle their generated Chromium third-party license pages, in addition to
-Qt's SPDX/attribution collection.
+unpack the matching runtime. The packager collects license/attribution data from the exact Chromium commit
+pinned by the matching Qt release, in addition to Qt's SPDX/attribution
+collection. Only metadata/notice blobs are fetched by Git's partial-clone
+protocol; sources are not checked out or executed. No unavailable Qt WebEngine
+documentation module or multi-gigabyte Chromium source download is needed.
 
 ## Verification
 

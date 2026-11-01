@@ -140,10 +140,6 @@ jobs:
           modules: qtmultimedia qtwebengine qtwebchannel qtpositioning
           cache: true
 
-      - name: Install matching Chromium license documentation
-        shell: pwsh
-        run: ./scripts/Install-WebEngineNotices.ps1 -QtPrefix $env:QT_ROOT_DIR -Version '6.8.3'
-
       - name: Configure application and one-file package
         env:
           # Whole auth.json to bake into the released EXE; the release build

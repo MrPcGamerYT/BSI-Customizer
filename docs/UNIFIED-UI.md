@@ -67,7 +67,7 @@ emulator's playback; there is no automatic encoder/converter.
 
 The standard Windows workflow deploys WebEngine's helper, matching ICU/PAK data,
 locales, QML imports and runtime DLLs inside the portable payload/installer.
-Matching Qt-generated Chromium third-party notices are bundled, not omitted to
+Matching Chromium vendored-source license/attribution notices are bundled, not omitted to
 shrink the download. A clean-PATH smoke test launches the packed renderer, not
 just the inner SDK build. The dedicated Chromium workflow additionally checks
 locked bridge access and renderer recovery. Neither feature-branch workflow

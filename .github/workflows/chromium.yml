@@ -50,10 +50,6 @@ jobs:
           arch: win64_msvc2022_64
           modules: qtmultimedia qtwebengine qtwebchannel qtpositioning
           cache: true
-      - name: Install matching Chromium license documentation
-        shell: pwsh
-        run: ./scripts/Install-WebEngineNotices.ps1 -QtPrefix $env:QT_ROOT_DIR -Version '6.8.3'
-
       - name: Configure Chromium build
         env:
           # Same public-client / server-role policy as the native release.
@@ -75,7 +71,7 @@ jobs:
           windeployqt --release --qmldir src --compiler-runtime --dir stage stage/BSI-Customizer.exe
           if ($LASTEXITCODE -ne 0) { throw 'windeployqt failed' }
           @('[Paths]', 'Prefix=.', 'Plugins=.', 'QmlImports=qml') | Set-Content stage/qt.conf
-          ./scripts/Copy-WebEngineNotices.ps1 -QtPrefix $env:QT_ROOT_DIR -Version '6.8.3' -OutputDirectory stage/licenses/Qt/Chromium
+          ./scripts/Collect-WebEngineNotices.ps1 -Version '6.8.3' -CacheDirectory (Join-Path $env:RUNNER_TEMP 'chromium-notices') -OutputDirectory stage/licenses/Qt/Chromium
       - name: Verify deployed Chromium without the Qt SDK on PATH
         shell: pwsh
         run: |

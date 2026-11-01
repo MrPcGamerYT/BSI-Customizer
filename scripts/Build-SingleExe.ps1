@@ -143,8 +143,8 @@ Invoke-Checked 'cmake' @("-DQT_VERSION=$qtVersion",
                          "-DCACHE_DIR=$(Join-Path $BuildRoot 'notices-cache')",
                          '-P', (Join-Path $repo 'cmake/CollectQtNotices.cmake'))
 if (Test-Path -LiteralPath (Join-Path $stage 'Qt6WebEngineCore.dll')) {
-    & (Join-Path $PSScriptRoot 'Copy-WebEngineNotices.ps1') -QtPrefix $QtPrefix -Version $qtVersion `
-        -OutputDirectory (Join-Path $stage 'licenses/Qt/Chromium')
+    & (Join-Path $PSScriptRoot 'Collect-WebEngineNotices.ps1') -Version $qtVersion `
+        -CacheDirectory (Join-Path $BuildRoot 'notices-cache/chromium') -OutputDirectory (Join-Path $stage 'licenses/Qt/Chromium')
 }
 @"
 BSI Customizer portable runtime
