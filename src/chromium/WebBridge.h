@@ -30,6 +30,9 @@ signals:
     void openFileRequested(const QString &role);
     void fileSelected(const QString &role, const QString &path);
     void nativeToolRequested(int page);
+    void videoFileRequested(const QUrl &file);
+    void videoControlRequested(const QString &action, const QVariantMap &options);
+    void videoStatus(const QString &message);
 
 private:
     void publish();

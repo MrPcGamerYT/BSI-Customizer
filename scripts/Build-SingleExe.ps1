@@ -54,6 +54,21 @@ if ($deployExit -ne 0) {
     Write-Warning "windeployqt exited $deployExit; validating the staged dependency closure and real launch below"
 }
 
+# Chromium-capable builds need their QML imports as well as the dependent
+# DLLs discovered by the first deployment pass. Keep native-only CI unchanged.
+if (Test-Path -LiteralPath (Join-Path $stage 'Qt6WebEngineCore.dll')) {
+    Invoke-Checked $deploy @('--release', '--no-compiler-runtime', '--qmldir',
+        (Join-Path $repo 'src/chromium'), '--dir', $stage,
+        (Join-Path $stage 'BSI-Customizer.exe'))
+    foreach ($relative in @('QtWebEngineProcess.exe', 'qml/QtWebEngine/qmldir',
+                            'qml/QtWebChannel/qmldir', 'resources/qtwebengine_resources.pak',
+                            'resources/icudtl.dat', 'translations/qtwebengine_locales/en-US.pak')) {
+        if (-not (Test-Path -LiteralPath (Join-Path $stage $relative))) {
+            throw "Incomplete animated UI runtime: $relative"
+        }
+    }
+}
+
 Copy-Required (Join-Path $qtBin 'Qt6Svg.dll') (Join-Path $stage 'Qt6Svg.dll')
 Copy-Required (Join-Path $QtPrefix 'plugins/imageformats/qsvg.dll') (Join-Path $stage 'imageformats/qsvg.dll')
 Copy-Required (Join-Path $QtPrefix 'plugins/platforms/qwindows.dll') (Join-Path $stage 'platforms/qwindows.dll')
@@ -123,9 +138,14 @@ if ($LASTEXITCODE -ne 0 -or $qtVersion -notmatch '^\d+\.\d+\.\d+$') { throw 'Can
 # Licence/attribution collection is a CMake script, so packaging needs nothing
 # beyond the toolchain that already builds the application - no interpreter.
 Invoke-Checked 'cmake' @("-DQT_VERSION=$qtVersion",
+                         "-DBSI_WITH_WEBENGINE=$(Test-Path -LiteralPath (Join-Path $stage 'Qt6WebEngineCore.dll'))",
                          "-DOUTPUT_DIR=$(Join-Path $stage 'licenses/Qt')",
                          "-DCACHE_DIR=$(Join-Path $BuildRoot 'notices-cache')",
                          '-P', (Join-Path $repo 'cmake/CollectQtNotices.cmake'))
+if (Test-Path -LiteralPath (Join-Path $stage 'Qt6WebEngineCore.dll')) {
+    & (Join-Path $PSScriptRoot 'Copy-WebEngineNotices.ps1') -QtPrefix $QtPrefix -Version $qtVersion `
+        -OutputDirectory (Join-Path $stage 'licenses/Qt/Chromium')
+}
 @"
 BSI Customizer portable runtime
 

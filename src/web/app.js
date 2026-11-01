@@ -16,9 +16,11 @@
     ['Appearance', 'Settings', 'Your workspace.', 'App appearance and target paths. These are not player theme colors.'],
     ['About BSI', 'About', 'Built around your player.', 'Chromium presentation. C++ patch engines. Existing login and update verification.'],
     ['Animated presence', 'Animated', 'Bring presence to life.', 'Configure the existing native GIF RPC plugin and restore flow.'],
-    ['Patch workspace', 'Workspace', 'One deliberate change.', 'Portable profiles, queued changes, dry runs and recoverable batch apply.']
+    ['Patch workspace', 'Workspace', 'One deliberate change.', 'Portable profiles, queued changes, dry runs and recoverable batch apply.'],
+    ['Debloat & Android', 'Debloat', 'A cleaner player.', 'Original configuration cleanup, Android ADB and journalled Root.vhd tools.']
   ];
   const icons = [`<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>`, `<circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1"/>`, `<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h4"/>`, `<path d="m4 16 5-7 4 4 7-9M15 4h5v5"/>`, `<path d="m12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6zM8 12l3 3 5-6"/>`, `<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m10 9 5 3-5 3z"/>`, `<path d="M5 7h14M5 12h14M5 17h14"/><circle cx="8" cy="7" r="1.5"/><circle cx="15" cy="12" r="1.5"/>`, `<path d="M4 5h16v12H8l-4 4zM8 10h8M8 13h5"/>`, `<circle cx="12" cy="12" r="4"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2"/>`, `<circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7v1"/>`, `<path d="m12 3 2.3 5.2L20 9l-4 4 .9 5.7-4.9-2.6-4.9 2.6L8 13 4 9l5.7-.8z"/>`, `<rect x="3" y="6" width="18" height="15" rx="2"/><path d="M8 6V3h8v3M3 11h18M10 11v3h4v-3"/>`];
+  icons.push(`<path d="M4 6h16M6 6l1 14h10l1-14M9 6V3h6v3M10 10v6M14 10v6"/>`);
   const svg = i => `<svg viewBox="0 0 24 24" aria-hidden="true">${icons[i]}</svg>`;
   let transport = null, preview = false, state = {}, page = 0, pending = false;
   let palette = { entries: [], hex: [], presets: [], method: 'auto' };
@@ -29,8 +31,8 @@
   const enabled = () => !!transport && state.authorized && !state.busy && !pending;
   const panel = body => `<div class="panel"><div class="pscroll">${body}</div></div>`;
   const button = (label, action, primary = false, extra = '') => `<button class="btn${primary ? ' pri' : ''}" data-action="${action}" ${extra} ${enabled() ? '' : 'disabled'}>${label}</button>`;
-  const native = index => button('Open full native editor ↗', 'native', false, `data-page="${index}"`);
-  const confirmDiscard = () => !dirty || confirm('Discard the unsaved resource text in this editor?');
+  const native = () => ''; // No second editor in the normal HTML workflow.
+  const confirmDiscard = async () => !dirty || BsiEffects.confirm('Discard the unsaved resource text in this editor?');
   function toast(message) {
     $('#toast').textContent = message; $('#toast').style.display = 'block';
     clearTimeout(toast.timer); toast.timer = setTimeout(() => { $('#toast').style.display = 'none'; }, 5000);
@@ -68,6 +70,7 @@
   }
   function markBusy() {
     document.body.classList.toggle('busy', !!state.busy || pending);
+    document.querySelectorAll('[data-window]').forEach(el => {el.disabled = !!state.busy || pending;});
     document.querySelectorAll('[data-action]').forEach(el => {
       el.disabled = !enabled();
     });
@@ -80,15 +83,15 @@
     const current = pages[page];
     $('#canvas').classList.toggle('page', page !== 0);
     $('#spine').innerHTML = pages.map((p, i) => `<button class="icon${page === i ? ' on' : ''}" data-page="${i}" title="${p[0]}" aria-label="${p[0]}" aria-current="${page === i ? 'page' : 'false'}">${svg(i)}</button>`).join('');
-    $('#cmd').innerHTML = [0, 1, 6, 8, 11].map(i => `<button class="cmditem${page === i ? ' active' : ''}" data-page="${i}"><strong>${pages[i][1]}</strong></button>`).join('');
+    $('#cmd').innerHTML = [0, 1, 6, 12, 8].map(i => `<button class="cmditem${page === i ? ' active' : ''}" data-page="${i}"><strong>${pages[i][1]}</strong></button>`).join('');
     $('#session').className = 'session' + (state.busy || pending ? ' busy' : !state.exeFound ? ' bad' : '');
     $('#session').innerHTML = `<i></i><b>${esc(preview ? 'Design preview' : state.authorized ? 'Discord verified' : 'Sign-in required')}</b><span>${state.busy || pending ? 'WORKING' : state.exeFound ? 'READY' : 'NO TARGET'}</span><em></em>`;
     $('#hero').innerHTML = `<div class="hero"><div class="hero-main"><div class="kicker">Control center / ${esc(current[1]).toLowerCase()}</div><h1>${esc(current[2])}</h1><p>${esc(current[3])}</p><div class="hero-line"></div></div><div class="target-card"><small>Active target</small><b>${esc(targetName())}</b><div class="ready${state.exeFound ? '' : ' bad'}"><i></i>${state.exeFound ? 'HD-Player.exe detected' : 'Select your player in Settings'}</div></div></div>`;
     $('#profile-options').innerHTML = `<div class="pd-h">Target installations</div>${(state.installs || []).map((install, index) => `<button class="pd-opt" data-action="useInstall" data-index="${index}" ${enabled() ? '' : 'disabled'}><i></i>${esc(install.profile || install.root)}</button>`).join('') || '<p class="note">Detect your installations in Settings.</p>'}<button class="pd-opt" data-page="8">Manage targets ↗</button>`;
     $('#stats').innerHTML = page === 0 ? `<div class="stats">${[['Profile', targetName(), 'Active target'], ['Executable', state.exeFound ? 'Found' : 'Missing', 'HD-Player.exe'], ['Colors', palette.entries.filter(c => !!c.edit).length, 'Staged edits'], ['Resources', resources.length || '—', 'Explicit scans only']].map(([k, v, hint]) => `<div class="stat"><small>${k}</small><b>${esc(v)}</b><span>${hint}</span></div>`).join('')}</div>` : '';
     const meters = [['Colors staged', palette.entries.filter(c => !!c.edit).length, palette.entries.length], ['Resources loaded', resources.length, Math.max(resources.length, 1)], ['Target selected', state.exeFound ? 1 : 0, 1]];
-    $('#tele').innerHTML = `<div class="telemetry"><div class="section-label">Live overview</div><h2>System state</h2>${meters.map(([label, value, total], i) => `<div class="meter"><div class="meter-top"><span>${label}</span><b>${i === 2 ? (value ? 'Ready' : 'Not set') : value + ' / ' + total}</b></div><div class="bar ${i === 1 ? 'blue' : i === 2 ? 'white' : ''}"><i style="width:${total ? Math.min(100, value / total * 100) : 0}%"></i></div></div>`).join('')}<div class="divider"></div>${[['Session', preview ? 'Preview only' : state.authorized ? 'Discord verified' : 'Required'], ['Engine', state.busy || pending ? 'Working…' : 'Idle'], ['Version', state.version || '—']].map(([k, v]) => `<div class="mini-status"><span>${k}</span><b>${esc(v)}</b></div>`).join('')}<div class="tele-actions">${button('OPEN PATCH WORKSPACE', 'workspaceHome', true)}${button('RESTORE ORIGINAL', 'restoreBackup')}<div class="tools">${button('Full tools ↗', 'native', false, `data-page="${page}"`)}${button('Sign out', 'signOut')}</div></div></div>`;
-    document.querySelectorAll('[data-window]').forEach(el => { el.disabled = !transport?.windowAction; });
+    $('#tele').innerHTML = `<div class="telemetry"><div class="section-label">Live overview</div><h2>System state</h2>${meters.map(([label, value, total], i) => `<div class="meter"><div class="meter-top"><span>${label}</span><b>${i === 2 ? (value ? 'Ready' : 'Not set') : value + ' / ' + total}</b></div><div class="bar ${i === 1 ? 'blue' : i === 2 ? 'white' : ''}"><i style="width:${total ? Math.min(100, value / total * 100) : 0}%"></i></div></div>`).join('')}<div class="divider"></div>${[['Session', preview ? 'Preview only' : state.authorized ? 'Discord verified' : 'Required'], ['Engine', state.busy || pending ? 'Working…' : 'Idle'], ['Version', state.version || '—']].map(([k, v]) => `<div class="mini-status"><span>${k}</span><b>${esc(v)}</b></div>`).join('')}<div class="tele-actions">${button('OPEN PATCH WORKSPACE', 'workspaceHome', true)}${button('RESTORE ORIGINAL', 'restoreBackup')}<div class="tools">${button('Sign out', 'signOut')}</div></div></div>`;
+    document.querySelectorAll('[data-window]').forEach(el => { el.disabled = !transport?.windowAction || !!state.busy || pending; });
     renderLogs(); markBusy();
   }
   function renderLogs() {
@@ -121,7 +124,7 @@
     if (page !== 0) $('#main .pscroll')?.insertAdjacentHTML('beforeend', editors.extra(page) + (page === 8 ? editors.extra(0) : ''));
     if (page === 2) { renderResources(); renderResourceEditor(); }
     if ($('#operation-result')) $('#operation-result').textContent = operationResult;
-    markBusy();
+    markBusy(); syncVideo();
   }
   function renderResources() {
     if (!$('#resource-rows')) return;
@@ -141,7 +144,7 @@
       if (/^data:image\/(png|jpeg|webp|gif|bmp);base64,/i.test(resourceData.preview || '')) {
         $('#resource-image').src = resourceData.preview; $('#resource-image').hidden = false;
       }
-      $('#resource-note').textContent = resourceData.note || 'No raster preview. Use the full native editor for additional formats.';
+      $('#resource-note').textContent = resourceData.note || 'No raster preview for this format. You can still extract or replace it.';
     }
   }
   function scheduleMeasurement() {
@@ -184,10 +187,10 @@
   }
   async function navigate(index) {
     if (!Number.isInteger(index) || index < 0 || index >= pages.length || index === page) return;
-    if (pending || state.busy || !confirmDiscard()) return;
+    if (pending || state.busy || !await confirmDiscard()) return;
     if (dirty) { selected = null; resourceData = null; }
     $('#profile-menu').open = false;
-    dirty = false; page = index; operationResult = ''; chrome(); renderView();
+    dirty = false; page = index; operationResult = ''; chrome(); renderView(); BsiEffects.enter($('#main'));
     // Reads only the already-loaded palette. Neither this nor Resources navigation scans files.
     if (page === 1 && enabled()) { await readPalette(); renderView(); }
     await editors.navigate(page);
@@ -197,28 +200,28 @@
     const name = el.dataset.action;
     if (!enabled()) return;
     if (name.startsWith('editor:')) { await editors.action(name.slice(7), el, page); renderView(); return; }
-    if (name === 'native') { if (confirmDiscard()) { if (dirty) { selected = null; resourceData = null; } dirty = false; await request('openNativeTool', { page: Number(el.dataset.page) }); } return; }
+    if (name === 'native') { if (await confirmDiscard()) { if (dirty) { selected = null; resourceData = null; } dirty = false; await request('openNativeTool', { page: Number(el.dataset.page) }); } return; }
     if (name === 'loadTheme') { await request('loadTheme', { mode: $('#theme-mode').value }); await readPalette(); }
-    else if (name === 'applyTheme') { if (!confirm('Apply staged colors to the selected EXE using the native engine?')) return; await request(name); await readPalette(); }
+    else if (name === 'applyTheme') { if (!await BsiEffects.confirm('Apply staged colors to the selected EXE using the native engine?')) return; await request(name); await readPalette(); }
     else if (name === 'preset') { await request('applyPreset', { id: $('#preset').value }); await readPalette(); }
-    else if (name === 'scanResources') { if (!confirmDiscard()) return; dirty = false; selected = null; resourceData = null; await request(name); await refreshResources(); }
-    else if (name === 'saveResource') { if (!confirm('Save this resource into the selected EXE? The native engine will validate storage capacity.')) return; await request(name, { index: selected.index, text: resourceData.text }); dirty = false; await refreshResources(); resourceData = await request('readResource', { index: selected.index }); }
+    else if (name === 'scanResources') { if (!await confirmDiscard()) return; dirty = false; selected = null; resourceData = null; await request(name); await refreshResources(); }
+    else if (name === 'saveResource') { if (!await BsiEffects.confirm('Save this resource into the selected EXE? The native engine will validate storage capacity.')) return; await request(name, { index: selected.index, text: resourceData.text }); dirty = false; await refreshResources(); resourceData = await request('readResource', { index: selected.index }); }
     else if (name === 'replaceResource' || name === 'extractResource') {
-      if (name === 'replaceResource' && !confirmDiscard()) return;
+      if (name === 'replaceResource' && !await confirmDiscard()) return;
       const path = await transport.chooseFile(name === 'replaceResource' ? 'replace' : 'extract');
       if (!path) return;
-      if (name === 'replaceResource' && !confirm('Replace the selected EXE resource with this file?')) return;
+      if (name === 'replaceResource' && !await BsiEffects.confirm('Replace the selected EXE resource with this file?')) return;
       await request(name, { index: selected.index, path });
       if (name === 'replaceResource') { dirty = false; await refreshResources(); resourceData = await request('readResource', { index: selected.index }); }
-    } else if (name === 'browse') { if (!confirmDiscard()) return; const path = await transport.chooseFile(el.dataset.role); if (!path) return; }
-    else if (name === 'path') { if (!confirmDiscard()) return; const role = el.dataset.role; await request('setPaths', { [role]: $('#path-' + role).value }); }
+    } else if (name === 'browse') { if (!await confirmDiscard()) return; const path = await transport.chooseFile(el.dataset.role); if (!path) return; }
+    else if (name === 'path') { if (!await confirmDiscard()) return; const role = el.dataset.role; await request('setPaths', { [role]: $('#path-' + role).value }); }
     else if (name === 'appearance') await request('setAppearance', { theme: Number($('#appearance-mode').value), accent: $('#accent').value });
     else if (name === 'detectInstalls') await request(name);
-    else if (name === 'useInstall') { if (!confirmDiscard()) return; await request(name, { index: Number(el.dataset.index) }); }
-    else if (name === 'signOut') { if (confirmDiscard()) await request(name); return; }
+    else if (name === 'useInstall') { if (!await confirmDiscard()) return; await request(name, { index: Number(el.dataset.index) }); }
+    else if (name === 'signOut') { if (await confirmDiscard()) await request(name); return; }
     else {
       const mutating = ['fpsPatch', 'fpsRestore', 'integrityPatch', 'integrityRestore', 'bootPatch', 'purgePlayerCache', 'restoreBackup'].includes(name);
-      if (mutating && !confirm('Run ' + name + ' on the selected target? Close all emulator instances first.')) return;
+      if (mutating && !await BsiEffects.confirm('Run ' + name + ' on the selected target? Close all emulator instances first.')) return;
       await request(name, name === 'fpsPatch' ? { limit: Number($('#fps-limit').value) } : name === 'bootPatch' ? { holdMs: Number($('#boot-hold').value) } : {});
     }
     renderView();
@@ -226,13 +229,13 @@
   document.addEventListener('click', async event => {
     try {
       const windowButton = event.target.closest('[data-window]');
-      if (windowButton) { transport?.windowAction?.(windowButton.dataset.window); return; }
+      if (windowButton) { if (windowButton.dataset.window === 'close' && !await confirmDiscard()) return; if (!state.busy && !pending) await BsiEffects.windowAction(windowButton.dataset.window, action => transport?.windowAction?.(action)); return; }
       const actionEl = event.target.closest('[data-action]');
       if (actionEl) { if (actionEl.dataset.action === 'workspaceHome') await navigate(11); else await action(actionEl); return; }
       const nav = event.target.closest('[data-page]');
       if (nav) { await navigate(Number(nav.dataset.page)); return; }
       const row = event.target.closest('[data-resource]');
-      if (row && enabled() && confirmDiscard()) {
+      if (row && enabled() && await confirmDiscard()) {
         const index = Number(row.dataset.resource);
         const data = await request('readResource', { index });
         ++measureSequence; clearTimeout(measureTimer);
@@ -273,11 +276,29 @@
     preview = true; state = {}; $('#connection').hidden = true; $('#preview-note').hidden = false;
     chrome(); renderView();
   };
+  let videoFrame=0, videoGeometry='';
+  function syncVideo() {
+    cancelAnimationFrame(videoFrame);
+    videoFrame=requestAnimationFrame(() => {
+      if(!transport || !state.authorized) {videoGeometry='';return;}
+      const host=$('#video-host'), rect=host?.getBoundingClientRect();
+      const animating=$('#main')?.getAnimations().some(a=>a.playState==='running');
+      const visible=!!rect && rect.bottom>0 && rect.top<innerHeight && !document.querySelector('dialog[open]') && !animating && !document.body.classList.contains('minimizing') && !document.body.classList.contains('closing');
+      const geometry={action:'geometry',visible,x:rect?.x||0,y:rect?.y||0,width:rect?.width||0,height:rect?.height||0};
+      const key=JSON.stringify(geometry);
+      if(key!==videoGeometry) {videoGeometry=key; transport.invoke('videoControl',geometry).catch(()=>{videoGeometry='';});}
+      if(animating) syncVideo();
+    });
+  }
+  addEventListener('resize',syncVideo);
+  document.addEventListener('scroll',syncVideo,true);
+  new MutationObserver(syncVideo).observe(document.body,{childList:true,subtree:true,attributes:true,attributeFilter:['open','class']});
   async function start() {
     chrome(); renderView();
     try {
       transport = await BsiTransport.connect();
       transport.onState(useState);
+      transport.onVideo?.(message => editors.videoStatus(message));
       transport.onLog(message => { logs.push([new Date().toLocaleTimeString(), message]); if (logs.length > 500) logs.shift(); renderLogs(); });
       const initial = await transport.snapshot();
       if (initial.protocol !== 1) throw new Error('Unsupported native bridge protocol. Restart with --native-ui.');

@@ -1,62 +1,80 @@
-# 3.0.1: one app, original features, new presentation
+# 3.0.1: actual HTML presentation, original BSI engines
 
 ## Normal entry point
 
-Double-click the tested **portable EXE** or install the tested **setup EXE**.
-`Main.qml` is the normal entry point, including in Chromium-capable builds.
-No command-line flag, WebEngine runtime folder or “open full native editor”
-switch is required. The original Discord login, role validation, settings and
-Backend remain authoritative.
+The Windows portable/installer workflow now builds with `BSI_CHROMIUM_UI=ON`.
+Double-clicking that build opens `ChromiumMain.qml`: the existing native Discord
+login gate followed by the **actual HTML/CSS/JavaScript workspace**. The supplied
+`gemini-code-1793470243134.html` is the presentation reference, not a Python bridge
+or a replacement EXE patcher. Its original concept credit is retained.
 
-The supplied HTML is the visual reference, not a replacement patching engine.
-The production shell uses its slim icon rail, compact navigation/target picker,
-mint/glass palette, bundled Manrope/Jakarta fonts and 2×2 dashboard. All editor
-pages below are the original QML components, in their original stable slots.
-Editor state is retained in the same StackLayout rather than recreated on each
-navigation. Resources scans remain manual.
+This supersedes the previous native-QML approximation. The HTML frontend has the
+glass shell, local Manrope/Jakarta fonts, hover/transitions, profile menu, custom
+HSV/HEX picker, styled asynchronous confirmation dialogs, page-entry animation,
+and delayed minimize/close effects. Reduced-motion preference is respected.
+Layout and controls may differ to accommodate BSI's original workflows safely.
 
-## Feature parity map
+There are no ordinary “full native editor” buttons inside the feature forms.
+`--native-ui` and the renderer-crash recovery button remain explicit emergency
+paths, not the normal feature implementation. The legacy `--web-ui` flag is no
+longer required in Chromium-enabled builds. Native-only developer builds still
+work when configured without WebEngine.
 
-| Slot | Existing editor reused unchanged | Features retained |
-|---|---|---|
-| 0 | DashboardPage (presentation refreshed) | Detect/use installations, target paths, instance detection |
-| 1 | ThemePage | Auto/QML/Hex, presets, individual edits, toggles, gradients, reload/stale detection |
-| 2 | ResourcesPage | Manual scan, search/kind filters, original preview/text editor, budgets, replacement/extraction |
-| 3 | FpsPage | Existing DLL detection, analysis, FPS patch and restore |
-| 4 | IntegrityPage | Existing inspect, patch and restore |
-| 5 | BootVideoPage | Existing boot timing patch and validation |
-| 6 | UiPage | Removals, layout, **sidebar ordering**, About text and link controls |
-| 7 | RpcidPage | Discord IDs, resource names, dry runs, patch/undo |
-| 8 | AppearancePage | Dark/light/system theme and accent |
-| 9 | AboutPage | Existing version, update/download/install and diagnostics UI |
-| 10 | GifRpcPage | Original GIF RPC configuration, inspect/apply/restore |
-| 11 | WorkspacePage | Original profiles, queues, dry run/apply/history, image/media utilities |
-| 12 | DebloatPage / RootVhdBrowser | Original Debloat, Android/ADB cleanup and complete disk browser operations |
+## Feature-to-engine map
 
-Cache purge remains in the top-bar menu, with its original confirmation dialog.
-Sign-out is in that menu too. The original worker/busy modal, activity log,
-backup rules, capacity checks and native resize/window controls are retained.
+| HTML page | Existing native operations retained |
+|---|---|
+| Overview | Install/instance detection, target selection and paths, backup restore |
+| Theme | Auto/QML/Hex, palettes/presets/staging, toggles, gradient load/apply, preview/dry run |
+| Resources | **Manual Scan Resources**, original search semantics, pagination, budgets, text save, replace and extraction |
+| FPS | Existing DLL detection, analysis, patch/restore and detection preference |
+| Integrity | Existing inspect, patch and restore |
+| Boot | Original timing patch, cache purge and profile staging |
+| Player UI | Original removals, layout tweaks, About text/link/visibility, sidebar row ordering/hiding/reset |
+| Discord IDs | Find/status/replace, dry run/undo, Windows resource names |
+| Interface | App theme/accent, target paths and installation selection |
+| Build | Update preference/check/download/verified apply, trust and helper diagnostics |
+| GIF RPC | Existing proxy inspection/install/restore, configuration/profile and IPC diagnostics |
+| Workspace | Profiles, queues, hash-bound dry run/apply, journals, image preparation, MP4 inspection and Qt decoder preview |
+| Debloat & Android | Original config cleanup/restore, live ADB package/storage cleanup/undo, Root.vhd/VHDX/archive tools |
 
-## What was deliberately not rewritten
+The disk tools reuse `Backend::rootvhd*`, including read-only/dirty-journal
+refusals, explicit write enabling, file/folder listing and search, extraction,
+add/replace, folder creation, rename/copy/move/delete, undo and journal discard.
+Listings are paginated in HTML. No image scan runs on page entry. Sidebar and
+Debloat options are read explicitly from the native engine; not invented by JS.
 
-No binary patcher, Backend operation, AuthManager policy or update verification
-was replaced for this UI consolidation. In particular the HTML forms do not
-become another source of production form state or feature coverage. The
-experimental Chromium adapter remains available only via explicit `--web-ui`
-in builds that compile it; it is not the normal full-feature download.
+The MP4 preview's controls are HTML. Only the video pixels are composited by
+`VideoOutput` using the **same Qt Multimedia decoder as the original editor**.
+No local-file browser permission, new HTTP service, replacement codec or generic
+filesystem endpoint is introduced. The preview pauses/hides on navigation,
+dialogs, busy engine state, and sign-out. Decoder playback does not certify the
+emulator's playback; there is no automatic encoder/converter.
 
-## Verification
+## Boundaries
 
-- `tests/workspace_qml_lint_test.py`: real Qt 6.8 metadata over every page/control.
-- `--selftest`: loads the real production Main.qml, checks all 13 original
-  editor objects and stable navigation slots, rejects invalid routes, verifies
-  manual-scan behavior and theme propagation; existing engine fixtures still run.
-- CI: native Windows build/self-tests and Linux Resources/search/runtime tests.
-- Portable/installer workflow: packages this same Main.qml and verifies the
-  deployed runtime/installer using the existing acceptance tests.
-- Chromium workflow remains a separate regression check for the optional adapter.
+- No patch engine, Backend operation, AuthManager policy, session store or
+  updater signature verification is replaced.
+- Every bridge command/file picker is re-authorized natively and refuses busy /
+  re-entrant calls. Renderer state never grants production access.
+- Confirmations are presentation only. Cancelling sends no write. Native
+  validation, backups, capacity checks and recovery journals remain authoritative.
+- Renderer crashes never automatically retry a write. Inspect the target and
+  backup before retrying an interrupted operation.
+- A disconnected browser preview cannot patch files or bypass Discord login.
 
-These automated checks do not prove every emulator version or a real Discord
-OAuth session. If a target-specific crash persists, record the exact feature,
-build/target version and local diagnostics log; do not retry an interrupted
-write without inspecting the target and backup first.
+## Packaging and verification
+
+The standard Windows workflow deploys WebEngine's helper, matching ICU/PAK data,
+locales, QML imports and runtime DLLs inside the portable payload/installer.
+Matching Qt-generated Chromium third-party notices are bundled, not omitted to
+shrink the download. A clean-PATH smoke test launches the packed renderer, not
+just the inner SDK build. The dedicated Chromium workflow additionally checks
+locked bridge access and renderer recovery. Neither feature-branch workflow
+publishes a public release.
+
+Automated browser tests use **test-only mock transport**, checking request
+arguments and UI behavior; they are not authenticated C++ engine end-to-end
+certification. Native engine fixtures and Windows deployment tests remain
+separate. Real Discord OAuth and every emulator version still require target-PC
+verification. See [CHROMIUM-UI.md](CHROMIUM-UI.md) for the bridge/security design.

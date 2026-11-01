@@ -36,6 +36,7 @@
         this.remote.requestFile(role);
       });
     }
+    onVideo(fn) { this.remote.videoStatus?.connect(fn); }
     onState(fn) { this.remote.stateChanged.connect(fn); }
     onLog(fn) { this.remote.logMessage.connect(fn); }
   }
@@ -43,7 +44,7 @@
     connect() {
       return new Promise((resolve, reject) => {
         if (!window.qt?.webChannelTransport || typeof QWebChannel !== 'function') {
-          reject(new Error('Open this workspace using BSI-Customizer.exe --web-ui. The browser alone cannot access C++ engines.'));
+          reject(new Error('Open this workspace using BSI-Customizer.exe. The browser alone cannot access C++ engines.'));
           return;
         }
         const timeout = setTimeout(() => reject(new Error('The native bridge did not respond. Restart with --native-ui.')), 10000);

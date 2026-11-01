@@ -1,3 +1,4 @@
+#include <cmath>
 #include "WebBridge.h"
 
 #include "core/AuthManager.h"
@@ -21,7 +22,9 @@ bool fileRole(const QString &role) {
         || role == QLatin1String("conf") || role == QLatin1String("replace") || role == QLatin1String("extract")
         || role == QLatin1String("profile-open") || role == QLatin1String("profile-save")
         || role == QLatin1String("report-save") || role == QLatin1String("image-open")
-        || role == QLatin1String("image-save") || role == QLatin1String("video-open");
+        || role == QLatin1String("image-save") || role == QLatin1String("video-open")
+        || role == QLatin1String("disk-open") || role == QLatin1String("disk-source")
+        || role == QLatin1String("disk-extract") || role == QLatin1String("disk-folder");
 }
 }
 
@@ -228,6 +231,8 @@ QVariantMap WebBridge::invoke(const QString &method, const QVariantMap &args)
             "clear", "queue-theme", "queue-resource", "dry-run", "apply", "history", "restore", "image", "video", "rpc" };
         if (!allowed.contains(action)) return failure(QStringLiteral("Unknown workspace action."));
         auto response = m_backend.workspace(action, args.value("options").toMap());
+        if (action == QLatin1String("video") && response.value("ok").toBool())
+            emit videoFileRequested(QUrl::fromLocalFile(args.value("options").toMap().value("file").toString()));
         if (response.contains("operation")) {
             auto operation = response.value("operation").toMap();
             operation.remove("data");
@@ -273,6 +278,60 @@ QVariantMap WebBridge::invoke(const QString &method, const QVariantMap &args)
         else if (action == QLatin1String("diagnostics")) value = m_updates.helperFailure();
         else if (action == QLatin1String("autoCheck")) m_updates.setAutoCheck(args.value("enabled").toBool());
         else return failure(QStringLiteral("Unknown updater action."));
+    } else if (method == QLatin1String("videoControl")) {
+        const QString action = text("action");
+        if (action == QLatin1String("geometry")) {
+            QVariantMap rect{{"visible", args.value("visible").toBool()}};
+            for (const auto *key : {"x", "y", "width", "height"}) {
+                bool ok = false;
+                const double coordinate = args.value(QLatin1String(key)).toDouble(&ok);
+                if (!ok || !std::isfinite(coordinate)) return failure(QStringLiteral("Invalid preview geometry."));
+                rect.insert(QLatin1String(key), qBound(-8192.0, coordinate, 8192.0));
+            }
+            emit videoControlRequested(action, rect);
+        } else if (action == QLatin1String("play") || action == QLatin1String("pause"))
+            emit videoControlRequested(action, {});
+        else if (action == QLatin1String("crop"))
+            emit videoControlRequested(action, {{"crop", args.value("crop").toBool()}});
+        else return failure(QStringLiteral("Unknown preview control."));
+        value = QVariantMap{{"msg", QStringLiteral("Preview control requested; emulator playback is not verified.")}};
+    } else if (method == QLatin1String("maintenance")) {
+        // Explicit adapters only: no reflection, script execution or generic
+        // QObject access. All authorization, busy and exception guards above
+        // apply to every action; the original engines validate every write.
+        const QString action = text("action");
+        const auto list = [&args](const char *key) {
+            QStringList out;
+            for (const auto &item : args.value(QLatin1String(key)).toList()) out << item.toString();
+            return out;
+        };
+        if (action == QLatin1String("sidebar-read")) value = m_backend.sidebarButtonRows();
+        else if (action == QLatin1String("sidebar-apply")) value = m_backend.applySidebarOrder(list("order"), list("hidden"));
+        else if (action == QLatin1String("debloat-read")) value = QVariantMap{{"state", m_backend.debloatState()}, {"options", m_backend.debloatOptions()}};
+        else if (action == QLatin1String("debloat-apply")) value = m_backend.debloatApply(list("ids"), text("instance"));
+        else if (action == QLatin1String("debloat-restore")) value = m_backend.debloatRestore();
+        else if (action == QLatin1String("android-read")) value = m_backend.androidState();
+        else if (action == QLatin1String("android-scan")) value = m_backend.androidScan(text("instance"));
+        else if (action == QLatin1String("android-apply")) value = m_backend.androidApply(list("packages"), args.value("wipeDownloads").toBool(), args.value("keepCopy", true).toBool(), args.value("clearAppData").toBool(), text("instance"));
+        else if (action == QLatin1String("android-restore")) value = m_backend.androidRestore(text("instance"));
+        else if (action == QLatin1String("disk-find")) value = QVariantMap{{"path", m_backend.rootvhdFind()}, {"folders", m_backend.rootvhdEngineFolders()}};
+        else if (action == QLatin1String("disk-archive")) value = m_backend.rootvhdOpenEngineArchive(text("file"));
+        else if (action == QLatin1String("disk-info")) value = m_backend.rootvhdInfo(text("image"));
+        else if (action == QLatin1String("disk-enable")) value = m_backend.rootvhdEnableWrite(text("image"));
+        else if (action == QLatin1String("disk-list")) value = m_backend.rootvhdList(text("image"), text("innerPath"));
+        else if (action == QLatin1String("disk-search")) value = m_backend.rootvhdSearch(text("image"), text("query"));
+        else if (action == QLatin1String("disk-extract")) value = m_backend.rootvhdExtract(text("image"), text("innerPath"), text("file"));
+        else if (action == QLatin1String("disk-add")) value = m_backend.rootvhdAdd(text("image"), text("innerPath"), text("file"));
+        else if (action == QLatin1String("disk-add-folder")) value = m_backend.rootvhdAddFolder(text("image"), text("innerPath"), text("file"));
+        else if (action == QLatin1String("disk-replace")) value = m_backend.rootvhdReplace(text("image"), text("innerPath"), text("file"));
+        else if (action == QLatin1String("disk-mkdir")) value = m_backend.rootvhdMkdir(text("image"), text("innerPath"), text("name"));
+        else if (action == QLatin1String("disk-rename")) value = m_backend.rootvhdRename(text("image"), text("innerPath"), text("name"));
+        else if (action == QLatin1String("disk-move")) value = m_backend.rootvhdMove(text("image"), text("innerPath"), text("destination"));
+        else if (action == QLatin1String("disk-copy")) value = m_backend.rootvhdCopy(text("image"), text("innerPath"), text("destination"), text("name"));
+        else if (action == QLatin1String("disk-remove")) value = m_backend.rootvhdRemove(text("image"), text("innerPath"));
+        else if (action == QLatin1String("disk-undo")) value = m_backend.rootvhdUndo(text("image"));
+        else if (action == QLatin1String("disk-discard")) value = m_backend.rootvhdDiscardUndo(text("image"));
+        else return failure(QStringLiteral("Unknown maintenance action."));
     } else if (method == QLatin1String("openNativeTool")) {
         bool valid = false; const int page = args.value("page").toInt(&valid);
         if (!valid || page < 0 || page > 12) return failure(QStringLiteral("Invalid native tool page."));

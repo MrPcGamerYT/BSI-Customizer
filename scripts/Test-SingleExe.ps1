@@ -29,6 +29,7 @@ function Run-Clean([string]$File, [string[]]$Arguments, [string]$Platform = 'off
     $info.Environment['PATH'] = "$env:SystemRoot\System32;$env:SystemRoot"
     $info.Environment['QT_QPA_PLATFORM'] = $Platform
     $info.Environment['QT_QUICK_BACKEND'] = 'software'
+    if ($Arguments -contains '--chromium-runtime-test') { $info.Environment.Remove('QT_QUICK_BACKEND') | Out-Null }
     $info.Environment['QML_DISABLE_DISK_CACHE'] = '1'
     $info.Environment['__COMPAT_LAYER'] = 'RUNASINVOKER'
     $process = [Diagnostics.Process]::new()
@@ -113,6 +114,16 @@ try {
     }
     $inner = Join-Path $extracted 'BSI-Customizer.exe'
     Check-Probe (Run-Clean $inner @('--deployment-test')) $false
+    if (Test-Path -LiteralPath (Join-Path $extracted 'Qt6WebEngineCore.dll')) {
+        # Execute from the real packed launcher with no SDK on PATH. Merely
+        # checking a file list would miss helpers/locales and QML imports.
+        $web = Run-Clean $portable @('--chromium-runtime-test') 'windows'
+        if ($web.Code -ne 0 -or $web.Out -notmatch 'CHROMIUM RUNTIME TEST PASSED') {
+            throw "Packed animated UI failed: $($web.Out) $($web.Err)"
+        }
+        Write-Host 'PASS packed Chromium helper/resources/locales / clean PATH'
+    }
+
     $sentinel = Join-Path $extracted 'do-not-overwrite.txt'
     'preserve this file' | Set-Content -LiteralPath $sentinel
     $result = Run-Clean $portable @('--extract-to', $extracted)

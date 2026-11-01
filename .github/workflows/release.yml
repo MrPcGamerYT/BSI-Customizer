@@ -137,7 +137,10 @@ jobs:
           host: windows
           target: desktop
           arch: win64_msvc2022_64
-          modules: qtmultimedia
+          modules: qtmultimedia qtwebengine qtwebchannel qtpositioning
+          documentation: true
+          doc-modules: qtwebengine
+          doc-archives: qtwebengine
           cache: true
 
       - name: Configure application and one-file package
@@ -145,7 +148,7 @@ jobs:
           # Whole auth.json to bake into the released EXE; the release build
           # fails closed if this secret is missing and locks out runtime overrides.
           ZLP_AUTH_JSON: ${{ secrets.ZLP_AUTH_JSON || secrets.BSIC_AUTH_JSON }}
-        run: cmake -S . -B build -A x64 -DCMAKE_BUILD_TYPE=Release -DBSI_TEST_QT5_REFERENCE=ON -DBSI_BUILD_PORTABLE=ON -DBSI_REQUIRE_EMBEDDED_AUTH=ON
+        run: cmake -S . -B build -A x64 -DCMAKE_BUILD_TYPE=Release -DBSI_TEST_QT5_REFERENCE=ON -DBSI_BUILD_PORTABLE=ON -DBSI_REQUIRE_EMBEDDED_AUTH=ON -DBSI_CHROMIUM_UI=ON
 
       # Also bundles the runtime and runs the portable-EXE smoke tests.
       #

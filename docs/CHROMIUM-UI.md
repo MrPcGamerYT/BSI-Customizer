@@ -2,7 +2,7 @@
 
 The user-supplied `gemini-code-1793470243134.html` is the visual reference.
 Original concept credit **@Floatz4Ever** is retained. This integration uses
-system fonts, local CSS/JS and real BSI engine calls, not its Python bridge,
+bundled local fonts, CSS/JS and real BSI engine calls, not its Python bridge,
 placeholder "EXE found" state, or a replacement login provider.
 
 ## Architecture and current status
@@ -17,17 +17,13 @@ Local Qt WebEngine / Chromium HTML + JS <-- Qt WebChannel --> WebBridge
                                         existing Backend / native engines
 ```
 
-The normal application now uses the **unified native glass shell** documented in
-[UNIFIED-UI.md](UNIFIED-UI.md). It reuses all thirteen original QML feature pages
-with the existing Backend, including sidebar ordering, Debloat/Android and the
-Root.vhd browser. No flag or second editor is needed for the normal app.
+The normal Windows portable/installer workflow now builds this frontend with
+`BSI_CHROMIUM_UI=ON`. It opens by default, after the unchanged Discord login.
+This corrects the earlier native-QML approximation; see [UNIFIED-UI.md](UNIFIED-UI.md).
+`--native-ui` remains an explicit recovery option and native-only developer builds
+remain supported. Feature forms no longer hand normal work to another editor.
 
-Chromium remains an experimental, explicitly selected adapter:
-`BSI-Customizer.exe --web-ui` in a build configured with `BSI_CHROMIUM_UI=ON`.
-`--native-ui` wins if both flags are present. Do not use Chromium test bundles as
-the normal full-feature download: use the tested portable EXE or installer.
-
-Implemented HTML flows now merge all 12 tool areas with their existing engines:
+Implemented HTML flows cover 13 areas using the existing engines:
 
 - Overview, detected installations/instances and native activity.
 - Theme Auto/QML/Hex loading, individual staging/deselection, presets, legacy
@@ -37,7 +33,7 @@ Implemented HTML flows now merge all 12 tool areas with their existing engines:
   cached encoded-size measurement, native save/replace/extract and bulk extract.
 - FPS detect/analyze/patch/restore and auto-detection preferences; native integrity
   check/patch/restore; boot patch/cache purge and staged boot profile settings.
-- Player removals, supported layout tweaks, About text/link/visibility editing,
+- Player removals, supported layout tweaks, sidebar ordering/hiding/reset, About text/link/visibility editing,
   About report and profile-section staging.
 - Offline Discord application ID find/status/replace/dry run/undo and Windows
   Explorer/Task Manager version-resource name editing.
@@ -50,16 +46,19 @@ Implemented HTML flows now merge all 12 tool areas with their existing engines:
 - Dark/Light/System theme/accent, target paths, installation selection, backup
   restore, auto-update preference, download/verified apply and helper diagnostics.
 
-The full original QML editors remain accessible **inside the same window** as a
-compatibility option, not as placeholder pages. Qt Multimedia video playback /
-actual decoder checks still use that native editor; the HTML workspace currently
-exposes the metadata inspector rather than serving arbitrary local media files
-into Chromium. Native login and the existing update banner remain reused.
+- Debloat config options/apply/restore, live Android/ADB scan/package and storage
+  cleanup/undo, image/archive inspection, Root.vhd/VHDX browsing, extraction,
+  write enabling, add/replace/mkdir/rename/move/copy/delete and journal undo.
 
-The merge does not alter the patch engines, AuthManager or SessionStore. Source
-and UI-contract coverage is not Windows runtime certification. Native build,
-authenticated C++/WebChannel end-to-end tests, real patch regressions and a complete
-Chromium deployment audit remain required before making this the default release.
+The MP4 preview uses HTML controls and the original Qt Multimedia VideoOutput
+for its pixels, composited in the HTML preview rectangle. File URLs are not
+served to Chromium. It pauses/hides when leaving the page, opening dialogs,
+running native work or signing out. Metadata inspection and decoder playback
+are not claims about emulator playback.
+
+The merge does not alter the patch engines, AuthManager or SessionStore.
+Browser tests use a mock transport; native build/engine fixtures and deployed
+Windows renderer tests are separate checks, not real Discord OAuth coverage.
 See [tool-to-engine mapping](CHROMIUM-MERGE-MAP.md).
 
 ## Invariants
@@ -86,34 +85,33 @@ See [tool-to-engine mapping](CHROMIUM-MERGE-MAP.md).
 
 Use the project's supported Qt 6 toolchain, plus **WebEngineQuick and WebChannel**
 (Qt installer modules `qtwebengine qtwebchannel`, and their dependencies).
-The separate Windows workflow installs Qt 6.8.3 and `qtpositioning` as well.
+The Windows workflows install Qt 6.8.3 and `qtpositioning` as well.
 
 ```powershell
 cmake -S . -B build-web -A x64 -DBSI_CHROMIUM_UI=ON
 cmake --build build-web --config Release --parallel
-.\build-web\Release\BSI-Customizer.exe --web-ui
+.\build-web\Release\BSI-Customizer.exe
 ```
 
 A Chromium desktop app is **not just its inner EXE**: deploy the matching
 `QtWebEngineProcess`, Chromium `.pak`/ICU data, locales, plugins and QML imports.
-Use `windeployqt --release --qmldir src` on the built binary. The opt-in
-workflow tests this full deployment with the Qt SDK removed from `PATH`.
-Do not reuse a native-only bundle or remove helpers to reduce its size. Do not
-turn off Chromium sandboxing to hide deployment/startup failures. Test elevated
-Windows launch (the existing manifest), helper startup and a clean machine before
-changing the production default. A portable outer EXE would still need to unpack
-the complete runtime. Include Qt WebEngine/Chromium third-party notices in any
-future distribution; the existing native-only release is not replaced here.
+The standard packager scans both native and Chromium QML directories, validates
+helper/resources/locales, and launches the packed renderer with the SDK removed
+from PATH. The dedicated Chromium workflow also tests its full deployment.
+Do not reuse a native-only payload or strip helpers to reduce size. Do not turn
+off sandboxing to hide deployment/startup failures. The portable outer EXE must
+unpack the matching runtime. The workflows install the matching WebEngine docs
+and bundle their generated Chromium third-party license pages, in addition to
+Qt's SPDX/attribution collection.
 
 ## Verification
 
-The optional shell source lives under `src/chromium/ChromiumMain.qml`, with a
-resource alias preserving its runtime URL under `src/qml`. This keeps WebEngine
-imports out of the existing native-only packager's `src/qml` scan. Chromium builds
-scan `src` to deploy both QML frontends. The QML metadata test checks both paths.
+The shell source lives under `src/chromium/ChromiumMain.qml`, with a
+resource alias preserving its runtime URL under `src/qml`. Native-only developer builds scan `src/qml`; Chromium packaging also scans
+`src/chromium`, deploying both frontends. The QML metadata test checks both paths.
 
 - `node tests/chromium_ui_test.cjs`: Playwright browser tests with an explicit
-  test-only transport double. Covers all 12 routes, offline lock, scan behavior,
+  test-only transport double. Covers all 13 routes, offline lock, scan behavior,
   pagination/search, safe text rendering, command arguments, refused operations,
   About visibility inversion, RPC/GIF settings, boot profile staging, gradients,
   profile import, hash-bound batch apply, failed-dry-run revocation and sign-out. Requires `playwright`; optional `BSI_PLAYWRIGHT` specifies its
@@ -163,7 +161,7 @@ checks remain enabled, and local sidecar/environment policy overrides are
 rejected for these bundles just as they are for native releases.
 
 Already downloaded bundles do not change when the workflow is fixed: download
-and extract the newly verified experimental artifact, then run `BSI-Customizer.exe --web-ui`. For the normal complete app, use the unified native build.
+and use the newly verified standard portable/installer artifact. The HTML frontend now opens by default.
 This verification checks configuration and locked bridge behavior offline;
 it does not claim to have completed a real Discord OAuth sign-in.
 

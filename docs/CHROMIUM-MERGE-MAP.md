@@ -14,12 +14,15 @@ required before a production release.
 | Performance | `fpsDetect`, `fpsAnalyze`, `fpsPatch`, `fpsRestore`, `SettingsManager::setFpsAutoDetect` |
 | Integrity | `integrityCheck`, `integrityPatch`, `integrityRestore` |
 | Boot | `bootPatch`, `purgePlayerCache`, `workspace("profile-section", boot)` |
-| Player Interface | `removalNames`, `applyRemovals`, `layoutTweaks`, `applyLayoutTweak`, `aboutPageState`, `aboutPageReport`, `applyAboutPage`, `workspace("profile-section", about)` |
+| Player Interface | `removalNames`, `applyRemovals`, `layoutTweaks`, `applyLayoutTweak`, `sidebarButtonRows`, `applySidebarOrder`, `aboutPageState`, `aboutPageReport`, `applyAboutPage`, `workspace("profile-section", about)` |
 | Discord ID / names | `rpcidFind`, `rpcidStatus`, `rpcidReplace`, `rpcidUndo`, `rpcidNames`, `rpcidSetName` |
 | Animated presence | `gifRpcInspect`, `gifRpcApply`, `gifRpcRestore`, `workspace("profile-section", gifRpc)`, `workspace("rpc")` |
 | Workspace / profiles | `customizationProfile`, `workspaceOperations`, `workspace` actions: inspect, diagnostics, profile-load/save, queue-theme/resource, clear, theme-dry-run, dry-run, apply, history, restore, image, video, rpc |
 | Appearance / targets | Existing `Backend` path setters, `ThemeManager` Dark/Light/System and accent setters, `restoreBackup` |
 | About / updates | Existing `UpdateChecker` state, auto-check, check, download, apply, cancel, skip/unskip, open-download, staged-file and helper-log actions |
+| Debloat / ADB | Original `debloatState/Options/Apply/Restore`, `androidState/Scan/Apply/Restore` |
+| Engine images | Original `rootvhdFind/OpenEngineArchive/Info/EnableWrite/List/Search/Extract/Add/AddFolder/Replace/Mkdir/Rename/Move/Copy/Remove/Undo/DiscardUndo/EngineFolders` |
+| Video preview | Original Qt Multimedia `MediaPlayer` / `VideoOutput`, HTML play/pause/crop and bounded native viewport geometry |
 | Login | Original `LoginGate.qml`, `AuthManager` and `SessionStore` — not reimplemented in the renderer |
 
 ## Behaviors deliberately preserved
@@ -39,8 +42,8 @@ required before a production release.
 - Operation errors/refusals are propagated. Plugin inspection/config saving does
   not claim an observed Discord connection or GIF animation.
 - Qt file dialogs handle import/export/source paths; no unrestricted local-file
-  origin is exposed to Chromium. The original native Workspace remains available
-  for Qt Multimedia playback and decoder validation.
+  origin is exposed to Chromium. HTML preview controls use the original Qt
+  Multimedia decoder, with only video pixels composited into the page.
 
 ## Verification boundaries
 

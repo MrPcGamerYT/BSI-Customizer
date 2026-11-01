@@ -2,13 +2,14 @@ import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Window
 import QtQuick.Layouts
+import QtMultimedia
 import QtQuick.Dialogs
 import QtWebEngine
 import QtWebChannel
 import BSICustomizer
 
-// Opt-in Chromium shell. The existing login, updater and full native editors
-// are reused, not reimplemented or bypassed by JavaScript.
+// Production HTML shell. Existing login, updater and engines remain native;
+// the original QML editors are retained only for explicit recovery.
 ApplicationWindow {
     id: window
     width: 1480
@@ -22,6 +23,35 @@ ApplicationWindow {
     property bool booted: false
     property int nativePage: -1
     signal retryBrowser()
+    property var videoRect: ({x:0, y:0, width:0, height:0, visible:false})
+    property bool videoCrop: true
+    // Only the video pixels are native. All controls and layout stay in HTML;
+    // this is the original Qt Multimedia decoder, not a different HTML codec.
+    MediaPlayer {
+        id: bootPreview
+        audioOutput: AudioOutput { muted: true }
+        loops: MediaPlayer.Infinite
+        onErrorOccurred: (error, message) => webBridge.videoStatus(message)
+        onPlaybackStateChanged: {
+            webBridge.videoStatus(playbackState === MediaPlayer.PlayingState
+                ? qsTr("Playing with this app's Qt decoder. Emulator playback is not verified.")
+                : qsTr("Preview paused / stopped. Emulator playback is not verified."))
+        }
+    }
+    Connections {
+        target: webBridge
+        function onVideoFileRequested(file) { bootPreview.stop(); bootPreview.source = file; }
+        function onVideoControlRequested(action, options) {
+            if (action === "geometry") { window.videoRect = options; if (!options.visible) bootPreview.pause(); }
+            else if (action === "play") bootPreview.play();
+            else if (action === "pause") bootPreview.pause();
+            else if (action === "crop") window.videoCrop = options.crop;
+        }
+    }
+    Connections {
+        target: backend
+        function onBusyChanged() { if (backend.busy) bootPreview.pause(); }
+    }
     property bool browserReady: false
     property string browserFailure: ""
     readonly property var nativeSources: ["DashboardPage.qml", "ThemePage.qml", "ResourcesPage.qml",
@@ -46,6 +76,7 @@ ApplicationWindow {
         signal stateChanged(var state)
         signal logMessage(string message, string color)
         signal fileSelected(string role, string path)
+        signal videoStatus(string message)
     }
     WebChannel { id: channel; registeredObjects: [rpc] }
 
@@ -83,6 +114,18 @@ ApplicationWindow {
                 settings.localContentCanAccessFileUrls: false
                 settings.javascriptCanOpenWindows: false
                 settings.pluginsEnabled: false
+                clip: true
+                VideoOutput {
+                    id: bootVideoPixels
+                    z: 10
+                    x: window.videoRect.x; y: window.videoRect.y
+                    width: Math.max(0, window.videoRect.width)
+                    height: Math.max(0, window.videoRect.height)
+                    visible: auth.authorized && window.nativePage < 0 && !backend.busy && !window.browserFailure && window.videoRect.visible
+                    fillMode: window.videoCrop ? VideoOutput.PreserveAspectCrop : VideoOutput.PreserveAspectFit
+                    Component.onCompleted: bootPreview.videoOutput = bootVideoPixels
+                    Component.onDestruction: { bootPreview.pause(); bootPreview.videoOutput = null; }
+                }
                 Connections {
                     target: window
                     function onRetryBrowser() { browser.reload(); }
@@ -139,16 +182,26 @@ ApplicationWindow {
         id: fileDialog
         property string roleName: ""
         title: roleName === "extract" ? qsTr("Extract resource to…") : qsTr("Select a local file")
-        fileMode: ["extract", "profile-save", "report-save", "image-save"].includes(roleName) ? FileDialog.SaveFile : FileDialog.OpenFile
+        fileMode: ["extract", "profile-save", "report-save", "image-save", "disk-extract"].includes(roleName) ? FileDialog.SaveFile : FileDialog.OpenFile
         onAccepted: webBridge.fileChosen(roleName, selectedFile)
         onRejected: webBridge.fileChosen(roleName, "")
+    }
+    FolderDialog {
+        id: folderDialog
+        title: qsTr("Choose a local folder")
+        onAccepted: webBridge.fileChosen("disk-folder", selectedFolder)
+        onRejected: webBridge.fileChosen("disk-folder", "")
     }
     Connections {
         target: webBridge
         function onStateChanged(state) { rpc.stateChanged(state); }
         function onLogMessage(message, color) { rpc.logMessage(message, color); logs.append(message, color); }
+        function onVideoStatus(message) { rpc.videoStatus(message); }
         function onFileSelected(role, path) { rpc.fileSelected(role, path); }
-        function onOpenFileRequested(role) { fileDialog.roleName = role; fileDialog.open(); }
+        function onOpenFileRequested(role) {
+            if (role === "disk-folder") { folderDialog.open(); return; }
+            fileDialog.roleName = role; fileDialog.open();
+        }
         function onNativeToolRequested(page) { window.nativePage = page; }
     }
     Connections {
@@ -158,7 +211,7 @@ ApplicationWindow {
                 window.booted = true;
                 backend.detectInstalls();
             }
-            if (!auth.authorized) { fileDialog.close(); window.nativePage = -1; }
+            if (!auth.authorized) { bootPreview.stop(); bootPreview.source = ""; window.videoRect = ({x:0,y:0,width:0,height:0,visible:false}); folderDialog.close(); fileDialog.close(); window.nativePage = -1; }
             // Do not destroy WebEngineView inside a WebChannel invocation
             // (e.g. sign-out). Let the native call and signal delivery unwind.
             Qt.callLater(function() {

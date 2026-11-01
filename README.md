@@ -1,13 +1,13 @@
 # BSI Customizer 3.0.1
 
-> **3.0.1 unified UI:** the normal EXE uses one mint/glass shell around all 13 original feature pages and the original native engines. No `--web-ui` flag or editor switching is needed. See [the feature/verification map](docs/UNIFIED-UI.md).
+> **3.0.1 HTML UI:** the normal Windows build uses the actual animated HTML/glass frontend with all 13 BSI feature areas connected to the original native engines. No `--web-ui` flag or editor switching is needed. See [the feature/verification map](docs/UNIFIED-UI.md).
 
 
 [![CI](https://github.com/MrPcGamerYT/BSI-Customizer/actions/workflows/ci.yml/badge.svg)](https://github.com/MrPcGamerYT/BSI-Customizer/actions/workflows/ci.yml)
 
 Windows desktop customizer for BlueStacks / MSI App Player. Version **3.0.1** integrates the Chromium workspace with the existing C++ engines and Discord login.
 
-For the complete new interface, use the standard portable or installer build: all original features share the unified glass shell. The separate Chromium workflow/`--web-ui` adapter is experimental and is not the normal full-feature app. This version label does not imply a published release.
+Use the standard portable or installer build for the animated interface; both now include Chromium. `--native-ui` is an emergency compatibility fallback, not the normal editing flow. Browser-only previews cannot patch files or bypass Discord authorization. This version label does not imply a published release.
 
 Search/scan performance findings, benchmarks and the optimization roadmap:
 [performance review](docs/PERFORMANCE.md).
@@ -1040,10 +1040,12 @@ A diagnostic EXE can be supplied with `-DBSI_EXE_TEST_FILE=<absolute-path>`. In 
 
 Compatibility is version-adaptive, not a guarantee for every past/future build: FPS detours currently support Windows x64 Qt 5/Qt 6 setters, and boot rewriting requires a recognizable boot-controller/media API with a validated resource mapping. Unknown architectures, ambiguous runtime selection and unrecognized resource layouts are refused instead of reporting a false success. Integrity behavior is not changed by these detection improvements.
 
-### Opt-in Chromium workspace
+### Animated HTML workspace
 
-A staged Qt WebEngine + WebChannel interface based on the supplied mint/glass
-concept is available with `-DBSI_CHROMIUM_UI=ON` and `--web-ui`. It reuses the
-existing native Discord login and C++ engines; the native UI remains the default,
-and full native editors remain accessible during migration. See
-[Chromium migration status, build requirements and verification](docs/CHROMIUM-UI.md).
+The supplied HTML frontend is now the default (`BSI_CHROMIUM_UI=ON`). Install
+Qt WebEngine, WebChannel, Positioning and Multimedia development modules when
+building it locally. The existing Discord login and C++ engines are unchanged.
+The standard portable/installer workflows include the complete runtime.
+`--native-ui` selects the emergency recovery shell; `BSI_CHROMIUM_UI=OFF` is an
+explicit native-only developer build. See [UI/engine mapping](docs/UNIFIED-UI.md)
+and [deployment requirements and verification](docs/CHROMIUM-UI.md).

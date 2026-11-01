@@ -41,7 +41,7 @@ qt_standard_project_setup(REQUIRES 6.5)
 # Staged UI migration: keep native builds/deployment unchanged unless requested.
 # Qt WebEngine ships Chromium helpers, locales and .pak data; it is not a
 # system-browser/localhost service and needs a complete Qt deployment.
-option(BSI_CHROMIUM_UI "Build the opt-in Chromium desktop workspace" OFF)
+option(BSI_CHROMIUM_UI "Build the animated HTML desktop workspace" ON)
 if(BSI_CHROMIUM_UI)
     find_package(Qt6 6.5 REQUIRED COMPONENTS WebEngineQuick WebChannel)
 endif()
@@ -396,7 +396,7 @@ if(BSI_CHROMIUM_UI)
         FILES src/chromium/ChromiumMain.qml)
     qt_add_resources(BSICustomizer "bsi_chromium_assets"
         PREFIX "/bsi-web" BASE "src/web"
-        FILES src/web/index.html src/web/styles.css src/web/transport.js src/web/resource-search.js src/web/editors.js src/web/app.js src/web/icon.png
+        FILES src/web/index.html src/web/styles.css src/web/transport.js src/web/resource-search.js src/web/editors.js src/web/maintenance.js src/web/effects.js src/web/app.js src/web/icon.png
             src/web/fonts/manrope-latin.woff2 src/web/fonts/plus-jakarta-sans-latin.woff2
             src/web/fonts/manrope-LICENSE.txt src/web/fonts/plus-jakarta-sans-LICENSE.txt)
 endif()

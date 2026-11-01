@@ -93,7 +93,8 @@ jobs:
           # Whole auth.json to embed at build time (falls back to the
           # BSIC_AUTH_JSON secret name; empty = build without an embed).
           ZLP_AUTH_JSON: ${{ secrets.ZLP_AUTH_JSON || secrets.BSIC_AUTH_JSON }}
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Release
+        # Dedicated native recovery/engine build; the other workflows test HTML.
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DBSI_CHROMIUM_UI=OFF
 
       - name: Build
         shell: pwsh

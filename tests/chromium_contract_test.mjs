@@ -28,7 +28,7 @@ for (const query of ['', 'file-22', '"folder 2"', 'qml min:2kb max:40kb', 'Folde
   }
 }
 const html = read('src/web/index.html'), cmake = read('CMakeLists.txt');
-for (const asset of ['styles.css', 'transport.js', 'resource-search.js', 'editors.js', 'app.js']) {
+for (const asset of ['styles.css', 'transport.js', 'resource-search.js', 'editors.js', 'maintenance.js', 'effects.js', 'app.js']) {
   assert.ok(html.includes(asset), 'Missing browser asset: ' + asset);
   assert.ok(cmake.includes('src/web/' + asset), 'Missing embedded desktop asset: ' + asset);
 }
@@ -53,12 +53,27 @@ assert.ok(bridge.includes('8 * 1024 * 1024'), 'Inline resource previews must be 
 for (const asset of ['icon.png', 'fonts/manrope-latin.woff2', 'fonts/plus-jakarta-sans-latin.woff2']) {
   assert.ok(cmake.includes('src/web/' + asset), 'Missing embedded reference asset: ' + asset);
 }
-assert.ok(read('src/main.cpp').includes('const bool chromiumUi = args.contains(QStringLiteral("--web-ui"))'));
+assert.ok(read('src/main.cpp').includes('const bool chromiumUi = !args.contains(QStringLiteral("--native-ui"))'));
 console.log('PASS: optional Chromium workspace, local assets, bounded previews, exception boundary and renderer recovery guards.');
 
 const nativeShell = read('src/qml/Main.qml');
 const originalPages = ['DashboardPage', 'ThemePage', 'ResourcesPage', 'FpsPage', 'IntegrityPage', 'BootVideoPage', 'UiPage', 'RpcidPage', 'AppearancePage', 'AboutPage', 'GifRpcPage', 'WorkspacePage', 'DebloatPage'];
 for (const page of originalPages) assert.equal((nativeShell.match(new RegExp('\\b' + page + ' \\{', 'g')) || []).length, 1, 'Exactly one original editor: ' + page);
 assert.ok(!nativeShell.includes('WebEngineView'), 'Normal app must not switch between duplicated editor implementations');
-assert.ok(read('src/main.cpp').includes('&& !args.contains(QStringLiteral("--native-ui"))'));
-console.log('PASS: one production shell retains all 13 original feature editors and backend contracts.');
+assert.ok(read('src/main.cpp').includes('const bool chromiumUi = !args.contains(QStringLiteral("--native-ui"))'));
+console.log('PASS: native recovery shell retains its 13 original feature editors and backend contracts.');
+
+// The ordinary deliverable must actually contain the HTML frontend, not merely
+// hide missing-feature escape buttons over a native-only installer.
+assert.ok(read('.github/workflows/release.yml').includes('-DBSI_CHROMIUM_UI=ON'));
+assert.ok(read('scripts/Build-SingleExe.ps1').includes("src/chromium"));
+assert.ok(read('scripts/Test-SingleExe.ps1').includes('--chromium-runtime-test'));
+assert.ok(read('src/web/app.js').includes("['Debloat & Android'"));
+for (const operation of ['sidebar-read','sidebar-apply','debloat-read','debloat-apply','debloat-restore','android-read','android-scan','android-apply','android-restore','disk-find','disk-archive','disk-info','disk-enable','disk-list','disk-search','disk-extract','disk-add','disk-add-folder','disk-replace','disk-mkdir','disk-rename','disk-move','disk-copy','disk-remove','disk-undo','disk-discard']) {
+  assert.ok(bridge.includes('"'+operation+'"'), 'Missing original engine adapter: '+operation);
+  assert.ok(read('src/web/maintenance.js').includes("'"+operation+"'"), 'Missing HTML workflow: '+operation);
+}
+assert.ok(read('src/chromium/ChromiumMain.qml').includes('MediaPlayer {'));
+assert.ok(read('src/web/editors.js').includes("'video-play'"));
+assert.ok(read('src/web/transport.js').includes('videoStatus'));
+console.log('PASS: normal HTML packaging, 13th maintenance area and original Qt decoder control contracts.');

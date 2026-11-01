@@ -5,8 +5,10 @@
   window.BsiEditors = {
     create(ctx) {
       const { esc, button, request, chooseFile, getState, getResources } = ctx;
+      const maintenance = BsiMaintenance.create(ctx);
       let fields = {}, interfaceInfo = null, profile = {}, operations = [], plan = null;
       let history = [], gradients = [], output = {}, rpcNames = [], instances = [];
+      let videoSelected = false, videoStatus = '';
       let imageSource = '', comparison = null, original = null;
       const checked = key => !!fields[key];
       const value = (key, fallback = '') => fields[key] ?? fallback;
@@ -18,7 +20,7 @@
       const preview = data => /^data:image\/(png|jpeg|webp|gif|bmp);base64,/i.test(data?.preview || '') ? `<img class="editor-preview" src="${esc(data.preview)}" alt="Native resource preview">` : '';
       const result = page => output[page] === undefined ? '' : `<pre class="editor-result">${esc(typeof output[page] === 'string' ? output[page] : JSON.stringify(output[page], (key, val) => key === 'preview' ? '[native preview returned]' : val, 2))}</pre>${preview(output[page])}`;
       const actions = body => `<div class="button-grid">${body}</div>`;
-      const confirmWrite = message => confirm(message + '\nClose emulator instances first. Native validation and backups remain authoritative.');
+      const confirmWrite = message => BsiEffects.confirm(message + '\nClose emulator instances first. Native validation and backups remain authoritative.');
       const gifFields = [['AppId', 'Discord application ID'], ['State', 'State'], ['LargeImage', 'Large image HTTPS URL / asset key'], ['LargeText', 'Large image tooltip'], ['SmallImage', 'Small image HTTPS URL / asset key'], ['SmallText', 'Small image tooltip'], ['Button1Label', 'Button 1 label'], ['Button1Url', 'Button 1 HTTPS URL'], ['Button2Label', 'Button 2 label'], ['Button2Url', 'Button 2 HTTPS URL']];
       function gifSettings() {
         const settings = Object.fromEntries(gifFields.map(([key]) => [key, String(value('gif:' + key))]));
@@ -60,12 +62,13 @@
         return response;
       }
       function render(page) {
+        if (page === 12) return maintenance.render() + result(page);
         if (page === 6) {
           const info = interfaceInfo;
           return card('Player interface', `<p class="note">Inspect the selected EXE explicitly to load supported removals, layout tweaks and About rows. No resources are scanned on navigation.</p>${actions(btn('Inspect player UI', 'interface-load', true) + btn('Export About report', 'about-report'))}`)
             + (info ? card('Remove selected controls', `<div class="editor-grid">${(info.removals || []).map((name, i) => check('remove:' + i, name)).join('')}</div>${actions(btn('Apply selected removals', 'removals') + btn('Restore EXE backup', 'restore'))}`)
             + card('Layout tweaks', (info.layout || []).map((t, i) => `<div class="editor-tweak"><b>${esc(t.label || t.id)}</b><p class="note">${esc(t.detail || '')} ${esc(t.state || '')}</p>${t.supported ? actions(btn(t.applied ? 'Restore this tweak' : 'Apply this tweak', 'layout', false, `data-index="${i}"`)) : '<span class="pill">Unsupported by this EXE</span>'}</div>`).join(''))
-            + card('Player Settings → About', `<p class="note">${esc(info.about?.detail || '')}</p>${area('about:text', 'About text', info.about?.text || '')}${check('about:sections', 'Show About/link sections', info.about?.showSections !== false)}${(info.about?.links || []).map((link, i) => `<div class="editor-link">${check('link:' + i + ':show', link.name || link.id || 'Show link', !link.hidden)}${field('link:' + i + ':label', 'Label', link.label || '')}${field('link:' + i + ':url', 'URL', link.url || '')}</div>`).join('')}${actions(btn('Apply About page', 'about-apply', true) + btn('Restore About bindings', 'about-restore') + btn('Save About to profile', 'about-profile'))}`) : '') + result(page);
+            + card('Player Settings → About', `<p class="note">${esc(info.about?.detail || '')}</p>${area('about:text', 'About text', info.about?.text || '')}${check('about:sections', 'Show About/link sections', info.about?.showSections !== false)}${(info.about?.links || []).map((link, i) => `<div class="editor-link">${check('link:' + i + ':show', link.name || link.id || 'Show link', !link.hidden)}${field('link:' + i + ':label', 'Label', link.label || '')}${field('link:' + i + ':url', 'URL', link.url || '')}</div>`).join('')}${actions(btn('Apply About page', 'about-apply', true) + btn('Restore About bindings', 'about-restore') + btn('Save About to profile', 'about-profile'))}`) : '') + maintenance.sidebar() + result(page);
         }
         if (page === 7) return card('Discord application ID', `<p class="note">Uses the existing native offline ID scanner and reversible patcher. No URL fetching or JavaScript binary editing.</p>${actions(btn('Read status', 'rpc-status', true) + btn('Scan application IDs', 'rpc-find') + btn('Load Explorer names', 'rpc-names'))}<div class="editor-grid">${field('rpc:newId', 'New application ID (17–20 digits)')}${field('rpc:oldId', 'Old ID (optional)')}</div>${actions(btn('Dry run ID replacement', 'rpc-dry') + btn('Apply application ID', 'rpc-apply', true) + btn('Undo ID patch', 'rpc-undo'))}`)
           + card('Explorer / Task Manager names', `<label class="editor-field"><span>Version-resource key</span><select class="inp" data-editor-field="rpc:nameKey"><option value="">All supported name keys</option>${rpcNames.map(n => `<option value="${esc(n.key)}" ${value('rpc:nameKey') === n.key ? 'selected' : ''}>${esc(n.key)} · maximum ${esc(n.max)}</option>`).join('')}</select></label>${field('rpc:name', 'New display name')}${actions(btn('Dry run name change', 'rpc-name-dry') + btn('Apply display name', 'rpc-name'))}`) + result(page);
@@ -82,7 +85,7 @@
             + card('Batch plan', `<p class="native-note">Queue current QML theme edits or replacements from an explicit Resources scan. Dry Run must succeed before Apply. Fingerprints and recovery journals remain validated by C++.</p>${actions(btn('Queue staged theme', 'ws-queue-theme') + btn('Clear batch', 'ws-clear') + btn('Dry Run', 'ws-dry-run', true) + (validPlan ? btn('Apply verified batch', 'ws-apply', true) : '<button class="btn" disabled title="Run a successful Dry Run for the current plan">Apply verified batch</button>'))}<ol>${operations.map(op => `<li>${esc(op.kind)} — ${esc(op.path || 'staged palette')}</li>`).join('')}</ol><pre class="editor-result">${esc(plan ? JSON.stringify(plan, null, 2) : 'No verified dry run for this target.')}</pre><label class="editor-field"><span>Scanned resource to replace</span><select class="inp" data-editor-field="workspace:resource">${getResources().map(r => `<option value="${r.index}" ${String(value('workspace:resource', '0')) === String(r.index) ? 'selected' : ''}>${esc(r.path)}</option>`).join('')}</select></label>${actions(btn('Choose replacement & queue…', 'ws-queue-resource'))}<p class="note">Scan Resources on the Resources page first. No scan is started here.</p>${comparison ? `<div class="editor-grid"><div><h4>Original</h4>${preview(original)}<pre class="editor-result">${esc((original?.text || '').slice(0, 16384))}</pre></div><div><h4>Staged replacement</h4>${preview(comparison)}<pre class="editor-result">${esc(comparison.text || comparison.msg || 'Replacement queued. Run Dry Run to validate the batch.')}</pre></div></div>` : ''}`)
             + card('Recovery history', `${actions(btn('Load recovery journals', 'ws-history'))}${history.map((entry, i) => `<div class="editor-tweak"><b>${esc(entry.id)}</b><p class="note">${esc(entry.path || entry.source || '')} ${esc(entry.state || '')}</p>${btn('Restore this journal', 'ws-restore', false, `data-index="${i}"`)}</div>`).join('')}`)
             + card('Image preparation', `<p class="note">Creates a new file, never silently replaces a player asset. JPEG alpha loss is refused; animation is not preserved.</p>${actions(btn('Choose source image…', 'image-open'))}<p class="note">${esc(imageSource || 'No source selected')}</p><div class="editor-grid">${field('image:width', 'Width', 512, 'number')}${field('image:height', 'Height', 512, 'number')}${field('image:quality', 'Quality 1–100', 95, 'number')}</div>${check('image:crop', 'Center crop (otherwise fit)')}${actions(btn('Prepare & save new image…', 'image-save'))}`)
-            + card('Boot video / RPC diagnostics', `<p class="note">Inspect MP4 metadata with the existing engine. Playback in the actual emulator still requires target testing; no automatic encoder or conversion is claimed.</p>${actions(btn('Inspect MP4…', 'video-inspect') + btn('Check saved profile / Discord IPC', 'gif-diagnostics'))}`) + result(page);
+            + card('Boot video / RPC diagnostics', `<p class="note">Inspect MP4 metadata with the existing engine. Playback in the actual emulator still requires target testing; no automatic encoder or conversion is claimed.</p>${actions(btn('Inspect MP4…', 'video-inspect') + (videoSelected ? btn('Play / Qt decoder check', 'video-play') + btn('Pause', 'video-pause') + btn('Toggle crop / fit', 'video-crop') : '') + btn('Check saved profile / Discord IPC', 'gif-diagnostics'))}${videoSelected ? '<div id="video-host" style="height:220px;background:#050807;border-radius:12px;overflow:hidden"></div><p id="video-status" class="note">' + esc(videoStatus) + '</p>' : ''}`) + result(page);
         }
         return '';
       }
@@ -96,48 +99,49 @@
       }
       async function action(name, el, page) {
         let response;
-        if (name === 'interface-load') {
+        if (name.startsWith('maint-')) response = await maintenance.action(name.slice(6), el);
+        else if (name === 'interface-load') {
           interfaceInfo = await request('readInterface');
           Object.keys(fields).filter(k => /^(about:|link:|remove:)/.test(k)).forEach(k => delete fields[k]);
         } else if (name === 'removals') {
           const names = (interfaceInfo?.removals || []).filter((_, i) => checked('remove:' + i));
           if (!names.length) throw new Error('Select at least one removal.');
-          if (!confirmWrite('Apply the selected player UI removals?')) return;
+          if (!await confirmWrite('Apply the selected player UI removals?')) return;
           response = await request('applyRemovals', { names });
         } else if (name === 'layout') {
           const tweak = interfaceInfo?.layout[Number(el.dataset.index)];
           if (!tweak?.supported) throw new Error('This layout tweak is not supported.');
-          if (!confirmWrite((tweak.applied ? 'Restore ' : 'Apply ') + (tweak.label || tweak.id) + '?')) return;
+          if (!await confirmWrite((tweak.applied ? 'Restore ' : 'Apply ') + (tweak.label || tweak.id) + '?')) return;
           response = await request('applyLayoutTweak', { id: tweak.id, enabled: !tweak.applied });
           interfaceInfo = await request('readInterface');
         } else if (name === 'about-apply' || name === 'about-restore') {
           if (!interfaceInfo) throw new Error('Inspect player UI first.');
-          if (!confirmWrite(name === 'about-apply' ? 'Apply the edited About page?' : 'Restore the original About bindings?')) return;
+          if (!await confirmWrite(name === 'about-apply' ? 'Apply the edited About page?' : 'Restore the original About bindings?')) return;
           response = await request('applyAboutPage', { ...aboutSettings(), enabled: name === 'about-apply' });
         } else if (name === 'about-profile') {
           if (!interfaceInfo) throw new Error('Inspect player UI first.');
           response = await workspace('profile-section', { section: 'about', value: aboutSettings() });
         } else if (name === 'about-report') response = await request('aboutPageReport');
-        else if (name === 'restore') { if (!confirmWrite('Restore the EXE backup?')) return; response = await request('restoreBackup'); ctx.invalidateResources(); interfaceInfo = null; }
+        else if (name === 'restore') { if (!await confirmWrite('Restore the EXE backup?')) return; response = await request('restoreBackup'); ctx.invalidateResources(); interfaceInfo = null; }
         else if (['rpc-status', 'rpc-find', 'rpc-names', 'rpc-undo'].includes(name)) {
-          if (name === 'rpc-undo' && !confirmWrite('Undo the Discord ID patch?')) return;
+          if (name === 'rpc-undo' && !await confirmWrite('Undo the Discord ID patch?')) return;
           response = await request({ 'rpc-status': 'rpcidStatus', 'rpc-find': 'rpcidFind', 'rpc-names': 'rpcidNames', 'rpc-undo': 'rpcidUndo' }[name]);
           if (name === 'rpc-names') rpcNames = response.entries || [];
         } else if (name === 'rpc-dry' || name === 'rpc-apply') {
           const newId = String(value('rpc:newId')).trim();
           if (!/^\d{17,20}$/.test(newId)) throw new Error('Use a 17–20 digit Discord application ID.');
-          if (name === 'rpc-apply' && !confirmWrite('Replace the application ID in the selected EXE?')) return;
+          if (name === 'rpc-apply' && !await confirmWrite('Replace the application ID in the selected EXE?')) return;
           response = await request('rpcidReplace', { newId, oldId: String(value('rpc:oldId')).trim(), dryRun: name === 'rpc-dry' });
         } else if (name === 'rpc-name' || name === 'rpc-name-dry') {
-          if (name === 'rpc-name' && !confirmWrite('Change Explorer / Task Manager display names?')) return;
+          if (name === 'rpc-name' && !await confirmWrite('Change Explorer / Task Manager display names?')) return;
           response = await request('rpcidSetName', { text: String(value('rpc:name')), key: String(value('rpc:nameKey')), dryRun: name === 'rpc-name-dry' });
         } else if (name === 'gif-inspect') {
           response = await request('gifRpcInspect');
           if (response.installed && response.settings) Object.entries(response.settings).forEach(([key, v]) => { fields['gif:' + key] = v; });
         } else if (name === 'gif-apply') {
-          if (!confirmWrite('Install / update the RPC-only proxy beside the selected player?')) return;
+          if (!await confirmWrite('Install / update the RPC-only proxy beside the selected player?')) return;
           response = await request('gifRpcApply', { settings: gifSettings(), replaceExisting: checked('gif:replaceExisting') });
-        } else if (name === 'gif-restore') { if (!confirmWrite('Restore the original proxy and RPC settings?')) return; response = await request('gifRpcRestore'); }
+        } else if (name === 'gif-restore') { if (!await confirmWrite('Restore the original proxy and RPC settings?')) return; response = await request('gifRpcRestore'); }
         else if (name === 'gif-profile') response = await workspace('profile-section', { section: 'gifRpc', value: gifSettings() });
         else if (name === 'boot-profile') response = await workspace('profile-section', { section: 'boot', value: { holdMs: Number(document.querySelector('#boot-hold')?.value ?? value('boot:holdMs', 3000)) } });
         else if (name === 'profile-fields') { await refreshWorkspace(true); response = 'Loaded staged profile fields. No files were deployed.'; }
@@ -148,7 +152,7 @@
           if (name === 'profile-load') await ctx.refreshPalette();
         } else if (name === 'ws-apply') {
           if (!plan?.outputSha256 || plan.revision !== getState().workspaceRevision || plan.exePath !== getState().exePath) throw new Error('Run Dry Run again for the current target and batch.');
-          if (!confirmWrite('Apply this verified batch? Output SHA-256:\n' + plan.outputSha256)) return;
+          if (!await confirmWrite('Apply this verified batch? Output SHA-256:\n' + plan.outputSha256)) return;
           const hash = plan.outputSha256; plan = null;
           response = await workspace('apply', { outputSha256: hash });
         } else if (name === 'ws-dry-run') {
@@ -164,7 +168,7 @@
         } else if (name === 'ws-history') { response = await workspace('history'); history = response.entries || []; }
         else if (name === 'ws-restore') {
           const entry = history[Number(el.dataset.index)]; if (!entry?.id) throw new Error('Select a recovery journal.');
-          if (!confirmWrite('Restore recovery journal ' + entry.id + '?')) return;
+          if (!await confirmWrite('Restore recovery journal ' + entry.id + '?')) return;
           response = await workspace('restore', { id: entry.id });
         } else if (name === 'ws-diagnostics') { const file = await chooseFile('report-save'); if (!file) return; response = await workspace('diagnostics', { file }); }
         else if (name.startsWith('ws-')) response = await workspace(name.slice(3));
@@ -173,23 +177,24 @@
           if (!imageSource) throw new Error('Choose a source image first.');
           const file = await chooseFile('image-save'); if (!file) return;
           response = await workspace('image', { source: imageSource, file, width: Number(value('image:width', 512)), height: Number(value('image:height', 512)), quality: Number(value('image:quality', 95)), crop: checked('image:crop') });
-        } else if (name === 'video-inspect') { const file = await chooseFile('video-open'); if (!file) return; response = await workspace('video', { file }); }
+        } else if (name === 'video-inspect') { const file = await chooseFile('video-open'); if (!file) return; response = await workspace('video', { file }); videoSelected = true; videoStatus = 'Metadata inspected. Press Play to check this app’s Qt decoder; this does not verify the emulator.'; }
+        else if (name.startsWith('video-')) { const cmd = name.slice(6); if (cmd === 'crop') fields.videoCrop = !value('videoCrop', true); response = await request('videoControl', {action:cmd, crop:value('videoCrop',true)}); }
         else if (name === 'gif-diagnostics') response = await workspace('rpc');
         else if (name === 'theme-reset') { response = await request('resetThemeEdits'); await ctx.refreshPalette(); }
         else if (name === 'theme-preview') response = await request('previewHex');
         else if (name === 'theme-dry') response = await workspace('theme-dry-run');
         else if (name === 'theme-toggles') {
           const id = document.querySelector('#preset')?.value; if (!id) throw new Error('Load a palette and choose a preset first.');
-          if (!confirmWrite('Recolor the preset toggle SVGs?')) return;
+          if (!await confirmWrite('Recolor the preset toggle SVGs?')) return;
           response = await request('recolorTogglesFromPreset', { id });
         } else if (name === 'gradient-load') { response = await request('loadGradients'); gradients = response.targets || []; }
         else if (name === 'gradient-apply') {
           const key = String(value('gradient:key', gradients[0]?.key || ''));
           if (!key || !gradients.some(t => t.key === key)) throw new Error('Load and choose a real gradient target first.');
-          if (!confirmWrite('Apply this gradient to the selected native surface?')) return;
+          if (!await confirmWrite('Apply this gradient to the selected native surface?')) return;
           response = await request('applyGradient', { key, first: value('gradient:first', '#7C5CFF'), second: value('gradient:second', '#00C2FF'), horizontal: value('gradient:horizontal', true), enabled: value('gradient:enabled', true) });
           await ctx.refreshPalette();
-        } else if (name === 'extract-all') { if (!confirm('Extract all scanned resources to the native output directory?')) return; response = await request('extractAllResources'); }
+        } else if (name === 'extract-all') { if (!await BsiEffects.confirm('Extract all scanned resources to the native output directory?')) return; response = await request('extractAllResources'); }
         else if (name === 'installs') response = await request('detectInstalls');
         else if (name === 'instances') instances = response = await request('detectInstances');
         else if (name === 'folder') response = await request('openExeFolder');
@@ -197,15 +202,16 @@
         else if (name === 'updates-auto') response = await request('updates', { action: 'autoCheck', enabled: value('updates:auto', getState().updates?.autoCheck !== false) });
         else if (name.startsWith('update-')) {
           const action = name.slice(7);
-          if (action === 'apply' && !confirm('Install the verified update and restart BSI Customizer?')) return;
+          if (action === 'apply' && !await BsiEffects.confirm('Install the verified update and restart BSI Customizer?')) return;
           response = await request('updates', { action });
         } else throw new Error('Unknown editor action: ' + name);
         if (response !== undefined) output[page] = response;
       }
       return {
         render, extra, action,
-        input(el) { if (el.dataset.editorField) fields[el.dataset.editorField] = el.type === 'checkbox' ? el.checked : el.value; },
-        reset() { fields = {}; interfaceInfo = null; profile = {}; operations = []; plan = null; history = []; gradients = []; output = {}; rpcNames = []; instances = []; imageSource = ''; comparison = null; original = null; },
+        videoStatus(message) { videoStatus=String(message).slice(0,2048); const node=document.querySelector('#video-status'); if(node)node.textContent=videoStatus; },
+        input(el) { maintenance.input(el); if (el.dataset.editorField) fields[el.dataset.editorField] = el.type === 'checkbox' ? el.checked : el.value; },
+        reset() { maintenance.reset(); videoSelected=false; videoStatus=''; fields = {}; interfaceInfo = null; profile = {}; operations = []; plan = null; history = []; gradients = []; output = {}; rpcNames = []; instances = []; imageSource = ''; comparison = null; original = null; },
         async navigate(page) { if ([5, 10, 11].includes(page) && ctx.enabled()) await refreshWorkspace(); }
       };
     }

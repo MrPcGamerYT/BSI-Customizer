@@ -1,7 +1,7 @@
-name: Chromium workspace (opt-in)
+name: Chromium workspace
 
-# Separate from the production release: verifies the migration without
-# replacing a release or adding an untested Chromium bundle to main.
+# Dedicated guarded-bridge and renderer regression build. Artifacts only;
+# this workflow does not publish a release.
 on:
   push:
     branches: [arena/3f309c3c-bsi-customizer]
@@ -49,8 +49,11 @@ jobs:
           target: desktop
           arch: win64_msvc2022_64
           modules: qtmultimedia qtwebengine qtwebchannel qtpositioning
+          documentation: true
+          doc-modules: qtwebengine
+          doc-archives: qtwebengine
           cache: true
-      - name: Configure opt-in Chromium build
+      - name: Configure Chromium build
         env:
           # Same public-client / server-role policy as the native release.
           # Never upload an apparently usable bundle with sign-in unconfigured.
@@ -71,6 +74,7 @@ jobs:
           windeployqt --release --qmldir src --compiler-runtime --dir stage stage/BSI-Customizer.exe
           if ($LASTEXITCODE -ne 0) { throw 'windeployqt failed' }
           @('[Paths]', 'Prefix=.', 'Plugins=.', 'QmlImports=qml') | Set-Content stage/qt.conf
+          ./scripts/Copy-WebEngineNotices.ps1 -QtPrefix $env:QT_ROOT_DIR -Version '6.8.3' -OutputDirectory stage/licenses/Qt/Chromium
       - name: Verify deployed Chromium without the Qt SDK on PATH
         shell: pwsh
         run: |

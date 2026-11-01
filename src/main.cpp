@@ -238,8 +238,7 @@ int main(int argc, char *argv[])
     QObject::connect(&updates, &UpdateChecker::restartRequested, &app, &QGuiApplication::quit);
 
 #ifdef BSI_CHROMIUM_UI
-    const bool chromiumUi = args.contains(QStringLiteral("--web-ui"))
-        && !args.contains(QStringLiteral("--native-ui"));
+    const bool chromiumUi = !args.contains(QStringLiteral("--native-ui"));
     if (chromiumUi) {
         auto *profile = QQuickWebEngineProfile::defaultProfile();
         profile->setUrlRequestInterceptor(new LocalContentPolicy(profile));
