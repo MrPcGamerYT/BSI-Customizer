@@ -349,6 +349,7 @@ Item {
         }
         Rectangle {
             id: progressTrack
+            objectName: "progressTrack"
             anchors.horizontalCenter: parent.horizontalCenter
             width: Math.min(root.width * 0.34, 360); height: 3; radius: 2; color: "#19314A"
             Rectangle {
