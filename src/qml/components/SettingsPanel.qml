@@ -10,6 +10,12 @@ Popup {
     signal notify(string message)
 
     property int currentTab: 0
+    property real dragOffsetX: 0
+    property real dragOffsetY: 0
+    property real dragStartX: 0
+    property real dragStartY: 0
+    property real dragPointerX: 0
+    property real dragPointerY: 0
     readonly property var tabs: [
         { label: qsTr("Appearance"), icon: Icons.appearance },
         { label: qsTr("Updates"), icon: Icons.refresh },
@@ -17,7 +23,10 @@ Popup {
     ]
 
     parent: Overlay.overlay
-    anchors.centerIn: parent
+    x: parent ? Math.max(0, Math.min(Math.max(0, parent.width - width),
+                                     (parent.width - width) / 2 + dragOffsetX)) : 0
+    y: parent ? Math.max(0, Math.min(Math.max(0, parent.height - height),
+                                     (parent.height - height) / 2 + dragOffsetY)) : 0
     width: Math.min(900, Math.max(660, parent ? parent.width * 0.70 : 830))
     height: Math.min(660, Math.max(480, parent ? parent.height * 0.74 : 560))
     modal: true
@@ -68,35 +77,66 @@ Popup {
             Layout.bottomMargin: 14
             spacing: 12
 
-            Rectangle {
-                Layout.preferredWidth: 40
-                Layout.preferredHeight: 40
-                radius: 12
-                color: Theme.accentSoft
-                border.width: 1
-                border.color: Theme.border
-                Image {
-                    anchors.centerIn: parent
-                    width: 20
-                    height: 20
-                    source: Icons.icon(Icons.settings, Theme.accentText)
-                    smooth: true
-                }
-            }
-
-            ColumnLayout {
+            Item {
+                id: dragHandle
                 Layout.fillWidth: true
-                spacing: 2
-                Text {
-                    text: qsTr("Settings")
-                    color: Theme.text
-                    font.pixelSize: 19
-                    font.weight: Font.Bold
+                Layout.preferredHeight: 40
+
+                RowLayout {
+                    anchors.fill: parent
+                    spacing: 12
+                    Rectangle {
+                        Layout.preferredWidth: 40
+                        Layout.preferredHeight: 40
+                        radius: 12
+                        color: Theme.accentSoft
+                        border.width: 1
+                        border.color: Theme.border
+                        Image {
+                            anchors.centerIn: parent
+                            width: 20
+                            height: 20
+                            source: Icons.icon(Icons.settings, Theme.accentText)
+                            smooth: true
+                        }
+                    }
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        spacing: 2
+                        Text {
+                            text: qsTr("Settings")
+                            color: Theme.text
+                            font.pixelSize: 19
+                            font.weight: Font.Bold
+                        }
+                        Text {
+                            text: qsTr("Personalize BSI Customizer · drag here to move")
+                            color: Theme.textDim
+                            font.pixelSize: 11
+                        }
+                    }
                 }
-                Text {
-                    text: qsTr("Personalize BSI Customizer")
-                    color: Theme.textDim
-                    font.pixelSize: 11
+
+                MouseArea {
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.SizeAllCursor
+                    onPressed: {
+                        panel.dragStartX = panel.x;
+                        panel.dragStartY = panel.y;
+                        const point = mapToItem(panel.parent, mouse.x, mouse.y);
+                        panel.dragPointerX = point.x;
+                        panel.dragPointerY = point.y;
+                    }
+                    onPositionChanged: {
+                        if (!pressed || !panel.parent)
+                            return;
+                        const point = mapToItem(panel.parent, mouse.x, mouse.y);
+                        panel.dragOffsetX = panel.dragStartX + point.x - panel.dragPointerX
+                                - (panel.parent.width - panel.width) / 2;
+                        panel.dragOffsetY = panel.dragStartY + point.y - panel.dragPointerY
+                                - (panel.parent.height - panel.height) / 2;
+                    }
                 }
             }
 
