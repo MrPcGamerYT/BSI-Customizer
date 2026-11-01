@@ -108,8 +108,14 @@ foreach(module IN LISTS BSI_QT_NOTICE_MODULES)
     set(work "${CACHE_DIR}/extract/${module}")
     file(REMOVE_RECURSE "${work}")
     file(MAKE_DIRECTORY "${work}")
+    set(notice_patterns "*/LICENSES/*")
+    # libarchive treats an unmatched pattern as an extraction failure. Some
+    # modules (e.g. WebChannel) have SPDX texts but no third-party attribution.
+    if(listing MATCHES "/qt_attribution[.]json(\n|$)")
+        list(APPEND notice_patterns "*/qt_attribution.json")
+    endif()
     file(ARCHIVE_EXTRACT INPUT "${archive}" DESTINATION "${work}"
-        PATTERNS "*/LICENSES/*" "*/qt_attribution.json")
+        PATTERNS ${notice_patterns})
 
     file(GLOB roots RELATIVE "${work}" "${work}/*")
     list(LENGTH roots root_count)

@@ -135,6 +135,32 @@ if(cached EQUAL 0)
     expect("a repeated run produces identical notices" again STREQUAL notices)
 endif()
 
+# WebEngine-capable packaging adds modules that may have no attribution JSON.
+foreach(module qtwebengine qtwebchannel qtpositioning)
+    set(root "${WORK_DIR}/extra/${module}-${version}")
+    file(WRITE "${root}/LICENSES/LGPL-3.0-only.txt" "SPDX-only text for ${module}\n")
+    execute_process(COMMAND "${CMAKE_COMMAND}" -E tar cf "${WORK_DIR}/cache/${module}-${version}.zip"
+        --format=zip -- "${module}-${version}" WORKING_DIRECTORY "${WORK_DIR}/extra"
+        RESULT_VARIABLE packed OUTPUT_QUIET)
+    expect("${module}: SPDX-only fixture archive" packed EQUAL 0)
+endforeach()
+execute_process(COMMAND "${CMAKE_COMMAND}"
+    "-DQT_VERSION=${version}" "-DBSI_WITH_WEBENGINE=ON"
+    "-DOUTPUT_DIR=${WORK_DIR}/web-out" "-DCACHE_DIR=${WORK_DIR}/cache"
+    "-DSOURCE_BASE_URL=file://${WORK_DIR}/www"
+    -P "${repo}/cmake/CollectQtNotices.cmake"
+    RESULT_VARIABLE web_collected OUTPUT_QUIET ERROR_VARIABLE web_error)
+expect("WebEngine modules without attribution JSON collect successfully" web_collected EQUAL 0)
+if(web_collected EQUAL 0)
+    file(READ "${WORK_DIR}/web-out/QT-NOTICES.txt" web_notices)
+    foreach(module qtwebengine qtwebchannel qtpositioning)
+        string(FIND "${web_notices}" "SPDX-only text for ${module}" found)
+        expect("${module}: own licence is retained without attribution files" found GREATER -1)
+    endforeach()
+else()
+    message("${web_error}")
+endif()
+
 file(REMOVE_RECURSE "${WORK_DIR}")
 if(failures GREATER 0)
     message(FATAL_ERROR "Qt notice collection self-test: ${failures} failure(s)")
