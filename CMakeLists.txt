@@ -332,6 +332,10 @@ qt_add_qml_module(BSICustomizer
         src/qml/pages/AboutPage.qml
     RESOURCES
         "BSI CUSTOMIZER.ico"
+        src/qml/fonts/Manrope.ttf
+        src/qml/fonts/PlusJakartaSans.ttf
+        src/qml/fonts/Manrope-OFL.txt
+        src/qml/fonts/PlusJakartaSans-OFL.txt
         src/qml/img/app-icon.png
         src/qml/img/discord-mark.svg
         src/qml/img/orb-cyan.png

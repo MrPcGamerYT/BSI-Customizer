@@ -17,7 +17,7 @@ Rectangle {
 
     implicitWidth: buttonLabel.implicitWidth + 30
     implicitHeight: 36
-    radius: 7
+    radius: 10
 
     color: button.accent ? (buttonArea.pressed ? Qt.darker(Theme.accent, 1.12) : Theme.accent)
                          : (buttonArea.pressed || buttonArea.containsMouse ? Theme.raised : Theme.card)

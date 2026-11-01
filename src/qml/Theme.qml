@@ -5,6 +5,7 @@ import QtQuick
 // the existing ThemeManager, including saved accents and the system theme.
 QtObject {
     id: theme
+    readonly property string headingFont: "Manrope"
 
     readonly property bool dark: themes.effectiveTheme === 0
     readonly property color accent: dark ? themes.accentColor : Qt.darker(themes.accentColor, 1.65)

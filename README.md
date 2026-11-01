@@ -1,10 +1,13 @@
 # BSI Customizer 3.0.1
 
+> **3.0.1 unified UI:** the normal EXE uses one mint/glass shell around all 13 original feature pages and the original native engines. No `--web-ui` flag or editor switching is needed. See [the feature/verification map](docs/UNIFIED-UI.md).
+
+
 [![CI](https://github.com/MrPcGamerYT/BSI-Customizer/actions/workflows/ci.yml/badge.svg)](https://github.com/MrPcGamerYT/BSI-Customizer/actions/workflows/ci.yml)
 
 Windows desktop customizer for BlueStacks / MSI App Player. Version **3.0.1** integrates the Chromium workspace with the existing C++ engines and Discord login.
 
-For the new interface, use the **Chromium workspace** build workflow or configure with `-DBSI_CHROMIUM_UI=ON` and launch with `--web-ui`. Native compatibility builds remain available; this version label does not imply a verified Windows build or a published release.
+For the complete new interface, use the standard portable or installer build: all original features share the unified glass shell. The separate Chromium workflow/`--web-ui` adapter is experimental and is not the normal full-feature app. This version label does not imply a published release.
 
 Search/scan performance findings, benchmarks and the optimization roadmap:
 [performance review](docs/PERFORMANCE.md).

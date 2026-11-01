@@ -15,6 +15,7 @@
 #include <QDataStream>
 #include <QFile>
 #include <QFileInfo>
+#include <QFontDatabase>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QQmlApplicationEngine>
@@ -316,6 +317,9 @@ int runSelfTest()
 
         QObject *root = engine.rootObjects().value(0, nullptr);
         check(root != nullptr, "Main.qml loaded without errors");
+        check(QFontDatabase::families().contains(QStringLiteral("Manrope"))
+                  && QFontDatabase::families().contains(QStringLiteral("Plus Jakarta Sans")),
+              "reference UI fonts are embedded and load without a font CDN");
 
         if (root) {
             QObject *stack = root->findChild<QObject *>(QStringLiteral("studioPageStack"));
@@ -346,6 +350,26 @@ int runSelfTest()
             QCoreApplication::processEvents();
             check(backend.resourceInfos().size() == resourceCount,
                   "opening Resources through studio navigation preserves resource results");
+            // The new presentation must retain every original editor, not
+            // route some controls through a second HTML implementation.
+            const char *featureObjects[] = {
+                "studioDashboard", "featureTheme", "featureResources", "featureFps",
+                "featureIntegrity", "featureBoot", "featureInterface", "featureRpc",
+                "featureSettings", "featureAbout", "featureGif", "featureWorkspace", "featureDebloat"
+            };
+            for (int index = 0; index < 13; ++index) {
+                const bool exists = root->findChild<QObject *>(QString::fromLatin1(featureObjects[index])) != nullptr;
+                const bool routed = QMetaObject::invokeMethod(root, "navigatePage", Q_ARG(QVariant, QVariant(index)));
+                check(exists && routed && stack && stack->property("currentIndex").toInt() == index,
+                      qPrintable(QStringLiteral("unified shell opens original feature page %1: %2")
+                          .arg(index).arg(QString::fromLatin1(featureObjects[index]))));
+            }
+            check(backend.resourceInfos().size() == resourceCount,
+                  "visiting all thirteen original features does not auto-scan Resources");
+            if (stack) stack->setProperty("currentIndex", 2);
+            QMetaObject::invokeMethod(root, "navigatePage", Q_ARG(QVariant, QVariant(99)));
+            check(stack && stack->property("currentIndex").toInt() == 2,
+                  "invalid navigation leaves the current original editor intact");
             if (stack) stack->setProperty("currentIndex", 0);
             const QColor bgDefault = root->property("testProbe").value<QColor>();
             themes.setTheme(ThemeManager::Light);

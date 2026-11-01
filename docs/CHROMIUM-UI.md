@@ -17,12 +17,15 @@ Local Qt WebEngine / Chromium HTML + JS <-- Qt WebChannel --> WebBridge
                                         existing Backend / native engines
 ```
 
-This is an **opt-in integrated implementation**, not a verified replacement release.
-In builds configured with `BSI_CHROMIUM_UI=ON`, the reference-style Chromium
-workspace opens by default on double-click. `--web-ui` remains accepted and
-`--native-ui` explicitly selects the full native interface (and takes precedence
-if both flags are present). Native-only builds are unchanged and still reject
-`--web-ui`. Discord sign-in is required before either workspace is accessible.
+The normal application now uses the **unified native glass shell** documented in
+[UNIFIED-UI.md](UNIFIED-UI.md). It reuses all thirteen original QML feature pages
+with the existing Backend, including sidebar ordering, Debloat/Android and the
+Root.vhd browser. No flag or second editor is needed for the normal app.
+
+Chromium remains an experimental, explicitly selected adapter:
+`BSI-Customizer.exe --web-ui` in a build configured with `BSI_CHROMIUM_UI=ON`.
+`--native-ui` wins if both flags are present. Do not use Chromium test bundles as
+the normal full-feature download: use the tested portable EXE or installer.
 
 Implemented HTML flows now merge all 12 tool areas with their existing engines:
 
@@ -160,7 +163,7 @@ checks remain enabled, and local sidecar/environment policy overrides are
 rejected for these bundles just as they are for native releases.
 
 Already downloaded bundles do not change when the workflow is fixed: download
-and extract the newly verified artifact, then run `BSI-Customizer.exe --web-ui`.
+and extract the newly verified experimental artifact, then run `BSI-Customizer.exe --web-ui`. For the normal complete app, use the unified native build.
 This verification checks configuration and locked bridge behavior offline;
 it does not claim to have completed a real Discord OAuth sign-in.
 

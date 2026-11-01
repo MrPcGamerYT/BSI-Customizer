@@ -53,5 +53,12 @@ assert.ok(bridge.includes('8 * 1024 * 1024'), 'Inline resource previews must be 
 for (const asset of ['icon.png', 'fonts/manrope-latin.woff2', 'fonts/plus-jakarta-sans-latin.woff2']) {
   assert.ok(cmake.includes('src/web/' + asset), 'Missing embedded reference asset: ' + asset);
 }
-assert.ok(read('src/main.cpp').includes('const bool chromiumUi = !args.contains(QStringLiteral("--native-ui"))'));
-console.log('PASS: default reference workspace, local assets, bounded previews, exception boundary and renderer recovery guards.');
+assert.ok(read('src/main.cpp').includes('const bool chromiumUi = args.contains(QStringLiteral("--web-ui"))'));
+console.log('PASS: optional Chromium workspace, local assets, bounded previews, exception boundary and renderer recovery guards.');
+
+const nativeShell = read('src/qml/Main.qml');
+const originalPages = ['DashboardPage', 'ThemePage', 'ResourcesPage', 'FpsPage', 'IntegrityPage', 'BootVideoPage', 'UiPage', 'RpcidPage', 'AppearancePage', 'AboutPage', 'GifRpcPage', 'WorkspacePage', 'DebloatPage'];
+for (const page of originalPages) assert.equal((nativeShell.match(new RegExp('\\b' + page + ' \\{', 'g')) || []).length, 1, 'Exactly one original editor: ' + page);
+assert.ok(!nativeShell.includes('WebEngineView'), 'Normal app must not switch between duplicated editor implementations');
+assert.ok(read('src/main.cpp').includes('&& !args.contains(QStringLiteral("--native-ui"))'));
+console.log('PASS: one production shell retains all 13 original feature editors and backend contracts.');
