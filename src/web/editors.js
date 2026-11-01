@@ -8,7 +8,7 @@
       const maintenance = BsiMaintenance.create(ctx);
       let fields = {}, interfaceInfo = null, profile = {}, operations = [], plan = null;
       let history = [], gradients = [], output = {}, rpcNames = [], instances = [];
-      let videoSelected = false, videoStatus = '';
+      let videoSelected = false, videoStatus = '', interfaceTab = 'layout';
       let imageSource = '', comparison = null, original = null;
       const checked = key => !!fields[key];
       const value = (key, fallback = '') => fields[key] ?? fallback;
@@ -27,10 +27,15 @@
         return { ...settings, Details: String(value('gif:Details')), Enabled: value('gif:Enabled', true), Timestamp: checked('gif:Timestamp'), Interval: Number(value('gif:Interval', 5)) };
       }
       function aboutSettings() {
-        return { text: String(value('about:text')), showSections: value('about:sections', true), links: (interfaceInfo?.about?.links || []).map((link, i) => ({
+        return { text: String(value('about:text', interfaceInfo?.about?.text || '')), showSections: value('about:sections', interfaceInfo?.about?.showSections !== false), links: (interfaceInfo?.about?.links || []).map((link, i) => ({
           ...link, label: String(value('link:' + i + ':label', link.label || '')), url: String(value('link:' + i + ':url', link.url || '')),
           hidden: !value('link:' + i + ':show', !link.hidden)
         })) };
+      }
+      function aboutPreview() {
+        const data = aboutSettings();
+        const links = data.links.filter(link => !link.hidden);
+        return `<div class="about-live-preview"><div class="about-live-mark">BS</div><span class="section-label">Player About preview</span><h3>${esc(data.text || 'Your player About text')}</h3>${data.showSections && links.length ? `<div class="about-live-links">${links.map(link => `<span>${esc(link.label || link.name || link.id || 'Link')}</span>`).join('')}</div>` : ''}<p class="note">Preview only · changes are written only when you choose Apply About page.</p></div>`;
       }
       function loadProfileFields(next) {
         profile = next || {};
@@ -65,10 +70,13 @@
         if (page === 12) return maintenance.render() + result(page);
         if (page === 6) {
           const info = interfaceInfo;
-          return card('Player interface', `<p class="note">Inspect the selected EXE explicitly to load supported removals, layout tweaks and About rows. No resources are scanned on navigation.</p>${actions(btn('Inspect player UI', 'interface-load', true) + btn('Export About report', 'about-report'))}`)
-            + (info ? card('Remove selected controls', `<div class="editor-grid">${(info.removals || []).map((name, i) => check('remove:' + i, name)).join('')}</div>${actions(btn('Apply selected removals', 'removals') + btn('Restore EXE backup', 'restore'))}`)
-            + card('Layout tweaks', (info.layout || []).map((t, i) => `<div class="editor-tweak"><b>${esc(t.label || t.id)}</b><p class="note">${esc(t.detail || '')} ${esc(t.state || '')}</p>${t.supported ? actions(btn(t.applied ? 'Restore this tweak' : 'Apply this tweak', 'layout', false, `data-index="${i}"`)) : '<span class="pill">Unsupported by this EXE</span>'}</div>`).join(''))
-            + card('Player Settings → About', `<p class="note">${esc(info.about?.detail || '')}</p>${area('about:text', 'About text', info.about?.text || '')}${check('about:sections', 'Show About/link sections', info.about?.showSections !== false)}${(info.about?.links || []).map((link, i) => `<div class="editor-link">${check('link:' + i + ':show', link.name || link.id || 'Show link', !link.hidden)}${field('link:' + i + ':label', 'Label', link.label || '')}${field('link:' + i + ':url', 'URL', link.url || '')}</div>`).join('')}${actions(btn('Apply About page', 'about-apply', true) + btn('Restore About bindings', 'about-restore') + btn('Save About to profile', 'about-profile'))}`) : '') + maintenance.sidebar() + result(page);
+          const tabs = [['layout', 'Layout & sidebar'], ['about', 'About page'], ['remove', 'Remove controls']];
+          const tabbar = `<div class="editor-tabs" role="tablist" aria-label="Player interface sections">${tabs.map(([id, label]) => `<button class="editor-tab${interfaceTab === id ? ' active' : ''}" role="tab" aria-selected="${interfaceTab === id}" data-interface-tab="${id}">${label}</button>`).join('')}</div>`;
+          let section = '<div class="empty">Inspect the selected player UI to load supported controls and About bindings.</div>';
+          if (info && interfaceTab === 'layout') section = card('Player layout tweaks', `<p class="note">Apply only tweaks reported as supported for this executable. Each action remains individually reversible.</p>${(info.layout || []).map((t, i) => `<div class="editor-tweak"><b>${esc(t.label || t.id)}</b><p class="note">${esc(t.detail || '')} ${esc(t.state || '')}</p>${t.supported ? actions(btn(t.applied ? 'Restore this tweak' : 'Apply this tweak', 'layout', false, `data-index="${i}"`)) : '<span class="pill">Unsupported by this EXE</span>'}</div>`).join('') || '<p class="note">No layout tweaks reported for this executable.</p>'}`) + maintenance.sidebar();
+          if (info && interfaceTab === 'remove') section = card('Remove selected controls', `<p class="note">Select only the unwanted controls; the native engine validates and backs up the executable before writing.</p><div class="editor-grid">${(info.removals || []).map((name, i) => check('remove:' + i, name)).join('') || '<p class="note">No supported removals were reported.</p>'}</div>${actions(btn('Apply selected removals', 'removals', true) + btn('Restore EXE backup', 'restore'))}`);
+          if (info && interfaceTab === 'about') section = card('Player About page', `<p class="note">Edit the in-player About text and links. The preview is plain text and does not execute markup or URLs.</p><div class="about-editor-grid"><div>${area('about:text', 'About text', info.about?.text || '')}${check('about:sections', 'Show About/link sections', info.about?.showSections !== false)}${(info.about?.links || []).map((link, i) => `<div class="editor-link">${check('link:' + i + ':show', link.name || link.id || 'Show link', !link.hidden)}${field('link:' + i + ':label', 'Label', link.label || '')}${field('link:' + i + ':url', 'URL', link.url || '')}</div>`).join('')}${actions(btn('Apply About page', 'about-apply', true) + btn('Restore About bindings', 'about-restore') + btn('Save About to profile', 'about-profile'))}</div><div id="interface-about-preview">${aboutPreview()}</div></div>`);
+          return card('Player interface', `<p class="note">Inspect once, then choose a focused task. No resources are scanned while navigating.</p>${actions(btn('Inspect player UI', 'interface-load', true) + btn('Export About report', 'about-report'))}${info ? `<p class="note">${esc(info.about?.detail || info.detail || 'Player UI capabilities loaded from the selected executable.')}</p>` : ''}`) + tabbar + section + result(page);
         }
         if (page === 7) return card('Discord application ID', `<p class="note">Uses the existing native offline ID scanner and reversible patcher. No URL fetching or JavaScript binary editing.</p>${actions(btn('Read status', 'rpc-status', true) + btn('Scan application IDs', 'rpc-find') + btn('Load Explorer names', 'rpc-names'))}<div class="editor-grid">${field('rpc:newId', 'New application ID (17–20 digits)')}${field('rpc:oldId', 'Old ID (optional)')}</div>${actions(btn('Dry run ID replacement', 'rpc-dry') + btn('Apply application ID', 'rpc-apply', true) + btn('Undo ID patch', 'rpc-undo'))}`)
           + card('Explorer / Task Manager names', `<label class="editor-field"><span>Version-resource key</span><select class="inp" data-editor-field="rpc:nameKey"><option value="">All supported name keys</option>${rpcNames.map(n => `<option value="${esc(n.key)}" ${value('rpc:nameKey') === n.key ? 'selected' : ''}>${esc(n.key)} · maximum ${esc(n.max)}</option>`).join('')}</select></label>${field('rpc:name', 'New display name')}${actions(btn('Dry run name change', 'rpc-name-dry') + btn('Apply display name', 'rpc-name'))}`) + result(page);
@@ -211,7 +219,10 @@
         render, extra, action,
         videoStatus(message) { videoStatus=String(message).slice(0,2048); const node=document.querySelector('#video-status'); if(node)node.textContent=videoStatus; },
         input(el) { maintenance.input(el); if (el.dataset.editorField) fields[el.dataset.editorField] = el.type === 'checkbox' ? el.checked : el.value; },
-        reset() { maintenance.reset(); videoSelected=false; videoStatus=''; fields = {}; interfaceInfo = null; profile = {}; operations = []; plan = null; history = []; gradients = []; output = {}; rpcNames = []; instances = []; imageSource = ''; comparison = null; original = null; },
+        selectInterfaceTab(tab) { if (['layout', 'about', 'remove'].includes(tab)) interfaceTab = tab; },
+        selectMaintenanceTab(tab) { maintenance.selectTab(tab); },
+        aboutPreview,
+        reset() { maintenance.reset(); videoSelected=false; videoStatus=''; interfaceTab='layout'; fields = {}; interfaceInfo = null; profile = {}; operations = []; plan = null; history = []; gradients = []; output = {}; rpcNames = []; instances = []; imageSource = ''; comparison = null; original = null; },
         async navigate(page) { if ([5, 10, 11].includes(page) && ctx.enabled()) await refreshWorkspace(); }
       };
     }

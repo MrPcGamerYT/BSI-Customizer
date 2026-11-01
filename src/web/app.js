@@ -30,7 +30,7 @@
   const drafts = {};
   const enabled = () => !!transport && state.authorized && !state.busy && !pending;
   const panel = body => `<div class="panel"><div class="pscroll">${body}</div></div>`;
-  const button = (label, action, primary = false, extra = '') => `<button class="btn${primary ? ' pri' : ''}" data-action="${action}" ${extra} ${enabled() ? '' : 'disabled'}>${label}</button>`;
+  const button = (label, action, primary = false, extra = '') => `<button class="btn${primary ? ' pri' : ''}" data-action="${action}" data-locked="${/^\s*disabled(?:\s|$)/.test(extra)}" ${extra} ${enabled() ? '' : 'disabled'}>${label}</button>`;
   const native = () => ''; // No second editor in the normal HTML workflow.
   const confirmDiscard = async () => !dirty || BsiEffects.confirm('Discard the unsaved resource text in this editor?');
   function toast(message) {
@@ -72,7 +72,7 @@
     document.body.classList.toggle('busy', !!state.busy || pending);
     document.querySelectorAll('[data-window]').forEach(el => {el.disabled = !!state.busy || pending;});
     document.querySelectorAll('[data-action]').forEach(el => {
-      el.disabled = !enabled();
+      el.disabled = !enabled() || el.dataset.locked === 'true';
     });
   }
   function targetName() {
@@ -82,8 +82,11 @@
   function chrome() {
     const current = pages[page];
     $('#canvas').classList.toggle('page', page !== 0);
-    $('#spine').innerHTML = pages.map((p, i) => `<button class="icon${page === i ? ' on' : ''}" data-page="${i}" title="${p[0]}" aria-label="${p[0]}" aria-current="${page === i ? 'page' : 'false'}">${svg(i)}</button>`).join('');
-    $('#cmd').innerHTML = [0, 1, 6, 12, 8].map(i => `<button class="cmditem${page === i ? ' active' : ''}" data-page="${i}"><strong>${pages[i][1]}</strong></button>`).join('');
+    const groups = [
+      ['HOME', [0]], ['CUSTOMIZE', [1, 2, 3, 4, 5, 6]],
+      ['PRESENCE', [7, 10]], ['APP', [8, 9]], ['TOOLS', [11, 12]]
+    ];
+    $('#spine').innerHTML = groups.map(([label, items]) => `<div class="nav-group"><span class="nav-group-label">${label}</span>${items.map(i => `<button class="icon${page === i ? ' on' : ''}" data-page="${i}" aria-label="${pages[i][0]}" aria-current="${page === i ? 'page' : 'false'}"><span class="nav-glyph">${svg(i)}</span><span class="nav-label">${esc(pages[i][0])}</span></button>`).join('')}</div>`).join('');
     $('#session').className = 'session' + (state.busy || pending ? ' busy' : !state.exeFound ? ' bad' : '');
     $('#session').innerHTML = `<i></i><b>${esc(preview ? 'Design preview' : state.authorized ? 'Discord verified' : 'Sign-in required')}</b><span>${state.busy || pending ? 'WORKING' : state.exeFound ? 'READY' : 'NO TARGET'}</span><em></em>`;
     $('#hero').innerHTML = `<div class="hero"><div class="hero-main"><div class="kicker">Control center / ${esc(current[1]).toLowerCase()}</div><h1>${esc(current[2])}</h1><p>${esc(current[3])}</p><div class="hero-line"></div></div><div class="target-card"><small>Active target</small><b>${esc(targetName())}</b><div class="ready${state.exeFound ? '' : ' bad'}"><i></i>${state.exeFound ? 'HD-Player.exe detected' : 'Select your player in Settings'}</div></div></div>`;
@@ -109,7 +112,7 @@
         return `<div class="color-row"><input type="checkbox" data-color-enabled="${index}" aria-label="Enable ${esc(row.name)}" ${(palette.method === 'hex' ? row.enabled : !!row.edit) ? 'checked' : ''} ${enabled() ? '' : 'disabled'}><div><b>${esc(row.name)}</b><small>${esc(row.purpose)}</small></div><input type="color" value="${esc(rgb)}" data-color="${index}" aria-label="Pick ${esc(row.name)}" ${enabled() ? '' : 'disabled'}><input class="inp mono" value="${esc(value)}" data-color="${index}" aria-label="Value for ${esc(row.name)}" ${enabled() ? '' : 'disabled'}></div>`;
       }).join('') : '<div class="empty">No palette loaded. Choose an executable, then click Load theme.</div>'}</div></div>`);
     } else if (page === 2) {
-      html = panel(`<div class="sec"><div class="sec-h">Resource explorer</div><div class="tools">${button('Scan Resources', 'scanResources', true)}${native(2)}<input class="inp grow" id="resource-filter" placeholder="Search paths (space-separated terms)" value="${esc(filter)}" aria-label="Search resource paths"></div><p class="note">Opening this page never scans. The backend enforces encoded storage capacity and refuses unsafe writes.</p><label class="editor-field"><span>Resource kind</span><select class="inp" id="resource-kind">${['All', 'Pictures', 'SVG', 'Code', 'Binary', 'Fonts', 'Modified vs backup'].map((label, index) => `<option value="${index}" ${kind === index ? 'selected' : ''}>${label}</option>`).join('')}</select></label><p class="note">Search supports quoted phrases and min: / max: byte sizes (e.g. min:2kb).</p><div id="resource-rows"></div><div id="resource-editor"></div></div>`);
+      html = panel(`<div class="sec"><div class="sec-h">Resource explorer</div><div class="tools">${button('Scan Resources', 'scanResources', true)}${native(2)}<input class="inp grow" id="resource-filter" placeholder="Search paths (space-separated terms)" value="${esc(filter)}" aria-label="Search resource paths"></div><p class="note">Opening this page never scans. The backend enforces encoded storage capacity and refuses unsafe writes.</p><label class="editor-field"><span>Show</span><select class="inp" id="resource-kind">${['All files', 'Pictures', 'SVG', 'Code', 'Binary', 'Fonts', 'Modified vs backup'].map((label, index) => `<option value="${index}" ${kind === index ? 'selected' : ''}>${label}</option>`).join('')}</select></label><p class="note">Search supports quoted phrases and min: / max: byte sizes (e.g. min:2kb).</p><div class="resource-browser"><div id="resource-rows"></div><div id="resource-editor"></div></div></div>`);
     } else if ([3, 4, 5].includes(page)) {
       const commands = page === 3 ? [['Detect FPS target', 'fpsDetect'], ['Analyze FPS', 'fpsAnalyze'], ['Apply FPS limit', 'fpsPatch'], ['Restore FPS', 'fpsRestore']]
         : page === 4 ? [['Check integrity', 'integrityCheck'], ['Apply integrity patch', 'integrityPatch'], ['Restore integrity', 'integrityRestore']]
@@ -130,21 +133,20 @@
     if (!$('#resource-rows')) return;
     const rows = BsiResourceSearch.filter(resourceIndex, filter, kind);
     offset = Math.max(0, Math.min(offset, Math.max(0, Math.ceil(rows.length / 100) - 1) * 100));
-    $('#resource-rows').innerHTML = `<p class="note">${rows.length} matching / ${resources.length} scanned · ${resources.length ? 'Showing ' + (offset + 1) + '–' + Math.min(offset + 100, rows.length) : 'Click Scan Resources to begin'}</p><div class="resource-list">${rows.slice(offset, offset + 100).map(r => `<button class="resource-row${r.index === selected?.index ? ' selected' : ''}" data-resource="${r.index}" ${enabled() ? '' : 'disabled'}><small>${esc(r.kind)} · ${esc(r.size)} B</small>${esc(r.path)}</button>`).join('')}</div>${rows.length > 100 ? `<div class="tools"><button class="btn sm" data-paginate="-1" ${offset ? '' : 'disabled'}>Previous</button><button class="btn sm" data-paginate="1" ${offset + 100 < rows.length ? '' : 'disabled'}>Next</button></div>` : ''}`;
+    $('#resource-rows').innerHTML = `<div class="resource-list-head"><b>Detected resources</b><span>${rows.length} shown · ${resources.length} total</span></div><div class="resource-list">${rows.slice(offset, offset + 100).map(r => `<button class="resource-row${r.index === selected?.index ? ' selected' : ''}" data-resource="${r.index}" ${enabled() ? '' : 'disabled'}><small>${esc(r.kind)} · ${esc(r.size)} B</small>${esc(r.path)}</button>`).join('')}</div>${rows.length > 100 ? `<div class="tools resource-pager"><button class="btn sm" data-paginate="-1" ${offset ? '' : 'disabled'}>Previous</button><span>${offset + 1}–${Math.min(offset + 100, rows.length)} of ${rows.length}</span><button class="btn sm" data-paginate="1" ${offset + 100 < rows.length ? '' : 'disabled'}>Next</button></div>` : ''}`;
   }
   function renderResourceEditor() {
     if (!$('#resource-editor')) return;
     const box = $('#resource-editor');
     if (!selected || !resourceData) { box.innerHTML = '<div class="empty">Select a scanned resource to inspect it.</div>'; return; }
-    box.innerHTML = `<h3>${esc(selected.path)}</h3><p class="note" id="resource-budget"></p>${selected.text ? '<textarea class="inp" id="resource-code" spellcheck="false" aria-label="Resource source text"></textarea>' : '<img id="resource-image" alt="Resource preview" hidden><p class="note" id="resource-note"></p>'}<div class="button-grid">${selected.text ? button('Save resource text', 'saveResource', true) : ''}${button('Replace with file…', 'replaceResource')}${button('Extract…', 'extractResource')}</div>`;
+    const hasPreview = /^data:image\/(png|jpeg|webp|gif|bmp);base64,/i.test(resourceData.preview || '');
+    box.innerHTML = `<div class="resource-editor-head"><div><span class="section-label">Selected resource</span><h3>${esc(selected.path)}</h3></div><span class="pill">${esc(selected.kind)} · ${esc(selected.size)} B</span></div><p class="note" id="resource-budget"></p><div class="resource-detail-grid ${selected.text ? 'has-code' : ''}">${selected.text ? '<label class="resource-source"><span class="editor-field-title">Source editor</span><textarea class="inp" id="resource-code" spellcheck="false" aria-label="Resource source text"></textarea></label>' : ''}<div class="resource-preview-panel"><span class="editor-field-title">Preview</span><img id="resource-image" alt="Resource preview" ${hasPreview ? '' : 'hidden'}><p class="note" id="resource-note"></p></div></div><div class="button-grid">${selected.text ? button('Save resource text', 'saveResource', true) : ''}${button('Replace with file…', 'replaceResource')}${button('Extract…', 'extractResource')}</div>`;
     const budget = resourceData.budget || {};
     $('#resource-budget').textContent = `Decoded: ${selected.size} B · Stored: ${selected.stored} B · Capacity: ${budget.known ? budget.capacity + ' B' : 'unknown'} · ${budget.msg || 'Validated by native engine on save.'}`;
     if ($('#resource-code')) $('#resource-code').value = resourceData.text || '';
     if ($('#resource-image')) {
-      if (/^data:image\/(png|jpeg|webp|gif|bmp);base64,/i.test(resourceData.preview || '')) {
-        $('#resource-image').src = resourceData.preview; $('#resource-image').hidden = false;
-      }
-      $('#resource-note').textContent = resourceData.note || 'No raster preview for this format. You can still extract or replace it.';
+      if (hasPreview) $('#resource-image').src = resourceData.preview;
+      $('#resource-note').textContent = resourceData.note || (hasPreview ? 'Preview generated by the native resource engine.' : 'No safe raster preview is available for this format.');
     }
   }
   function scheduleMeasurement() {
@@ -204,7 +206,7 @@
     if (name === 'loadTheme') { await request('loadTheme', { mode: $('#theme-mode').value }); await readPalette(); }
     else if (name === 'applyTheme') { if (!await BsiEffects.confirm('Apply staged colors to the selected EXE using the native engine?')) return; await request(name); await readPalette(); }
     else if (name === 'preset') { await request('applyPreset', { id: $('#preset').value }); await readPalette(); }
-    else if (name === 'scanResources') { if (!await confirmDiscard()) return; dirty = false; selected = null; resourceData = null; await request(name); await refreshResources(); }
+    else if (name === 'scanResources') { if (!await confirmDiscard()) return; dirty = false; selected = null; resourceData = null; filter = ''; kind = 0; offset = 0; if ($('#resource-filter')) $('#resource-filter').value = ''; if ($('#resource-kind')) $('#resource-kind').value = '0'; await request(name); await refreshResources(); }
     else if (name === 'saveResource') { if (!await BsiEffects.confirm('Save this resource into the selected EXE? The native engine will validate storage capacity.')) return; await request(name, { index: selected.index, text: resourceData.text }); dirty = false; await refreshResources(); resourceData = await request('readResource', { index: selected.index }); }
     else if (name === 'replaceResource' || name === 'extractResource') {
       if (name === 'replaceResource' && !await confirmDiscard()) return;
@@ -230,6 +232,10 @@
     try {
       const windowButton = event.target.closest('[data-window]');
       if (windowButton) { if (windowButton.dataset.window === 'close' && !await confirmDiscard()) return; if (!state.busy && !pending) await BsiEffects.windowAction(windowButton.dataset.window, action => transport?.windowAction?.(action)); return; }
+      const interfaceTab = event.target.closest('[data-interface-tab]');
+      if (interfaceTab) { editors.selectInterfaceTab(interfaceTab.dataset.interfaceTab); renderView(); return; }
+      const maintenanceTab = event.target.closest('[data-maint-tab]');
+      if (maintenanceTab) { editors.selectMaintenanceTab(maintenanceTab.dataset.maintTab); renderView(); return; }
       const actionEl = event.target.closest('[data-action]');
       if (actionEl) { if (actionEl.dataset.action === 'workspaceHome') await navigate(11); else await action(actionEl); return; }
       const nav = event.target.closest('[data-page]');
@@ -252,6 +258,7 @@
   document.addEventListener('input', event => {
     const el = event.target;
     editors.input(el);
+    if (page === 6 && /^(about:|link:)/.test(el.dataset.editorField || '')) { const preview = $('#interface-about-preview'); if (preview) preview.innerHTML = editors.aboutPreview(); }
     if (el.id === 'resource-filter') { filter = el.value; offset = 0; renderResources(); }
     if (el.id === 'resource-code' && resourceData) { resourceData.text = el.value; dirty = true; scheduleMeasurement(); }
     if (el.dataset.draft) drafts[el.dataset.draft] = el.value;
@@ -259,6 +266,7 @@
   document.addEventListener('change', async event => {
     const el = event.target;
     editors.input(el);
+    if (page === 6 && /^(about:|link:)/.test(el.dataset.editorField || '')) { const preview = $('#interface-about-preview'); if (preview) preview.innerHTML = editors.aboutPreview(); }
     if (el.id === 'resource-kind') { kind = Number(el.value); offset = 0; renderResources(); return; }
     const index = el.dataset.color ?? el.dataset.colorEnabled;
     if (index === undefined || !enabled()) return;
