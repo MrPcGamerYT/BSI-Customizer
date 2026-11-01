@@ -12,7 +12,7 @@ from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("QSG_RHI_BACKEND", "software")
-from PySide6.QtCore import QObject, QUrl
+from PySide6.QtCore import QObject, QUrl, QCoreApplication, QEvent
 from PySide6.QtGui import QGuiApplication, QWindow
 from PySide6.QtQml import QQmlComponent, QQmlEngine
 from PySide6.QtTest import QTest
@@ -144,8 +144,26 @@ Window {
     assert page.property("selectedIndex") == -1 and page.property("code") == ""
     assert backend.property("scans") == 1, "changing target must still require manual scan"
     assert not errors, errors
-    print("PASS: real QML page; manual-only scans, 12,000-row search, no filter-time I/O, pending edits preserved")
+    # As with the boot-provider fixtures, release Python wrappers and drain
+    # Qt's DeferredDelete events before destroying composite QML type caches.
+    # Never directly shiboken-delete an engine with live QML mock instances.
     window.close()
-    import shiboken6
-    shiboken6.delete(window)
-    shiboken6.delete(engine)
+    page = field = None
+    for instance in reversed(instances):
+        instance.deleteLater()
+    instance = None
+    instances.clear()
+    window = backend = themes = None
+    QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+    for component in reversed(components):
+        component.deleteLater()
+    component = None
+    components.clear()
+    QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+    engine.collectGarbage()
+    engine.clearComponentCache()
+    engine.deleteLater()
+    engine = None
+    QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+    QTest.qWait(1)
+    print("PASS: real QML page; manual-only scans, 12,000-row search, no filter-time I/O, pending edits preserved; clean teardown")
