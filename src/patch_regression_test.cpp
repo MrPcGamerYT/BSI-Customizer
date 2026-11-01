@@ -1,5 +1,8 @@
 #include "core/Backend.h"
 #include "core/BootVideoPatcher.h"
+#include "core/PlayerCache.h"
+#include "core/GifRpc.h"
+#include "../plugins/gif-rpc/RpcPayload.h"
 #include "core/BsDetector.h"
 #include "core/EmbeddedImages.h"
 #include "core/EmbeddedResources.h"
@@ -33,6 +36,8 @@
 
 #include <QCoreApplication>
 #include <QCryptographicHash>
+#include <QElapsedTimer>
+#include <QThread>
 #include <QColor>
 #include <QDir>
 #include <QBuffer>
@@ -68,6 +73,10 @@
 #  endif
 #  include <windows.h>
 #endif
+
+#define BSI_WORKSPACE_INTEGRATED
+#include "../tests/workspace_core_test.cpp"
+#undef BSI_WORKSPACE_INTEGRATED
 
 using namespace ByteUtils;
 
@@ -135,6 +144,13 @@ bool write(const QString &path, const QByteArray &bytes)
 {
     QFile file(path);
     return file.open(QIODevice::WriteOnly) && file.write(bytes) == bytes.size();
+}
+QByteArray utf16be(const QString &text)
+{
+    QByteArray bytes(text.size() * 2, '\0');
+    for (qsizetype i = 0; i < text.size(); ++i)
+        putBe16(bytes, i * 2, text.at(i).unicode());
+    return bytes;
 }
 QByteArray peFile()
 {
@@ -338,6 +354,60 @@ Fixture fixture(int version, const QString &color, const QByteArray &compiled = 
     }
     return f;
 }
+// Opt in only fixtures whose runtime consumer is explicitly given these bases.
+// Unanchored fixtures still exercise inference and genuine ambiguity refusal.
+void declarePoolBases(Fixture &f)
+{
+    const qint64 header = 0x1100;
+    f.bytes.replace(header, 4, "qres");
+    putBe32(f.bytes, header + 4, quint32(f.version));
+    putBe32(f.bytes, header + 8, quint32(f.tree - header));
+    putBe32(f.bytes, header + 12, quint32(f.payloads - header));
+    putBe32(f.bytes, header + 16, quint32(f.names - header));
+}
+
+// QtWebEngine types can already be process-globally registered when the
+// executable links Chromium, even in a fresh test subprocess. Namespace only
+// these temporary synthetic providers so the test never selects a real codec
+// or GPU WebEngine view instead of its fixture API. Production player imports
+// are asserted separately before this fixture-only rewrite.
+bool prepareSyntheticBootPlayer(const QString &path)
+{
+    auto source = read(path);
+    if (!source.contains("import QtMultimedia") || !source.contains("import QtWebEngine"))
+        return false;
+    source.replace("import QtMultimedia", "import BsiFixtureMultimedia");
+    source.replace("import QtWebEngine", "import BsiFixtureWebEngine");
+    return write(path, source);
+}
+
+int bootRuntimeInChild(const QString &qml, const QString &imports,
+                       const QString &provider, const QUrl &media)
+{
+    QProcess process;
+    auto env = QProcessEnvironment::systemEnvironment();
+    env.insert(QStringLiteral("QT_QPA_PLATFORM"), QStringLiteral("offscreen"));
+    env.insert(QStringLiteral("QT_QUICK_BACKEND"), QStringLiteral("software"));
+    env.insert(QStringLiteral("QML_DISABLE_DISK_CACHE"), QStringLiteral("1"));
+    process.setProcessEnvironment(env);
+    process.start(QCoreApplication::applicationFilePath(), {
+        QStringLiteral("--boot-runtime-test"), qml, imports, provider,
+        media.toString(QUrl::FullyEncoded)
+    });
+    if (!process.waitForStarted(10000) || !process.waitForFinished(30000)) {
+        process.kill();
+        process.waitForFinished();
+        std::printf("    boot runtime child: %s\n", qPrintable(process.errorString()));
+        return -1;
+    }
+    if (process.exitStatus() != QProcess::NormalExit || process.exitCode() != 0) {
+        std::printf("    boot runtime %s: %s\n%s\n", qPrintable(provider),
+                    process.readAllStandardOutput().constData(),
+                    process.readAllStandardError().constData());
+    }
+    return process.exitStatus() == QProcess::NormalExit ? process.exitCode() : -1;
+}
+
 bool loadInQt(const QString &path, const Fixture &f, const QString &cache, const QString &expected)
 {
     QProcess process;
@@ -939,6 +1009,45 @@ static QString aboutPageFixture()
         "        }\r\n"
         "    }\r\n"
         "}\r\n");
+}
+
+// Internal self-test subprocess: only the synthetic provider fixture is loaded.
+// Like the theme runtime probe, this runs before the application UI is created.
+int runBootPlayerRuntimeTest(const QStringList &args)
+{
+    const int at = args.indexOf(QStringLiteral("--boot-runtime-test"));
+    if (at < 0 || args.size() != at + 5) return 3;
+    const QString provider = args.at(at + 3);
+    if (provider != QLatin1String("qt5") && provider != QLatin1String("qt6")
+        && provider != QLatin1String("web")) return 3;
+    QQmlEngine engine;
+    engine.addImportPath(args.at(at + 2));
+    QObject::connect(&engine, &QQmlEngine::warnings, [](const QList<QQmlError> &warnings) {
+        for (const auto &warning : warnings)
+            std::fprintf(stderr, "Boot fixture QML: %s\n", qPrintable(warning.toString()));
+    });
+    QQmlComponent component(&engine, QUrl::fromLocalFile(args.at(at + 1)));
+    std::unique_ptr<QObject> object(component.create());
+    if (!object) {
+        std::fprintf(stderr, "Boot fixture compile error: %s\n", qPrintable(component.errorString()));
+        return 2;
+    }
+    // The controller's Loader can complete asynchronously. Keep assertions on
+    // the actual generated player rather than assuming one event pump suffices.
+    QElapsedTimer timer;
+    timer.start();
+    do {
+        QCoreApplication::processEvents();
+        const bool web = provider == QLatin1String("web");
+        const auto player = object->findChild<QObject *>(web
+            ? QStringLiteral("bsiWebBootVideo") : QStringLiteral("bsiBootVideo"));
+        if (player && (web ? player->property("url").toUrl().scheme() == QLatin1String("data")
+                          : player->property("started").toBool()
+                            && player->property("source").toUrl() == QUrl(args.at(at + 4)))) return 0;
+        QThread::msleep(10);
+    } while (timer.elapsed() < 5000);
+    std::fprintf(stderr, "Boot fixture %s did not start with its expected URL\n", qPrintable(provider));
+    return 1;
 }
 
 // ---- BlueStacks Debloat -------------------------------------------------
@@ -1910,15 +2019,60 @@ void checkRootDisk()
 
 int runPatchRegressionTests()
 {
-    failures = 0;
+    failures = WorkspaceTests::run();
     QTemporaryDir temp;
     check(temp.isValid(), "regression temp directory available");
     if (!temp.isValid())
         return failures;
+    std::printf("[theme-probe] binary previews must not truncate diagnostics\n");
+    {
+        auto f = fixture(2, QStringLiteral("#112233"));
+        // Reproduce a filename marker beside a compressed image/binary stream.
+        // The real user's report stopped at the NUL following its first byte.
+        const QByteArray binary = QByteArray::fromHex("0100504e470d0a097f5cff") + QByteArray(512, '\0');
+        f.bytes += utf16be(QStringLiteral("UiThemeObject.qml"));
+        f.bytes += qCompress(binary, 9);
+        const QString path = temp.filePath(QStringLiteral("binary-preview.exe"));
+        check(write(path, f.bytes), "write binary-preview diagnostic fixture");
+        const QString report = ThemeEngine::probeReport(path);
+        check(report.contains(QStringLiteral("\\x01\\x00PNG\\x0d\\x0a\\x09\\x7f\\\\\\xff")),
+              "probe escapes NUL, newlines, other controls, backslash and high bytes");
+        check(!report.contains(QChar(0)) && report.contains(QStringLiteral("[4]"))
+                  && report.contains(QStringLiteral("qrc mapping"))
+                  && report.contains(QStringLiteral("[6] patch feasibility"))
+                  && report.endsWith(QStringLiteral("Probe complete.\n")),
+              "probe includes final detection, resource mapping and feasibility after binary preview");
+        const QByteArray text = report.toUtf8();
+        check(size_t(text.size()) == std::strlen(text.constData()),
+              "diagnostic text remains safe for C-string consumers");
+        QProcess probe;
+        auto env = QProcessEnvironment::systemEnvironment();
+        env.insert(QStringLiteral("QT_QPA_PLATFORM"), QStringLiteral("offscreen"));
+#ifdef Q_OS_WIN
+        env.insert(QStringLiteral("__COMPAT_LAYER"), QStringLiteral("RUNASINVOKER"));
+#endif
+        probe.setProcessEnvironment(env);
+        probe.start(QCoreApplication::applicationFilePath(), { QStringLiteral("--theme-probe"), path });
+        const bool finished = probe.waitForStarted(10000) && probe.waitForFinished(30000);
+        if (!finished) {
+            probe.kill();
+            probe.waitForFinished();
+        }
+        const QByteArray stdoutText = probe.readAllStandardOutput().replace("\r\n", "\n");
+        check(finished && probe.exitStatus() == QProcess::NormalExit && probe.exitCode() == 0
+                  && stdoutText == text,
+              "actual theme-probe command exports the entire UTF-8 report through redirected stdout");
+        check(read(path) == f.bytes && !QFileInfo::exists(path + QStringLiteral(".bak")),
+              "collecting theme diagnostics never changes or backs up the emulator file");
+    }
     std::printf("[theme-runtime] real Qt resources, disk caches and restarts\n");
     QByteArray diskUnit;
     for (const int version : { 1, 2, 3 }) {
-        const auto f = fixture(version, QStringLiteral("#112233"));
+        auto f = fixture(version, QStringLiteral("#112233"));
+        // The runtime child is explicitly given these bases. Represent that
+        // same ground truth in the PE, rather than asking detection to invent
+        // a base from the retained orphan after a verified relocation.
+        declarePoolBases(f);
         const QString path = temp.filePath(QStringLiteral("resource%1.exe").arg(version));
         const QString cache = temp.filePath(QStringLiteral("qmlcache%1").arg(version));
         check(write(path, f.bytes), "write untouched resource fixture");
@@ -1954,8 +2108,9 @@ int runPatchRegressionTests()
                                                         { { QStringLiteral("primary100"), color } });
             if (!patched.ok)
                 std::printf("    patch error: %s\n", qPrintable(patched.msg));
-            check(patched.ok, "patch works without running another theme changer first");
+            check(patched.ok, QStringLiteral("patch works without running another theme changer first (rcc %1): %2").arg(version).arg(patched.msg));
             const auto after = read(path);
+            check(after.size() == before.size(), "ordinary palette edits use verified existing storage without PE growth");
             check(after.mid(f.neighbor, 4 + be32(f.bytes, f.neighbor))
                       == f.bytes.mid(f.neighbor, 4 + be32(f.bytes, f.neighbor)),
                   "next resource's zero-prefixed length header is preserved");
@@ -1976,7 +2131,8 @@ int runPatchRegressionTests()
         // Precompiled resource units normally have a zero source timestamp,
         // which means source mtime checks alone cannot invalidate them.
         std::fill(diskUnit.begin() + 16, diskUnit.begin() + 24, '\0');
-        const auto f = fixture(2, QStringLiteral("#556677"), diskUnit);
+        auto f = fixture(2, QStringLiteral("#556677"), diskUnit);
+        declarePoolBases(f);
         const QString path = temp.filePath(QStringLiteral("compiled.exe"));
         const QString cache = temp.filePath(QStringLiteral("embedded-cache"));
         write(path, f.bytes);
@@ -1985,6 +2141,7 @@ int runPatchRegressionTests()
         const auto info = ThemeEngine::detectTheme(f.bytes, QStringLiteral("qml"));
         const auto r = ThemeEngine::patchTheme(path, info, ThemeEngine::parseQmlEntries(info.qml),
                                               { { QStringLiteral("primary100"), QStringLiteral("#cf50ab") } });
+        if (!r.ok) std::printf("    compiled theme patch: %s\n", qPrintable(r.msg));
         check(r.ok, "patch source and invalidate only its compiled theme unit");
         const QByteArray after = read(path);
         const auto unitPos = after.indexOf(QByteArray("qv4cdata\0", 8));
@@ -4251,103 +4408,215 @@ Window {
         const auto path = QDir(folder).filePath(QStringLiteral("HD-Player.exe")); write(path, r.f.bytes);
 
         const auto outcome = BootVideoPatcher::patch(path);
-        check(outcome.ok, QStringLiteral("a stock boot screen is patched without a BootVideo.qml in the "
-                                         "resource pool: %1").arg(outcome.msg));
-        const auto patched = read(path);
-        check(patched.size() == r.f.bytes.size(), "the EXE does not grow");
-        check(read(path + QStringLiteral(".bak")) == r.f.bytes, "the untouched original is preserved as .bak");
-
-        const auto qml = resourceText(patched, r, QStringLiteral("PlrBootProgressBar.qml"));
-        const auto url = QUrl::fromLocalFile(QDir(folder).filePath(QStringLiteral("Assets/BootVideo.qml")));
-        check(qml.contains(QStringLiteral("Loader{id:pv;objectName:\"bsiBootLoader\";z:-1;anchors.fill:parent;"
-                                           "source:\"%1\"}").arg(url.toString(QUrl::FullyEncoded))),
-              "the boot screen loads the external player by file URL");
-        check(qml.contains(QLatin1String("Image { id: iBootImage; objectName: 'bootImage'; visible: false }"))
-                  && qml.contains(QLatin1String("iBootImage.visible = false"))
-                  && qml.contains(QLatin1String("iBootLoadingText.visible = true")),
-              "the stock artwork is hidden while the loading text stays");
-        check(!qml.contains(QLatin1String("QtMultimedia")) && !qml.contains(QLatin1String("BsiMedia")),
-              "no media import is added to the player's own QML");
-
-        const auto video = read(QDir(folder).filePath(QStringLiteral("Assets/BootVideo.qml")));
-        check(video.contains("QtMultimedia") && video.contains("QtMultimedia 5.15")
-                  && video.contains("QtWebEngine") && video.contains("Qt.resolvedUrl(\"Promo.mp4\")"),
-              "the external player tries Qt6, Qt5 and WebEngine video at run time");
-        const auto player = resourceText(patched, r, QStringLiteral("plr.qml"));
-        check(player.contains(QLatin1String("property bool pBootVideoDone: false"))
-                  && player.contains(QLatin1String("Timer{id:bvDone;interval:3000;running:pIsBootComplete&&!pBootVideoDone"))
-                  && player.contains(QLatin1String("((pIsBootComplete&&pBootVideoDone)||pShowAndroidAd)")),
-              "the host keeps the boot screen, and so the video, for the hold time");
-        QQmlEngine engine;
-        QQmlComponent component(&engine);
-        component.setData(qml.toUtf8(), QUrl::fromLocalFile(QDir(folder).filePath(QStringLiteral("PlrBootProgressBar.qml"))));
-        if (component.status() != QQmlComponent::Ready)
-            std::printf("    %s\n", qPrintable(component.errorString()));
-        check(component.status() == QQmlComponent::Ready,
-              "the rewritten boot screen is valid QML");
-
-        BootVideoPatcher::Options plain; plain.holdMs = 0;
-        const auto off = BootVideoPatcher::patch(path, plain);
-        check(off.ok, QStringLiteral("the hold can be switched off again: %1").arg(off.msg));
-        const auto reverted = read(path);
-        const auto plainPlayer = resourceText(reverted, r, QStringLiteral("plr.qml"));
-        check(!plainPlayer.contains(QLatin1String("pBootVideoDone"))
-                  && plainPlayer.contains(QLatin1String("sourceComponent: pIsBootComplete || pShowAndroidAd"))
-                  && reverted.size() == r.f.bytes.size(),
-              "switching the hold off restores the stock boot swap");
-        const auto again = BootVideoPatcher::patch(path);
-        check(again.ok, QStringLiteral("the boot video can be patched again afterwards: %1").arg(again.msg));
+        if (!outcome.ok) std::printf("    %s\n", qPrintable(outcome.msg));
+        check(outcome.ok, "PlrBootProgressBar works without a stock BootVideo.qml or an import in the boot file");
+        const auto modified = resourceText(read(path), r, QStringLiteral("PlrBootProgressBar.qml"));
+        check(modified.contains(QLatin1String("bsiBootLoader"))
+                  && modified.contains(QUrl::fromLocalFile(QDir(folder).filePath(QStringLiteral("Assets/BootVideo.qml"))).toString(QUrl::FullyEncoded)),
+              "the controller loads an external QML player, never an MP4 or a hard QtMultimedia import");
+        // A tiny, explicitly synthetic QtMultimedia API validates the generated
+        // QML/argument flow without playing media or running extracted user QML.
+        const auto imports = QDir(folder).filePath(QStringLiteral("imports/BsiFixtureMultimedia")); QDir().mkpath(imports);
+        write(QDir(imports).filePath(QStringLiteral("qmldir")), "module BsiFixtureMultimedia\nVideo 5.15 Video.qml\nMediaPlayer 5.15 MediaPlayer.qml\nVideoOutput 5.15 VideoOutput.qml\n");
+        write(QDir(imports).filePath(QStringLiteral("Video.qml")), "import QtQuick\nItem{property url source;property int loops;property int fillMode;property bool muted:false;property bool autoPlay:false;property bool started:false;function play(){started=true}}\n");
+        write(QDir(imports).filePath(QStringLiteral("MediaPlayer.qml")), "import QtQuick\nQtObject{enum Loops{Infinite=1}}\n");
+        write(QDir(imports).filePath(QStringLiteral("VideoOutput.qml")), "import QtQuick\nQtObject{enum FillMode{PreserveAspectCrop=1}}\n");
+        const auto controller = QDir(folder).filePath(QStringLiteral("PlrBootProgressBar.qml"));
+        check(write(controller, modified.toUtf8()), "write generated boot controller fixture");
+        // QML module/type registrations outlive engines. A new process per
+        // provider prevents earlier real/fake QtMultimedia imports leaking in.
+        check(prepareSyntheticBootPlayer(QDir(folder).filePath(QStringLiteral("Assets/BootVideo.qml"))),
+              "isolate synthetic Qt5 boot provider from registered SDK types");
+        const int qt5Result = bootRuntimeInChild(controller,
+            QDir(folder).filePath(QStringLiteral("imports")), QStringLiteral("qt5"),
+            QUrl::fromLocalFile(QDir(folder).filePath(QStringLiteral("Assets/Promo.mp4"))));
+        check(qt5Result == 0 || qt5Result == 1,
+              "external boot player QML compiles with the synthetic multimedia API");
+        check(qt5Result == 0,
+              "the Qt5 fallback starts and receives the installation-relative media URL");
+        check(BootVideoPatcher::patch(path).ok && read(path + QStringLiteral(".bak")) == r.f.bytes,
+              "real-name boot repatching keeps one loader and preserves the original backup");
         const auto twice = resourceText(read(path), r, QStringLiteral("PlrBootProgressBar.qml"));
-        check(twice.count(QLatin1String("bsiBootLoader")) == 1, "a repatch does not stack a second player");
+        check(twice.count(QLatin1String("objectName:\"bsiBootLoader\"")) == 1,
+              "repatching does not duplicate the custom video component");
+    }
+    std::printf("[boot-script] adaptive player, hold, recovery and refusal paths\n");
+    {
+        const QString boot = QStringLiteral("import QtQuick\nItem{Image{id:iBootImage;visible:true}Text{id:iBootLoadingText;visible:false}function fSetBootPromotion(){iBootImage.visible=true;iBootLoadingText.visible=false}}\n");
+        const QString host = QStringLiteral("import QtQuick\nItem{property bool pIsBootComplete:false;property bool pShowAndroidAd:false;Component{id:iBootProgressComponent;Item{}}Component{id:iGlContainerComponent;Rectangle{color:'#000000'}}Loader{id:iBootLoader;sourceComponent:pIsBootComplete || pShowAndroidAd ? iGlContainerComponent : iBootProgressComponent}}\n");
+        const auto r = resources({{QStringLiteral("boot.qml"),boot},{QStringLiteral("plr.qml"),host}}, true);
+        const auto folder = temp.filePath(QStringLiteral("adaptive boot ' & unicode Ω")); QDir().mkpath(folder);
+        const auto path = QDir(folder).filePath(QStringLiteral("HD-Player.exe")); write(path,r.f.bytes);
+        check(!BootVideoPatcher::patch(path,-1).ok && read(path)==r.f.bytes,
+              "invalid boot holds refuse without changing the executable");
+        const auto applied=BootVideoPatcher::patch(path,3000);
+        if(!applied.ok) std::printf("    %s\n",qPrintable(applied.msg));
+        check(applied.ok,"external adaptive player does not require an existing multimedia import");
+        auto text=resourceText(read(path),r,QStringLiteral("plr.qml"));
+        check(text.contains(QLatin1String("interval:3000")) && text.contains(QLatin1String("pIsBootComplete&&pBootVideoDone")),
+              "the Android loader is held only after boot completion while ads retain their bypass");
+        const auto player=read(QDir(folder).filePath(QStringLiteral("Assets/BootVideo.qml")));
+        check(player.contains("import QtMultimedia;") && player.contains("import QtMultimedia 5.15;") && player.contains("import QtWebEngine;")
+                  && player.contains("JSON.stringify") && player.contains("Qt.resolvedUrl(\"Promo.mp4\")"),
+              "external player tries Qt6, Qt5 and WebEngine and quotes media URLs safely");
+        check(BootVideoPatcher::patch(path,4500).ok,"boot hold can be updated on a repatch");
+        text=resourceText(read(path),r,QStringLiteral("plr.qml"));
+        check(text.count(QLatin1String("id:bvDone"))==1 && text.contains(QLatin1String("interval:4500")),
+              "repatching updates the existing timer without duplicating it");
+        check(BootVideoPatcher::patch(path,0).ok,"zero hold restores immediate Android handoff");
+        text=resourceText(read(path),r,QStringLiteral("plr.qml"));
+        check(!text.contains(QLatin1String("pBootVideoDone")) && !text.contains(QLatin1String("bvDone"))
+                  && text.contains(QLatin1String("sourceComponent:pIsBootComplete||pShowAndroidAd?")),
+              "disabling hold removes both timer and state");
+        check(read(path+QStringLiteral(".bak"))==r.f.bytes,"all repatches preserve the first original backup");
+        // Validate dynamic Qt6 and WebEngine creation against deliberately
+        // synthetic APIs. Never load a real codec or extracted player QML.
+        const auto mediaImports=QDir(folder).filePath(QStringLiteral("qt6Imports/BsiFixtureMultimedia")); QDir().mkpath(mediaImports);
+        write(QDir(mediaImports).filePath(QStringLiteral("qmldir")),"module BsiFixtureMultimedia\nMediaPlayer 5.15 MediaPlayer.qml\nVideoOutput 5.15 VideoOutput.qml\nAudioOutput 5.15 AudioOutput.qml\n");
+        write(QDir(mediaImports).filePath(QStringLiteral("MediaPlayer.qml")),"import QtQuick\nQtObject{enum Loops{Infinite=1}property url source;property int loops;property var videoOutput;property var audioOutput;property bool started:false;function play(){started=true}}\n");
+        write(QDir(mediaImports).filePath(QStringLiteral("VideoOutput.qml")),"import QtQuick\nItem{enum FillMode{PreserveAspectCrop=1}property int fillMode}\n");
+        write(QDir(mediaImports).filePath(QStringLiteral("AudioOutput.qml")),"import QtQuick\nQtObject{property bool muted:false}\n");
+        check(prepareSyntheticBootPlayer(QDir(folder).filePath(QStringLiteral("Assets/BootVideo.qml"))),
+              "isolate synthetic Qt6 and WebEngine boot providers from registered SDK types");
+        check(bootRuntimeInChild(QDir(folder).filePath(QStringLiteral("Assets/BootVideo.qml")),
+                  QDir(folder).filePath(QStringLiteral("qt6Imports")), QStringLiteral("qt6"),
+                  QUrl::fromLocalFile(QDir(folder).filePath(QStringLiteral("Assets/Promo.mp4")))) == 0,
+              "the Qt6 adaptive branch compiles, starts and handles quoted Unicode installation paths");
+        const auto webImports=QDir(folder).filePath(QStringLiteral("webImports"));
+        QDir().mkpath(QDir(webImports).filePath(QStringLiteral("BsiFixtureMultimedia")));
+        QDir().mkpath(QDir(webImports).filePath(QStringLiteral("BsiFixtureWebEngine")));
+        // An empty qmldir can fall through to the SDK's real multimedia
+        // module. Export explicitly unavailable types so both imports are
+        // deterministically refused without loading real codecs.
+        write(QDir(webImports).filePath(QStringLiteral("BsiFixtureMultimedia/qmldir")),
+              "module BsiFixtureMultimedia\nMediaPlayer 5.15 Unavailable.qml\nVideo 5.15 Unavailable.qml\n");
+        write(QDir(webImports).filePath(QStringLiteral("BsiFixtureMultimedia/Unavailable.qml")),
+              "import QtQuick\nMissingSyntheticMultimediaApi {}\n");
+        write(QDir(webImports).filePath(QStringLiteral("BsiFixtureWebEngine/qmldir")),"module BsiFixtureWebEngine\nWebEngineView 1.0 WebEngineView.qml\n");
+        write(QDir(webImports).filePath(QStringLiteral("BsiFixtureWebEngine/WebEngineView.qml")),"import QtQuick\nItem{objectName:'bsiWebBootVideo';property url url}\n");
+        check(bootRuntimeInChild(QDir(folder).filePath(QStringLiteral("Assets/BootVideo.qml")),
+                  webImports, QStringLiteral("web"), QUrl()) == 0,
+              "missing multimedia APIs fall back to a WebEngine data-URL player");
+        // A previously forced stub can only recover from a uniquely linked
+        // original resource in the backup; it never guesses missing UI source.
+        const auto stub=resources({{QStringLiteral("boot.qml"),QStringLiteral("import QtQuick\nItem{function fSetBootPromotion(a,b,c){}}\n")},{QStringLiteral("plr.qml"),host}},true);
+        const auto stubPath=QDir(folder).filePath(QStringLiteral("stub.exe")); write(stubPath,stub.f.bytes);
+        check(!BootVideoPatcher::patch(stubPath).ok && read(stubPath)==stub.f.bytes,
+              "a forced boot stub with no original backup is a non-writing error");
+        write(stubPath+QStringLiteral(".bak"),r.f.bytes);
+        check(BootVideoPatcher::patch(stubPath).ok && resourceText(read(stubPath),stub,QStringLiteral("boot.qml")).contains(QLatin1String("iBootImage")),
+              "a linked backup repairs the boot stub without discarding unrelated executable edits");
     }
 
-    std::printf("[boot-legacy] the older boot loader is unloaded, not swapped\n");
+    std::printf("[gif-rpc] clean proxy validation, JSON escaping, configuration and restore\n");
     {
-        // 5.9 / 5.10 shape: boot ends by unloading the loader outright, so the
-        // hold has to defer that unload instead of rewiring a binding.
-        const QString boot = QStringLiteral(
-            "/*\r\n * Copyright (C) 2020-2021 BlueStack Systems, Inc.\r\n */\r\n"
-            "import QtQuick\r\n"
-            "Item {\r\n"
-            "    property bool bootBackgroundImage: true\r\n"
-            "    Image { id: iBootImage; visible: true }\r\n"
-            "    Text { id: iBootLoadingText }\r\n"
-            "    function fSetBootPromotion() { iBootImage.visible = true }\r\n"
-            "}\r\n");
-        const QString host = QStringLiteral(
-            "/* (C) BlueStack Systems - the ApplicationWindow of the player */\r\n"
-            "import QtQuick\r\n"
-            "Item {\r\n"
-            "    id: iAppwin\r\n"
-            "    property bool pIsBootComplete: false\r\n"
-            "    Component { id: iBootProgressComponent; PlrBootProgressBar {} }\r\n"
-            "    Loader { id: iBootLoader; anchors.fill: parent; visible: !pIsBootComplete }\r\n"
-            "    function fUiHideBootProgressBar() {\r\n"
-            "        iBootLoader.item.fBootComplete()\r\n"
-            "        iBootLoader.sourceComponent = undefined\r\n"
-            "        pIsBootComplete = true\r\n"
-            "    }\r\n"
-            "}\r\n");
-        auto r = resources({ { QStringLiteral("PlrBootProgressBar.qml"), boot },
-                                   { QStringLiteral("plr.qml"), host } }, false, {}, 256);
-        addRegistration(r, false);
-        const auto folder = temp.filePath(QStringLiteral("legacy boot")); QDir().mkpath(folder);
-        const auto path = QDir(folder).filePath(QStringLiteral("HD-Player.exe")); write(path, r.f.bytes);
+        GifRpcPayload::Config payload;
+        payload.state="quotes \" \\ \n unicode";payload.details={"one","two"};payload.timestamp=true;
+        payload.label1="YouTube";payload.url1="https://youtube.com/@nova_xis20";
+        payload.largeImage="https://example.org/presence.gif";
+        const auto text=GifRpcPayload::activity(payload,1,123,456,7);
+        QJsonParseError parse;
+        const auto json=QJsonDocument::fromJson(QByteArray::fromStdString(text),&parse);
+        const auto activity=json.object().value(QStringLiteral("args")).toObject().value(QStringLiteral("activity")).toObject();
+        check(parse.error==QJsonParseError::NoError && activity.value(QStringLiteral("state")).toString().toStdString()==payload.state
+                  && activity.value(QStringLiteral("details")).toString()==QLatin1String("two"),
+              "GIF RPC serializes real Discord IPC JSON, escaping strings and rotating details");
+        QVariantMap config={{QStringLiteral("AppId"),QStringLiteral("1542174289523122330")},
+            {QStringLiteral("State"),QStringLiteral("Nova Ω")},{QStringLiteral("Details"),QStringLiteral("one\ntwo")},
+            {QStringLiteral("Enabled"),true},{QStringLiteral("Interval"),5},{QStringLiteral("Timestamp"),true}};
+        QString error;
+        check(GifRpc::validate(config,&error),"valid RPC-only configuration is accepted");
+        auto invalid=config;invalid[QStringLiteral("AppId")]=QStringLiteral("not an id");
+        check(!GifRpc::validate(invalid,&error),"GIF RPC rejects invalid application IDs");
+        invalid=config;invalid[QStringLiteral("LargeImage")]=QStringLiteral("file:///C:/Windows/version.dll");
+        check(!GifRpc::validate(invalid,&error),"GIF RPC refuses local/executable image URL schemes");
+        invalid=config;invalid[QStringLiteral("Button1Label")]=QStringLiteral("missing URL");
+        check(!GifRpc::validate(invalid,&error),"GIF RPC validates paired button labels and HTTPS URLs");
+#ifdef Q_OS_WIN
+        const auto bytes=GifRpc::bundledProxy();
+        check(GifRpc::isOurProxy(bytes,&error),QStringLiteral("embedded RPC-only DLL has a valid x64 PE/DLL header, schema and all forwarding exports: %1").arg(error));
+        check(!GifRpc::isOurProxy(bytes.left(128),&error),"truncated RPC DLLs are refused");
+        const auto folder=temp.filePath(QStringLiteral("gif-rpc-install"));QDir().mkpath(folder);
+        const auto exe=QDir(folder).filePath(QStringLiteral("HD-Player.exe"));write(exe,peFile());
+        const auto dll=QDir(folder).filePath(QStringLiteral("version.dll"));
+        const auto ini=QDir(folder).filePath(QStringLiteral("bsi-gif-rpc.ini"));
+        auto installed=GifRpc::apply(exe,config);
+        check(installed.value(QStringLiteral("ok")).toBool(),installed.value(QStringLiteral("msg")).toString());
+        const auto inspected=GifRpc::inspect(exe);
+        check(inspected.value(QStringLiteral("installed")).toBool()
+                  && inspected.value(QStringLiteral("settings")).toMap().value(QStringLiteral("State")).toString()==QStringLiteral("Nova Ω"),
+              "installed RPC settings round-trip Unicode without binary string-slot patching");
+        // Loading only OUR verified payload in the customizer test process must
+        // forward version APIs without starting RPC (host is not HD-Player).
+        HMODULE proxy=LoadLibraryW(reinterpret_cast<LPCWSTR>(dll.utf16()));
+        check(proxy!=nullptr,"our validated proxy loads without a Discord SDK dependency");
+        if(proxy) {
+            using Schema=const char *(*)();const auto schema=reinterpret_cast<Schema>(GetProcAddress(proxy,"BsiGifRpcSchema"));
+            using Size=DWORD (WINAPI*)(LPCWSTR,LPDWORD);
+            const auto size=reinterpret_cast<Size>(GetProcAddress(proxy,"GetFileVersionInfoSizeW"));
+            wchar_t windows[MAX_PATH];GetSystemDirectoryW(windows,MAX_PATH);
+            const QString kernel=QDir(QString::fromWCharArray(windows)).filePath(QStringLiteral("kernel32.dll"));DWORD handle=0;
+            check(schema&&QByteArray(schema())=="BSI_GIF_RPC_PROXY_V1"&&size&&size(reinterpret_cast<LPCWSTR>(kernel.utf16()),&handle)>0,
+                  "proxy schema and actual System32 version API forwarding work");
+            FreeLibrary(proxy);
+        }
+        check(GifRpc::restore(exe).value(QStringLiteral("ok")).toBool()&&!QFileInfo::exists(dll),
+              "removing a new RPC deployment does not delete saved settings or unrelated files");
+        const QByteArray original=peFile();write(dll,original);
+        const auto beforeIni=read(ini);
+        check(!GifRpc::apply(exe,config).value(QStringLiteral("ok")).toBool()&&read(dll)==original&&read(ini)==beforeIni,
+              "a third-party app-local version.dll cannot be overwritten implicitly");
+        check(GifRpc::apply(exe,config,true).value(QStringLiteral("ok")).toBool()
+                  && read(dll+QStringLiteral(".bsi-gif-rpc.bak"))==original,
+              "explicit replacement preserves and verifies the original DLL backup");
+        check(GifRpc::restore(exe).value(QStringLiteral("ok")).toBool()&&read(dll)==original,
+              "RPC restore recovers the original app-local DLL byte for byte");
+#endif
+    }
 
-        const auto outcome = BootVideoPatcher::patch(path);
-        check(outcome.ok, QStringLiteral("a build that unloads its boot loader is patched: %1").arg(outcome.msg));
-        check(read(path).size() == r.f.bytes.size(), "a build that unloads its boot loader is patched in place");
-        const auto player = resourceText(read(path), r, QStringLiteral("plr.qml"));
-        check(player.contains(QLatin1String("pIsBootComplete = true\r\n        iBootLoader.visible = true\r\n"
-                                            "        bvHold.restart()"))
-                  && player.contains(QLatin1String("Timer{id:bvHold;interval:3000;onTriggered:{"))
-                  && !player.contains(QLatin1String("iBootLoader.sourceComponent = undefined\r\n        pIsBootComplete")),
-              "the unload is deferred to a timer so the video stays on screen");
-        BootVideoPatcher::Options plain; plain.holdMs = 0;
-        const auto off = BootVideoPatcher::patch(path, plain);
-        check(off.ok, QStringLiteral("the legacy hold can be switched off: %1").arg(off.msg));
-        check(!resourceText(read(path), r, QStringLiteral("plr.qml")).contains(QLatin1String("bvHold")),
-              "switching the hold off puts the legacy unload back");
+    std::printf("[player-cache] exact AppData cache scope and symlink isolation\n");
+    {
+        const auto base=temp.filePath(QStringLiteral("appdata"));
+        const auto root=QDir(base).filePath(QStringLiteral("HD-Player"));
+        QDir().mkpath(QDir(root).filePath(QStringLiteral("cache/qmlcache")));
+        QDir().mkpath(QDir(root).filePath(QStringLiteral("GPUCache")));
+        QDir().mkpath(QDir(root).filePath(QStringLiteral("Engine")));
+        write(QDir(root).filePath(QStringLiteral("cache/qmlcache/unit.qmlc")),"cached");
+        write(QDir(root).filePath(QStringLiteral("GPUCache/shader")),"cached");
+        write(QDir(root).filePath(QStringLiteral("settings.json")),"keep settings");
+        write(QDir(root).filePath(QStringLiteral("Engine/Data.vhdx")),"keep virtual disk");
+        QDir().mkpath(QDir(base).filePath(QStringLiteral("Unrelated/cache")));
+        write(QDir(base).filePath(QStringLiteral("Unrelated/cache/keep")),"keep");
+        const auto purged=PlayerCache::purge({base,base,QString()});
+        check(purged.ok && purged.removed==2 && !QFileInfo::exists(QDir(root).filePath(QStringLiteral("cache")))
+                  && !QFileInfo::exists(QDir(root).filePath(QStringLiteral("GPUCache"))),
+              "manual purge removes only recognized HD-Player cache directories and deduplicates roots");
+        check(read(QDir(root).filePath(QStringLiteral("settings.json")))=="keep settings"
+                  && read(QDir(root).filePath(QStringLiteral("Engine/Data.vhdx")))=="keep virtual disk"
+                  && read(QDir(base).filePath(QStringLiteral("Unrelated/cache/keep")))=="keep",
+              "cache purge preserves settings, virtual disks and unrelated application caches");
+        check(PlayerCache::purge({base}).ok && PlayerCache::purge({base}).removed==0,
+              "purging an already clean cache is an idempotent success");
+        const auto outside=temp.filePath(QStringLiteral("outside-cache")); QDir().mkpath(outside);
+        write(QDir(outside).filePath(QStringLiteral("keep")),"untouched");
+        const auto link=QDir(root).filePath(QStringLiteral("qmlcache"));
+#ifdef Q_OS_WIN
+        const bool linked = QProcess::execute(QStringLiteral("cmd.exe"),
+            {QStringLiteral("/c"),QStringLiteral("mklink"),QStringLiteral("/J"),QDir::toNativeSeparators(link),QDir::toNativeSeparators(outside)}) == 0;
+#else
+        const bool linked = QFile::link(outside,link);
+#endif
+        check(linked, "the cache-isolation fixture creates a directory link/junction");
+        if(linked) {
+            const auto blocked=PlayerCache::purge({base});
+            check(!blocked.ok && read(QDir(outside).filePath(QStringLiteral("keep")))=="untouched",
+                  "a linked cache is refused without traversing or deleting its target");
+#ifdef Q_OS_WIN
+            QDir().rmdir(link);
+#else
+            QFile::remove(link);
+#endif
+        }
     }
 
 #ifdef BSI_EXE_TEST_FILE
@@ -5891,6 +6160,43 @@ Window {
                                    { QStringLiteral("cache/panel.qmlc"), QByteArray("qv4cdata\0\0\0\0", 12) } });
         addRegistration(r, false);
 
+        // The QML-facing list is a scan snapshot, including thumbnails. A
+        // metadata query/filter must never re-read or decode the backing EXE.
+        {
+            const QString cachedPath = temp.filePath(QStringLiteral("resource-snapshot.exe"));
+            write(cachedPath, r.f.bytes);
+            SettingsManager settings(nullptr, false);
+            settings.setFpsAutoDetect(false);
+            settings.setExePath(cachedPath);
+            Backend backend(&settings);
+            int notifications = 0;
+            bool notificationsIdle = true;
+            QObject::connect(&backend, &Backend::resourcesChanged, [&] {
+                ++notifications;
+                notificationsIdle = notificationsIdle && !backend.busy();
+            });
+            check(backend.resourceInfos().isEmpty(), "selecting a target does not scan Resources");
+            check(backend.scanResources(true) == 4, "explicit Resources scan publishes the entire snapshot");
+            check(notificationsIdle, "Resources publishes after releasing the busy guard so budget reads are allowed");
+            const auto snapshot = backend.resourceInfos();
+            bool pngThumb = false, svgThumb = false;
+            for (const auto &value : snapshot) {
+                const auto row = value.toMap();
+                if (row.value(QStringLiteral("path")).toString() == QStringLiteral("images/logo.png"))
+                    pngThumb = row.value(QStringLiteral("thumbnail")).toString().startsWith(QLatin1String("data:image/png"));
+                if (row.value(QStringLiteral("path")).toString() == QStringLiteral("icons/star.svg"))
+                    svgThumb = row.value(QStringLiteral("thumbnail")).toString().startsWith(QLatin1String("data:image/svg"));
+            }
+            check(pngThumb && svgThumb, "scan worker prepares PNG and SVG thumbnails before publishing rows");
+            const int before = notifications;
+            backend.rpcidNames(cachedPath); // unrelated worker completion
+            check(notifications == before, "unrelated operations do not reload the Resources editor");
+            QFile::remove(cachedPath);
+            check(backend.resourceInfos() == snapshot, "metadata reads use the snapshot, not disk I/O");
+            settings.setExePath(temp.filePath(QStringLiteral("different-player.exe")));
+            check(backend.resourceInfos().isEmpty(), "a target change drops cached rows and thumbnails without a scan");
+        }
+
         const auto entries = EmbeddedResources::list(r.f.bytes, true);
         const auto find = [&entries](const QString &path) {
             for (const auto &entry : entries)
@@ -5939,13 +6245,16 @@ Window {
 
         const QString exePath = temp.filePath(QStringLiteral("resources.exe"));
         write(exePath, original);
-        const auto refusedText = EmbeddedResources::replaceText(exePath, qmlEntry.path, longer);
-        check(!refusedText.ok && refusedText.msg.contains(QLatin1String("never made bigger"))
-                  && read(exePath) == original,
-              QStringLiteral("a QML edit that grows the embedded file is refused outright (%1)")
-                  .arg(refusedText.msg));
-        check(!QFileInfo::exists(exePath + QStringLiteral(".bak")),
-              "a refused edit does not even create a backup: the EXE was never opened for writing");
+        const auto grownText = EmbeddedResources::replaceText(exePath, qmlEntry.path, longer);
+        check(grownText.ok && read(exePath).size() == originalSize,
+              QStringLiteral("larger decoded QML fits verified storage without EXE growth (%1)").arg(grownText.msg));
+        write(exePath, original); QFile::remove(exePath + QStringLiteral(".bak"));
+        QString huge; huge.reserve(400000);
+        for (int i = 0; i < 400000; ++i) { seed = seed * 1103515245u + 12345u; huge += QChar(ushort('a' + (seed >> 16) % 26)); }
+        const auto refusedText = EmbeddedResources::replaceText(exePath, qmlEntry.path, qmlSource + huge);
+        check(!refusedText.ok && read(exePath) == original,
+              QStringLiteral("oversized payload without verified storage is refused (%1)").arg(refusedText.msg));
+        check(!QFileInfo::exists(exePath + QStringLiteral(".bak")), "refused growth does not create a backup");
 
         const QString shorter = QStringLiteral("import QtQuick\nItem { width: 10 }\n");
         const auto saved = EmbeddedResources::replaceText(exePath, qmlEntry.path, shorter);
@@ -5977,10 +6286,11 @@ Window {
         write(biggerPng, widerPng);
         const auto refusedPicture = EmbeddedResources::replacePicture(
             exePath, pngEntry.path, biggerPng);
-        check(!refusedPicture.ok && read(exePath) == afterSave,
-              QStringLiteral("a bigger picture is refused, not grown into the file (%1)")
+        check(refusedPicture.ok && read(exePath).size() == afterSave.size(),
+              QStringLiteral("a larger picture uses verified storage without growing the EXE (%1)")
                   .arg(refusedPicture.msg));
 
+        write(exePath, afterSave); // isolate the next case from the image relocation
         const auto refusedBinary = EmbeddedResources::replaceBytes(
             exePath, cacheEntry.path, QByteArray(4096, char(0x42)));
         check(!refusedBinary.ok && read(exePath) == afterSave,
@@ -6130,10 +6440,24 @@ Window {
         check(read(scannedPath).mid(int(pngEntry.entryOff) + 4, logo.size()) == logo,
               "the replacement is on disk at the same offset");
 
-        const auto tooBig = EmbeddedResources::replaceBytes(
-            scannedPath, pngEntry.path, QByteArray(logo.size() + 1, '\x89'));
-        check(!tooBig.ok && tooBig.msg.contains(QLatin1String("grow")),
-              QStringLiteral("growing a scanned record is refused (%1)").arg(tooBig.msg));
+        // Reach the scanned-record size guard with a real PNG, rather than
+        // random bytes that correctly fail picture validation first.
+        QImage largerImage(32, 32, QImage::Format_ARGB32);
+        for (int y = 0; y < largerImage.height(); ++y)
+            for (int x = 0; x < largerImage.width(); ++x)
+                largerImage.setPixelColor(x, y, QColor((x * 37) % 256, (y * 53) % 256, (x * y) % 256));
+        QByteArray largerPng;
+        QBuffer largerBuffer(&largerPng);
+        largerBuffer.open(QIODevice::WriteOnly);
+        const bool encoded = largerImage.save(&largerBuffer, "PNG");
+        largerBuffer.close();
+        check(encoded && largerPng.size() > logo.size(),
+              "scanned-record overflow fixture is a valid larger PNG");
+        const auto beforeRefusal = read(scannedPath);
+        const auto tooBig = EmbeddedResources::replaceBytes(scannedPath, pngEntry.path, largerPng);
+        check(!tooBig.ok && tooBig.msg.contains(QLatin1String("grow"))
+                  && read(scannedPath) == beforeRefusal,
+              QStringLiteral("growing a scanned record is refused without writes (%1)").arg(tooBig.msg));
 
         const auto svgEdit = EmbeddedResources::replaceText(
             scannedPath, svgEntry.path,
@@ -6730,6 +7054,13 @@ Window {
                   QStringLiteral("the downloaded setup is executable, not deleted (%1)").arg(peError));
             check(!UpdateChecker::canReplaceThisProgram(setup, &peError),
                   QStringLiteral("but it is never copied over the running program (%1)").arg(peError));
+            const auto setupBytes = read(setup);
+            const auto setupHash = QString::fromLatin1(QCryptographicHash::hash(setupBytes, QCryptographicHash::Sha256).toHex());
+            check(UpdateChecker::verifyStagedFile(setup, setupBytes.size(), setupHash, &peError),
+                  "the download verifier keeps an x86 installer instead of rejecting machine 0x014c");
+            check(!UpdateChecker::verifyStagedFile(setup, setupBytes.size() + 1, setupHash, &peError)
+                      && !UpdateChecker::verifyStagedFile(setup, setupBytes.size(), QString(64, QLatin1Char('0')), &peError),
+                  "accepting x86 installers never bypasses size or SHA-256 verification");
 
             const QString portable = temp.filePath(QStringLiteral("release-portable.exe"));
             write(portable, peImage(0x8664, true, false));
@@ -6739,6 +7070,15 @@ Window {
             check(UpdateChecker::canReplaceThisProgram(portable, &peError),
                   QStringLiteral("a 64-bit build may replace this 64-bit program (%1)").arg(peError));
 #endif
+            QByteArray sameArchSetup = peImage(0x8664, true, false);
+            sameArchSetup.replace(1024, 12, QByteArray("NullsoftInst"));
+            const QString x64Setup = temp.filePath(QStringLiteral("same-arch-setup.exe"));
+            write(x64Setup, sameArchSetup);
+            check(UpdateChecker::looksLikeInstaller(x64Setup)
+                      && UpdateChecker::looksLikeExecutable(x64Setup, &peError)
+                      && !UpdateChecker::canReplaceThisProgram(x64Setup, &peError)
+                      && peError.contains(QLatin1String("setup program")),
+                  "even a same-architecture setup is launched, never copied over the app");
 
             const QString library = temp.filePath(QStringLiteral("release.dll"));
             write(library, peImage(0x8664, true, true));
@@ -6937,11 +7277,9 @@ Window {
               QStringLiteral("but it is refused before it can replace a 64-bit build (%1)")
                   .arg(stageError));
 
-        // A setup is judged as a setup, not as a program to copy over this one.
-        // Its loader is x86 whatever it installs, and a header this code cannot
-        // make sense of must never turn a finished download into "a processor
-        // this PC cannot run" - that message deleted every download at 100%
-        // before 2.5.2, and the processor in the setup is not the app's.
+        // A setup marker is not permission to skip executable validation.
+        // An actual x86 PE32 loader passes above; a contradictory PE32+ header
+        // is damaged even when the file contains an authentic-looking marker.
         {
             QByteArray setupImage = i386Image;
             setupImage[peOffset + 24] = char(0x0b);
@@ -6959,9 +7297,9 @@ Window {
             check(!UpdateChecker::looksLikeExecutable(setupPath, &stageError),
                   "and that header is not one a program may be started from");
             const QString setupHash = UpdateChecker::fileSha256(setupPath);
-            check(UpdateChecker::verifyStagedFile(setupPath, setupImage.size(), setupHash, &stageError),
-                  QStringLiteral("yet the finished setup download is kept: the processor in its "
-                                 "loader is not the app's (%1)").arg(stageError));
+            check(!UpdateChecker::verifyStagedFile(setupPath, setupImage.size(), setupHash, &stageError),
+                  QStringLiteral("a marker never bypasses rejection of a contradictory installer header (%1)")
+                      .arg(stageError));
             check(!UpdateChecker::canReplaceThisProgram(setupPath, &stageError)
                       && stageError.contains(QLatin1String("setup")),
                   QStringLiteral("a setup is run, never copied over the running program (%1)")

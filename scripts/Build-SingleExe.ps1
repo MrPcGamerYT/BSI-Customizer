@@ -8,6 +8,11 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+trap {
+    $message = ($_.Exception.Message + "`n" + $_.ScriptStackTrace).Replace('%','%25').Replace("`r",'%0D').Replace("`n",'%0A')
+    Write-Host "::error::$message"
+    throw
+}
 $repo = Split-Path $PSScriptRoot -Parent
 if ($Version -notmatch '^\d+\.\d+\.\d+(\.\d+)?$') { throw 'Version must be numeric, e.g. 2.0.0' }
 $AppExecutable = (Resolve-Path -LiteralPath $AppExecutable).Path
@@ -52,6 +57,27 @@ if ($deployExit -ne 0) {
     # Never use this warning as a substitute for dependency/launch checks.
     Get-Content -LiteralPath $deployLog -Tail 30 | Write-Host
     Write-Warning "windeployqt exited $deployExit; validating the staged dependency closure and real launch below"
+}
+
+# Chromium-capable builds need their QML imports as well as the dependent
+# DLLs discovered by the first deployment pass. Keep native-only CI unchanged.
+if (Test-Path -LiteralPath (Join-Path $stage 'Qt6WebEngineCore.dll')) {
+    Invoke-Checked $deploy @('--release', '--no-compiler-runtime', '--qmldir',
+        (Join-Path $repo 'src/chromium'), '--dir', $stage,
+        (Join-Path $stage 'BSI-Customizer.exe'))
+    # Some distributions embed ICU data; other SDKs ship it separately.
+    # Validate the actual matching SDK rather than assuming either layout.
+    if ((Test-Path -LiteralPath (Join-Path $QtPrefix 'resources/icudtl.dat')) -and
+        -not (Test-Path -LiteralPath (Join-Path $stage 'resources/icudtl.dat'))) {
+        throw 'Missing external ICU data required by this Qt SDK'
+    }
+    foreach ($relative in @('QtWebEngineProcess.exe', 'qml/QtWebEngine/qmldir',
+                            'qml/QtWebChannel/qmldir', 'resources/qtwebengine_resources.pak',
+                            'translations/qtwebengine_locales/en-US.pak')) {
+        if (-not (Test-Path -LiteralPath (Join-Path $stage $relative))) {
+            throw "Incomplete animated UI runtime: $relative"
+        }
+    }
 }
 
 Copy-Required (Join-Path $qtBin 'Qt6Svg.dll') (Join-Path $stage 'Qt6Svg.dll')
@@ -123,9 +149,14 @@ if ($LASTEXITCODE -ne 0 -or $qtVersion -notmatch '^\d+\.\d+\.\d+$') { throw 'Can
 # Licence/attribution collection is a CMake script, so packaging needs nothing
 # beyond the toolchain that already builds the application - no interpreter.
 Invoke-Checked 'cmake' @("-DQT_VERSION=$qtVersion",
+                         "-DBSI_WITH_WEBENGINE=$(Test-Path -LiteralPath (Join-Path $stage 'Qt6WebEngineCore.dll'))",
                          "-DOUTPUT_DIR=$(Join-Path $stage 'licenses/Qt')",
                          "-DCACHE_DIR=$(Join-Path $BuildRoot 'notices-cache')",
                          '-P', (Join-Path $repo 'cmake/CollectQtNotices.cmake'))
+if (Test-Path -LiteralPath (Join-Path $stage 'Qt6WebEngineCore.dll')) {
+    & (Join-Path $PSScriptRoot 'Collect-WebEngineNotices.ps1') -Version $qtVersion `
+        -CacheDirectory (Join-Path $BuildRoot 'notices-cache/chromium') -OutputDirectory (Join-Path $stage 'licenses/Qt/Chromium')
+}
 @"
 BSI Customizer portable runtime
 

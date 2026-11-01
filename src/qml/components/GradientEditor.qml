@@ -144,6 +144,7 @@ import BSICustomizer
                 // line explains what each entry is, because the discovered paths are
                 // long and read like QML object names.
                 delegate: ItemDelegate {
+                    id: targetDelegate
                     width: targetBox.width
                     height: 44
                     contentItem: ColumnLayout {
@@ -164,7 +165,7 @@ import BSICustomizer
                             font.pixelSize: 10
                         }
                     }
-                    background: Rectangle { color: parent && parent.highlighted ? Theme.raised : "transparent" }
+                    background: Rectangle { color: targetDelegate.highlighted ? Theme.raised : "transparent" }
                 }
             }
             TextField {

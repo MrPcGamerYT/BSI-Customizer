@@ -17,14 +17,11 @@
 //                .qmlc cache is invalidated, which the writer does)
 //  * binary    - listed, extracted and replaceable with bytes of the same kind
 //
-// SIZE RULES, both enforced here and by the writer:
-//  1. the embedded file itself never grows - a replacement with more decoded
-//     bytes than the entry already has is refused before anything is touched;
-//  2. HD-Player.exe never grows - the record has to fit the space the entry
-//     already owns, or a verified empty gap inside the same PE section, which
-//     the writer re-points the tree node at. Nothing is ever appended, no
-//     section changes and the file size is asserted again after the rewrite.
-// A replacement that breaks either rule is refused and the EXE is untouched.
+// Storage policy: decoded resources may grow, but their encoded payload must
+// fit verified in-place capacity or a verified mapped gap. The EXE itself is
+// never grown by this writer. Unlinked scanned records remain in-place only.
+// A preparedImage output requests a verified in-memory simulation: no backup,
+// EXE write or cache deletion takes place.
 namespace EmbeddedResources {
 
 enum class Kind { Image, Svg, Text, Binary };
@@ -95,7 +92,8 @@ struct Result
 
 // Write `bytes` into the entry, refusing anything that would need the file to
 // grow. The EXE is backed up first, verified, and only then replaced on disk.
-Result replaceBytes(const QString &exePath, const QString &path, const QByteArray &bytes);
+Result replaceBytes(const QString &exePath, const QString &path, const QByteArray &bytes,
+                    QByteArray *preparedImage = nullptr);
 
 // Text entry: the same write, with the bytes taken from the editor. A UTF-8 BOM
 // is preserved when the original entry had one.

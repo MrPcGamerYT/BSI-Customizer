@@ -44,10 +44,12 @@ UninstallDisplayName=BSI Customizer {#AppVersion}
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
+SetupLogging=yes
 ; The tool patches files inside the BlueStacks install, so it runs elevated
 ; anyway; installing to Program Files keeps the uninstaller honest.
 PrivilegesRequired=admin
-ArchitecturesInstallIn64BitMode=x64
+ArchitecturesAllowed=x64compatible
+ArchitecturesInstallIn64BitMode=x64compatible
 ; A self-update starts the setup while the old build is still closing: let the
 ; Restart Manager take care of it instead of failing on a locked file.
 CloseApplications=yes
@@ -84,10 +86,21 @@ Name: "{autodesktop}\BSI Customizer"; Filename: "{app}\BSI-Customizer.exe"; Task
 ; - the error dialog a manual install used to end with (an entry that has
 ; postinstall otherwise runs as the original, non-elevated user). The app is
 ; administrator-only by design, so it starts with Setup's own token.
-Filename: "{app}\BSI-Customizer.exe"; Description: "{cm:LaunchProgram,BSI Customizer}"; Flags: nowait postinstall skipifsilent runascurrentuser
-Filename: "{app}\BSI-Customizer.exe"; Description: "{cm:LaunchProgram,BSI Customizer}"; Flags: nowait skipifnotsilent runascurrentuser
+Filename: "{app}\BSI-Customizer.exe"; Description: "{cm:LaunchProgram,BSI Customizer}"; Flags: nowait postinstall skipifsilent runascurrentuser; Check: ShouldLaunch
+Filename: "{app}\BSI-Customizer.exe"; Description: "{cm:LaunchProgram,BSI Customizer}"; Flags: nowait skipifnotsilent runascurrentuser; Check: ShouldLaunch
 
 [UninstallDelete]
 ; Leftovers of a patch: the backup the tool keeps next to HD-Player.exe is not
 ; ours to delete, but its own settings and logs live with the user profile.
 Type: filesandordirs; Name: "{localappdata}\BSI Customizer\cache"
+
+[Code]
+function ShouldLaunch: Boolean;
+var
+  I: Integer;
+begin
+  Result := True;
+  for I := 1 to ParamCount do
+    if CompareText(ParamStr(I), '/NOLAUNCH') = 0 then
+      Result := False;
+end;

@@ -7,6 +7,7 @@
 #include "ZlibUtils.h"
 
 #include <QDir>
+#include <QColor>
 #include <QFile>
 #include <QCryptographicHash>
 #include <QFileInfo>
@@ -1222,11 +1223,19 @@ QString ThemeEngine::buildQml(const QString &qml, const QList<QmlEntry> &entries
 ThemeEngine::PatchResult ThemeEngine::patchTheme(const QString &exePath, const ThemeInfo &info,
                                                  const QList<QmlEntry> &entries,
                                                  const QMap<QString, QString> &edits,
-                                                 Logger logger)
+                                                 Logger logger, QByteArray *preparedImage)
 {
+    if (preparedImage) preparedImage->clear();
     if (!info.found)
         return { false, QStringLiteral("Load the theme first.") };
-    if (BsDetector::isProcessRunning(QStringLiteral("HD-Player.exe")))
+    QMap<QString, QString> solidEdits;
+    for (auto it = edits.cbegin(); it != edits.cend(); ++it) {
+        const QColor color(it.value());
+        if (!color.isValid())
+            return { false, QStringLiteral("Invalid solid color for %1: %2. No file was written.").arg(it.key(), it.value()) };
+        solidEdits[it.key()] = color.name(color.alpha() == 255 ? QColor::HexRgb : QColor::HexArgb);
+    }
+    if (!preparedImage && BsDetector::isProcessRunning(QStringLiteral("HD-Player.exe")))
         return { false, QStringLiteral("Close all BlueStacks instances (HD-Player.exe) before "
                                         "patching. Then reopen BlueStacks to load the new colors.") };
 
@@ -1278,7 +1287,7 @@ ThemeEngine::PatchResult ThemeEngine::patchTheme(const QString &exePath, const T
     // The zlib record is recompressed (and relocated if it outgrows its slot),
     // so a longer hex color is fine there; a plain-text theme must fit in place.
     QStringList skipped;
-    const QString q = buildQml(live.qml, liveEntries, edits,
+    const QString q = buildQml(live.qml, liveEntries, solidEdits,
                                live.mode == QLatin1String("zlib"), &skipped);
     for (const QString &why : skipped)
         log(logger, QStringLiteral("Not applied - %1").arg(why), QStringLiteral("orange"));
@@ -1325,6 +1334,7 @@ ThemeEngine::PatchResult ThemeEngine::patchTheme(const QString &exePath, const T
         if (diff == 0)
             return { false, QStringLiteral("Nothing to patch - set some colors first.") };
 
+        if (preparedImage) { *preparedImage = data; return { true, QStringLiteral("Dry run verified; no file or cache was changed.") }; }
         if (!backup(exePath, logger))
             return { false, QStringLiteral("Could not create backup.") };
         QString error;
@@ -1366,7 +1376,15 @@ ThemeEngine::PatchResult ThemeEngine::patchTheme(const QString &exePath, const T
 
     bool relocated = false;
 
-    if (comp.size() <= compCapacity) {
+    if (live.hasQrcNode) {
+        // One validated writer for aliases, owned ranges and mapped growth.
+        // Never zero the old record: another pool can still reference it.
+        QString why;
+        qint64 newEntry = live.entryOff;
+        if (!QtResources::replaceResource(data, live.entryOff, live.resource, qbytes, &why, &newEntry))
+            return { false, why };
+        relocated = newEntry != live.entryOff;
+    } else if (comp.size() <= compCapacity) {
         // ---- in place ----
         // Only an 8-byte record has an outer length field.  A bare qCompress
         // blob (4-byte) or a headerless stream (0-byte) must not have the bytes
@@ -1498,6 +1516,7 @@ ThemeEngine::PatchResult ThemeEngine::patchTheme(const QString &exePath, const T
         || (live.hasQrcNode && (!vt.hasQrcNode || vt.qrcNodeOff != live.qrcNodeOff)))
         return { false, QStringLiteral("Active theme verification failed. File was not written.") };
 
+    if (preparedImage) { *preparedImage = data; return { true, QStringLiteral("Dry run verified; no file or cache was changed.") }; }
     if (!backup(exePath, logger))
         return { false, QStringLiteral("Could not create backup.") };
     QString error;
@@ -1853,10 +1872,18 @@ bool ThemeEngine::backup(const QString &path, Logger logger)
 QString ThemeEngine::probeReport(const QString &exePath)
 {
     QString out;
-    auto line = [&out](const QString &s = QString()) { out += s + QLatin1Char('\n'); };
+    auto line = [&out](const QString &s = QString()) {
+        for (const QChar c : s) {
+            if ((c.unicode() < 32 && c != QLatin1Char('\n') && c != QLatin1Char('\t')) || c.unicode() == 127)
+                out += QStringLiteral("\\x%1").arg(c.unicode(), 2, 16, QLatin1Char('0'));
+            else out += c;
+        }
+        out += QLatin1Char('\n');
+    };
 
     line(QStringLiteral("BSI Customizer theme probe"));
     line(QStringLiteral("=========================="));
+    line(QStringLiteral("report format: 2 (escaped binary previews)"));
     line(QStringLiteral("file: %1").arg(exePath));
 
     QFile f(exePath);
@@ -2015,8 +2042,18 @@ QString ThemeEngine::probeReport(const QString &exePath)
         line(QStringLiteral("    layout C [zlib] (no header, size unknown): %1").arg(verdictC));
         if (!qb.isEmpty()) {
             line(QStringLiteral("      content: %1").arg(looksLikeTheme(QString::fromLatin1(qb))));
-            const QString preview = QString::fromLatin1(qb).left(160).replace(QLatin1Char('\n'),
-                                                                              QLatin1Char(' '));
+            // A nearby stream can be image/binary data, not QML. Never put
+            // its raw control bytes into the text report: an embedded NUL
+            // used to truncate printf("%s") before the actual mapping results.
+            QString preview;
+            for (const unsigned char ch : qb.left(160)) {
+                if (ch >= 0x20 && ch <= 0x7e && ch != '\\')
+                    preview += QLatin1Char(char(ch));
+                else if (ch == '\\')
+                    preview += QStringLiteral("\\\\");
+                else
+                    preview += QStringLiteral("\\x%1").arg(ch, 2, 16, QLatin1Char('0'));
+            }
             line(QStringLiteral("      preview: %1").arg(preview));
         }
         line();

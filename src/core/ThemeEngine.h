@@ -133,7 +133,8 @@ public:
                                   const ThemeInfo &info,
                                   const QList<QmlEntry> &entries,
                                   const QMap<QString, QString> &edits,
-                                  Logger logger = {});
+                                  Logger logger = {},
+                                  QByteArray *preparedImage = nullptr);
 
     static PatchResult applyHexTheme(const QString &exePath,
                                      const QString &profile,

@@ -371,7 +371,11 @@ Item {
                                 { name: "Mr.Pc Gamer",
                                   role: qsTr("Developer"),
                                   handle: "@MR.PC_GAMER_YT",
-                                  url: "https://www.youtube.com/@MR.PC_GAMER_YT?sub_confirmation=1" }
+                                  url: "https://www.youtube.com/@MR.PC_GAMER_YT?sub_confirmation=1" },
+                                { name: "Nova",
+                                  role: qsTr("Contributor"),
+                                  handle: "@nova_xis20",
+                                  url: "https://www.youtube.com/@nova_xis20" }
                             ]
                             delegate: Rectangle {
                                 id: authorCard

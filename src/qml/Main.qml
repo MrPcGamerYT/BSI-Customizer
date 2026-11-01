@@ -1,5 +1,4 @@
 import QtQuick
-import QtQuick.Effects
 import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import QtQuick.Window
@@ -10,8 +9,8 @@ ApplicationWindow {
     onClosing: (close) => { if (backend.busy) close.accepted = false; }
 
     id: window
-    width: 1180
-    height: 760
+    width: 1480
+    height: 920
     minimumWidth: 980
     minimumHeight: 640
     visible: true
@@ -20,6 +19,34 @@ ApplicationWindow {
     flags: Qt.Window | Qt.FramelessWindowHint
     title: qsTr("BlueStacks 5 / MSI 5 — BSI Customizer")
     color: Theme.window
+    font.family: "Plus Jakarta Sans"
+    font.pixelSize: 13
+    palette.window: Theme.window
+    palette.windowText: Theme.text
+    palette.text: Theme.text
+    palette.base: Theme.cardLow
+    palette.button: Theme.card
+    palette.buttonText: Theme.text
+    palette.highlight: Theme.accent
+    palette.highlightedText: Theme.primaryText
+    palette.placeholderText: Theme.textDim
+
+    Dialog {
+        id: purgeCacheDialog
+        anchors.centerIn: parent
+        title: qsTr("Purge HD-Player cache?")
+        width: 440
+        modal: true
+        standardButtons: Dialog.Ok | Dialog.Cancel
+        contentItem: Label {
+            text: qsTr("Close all emulator instances first. This removes only HD-Player cache folders in AppData. Settings, installed apps and emulator disks are kept.")
+            wrapMode: Text.Wrap
+        }
+        onAccepted: {
+            const r = backend.purgePlayerCache();
+            toast.show(r.msg || qsTr("Cache purge finished."));
+        }
+    }
 
     // ---- probes used by the C++ --selftest (do not remove) ----
     property color testProbe: Theme.window
@@ -27,422 +54,191 @@ ApplicationWindow {
 
     property bool booted: false
 
-    // ------------------------------------------------------------------
-    // Painted background — the FalcoForge .bg layer: gradient field,
-    // drifting orbs and a faint grid. No image is needed to start the app.
-    // ------------------------------------------------------------------
-    Item {
-        anchors.fill: parent
-
-        Rectangle {
-            anchors.fill: parent
-            color: Theme.window
-        }
-        Image {
-            source: "img/orb-cyan.png"
-            width: 420; height: 420
-            x: parent.width - width + 80
-            y: -120
-            opacity: 0.55
-            smooth: true
-        }
-        Image {
-            source: "img/orb-blue.png"
-            width: 360; height: 360
-            x: -60
-            y: parent.height - height + 120
-            opacity: 0.55
-            smooth: true
-        }
-        Image {
-            source: "img/orb-green.png"
-            width: 260; height: 260
-            x: parent.width * 0.56
-            y: parent.height * 0.42
-            opacity: 0.5
-            smooth: true
-        }
-        Image {
-            source: "img/orb-violet.png"
-            width: 220; height: 220
-            x: parent.width * 0.88 - width
-            y: parent.height * 0.62
-            opacity: 0.5
-            smooth: true
-        }
-        Canvas {
-            id: gridLines
-            anchors.fill: parent
-            onPaint: {
-                const ctx = getContext("2d");
-                ctx.clearRect(0, 0, width, height);
-                ctx.strokeStyle = "rgba(64, 200, 240, 0.045)";
-                ctx.lineWidth = 1;
-                for (let x = 0; x < width; x += 44) {
-                    ctx.beginPath();
-                    ctx.moveTo(x + 0.5, 0);
-                    ctx.lineTo(x + 0.5, height);
-                    ctx.stroke();
-                }
-                for (let y = 0; y < height; y += 44) {
-                    ctx.beginPath();
-                    ctx.moveTo(0, y + 0.5);
-                    ctx.lineTo(width, y + 0.5);
-                    ctx.stroke();
-                }
-            }
-            onWidthChanged: requestPaint()
-            onHeightChanged: requestPaint()
-            Component.onCompleted: requestPaint()
-        }
+    // ONE production shell. Every page below is the original QML editor;
+    // no HTML command adapter, parallel form state or native-editor switch.
+    readonly property var featurePages: [
+        { label: qsTr("Dashboard"), icon: Icons.dashboard },
+        { label: qsTr("Color studio"), icon: Icons.theme },
+        { label: qsTr("Resources"), icon: Icons.images },
+        { label: qsTr("Performance"), icon: Icons.fps },
+        { label: qsTr("Integrity & safety"), icon: Icons.integrity },
+        { label: qsTr("Boot experience"), icon: Icons.boot },
+        { label: qsTr("Player interface"), icon: Icons.extras },
+        { label: qsTr("Discord presence"), icon: Icons.discord },
+        { label: qsTr("Settings"), icon: Icons.appearance },
+        { label: qsTr("About & updates"), icon: Icons.about },
+        { label: qsTr("Animated presence"), icon: Icons.discord },
+        { label: qsTr("Patch workspace"), icon: Icons.extras },
+        { label: qsTr("Debloat / Android / Root.vhd"), icon: Icons.debloat }
+    ]
+    readonly property var pageNames: featurePages.map(p => p.label)
+    property alias currentPage: pages.currentIndex
+    function navigatePage(index) {
+        if (!backend.busy && Number.isInteger(index) && index >= 0 && index < featurePages.length)
+            pages.currentIndex = index;
     }
 
-    // ------------------------------------------------------------------
-    // Topbar — FalcoForge .topbar: brand left, status dot + plan pill +
-    // the window control box at the far edge. The whole strip drags the
-    // frameless window.
-    // ------------------------------------------------------------------
+    Image {
+        anchors.left: parent.left; anchors.top: parent.top
+        width: parent.width * 0.8; height: parent.height
+        source: "img/orb-green.png"; opacity: Theme.dark ? 0.24 : 0.06
+    }
+    Image {
+        anchors.right: parent.right; anchors.bottom: parent.bottom
+        width: parent.width * 0.6; height: parent.height * 0.85
+        source: "img/orb-green.png"; opacity: Theme.dark ? 0.16 : 0.05
+    }
+
     Rectangle {
+        id: rail
+        objectName: "studioSidebar"
+        anchors.left: parent.left; anchors.top: parent.top; anchors.bottom: parent.bottom
+        width: 76
+        color: Theme.dark ? "#55030a08" : "#55ffffff"
+        visible: auth.authorized
+        Rectangle { anchors.right: parent.right; height: parent.height; width: 1; color: Theme.border }
+        Image { anchors.top: parent.top; anchors.topMargin: 20; anchors.horizontalCenter: parent.horizontalCenter; width: 38; height: 38; source: "img/app-icon.png" }
+        ScrollView {
+            anchors.top: parent.top; anchors.topMargin: 86
+            anchors.bottom: railFooter.top; anchors.bottomMargin: 14
+            anchors.left: parent.left; anchors.right: parent.right
+            contentWidth: availableWidth
+            clip: true
+            ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+            ColumnLayout {
+                width: rail.width
+                spacing: 5
+                Repeater {
+                    model: window.featurePages
+                    delegate: AbstractButton {
+                        id: railButton
+                        required property var modelData
+                        required property int index
+                        objectName: "featureNav" + index
+                        Layout.alignment: Qt.AlignHCenter
+                        implicitWidth: 44; implicitHeight: 42
+                        enabled: !backend.busy
+                        Accessible.name: modelData.label
+                        ToolTip.visible: hovered
+                        ToolTip.text: modelData.label
+                        background: Rectangle {
+                            radius: 12
+                            color: pages.currentIndex === railButton.index ? Qt.alpha(Theme.accent, 0.14) : railButton.hovered ? Qt.alpha(Theme.text, 0.06) : "transparent"
+                            border.color: pages.currentIndex === railButton.index || railButton.activeFocus ? Qt.alpha(Theme.accent, 0.35) : "transparent"
+                            Rectangle { visible: pages.currentIndex === railButton.index; width: 2; height: 20; radius: 1; x: -16; anchors.verticalCenter: parent.verticalCenter; color: Theme.accent }
+                        }
+                        contentItem: Image {
+                            source: Icons.icon(railButton.modelData.icon, pages.currentIndex === railButton.index ? Theme.text : Theme.textDim)
+                            sourceSize: Qt.size(19,19)
+                            fillMode: Image.Pad
+                        }
+                        onClicked: window.navigatePage(index)
+                    }
+                }
+            }
+        }
+        Text { id: railFooter; anchors.bottom: parent.bottom; anchors.bottomMargin: 18; anchors.horizontalCenter: parent.horizontalCenter; text: "BSI 3.0.1"; color: Theme.textDim; font.pixelSize: 8; font.letterSpacing: 1 }
+    }
+
+    Item {
         id: topbar
-        anchors.top: parent.top
-        anchors.left: parent.left
-        anchors.right: parent.right
-        height: 48
-        gradient: Gradient {
-            GradientStop { position: 0; color: "#061120" }
-            GradientStop { position: 1; color: "#030a14" }
-        }
-
-        Rectangle {
-            anchors.bottom: parent.bottom
-            width: parent.width
-            height: 1
-            color: Theme.neonFaint
-        }
-
-        RowLayout {
-            anchors.fill: parent
-            anchors.rightMargin: 0
-            spacing: 0
-
-            Row {
-                Layout.leftMargin: 14
-                spacing: 10
-
-                Rectangle {
-                    width: 32; height: 32; radius: 8
-                    anchors.verticalCenter: parent.verticalCenter
-                    color: "#0a1a2c"
-                    border.width: 1
-                    border.color: Theme.neonFaint
-                    clip: true
-
-                    Image {
-                        anchors.fill: parent
-                        anchors.margins: 2
-                        source: "img/app-icon.png"
-                        sourceSize: Qt.size(28, 28)
-                        smooth: true
-                    }
-                }
-                Column {
-                    anchors.verticalCenter: parent.verticalCenter
-                    Text {
-                        text: qsTr("BSI Customizer")
-                        color: Theme.text
-                        font.pixelSize: 14
-                        font.weight: Font.Bold
-                    }
-                    Text {
-                        text: qsTr("BlueStacks 5 / MSI 5 toolkit — dev build")
-                        color: Theme.textDim
-                        font.pixelSize: 11
-                    }
-                }
-            }
-
-            Item { Layout.fillWidth: true }
-
-            Rectangle {
-                id: titleDot
-                Layout.preferredWidth: 8
-                Layout.preferredHeight: 8
-                radius: 4
-                color: auth.authorized ? "#4dffd9" : "#ffc45c"
-            }
-
-            Rectangle {
-                Layout.leftMargin: 10
-                Layout.preferredHeight: 26
-                Layout.preferredWidth: planLabel.implicitWidth + 24
-                radius: 13
-                color: "transparent"
-                border.width: 1
-                border.color: auth.authorized ? Qt.rgba(77 / 255, 255 / 255, 217 / 255, 0.5)
-                                              : Theme.neonFaint
-
-                Text {
-                    id: planLabel
-                    anchors.centerIn: parent
-                    text: auth.authorized ? qsTr("Dev access") : qsTr("Locked")
-                    color: auth.authorized ? Theme.green : Theme.textDim
-                    font.pixelSize: 12
-                    font.weight: Font.DemiBold
-                }
-            }
-
-            WinControls {
-                Layout.leftMargin: 8
-                appWindow: window
-            }
-        }
-
-        // Drag the frameless window from the strip; double-click toggles max.
+        anchors.left: rail.right; anchors.right: parent.right; anchors.top: parent.top
+        anchors.leftMargin: 28; anchors.rightMargin: 22
+        height: 86
+        visible: auth.authorized
         MouseArea {
             anchors.fill: parent
-            anchors.rightMargin: 146
-            property real lastClick: 0
-            onPressed: {
-                const now = Date.now();
-                if (now - lastClick < 320) {
-                    if (window.visibility === Window.Maximized)
-                        window.showNormal();
-                    else
-                        window.showMaximized();
-                }
-                lastClick = now;
-                window.startSystemMove();
+            onPressed: window.startSystemMove()
+            onDoubleClicked: window.visibility === Window.Maximized ? window.showNormal() : window.showMaximized()
+        }
+        RowLayout {
+            anchors.fill: parent
+            spacing: 16
+            ColumnLayout {
+                Layout.fillWidth: true; spacing: 4
+                Text { text: qsTr("BSI Customizer"); color: Theme.text; font.family: Theme.headingFont; font.pixelSize: 16; font.weight: Font.Bold }
+                Text { text: qsTr("Premium emulator control center"); color: Theme.textDim; font.pixelSize: 10 }
             }
+            Rectangle {
+                visible: window.width > 1380
+                implicitWidth: quickNav.implicitWidth + 10; implicitHeight: 42
+                radius: 13; color: Qt.alpha(Theme.window, 0.5); border.color: Theme.border
+                RowLayout {
+                    id: quickNav
+                    anchors.centerIn: parent; spacing: 3
+                    Repeater {
+                        model: [0, 1, 6, 8, 12]
+                        delegate: AbstractButton {
+                            id: quickButton
+                            required property int modelData
+                            implicitWidth: quickLabel.implicitWidth + 22; implicitHeight: 32
+                            enabled: !backend.busy
+                            background: Rectangle { radius: 9; color: pages.currentIndex === quickButton.modelData ? Qt.alpha(Theme.accent, 0.12) : "transparent"; border.color: pages.currentIndex === quickButton.modelData || quickButton.activeFocus ? Theme.neonSoft : "transparent" }
+                            contentItem: Text { id: quickLabel; text: window.featurePages[quickButton.modelData].label; color: pages.currentIndex === quickButton.modelData ? Theme.text : Theme.textDim; font.pixelSize: 10; font.weight: Font.DemiBold; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }
+                            onClicked: window.navigatePage(modelData)
+                        }
+                    }
+                }
+            }
+            ComboBox {
+                id: targetPicker
+                objectName: "shellTargetPicker"
+                Layout.preferredWidth: Math.min(210, window.width * 0.17)
+                implicitHeight: 38
+                enabled: !backend.busy
+                model: backend.installs
+                currentIndex: {
+                    const found = backend.installs.findIndex(i => i.exe === backend.exePath);
+                    return found;
+                }
+                textRole: "profile"
+                displayText: currentText || qsTr("Select target")
+                onActivated: backend.useInstall(currentIndex)
+                ToolTip.visible: hovered
+                ToolTip.text: qsTr("Choose an existing installation; detect players on Dashboard")
+            }
+            ActionButton { text: "⋯"; implicitWidth: 32; implicitHeight: 34; onClicked: appMenu.popup() }
+            WinControls { appWindow: window; barHeight: 40 }
         }
     }
+    Menu {
+        id: appMenu
+        MenuItem { text: qsTr("Purge player cache…"); enabled: !backend.busy; onTriggered: purgeCacheDialog.open() }
+        MenuItem { text: qsTr("About & updates"); enabled: !backend.busy; onTriggered: window.navigatePage(9) }
+        MenuSeparator {}
+        MenuItem { text: qsTr("Sign out"); enabled: !backend.busy; onTriggered: auth.signOut() }
+    }
 
-    // ------------------------------------------------------------------
-    // Sidebar — grouped the way the toolbox groups its menu, with the
-    // signed-in account pinned at the bottom.
-    // ------------------------------------------------------------------
-    RowLayout {
+    ColumnLayout {
         id: shell
-        anchors.top: topbar.bottom
-        anchors.left: parent.left
-        anchors.right: parent.right
-        anchors.bottom: parent.bottom
-        spacing: 0
-
-        Rectangle {
-            Layout.fillHeight: true
-            Layout.preferredWidth: 268
-            gradient: Gradient {
-                GradientStop { position: 0; color: "#050e1a" }
-                GradientStop { position: 1; color: "#020710" }
-            }
-
-            Rectangle {
-                anchors.right: parent.right
-                width: 1
-                height: parent.height
-                color: Theme.neonFaint
-            }
-
-            ColumnLayout {
-                anchors.fill: parent
-                anchors.margins: 6
-                spacing: 3
-
-                Item { Layout.preferredHeight: 10 }
-
-                Repeater {
-                    model: [
-                        { header: true,  label: qsTr("CUSTOMIZE") },
-                        { page: 0, label: qsTr("Dashboard"),   icon: Icons.dashboard },
-                        { page: 1, label: qsTr("Theme"),       icon: Icons.theme },
-                        { page: 2, label: qsTr("Resources"),   icon: Icons.images },
-                        { header: true,  label: qsTr("TUNE") },
-                        { page: 3, label: qsTr("FPS"),         icon: Icons.fps },
-                        { page: 4, label: qsTr("Integrity"),   icon: Icons.integrity },
-                        { page: 5, label: qsTr("Boot Video"),  icon: Icons.boot },
-                        { header: true,  label: qsTr("TOOLS") },
-                        { page: 6, label: qsTr("UI"),          icon: Icons.extras },
-                        { page: 7, label: qsTr("Debloat"),     icon: Icons.debloat },
-                        { page: 8, label: qsTr("Discord RPC"), icon: Icons.discord },
-                        { header: true,  label: qsTr("APP") },
-                        { page: 9, label: qsTr("Appearance"),  icon: Icons.appearance },
-                        { page: 10, label: qsTr("About"),      icon: Icons.about }
-                    ]
-                    delegate: Loader {
-                        required property var modelData
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: modelData.header ? 30 : 42
-                        sourceComponent: modelData.header ? navHeader : navButton
-
-                        onLoaded: {
-                            if (modelData.header) {
-                                item.labelText = modelData.label;
-                            } else {
-                                item.label = modelData.label;
-                                item.iconPath = modelData.icon;
-                                item.active = Qt.binding(() => pages.currentIndex === modelData.page);
-                                item.clicked.connect(() => pages.currentIndex = modelData.page);
-                            }
-                        }
-                    }
-                }
-
-                Item { Layout.fillHeight: true }
-
-                // ---- the signed-in account, pinned at the bottom ----
-                Rectangle {
-                    visible: auth.authorized
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: 64
-                    Layout.bottomMargin: 6
-                    radius: 12
-                    color: Qt.rgba(1, 1, 1, 0.02)
-                    border.width: 1
-                    border.color: Theme.neonFaint
-
-                    RowLayout {
-                        anchors.fill: parent
-                        anchors.margins: 10
-                        spacing: 10
-
-                        Rectangle {
-                            Layout.preferredWidth: 38
-                            Layout.preferredHeight: 38
-                            radius: width / 2
-                            color: "#0a1a2c"
-                            border.width: 1
-                            border.color: Qt.rgba(56 / 255, 225 / 255, 255 / 255, 0.5)
-
-                            Text {
-                                anchors.centerIn: parent
-                                visible: accountAvatar.status !== Image.Ready
-                                text: {
-                                    const name = auth.user.DisplayName || auth.user.Username || "?";
-                                    return name.charAt(0).toUpperCase();
-                                }
-                                color: Theme.neon
-                                font.pixelSize: 14
-                                font.weight: Font.Bold
-                            }
-                            Image {
-                                id: accountAvatar
-                                anchors.fill: parent
-                                anchors.margins: 1
-                                source: auth.user.AvatarUrl || ""
-                                fillMode: Image.PreserveAspectCrop
-                                asynchronous: true
-                                smooth: true
-                                layer.enabled: true
-                                layer.effect: MultiEffect {
-                                    maskEnabled: true
-                                    maskSource: accountAvatarMask
-                                }
-                            }
-                            Rectangle {
-                                id: accountAvatarMask
-                                width: accountAvatar.width
-                                height: accountAvatar.height
-                                radius: width / 2
-                                color: "white"
-                                antialiasing: true
-                                visible: false
-                                layer.enabled: true
-                            }
-                        }
-
-                        ColumnLayout {
-                            Layout.fillWidth: true
-                            spacing: 2
-                            Text {
-                                Layout.fillWidth: true
-                                text: auth.user.DisplayName || auth.user.Username || qsTr("Signed in")
-                                color: Theme.text
-                                font.pixelSize: 13
-                                font.weight: Font.DemiBold
-                                elide: Text.ElideRight
-                            }
-                            Text {
-                                text: qsTr("Dev access")
-                                color: Theme.green
-                                font.pixelSize: 11
-                            }
-                        }
-
-                        Rectangle {
-                            Layout.preferredWidth: 62
-                            Layout.preferredHeight: 28
-                            radius: 8
-                            color: signOutArea.containsMouse ? Qt.rgba(1, 111 / 255, 131 / 255, 0.12) : "transparent"
-                            border.width: 1
-                            border.color: Theme.border
-
-                            Text {
-                                anchors.centerIn: parent
-                                text: qsTr("Sign out")
-                                color: signOutArea.containsMouse ? Theme.danger : Theme.textDim
-                                font.pixelSize: 11
-                            }
-                            MouseArea {
-                                id: signOutArea
-                                anchors.fill: parent
-                                hoverEnabled: true
-                                cursorShape: Qt.PointingHandCursor
-                                onClicked: auth.signOut()
-                            }
-                        }
-                    }
-                }
-            }
+        anchors.top: topbar.bottom; anchors.bottom: parent.bottom
+        anchors.left: rail.right; anchors.right: parent.right
+        anchors.leftMargin: 20; anchors.rightMargin: 20; anchors.bottomMargin: 16
+        visible: auth.authorized
+        spacing: 10
+        UpdateBanner { Layout.fillWidth: true; Layout.preferredHeight: visible ? implicitHeight : 0 }
+        StackLayout {
+            id: pages
+            objectName: "studioPageStack"
+            Layout.fillWidth: true; Layout.fillHeight: true
+            DashboardPage { objectName: "studioDashboard"; onNavigate: (index) => window.navigatePage(index) }
+            ThemePage { objectName: "featureTheme" }
+            ResourcesPage { objectName: "featureResources" }
+            FpsPage { objectName: "featureFps" }
+            IntegrityPage { objectName: "featureIntegrity" }
+            BootVideoPage { objectName: "featureBoot" }
+            UiPage { objectName: "featureInterface"; onNotify: (msg) => toast.show(msg) }
+            RpcidPage { objectName: "featureRpc" }
+            AppearancePage { objectName: "featureSettings"; onNotify: (msg) => toast.show(msg) }
+            AboutPage { objectName: "featureAbout"; onNotify: (msg) => toast.show(msg) }
+            GifRpcPage { objectName: "featureGif" }
+            WorkspacePage { objectName: "featureWorkspace"; onNavigate: (index) => window.navigatePage(index) }
+            DebloatPage { objectName: "featureDebloat"; onNotify: (msg) => toast.show(msg) }
         }
-
-        // ---------------- content ----------------
-        ColumnLayout {
+        LogPanel {
+            id: logPanel
             Layout.fillWidth: true
-            Layout.fillHeight: true
-            spacing: 0
-
-            // Self-update strip: only takes space while an update is being
-            // offered, downloaded or installed (see UpdateBanner.qml).
-            UpdateBanner {
-                Layout.fillWidth: true
-                Layout.leftMargin: 12
-                Layout.rightMargin: 12
-                Layout.topMargin: visible ? 10 : 0
-                Layout.preferredHeight: visible ? implicitHeight : 0
-            }
-
-            StackLayout {
-                id: pages
-                Layout.fillWidth: true
-                Layout.fillHeight: true
-
-                DashboardPage {}
-                ThemePage {}
-                ResourcesPage {}
-                FpsPage {}
-                IntegrityPage {}
-                BootVideoPage {}
-                UiPage {
-                    onNotify: (msg) => toast.show(msg)
-                }
-                DebloatPage {
-                    onNotify: (msg) => toast.show(msg)
-                }
-                RpcidPage {}
-                AppearancePage {
-                    onNotify: (msg) => toast.show(msg)
-                }
-                AboutPage {
-                    onNotify: (msg) => toast.show(msg)
-                }
-            }
-
-            LogPanel {
-                id: logPanel
-                Layout.fillWidth: true
-                Layout.preferredHeight: logPanel.collapsed ? 42 : 150
-                Behavior on Layout.preferredHeight { NumberAnimation { duration: 140 } }
-            }
+            Layout.preferredHeight: logPanel.collapsed ? 40 : Math.min(150, window.height * 0.2)
         }
     }
 
@@ -529,34 +325,8 @@ ApplicationWindow {
         function onAuthorizedChanged() {
             if (auth.authorized && !window.booted) {
                 window.booted = true;
-                backend.detectInstalls();
+                Qt.callLater(function() { if (auth.authorized && !backend.busy) backend.detectInstalls(); });
             }
-        }
-    }
-
-    // Nav groups + buttons for the sidebar Repeater.
-    Component {
-        id: navHeader
-        Item {
-            property alias labelText: headerLabel.text
-            height: 30
-            Text {
-                id: headerLabel
-                anchors.left: parent.left
-                anchors.leftMargin: 16
-                anchors.verticalCenter: parent.verticalCenter
-                color: Theme.textDim
-                font.pixelSize: 11
-                font.weight: Font.Bold
-                font.letterSpacing: 1.2
-                opacity: 0.8
-            }
-        }
-    }
-    Component {
-        id: navButton
-        SidebarButton {
-            Layout.fillWidth: true
         }
     }
 
@@ -585,7 +355,7 @@ ApplicationWindow {
         visible: backend.busy
         padding: 24
         background: Rectangle {
-            color: "#0a1a2c"
+            color: Theme.card
             radius: 16
             border.color: Theme.neonFaint
         }

@@ -15,6 +15,7 @@
 #include <QDataStream>
 #include <QFile>
 #include <QFileInfo>
+#include <QFontDatabase>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QQmlApplicationEngine>
@@ -316,8 +317,60 @@ int runSelfTest()
 
         QObject *root = engine.rootObjects().value(0, nullptr);
         check(root != nullptr, "Main.qml loaded without errors");
+        check(QFontDatabase::families().contains(QStringLiteral("Manrope"))
+                  && QFontDatabase::families().contains(QStringLiteral("Plus Jakarta Sans")),
+              "reference UI fonts are embedded and load without a font CDN");
 
         if (root) {
+            QObject *stack = root->findChild<QObject *>(QStringLiteral("studioPageStack"));
+            QObject *dashboard = root->findChild<QObject *>(QStringLiteral("studioDashboard"));
+            check(stack && stack->property("count").toInt() == 13,
+                  "studio shell retains all thirteen application pages including Debloat");
+            check(root->findChild<QObject *>(QStringLiteral("studioSidebar")) != nullptr,
+                  "studio navigation sidebar is present");
+            QObject *instanceFlow = root->findChild<QObject *>(QStringLiteral("studioInstanceFlow"));
+            const QVariantList fixtureInstances {
+                QVariantMap {{QStringLiteral("display"), QStringLiteral("UI fixture A")}},
+                QVariantMap {{QStringLiteral("display"), QStringLiteral("UI fixture B")}}
+            };
+            if (dashboard) dashboard->setProperty("instances", fixtureInstances);
+            QCoreApplication::processEvents();
+            if (instanceFlow) QMetaObject::invokeMethod(instanceFlow, "forceLayout");
+            check(instanceFlow && instanceFlow->property("implicitHeight").toReal() > 0,
+                  "dashboard Flow derives a nonzero height from instance chips");
+            if (dashboard) dashboard->setProperty("instances", QVariantList {});
+            QCoreApplication::processEvents();
+            if (instanceFlow) QMetaObject::invokeMethod(instanceFlow, "forceLayout");
+            check(instanceFlow && instanceFlow->property("implicitHeight").toReal() == 0,
+                  "dashboard Flow releases its height when instance chips are removed");
+            const auto resourceCount = backend.resourceInfos().size();
+            const bool navigated = dashboard && QMetaObject::invokeMethod(dashboard, "navigate", Q_ARG(int, 2));
+            check(navigated && stack && stack->property("currentIndex").toInt() == 2,
+                  "dashboard toolkit navigation opens the real Resources page");
+            QCoreApplication::processEvents();
+            check(backend.resourceInfos().size() == resourceCount,
+                  "opening Resources through studio navigation preserves resource results");
+            // The new presentation must retain every original editor, not
+            // route some controls through a second HTML implementation.
+            const char *featureObjects[] = {
+                "studioDashboard", "featureTheme", "featureResources", "featureFps",
+                "featureIntegrity", "featureBoot", "featureInterface", "featureRpc",
+                "featureSettings", "featureAbout", "featureGif", "featureWorkspace", "featureDebloat"
+            };
+            for (int index = 0; index < 13; ++index) {
+                const bool exists = root->findChild<QObject *>(QString::fromLatin1(featureObjects[index])) != nullptr;
+                const bool routed = QMetaObject::invokeMethod(root, "navigatePage", Q_ARG(QVariant, QVariant(index)));
+                check(exists && routed && stack && stack->property("currentIndex").toInt() == index,
+                      qPrintable(QStringLiteral("unified shell opens original feature page %1: %2")
+                          .arg(index).arg(QString::fromLatin1(featureObjects[index]))));
+            }
+            check(backend.resourceInfos().size() == resourceCount,
+                  "visiting all thirteen original features does not auto-scan Resources");
+            if (stack) stack->setProperty("currentIndex", 2);
+            QMetaObject::invokeMethod(root, "navigatePage", Q_ARG(QVariant, QVariant(99)));
+            check(stack && stack->property("currentIndex").toInt() == 2,
+                  "invalid navigation leaves the current original editor intact");
+            if (stack) stack->setProperty("currentIndex", 0);
             const QColor bgDefault = root->property("testProbe").value<QColor>();
             themes.setTheme(ThemeManager::Light);
             const QColor bgLight = root->property("testProbe").value<QColor>();
@@ -875,7 +928,7 @@ int runSelfTest()
         check(patched.mid(int(entryOff - 4), 4) == before,
               "bare qCompress: bytes in front of the record were NOT rewritten");
         const ThemeInfo again = ThemeEngine::detectTheme(patched, QStringLiteral("qml"));
-        check(again.found && again.qml.contains(QStringLiteral("#0B0B0B")),
+        check(again.found && again.qml.contains(QStringLiteral("#0B0B0B"), Qt::CaseInsensitive),
               "bare qCompress: the edit is live after patching");
         check(again.headerBytes == 4, "bare qCompress: still detected as a 4-byte header");
     }
@@ -925,7 +978,7 @@ int runSelfTest()
         check(patched.mid(int(zoff - 8), 8) == before,
               "headerless: the 8 bytes in front of the stream were NOT rewritten");
         const ThemeInfo again = ThemeEngine::detectTheme(patched, QStringLiteral("qml"));
-        check(again.found && again.qml.contains(QStringLiteral("#0D0D0D")),
+        check(again.found && again.qml.contains(QStringLiteral("#0D0D0D"), Qt::CaseInsensitive),
               "headerless: the edit is live after patching");
     }
 
@@ -1154,10 +1207,24 @@ int runSelfTest()
         QByteArray pe = makeFakePe(0, 0x20000);
         const qint64 entryOff = 0x2000;
         pe.replace(int(entryOff), rec.size(), rec);
+        // A resource relocation fixture needs a data section, not executable
+        // .text padding. The production writer must never reuse code as a cave.
+        pe.replace(0x188, 8, QByteArray(".rdata\0\0", 8));
+        putLe32(pe, 0x1ac, 0x40000040);
         pe[int(entryOff + rec.size())] = char(0xFF); // no zero slack -> forces relocation
-        const qint64 nameRec = ((entryOff + rec.size() + 1) + 3) & ~qint64(3);
-        const qint64 nodeOff = ((nameRec + 6 + 34) + 3) & ~qint64(3);
+        const qint64 nameRec = 0x6000;
+        const qint64 nodeOff = 0x7000;
         writeQrcNode(pe, entryOff, nameRec, nodeOff);
+        // Anchor the pool's real bases so the retained original payload cannot
+        // be mistaken for a second live theme after its node is repointed.
+        const qint64 header = 0x1100;
+        pe.replace(header, 4, "qres");
+        putBe32(pe, header + 4, 1);
+        putBe32(pe, header + 8, quint32(nodeOff - header));
+        putBe32(pe, header + 12, quint32(entryOff - header));
+        putBe32(pe, header + 16, quint32(nameRec - header));
+        putBe32(pe, nodeOff + 14 + 10, 0); // File data offset from entryOff.
+
 
         const QString exePath = tmp.path() + QStringLiteral("/relocate.exe");
         {

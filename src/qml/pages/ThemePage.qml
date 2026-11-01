@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls.Basic
+import QtQuick.Dialogs
 import QtQuick.Layouts
 import BSICustomizer
 
@@ -11,6 +12,8 @@ Item {
     // and a manual "Hex (old)" pick all display exactly what was loaded.
     property bool qmlMethod: backend.resolvedThemeMethod === "qml"
     property bool fileChanged: backend.themeFileChanged()
+    property bool showPreview: false
+    property string diagnosticStatus: ""
     property string filterText: ""
     property string presetId: ""
     property string hexPresetId: ""
@@ -98,6 +101,19 @@ Item {
         anchors.margins: 24
         spacing: 12
 
+        RowLayout {
+            Layout.fillWidth: true
+            ActionButton { text: page.showPreview ? qsTr("Hide preview") : qsTr("Preview palette"); onClicked: page.showPreview = !page.showPreview }
+            ActionButton { text: qsTr("Dry Run"); enabled: backend.themeFound && !backend.busy; onClicked: { const r = backend.workspace("theme-dry-run", {}); page.diagnosticStatus = r.msg || ""; } }
+            ActionButton { text: qsTr("Export Diagnostics…"); enabled: !backend.busy; onClicked: diagnosticsDialog.open() }
+            Label { Layout.fillWidth: true; color: Theme.textDim; wrapMode: Text.Wrap; text: page.diagnosticStatus }
+        }
+        ThemePreview { Layout.fillWidth: true; visible: page.showPreview; entries: backend.themeEntries }
+        Label {
+            Layout.fillWidth: true; visible: backend.themeFound && !backend.themeWritable
+            color: Theme.logOrange; wrapMode: Text.Wrap
+            text: qsTr("Read-only theme: the active resource mapping is not verified or is ambiguous. Patching is disabled to protect the EXE. Export Diagnostics; forcing Hex is not a safe workaround.")
+        }
         // ---------------- header ----------------
         RowLayout {
             Layout.fillWidth: true
@@ -377,7 +393,7 @@ Item {
                     ActionButton {
                         accent: true
                         text: qsTr("Patch Theme")
-                        enabled: backend.themeFound && backend.themeMode !== "hex"
+                        enabled: backend.themeWritable && backend.themeMode !== "hex" && !backend.busy && !page.fileChanged
                         onClicked: {
                             const r = backend.patchThemeQml();
                             if (r.ok)
@@ -872,4 +888,9 @@ Item {
             }
         }
     }
+    FileDialog {
+        id: diagnosticsDialog; fileMode: FileDialog.SaveFile; defaultSuffix: "txt"; nameFilters: ["Text reports (*.txt)"]
+        onAccepted: { const r = backend.workspace("diagnostics", {file: backend.localFilePath(selectedFile)}); page.diagnosticStatus = r.msg || ""; }
+    }
+
 }

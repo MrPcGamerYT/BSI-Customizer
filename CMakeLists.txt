@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.21)
 
-project(BSICustomizer VERSION 2.7.0 LANGUAGES C CXX)
+project(BSICustomizer VERSION 3.0.1 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -34,9 +34,18 @@ add_library(bsi_7z STATIC
 target_include_directories(bsi_7z PUBLIC src/third_party/7zip/C)
 target_compile_definitions(bsi_7z PRIVATE Z7_EXTRACT_ONLY Z7_PPMD_SUPPORT)
 
-find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Network Qml Quick QuickControls2 Svg)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Network Qml Quick QuickControls2 Svg Multimedia)
 
 qt_standard_project_setup(REQUIRES 6.5)
+
+# Staged UI migration: keep native builds/deployment unchanged unless requested.
+# Qt WebEngine ships Chromium helpers, locales and .pak data; it is not a
+# system-browser/localhost service and needs a complete Qt deployment.
+option(BSI_CHROMIUM_UI "Build the animated HTML desktop workspace" ON)
+if(BSI_CHROMIUM_UI)
+    find_package(Qt6 6.5 REQUIRED COMPONENTS WebEngineQuick WebChannel)
+endif()
+
 
 # Mark Theme.qml as a QML singleton (must happen BEFORE qt_add_qml_module)
 set_source_files_properties(src/qml/Theme.qml PROPERTIES QT_QML_SINGLETON_TYPE TRUE)
@@ -84,6 +93,10 @@ qt_add_executable(BSICustomizer
     src/core/RpcIdPatcher.cpp
     src/core/VersionResource.h
     src/core/VersionResource.cpp
+    src/core/GifRpc.h
+    src/core/GifRpc.cpp
+    src/core/PlayerCache.h
+    src/core/PlayerCache.cpp
     src/core/BootVideoPatcher.h
     src/core/BootVideoPatcher.cpp
     src/core/EmbeddedImages.h
@@ -114,7 +127,10 @@ qt_add_executable(BSICustomizer
     src/core/SevenZipArchive.cpp
     src/core/BsDetector.h
     src/core/BsDetector.cpp
+    src/core/CustomizationWorkspace.h
+    src/core/CustomizationWorkspace.cpp
     src/core/Backend.h
+    src/core/CrashDiagnostics.cpp src/core/CrashDiagnostics.h
     src/core/Backend.cpp
     src/core/AuthManager.h
     src/core/AuthManager.cpp
@@ -284,6 +300,7 @@ qt_add_qml_module(BSICustomizer
         src/qml/Main.qml
         src/qml/Theme.qml
         src/qml/Icons.js
+        src/qml/ResourceSearch.js
         src/qml/LoginGate.qml
         src/qml/UpdateBanner.qml
         src/qml/components/SidebarButton.qml
@@ -297,6 +314,7 @@ qt_add_qml_module(BSICustomizer
         src/qml/components/PathRow.qml
         src/qml/components/RootVhdBrowser.qml
         src/qml/components/ColorField.qml
+        src/qml/components/ThemePreview.qml
         src/qml/components/GradientEditor.qml
         src/qml/components/LogPanel.qml
         src/qml/pages/DashboardPage.qml
@@ -306,12 +324,18 @@ qt_add_qml_module(BSICustomizer
         src/qml/pages/IntegrityPage.qml
         src/qml/pages/BootVideoPage.qml
         src/qml/pages/UiPage.qml
+        src/qml/pages/GifRpcPage.qml
+        src/qml/pages/WorkspacePage.qml
         src/qml/pages/DebloatPage.qml
         src/qml/pages/RpcidPage.qml
         src/qml/pages/AppearancePage.qml
         src/qml/pages/AboutPage.qml
     RESOURCES
         "BSI CUSTOMIZER.ico"
+        src/qml/fonts/Manrope.ttf
+        src/qml/fonts/PlusJakartaSans.ttf
+        src/qml/fonts/Manrope-OFL.txt
+        src/qml/fonts/PlusJakartaSans-OFL.txt
         src/qml/img/app-icon.png
         src/qml/img/discord-mark.svg
         src/qml/img/orb-cyan.png
@@ -332,10 +356,49 @@ target_link_libraries(BSICustomizer PRIVATE
     Qt6::Qml
     Qt6::Quick
     Qt6::QuickControls2
-    Qt6::Svg
+    Qt6::Svg Qt6::Multimedia
 )
 if(WIN32)
     target_link_libraries(BSICustomizer PRIVATE Crypt32)
+endif()
+
+# Embed our clean, RPC-only proxy in the inner EXE. Never put version.dll
+# alongside the customizer: deployment is explicit, into a selected HD-Player.
+if(WIN32 AND MSVC AND CMAKE_SIZEOF_VOID_P EQUAL 8)
+    add_library(BsiGifRpcProxy SHARED plugins/gif-rpc/proxy.cpp plugins/gif-rpc/version.def)
+    set_target_properties(BsiGifRpcProxy PROPERTIES AUTOMOC OFF AUTOUIC OFF AUTORCC OFF OUTPUT_NAME version PREFIX ""
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/gif-rpc"
+        MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+    target_compile_features(BsiGifRpcProxy PRIVATE cxx_std_17)
+    set(_gif_rc "${CMAKE_CURRENT_BINARY_DIR}/gif-rpc-payload-$<CONFIG>.rc")
+    add_custom_command(OUTPUT "${_gif_rc}"
+        COMMAND ${CMAKE_COMMAND} "-DDLL=$<TARGET_FILE:BsiGifRpcProxy>" "-DOUTPUT=${_gif_rc}"
+            -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/EmbedGifRpc.cmake"
+        DEPENDS BsiGifRpcProxy "$<TARGET_FILE:BsiGifRpcProxy>" cmake/EmbedGifRpc.cmake VERBATIM)
+    target_sources(BSICustomizer PRIVATE "${_gif_rc}")
+    add_dependencies(BSICustomizer BsiGifRpcProxy)
+endif()
+
+if(BSI_CHROMIUM_UI)
+    target_sources(BSICustomizer PRIVATE
+        src/chromium/WebBridge.h src/chromium/WebBridge.cpp
+        src/chromium/LocalContentPolicy.h src/chromium/LocalContentPolicy.cpp
+        src/chromium/ChromiumTests.cpp)
+    target_include_directories(BSICustomizer PRIVATE src)
+    target_compile_definitions(BSICustomizer PRIVATE BSI_CHROMIUM_UI=1)
+    target_link_libraries(BSICustomizer PRIVATE Qt6::WebEngineQuick Qt6::WebChannel)
+    # Keep optional WebEngine imports outside the native-only qmldir scanned by
+    # the existing production packager, but retain the runtime URL/relative pages.
+    set_source_files_properties(src/chromium/ChromiumMain.qml PROPERTIES
+        QT_RESOURCE_ALIAS "src/qml/ChromiumMain.qml")
+    qt_add_resources(BSICustomizer "bsi_chromium_qml"
+        PREFIX "/qt/qml/BSICustomizer"
+        FILES src/chromium/ChromiumMain.qml)
+    qt_add_resources(BSICustomizer "bsi_chromium_assets"
+        PREFIX "/bsi-web" BASE "src/web"
+        FILES src/web/index.html src/web/styles.css src/web/transport.js src/web/resource-search.js src/web/editors.js src/web/maintenance.js src/web/effects.js src/web/app.js src/web/icon.png
+            src/web/fonts/manrope-latin.woff2 src/web/fonts/plus-jakarta-sans-latin.woff2
+            src/web/fonts/manrope-LICENSE.txt src/web/fonts/plus-jakarta-sans-LICENSE.txt)
 endif()
 
 install(TARGETS BSICustomizer RUNTIME DESTINATION bin)

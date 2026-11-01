@@ -17,10 +17,10 @@ Rectangle {
 
     width: Math.min(label.implicitWidth + 44, 520)
     height: 42
-    radius: 21
-    color: Theme.dark ? "#081524" : "#232336"
+    radius: 9
+    color: Theme.raised
     border.width: 1
-    border.color: Theme.dark ? Theme.neonFaint : "transparent"
+    border.color: Theme.borderStrong
     opacity: 0
     visible: opacity > 0.01
 
@@ -28,7 +28,7 @@ Rectangle {
         id: label
         anchors.centerIn: parent
         width: Math.min(implicitWidth, 460)
-        color: Theme.dark ? "#e8f0ff" : "#ffffff"
+        color: Theme.text
         font.pixelSize: 13
         elide: Text.ElideRight
     }

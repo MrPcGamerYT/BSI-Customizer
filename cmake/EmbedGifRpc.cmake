@@ -1,0 +1,5 @@
+if(NOT EXISTS "${DLL}")
+    message(FATAL_ERROR "GIF RPC DLL was not built")
+endif()
+file(TO_CMAKE_PATH "${DLL}" DLL_RC)
+file(WRITE "${OUTPUT}" "201 RCDATA \"${DLL_RC}\"\n")

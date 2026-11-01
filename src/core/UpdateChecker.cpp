@@ -2415,19 +2415,10 @@ bool UpdateChecker::verifyStagedFile(const QString &path, qint64 expectedSize,
                               .arg(expectedSha256.left(12), actual.left(12)));
         }
     }
-    // A setup is judged as a setup, never by the processor its loader names.
-    // Inno's own loader is a 32-bit x86 program even when it installs a 64-bit
-    // one, and a build of Inno whose header this check cannot make sense of
-    // must not turn a good download into "a processor this PC cannot run" -
-    // that is exactly the message that deleted every finished download before
-    // 2.5.2. Only a file that would *replace* this EXE is asked about its
-    // architecture, and a setup never replaces it: it is run.
-    if (looksLikeInstaller(path)) {
-        QFile probe(path);
-        if (!probe.open(QIODevice::ReadOnly) || probe.read(2) != QByteArrayLiteral("MZ"))
-            return reject(QStringLiteral("the installer has no MZ header"));
-        return true;
-    }
+    // Inno's x86 / PE32 loader is runnable on an x64 PC. Use that check,
+    // not the application's stricter copy-over architecture requirement.
+    // Installer markers are not executable validation: corrupted/truncated
+    // files containing "Inno Setup" must still fail the PE/header checks.
     QString peError;
     if (!looksLikeExecutable(path, &peError))
         return reject(peError);
