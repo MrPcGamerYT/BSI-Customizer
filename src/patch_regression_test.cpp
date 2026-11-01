@@ -366,6 +366,21 @@ void declarePoolBases(Fixture &f)
     putBe32(f.bytes, header + 16, quint32(f.names - header));
 }
 
+// QtWebEngine types can already be process-globally registered when the
+// executable links Chromium, even in a fresh test subprocess. Namespace only
+// these temporary synthetic providers so the test never selects a real codec
+// or GPU WebEngine view instead of its fixture API. Production player imports
+// are asserted separately before this fixture-only rewrite.
+bool prepareSyntheticBootPlayer(const QString &path)
+{
+    auto source = read(path);
+    if (!source.contains("import QtMultimedia") || !source.contains("import QtWebEngine"))
+        return false;
+    source.replace("import QtMultimedia", "import BsiFixtureMultimedia");
+    source.replace("import QtWebEngine", "import BsiFixtureWebEngine");
+    return write(path, source);
+}
+
 int bootRuntimeInChild(const QString &qml, const QString &imports,
                        const QString &provider, const QUrl &media)
 {
@@ -4401,8 +4416,8 @@ Window {
               "the controller loads an external QML player, never an MP4 or a hard QtMultimedia import");
         // A tiny, explicitly synthetic QtMultimedia API validates the generated
         // QML/argument flow without playing media or running extracted user QML.
-        const auto imports = QDir(folder).filePath(QStringLiteral("imports/QtMultimedia")); QDir().mkpath(imports);
-        write(QDir(imports).filePath(QStringLiteral("qmldir")), "module QtMultimedia\nVideo 5.15 Video.qml\nMediaPlayer 5.15 MediaPlayer.qml\nVideoOutput 5.15 VideoOutput.qml\n");
+        const auto imports = QDir(folder).filePath(QStringLiteral("imports/BsiFixtureMultimedia")); QDir().mkpath(imports);
+        write(QDir(imports).filePath(QStringLiteral("qmldir")), "module BsiFixtureMultimedia\nVideo 5.15 Video.qml\nMediaPlayer 5.15 MediaPlayer.qml\nVideoOutput 5.15 VideoOutput.qml\n");
         write(QDir(imports).filePath(QStringLiteral("Video.qml")), "import QtQuick\nItem{property url source;property int loops;property int fillMode;property bool muted:false;property bool autoPlay:false;property bool started:false;function play(){started=true}}\n");
         write(QDir(imports).filePath(QStringLiteral("MediaPlayer.qml")), "import QtQuick\nQtObject{enum Loops{Infinite=1}}\n");
         write(QDir(imports).filePath(QStringLiteral("VideoOutput.qml")), "import QtQuick\nQtObject{enum FillMode{PreserveAspectCrop=1}}\n");
@@ -4410,6 +4425,8 @@ Window {
         check(write(controller, modified.toUtf8()), "write generated boot controller fixture");
         // QML module/type registrations outlive engines. A new process per
         // provider prevents earlier real/fake QtMultimedia imports leaking in.
+        check(prepareSyntheticBootPlayer(QDir(folder).filePath(QStringLiteral("Assets/BootVideo.qml"))),
+              "isolate synthetic Qt5 boot provider from registered SDK types");
         const int qt5Result = bootRuntimeInChild(controller,
             QDir(folder).filePath(QStringLiteral("imports")), QStringLiteral("qt5"),
             QUrl::fromLocalFile(QDir(folder).filePath(QStringLiteral("Assets/Promo.mp4"))));
@@ -4454,27 +4471,29 @@ Window {
         check(read(path+QStringLiteral(".bak"))==r.f.bytes,"all repatches preserve the first original backup");
         // Validate dynamic Qt6 and WebEngine creation against deliberately
         // synthetic APIs. Never load a real codec or extracted player QML.
-        const auto mediaImports=QDir(folder).filePath(QStringLiteral("qt6Imports/QtMultimedia")); QDir().mkpath(mediaImports);
-        write(QDir(mediaImports).filePath(QStringLiteral("qmldir")),"module QtMultimedia\nMediaPlayer 5.15 MediaPlayer.qml\nVideoOutput 5.15 VideoOutput.qml\nAudioOutput 5.15 AudioOutput.qml\n");
+        const auto mediaImports=QDir(folder).filePath(QStringLiteral("qt6Imports/BsiFixtureMultimedia")); QDir().mkpath(mediaImports);
+        write(QDir(mediaImports).filePath(QStringLiteral("qmldir")),"module BsiFixtureMultimedia\nMediaPlayer 5.15 MediaPlayer.qml\nVideoOutput 5.15 VideoOutput.qml\nAudioOutput 5.15 AudioOutput.qml\n");
         write(QDir(mediaImports).filePath(QStringLiteral("MediaPlayer.qml")),"import QtQuick\nQtObject{enum Loops{Infinite=1}property url source;property int loops;property var videoOutput;property var audioOutput;property bool started:false;function play(){started=true}}\n");
         write(QDir(mediaImports).filePath(QStringLiteral("VideoOutput.qml")),"import QtQuick\nItem{enum FillMode{PreserveAspectCrop=1}property int fillMode}\n");
         write(QDir(mediaImports).filePath(QStringLiteral("AudioOutput.qml")),"import QtQuick\nQtObject{property bool muted:false}\n");
+        check(prepareSyntheticBootPlayer(QDir(folder).filePath(QStringLiteral("Assets/BootVideo.qml"))),
+              "isolate synthetic Qt6 and WebEngine boot providers from registered SDK types");
         check(bootRuntimeInChild(QDir(folder).filePath(QStringLiteral("Assets/BootVideo.qml")),
                   QDir(folder).filePath(QStringLiteral("qt6Imports")), QStringLiteral("qt6"),
                   QUrl::fromLocalFile(QDir(folder).filePath(QStringLiteral("Assets/Promo.mp4")))) == 0,
               "the Qt6 adaptive branch compiles, starts and handles quoted Unicode installation paths");
         const auto webImports=QDir(folder).filePath(QStringLiteral("webImports"));
-        QDir().mkpath(QDir(webImports).filePath(QStringLiteral("QtMultimedia")));
-        QDir().mkpath(QDir(webImports).filePath(QStringLiteral("QtWebEngine")));
+        QDir().mkpath(QDir(webImports).filePath(QStringLiteral("BsiFixtureMultimedia")));
+        QDir().mkpath(QDir(webImports).filePath(QStringLiteral("BsiFixtureWebEngine")));
         // An empty qmldir can fall through to the SDK's real multimedia
         // module. Export explicitly unavailable types so both imports are
         // deterministically refused without loading real codecs.
-        write(QDir(webImports).filePath(QStringLiteral("QtMultimedia/qmldir")),
-              "module QtMultimedia\nMediaPlayer 5.15 Unavailable.qml\nVideo 5.15 Unavailable.qml\n");
-        write(QDir(webImports).filePath(QStringLiteral("QtMultimedia/Unavailable.qml")),
+        write(QDir(webImports).filePath(QStringLiteral("BsiFixtureMultimedia/qmldir")),
+              "module BsiFixtureMultimedia\nMediaPlayer 5.15 Unavailable.qml\nVideo 5.15 Unavailable.qml\n");
+        write(QDir(webImports).filePath(QStringLiteral("BsiFixtureMultimedia/Unavailable.qml")),
               "import QtQuick\nMissingSyntheticMultimediaApi {}\n");
-        write(QDir(webImports).filePath(QStringLiteral("QtWebEngine/qmldir")),"module QtWebEngine\nWebEngineView 1.0 WebEngineView.qml\n");
-        write(QDir(webImports).filePath(QStringLiteral("QtWebEngine/WebEngineView.qml")),"import QtQuick\nItem{objectName:'bsiWebBootVideo';property url url}\n");
+        write(QDir(webImports).filePath(QStringLiteral("BsiFixtureWebEngine/qmldir")),"module BsiFixtureWebEngine\nWebEngineView 1.0 WebEngineView.qml\n");
+        write(QDir(webImports).filePath(QStringLiteral("BsiFixtureWebEngine/WebEngineView.qml")),"import QtQuick\nItem{objectName:'bsiWebBootVideo';property url url}\n");
         check(bootRuntimeInChild(QDir(folder).filePath(QStringLiteral("Assets/BootVideo.qml")),
                   webImports, QStringLiteral("web"), QUrl()) == 0,
               "missing multimedia APIs fall back to a WebEngine data-URL player");
