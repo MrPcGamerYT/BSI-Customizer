@@ -2,6 +2,11 @@
 param([Parameter(Mandatory)][string]$ExecutablePath)
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+trap {
+    $message = ($_.Exception.Message + "`n" + $_.ScriptStackTrace).Replace('%','%25').Replace("`r",'%0D').Replace("`n",'%0A')
+    Write-Host "::error::$message"
+    throw
+}
 $ExecutablePath = (Resolve-Path -LiteralPath $ExecutablePath).Path
 $root = Join-Path ([IO.Path]::GetTempPath()) ('BSI-onefile-test-' + [guid]::NewGuid().ToString('N'))
 $clean = Join-Path $root 'folder with spaces'

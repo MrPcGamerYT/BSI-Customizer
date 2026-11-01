@@ -26,6 +26,9 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
+      - name: Verify matching Chromium notice collection
+        shell: pwsh
+        run: ./scripts/Collect-WebEngineNotices.ps1 -Version '6.8.3' -CacheDirectory (Join-Path $env:RUNNER_TEMP 'notice-cache') -OutputDirectory (Join-Path $env:RUNNER_TEMP 'notice-output')
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -66,6 +69,11 @@ jobs:
       - name: Deploy complete Chromium runtime
         shell: pwsh
         run: |
+          trap {
+              $message = ($_.Exception.Message + "`n" + $_.ScriptStackTrace).Replace('%','%25').Replace("`r",'%0D').Replace("`n",'%0A')
+              Write-Host "::error::$message"
+              throw
+          }
           New-Item -ItemType Directory -Force stage | Out-Null
           Copy-Item build-web/Release/BSI-Customizer.exe stage/
           windeployqt --release --qmldir src --compiler-runtime --dir stage stage/BSI-Customizer.exe

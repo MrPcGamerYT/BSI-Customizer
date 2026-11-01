@@ -8,6 +8,11 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+trap {
+    $message = ($_.Exception.Message + "`n" + $_.ScriptStackTrace).Replace('%','%25').Replace("`r",'%0D').Replace("`n",'%0A')
+    Write-Host "::error::$message"
+    throw
+}
 $repo = Split-Path $PSScriptRoot -Parent
 if ($Version -notmatch '^\d+\.\d+\.\d+(\.\d+)?$') { throw 'Version must be numeric, e.g. 2.0.0' }
 $AppExecutable = (Resolve-Path -LiteralPath $AppExecutable).Path
