@@ -57,11 +57,17 @@ assert.ok(read('src/main.cpp').includes('const bool chromiumUi = !args.contains(
 console.log('PASS: optional Chromium workspace, local assets, bounded previews, exception boundary and renderer recovery guards.');
 
 const nativeShell = read('src/qml/Main.qml');
-const originalPages = ['DashboardPage', 'ThemePage', 'ResourcesPage', 'FpsPage', 'IntegrityPage', 'BootVideoPage', 'UiPage', 'RpcidPage', 'AppearancePage', 'AboutPage', 'GifRpcPage', 'WorkspacePage', 'DebloatPage'];
-for (const page of originalPages) assert.equal((nativeShell.match(new RegExp('\\b' + page + ' \\{', 'g')) || []).length, 1, 'Exactly one original editor: ' + page);
+const settingsPanel = read('src/qml/components/SettingsPanel.qml');
+const featurePages = ['DashboardPage', 'ThemePage', 'ResourcesPage', 'FpsPage', 'IntegrityPage', 'BootVideoPage', 'UiPage', 'RpcidPage', 'GifRpcPage', 'WorkspacePage', 'DebloatPage'];
+const settingsPages = ['AppearancePage', 'UpdatesPage', 'AboutPage'];
+for (const page of featurePages) assert.equal((nativeShell.match(new RegExp('\\b' + page + ' \\{', 'g')) || []).length, 1, 'Exactly one feature editor: ' + page);
+for (const page of settingsPages) assert.equal((settingsPanel.match(new RegExp('\\b' + page + ' \\{', 'g')) || []).length, 1, 'Exactly one settings tab: ' + page);
+assert.ok(nativeShell.includes('SettingsPanel {') && nativeShell.includes('objectName: "settingsPanel"'), 'Settings panel is wired into the shell');
+assert.ok(settingsPanel.includes('settingsPanelDragHandle') && settingsPanel.includes('mapToItem(panel.parent'), 'Settings header supports pointer-based dragging');
+assert.ok(settingsPanel.includes('panel.dragOffsetX') && settingsPanel.includes('panel.dragOffsetY'), 'Settings dragging updates bounded panel offsets');
 assert.ok(!nativeShell.includes('WebEngineView'), 'Normal app must not switch between duplicated editor implementations');
 assert.ok(read('src/main.cpp').includes('const bool chromiumUi = !args.contains(QStringLiteral("--native-ui"))'));
-console.log('PASS: native recovery shell retains its 13 original feature editors and backend contracts.');
+console.log('PASS: native shell retains eleven feature editors; Appearance, Updates and About are single-instance settings tabs with drag support.');
 
 // The ordinary deliverable must actually contain the HTML frontend, not merely
 // hide missing-feature escape buttons over a native-only installer.

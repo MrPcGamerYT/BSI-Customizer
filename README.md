@@ -1036,7 +1036,7 @@ SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 </details>
 
-A diagnostic EXE can be supplied with `-DBSI_EXE_TEST_FILE=<absolute-path>`. In GitHub CI, a user-supplied `HD-Player.exe` at the repository root is also recognized as optional diagnostic input. Self-tests only read it and patch disposable copies; they do not execute its native code or QML. The probe records its SHA-256 so results from different installations/builds are not confused. Diagnostic input is not a runtime dependency of the portable EXE.
+A diagnostic EXE can be supplied with `-DBSI_EXE_TEST_FILE=<absolute-path>`. The Windows CI matrix checks the four pinned `HD-Player.exe` uploads in `MrPcGamerYT/HD-Player` as diagnostic inputs. Self-tests only read them and patch disposable copies; they do not execute their native code or QML. The probe records each SHA-256 so results from different installations/builds are not confused. Diagnostic input is not a runtime dependency of the portable EXE.
 
 Compatibility is version-adaptive, not a guarantee for every past/future build: FPS detours currently support Windows x64 Qt 5/Qt 6 setters, and boot rewriting requires a recognizable boot-controller/media API with a validated resource mapping. Unknown architectures, ambiguous runtime selection and unrecognized resource layouts are refused instead of reporting a false success. Integrity behavior is not changed by these detection improvements.
 

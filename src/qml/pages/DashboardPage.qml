@@ -81,7 +81,7 @@ Item {
                     ToolTile { Layout.fillWidth: true; primary: true; number: "01"; title: qsTr("Color studio"); description: qsTr("Edit the original QML or Hex palette, presets and gradients."); iconPath: Icons.theme; onActivated: dashPage.navigate(1) }
                     ToolTile { Layout.fillWidth: true; number: "02"; title: qsTr("Resource explorer"); description: qsTr("Inspect and edit player resources. Scans stay manual."); iconPath: Icons.images; onActivated: dashPage.navigate(2) }
                     ToolTile { Layout.fillWidth: true; number: "03"; title: qsTr("Player interface"); description: qsTr("UI removals, sidebar ordering, layout and About controls."); iconPath: Icons.extras; onActivated: dashPage.navigate(6) }
-                    ToolTile { Layout.fillWidth: true; number: "04"; title: qsTr("Debloat & Android"); description: qsTr("The original cleanup, ADB and Root.vhd tools."); iconPath: Icons.debloat; onActivated: dashPage.navigate(12) }
+                    ToolTile { Layout.fillWidth: true; number: "04"; title: qsTr("Debloat & Android"); description: qsTr("The original cleanup, ADB and Root.vhd tools."); iconPath: Icons.debloat; onActivated: dashPage.navigate(10) }
                 }
                 Card {
                     Layout.preferredWidth: 250
@@ -98,7 +98,7 @@ Item {
                         Text { text: qsTr("Theme: %1").arg(backend.themeFound ? qsTr("Loaded") : qsTr("Not loaded")); color: Theme.textDim; font.pixelSize: 11 }
                         Item { Layout.fillHeight: true }
                         ActionButton { Layout.fillWidth: true; text: qsTr("DETECT INSTALLATIONS"); accent: true; enabled: !backend.busy; onClicked: backend.detectInstalls() }
-                        ActionButton { Layout.fillWidth: true; text: qsTr("PATCH WORKSPACE"); onClicked: dashPage.navigate(11) }
+                        ActionButton { Layout.fillWidth: true; text: qsTr("PATCH WORKSPACE"); onClicked: dashPage.navigate(9) }
                     }
                 }
             }

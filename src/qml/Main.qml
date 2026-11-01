@@ -65,8 +65,6 @@ ApplicationWindow {
         { label: qsTr("Boot experience"), icon: Icons.boot },
         { label: qsTr("Player interface"), icon: Icons.extras },
         { label: qsTr("Discord presence"), icon: Icons.discord },
-        { label: qsTr("Settings"), icon: Icons.appearance },
-        { label: qsTr("About & updates"), icon: Icons.about },
         { label: qsTr("Animated presence"), icon: Icons.discord },
         { label: qsTr("Patch workspace"), icon: Icons.extras },
         { label: qsTr("Debloat / Android / Root.vhd"), icon: Icons.debloat }
@@ -167,7 +165,7 @@ ApplicationWindow {
                     id: quickNav
                     anchors.centerIn: parent; spacing: 3
                     Repeater {
-                        model: [0, 1, 6, 8, 12]
+                        model: [0, 1, 6, 7, 10]
                         delegate: AbstractButton {
                             id: quickButton
                             required property int modelData
@@ -197,6 +195,27 @@ ApplicationWindow {
                 ToolTip.visible: hovered
                 ToolTip.text: qsTr("Choose an existing installation; detect players on Dashboard")
             }
+            AbstractButton {
+                id: settingsButton
+                objectName: "settingsButton"
+                implicitWidth: 38
+                implicitHeight: 34
+                enabled: !backend.busy
+                Accessible.name: qsTr("Open settings")
+                ToolTip.visible: hovered
+                ToolTip.text: qsTr("Appearance, updates and About")
+                background: Rectangle {
+                    radius: 10
+                    color: settingsButton.hovered ? Theme.accentSoft : "transparent"
+                    border.color: settingsButton.hovered || settingsButton.activeFocus ? Theme.borderStrong : Theme.border
+                }
+                contentItem: Image {
+                    source: Icons.icon(Icons.settings, settingsButton.hovered ? Theme.accentText : Theme.textDim)
+                    sourceSize: Qt.size(18, 18)
+                    fillMode: Image.Pad
+                }
+                onClicked: { settingsPanel.currentTab = 0; settingsPanel.open(); }
+            }
             ActionButton { text: "⋯"; implicitWidth: 32; implicitHeight: 34; onClicked: appMenu.popup() }
             WinControls { appWindow: window; barHeight: 40 }
         }
@@ -204,7 +223,21 @@ ApplicationWindow {
     Menu {
         id: appMenu
         MenuItem { text: qsTr("Purge player cache…"); enabled: !backend.busy; onTriggered: purgeCacheDialog.open() }
-        MenuItem { text: qsTr("About & updates"); enabled: !backend.busy; onTriggered: window.navigatePage(9) }
+        MenuItem {
+            text: qsTr("Settings")
+            enabled: !backend.busy
+            onTriggered: { settingsPanel.currentTab = 0; settingsPanel.open(); }
+        }
+        MenuItem {
+            text: qsTr("Updates")
+            enabled: !backend.busy
+            onTriggered: { settingsPanel.currentTab = 1; settingsPanel.open(); }
+        }
+        MenuItem {
+            text: qsTr("About")
+            enabled: !backend.busy
+            onTriggered: { settingsPanel.currentTab = 2; settingsPanel.open(); }
+        }
         MenuSeparator {}
         MenuItem { text: qsTr("Sign out"); enabled: !backend.busy; onTriggered: auth.signOut() }
     }
@@ -229,8 +262,6 @@ ApplicationWindow {
             BootVideoPage { objectName: "featureBoot" }
             UiPage { objectName: "featureInterface"; onNotify: (msg) => toast.show(msg) }
             RpcidPage { objectName: "featureRpc" }
-            AppearancePage { objectName: "featureSettings"; onNotify: (msg) => toast.show(msg) }
-            AboutPage { objectName: "featureAbout"; onNotify: (msg) => toast.show(msg) }
             GifRpcPage { objectName: "featureGif" }
             WorkspacePage { objectName: "featureWorkspace"; onNavigate: (index) => window.navigatePage(index) }
             DebloatPage { objectName: "featureDebloat"; onNotify: (msg) => toast.show(msg) }
@@ -335,6 +366,12 @@ ApplicationWindow {
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.bottom: parent.bottom
         anchors.bottomMargin: 24
+    }
+
+    SettingsPanel {
+        id: settingsPanel
+        objectName: "settingsPanel"
+        onNotify: (message) => toast.show(message)
     }
 
     Connections {

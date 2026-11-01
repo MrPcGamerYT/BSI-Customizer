@@ -70,13 +70,58 @@ jobs:
         run: python tests/run_qt_runtime_test.py tests/resources_page_runtime_test.py
 
   build-windows:
-    name: Build & self-test (Windows x64)
+    name: Build & self-test (Windows x64 · ${{ matrix.label }})
     runs-on: windows-latest
     timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: MSI latest package
+            reference-file: HD-Player MSI Latest version.zip
+          - label: MSI v5.9
+            reference-file: HD-Player MSI v5.9.exe
+          - label: BlueStacks 5 latest package
+            reference-file: HD-Player latest version Bluestacks 5.zip
+          - label: BlueStacks v5.10
+            reference-file: HD-Player v.5.10 bluestacks.exe
 
     steps:
-      - name: Checkout
+      - name: Checkout BSI Customizer
         uses: actions/checkout@v5
+
+      - name: Checkout pinned HD-Player reference images
+        uses: actions/checkout@v5
+        with:
+          repository: MrPcGamerYT/HD-Player
+          ref: 6e4dc894eb1b6956060b3f76d13fc438e5178d03
+          path: hd-player-reference
+          persist-credentials: false
+
+      - name: Prepare the selected HD-Player reference
+        shell: pwsh
+        env:
+          REFERENCE_FILE: ${{ matrix.reference-file }}
+        run: |
+          $source = Join-Path (Join-Path $env:GITHUB_WORKSPACE 'hd-player-reference') $env:REFERENCE_FILE
+          if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
+            throw "Reference file not found in pinned HD-Player repo: $env:REFERENCE_FILE"
+          }
+          if ($source.EndsWith('.zip', [StringComparison]::OrdinalIgnoreCase)) {
+            $extract = Join-Path $env:RUNNER_TEMP 'hd-player-extract'
+            Expand-Archive -LiteralPath $source -DestinationPath $extract -Force
+            $player = Get-ChildItem -LiteralPath $extract -Filter 'HD-Player.exe' -File -Recurse |
+                      Select-Object -First 1 -ExpandProperty FullName
+            if (-not $player) { throw "No HD-Player.exe found inside $env:REFERENCE_FILE" }
+          } else {
+            $player = $source
+          }
+          $target = Join-Path $env:GITHUB_WORKSPACE 'HD-Player.exe'
+          Copy-Item -LiteralPath $player -Destination $target -Force
+          $hash = (Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash.ToLowerInvariant()
+          "| $env:REFERENCE_FILE | $((Get-Item -LiteralPath $target).Length) | $hash |" |
+            Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          Write-Host "Reference copied as data only: $target (SHA256 $hash)"
 
       - name: Install Qt 6
         uses: jurplel/install-qt-action@v4.3.1
@@ -93,8 +138,9 @@ jobs:
           # Whole auth.json to embed at build time (falls back to the
           # BSIC_AUTH_JSON secret name; empty = build without an embed).
           ZLP_AUTH_JSON: ${{ secrets.ZLP_AUTH_JSON || secrets.BSIC_AUTH_JSON }}
-        # Dedicated native recovery/engine build; the other workflows test HTML.
-        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DBSI_CHROMIUM_UI=OFF
+          BSI_EXE_TEST_FILE: ${{ github.workspace }}/HD-Player.exe
+        # Each matrix job compiles the same diagnostic against one real reference.
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DBSI_CHROMIUM_UI=OFF "-DBSI_EXE_TEST_FILE=$env:BSI_EXE_TEST_FILE"
 
       - name: Build
         shell: pwsh

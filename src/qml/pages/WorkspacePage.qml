@@ -189,7 +189,7 @@ Item {
                     Label { text: qsTr("GIF RPC connection diagnostics"); color: Theme.text; font.bold: true }
                     RowLayout {
                         ActionButton { text: qsTr("Check saved profile / Discord IPC"); enabled: !backend.busy; onClicked: page.run("rpc") }
-                        ActionButton { text: qsTr("GIF RPC editor →"); onClicked: page.navigate(10) }
+                        ActionButton { text: qsTr("GIF RPC editor →"); onClicked: page.navigate(8) }
                     }
                     Label { Layout.fillWidth: true; color: Theme.textDim; wrapMode: Text.Wrap; text: qsTr("Reachability and proxy-file inspection are separate from a successful activity connection. The tool does not claim live GIF animation or server acceptance without observing it.") }
                 }

@@ -41,6 +41,7 @@
 #include "core/ThemeEngine.h"
 #include "core/ThemeManager.h"
 #include "core/ThemePresets.h"
+#include "core/UpdateChecker.h"
 #include "core/ZlibUtils.h"
 
 using namespace ByteUtils;
@@ -303,6 +304,7 @@ int runSelfTest()
         ThemeManager themes;
         Backend backend(&settings);
         SysInfo sysinfo;
+        UpdateChecker updates;
         QTemporaryDir authUiTmp;
         AuthManager auth(authUiTmp.path());
         backend.setAuthManager(&auth);
@@ -313,10 +315,34 @@ int runSelfTest()
         engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
         engine.rootContext()->setContextProperty(QStringLiteral("sysinfo"), &sysinfo);
         engine.rootContext()->setContextProperty(QStringLiteral("auth"), &auth);
+        engine.rootContext()->setContextProperty(QStringLiteral("updates"), &updates);
         engine.load(QUrl(QStringLiteral("qrc:/qt/qml/BSICustomizer/src/qml/Main.qml")));
 
         QObject *root = engine.rootObjects().value(0, nullptr);
         check(root != nullptr, "Main.qml loaded without errors");
+        if (root) {
+            QObject *settingsPanel = root->findChild<QObject *>(QStringLiteral("settingsPanel"));
+            check(settingsPanel != nullptr, "the compact settings panel is wired into the main window");
+            if (settingsPanel) {
+                const QVariantList settingTabs = settingsPanel->property("tabs").toList();
+                check(settingTabs.size() == 3, "settings exposes Appearance, Updates and About icon tabs");
+                const qreal originalX = settingsPanel->property("x").toReal();
+                const qreal originalY = settingsPanel->property("y").toReal();
+                QMetaObject::invokeMethod(settingsPanel, "open");
+                QCoreApplication::processEvents();
+                check(settingsPanel->property("visible").toBool(), "the Settings button opens the movable panel");
+                settingsPanel->setProperty("dragOffsetX", 48.0);
+                settingsPanel->setProperty("dragOffsetY", 24.0);
+                QCoreApplication::processEvents();
+                check(settingsPanel->property("x").toReal() > originalX
+                          && settingsPanel->property("y").toReal() > originalY,
+                      "drag offsets reposition the panel without leaving it centered");
+                settingsPanel->setProperty("dragOffsetX", 0.0);
+                settingsPanel->setProperty("dragOffsetY", 0.0);
+                QMetaObject::invokeMethod(settingsPanel, "close");
+                QCoreApplication::processEvents();
+            }
+        }
         check(QFontDatabase::families().contains(QStringLiteral("Manrope"))
                   && QFontDatabase::families().contains(QStringLiteral("Plus Jakarta Sans")),
               "reference UI fonts are embedded and load without a font CDN");
@@ -324,8 +350,8 @@ int runSelfTest()
         if (root) {
             QObject *stack = root->findChild<QObject *>(QStringLiteral("studioPageStack"));
             QObject *dashboard = root->findChild<QObject *>(QStringLiteral("studioDashboard"));
-            check(stack && stack->property("count").toInt() == 13,
-                  "studio shell retains all thirteen application pages including Debloat");
+            check(stack && stack->property("count").toInt() == 11,
+                  "studio shell retains eleven feature pages including Debloat; app settings are in the modal panel");
             check(root->findChild<QObject *>(QStringLiteral("studioSidebar")) != nullptr,
                   "studio navigation sidebar is present");
             QObject *instanceFlow = root->findChild<QObject *>(QStringLiteral("studioInstanceFlow"));
@@ -350,14 +376,14 @@ int runSelfTest()
             QCoreApplication::processEvents();
             check(backend.resourceInfos().size() == resourceCount,
                   "opening Resources through studio navigation preserves resource results");
-            // The new presentation must retain every original editor, not
-            // route some controls through a second HTML implementation.
+            // Keep every feature editor in this single QML stack; settings are
+            // hosted by the separate three-tab modal panel above.
             const char *featureObjects[] = {
                 "studioDashboard", "featureTheme", "featureResources", "featureFps",
                 "featureIntegrity", "featureBoot", "featureInterface", "featureRpc",
-                "featureSettings", "featureAbout", "featureGif", "featureWorkspace", "featureDebloat"
+                "featureGif", "featureWorkspace", "featureDebloat"
             };
-            for (int index = 0; index < 13; ++index) {
+            for (int index = 0; index < 11; ++index) {
                 const bool exists = root->findChild<QObject *>(QString::fromLatin1(featureObjects[index])) != nullptr;
                 const bool routed = QMetaObject::invokeMethod(root, "navigatePage", Q_ARG(QVariant, QVariant(index)));
                 check(exists && routed && stack && stack->property("currentIndex").toInt() == index,
@@ -365,7 +391,7 @@ int runSelfTest()
                           .arg(index).arg(QString::fromLatin1(featureObjects[index]))));
             }
             check(backend.resourceInfos().size() == resourceCount,
-                  "visiting all thirteen original features does not auto-scan Resources");
+                  "visiting all eleven feature pages does not auto-scan Resources");
             if (stack) stack->setProperty("currentIndex", 2);
             QMetaObject::invokeMethod(root, "navigatePage", Q_ARG(QVariant, QVariant(99)));
             check(stack && stack->property("currentIndex").toInt() == 2,

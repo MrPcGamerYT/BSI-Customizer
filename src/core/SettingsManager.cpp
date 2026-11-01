@@ -8,6 +8,29 @@
 #include <QSettings>
 #include <QProcessEnvironment>
 #include <QUrl>
+#include <QVariantMap>
+
+namespace {
+
+QVariantList defaultAboutLinks()
+{
+    return {
+        QVariantMap { { QStringLiteral("kind"), QStringLiteral("github") },
+                      { QStringLiteral("title"), QStringLiteral("Open-source project") },
+                      { QStringLiteral("url"), QStringLiteral("https://github.com/MrPcGamerYT/BSI-Customizer") } },
+        QVariantMap { { QStringLiteral("kind"), QStringLiteral("discord") },
+                      { QStringLiteral("title"), QStringLiteral("Community Discord") },
+                      { QStringLiteral("url"), QStringLiteral("https://discord.gg/5qkKPRZkWa") } },
+        QVariantMap { { QStringLiteral("kind"), QStringLiteral("youtube") },
+                      { QStringLiteral("title"), QStringLiteral("Mr.Pc Gamer on YouTube") },
+                      { QStringLiteral("url"), QStringLiteral("https://www.youtube.com/@MR.PC_GAMER_YT?sub_confirmation=1") } },
+        QVariantMap { { QStringLiteral("kind"), QStringLiteral("youtube") },
+                      { QStringLiteral("title"), QStringLiteral("Romulos on YouTube") },
+                      { QStringLiteral("url"), QStringLiteral("https://www.youtube.com/@Romulus_FF?sub_confirmation=1") } }
+    };
+}
+
+} // namespace
 
 SettingsManager::SettingsManager(QObject *parent, bool initialize)
     : QObject(parent)
@@ -18,6 +41,19 @@ SettingsManager::SettingsManager(QObject *parent, bool initialize)
     m_dllPath = settings.value(QStringLiteral("paths/dll")).toString();
     m_confPath = settings.value(QStringLiteral("paths/conf")).toString();
     m_fpsAutoDetect = settings.value(QStringLiteral("fps/autoDetect"), true).toBool();
+    m_aboutDeveloperName = settings.value(QStringLiteral("about/developerName"),
+                                          QStringLiteral("Mr.Pc Gamer & Romulos")).toString().trimmed();
+    if (m_aboutDeveloperName.isEmpty())
+        m_aboutDeveloperName = QStringLiteral("Mr.Pc Gamer & Romulos");
+    m_aboutTagline = settings.value(QStringLiteral("about/tagline"),
+                                    QStringLiteral("BlueStacks tools · with contributor Nova")).toString().trimmed();
+    if (m_aboutTagline.isEmpty())
+        m_aboutTagline = QStringLiteral("BlueStacks tools · with contributor Nova");
+    m_aboutLinks = settings.value(QStringLiteral("about/links")).toList();
+    if (m_aboutLinks.size() != 4) {
+        m_aboutLinks = defaultAboutLinks();
+        settings.setValue(QStringLiteral("about/links"), m_aboutLinks);
+    }
     if (!QFileInfo(m_exePath).isFile()) {
         const auto installs = BsDetector::findBlueStacks();
         if (installs.size() == 1) {
@@ -87,6 +123,65 @@ void SettingsManager::setDllPath(const QString &path)
     m_dllPath = clean;
     QSettings().setValue(QStringLiteral("paths/dll"), m_dllPath);
     emit dllPathChanged();
+}
+
+void SettingsManager::setAboutDeveloperName(const QString &name)
+{
+    QString clean = name.trimmed().left(80);
+    if (clean.isEmpty())
+        clean = QStringLiteral("Mr.Pc Gamer & Romulos");
+    if (clean == m_aboutDeveloperName)
+        return;
+    m_aboutDeveloperName = clean;
+    QSettings().setValue(QStringLiteral("about/developerName"), m_aboutDeveloperName);
+    emit aboutProfileChanged();
+}
+
+void SettingsManager::setAboutTagline(const QString &tagline)
+{
+    const QString clean = tagline.trimmed().left(120);
+    if (clean == m_aboutTagline)
+        return;
+    m_aboutTagline = clean;
+    QSettings().setValue(QStringLiteral("about/tagline"), m_aboutTagline);
+    emit aboutProfileChanged();
+}
+
+void SettingsManager::setAboutLinks(const QVariantList &links)
+{
+    if (links.size() != 4)
+        return;
+
+    QVariantList cleanLinks;
+    cleanLinks.reserve(4);
+    for (const QVariant &value : links) {
+        const QVariantMap row = value.toMap();
+        const QString kind = row.value(QStringLiteral("kind")).toString();
+        const QString title = row.value(QStringLiteral("title")).toString().trimmed().left(64);
+        const QString urlText = row.value(QStringLiteral("url")).toString().trimmed().left(512);
+        if (kind != QStringLiteral("github") && kind != QStringLiteral("discord")
+            && kind != QStringLiteral("youtube"))
+            return;
+        if (title.isEmpty() != urlText.isEmpty())
+            return;
+        if (!urlText.isEmpty()) {
+            const QUrl url(urlText);
+            const QString scheme = url.scheme().toLower();
+            if (!url.isValid() || url.host().isEmpty()
+                || (scheme != QStringLiteral("https") && scheme != QStringLiteral("http")))
+                return;
+        }
+        cleanLinks.append(QVariantMap {
+            { QStringLiteral("kind"), kind },
+            { QStringLiteral("title"), title },
+            { QStringLiteral("url"), urlText }
+        });
+    }
+    if (cleanLinks == m_aboutLinks)
+        return;
+    m_aboutLinks = cleanLinks;
+    QSettings().setValue(QStringLiteral("about/links"), m_aboutLinks);
+    emit aboutProfileChanged();
 }
 
 void SettingsManager::setConfPath(const QString &path)
