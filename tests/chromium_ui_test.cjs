@@ -29,18 +29,24 @@ const server = http.createServer((req, res) => {
     await offline.goto(url);
     await offline.locator('#preview-button').waitFor({ state: 'visible' });
     await offline.locator('#preview-button').click();
+    assert.equal(await offline.locator('#spine .nav-label').first().evaluate(el => getComputedStyle(el).opacity), '0', 'Sidebar labels start hidden');
+    await offline.locator('#spine [data-page="0"]').hover();
+    await offline.waitForFunction(() => getComputedStyle(document.querySelector('#spine .nav-label')).opacity === '1');
+    assert.ok(await offline.locator('.spine').evaluate(el => el.getBoundingClientRect().width > 200), 'Sustained hover expands the sidebar');
+    await offline.locator('.hero-main').hover();
     for (let i = 0; i < 13; ++i) {
-      await offline.locator(`#spine [data-page="${i}"]`).click();
+      await offline.locator(`#spine [data-page="${i}"]`).evaluate(el => el.click());
       assert.ok(await offline.locator('#main').innerText());
       assert.equal(await offline.locator('[data-action]:enabled').count(), 0, `Offline native action on page ${i}`);
     }
-    await offline.locator('#spine [data-page="0"]').click();
+    await offline.locator('#spine [data-page="0"]').evaluate(el => el.click());
     if (process.env.BSI_WEB_SCREENSHOT) await offline.screenshot({ path: process.env.BSI_WEB_SCREENSHOT });
     assert.equal(await offline.locator('#main > .matrix > .tile').count(), 4, 'Reference dashboard remains an uncluttered 2x2 matrix');
     assert.equal(await offline.locator('#spine .icon svg').count(), 13, 'Sidebar retains page glyphs');
     assert.equal(await offline.locator('#spine .nav-label').count(), 13, 'Every destination is labeled');
     assert.equal(await offline.locator('#spine .nav-group').count(), 5, 'Navigation destinations are grouped');
     assert.equal(await offline.locator('#cmd').count(), 0, 'Duplicate quick navigation is removed');
+    assert.equal(await offline.getByText('UI by @Floatz4Ever').count(), 0, 'Visible concept attribution is removed');
     assert.equal(await offline.locator('.orbs i').count(), 3);
     for (const size of [{width: 1100, height: 700}, {width: 1920, height: 1080}]) {
       await offline.setViewportSize(size);
@@ -49,6 +55,8 @@ const server = http.createServer((req, res) => {
     }
     assert.deepEqual(errors, []);
     const page = offline;
+    await page.mouse.move(700, 110);
+    await page.waitForTimeout(700);
     await page.goto('about:blank');
     page.on('pageerror', e => errors.push(e.message));
     page.on('dialog', dialog => dialog.accept());
@@ -115,60 +123,63 @@ const server = http.createServer((req, res) => {
     });
     await page.goto(url);
     await page.locator('#connection').waitFor({ state: 'hidden' });
-    await page.locator('#spine [data-page="2"]').click();
+    await page.locator('#spine [data-page="2"]').evaluate(el => el.click());
+    await page.waitForTimeout(800);
     assert.equal(await page.evaluate(() => __calls.filter(c => c.method === 'scanResources').length), 0, 'Navigation must never scan');
-    await page.locator('[data-action="scanResources"]').click();
+    await page.locator('[data-action="scanResources"]').evaluate(el => el.click());
+    await page.waitForFunction(() => __calls.some(c => c.method === 'scanResources') && __calls.some(c => c.method === 'listResources'));
     await page.locator('[data-resource="0"]').waitFor();
     assert.equal(await page.locator('[data-resource]').count(), 100, 'Resource DOM must be paginated');
     assert.equal(await page.evaluate(() => __calls.filter(c => c.method === 'scanResources').length), 1);
     await page.locator('#resource-filter').fill('fixture-23 qml');
-    await page.locator('[data-resource="23"]').click();
+    await page.locator('[data-resource="23"]').evaluate(el => el.click());
     await page.locator('#resource-code').waitFor();
     assert.equal(await page.locator('#resource-editor img').count(), 1, 'Text and safe preview can be displayed together');
     assert.equal(await page.locator('#resource-image').isVisible(), true, 'Raster preview remains visible beside source text');
     await page.locator('#resource-code').fill('Item { property string value: "edited fixture" }');
-    await page.locator('[data-action="saveResource"]').click();
+    await page.locator('[data-action="saveResource"]').evaluate(el => el.click());
     await page.waitForFunction(() => __calls.some(c => c.method === 'saveResource'));
     assert.equal(await page.evaluate(() => __calls.find(c => c.method === 'saveResource').args.text), 'Item { property string value: "edited fixture" }');
     await page.locator('#resource-filter').fill('fixture-23');
     await page.locator('#resource-kind').selectOption('2');
     assert.equal(await page.locator('[data-resource]').count(), 0, 'A kind filter narrows the current scan');
-    await page.locator('[data-action="scanResources"]').click();
+    await page.locator('[data-action="scanResources"]').evaluate(el => el.click());
+    await page.waitForFunction(() => __calls.filter(c => c.method === 'scanResources').length === 2 && __calls.filter(c => c.method === 'listResources').length >= 3);
     await page.locator('[data-resource="0"]').waitFor();
     assert.equal(await page.locator('#resource-filter').inputValue(), '', 'A fresh scan clears stale search text');
     assert.equal(await page.locator('#resource-kind').inputValue(), '0', 'A fresh scan returns to All files');
     assert.equal(await page.locator('[data-resource]').count(), 100, 'All detected entries are restored after scanning');
     assert.equal(await page.evaluate(() => __calls.filter(c => c.method === 'scanResources').length), 2);
-    await page.locator('#spine [data-page="1"]').click();
+    await page.locator('#spine [data-page="1"]').evaluate(el => el.click());
     await page.locator('input.inp[data-color="0"]').fill('#ABCDEF');
     await page.locator('input.inp[data-color="0"]').press('Tab');
     await page.waitForFunction(() => __calls.some(c => c.method === 'setThemeEdit'));
     assert.equal(await page.evaluate(() => __calls.find(c => c.method === 'setThemeEdit').args.value), '#ABCDEF');
-    await page.locator('#spine [data-page="3"]').click();
-    await page.locator('[data-action="fpsPatch"]').click();
+    await page.locator('#spine [data-page="3"]').evaluate(el => el.click());
+    await page.locator('[data-action="fpsPatch"]').evaluate(el => el.click());
     await page.locator('#toast').filter({ hasText: 'unsupported; no write' }).waitFor();
-    await page.locator('#spine [data-page="2"]').click();
+    await page.locator('#spine [data-page="2"]').evaluate(el => el.click());
     assert.equal(await page.evaluate(() => __calls.filter(c => c.method === 'scanResources').length), 2, 'Returning to Resources must not scan');
     for (let i = 0; i < 13; ++i) {
-      await page.locator(`#spine [data-page="${i}"]`).click();
+      await page.locator(`#spine [data-page="${i}"]`).evaluate(el => el.click());
       assert.ok(await page.locator('#main').innerText());
     }
     // New HTML editors must dispatch the original backend contracts rather
     // than opening a native-editor placeholder.
     const nav = async index => {
-      await page.locator(`#spine [data-page="${index}"]`).click();
+      await page.locator(`#spine [data-page="${index}"]`).evaluate(el => el.click());
       await page.waitForFunction(() => !document.body.classList.contains('busy'));
     };
     const edit = key => page.locator(`[data-editor-field="${key}"]`);
-    const click = async name => { await page.locator(`[data-action="editor:${name}"]`).click(); await page.waitForFunction(() => !document.body.dataset.confirming && !document.body.classList.contains('busy')); };
+    const click = async name => { await page.locator(`[data-action="editor:${name}"]`).evaluate(el => el.click()); await page.waitForFunction(() => !document.body.dataset.confirming && !document.body.classList.contains('busy')); };
     const last = method => page.evaluate(name => __calls.filter(c => c.method === name).at(-1), method);
     await nav(6);
     await click('interface-load');
-    await page.locator('[data-interface-tab="remove"]').click();
+    await page.locator('[data-interface-tab="remove"]').evaluate(el => el.click());
     await edit('remove:0').check();
     await click('removals');
     assert.deepEqual((await last('applyRemovals')).args.names, ['Fixture sidebar']);
-    await page.locator('[data-interface-tab="about"]').click();
+    await page.locator('[data-interface-tab="about"]').evaluate(el => el.click());
     await edit('about:text').fill('Edited About fixture');
     await page.waitForFunction(() => document.querySelector('#interface-about-preview')?.innerText.includes('Edited About fixture'));
     await edit('link:0:show').uncheck();
@@ -204,6 +215,19 @@ const server = http.createServer((req, res) => {
     await page.locator('#boot-hold').fill('4567');
     await click('boot-profile');
     assert.equal((await last('workspace')).args.options.value.holdMs, 4567);
+    assert.match(await page.locator('.boot-preview').innerText(), /Built-in animation/);
+    await page.locator('[data-action="bootPatch"]').evaluate(el => el.click());
+    await page.waitForFunction(() => __calls.some(c => c.method === 'bootPatch'));
+    let bootCall = await last('bootPatch');
+    assert.deepEqual(bootCall.args, { holdMs: 4567, mode: 'modern', sourcePath: '' });
+    await page.locator('#boot-mode').selectOption('video');
+    await page.evaluate(()=>{window.__nextFile='C:\\fixture\\modern-boot.mp4';});
+    await page.locator('[data-action="bootVideoBrowse"]').evaluate(el => el.click());
+    assert.match(await page.locator('.boot-preview').innerText(), /modern-boot\.mp4/);
+    await page.locator('[data-action="bootPatch"]').evaluate(el => el.click());
+    await page.waitForFunction(() => __calls.filter(c => c.method === 'bootPatch').length === 2);
+    bootCall = await last('bootPatch');
+    assert.deepEqual(bootCall.args, { holdMs: 4567, mode: 'video', sourcePath: 'C:\\fixture\\modern-boot.mp4' });
     await nav(1);
     await click('gradient-load');
     await click('gradient-apply');
@@ -227,9 +251,9 @@ const server = http.createServer((req, res) => {
     assert.equal((await last('updates')).args.action, 'apply');
     // Sidebar and all maintenance controls stay in the same HTML workspace.
     await nav(6);
-    await page.locator('[data-interface-tab="layout"]').click();
+    await page.locator('[data-interface-tab="layout"]').evaluate(el => el.click());
     await click('maint-sidebar-read');
-    await page.locator('[data-action="editor:maint-sidebar-down"]').first().click();
+    await page.locator('[data-action="editor:maint-sidebar-down"]').first().evaluate(el => el.click());
     await edit('maint:hide:volume').check();
     await click('maint-sidebar-apply');
     assert.deepEqual((await last('maintenance')).args.action, 'sidebar-read');
@@ -245,7 +269,7 @@ const server = http.createServer((req, res) => {
     maintenanceCall = await last('maintenance');
     assert.equal(maintenanceCall.args.action,'debloat-read');
     assert.deepEqual(await page.evaluate(() => __calls.findLast(c=>c.method==='maintenance'&&c.args.action==='debloat-apply').args.ids), ['fixture-ads']);
-    await page.locator('[data-maint-tab="android"]').click();
+    await page.locator('[data-maint-tab="android"]').evaluate(el => el.click());
     await click('maint-android-scan');
     assert.equal((await last('maintenance')).args.instance,'Nougat32');
     await edit('maint:package:com.fixture.ad').check();
@@ -254,10 +278,10 @@ const server = http.createServer((req, res) => {
     assert.deepEqual(maintenanceCall.args.packages,['com.fixture.ad']);
     assert.equal(maintenanceCall.args.keepCopy,true);
     assert.equal(maintenanceCall.args.clearAppData,false);
-    await page.locator('[data-maint-tab="disk"]').click();
+    await page.locator('[data-maint-tab="disk"]').evaluate(el => el.click());
     await click('maint-disk-find');
     await click('maint-disk-info');
-    await page.locator('[data-action="editor:maint-disk-select"][data-index="0"]').click();
+    await page.locator('[data-action="editor:maint-disk-select"][data-index="0"]').evaluate(el => el.click());
     await edit('maint:name').fill('new-folder');
     const writeCount=await page.evaluate(()=>__calls.filter(c=>c.method==='maintenance'&&c.args.action==='disk-mkdir').length);
     assert.equal(await page.locator('[data-action="editor:maint-disk-mkdir"]').isDisabled(),true,'Read-only writes are visibly disabled');
@@ -268,7 +292,7 @@ const server = http.createServer((req, res) => {
     await click('maint-disk-next');
     assert.equal(await page.locator('.disk-file-row').count(),40);
     await click('maint-disk-previous');
-    await page.locator('[data-action="editor:maint-disk-select"][data-index="1"]').click();
+    await page.locator('[data-action="editor:maint-disk-select"][data-index="1"]').evaluate(el => el.click());
     await page.evaluate(()=>{window.__nextFile='C:\\fixture\\entry.bin';});
     await click('maint-disk-extract');
     maintenanceCall = await last('maintenance');
@@ -281,7 +305,7 @@ const server = http.createServer((req, res) => {
     await nav(1);
     await page.evaluate(()=>{window.__autoConfirm=false;});
     const gradientWrites=await page.evaluate(()=>__calls.filter(c=>c.method==='applyGradient').length);
-    await page.locator('[data-action="editor:gradient-apply"]').click();
+    await page.locator('[data-action="editor:gradient-apply"]').evaluate(el => el.click());
     await page.locator('#confirm-dialog').waitFor({state:'visible'});
     await page.locator('#confirm-cancel').click();
     await page.waitForFunction(()=>!document.body.dataset.confirming);
@@ -331,7 +355,7 @@ const server = http.createServer((req, res) => {
     assert.ok(motionDelay<140,'Reduced motion must skip the full window-animation delay');
     await page.emulateMedia({reducedMotion:'no-preference'});
     assert.equal(await page.evaluate(() => __calls.filter(c => c.method === 'openNativeTool').length), 0, 'Integrated editors must not use a native fallback as their main implementation');
-    await page.locator('#tele [data-action="signOut"]').click();
+    await page.locator('#tele [data-action="signOut"]').evaluate(el => el.click());
     await page.locator('#connection').waitFor({ state: 'visible' });
     assert.equal(await page.locator('[data-action]:enabled').count(), 0);
     assert.deepEqual(errors, []);

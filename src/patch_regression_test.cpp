@@ -4350,6 +4350,47 @@ Window {
         const auto again = BootVideoPatcher::patch(path);
         check(again.ok, QStringLiteral("the patched player accepts a second pass: %1").arg(again.msg));
 
+        const QString modernPath = QDir(folder).filePath(QStringLiteral("HD-Player-modern.exe"));
+        write(modernPath, image);
+        const auto modern = BootVideoPatcher::patch(modernPath, 3000, QStringLiteral("modern"));
+        const QString modernAssets = QDir(QFileInfo(modernPath).absolutePath()).filePath(QStringLiteral("Assets"));
+        const QByteArray modernHelper = read(QDir(modernAssets).filePath(QStringLiteral("BootVideo.qml")));
+        check(modern.ok && modernHelper.contains("bsiModernBoot")
+                  && !modernHelper.contains("QtMultimedia") && !modernHelper.contains("QtWebEngine")
+                  && !QFile::exists(QDir(modernAssets).filePath(QStringLiteral("Promo.mp4"))),
+              "built-in modern mode patches the fixture without installing video, media imports, or network fallback");
+        check(read(modernPath + QStringLiteral(".bak")) == image,
+              "built-in modern mode preserves the complete original executable backup");
+
+        const QString customPath = QDir(folder).filePath(QStringLiteral("HD-Player-custom.exe"));
+        const QString customSource = QDir(folder).filePath(QStringLiteral("selected-startup.mp4"));
+        const QString customAssets = QDir(QFileInfo(customPath).absolutePath()).filePath(QStringLiteral("Assets"));
+        const QByteArray selectedMp4(128, 'M');
+        const QByteArray previousMp4(96, 'P');
+        write(customPath, image);
+        write(customSource, selectedMp4);
+        QDir().mkpath(customAssets);
+        write(QDir(customAssets).filePath(QStringLiteral("Promo.mp4")), previousMp4);
+        const auto custom = BootVideoPatcher::patch(customPath, 2500, QStringLiteral("video"), customSource);
+        const QByteArray customHelper = read(QDir(customAssets).filePath(QStringLiteral("BootVideo.qml")));
+        check(custom.ok && read(QDir(customAssets).filePath(QStringLiteral("Promo.mp4"))) == selectedMp4
+                  && read(QDir(customAssets).filePath(QStringLiteral("Promo.mp4.bak"))) == previousMp4,
+              "custom mode installs the selected MP4 and preserves the previous startup video");
+        check(customHelper.contains("BSI  /  STARTUP") && customHelper.contains("BLUE STACKS")
+                  && customHelper.contains("QtMultimedia"),
+              "custom mode adds the BSI overlay and adaptive media player to its generated QML helper");
+        check(read(customPath + QStringLiteral(".bak")) == image,
+              "custom mode preserves the complete original executable backup");
+
+        const QString refusedPath = QDir(folder).filePath(QStringLiteral("HD-Player-refused.exe"));
+        const QString wrongFormat = QDir(folder).filePath(QStringLiteral("not-an-mp4.txt"));
+        write(refusedPath, image);
+        write(wrongFormat, selectedMp4);
+        const auto refusedFormat = BootVideoPatcher::patch(refusedPath, 3000, QStringLiteral("video"), wrongFormat);
+        check(!refusedFormat.ok && read(refusedPath) == image
+                  && !QFile::exists(refusedPath + QStringLiteral(".bak")),
+              "custom mode refuses a non-MP4 before changing the fixture executable");
+
         auto twice = resources({ { QStringLiteral("BootOne.qml"), controller },
                                  { QStringLiteral("BootTwo.qml"), controller },
                                  { QStringLiteral("Shell.qml"), host } }, true);
@@ -4679,6 +4720,7 @@ Window {
             check(gradientTargets.candidates == 0 || gradientTargets.parsed > 0,
                   "the QML of the supplied EXE is parsed instead of being silently skipped");
             for (const auto &label : { QStringLiteral("Sidebar background"), QStringLiteral("Top bar background"),
+                                      QStringLiteral("Settings window background"),
                                       QStringLiteral("Sidebar (player window)"), QStringLiteral("Top bar (player window)"),
                                       QStringLiteral("Button backgrounds (all states)"),
                                       QStringLiteral("Theme gradients.gradientButton") }) {
@@ -4724,7 +4766,39 @@ Window {
             }
             check(read(path + QStringLiteral(".bak")) == original, "the real-file copy retains its first complete backup");
         }
-        check(read(input) == original, "the supplied EXE remains byte-for-byte untouched");
+
+        const QString modernPath = QDir(folder).filePath(QStringLiteral("HD-Player-modern.exe"));
+        write(modernPath, original);
+        const auto modernBoot = BootVideoPatcher::patch(modernPath, 3000, QStringLiteral("modern"));
+        const QString modernAssets = QDir(QFileInfo(modernPath).absolutePath()).filePath(QStringLiteral("Assets"));
+        const QByteArray modernHelper = read(QDir(modernAssets).filePath(QStringLiteral("BootVideo.qml")));
+        check(modernBoot.ok && modernHelper.contains("bsiModernBoot")
+                  && !modernHelper.contains("QtMultimedia") && !modernHelper.contains("QtWebEngine")
+                  && !QFile::exists(QDir(modernAssets).filePath(QStringLiteral("Promo.mp4"))),
+              "built-in modern boot patches this real HD-Player version without media assets or codec imports");
+        check(read(modernPath + QStringLiteral(".bak")) == original,
+              "modern boot preserves the complete original of this HD-Player version");
+
+        const QString customPath = QDir(folder).filePath(QStringLiteral("HD-Player-custom.exe"));
+        const QString customSource = QDir(folder).filePath(QStringLiteral("synthetic-custom-boot.mp4"));
+        const QString customAssets = QDir(QFileInfo(customPath).absolutePath()).filePath(QStringLiteral("Assets"));
+        const QByteArray selectedVideo(256, 'V');
+        const QByteArray previousVideo(192, 'P');
+        write(customPath, original);
+        write(customSource, selectedVideo);
+        QDir().mkpath(customAssets);
+        write(QDir(customAssets).filePath(QStringLiteral("Promo.mp4")), previousVideo);
+        const auto customBoot = BootVideoPatcher::patch(customPath, 2500, QStringLiteral("video"), customSource);
+        const QByteArray customHelper = read(QDir(customAssets).filePath(QStringLiteral("BootVideo.qml")));
+        check(customBoot.ok && read(QDir(customAssets).filePath(QStringLiteral("Promo.mp4"))) == selectedVideo
+                  && read(QDir(customAssets).filePath(QStringLiteral("Promo.mp4.bak"))) == previousVideo,
+              "custom boot installs a bounded synthetic MP4 and preserves the prior video on this real HD-Player copy");
+        check(customHelper.contains("BSI  /  STARTUP") && customHelper.contains("BLUE STACKS")
+                  && customHelper.contains("QtMultimedia"),
+              "custom boot installs the BSI-styled adaptive player helper for this real HD-Player version");
+        check(read(customPath + QStringLiteral(".bak")) == original,
+              "custom boot preserves the complete original of this HD-Player version");
+        check(read(input) == original, "the supplied HD-Player reference remains byte-for-byte untouched");
     }
 #endif
 

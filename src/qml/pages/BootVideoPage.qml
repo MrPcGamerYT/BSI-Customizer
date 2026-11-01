@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls.Basic
+import QtQuick.Dialogs
 import QtQuick.Layouts
 import BSICustomizer
 
@@ -8,6 +9,8 @@ Item {
 
     property string state: qsTr("Not patched yet")
     property string stateColorName: "gray"
+    property string bootMode: "modern"
+    property string videoPath: ""
 
     property string lastProfileBoot: JSON.stringify((backend.customizationProfile || {}).boot || {})
     Connections {
@@ -44,48 +47,63 @@ Item {
                 anchors.fill: parent
                 spacing: 14
 
-                ColumnLayout {
+                RowLayout {
                     Layout.fillWidth: true
-                    spacing: 4
-                    Text {
-                        text: qsTr("Replace the BlueStacks boot animation with your own video.")
-                        color: Theme.text
-                        font.pixelSize: 14
-                        font.weight: Font.Bold
+                    Text { text: qsTr("Boot style"); color: Theme.text; font.weight: Font.DemiBold }
+                    ComboBox {
+                        id: bootStyle
+                        Layout.preferredWidth: 270
+                        model: [qsTr("Built-in modern boot"), qsTr("Custom MP4 + BSI overlay")]
+                        currentIndex: page.bootMode === "modern" ? 0 : 1
+                        onActivated: page.bootMode = currentIndex === 0 ? "modern" : "video"
                     }
-                    Text {
-                        Layout.fillWidth: true
-                        wrapMode: Text.Wrap
-                        color: Theme.textDim
-                        font.pixelSize: 12
-                        text: qsTr("Put your video at:")
+                    Item { Layout.fillWidth: true }
+                    ActionButton {
+                        visible: page.bootMode === "video"
+                        text: qsTr("Choose MP4…")
+                        onClicked: bootVideoDialog.open()
+                    }
+                }
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 230
+                    radius: 14
+                    clip: true
+                    color: "#050B14"
+                    border.color: "#23405E"
+                    Rectangle {
+                        id: previewAura
+                        width: 174; height: 174; radius: 87
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        anchors.verticalCenter: parent.verticalCenter
+                        anchors.verticalCenterOffset: -16
+                        color: "#0D2038"; opacity: 0.72
+                        SequentialAnimation on opacity { loops: Animation.Infinite; NumberAnimation { to: 0.42; duration: 1700 } NumberAnimation { to: 0.72; duration: 1700 } }
                     }
                     Rectangle {
-                        Layout.fillWidth: true
-                        height: 34
-                        Layout.preferredHeight: 34
-                        radius: 8
-                        color: Theme.raised
-                        border.color: Theme.border
-                        Text {
-                            anchors.verticalCenter: parent.verticalCenter
-                            anchors.left: parent.left
-                            anchors.leftMargin: 12
-                            text: settings.exeFolder + "\\Assets\\Promo.mp4"
-                            color: Theme.accentText
-                            font.pixelSize: 12
-                            font.family: "Consolas"
-                        }
+                        width: 116; height: 116; radius: 58
+                        anchors.centerIn: previewAura
+                        color: "transparent"; border.width: 2; border.color: "#2588D8"
+                        RotationAnimation on rotation { from: 0; to: 360; duration: 5200; loops: Animation.Infinite }
+                        Text { anchors.centerIn: parent; text: "BSI"; color: "#F1FAFF"; font.pixelSize: 30; font.bold: true; font.letterSpacing: 4 }
                     }
-                    Text {
-                        Layout.fillWidth: true
-                        wrapMode: Text.Wrap
-                        color: Theme.textDim
-                        font.pixelSize: 12
-                        text: qsTr("The patcher preserves the loading UI and installs an adaptive Qt 6 / Qt 5 / WebEngine player in Assets/BootVideo.qml when needed. Validated QML resources "
-                                   + "can grow into mapped PE storage, and their caches are refreshed. "
-                                   + "Close BlueStacks first. The original .bak is preserved.")
-                    }
+                    Text { anchors.horizontalCenter: parent.horizontalCenter; anchors.bottom: parent.bottom; anchors.bottomMargin: 38; text: qsTr("STARTING YOUR PLAYER"); color: "#D8F2FF"; font.pixelSize: 12; font.bold: true; font.letterSpacing: 2 }
+                    Text { anchors.horizontalCenter: parent.horizontalCenter; anchors.bottom: parent.bottom; anchors.bottomMargin: 19; text: page.bootMode === "modern" ? qsTr("Built-in animated boot · no extra video required") : (page.videoPath || qsTr("Choose an MP4 to preview this style on the next boot")); color: "#829CB8"; font.pixelSize: 10; elide: Text.ElideMiddle; width: parent.width - 40; horizontalAlignment: Text.AlignHCenter }
+                }
+                Text {
+                    Layout.fillWidth: true
+                    visible: page.bootMode === "video"
+                    wrapMode: Text.Wrap
+                    color: Theme.textDim
+                    font.pixelSize: 12
+                    text: qsTr("The selected MP4 is copied to Assets/Promo.mp4. The patcher preserves an existing video as Promo.mp4.bak and overlays BSI startup styling; codec support still depends on the installed Qt/WebEngine runtime.")
+                }
+                Text {
+                    Layout.fillWidth: true
+                    wrapMode: Text.Wrap
+                    color: Theme.textDim
+                    font.pixelSize: 12
+                    text: qsTr("The patcher preserves the emulator's loading UI, validates the boot layout, refreshes QML caches, and keeps the original executable backup. Close BlueStacks before applying.")
                 }
 
                 RowLayout {
@@ -108,10 +126,15 @@ Item {
                     }
                     ActionButton {
                         accent: true
-                        text: qsTr("Patch Boot Video")
+                        text: page.bootMode === "modern" ? qsTr("Install Modern Boot") : qsTr("Install Custom Boot")
                         onClicked: {
                             backend.exePath = bootPath.text;
-                            const r = backend.bootPatch(bootHold.value);
+                            if (page.bootMode === "video" && page.videoPath === "") {
+                                page.state = qsTr("Choose an MP4 first.");
+                                page.stateColorName = "red";
+                                return;
+                            }
+                            const r = backend.bootPatch(bootHold.value, page.bootMode, page.videoPath);
                             page.state = r.msg || "?";
                             page.stateColorName = r.ok ? "green" : "red";
                         }
@@ -121,5 +144,12 @@ Item {
         }
 
         Item { Layout.fillHeight: true }
+    }
+    FileDialog {
+        id: bootVideoDialog
+        title: qsTr("Choose a boot MP4")
+        nameFilters: [qsTr("MP4 video (*.mp4)")]
+        fileMode: FileDialog.OpenFile
+        onAccepted: page.videoPath = selectedFile.toLocalFile()
     }
 }

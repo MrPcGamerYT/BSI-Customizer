@@ -4,6 +4,7 @@ import QtQuick.Layouts
 import QtQuick.Window
 import BSICustomizer
 import "Icons.js" as Icons
+import "WindowGeometry.js" as WindowGeometry
 
 ApplicationWindow {
     onClosing: (close) => { if (backend.busy) close.accepted = false; }
@@ -13,6 +14,19 @@ ApplicationWindow {
     height: 920
     minimumWidth: 980
     minimumHeight: 640
+    function fitToAvailableScreen() {
+        const area = window.screen ? window.screen.availableGeometry : null;
+        const bounds = area ? { x: area.x, y: area.y, width: area.width, height: area.height }
+                            : { x: 0, y: 0, width: Screen.desktopAvailableWidth, height: Screen.desktopAvailableHeight };
+        const fitted = WindowGeometry.initialGeometry(bounds);
+        minimumWidth = fitted.minimumWidth;
+        minimumHeight = fitted.minimumHeight;
+        width = fitted.width;
+        height = fitted.height;
+        x = fitted.x;
+        y = fitted.y;
+    }
+    Component.onCompleted: fitToAvailableScreen()
     visible: true
     // Premium-Optimizer chrome: frameless window with the app's own topbar and
     // control box (startSystemMove / startSystemResize keep native snap+resize).

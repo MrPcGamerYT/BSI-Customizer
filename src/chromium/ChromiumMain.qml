@@ -7,6 +7,7 @@ import QtQuick.Dialogs
 import QtWebEngine
 import QtWebChannel
 import BSICustomizer
+import "../qml/WindowGeometry.js" as WindowGeometry
 
 // Production HTML shell. Existing login, updater and engines remain native;
 // the original QML editors are retained only for explicit recovery.
@@ -17,6 +18,19 @@ ApplicationWindow {
     minimumWidth: 980
     minimumHeight: 640
     visible: true
+    function fitToAvailableScreen() {
+        const area = window.screen ? window.screen.availableGeometry : null;
+        const bounds = area ? { x: area.x, y: area.y, width: area.width, height: area.height }
+                            : { x: 0, y: 0, width: Screen.desktopAvailableWidth, height: Screen.desktopAvailableHeight };
+        const fitted = WindowGeometry.initialGeometry(bounds);
+        minimumWidth = fitted.minimumWidth;
+        minimumHeight = fitted.minimumHeight;
+        width = fitted.width;
+        height = fitted.height;
+        x = fitted.x;
+        y = fitted.y;
+    }
+    Component.onCompleted: fitToAvailableScreen()
     flags: Qt.Window | Qt.FramelessWindowHint
     title: qsTr("BSI Customizer — Chromium workspace")
     color: Theme.window
@@ -189,7 +203,8 @@ ApplicationWindow {
     FileDialog {
         id: fileDialog
         property string roleName: ""
-        title: roleName === "extract" ? qsTr("Extract resource to…") : qsTr("Select a local file")
+        title: roleName === "extract" ? qsTr("Extract resource to…") : roleName === "boot-video" ? qsTr("Choose a boot MP4") : qsTr("Select a local file")
+        nameFilters: roleName === "boot-video" ? [qsTr("MP4 video (*.mp4)")] : []
         fileMode: ["extract", "profile-save", "report-save", "image-save", "disk-extract"].includes(roleName) ? FileDialog.SaveFile : FileDialog.OpenFile
         onAccepted: webBridge.fileChosen(roleName, selectedFile)
         onRejected: webBridge.fileChosen(roleName, "")

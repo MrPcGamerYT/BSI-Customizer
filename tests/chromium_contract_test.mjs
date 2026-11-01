@@ -105,4 +105,12 @@ assert.ok(webEditors.includes('data-interface-tab') && webEditors.includes('Abou
 const webMaintenance = read('src/web/maintenance.js');
 assert.ok(webMaintenance.includes('data-maint-tab') && webMaintenance.includes('Root image file manager') && webMaintenance.includes('disk-manager') && webMaintenance.includes('disk-breadcrumbs'), 'Debloat modes are grouped and Root disk browsing uses a file-manager layout');
 assert.ok(webMaintenance.includes("disk?.writable") && webApp.includes("el.dataset.locked === 'true'"), 'Disk writes remain visibly gated by native writable status');
-console.log('PASS: Chromium shell, Resources, Player Interface and Root image manager now carry the grouped UX improvements.');
+assert.ok(read('src/web/styles.css').includes('transition:width .22s ease .5s') && !webHtml.includes('UI by @Floatz4Ever'), 'Chromium sidebar collapses to icons and removes the visible credit');
+assert.ok(read('src/qml/Main.qml').includes('WindowGeometry.initialGeometry') && read('src/chromium/ChromiumMain.qml').includes('WindowGeometry.initialGeometry'), 'native and Chromium shells use screen-aware centered startup geometry');
+assert.ok(webApp.includes("'bootVideoBrowse'") && webApp.includes("mode, sourcePath: mode === 'video'"), 'Chromium boot editor supports built-in and selected-video modes');
+const bootPatcher = read('src/core/BootVideoPatcher.cpp');
+assert.ok(bootPatcher.includes('QString modernBootPlayer()') && bootPatcher.includes('R"MODERN(') && bootPatcher.includes('Promo.mp4.bak'), 'Boot patcher contains a codec-free animation and protects prior custom video');
+assert.ok(bootPatcher.includes('sourceInfo.size() > maxVideoBytes') && bootPatcher.includes('sourceInfo.isSymLink()') && bootPatcher.includes('readBounded(source, maxVideoBytes'), 'Custom boot video path is size-bounded and refuses linked or oversized input files');
+assert.ok(bootPatcher.includes('rollbackVideo') && bootPatcher.includes('rollbackHelper') && bootPatcher.includes('samePath(videoPath, movie)'), 'Boot asset changes roll back on patch failure and avoid copying the target onto itself');
+assert.ok(read('src/chromium/WebBridge.cpp').includes('role == QLatin1String("boot-video")') && read('src/chromium/ChromiumMain.qml').includes('MP4 video (*.mp4)'), 'Chromium uses the authenticated native file dialog for MP4 selection');
+console.log('PASS: Chromium shell, Resources, Player Interface, Root image manager and boot styles carry the UX improvements.');

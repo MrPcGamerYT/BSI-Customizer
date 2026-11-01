@@ -1416,12 +1416,12 @@ QVariantMap Backend::integrityRestore()
 
 // -------------------------------------------------------------- boot video
 
-QVariantMap Backend::bootPatch(int holdMs)
+QVariantMap Backend::bootPatch(int holdMs, const QString &mode, const QString &videoPath)
 {
     if (actionsLocked()) return lockedMap();
     if (!m_backgroundWorker)
-        return runBackground([=](Backend &worker) { return worker.bootPatch(holdMs); });
-    const auto r = BootVideoPatcher::patch(m_settings->exePath(), holdMs);
+        return runBackground([=](Backend &worker) { return worker.bootPatch(holdMs, mode, videoPath); });
+    const auto r = BootVideoPatcher::patch(m_settings->exePath(), holdMs, mode, videoPath);
     return result(r.ok, r.msg, QStringLiteral("green"));
 }
 
