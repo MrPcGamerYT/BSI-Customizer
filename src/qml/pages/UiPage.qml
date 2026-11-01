@@ -27,6 +27,12 @@ Item {
     property bool showSectionsWanted: true
     // the last Apply/Restore answer, kept on the card (a toast can be missed)
     property string aboutMsg: ""
+    // The buttons of the moved row, in the order they are shown, with the ones
+    // the user hid. Staged here and written by the card's Apply button.
+    property var buttonRows: []
+    property bool buttonOrderReady: false
+    property bool buttonOrderDirty: false
+    property string buttonOrderDetail: ""
 
     // Delegate roots add properties beyond QQuickItem. Mark those lookups as
     // dynamic rather than treating a generic itemAt() result as a typed row.
@@ -103,8 +109,63 @@ Item {
     // The About card reads the player, so it follows the file: on first show,
     // whenever the path changes, and every time the tab is opened again (the
     // EXE may have been patched or restored from another tab meanwhile).
+    function refreshButtonRows() {
+        const state = backend.sidebarButtonRows();
+        page.buttonOrderReady = !!(state.supported && state.applied);
+        // Without the layout there is no row to order, so the card shows the
+        // reason instead of a list left over from before the restore.
+        page.buttonRows = page.buttonOrderReady ? (state.buttons || []) : [];
+        page.buttonOrderDetail = state.detail || "";
+        page.buttonOrderDirty = false;
+    }
+
+    // Move one row by delta (-1 up, +1 down). The order is only staged; the
+    // card's Apply button writes it into the player.
+    function moveButtonRow(index, delta) {
+        const rows = page.buttonRows.slice();
+        const to = index + delta;
+        if (to < 0 || to >= rows.length)
+            return;
+        const moved = rows[index];
+        rows[index] = rows[to];
+        rows[to] = moved;
+        page.buttonRows = rows;
+        page.buttonOrderDirty = true;
+    }
+
+    function setButtonHidden(index, hidden) {
+        const rows = page.buttonRows.slice();
+        if (index < 0 || index >= rows.length)
+            return;
+        const row = rows[index];
+        if (!row.canHide)
+            return;
+        rows[index] = { key: row.key, label: row.label, hidden: hidden, canHide: row.canHide };
+        page.buttonRows = rows;
+        page.buttonOrderDirty = true;
+    }
+
+    // reset -> empty order, which the patcher fills with its default row.
+    function applyButtonOrder(reset) {
+        const keys = [];
+        const hidden = [];
+        if (!reset) {
+            for (let i = 0; i < page.buttonRows.length; i++) {
+                keys.push(page.buttonRows[i].key);
+                if (page.buttonRows[i].hidden)
+                    hidden.push(page.buttonRows[i].key);
+            }
+        }
+        const result = backend.applySidebarOrder(keys, hidden);
+        page.refreshLayout();
+        page.refreshButtonRows();
+        if (result && result.msg)
+            page.notify(result.msg);
+    }
+
     function reloadAll() {
         refreshLayout();
+        refreshButtonRows();
         refreshAbout(true);
     }
 
@@ -116,6 +177,17 @@ Item {
         target: backend
         function onExePathChanged() {
             page.reloadAll();
+        }
+        // A layout write happens in a worker; when it is done the row of
+        // buttons has changed (or the title-bar move was reverted), so the
+        // order card follows without asking the user to reopen the tab.
+        function onBusyChanged() {
+            if (backend.busy)
+                return;
+            // Only the two card states that depend on the file: the About
+            // editor keeps whatever the user has typed.
+            page.refreshLayout();
+            page.refreshButtonRows();
         }
     }
 
@@ -243,6 +315,7 @@ Item {
                                                      && !page.cleanTweak.needsUpdate);
                                     const result = backend.applyLayoutTweak("clean-player-ui", target);
                                     page.refreshLayout();
+                                    page.refreshButtonRows();
                                     if (result && result.msg)
                                         page.notify(result.msg);
                                 }
@@ -398,11 +471,145 @@ Item {
                                         const result = backend.applyLayoutTweak(modelData.id,
                                                                                 tweakCheck.checked);
                                         page.refreshLayout();
+                                        page.refreshButtonRows();
                                         if (result && result.msg)
                                             page.notify(result.msg);
                                     }
                                 }
                             }
+                        }
+                    }
+                }
+
+                Card {
+                    Layout.fillWidth: true
+                    pad: 14
+
+                    ColumnLayout {
+                        anchors.fill: parent
+                        spacing: 8
+
+                        Text {
+                            text: qsTr("Top-bar button order")
+                            color: Theme.text
+                            font.pixelSize: 15
+                            font.weight: Font.Bold
+                        }
+                        Text {
+                            Layout.fillWidth: true
+                            wrapMode: Text.Wrap
+                            text: qsTr("The row the sidebar becomes sits in the middle of the title bar, "
+                                       + "exactly like before the order could be changed. Move any button "
+                                       + "up or down, including Back, Home and Recent, or untick it to "
+                                       + "leave it out. Only the buttons shown here exist in this player "
+                                       + "and the list follows the layout automatically.")
+                            color: Theme.textDim
+                            font.pixelSize: 11
+                        }
+                        Text {
+                            Layout.fillWidth: true
+                            wrapMode: Text.Wrap
+                            visible: !page.buttonOrderReady
+                            text: page.buttonOrderDetail.length > 0
+                                  ? page.buttonOrderDetail
+                                  : qsTr("Apply the title-bar layout first; the order belongs to it.")
+                            color: Theme.warn
+                            font.pixelSize: 11
+                            font.weight: Font.DemiBold
+                        }
+
+                        Repeater {
+                            model: page.buttonRows
+                            delegate: RowLayout {
+                                Layout.fillWidth: true
+                                spacing: 8
+                                required property var modelData
+                                required property int index
+
+                                Text {
+                                    Layout.preferredWidth: 22
+                                    text: (index + 1)
+                                    color: Theme.textDim
+                                    font.pixelSize: 11
+                                }
+                                Text {
+                                    Layout.fillWidth: true
+                                    text: modelData.label
+                                    color: modelData.hidden ? Theme.textDim : Theme.text
+                                    font.pixelSize: 12
+                                    elide: Text.ElideRight
+                                }
+                                Text {
+                                    visible: !modelData.canHide
+                                    text: qsTr("always shown")
+                                    color: Theme.textDim
+                                    font.pixelSize: 10
+                                }
+                                // Every row can be moved - Back, Home and Recent
+                                // included; only the tick is limited to the
+                                // buttons that may be left out.
+                                ActionButton {
+                                    implicitHeight: 24
+                                    implicitWidth: 26
+                                    text: "\u2191"
+                                    enabled: page.buttonOrderReady && index > 0
+                                    onClicked: page.moveButtonRow(index, -1)
+                                }
+                                ActionButton {
+                                    implicitHeight: 24
+                                    implicitWidth: 26
+                                    text: "\u2193"
+                                    enabled: page.buttonOrderReady && index < page.buttonRows.length - 1
+                                    onClicked: page.moveButtonRow(index, 1)
+                                }
+                                CheckBox {
+                                    id: showCheck
+                                    visible: modelData.canHide
+                                    enabled: page.buttonOrderReady
+                                    checked: !modelData.hidden
+                                    padding: 0
+                                    implicitWidth: 18
+                                    implicitHeight: 18
+                                    indicator: Rectangle {
+                                        implicitWidth: 18
+                                        implicitHeight: 18
+                                        radius: 5
+                                        color: showCheck.checked ? Theme.accent : "transparent"
+                                        border.width: 1
+                                        border.color: showCheck.checked ? Theme.accent
+                                                                        : Theme.borderStrong
+                                        Text {
+                                            anchors.centerIn: parent
+                                            visible: showCheck.checked
+                                            text: "\u2713"
+                                            color: Theme.primaryText
+                                            font.pixelSize: 11
+                                            font.weight: Font.Black
+                                        }
+                                    }
+                                    onToggled: page.setButtonHidden(index, !checked)
+                                }
+                            }
+                        }
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 8
+                            ActionButton {
+                                accent: true
+                                implicitHeight: 28
+                                enabled: page.buttonOrderReady && page.buttonRows.length > 0
+                                         && page.buttonOrderDirty
+                                text: qsTr("Apply order")
+                                onClicked: page.applyButtonOrder(false)
+                            }
+                            ActionButton {
+                                implicitHeight: 28
+                                enabled: page.buttonOrderReady
+                                text: qsTr("Reset to default")
+                                onClicked: page.applyButtonOrder(true)
+                            }
+                            Item { Layout.fillWidth: true }
                         }
                     }
                 }

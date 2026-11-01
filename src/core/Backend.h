@@ -197,6 +197,10 @@ public:
     Q_INVOKABLE QVariantMap applyRemovals(const QStringList &names);
     Q_INVOKABLE QVariantList layoutTweaks();
     Q_INVOKABLE QVariantMap applyLayoutTweak(const QString &id, bool enabled);
+    // The buttons of the title-bar row, in display order, and the editor that
+    // moves them.
+    Q_INVOKABLE QVariantMap sidebarButtonRows();
+    Q_INVOKABLE QVariantMap applySidebarOrder(const QStringList &order, const QStringList &hidden);
     Q_INVOKABLE QVariantMap aboutPageState();
     Q_INVOKABLE QVariantMap applyAboutPage(const QString &text, const QVariantList &links,
                                            bool showSections, bool enabled);
@@ -204,6 +208,58 @@ public:
     // page prints now and why it is refused when it is.
     Q_INVOKABLE QString aboutPageReport();
     Q_INVOKABLE QVariantMap restoreBackup(const QString &path);
+
+    // ---- BlueStacks Debloat (config, hosts, cloud companions) ----
+    // The switch list with this installation's current state, the instance
+    // names bluestacks.conf declares, and the cloud folders that were found.
+    Q_INVOKABLE QVariantMap debloatState();
+    Q_INVOKABLE QVariantList debloatOptions();
+    Q_INVOKABLE QVariantMap debloatApply(const QStringList &optionIds, const QString &instance);
+    Q_INVOKABLE QVariantMap debloatRestore();
+
+    // ---- Android, inside the running instance (ADB) ----
+    // The reviewed preinstalled-app list and the guest storage as they are now;
+    // scan() and the two write calls need the instance to be running.
+    Q_INVOKABLE QVariantMap androidState();
+    Q_INVOKABLE QVariantMap androidScan(const QString &instance);
+    Q_INVOKABLE QVariantMap androidApply(const QStringList &packages, bool wipeDownloads,
+                                         bool keepCopy, bool clearAppData,
+                                         const QString &instance);
+    Q_INVOKABLE QVariantMap androidRestore(const QString &instance);
+
+    // ---- the hardcode debloater: Root.vhd as a file manager ----
+    // Every write is journalled first, so undo() puts the image back exactly.
+    Q_INVOKABLE QString rootvhdFind();
+    Q_INVOKABLE QVariantMap rootvhdOpenEngineArchive(const QString &archive);
+    Q_INVOKABLE QVariantMap rootvhdInfo(const QString &image);
+    Q_INVOKABLE QVariantMap rootvhdEnableWrite(const QString &image);
+    Q_INVOKABLE QVariantMap rootvhdList(const QString &image, const QString &innerPath);
+    Q_INVOKABLE QVariantMap rootvhdSearch(const QString &image, const QString &query);
+    Q_INVOKABLE QVariantMap rootvhdExtract(const QString &image, const QString &innerPath,
+                                           const QString &localPath);
+    Q_INVOKABLE QVariantMap rootvhdAdd(const QString &image, const QString &innerDir,
+                                       const QString &localFile);
+    Q_INVOKABLE QVariantMap rootvhdReplace(const QString &image, const QString &innerPath,
+                                           const QString &localFile);
+    Q_INVOKABLE QVariantMap rootvhdAddFolder(const QString &image, const QString &innerDir,
+                                             const QString &localDir);
+    // A file or a whole folder tree, whichever the path turns out to be.
+    Q_INVOKABLE QVariantMap rootvhdAddPath(const QString &image, const QString &innerDir,
+                                           const QString &localPath);
+    Q_INVOKABLE QVariantMap rootvhdMkdir(const QString &image, const QString &innerDir,
+                                         const QString &name);
+    Q_INVOKABLE QVariantMap rootvhdRename(const QString &image, const QString &innerPath,
+                                          const QString &newName);
+    Q_INVOKABLE QVariantMap rootvhdMove(const QString &image, const QString &innerPath,
+                                        const QString &destinationDir);
+    Q_INVOKABLE QVariantMap rootvhdCopy(const QString &image, const QString &innerPath,
+                                        const QString &destinationDir, const QString &newName);
+    Q_INVOKABLE QVariantMap rootvhdRemove(const QString &image, const QString &innerPath);
+    Q_INVOKABLE QVariantMap rootvhdUndo(const QString &image);
+    Q_INVOKABLE QVariantMap rootvhdDiscardUndo(const QString &image);
+    // Engine folders found for this installation, so the page can say where
+    // Root.vhd would be before the user picks one.
+    Q_INVOKABLE QStringList rootvhdEngineFolders();
 
     // ---- Discord Rich Presence ID utility ----
     Q_INVOKABLE QVariantMap rpcidFind(const QString &path, bool noNetwork = true);

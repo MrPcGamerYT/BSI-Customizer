@@ -1,9 +1,38 @@
 cmake_minimum_required(VERSION 3.21)
 
-project(BSICustomizer VERSION 3.0.1 LANGUAGES CXX)
+project(BSICustomizer VERSION 3.0.1 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_C_STANDARD 99)
+set(CMAKE_C_STANDARD_REQUIRED ON)
+
+# Public-domain 7-Zip SDK decoder: used in-process to open the self-extracting
+# BlueStacks engine package and extract Root.vhd without requiring a separate
+# archive utility to be installed.
+add_library(bsi_7z STATIC
+    src/third_party/7zip/C/7zAlloc.c
+    src/third_party/7zip/C/7zArcIn.c
+    src/third_party/7zip/C/7zBuf.c
+    src/third_party/7zip/C/7zBuf2.c
+    src/third_party/7zip/C/7zCrc.c
+    src/third_party/7zip/C/7zCrcOpt.c
+    src/third_party/7zip/C/7zDec.c
+    src/third_party/7zip/C/7zFile.c
+    src/third_party/7zip/C/7zStream.c
+    src/third_party/7zip/C/Bcj2.c
+    src/third_party/7zip/C/Bra.c
+    src/third_party/7zip/C/Bra86.c
+    src/third_party/7zip/C/BraIA64.c
+    src/third_party/7zip/C/CpuArch.c
+    src/third_party/7zip/C/Delta.c
+    src/third_party/7zip/C/Lzma2Dec.c
+    src/third_party/7zip/C/LzmaDec.c
+    src/third_party/7zip/C/Ppmd7.c
+    src/third_party/7zip/C/Ppmd7Dec.c
+)
+target_include_directories(bsi_7z PUBLIC src/third_party/7zip/C)
+target_compile_definitions(bsi_7z PRIVATE Z7_EXTRACT_ONLY Z7_PPMD_SUPPORT)
 
 find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Network Qml Quick QuickControls2 Svg Multimedia)
 
@@ -81,6 +110,21 @@ qt_add_executable(BSICustomizer
     src/core/LayoutPatcher.cpp
     src/core/AboutPatcher.h
     src/core/AboutPatcher.cpp
+    src/core/DebloatConfig.h
+    src/core/DebloatConfig.cpp
+    src/core/DebloatPatcher.h
+    src/core/DebloatPatcher.cpp
+    src/core/AdbClient.h
+    src/core/AdbClient.cpp
+    src/core/AndroidCleanup.h
+    src/core/AndroidCleanup.cpp
+    src/core/rootdisk/RootDisk.h
+    src/core/rootdisk/RootDisk.cpp
+    src/core/rootdisk/RootDiskWrite.cpp
+    src/core/RootVhd.h
+    src/core/RootVhd.cpp
+    src/core/SevenZipArchive.h
+    src/core/SevenZipArchive.cpp
     src/core/BsDetector.h
     src/core/BsDetector.cpp
     src/core/CustomizationWorkspace.h
@@ -148,20 +192,42 @@ set_target_properties(BSICustomizer PROPERTIES
 target_compile_definitions(BSICustomizer PRIVATE
     BSI_VERSION="${PROJECT_VERSION}"
 )
+target_link_libraries(BSICustomizer PRIVATE bsi_7z)
 
 # ---------------------------------------------------------------------------
 # Optional build-time auth embed ("zip auth json"): the whole auth.json blob
 # comes from the ZLP_AUTH_JSON repository secret (BSIC_AUTH_JSON accepted as
 # an alias) and is baked into the EXE as :/bsic_auth/auth.json, so released
-# builds sign in with no sidecar file. At runtime an auth.json next to the
-# EXE - or a ZLP_AUTH_JSON env blob - still overrides it. No secret -> the
-# build simply carries no embed and the file/env paths work as before.
+# builds sign in with no sidecar file. Production release builds can require
+# this embed and treat it as authoritative, so a local auth.json or environment
+# override cannot replace the role policy. Development builds may omit it.
 # ---------------------------------------------------------------------------
+option(BSI_REQUIRE_EMBEDDED_AUTH
+    "Fail closed unless Discord authorization config is embedded in this build" OFF)
 set(BSI_AUTH_EMBED_DIR "${CMAKE_BINARY_DIR}/generated")
 set(BSI_AUTH_EMBED_JSON "${BSI_AUTH_EMBED_DIR}/auth.json")
 set(BSI_AUTH_BLOB "$ENV{ZLP_AUTH_JSON}")
 if(BSI_AUTH_BLOB STREQUAL "")
     set(BSI_AUTH_BLOB "$ENV{BSIC_AUTH_JSON}")
+endif()
+if(BSI_REQUIRE_EMBEDDED_AUTH AND BSI_AUTH_BLOB STREQUAL "")
+    message(FATAL_ERROR "This build requires ZLP_AUTH_JSON (or BSIC_AUTH_JSON) so the authorization policy cannot be replaced by a local auth.json file.")
+endif()
+if(BSI_REQUIRE_EMBEDDED_AUTH)
+    string(JSON BSI_AUTH_DISCORD_TYPE ERROR_VARIABLE BSI_AUTH_PARSE_ERROR
+        TYPE "${BSI_AUTH_BLOB}" discord)
+    if(NOT BSI_AUTH_PARSE_ERROR STREQUAL "NOTFOUND"
+       OR NOT BSI_AUTH_DISCORD_TYPE STREQUAL "OBJECT")
+        message(FATAL_ERROR "ZLP_AUTH_JSON must be plain JSON with a discord object in a release build.")
+    endif()
+    string(JSON BSI_AUTH_CLIENT_SECRET ERROR_VARIABLE BSI_AUTH_JSON_ERROR
+        GET "${BSI_AUTH_BLOB}" discord clientSecret)
+    if(BSI_AUTH_JSON_ERROR STREQUAL "NOTFOUND" AND NOT BSI_AUTH_CLIENT_SECRET STREQUAL "")
+        message(FATAL_ERROR "Do not embed a Discord OAuth client secret in a desktop EXE. Configure the Discord app as a public PKCE client and leave discord.clientSecret empty.")
+    endif()
+endif()
+if(BSI_REQUIRE_EMBEDDED_AUTH)
+    target_compile_definitions(BSICustomizer PRIVATE BSI_ENFORCE_EMBEDDED_AUTH=1)
 endif()
 if(NOT BSI_AUTH_BLOB STREQUAL "")
     file(MAKE_DIRECTORY "${BSI_AUTH_EMBED_DIR}")
@@ -190,6 +256,25 @@ if(BSI_TEST_QT5_REFERENCE)
     include(cmake/Qt5FpsReference.cmake)
     bsi_qt5_fps_reference("${CMAKE_CURRENT_BINARY_DIR}/fps-reference/qt5" _bsi_qt5_dll)
     target_compile_definitions(BSICustomizer PRIVATE BSI_QT5_REFERENCE_DLL="${_bsi_qt5_dll}")
+endif()
+
+# The 256 KiB ext4-in-a-fixed-VHD the hardcode debloater is exercised on.
+# tests/fixtures is regenerated by scripts/make-test-image.sh.
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/root-256k.vhd")
+    file(TO_CMAKE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/root-256k.vhd" _bsi_root_vhd)
+    target_compile_definitions(BSICustomizer PRIVATE BSI_ROOT_VHD_FIXTURE="${_bsi_root_vhd}")
+endif()
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/root-256k.vhdx")
+    file(TO_CMAKE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/root-256k.vhdx" _bsi_root_vhdx)
+    target_compile_definitions(BSICustomizer PRIVATE BSI_ROOT_VHDX_FIXTURE="${_bsi_root_vhdx}")
+endif()
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/root-256k-fixed.vhdx")
+    file(TO_CMAKE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/root-256k-fixed.vhdx" _bsi_root_vhdx_fixed)
+    target_compile_definitions(BSICustomizer PRIVATE BSI_ROOT_VHDX_FIXED_FIXTURE="${_bsi_root_vhdx_fixed}")
+endif()
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/root-256k.7z")
+    file(TO_CMAKE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/root-256k.7z" _bsi_root_7z)
+    target_compile_definitions(BSICustomizer PRIVATE BSI_ROOT_7Z_FIXTURE="${_bsi_root_7z}")
 endif()
 
 # Optional user-supplied diagnostic input. It is read as data and only disposable
@@ -226,6 +311,7 @@ qt_add_qml_module(BSICustomizer
         src/qml/components/ChoiceChips.qml
         src/qml/components/Toast.qml
         src/qml/components/PathRow.qml
+        src/qml/components/RootVhdBrowser.qml
         src/qml/components/ColorField.qml
         src/qml/components/ThemePreview.qml
         src/qml/components/GradientEditor.qml
@@ -239,6 +325,7 @@ qt_add_qml_module(BSICustomizer
         src/qml/pages/UiPage.qml
         src/qml/pages/GifRpcPage.qml
         src/qml/pages/WorkspacePage.qml
+        src/qml/pages/DebloatPage.qml
         src/qml/pages/RpcidPage.qml
         src/qml/pages/AppearancePage.qml
         src/qml/pages/AboutPage.qml
@@ -266,6 +353,9 @@ target_link_libraries(BSICustomizer PRIVATE
     Qt6::QuickControls2
     Qt6::Svg Qt6::Multimedia
 )
+if(WIN32)
+    target_link_libraries(BSICustomizer PRIVATE Crypt32)
+endif()
 
 # Embed our clean, RPC-only proxy in the inner EXE. Never put version.dll
 # alongside the customizer: deployment is explicit, into a selected HD-Player.

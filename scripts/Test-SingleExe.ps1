@@ -108,7 +108,7 @@ try {
     $extracted = Join-Path $clean 'explicit extraction'
     $result = Run-Clean $portable @('--extract-to', $extracted)
     if ($result.Code -ne 0) { throw "Explicit extraction failed: $($result.Err)" }
-    foreach ($file in @('BSI-Customizer.exe', 'Qt6Core.dll', 'qt.conf', 'licenses/Qt/QT-NOTICES.txt', 'licenses/HDE64.txt')) {
+    foreach ($file in @('BSI-Customizer.exe', 'Qt6Core.dll', 'qt.conf', 'licenses/Qt/QT-NOTICES.txt', 'licenses/HDE64.txt', 'licenses/7zip/LICENSE.txt')) {
         if (-not (Test-Path -LiteralPath (Join-Path $extracted $file))) { throw "Explicit extraction missing $file" }
     }
     $inner = Join-Path $extracted 'BSI-Customizer.exe'

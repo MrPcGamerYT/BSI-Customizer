@@ -1,5 +1,7 @@
 #include "Backend.h"
 
+#include "AdbClient.h"
+#include "AndroidCleanup.h"
 #include "AuthManager.h"
 #include "CustomizationWorkspace.h"
 #include <QCryptographicHash>
@@ -10,7 +12,9 @@
 #include "ExtrasPatcher.h"
 #include "IntegrityPatcher.h"
 #include "AboutPatcher.h"
+#include "DebloatPatcher.h"
 #include "LayoutPatcher.h"
+#include "RootVhd.h"
 #include "RpcIdPatcher.h"
 #include "QtResources.h"
 #include "SettingsManager.h"
@@ -1460,6 +1464,288 @@ QVariantMap Backend::gifRpcRestore(const QString &path)
 
 // ------------------------------------------------------------------ extras
 
+// ---------------------------------------------------------------------------
+// BlueStacks Debloat
+// ---------------------------------------------------------------------------
+
+QVariantList Backend::debloatOptions()
+{
+    QVariantList list;
+    for (const auto &option : Debloat::options())
+        list << QVariantMap { { QStringLiteral("id"), option.id },
+                              { QStringLiteral("group"), option.group },
+                              { QStringLiteral("label"), option.label },
+                              { QStringLiteral("hint"), option.hint },
+                              { QStringLiteral("needsInstance"), option.needsInstance } };
+    return list;
+}
+
+QVariantMap Backend::debloatState()
+{
+    const Debloat::Status state = Debloat::status(m_settings->confPath());
+    QVariantList cloud;
+    for (const auto &entry : state.cloud) cloud << entry;
+    return { { QStringLiteral("supported"), state.supported },
+             { QStringLiteral("applied"), state.applied },
+             { QStringLiteral("conf"), state.conf },
+             { QStringLiteral("detail"), state.detail },
+             { QStringLiteral("instances"), state.instances },
+             { QStringLiteral("instance"), state.instance },
+             { QStringLiteral("already"), state.already },
+             { QStringLiteral("hostsInstalled"), state.hostsInstalled },
+             { QStringLiteral("cloud"), cloud },
+             { QStringLiteral("anyCloudMoved"), state.anyCloudMoved },
+             { QStringLiteral("recorded"), state.anyRecord },
+             { QStringLiteral("pendingChanges"), state.pendingChanges },
+             { QStringLiteral("backups"), Debloat::backups().size() } };
+}
+
+QVariantMap Backend::debloatApply(const QStringList &optionIds, const QString &instance)
+{
+    if (actionsLocked()) return lockedMap();
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) { return worker.debloatApply(optionIds, instance); });
+    if (optionIds.isEmpty())
+        return result(false, QStringLiteral("Select at least one option."), QStringLiteral("orange"));
+    Debloat::Request request;
+    request.options = optionIds;
+    request.instance = instance;
+    const auto reply = Debloat::apply(m_settings->confPath(), m_settings->exePath(), request);
+    return result(reply.value(QStringLiteral("ok")).toBool(),
+                  reply.value(QStringLiteral("msg")).toString(), QStringLiteral("green"));
+}
+
+QVariantMap Backend::debloatRestore()
+{
+    if (actionsLocked()) return lockedMap();
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) { return worker.debloatRestore(); });
+    const auto reply = Debloat::restore(m_settings->confPath(), m_settings->exePath());
+    // The Android apps and guest storage are part of the same undo record. If
+    // the instance is not running, its part says so and keeps its record; the
+    // configuration restore above is never held back by that.
+    const QVariantMap android = Android::isEmpty(Android::loadRecord())
+        ? QVariantMap()
+        : Android::restore(m_settings->exePath(), m_settings->confPath(), QString());
+    QString message = reply.value(QStringLiteral("msg")).toString();
+    if (!android.isEmpty()) {
+        message += QLatin1Char(' ') + android.value(QStringLiteral("msg")).toString();
+        const bool ok = reply.value(QStringLiteral("ok")).toBool()
+            && android.value(QStringLiteral("ok")).toBool();
+        return result(ok, message, ok ? QStringLiteral("green") : QStringLiteral("red"));
+    }
+    return result(reply.value(QStringLiteral("ok")).toBool(), message, QStringLiteral("green"));
+}
+
+// ---------------------------------------------------------------------------
+// Android — the inside of the instance, through its own ADB
+// ---------------------------------------------------------------------------
+
+QVariantMap Backend::androidState()
+{
+    return Android::state();
+}
+
+QVariantMap Backend::androidScan(const QString &instance)
+{
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) { return worker.androidScan(instance); });
+    return Android::scan(m_settings->exePath(), m_settings->confPath(), instance);
+}
+
+QVariantMap Backend::androidApply(const QStringList &packages, bool wipeDownloads, bool keepCopy,
+                                  bool clearAppData, const QString &instance)
+{
+    if (actionsLocked()) return lockedMap();
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) {
+            return worker.androidApply(packages, wipeDownloads, keepCopy, clearAppData, instance);
+        });
+    Android::Request request;
+    request.packages = packages;
+    request.wipeDownloads = wipeDownloads;
+    request.keepCopy = keepCopy;
+    request.clearAppData = clearAppData;
+    return Android::apply(m_settings->exePath(), m_settings->confPath(), instance, request);
+}
+
+// ---------------------------------------------------------------------------
+// the hardcode debloater (Root.vhd)
+// ---------------------------------------------------------------------------
+
+QString Backend::rootvhdFind()
+{
+    return RootVhd::findImage(m_settings->exePath());
+}
+
+QVariantMap Backend::rootvhdOpenEngineArchive(const QString &archive)
+{
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) {
+            return worker.rootvhdOpenEngineArchive(archive);
+        });
+    return RootVhd::extractEngineArchive(archive);
+}
+
+QVariantMap Backend::rootvhdInfo(const QString &image)
+{
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) { return worker.rootvhdInfo(image); });
+    return RootVhd::info(image);
+}
+
+QVariantMap Backend::rootvhdEnableWrite(const QString &image)
+{
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) { return worker.rootvhdEnableWrite(image); });
+    return RootVhd::enableWriteAccess(image);
+}
+
+QVariantMap Backend::rootvhdList(const QString &image, const QString &innerPath)
+{
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) { return worker.rootvhdList(image, innerPath); });
+    return RootVhd::listing(image, innerPath);
+}
+
+QVariantMap Backend::rootvhdSearch(const QString &image, const QString &query)
+{
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) { return worker.rootvhdSearch(image, query); });
+    return RootVhd::search(image, query);
+}
+
+QVariantMap Backend::rootvhdExtract(const QString &image, const QString &innerPath,
+                                    const QString &localPath)
+{
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) {
+            return worker.rootvhdExtract(image, innerPath, localPath);
+        });
+    return RootVhd::extract(image, innerPath, localPath);
+}
+
+QVariantMap Backend::rootvhdAdd(const QString &image, const QString &innerDir,
+                                const QString &localFile)
+{
+    if (actionsLocked()) return lockedMap();
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) {
+            return worker.rootvhdAdd(image, innerDir, localFile);
+        });
+    return RootVhd::addFile(image, innerDir, localFile);
+}
+
+QVariantMap Backend::rootvhdReplace(const QString &image, const QString &innerPath,
+                                    const QString &localFile)
+{
+    if (actionsLocked()) return lockedMap();
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) {
+            return worker.rootvhdReplace(image, innerPath, localFile);
+        });
+    return RootVhd::replaceFile(image, innerPath, localFile);
+}
+
+QVariantMap Backend::rootvhdAddFolder(const QString &image, const QString &innerDir,
+                                      const QString &localDir)
+{
+    if (actionsLocked()) return lockedMap();
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) {
+            return worker.rootvhdAddFolder(image, innerDir, localDir);
+        });
+    return RootVhd::addFolder(image, innerDir, localDir);
+}
+
+QVariantMap Backend::rootvhdAddPath(const QString &image, const QString &innerDir,
+                                    const QString &localPath)
+{
+    if (actionsLocked()) return lockedMap();
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) {
+            return worker.rootvhdAddPath(image, innerDir, localPath);
+        });
+    return RootVhd::addPath(image, innerDir, localPath);
+}
+
+QVariantMap Backend::rootvhdMkdir(const QString &image, const QString &innerDir, const QString &name)
+{
+    if (actionsLocked()) return lockedMap();
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) { return worker.rootvhdMkdir(image, innerDir, name); });
+    return RootVhd::makeFolder(image, innerDir, name);
+}
+
+QVariantMap Backend::rootvhdRename(const QString &image, const QString &innerPath,
+                                   const QString &newName)
+{
+    if (actionsLocked()) return lockedMap();
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) {
+            return worker.rootvhdRename(image, innerPath, newName);
+        });
+    return RootVhd::rename(image, innerPath, newName);
+}
+
+QVariantMap Backend::rootvhdMove(const QString &image, const QString &innerPath,
+                                 const QString &destinationDir)
+{
+    if (actionsLocked()) return lockedMap();
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) {
+            return worker.rootvhdMove(image, innerPath, destinationDir);
+        });
+    return RootVhd::move(image, innerPath, destinationDir);
+}
+
+QVariantMap Backend::rootvhdCopy(const QString &image, const QString &innerPath,
+                                 const QString &destinationDir, const QString &newName)
+{
+    if (actionsLocked()) return lockedMap();
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) {
+            return worker.rootvhdCopy(image, innerPath, destinationDir, newName);
+        });
+    return RootVhd::copy(image, innerPath, destinationDir, newName);
+}
+
+QVariantMap Backend::rootvhdRemove(const QString &image, const QString &innerPath)
+{
+    if (actionsLocked()) return lockedMap();
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) { return worker.rootvhdRemove(image, innerPath); });
+    return RootVhd::remove(image, innerPath);
+}
+
+QVariantMap Backend::rootvhdUndo(const QString &image)
+{
+    if (actionsLocked()) return lockedMap();
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) { return worker.rootvhdUndo(image); });
+    return RootVhd::undo(image);
+}
+
+QVariantMap Backend::rootvhdDiscardUndo(const QString &image)
+{
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) { return worker.rootvhdDiscardUndo(image); });
+    return RootVhd::discardUndo(image);
+}
+
+QStringList Backend::rootvhdEngineFolders()
+{
+    return RootVhd::engineFolders(m_settings->exePath());
+}
+
+QVariantMap Backend::androidRestore(const QString &instance)
+{
+    if (actionsLocked()) return lockedMap();
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) { return worker.androidRestore(instance); });
+    return Android::restore(m_settings->exePath(), m_settings->confPath(), instance);
+}
+
 QVariantMap Backend::applyRemovals(const QStringList &names)
 {
     if (actionsLocked()) return lockedMap();
@@ -1504,6 +1790,35 @@ QVariantList Backend::layoutTweaks()
         };
     }
     return out;
+}
+
+QVariantMap Backend::sidebarButtonRows()
+{
+    const auto state = LayoutPatcher::buttonRows(readExe());
+    QVariantList buttons;
+    for (const auto &button : state.buttons) {
+        buttons << QVariantMap {
+            { QStringLiteral("key"), button.key },
+            { QStringLiteral("label"), button.label.isEmpty() ? button.key : button.label },
+            { QStringLiteral("hidden"), button.hidden },
+            { QStringLiteral("canHide"), button.canHide },
+        };
+    }
+    return QVariantMap {
+        { QStringLiteral("supported"), state.supported },
+        { QStringLiteral("applied"), state.applied },
+        { QStringLiteral("detail"), state.detail },
+        { QStringLiteral("buttons"), buttons },
+    };
+}
+
+QVariantMap Backend::applySidebarOrder(const QStringList &order, const QStringList &hidden)
+{
+    if (actionsLocked()) return lockedMap();
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) { return worker.applySidebarOrder(order, hidden); });
+    const auto r = LayoutPatcher::applyOrder(m_settings->exePath(), order, hidden);
+    return result(r.ok, r.msg, r.ok ? QStringLiteral("green") : QStringLiteral("red"));
 }
 
 QVariantMap Backend::applyLayoutTweak(const QString &id, bool enabled)

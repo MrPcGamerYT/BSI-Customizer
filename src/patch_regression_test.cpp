@@ -8,6 +8,11 @@
 #include "core/EmbeddedResources.h"
 #include "core/ExtrasPatcher.h"
 #include "core/AboutPatcher.h"
+#include "core/AndroidCleanup.h"
+#include "core/rootdisk/RootDisk.h"
+#include "core/AdbClient.h"
+#include "core/DebloatConfig.h"
+#include "core/DebloatPatcher.h"
 #include "core/IntegrityPatcher.h"
 #include "core/LayoutPatcher.h"
 #include "core/QmlText.h"
@@ -18,6 +23,8 @@
 #include "core/PeUtils.h"
 #include "core/QtResources.h"
 #include "core/QtResourceRegistration.h"
+#include "core/RootVhd.h"
+#include "core/SevenZipArchive.h"
 #include "core/RpcIdPatcher.h"
 #include "core/RpcIdScan.h"
 #include "core/SettingsManager.h"
@@ -96,6 +103,30 @@ void check(bool ok, const char *message)
 void check(bool ok, const QString &message)
 {
     check(ok, qPrintable(message));
+}
+
+// A byte comparison that fails says nothing about where: show the first lines
+// that differ so one CI annotation is enough to diagnose it.
+// One line, because a GitHub annotation stops at the first line break.
+QString firstDifference(const QString &expected, const QString &actual)
+{
+    const QStringList left = expected.split(QLatin1Char('\n'));
+    const QStringList right = actual.split(QLatin1Char('\n'));
+    QStringList lines;
+    for (int i = 0; i < left.size() || i < right.size(); ++i) {
+        const QString a = i < left.size() ? left.at(i) : QStringLiteral("<end of file>");
+        const QString b = i < right.size() ? right.at(i) : QStringLiteral("<end of file>");
+        if (a == b) continue;
+        QString shown = a.trimmed();
+        QString got = b.trimmed();
+        lines << QStringLiteral("line %1 expected [%2] got [%3]")
+                     .arg(i + 1).arg(shown.left(150), got.left(150));
+        if (lines.size() == 3) break;
+    }
+    if (lines.isEmpty())
+        return QStringLiteral("no line differs: lengths %1 vs %2").arg(expected.size()).arg(actual.size());
+    return QStringLiteral("sizes %1 vs %2: ").arg(expected.size()).arg(actual.size())
+        + lines.join(QLatin1String(" || "));
 }
 // The job log of a *passing* Windows run is not retrievable either, so the few
 // numbers that prove what was really exercised are published as annotations.
@@ -1002,6 +1033,973 @@ int runBootPlayerRuntimeTest(const QStringList &args)
     } while (timer.elapsed() < 5000);
     std::fprintf(stderr, "Boot fixture %s did not start with its expected URL\n", qPrintable(provider));
     return 1;
+}
+
+// ---- BlueStacks Debloat -------------------------------------------------
+// The tab edits a file BlueStacks owns and rewrites itself, so the tests pin
+// the two properties that make it safe: every byte outside a changed value
+// survives, and a plan never invents a setting the build does not declare.
+void checkAndroid()
+{
+    std::printf("[android] reviewed apps, commands and the undo record\n");
+    {
+        const auto &rules = Android::appRules();
+        check(rules.size() >= 5, "the reviewed app list is populated");
+        bool allValid = true, unique = true, anyRecommended = false;
+        QStringList names;
+        for (const auto &rule : rules) {
+            if (!Android::validPackage(rule.package)) allValid = false;
+            if (names.contains(rule.package)) unique = false;
+            names << rule.package;
+            if (rule.recommended) anyRecommended = true;
+            if (rule.label.isEmpty() || rule.note.isEmpty()) allValid = false;
+        }
+        check(allValid, "every reviewed package and its label are well formed");
+        check(unique, "no package is on the reviewed list twice");
+        check(anyRecommended, "the deceptive apps are the ones pre-ticked");
+        check(Android::knownPackages() == names, "the lookup list is the reviewed list");
+        check(Android::appLabel(QStringLiteral("gg.now.ads.service")).contains(QLatin1String("now.gg")),
+              "a package is described by its label, not by its identifier");
+        // Root.vhd is deliberately absent from this module: the system image is
+        // shared and read-only, so nothing here addresses a file on disk.
+        check(!Android::recordPath().isEmpty()
+                  && Android::recordPath().endsWith(QLatin1String("/debloat/android.json")),
+              "the undo record sits next to the configuration record");
+    }
+    {
+        // A package name is interpolated into a shell command, so only the
+        // shape Android itself allows gets through.
+        check(Android::validPackage(QStringLiteral("com.android.egg")),
+              "a normal package name is accepted");
+        check(!Android::validPackage(QString()),
+              "an empty package is refused");
+        check(!Android::validPackage(QStringLiteral("com.android.egg; rm -rf /sdcard")),
+              "a package carrying a second command is refused");
+        check(!Android::validPackage(QStringLiteral("com.android.egg && reboot")),
+              "a package carrying a shell operator is refused");
+        check(!Android::validPackage(QStringLiteral("$(reboot)")),
+              "a package carrying command substitution is refused");
+        check(!Android::validPackage(QStringLiteral("no_dots")),
+              "a name without a package segment is refused");
+        check(!Android::validPackage(QStringLiteral("../etc/passwd")),
+              "a path is not a package name");
+
+        const QString pkg = QStringLiteral("com.android.traceur");
+        check(Android::uninstallCommand(pkg)
+                  == QLatin1String("pm uninstall --user 0 com.android.traceur"),
+              "uninstall targets user 0 only, so the system image is never written");
+        check(Android::disableCommand(pkg).contains(QLatin1String("disable-user"))
+                  && Android::disableCommand(pkg).endsWith(pkg),
+              "the fallback for a system package disables it instead");
+        check(Android::installExistingCommand(pkg).startsWith(QLatin1String("cmd package install-existing"))
+                  && Android::installExistingCommand(pkg).endsWith(pkg),
+              "restore reinstalls the package the player shipped");
+        check(Android::enableCommand(pkg).startsWith(QLatin1String("pm enable"))
+                  && Android::enableCommand(pkg).endsWith(pkg),
+              "a disabled package is enabled again");
+        check(Android::listCommand().contains(QLatin1String("--user 0")),
+              "the package list asked for is the one the remove step is verified against");
+        check(Adb::remoteShellCommand(Android::listCommand())
+                  == QLatin1String("pm list packages --user 0; echo \"BSI-EXIT:$?\"")
+                  && !Adb::remoteShellCommand(Android::listCommand()).contains(QLatin1Char('(')),
+              "HD-Adb receives one unwrapped shell command and an exit marker, not unsupported nested sh syntax");
+        const QStringList installed = Android::installedPackagesFromOutput(
+            QStringLiteral("package:com.android.systemui\npackage:org.example.game\n"
+                           "package:com.android.systemui\nnot-a-package\n"));
+        check(installed == (QStringList { QStringLiteral("com.android.systemui"),
+                                          QStringLiteral("org.example.game") }),
+              "the live debloater parses all installed packages, deduplicates and sorts them");
+
+        const QStringList wipe = Android::downloadWipeCommands();
+        bool removes = false, recreates = false;
+        for (const QString &command : wipe) {
+            if (command.contains(QLatin1String("rm -rf /sdcard/Download"))) removes = true;
+            if (command.contains(QLatin1String("mkdir -p /sdcard/Download"))) recreates = true;
+        }
+        check(removes && recreates,
+              "the whole Download folder goes, then comes back empty, so nothing is left behind");
+        const QStringList appData = Android::appDataWipeCommands();
+        bool data = false, obb = false;
+        for (const QString &command : appData) {
+            if (command.contains(QLatin1String("/sdcard/Android/data"))) data = true;
+            if (command.contains(QLatin1String("/sdcard/Android/obb"))) obb = true;
+        }
+        check(data && obb, "clearing app data covers both the data and the obb folders");
+        check(Android::copyLimitBytes() > 0, "the automatic copy has a size ceiling");
+    }
+    {
+        // ---- the instance's ADB port, from the configuration it publishes ----
+        QTemporaryDir temp;
+        check(temp.isValid(), "a temporary folder holds the fake bluestacks.conf");
+        const QString current = temp.filePath(QStringLiteral("current.conf"));
+        const QString legacy = temp.filePath(QStringLiteral("legacy.conf"));
+        const QString none = temp.filePath(QStringLiteral("none.conf"));
+        const auto write = [](const QString &path, const QByteArray &bytes) {
+            QFile file(path);
+            if (!file.open(QIODevice::WriteOnly)) return false;
+            file.write(bytes);
+            file.close();
+            return true;
+        };
+        check(write(current, "bst.instance.Pie64.status.adb_port=\"5565\"\r\n"
+                             "bst.instance.Nougat32.status.adb_port=\"5567\"\r\n"),
+              "the fixture publishes two instance ports");
+        check(write(legacy, "bst.instance.Pie64.adb_port=\"5575\"\n"),
+              "the fixture uses the older key as well");
+        check(write(none, "bst.instance.Pie64.cpus=\"4\"\n"),
+              "the fixture without a port is written");
+        check(Adb::instancePort(current, QStringLiteral("Pie64")) == 5565,
+              "the running instance's published port is the one used");
+        check(Adb::instancePort(current, QStringLiteral("Nougat32")) == 5567,
+              "each instance has its own port");
+        check(Adb::instancePort(legacy, QStringLiteral("Pie64")) == 5575,
+              "the older key spelling is understood");
+        check(Adb::instancePort(none, QStringLiteral("Pie64")) == 0,
+              "an instance without a published port is reported as such, never guessed");
+        check(Adb::instancePort(temp.filePath(QStringLiteral("missing.conf")),
+                                QStringLiteral("Pie64")) == 0,
+              "a missing configuration is not an error, just no port");
+        check(Adb::findAdb(temp.filePath(QStringLiteral("HD-Player.exe"))).isEmpty(),
+              "a folder without the player's adb reports no adb instead of inventing one");
+    }
+    {
+        // ---- the undo record survives a round trip, per instance ----
+        Android::Record record;
+        check(Android::isEmpty(record), "a fresh record is empty");
+        record.removed << Android::RemovedApp { QStringLiteral("gg.now.ads.service"),
+                                                QStringLiteral("uninstall"),
+                                                QStringLiteral("Pie64") };
+        record.removed << Android::RemovedApp { QStringLiteral("com.android.egg"),
+                                                QStringLiteral("disable"),
+                                                QStringLiteral("Nougat32") };
+        record.downloads << Android::WipedFolder { QStringLiteral("Pie64"),
+                                                   { QStringLiteral("apps"), QStringLiteral("game.apk") },
+                                                   QStringLiteral("C:/backups/download-1") };
+        record.appData << QStringLiteral("Pie64");
+        check(!Android::isEmpty(record), "a record with work in it is not empty");
+        const auto back = Android::recordFromJson(Android::recordToJson(record));
+        check(back.removed.size() == 2 && back.removed.first().instance == QLatin1String("Pie64")
+                  && back.removed.last().action == QLatin1String("disable"),
+              "each removed app keeps the instance it was removed from");
+        check(back.downloads.size() == 1 && back.downloads.first().entries.size() == 2
+                  && back.downloads.first().entries.first() == QLatin1String("apps"),
+              "what was in the Download folder, and where its copy is, is kept");
+        check(back.downloads.first().backup == QLatin1String("C:/backups/download-1"),
+              "the copy on this PC is part of the record");
+        check(back.appData == (QStringList { QStringLiteral("Pie64") }),
+              "the instances whose app data was cleared are kept");
+        check(Android::isEmpty(Android::recordFromJson(QByteArray("not json"))),
+              "a damaged record reads as empty instead of pretending to have work");
+    }
+}
+
+void checkDebloat()
+{
+    std::printf("[debloat] config values, hosts block and cloud folders\n");
+    {
+        const QByteArray config =
+            "\xEF\xBB\xBF" "bst.enable_programmatic_ads=\"1\"\r\n"
+            "bst.feature.usage_stats=\"true\"\r\n"
+            "bst.instance.Pie64.cpus=\"4\"\r\n"
+            "bst.instance.Pie64.enable_high_fps=\"0\"\r\n"
+            "bst.instance.Pie64.max_fps=\"60\"\r\n"
+            "bst.instance.Pie64.enable_vsync=\"1\"\r\n"
+            "bst.enable_adb_access=\"0\"\r\n"
+            "# a comment the player keeps\r\n"
+            "bst.not_a_switch=raw value\r\n";
+        const auto file = DebloatConfig::File::parse(config);
+        check(file.isValid(), "bluestacks.conf is parsed with its BOM, quotes and CRLF kept");
+        check(file.value(QStringLiteral("bst.enable_programmatic_ads")) == QLatin1String("1"),
+              "a quoted flag reads back without its quotes");
+        check(file.instances() == (QStringList { QStringLiteral("Pie64") }),
+              "the instance names are read from the settings that declare them");
+
+        Debloat::Request request;
+        request.options = { QStringLiteral("ads"), QStringLiteral("telemetry"),
+                            QStringLiteral("downloads") };
+        const auto plan = Debloat::planFor(config, request);
+        check(plan.ok && plan.changes.size() == 2,
+              "only the two declared flags in this fixture change; undeclared keys are skipped");
+        bool skippedMissing = false;
+        for (const auto &entry : plan.skipped)
+            if (entry.startsWith(QLatin1String("bst.enable_boot_banner"))) skippedMissing = true;
+        check(skippedMissing, "a setting this build does not declare is reported, never created");
+
+        QMap<QString, QString> wanted;
+        for (const auto &change : plan.changes) wanted.insert(change.key, change.after);
+        QByteArray edited;
+        QString editError;
+        check(DebloatConfig::File::parse(config).applyEdits(wanted, &edited, &editError),
+              "the planned values are written into the bytes the player owns");
+        check(edited.contains("bst.enable_programmatic_ads=\"0\""),
+              "the ad flag is written as the same quoted zero the player uses");
+        check(edited.contains("bst.feature.usage_stats=\"false\""),
+              "a flag spelled true becomes false, not 0");
+        // Everything the plan did not touch has to survive byte for byte; the
+        // comparison stays in bytes so a text round trip cannot hide a change.
+        QByteArray stripped = edited;
+        stripped.replace("bst.enable_programmatic_ads=\"0\"",
+                         "bst.enable_programmatic_ads=\"1\"");
+        stripped.replace("bst.feature.usage_stats=\"false\"",
+                         "bst.feature.usage_stats=\"true\"");
+        check(stripped == config,
+              "the edited document is the original plus exactly the changed values");
+
+        Debloat::Request tuning;
+        tuning.options = { QStringLiteral("highfps") };
+        tuning.instance = QStringLiteral("Pie64");
+        const auto tuned = Debloat::planFor(config, tuning);
+        bool fps = false, limit = false, vsync = false;
+        for (const auto &change : tuned.changes) {
+            if (change.key == QLatin1String("bst.instance.Pie64.enable_high_fps")) fps = true;
+            if (change.key == QLatin1String("bst.instance.Pie64.max_fps")) limit = true;
+            if (change.key == QLatin1String("bst.instance.Pie64.enable_vsync")) vsync = true;
+        }
+        check(fps && limit && vsync && tuned.changes.size() == 3,
+              "high frame-rate mode writes the instance's own three settings");
+        // It is the player's setting: the binary patch on the FPS page is a
+        // separate edit and must not be implied here.
+        check(!tuned.changes.isEmpty() && !config.contains("max_fps=\"120\""),
+              "no unrelated FPS value is invented");
+    }
+    {
+        // A value the player spells differently is left alone instead of being
+        // forced into a shape it would not understand.
+        const QByteArray odd = "bst.enable_smart_downloads=\"2\"\n";
+        Debloat::Request request;
+        request.options = { QStringLiteral("downloads") };
+        const auto plan = Debloat::planFor(odd, request);
+        check(plan.ok && plan.changes.isEmpty() && plan.skipped.size() == 2,
+              "an unexpected value is reported and left untouched (the feature key is missing)");
+    }
+    {
+        // ---- hosts file ----
+        const QByteArray hosts = "127.0.0.1 localhost\r\n10.0.0.5 internal.example\r\n";
+        QByteArray withBlock, removed;
+        QString error;
+        check(Debloat::hostsEdits(hosts, true, &withBlock, &error),
+              "the ad domains are added to a clean hosts file");
+        check(withBlock.startsWith(hosts),
+              "the existing hosts content is untouched, byte for byte");
+        check(withBlock.contains("0.0.0.0 ads.bluestacks.com")
+                  && withBlock.contains("0.0.0.0 adsdk.bluestacks.com")
+                  && withBlock.contains(Debloat::hostsStartMarker().toUtf8()),
+              "exactly the two BlueStacks ad domains are blocked");
+        check(!withBlock.contains("googleads") && !withBlock.contains("doubleclick"),
+              "no Google or game domain is blocked");
+        QByteArray again;
+        check(Debloat::hostsEdits(withBlock, true, &again, &error) && again == withBlock,
+              "applying the block twice does not stack a second copy");
+        check(Debloat::hostsEdits(withBlock, false, &removed, &error) && removed == hosts,
+              "removing the block restores the original hosts file exactly");
+        QByteArray untouched;
+        check(Debloat::hostsEdits(hosts, false, &untouched, &error) && untouched == hosts,
+              "removing a block that is not there changes nothing");
+        // A half-deleted block is refused, never repaired by guesswork.
+        const QByteArray broken = hosts + Debloat::hostsStartMarker().toUtf8()
+            + "\r\n0.0.0.0 ads.bluestacks.com\r\n";
+        QByteArray out;
+        check(!Debloat::hostsEdits(broken, true, &out, &error),
+              "an incomplete block is refused instead of rewritten");
+        QByteArray utf16;
+        check(!Debloat::hostsEdits(QByteArray("\xff\xfe" "1\x00"), true, &utf16, &error),
+              "a UTF-16 hosts file is refused so its encoding cannot be damaged");
+    }
+    {
+        // ---- cloud companions ----
+        QTemporaryDir temp;
+        check(temp.isValid(), "a temporary folder holds the fake cloud installs");
+        const QString rootA = temp.filePath(QStringLiteral("a"));
+        const QString rootB = temp.filePath(QStringLiteral("b"));
+        QDir().mkpath(rootA + QStringLiteral("/BlueStacks X"));
+        QDir().mkpath(rootB + QStringLiteral("/Programs/bluestacks-services"));
+        QFile x(rootA + QStringLiteral("/BlueStacks X/BlueStacks X.exe"));
+        x.open(QIODevice::WriteOnly);
+        x.write("x");
+        x.close();
+        QFile services(rootB + QStringLiteral("/Programs/bluestacks-services/BlueStacksServices.exe"));
+        services.open(QIODevice::WriteOnly);
+        services.write("s");
+        services.close();
+        const auto found = Debloat::cloudProductsAt({ rootA, rootB });
+        check(found.size() == 2 && !found.first().moved,
+              "both cloud companions are found and reported as installed");
+        // The park name is what makes the move reversible in one rename: no
+        // delete, no registry edit, no change on another volume.
+        const QString parked = Debloat::cloudParkedPath(rootA + QStringLiteral("/BlueStacks X"));
+        check(parked.endsWith(QLatin1String("BlueStacks X.bsi-disabled"))
+                  && QFileInfo(parked).absolutePath() == QDir(rootA).absolutePath(),
+              "a removed companion is parked next to itself, on the same drive");
+        check(QDir().rename(rootA + QStringLiteral("/BlueStacks X"), parked),
+              "parking the folder is a single rename");
+        const auto afterMove = Debloat::cloudProductsAt({ rootA });
+        check(afterMove.size() == 1 && afterMove.first().moved && afterMove.first().id == QLatin1String("x"),
+              "a parked companion is still reported, flagged as moved");
+        check(QDir().rename(parked, rootA + QStringLiteral("/BlueStacks X")),
+              "restore renames the folder back");
+        check(!Debloat::cloudProductsAt({ temp.filePath(QStringLiteral("empty")) }).size(),
+              "a folder without the companion executable is not treated as an install");
+    }
+}
+
+// The hardcode debloater: open a real VHD, read the ext4 inside it, write
+// files and folders into it, delete them again, and prove one Undo puts the
+// image back byte for byte.
+void checkRootDisk()
+{
+    std::printf("[rootdisk] Root.vhd as a file manager\n");
+#ifdef BSI_ROOT_VHD_FIXTURE
+    const QString fixture = QString::fromUtf8(BSI_ROOT_VHD_FIXTURE);
+    check(QFileInfo::exists(fixture), "the Root.vhd fixture is in the tree");
+    if (!QFileInfo::exists(fixture))
+        return;
+
+    QTemporaryDir temp;
+    check(temp.isValid(), "a scratch folder is available for the image");
+    if (!temp.isValid())
+        return;
+    const QString work = temp.filePath(QStringLiteral("Root.vhd"));
+    check(QFile::copy(fixture, work), "the fixture is copied so the tree is never written to");
+    const QByteArray pristine = [&work] {
+        QFile file(work);
+        return file.open(QIODevice::ReadOnly) ? file.readAll() : QByteArray();
+    }();
+    check(pristine.size() > 512, "the working copy really is a disk image");
+
+#ifdef Q_OS_WIN
+    // BlueStacks images may carry the Windows Read-only attribute. Verify the
+    // explicit recovery action clears it and reopens the ext4 volume writable.
+    const QString readOnlyCopy = temp.filePath(QStringLiteral("Root-readonly.vhd"));
+    const bool copiedReadOnly = QFile::copy(fixture, readOnlyCopy);
+    check(copiedReadOnly, "a separate copy is available for the Windows read-only test");
+    if (copiedReadOnly) {
+        const QFileDevice::Permissions originalPermissions = QFile::permissions(readOnlyCopy);
+        const QFileDevice::Permissions readOnlyPermissions =
+            originalPermissions & ~(QFileDevice::WriteOwner | QFileDevice::WriteUser
+                                    | QFileDevice::WriteGroup | QFileDevice::WriteOther);
+        const bool markedReadOnly = QFile::setPermissions(readOnlyCopy, readOnlyPermissions);
+        check(markedReadOnly, "the test image can be marked read-only on Windows");
+        if (markedReadOnly) {
+            const auto beforeEnable = RootVhd::info(readOnlyCopy);
+            check(beforeEnable.value(QStringLiteral("ok")).toBool()
+                      && !beforeEnable.value(QStringLiteral("writable")).toBool(),
+                  "a read-only host file is reported as not writable before user action");
+            const auto enabled = RootVhd::enableWriteAccess(readOnlyCopy);
+            check(enabled.value(QStringLiteral("ok")).toBool(),
+                  "Enable editing clears the Windows read-only attribute when safe");
+            const auto afterEnable = RootVhd::info(readOnlyCopy);
+            const bool writable = afterEnable.value(QStringLiteral("writable")).toBool();
+            check(writable,
+                  "the image reopens as writable after enabling editing");
+            if (writable) {
+                const auto created = RootVhd::makeFolder(readOnlyCopy, QStringLiteral("/"),
+                                                         QStringLiteral("readonly-test"));
+                check(created.value(QStringLiteral("ok")).toBool(),
+                      "a Windows read-only VHD becomes editable after enabling write access");
+                const auto undone = RootVhd::undo(readOnlyCopy);
+                check(undone.value(QStringLiteral("ok")).toBool(),
+                      "the read-only VHD edit can be undone after the host attribute is cleared");
+            }
+        }
+        QFile::setPermissions(readOnlyCopy, originalPermissions | QFileDevice::WriteOwner);
+    }
+#endif
+
+#ifdef BSI_ROOT_VHDX_FIXED_FIXTURE
+    {
+        const QString fixedFixture = QString::fromUtf8(BSI_ROOT_VHDX_FIXED_FIXTURE);
+        const QString fixedWork = temp.filePath(QStringLiteral("Root-fixed-test.vhdx"));
+        const bool copiedFixed = QFile::copy(fixedFixture, fixedWork);
+        check(copiedFixed, "the synthetic fixed-VHDX fixture is copied before testing");
+        if (copiedFixed) {
+            const auto info = RootVhd::info(fixedWork);
+            check(info.value(QStringLiteral("ok")).toBool()
+                      && info.value(QStringLiteral("kind")).toString() == QStringLiteral("fixed VHDX")
+                      && info.value(QStringLiteral("writable")).toBool(),
+                  "the fixed VHDX reader mounts its ext4 volume as writable");
+            std::string fixedError;
+            auto image = RootDisk::openImage(QFile::encodeName(fixedWork).toStdString(),
+                                              &fixedError);
+            std::vector<std::uint8_t> pattern(512, 0x5A), readBack(512);
+            const bool fixedWrite = image && image->kind() == "fixed VHDX"
+                && image->write(1024 * 1024 + 512, pattern.data(), pattern.size())
+                && image->flush()
+                && image->read(1024 * 1024 + 512, readBack.data(), readBack.size())
+                && readBack == pattern;
+            check(fixedWrite, "fixed VHDX payload blocks can be edited in place");
+        }
+    }
+#endif
+
+#ifdef BSI_ROOT_VHDX_FIXTURE
+    {
+        const QString vhdxFixture = QString::fromUtf8(BSI_ROOT_VHDX_FIXTURE);
+        const QString vhdxWork = temp.filePath(QStringLiteral("Root-test.vhdx"));
+        const bool copiedVhdx = QFile::copy(vhdxFixture, vhdxWork);
+        check(copiedVhdx, "the synthetic VHDX fixture is copied before testing");
+        if (copiedVhdx) {
+            // Standard required metadata (including physical sector size and
+            // virtual disk ID) must open; an unknown required GUID must be
+            // refused with its identifier so unsupported formats are visible.
+            const QString unknownMetadata = temp.filePath(QStringLiteral("Root-unknown-metadata.vhdx"));
+            if (QFile::copy(vhdxFixture, unknownMetadata)) {
+                QFile metadataFile(unknownMetadata);
+                if (metadataFile.open(QIODevice::ReadWrite)
+                    && metadataFile.seek(2 * 1024 * 1024 + 32 + 4 * 32)) {
+                    QByteArray guid = metadataFile.read(16);
+                    if (guid.size() == 16) {
+                        guid[0] = char(guid[0] ^ 1);
+                        metadataFile.seek(2 * 1024 * 1024 + 32 + 4 * 32);
+                        metadataFile.write(guid);
+                    }
+                }
+                metadataFile.close();
+                std::string unsupportedError;
+                auto unsupported = RootDisk::openImage(
+                    QFile::encodeName(unknownMetadata).toStdString(), &unsupportedError);
+                check(!unsupported
+                          && unsupportedError.find("unsupported metadata GUID") != std::string::npos,
+                      "unknown required VHDX metadata is refused with its GUID reported");
+            } else {
+                check(false, "a copy is available for the unknown-metadata refusal test");
+            }
+
+            const auto info = RootVhd::info(vhdxWork);
+            check(info.value(QStringLiteral("ok")).toBool()
+                      && info.value(QStringLiteral("kind")).toString() == QStringLiteral("dynamic VHDX")
+                      && info.value(QStringLiteral("writable")).toBool(),
+                  "the VHDX reader mounts its ext4 volume as writable");
+            const auto rootBefore = RootVhd::listing(vhdxWork, QStringLiteral("/"));
+            check(rootBefore.value(QStringLiteral("ok")).toBool(),
+                  "the file manager lists the VHDX ext4 root directory");
+
+            std::string vhdxError;
+            auto image = RootDisk::openImage(QFile::encodeName(vhdxWork).toStdString(), &vhdxError);
+            check(image && image->kind() == "dynamic VHDX"
+                      && image->size() == 4097ull * 1024 * 1024,
+                  "the VHDX wrapper exposes its virtual size and dynamic type");
+            if (image) {
+                std::vector<std::uint8_t> sparse(512, 0xFF);
+                check(image->read(1024 * 1024, sparse.data(), sparse.size())
+                          && std::all_of(sparse.begin(), sparse.end(),
+                                         [](std::uint8_t value) { return value == 0; }),
+                      "unallocated VHDX blocks read as zeroes");
+                std::vector<std::uint8_t> pattern(512);
+                for (std::size_t i = 0; i < pattern.size(); ++i)
+                    pattern[i] = std::uint8_t(i ^ 0xA5);
+                const bool wroteSparse = image->write(1024 * 1024 + 512,
+                                                       pattern.data(), pattern.size())
+                    && image->flush();
+                check(wroteSparse, "writing into a sparse VHDX block allocates and stores it");
+                const std::uint64_t afterFirstChunk = 4096ull * 1024 * 1024 + 64;
+                std::vector<std::uint8_t> chunkPattern(512, 0x37);
+                const bool wroteAfterChunk = image->write(afterFirstChunk,
+                                                           chunkPattern.data(),
+                                                           chunkPattern.size())
+                    && image->flush();
+                check(wroteAfterChunk,
+                      "VHDX BAT chunk interleaving is followed across a bitmap boundary");
+                image.reset();
+                auto reopened = RootDisk::openImage(QFile::encodeName(vhdxWork).toStdString(),
+                                                    &vhdxError);
+                std::vector<std::uint8_t> readBack(pattern.size()), chunkReadBack(chunkPattern.size());
+                check(reopened && reopened->read(1024 * 1024 + 512,
+                                                  readBack.data(), readBack.size())
+                          && readBack == pattern,
+                      "the allocated VHDX block persists after closing and reopening");
+                check(reopened && reopened->read(afterFirstChunk, chunkReadBack.data(),
+                                                  chunkReadBack.size())
+                          && chunkReadBack == chunkPattern,
+                      "the payload after a VHDX BAT chunk boundary persists on reopen");
+                reopened.reset();
+            }
+
+#ifdef Q_OS_WIN
+            // Exercise the exact recovery path on a VHDX, including a Unicode
+            // filename: the Windows probe and the engine's read/write handle
+            // must resolve to the same file before an edit is allowed.
+            const QString unicodeReadOnlyVhdx = temp.filePath(QStringLiteral("Root-\u8def\u5f84.vhdx"));
+            const bool copiedReadOnlyVhdx = QFile::copy(vhdxFixture, unicodeReadOnlyVhdx);
+            check(copiedReadOnlyVhdx,
+                  "a separate Unicode-named VHDX copy is available for the Windows read-only test");
+            if (copiedReadOnlyVhdx) {
+                const QFileDevice::Permissions originalVhdxPermissions =
+                    QFile::permissions(unicodeReadOnlyVhdx);
+                const QFileDevice::Permissions readOnlyVhdxPermissions =
+                    originalVhdxPermissions & ~(QFileDevice::WriteOwner | QFileDevice::WriteUser
+                                                | QFileDevice::WriteGroup | QFileDevice::WriteOther);
+                const bool markedVhdxReadOnly =
+                    QFile::setPermissions(unicodeReadOnlyVhdx, readOnlyVhdxPermissions);
+                check(markedVhdxReadOnly, "the VHDX test copy can be marked read-only on Windows");
+                if (markedVhdxReadOnly) {
+                    const auto beforeVhdxEnable = RootVhd::info(unicodeReadOnlyVhdx);
+                    check(beforeVhdxEnable.value(QStringLiteral("ok")).toBool()
+                              && !beforeVhdxEnable.value(QStringLiteral("writable")).toBool(),
+                          "a read-only VHDX is reported as not writable before user action");
+                    const auto enableVhdx = RootVhd::enableWriteAccess(unicodeReadOnlyVhdx);
+                    check(enableVhdx.value(QStringLiteral("ok")).toBool(),
+                          "Enable editing clears the Windows Read-only attribute on a VHDX");
+                    const auto afterVhdxEnable = RootVhd::info(unicodeReadOnlyVhdx);
+                    const bool vhdxWritable = afterVhdxEnable.value(QStringLiteral("writable")).toBool();
+                    check(vhdxWritable,
+                          "a Unicode-named VHDX reopens writable after enabling editing");
+                    if (vhdxWritable) {
+                        std::string directWriteError;
+                        auto directWriteImage = RootDisk::openImage(
+                            QDir::toNativeSeparators(unicodeReadOnlyVhdx).toStdWString(),
+                            &directWriteError);
+                        std::vector<std::uint8_t> sectorBefore(512), sectorAfter(512);
+                        const bool readBefore = directWriteImage
+                            && directWriteImage->read(0, sectorBefore.data(), sectorBefore.size());
+                        const bool directWrite = readBefore
+                            && directWriteImage->write(0, sectorBefore.data(), sectorBefore.size())
+                            && directWriteImage->flush()
+                            && directWriteImage->read(0, sectorAfter.data(), sectorAfter.size())
+                            && sectorBefore == sectorAfter;
+                        check(directWrite,
+                              QStringLiteral("the writable VHDX accepts a direct sector write: %1")
+                                  .arg(QString::fromStdString(directWriteError)));
+                        directWriteImage.reset();
+                        const auto created = RootVhd::makeFolder(unicodeReadOnlyVhdx,
+                                                                  QStringLiteral("/"),
+                                                                  QStringLiteral("readonly-vhdx-test"));
+                        check(created.value(QStringLiteral("ok")).toBool(),
+                              QStringLiteral("the read-only VHDX accepts an actual folder edit after enabling access: %1")
+                                  .arg(created.value(QStringLiteral("msg")).toString()));
+                        const auto undone = RootVhd::undo(unicodeReadOnlyVhdx);
+                        check(undone.value(QStringLiteral("ok")).toBool(),
+                              QStringLiteral("the VHDX edit can be undone after clearing the host Read-only attribute: %1")
+                                  .arg(undone.value(QStringLiteral("msg")).toString()));
+                    }
+                }
+                QFile::setPermissions(unicodeReadOnlyVhdx, originalVhdxPermissions);
+            }
+#endif
+
+            const QString localFile = temp.filePath(QStringLiteral("vhdx-added.txt"));
+            {
+                QFile file(localFile);
+                file.open(QIODevice::WriteOnly);
+                file.write("VHDX journal write\n");
+            }
+            const auto added = RootVhd::addFile(vhdxWork, QStringLiteral("/"), localFile);
+            check(added.value(QStringLiteral("ok")).toBool(),
+                  "the journalled file manager writes a file into VHDX ext4");
+            const auto rootAfterAdd = RootVhd::listing(vhdxWork, QStringLiteral("/"));
+            bool foundAdded = false;
+            for (const QVariant &entry : rootAfterAdd.value(QStringLiteral("entries")).toList())
+                foundAdded = foundAdded
+                    || entry.toMap().value(QStringLiteral("name")).toString()
+                           == QStringLiteral("vhdx-added.txt");
+            check(foundAdded, "the VHDX file manager can read back the newly added file");
+            const auto undone = RootVhd::undo(vhdxWork);
+            check(undone.value(QStringLiteral("ok")).toBool(),
+                  "journalled VHDX edits can be undone");
+            const auto rootAfterUndo = RootVhd::listing(vhdxWork, QStringLiteral("/"));
+            bool stillFoundAdded = false;
+            for (const QVariant &entry : rootAfterUndo.value(QStringLiteral("entries")).toList())
+                stillFoundAdded = stillFoundAdded
+                    || entry.toMap().value(QStringLiteral("name")).toString()
+                           == QStringLiteral("vhdx-added.txt");
+            check(!stillFoundAdded, "undo removes the added file from the VHDX filesystem");
+        }
+    }
+#endif
+
+#ifdef BSI_ROOT_7Z_FIXTURE
+    // Opening a plain archive and a synthetic SFX both exercises the bundled
+    // decoder: no WinRAR/7-Zip installation is part of the test machine.
+    const auto extractedArchive = SevenZipArchive::extractRootVhd(
+        QString::fromUtf8(BSI_ROOT_7Z_FIXTURE), temp.filePath(QStringLiteral("archive-cache")));
+    check(extractedArchive.value(QStringLiteral("ok")).toBool(),
+          "the built-in decoder extracts Root.vhd from a plain 7z package");
+    if (extractedArchive.value(QStringLiteral("ok")).toBool())
+        check(read(extractedArchive.value(QStringLiteral("path")).toString()) == pristine,
+              "the plain-archive Root.vhd is byte-identical to the source fixture");
+
+    QFile archiveFixture(QString::fromUtf8(BSI_ROOT_7Z_FIXTURE));
+    QByteArray archiveBytes;
+    if (archiveFixture.open(QIODevice::ReadOnly)) archiveBytes = archiveFixture.readAll();
+    const QString sfxPath = temp.filePath(QStringLiteral("engine-package.exe"));
+    check(write(sfxPath, QByteArray("MZ synthetic SFX stub\r\n") + archiveBytes),
+          "write a synthetic engine self-extractor around the 7z fixture");
+    const auto extractedSfx = SevenZipArchive::extractRootVhd(
+        sfxPath, temp.filePath(QStringLiteral("sfx-cache")));
+    check(extractedSfx.value(QStringLiteral("ok")).toBool(),
+          "the built-in decoder finds and extracts Root.vhd inside an EXE");
+    if (extractedSfx.value(QStringLiteral("ok")).toBool())
+        check(read(extractedSfx.value(QStringLiteral("path")).toString()) == pristine,
+              "the SFX Root.vhd is byte-identical to the source fixture");
+#endif
+
+    // Some engine images are GPT-partitioned rather than raw ext4 or MBR. Put
+    // the fixture behind a minimal GPT partition and verify mount locates it.
+    {
+        constexpr int partitionOffset = 1024 * 1024;
+        constexpr int filesystemBytes = 256 * 1024;
+        QByteArray gpt(partitionOffset + filesystemBytes, '\0');
+        gpt.replace(partitionOffset, filesystemBytes, pristine.left(filesystemBytes));
+        auto put32 = [&gpt](int at, quint32 value) {
+            for (int i = 0; i < 4; ++i) gpt[at + i] = char((value >> (8 * i)) & 0xff);
+        };
+        auto put64 = [&gpt](int at, quint64 value) {
+            for (int i = 0; i < 8; ++i) gpt[at + i] = char((value >> (8 * i)) & 0xff);
+        };
+        gpt[510] = char(0x55); gpt[511] = char(0xaa);
+        gpt[446 + 4] = char(0xee);
+        put32(446 + 8, 1);
+        gpt.replace(512, 8, QByteArray("EFI PART", 8));
+        put32(512 + 8, 0x00010000);
+        put32(512 + 12, 92);
+        put64(512 + 24, 1);
+        put64(512 + 32, quint64(gpt.size() / 512) - 1);
+        put64(512 + 40, 34);
+        put64(512 + 48, quint64(gpt.size() / 512) - 34);
+        put64(512 + 72, 2);
+        put32(512 + 80, 128);
+        put32(512 + 84, 128);
+        // A non-zero partition type GUID and the starting/ending LBAs.
+        gpt[1024] = char(0x28);
+        put64(1024 + 32, partitionOffset / 512);
+        put64(1024 + 40, (partitionOffset + filesystemBytes) / 512 - 1);
+        gpt[510] = char(0x55); gpt[511] = char(0xaa);
+        const QString gptPath = temp.filePath(QStringLiteral("gpt-root.img"));
+        check(write(gptPath, gpt), "write a synthetic GPT-partitioned image");
+        std::string gptError;
+        auto gptImage = RootDisk::openImage(QFile::encodeName(gptPath).toStdString(), &gptError);
+        auto gptVolume = RootDisk::Volume::mount(std::move(gptImage), &gptError);
+        check(gptVolume != nullptr, "ext4 mounts from a GPT partition");
+        if (gptVolume)
+            check(gptVolume->list("/", &gptError).inode != 0,
+                  "the filesystem inside the GPT partition can be browsed");
+
+        // Also cover vendor images whose ext4 starts at a sector-aligned
+        // offset but whose partition map is absent or unusable.
+        QByteArray unlabelled(partitionOffset + filesystemBytes, '\0');
+        unlabelled.replace(partitionOffset, filesystemBytes, pristine.left(filesystemBytes));
+        const QString unlabelledPath = temp.filePath(QStringLiteral("offset-root.img"));
+        check(write(unlabelledPath, unlabelled), "write an ext4 image with no partition map");
+        std::string offsetError;
+        auto offsetImage = RootDisk::openImage(QFile::encodeName(unlabelledPath).toStdString(),
+                                               &offsetError);
+        auto offsetVolume = RootDisk::Volume::mount(std::move(offsetImage), &offsetError);
+        check(offsetVolume != nullptr, "the bounded signature scan finds an unlabelled ext4 volume");
+        if (offsetVolume)
+            check(offsetVolume->list("/", &offsetError).inode != 0,
+                  "the unlabelled ext4 volume can be browsed");
+    }
+
+    // ---- the engine ----
+    {
+        std::string error;
+        auto image = RootDisk::openImage(QFile::encodeName(work).toStdString(), &error);
+        check(image != nullptr, "the VHD opens");
+        if (image) {
+            check(image->kind() == "fixed VHD",
+                  "the footer is recognised as a fixed (not dynamic) disk");
+            auto volume = RootDisk::Volume::mount(std::move(image), &error);
+            check(volume != nullptr, "the ext4 inside the VHD mounts");
+            if (volume) {
+                check(volume->writable(), "a clean filesystem is writable");
+                check(volume->blockSize() == 1024, "the 1 KiB block size is read from the superblock");
+
+                const RootDisk::Listing root = volume->list("/", &error);
+                bool hasHello = false;
+                for (const auto &entry : root.entries)
+                    if (entry.name == "hello.txt") hasHello = true;
+                check(root.inode != 0 && hasHello, "the root folder lists the file that is in it");
+                check(root.inode != 0 && root.entries.size() >= 2,
+                      "the root folder lists more than one entry");
+
+                const std::uint32_t file = volume->resolve("/hello.txt", &error);
+                check(file != 0, "/hello.txt resolves to an inode");
+                const auto data = volume->readFile(file, &error);
+                check(std::string(data.begin(), data.end()) == "hello world\n",
+                      "the file reads back with its bytes intact");
+            }
+        }
+    }
+
+    // ---- symbolic links (fast inline and extent-backed) ----
+    {
+        const QString symlinkImage = temp.filePath(QStringLiteral("symlink.vhd"));
+        check(QFile::copy(fixture, symlinkImage), "a copy of the ext4 fixture is made for symlink tests");
+        const std::vector<std::uint8_t> shortTarget { 's', 'y', 's', '/', 'b', 'i', 'n' };
+        std::string error;
+        auto image = RootDisk::openImage(QFile::encodeName(symlinkImage).toStdString(), &error);
+        auto volume = image ? RootDisk::Volume::mount(std::move(image), &error) : nullptr;
+        check(volume != nullptr, "the symlink test image mounts");
+        if (volume) {
+            const auto root = volume->resolve("/", &error);
+            check(volume->putSymlink(root, "fast-link", shortTarget, &error),
+                  "a short symbolic link is created inline");
+            const auto fastInode = volume->resolve("/fast-link", &error);
+            const auto fastStat = volume->stat(fastInode, &error);
+            check(fastStat.symlink() && volume->readFile(fastInode, &error) == shortTarget,
+                  "reading a short symbolic link returns its target, not block pointers");
+
+            const QByteArray longTarget(100, 'x');
+            const std::vector<std::uint8_t> longBytes(longTarget.begin(), longTarget.end());
+            check(volume->putSymlink(root, "long-link", longBytes, &error),
+                  "a long symbolic link is stored using extents");
+            const auto longInode = volume->resolve("/long-link", &error);
+            check(volume->stat(longInode, &error).symlink()
+                      && volume->readFile(longInode, &error) == longBytes,
+                  "an extent-backed symbolic link returns its full target");
+            check(volume->makeDir(root, "links-copy", 0755, &error),
+                  "a destination folder is created for symbolic-link copy tests");
+        }
+        const auto copiedLink = RootVhd::copy(symlinkImage, QStringLiteral("/fast-link"),
+                                               QStringLiteral("/links-copy"));
+        check(copiedLink.value(QStringLiteral("ok")).toBool(),
+              "symbolic links can be copied without dereferencing their target");
+        const QString linkTargetFile = temp.filePath(QStringLiteral("link-target.txt"));
+        const auto linkExtract = RootVhd::extract(symlinkImage,
+                                                  QStringLiteral("/links-copy/fast-link"),
+                                                  linkTargetFile);
+        QFile linkTarget(linkTargetFile);
+        linkTarget.open(QIODevice::ReadOnly);
+        check(linkExtract.value(QStringLiteral("ok")).toBool()
+                  && linkTarget.readAll() == QByteArray("sys/bin"),
+              "saving a symbolic link writes its target text");
+    }
+
+    // ---- the file manager: add, list, delete ----
+    int originalEntries = 0;                  // the root folder as the image shipped it
+    {
+        const auto info = RootVhd::info(work);
+        check(info.value(QStringLiteral("ok")).toBool(), "RootVhd::info opens the image");
+        check(info.value(QStringLiteral("writable")).toBool(), "RootVhd reports it writable");
+
+        const auto before = RootVhd::listing(work, QStringLiteral("/"));
+        check(before.value(QStringLiteral("ok")).toBool(), "the root folder is listed");
+        const int entries = before.value(QStringLiteral("entries")).toList().size();
+        originalEntries = entries;
+        check(entries >= 2, "the listing carries the folder's entries");
+
+        const QString added = temp.filePath(QStringLiteral("added.txt"));
+        {
+            QFile file(added);
+            file.open(QIODevice::WriteOnly);
+            file.write("added by the regression test\n");
+        }
+        const auto add = RootVhd::addFile(work, QStringLiteral("/"), added);
+        check(add.value(QStringLiteral("ok")).toBool(), "a local file is written into the image");
+        const auto afterAdd = RootVhd::listing(work, QStringLiteral("/"));
+        check(afterAdd.value(QStringLiteral("entries")).toList().size() == entries + 1,
+              "the folder lists one entry more");
+        check(RootVhd::hasUndo(work), "the write left an undo record behind");
+        const auto duplicate = RootVhd::addFile(work, QStringLiteral("/"), added);
+        check(!duplicate.value(QStringLiteral("ok")).toBool()
+                  && duplicate.value(QStringLiteral("msg")).toString().contains(QLatin1String("Replace")),
+              "Add refuses an existing name and directs the user to Replace");
+
+        const auto renamed = RootVhd::rename(work, QStringLiteral("/added.txt"),
+                                              QStringLiteral("renamed.txt"));
+        check(renamed.value(QStringLiteral("ok")).toBool(),
+              "a file can be renamed without changing its contents");
+        const auto collision = RootVhd::rename(work, QStringLiteral("/renamed.txt"),
+                                                QStringLiteral("hello.txt"));
+        check(!collision.value(QStringLiteral("ok")).toBool(),
+              "rename refuses to overwrite an existing entry");
+
+        const QString replacementPath = temp.filePath(QStringLiteral("replacement.bin"));
+        const QByteArray replacementBytes("new bytes replace the old contents\n");
+        {
+            QFile replacement(replacementPath);
+            replacement.open(QIODevice::WriteOnly);
+            replacement.write(replacementBytes);
+        }
+        const auto replaced = RootVhd::replaceFile(work, QStringLiteral("/renamed.txt"),
+                                                   replacementPath);
+        check(replaced.value(QStringLiteral("ok")).toBool(),
+              "an existing image file can be replaced from a differently named local file");
+
+        const QString out = temp.filePath(QStringLiteral("out.txt"));
+        const auto extract = RootVhd::extract(work, QStringLiteral("/renamed.txt"), out);
+        check(extract.value(QStringLiteral("ok")).toBool(), "the replacement can be extracted");
+        {
+            QFile file(out);
+            file.open(QIODevice::ReadOnly);
+            check(file.readAll() == replacementBytes,
+                  "Replace keeps the image path and writes the selected local file's bytes");
+        }
+
+        const auto mkdir = RootVhd::makeFolder(work, QStringLiteral("/"), QStringLiteral("debloat"));
+        check(mkdir.value(QStringLiteral("ok")).toBool(), "a folder is created in the image");
+
+        // Adding at the image root builds "/name", not "//name": cleanPath keeps
+        // a double leading slash on Windows, and the path then does not resolve.
+        const QString treeRoot = temp.filePath(QStringLiteral("tree"));
+        QDir().mkpath(treeRoot + QStringLiteral("/nested"));
+        {
+            QFile file(treeRoot + QStringLiteral("/nested/leaf.txt"));
+            file.open(QIODevice::WriteOnly);
+            file.write("a leaf\n");
+            QFile top(treeRoot + QStringLiteral("/top.txt"));
+            top.open(QIODevice::WriteOnly);
+            top.write("top\n");
+        }
+        const auto addTree = RootVhd::addFolder(work, QStringLiteral("/"), treeRoot);
+        check(addTree.value(QStringLiteral("ok")).toBool(),
+              "a folder tree is added at the image root");
+        const auto nested = RootVhd::listing(work, QStringLiteral("/tree/nested"));
+        check(nested.value(QStringLiteral("ok")).toBool()
+                  && nested.value(QStringLiteral("entries")).toList().size() == 1,
+              "the tree keeps its structure, sub-folder included");
+        const auto moveTree = RootVhd::move(work, QStringLiteral("/tree"),
+                                            QStringLiteral("/debloat"));
+        check(moveTree.value(QStringLiteral("ok")).toBool()
+                  && RootVhd::listing(work, QStringLiteral("/debloat/tree/nested"))
+                         .value(QStringLiteral("ok")).toBool(),
+              "a folder tree can be moved within the image without losing its children");
+        const auto cycleMove = RootVhd::move(work, QStringLiteral("/debloat/tree"),
+                                             QStringLiteral("/debloat/tree/nested"));
+        check(!cycleMove.value(QStringLiteral("ok")).toBool(),
+              "a folder cannot be moved into one of its own descendants");
+        const auto moveTreeBack = RootVhd::move(work, QStringLiteral("/debloat/tree"),
+                                                QStringLiteral("/"));
+        check(moveTreeBack.value(QStringLiteral("ok")).toBool()
+                  && RootVhd::listing(work, QStringLiteral("/tree/nested"))
+                         .value(QStringLiteral("ok")).toBool(),
+              "a moved folder can be moved back to its original parent");
+        const auto copyTree = RootVhd::copy(work, QStringLiteral("/tree"),
+                                            QStringLiteral("/debloat"));
+        const auto copiedNested = RootVhd::listing(work, QStringLiteral("/debloat/tree/nested"));
+        check(copyTree.value(QStringLiteral("ok")).toBool()
+                  && copiedNested.value(QStringLiteral("ok")).toBool(),
+              "a folder tree can be copied within the image");
+        const QVariantMap sourceLeafInfo = RootVhd::listing(work, QStringLiteral("/tree/nested"))
+                                               .value(QStringLiteral("entries")).toList().value(0).toMap();
+        const QVariantMap copiedLeafInfo = copiedNested.value(QStringLiteral("entries"))
+                                               .toList().value(0).toMap();
+        check(copiedLeafInfo.value(QStringLiteral("mode")) == sourceLeafInfo.value(QStringLiteral("mode"))
+                  && copiedLeafInfo.value(QStringLiteral("uid")) == sourceLeafInfo.value(QStringLiteral("uid"))
+                  && copiedLeafInfo.value(QStringLiteral("gid")) == sourceLeafInfo.value(QStringLiteral("gid"))
+                  && copiedLeafInfo.value(QStringLiteral("mtime")) == sourceLeafInfo.value(QStringLiteral("mtime")),
+              "a folder copy retains file permissions, owner, group, and modification time");
+        const QString copiedLeaf = temp.filePath(QStringLiteral("copied-leaf.txt"));
+        const auto copyExtract = RootVhd::extract(work, QStringLiteral("/debloat/tree/nested/leaf.txt"),
+                                                  copiedLeaf);
+        QFile copiedLeafFile(copiedLeaf);
+        copiedLeafFile.open(QIODevice::ReadOnly);
+        check(copyExtract.value(QStringLiteral("ok")).toBool()
+                  && copiedLeafFile.readAll() == QByteArray("a leaf\n"),
+              "a copied tree contains the original file bytes");
+        const auto removeCopiedTree = RootVhd::remove(work, QStringLiteral("/debloat/tree"));
+        check(removeCopiedTree.value(QStringLiteral("ok")).toBool(),
+              "the copied folder tree can be removed recursively");
+        const auto copyRenamedFile = RootVhd::copy(work, QStringLiteral("/renamed.txt"),
+                                                   QStringLiteral("/debloat"),
+                                                   QStringLiteral("renamed-copy.txt"));
+        const QString copiedFilePath = temp.filePath(QStringLiteral("renamed-copy.txt"));
+        const auto copyFileExtract = RootVhd::extract(work,
+                                                      QStringLiteral("/debloat/renamed-copy.txt"),
+                                                      copiedFilePath);
+        QFile copiedFile(copiedFilePath);
+        copiedFile.open(QIODevice::ReadOnly);
+        check(copyRenamedFile.value(QStringLiteral("ok")).toBool()
+                  && copyFileExtract.value(QStringLiteral("ok")).toBool()
+                  && copiedFile.readAll() == replacementBytes,
+              "a file can be copied under a new name with its bytes intact");
+        check(RootVhd::remove(work, QStringLiteral("/debloat/renamed-copy.txt"))
+                  .value(QStringLiteral("ok")).toBool(),
+              "the copied file can be removed independently");
+
+        // A file and a folder are both accepted by one addPath call.
+        const QString pathFile = temp.filePath(QStringLiteral("path-added.txt"));
+        {
+            QFile file(pathFile);
+            file.open(QIODevice::WriteOnly);
+            file.write("added through addPath\\n");
+        }
+        const auto addPathFile = RootVhd::addPath(work, QStringLiteral("/"), pathFile);
+        check(addPathFile.value(QStringLiteral("ok")).toBool(), "addPath takes a file");
+        const auto addPathDir = RootVhd::addPath(work, QStringLiteral("/debloat"), treeRoot);
+        check(addPathDir.value(QStringLiteral("ok")).toBool(), "addPath takes a folder");
+
+        // Search walks the whole image, not just the open folder.
+        const auto search = RootVhd::search(work, QStringLiteral("leaf"));
+        bool foundLeaf = false;
+        for (const auto &value : search.value(QStringLiteral("entries")).toList()) {
+            const QString path = value.toMap().value(QStringLiteral("path")).toString();
+            if (path == QLatin1String("/tree/nested/leaf.txt")) foundLeaf = true;
+        }
+        check(search.value(QStringLiteral("ok")).toBool() && foundLeaf,
+              "search finds a file by name anywhere in the image");
+        const auto removeTree = RootVhd::remove(work, QStringLiteral("/tree"));
+        check(removeTree.value(QStringLiteral("ok")).toBool()
+                  && !RootVhd::listing(work, QStringLiteral("/tree")).value(QStringLiteral("ok")).toBool(),
+              "deleting a folder removes its nested files and subfolders");
+        const auto noMatch = RootVhd::search(work, QStringLiteral("zzz-nothing-zzz"));
+        check(noMatch.value(QStringLiteral("ok")).toBool()
+                  && noMatch.value(QStringLiteral("entries")).toList().isEmpty(),
+              "a search with no match says so instead of failing");
+        const auto inside = RootVhd::listing(work, QStringLiteral("/debloat"));
+        bool hasCopiedTree = false;
+        for (const auto &value : inside.value(QStringLiteral("entries")).toList())
+            if (value.toMap().value(QStringLiteral("name")).toString() == QLatin1String("tree"))
+                hasCopiedTree = true;
+        check(inside.value(QStringLiteral("ok")).toBool() && hasCopiedTree,
+              "the folder added by addPath is in the folder it was told to go to");
+
+        const int beforeRemove =
+            RootVhd::listing(work, QStringLiteral("/")).value(QStringLiteral("entries")).toList().size();
+        const auto remove = RootVhd::remove(work, QStringLiteral("/renamed.txt"));
+        check(remove.value(QStringLiteral("ok")).toBool(), "a file is removed from the image");
+        check(RootVhd::listing(work, QStringLiteral("/")).value(QStringLiteral("entries")).toList().size()
+                  == beforeRemove - 1,
+              "the folder lists one entry fewer after the delete");
+        const auto removePathFile = RootVhd::remove(work, QStringLiteral("/path-added.txt"));
+        check(removePathFile.value(QStringLiteral("ok")).toBool(),
+              "a file added through addPath can be deleted");
+        const auto refused = RootVhd::remove(work, QStringLiteral("/not-there.txt"));
+        check(!refused.value(QStringLiteral("ok")).toBool(),
+              "removing something that is not there is refused, not guessed at");
+    }
+
+    // ---- undo ----
+    {
+        check(RootVhd::hasUndo(work), "the image still has an undo record");
+        const auto undone = RootVhd::undo(work);
+        check(undone.value(QStringLiteral("ok")).toBool(), "undo runs");
+        QFile file(work);
+        file.open(QIODevice::ReadOnly);
+        const QByteArray restored = file.readAll();
+        file.close();
+        check(restored == pristine, "undo restores the image byte for byte");
+        check(!RootVhd::hasUndo(work), "the undo record is gone once it has been replayed");
+        const auto reopened = RootVhd::listing(work, QStringLiteral("/"));
+        check(reopened.value(QStringLiteral("ok")).toBool()
+                  && reopened.value(QStringLiteral("entries")).toList().size() == originalEntries,
+              "the restored image opens again and holds its original entries");
+        // The folder added at the root and everything below it are gone again:
+        // the inode table, the bitmaps and the group counts all went back.
+        const auto gone = RootVhd::listing(work, QStringLiteral("/tree"));
+        check(!gone.value(QStringLiteral("ok")).toBool(),
+              "the folder tree added during the test is gone after the undo");
+        const auto goneFile = RootVhd::listing(work, QStringLiteral("/debloat"));
+        check(!goneFile.value(QStringLiteral("ok")).toBool(),
+              "the folder created during the test is gone after the undo");
+    }
+
+    // ---- refusals ----
+    {
+        const auto missing = RootVhd::info(temp.filePath(QStringLiteral("nope.vhd")));
+        check(!missing.value(QStringLiteral("ok")).toBool(), "a missing image is refused");
+        const QString junk = temp.filePath(QStringLiteral("junk.vhd"));
+        {
+            QFile file(junk);
+            file.open(QIODevice::WriteOnly);
+            file.write(QByteArray(4096, 'x'));
+        }
+        const auto bad = RootVhd::info(junk);
+        check(!bad.value(QStringLiteral("ok")).toBool(), "a file with no ext4 in it is refused");
+        check(RootVhd::findImage(QString()).isEmpty(), "no installation means no engine folder guess");
+    }
+#else
+    check(true, "no Root.vhd fixture in this checkout; the file manager is not exercised");
+#endif
 }
 
 int runPatchRegressionTests()
@@ -2228,6 +3226,12 @@ int runPatchRegressionTests()
             "        UiImageButton {\r\n"
             "            id: iBackBtn\r\n"
             "        }\r\n"
+            "        UiImageButton {\r\n"
+            "            id: iHomeBtn\r\n"
+            "        }\r\n"
+            "        UiImageButton {\r\n"
+            "            id: iRecentBtn\r\n"
+            "        }\r\n"
             "    }\r\n"
             "}\r\n");
         // Current player: the sidebar is a sibling of the title bar inside the
@@ -2381,9 +3385,12 @@ int runPatchRegressionTests()
         check(QmlText::objects(QmlText::mask(patchedPlr), QStringLiteral("PlrSidebar")).size() == 1
                   && patchedPlr.contains(QStringLiteral("iSidebar.parent = iSidebarTitlebar")),
               "one original sidebar owns the controls, backend connections and animations");
-        check(patchedPlr.contains(QStringLiteral("anchors.leftMargin: Math.min(144, parent.width / 4)"))
-                  && patchedPlr.contains(QStringLiteral("anchors.rightMargin: Math.min(144, parent.width / 4)")),
-              "the moved row reserves space for title-bar controls instead of covering them");
+        check(patchedPlr.contains(
+                  QStringLiteral("anchors.leftMargin: Math.min(144, parent.width / 4)"))
+                  && patchedPlr.contains(
+                      QStringLiteral("anchors.rightMargin: Math.min(144, parent.width / 4)"))
+                  && !patchedPlr.contains(QLatin1String("pBSISidebarX")),
+              "the moved row keeps the same margins on both sides, so it stays in the middle");
 
         // Execute the actual injected mount QML, not a reimplementation. The
         // original sidebar is deliberately declared AFTER its host, as in plr.
@@ -2434,8 +3441,9 @@ int runPatchRegressionTests()
         const auto patchedSidebar = resourceText(read(path), r, QStringLiteral("PlrSidebar.qml"));
         check(patchedSidebar.contains(QLatin1String("UiRowLayout"))
                   && !patchedSidebar.contains(QLatin1String("UiColumnLayout"))
-                  && patchedSidebar.contains(QLatin1String("anchors.centerIn: parent")),
-              "the button column becomes a row centered inside the title bar");
+                  && patchedSidebar.contains(QLatin1String("anchors.centerIn: parent"))
+                  && !patchedSidebar.contains(QLatin1String("anchors.fill: parent")),
+              "the button column becomes a row centred in the title bar, as it was before");
         check(patchedSidebar.contains(QLatin1String("visible: iSidebar.width > 0")),
               "the zero-width original hides its row instead of painting outside the strip");
         check(patchedSidebar.contains(QLatin1String("onWidthChanged"))
@@ -2512,7 +3520,7 @@ Window {
         }
         Rectangle { id: iKebabMenuBtn; objectName: "threeDots"; x: iSidebar.pVisibleSidebarElementsCount * 32; width: 32; height: 32 }
         Rectangle { id: iCollapseBtn; visible: false; width: 32; height: 32 }
-        Rectangle { id: iSettingsBtn; width: 32; height: 32 }
+        Rectangle { id: iSettingsBtn; objectName: "settingsGear"; width: 32; height: 32 }
         Rectangle { id: iBackBtn; width: 32; height: 32 }
         Rectangle { id: iHomeBtn; width: 32; height: 32 }
         Rectangle { id: iRecentBtn; width: 32; height: 32 }
@@ -2604,6 +3612,24 @@ Window {
                     QCoreApplication::processEvents();
                     check(!dots->isVisible() && sound->isVisible(),
                           "resizing larger restores every fitting button and hides the three dots again");
+                    // The order editor untick writes the row's hidden list.
+                    // The player's own fResetSidebar switches the Settings
+                    // gear back on line by line, so a helper that assigns
+                    // visibility without reading that list undoes the hide -
+                    // the row then carried the strip's gear *and* the model
+                    // entry the move adds, i.e. two Settings buttons.
+                    auto *gear = window->findChild<QQuickItem *>(QStringLiteral("settingsGear"));
+                    bar->setProperty("pBSIHiddenButtons", QStringLiteral("|iSettingsBtn|"));
+                    QMetaObject::invokeMethod(bar, "fBSIUpdateOverflow");
+                    QCoreApplication::processEvents();
+                    check(gear && !gear->isVisible() && !dots->isVisible()
+                              && bar->property("pVisibleSidebarElementsCount").toInt() == 6,
+                          "a button unticked in the order editor stays off when the row recomputes");
+                    bar->setProperty("pBSIHiddenButtons", QString());
+                    QMetaObject::invokeMethod(bar, "fBSIUpdateOverflow");
+                    QCoreApplication::processEvents();
+                    check(gear && gear->isVisible() && !dots->isVisible(),
+                          "clearing the hidden list brings that button back with the row");
                 } else check(false, "the responsive QML exposes its panel, buttons and three-dot menu");
             }
         }
@@ -2613,12 +3639,18 @@ Window {
               "the show-sidebar button is disabled without touching the toggled Back entry");
         check(patchedTopbar.count(QStringLiteral("pVisible: false")) == 3
                   && patchedTopbar.count(QStringLiteral("pVisible: true")) == 0,
-              "the duplicated Back/Home/Recent entries leave the title bar");
+              "the title bar's own Back/Home/Recent step aside so the moved row is the only copy");
         // An older responsive helper was shipped before the fixed-button
         // model relationship and unmodelled Discord were accounted for. The
         // version marker upgrades it in place without changing the ownership
         // of an independently selected stock-sidebar option.
         const auto olderResponsive = [](QString qml) {
+            qml.replace(QStringLiteral("// BSI CUSTOMIZER: responsive sidebar begin [titlebar] [v3]"),
+                        QStringLiteral("// BSI CUSTOMIZER: responsive sidebar begin [titlebar]"));
+            qml.replace(QStringLiteral("// BSI CUSTOMIZER: responsive sidebar begin [v3]"),
+                        QStringLiteral("// BSI CUSTOMIZER: responsive sidebar begin"));
+            // The release before this one wrote the marker without the hidden
+            // list; both shapes are older helpers that must upgrade in place.
             qml.replace(QStringLiteral("// BSI CUSTOMIZER: responsive sidebar begin [titlebar] [v2]"),
                         QStringLiteral("// BSI CUSTOMIZER: responsive sidebar begin [titlebar]"));
             qml.replace(QStringLiteral("// BSI CUSTOMIZER: responsive sidebar begin [v2]"),
@@ -2649,9 +3681,15 @@ Window {
         const auto earlierTitlebarState = LayoutPatcher::analyze(read(earlierTitlebarPath), id);
         check(earlierTitlebarState.supported && earlierTitlebarState.applied && earlierTitlebarState.needsUpdate,
               "an older title-bar helper offers an in-place Update");
-        check(LayoutPatcher::apply(earlierTitlebarPath, id, true).ok
-                  && resourceText(read(earlierTitlebarPath), earlierTitlebar, QStringLiteral("PlrSidebar.qml")) == patchedSidebar,
-              "Update installs the current helper without moving the sidebar twice");
+        const auto titlebarUpgrade = LayoutPatcher::apply(earlierTitlebarPath, id, true);
+        const QString upgradedTitlebar =
+            resourceText(read(earlierTitlebarPath), earlierTitlebar, QStringLiteral("PlrSidebar.qml"));
+        check(titlebarUpgrade.ok && upgradedTitlebar == patchedSidebar,
+              QStringLiteral("Update installs the current helper without moving the sidebar twice%1")
+                  .arg(titlebarUpgrade.ok && upgradedTitlebar == patchedSidebar
+                           ? QString()
+                           : QStringLiteral(" -- apply: %1 -- %2").arg(titlebarUpgrade.msg,
+                                 firstDifference(patchedSidebar, upgradedTitlebar))));
         check(LayoutPatcher::apply(earlierTitlebarPath, id, false).ok
                   && resourceText(read(earlierTitlebarPath), earlierTitlebar, QStringLiteral("PlrSidebar.qml")) == sidebar
                   && resourceText(read(earlierTitlebarPath), earlierTitlebar, QStringLiteral("plr.qml")) == anchoredPlr,
@@ -2690,7 +3728,7 @@ Window {
         const auto manualUpgrade = LayoutPatcher::apply(earlierManualPath, id, true);
         const auto manualMoved = resourceText(read(earlierManualPath), earlierManual, QStringLiteral("PlrSidebar.qml"));
         check(manualState.needsUpdate && manualUpgrade.ok
-                  && manualMoved.contains(QLatin1String("responsive sidebar begin [v2]"))
+                  && manualMoved.contains(QLatin1String("responsive sidebar begin [v3]"))
                   && !manualMoved.contains(QLatin1String("responsive sidebar begin [titlebar]"))
                   && manualMoved.contains(QLatin1String("var available = iSidebar.width - (iBSISidebarLayout.leftPadding")),
               "an older manual helper is updated for horizontal space without becoming title-bar-owned");
@@ -2756,13 +3794,98 @@ Window {
         const auto oldState = LayoutPatcher::analyze(read(oldSinglePath), id);
         check(oldState.supported && oldState.applied && oldState.needsUpdate,
               "earlier single-owner title bars offer an in-place overflow/popup update");
-        check(LayoutPatcher::apply(oldSinglePath, id, true).ok
-                  && resourceText(read(oldSinglePath), oldSingle, QStringLiteral("PlrSidebar.qml")) == patchedSidebar
-                  && !LayoutPatcher::analyze(read(oldSinglePath), id).needsUpdate,
-              "Update adds smart overflow and anchored panels without changing the existing title bar");
+        const auto singleUpgrade = LayoutPatcher::apply(oldSinglePath, id, true);
+        const QString upgradedSingle =
+            resourceText(read(oldSinglePath), oldSingle, QStringLiteral("PlrSidebar.qml"));
+        const bool singleDone =
+            singleUpgrade.ok && upgradedSingle == patchedSidebar
+            && !LayoutPatcher::analyze(read(oldSinglePath), id).needsUpdate;
+        check(singleDone,
+              QStringLiteral("Update adds smart overflow and anchored panels without changing the existing title bar%1")
+                  .arg(singleDone ? QString()
+                                  : QStringLiteral(" -- apply: %1 -- %2").arg(singleUpgrade.msg,
+                                        firstDifference(patchedSidebar, upgradedSingle))));
         check(LayoutPatcher::apply(oldSinglePath, id, false).ok
                   && resourceText(read(oldSinglePath), oldSingle, QStringLiteral("PlrSidebar.qml")) == sidebar,
               "an updated earlier title bar still restores the stock sidebar byte-for-byte");
+        // A release of this tool started the row right after the title bar's
+        // own navigation instead of centring it. That shape offers Update, and
+        // the update writes exactly the centred row a fresh apply produces.
+        {
+            QString leftPlr = patchedPlr;
+            QString leftTopbar = patchedTopbar;
+            QString leftSidebar = patchedSidebar;
+            const QString centredMargin =
+                QStringLiteral("            anchors.leftMargin: Math.min(144, parent.width / 4)");
+            // The strip is the first UiRowLayout, so its own anchor is the
+            // occurrence that follows it - other members may be centred too.
+            const int centredAt = leftSidebar.indexOf(QLatin1String("anchors.centerIn: parent"),
+                                                      leftSidebar.indexOf(QLatin1String("UiRowLayout")));
+            // Round 57 hid the navigation in the same two-line block a fresh
+            // apply writes, with the three ids added. Only that block's code
+            // line may change: the player's own `iSettingsBtn.visible = false`
+            // earlier in fResetSidebar is stock text and has to survive.
+            const QString markerText = QStringLiteral("// BSI CUSTOMIZER: hidden row buttons=");
+            const int markerAt = leftSidebar.indexOf(markerText);
+            const int blockNl = markerAt < 0 ? -1 : leftSidebar.indexOf(QLatin1Char('\n'), markerAt);
+            const int blockStart = blockNl < 0 ? -1 : blockNl + 1;
+            const int blockEnd = blockStart < 0 ? -1 : leftSidebar.indexOf(QLatin1Char('\n'), blockStart);
+            const QString settingsLine = QStringLiteral("iSettingsBtn.visible = false");
+            const int settingsAt = blockEnd < 0 ? -1 : leftSidebar.indexOf(settingsLine, blockStart);
+            const bool legacyBlock = settingsAt > blockStart && settingsAt < blockEnd
+                && settingsAt + settingsLine.size() <= blockEnd;
+            check(leftPlr.contains(centredMargin) && leftTopbar.count(QStringLiteral("pVisible: false")) == 3
+                      && centredAt > 0 && legacyBlock,
+                  "the centred fixtures contain what the left-anchored shape is built from");
+            leftPlr.replace(centredMargin, QStringLiteral("            anchors.leftMargin: parent.pBSISidebarX"));
+            leftTopbar.replace(QStringLiteral("pVisible: false"), QStringLiteral("pVisible: true"));
+            const int itemsAt = leftTopbar.indexOf(QStringLiteral("    property list<QtObject> pNonFixedTopbarItems"));
+            if (itemsAt > 0)
+                leftTopbar.insert(itemsAt, QStringLiteral("    property real pBSISidebarX: 144"
+                                                          " // BSI CUSTOMIZER: sidebar row position\r\n"));
+            if (centredAt > 0)
+                leftSidebar.replace(centredAt, int(QLatin1String("anchors.centerIn: parent").size()),
+                                    QStringLiteral("anchors.left: parent.left"));
+            if (legacyBlock) {
+                // The code line first: the marker sits above it and keeps its offset.
+                leftSidebar.replace(settingsAt, int(settingsLine.size()),
+                                    QStringLiteral("iBackBtn.visible = false; iHomeBtn.visible = false; "
+                                                   "iRecentBtn.visible = false; iSettingsBtn.visible = false"));
+                leftSidebar.replace(markerAt, int(markerText.size()),
+                                    markerText + QStringLiteral("iBackBtn,iHomeBtn,iRecentBtn,"));
+            }
+            auto earlierLeft = resources({ { QStringLiteral("plr.qml"), leftPlr },
+                                           { QStringLiteral("PlrSidebar.qml"), leftSidebar },
+                                           { QStringLiteral("PlrTopbar.qml"), leftTopbar } }, true, {});
+            addRegistration(earlierLeft, false);
+            const QString leftPath = temp.filePath(QStringLiteral("layout-left-anchored.exe"));
+            write(leftPath, earlierLeft.f.bytes);
+            const auto leftState = LayoutPatcher::analyze(read(leftPath), id);
+            check(leftState.supported && leftState.applied && leftState.needsUpdate,
+                  "a row that starts after the navigation offers an Update to centre it");
+            const auto leftUpgrade = LayoutPatcher::apply(leftPath, id, true);
+            const QString leftPlrNow = resourceText(read(leftPath), earlierLeft, QStringLiteral("plr.qml"));
+            const QString leftSidebarNow =
+                resourceText(read(leftPath), earlierLeft, QStringLiteral("PlrSidebar.qml"));
+            const QString leftTopbarNow =
+                resourceText(read(leftPath), earlierLeft, QStringLiteral("PlrTopbar.qml"));
+            check(leftUpgrade.ok && leftPlrNow == patchedPlr && leftSidebarNow == patchedSidebar
+                      && leftTopbarNow == patchedTopbar,
+                  QStringLiteral("Update centres that row and drops the anchor helper%1")
+                      .arg(leftUpgrade.ok ? (leftPlrNow == patchedPlr && leftSidebarNow == patchedSidebar
+                                                 && leftTopbarNow == patchedTopbar
+                                             ? QString()
+                                             : QStringLiteral(" -- plr %1 -- sidebar %2 -- topbar %3")
+                                                   .arg(firstDifference(patchedPlr, leftPlrNow),
+                                                        firstDifference(patchedSidebar, leftSidebarNow),
+                                                        firstDifference(patchedTopbar, leftTopbarNow)))
+                                         : QStringLiteral(" -- apply: %1").arg(leftUpgrade.msg)));
+            check(LayoutPatcher::apply(leftPath, id, false).ok
+                      && resourceText(read(leftPath), earlierLeft, QStringLiteral("plr.qml")) == anchoredPlr
+                      && resourceText(read(leftPath), earlierLeft, QStringLiteral("PlrSidebar.qml")) == sidebar
+                      && resourceText(read(leftPath), earlierLeft, QStringLiteral("PlrTopbar.qml")) == topbar,
+                  "the centred update still restores every original document exactly");
+        }
         const QByteArray afterFirst = read(path);
         const auto again = LayoutPatcher::apply(path, id, true);
         check(again.ok && read(path) == afterFirst
@@ -2770,6 +3893,93 @@ Window {
               "applying an already-applied tweak is a no-op");
         const auto patchedState = LayoutPatcher::analyze(read(path), id);
         check(patchedState.supported && patchedState.applied, "the patched player reports the tweak as applied");
+        // ---- the row's button order and the buttons it leaves out ----
+        // The default row is the sidebar's own strip, centred in the title
+        // bar: Back, Home and Recent first, then the player's buttons, with
+        // Settings taking a normal place among them instead of sitting after
+        // the whole row.
+        const auto defaultRows = LayoutPatcher::buttonRows(read(path));
+        QStringList defaultKeys;
+        for (const auto &button : defaultRows.buttons) defaultKeys << button.key;
+        check(defaultRows.supported && defaultRows.applied && defaultKeys.size() >= 5
+                  && defaultKeys.mid(0, 3) == (QStringList { QStringLiteral("back"),
+                                                             QStringLiteral("home"),
+                                                             QStringLiteral("recent") })
+                  && defaultRows.buttons.first().canHide == false,
+              "the row starts with Back/Home/Recent, which can be moved but never hidden");
+        const auto hiddenRowBlock = [](const QString &qml) {
+            const int at = qml.indexOf(QLatin1String("// BSI CUSTOMIZER: hidden row buttons="));
+            if (at < 0) return QString();
+            const int end = qml.indexOf(QLatin1Char('\n'), qml.indexOf(QLatin1Char('\n'), at) + 1);
+            return end < 0 ? qml.mid(at) : qml.mid(at, end - at);
+        };
+        const QString settingsBlock = hiddenRowBlock(patchedSidebar);
+        QStringList settingsMissing;
+        for (const auto &id : { QStringLiteral("iSettingsBtn") }) {
+            if (!settingsBlock.contains(QStringLiteral("%1.visible = false").arg(id)))
+                settingsMissing << id;
+        }
+        // The row is the only copy of the navigation now, so the strip's own
+        // Back/Home/Recent must not be switched off with it.
+        for (const auto &id : { QStringLiteral("iBackBtn"), QStringLiteral("iHomeBtn"),
+                                QStringLiteral("iRecentBtn") }) {
+            if (settingsBlock.contains(QStringLiteral("%1.visible = false").arg(id)))
+                settingsMissing << QStringLiteral("hides ") + id;
+        }
+        check(patchedSidebar.contains(QLatin1String("true /* BSI CUSTOMIZER: settings in the row */"))
+                  && settingsBlock.contains(QLatin1String("hidden row buttons="))
+                  && settingsMissing.isEmpty(),
+              QStringLiteral("Settings joins the row as a normal button and its own strip button steps aside%1")
+                  .arg(settingsMissing.isEmpty()
+                           ? QString()
+                           : QStringLiteral(" -- block [%1] missing [%2]")
+                                 .arg(settingsBlock.simplified().left(220),
+                                      settingsMissing.join(QLatin1Char(',')))));
+        check(!patchedPlr.contains(QLatin1String("pBSISidebarX"))
+                  && !patchedTopbar.contains(QLatin1String("pBSISidebarX")),
+              "no anchor helper is left behind for the centred row");
+
+        const auto reorder = LayoutPatcher::applyOrder(
+            path, { QStringLiteral("recent"), QStringLiteral("home"), QStringLiteral("back"),
+                    QStringLiteral("screen"), QStringLiteral("sound") },
+            { QStringLiteral("sound") });
+        if (!reorder.ok) std::printf("    %s\n", qPrintable(reorder.msg));
+        check(reorder.ok, "a player with the title bar applied accepts a new button order");
+        const auto custom = LayoutPatcher::buttonRows(read(path));
+        QStringList customKeys;
+        for (const auto &button : custom.buttons) customKeys << button.key;
+        check(customKeys.mid(0, 3) == (QStringList { QStringLiteral("recent"),
+                                                     QStringLiteral("home"),
+                                                     QStringLiteral("back") })
+                  && customKeys.indexOf(QStringLiteral("sound"))
+                     > customKeys.indexOf(QStringLiteral("screen")),
+              "the row follows the requested order");
+        bool soundHidden = false;
+        for (const auto &button : custom.buttons)
+            if (button.key == QLatin1String("sound")) soundHidden = button.hidden;
+        check(soundHidden
+                  && resourceText(read(path), r, QStringLiteral("PlrSidebar.qml"))
+                         .contains(QLatin1String("pVisible: false /* BSI CUSTOMIZER: hidden button */")),
+              "an unticked button keeps its place in the source and is switched off");
+        check(LayoutPatcher::applyOrder(path, {}, {}).ok,
+              "an empty order restores the default row");
+        const auto resetRows = LayoutPatcher::buttonRows(read(path));
+        check(!resetRows.buttons.isEmpty()
+                  && resetRows.buttons.first().key == QLatin1String("back"),
+              "the default row comes back after a reset");
+        // Put the reordered state back so the restore below proves that a
+        // reordered, partly hidden row still restores byte-for-byte.
+        check(LayoutPatcher::applyOrder(
+                  path, { QStringLiteral("recent"), QStringLiteral("screen"),
+                          QStringLiteral("sound") },
+                  { QStringLiteral("sound") }).ok,
+              "the order can be changed again without stacking markers");
+        const QString stockOrderPath = temp.filePath(QStringLiteral("layout-order-stock.exe"));
+        write(stockOrderPath, original);
+        check(!LayoutPatcher::applyOrder(stockOrderPath, { QStringLiteral("home") }, {}).ok
+                  && read(stockOrderPath) == original,
+              "a player without the title-bar layout refuses an order instead of writing one");
+
         check(LayoutPatcher::apply(path, id, false).ok, "turning the option off restores the stock layout");
         const QByteArray restoredBytes = read(path);
         check(resourceText(restoredBytes, r, QStringLiteral("plr.qml")) == anchoredPlr
@@ -2778,6 +3988,34 @@ Window {
               "the restore writes every edited document back byte-for-byte");
         const auto restored = LayoutPatcher::analyze(read(path), id);
         check(restored.supported && !restored.applied, "the restored player reports stock again");
+
+        // The patched text is always longer than the record it replaces. When
+        // the file has a gap - every real player has one, and this fixture gets
+        // exactly one punched into an otherwise solid image - the record is
+        // built there and the tree node re-pointed, so the EXE keeps its size
+        // instead of gaining a section the way an append would.
+        auto gapped = resources({ { QStringLiteral("plr.qml"), anchoredPlr },
+                                  { QStringLiteral("PlrSidebar.qml"), sidebar },
+                                  { QStringLiteral("PlrTopbar.qml"), topbar } }, true, {});
+        addRegistration(gapped, false);
+        gapped.f.bytes.replace(0x10000, 0x4000, QByteArray(0x4000, '\0'));
+        const qint64 gappedSize = qint64(gapped.f.bytes.size());
+        const QString gappedPath = temp.filePath(QStringLiteral("layout-gap.exe"));
+        write(gappedPath, gapped.f.bytes);
+        const auto gapApplied = LayoutPatcher::apply(gappedPath, id, true);
+        if (!gapApplied.ok) std::printf("    %s\n", qPrintable(gapApplied.msg));
+        check(gapApplied.ok && QFileInfo(gappedPath).size() == gappedSize
+                  && resourceText(read(gappedPath), gapped, QStringLiteral("PlrSidebar.qml"))
+                         .contains(QLatin1String("anchors.centerIn: parent")),
+              "the title-bar patch writes its longer records into a gap the file already has, "
+              "so the EXE keeps its size instead of growing a section");
+        check(LayoutPatcher::apply(gappedPath, id, false).ok
+                  && QFileInfo(gappedPath).size() == gappedSize
+                  && resourceText(read(gappedPath), gapped, QStringLiteral("plr.qml")) == anchoredPlr
+                  && resourceText(read(gappedPath), gapped, QStringLiteral("PlrSidebar.qml")) == sidebar
+                  && resourceText(read(gappedPath), gapped, QStringLiteral("PlrTopbar.qml")) == topbar,
+              "restoring the layout keeps every record in the same gap and restores the stock "
+              "documents byte-for-byte without touching the file size");
 
         // ---- a build that spells the palette, the sidebar width and the
         // Android-frame inset differently, and has no sidebar toggle. Both
@@ -2866,7 +4104,7 @@ Window {
                   && plainPatched.contains(QLatin1String("stock overflow only"))
                   && plainPatched.contains(QLatin1String("var availableHeight = iSidebar.width"))
                   && plainPatched.contains(QLatin1String("onWidthChanged")),
-              "the strip becomes a centered row and keeps the build's own overflow code");
+              "the strip becomes a centred row and keeps the build's own overflow code");
         const auto plainState = LayoutPatcher::analyze(read(plainPath), id);
         check(plainState.supported && plainState.applied && !plainState.needsUpdate,
               "the patched plain build reports applied without asking for an upgrade");
@@ -2963,7 +4201,8 @@ Window {
                   && fixedQml.contains(QLatin1String("items[i].pShowViaRepeaterOnly"))
                   && fixedQml.contains(QLatin1String("elementId: pRecent"))
                   && fixedQml.contains(QLatin1String("fixed[n].allowed && !fixed[n].button.visible"))
-                  && fixedQml.contains(QLatin1String("var unmodelled = [{ button: iDiscordBtn, allowed: (iAppwin.pIsBootComplete) }]")),
+                  && fixedQml.contains(QLatin1String("var unmodelled = [{ button: iDiscordBtn, allowed: "
+                                                     "(iAppwin.pIsBootComplete) && pBSIHiddenButtons.indexOf(\"|iDiscordBtn|\") < 0 }]")),
               "modelled fixed buttons overflow only when eligible; unmodelled Discord stays visible and budgeted");
         check(LayoutPatcher::apply(filteredPath, id, false).ok
                   && resourceText(read(filteredPath), filtered, QStringLiteral("PlrSidebar.qml")) == filteredSidebar,
@@ -6375,6 +7614,10 @@ Window {
               "a published manifest wins over a text announcement");
     }
 
+
+    checkDebloat();
+    checkAndroid();
+    checkRootDisk();
 
     return failures;
 }

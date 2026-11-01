@@ -9,22 +9,26 @@ For the new interface, use the **Chromium workspace** build workflow or configur
 Search/scan performance findings, benchmarks and the optimization roadmap:
 [performance review](docs/PERFORMANCE.md).
 
+Tabs: **Dashboard**, **Theme**, **Resources**, **FPS**, **Integrity**, **Boot
+Video**, **UI** (clean-up, title-bar row and button order, removals, About page),
+**Debloat** (live ADB debloat, the Deep Engine Image Debloater for `Root.vhd`
+and VHDX, and the ads/telemetry/cloud/hosts/companion switches),
+**Discord RPC**, **Appearance**, **About**.
+
 ## Sign-in gate (Discord only)
 
 This is a private dev tool: the app opens on the Premium-Optimizer-style
-sign-in card with **one option - Continue with Discord**. Access follows
-either a dev allowlist of Discord user IDs (`discord.allowUsers`) or a
-**Discord server role gate** (`discord.guildId` + `discord.roles` +
-`discord.requiredTier`, checked live with the `guilds.members.read` scope);
-a rejected sign-in shows the account's Discord ID on the result page so it
-can be added. The flow is Discord OAuth2 with
-PKCE + a `127.0.0.1:43713` loopback callback (paste-the-link fallback), and a
-successful sign-in writes an HMAC-signed machine-bound session that only
-earns a one-click "Welcome back" continue on the next launch. The gate is
-enforced in C++ (`AuthManager` + `Backend` guards), not only in the UI.
-The whole `auth.json` can also be baked into the EXE at build time from the
-`ZLP_AUTH_JSON` repository secret (the Actions workflows pass it through), so
-releases sign in with no sidecar config file.
+sign-in card with **one option - Continue with Discord**. When a Discord
+server role gate is configured (`discord.guildId` + `discord.roles` +
+`discord.requiredTier`), Discord's current membership and role are checked on
+every sign-in and every app launch; a local allowlist is only used when no role
+gate is configured. The flow is OAuth2 PKCE with a `127.0.0.1:43713` loopback
+callback (paste-the-link fallback). The saved identity is never enough to open
+the app: Windows DPAPI protects the refresh token, which is refreshed and
+validated against Discord before the gate opens. The gate is enforced in C++
+(`AuthManager` + `Backend` guards), not only in the UI. Release builds require
+an embedded server-role policy and ignore local auth-file/environment overrides;
+see [docs/AUTH.md](docs/AUTH.md) for the security limits of a client-side gate.
 Setup: [docs/AUTH.md](docs/AUTH.md) and `auth.example.json`.
 
 ## Download: installer (and the single EXE next to it)
@@ -66,17 +70,22 @@ The original `.bak` is preserved. Theme edits are made against the current EXE, 
 
 ## Sidebar buttons in the title bar
 
-The layout tweak moves the **original sidebar** into a centered title-bar host
-instead of creating a second set of controls. This keeps button state, animations,
-and popup ownership attached to the same instance used by the player. The host
-reserves space at both ends for title-bar controls and follows window resizing.
+The layout tweak moves the **original sidebar** into a host in the middle of the
+title bar, instead of creating a second set of controls. This keeps button state,
+animations, and popup ownership attached to the same instance used by the player.
+The host keeps the same margin on both sides and follows window resizing, so the
+row stays centred exactly as it always has; the title bar's own Back/Home/Recent
+step aside while the row is shown, because the row carries the sidebar's own
+copies of those three buttons.
 The buttons stay visible until the available width runs out; only then does a
 three-dot overflow button replace the buttons that don't fit. Sound, controls,
 and other button panels open directly beneath the button that launched them
 (or beneath the three dots when opened from overflow), staying inside the
-visible screen. There is no separate option for responsive overflow or
-panel placement - that behavior is built into the title-bar move and applied
-automatically. Untick and apply to restore the stock sidebar.
+visible screen of the monitor the player window is on - the panel is clamped by
+its own visible edge, not by the popup window's shadow area. There is no
+separate option for responsive overflow or panel placement - that behavior is
+built into the title-bar move and applied automatically. Untick and apply to
+restore the stock sidebar.
 
 The tweak recognizes the player's sidebar by its **structure** (the instance
 that carries the stock sidebar width, the sidebar component and its button
@@ -92,6 +101,39 @@ three-dot button, Repeater model or windowed popups are moved as well; they
 keep their own overflow code (the status line says *"This build keeps its own
 overflow menu"*). A sidebar with no movable strip at all is refused with that
 reason instead of being written blindly.
+
+### Choosing which buttons the row shows, and in what order
+
+The first apply already puts the row in a sensible order: **Back, Home and
+Recent**, then **Fullscreen, Sound, Files / APK and Settings**, then the rest of
+the sidebar buttons in the order the player declares them.
+
+The **Top-bar button order** card below the layout option lists every button the
+player really has - the strip's own buttons, including Back, Home and Recent, and
+the entries its Repeater renders - as one numbered row. **Up/down** move a
+button, the tick leaves it out of the row, and **Apply order** writes the result.
+**Reset to default** puts the order above back. Back, Home and Recent are marked
+*always shown*: they can be moved but not hidden, because the tool never removes
+the player's navigation. The card follows the layout by itself: applying or
+restoring the title-bar move refreshes it, so it never shows a stale row.
+
+Moving a button moves its **declaration**, not its contents: the declaration
+keeps its bindings and its line breaks, so turning the layout off restores the
+stock document byte-for-byte. Hiding one switches the member that decides its
+visibility - for the strip's own buttons, which the player's resize handler
+re-shows, that happens in one tagged block at the end of `fResetSidebar()` that
+a later run replaces or removes verbatim. The row's own space calculation reads
+the same list, so an unticked button stays unticked when the window is resized;
+Settings is one of these buttons, with a single copy in the row that can be
+moved and unticked like any other.
+
+The patched document is always longer than the record it replaces, so the
+record is built in a gap **the file already has** - a run of zero bytes inside
+the same data section that no resource owns - and the resource tree node is
+re-pointed at it. Nothing is appended and no section changes size, so
+`HD-Player.exe` keeps its exact size; the gap is taken with a little slack, so
+the next order or visibility change still fits in place. Only an image with no
+usable gap falls back to the mapped storage older versions always added.
 
 If you used an earlier version of the title-bar tweak, close BlueStacks,
 keep the option checked, and click **Update** to upgrade the old layout.
@@ -480,6 +522,205 @@ A per-DLL `.bak` supports restoring the original. Unsupported setter code and ba
 The patcher decodes complete supported x64 entry instructions instead of requiring one exact five-byte prologue. It supports common MSVC/MinGW stack-save/frame variants, relocates RIP-relative operands, and preserves CET landing instructions. Compiler entry jumps are followed only when their destination is a verified PE runtime-function entry; unknown third-party detours are not overwritten.
 
 If Analyze reports a **recognized partial FPS patch**, keep the matching clean `.bak` and click **Patch FPS**. Both setters are rebuilt together; no unknown setter is silently skipped. If a build is still unsupported, the selectable State message includes the exact setter, RVA and entry bytes. Copy that message and provide the affected DLL and `.bak` for diagnosis—do not delete the backup to bypass the safety check.
+
+## Debloat tab
+
+BlueStacks Debloat's switch set, built into this tool: nothing is downloaded and
+no second program is started. The **Debloat** page edits what the player
+already owns and keeps one undo record for everything it writes.
+
+The page opens on **two main choices**:
+
+| Choice | What it does |
+|---|---|
+| **1 · Live ADB debloat** | Removes the preinstalled apps from a running instance and empties the guest's `/sdcard/Download`. Nothing on disk is edited, and every app can be put back. |
+| **2 · Deep Engine Image Debloater** | Opens the engine's `Root.vhd` or a supported VHDX like a 7-Zip window: browse every folder and file, extract, add files and folders, delete them. Every write is journalled, so one **Undo** puts the image back. |
+
+Below them, one card holds the switch set:
+
+| Card | What it does |
+|---|---|
+| **Don't want these** | Turns off the ad controls, the usage/statistics reporting, Smart Downloads, and the cloud / nowBux / AI features the player itself declares. |
+| **Tuning switches** | Android debugging, silent notifications for one instance, the dedicated-GPU preference, and the player's own high-frame-rate mode. |
+| **System switches** | The ad-domain block in the Windows hosts file, and moving BlueStacks X / Store or the separate Services companion aside. |
+| **Cloud companions** | What was found, where it is, and whether it is installed or already parked. |
+| **Apply / Restore everything** | Writes the ticked switches, or puts every recorded value back. |
+
+Only settings **this build already declares** are written. A key the player does
+not have is skipped and listed in the result instead of being created: an
+invented key is deleted by BlueStacks again on its next exit, and a missing key
+means that build has no such feature. Values keep the shape the player uses —
+`"1"` becomes `"0"` and `"true"` becomes `"false"` — and a value that is
+spelled any other way is reported and left alone.
+
+`bluestacks.conf` is never regenerated: only the bytes of a value that really
+changes are replaced, so key order, quoting, spacing, comments and line endings
+all survive, and Restore writes the previous text back exactly. BlueStacks
+rewrites this file from memory when it exits, which is why Apply asks you to
+close it first. Three full copies are kept under the application data folder as
+well, next to the per-key undo record.
+
+The hosts block is delimited by two marker lines and replaces only itself, so
+applying it twice cannot stack copies, removing it restores the original file
+byte-for-byte, and a block with a missing marker is refused rather than
+repaired. It blocks exactly `ads.bluestacks.com` and `adsdk.bluestacks.com` —
+no Google, Play Store or game host is touched. Rewarded in-game ads can stop
+working.
+
+BlueStacks X / Store and BlueStacks Services are **renamed** to
+`<folder>.bsi-disabled` on their own drive, never deleted: the local player, its
+disks, its instances and the Multi-instance Manager stay where they are, and
+Restore renames the folder back. A link, a folder holding something else, or a
+park name that already exists is refused.
+
+The high-FPS switch here is the player's own setting; the **FPS** page is the
+separate edit that raises the ceiling inside the player binary. Neither one
+guarantees a frame rate — the game and the GPU decide that.
+
+### 1 · Live ADB debloat
+
+This half never touches `Root.vhd`. What makes a preinstalled app disappear
+here is the package state inside the running instance, so that is what it
+changes — through the player's own `HD-Adb.exe`, on the instance's published
+ADB port, with a private adb server that is stopped again afterwards. Nothing is
+downloaded, and no root/Magisk is involved. Use the **Deep Engine Image Debloater**
+when you want the file itself gone from the image.
+
+* **Every installed app** — Scan reads the full `pm list packages --user 0`
+  result and shows every package actually installed in that instance. Search by
+  label or package name, then use **Select installed** for bulk selection or
+  choose apps individually. The
+  reviewed suggestions (`gg.now.ads.service`, `com.uncube.gamevantage`,
+  `com.bluestacks.appmart` and `com.bluestacks.appfinder`) get friendly names
+  and are prechecked. Other packages are visible and selectable too, but are
+  unchecked and labelled as unreviewed: removing a system package can break
+  Android or BlueStacks. Removal is for Android user 0 (`pm uninstall --user 0`),
+  with `pm disable-user --user 0` as a fallback for packages on the system
+  partition. The tool verifies that each selected package is installed first.
+* **Undo** — the package, the action used and the instance it was done in are
+  recorded first. **Undo in this instance** reinstalls with
+  `cmd package install-existing --user 0` (or re-enables the package) and
+  verifies against the package list rather than trusting the reply.
+* **Guest storage** — `/sdcard/Download` is deleted *completely* and recreated
+  empty, so no file, no hidden file and no `apps` sub-folder is left behind.
+  Tick **Keep a copy on this PC first** and the folder is pulled into the
+  application data folder before anything is deleted; if that copy fails,
+  nothing is deleted. Copies above 4 GB are refused instead of filling the
+  system drive. **Also clear app data** empties `/sdcard/Android/data` and
+  `/sdcard/Android/obb` as well — that signs every app out and erases downloaded
+  game assets.
+
+The instance must be **running** with *Enable Android debugging (ADB)* on; the
+ADB port comes from `bluestacks.conf`, so it is never guessed. The guest storage
+lives in the instance's own `Data.vhdx`, which is why two instances can be
+cleaned independently and why the undo record is kept per instance.
+
+### 2 · Deep Engine Image Debloater
+
+`Root.vhd` is the engine's Android system disk: an ext4 filesystem inside a VHD,
+in `<ProgramData>\BlueStacks_*\Engine\<arch>\Root.vhd`. The browser also accepts
+standalone fixed and dynamic VHDX images. A `Data.vhdx` is different: it holds
+instance-specific user/app data, not the shared engine system disk. Back it up
+and fully exit BlueStacks before editing. Dirty ext4 journals remain read-only
+until BlueStacks shuts that image down cleanly and the browser is rechecked.
+Its ext4/VHD/VHDX reader, writer and 7-Zip SDK decoder are built into BSI
+Customizer; no external filesystem or archive utility needs to be installed.
+**Find** locates an
+installed image. You can also select the BlueStacks engine package EXE or a
+plain `.7z` file directly: the app extracts only `Root.vhd` into its private
+working cache, leaves the package unchanged, and opens that image. This half
+then gives you a **two-pane file manager** over it, the way a 7-Zip window
+works:
+
+* the **folder tree** on the left, expandable level by level, with the folder
+  you are in highlighted;
+* the **listing** on the right — name, size, folders before files, sorted by
+  name or size with one click on the column header;
+* a **path bar** with Up and clickable breadcrumbs, and **Refresh**;
+* **Add file**, **Add folder** (a whole tree, structure included), **New
+  folder**, **Rename**, **Copy** or **Move** items within the image, **Replace**
+  (swap the contents of an existing file while keeping its path in Root.vhd),
+  **Save** (extract a file or folder anywhere on this PC), and **Delete** — a
+  file goes at once, a folder asks first because everything under it goes with
+  it. Copy keeps the folder tree, ownership, permission bits and modification
+  times; Move keeps the in-image inode and metadata. Adding a duplicate name is refused; use Replace
+  explicitly instead;
+* **drag and drop** from Explorer straight into the open folder;
+* symbolic links are shown with a link icon; **Copy** preserves the link, while
+  **Save target** writes its target path as text instead of following it;
+* **filter this folder** as you type, or **Search everywhere** to find a name
+  anywhere in the image (it walks the folders itself, and says when it stops
+  at its result cap).
+
+If Windows marks the image file itself read-only, the browser offers **Enable
+editing**. This explicitly clears the Windows Read-only attribute only after
+you click it, then verifies that the VHD and ext4 volume can be written; it does
+not change the image contents. If Windows still denies access, close BlueStacks
+if it is using the image and check Modify permissions. Elevation alone does not
+override an open-file lock or every permission policy. A dirty ext4 filesystem
+or pending journal replay is a separate safety condition: the browser keeps it
+read-only until you start that image in BlueStacks, shut the player down cleanly,
+and then recheck it. It never clears the dirty flag or skips journal recovery.
+
+Writes are real writes: the bytes of the image change, and the next boot of an
+instance that uses the engine sees them.
+
+What it supports is checked before it is mounted, and anything outside that is
+refused with a reason instead of guessed at:
+
+* **VHD/VHDX:** fixed and dynamic VHDs, fixed and dynamic VHDX files with a
+  clean log and no parent, and plain raw images. VHD BATs and VHDX BAT chunks
+  are followed, and MBR, extended-MBR and GPT partition tables are walked to
+  find the filesystem. File offsets are 64-bit, including for engine images
+  larger than 2 GiB. VHDX files with an active log or a differencing parent are
+  refused rather than opened from an incomplete view.
+* **ext4:** 1 KiB–64 KiB blocks, extent trees, 32-bit and 64-bit, metadata
+  checksums (`metadata_csum`) recomputed exactly as the kernel does, sparse
+  superblocks and flex groups.
+* **Refused read-only:** a filesystem with a dirty journal or failed
+  validation, or unsupported volume-wide features such as `meta_bg`,
+  `bigalloc`, inline data and encrypted names. Indexed (htree) folders can be
+  browsed and existing files can be replaced or deleted; adding or renaming
+  entries in those folders is refused because the hash index is not rebuilt.
+  This is an intentional safety limit, not full DiskGenius parity.
+
+Every change is a block journal first: the original bytes of each 512-byte
+sector the edit is about to touch are saved to the application data folder
+(`…/rootvhd/<stamp>-Root.vhd.bin` plus a `.json` manifest) *before* the image is
+written, and the record only becomes real once the write succeeded. **Undo**
+replays the ranges in reverse and restores the virtual disk sectors touched by
+the edit. Dynamic VHD/VHDX containers can retain blocks allocated during an
+edit (filled with the original zero contents after undo), so the host container
+may remain larger even though the virtual filesystem state is restored. The
+regression suite checks exact restoration on a fixed 256 KiB ext4-in-a-VHD
+fixture (`tests/fixtures/root-256k.vhd`) and exercises VHDX sparse-block
+allocation across a BAT chunk boundary, plus file-manager write/undo on
+`tests/fixtures/root-256k.vhdx`; fixed-VHDX in-place writes use
+`tests/fixtures/root-256k-fixed.vhdx`.
+
+Two things worth knowing before you write:
+
+* **Close BlueStacks.** The player keeps the image open and reads it while it
+  runs; a write from here while it is running is not seen by the running
+  instance and can be overwritten when it exits.
+* **The image is shared.** Instances cloned from the same engine boot from this
+  one file, so a change here is a change for all of them, and a BlueStacks
+  engine update downloads a fresh `Root.vhd` and replaces it. The journal is
+  your way back, and the tool never writes without one.
+
+The engine files themselves are not downloaded by this tool. If the installation
+has no engine folder yet, download the engine package from BlueStacks and select
+the package EXE directly in the **Root.vhd** path row. The built-in 7-Zip SDK
+reader finds the appended archive and extracts only `Root.vhd` into the tool's
+private working cache; no WinRAR/7-Zip installation or manual extraction is
+needed, and the downloaded package is left untouched. The image browser edits
+the extracted working copy, so use that `Root.vhd` when you install the engine.
+
+The Debloat feature set follows
+[Jordan231111/Bluestacks-Debloat](https://github.com/Jordan231111/Bluestacks-Debloat)
+(CC BY-NC-ND 4.0); the switch lists, the hosts domains, the reviewed package list
+and the cloud-companion handling are derived from it and were reimplemented
+natively here. Its root/Magisk parts are deliberately not included.
 
 ## Discord Rich Presence ID utility
 

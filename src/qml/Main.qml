@@ -57,7 +57,7 @@ ApplicationWindow {
     // The studio shell uses the existing page stack and live context objects.
     readonly property var pageNames: [qsTr("Overview"), qsTr("Theme studio"), qsTr("Resource explorer"),
         qsTr("Performance"), qsTr("Integrity & safety"), qsTr("Boot experience"), qsTr("Player interface"),
-        qsTr("Discord presence"), qsTr("Appearance"), qsTr("About BSI"), qsTr("Animated presence"), qsTr("Patch workspace")]
+        qsTr("Discord presence"), qsTr("Appearance"), qsTr("About BSI"), qsTr("Animated presence"), qsTr("Patch workspace"), qsTr("Debloat")]
 
     Rectangle {
         id: topbar
@@ -174,6 +174,7 @@ ApplicationWindow {
                                 { page: 7, label: qsTr("Discord presence"), icon: Icons.discord },
                                 { page: 10, label: qsTr("Animated presence"), icon: Icons.discord },
                                 { page: 11, label: qsTr("Patch workspace"), icon: Icons.extras },
+                                { page: 12, label: qsTr("Debloat"), icon: Icons.debloat },
                                 { header: true, label: qsTr("APPLICATION") },
                                 { page: 8, label: qsTr("Appearance"), icon: Icons.appearance },
                                 { page: 9, label: qsTr("About BSI"), icon: Icons.about }
@@ -255,6 +256,7 @@ ApplicationWindow {
                 AboutPage { onNotify: (msg) => toast.show(msg) }
                 GifRpcPage {}
                 WorkspacePage { onNavigate: (index) => pages.currentIndex = index }
+                DebloatPage { onNotify: (msg) => toast.show(msg) }
             }
             LogPanel {
                 id: logPanel

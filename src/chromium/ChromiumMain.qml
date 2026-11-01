@@ -21,7 +21,7 @@ ApplicationWindow {
     property int nativePage: -1
     readonly property var nativeSources: ["DashboardPage.qml", "ThemePage.qml", "ResourcesPage.qml",
         "FpsPage.qml", "IntegrityPage.qml", "BootVideoPage.qml", "UiPage.qml", "RpcidPage.qml",
-        "AppearancePage.qml", "AboutPage.qml", "GifRpcPage.qml", "WorkspacePage.qml"]
+        "AppearancePage.qml", "AboutPage.qml", "GifRpcPage.qml", "WorkspacePage.qml", "DebloatPage.qml"]
     onClosing: (close) => { if (backend.busy) close.accepted = false; }
 
     QtObject {
@@ -50,6 +50,7 @@ ApplicationWindow {
                 anchors.fill: parent
                 anchors.margins: 8
                 Button { text: qsTr("← Back to Chromium workspace"); enabled: !backend.busy; onClicked: window.nativePage = -1 }
+                Button { text: qsTr("Debloat / Root.vhd tools"); enabled: !backend.busy; onClicked: window.nativePage = 12 }
                 Label { text: qsTr("Full native editor · same session and C++ backend"); color: Theme.text; Layout.fillWidth: true }
             }
         }

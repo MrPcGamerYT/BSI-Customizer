@@ -302,7 +302,8 @@ int runSelfTest()
         ThemeManager themes;
         Backend backend(&settings);
         SysInfo sysinfo;
-        AuthManager auth;
+        QTemporaryDir authUiTmp;
+        AuthManager auth(authUiTmp.path());
         backend.setAuthManager(&auth);
 
         QQmlApplicationEngine engine;
@@ -1591,6 +1592,15 @@ int runSelfTest()
             check(reloaded.identity().value(QStringLiteral("Id")).toString()
                       == QStringLiteral("42"),
                   "identity round-trips");
+#ifdef Q_OS_WIN
+            QString credentialError;
+            check(reloaded.saveRefreshToken(QStringLiteral("test-refresh-token"),
+                                            &credentialError),
+                  "refresh token is protected and stored by Windows DPAPI");
+            SessionStore credentialReloaded(authTmp.path());
+            check(credentialReloaded.refreshToken() == QStringLiteral("test-refresh-token"),
+                  "DPAPI refresh token decrypts for the same Windows user");
+#endif
         }
         {
             QFile f(authTmp.path() + QStringLiteral("/session.json"));
@@ -1624,6 +1634,13 @@ int runSelfTest()
         check(AuthManager::pkceChallenge(verifier) == QString::fromLatin1(expected),
               "PKCE challenge is S256 of the verifier");
         check(AuthManager::randomHex(16).length() == 32, "state is 16 hex bytes");
+        const QString invalidClientHelp = AuthManager::mapDiscordTokenError(
+            400, QByteArrayLiteral("{\"error\":\"invalid_client\"}"),
+            QStringLiteral("http://127.0.0.1:43713/auth/discord/callback"),
+            QStringLiteral("identify guilds.members.read"));
+        check(invalidClientHelp.contains(QStringLiteral("Public Client"))
+                  && !invalidClientHelp.contains(QStringLiteral("ZLP_AUTH_JSON")),
+              "invalid_client guidance points to public PKCE setup, not embedding a client secret");
 
         // ---- readCode (callback URL and bare code) ----
         QString code, state;
@@ -1635,6 +1652,22 @@ int runSelfTest()
         AuthManager::readCode(QStringLiteral("only-a-code"), code, state);
         check(code == QLatin1String("only-a-code") && state.isEmpty(), "bare code accepted");
 
+#ifdef BSI_ENFORCE_EMBEDDED_AUTH
+        // Shipped builds must ignore untrusted local config and env overrides.
+        const AuthManager::Config lockedConfig = AuthManager::loadConfig();
+        check(lockedConfig.configured && lockedConfig.sourceFile.contains(QStringLiteral("embedded")),
+              "release authentication policy comes from the embedded config");
+        qputenv("ZLP_AUTH_JSON",
+                QByteArrayLiteral("{\"discord\":{\"clientId\":\"attacker-client\","
+                                  "\"allowUsers\":[\"attacker\"]}}"));
+        qputenv("BSIC_DISCORD_ALLOW_USERS", QByteArrayLiteral("attacker"));
+        const AuthManager::Config afterOverride = AuthManager::loadConfig();
+        check(afterOverride.clientId == lockedConfig.clientId
+                  && afterOverride.allowUsers == lockedConfig.allowUsers,
+              "release policy cannot be replaced by a sidecar environment override");
+        qunsetenv("ZLP_AUTH_JSON");
+        qunsetenv("BSIC_DISCORD_ALLOW_USERS");
+#else
         // ---- config from env (restored afterwards) ----
         const QByteArray oldClient = qgetenv("BSIC_DISCORD_CLIENT_ID");
         const QByteArray oldAllow = qgetenv("BSIC_DISCORD_ALLOW_USERS");
@@ -1772,12 +1805,14 @@ int runSelfTest()
         qputenv("BSIC_DISCORD_CLIENT_ID", QByteArrayLiteral("fake-client-id"));
         qputenv("BSIC_DISCORD_ALLOW_USERS", QByteArrayLiteral("111, 222;333"));
         qputenv("BSIC_DISCORD_REDIRECT_PORT", QByteArrayLiteral("43713"));
+#endif // BSI_ENFORCE_EMBEDDED_AUTH
 
         // ---- gate authority: Backend refuses while the gate is closed ----
         {
             SettingsManager gateSettings;
             Backend gated(&gateSettings);
-            AuthManager gate;
+            QTemporaryDir gateTmp;
+            AuthManager gate(gateTmp.path());
             gated.setAuthManager(&gate);
             check(!gate.isAuthorized(), "saved sign-in alone never opens the gate");
             const QVariantMap refused = gated.patchThemeQml();
@@ -1792,22 +1827,26 @@ int runSelfTest()
                   "Backend without an AuthManager stays ungated (tests/scripts)");
         }
 
-        // ---- one-click continue over a saved, allowlisted session ----
+        // ---- a saved identity without a live Discord credential fails closed ----
         {
-            SessionStore staged; // the store the gate itself reads
+            QTemporaryDir savedTmp;
+            SessionStore staged(savedTmp.path());
             QVariantMap mine;
             mine.insert(QStringLiteral("Id"), QStringLiteral("111"));
             mine.insert(QStringLiteral("Username"), QStringLiteral("mrpcgamer"));
             mine.insert(QStringLiteral("DisplayName"), QStringLiteral("MR.PC GAMER"));
-            check(staged.saveIdentity(mine, &saveError), "gate session staged");
-            AuthManager gate;
-            check(gate.hasSavedSession(), "gate offers the one-click continue");
-            check(gate.continueSaved(), "allowlisted saved sign-in opens the gate");
-            check(gate.isAuthorized(), "gate is open after continue");
+            check(staged.saveIdentity(mine, &saveError), "gate identity staged");
+            staged.clearRefreshToken();
+            AuthManager gate(savedTmp.path());
+            check(gate.hasSavedSession(), "gate can display the saved account name");
+            QCoreApplication::processEvents(); // run startup validation (no network without token)
+            check(!gate.isAuthorized(),
+                  "a locally saved identity cannot open the gate without live Discord verification");
             gate.signOut();
-            check(!gate.hasSavedSession(), "sign-out drops the session");
+            check(!gate.hasSavedSession(), "sign-out removes the saved identity and credential");
         }
 
+#ifndef BSI_ENFORCE_EMBEDDED_AUTH
         if (oldClient.isNull())
             qunsetenv("BSIC_DISCORD_CLIENT_ID");
         else
@@ -1824,6 +1863,7 @@ int runSelfTest()
             qunsetenv("ZLP_AUTH_JSON");
         else
             qputenv("ZLP_AUTH_JSON", oldBlob);
+#endif // BSI_ENFORCE_EMBEDDED_AUTH
     }
 
     g_failures += runPatchRegressionTests();

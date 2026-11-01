@@ -21,6 +21,7 @@
 #include <QStandardPaths>
 #include <QTcpSocket>
 #include <QThread>
+#include <QTimer>
 #include <QUrlQuery>
 #include <QVariantMap>
 
@@ -180,6 +181,16 @@ AuthManager::Config AuthManager::loadConfig()
     };
 
     QJsonObject discord;
+    bool embeddedPolicyAuthoritative = false;
+#ifdef BSI_ENFORCE_EMBEDDED_AUTH
+    if (!parseDiscord(embeddedAuthJson(), &discord)) {
+        config.setupHint = QStringLiteral("This release has no valid embedded Discord access policy. "
+                                          "It cannot be unlocked with a local auth.json file.");
+        return config;
+    }
+    config.sourceFile = QStringLiteral("embedded, locked release policy");
+    embeddedPolicyAuthoritative = true;
+#else
     const QByteArray zlpBlob = env.value(QStringLiteral("ZLP_AUTH_JSON")).toUtf8();
     const QByteArray bsicBlob = env.value(QStringLiteral("BSIC_AUTH_JSON")).toUtf8();
     if (parseDiscord(zlpBlob, &discord)) {
@@ -209,17 +220,23 @@ AuthManager::Config AuthManager::loadConfig()
         if (config.sourceFile.isEmpty() && parseDiscord(embeddedAuthJson(), &discord))
             config.sourceFile = QStringLiteral("embedded auth.json (build-time ZLP_AUTH_JSON)");
     }
+#endif
+    // In official release builds environment variables cannot replace a baked
+    // guild, role, allowlist, client ID, or secret.
+    const QProcessEnvironment settingsEnv = embeddedPolicyAuthoritative
+                                                ? QProcessEnvironment()
+                                                : env;
 
-    config.clientId = envOr(env, "BSIC_DISCORD_CLIENT_ID",
+    config.clientId = envOr(settingsEnv, "BSIC_DISCORD_CLIENT_ID",
                             jsonText(discord.value("clientId")))
                           .trimmed();
-    config.clientSecret = envOr(env, "BSIC_DISCORD_CLIENT_SECRET",
+    config.clientSecret = envOr(settingsEnv, "BSIC_DISCORD_CLIENT_SECRET",
                                 jsonText(discord.value("clientSecret")))
                               .trimmed();
-    config.guildId = envOr(env, "BSIC_DISCORD_GUILD_ID",
+    config.guildId = envOr(settingsEnv, "BSIC_DISCORD_GUILD_ID",
                            jsonText(discord.value("guildId")))
                          .trimmed();
-    config.requiredTier = envOr(env, "BSIC_DISCORD_REQUIRED_TIER",
+    config.requiredTier = envOr(settingsEnv, "BSIC_DISCORD_REQUIRED_TIER",
                                 jsonText(discord.value("requiredTier")))
                               .trimmed();
 
@@ -275,13 +292,13 @@ AuthManager::Config AuthManager::loadConfig()
 
     // Keep the scopes Discord needs. guilds.members.read is added for a role
     // gate even when the blob forgets it; identify is always present.
-    config.scope = normalizeScope(envOr(env, "BSIC_DISCORD_SCOPE",
+    config.scope = normalizeScope(envOr(settingsEnv, "BSIC_DISCORD_SCOPE",
                                         jsonText(discord.value("scope"))),
                                   config.roleGateConfigured());
     config.inviteUrl = stripMarkdownLink(
-        envOr(env, "BSIC_DISCORD_INVITE", jsonText(discord.value("inviteUrl"))), false);
+        envOr(settingsEnv, "BSIC_DISCORD_INVITE", jsonText(discord.value("inviteUrl"))), false);
 
-    const QString portEnv = env.value(QStringLiteral("BSIC_DISCORD_REDIRECT_PORT")).trimmed();
+    const QString portEnv = settingsEnv.value(QStringLiteral("BSIC_DISCORD_REDIRECT_PORT")).trimmed();
     bool portOk = false;
     const int portFromEnv = portEnv.toInt(&portOk);
     const int portFromFile = discord.value("redirectPort").toInt(kDefaultRedirectPort);
@@ -295,7 +312,7 @@ AuthManager::Config AuthManager::loadConfig()
 
     // Allowlist: BSIC_DISCORD_ALLOW_USERS ("id1,id2") or discord.allowUsers.
     QStringList allow;
-    const QString allowEnv = env.value(QStringLiteral("BSIC_DISCORD_ALLOW_USERS")).trimmed();
+    const QString allowEnv = settingsEnv.value(QStringLiteral("BSIC_DISCORD_ALLOW_USERS")).trimmed();
     if (!allowEnv.isEmpty()) {
         for (const QString &piece : allowEnv.split(QRegularExpression(QStringLiteral("[,;\\s]+")),
                                                   Qt::SkipEmptyParts))
@@ -316,13 +333,27 @@ AuthManager::Config AuthManager::loadConfig()
     }
     config.allowUsers = allow;
 
+#ifdef BSI_ENFORCE_EMBEDDED_AUTH
+    if (!config.roleGateConfigured()) {
+        config.setupHint = QStringLiteral("This release requires an embedded Discord server-role "
+                                          "policy (guildId and roles); an allowlist-only policy is "
+                                          "not sufficient.");
+        return config;
+    }
+#endif
+
     config.configured = !config.clientId.isEmpty();
     if (!config.configured) {
+#ifdef BSI_ENFORCE_EMBEDDED_AUTH
+        config.setupHint = QStringLiteral("The embedded release policy is missing discord.clientId. "
+                                          "Rebuild with the correct ZLP_AUTH_JSON secret.");
+#else
         config.setupHint = QStringLiteral(
             "Discord sign-in is not configured yet. Set BSIC_DISCORD_CLIENT_ID, or copy "
             "auth.example.json to auth.json next to the EXE and fill in discord.clientId - "
             "or bake the whole auth.json into the build with the ZLP_AUTH_JSON secret. "
             "See docs/AUTH.md.");
+#endif
     } else if (config.allowUsers.isEmpty() && !config.roleGateConfigured()) {
         if (!config.roles.isEmpty() && config.guildId.isEmpty()) {
             config.setupHint = QStringLiteral(
@@ -363,23 +394,30 @@ QByteArray AuthManager::embeddedAuthJson()
 // ---------------------------------------------------------------------------
 
 AuthManager::AuthManager(QObject *parent)
+    : AuthManager(QString(), parent)
+{
+}
+
+AuthManager::AuthManager(const QString &sessionDataDir, QObject *parent)
     : QObject(parent)
     , m_config(loadConfig())
+    , m_store(sessionDataDir)
 {
-    // A saved session is never an automatic login - it only earns the
-    // one-click "Welcome back" strip (same rule as FalcoForge).
     if (m_store.hasSaved())
         emit sessionChanged();
 
     if (!m_config.configured) {
         setNote(m_config.setupHint, QStringLiteral("bad"));
     } else if (m_store.hasSaved()) {
-        setNote(QStringLiteral("We found your previous sign-in on this PC - continue, or sign "
-                               "in with Discord."),
+        // The local identity is only a hint for the Welcome back card. It never
+        // opens the gate: refresh Discord and fetch current roles every launch.
+        setBusy(true);
+        setProgress(0, true);
+        setNote(QStringLiteral("Checking your current Discord account and server access…"),
                 QString());
+        QTimer::singleShot(0, this, [this] { recheckSavedSession(false); });
     } else {
-        setNote(QStringLiteral("Dev access is verified on this PC before the tool opens - "
-                               "Discord sign-in only."),
+        setNote(QStringLiteral("Sign in with Discord to verify your current access."),
                 QString());
     }
 }
@@ -471,14 +509,6 @@ bool AuthManager::tierForRoles(const Config &config, const QStringList &memberRo
         return true;
     }
     return false;
-}
-
-bool AuthManager::savedRoleStillGranted(const QVariantMap &identity) const
-{
-    const QString role = identity.value(QStringLiteral("AccessRole")).toString().trimmed();
-    if (role.isEmpty() || !m_config.roleGateConfigured())
-        return false;
-    return tierForRoles(m_config, QStringList { role }, nullptr, nullptr);
 }
 
 // ---------------------------------------------------------------------------
@@ -650,12 +680,12 @@ QString AuthManager::mapDiscordTokenError(int status, const QByteArray &body,
                                 "button once more.");
     if (containsText(desc, QStringLiteral("invalid_client")))
         return QStringLiteral(
-            "Discord rejected the application credentials (invalid_client). Check that the "
-            "client id is the numeric Application ID from the Discord Developer Portal. If "
-            "discord.clientSecret is empty, Discord only accepts a secret-less PKCE exchange "
-            "when the application has the Public Client flag enabled (Developer Portal -> "
-            "OAuth2); otherwise put the current Client Secret into the ZLP_AUTH_JSON secret as "
-            "discord.clientSecret and re-run the build.");
+            "Discord rejected the application credentials (invalid_client). Check that "
+            "discord.clientId is the numeric Application ID from the Developer Portal. This "
+            "desktop release uses PKCE and does not embed a client secret: in Developer Portal "
+            "-> OAuth2, enable and save Public Client, then retry Discord sign-in. If Discord "
+            "requires a confidential client, it needs a server-side token exchange; do not put "
+            "the client secret into a distributed EXE.");
     if (containsText(desc, QStringLiteral("code_verifier"))
         || containsText(desc, QStringLiteral("code verifier"))
         || containsText(desc, QStringLiteral("pkce"))
@@ -1056,10 +1086,14 @@ AuthManager::DiscordProfile AuthManager::completeDiscord(const QString &urlOrCod
         profile.message = QStringLiteral("That link has no sign-in code in it.");
         return profile;
     }
-    if (!state.isEmpty() && !m_handoff.state.isEmpty() && state != m_handoff.state) {
+    const bool isRedirectUrl = urlOrCode.contains(QLatin1String("://"))
+                               || urlOrCode.contains(QLatin1Char('?'))
+                               || urlOrCode.contains(QLatin1String("code="))
+                               || urlOrCode.contains(QLatin1String("state="));
+    if ((isRedirectUrl && (state.isEmpty() || m_handoff.state.isEmpty()))
+        || (!state.isEmpty() && state != m_handoff.state)) {
         profile.message = QStringLiteral(
-            "The one-time sign-in code and its PKCE proof no longer match. Press the Discord "
-            "button once more to start a fresh attempt.");
+            "The sign-in state did not match this one-time Discord attempt. Start a fresh sign-in.");
         return profile;
     }
 
@@ -1080,6 +1114,7 @@ AuthManager::DiscordProfile AuthManager::completeDiscord(const QString &urlOrCod
     const QJsonDocument tokenDoc = QJsonDocument::fromJson(token.body, &parseError);
     const QJsonObject tokenBody = tokenDoc.object();
     const QString accessToken = tokenBody.value(QStringLiteral("access_token")).toString();
+    const QString refreshToken = tokenBody.value(QStringLiteral("refresh_token")).toString();
     if (token.status != 200 || accessToken.isEmpty()) {
         profile.message = mapDiscordTokenError(token.status, token.body, m_config.redirectUri,
                                                m_config.scope);
@@ -1120,14 +1155,16 @@ AuthManager::DiscordProfile AuthManager::completeDiscord(const QString &urlOrCod
     identity.insert(QStringLiteral("LinkedAt"),
                     QDateTime::currentDateTimeUtc().toString(Qt::ISODate));
 
-    // ---- dev access: explicit allowlist OR the Discord server role gate ----
+    // A configured server role gate is authoritative and is checked for every
+    // sign-in, even when this ID is also on the developer allowlist. The
+    // allowlist is used only when no role gate is configured.
     const QString displayName = identity.value(QStringLiteral("DisplayName")).toString();
-    bool granted = allowlisted(id);
-    QString accessVia = granted ? QStringLiteral("allowlist") : QString();
+    bool granted = false;
+    QString accessVia;
     QString accessTier;
     QString accessRole;
 
-    if (!granted && m_config.roleGateConfigured()) {
+    if (m_config.roleGateConfigured()) {
         const GuildRoleAnswer role = checkGuildRole(accessToken);
         if (!role.ok) {
             profile.identity = identity;
@@ -1155,9 +1192,8 @@ AuthManager::DiscordProfile AuthManager::completeDiscord(const QString &urlOrCod
                         ? QStringLiteral("one of the configured server roles")
                         : QStringLiteral("the \"%1\" role tier").arg(m_config.requiredTier);
                 why = QStringLiteral(
-                          "none of that account's roles in the required Discord server grant "
-                          "%1. Ask a server admin for the role, or add the ID to "
-                          "discord.allowUsers in auth.json.")
+                          "none of that account's current roles in the required Discord server "
+                          "grant %1. Ask a server admin for the role.")
                           .arg(requirement);
             }
             profile.identity = identity;
@@ -1165,6 +1201,9 @@ AuthManager::DiscordProfile AuthManager::completeDiscord(const QString &urlOrCod
                                   .arg(displayName, id, why);
             return profile;
         }
+    } else if (allowlisted(id)) {
+        granted = true;
+        accessVia = QStringLiteral("allowlist");
     }
 
     identity.insert(QStringLiteral("AccessVia"), accessVia);
@@ -1173,23 +1212,22 @@ AuthManager::DiscordProfile AuthManager::completeDiscord(const QString &urlOrCod
 
     if (!granted) {
         profile.identity = identity;
-        profile.message =
-            (m_config.allowUsers.isEmpty() && !m_config.roleGateConfigured())
+        profile.message = m_config.allowUsers.isEmpty()
                 ? QStringLiteral(
-                      "Discord linked as %1 (ID %2), but no dev access gate is configured. Add "
+                      "Discord linked as %1 (ID %2), but no access gate is configured. Add "
                       "that ID to discord.allowUsers, or configure discord.guildId + "
                       "discord.roles + discord.requiredTier - see docs/AUTH.md.")
                       .arg(displayName, id)
                 : QStringLiteral(
-                      "Discord linked as %1 (ID %2), but this account is not on the dev "
-                      "allowlist. Add that ID to discord.allowUsers in auth.json to grant "
-                      "access.")
+                      "Discord linked as %1 (ID %2), but this account is not on the "
+                      "allowlist.")
                       .arg(displayName, id);
         return profile;
     }
 
     profile.ok = true;
     profile.identity = identity;
+    profile.refreshToken = refreshToken;
     return profile;
 }
 
@@ -1206,16 +1244,27 @@ void AuthManager::finishHandoff(const DiscordProfile &profile)
         emit userChanged();
 
         QString saveError;
-        if (!m_store.saveIdentity(profile.identity, &saveError))
-            setNote(QStringLiteral("Signed in, but the session could not be saved (%1).")
-                        .arg(saveError),
-                    QString());
-        else
+        const bool identitySaved = m_store.saveIdentity(profile.identity, &saveError);
+        QString credentialError;
+        const bool credentialSaved = identitySaved && !profile.refreshToken.isEmpty()
+                                     && m_store.saveRefreshToken(profile.refreshToken,
+                                                                 &credentialError);
+        QString successMessage = QStringLiteral("Discord linked. Current Discord access was verified.");
+        if (!identitySaved) {
+            successMessage = QStringLiteral("Signed in for this run, but the saved identity could not "
+                                           "be written (%1).")
+                                 .arg(saveError);
+        } else {
             emit sessionChanged();
+            if (!credentialSaved)
+                successMessage = QStringLiteral("Signed in for this run. The Discord refresh token "
+                                                "could not be saved securely, so sign in again next time.");
+        }
 
         setBusy(false);
         setProgress(100, false);
-        setNote(QStringLiteral("Discord linked."), QStringLiteral("good"));
+        setNote(successMessage, identitySaved && credentialSaved
+                                   ? QStringLiteral("good") : QString());
         setAuthorized(true);
         emit signInFinished(true, QStringLiteral("Discord linked."));
         return;
@@ -1241,36 +1290,186 @@ void AuthManager::cancelDiscord()
     setNote(QStringLiteral("Discord sign-in cancelled."), QString());
 }
 
-bool AuthManager::continueSaved()
+bool AuthManager::recheckSavedSession(bool interactiveIfCredentialMissing)
 {
-    if (!m_store.hasSaved())
+    if (!m_config.configured) {
+        setBusy(false);
+        setProgress(0, false);
+        setNote(m_config.setupHint, QStringLiteral("bad"));
         return false;
+    }
+    if (!m_store.hasSaved()) {
+        setBusy(false);
+        setProgress(0, false);
+        return false;
+    }
 
-    const QVariantMap identity = m_store.identity();
-    const QString id = identity.value(QStringLiteral("Id")).toString();
-    const bool byAllowlist = allowlisted(id);
-    // A role-based session stored the matched role ID in its signed envelope.
-    // Re-check it against the CURRENT config so removing/retiering a role
-    // closes the gate on the next continue.
-    const bool byRole = !byAllowlist && savedRoleStillGranted(identity);
-    if (!byAllowlist && !byRole) {
+    setAuthorized(false);
+    setBusy(true);
+    setProgress(0, true);
+    QString credentialError;
+    const QString oldRefreshToken = m_store.refreshToken(&credentialError);
+    if (oldRefreshToken.isEmpty()) {
+        setBusy(false);
+        setProgress(0, false);
+        setNote(QStringLiteral("Your saved sign-in cannot be checked securely. Sign in with Discord "
+                               "again to verify your current server role."),
+                QStringLiteral("bad"));
+        if (interactiveIfCredentialMissing)
+            startDiscord();
+        return false;
+    }
+
+    QList<QPair<QString, QString>> fields {
+        { QStringLiteral("client_id"), m_config.clientId },
+        { QStringLiteral("grant_type"), QStringLiteral("refresh_token") },
+        { QStringLiteral("refresh_token"), oldRefreshToken },
+    };
+    if (!m_config.clientSecret.isEmpty())
+        fields.append({ QStringLiteral("client_secret"), m_config.clientSecret });
+
+    const HttpAnswer token = httpPostForm(QString::fromLatin1(kTokenUrl),
+                                          buildForm(fields).toUtf8());
+    QJsonParseError parseError;
+    const QJsonObject tokenBody = QJsonDocument::fromJson(token.body, &parseError).object();
+    const QString accessToken = tokenBody.value(QStringLiteral("access_token")).toString();
+    const QString newRefreshToken = tokenBody.value(QStringLiteral("refresh_token")).toString();
+    if (token.status != 200 || accessToken.isEmpty()) {
+        if (token.status == 400
+            && tokenBody.value(QStringLiteral("error")).toString()
+                   == QLatin1String("invalid_grant"))
+            m_store.clearRefreshToken();
+        setBusy(false);
+        setProgress(0, false);
+        const QString detail = token.status == 0
+                                   ? (token.error.isEmpty()
+                                          ? QStringLiteral("Discord could not be reached.")
+                                          : token.error)
+                                   : mapDiscordTokenError(token.status, token.body,
+                                                         m_config.redirectUri, m_config.scope);
+        setNote(QStringLiteral("Current Discord access could not be verified; the tool remains "
+                               "locked. %1").arg(detail), QStringLiteral("bad"));
+        return false;
+    }
+
+    // Discord may rotate the refresh token. Persist the new one immediately so
+    // a later profile/role API outage does not leave only an invalid old token.
+    const QString tokenToSave = newRefreshToken.isEmpty() ? oldRefreshToken : newRefreshToken;
+    QString tokenSaveError;
+    bool refreshSaved = m_store.saveRefreshToken(tokenToSave, &tokenSaveError);
+    if (!refreshSaved)
+        m_store.clearRefreshToken();
+
+    const HttpAnswer me = httpGet(QString::fromLatin1(kApiUrl) + QStringLiteral("/users/@me"),
+                                  accessToken);
+    const QJsonObject user = QJsonDocument::fromJson(me.body, &parseError).object();
+    const QVariantMap savedIdentity = m_store.identity();
+    const QString savedId = savedIdentity.value(QStringLiteral("Id")).toString();
+    const QString currentId = user.value(QStringLiteral("id")).toString();
+    if (me.status != 200 || currentId.isEmpty() || currentId != savedId) {
+        if (me.status == 401 || (me.status == 200 && currentId != savedId)) {
+            m_store.clear();
+            emit sessionChanged();
+        }
+        setBusy(false);
+        setProgress(0, false);
+        setNote(me.status == 0
+                    ? QStringLiteral("Discord could not be reached to verify this account; the "
+                                     "tool remains locked.")
+                    : QStringLiteral("Discord could not verify the saved account. Sign in again; "
+                                     "the tool remains locked."),
+                QStringLiteral("bad"));
+        return false;
+    }
+
+    QVariantMap identity = savedIdentity;
+    const QString username = user.value(QStringLiteral("username")).toString();
+    const QString globalName = firstNonEmpty({
+        user.value(QStringLiteral("global_name")).toString(),
+        user.value(QStringLiteral("globalName")).toString(),
+    });
+    identity.insert(QStringLiteral("Username"), username);
+    identity.insert(QStringLiteral("GlobalName"), globalName);
+    identity.insert(QStringLiteral("DisplayName"), firstNonEmpty({ globalName, username, currentId }));
+    identity.insert(QStringLiteral("Avatar"), user.value(QStringLiteral("avatar")).toString());
+    identity.insert(QStringLiteral("AvatarUrl"), avatarUrlFor(identity));
+
+    QString accessVia;
+    QString accessTier;
+    QString accessRole;
+    bool granted = false;
+    if (m_config.roleGateConfigured()) {
+        // Server role is authoritative even if this ID also appears in the
+        // local allowlist. Never trust the role ID cached in session.json.
+        const GuildRoleAnswer role = checkGuildRole(accessToken);
+        if (!role.ok) {
+            setBusy(false);
+            setProgress(0, false);
+            setNote(QStringLiteral("Could not re-check your current Discord server role; the tool "
+                                   "remains locked. %1").arg(role.message),
+                    QStringLiteral("bad"));
+            return false;
+        }
+        if (!role.granted) {
+            m_store.clear();
+            emit sessionChanged();
+            setBusy(false);
+            setProgress(0, false);
+            setNote(role.notMember
+                        ? QStringLiteral("This Discord account is no longer in the required server. "
+                                         "The tool remains locked.")
+                        : QStringLiteral("This Discord account no longer has the required server "
+                                         "role. The tool remains locked."),
+                    QStringLiteral("bad"));
+            return false;
+        }
+        granted = true;
+        accessVia = QStringLiteral("role");
+        accessTier = role.tier;
+        accessRole = role.roleId;
+    } else if (allowlisted(currentId)) {
+        granted = true;
+        accessVia = QStringLiteral("allowlist");
+    }
+
+    if (!granted) {
         m_store.clear();
         emit sessionChanged();
-        setNote(QStringLiteral("That account no longer passes the dev allowlist or Discord role "
-                               "gate. Sign in with Discord again."),
-                QStringLiteral("bad"));
-        emit signInFinished(false, QStringLiteral("The saved sign-in no longer passes the gate."));
+        setBusy(false);
+        setProgress(0, false);
+        setNote(QStringLiteral("This Discord account no longer passes the configured access gate. "
+                               "The tool remains locked."), QStringLiteral("bad"));
         return false;
+    }
+
+    identity.insert(QStringLiteral("AccessVia"), accessVia);
+    identity.insert(QStringLiteral("AccessTier"), accessTier);
+    identity.insert(QStringLiteral("AccessRole"), accessRole);
+    QString saveError;
+    const bool identitySaved = m_store.saveIdentity(identity, &saveError);
+    if (!identitySaved) {
+        m_store.clear();
+        refreshSaved = false;
     }
 
     m_user = identity;
     emit userChanged();
+    emit sessionChanged();
     setBusy(false);
     setProgress(100, false);
-    setNote(QStringLiteral("Welcome back - access re-checked on this PC."), QStringLiteral("good"));
+    setNote(refreshSaved
+                ? QStringLiteral("Welcome back - your current Discord server access was verified.")
+                : QStringLiteral("Discord verified this run, but secure session storage failed. "
+                                 "Sign in again next time."),
+            refreshSaved ? QStringLiteral("good") : QString());
     setAuthorized(true);
     emit signInFinished(true, QStringLiteral("Welcome back."));
     return true;
+}
+
+bool AuthManager::continueSaved()
+{
+    return recheckSavedSession(true);
 }
 
 void AuthManager::forgetSaved()
