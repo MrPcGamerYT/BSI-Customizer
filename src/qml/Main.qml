@@ -191,8 +191,48 @@ ApplicationWindow {
                 }
             }
 
+            Rectangle {
+                id: settingsButton
+                Layout.leftMargin: 10
+                Layout.rightMargin: 8
+                Layout.preferredWidth: 92
+                Layout.preferredHeight: 30
+                radius: 9
+                color: settingsHover.containsMouse ? Theme.raised : "transparent"
+                border.width: 1
+                border.color: settingsHover.containsMouse ? Theme.borderStrong : Theme.border
+                Row {
+                    anchors.centerIn: parent
+                    spacing: 7
+                    Image {
+                        anchors.verticalCenter: parent.verticalCenter
+                        width: 15
+                        height: 15
+                        source: Icons.icon(Icons.settings, settingsHover.containsMouse ? Theme.accentText : Theme.textDim)
+                        smooth: true
+                    }
+                    Text {
+                        anchors.verticalCenter: parent.verticalCenter
+                        text: qsTr("Settings")
+                        color: settingsHover.containsMouse ? Theme.accentText : Theme.soft
+                        font.pixelSize: 11
+                        font.weight: Font.DemiBold
+                    }
+                }
+                MouseArea {
+                    id: settingsHover
+                    anchors.fill: parent
+                    hoverEnabled: true
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: settingsPanel.open()
+                }
+                ToolTip.visible: settingsHover.containsMouse
+                ToolTip.text: qsTr("Open appearance and About settings")
+                ToolTip.delay: 500
+            }
+
             WinControls {
-                Layout.leftMargin: 8
+                Layout.leftMargin: 0
                 appWindow: window
             }
         }
@@ -200,7 +240,7 @@ ApplicationWindow {
         // Drag the frameless window from the strip; double-click toggles max.
         MouseArea {
             anchors.fill: parent
-            anchors.rightMargin: 146
+            anchors.rightMargin: 260
             property real lastClick: 0
             onPressed: {
                 const now = Date.now();
@@ -263,10 +303,7 @@ ApplicationWindow {
                         { header: true,  label: qsTr("TOOLS") },
                         { page: 6, label: qsTr("UI"),          icon: Icons.extras },
                         { page: 7, label: qsTr("Debloat"),     icon: Icons.debloat },
-                        { page: 8, label: qsTr("Discord RPC"), icon: Icons.discord },
-                        { header: true,  label: qsTr("APP") },
-                        { page: 9, label: qsTr("Appearance"),  icon: Icons.appearance },
-                        { page: 10, label: qsTr("About"),      icon: Icons.about }
+                        { page: 8, label: qsTr("Discord RPC"), icon: Icons.discord }
                     ]
                     delegate: Loader {
                         required property var modelData
@@ -429,12 +466,6 @@ ApplicationWindow {
                     onNotify: (msg) => toast.show(msg)
                 }
                 RpcidPage {}
-                AppearancePage {
-                    onNotify: (msg) => toast.show(msg)
-                }
-                AboutPage {
-                    onNotify: (msg) => toast.show(msg)
-                }
             }
 
             LogPanel {
@@ -444,6 +475,11 @@ ApplicationWindow {
                 Behavior on Layout.preferredHeight { NumberAnimation { duration: 140 } }
             }
         }
+    }
+
+    SettingsPanel {
+        id: settingsPanel
+        onNotify: (message) => toast.show(message)
     }
 
     // ------------------------------------------------------------------

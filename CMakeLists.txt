@@ -299,6 +299,7 @@ qt_add_qml_module(BSICustomizer
         src/qml/components/ColorField.qml
         src/qml/components/GradientEditor.qml
         src/qml/components/LogPanel.qml
+        src/qml/components/SettingsPanel.qml
         src/qml/pages/DashboardPage.qml
         src/qml/pages/ThemePage.qml
         src/qml/pages/ResourcesPage.qml
@@ -309,6 +310,7 @@ qt_add_qml_module(BSICustomizer
         src/qml/pages/DebloatPage.qml
         src/qml/pages/RpcidPage.qml
         src/qml/pages/AppearancePage.qml
+        src/qml/pages/UpdatesPage.qml
         src/qml/pages/AboutPage.qml
     RESOURCES
         "BSI CUSTOMIZER.ico"
