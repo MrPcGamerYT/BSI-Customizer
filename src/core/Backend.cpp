@@ -109,6 +109,9 @@ QVariantMap Backend::runBackground(const std::function<QVariantMap(Backend &)> &
     settings->m_dllPath = m_settings->m_dllPath;
     settings->m_confPath = m_settings->m_confPath;
     settings->m_fpsAutoDetect = m_settings->m_fpsAutoDetect;
+    settings->m_aboutDeveloperName = m_settings->m_aboutDeveloperName;
+    settings->m_aboutTagline = m_settings->m_aboutTagline;
+    settings->m_aboutLinks = m_settings->m_aboutLinks;
     auto *worker = new Backend(settings);
     settings->setParent(worker);
     worker->copyPatchState(*this);
