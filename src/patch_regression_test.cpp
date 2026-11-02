@@ -4931,30 +4931,23 @@ Window {
         }
 
         const auto gradientCatalog = GradientPatcher::analyze(original);
-        const bool hasHexGradient = std::any_of(gradientCatalog.targets.cbegin(), gradientCatalog.targets.cend(),
+        const auto selectedGradient = std::find_if(gradientCatalog.targets.cbegin(), gradientCatalog.targets.cend(),
             [](const GradientPatcher::Target &target) { return target.hexGradient; });
-        if (gradientCatalog.ok && hasHexGradient) {
+        if (gradientCatalog.ok && selectedGradient != gradientCatalog.targets.cend()) {
             QByteArray gradientCopy = original;
             GradientPatcher::Spec realGradient;
             realGradient.first = QStringLiteral("#3B6FFF");
             realGradient.second = QStringLiteral("#22D3A6");
             QString gradientError;
-            const bool gradientApplied = GradientPatcher::applySurfaces(
-                gradientCopy, GradientPatcher::allGradientKey(), realGradient, &gradientError);
+            const bool gradientApplied = GradientPatcher::apply(
+                gradientCopy, selectedGradient->key, realGradient, &gradientError);
             check(gradientApplied && gradientCopy != original,
-                  QStringLiteral("the real %1 gradient catalog writes its loaded QML targets (%2)")
-                      .arg(QFileInfo(input).fileName(), gradientError));
-            if (gradientApplied) {
-                for (const auto &target : gradientCatalog.targets) {
-                    if (!target.hexGradient) continue;
-                    const QStringList names {target.resource};
-                    const int beforeMatches = QtResources::matchingUnits(original, names);
-                    if (beforeMatches == 0) continue;
-                    check(QtResources::activeUnits(gradientCopy, names) == 0,
-                          QStringLiteral("the real %1 gradient target %2 has no active matching compiled QML after its source change")
-                              .arg(QFileInfo(input).fileName(), target.resource));
-                }
-            }
+                  QStringLiteral("the real %1 gradient target %2 writes its loaded QML source (%3)")
+                      .arg(QFileInfo(input).fileName(), selectedGradient->resource, gradientError));
+            if (gradientApplied && QtResources::matchingUnits(original, {selectedGradient->resource}) > 0)
+                check(QtResources::activeUnits(gradientCopy, {selectedGradient->resource}) == 0,
+                      QStringLiteral("the real %1 gradient target %2 has no active matching compiled QML after its source change")
+                          .arg(QFileInfo(input).fileName(), selectedGradient->resource));
         } else {
             ciNotice(QStringLiteral("real gradient target workflow skipped for %1: %2")
                          .arg(QFileInfo(input).fileName(), gradientCatalog.message));
