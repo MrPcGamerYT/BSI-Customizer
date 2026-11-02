@@ -179,7 +179,18 @@ TargetSources readSources(const QString &exePath, const QByteArray &image)
     }
     const QByteArray playerBytes = QtResources::readFile(image, *playerRoot, kMaxQml);
     const QString playerText = EmbeddedResources::decodeText(playerBytes);
-    if (playerText.isEmpty() || !playerText.contains(QLatin1String("SettingElementModelList pSettingsItems"))) {
+    const bool inlineSettingsModel = playerText.contains(QLatin1String("SettingElementModelList pSettingsItems"));
+    // Newer MSI/BlueStacks builds keep the same native SettingElementModelList
+    // inside a Component in plr.qml, then pass its created instance into the
+    // dynamically created UiSettingsWindow. Validate that live connection, not
+    // just a similarly named orphan model.
+    const QRegularExpression componentSettingsModelPattern(
+        QStringLiteral("\\bComponent\\s*\\{\\s*id\\s*:\\s*iSettingsItems\\s+SettingElementModelList\\s*\\{"));
+    const QRegularExpression componentSettingsBindingPattern(
+        QStringLiteral("\\bpSettingsWindow\\s*=\\s*component\\.createObject\\s*\\([^;]*[\\\"']pSettingsItems[\\\"']\\s*:\\s*iSettingsItems\\.createObject\\s*\\("));
+    const bool componentSettingsModel = componentSettingsModelPattern.match(playerText).hasMatch()
+        && componentSettingsBindingPattern.match(playerText).hasMatch();
+    if (playerText.isEmpty() || (!inlineSettingsModel && !componentSettingsModel)) {
         out.error = QStringLiteral("The registered plr.qml does not expose the expected native Settings tab model; this player layout is unsupported.");
         return out;
     }
