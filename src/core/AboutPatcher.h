@@ -61,6 +61,7 @@ struct TableString
 struct State
 {
     bool supported = false; // the player's About QML has the expected shape
+    bool settingsPanelConflict = false; // a Settings rebuild owns the About page; route to it, but refuse edits
     bool applied = false;   // our content is currently written into the EXE
     QString detail;         // why not supported / what is currently there
     bool sectionsHidden = false; // the build hides the links/About sections

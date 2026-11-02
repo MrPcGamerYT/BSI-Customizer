@@ -2365,7 +2365,8 @@ bool hasAboutPage(const QString &path, bool prefilter = true)
     if (!file.open(QIODevice::ReadOnly)) return false;
     const QByteArray image = file.readAll();
     file.close();
-    return analyze(image).supported;
+    const State state = analyze(image);
+    return state.supported || state.settingsPanelConflict;
 }
 
 } // namespace
@@ -2489,9 +2490,17 @@ State analyze(const QByteArray &image)
                               "%1, but not inside a string record this version can rewrite.")
             .arg(where.join(QStringLiteral(", ")));
     };
+    QList<Doc> aboutCopies;
+    const bool copiesFound = findDocs(image, QStringLiteral("PlrAboutSetting.qml"),
+                                      &aboutCopies, nullptr);
+    bool settingsOwnsAbout = false;
+    if (copiesFound)
+        for (const Doc &copy : aboutCopies)
+            if (copy.qml.contains(kSettingsAboutMarker)) { settingsOwnsAbout = true; break; }
     const bool hasQmlPage = findDoc(image, QStringLiteral("PlrAboutSetting.qml"), &doc, &error);
-    if (hasQmlPage && doc.qml.contains(kSettingsAboutMarker)) {
-        state.source = doc.qml;
+    if (settingsOwnsAbout || (hasQmlPage && doc.qml.contains(kSettingsAboutMarker))) {
+        state.settingsPanelConflict = true;
+        state.source = settingsOwnsAbout ? aboutCopies.first().qml : doc.qml;
         state.detail = QStringLiteral("The Settings-panel rebuild owns this About page. The About editor cannot safely replace its links or compiled copy; restore the Settings panel first, then retry the About edit.");
         return state;
     }

@@ -4492,16 +4492,20 @@ Window {
                   && !QFile::exists(refusedPath + QStringLiteral(".bak")),
               "custom mode refuses a non-MP4 before changing the fixture executable");
 
+        QString ambiguousHost = host;
+        ambiguousHost.replace(QLatin1String("Component { id: iBootProgressComponent; RenamedStartup {} }"),
+            QStringLiteral("Component { id: iBootProgressComponent; BootOne {} }\r\n"
+                           "    Component { id: iBootProgressComponent; BootTwo {} }"));
         auto twice = resources({ { QStringLiteral("BootOne.qml"), controller },
                                  { QStringLiteral("BootTwo.qml"), controller },
-                                 { QStringLiteral("Shell.qml"), host } }, true);
+                                 { QStringLiteral("Shell.qml"), ambiguousHost } }, true);
         addRegistration(twice, false);
         const QString ambiguousPath = temp.filePath(QStringLiteral("two-boots.exe"));
         write(ambiguousPath, twice.f.bytes);
         const auto refused = BootVideoPatcher::patch(ambiguousPath);
-        check(!refused.ok && refused.msg.contains(QLatin1String("boot screen"))
+        check(!refused.ok && refused.msg.contains(QLatin1String("uniquely instantiate"))
                   && read(ambiguousPath) == twice.f.bytes,
-              "two registered boot screens are refused instead of guessing");
+              "two boot controllers instantiated by the registered host are refused instead of guessing");
 
         auto none = resources({ { QStringLiteral("Shell.qml"), host },
                                 { QStringLiteral("Other.qml"), QStringLiteral("import QtQuick; QtObject {}") } }, true);
@@ -4831,10 +4835,15 @@ Window {
             aboutFirstConfig.text = QStringLiteral("About first regression");
             aboutFirstConfig.showSections = true;
             const auto aboutFirst = AboutPatcher::apply(aboutFirstPath, true, aboutFirstConfig);
-            check(aboutFirst.ok,
-                  QStringLiteral("the real %1 About editor can prepare the overlap regression (%2)")
-                      .arg(QFileInfo(input).fileName(), aboutFirst.msg));
-            if (aboutFirst.ok) {
+            if (!aboutFirst.ok) {
+                check(read(aboutFirstPath) == original
+                          && (aboutFirst.msg.contains(QStringLiteral("free space"), Qt::CaseInsensitive)
+                              || aboutFirst.msg.contains(QStringLiteral("room its record"), Qt::CaseInsensitive)),
+                      QStringLiteral("the real %1 About editor safely refuses a source rewrite that cannot fit, without changing the EXE (%2)")
+                          .arg(QFileInfo(input).fileName(), aboutFirst.msg));
+                ciNotice(QStringLiteral("real About-first overlap guard not exercised for %1 because the source record has no spare room; the synthetic overlap regression covers that ordering")
+                             .arg(QFileInfo(input).fileName()));
+            } else {
                 const QByteArray aboutFirstBytes = read(aboutFirstPath);
                 const auto settingsAfterAbout = SettingsPanelPatcher::analyze(aboutFirstPath);
                 const auto settingsApplyAfterAbout = SettingsPanelPatcher::apply(aboutFirstPath,
@@ -6182,7 +6191,7 @@ Window {
             {{QStringLiteral("PlrAboutSetting.qml"), settingsOwnedAbout}}, true, {});
         addRegistration(settingsOwnedFixture, false);
         const auto settingsOwnedState = AboutPatcher::analyze(settingsOwnedFixture.f.bytes);
-        check(!settingsOwnedState.supported
+        check(!settingsOwnedState.supported && settingsOwnedState.settingsPanelConflict
                   && settingsOwnedState.detail.contains(QStringLiteral("restore the Settings panel")),
               "the About editor gives a safe, actionable conflict when the Settings rebuild owns the page");
         const QString conflictPath = temp.filePath(QStringLiteral("settings-about-conflict.exe"));
