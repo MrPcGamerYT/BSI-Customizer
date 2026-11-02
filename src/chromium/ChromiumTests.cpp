@@ -52,7 +52,7 @@ int runWebBridgeAccessTest()
 #endif
     const char *commands[] = {
         "aboutPageReport", "applyAboutPage", "applySettingsPanelRebuild", "applyGradient", "applyLayoutTweak", "applyPreset",
-        "applyRemovals", "applyTheme", "bootPatch", "checkUpdates", "detectInstalls",
+        "applyRemovals", "applyTheme", "bootLogoPreview", "bootPatch", "checkUpdates", "detectInstalls",
         "detectInstances", "extractAllResources", "extractResource", "fpsAnalyze", "fpsDetect",
         "fpsPatch", "fpsRestore", "gifRpcApply", "gifRpcInspect", "gifRpcRestore",
         "integrityCheck", "integrityPatch", "integrityRestore", "listResources", "loadGradients",

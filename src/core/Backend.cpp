@@ -1429,6 +1429,14 @@ QVariantMap Backend::bootPatch(int holdMs, const QString &mode, const QString &v
     return result(r.ok, r.msg, QStringLiteral("green"));
 }
 
+QVariantMap Backend::bootLogoPreview()
+{
+    if (actionsLocked()) return lockedMap();
+    const QString logo = BootVideoPatcher::logoPreviewDataUrl(m_settings->exePath());
+    return {{QStringLiteral("available"), !logo.isEmpty()},
+            {QStringLiteral("logo"), logo}};
+}
+
 QVariantMap Backend::purgePlayerCache()
 {
     if (actionsLocked()) return lockedMap();

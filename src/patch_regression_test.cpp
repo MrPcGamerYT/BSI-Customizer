@@ -4397,7 +4397,8 @@ Window {
         auto r = resources({ { QStringLiteral("RenamedStartup.qml"), controller },
                              { QStringLiteral("UnusedStartup.qml"), unusedController },
                              { QStringLiteral("Shell.qml"), host },
-                             { QStringLiteral("Other.qml"), QStringLiteral("import QtQuick; QtObject {}") } },
+                             { QStringLiteral("Other.qml"), QStringLiteral("import QtQuick; QtObject {}") },
+                             { QStringLiteral("BlueStacks5Beta.svg"), QStringLiteral("<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 64 64\"><circle cx=\"32\" cy=\"32\" r=\"25\" fill=\"#55aaff\"/></svg>") } },
                            false, {}, 256);
         addRegistration(r, false);
         // A record an earlier patch left behind: valid QML, no tree node, so the
@@ -4435,9 +4436,13 @@ Window {
         const QString modernAssets = QDir(QFileInfo(modernPath).absolutePath()).filePath(QStringLiteral("Assets"));
         const QByteArray modernHelper = read(QDir(modernAssets).filePath(QStringLiteral("BootVideo.qml")));
         check(modern.ok && modernHelper.contains("bsiModernBoot")
+                  && modernHelper.contains("data:image/svg+xml;base64,")
+                  && !modernHelper.contains("Text {")
+                  && !modernHelper.contains("STARTING YOUR PLAYER")
+                  && !modernHelper.contains("BSI / PLAYER STARTUP")
                   && !modernHelper.contains("QtMultimedia") && !modernHelper.contains("QtWebEngine")
                   && !QFile::exists(QDir(modernAssets).filePath(QStringLiteral("Promo.mp4"))),
-              "built-in modern mode patches the fixture without installing video, media imports, or network fallback");
+              "built-in modern mode embeds the player logo in a silent-text, smooth QtQuick loading screen without video or network dependencies");
         const QString modernControllerPath = QDir(folder).filePath(QStringLiteral("modern-controller.qml"));
         const QString modernControllerText = resourceText(read(modernPath), r, QStringLiteral("RenamedStartup.qml"));
         const bool controllerWritten = !modernControllerText.isEmpty()
@@ -4455,10 +4460,14 @@ Window {
         }
         QObject *modernLoader = modernRoot ? modernRoot->findChild<QObject *>(QStringLiteral("bsiBootLoader")) : nullptr;
         QObject *modernSplash = modernLoader ? modernLoader->property("item").value<QQuickItem *>() : nullptr;
+        QObject *modernLogo = modernSplash ? modernSplash->findChild<QObject *>(QStringLiteral("bsiEmulatorLogo")) : nullptr;
+        QObject *modernProgress = modernSplash ? modernSplash->findChild<QObject *>(QStringLiteral("progressTrack")) : nullptr;
         check(modernLoader && modernLoader->property("z").toDouble() >= 9999
                   && modernLoader->property("visible").toBool() && modernSplash
-                  && modernSplash->objectName() == QLatin1String("bsiModernBoot"),
-              "built-in animated boot loads visibly above the patched controller in a real Qt Quick engine");
+                  && modernSplash->objectName() == QLatin1String("bsiModernBoot")
+                  && modernLogo && modernLogo->property("source").toString().startsWith(QLatin1String("data:image/svg+xml;base64,"))
+                  && modernProgress,
+              "built-in boot displays the real registered BlueStacks logo and smooth loading bar in Qt Quick, without text overlays");
         delete modernRoot;
         check(read(modernPath + QStringLiteral(".bak")) == image,
               "built-in modern mode preserves the complete original executable backup");
@@ -4477,9 +4486,12 @@ Window {
         check(custom.ok && read(QDir(customAssets).filePath(QStringLiteral("Promo.mp4"))) == selectedMp4
                   && read(QDir(customAssets).filePath(QStringLiteral("Promo.mp4.bak"))) == previousMp4,
               "custom mode installs the selected MP4 and preserves the previous startup video");
-        check(customHelper.contains("BSI  /  STARTUP") && customHelper.contains("BLUE STACKS")
+        check(customHelper.contains("data:image/svg+xml;base64,")
+                  && !customHelper.contains("BSI  /  STARTUP")
+                  && !customHelper.contains("BLUE STACKS")
+                  && !customHelper.contains("Text {")
                   && customHelper.contains("QtMultimedia"),
-              "custom mode adds the BSI overlay and adaptive media player to its generated QML helper");
+              "custom video keeps only the real emulator logo and silent loading indicator as its overlay");
         check(read(customPath + QStringLiteral(".bak")) == image,
               "custom mode preserves the complete original executable backup");
 
@@ -5057,9 +5069,10 @@ Window {
         const QString modernAssets = QDir(QFileInfo(modernPath).absolutePath()).filePath(QStringLiteral("Assets"));
         const QByteArray modernHelper = read(QDir(modernAssets).filePath(QStringLiteral("BootVideo.qml")));
         check(modernBoot.ok && modernHelper.contains("bsiModernBoot")
+                  && modernHelper.contains("data:image/") && !modernHelper.contains("Text {")
                   && !modernHelper.contains("QtMultimedia") && !modernHelper.contains("QtWebEngine")
                   && !QFile::exists(QDir(modernAssets).filePath(QStringLiteral("Promo.mp4"))),
-              "built-in modern boot patches this real HD-Player version without media assets or codec imports");
+              "built-in modern boot patches this real HD-Player version with its registered logo and no text, media assets, or codec imports");
         const int activeBootUnits = QtResources::activeUnits(read(modernPath), {}, {
             QStringLiteral("iBootImage"), QStringLiteral("iBootProgressContainer"),
             QStringLiteral("iBootProgressComponent"), QStringLiteral("iBootLoader") });
@@ -5082,9 +5095,9 @@ Window {
         check(customBoot.ok && read(QDir(customAssets).filePath(QStringLiteral("Promo.mp4"))) == selectedVideo
                   && read(QDir(customAssets).filePath(QStringLiteral("Promo.mp4.bak"))) == previousVideo,
               "custom boot installs a bounded synthetic MP4 and preserves the prior video on this real HD-Player copy");
-        check(customHelper.contains("BSI  /  STARTUP") && customHelper.contains("BLUE STACKS")
+        check(customHelper.contains("data:image/") && !customHelper.contains("Text {")
                   && customHelper.contains("QtMultimedia"),
-              "custom boot installs the BSI-styled adaptive player helper for this real HD-Player version");
+              "custom boot uses the real emulator logo with a text-free adaptive player overlay for this real HD-Player version");
         check(read(customPath + QStringLiteral(".bak")) == original,
               "custom boot preserves the complete original of this HD-Player version");
         check(read(input) == original, "the supplied HD-Player reference remains byte-for-byte untouched");

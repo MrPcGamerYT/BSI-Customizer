@@ -113,6 +113,7 @@ const server = http.createServer((req, res) => {
           if (method === 'saveResource') { ++state.resourceRevision; value = { ok: true, msg: 'Test fixture acknowledged save' }; }
           if (method === 'setAboutProfile') { state.aboutProfile = { ...args, links: args.links.map(link => ({...link})) }; value = true; }
           if (method === 'fpsPatch') value = { ok: false, msg: 'Fixture: target is unsupported; no write' };
+          if (method === 'bootLogoPreview') value = { available: true, logo: svgPreview };
           if (method === 'bootPatch') value = { ok: true, msg: 'Built-in modern boot screen installed; no supported completion gate was found; requested 4567 ms hold was not applied.' };
           if (method === 'readInterface') value = {
             removals: ['Fixture sidebar', 'Fixture banner'], layout: [{ id: 'test-layout', label: 'Fixture layout', supported: true, applied: false }],
@@ -291,7 +292,9 @@ const server = http.createServer((req, res) => {
     await page.locator('#boot-hold').fill('4567');
     await click('boot-profile');
     assert.equal((await last('workspace')).args.options.value.holdMs, 4567);
-    assert.match(await page.locator('.boot-preview').innerText(), /Built-in animation/);
+    assert.equal((await page.locator('.boot-preview').innerText()).trim(), '', 'boot preview has no added captions or credits');
+    assert.ok((await page.locator('.boot-logo').getAttribute('src')).startsWith('data:image/svg+xml;base64,'), 'boot preview uses the selected player’s real logo');
+    assert.equal(await page.locator('.boot-track').count(), 1, 'boot preview shows the smooth indeterminate loading line');
     await page.locator('[data-action="bootPatch"]').evaluate(el => el.click());
     await page.waitForFunction(() => __calls.some(c => c.method === 'bootPatch'));
     let bootCall = await last('bootPatch');
@@ -301,7 +304,8 @@ const server = http.createServer((req, res) => {
     await page.locator('#boot-mode').selectOption('video');
     await page.evaluate(()=>{window.__nextFile='C:\\fixture\\modern-boot.mp4';});
     await page.locator('[data-action="bootVideoBrowse"]').evaluate(el => el.click());
-    assert.match(await page.locator('.boot-preview').innerText(), /modern-boot\.mp4/);
+    assert.match(await page.locator('#boot-video-selected').innerText(), /modern-boot\.mp4/);
+    assert.equal((await page.locator('.boot-preview').innerText()).trim(), '', 'custom-video preview also avoids overlaid text');
     await page.locator('[data-action="bootPatch"]').evaluate(el => el.click());
     await page.waitForFunction(() => __calls.filter(c => c.method === 'bootPatch').length === 2);
     bootCall = await last('bootPatch');

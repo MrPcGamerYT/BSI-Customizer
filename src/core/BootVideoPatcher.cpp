@@ -1,6 +1,7 @@
 #include "BootVideoPatcher.h"
 #include "ByteUtils.h"
 #include "BsDetector.h"
+#include "EmbeddedResources.h"
 #include "PatchFile.h"
 #include "PeUtils.h"
 #include "QtResources.h"
@@ -192,29 +193,96 @@ QList<Stream> streams(const QByteArray &data)
 }
 
 
-QString externalPlayer()
+QString embeddedEmulatorLogo(const QByteArray &image)
 {
-    // Adapted from the supplied script. Keep module imports inside dynamically
-    // created components, so an unavailable QtMultimedia module cannot prevent
-    // the boot controller itself from loading. No module is copied into the
-    // emulator, and no Loader is ever given an MP4 as its QML source.
-    return QStringLiteral(R"QML(import QtQuick 2.15
+    QList<QtResources::File> candidates;
+    for (const auto &file : QtResources::registeredFiles(image)) {
+        const QString leaf = file.name.toCaseFolded();
+        if (!leaf.contains(QStringLiteral("bluestacks"))) continue;
+        if (!leaf.endsWith(QLatin1String(".svg")) && !leaf.endsWith(QLatin1String(".png"))) continue;
+        candidates << file;
+    }
+    std::stable_sort(candidates.begin(), candidates.end(), [](const auto &a, const auto &b) {
+        const auto rank = [](const QtResources::File &file) {
+            const QString leaf = file.name.toCaseFolded();
+            if (leaf == QLatin1String("bluestacks5beta.svg")) return 0;
+            if (leaf == QLatin1String("bluestacks5beta.png")) return 1;
+            if (leaf.endsWith(QLatin1String(".svg"))) return 2;
+            return 3;
+        };
+        return rank(a) < rank(b);
+    });
+    constexpr qint64 maxLogoBytes = 1024 * 1024;
+    for (const auto &file : candidates) {
+        const QByteArray bytes = QtResources::readFile(image, file, maxLogoBytes);
+        if (bytes.isEmpty() || bytes.size() > maxLogoBytes) continue;
+        const QString leaf = file.name.toCaseFolded();
+        if (leaf.endsWith(QLatin1String(".svg"))) {
+            if (!bytes.toLower().contains(QByteArrayLiteral("<svg"))) continue;
+            return QStringLiteral("data:image/svg+xml;base64,") + QString::fromLatin1(bytes.toBase64());
+        }
+        if (bytes.startsWith(QByteArray::fromHex("89504e470d0a1a0a")))
+            return QStringLiteral("data:image/png;base64,") + QString::fromLatin1(bytes.toBase64());
+    }
+    return {};
+}
+
+QString externalPlayer(const QString &logoUrl)
+{
+    // The video remains the only background content. The emulator's own logo
+    // and a quiet, indeterminate progress track are the complete overlay: no
+    // product slogans, status labels, or BSI attribution are shown.
+    QString qml = QString::fromUtf8(R"QML(import QtQuick 2.15
 Item {
     id: root
     anchors.fill: parent
     clip: true
-    Rectangle { anchors.fill: parent; color: "#000000" }
-    Rectangle { z: 10; anchors.fill: parent; color: "#06101C"; opacity: 0.32 }
-    Rectangle { z: 11; anchors.right: parent.right; anchors.top: parent.top; anchors.margins: Math.max(22, parent.width * 0.035); width: 132; height: 34; radius: 17; color: "#182B42"; border.color: "#35B8F4"; border.width: 1
-        Text { anchors.centerIn: parent; text: "BSI  /  STARTUP"; color: "#BDEBFF"; font.pixelSize: 11; font.bold: true }
+    Rectangle { anchors.fill: parent; color: "#02060B" }
+    Rectangle { z: 8; anchors.fill: parent; color: "#06101C"; opacity: 0.26 }
+    Image {
+        id: emulatorLogo
+        objectName: "bsiEmulatorLogo"
+        z: 10
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.verticalCenter: parent.verticalCenter
+        anchors.verticalCenterOffset: -parent.height * 0.055
+        width: Math.min(parent.width * 0.26, 280)
+        height: Math.min(parent.height * 0.25, 190)
+        source: "__BSI_EMULATOR_LOGO__"
+        fillMode: Image.PreserveAspectFit
+        smooth: true
+        mipmap: true
+        opacity: 0.94
+        SequentialAnimation on opacity {
+            loops: Animation.Infinite
+            NumberAnimation { to: 0.82; duration: 1900; easing.type: Easing.InOutSine }
+            NumberAnimation { to: 0.94; duration: 1900; easing.type: Easing.InOutSine }
+        }
     }
-    Column { z: 11; anchors.left: parent.left; anchors.bottom: parent.bottom; anchors.margins: Math.max(26, parent.width * 0.06); spacing: 8
-        Text { text: "POWERING UP"; color: "#77D8FF"; font.pixelSize: 11; font.bold: true; font.letterSpacing: 2 }
-        Text { text: "BLUE STACKS"; color: "#FFFFFF"; font.pixelSize: 24; font.bold: true }
-        Text { text: "A faster, cleaner start."; color: "#B8C7D8"; font.pixelSize: 12 }
-        Rectangle { width: 190; height: 3; radius: 2; color: "#233B54"
-            Rectangle { width: parent.width * 0.42; height: parent.height; radius: 2; color: "#38C5FF"
-                NumberAnimation on x { from: 0; to: 110; duration: 1600; loops: Animation.Infinite }
+    Rectangle {
+        id: progressTrack
+        objectName: "bsiBootProgressTrack"
+        z: 11
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: Math.max(34, parent.height * 0.10)
+        width: Math.min(parent.width * 0.34, 340)
+        height: 3
+        radius: 2
+        color: "#35495A"
+        opacity: 0.68
+        Rectangle {
+            id: progressLight
+            width: parent.width * 0.28
+            height: parent.height
+            radius: 2
+            color: "#D5E8F6"
+            NumberAnimation on x {
+                from: 0
+                to: progressTrack.width - progressLight.width
+                duration: 2500
+                loops: Animation.Infinite
+                easing.type: Easing.InOutSine
             }
         }
     }
@@ -230,17 +298,19 @@ Item {
         var du = 'data:text/html;charset=utf-8,' + encodeURIComponent(html)
         var web = 'import QtQuick 2.15;import QtWebEngine;WebEngineView{anchors.fill:parent;url:'+JSON.stringify(du)+'}'
         try { Qt.createQmlObject(web, root, "promoWeb") }
-        catch(e) { console.warn("Boot video needs QtMultimedia or QtWebEngine and a supported MP4 codec: " + e) }
+        catch(e) { console.warn("Boot video requires a supported QtMultimedia or QtWebEngine playback runtime: " + e) }
     }
 }
 )QML");
+    qml.replace(QLatin1String("__BSI_EMULATOR_LOGO__"), logoUrl);
+    return qml;
 }
 
-QString modernBootPlayer()
+QString modernBootPlayer(const QString &logoUrl)
 {
-    // Built-in QtQuick-only splash: no video, codecs, network, or extra runtime
-    // packages are required in the emulator installation.
-    return QStringLiteral(R"MODERN(import QtQuick 2.15
+    // Quiet QtQuick-only splash: the real logo from this player build, smooth
+    // motion, and no text, external video, codecs, or network dependencies.
+    QString qml = QString::fromUtf8(R"MODERN(import QtQuick 2.15
 Item {
     id: root
     objectName: "bsiModernBoot"
@@ -249,126 +319,100 @@ Item {
     Rectangle {
         anchors.fill: parent
         gradient: Gradient {
-            GradientStop { position: 0.0; color: "#07111F" }
-            GradientStop { position: 0.55; color: "#08182A" }
-            GradientStop { position: 1.0; color: "#030811" }
+            GradientStop { position: 0.0; color: "#070D15" }
+            GradientStop { position: 0.54; color: "#0A1724" }
+            GradientStop { position: 1.0; color: "#050A10" }
         }
     }
     Rectangle {
-        width: Math.min(root.side * 1.12, 1120); height: width; radius: width / 2
-        anchors.centerIn: parent; anchors.horizontalCenterOffset: -root.width * 0.04
-        color: "#176BC2"
+        width: Math.min(root.side * 0.72, 820)
+        height: width
+        radius: width / 2
+        anchors.centerIn: parent
+        anchors.verticalCenterOffset: -root.height * 0.025
+        color: "#163B58"
+        opacity: 0.13
         SequentialAnimation on opacity {
             loops: Animation.Infinite
-            NumberAnimation { from: 0.055; to: 0.10; duration: 2200; easing.type: Easing.InOutSine }
-            NumberAnimation { to: 0.045; duration: 2200; easing.type: Easing.InOutSine }
+            NumberAnimation { to: 0.19; duration: 2600; easing.type: Easing.InOutSine }
+            NumberAnimation { to: 0.11; duration: 2600; easing.type: Easing.InOutSine }
         }
     }
     Rectangle {
-        width: Math.min(root.side * 0.86, 900); height: width; radius: width / 2
-        anchors.centerIn: parent; color: "transparent"
-        border.width: 1; border.color: "#183956"; opacity: 0.58
-        RotationAnimation on rotation { from: 0; to: 360; duration: 48000; loops: Animation.Infinite }
-    }
-    Rectangle {
-        width: Math.min(root.side * 0.66, 700); height: width; radius: width / 2
-        anchors.centerIn: parent; color: "transparent"
-        border.width: 1; border.color: "#23527A"; opacity: 0.72
-        RotationAnimation on rotation { from: 360; to: 0; duration: 32000; loops: Animation.Infinite }
-    }
-    Rectangle {
-        id: orbit
-        objectName: "orbit"
-        width: Math.min(root.side * 0.48, 500); height: width; radius: width / 2
-        anchors.centerIn: parent; color: "transparent"
-        border.width: 2; border.color: "#2C8ED0"; opacity: 0.88
-        RotationAnimation on rotation { from: 0; to: 360; duration: 9000; loops: Animation.Infinite }
-        Rectangle {
-            width: Math.max(8, root.side * 0.018); height: width; radius: width / 2
-            anchors.horizontalCenter: parent.horizontalCenter; anchors.top: parent.top
-            anchors.topMargin: -height / 2; color: "#8AE9FF"
-            Rectangle { anchors.centerIn: parent; width: parent.width * 2.8; height: width; radius: width / 2; color: "#4ACBFF"; opacity: 0.18 }
+        width: Math.min(root.side * 0.47, 480)
+        height: width
+        radius: width / 2
+        anchors.centerIn: parent
+        anchors.verticalCenterOffset: -root.height * 0.025
+        color: "transparent"
+        border.width: 1
+        border.color: "#4A657B"
+        opacity: 0.28
+        RotationAnimation on rotation {
+            from: 0; to: 360; duration: 36000; loops: Animation.Infinite
+            easing.type: Easing.Linear
         }
     }
-    Rectangle {
-        id: core
-        width: Math.min(root.side * 0.34, 350); height: width; radius: width / 2
-        anchors.centerIn: parent; anchors.verticalCenterOffset: -root.side * 0.035
-        gradient: Gradient {
-            GradientStop { position: 0.0; color: "#102944" }
-            GradientStop { position: 1.0; color: "#081421" }
-        }
-        border.width: 1; border.color: "#4FCBFF"
-        Rectangle {
-            anchors.fill: parent; anchors.margins: 8; radius: width / 2
-            color: "transparent"; border.width: 1; border.color: "#244663"; opacity: 0.8
-        }
-        Column {
-            anchors.centerIn: parent; spacing: 5
-            Text {
-                anchors.horizontalCenter: parent.horizontalCenter
-                text: "BSI"; color: "#F4FBFF"
-                font.pixelSize: Math.min(core.width * 0.31, 72); font.bold: true; font.letterSpacing: 7
-            }
-            Rectangle { anchors.horizontalCenter: parent.horizontalCenter; width: Math.min(core.width * 0.42, 118); height: 2; radius: 1; color: "#53CFFF"; opacity: 0.9 }
-            Text {
-                anchors.horizontalCenter: parent.horizontalCenter
-                text: "CUSTOMIZER"; color: "#8EBCD8"
-                font.pixelSize: Math.min(core.width * 0.052, 12); font.bold: true; font.letterSpacing: 2.2
-            }
-        }
+    Image {
+        id: emulatorLogo
+        objectName: "bsiEmulatorLogo"
+        anchors.centerIn: parent
+        anchors.verticalCenterOffset: -root.height * 0.035
+        width: Math.min(root.width * 0.25, 270)
+        height: Math.min(root.height * 0.24, 180)
+        source: "__BSI_EMULATOR_LOGO__"
+        fillMode: Image.PreserveAspectFit
+        smooth: true
+        mipmap: true
+        opacity: 0.96
         SequentialAnimation on scale {
             loops: Animation.Infinite
-            NumberAnimation { to: 1.025; duration: 1800; easing.type: Easing.InOutSine }
-            NumberAnimation { to: 1.0; duration: 1800; easing.type: Easing.InOutSine }
+            NumberAnimation { to: 1.018; duration: 2300; easing.type: Easing.InOutSine }
+            NumberAnimation { to: 1.0; duration: 2300; easing.type: Easing.InOutSine }
+        }
+        SequentialAnimation on opacity {
+            loops: Animation.Infinite
+            NumberAnimation { to: 0.82; duration: 2500; easing.type: Easing.InOutSine }
+            NumberAnimation { to: 0.96; duration: 2500; easing.type: Easing.InOutSine }
         }
     }
-    Text {
-        anchors.left: parent.left; anchors.top: parent.top
-        anchors.leftMargin: Math.max(24, root.width * 0.045); anchors.topMargin: Math.max(22, root.height * 0.055)
-        text: "BSI  /  PLAYER STARTUP"; color: "#9BC5E0"
-        font.pixelSize: 10; font.bold: true; font.letterSpacing: 1.8
-    }
-    Text {
-        anchors.right: parent.right; anchors.top: parent.top
-        anchors.rightMargin: Math.max(24, root.width * 0.045); anchors.topMargin: Math.max(22, root.height * 0.055)
-        text: "BUILT-IN  ·  NO VIDEO"; color: "#668AA8"
-        font.pixelSize: 9; font.letterSpacing: 1.2
-    }
-    Column {
+    Rectangle {
+        id: progressTrack
+        objectName: "progressTrack"
         anchors.horizontalCenter: parent.horizontalCenter
-        anchors.bottom: parent.bottom; anchors.bottomMargin: Math.max(38, root.height * 0.075)
-        spacing: 11
-        Text {
-            anchors.horizontalCenter: parent.horizontalCenter
-            text: "STARTING YOUR PLAYER"; color: "#E5F5FF"
-            font.pixelSize: Math.min(root.side * 0.023, 15); font.bold: true; font.letterSpacing: 2.4
-        }
-        Text {
-            anchors.horizontalCenter: parent.horizontalCenter
-            text: "A cleaner, smoother start."; color: "#86A6BE"
-            font.pixelSize: Math.min(root.side * 0.017, 12)
-        }
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: Math.max(34, root.height * 0.10)
+        width: Math.min(root.width * 0.34, 360)
+        height: 3
+        radius: 2
+        color: "#263747"
         Rectangle {
-            id: progressTrack
-            objectName: "progressTrack"
-            anchors.horizontalCenter: parent.horizontalCenter
-            width: Math.min(root.width * 0.34, 360); height: 3; radius: 2; color: "#19314A"
+            id: progressGlow
+            width: parent.width * 0.28
+            height: parent.height
+            radius: 2
+            color: "#D8EBF9"
             Rectangle {
-                id: progressGlow
-                width: parent.width * 0.24; height: parent.height; radius: 2; color: "#61D9FF"
-                Rectangle { anchors.centerIn: parent; width: parent.width * 1.45; height: 8; radius: 4; color: "#55CFFF"; opacity: 0.15 }
-                NumberAnimation on x { from: 0; to: progressTrack.width - progressGlow.width; duration: 2100; loops: Animation.Infinite; easing.type: Easing.InOutSine }
+                anchors.centerIn: parent
+                width: parent.width * 1.8
+                height: 7
+                radius: 4
+                color: "#B8D9EE"
+                opacity: 0.16
             }
-        }
-        Text {
-            anchors.horizontalCenter: parent.horizontalCenter
-            text: "BUILT-IN BOOT EXPERIENCE"; color: "#476884"
-            font.pixelSize: 8; font.bold: true; font.letterSpacing: 1.5
+            NumberAnimation on x {
+                from: 0
+                to: progressTrack.width - progressGlow.width
+                duration: 2650
+                loops: Animation.Infinite
+                easing.type: Easing.InOutSine
+            }
         }
     }
 }
 )MODERN");
+    qml.replace(QLatin1String("__BSI_EMULATOR_LOGO__"), logoUrl);
+    return qml;
 }
 
 bool writeAsset(const QString &path, const QByteArray &bytes)
@@ -485,6 +529,16 @@ bool updateHost(QString &host, int holdMs, bool *applied, QString *error)
 
 }
 
+QString logoPreviewDataUrl(const QString &exePath)
+{
+    QFile file(exePath);
+    if (!file.open(QIODevice::ReadOnly) || file.size() <= 0 || file.size() > 512ll * 1024 * 1024)
+        return {};
+    const QByteArray image = file.readAll();
+    if (file.error() != QFileDevice::NoError || image.size() != file.size()) return {};
+    return embeddedEmulatorLogo(image);
+}
+
 Result patch(const QString &exePath, int holdMs, const QString &requestedMode, const QString &videoPath)
 {
     const QString mode = requestedMode.isEmpty() ? QStringLiteral("video") : requestedMode;
@@ -515,6 +569,7 @@ Result patch(const QString &exePath, int holdMs, const QString &requestedMode, c
     const QByteArray original = file.readAll(); file.close();
     if (PeUtils::sections(original).isEmpty())
         return {false, QStringLiteral("This file is not a player executable; nothing was written.")};
+    const QString logoUrl = embeddedEmulatorLogo(original);
     auto candidates = streams(original);
     for (auto &stream : candidates) {
         if (!bootStub(stream.text)) continue;
@@ -744,7 +799,7 @@ Result patch(const QString &exePath, int holdMs, const QString &requestedMode, c
         videoWritten = true;
     }
     if (!reusedPlayer) {
-        const QByteArray helper = (mode == QLatin1String("modern") ? modernBootPlayer() : externalPlayer()).toUtf8();
+        const QByteArray helper = (mode == QLatin1String("modern") ? modernBootPlayer(logoUrl) : externalPlayer(logoUrl)).toUtf8();
         if (!writeAsset(helperPath, helper)) {
             const bool restored = rollbackVideo();
             return { false, restored ? QStringLiteral("Cannot atomically write Assets/BootVideo.qml; no executable was written.")

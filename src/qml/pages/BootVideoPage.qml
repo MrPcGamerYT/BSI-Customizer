@@ -11,6 +11,15 @@ Item {
     property string stateColorName: "gray"
     property string bootMode: "modern"
     property string videoPath: ""
+    property string bootLogoUrl: ""
+
+    function refreshBootLogo() {
+        const preview = backend.bootLogoPreview();
+        page.bootLogoUrl = preview.logo || "";
+    }
+
+    Component.onCompleted: refreshBootLogo()
+    onVisibleChanged: if (visible) refreshBootLogo()
 
     property string lastProfileBoot: JSON.stringify((backend.customizationProfile || {}).boot || {})
     Connections {
@@ -20,6 +29,7 @@ Item {
             const value = JSON.stringify(b);
             if (value !== page.lastProfileBoot) { page.lastProfileBoot = value; bootHold.value = b.holdMs === undefined ? 3000 : b.holdMs; }
         }
+        function onExePathChanged() { page.refreshBootLogo(); }
     }
     ColumnLayout {
         anchors.fill: parent
@@ -53,7 +63,7 @@ Item {
                     ComboBox {
                         id: bootStyle
                         Layout.preferredWidth: 270
-                        model: [qsTr("Built-in modern boot"), qsTr("Custom MP4 + BSI overlay")]
+                        model: [qsTr("Built-in modern boot"), qsTr("Custom MP4")]
                         currentIndex: page.bootMode === "modern" ? 0 : 1
                         onActivated: page.bootMode = currentIndex === 0 ? "modern" : "video"
                     }
@@ -76,19 +86,37 @@ Item {
                         width: 174; height: 174; radius: 87
                         anchors.horizontalCenter: parent.horizontalCenter
                         anchors.verticalCenter: parent.verticalCenter
-                        anchors.verticalCenterOffset: -16
-                        color: "#0D2038"
-                        SequentialAnimation on opacity { loops: Animation.Infinite; NumberAnimation { from: 0.72; to: 0.42; duration: 1700 } NumberAnimation { to: 0.72; duration: 1700 } }
+                        anchors.verticalCenterOffset: -10
+                        color: "#183246"
+                        opacity: 0.22
+                        SequentialAnimation on opacity { loops: Animation.Infinite; NumberAnimation { to: 0.30; duration: 2600; easing.type: Easing.InOutSine } NumberAnimation { to: 0.16; duration: 2600; easing.type: Easing.InOutSine } }
                     }
                     Rectangle {
-                        width: 116; height: 116; radius: 58
+                        width: 122; height: 122; radius: 61
                         anchors.centerIn: previewAura
-                        color: "transparent"; border.width: 2; border.color: "#2588D8"
-                        RotationAnimation on rotation { from: 0; to: 360; duration: 5200; loops: Animation.Infinite }
-                        Text { anchors.centerIn: parent; text: "BSI"; color: "#F1FAFF"; font.pixelSize: 30; font.bold: true; font.letterSpacing: 4 }
+                        color: "transparent"; border.width: 1; border.color: "#648097"; opacity: 0.3
+                        RotationAnimation on rotation { from: 0; to: 360; duration: 36000; loops: Animation.Infinite; easing.type: Easing.Linear }
                     }
-                    Text { anchors.horizontalCenter: parent.horizontalCenter; anchors.bottom: parent.bottom; anchors.bottomMargin: 38; text: qsTr("STARTING YOUR PLAYER"); color: "#D8F2FF"; font.pixelSize: 12; font.bold: true; font.letterSpacing: 2 }
-                    Text { anchors.horizontalCenter: parent.horizontalCenter; anchors.bottom: parent.bottom; anchors.bottomMargin: 19; text: page.bootMode === "modern" ? qsTr("Built-in animated boot · no extra video required") : (page.videoPath || qsTr("Choose an MP4 to preview this style on the next boot")); color: "#829CB8"; font.pixelSize: 10; elide: Text.ElideMiddle; width: parent.width - 40; horizontalAlignment: Text.AlignHCenter }
+                    Image {
+                        anchors.centerIn: previewAura
+                        width: 110; height: 96
+                        source: page.bootLogoUrl
+                        fillMode: Image.PreserveAspectFit
+                        smooth: true; mipmap: true
+                        opacity: 0.95
+                        SequentialAnimation on scale { loops: Animation.Infinite; NumberAnimation { to: 1.018; duration: 2300; easing.type: Easing.InOutSine } NumberAnimation { to: 1.0; duration: 2300; easing.type: Easing.InOutSine } }
+                    }
+                    Rectangle {
+                        id: previewProgressTrack
+                        anchors.horizontalCenter: parent.horizontalCenter
+                        anchors.bottom: parent.bottom; anchors.bottomMargin: 23
+                        width: Math.min(parent.width * 0.34, 310); height: 3; radius: 2; color: "#293D4D"
+                        Rectangle {
+                            id: previewProgressLight
+                            width: parent.width * 0.28; height: parent.height; radius: 2; color: "#D5E7F3"
+                            NumberAnimation on x { from: 0; to: previewProgressTrack.width - previewProgressLight.width; duration: 2650; loops: Animation.Infinite; easing.type: Easing.InOutSine }
+                        }
+                    }
                 }
                 Text {
                     Layout.fillWidth: true
@@ -96,14 +124,14 @@ Item {
                     wrapMode: Text.Wrap
                     color: Theme.textDim
                     font.pixelSize: 12
-                    text: qsTr("The selected MP4 is copied to Assets/Promo.mp4. The patcher preserves an existing video as Promo.mp4.bak and overlays BSI startup styling; codec support still depends on the installed Qt/WebEngine runtime.")
+                    text: qsTr("The selected MP4 is copied to Assets/Promo.mp4. An existing video is preserved as Promo.mp4.bak. The emulator's own logo and a quiet loading line are overlaid without labels or attribution; playback still depends on the installed Qt/WebEngine runtime.")
                 }
                 Text {
                     Layout.fillWidth: true
                     wrapMode: Text.Wrap
                     color: Theme.textDim
                     font.pixelSize: 12
-                    text: qsTr("The selected style replaces BlueStacks' stock loading artwork and progress panel with the animated BSI boot screen. Native Android startup handoff and ads remain intact. The patcher validates the boot layout, refreshes QML caches, and keeps the original executable backup. Close BlueStacks before applying.")
+                    text: qsTr("The selected style replaces BlueStacks' stock loading artwork and progress panel with a quiet, animated screen using the player's own logo. No extra labels or credits are shown. Native Android startup handoff and ads remain intact. The patcher validates the boot layout, refreshes QML caches, and keeps the original executable backup. Close BlueStacks before applying.")
                 }
 
                 RowLayout {
