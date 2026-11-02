@@ -27,7 +27,7 @@ Item {
         spacing: 16
 
         Text {
-            text: qsTr("Boot Video")
+            text: qsTr("Boot Experience")
             color: Theme.text
             font.pixelSize: 24
             font.weight: Font.Bold
@@ -103,7 +103,7 @@ Item {
                     wrapMode: Text.Wrap
                     color: Theme.textDim
                     font.pixelSize: 12
-                    text: qsTr("The patcher preserves the emulator's loading UI, validates the boot layout, refreshes QML caches, and keeps the original executable backup. Close BlueStacks before applying.")
+                    text: qsTr("The selected style replaces BlueStacks' stock loading artwork and progress panel with the animated BSI boot screen. Native Android startup handoff and ads remain intact. The patcher validates the boot layout, refreshes QML caches, and keeps the original executable backup. Close BlueStacks before applying.")
                 }
 
                 RowLayout {
@@ -126,7 +126,7 @@ Item {
                     }
                     ActionButton {
                         accent: true
-                        text: page.bootMode === "modern" ? qsTr("Install Modern Boot") : qsTr("Install Custom Boot")
+                        text: page.bootMode === "modern" ? qsTr("Install Animated Modern Boot") : qsTr("Install Custom Video Boot")
                         onClicked: {
                             backend.exePath = bootPath.text;
                             if (page.bootMode === "video" && page.videoPath === "") {

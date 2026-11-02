@@ -110,6 +110,8 @@ qt_add_executable(BSICustomizer
     src/core/LayoutPatcher.cpp
     src/core/AboutPatcher.h
     src/core/AboutPatcher.cpp
+    src/core/SettingsPanelPatcher.h
+    src/core/SettingsPanelPatcher.cpp
     src/core/DebloatConfig.h
     src/core/DebloatConfig.cpp
     src/core/DebloatPatcher.h

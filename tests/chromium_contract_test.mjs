@@ -105,6 +105,8 @@ assert.ok(webApp.includes('resource-detail-grid') && webApp.includes('resource-p
 assert.ok(webApp.includes("['All files', 'Pictures', 'SVG'"), 'The resource filter names the all-files state explicitly');
 const webEditors = read('src/web/editors.js');
 assert.ok(webEditors.includes('data-interface-tab') && webEditors.includes('About page') && webEditors.includes('aboutPreview'), 'Player Interface is grouped and has a live safe About preview');
+assert.ok(webEditors.includes("'settings-panel'") && webEditors.includes("'settings-panel-apply'") && webEditors.includes("'settings-panel-restore'"), 'The Chromium Player Interface exposes native Settings-panel apply and restore actions');
+assert.ok(bridge.includes('applySettingsPanelRebuild') && bridge.includes('"settingsPanel", m_backend.settingsPanelRebuildState()'), 'Native bridge reports and applies the real Settings-panel patcher');
 const webMaintenance = read('src/web/maintenance.js');
 assert.ok(webMaintenance.includes('data-maint-tab') && webMaintenance.includes('Root image file manager') && webMaintenance.includes('disk-manager') && webMaintenance.includes('disk-breadcrumbs'), 'Debloat modes are grouped and Root disk browsing uses a file-manager layout');
 assert.ok(webMaintenance.includes("disk?.writable") && webApp.includes("el.dataset.locked === 'true'"), 'Disk writes remain visibly gated by native writable status');
@@ -122,6 +124,8 @@ assert.ok(read('src/qml/Main.qml').includes('WindowGeometry.initialGeometry') &&
 assert.ok(webApp.includes("'bootVideoBrowse'") && webApp.includes("mode, sourcePath: mode === 'video'"), 'Chromium boot editor supports built-in and selected-video modes');
 const bootPatcher = read('src/core/BootVideoPatcher.cpp');
 assert.ok(bootPatcher.includes('QString modernBootPlayer()') && bootPatcher.includes('R"MODERN(') && bootPatcher.includes('Promo.mp4.bak'), 'Boot patcher contains a codec-free animation and protects prior custom video');
+assert.ok(bootPatcher.includes('z:10000') && bootPatcher.includes('iBootProgressContainer') && bootPatcher.includes('iBootTipstimer'), 'Boot patcher foregrounds the replacement splash and removes the original progress overlay');
+assert.ok(read('src/qml/pages/BootVideoPage.qml').includes('Install Animated Modern Boot') && webApp.includes('Install Animated Modern Boot'), 'the animated boot patch action is available from both Boot Experience UIs');
 assert.ok(bootPatcher.includes('sourceInfo.size() > maxVideoBytes') && bootPatcher.includes('sourceInfo.isSymLink()') && bootPatcher.includes('readBounded(source, maxVideoBytes'), 'Custom boot video path is size-bounded and refuses linked or oversized input files');
 assert.ok(bootPatcher.includes('rollbackVideo') && bootPatcher.includes('rollbackHelper') && bootPatcher.includes('samePath(videoPath, movie)'), 'Boot asset changes roll back on patch failure and avoid copying the target onto itself');
 assert.ok(bootPatcher.includes('requested %1 ms hold was not applied') && bootPatcher.includes('No extra boot hold was requested'), 'Boot result accurately distinguishes an unsupported requested hold from opting out');

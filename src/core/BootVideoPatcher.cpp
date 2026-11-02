@@ -122,7 +122,9 @@ void assignments(QString &qml)
     auto matches = re.globalMatch(code);
     while (matches.hasNext()) {
         const auto m = matches.next();
-        edits << qMakePair(m.capturedStart(2), qMakePair(m.capturedLength(2), m.captured(1).startsWith(QLatin1String("iBootLoadingText")) ? QStringLiteral("true") : QStringLiteral("false")));
+        // The modern/custom player supplies its own status text. Keep every
+        // stock boot overlay hidden if promotion callbacks run after patching.
+        edits << qMakePair(m.capturedStart(2), qMakePair(m.capturedLength(2), QStringLiteral("false")));
     }
     for (auto it = edits.crbegin(); it != edits.crend(); ++it) qml.replace(it->first, it->second.first, it->second.second);
 }
@@ -399,8 +401,8 @@ bool samePath(const QString &a, const QString &b)
 #endif
 }
 
-// Preserve the Android GL container and only gate the known boot Loader. The
-// original controller continues to own loading text/progress and Android ads.
+// Preserve the Android GL-container handoff and ads. The generated splash
+// replaces the stock loading artwork, text and progress controls.
 bool updateHost(QString &host, int holdMs, bool *applied, QString *error)
 {
     *applied = false;
@@ -601,11 +603,20 @@ Result patch(const QString &exePath, int holdMs, const QString &requestedMode, c
                 if (object.type == QLatin1String("Loader") && object.id == loaderId) { property(boot, object, key, QStringLiteral("true"), true); break; }
             }
         }
+        for (const auto &object : objects(boot)) {
+            if (object.type == QLatin1String("Loader") && object.id == loaderId) {
+                property(boot, object, QStringLiteral("z"), QStringLiteral("10000"), true);
+                property(boot, object, QStringLiteral("objectName"), QStringLiteral("\"bsiBootLoader\""), true);
+                break;
+            }
+        }
     } else {
         const QString helperPath = QDir(QFileInfo(exePath).absolutePath()).filePath(QStringLiteral("Assets/BootVideo.qml"));
         const QString helperUrl = QLatin1Char('"') + QUrl::fromLocalFile(helperPath).toString(QUrl::FullyEncoded) + QLatin1Char('"');
         const QString id = loaders.isEmpty() || loaders.first().id.isEmpty() ? QStringLiteral("pv") : loaders.first().id;
-        const QString loader = QStringLiteral("Loader{id:%1;objectName:\"bsiBootLoader\";z:-1;anchors.fill:parent;source:%2}").arg(id, helperUrl);
+        // The replacement is the complete splash, not an underlay. Keep it
+        // above the stock progress panel, promotion image and loading text.
+        const QString loader = QStringLiteral("Loader{id:%1;objectName:\"bsiBootLoader\";z:10000;anchors.fill:parent;source:%2}").arg(id, helperUrl);
         if (!loaders.isEmpty()) boot.replace(loaders.first().begin, loaders.first().end-loaders.first().begin, loader);
         else {
             const auto all = objects(boot);
@@ -613,8 +624,16 @@ Result patch(const QString &exePath, int holdMs, const QString &requestedMode, c
             boot.insert(all.first().body, loader);
         }
     }
-    visible(boot, QStringLiteral("iBootImage"), false);
-    visible(boot, QStringLiteral("iBootLoadingText"), true);
+    for (const auto &id : { QStringLiteral("iBootImage"), QStringLiteral("iBootLoadingText"),
+                            QStringLiteral("iBootProgressContainer"), QStringLiteral("iBootAppImage"),
+                            QStringLiteral("iBootAppTitle"), QStringLiteral("iBootAppDetails"),
+                            QStringLiteral("iPromotionInfoRect"), QStringLiteral("iBootImageBtn") })
+        visible(boot, id, false);
+    for (const auto &id : { QStringLiteral("iTimer"), QStringLiteral("iBootTipstimer") }) {
+        for (const auto &object : objects(boot)) {
+            if (object.id == id) { property(boot, object, QStringLiteral("running"), QStringLiteral("false"), true); break; }
+        }
+    }
     assignments(boot);
     for (const auto &name : {QStringLiteral("pBootImageButtonVisible"), QStringLiteral("pBootGridVisible")}) {
         const auto roots = objects(boot);

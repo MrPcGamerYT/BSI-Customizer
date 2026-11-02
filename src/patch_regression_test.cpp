@@ -8,6 +8,7 @@
 #include "core/EmbeddedResources.h"
 #include "core/ExtrasPatcher.h"
 #include "core/AboutPatcher.h"
+#include "core/SettingsPanelPatcher.h"
 #include "core/AndroidCleanup.h"
 #include "core/rootdisk/RootDisk.h"
 #include "core/AdbClient.h"
@@ -4308,6 +4309,7 @@ Window {
             "    property bool bootBackgroundImage: true\r\n"
             "    Image { id: iBootImage; objectName: 'bootImage'; visible: true }\r\n"
             "    Text { id: iBootLoadingText; objectName: 'loadingText' }\r\n"
+            "    Rectangle { id:iBootProgressContainer; objectName:'stockProgress'; visible:true }\r\n"
             "    function fSetBootPromotion() { iBootImage.visible = true }\r\n"
             "}\r\n");
         const QString host = QStringLiteral(
@@ -4342,9 +4344,13 @@ Window {
         const auto patched = read(path);
         check(patched.size() == image.size(), "the patched player is exactly as large as the original");
         const auto qml = resourceText(patched, r, QStringLiteral("RenamedStartup.qml"));
+        const bool stockProgressHidden = QRegularExpression(
+            QStringLiteral("id\\s*:\\s*iBootProgressContainer[^}]*visible\\s*:\\s*false"))
+                .match(qml).hasMatch();
         check(qml.contains(QLatin1String("objectName:\"bsiBootLoader\""))
-                  && qml.contains(QLatin1String("BootVideo.qml")),
-              "the boot screen is pointed at the video player the tool writes next to the EXE");
+                  && qml.contains(QLatin1String("z:10000"))
+                  && qml.contains(QLatin1String("BootVideo.qml")) && stockProgressHidden,
+              "the replacement splash is foregrounded and the old progress panel is hidden");
         check(patched.mid(leftover, image.size() - leftover) == image.mid(leftover),
               "a record the tree does not point at is never rewritten");
         const auto again = BootVideoPatcher::patch(path);
@@ -4359,6 +4365,28 @@ Window {
                   && !modernHelper.contains("QtMultimedia") && !modernHelper.contains("QtWebEngine")
                   && !QFile::exists(QDir(modernAssets).filePath(QStringLiteral("Promo.mp4"))),
               "built-in modern mode patches the fixture without installing video, media imports, or network fallback");
+        const QString modernControllerPath = QDir(folder).filePath(QStringLiteral("modern-controller.qml"));
+        const QString modernControllerText = resourceText(read(modernPath), r, QStringLiteral("RenamedStartup.qml"));
+        const bool controllerWritten = !modernControllerText.isEmpty()
+            && write(modernControllerPath, modernControllerText.toUtf8());
+        QQmlEngine modernEngine;
+        QQmlComponent modernComponent(&modernEngine, QUrl::fromLocalFile(modernControllerPath));
+        QObject *modernRoot = controllerWritten ? modernComponent.create() : nullptr;
+        if (modernRoot) {
+            modernRoot->setProperty("width", 1280);
+            modernRoot->setProperty("height", 720);
+            QCoreApplication::processEvents();
+        } else {
+            for (const auto &error : modernComponent.errors())
+                std::printf("    modern boot QML: %s\n", qPrintable(error.toString()));
+        }
+        QObject *modernLoader = modernRoot ? modernRoot->findChild<QObject *>(QStringLiteral("bsiBootLoader")) : nullptr;
+        QObject *modernSplash = modernLoader ? modernLoader->property("item").value<QQuickItem *>() : nullptr;
+        check(modernLoader && modernLoader->property("z").toDouble() >= 9999
+                  && modernLoader->property("visible").toBool() && modernSplash
+                  && modernSplash->objectName() == QLatin1String("bsiModernBoot"),
+              "built-in animated boot loads visibly above the patched controller in a real Qt Quick engine");
+        delete modernRoot;
         check(read(modernPath + QStringLiteral(".bak")) == image,
               "built-in modern mode preserves the complete original executable backup");
 
@@ -4705,6 +4733,57 @@ Window {
         }
         ciNotice(QStringLiteral("real All files scan: %1 entries, %2 SVGs, %3 SVG thumbnails")
                      .arg(resourceCount).arg(svgCount).arg(svgThumbCount));
+
+        // Exercise the actual Settings-panel rebuild on a disposable copy of
+        // every uploaded player version. The source reference is only read;
+        // both the native settings window and About source are restored after
+        // the apply/update/restore cycle.
+        const auto panelState = SettingsPanelPatcher::analyze(input);
+        check(panelState.supported && !panelState.applied,
+              QStringLiteral("the real %1 exposes a unique editable Settings window and About page (%2)")
+                  .arg(QFileInfo(input).fileName(), panelState.detail));
+        if (panelState.supported && !panelState.applied) {
+            const QString panelDir = temp.filePath(QStringLiteral("settings-panel-")
+                                                    + QFileInfo(input).completeBaseName());
+            QDir().mkpath(panelDir);
+            const QString panelCopy = QDir(panelDir).filePath(QStringLiteral("HD-Player.exe"));
+            write(panelCopy, original);
+            QVariantList panelLinks {
+                QVariantMap{{QStringLiteral("title"), QStringLiteral("Regression source")},
+                            {QStringLiteral("url"), QStringLiteral("https://example.com/source")}},
+                QVariantMap{{QStringLiteral("title"), QStringLiteral("Regression community")},
+                            {QStringLiteral("url"), QStringLiteral("https://example.com/community")}},
+                QVariantMap{{QStringLiteral("title"), QStringLiteral("Regression video")},
+                            {QStringLiteral("url"), QStringLiteral("https://example.com/video")}}
+            };
+            const auto appliedPanel = SettingsPanelPatcher::apply(panelCopy,
+                QStringLiteral("BSI Panel Regression"), panelLinks, true);
+            check(appliedPanel.value(QStringLiteral("ok")).toBool(),
+                  QStringLiteral("the real %1 Settings panel rebuild applies to a disposable copy (%2)")
+                      .arg(QFileInfo(input).fileName(), appliedPanel.value(QStringLiteral("msg")).toString()));
+            if (appliedPanel.value(QStringLiteral("ok")).toBool()) {
+                const auto activePanel = SettingsPanelPatcher::analyze(panelCopy);
+                check(activePanel.supported && activePanel.applied && activePanel.restorable,
+                      QStringLiteral("the rebuilt %1 panel reads back and has a selective recovery snapshot")
+                          .arg(QFileInfo(input).fileName()));
+                const auto updatedPanel = SettingsPanelPatcher::apply(panelCopy,
+                    QStringLiteral("BSI Panel Regression Updated"), panelLinks, true);
+                check(updatedPanel.value(QStringLiteral("ok")).toBool(),
+                      QStringLiteral("the real %1 panel safely accepts an About profile update (%2)")
+                          .arg(QFileInfo(input).fileName(), updatedPanel.value(QStringLiteral("msg")).toString()));
+                const auto restoredPanel = SettingsPanelPatcher::apply(panelCopy, QString(), {}, false);
+                check(restoredPanel.value(QStringLiteral("ok")).toBool(),
+                      QStringLiteral("the real %1 panel restores only its two original QML sources (%2)")
+                          .arg(QFileInfo(input).fileName(), restoredPanel.value(QStringLiteral("msg")).toString()));
+                const auto finalPanel = SettingsPanelPatcher::analyze(panelCopy);
+                check(finalPanel.supported && !finalPanel.applied,
+                      QStringLiteral("the original %1 Settings window is recognized again after restore")
+                          .arg(QFileInfo(input).fileName()));
+            }
+            check(read(input) == original,
+                  QStringLiteral("the uploaded %1 reference remains byte-for-byte untouched")
+                      .arg(QFileInfo(input).fileName()));
+        }
 
         const auto first = ThemeEngine::findThemeZlib(original);
         check(first.found && first.hasQrcNode && !first.ambiguous, "the supplied EXE has a unique mapped theme resource");

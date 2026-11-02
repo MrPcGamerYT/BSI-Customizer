@@ -12,6 +12,7 @@
 #include "ExtrasPatcher.h"
 #include "IntegrityPatcher.h"
 #include "AboutPatcher.h"
+#include "SettingsPanelPatcher.h"
 #include "DebloatPatcher.h"
 #include "LayoutPatcher.h"
 #include "RootVhd.h"
@@ -108,6 +109,9 @@ QVariantMap Backend::runBackground(const std::function<QVariantMap(Backend &)> &
     settings->m_dllPath = m_settings->m_dllPath;
     settings->m_confPath = m_settings->m_confPath;
     settings->m_fpsAutoDetect = m_settings->m_fpsAutoDetect;
+    settings->m_aboutDeveloperName = m_settings->m_aboutDeveloperName;
+    settings->m_aboutTagline = m_settings->m_aboutTagline;
+    settings->m_aboutLinks = m_settings->m_aboutLinks;
     auto *worker = new Backend(settings);
     settings->setParent(worker);
     worker->copyPatchState(*this);
@@ -1950,6 +1954,28 @@ QString Backend::aboutPageReport()
     if (path.isEmpty() || !QFileInfo::exists(path))
         return QStringLiteral("Select the HD-Player.exe path first.");
     return AboutPatcher::summary(path);
+}
+
+QVariantMap Backend::settingsPanelRebuildState()
+{
+    const auto state = SettingsPanelPatcher::analyze(m_settings->exePath());
+    return {{QStringLiteral("supported"), state.supported},
+            {QStringLiteral("applied"), state.applied},
+            {QStringLiteral("restorable"), state.restorable},
+            {QStringLiteral("detail"), state.detail}};
+}
+
+QVariantMap Backend::applySettingsPanelRebuild(bool enabled)
+{
+    if (actionsLocked()) return lockedMap();
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) { return worker.applySettingsPanelRebuild(enabled); });
+    const auto response = SettingsPanelPatcher::apply(m_settings->exePath(),
+        m_settings->aboutDeveloperName(), m_settings->aboutLinks(), enabled);
+    if (response.value(QStringLiteral("ok")).toBool()) emit resourcesChanged();
+    return result(response.value(QStringLiteral("ok")).toBool(),
+                  response.value(QStringLiteral("msg")).toString(),
+                  response.value(QStringLiteral("ok")).toBool() ? QStringLiteral("green") : QStringLiteral("red"));
 }
 
 QVariantMap Backend::restoreBackup(const QString &path)

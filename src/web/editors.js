@@ -74,12 +74,18 @@
         if (page === 12) return maintenance.render() + result(page);
         if (page === 6) {
           const info = interfaceInfo;
-          const tabs = [['layout', 'Layout & sidebar'], ['about', 'About page'], ['remove', 'Remove controls']];
+          const tabs = [['layout', 'Layout & sidebar'], ['about', 'About page'], ['settings-panel', 'Settings panel rebuild'], ['remove', 'Remove controls']];
           const tabbar = `<div class="editor-tabs" role="tablist" aria-label="Player interface sections">${tabs.map(([id, label]) => `<button class="editor-tab${interfaceTab === id ? ' active' : ''}" role="tab" aria-selected="${interfaceTab === id}" data-interface-tab="${id}">${label}</button>`).join('')}</div>`;
           let section = '<div class="empty">Inspect the selected player UI to load supported controls and About bindings.</div>';
           if (info && interfaceTab === 'layout') section = card('Player layout tweaks', `<p class="note">Apply only tweaks reported as supported for this executable. Each action remains individually reversible.</p>${(info.layout || []).map((t, i) => `<div class="editor-tweak"><b>${esc(t.label || t.id)}</b><p class="note">${esc(t.detail || '')} ${esc(t.state || '')}</p>${t.supported ? actions(btn(t.applied ? 'Restore this tweak' : 'Apply this tweak', 'layout', false, `data-index="${i}"`)) : '<span class="pill">Unsupported by this EXE</span>'}</div>`).join('') || '<p class="note">No layout tweaks reported for this executable.</p>'}`) + maintenance.sidebar();
           if (info && interfaceTab === 'remove') section = card('Remove selected controls', `<p class="note">Select only the unwanted controls; the native engine validates and backs up the executable before writing.</p><div class="editor-grid">${(info.removals || []).map((name, i) => check('remove:' + i, name)).join('') || '<p class="note">No supported removals were reported.</p>'}</div>${actions(btn('Apply selected removals', 'removals', true) + btn('Restore EXE backup', 'restore'))}`);
           if (info && interfaceTab === 'about') section = card('Player About page', `<p class="note">Edit the in-player About text and links. The preview is plain text and does not execute markup or URLs.</p><div class="about-editor-grid"><div>${area('about:text', 'About text', info.about?.text || '')}${check('about:sections', 'Show About/link sections', info.about?.showSections !== false)}${(info.about?.links || []).map((link, i) => `<div class="editor-link">${check('link:' + i + ':show', link.name || link.id || 'Show link', !link.hidden)}${field('link:' + i + ':label', 'Label', link.label || '')}${field('link:' + i + ':url', 'URL', link.url || '')}</div>`).join('')}${actions(btn('Apply About page', 'about-apply', true) + btn('Restore About bindings', 'about-restore') + btn('Save About to profile', 'about-profile'))}</div><div id="interface-about-preview">${aboutPreview()}</div></div>`);
+          if (info && interfaceTab === 'settings-panel') {
+            const panelState = info.settingsPanel || {};
+            const savedProfile = getState().aboutProfile || {};
+            const profileLinks = (savedProfile.links || []).filter(link => link.title && link.url);
+            section = card('Rebuild the BlueStacks Settings panel', `<p class="note">This changes the Settings window inside BlueStacks / HD-Player, not this customizer. It replaces the vertical category list with horizontally scrollable icon-and-label tabs, keeps every native settings page and its save/discard flow, makes the compact window draggable, and redesigns About with the BlueStacks icon plus your saved developer profile.</p><div class="editor-grid"><div class="kv"><span>Patch support</span><b>${panelState.supported ? 'Supported' : 'Not supported'}</b></div><div class="kv"><span>Current panel</span><b>${panelState.applied ? 'Custom rebuild installed' : 'Original panel'}</b></div></div><p class="note">${esc(panelState.detail || 'Inspect the selected player UI to check its embedded QML resources.')}</p><div class="about-live-preview"><div class="about-live-mark">BS</div><span class="section-label">Saved About profile</span><h3>${esc(savedProfile.developerName || 'No developer name saved')}</h3><div class="about-live-links">${profileLinks.map(link => `<span>${esc(link.title)}</span>`).join('') || '<span>No links saved</span>'}</div><p class="note">Edit this profile under About BSI → Customize About page, then apply the rebuild.</p></div>${actions(btn(panelState.applied ? 'Update rebuilt Settings panel' : 'Apply Settings panel rebuild', 'settings-panel-apply', true, panelState.supported ? '' : 'disabled title="This executable does not expose the required editable QML sources"') + btn('Restore original Settings panel', 'settings-panel-restore', false, panelState.restorable ? '' : 'disabled title="No safe feature-specific recovery snapshot is available"'))}`);
+          }
           return card('Player interface', `<p class="note">Inspect once, then choose a focused task. No resources are scanned while navigating.</p>${actions(btn('Inspect player UI', 'interface-load', true) + btn('Export About report', 'about-report'))}${info ? `<p class="note">${esc(info.about?.detail || info.detail || 'Player UI capabilities loaded from the selected executable.')}</p>` : ''}`) + tabbar + section + result(page);
         }
         if (page === 7) return card('Discord application ID', `<p class="note">Uses the existing native offline ID scanner and reversible patcher. No URL fetching or JavaScript binary editing.</p>${actions(btn('Read status', 'rpc-status', true) + btn('Scan application IDs', 'rpc-find') + btn('Load Explorer names', 'rpc-names'))}<div class="editor-grid">${field('rpc:newId', 'New application ID (17–20 digits)')}${field('rpc:oldId', 'Old ID (optional)')}</div>${actions(btn('Dry run ID replacement', 'rpc-dry') + btn('Apply application ID', 'rpc-apply', true) + btn('Undo ID patch', 'rpc-undo'))}`)
@@ -133,6 +139,14 @@
         } else if (name === 'about-profile') {
           if (!interfaceInfo) throw new Error('Inspect player UI first.');
           response = await workspace('profile-section', { section: 'about', value: aboutSettings() });
+        } else if (name === 'settings-panel-apply' || name === 'settings-panel-restore') {
+          if (!interfaceInfo) throw new Error('Inspect player UI first.');
+          if (!await confirmWrite(name === 'settings-panel-apply'
+            ? 'Rebuild the Settings window inside the selected BlueStacks player using the saved About profile?'
+            : 'Restore only the original Settings-window and About-page QML sources?')) return;
+          response = await request('applySettingsPanelRebuild', { enabled: name === 'settings-panel-apply' });
+          interfaceInfo = await request('readInterface');
+          ctx.invalidateResources();
         } else if (name === 'about-report') response = await request('aboutPageReport');
         else if (name === 'restore') { if (!await confirmWrite('Restore the EXE backup?')) return; response = await request('restoreBackup'); ctx.invalidateResources(); interfaceInfo = null; }
         else if (['rpc-status', 'rpc-find', 'rpc-names', 'rpc-undo'].includes(name)) {
@@ -223,7 +237,7 @@
         render, extra, action,
         videoStatus(message) { videoStatus=String(message).slice(0,2048); const node=document.querySelector('#video-status'); if(node)node.textContent=videoStatus; },
         input(el) { maintenance.input(el); if (el.dataset.editorField) fields[el.dataset.editorField] = el.type === 'checkbox' ? el.checked : el.value; },
-        selectInterfaceTab(tab) { if (['layout', 'about', 'remove'].includes(tab)) interfaceTab = tab; },
+        selectInterfaceTab(tab) { if (['layout', 'about', 'settings-panel', 'remove'].includes(tab)) interfaceTab = tab; },
         selectMaintenanceTab(tab) { maintenance.selectTab(tab); },
         aboutPreview,
         settingsUpdates,
