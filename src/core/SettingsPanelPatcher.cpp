@@ -180,164 +180,41 @@ QString buildWindow(const QString &stock)
         // BSI CUSTOMIZER: redesigned Settings window v1
         id: iSettingsWindowShadowContainer
         anchors.fill: parent
-
         Rectangle {
             anchors.fill: parent
             color: UiTheme.colors.primary80
-
-            ColumnLayout {
-                anchors.fill: parent
-                anchors.margins: 18
-                spacing: 12
-
-                RowLayout {
-                    id: iBsiSettingsHeader
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: 34
-                    spacing: 10
-
-                    MouseArea {
-                        id: iBsiSettingsDrag
-                        anchors.fill: parent
-                        z: 0
-                        property real pPressX: 0
-                        property real pPressY: 0
-                        property real pWindowX: 0
-                        property real pWindowY: 0
-                        onPressed: function(mouse) {
-                            pPressX = mouse.screenX
-                            pPressY = mouse.screenY
-                            pWindowX = iSettingsWindow.x
-                            pWindowY = iSettingsWindow.y
-                        }
-                        onPositionChanged: function(mouse) {
-                            if (!pressed || !iSettingsWindow.screen) return
-                            var area = iSettingsWindow.screen.availableGeometry
-                            iSettingsWindow.x = Math.max(area.x, Math.min(area.x + area.width - iSettingsWindow.width,
-                                pWindowX + mouse.screenX - pPressX))
-                            iSettingsWindow.y = Math.max(area.y, Math.min(area.y + area.height - iSettingsWindow.height,
-                                pWindowY + mouse.screenY - pPressY))
-                        }
-                        cursorShape: pressed ? Qt.ClosedHandCursor : Qt.OpenHandCursor
-                    }
-                    Text {
-                        text: qsTranslate("QObject", "Settings")
-                        font: UiTheme.fonts.bodyLarge
-                        color: UiTheme.colors.primary10
-                        Layout.fillWidth: true
-                        z: 1
-                    }
-                    Text {
-                        text: "×"
-                        font.pixelSize: 24
-                        color: UiTheme.colors.primary20
-                        Layout.preferredWidth: 30
-                        horizontalAlignment: Text.AlignHCenter
-                        z: 2
-                        MouseArea {
-                            anchors.fill: parent
-                            onClicked: iSettingsWindow.close()
-                            cursorShape: Qt.PointingHandCursor
-                        }
-                    }
+            MouseArea { width: parent.width - 54; height: 48; onPressed: iSettingsWindow.startSystemMove() }
+            UiImageButton {
+                asset: "CloseIcon"; pImageWidth: 16; pImageHeight: 16
+                anchors.top: parent.top; anchors.right: parent.right; anchors.margins: 14
+                onClicked: iSettingsWindow.close()
+            }
+            ListView {
+                x: 12; y: 52; width: parent.width - 24; height: 72; clip: true
+                orientation: ListView.Horizontal; spacing: 5
+                ScrollBar.horizontal: ScrollBar { policy: ScrollBar.AsNeeded }
+                model: pSettingsItems.pSettingElements
+                delegate: UiSettingsButton {
+                    width: 76; height: 64
+                    pSettingIdx: model.index
+                    pSettingBtnText: ["ϟ ", "▣ ", "◈ ", "⌖ ", "◖ ", "♧ ", "⚙ ", "▯ ", "⌨ ", "◉ ", "⚒ ", "ⓘ "][model.index] + model.modelData.pButtonText
+                    pSelected: model.index === pCurrentTabIndex
+                    pShowRedDot: model.modelData.pShowRedDot
+                    onSettingClicked: fChangeSelectedSetting(model.index)
                 }
-
-                Flickable {
-                    id: iBsiSettingsTabsViewport
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: 70
-                    contentWidth: iBsiSettingsTabs.implicitWidth
-                    contentHeight: height
-                    clip: true
-                    boundsBehavior: Flickable.StopAtBounds
-                    flickableDirection: Flickable.HorizontalFlick
-                    ScrollBar.horizontal: ScrollBar { policy: ScrollBar.AsNeeded }
-
-                    Row {
-                        id: iBsiSettingsTabs
-                        spacing: 7
-                        height: iBsiSettingsTabsViewport.height
-
-                        Repeater {
-                            model: pSettingsItems.pSettingElements
-                            delegate: Rectangle {
-                                id: iBsiSettingTab
-                                width: 88
-                                height: 62
-                                radius: 10
-                                visible: model.modelData.pIsVisible === undefined || model.modelData.pIsVisible
-                                color: model.index === pCurrentTabIndex
-                                    ? Qt.rgba(UiTheme.colors.accentNormal.r, UiTheme.colors.accentNormal.g,
-                                              UiTheme.colors.accentNormal.b, 0.19)
-                                    : Qt.rgba(UiTheme.colors.primary60.r, UiTheme.colors.primary60.g,
-                                              UiTheme.colors.primary60.b, 0.54)
-                                border.width: model.index === pCurrentTabIndex ? 1 : 0
-                                border.color: UiTheme.colors.accentNormal
-
-                                Column {
-                                    anchors.fill: parent
-                                    anchors.margins: 4
-                                    spacing: 2
-                                    Text {
-                                        text: fBsiSettingsIcon(model.index)
-                                        color: model.index === pCurrentTabIndex
-                                            ? UiTheme.colors.accentNormal : UiTheme.colors.primary20
-                                        font.pixelSize: 19
-                                        font.bold: true
-                                        width: parent.width
-                                        horizontalAlignment: Text.AlignHCenter
-                                    }
-                                    Text {
-                                        text: model.modelData.pButtonText
-                                        color: model.index === pCurrentTabIndex
-                                            ? UiTheme.colors.primary10 : UiTheme.colors.primary20
-                                        font: UiTheme.fonts.bodyExtraSmall
-                                        width: parent.width
-                                        horizontalAlignment: Text.AlignHCenter
-                                        wrapMode: Text.Wrap
-                                        maximumLineCount: 2
-                                        elide: Text.ElideRight
-                                    }
-                                }
-                                MouseArea {
-                                    anchors.fill: parent
-                                    onClicked: fChangeSelectedSetting(model.index)
-                                    cursorShape: Qt.PointingHandCursor
-                                }
-                            }
+            }
+            StackLayout {
+                id: iSelectedSettingControl
+                x: 12; y: 132; width: parent.width - 24; height: parent.height - 144
+                currentIndex: pCurrentTabIndex
+                Repeater {
+                    model: pSettingsItems.pSettingElements
+                    delegate: Loader {
+                        Component.onCompleted: {
+                            if (model.modelData.pComponentArgs !== null) setSource(model.modelData.pQmlSource, model.modelData.pComponentArgs)
+                            else setSource(model.modelData.pQmlSource)
                         }
-                    }
-                }
-
-                Rectangle {
-                    Layout.fillWidth: true
-                    Layout.fillHeight: true
-                    Layout.minimumHeight: 260
-                    radius: 12
-                    color: Qt.rgba(UiTheme.colors.primary70.r, UiTheme.colors.primary70.g,
-                                   UiTheme.colors.primary70.b, 0.56)
-
-                    StackLayout {
-                        id: iSelectedSettingControl
-                        anchors.fill: parent
-                        anchors.margins: 8
-                        currentIndex: pCurrentTabIndex
-                        Repeater {
-                            model: pSettingsItems.pSettingElements
-                            delegate: Loader {
-                                Component.onCompleted: {
-                                    if (model.modelData.pComponentArgs !== null)
-                                        setSource(model.modelData.pQmlSource, model.modelData.pComponentArgs)
-                                    else
-                                        setSource(model.modelData.pQmlSource)
-                                }
-                                onLoaded: {
-                                    model.modelData.pComponentObj = item
-                                    if (item.fOnQmlLoaded)
-                                        item.fOnQmlLoaded()
-                                }
-                            }
-                        }
+                        onLoaded: { model.modelData.pComponentObj = item; if (item.fOnQmlLoaded) item.fOnQmlLoaded() }
                     }
                 }
             }
@@ -349,24 +226,12 @@ QString buildWindow(const QString &stock)
     // The toolbar changes with BlueStacks translations, so use stable model
     // order to supply a distinct, legible icon for every stock category.
     const QString helper = QStringLiteral(R"QML(
-    function fBsiSettingsIcon(index) {
-        var icons = ["ϟ", "▣", "◈", "⌖", "◖", "♧", "⚙", "▯", "⌨", "◉", "⚒", "ⓘ"]
-        return icons[index] || "•"
+    onVisibleChanged: if (visible && transientParent) {
+        width = transientParent.width * 0.72
+        height = transientParent.height * 0.8
+        x = transientParent.x + (transientParent.width - width) / 2
+        y = transientParent.y + (transientParent.height - height) / 2
     }
-
-    function fBsiFitSettingsWindow() {
-        if (!transientParent || !screen) return
-        var area = screen.availableGeometry
-        var wantedWidth = Math.round(transientParent.width * 0.72)
-        var wantedHeight = Math.round(transientParent.height * 0.80)
-        width = Math.max(600, Math.min(wantedWidth, Math.round(area.width * 0.90)))
-        height = Math.max(430, Math.min(wantedHeight, Math.round(area.height * 0.90)))
-        x = Math.max(area.x, Math.min(area.x + area.width - width,
-            transientParent.x + Math.round((transientParent.width - width) / 2)))
-        y = Math.max(area.y, Math.min(area.y + area.height - height,
-            transientParent.y + Math.round((transientParent.height - height) / 2)))
-    }
-    onVisibleChanged: if (visible) Qt.callLater(fBsiFitSettingsWindow)
 )QML");
     const int rootClose = out.lastIndexOf(QLatin1String("\n}"));
     if (rootClose < 0) return {};
