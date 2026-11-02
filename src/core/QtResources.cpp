@@ -119,30 +119,118 @@ QString unitString(const QByteArray &data, qsizetype pos, quint32 size, quint32 
     return path;
 }
 
-QStringList unitNeedles(const QStringList &sourceNames)
+QStringList unitNeedles(const QStringList &sourceNames, const QStringList &identifiers = {})
 {
     QStringList needles;
+    const auto add = [&needles](const QString &value) {
+        if (!value.isEmpty() && value.size() <= 128 && !needles.contains(value))
+            needles << value;
+    };
     for (const QString &n : sourceNames) {
         const QString file = n.section(QLatin1Char('/'), -1).section(QLatin1Char('\\'), -1);
         if (file.isEmpty())
             continue;
-        if (!needles.contains(file))
-            needles << file;
+        add(file);
         const QString stem = QFileInfo(file).completeBaseName();
         // Short stems like "plr" match unrelated identifiers (plrBackend).
-        if (stem.size() >= 6 && !needles.contains(stem))
-            needles << stem;
+        if (stem.size() >= 6)
+            add(stem);
         if (file.compare(QLatin1String("plr.qml"), Qt::CaseInsensitive) == 0) {
             for (const QString &extra : { QStringLiteral("iSidebar"), QStringLiteral("iTopbar"),
-                                          QStringLiteral("PlrSidebar"), QStringLiteral("PlrTopbar") }) {
-                if (!needles.contains(extra))
-                    needles << extra;
-            }
+                                          QStringLiteral("PlrSidebar"), QStringLiteral("PlrTopbar") })
+                add(extra);
+        } else if (file.compare(QLatin1String("UiSettingsWindow.qml"), Qt::CaseInsensitive) == 0) {
+            // MSI 5's QV4 units often have an empty sourceFileIndex and omit
+            // the source filename from their string table. Match distinctive
+            // IDs from the real Settings-window unit instead of claiming that
+            // replacing the editable .qml made the player use it.
+            for (const QString &extra : { QStringLiteral("iSettingsWindowShadowContainer"),
+                                          QStringLiteral("fChangeSelectedSetting") })
+                add(extra);
+        } else if (file.compare(QLatin1String("PlrAboutSetting.qml"), Qt::CaseInsensitive) == 0) {
+            for (const QString &extra : { QStringLiteral("aboutSettings"),
+                                          QStringLiteral("Important links"),
+                                          QStringLiteral("About and other info"),
+                                          QStringLiteral("iSupportEmailText") })
+                add(extra);
+        } else if (file.compare(QLatin1String("PlrSidebar.qml"), Qt::CaseInsensitive) == 0) {
+            // MSI's QV4 copy has an empty sourceFileIndex and no filename or
+            // PlrSidebar stem. These are structural identifiers in that unit.
+            for (const QString &extra : { QStringLiteral("fGetMacroBtnEnabled"),
+                                          QStringLiteral("fHandleInstallApkBtnClicked") })
+                add(extra);
+        } else if (file.compare(QLatin1String("PlrTopbar.qml"), Qt::CaseInsensitive) == 0) {
+            for (const QString &extra : { QStringLiteral("fOpenHamburgerPopup"),
+                                          QStringLiteral("fReloadTopbarElements") })
+                add(extra);
+        } else if (file.compare(QLatin1String("PlrNotificationBarWindow.qml"), Qt::CaseInsensitive) == 0) {
+            for (const QString &extra : { QStringLiteral("iNotificationBarLayout"),
+                                          QStringLiteral("iNotificationAnimation") })
+                add(extra);
+        } else if (file.compare(QLatin1String("UiButton.qml"), Qt::CaseInsensitive) == 0) {
+            for (const QString &extra : { QStringLiteral("defaultComp"),
+                                          QStringLiteral("gradientBorderComp") })
+                add(extra);
         }
     }
+    for (const QString &identifier : identifiers)
+        add(identifier);
     return needles;
 }
 
+QList<qsizetype> matchingUnitOffsets(const QByteArray &data, const QStringList &sourceNames,
+                                     const QStringList &identifiers)
+{
+    const QStringList needles = unitNeedles(sourceNames, identifiers);
+    QList<qsizetype> matches;
+    const QByteArray magic("qv4cdata", 8);
+    for (qsizetype pos = data.indexOf(magic); pos >= 0; pos = data.indexOf(magic, pos + 8)) {
+        if (!inRange(data, pos, 248))
+            continue;
+        const quint32 size = le32(data, pos + 24);
+        const quint32 qt = le32(data, pos + 12);
+        if (size < 248 || !inRange(data, pos, size) || (qt >> 16 != 5 && qt >> 16 != 6))
+            continue;
+        const quint32 count = le32(data, pos + 112);
+        const quint32 table = le32(data, pos + 116);
+        const quint32 source = le32(data, pos + 236);
+        if (table < 248 || quint64(table) + quint64(count) * 4 > size)
+            continue;
+        const int header = qt >> 16 == 5 ? 24 : 4;
+        bool match = false;
+        if (source < count) {
+            QString path = unitString(data, pos, size, table, source, header);
+            path.replace(QLatin1Char('\\'), QLatin1Char('/'));
+            const QString file = path.section(QLatin1Char('/'), -1);
+            for (const QString &sourceName : sourceNames) {
+                const QString requested = sourceName.section(QLatin1Char('/'), -1)
+                    .section(QLatin1Char('\\'), -1);
+                if (!file.isEmpty() && file.compare(requested, Qt::CaseInsensitive) == 0) {
+                    match = true;
+                    break;
+                }
+            }
+        }
+        // Many MSI/BlueStacks Qt 5 units store an empty sourceFileIndex. Match
+        // a bounded table of distinctive QML identifiers or visible strings.
+        if (!match && !needles.isEmpty() && count > 0 && count < 4096) {
+            for (quint32 i = 0; i < count && !match; ++i) {
+                const QString value = unitString(data, pos, size, table, i, header);
+                if (value.isEmpty())
+                    continue;
+                for (const QString &needle : needles) {
+                    if (value.contains(needle, Qt::CaseInsensitive)) {
+                        match = true;
+                        break;
+                    }
+                }
+            }
+        }
+        if (match)
+            matches << pos;
+    }
+    return matches;
+}
 } // namespace
 
 Link findLink(const QByteArray &data, qint64 entryOff, const QString &name)
@@ -443,60 +531,35 @@ int invalidateThemeUnits(QByteArray &data)
     return invalidateUnits(data, { QStringLiteral("UiThemeObject.qml") });
 }
 
-int invalidateUnits(QByteArray &data, const QStringList &sourceNames)
+int invalidateUnits(QByteArray &data, const QStringList &sourceNames,
+                    const QStringList &identifiers)
 {
-    const QStringList needles = unitNeedles(sourceNames);
     int changed = 0;
-    const QByteArray magic("qv4cdata\0", 8);
-    for (qsizetype pos = data.indexOf(magic); pos >= 0; pos = data.indexOf(magic, pos + 8)) {
-        // Qt 5.15 and Qt 6 use the same Unit header offsets. Check every bound
-        // and the actual source string, not nearby occurrences of the filename.
-        if (!inRange(data, pos, 248))
-            continue;
-        const quint32 size = le32(data, pos + 24);
-        const quint32 qt = le32(data, pos + 12);
-        if (size < 248 || !inRange(data, pos, size) || (qt >> 16 != 5 && qt >> 16 != 6))
-            continue;
-        const quint32 count = le32(data, pos + 112);
-        const quint32 table = le32(data, pos + 116);
-        const quint32 source = le32(data, pos + 236);
-        if (table < 248 || quint64(table) + quint64(count) * 4 > size)
-            continue;
-        const int header = qt >> 16 == 5 ? 24 : 4;
-        bool match = false;
-        if (source < count) {
-            QString path = unitString(data, pos, size, table, source, header);
-            path.replace(QLatin1Char('\\'), QLatin1Char('/'));
-            const QString file = path.section(QLatin1Char('/'), -1);
-            if (!file.isEmpty() && sourceNames.contains(file))
-                match = true;
-        }
-        // Qt 5.15.4 BlueStacks units often leave sourceFileIndex at 0 (empty
-        // string). Scan the unit string table for distinctive identifiers so
-        // compiled PlrSidebar/plr.qml cannot keep painting the old chrome.
-        if (!match && !needles.isEmpty() && count > 0 && count < 4096) {
-            for (quint32 i = 0; i < count && !match; ++i) {
-                const QString s = unitString(data, pos, size, table, i, header);
-                if (s.isEmpty())
-                    continue;
-                for (const QString &needle : needles) {
-                    if (s.contains(needle, Qt::CaseInsensitive)) {
-                        match = true;
-                        break;
-                    }
-                }
-            }
-        }
-        if (!match)
-            continue;
-        // The format version is outside the payload checksum. A mismatch
-        // makes Qt fall back to the source without touching other cached units.
+    for (const qsizetype pos : matchingUnitOffsets(data, sourceNames, identifiers)) {
+        // The format version is outside the payload checksum. A mismatch makes
+        // Qt compile the edited .qml instead of using the embedded QV4 unit.
         if (le32(data, pos + 8) != 0) {
             putLe32(data, pos + 8, 0);
             ++changed;
         }
     }
     return changed;
+}
+
+int matchingUnits(const QByteArray &data, const QStringList &sourceNames,
+                  const QStringList &identifiers)
+{
+    return matchingUnitOffsets(data, sourceNames, identifiers).size();
+}
+
+int activeUnits(const QByteArray &data, const QStringList &sourceNames,
+                const QStringList &identifiers)
+{
+    int active = 0;
+    for (const qsizetype pos : matchingUnitOffsets(data, sourceNames, identifiers))
+        if (le32(data, pos + 8) != 0)
+            ++active;
+    return active;
 }
 
 namespace {

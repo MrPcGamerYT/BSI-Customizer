@@ -2821,6 +2821,42 @@ int runPatchRegressionTests()
         check(QtResources::invalidateUnits(hit, { QStringLiteral("PlrSidebar.qml") }) == 1
                   && le32(hit, 8) == 0,
               "Qt 5.15 units with empty sourceFileIndex are invalidated via the string table");
+        auto sidebarUnit = unit;
+        const QString sidebarId = QStringLiteral("fGetMacroBtnEnabled");
+        putLe32(sidebarUnit, 304, quint32(sidebarId.size()));
+        for (int i = 0; i < sidebarId.size(); ++i)
+            putLe16(sidebarUnit, 324 + i * 2, sidebarId.at(i).unicode());
+        check(QtResources::activeUnits(sidebarUnit, { QStringLiteral("PlrSidebar.qml") }) == 1
+                  && QtResources::invalidateUnits(sidebarUnit, { QStringLiteral("PlrSidebar.qml") }) == 1
+                  && QtResources::activeUnits(sidebarUnit, { QStringLiteral("PlrSidebar.qml") }) == 0,
+              "the MSI sidebar QV4 unit is selected by its structural function IDs despite having no filename or stem");
+        auto topbarUnit = unit;
+        const QString topbarId = QStringLiteral("fReloadTopbarElements");
+        putLe32(topbarUnit, 304, quint32(topbarId.size()));
+        for (int i = 0; i < topbarId.size(); ++i)
+            putLe16(topbarUnit, 324 + i * 2, topbarId.at(i).unicode());
+        check(QtResources::activeUnits(topbarUnit, { QStringLiteral("PlrTopbar.qml") }) == 1
+                  && QtResources::invalidateUnits(topbarUnit, { QStringLiteral("PlrTopbar.qml") }) == 1
+                  && QtResources::activeUnits(topbarUnit, { QStringLiteral("PlrTopbar.qml") }) == 0,
+              "the MSI topbar QV4 unit is selected by its structural function IDs despite having no filename or stem");
+        auto notificationUnit = unit;
+        const QString notificationId = QStringLiteral("iNotificationBarLayout");
+        putLe32(notificationUnit, 304, quint32(notificationId.size()));
+        for (int i = 0; i < notificationId.size(); ++i)
+            putLe16(notificationUnit, 324 + i * 2, notificationId.at(i).unicode());
+        check(QtResources::activeUnits(notificationUnit, { QStringLiteral("PlrNotificationBarWindow.qml") }) == 1
+                  && QtResources::invalidateUnits(notificationUnit, { QStringLiteral("PlrNotificationBarWindow.qml") }) == 1
+                  && QtResources::activeUnits(notificationUnit, { QStringLiteral("PlrNotificationBarWindow.qml") }) == 0,
+              "notification-bar QV4 units used by gradient surfaces are selected by a structural identifier");
+        auto buttonUnit = unit;
+        const QString buttonId = QStringLiteral("defaultComp");
+        putLe32(buttonUnit, 304, quint32(buttonId.size()));
+        for (int i = 0; i < buttonId.size(); ++i)
+            putLe16(buttonUnit, 324 + i * 2, buttonId.at(i).unicode());
+        check(QtResources::activeUnits(buttonUnit, { QStringLiteral("UiButton.qml") }) == 1
+                  && QtResources::invalidateUnits(buttonUnit, { QStringLiteral("UiButton.qml") }) == 1
+                  && QtResources::activeUnits(buttonUnit, { QStringLiteral("UiButton.qml") }) == 0,
+              "shared UiButton QV4 bytecode used by gradient surfaces is selected structurally");
         auto miss = unit;
         check(QtResources::invalidateUnits(miss, { QStringLiteral("UiThemeObject.qml") }) == 0
                   && le32(miss, 8) == 41,
@@ -2832,6 +2868,38 @@ int runPatchRegressionTests()
             putLe16(plr, 324 + i * 2, chromeId.at(i).unicode());
         check(QtResources::invalidateUnits(plr, { QStringLiteral("plr.qml") }) == 1,
               "plr.qml invalidation matches iSidebar in the compiled unit");
+
+        auto settingsWindow = unit;
+        const QString settingsId = QStringLiteral("iSettingsWindowShadowContainer");
+        putLe32(settingsWindow, 304, quint32(settingsId.size()));
+        for (int i = 0; i < settingsId.size(); ++i)
+            putLe16(settingsWindow, 324 + i * 2, settingsId.at(i).unicode());
+        check(QtResources::matchingUnits(settingsWindow, { QStringLiteral("UiSettingsWindow.qml") }) == 1
+                  && QtResources::activeUnits(settingsWindow, { QStringLiteral("UiSettingsWindow.qml") }) == 1
+                  && QtResources::invalidateUnits(settingsWindow, { QStringLiteral("UiSettingsWindow.qml") }) == 1
+                  && QtResources::matchingUnits(settingsWindow, { QStringLiteral("UiSettingsWindow.qml") }) == 1
+                  && QtResources::activeUnits(settingsWindow, { QStringLiteral("UiSettingsWindow.qml") }) == 0,
+              "MSI Settings-window QV4 IDs invalidate even when the compiled unit omits its source filename");
+
+        auto aboutUnit = unit;
+        const QString aboutId = QStringLiteral("Important links");
+        putLe32(aboutUnit, 304, quint32(aboutId.size()));
+        for (int i = 0; i < aboutId.size(); ++i)
+            putLe16(aboutUnit, 324 + i * 2, aboutId.at(i).unicode());
+        check(QtResources::activeUnits(aboutUnit, { QStringLiteral("PlrAboutSetting.qml") }) == 1
+                  && QtResources::invalidateUnits(aboutUnit, { QStringLiteral("PlrAboutSetting.qml") }) == 1
+                  && QtResources::activeUnits(aboutUnit, { QStringLiteral("PlrAboutSetting.qml") }) == 0,
+              "MSI About-page QV4 IDs invalidate the active compiled copy so new developer links can render");
+
+        auto bootControllerUnit = unit;
+        const QString bootControllerId = QStringLiteral("iBootProgressContainer");
+        putLe32(bootControllerUnit, 304, quint32(bootControllerId.size()));
+        for (int i = 0; i < bootControllerId.size(); ++i)
+            putLe16(bootControllerUnit, 324 + i * 2, bootControllerId.at(i).unicode());
+        check(QtResources::activeUnits(bootControllerUnit, {}, { QStringLiteral("iBootProgressContainer") }) == 1
+                  && QtResources::invalidateUnits(bootControllerUnit, {}, { QStringLiteral("iBootProgressContainer") }) == 1
+                  && QtResources::activeUnits(bootControllerUnit, {}, { QStringLiteral("iBootProgressContainer") }) == 0,
+              "boot controller compiled QML can be selected by an explicit structural identifier");
     }
 
     {
@@ -4324,7 +4392,10 @@ Window {
             "    Loader { id: iBootLoader; anchors.fill: parent\r\n"
             "        sourceComponent: pIsBootComplete || pShowAndroidAd ? iGlContainerComponent : iBootProgressComponent }\r\n"
             "}\r\n");
+        QString unusedController = controller;
+        unusedController.replace(QLatin1String("bootImage"), QLatin1String("unusedBootImage"));
         auto r = resources({ { QStringLiteral("RenamedStartup.qml"), controller },
+                             { QStringLiteral("UnusedStartup.qml"), unusedController },
                              { QStringLiteral("Shell.qml"), host },
                              { QStringLiteral("Other.qml"), QStringLiteral("import QtQuick; QtObject {}") } },
                            false, {}, 256);
@@ -4351,6 +4422,8 @@ Window {
                   && qml.contains(QLatin1String("z:10000"))
                   && qml.contains(QLatin1String("BootVideo.qml")) && stockProgressHidden,
               "the replacement splash is foregrounded and the old progress panel is hidden");
+        check(resourceText(patched, r, QStringLiteral("UnusedStartup.qml")) == unusedController,
+              "a boot-looking QML resource not instantiated by the player root is never patched");
         check(patched.mid(leftover, image.size() - leftover) == image.mid(leftover),
               "a record the tree does not point at is never rewritten");
         const auto again = BootVideoPatcher::patch(path);
@@ -4419,16 +4492,20 @@ Window {
                   && !QFile::exists(refusedPath + QStringLiteral(".bak")),
               "custom mode refuses a non-MP4 before changing the fixture executable");
 
+        QString ambiguousHost = host;
+        ambiguousHost.replace(QLatin1String("Component { id: iBootProgressComponent; RenamedStartup {} }"),
+            QStringLiteral("Component { id: iBootProgressComponent; BootOne {} }\r\n"
+                           "    Component { id: iBootProgressComponent; BootTwo {} }"));
         auto twice = resources({ { QStringLiteral("BootOne.qml"), controller },
                                  { QStringLiteral("BootTwo.qml"), controller },
-                                 { QStringLiteral("Shell.qml"), host } }, true);
+                                 { QStringLiteral("Shell.qml"), ambiguousHost } }, true);
         addRegistration(twice, false);
         const QString ambiguousPath = temp.filePath(QStringLiteral("two-boots.exe"));
         write(ambiguousPath, twice.f.bytes);
         const auto refused = BootVideoPatcher::patch(ambiguousPath);
-        check(!refused.ok && refused.msg.contains(QLatin1String("boot screen"))
+        check(!refused.ok && refused.msg.contains(QLatin1String("uniquely instantiate"))
                   && read(ambiguousPath) == twice.f.bytes,
-              "two registered boot screens are refused instead of guessing");
+              "two boot controllers instantiated by the registered host are refused instead of guessing");
 
         auto none = resources({ { QStringLiteral("Shell.qml"), host },
                                 { QStringLiteral("Other.qml"), QStringLiteral("import QtQuick; QtObject {}") } }, true);
@@ -4512,8 +4589,8 @@ Window {
     std::printf("[boot-script] adaptive player, hold, recovery and refusal paths\n");
     {
         const QString boot = QStringLiteral("import QtQuick\nItem{Image{id:iBootImage;visible:true}Text{id:iBootLoadingText;visible:false}function fSetBootPromotion(){iBootImage.visible=true;iBootLoadingText.visible=false}}\n");
-        const QString host = QStringLiteral("import QtQuick\nItem{property bool pIsBootComplete:false;property bool pShowAndroidAd:false;Component{id:iBootProgressComponent;Item{}}Component{id:iGlContainerComponent;Rectangle{color:'#000000'}}Loader{id:iBootLoader;sourceComponent:pIsBootComplete || pShowAndroidAd ? iGlContainerComponent : iBootProgressComponent}}\n");
-        const auto r = resources({{QStringLiteral("boot.qml"),boot},{QStringLiteral("plr.qml"),host}}, true);
+        const QString host = QStringLiteral("import QtQuick\nItem{property bool pIsBootComplete:false;property bool pShowAndroidAd:false;Component{id:iBootProgressComponent;Boot{}}Component{id:iGlContainerComponent;Rectangle{color:'#000000'}}Loader{id:iBootLoader;sourceComponent:pIsBootComplete || pShowAndroidAd ? iGlContainerComponent : iBootProgressComponent}}\n");
+        const auto r = resources({{QStringLiteral("Boot.qml"),boot},{QStringLiteral("plr.qml"),host}}, true);
         const auto folder = temp.filePath(QStringLiteral("adaptive boot ' & unicode Ω")); QDir().mkpath(folder);
         const auto path = QDir(folder).filePath(QStringLiteral("HD-Player.exe")); write(path,r.f.bytes);
         check(!BootVideoPatcher::patch(path,-1).ok && read(path)==r.f.bytes,
@@ -4568,12 +4645,12 @@ Window {
               "missing multimedia APIs fall back to a WebEngine data-URL player");
         // A previously forced stub can only recover from a uniquely linked
         // original resource in the backup; it never guesses missing UI source.
-        const auto stub=resources({{QStringLiteral("boot.qml"),QStringLiteral("import QtQuick\nItem{function fSetBootPromotion(a,b,c){}}\n")},{QStringLiteral("plr.qml"),host}},true);
+        const auto stub=resources({{QStringLiteral("Boot.qml"),QStringLiteral("import QtQuick\nItem{function fSetBootPromotion(a,b,c){}}\n")},{QStringLiteral("plr.qml"),host}},true);
         const auto stubPath=QDir(folder).filePath(QStringLiteral("stub.exe")); write(stubPath,stub.f.bytes);
         check(!BootVideoPatcher::patch(stubPath).ok && read(stubPath)==stub.f.bytes,
               "a forced boot stub with no original backup is a non-writing error");
         write(stubPath+QStringLiteral(".bak"),r.f.bytes);
-        check(BootVideoPatcher::patch(stubPath).ok && resourceText(read(stubPath),stub,QStringLiteral("boot.qml")).contains(QLatin1String("iBootImage")),
+        check(BootVideoPatcher::patch(stubPath).ok && resourceText(read(stubPath),stub,QStringLiteral("Boot.qml")).contains(QLatin1String("iBootImage")),
               "a linked backup repairs the boot stub without discarding unrelated executable edits");
     }
 
@@ -4739,9 +4816,49 @@ Window {
         // both the native settings window and About source are restored after
         // the apply/update/restore cycle.
         const auto panelState = SettingsPanelPatcher::analyze(input);
-        check(panelState.supported && !panelState.applied,
+        ciNotice(QStringLiteral("real Settings graph: %1 native tabs, %2 QML dependencies; compiled QV4 units: %3 detected, %4 active")
+                     .arg(panelState.settingsPageCount).arg(panelState.settingsQmlResourceCount)
+                     .arg(panelState.compiledUnitsDetected).arg(panelState.compiledUnitsActive));
+        check(panelState.supported && !panelState.applied
+                  && panelState.settingsPageCount >= 8 && panelState.settingsQmlResourceCount > 0,
               QStringLiteral("the real %1 exposes a unique editable Settings window and About page (%2)")
                   .arg(QFileInfo(input).fileName(), panelState.detail));
+        const auto stockAbout = AboutPatcher::analyze(original);
+        if (panelState.supported && !panelState.applied && stockAbout.supported
+            && stockAbout.sourceEditable) {
+            const QString aboutFirstPath = temp.filePath(QStringLiteral("about-first-")
+                                                          + QFileInfo(input).completeBaseName()
+                                                          + QStringLiteral("/HD-Player.exe"));
+            QDir().mkpath(QFileInfo(aboutFirstPath).absolutePath());
+            write(aboutFirstPath, original);
+            AboutPatcher::Config aboutFirstConfig = stockAbout.config;
+            aboutFirstConfig.text = QStringLiteral("About first regression");
+            aboutFirstConfig.showSections = true;
+            const auto aboutFirst = AboutPatcher::apply(aboutFirstPath, true, aboutFirstConfig);
+            if (!aboutFirst.ok) {
+                check(read(aboutFirstPath) == original
+                          && (aboutFirst.msg.contains(QStringLiteral("free space"), Qt::CaseInsensitive)
+                              || aboutFirst.msg.contains(QStringLiteral("room its record"), Qt::CaseInsensitive)),
+                      QStringLiteral("the real %1 About editor safely refuses a source rewrite that cannot fit, without changing the EXE (%2)")
+                          .arg(QFileInfo(input).fileName(), aboutFirst.msg));
+                ciNotice(QStringLiteral("real About-first overlap guard not exercised for %1 because the source record has no spare room; the synthetic overlap regression covers that ordering")
+                             .arg(QFileInfo(input).fileName()));
+            } else {
+                const QByteArray aboutFirstBytes = read(aboutFirstPath);
+                const auto settingsAfterAbout = SettingsPanelPatcher::analyze(aboutFirstPath);
+                const auto settingsApplyAfterAbout = SettingsPanelPatcher::apply(aboutFirstPath,
+                    QStringLiteral("Should be refused"), {}, true);
+                check(!settingsAfterAbout.supported && !settingsApplyAfterAbout.value(QStringLiteral("ok")).toBool()
+                          && read(aboutFirstPath) == aboutFirstBytes
+                          && settingsApplyAfterAbout.value(QStringLiteral("msg")).toString()
+                              .contains(QStringLiteral("Restore that page to stock")),
+                      QStringLiteral("the real %1 Settings rebuild refuses to overwrite About-editor changes")
+                          .arg(QFileInfo(input).fileName()));
+            }
+        } else {
+            ciNotice(QStringLiteral("real About/Settings order regression skipped for %1: About page is not editable by the supported source workflow")
+                         .arg(QFileInfo(input).fileName()));
+        }
         if (panelState.supported && !panelState.applied) {
             const QString panelDir = temp.filePath(QStringLiteral("settings-panel-")
                                                     + QFileInfo(input).completeBaseName());
@@ -4762,9 +4879,37 @@ Window {
                   QStringLiteral("the real %1 Settings panel rebuild applies to a disposable copy (%2)")
                       .arg(QFileInfo(input).fileName(), appliedPanel.value(QStringLiteral("msg")).toString()));
             if (appliedPanel.value(QStringLiteral("ok")).toBool()) {
+                const QByteArray rebuiltBeforeAbout = read(panelCopy);
+                const auto aboutOnRebuiltSettings = AboutPatcher::analyze(rebuiltBeforeAbout);
+                const auto aboutOnRebuiltApply = AboutPatcher::apply(panelCopy, true,
+                    AboutPatcher::Config{QStringLiteral("Conflict regression"), {}, true});
+                check(!aboutOnRebuiltSettings.supported && !aboutOnRebuiltApply.ok
+                          && read(panelCopy) == rebuiltBeforeAbout
+                          && aboutOnRebuiltApply.msg.contains(QStringLiteral("restore the Settings panel")),
+                      QStringLiteral("the real %1 Settings-owned About page refuses an independent About edit without changing the EXE")
+                          .arg(QFileInfo(input).fileName()));
+                const auto panelImage = read(panelCopy);
+                QString expectedLogoExtension;
+                for (const auto &file : QtResources::registeredFiles(original)) {
+                    if (file.path.compare(QLatin1String("qrcAssets/BlueStacks5Beta.svg"), Qt::CaseInsensitive) == 0)
+                        expectedLogoExtension = QStringLiteral(".svg");
+                    else if (file.path.compare(QLatin1String("qrcAssets/BlueStacks5Beta.png"), Qt::CaseInsensitive) == 0)
+                        expectedLogoExtension = QStringLiteral(".png");
+                }
+                QString rebuiltAbout;
+                for (const auto &file : QtResources::registeredFiles(panelImage)) {
+                    if (file.name.compare(QLatin1String("PlrAboutSetting.qml"), Qt::CaseInsensitive) == 0)
+                        rebuiltAbout = QString::fromUtf8(QtResources::readFile(panelImage, file));
+                }
+                check(!expectedLogoExtension.isEmpty()
+                          && rebuiltAbout.contains(QStringLiteral("extn: \"%1\"").arg(expectedLogoExtension)),
+                      QStringLiteral("the rebuilt %1 About page selects the logo format actually present in its resource pool")
+                          .arg(QFileInfo(input).fileName()));
                 const auto activePanel = SettingsPanelPatcher::analyze(panelCopy);
-                check(activePanel.supported && activePanel.applied && activePanel.restorable,
-                      QStringLiteral("the rebuilt %1 panel reads back and has a selective recovery snapshot")
+                check(activePanel.supported && activePanel.applied && activePanel.restorable
+                          && activePanel.compiledUnitsDetected == panelState.compiledUnitsDetected
+                          && activePanel.compiledUnitsActive == 0,
+                      QStringLiteral("the rebuilt %1 panel reads back, retains a selective recovery snapshot, and has no active stale compiled QML")
                           .arg(QFileInfo(input).fileName()));
                 const auto updatedPanel = SettingsPanelPatcher::apply(panelCopy,
                     QStringLiteral("BSI Panel Regression Updated"), panelLinks, true);
@@ -4783,6 +4928,29 @@ Window {
             check(read(input) == original,
                   QStringLiteral("the uploaded %1 reference remains byte-for-byte untouched")
                       .arg(QFileInfo(input).fileName()));
+        }
+
+        const auto gradientCatalog = GradientPatcher::analyze(original);
+        const auto selectedGradient = std::find_if(gradientCatalog.targets.cbegin(), gradientCatalog.targets.cend(),
+            [](const GradientPatcher::Target &target) { return target.hexGradient; });
+        if (gradientCatalog.ok && selectedGradient != gradientCatalog.targets.cend()) {
+            QByteArray gradientCopy = original;
+            GradientPatcher::Spec realGradient;
+            realGradient.first = QStringLiteral("#3B6FFF");
+            realGradient.second = QStringLiteral("#22D3A6");
+            QString gradientError;
+            const bool gradientApplied = GradientPatcher::apply(
+                gradientCopy, selectedGradient->key, realGradient, &gradientError);
+            check(gradientApplied && gradientCopy != original,
+                  QStringLiteral("the real %1 gradient target %2 writes its loaded QML source (%3)")
+                      .arg(QFileInfo(input).fileName(), selectedGradient->resource, gradientError));
+            if (gradientApplied && QtResources::matchingUnits(original, {selectedGradient->resource}) > 0)
+                check(QtResources::activeUnits(gradientCopy, {selectedGradient->resource}) == 0,
+                      QStringLiteral("the real %1 gradient target %2 has no active matching compiled QML after its source change")
+                          .arg(QFileInfo(input).fileName(), selectedGradient->resource));
+        } else {
+            ciNotice(QStringLiteral("real gradient target workflow skipped for %1: %2")
+                         .arg(QFileInfo(input).fileName(), gradientCatalog.message));
         }
 
         const auto first = ThemeEngine::findThemeZlib(original);
@@ -4892,6 +5060,11 @@ Window {
                   && !modernHelper.contains("QtMultimedia") && !modernHelper.contains("QtWebEngine")
                   && !QFile::exists(QDir(modernAssets).filePath(QStringLiteral("Promo.mp4"))),
               "built-in modern boot patches this real HD-Player version without media assets or codec imports");
+        const int activeBootUnits = QtResources::activeUnits(read(modernPath), {}, {
+            QStringLiteral("iBootImage"), QStringLiteral("iBootProgressContainer"),
+            QStringLiteral("iBootProgressComponent"), QStringLiteral("iBootLoader") });
+        check(modernBoot.ok && activeBootUnits == 0,
+              "built-in modern boot leaves no matching active compiled controller or host QML in the real player image");
         check(read(modernPath + QStringLiteral(".bak")) == original,
               "modern boot preserves the complete original of this HD-Player version");
 
@@ -4974,7 +5147,9 @@ Window {
             "Text{id:iBootLoadingText;objectName:'loadingText';visible:false}"
             "function fSetBootPromotion(){iBootImage.visible=true;pBootGridVisible=true;iBootLoadingText.visible=false}}\r\n");
         const QString video = QStringLiteral("import QtQuick\nMediaPlayer { source:'x';objectName:'mediaPlayer' }\n");
+        const QString host = QStringLiteral("import QtQuick\nItem{property bool pIsBootComplete:false;property bool pShowAndroidAd:false;Component{id:iBootProgressComponent;Boot{}}Component{id:iGlContainerComponent;Rectangle{color:'#000000'}}Loader{id:iBootLoader;sourceComponent:pIsBootComplete || pShowAndroidAd ? iGlContainerComponent : iBootProgressComponent}}\n");
         const auto r = resources({ { QStringLiteral("Boot.qml"), boot }, { QStringLiteral("BootVideo.qml"), video },
+                                  { QStringLiteral("plr.qml"), host },
                                   { QStringLiteral("Other.qml"), QStringLiteral("import QtQuick; QtObject {}") } },
                                 false, {}, 256);
         const QString folder = temp.filePath(QStringLiteral("boot test with spaces")); QDir().mkpath(folder);
@@ -6002,6 +6177,22 @@ Window {
         check(renamedState.config.text == stock.config.text,
               QStringLiteral("the renamed row is read by the text it prints (%1)")
                   .arg(renamedState.config.text));
+
+        QString settingsOwnedAbout = about;
+        settingsOwnedAbout.prepend(QStringLiteral("// BSI CUSTOMIZER: redesigned About page v1\n"));
+        auto settingsOwnedFixture = resources(
+            {{QStringLiteral("PlrAboutSetting.qml"), settingsOwnedAbout}}, true, {});
+        addRegistration(settingsOwnedFixture, false);
+        const auto settingsOwnedState = AboutPatcher::analyze(settingsOwnedFixture.f.bytes);
+        check(!settingsOwnedState.supported && settingsOwnedState.settingsPanelConflict
+                  && settingsOwnedState.detail.contains(QStringLiteral("restore the Settings panel")),
+              "the About editor gives a safe, actionable conflict when the Settings rebuild owns the page");
+        const QString conflictPath = temp.filePath(QStringLiteral("settings-about-conflict.exe"));
+        write(conflictPath, settingsOwnedFixture.f.bytes);
+        const auto conflictApply = AboutPatcher::apply(conflictPath, true, stock.config);
+        check(!conflictApply.ok && read(conflictPath) == settingsOwnedFixture.f.bytes
+                  && conflictApply.msg.contains(QStringLiteral("restore the Settings panel")),
+              "About edits refuse a Settings-owned page without changing the executable");
 
         const QString aboutPath = temp.filePath(QStringLiteral("about-page.exe"));
         write(aboutPath, original);

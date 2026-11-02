@@ -69,7 +69,16 @@ bool refreshTimestamp(QByteArray &data, const Link &link);
 // to UiThemeObject.qml. They otherwise take precedence over edited QML source,
 // even with the disk cache empty. Never disable the entire Qt cache globally.
 int invalidateThemeUnits(QByteArray &data);
-int invalidateUnits(QByteArray &data, const QStringList &sourceNames);
+int invalidateUnits(QByteArray &data, const QStringList &sourceNames,
+                    const QStringList &identifiers = {});
+// Number of matching compiled units found, including units already invalidated.
+int matchingUnits(const QByteArray &data, const QStringList &sourceNames,
+                  const QStringList &identifiers = {});
+// Number of matching compiled units that remain active (format version != 0).
+// Used by patchers to refuse a source-only success when embedded bytecode would
+// still take precedence over the edited QML.
+int activeUnits(const QByteArray &data, const QStringList &sourceNames,
+                const QStringList &identifiers = {});
 // Qt 5.15 units often leave sourceFileIndex empty. Fall back to the unit's
 // string table so a patched PlrSidebar/plr.qml is not shadowed by bytecode.
 // Also drop the on-disk qmlcache next to HD-Player.exe (BlueStacks uses

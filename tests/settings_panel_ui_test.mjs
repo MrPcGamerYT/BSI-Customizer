@@ -61,6 +61,8 @@ assert.match(view, /Apply Settings panel rebuild/);
 assert.match(view, /Panel Test/);
 assert.match(view, /Community/);
 assert.match(view, /Restore original Settings panel/);
+assert.match(view, /Native Settings tabs/);
+assert.match(view, /Embedded compiled QML/);
 
 await editors.action('settings-panel-apply', null, 6);
 assert.equal(JSON.stringify(requests.filter(x => x.method === 'applySettingsPanelRebuild').at(-1)?.args), '{"enabled":true}');
