@@ -124,6 +124,8 @@ assert.ok(read('src/qml/Main.qml').includes('WindowGeometry.initialGeometry') &&
 assert.ok(webApp.includes("'bootVideoBrowse'") && webApp.includes("mode, sourcePath: mode === 'video'"), 'Chromium boot editor supports built-in and selected-video modes');
 const bootPatcher = read('src/core/BootVideoPatcher.cpp');
 assert.ok(bootPatcher.includes('QString modernBootPlayer()') && bootPatcher.includes('R"MODERN(') && bootPatcher.includes('Promo.mp4.bak'), 'Boot patcher contains a codec-free animation and protects prior custom video');
+assert.ok(bootPatcher.includes('z:10000') && bootPatcher.includes('iBootProgressContainer') && bootPatcher.includes('iBootTipstimer'), 'Boot patcher foregrounds the replacement splash and removes the original progress overlay');
+assert.ok(read('src/qml/pages/BootVideoPage.qml').includes('Install Animated Modern Boot') && webApp.includes('Install Animated Modern Boot'), 'the animated boot patch action is available from both Boot Experience UIs');
 assert.ok(bootPatcher.includes('sourceInfo.size() > maxVideoBytes') && bootPatcher.includes('sourceInfo.isSymLink()') && bootPatcher.includes('readBounded(source, maxVideoBytes'), 'Custom boot video path is size-bounded and refuses linked or oversized input files');
 assert.ok(bootPatcher.includes('rollbackVideo') && bootPatcher.includes('rollbackHelper') && bootPatcher.includes('samePath(videoPath, movie)'), 'Boot asset changes roll back on patch failure and avoid copying the target onto itself');
 assert.ok(bootPatcher.includes('requested %1 ms hold was not applied') && bootPatcher.includes('No extra boot hold was requested'), 'Boot result accurately distinguishes an unsupported requested hold from opting out');

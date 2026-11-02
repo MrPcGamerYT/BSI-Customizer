@@ -4309,6 +4309,7 @@ Window {
             "    property bool bootBackgroundImage: true\r\n"
             "    Image { id: iBootImage; objectName: 'bootImage'; visible: true }\r\n"
             "    Text { id: iBootLoadingText; objectName: 'loadingText' }\r\n"
+            "    Rectangle { id:iBootProgressContainer; objectName:'stockProgress'; visible:true }\r\n"
             "    function fSetBootPromotion() { iBootImage.visible = true }\r\n"
             "}\r\n");
         const QString host = QStringLiteral(
@@ -4343,9 +4344,13 @@ Window {
         const auto patched = read(path);
         check(patched.size() == image.size(), "the patched player is exactly as large as the original");
         const auto qml = resourceText(patched, r, QStringLiteral("RenamedStartup.qml"));
+        const bool stockProgressHidden = QRegularExpression(
+            QStringLiteral("id\\s*:\\s*iBootProgressContainer[^}]*visible\\s*:\\s*false"))
+                .match(qml).hasMatch();
         check(qml.contains(QLatin1String("objectName:\"bsiBootLoader\""))
-                  && qml.contains(QLatin1String("BootVideo.qml")),
-              "the boot screen is pointed at the video player the tool writes next to the EXE");
+                  && qml.contains(QLatin1String("z:10000"))
+                  && qml.contains(QLatin1String("BootVideo.qml")) && stockProgressHidden,
+              "the replacement splash is foregrounded and the old progress panel is hidden");
         check(patched.mid(leftover, image.size() - leftover) == image.mid(leftover),
               "a record the tree does not point at is never rewritten");
         const auto again = BootVideoPatcher::patch(path);
@@ -4360,6 +4365,28 @@ Window {
                   && !modernHelper.contains("QtMultimedia") && !modernHelper.contains("QtWebEngine")
                   && !QFile::exists(QDir(modernAssets).filePath(QStringLiteral("Promo.mp4"))),
               "built-in modern mode patches the fixture without installing video, media imports, or network fallback");
+        const QString modernControllerPath = QDir(folder).filePath(QStringLiteral("modern-controller.qml"));
+        const QString modernControllerText = resourceText(read(modernPath), r, QStringLiteral("RenamedStartup.qml"));
+        const bool controllerWritten = !modernControllerText.isEmpty()
+            && write(modernControllerPath, modernControllerText.toUtf8());
+        QQmlEngine modernEngine;
+        QQmlComponent modernComponent(&modernEngine, QUrl::fromLocalFile(modernControllerPath));
+        QObject *modernRoot = controllerWritten ? modernComponent.create() : nullptr;
+        if (modernRoot) {
+            modernRoot->setProperty("width", 1280);
+            modernRoot->setProperty("height", 720);
+            QCoreApplication::processEvents();
+        } else {
+            for (const auto &error : modernComponent.errors())
+                std::printf("    modern boot QML: %s\n", qPrintable(error.toString()));
+        }
+        QObject *modernLoader = modernRoot ? modernRoot->findChild<QObject *>(QStringLiteral("bsiBootLoader")) : nullptr;
+        QObject *modernSplash = modernLoader ? modernLoader->property("item").value<QQuickItem *>() : nullptr;
+        check(modernLoader && modernLoader->property("z").toDouble() >= 9999
+                  && modernLoader->property("visible").toBool() && modernSplash
+                  && modernSplash->objectName() == QLatin1String("bsiModernBoot"),
+              "built-in animated boot loads visibly above the patched controller in a real Qt Quick engine");
+        delete modernRoot;
         check(read(modernPath + QStringLiteral(".bak")) == image,
               "built-in modern mode preserves the complete original executable backup");
 
