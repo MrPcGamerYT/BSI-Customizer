@@ -195,9 +195,9 @@ QString buildWindow(const QString &stock)
                 ScrollBar.horizontal: ScrollBar { policy: ScrollBar.AsNeeded }
                 model: pSettingsItems.pSettingElements
                 delegate: UiSettingsButton {
-                    width: 76; height: 64
+                    width: 92; height: 64
                     pSettingIdx: model.index
-                    pSettingBtnText: ["ϟ ", "▣ ", "◈ ", "⌖ ", "◖ ", "♧ ", "⚙ ", "▯ ", "⌨ ", "◉ ", "⚒ ", "ⓘ "][model.index] + model.modelData.pButtonText
+                    pSettingBtnText: ["ϟ", "▣", "◈", "⌖", "◖", "♧", "⚙", "▯", "⌨", "◉", "⚒", "ⓘ"][model.index] + "\n" + model.modelData.pButtonText
                     pSelected: model.index === pCurrentTabIndex
                     pShowRedDot: model.modelData.pShowRedDot
                     onSettingClicked: fChangeSelectedSetting(model.index)
