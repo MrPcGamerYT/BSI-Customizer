@@ -1030,6 +1030,8 @@ int runBootPlayerRuntimeTest(const QStringList &args)
         std::fprintf(stderr, "Boot fixture compile error: %s\n", qPrintable(component.errorString()));
         return 2;
     }
+    object->setProperty("width", 1280);
+    object->setProperty("height", 720);
     // The controller's Loader can complete asynchronously. Keep assertions on
     // the actual generated player rather than assuming one event pump suffices.
     QElapsedTimer timer;

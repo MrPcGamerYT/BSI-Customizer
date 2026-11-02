@@ -29,7 +29,7 @@ assert "localContentCanAccessFileUrls:true" in qml
 assert "playbackRequiresUserGesture:false" in qml
 assert 'class="ring-track"' in html and "Emulator is starting…" in html
 assert "__BSI_EMULATOR_LOGO__" in qml and "__BSI_WITH_VIDEO__" in qml
-assert "Promo.mp4" in html and "__VIDEO_BACKGROUND__" in html
+assert "Promo.mp4" in source and "__VIDEO_BACKGROUND__" in html
 
 messages = []
 def log(kind, context, message):

@@ -282,7 +282,6 @@ Item {
     objectName: "bsiBootHtmlWrapper"
     anchors.fill: parent
     clip: true
-    objectName: "bsiBootHtmlWrapper"
     property string logoUrl: "__BSI_EMULATOR_LOGO__"
     property bool withVideo: __BSI_WITH_VIDEO__
     property bool htmlLoaded: false
