@@ -58,6 +58,9 @@ struct Change
     QString after;
 };
 
+// Keep the first undo baseline when a different profile changes the same key.
+QList<Change> mergeRecordedChanges(const QList<Change> &previous, const QList<Change> &next);
+
 struct Plan
 {
     bool ok = false;

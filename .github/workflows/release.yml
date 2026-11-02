@@ -292,8 +292,7 @@ jobs:
           }
           $source = (Resolve-Path (Join-Path 'build/artifacts' $env:EXE_NAME)).Path
           $out = (Resolve-Path 'build/artifacts').Path
-          & $iscc "/DAppVersion=$env:VERSION" "/DSourceExe=$source" "/DOutputDir=$out" `
-              'packaging/installer/BSI-Customizer.iss'
+          ./scripts/Build-Installer.ps1 -PortableExe $source -Version $env:VERSION -OutputDirectory $out -IsccPath $iscc
           if ($LASTEXITCODE -ne 0) {
             throw "ISCC failed with exit code $LASTEXITCODE"
           }

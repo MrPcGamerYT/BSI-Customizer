@@ -92,8 +92,8 @@ std::unique_ptr<Adb::Client> openClient(const QString &exePath, const QString &c
 {
     const QString adb = Adb::findAdb(exePath);
     if (adb.isEmpty()) {
-        *error = QStringLiteral("HD-Adb.exe was not found next to HD-Player.exe. Point the tool at "
-                                "the player's folder first.");
+        *error = QStringLiteral("ADB was not found. Put trusted adb.exe, AdbWinApi.dll and AdbWinUsbApi.dll "
+                                "beside BSI-Customizer.exe (or in its adb folder), or select a player with HD-Adb.exe.");
         return nullptr;
     }
     if (instance.isEmpty()) {

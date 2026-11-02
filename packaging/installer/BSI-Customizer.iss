@@ -6,7 +6,7 @@
 ; single-file build CI already tested.
 ;
 ; Built by .github/workflows/release.yml:
-;   ISCC.exe /DAppVersion=2.6.0 /DSourceExe=<exe> /DOutputDir=<dir> BSI-Customizer.iss
+;   ISCC.exe /DAppVersion=3.0.1 /DSourceExe=<exe> /DOutputDir=<dir> BSI-Customizer.iss
 ;
 ; Nothing here is required to run the app: the installed EXE is still portable,
 ; a copy of it runs from anywhere.
@@ -65,6 +65,15 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 [Files]
 Source: "{#SourceExe}"; DestDir: "{app}"; DestName: "BSI-Customizer.exe"; Flags: ignoreversion
 Source: "..\..\src\third_party\7zip\LICENSE.txt"; DestDir: "{app}\licenses\7zip"; DestName: "LICENSE.txt"; Flags: ignoreversion
+
+; Optional external ADB payload. An explicit allowlist prevents shipping adbkey
+; or unrelated SDK tools. Nothing is downloaded by the setup or application.
+#ifdef AdbDirectory
+Source: "{#AdbDirectory}\adb.exe"; DestDir: "{app}\adb"; Flags: ignoreversion
+Source: "{#AdbDirectory}\AdbWinApi.dll"; DestDir: "{app}\adb"; Flags: ignoreversion
+Source: "{#AdbDirectory}\AdbWinUsbApi.dll"; DestDir: "{app}\adb"; Flags: ignoreversion
+Source: "{#AdbDirectory}\NOTICE.txt"; DestDir: "{app}\adb"; Flags: ignoreversion
+#endif
 
 [Icons]
 Name: "{group}\BSI Customizer"; Filename: "{app}\BSI-Customizer.exe"

@@ -30,7 +30,9 @@ function Run-Clean([string]$File, [string[]]$Arguments, [string]$Platform = 'off
     $info.CreateNoWindow = $true
     foreach ($argument in $Arguments) { $info.ArgumentList.Add($argument) }
     foreach ($key in @('QT_PLUGIN_PATH', 'QT_QPA_PLATFORM_PLUGIN_PATH', 'QML2_IMPORT_PATH', 'QML_IMPORT_PATH',
-                       'QT_ROOT_DIR', 'QTDIR', 'BSI_PORTABLE')) { $info.Environment.Remove($key) | Out-Null }
+                       'QT_ROOT_DIR', 'QTDIR', 'BSI_PORTABLE', 'BSI_LAUNCHER_PATH')) { $info.Environment.Remove($key) | Out-Null }
+    # A forged inherited marker must be replaced by the real module path.
+    if ($File -eq $portable) { $info.Environment['BSI_LAUNCHER_PATH'] = 'C:\not-the-launcher.exe' }
     $info.Environment['PATH'] = "$env:SystemRoot\System32;$env:SystemRoot"
     $info.Environment['QT_QPA_PLATFORM'] = $Platform
     $info.Environment['QT_QUICK_BACKEND'] = 'software'
@@ -98,6 +100,7 @@ try {
     foreach ($platform in @('offscreen', 'windows')) {
         $result = Run-Clean $portable $arguments $platform
         Check-Probe $result $true
+        if ($result.Out -notmatch '(?m)^DEPLOYMENT_LAUNCHER=(.+)$' -or $Matches[1].Trim() -ine $portable) { throw 'Portable launcher path did not override the inherited marker' }
         if ($result.Out -notmatch '(?m)^DEPLOYMENT_ARGS=(.+)$') { throw 'Missing argument-forwarding proof' }
         $actual = @($Matches[1] | ConvertFrom-Json)
         if ($actual.Count -ne $arguments.Count + 1) { throw 'Argument count changed in the launcher' }
@@ -110,6 +113,18 @@ try {
         Write-Host "PASS single EXE / $platform platform / clean PATH / argument forwarding / cleanup"
     }
     if (@(Get-ChildItem -LiteralPath $clean -Force).Count -ne 1) { throw 'The launcher left loose runtime files next to the EXE' }
+
+    # Only empty fixture bytes: discovery must not execute the candidate ADB.
+    $adbDirectory = Join-Path $clean 'adb'
+    New-Item -ItemType Directory -Path $adbDirectory | Out-Null
+    $fakeAdb = Join-Path $adbDirectory 'adb.exe'
+    [IO.File]::WriteAllBytes($fakeAdb,[byte[]]@(0))
+    try {
+        $result = Run-Clean $portable @('--deployment-test')
+        Check-Probe $result $true
+        if ($result.Out -notmatch '(?m)^DEPLOYMENT_ADB=(.+)$' -or $Matches[1].Trim() -ine $fakeAdb) { throw 'ADB beside the OUTER portable launcher was not discovered' }
+        Write-Host 'PASS app-local ADB discovery outside the private extraction directory (no ADB execution)'
+    } finally { Remove-Item -LiteralPath $adbDirectory -Recurse -Force }
 
     $extracted = Join-Path $clean 'explicit extraction'
     $result = Run-Clean $portable @('--extract-to', $extracted)

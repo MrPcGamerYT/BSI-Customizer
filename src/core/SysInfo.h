@@ -5,6 +5,7 @@
 #include <QStorageInfo>
 #include <QSysInfo>
 #include <QThread>
+#include <QVariantMap>
 
 #ifdef Q_OS_WIN
 #ifndef NOMINMAX
@@ -29,6 +30,7 @@ public:
 
     int cpuCores() const { return qMax(1, QThread::idealThreadCount()); }
     double ramGb() const;
+    QVariantMap snapshot(const QString &targetPath) const;
     double diskFreeGb() const
     {
         return double(QStorageInfo(QDir::rootPath()).bytesAvailable()) / 1073741824.0;

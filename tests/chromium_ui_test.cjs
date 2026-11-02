@@ -12,7 +12,7 @@ const { chromium } = require(process.env.BSI_PLAYWRIGHT || 'playwright');
 const root = path.resolve(__dirname, '../src/web');
 const server = http.createServer((req, res) => {
   const name = new URL(req.url, 'http://test').pathname.slice(1) || 'index.html';
-  if (!['index.html', 'styles.css', 'transport.js', 'editors.js', 'maintenance.js', 'binary-lab.js', 'resource-search.js', 'effects.js', 'app.js', 'icon.png', 'fonts/manrope-latin.woff2', 'fonts/plus-jakarta-sans-latin.woff2'].includes(name)) { res.writeHead(404).end(); return; }
+  if (!['index.html', 'styles.css', 'transport.js', 'editors.js', 'maintenance.js', 'binary-lab.js', 'resource-search.js', 'emulator-icons.js', 'effects.js', 'app.js', 'icon.png', 'fonts/manrope-latin.woff2', 'fonts/plus-jakarta-sans-latin.woff2'].includes(name)) { res.writeHead(404).end(); return; }
   res.setHeader('Content-Type', name.endsWith('.js') ? 'text/javascript' : name.endsWith('.css') ? 'text/css' : name.endsWith('.woff2') ? 'font/woff2' : name.endsWith('.png') ? 'image/png' : 'text/html');
   res.end(fs.readFileSync(path.join(root, name)));
 });
@@ -60,6 +60,10 @@ const server = http.createServer((req, res) => {
       const state = { protocol: 1, authorized: true, busy: false, exeFound: true, exePath: 'C:\\fixture\\HD-Player.exe', version: 'test-only', resourceRevision: 0, workspaceRevision: 0, updates: { configured: true, state: 'idle' }, themeStatus: 'Fixture palette', themeMethod: 'qml' };
       const colors = [{ name: 'testAccent', value: '#123456', edit: '', purpose: 'Test fixture only' }];
       const rows = Array.from({ length: 250 }, (_, index) => ({ index, path: `qml/fixture-${index}.qml`, kind: 'text', text: true, size: 100, stored: 80, format: 'QML' }));
+      const png='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aNc0AAAAASUVORK5CYII=';
+      rows[247]={index:247,path:'fonts/fixture-font.ttf',kind:'binary',text:false,format:'TTF',size:100,stored:100,thumbnail:'data:image/svg+xml,<svg onload=alert(1)/>'};
+      rows[248]={index:248,path:'images/fixture-image.png',kind:'image',text:false,format:'PNG',size:100,stored:100,thumbnail:png};
+      rows[249]={index:249,path:'images/home-icon.svg',kind:'svg',text:true,format:'SVG',size:200,stored:200,thumbnail:png};
       const remote = {
         stateChanged: signal(), logMessage: signal(), fileSelected: signal(), videoStatus: signal(),
         snapshot(callback) { callback({ ...state }); },
@@ -72,6 +76,9 @@ const server = http.createServer((req, res) => {
           if (method === 'scanResources') { ++state.resourceRevision; value = rows.length; }
           if (method === 'listResources') value = rows;
           if (method === 'readResource') value = { text: 'Item { property string value: "<img src=x onerror=alert(1)>" }', preview: '', budget: { known: true, capacity: 300, msg: 'Test only' } };
+          if(method==='readResource'&&args.index===249)value={text:'<svg xmlns="http://www.w3.org/2000/svg" width="18" height="20" viewBox="0 0 24 24"><path d="M2 2h20"/></svg>',preview:png,hex:'0000  3c 73 76 67   <svg>',budget:{known:true,capacity:300}};
+          if(method==='readResource'&&args.index===248)value={text:'',preview:png,note:'PNG preview',hex:'0000  89 50 4e 47   .PNG',budget:{known:true,capacity:300}};
+          if(method==='readResource'&&args.index===247)value={text:'',preview:'data:image/svg+xml,<svg onload=alert(1)/>',note:'No image preview for fonts',hex:'0000  3c 73   <script>not executable</script>',budget:{known:true,capacity:300}};
           if (method === 'saveResource') { ++state.resourceRevision; value = { ok: true, msg: 'Test fixture acknowledged save' }; }
           if (method === 'fpsPatch') value = { ok: false, msg: 'Fixture: target is unsupported; no write' };
           if (method === 'readInterface') value = {
@@ -90,7 +97,8 @@ const server = http.createServer((req, res) => {
           if (method === 'maintenance') {
             value = {ok:true,msg:'Native maintenance fixture'};
             if(args.action==='sidebar-read') value={supported:true,applied:true,buttons:[{key:'capture',label:'Screenshot',hidden:false},{key:'volume',label:'Volume',hidden:false}]};
-            if(args.action==='debloat-read') value={state:{supported:true},options:[{id:'fixture-ads',label:'Disable ads',hint:'Fixture configuration option'}]};
+            if(args.action==='debloat-read') value={state:{supported:true},options:[{id:'fixture-ads',label:'Disable ads',hint:'Fixture configuration option'},...['highfps','balancedfps','efficientfps','downloads','quiet'].map(id=>({id,label:id,group:'tuning',needsInstance:true}))]};
+            if(args.action==='system-read')value={os:'Fixture Windows',cores:8,ramGb:16,availableRamGb:6,systemFreeGb:40,targetFreeGb:28,adbPath:'C:\\fixture\\adb\\adb.exe',adbDirectories:['C:\\fixture']};
             if(args.action==='android-scan') value={ok:true,apps:[{package:'com.fixture.ad',label:'Fixture ad',installed:true,debloatable:true,note:'Reviewed fixture'}],download:{size:'1 KB'}};
             if(args.action==='disk-find') value={path:'C:\\fixture\\Root.vhd'};
             if(args.action==='disk-enable') window.__diskWritable=true;
@@ -133,6 +141,51 @@ const server = http.createServer((req, res) => {
     await page.locator('[data-action="saveResource"]').click();
     await page.waitForFunction(() => __calls.some(c => c.method === 'saveResource'));
     assert.equal(await page.evaluate(() => __calls.find(c => c.method === 'saveResource').args.text), 'Item { property string value: "edited fixture" }');
+    await page.locator('#resource-filter').fill('fixture-image.png');
+    assert.equal(await page.locator('[data-resource="248"] .resource-thumb img').count(),1,'Cached raster thumbnails are visible');
+    await page.locator('[data-resource="248"]').click();
+    await page.locator('#resource-image').waitFor();
+    assert.equal(await page.locator('#resource-code').count(),0,'Binary images are not shown as editable code');
+    await page.locator('#resource-preview-bg').selectOption('light');
+    assert.equal(await page.locator('#resource-picture').getAttribute('data-background'),'light');
+    await page.locator('[data-resource-zoom="200"]').click();
+    assert.equal(await page.locator('#resource-image').evaluate(el=>el.style.maxWidth),'none');
+    await page.locator('#resource-filter').fill('fixture-font.ttf');
+    assert.equal(await page.locator('[data-resource="247"] img').count(),0,'Untrusted SVG data URLs cannot become list thumbnails');
+    await page.locator('[data-resource="247"]').click();
+    await page.locator('.resource-byte-details > summary').click();
+    await page.locator('#resource-hex').waitFor();
+    assert.equal(await page.locator('#resource-editor img,#resource-editor script,#resource-editor svg').count(),0,'Unsupported font/SVG payload remains escaped metadata and hex, not active HTML');
+    assert.ok((await page.locator('#resource-hex').textContent()).includes('<script>not executable</script>'));
+    // Emulator icon presets are local drafts, never automatic file writes.
+    await page.locator('#resource-filter').fill('home-icon.svg');
+    await page.locator('[data-resource="249"]').click();
+    await page.locator('#resource-image').waitFor();
+    assert.equal(await page.locator('#resource-code').count(),1,'SVG preview and source editor are both visible');
+    assert.equal(await page.locator('#resource-editor svg').count(),0,'Untrusted resource SVG is rasterized, never injected');
+    await page.locator('#emu-icon-details > summary').click();
+    assert.equal(await page.locator('[data-emulator-icon]').count(),22);
+    await page.locator('[data-emulator-icon="keymap"]').click();
+    await page.locator('#emu-icon-stroke').selectOption('2');
+    await page.locator('#emu-icon-color').fill('#AABBCC');
+    const writesBefore=await page.evaluate(()=>__calls.filter(c=>['saveResource','replaceResource'].includes(c.method)).length);
+    await page.locator('[data-action="stageEmulatorIcon"]').click();
+    await page.waitForFunction(()=>document.querySelector('#resource-code').value.toLowerCase().includes('stroke="#aabbcc"'));
+    const stagedSvg=await page.locator('#resource-code').inputValue();
+    assert.ok(stagedSvg.includes('width="18" height="20"')&&stagedSvg.includes('stroke-width="2"'));
+    assert.equal(await page.evaluate(()=>__calls.filter(c=>['saveResource','replaceResource'].includes(c.method)).length),writesBefore,'Staging icon does not write to the emulator');
+    await page.evaluate(()=>window.__autoConfirm=false);
+    await page.locator('[data-emulator-icon="close"]').click();
+    await page.locator('[data-action="stageEmulatorIcon"]').click();
+    await page.locator('#confirm-dialog[open]').waitFor();
+    await page.locator('#confirm-cancel').click();
+    assert.equal(await page.locator('#resource-code').inputValue(),stagedSvg,'Cancel retains previous icon draft');
+    await page.evaluate(()=>window.__autoConfirm=true);
+    await page.locator('[data-action="saveResource"]').click();
+    await page.waitForFunction(()=>__calls.filter(c=>c.method==='saveResource').length===2);
+    const iconWrite=await page.evaluate(()=>__calls.filter(c=>c.method==='saveResource').at(-1));
+    assert.equal(iconWrite.args.index,249);assert.equal(iconWrite.args.text,stagedSvg);
+    assert.equal(await page.evaluate(()=>__calls.filter(c=>c.method==='scanResources').length),1,'Icon studio must not scan automatically');
     await page.locator('#spine [data-page="1"]').click();
     await page.locator('input.inp[data-color="0"]').fill('#ABCDEF');
     await page.locator('input.inp[data-color="0"]').press('Tab');
@@ -255,6 +308,20 @@ const server = http.createServer((req, res) => {
     maintenanceCall = await last('maintenance');
     assert.equal(maintenanceCall.args.action,'debloat-read');
     assert.deepEqual(await page.evaluate(() => __calls.findLast(c=>c.method==='maintenance'&&c.args.action==='debloat-apply').args.ids), ['fixture-ads']);
+    const beforeStage=await page.evaluate(()=>__calls.filter(c=>c.method==='maintenance'&&c.args.action==='debloat-apply').length);
+    await click('maint-preset-balanced');
+    assert.ok(await edit('maint:option:balancedfps').isChecked());
+    assert.ok(await edit('maint:option:downloads').isChecked());
+    assert.equal(await page.evaluate(()=>__calls.filter(c=>c.method==='maintenance'&&c.args.action==='debloat-apply').length),beforeStage,'A frame profile only stages the selection');
+    await edit('maint:option:efficientfps').check();
+    assert.equal(await edit('maint:option:balancedfps').isChecked(),false,'Selecting another frame profile clears the conflicting one');
+    await click('maint-debloat-apply');
+    assert.deepEqual(await page.evaluate(()=>__calls.findLast(c=>c.method==='maintenance'&&c.args.action==='debloat-apply').args.ids),['efficientfps','downloads']);
+    assert.equal(await page.evaluate(()=>__calls.filter(c=>c.method==='maintenance'&&c.args.action==='system-read').length),0,'No hardware/ADB scan on page entry');
+    await click('maint-system-read');
+    assert.ok((await page.locator('#main').textContent()).includes('C:\\fixture\\adb\\adb.exe'));
+    await click('maint-system-power');
+    assert.deepEqual((await last('maintenance')).args,{action:'system-settings',setting:'power'});
     await click('maint-android-scan');
     assert.equal((await last('maintenance')).args.instance,'Nougat32');
     await edit('maint:package:com.fixture.ad').check();

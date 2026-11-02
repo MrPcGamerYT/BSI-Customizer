@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QString>
+#include <QStringList>
 
 /**
  * Adb — a minimal bridge to the player's own `HD-Adb.exe`.
@@ -20,7 +21,11 @@ struct Output
     QString error;    // why it failed, or the command's stderr tail
 };
 
-// `HD-Adb.exe` next to the given player, or the one in the installation root.
+// Trusted application directories first (outer portable EXE, then runtime),
+// then the selected player's folder. Never search cwd/PATH. ADB is user supplied.
+QStringList customizerDirectories();
+// Deterministic resolver, also used by fixture-only tests. Relative roots ignored.
+QString findAdbInDirectories(const QStringList &directories);
 QString findAdb(const QString &exePath);
 
 // The instance's published Android port, from bluestacks.conf

@@ -328,11 +328,16 @@ std::vector<wchar_t> childEnvironment()
         const std::wstring entry(p);
         const std::wstring key = lower(entry.substr(0, entry.find(L'=')));
         if (key == L"qt_plugin_path" || key == L"qt_qpa_platform_plugin_path" || key == L"qml2_import_path"
-            || key == L"qml_import_path" || key == L"bsi_portable") continue;
+            || key == L"qml_import_path" || key == L"bsi_portable" || key == L"bsi_launcher_path") continue;
         entries.push_back(entry);
     }
     FreeEnvironmentStringsW(block);
     entries.push_back(L"BSI_PORTABLE=1");
+    // Resolve our actual loaded module, never argv[0], cwd or an inherited path.
+    std::vector<wchar_t> module(32768);
+    const DWORD length=GetModuleFileNameW(nullptr,module.data(),DWORD(module.size()));
+    if (!length || length>=module.size()) fail(L"Cannot locate the portable launcher",GetLastError());
+    entries.push_back(L"BSI_LAUNCHER_PATH=" + std::wstring(module.data(),length));
     std::sort(entries.begin(), entries.end(), [](const auto &a, const auto &b) { return _wcsicmp(a.c_str(), b.c_str()) < 0; });
     std::vector<wchar_t> result;
     for (const auto &entry : entries) {

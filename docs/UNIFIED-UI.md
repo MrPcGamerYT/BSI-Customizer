@@ -100,3 +100,42 @@ search, selection, storage warnings and restore. Selection is staging only.
 Downloads backup does not back up Android/data or obb. No new arbitrary ADB
 shell endpoint, placebo optimizer, automatic scan or blanket safe-removal claim
 is introduced.
+
+## Emulator outline icons
+
+Resources now includes **Emulator icon studio** with 22 original BSI Outline
+SVGs for the *player's* topbar/sidebar, not this app's navigation. It previews
+trusted SVG templates, accepts a constrained color/stroke, and stages into a
+selected text-editable SVG only. Numeric root dimensions are retained where
+possible. Choosing, previewing and staging never scans or saves. Saving still
+uses the existing `saveResource` native guard/writer, capacity checks, backup and
+stale-file protections. No new filesystem or bridge endpoint is introduced.
+Original native raster previews are used; untrusted source SVG is never inserted
+into the DOM. Applying an icon does not remap its button or change bar spacing.
+See `assets/emulator-icons/README.md` for mapping, variants and recovery notes.
+
+## Resource previews, profiles and external ADB
+
+Resources now displays native scan-cached SVG/raster thumbnails, with paginated
+100-row rendering. Opening an SVG shows a Qt-rasterized saved preview **and** its
+source editor; PNG/JPEG/WebP and other supported Qt image formats use the same
+preview pane (static frame for animated formats). Fit/100%/200% refer to preview
+pixels, with checker/dark/light backgrounds. Unsupported formats have metadata,
+a bounded 256-byte decoded sample, and extraction; QML/scripts/fonts are never
+executed by the preview. Existing native scan/decode budgets remain in force.
+There is no scan on navigation/filtering. Draft source is not rasterized live.
+
+Debloat / Android adds manual host/ADB diagnostics, fixed Windows Settings links,
+and draft-only profile shortcuts. The new 60 FPS balanced / 30 FPS efficiency
+profiles require the existing selected instance's three supported frame settings,
+conflict with the 240 FPS mode and keep the original native config journal. Caps
+are load/smoothness trade-offs, not guaranteed speed gains. Re-applying a different
+profile preserves the original undo baseline. No CPU/RAM cleaner or security /
+service disabling is implemented. Windows settings are opened, not auto-changed.
+
+App-local ADB discovery supports both loose sidecars and `adb/`, including the
+outer portable launcher's folder. Inherited launcher paths must match the actual
+parent process; cwd/PATH are not searched. Real ADB binaries are external. See
+[INSTALLER.md](INSTALLER.md) for exact installer commands and the optional ADB
+allowlist. New native tests exercise discovery and frame plans; real emulator /
+supplier-binary acceptance must still be performed on Windows.

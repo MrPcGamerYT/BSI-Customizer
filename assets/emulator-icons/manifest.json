@@ -1,0 +1,161 @@
+{
+  "name": "BSI Outline",
+  "version": 1,
+  "viewBox": "0 0 24 24",
+  "icons": [
+    {
+      "id": "back",
+      "label": "Back",
+      "area": "topbar",
+      "searchHint": "back",
+      "file": "outline/back.svg"
+    },
+    {
+      "id": "home",
+      "label": "Home",
+      "area": "topbar",
+      "searchHint": "home",
+      "file": "outline/home.svg"
+    },
+    {
+      "id": "recent",
+      "label": "Recent apps",
+      "area": "topbar",
+      "searchHint": "recent",
+      "file": "outline/recent.svg"
+    },
+    {
+      "id": "help",
+      "label": "Help",
+      "area": "topbar",
+      "searchHint": "help",
+      "file": "outline/help.svg"
+    },
+    {
+      "id": "menu",
+      "label": "Menu",
+      "area": "topbar",
+      "searchHint": "menu",
+      "file": "outline/menu.svg"
+    },
+    {
+      "id": "minimize",
+      "label": "Minimize",
+      "area": "topbar",
+      "searchHint": "minimize",
+      "file": "outline/minimize.svg"
+    },
+    {
+      "id": "maximize",
+      "label": "Maximize",
+      "area": "topbar",
+      "searchHint": "maximize",
+      "file": "outline/maximize.svg"
+    },
+    {
+      "id": "close",
+      "label": "Close",
+      "area": "topbar",
+      "searchHint": "close",
+      "file": "outline/close.svg"
+    },
+    {
+      "id": "fullscreen",
+      "label": "Fullscreen",
+      "area": "sidebar",
+      "searchHint": "fullscreen",
+      "file": "outline/fullscreen.svg"
+    },
+    {
+      "id": "volume",
+      "label": "Volume",
+      "area": "sidebar",
+      "searchHint": "volume",
+      "file": "outline/volume.svg"
+    },
+    {
+      "id": "mute",
+      "label": "Mute",
+      "area": "sidebar",
+      "searchHint": "mute",
+      "file": "outline/mute.svg"
+    },
+    {
+      "id": "keymap",
+      "label": "Key mapping",
+      "area": "sidebar",
+      "searchHint": "key",
+      "file": "outline/keymap.svg"
+    },
+    {
+      "id": "gamepad",
+      "label": "Game controls",
+      "area": "sidebar",
+      "searchHint": "gamepad",
+      "file": "outline/gamepad.svg"
+    },
+    {
+      "id": "macro",
+      "label": "Macro recorder",
+      "area": "sidebar",
+      "searchHint": "macro",
+      "file": "outline/macro.svg"
+    },
+    {
+      "id": "screenshot",
+      "label": "Screenshot",
+      "area": "sidebar",
+      "searchHint": "screenshot",
+      "file": "outline/screenshot.svg"
+    },
+    {
+      "id": "rotate",
+      "label": "Rotate screen",
+      "area": "sidebar",
+      "searchHint": "rotate",
+      "file": "outline/rotate.svg"
+    },
+    {
+      "id": "install",
+      "label": "Install APK",
+      "area": "sidebar",
+      "searchHint": "apk",
+      "file": "outline/install.svg"
+    },
+    {
+      "id": "sync",
+      "label": "Sync operations",
+      "area": "sidebar",
+      "searchHint": "sync",
+      "file": "outline/sync.svg"
+    },
+    {
+      "id": "eco",
+      "label": "Eco mode",
+      "area": "sidebar",
+      "searchHint": "eco",
+      "file": "outline/eco.svg"
+    },
+    {
+      "id": "settings",
+      "label": "Settings",
+      "area": "sidebar",
+      "searchHint": "setting",
+      "file": "outline/settings.svg"
+    },
+    {
+      "id": "collapse",
+      "label": "Collapse sidebar",
+      "area": "sidebar",
+      "searchHint": "collapse",
+      "file": "outline/collapse.svg"
+    },
+    {
+      "id": "pin",
+      "label": "Always on top",
+      "area": "topbar",
+      "searchHint": "pin",
+      "file": "outline/pin.svg"
+    }
+  ]
+}

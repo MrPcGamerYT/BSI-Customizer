@@ -1175,8 +1175,25 @@ void checkAndroid()
         check(Adb::instancePort(temp.filePath(QStringLiteral("missing.conf")),
                                 QStringLiteral("Pie64")) == 0,
               "a missing configuration is not an error, just no port");
-        check(Adb::findAdb(temp.filePath(QStringLiteral("HD-Player.exe"))).isEmpty(),
+        check(Adb::findAdbInDirectories({temp.path()}).isEmpty(),
               "a folder without the player's adb reports no adb instead of inventing one");
+        const QString player=temp.filePath(QStringLiteral("player")), app=temp.filePath(QStringLiteral("customizer with spaces"));
+        QDir().mkpath(player); QDir().mkpath(app+QStringLiteral("/adb"));
+        check(write(player+QStringLiteral("/HD-Adb.exe"),"fixture"),"player ADB fixture exists");
+        check(Adb::findAdbInDirectories({app,player})==QDir::toNativeSeparators(player+QStringLiteral("/HD-Adb.exe")),"missing customizer ADB falls back to the selected player");
+        check(write(app+QStringLiteral("/adb.exe"),"fixture"),"loose app-local ADB fixture exists");
+        check(Adb::findAdbInDirectories({app,player})==QDir::toNativeSeparators(app+QStringLiteral("/adb.exe")),"loose app-local ADB takes precedence over player ADB");
+        check(write(app+QStringLiteral("/adb/adb.exe"),"fixture"),"installer ADB fixture exists");
+        check(Adb::findAdbInDirectories({app,player})==QDir::toNativeSeparators(app+QStringLiteral("/adb/adb.exe")),"dedicated app ADB folder wins deterministically");
+        check(Adb::findAdbInDirectories({QString(),QStringLiteral("."),QStringLiteral("relative/path")}).isEmpty(),"relative/empty roots cannot search cwd or PATH");
+        const auto oldPortable=qgetenv("BSI_PORTABLE"), oldLauncher=qgetenv("BSI_LAUNCHER_PATH");
+        const auto outer=temp.filePath(QStringLiteral("outer portable.exe")); write(outer,"fixture");
+        qputenv("BSI_LAUNCHER_PATH",outer.toUtf8()); qputenv("BSI_PORTABLE","0");
+        check(!Adb::customizerDirectories().contains(temp.path()),"an ordinary app ignores an inherited launcher path without the portable marker");
+        qputenv("BSI_PORTABLE","1");
+        check(!Adb::customizerDirectories().contains(temp.path()),"a forged outer path is ignored unless it matches the actual parent launcher");
+        if(oldPortable.isNull())qunsetenv("BSI_PORTABLE");else qputenv("BSI_PORTABLE",oldPortable);
+        if(oldLauncher.isNull())qunsetenv("BSI_LAUNCHER_PATH");else qputenv("BSI_LAUNCHER_PATH",oldLauncher);
     }
     {
         // ---- the undo record survives a round trip, per instance ----
@@ -1273,6 +1290,27 @@ void checkDebloat()
         }
         check(fps && limit && vsync && tuned.changes.size() == 3,
               "high frame-rate mode writes the instance's own three settings");
+        const auto merged=Debloat::mergeRecordedChanges({{QStringLiteral("fps"),QStringLiteral("90"),QStringLiteral("240")},
+            {QStringLiteral("other"),QStringLiteral("1"),QStringLiteral("0")}},
+            {{QStringLiteral("fps"),QStringLiteral("240"),QStringLiteral("60")}});
+        check(merged.size()==2 && merged.first().before==QLatin1String("90") && merged.first().after==QLatin1String("60")
+            && merged.last().key==QLatin1String("other"),"changing profiles preserves the first undo baseline and unrelated recorded settings");
+        const QByteArray frameConfig="bst.instance.Pie64.enable_high_fps=\"1\"\n"
+            "bst.instance.Pie64.max_fps=\"240\"\n" "bst.instance.Pie64.enable_vsync=\"0\"\n";
+        for(const auto &profile:{QStringLiteral("balancedfps"),QStringLiteral("efficientfps")}) {
+            Debloat::Request request;request.instance=QStringLiteral("Pie64");request.options={profile};
+            const auto planned=Debloat::planFor(frameConfig,request);
+            QMap<QString,QString> updates;
+            for(const auto &change:planned.changes)updates.insert(change.key,change.after);
+            check(planned.ok && planned.changes.size()==3 && updates.value(QStringLiteral("bst.instance.Pie64.max_fps"))==(profile==QLatin1String("balancedfps")?QStringLiteral("60"):QStringLiteral("30"))
+                && updates.value(QStringLiteral("bst.instance.Pie64.enable_high_fps"))==QLatin1String("0") && updates.value(QStringLiteral("bst.instance.Pie64.enable_vsync"))==QLatin1String("1"),"balanced/efficiency profiles change exactly three declared frame settings");
+            request.options << QStringLiteral("highfps");
+            check(!Debloat::planFor(frameConfig,request).ok,"contradictory frame profiles are refused before writes");
+            request.options={profile}; request.instance=QStringLiteral("missing");
+            check(!Debloat::planFor(frameConfig,request).ok,"a frame cap requires an existing selected instance");
+            request.instance=QStringLiteral("Pie64");
+            check(!Debloat::planFor("bst.instance.Pie64.max_fps=\"240\"\n",request).ok,"partial/unsupported frame settings are refused, never invented");
+        }
         // It is the player's setting: the binary patch on the FPS page is a
         // separate edit and must not be implied here.
         check(!tuned.changes.isEmpty() && !config.contains("max_fps=\"120\""),

@@ -22,3 +22,7 @@ updater-bot/.state.json
 # Python bytecode
 __pycache__/
 *.pyc
+
+# User-supplied Android platform-tools are external, never commit binaries/keys.
+/tools/adb/*
+!/tools/adb/README.md

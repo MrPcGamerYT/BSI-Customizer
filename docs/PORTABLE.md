@@ -155,3 +155,5 @@ replace Qt DLLs with an ABI-compatible modified build if desired, and run the
 inner `BSI-Customizer.exe` directly. Qt remains dynamically linked and replaceable.
 The launcher checks the embedded archive for corruption; it does not prohibit
 running the separately extracted application with replacement libraries.
+
+For local setup packaging and optional external ADB sidecars, see [INSTALLER.md](INSTALLER.md).

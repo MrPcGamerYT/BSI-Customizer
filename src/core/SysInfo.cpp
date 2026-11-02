@@ -1,3 +1,5 @@
+#include <QFileInfo>
+#include "AdbClient.h"
 #include "SysInfo.h"
 
 #ifdef Q_OS_LINUX
@@ -30,4 +32,20 @@ double SysInfo::ramGb() const
 #else
     return 0.0;
 #endif
+}
+
+QVariantMap SysInfo::snapshot(const QString &targetPath) const
+{
+    double available=-1;
+#ifdef Q_OS_WIN
+    MEMORYSTATUSEX memory {};
+    memory.dwLength=sizeof(memory);
+    if(GlobalMemoryStatusEx(&memory)) available=double(memory.ullAvailPhys)/1073741824.0;
+#endif
+    const QStorageInfo system(QDir::rootPath());
+    const QStorageInfo target(targetPath.isEmpty()?QDir::rootPath():QFileInfo(targetPath).absolutePath());
+    return {{"os",os()},{"cores",cpuCores()},{"ramGb",ramGb()},{"availableRamGb",available},
+        {"systemFreeGb",system.isReady()?double(system.bytesAvailable())/1073741824.0:-1.0},
+        {"targetFreeGb",target.isReady()?double(target.bytesAvailable())/1073741824.0:-1.0},
+        {"adbPath",Adb::findAdb(targetPath)},{"adbDirectories",Adb::customizerDirectories()}};
 }

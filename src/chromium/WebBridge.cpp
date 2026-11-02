@@ -4,6 +4,7 @@
 #include "core/AuthManager.h"
 #include "core/Backend.h"
 #include "core/BinaryInspector.h"
+#include <QDesktopServices>
 #include <QFile>
 #include <QSaveFile>
 #include <QJsonDocument>
@@ -17,6 +18,8 @@
 #include <cmath>
 #include <exception>
 #include <new>
+
+#include "core/SysInfo.h"
 
 namespace {
 QVariantMap failure(const QString &message) { return {{"ok", false}, {"error", message}}; }
@@ -154,7 +157,9 @@ QVariantMap WebBridge::invoke(const QString &method, const QVariantMap &args)
         QVariantList metadata;
         for (const auto &item : m_backend.resourceInfos()) {
             auto row = item.toMap();
-            row.remove("thumbnail"); // The paginated web list does not render thumbnails.
+            // The native scan already bounds cached thumbnails to 8 MiB.
+            // Filtering/pagination only reuses these rasters; it never decodes files.
+            if (!args.value("thumbnails", true).toBool()) row.remove("thumbnail");
             metadata << row;
         }
         value = metadata;
@@ -170,7 +175,8 @@ QVariantMap WebBridge::invoke(const QString &method, const QVariantMap &args)
                 return failure(QStringLiteral("This resource is too large for an inline preview. Extract it or use the full native tools."));
             value = QVariantMap{
             {"text", m_backend.resourceTextAt(index)}, {"preview", m_backend.resourcePreviewAt(index, 640)},
-            {"note", m_backend.resourcePreviewNote(index)}, {"budget", m_backend.resourceBudgetAt(index)}};
+            {"note", m_backend.resourcePreviewNote(index)}, {"budget", m_backend.resourceBudgetAt(index)},
+            {"hex", m_backend.resourceHexPreviewAt(index)}};
         }
         else if (method == QLatin1String("saveResource")) value = m_backend.saveResourceText(index, text("text"));
         else if (method == QLatin1String("replaceResource")) value = m_backend.replaceResourceWithFile(index, text("path"));
@@ -357,7 +363,22 @@ QVariantMap WebBridge::invoke(const QString &method, const QVariantMap &args)
             for (const auto &item : args.value(QLatin1String(key)).toList()) out << item.toString();
             return out;
         };
-        if (action == QLatin1String("sidebar-read")) value = m_backend.sidebarButtonRows();
+        if (action == QLatin1String("system-read")) { SysInfo info; value=info.snapshot(m_backend.exePath()); }
+        else if (action == QLatin1String("system-settings")) {
+#ifdef Q_OS_WIN
+            // A fixed allowlist, never renderer-supplied commands, URLs or paths.
+            const QString key=text("setting");
+            const QMap<QString,QString> links{{"power","ms-settings:powersleep"},
+                {"storage","ms-settings:storagesense"},{"graphics","ms-settings:display-advancedgraphics"},
+                {"gaming","ms-settings:gaming-gamemode"}};
+            if(!links.contains(key)) return failure(QStringLiteral("Unknown Windows settings panel."));
+            if(!QDesktopServices::openUrl(QUrl(links.value(key)))) return failure(QStringLiteral("Windows could not open that settings panel."));
+            value=QVariantMap{{"msg","Opened Windows Settings. No system setting was changed automatically."}};
+#else
+            return failure(QStringLiteral("These settings panels require Windows."));
+#endif
+        }
+        else if (action == QLatin1String("sidebar-read")) value = m_backend.sidebarButtonRows();
         else if (action == QLatin1String("sidebar-apply")) value = m_backend.applySidebarOrder(list("order"), list("hidden"));
         else if (action == QLatin1String("debloat-read")) value = QVariantMap{{"state", m_backend.debloatState()}, {"options", m_backend.debloatOptions()}};
         else if (action == QLatin1String("debloat-apply")) value = m_backend.debloatApply(list("ids"), text("instance"));

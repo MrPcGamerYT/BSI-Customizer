@@ -58,6 +58,14 @@ const QList<Option> &optionTable()
                          "reached. The FPS page raises the ceiling in the player binary; this is "
                          "the setting the player itself exposes."),
           true, false },
+        { QStringLiteral("balancedfps"), QStringLiteral("tuning"),
+          QStringLiteral("Balanced frame limit · 60 FPS"),
+          QStringLiteral("Caps the selected instance at 60 FPS, disables high-FPS mode and enables VSync. "
+                         "May reduce GPU load versus 240 FPS; not a speed boost. Choose one frame profile."), true, false },
+        { QStringLiteral("efficientfps"), QStringLiteral("tuning"),
+          QStringLiteral("Efficiency frame limit · 30 FPS"),
+          QStringLiteral("Caps the selected instance at 30 FPS, disables high-FPS mode and enables VSync. "
+                         "Trades motion smoothness for potentially lower GPU load and heat. Choose one frame profile."), true, false },
         { QStringLiteral("adb"), QStringLiteral("tuning"),
           QStringLiteral("Enable Android debugging (ADB)"),
           QStringLiteral("Lets this tool (and scrcpy, and your own scripts) talk to a running "
@@ -361,6 +369,17 @@ QString gpuPreferenceValue()
 // plan
 // ---------------------------------------------------------------------------
 
+QList<Change> mergeRecordedChanges(const QList<Change> &previous, const QList<Change> &next)
+{
+    QList<Change> merged=next;
+    for(const auto &old:previous) {
+        bool present=false;
+        for(auto &change:merged) if(change.key==old.key) { change.before=old.before; present=true; }
+        if(!present)merged << old;
+    }
+    return merged;
+}
+
 Plan planFor(const QByteArray &configBytes, const Request &request)
 {
     Plan plan;
@@ -369,6 +388,11 @@ Plan planFor(const QByteArray &configBytes, const Request &request)
         plan.error = config.error();
         return plan;
     }
+
+    int profiles=0;
+    for(const auto &id:{QStringLiteral("highfps"),QStringLiteral("balancedfps"),QStringLiteral("efficientfps")})
+        if(request.options.contains(id)) ++profiles;
+    if(profiles>1) { plan.error=QStringLiteral("Choose only one frame-rate profile (240, 60 or 30 FPS)."); return plan; }
 
     QMap<QString, QString> wanted;
     const auto flipAll = [&](const QStringList &keys) {
@@ -428,6 +452,20 @@ Plan planFor(const QByteArray &configBytes, const Request &request)
         } else {
             plan.notes << QStringLiteral("High frame-rate mode needs an instance; choose one first.");
         }
+    }
+    if(chosen.contains(QStringLiteral("balancedfps")) || chosen.contains(QStringLiteral("efficientfps"))) {
+        if(!hasInstance) { plan.error=QStringLiteral("Choose an existing instance for the frame-rate profile."); return plan; }
+        const QString high=instanceKey(QStringLiteral("enable_high_fps")),
+            sync=instanceKey(QStringLiteral("enable_vsync")), limit=instanceKey(QStringLiteral("max_fps"));
+        bool validLimit=false;
+        const int oldLimit=config.value(limit).toInt(&validLimit);
+        const auto flag=[&](const QString &key){return config.contains(key) && (config.value(key)==QLatin1String("0") || config.value(key)==QLatin1String("1"));};
+        if(!flag(high) || !flag(sync) || !config.contains(limit) || !validLimit || oldLimit<1 || oldLimit>1000) {
+            plan.error=QStringLiteral("This instance does not declare the three supported frame-rate settings. Nothing was written."); return plan;
+        }
+        setTo(high,QStringLiteral("0")); setTo(sync,QStringLiteral("1"));
+        setTo(limit,chosen.contains(QStringLiteral("efficientfps"))?QStringLiteral("30"):QStringLiteral("60"));
+        plan.notes << QStringLiteral("Frame cap / VSync changes trade throughput for reduced rendering load; actual FPS depends on the game. Restart the instance after applying.");
     }
     if (chosen.contains(QStringLiteral("adb"))) {
         setTo(QStringLiteral("bst.enable_adb_access"), QStringLiteral("1"));
@@ -807,10 +845,12 @@ QVariantMap apply(const QString &confPath, const QString &exePath, const Request
 
     bool gpuSet = false;
 #ifdef Q_OS_WIN
+    QString gpuBefore;
     if (plan.gpu && !exePath.isEmpty()) {
         QSettings preferences(kGpuKey, QSettings::NativeFormat);
         const QString key = QDir::toNativeSeparators(exePath);
         if (preferences.value(key).toString() != gpuPreferenceValue()) {
+            gpuBefore=preferences.value(key).toString();
             preferences.setValue(key, gpuPreferenceValue());
             gpuSet = true;
         }
@@ -821,14 +861,7 @@ QVariantMap apply(const QString &confPath, const QString &exePath, const Request
 
     Record record = loadRecord();
     if (!plan.changes.isEmpty()) {
-        QList<Change> merged = plan.changes;
-        for (const auto &previous : configChanges(record, confPath)) {
-            bool present = false;
-            for (const auto &change : merged)
-                if (change.key == previous.key) present = true;
-            if (!present) merged << previous;
-        }
-        setConfigChanges(&record, confPath, merged);
+        setConfigChanges(&record, confPath, mergeRecordedChanges(configChanges(record,confPath),plan.changes));
     }
     if (hostsChanged) record.hosts = true;
     for (const auto &move : moves) record.cloud << move;
@@ -836,7 +869,7 @@ QVariantMap apply(const QString &confPath, const QString &exePath, const Request
     if (gpuSet && !record.gpu) {
         record.gpu = true;
         record.gpuPath = exePath;
-        record.gpuBefore.clear();
+        record.gpuBefore=gpuBefore;
     }
 #endif
     if (!saveRecord(record))

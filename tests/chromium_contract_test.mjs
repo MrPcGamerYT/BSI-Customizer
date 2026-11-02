@@ -28,7 +28,7 @@ for (const query of ['', 'file-22', '"folder 2"', 'qml min:2kb max:40kb', 'Folde
   }
 }
 const html = read('src/web/index.html'), cmake = read('CMakeLists.txt');
-for (const asset of ['styles.css', 'transport.js', 'resource-search.js', 'editors.js', 'maintenance.js', 'binary-lab.js', 'effects.js', 'app.js']) {
+for (const asset of ['styles.css', 'transport.js', 'resource-search.js', 'emulator-icons.js', 'editors.js', 'maintenance.js', 'binary-lab.js', 'effects.js', 'app.js']) {
   assert.ok(html.includes(asset), 'Missing browser asset: ' + asset);
   assert.ok(cmake.includes('src/web/' + asset), 'Missing embedded desktop asset: ' + asset);
 }
@@ -89,3 +89,22 @@ const webApp=read('src/web/app.js');
 for(const label of ['Dashboard','Color studio','Resources','Performance','Integrity & safety','Boot experience','Player interface','Discord presence','Settings','About & updates','Animated presence','Patch workspace','Debloat / Android / Root.vhd'])
   assert.ok(webApp.includes("['"+label+"'"),'Original section name retained: '+label);
 console.log('PASS: all 13 original native section names retained alongside Binary Lab.');
+
+assert.ok(bridge.includes('args.value("thumbnails", true)'));
+assert.ok(bridge.includes('resourceHexPreviewAt(index)'));
+assert.ok(webApp.includes('rasterPreview(r.thumbnail)'));
+assert.ok(webApp.includes('selected.text?')&&webApp.includes('resource-inspector'));
+const adb=read('src/core/AdbClient.cpp');
+assert.ok(adb.includes('QueryFullProcessImageNameW'));
+assert.ok(adb.includes('parent.compare(advertised'));
+assert.ok(!adb.includes('findExecutable('),'Do not execute ADB from PATH');
+for(const id of ['system-read','system-settings'])assert.ok(bridge.includes('"'+id+'"'));
+for(const id of ['balancedfps','efficientfps'])assert.ok(read('src/core/DebloatPatcher.cpp').includes('"'+id+'"'));
+const installer=read('scripts/Build-Installer.ps1');
+for(const file of ['adb.exe','AdbWinApi.dll','AdbWinUsbApi.dll','NOTICE.txt']) {
+  assert.ok(installer.includes("'"+file+"'"));
+  assert.ok(read('packaging/installer/BSI-Customizer.iss').includes('AdbDirectory}\\'+file));
+}
+assert.ok(installer.includes('WaitForExit(120000)'));
+assert.ok(read('.github/workflows/release.yml').includes('./scripts/Build-Installer.ps1'));
+console.log('PASS: cached raster resource previews, guarded system actions, declared frame profiles, parent-validated ADB lookup and explicit installer sidecar allowlist.');

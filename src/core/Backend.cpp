@@ -1102,6 +1102,22 @@ QString Backend::resourcePreviewNote(int index) const
                           "or replaced.").arg(bytes.size()).arg(entry.format);
 }
 
+QString Backend::resourceHexPreviewAt(int index) const
+{
+    if (index<0 || index>=m_resources.size()) return {};
+    const auto &entry=m_resources.at(index);
+    if (entry.size>8*1024*1024) return {};
+    const auto bytes=EmbeddedResources::readEntry(m_settings->exePath(),entry.entryOff,entry.flags,8*1024*1024).left(256);
+    QString result;
+    for (int at=0;at<bytes.size();at+=16) {
+        const auto row=bytes.mid(at,16); QString ascii;
+        for(char c:row) ascii+=(uchar(c)>=32 && uchar(c)<127)?QChar(uchar(c)):QChar('.');
+        result+=QStringLiteral("%1  %2  %3\n").arg(at,4,16,QChar('0'))
+            .arg(QString::fromLatin1(row.toHex(' ')),-47).arg(ascii);
+    }
+    return result;
+}
+
 QString Backend::resourceTextAt(int index) const
 {
     if (index < 0 || index >= m_resources.size()) return {};

@@ -2,6 +2,7 @@
 
 #include "DebloatConfig.h"
 
+#include <QCoreApplication>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -12,9 +13,39 @@
 #include <QStringList>
 #include <QThread>
 
+#ifdef Q_OS_WIN
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#include <tlhelp32.h>
+#endif
+
 namespace {
 
 constexpr int kStartTimeout = 30000;
+
+QString parentModulePath()
+{
+#ifdef Q_OS_WIN
+    const HANDLE snapshot=CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS,0);
+    if(snapshot==INVALID_HANDLE_VALUE)return {};
+    PROCESSENTRY32W entry {}; entry.dwSize=sizeof(entry);
+    DWORD parent=0;
+    for(BOOL more=Process32FirstW(snapshot,&entry);more;more=Process32NextW(snapshot,&entry)) {
+        if(entry.th32ProcessID==GetCurrentProcessId()) { parent=entry.th32ParentProcessID; break; }
+    }
+    CloseHandle(snapshot);
+    if(!parent)return {};
+    const HANDLE process=OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION,FALSE,parent);
+    if(!process)return {};
+    wchar_t module[32768] {}; DWORD length=32768;
+    const BOOL found=QueryFullProcessImageNameW(process,0,module,&length);
+    CloseHandle(process);
+    if(found)return QString::fromWCharArray(module,int(length));
+#endif
+    return {};
+}
 
 QString finishedText(const QString &value)
 {
@@ -33,23 +64,52 @@ quint16 pickPort()
 
 namespace Adb {
 
+QStringList customizerDirectories()
+{
+    QStringList roots;
+    // The launcher overwrites both markers; inherited paths cannot redirect it.
+    // Ordinary unpacked/development runs do not honor a launcher path alone.
+    if (qEnvironmentVariable("BSI_PORTABLE")==QLatin1String("1")) {
+        const QFileInfo outer(qEnvironmentVariable("BSI_LAUNCHER_PATH"));
+        const auto parent=QDir::cleanPath(QDir::fromNativeSeparators(parentModulePath()));
+        const auto advertised=QDir::cleanPath(QDir::fromNativeSeparators(outer.filePath()));
+        // Never execute an inherited user-environment path in an elevated raw
+        // install. Only the actual waiting parent launcher can supply this root.
+        if (outer.isAbsolute() && !parent.isEmpty() && parent.compare(advertised,Qt::CaseInsensitive)==0
+            && outer.isFile() && outer.suffix().compare(QLatin1String("exe"),Qt::CaseInsensitive)==0)
+            roots << outer.absolutePath();
+    }
+    roots << QCoreApplication::applicationDirPath();
+    roots.removeDuplicates();
+    return roots;
+}
+
+QString findAdbInDirectories(const QStringList &directories)
+{
+    for (const auto &directory : directories) {
+        if (directory.isEmpty() || !QDir::isAbsolutePath(directory)) continue;
+        // A dedicated adb/ folder is convenient for installers; loose sidecars
+        // beside BSI-Customizer.exe are supported too. Never recurse or use PATH.
+        for (const auto &relative : {QStringLiteral("adb/adb.exe"),QStringLiteral("adb.exe"),
+                                    QStringLiteral("HD-Adb.exe"),QStringLiteral("HD-Adb")}) {
+            const QFileInfo candidate(QDir(directory).filePath(relative));
+            if (candidate.isFile() && !candidate.isSymLink())
+                return QDir::toNativeSeparators(candidate.absoluteFilePath());
+        }
+    }
+    return {};
+}
+
 QString findAdb(const QString &exePath)
 {
 #ifndef Q_OS_WIN
     Q_UNUSED(exePath);
-    return QString();
+    return {};
 #else
-    const QFileInfo exe(exePath);
-    const QStringList candidates{
-        exe.absolutePath() + QStringLiteral("/HD-Adb.exe"),
-        exe.absolutePath() + QStringLiteral("/adb.exe"),
-        exe.absolutePath() + QStringLiteral("/HD-Adb"),
-    };
-    for (const QString &candidate : candidates) {
-        if (QFileInfo::exists(candidate))
-            return QDir::toNativeSeparators(candidate);
-    }
-    return QString();
+    auto roots=customizerDirectories();
+    // Empty or relative player paths must not introduce the working directory.
+    if (!exePath.isEmpty() && QFileInfo(exePath).isAbsolute()) roots << QFileInfo(exePath).absolutePath();
+    return findAdbInDirectories(roots);
 #endif
 }
 

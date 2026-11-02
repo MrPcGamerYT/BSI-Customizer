@@ -23,6 +23,7 @@
 #include <memory>
 
 #include "core/AboutPatcher.h"
+#include "core/AdbClient.h"
 #include "core/Backend.h"
 #include "core/CrashDiagnostics.h"
 #include "core/AuthManager.h"
@@ -332,6 +333,8 @@ int main(int argc, char *argv[])
             }
             std::printf("DEPLOYMENT_ROOT=%s\n", root.toUtf8().constData());
             std::printf("DEPLOYMENT_PORTABLE=%s\n", qEnvironmentVariable("BSI_PORTABLE", QStringLiteral("0")).toUtf8().constData());
+            std::printf("DEPLOYMENT_LAUNCHER=%s\n", qEnvironmentVariable("BSI_LAUNCHER_PATH").toUtf8().constData());
+            std::printf("DEPLOYMENT_ADB=%s\n", Adb::findAdb(QString()).toUtf8().constData());
             std::printf("DEPLOYMENT_ARGS=%s\n", QJsonDocument(QJsonArray::fromStringList(args)).toJson(QJsonDocument::Compact).constData());
             if (ok)
                 std::printf("DEPLOYMENT TEST PASSED\n");

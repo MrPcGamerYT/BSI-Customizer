@@ -39,6 +39,7 @@
   let resourceIndex = [], kind = 0, measureTimer = null, measureSequence = 0;
   let resources = [], selected = null, resourceData = null, dirty = false, filter = '', offset = 0;
   let operationResult = '', logs = [], editors = null;
+  let emulatorIcon='home', emulatorIconColor='#F1F5F9', emulatorIconStroke='1.7', iconStudioOpen=false;
   const drafts = {};
   const enabled = () => !!transport && state.authorized && !state.busy && !pending;
   const panel = body => `<div class="panel"><div class="pscroll">${body}</div></div>`;
@@ -121,7 +122,7 @@
         return `<div class="color-row"><input type="checkbox" data-color-enabled="${index}" aria-label="Enable ${esc(row.name)}" ${(palette.method === 'hex' ? row.enabled : !!row.edit) ? 'checked' : ''} ${enabled() ? '' : 'disabled'}><div><b>${esc(row.name)}</b><small>${esc(row.purpose)}</small></div><input type="color" value="${esc(rgb)}" data-color="${index}" aria-label="Pick ${esc(row.name)}" ${enabled() ? '' : 'disabled'}><input class="inp mono" value="${esc(value)}" data-color="${index}" aria-label="Value for ${esc(row.name)}" ${enabled() ? '' : 'disabled'}></div>`;
       }).join('') : '<div class="empty">No palette loaded. Choose an executable, then click Load theme.</div>'}</div></div>`);
     } else if (page === 2) {
-      html = panel(`<div class="sec"><div class="sec-h">Resource explorer</div><div class="tools">${button('Scan Resources', 'scanResources', true)}${native(2)}<input class="inp grow" id="resource-filter" placeholder="Search paths (space-separated terms)" value="${esc(filter)}" aria-label="Search resource paths"></div><p class="note">Opening this page never scans. The backend enforces encoded storage capacity and refuses unsafe writes.</p><label class="editor-field"><span>Resource kind</span><select class="inp" id="resource-kind">${['All', 'Pictures', 'SVG', 'Code', 'Binary', 'Fonts', 'Modified vs backup'].map((label, index) => `<option value="${index}" ${kind === index ? 'selected' : ''}>${label}</option>`).join('')}</select></label><p class="note">Search supports quoted phrases and min: / max: byte sizes (e.g. min:2kb).</p><div id="resource-rows"></div><div id="resource-editor"></div></div>`);
+      html = panel(`<div class="sec"><div class="sec-h">Resource explorer</div><div class="tools">${button('Scan Resources', 'scanResources', true)}${native(2)}<input class="inp grow" id="resource-filter" placeholder="Search paths (space-separated terms)" value="${esc(filter)}" aria-label="Search resource paths"></div><p class="note">Opening this page never scans. The backend enforces encoded storage capacity and refuses unsafe writes.</p><label class="editor-field"><span>Resource kind</span><select class="inp" id="resource-kind">${['All', 'Pictures', 'SVG', 'Code', 'Binary', 'Fonts', 'Modified vs backup'].map((label, index) => `<option value="${index}" ${kind === index ? 'selected' : ''}>${label}</option>`).join('')}</select></label><p class="note">Search supports quoted phrases and min: / max: byte sizes (e.g. min:2kb).</p><div id="emulator-icon-studio"></div><div id="resource-rows"></div><div id="resource-editor"></div></div>`);
     } else if ([3, 4, 5].includes(page)) {
       const commands = page === 3 ? [['Detect FPS target', 'fpsDetect'], ['Analyze FPS', 'fpsAnalyze'], ['Apply FPS limit', 'fpsPatch'], ['Restore FPS', 'fpsRestore']]
         : page === 4 ? [['Check integrity', 'integrityCheck'], ['Apply integrity patch', 'integrityPatch'], ['Restore integrity', 'integrityRestore']]
@@ -140,26 +141,32 @@
     if ($('#operation-result')) $('#operation-result').textContent = operationResult;
     markBusy(); syncVideo();
   }
+  const rasterPreview = value => /^data:image\/(png|jpeg|webp|gif|bmp);base64,/i.test(value||'');
+  let resourcePreviewBackground='checker';
   function renderResources() {
     if (!$('#resource-rows')) return;
     const rows = BsiResourceSearch.filter(resourceIndex, filter, kind);
     offset = Math.max(0, Math.min(offset, Math.max(0, Math.ceil(rows.length / 100) - 1) * 100));
-    $('#resource-rows').innerHTML = `<p class="note">${rows.length} matching / ${resources.length} scanned · ${resources.length ? 'Showing ' + (offset + 1) + '–' + Math.min(offset + 100, rows.length) : 'Click Scan Resources to begin'}</p><div class="resource-list">${rows.slice(offset, offset + 100).map(r => `<button class="resource-row${r.index === selected?.index ? ' selected' : ''}" data-resource="${r.index}" ${enabled() ? '' : 'disabled'}><small>${esc(r.kind)} · ${esc(r.size)} B</small>${esc(r.path)}</button>`).join('')}</div>${rows.length > 100 ? `<div class="tools"><button class="btn sm" data-paginate="-1" ${offset ? '' : 'disabled'}>Previous</button><button class="btn sm" data-paginate="1" ${offset + 100 < rows.length ? '' : 'disabled'}>Next</button></div>` : ''}`;
+    $('#resource-rows').innerHTML = `<p class="note">${rows.length} matching / ${resources.length} scanned · ${resources.length ? 'Showing ' + (offset + 1) + '–' + Math.min(offset + 100, rows.length) : 'Click Scan Resources to begin'}</p><div class="resource-list">${rows.slice(offset, offset + 100).map(r => `<button class="resource-row${r.index === selected?.index ? ' selected' : ''}" data-resource="${r.index}" ${enabled() ? '' : 'disabled'}><span class="resource-thumb">${rasterPreview(r.thumbnail)?`<img src="${esc(r.thumbnail)}" loading="lazy" alt="${esc(r.name||r.path)} preview">`:`<b>${esc(r.format||r.kind)}</b>`}</span><span class="resource-row-info"><small>${esc(r.kind)} · ${esc(r.size)} B${r.width?` · ${r.width} × ${r.height}`:''}</small>${esc(r.path)}</span></button>`).join('')}</div>${rows.length > 100 ? `<div class="tools"><button class="btn sm" data-paginate="-1" ${offset ? '' : 'disabled'}>Previous</button><button class="btn sm" data-paginate="1" ${offset + 100 < rows.length ? '' : 'disabled'}>Next</button></div>` : ''}`;
+  }
+  function renderEmulatorIcons() {
+    const box=$('#emulator-icon-studio'); if(!box)return;
+    box.innerHTML=BsiEmulatorIcons.render({esc,button,selected,preview:resourceData?.preview,choice:emulatorIcon,color:emulatorIconColor,stroke:emulatorIconStroke});
+    $('#emu-icon-details').open=iconStudioOpen;
+    markBusy();
   }
   function renderResourceEditor() {
+    renderEmulatorIcons();
     if (!$('#resource-editor')) return;
     const box = $('#resource-editor');
     if (!selected || !resourceData) { box.innerHTML = '<div class="empty">Select a scanned resource to inspect it.</div>'; return; }
-    box.innerHTML = `<h3>${esc(selected.path)}</h3><p class="note" id="resource-budget"></p>${selected.text ? '<textarea class="inp" id="resource-code" spellcheck="false" aria-label="Resource source text"></textarea>' : '<img id="resource-image" alt="Resource preview" hidden><p class="note" id="resource-note"></p>'}<div class="button-grid">${selected.text ? button('Save resource text', 'saveResource', true) : ''}${button('Replace with file…', 'replaceResource')}${button('Extract…', 'extractResource')}</div>`;
-    const budget = resourceData.budget || {};
-    $('#resource-budget').textContent = `Decoded: ${selected.size} B · Stored: ${selected.stored} B · Capacity: ${budget.known ? budget.capacity + ' B' : 'unknown'} · ${budget.msg || 'Validated by native engine on save.'}`;
-    if ($('#resource-code')) $('#resource-code').value = resourceData.text || '';
-    if ($('#resource-image')) {
-      if (/^data:image\/(png|jpeg|webp|gif|bmp);base64,/i.test(resourceData.preview || '')) {
-        $('#resource-image').src = resourceData.preview; $('#resource-image').hidden = false;
-      }
-      $('#resource-note').textContent = resourceData.note || 'No raster preview for this format. You can still extract or replace it.';
-    }
+    const picture=rasterPreview(resourceData.preview);
+    box.innerHTML = `<h3>${esc(selected.path)}</h3><p class="note" id="resource-budget"></p><div class="resource-inspector${picture?' has-picture':''}">${picture?`<div><div class="tools"><label class="note">Preview background <select class="inp" id="resource-preview-bg">${['checker','dark','light'].map(bg=>`<option value="${bg}" ${bg===resourcePreviewBackground?'selected':''}>${bg}</option>`).join('')}</select></label><button class="btn sm" data-resource-zoom="fit">Fit</button><button class="btn sm" data-resource-zoom="100">100%</button><button class="btn sm" data-resource-zoom="200">200%</button></div><div class="resource-picture" id="resource-picture" data-background="${resourcePreviewBackground}"><img id="resource-image" alt="Saved SVG / image rendered by the native Qt decoder"></div><p class="note">Saved/native raster preview (static frame for animated formats). SVG source is not injected into the page. Unsaved drafts are not rendered here.</p></div>`:''}<div>${selected.text?'<label class="lbl" for="resource-code">Source editor</label><textarea class="inp" id="resource-code" spellcheck="false" aria-label="Resource source text"></textarea>':`<p class="note">${esc(resourceData.note||'No supported image preview. Inspect bytes or extract the file.')}</p>`}<details class="resource-byte-details"><summary>Raw bytes · first 256 decoded bytes</summary><pre class="lab-hex" id="resource-hex"></pre><p class="note">Offsets are within the decoded resource, not EXE file offsets. Fonts/compiled data are not executed or loaded as code.</p></details></div></div><div class="button-grid">${selected.text?button('Save resource text','saveResource',true):''}${button('Replace with file…','replaceResource')}${button('Extract…','extractResource')}</div>`;
+    const budget=resourceData.budget||{};
+    $('#resource-budget').textContent=`${selected.format||selected.kind} · Decoded: ${selected.size} B · Stored: ${selected.stored} B · Capacity: ${budget.known?budget.capacity+' B':'unknown'} · ${budget.msg||'Validated by native engine on save.'}`;
+    if($('#resource-code'))$('#resource-code').value=resourceData.text||'';
+    if($('#resource-image'))$('#resource-image').src=resourceData.preview;
+    $('#resource-hex').textContent=resourceData.hex||'No byte sample available. Extract the resource to inspect it externally.';
   }
   function scheduleMeasurement() {
     const sequence = ++measureSequence;
@@ -214,6 +221,18 @@
     const name = el.dataset.action;
     if (!enabled()) return;
     if (name.startsWith('editor:')) { await editors.action(name.slice(7), el, page); renderView(); return; }
+    if (name === 'stageEmulatorIcon') {
+      if(!BsiEmulatorIcons.eligible(selected)||!resourceData)throw Error('Select a scanned, text-editable SVG button icon first.');
+      const icon=BsiEmulatorIcons.icons.find(i=>i.id===emulatorIcon);
+      if(!await BsiEffects.confirm(`Stage ${icon.label} for ${selected.path}? This replaces the editor draft only. Button behavior stays unchanged. Use Save resource text separately to write.`))return;
+      // Parsing XML in an inert document is not rendering arbitrary SVG markup.
+      // Only numeric root dimensions are carried into the trusted icon template.
+      const root=new DOMParser().parseFromString(resourceData.text||'', 'image/svg+xml').documentElement;
+      const dimension=key=>root?.localName==='svg'&&/^(?:\d+(?:\.\d+)?)(?:px)?$/.test(root.getAttribute(key)||'')?parseFloat(root.getAttribute(key)):24;
+      resourceData.text=BsiEmulatorIcons.svg(emulatorIcon,{color:emulatorIconColor,stroke:emulatorIconStroke,width:dimension('width'),height:dimension('height')});
+      dirty=true; renderResourceEditor(); scheduleMeasurement();
+      toast('Icon staged only. Review the draft and native budget, then Save resource text to apply.');return;
+    }
     if (name === 'native') { if (await confirmDiscard()) { if (dirty) { selected = null; resourceData = null; } dirty = false; await request('openNativeTool', { page: Number(el.dataset.page) }); } return; }
     if (name === 'loadTheme') { await request('loadTheme', { mode: $('#theme-mode').value }); await readPalette(); }
     else if (name === 'applyTheme') { if (!await BsiEffects.confirm('Apply staged colors to the selected EXE using the native engine?')) return; await request(name); await readPalette(); }
@@ -242,6 +261,10 @@
   }
   document.addEventListener('click', async event => {
     try {
+      const zoom=event.target.closest('[data-resource-zoom]');
+      if(zoom){const img=$('#resource-image');if(img){const n=zoom.dataset.resourceZoom;img.style.maxWidth=n==='fit'?'100%':'none';img.style.width=n==='fit'?'auto':img.naturalWidth*(Number(n)/100)+'px';}return;}
+      const iconChoice=event.target.closest('[data-emulator-icon]');
+      if(iconChoice){if(BsiEmulatorIcons.icons.some(i=>i.id===iconChoice.dataset.emulatorIcon)){emulatorIcon=iconChoice.dataset.emulatorIcon;renderEmulatorIcons();}return;}
       const windowButton = event.target.closest('[data-window]');
       if (windowButton) { if (windowButton.dataset.window === 'close' && !await confirmDiscard()) return; if (!state.busy && !pending) await BsiEffects.windowAction(windowButton.dataset.window, action => transport?.windowAction?.(action)); return; }
       const actionEl = event.target.closest('[data-action]');
@@ -261,11 +284,13 @@
       if (event.target.closest('#clear-logs')) { logs = []; renderLogs(); }
     } catch (error) { toast(error.message || String(error)); renderView(); }
   });
+  document.addEventListener('toggle',event=>{if(event.target.id==='emu-icon-details'&&event.target.isConnected)iconStudioOpen=event.target.open;},true);
   $('.title').addEventListener('pointerdown', event => { if (event.button === 0) transport?.windowAction?.('move'); });
   $('.title').addEventListener('dblclick', () => transport?.windowAction?.('max'));
   document.addEventListener('input', event => {
     const el = event.target;
     editors.input(el);
+    if(el.id==='emu-icon-color'&&/^#[0-9a-f]{6}$/i.test(el.value)){emulatorIconColor=el.value;renderEmulatorIcons();return;}
     if (el.id === 'resource-filter') { filter = el.value; offset = 0; renderResources(); }
     if (el.id === 'resource-code' && resourceData) { resourceData.text = el.value; dirty = true; scheduleMeasurement(); }
     if (el.dataset.draft) drafts[el.dataset.draft] = el.value;
@@ -273,6 +298,8 @@
   document.addEventListener('change', async event => {
     const el = event.target;
     editors.input(el);
+    if(el.id==='resource-preview-bg'){resourcePreviewBackground=el.value;$('#resource-picture')?.setAttribute('data-background',el.value);return;}
+    if(el.id==='emu-icon-stroke'&&['1.4','1.7','2'].includes(el.value)){emulatorIconStroke=el.value;renderEmulatorIcons();return;}
     if (el.id === 'resource-kind') { kind = Number(el.value); offset = 0; renderResources(); return; }
     const index = el.dataset.color ?? el.dataset.colorEnabled;
     if (index === undefined || !enabled()) return;

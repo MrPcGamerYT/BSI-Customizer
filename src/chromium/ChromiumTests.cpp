@@ -70,6 +70,10 @@ int runWebBridgeAccessTest()
             ok = false;
         }
     }
+    for(const auto &action:{QStringLiteral("system-read"),QStringLiteral("system-settings")}) {
+        const auto result=bridge.invoke(QStringLiteral("maintenance"),{{"action",action},{"setting","power"}});
+        if(result.value("ok").toBool() || !result.contains("error")) ok=false;
+    }
     bridge.requestFile(QStringLiteral("exe"));
     bridge.fileChosen(QStringLiteral("exe"), QUrl::fromLocalFile(directory.filePath(QStringLiteral("must-not-write.exe"))));
     ok = ok && settings.exePath() == original && fileSignals == 0 && nativeSignals == 0;
