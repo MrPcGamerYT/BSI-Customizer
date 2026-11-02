@@ -24,7 +24,8 @@ bool fileRole(const QString &role) {
         || role == QLatin1String("report-save") || role == QLatin1String("image-open")
         || role == QLatin1String("image-save") || role == QLatin1String("video-open")
         || role == QLatin1String("disk-open") || role == QLatin1String("disk-source")
-        || role == QLatin1String("disk-extract") || role == QLatin1String("disk-folder");
+        || role == QLatin1String("disk-extract") || role == QLatin1String("disk-folder")
+        || role == QLatin1String("boot-video");
 }
 }
 
@@ -183,8 +184,10 @@ QVariantMap WebBridge::invoke(const QString &method, const QVariantMap &args)
     else if (method == QLatin1String("integrityRestore")) value = m_backend.integrityRestore();
     else if (method == QLatin1String("bootPatch")) {
         bool valid = false; const int hold = args.value("holdMs").toInt(&valid);
-        if (!valid || hold < 0 || hold > 600000) return failure(QStringLiteral("Hold duration must be between 0 and 600000 milliseconds."));
-        value = m_backend.bootPatch(hold);
+        if (!valid || hold < 0 || hold > 15000) return failure(QStringLiteral("Hold duration must be between 0 and 15000 milliseconds."));
+        const QString mode = text("mode").isEmpty() ? QStringLiteral("video") : text("mode");
+        if (mode != QLatin1String("modern") && mode != QLatin1String("video")) return failure(QStringLiteral("Invalid boot style."));
+        value = m_backend.bootPatch(hold, mode, text("sourcePath"));
     } else if (method == QLatin1String("purgePlayerCache")) value = m_backend.purgePlayerCache();
     else if (method == QLatin1String("restoreBackup")) value = m_backend.restoreBackup(m_backend.exePath());
     else if (method == QLatin1String("checkUpdates")) m_updates.check();

@@ -300,6 +300,7 @@ qt_add_qml_module(BSICustomizer
         src/qml/Main.qml
         src/qml/Theme.qml
         src/qml/Icons.js
+        src/qml/WindowGeometry.js
         src/qml/ResourceSearch.js
         src/qml/LoginGate.qml
         src/qml/UpdateBanner.qml

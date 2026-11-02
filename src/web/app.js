@@ -1,5 +1,4 @@
-/* BSI Chromium workspace. Visual concept: @Floatz4Ever.
-   Native authentication and engines remain the authority; no Python bridge. */
+/* BSI Chromium workspace. Native authentication and engines remain the authority. */
 (() => {
   'use strict';
   const $ = s => document.querySelector(s);
@@ -116,8 +115,9 @@
     } else if ([3, 4, 5].includes(page)) {
       const commands = page === 3 ? [['Detect FPS target', 'fpsDetect'], ['Analyze FPS', 'fpsAnalyze'], ['Apply FPS limit', 'fpsPatch'], ['Restore FPS', 'fpsRestore']]
         : page === 4 ? [['Check integrity', 'integrityCheck'], ['Apply integrity patch', 'integrityPatch'], ['Restore integrity', 'integrityRestore']]
-        : [['Apply boot patch', 'bootPatch'], ['Purge player cache', 'purgePlayerCache']];
-      html = panel(`<div class="sec"><div class="sec-h">${pages[page][0]}</div><p class="native-note">These commands call the existing engines directly. Close all emulator instances before changing files. Backups and validation stay in C++.</p>${page === 3 ? `<label class="lbl" for="fps-limit">FPS limit</label><input id="fps-limit" class="inp" type="number" min="1" max="10000" data-draft="fps" value="${esc(drafts.fps || '240')}">` : page === 5 ? `<label class="lbl" for="boot-hold">Boot hold (milliseconds)</label><input id="boot-hold" class="inp" type="number" min="0" max="600000" data-draft="hold" value="${esc(drafts.hold || '3000')}">` : ''}<div class="button-grid">${commands.map(([label, action]) => button(label, action)).join('')}${native(page)}</div><pre id="operation-result"></pre></div>`);
+        : [['Install selected boot style', 'bootPatch'], ['Purge player cache', 'purgePlayerCache']];
+      const bootOptions = page === 5 ? `<label class="editor-field"><span>Boot style</span><select class="inp" id="boot-mode" data-draft="bootMode"><option value="modern" ${(drafts.bootMode || 'modern') === 'modern' ? 'selected' : ''}>Built-in modern boot</option><option value="video" ${drafts.bootMode === 'video' ? 'selected' : ''}>Custom MP4 + BSI overlay</option></select></label><div class="boot-preview"><div class="boot-orbit"></div><b>BSI</b><strong>STARTING YOUR PLAYER</strong><span>${drafts.bootMode === 'video' ? esc(drafts.bootVideo || 'Choose an MP4 to use this style') : 'Built-in animation · no extra video or codec required'}</span></div>${drafts.bootMode === 'video' ? `<div class="tools">${button('Choose MP4…', 'bootVideoBrowse')}<span class="note grow">${esc(drafts.bootVideo || 'No MP4 selected')}</span></div>` : ''}<p class="note">The patcher preserves the emulator loading UI and original EXE backup. Custom MP4 is copied to Assets/Promo.mp4 with a protected .bak; built-in mode needs no added file.</p>` : '';
+      html = panel(`<div class="sec"><div class="sec-h">${pages[page][0]}</div><p class="native-note">These commands call the existing engines directly. Close all emulator instances before changing files. Backups and validation stay in C++.</p>${page === 3 ? `<label class="lbl" for="fps-limit">FPS limit</label><input id="fps-limit" class="inp" type="number" min="1" max="10000" data-draft="fps" value="${esc(drafts.fps || '240')}">` : page === 5 ? `<label class="lbl" for="boot-hold">Boot hold (milliseconds)</label><input id="boot-hold" class="inp" type="number" min="0" max="15000" data-draft="hold" value="${esc(drafts.hold || '3000')}">${bootOptions}` : ''}<div class="button-grid">${commands.map(([label, action]) => button(label, action)).join('')}${native(page)}</div><pre id="operation-result"></pre></div>`);
     } else if (page === 8) {
       html = panel(`<div class="sec"><div class="sec-h">Application appearance</div><div class="tools"><select class="inp" id="appearance-mode" aria-label="App theme">${['Dark', 'Light', 'System'].map((v, i) => `<option value="${i}" ${state.appearance === i ? 'selected' : ''}>${v}</option>`).join('')}</select><input type="color" id="accent" aria-label="App accent" value="${esc(state.accent || '#9ce9c1')}">${button('Save appearance', 'appearance', true)}</div></div><div class="sec"><div class="sec-h">Native targets</div>${['exe', 'dll', 'conf'].map(role => `<label class="lbl" for="path-${role}">${{ exe: 'HD-Player.exe', dll: 'Qt5/Qt6 QuickTemplates2 DLL', conf: 'bluestacks.conf' }[role]}</label><div class="path-row"><input class="inp mono" id="path-${role}" value="${esc(state[role + 'Path'] || '')}">${button('Browse…', 'browse', false, `data-role="${role}"`)}${button('Set path', 'path', false, `data-role="${role}"`)}</div>`).join('')}<div class="button-grid">${button('Detect installations', 'detectInstalls')}${button('Restore EXE backup', 'restoreBackup')}</div>${(state.installs || []).map((install, index) => `<div class="kv"><span>${esc(install.profile || install.root)}</span>${button('Use installation', 'useInstall', false, `data-index="${index}"`)}</div>`).join('')}</div>`);
     } else {
@@ -216,6 +216,7 @@
       await request(name, { index: selected.index, path });
       if (name === 'replaceResource') { dirty = false; await refreshResources(); resourceData = await request('readResource', { index: selected.index }); }
     } else if (name === 'browse') { if (!await confirmDiscard()) return; const path = await transport.chooseFile(el.dataset.role); if (!path) return; }
+    else if (name === 'bootVideoBrowse') { const path = await transport.chooseFile('boot-video'); if (!path) return; drafts.bootVideo = path; }
     else if (name === 'path') { if (!await confirmDiscard()) return; const role = el.dataset.role; await request('setPaths', { [role]: $('#path-' + role).value }); }
     else if (name === 'appearance') await request('setAppearance', { theme: Number($('#appearance-mode').value), accent: $('#accent').value });
     else if (name === 'detectInstalls') await request(name);
@@ -224,7 +225,11 @@
     else {
       const mutating = ['fpsPatch', 'fpsRestore', 'integrityPatch', 'integrityRestore', 'bootPatch', 'purgePlayerCache', 'restoreBackup'].includes(name);
       if (mutating && !await BsiEffects.confirm('Run ' + name + ' on the selected target? Close all emulator instances first.')) return;
-      await request(name, name === 'fpsPatch' ? { limit: Number($('#fps-limit').value) } : name === 'bootPatch' ? { holdMs: Number($('#boot-hold').value) } : {});
+      if (name === 'bootPatch') {
+        const mode = $('#boot-mode')?.value || drafts.bootMode || 'modern';
+        if (mode === 'video' && !drafts.bootVideo) throw new Error('Choose an MP4 before installing the custom boot.');
+        await request(name, { holdMs: Number($('#boot-hold').value), mode, sourcePath: mode === 'video' ? drafts.bootVideo : '' });
+      } else await request(name, name === 'fpsPatch' ? { limit: Number($('#fps-limit').value) } : {});
     }
     renderView();
   }
@@ -266,6 +271,8 @@
   document.addEventListener('change', async event => {
     const el = event.target;
     editors.input(el);
+    if (el.dataset.draft) drafts[el.dataset.draft] = el.value;
+    if (el.id === 'boot-mode') { renderView(); return; }
     if (page === 6 && /^(about:|link:)/.test(el.dataset.editorField || '')) { const preview = $('#interface-about-preview'); if (preview) preview.innerHTML = editors.aboutPreview(); }
     if (el.id === 'resource-kind') { kind = Number(el.value); offset = 0; renderResources(); return; }
     const index = el.dataset.color ?? el.dataset.colorEnabled;

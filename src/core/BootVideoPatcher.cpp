@@ -202,6 +202,20 @@ Item {
     anchors.fill: parent
     clip: true
     Rectangle { anchors.fill: parent; color: "#000000" }
+    Rectangle { z: 10; anchors.fill: parent; color: "#06101C"; opacity: 0.32 }
+    Rectangle { z: 11; anchors.right: parent.right; anchors.top: parent.top; anchors.margins: Math.max(22, parent.width * 0.035); width: 132; height: 34; radius: 17; color: "#182B42"; border.color: "#35B8F4"; border.width: 1
+        Text { anchors.centerIn: parent; text: "BSI  /  STARTUP"; color: "#BDEBFF"; font.pixelSize: 11; font.bold: true }
+    }
+    Column { z: 11; anchors.left: parent.left; anchors.bottom: parent.bottom; anchors.margins: Math.max(26, parent.width * 0.06); spacing: 8
+        Text { text: "POWERING UP"; color: "#77D8FF"; font.pixelSize: 11; font.bold: true; font.letterSpacing: 2 }
+        Text { text: "BLUE STACKS"; color: "#FFFFFF"; font.pixelSize: 24; font.bold: true }
+        Text { text: "A faster, cleaner start."; color: "#B8C7D8"; font.pixelSize: 12 }
+        Rectangle { width: 190; height: 3; radius: 2; color: "#233B54"
+            Rectangle { width: parent.width * 0.42; height: parent.height; radius: 2; color: "#38C5FF"
+                NumberAnimation on x { from: 0; to: 110; duration: 1600; loops: Animation.Infinite }
+            }
+        }
+    }
     Component.onCompleted: {
         var u = Qt.resolvedUrl("Promo.mp4").toString()
         var src = JSON.stringify(u)
@@ -220,10 +234,169 @@ Item {
 )QML");
 }
 
+QString modernBootPlayer()
+{
+    // Built-in QtQuick-only splash: no video, codecs, network, or extra runtime
+    // packages are required in the emulator installation.
+    return QStringLiteral(R"MODERN(import QtQuick 2.15
+Item {
+    id: root
+    objectName: "bsiModernBoot"
+    anchors.fill: parent
+    property real side: Math.max(1, Math.min(width, height))
+    Rectangle {
+        anchors.fill: parent
+        gradient: Gradient {
+            GradientStop { position: 0.0; color: "#07111F" }
+            GradientStop { position: 0.55; color: "#08182A" }
+            GradientStop { position: 1.0; color: "#030811" }
+        }
+    }
+    Rectangle {
+        width: Math.min(root.side * 1.12, 1120); height: width; radius: width / 2
+        anchors.centerIn: parent; anchors.horizontalCenterOffset: -root.width * 0.04
+        color: "#176BC2"
+        SequentialAnimation on opacity {
+            loops: Animation.Infinite
+            NumberAnimation { from: 0.055; to: 0.10; duration: 2200; easing.type: Easing.InOutSine }
+            NumberAnimation { to: 0.045; duration: 2200; easing.type: Easing.InOutSine }
+        }
+    }
+    Rectangle {
+        width: Math.min(root.side * 0.86, 900); height: width; radius: width / 2
+        anchors.centerIn: parent; color: "transparent"
+        border.width: 1; border.color: "#183956"; opacity: 0.58
+        RotationAnimation on rotation { from: 0; to: 360; duration: 48000; loops: Animation.Infinite }
+    }
+    Rectangle {
+        width: Math.min(root.side * 0.66, 700); height: width; radius: width / 2
+        anchors.centerIn: parent; color: "transparent"
+        border.width: 1; border.color: "#23527A"; opacity: 0.72
+        RotationAnimation on rotation { from: 360; to: 0; duration: 32000; loops: Animation.Infinite }
+    }
+    Rectangle {
+        id: orbit
+        objectName: "orbit"
+        width: Math.min(root.side * 0.48, 500); height: width; radius: width / 2
+        anchors.centerIn: parent; color: "transparent"
+        border.width: 2; border.color: "#2C8ED0"; opacity: 0.88
+        RotationAnimation on rotation { from: 0; to: 360; duration: 9000; loops: Animation.Infinite }
+        Rectangle {
+            width: Math.max(8, root.side * 0.018); height: width; radius: width / 2
+            anchors.horizontalCenter: parent.horizontalCenter; anchors.top: parent.top
+            anchors.topMargin: -height / 2; color: "#8AE9FF"
+            Rectangle { anchors.centerIn: parent; width: parent.width * 2.8; height: width; radius: width / 2; color: "#4ACBFF"; opacity: 0.18 }
+        }
+    }
+    Rectangle {
+        id: core
+        width: Math.min(root.side * 0.34, 350); height: width; radius: width / 2
+        anchors.centerIn: parent; anchors.verticalCenterOffset: -root.side * 0.035
+        gradient: Gradient {
+            GradientStop { position: 0.0; color: "#102944" }
+            GradientStop { position: 1.0; color: "#081421" }
+        }
+        border.width: 1; border.color: "#4FCBFF"
+        Rectangle {
+            anchors.fill: parent; anchors.margins: 8; radius: width / 2
+            color: "transparent"; border.width: 1; border.color: "#244663"; opacity: 0.8
+        }
+        Column {
+            anchors.centerIn: parent; spacing: 5
+            Text {
+                anchors.horizontalCenter: parent.horizontalCenter
+                text: "BSI"; color: "#F4FBFF"
+                font.pixelSize: Math.min(core.width * 0.31, 72); font.bold: true; font.letterSpacing: 7
+            }
+            Rectangle { anchors.horizontalCenter: parent.horizontalCenter; width: Math.min(core.width * 0.42, 118); height: 2; radius: 1; color: "#53CFFF"; opacity: 0.9 }
+            Text {
+                anchors.horizontalCenter: parent.horizontalCenter
+                text: "CUSTOMIZER"; color: "#8EBCD8"
+                font.pixelSize: Math.min(core.width * 0.052, 12); font.bold: true; font.letterSpacing: 2.2
+            }
+        }
+        SequentialAnimation on scale {
+            loops: Animation.Infinite
+            NumberAnimation { to: 1.025; duration: 1800; easing.type: Easing.InOutSine }
+            NumberAnimation { to: 1.0; duration: 1800; easing.type: Easing.InOutSine }
+        }
+    }
+    Text {
+        anchors.left: parent.left; anchors.top: parent.top
+        anchors.leftMargin: Math.max(24, root.width * 0.045); anchors.topMargin: Math.max(22, root.height * 0.055)
+        text: "BSI  /  PLAYER STARTUP"; color: "#9BC5E0"
+        font.pixelSize: 10; font.bold: true; font.letterSpacing: 1.8
+    }
+    Text {
+        anchors.right: parent.right; anchors.top: parent.top
+        anchors.rightMargin: Math.max(24, root.width * 0.045); anchors.topMargin: Math.max(22, root.height * 0.055)
+        text: "BUILT-IN  ·  NO VIDEO"; color: "#668AA8"
+        font.pixelSize: 9; font.letterSpacing: 1.2
+    }
+    Column {
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.bottom: parent.bottom; anchors.bottomMargin: Math.max(38, root.height * 0.075)
+        spacing: 11
+        Text {
+            anchors.horizontalCenter: parent.horizontalCenter
+            text: "STARTING YOUR PLAYER"; color: "#E5F5FF"
+            font.pixelSize: Math.min(root.side * 0.023, 15); font.bold: true; font.letterSpacing: 2.4
+        }
+        Text {
+            anchors.horizontalCenter: parent.horizontalCenter
+            text: "A cleaner, smoother start."; color: "#86A6BE"
+            font.pixelSize: Math.min(root.side * 0.017, 12)
+        }
+        Rectangle {
+            id: progressTrack
+            objectName: "progressTrack"
+            anchors.horizontalCenter: parent.horizontalCenter
+            width: Math.min(root.width * 0.34, 360); height: 3; radius: 2; color: "#19314A"
+            Rectangle {
+                id: progressGlow
+                width: parent.width * 0.24; height: parent.height; radius: 2; color: "#61D9FF"
+                Rectangle { anchors.centerIn: parent; width: parent.width * 1.45; height: 8; radius: 4; color: "#55CFFF"; opacity: 0.15 }
+                NumberAnimation on x { from: 0; to: progressTrack.width - progressGlow.width; duration: 2100; loops: Animation.Infinite; easing.type: Easing.InOutSine }
+            }
+        }
+        Text {
+            anchors.horizontalCenter: parent.horizontalCenter
+            text: "BUILT-IN BOOT EXPERIENCE"; color: "#476884"
+            font.pixelSize: 8; font.bold: true; font.letterSpacing: 1.5
+        }
+    }
+}
+)MODERN");
+}
+
 bool writeAsset(const QString &path, const QByteArray &bytes)
 {
     QSaveFile file(path);
     return file.open(QIODevice::WriteOnly) && file.write(bytes) == bytes.size() && file.commit();
+}
+
+bool readBounded(QFile &file, qint64 maxBytes, QByteArray *output)
+{
+    output->clear();
+    while (!file.atEnd()) {
+        const qint64 remaining = maxBytes + 1 - output->size();
+        if (remaining <= 0) return false;
+        const QByteArray chunk = file.read(qMin<qint64>(64 * 1024, remaining));
+        if (chunk.isEmpty()) return file.atEnd() && file.error() == QFileDevice::NoError;
+        output->append(chunk);
+    }
+    return output->size() <= maxBytes && file.error() == QFileDevice::NoError;
+}
+
+bool samePath(const QString &a, const QString &b)
+{
+    const QString left = QDir::cleanPath(QFileInfo(a).absoluteFilePath());
+    const QString right = QDir::cleanPath(QFileInfo(b).absoluteFilePath());
+#ifdef Q_OS_WIN
+    return QString::compare(left, right, Qt::CaseInsensitive) == 0;
+#else
+    return left == right;
+#endif
 }
 
 // Preserve the Android GL container and only gate the known boot Loader. The
@@ -310,10 +483,29 @@ bool updateHost(QString &host, int holdMs, bool *applied, QString *error)
 
 }
 
-Result patch(const QString &exePath, int holdMs)
+Result patch(const QString &exePath, int holdMs, const QString &requestedMode, const QString &videoPath)
 {
+    const QString mode = requestedMode.isEmpty() ? QStringLiteral("video") : requestedMode;
+    if (mode != QLatin1String("video") && mode != QLatin1String("modern"))
+        return { false, QStringLiteral("Choose the built-in modern boot or custom MP4 mode.") };
     if (holdMs < 0 || holdMs > 15000)
         return { false, QStringLiteral("Boot hold must be between 0 and 15000 ms.") };
+    if (mode == QLatin1String("modern") && !videoPath.trimmed().isEmpty())
+        return { false, QStringLiteral("The built-in boot mode does not accept a video path.") };
+    QByteArray selectedVideo;
+    bool copySelectedVideo = false;
+    if (mode == QLatin1String("video") && !videoPath.trimmed().isEmpty()) {
+        const QFileInfo sourceInfo(videoPath);
+        constexpr qint64 maxVideoBytes = 128ll * 1024 * 1024;
+        if (!sourceInfo.isFile() || sourceInfo.isSymLink() || sourceInfo.isJunction()
+            || sourceInfo.suffix().compare(QLatin1String("mp4"), Qt::CaseInsensitive) != 0
+            || sourceInfo.size() < 16 || sourceInfo.size() > maxVideoBytes)
+            return { false, QStringLiteral("Choose a regular MP4 file between 16 bytes and 128 MiB; links and other formats are refused.") };
+        QFile source(videoPath);
+        if (!source.open(QIODevice::ReadOnly)) return { false, QStringLiteral("Cannot read the selected MP4; no files were changed.") };
+        if (!readBounded(source, maxVideoBytes, &selectedVideo) || selectedVideo.size() != sourceInfo.size())
+            return { false, QStringLiteral("The selected MP4 changed or exceeded the size limit while reading; no files were changed.") };
+    }
     if (BsDetector::isProcessRunning(QStringLiteral("HD-Player.exe")))
         return { false, QStringLiteral("Close all BlueStacks instances before patching boot video.") };
     QFile file(exePath);
@@ -366,6 +558,8 @@ Result patch(const QString &exePath, int holdMs)
     const auto controller = controllers.first();
     QString boot = controller.text;
     const QString movie = QDir(QFileInfo(exePath).absolutePath()).filePath(QStringLiteral("Assets/Promo.mp4"));
+    if (!selectedVideo.isEmpty())
+        copySelectedVideo = !samePath(videoPath, movie);
     const QString url = QLatin1Char('"') + QUrl::fromLocalFile(movie).toString(QUrl::FullyEncoded) + QLatin1Char('"');
     QByteArray data = original;
     bool reusedPlayer = false;
@@ -381,7 +575,7 @@ Result patch(const QString &exePath, int holdMs)
     // An unrelated embedded BootVideo.qml is not a stock player in use. In
     // particular, never reinterpret our external file:// loader as a reference
     // to that embedded file when repatching.
-    if (players.size() == 1 && stockReferenced) {
+    if (mode == QLatin1String("video") && videoPath.isEmpty() && players.size() == 1 && stockReferenced) {
         auto player = players.first();
         for (const auto &object : objects(player.text)) {
             if (object.type == QLatin1String("Video") || object.type == QLatin1String("MediaPlayer")) {
@@ -438,40 +632,96 @@ Result patch(const QString &exePath, int holdMs)
         if (host != hosts.first().text && !QtResources::replaceResource(data, hosts.first().entry, hosts.first().link, host.toUtf8(), &error))
             return { false, error };
     }
-    if (!ThemeEngine::backup(exePath)) return { false, QStringLiteral("Could not preserve the original .bak; no EXE was written.") };
+    const QDir install(QFileInfo(exePath).absolutePath());
+    const QString assets = install.filePath(QStringLiteral("Assets"));
+    const QFileInfo assetInfo(assets);
+    if (assetInfo.isSymLink() || assetInfo.isJunction())
+        return { false, QStringLiteral("Linked Assets/player directories are not overwritten.") };
+
     QString helperPath;
     QByteArray previousHelper;
     bool hadHelper = false;
     if (!reusedPlayer) {
-        const QDir install(QFileInfo(exePath).absolutePath());
-        const QString assets = install.filePath(QStringLiteral("Assets"));
-        const QFileInfo assetInfo(assets);
         helperPath = QDir(assets).filePath(QStringLiteral("BootVideo.qml"));
         const QFileInfo helperInfo(helperPath);
-        if (assetInfo.isSymLink() || assetInfo.isJunction() || helperInfo.isSymLink() || helperInfo.isJunction())
+        if (helperInfo.isSymLink() || helperInfo.isJunction())
             return { false, QStringLiteral("Linked Assets/player files are not overwritten.") };
         hadHelper = helperInfo.exists();
         if (hadHelper) {
+            constexpr qint64 maxHelperBytes = 5ll * 1024 * 1024;
+            if (helperInfo.size() > maxHelperBytes) return { false, QStringLiteral("The existing BootVideo.qml is too large to preserve safely.") };
             QFile saved(helperPath);
-            if (!saved.open(QIODevice::ReadOnly)) return { false, QStringLiteral("Cannot preserve the existing BootVideo.qml.") };
-            previousHelper = saved.readAll();
+            if (!saved.open(QIODevice::ReadOnly) || !readBounded(saved, maxHelperBytes, &previousHelper))
+                return { false, QStringLiteral("Cannot preserve the existing BootVideo.qml.") };
         }
-        if (!QDir().mkpath(assets) || !writeAsset(helperPath, externalPlayer().toUtf8()))
-            return { false, QStringLiteral("Cannot atomically write Assets/BootVideo.qml; no executable was written.") };
+    }
+
+    QString videoBackupPath;
+    QByteArray previousVideo;
+    bool hadVideo = false;
+    if (copySelectedVideo) {
+        const QFileInfo movieInfo(movie);
+        videoBackupPath = movie + QStringLiteral(".bak");
+        const QFileInfo videoBackupInfo(videoBackupPath);
+        if (movieInfo.isSymLink() || movieInfo.isJunction() || videoBackupInfo.isSymLink() || videoBackupInfo.isJunction())
+            return { false, QStringLiteral("Linked Promo.mp4 files are not overwritten.") };
+        if (movieInfo.exists()) {
+            if (movieInfo.size() > 128ll * 1024 * 1024)
+                return { false, QStringLiteral("The existing Promo.mp4 is too large to back up safely.") };
+            if (videoBackupInfo.exists())
+                return { false, QStringLiteral("Assets/Promo.mp4.bak already exists. Preserve or move it before replacing the current boot video.") };
+            QFile saved(movie);
+            if (!saved.open(QIODevice::ReadOnly) || !readBounded(saved, 128ll * 1024 * 1024, &previousVideo)
+                || previousVideo.size() != movieInfo.size())
+                return { false, QStringLiteral("Cannot preserve the existing Promo.mp4; no files were changed.") };
+            hadVideo = true;
+        }
+    }
+    if (!ThemeEngine::backup(exePath)) return { false, QStringLiteral("Could not preserve the original .bak; no EXE was written.") };
+    if ((copySelectedVideo || !reusedPlayer) && !QDir().mkpath(assets))
+        return { false, QStringLiteral("Cannot create the selected installation's Assets folder.") };
+
+    bool helperWritten = false;
+    bool videoWritten = false;
+    auto rollbackHelper = [&] {
+        if (!helperWritten) return true;
+        return hadHelper ? writeAsset(helperPath, previousHelper) : (QFile::remove(helperPath) || !QFile::exists(helperPath));
+    };
+    auto rollbackVideo = [&] {
+        if (!videoWritten) return true;
+        return hadVideo ? writeAsset(movie, previousVideo) : (QFile::remove(movie) || !QFile::exists(movie));
+    };
+    if (copySelectedVideo) {
+        if (hadVideo && !writeAsset(videoBackupPath, previousVideo))
+            return { false, QStringLiteral("Cannot create Promo.mp4.bak; the existing video was not replaced.") };
+        if (!writeAsset(movie, selectedVideo))
+            return { false, QStringLiteral("Cannot atomically install the selected MP4 as Assets/Promo.mp4.") };
+        videoWritten = true;
+    }
+    if (!reusedPlayer) {
+        const QByteArray helper = (mode == QLatin1String("modern") ? modernBootPlayer() : externalPlayer()).toUtf8();
+        if (!writeAsset(helperPath, helper)) {
+            const bool restored = rollbackVideo();
+            return { false, restored ? QStringLiteral("Cannot atomically write Assets/BootVideo.qml; no executable was written.")
+                                     : QStringLiteral("Cannot write Assets/BootVideo.qml, and the previous Promo.mp4 could not be restored.") };
+        }
+        helperWritten = true;
     }
     if (!PatchFile::writeVerified(exePath, original, data, &error)) {
-        if (!helperPath.isEmpty()) {
-            const bool restored = hadHelper ? writeAsset(helperPath, previousHelper) : QFile::remove(helperPath);
-            if (!restored) error += QStringLiteral(" The external player could not be rolled back.");
-        }
+        const bool helperRestored = rollbackHelper();
+        const bool videoRestored = rollbackVideo();
+        if (!helperRestored) error += QStringLiteral(" The boot-screen helper could not be rolled back.");
+        if (!videoRestored) error += QStringLiteral(" The previous Promo.mp4 could not be restored.");
         return { false, error };
     }
     QtResources::clearPlayerQmlCache(exePath);
-    return { true, QStringLiteral("Boot video written, caches refreshed and bytes verified. Video: %1. %2 Restart BlueStacks.%3")
-        .arg(QDir::toNativeSeparators(movie),
-             holdApplied ? QStringLiteral("Extra boot hold: %1 ms.").arg(holdMs)
-                         : QStringLiteral("No supported completion gate was found; no extra hold was applied."),
-             QFileInfo::exists(movie) ? QString() : QStringLiteral(" Copy Promo.mp4 into Assets before starting.")) };
+    const QString modeMessage = mode == QLatin1String("modern")
+        ? QStringLiteral("Built-in modern boot screen installed; no extra video or codec is required.")
+        : QStringLiteral("Custom boot video with the modern BSI overlay installed. Video: %1.%2")
+            .arg(QDir::toNativeSeparators(movie), QFileInfo::exists(movie) ? QString() : QStringLiteral(" Copy Promo.mp4 into Assets before starting."));
+    return { true, QStringLiteral("%1 %2 Restart BlueStacks.")
+        .arg(modeMessage, holdApplied ? QStringLiteral("Extra boot hold: %1 ms.").arg(holdMs)
+                                     : QStringLiteral("No supported completion gate was found; no extra hold was applied.")) };
 
 }
 } // namespace BootVideoPatcher

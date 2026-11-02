@@ -101,3 +101,41 @@ for provider in (sys.argv[1],):
         QTest.qWait(1)
         messages.clear()
         print(f"PASS: adaptive boot player {provider} (including teardown)", flush=True)
+
+# The bundled modern screen must remain QtQuick-only and render without any
+# video codec or custom asset provider.
+modern_qml = re.search(r'R"MODERN\((.*?)\)MODERN"', source, re.S).group(1)
+assert "QtMultimedia" not in modern_qml and "QtWebEngine" not in modern_qml
+with tempfile.TemporaryDirectory(prefix="modern boot ") as tmp:
+    path = Path(tmp) / "ModernBoot.qml"
+    path.write_text(modern_qml)
+    engine = QQmlEngine()
+    component = QQmlComponent(engine, QUrl.fromLocalFile(str(path)))
+    obj = component.create()
+    if obj is not None:
+        obj.setProperty("width", 1280)
+        obj.setProperty("height", 720)
+    QTest.qWait(20)
+    try:
+        assert obj is not None, [error.toString() for error in component.errors()]
+        assert obj.objectName() == "bsiModernBoot"
+        orbit = obj.findChild(QObject, "orbit")
+        track = obj.findChild(QObject, "progressTrack")
+        assert orbit is not None and orbit.property("width") > 0
+        assert track is not None and track.property("width") > 0
+    except AssertionError as error:
+        for line in [f"modern: {error}"] + messages:
+            escaped = line.replace("%", "%25").replace("\n", "%0A").replace("\r", "%0D")
+            print(f"::error::{escaped}", flush=True)
+        raise
+    obj.deleteLater()
+    obj = None
+    QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+    component.deleteLater()
+    component = None
+    QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+    engine.clearComponentCache()
+    engine.deleteLater()
+    engine = None
+    QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
+    print("PASS: built-in modern boot screen (QtQuick-only, no media codec)", flush=True)
