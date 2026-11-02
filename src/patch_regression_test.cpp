@@ -4392,7 +4392,8 @@ Window {
             "    Loader { id: iBootLoader; anchors.fill: parent\r\n"
             "        sourceComponent: pIsBootComplete || pShowAndroidAd ? iGlContainerComponent : iBootProgressComponent }\r\n"
             "}\r\n");
-        const QString unusedController = controller.replace(QLatin1String("bootImage"), QLatin1String("unusedBootImage"));
+        QString unusedController = controller;
+        unusedController.replace(QLatin1String("bootImage"), QLatin1String("unusedBootImage"));
         auto r = resources({ { QStringLiteral("RenamedStartup.qml"), controller },
                              { QStringLiteral("UnusedStartup.qml"), unusedController },
                              { QStringLiteral("Shell.qml"), host },
