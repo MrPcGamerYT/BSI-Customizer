@@ -2821,6 +2821,42 @@ int runPatchRegressionTests()
         check(QtResources::invalidateUnits(hit, { QStringLiteral("PlrSidebar.qml") }) == 1
                   && le32(hit, 8) == 0,
               "Qt 5.15 units with empty sourceFileIndex are invalidated via the string table");
+        auto sidebarUnit = unit;
+        const QString sidebarId = QStringLiteral("fGetMacroBtnEnabled");
+        putLe32(sidebarUnit, 304, quint32(sidebarId.size()));
+        for (int i = 0; i < sidebarId.size(); ++i)
+            putLe16(sidebarUnit, 324 + i * 2, sidebarId.at(i).unicode());
+        check(QtResources::activeUnits(sidebarUnit, { QStringLiteral("PlrSidebar.qml") }) == 1
+                  && QtResources::invalidateUnits(sidebarUnit, { QStringLiteral("PlrSidebar.qml") }) == 1
+                  && QtResources::activeUnits(sidebarUnit, { QStringLiteral("PlrSidebar.qml") }) == 0,
+              "the MSI sidebar QV4 unit is selected by its structural function IDs despite having no filename or stem");
+        auto topbarUnit = unit;
+        const QString topbarId = QStringLiteral("fReloadTopbarElements");
+        putLe32(topbarUnit, 304, quint32(topbarId.size()));
+        for (int i = 0; i < topbarId.size(); ++i)
+            putLe16(topbarUnit, 324 + i * 2, topbarId.at(i).unicode());
+        check(QtResources::activeUnits(topbarUnit, { QStringLiteral("PlrTopbar.qml") }) == 1
+                  && QtResources::invalidateUnits(topbarUnit, { QStringLiteral("PlrTopbar.qml") }) == 1
+                  && QtResources::activeUnits(topbarUnit, { QStringLiteral("PlrTopbar.qml") }) == 0,
+              "the MSI topbar QV4 unit is selected by its structural function IDs despite having no filename or stem");
+        auto notificationUnit = unit;
+        const QString notificationId = QStringLiteral("iNotificationBarLayout");
+        putLe32(notificationUnit, 304, quint32(notificationId.size()));
+        for (int i = 0; i < notificationId.size(); ++i)
+            putLe16(notificationUnit, 324 + i * 2, notificationId.at(i).unicode());
+        check(QtResources::activeUnits(notificationUnit, { QStringLiteral("PlrNotificationBarWindow.qml") }) == 1
+                  && QtResources::invalidateUnits(notificationUnit, { QStringLiteral("PlrNotificationBarWindow.qml") }) == 1
+                  && QtResources::activeUnits(notificationUnit, { QStringLiteral("PlrNotificationBarWindow.qml") }) == 0,
+              "notification-bar QV4 units used by gradient surfaces are selected by a structural identifier");
+        auto buttonUnit = unit;
+        const QString buttonId = QStringLiteral("defaultComp");
+        putLe32(buttonUnit, 304, quint32(buttonId.size()));
+        for (int i = 0; i < buttonId.size(); ++i)
+            putLe16(buttonUnit, 324 + i * 2, buttonId.at(i).unicode());
+        check(QtResources::activeUnits(buttonUnit, { QStringLiteral("UiButton.qml") }) == 1
+                  && QtResources::invalidateUnits(buttonUnit, { QStringLiteral("UiButton.qml") }) == 1
+                  && QtResources::activeUnits(buttonUnit, { QStringLiteral("UiButton.qml") }) == 0,
+              "shared UiButton QV4 bytecode used by gradient surfaces is selected structurally");
         auto miss = unit;
         check(QtResources::invalidateUnits(miss, { QStringLiteral("UiThemeObject.qml") }) == 0
                   && le32(miss, 8) == 41,
@@ -4782,6 +4818,37 @@ Window {
                   && panelState.settingsPageCount >= 8 && panelState.settingsQmlResourceCount > 0,
               QStringLiteral("the real %1 exposes a unique editable Settings window and About page (%2)")
                   .arg(QFileInfo(input).fileName(), panelState.detail));
+        const auto stockAbout = AboutPatcher::analyze(original);
+        if (panelState.supported && !panelState.applied && stockAbout.supported
+            && stockAbout.sourceEditable) {
+            const QString aboutFirstPath = temp.filePath(QStringLiteral("about-first-")
+                                                          + QFileInfo(input).completeBaseName()
+                                                          + QStringLiteral("/HD-Player.exe"));
+            QDir().mkpath(QFileInfo(aboutFirstPath).absolutePath());
+            write(aboutFirstPath, original);
+            AboutPatcher::Config aboutFirstConfig = stockAbout.config;
+            aboutFirstConfig.text = QStringLiteral("About first regression");
+            aboutFirstConfig.showSections = true;
+            const auto aboutFirst = AboutPatcher::apply(aboutFirstPath, true, aboutFirstConfig);
+            check(aboutFirst.ok,
+                  QStringLiteral("the real %1 About editor can prepare the overlap regression (%2)")
+                      .arg(QFileInfo(input).fileName(), aboutFirst.msg));
+            if (aboutFirst.ok) {
+                const QByteArray aboutFirstBytes = read(aboutFirstPath);
+                const auto settingsAfterAbout = SettingsPanelPatcher::analyze(aboutFirstPath);
+                const auto settingsApplyAfterAbout = SettingsPanelPatcher::apply(aboutFirstPath,
+                    QStringLiteral("Should be refused"), {}, true);
+                check(!settingsAfterAbout.supported && !settingsApplyAfterAbout.value(QStringLiteral("ok")).toBool()
+                          && read(aboutFirstPath) == aboutFirstBytes
+                          && settingsApplyAfterAbout.value(QStringLiteral("msg")).toString()
+                              .contains(QStringLiteral("Restore that page to stock")),
+                      QStringLiteral("the real %1 Settings rebuild refuses to overwrite About-editor changes")
+                          .arg(QFileInfo(input).fileName()));
+            }
+        } else {
+            ciNotice(QStringLiteral("real About/Settings order regression skipped for %1: About page is not editable by the supported source workflow")
+                         .arg(QFileInfo(input).fileName()));
+        }
         if (panelState.supported && !panelState.applied) {
             const QString panelDir = temp.filePath(QStringLiteral("settings-panel-")
                                                     + QFileInfo(input).completeBaseName());
@@ -4802,6 +4869,15 @@ Window {
                   QStringLiteral("the real %1 Settings panel rebuild applies to a disposable copy (%2)")
                       .arg(QFileInfo(input).fileName(), appliedPanel.value(QStringLiteral("msg")).toString()));
             if (appliedPanel.value(QStringLiteral("ok")).toBool()) {
+                const QByteArray rebuiltBeforeAbout = read(panelCopy);
+                const auto aboutOnRebuiltSettings = AboutPatcher::analyze(rebuiltBeforeAbout);
+                const auto aboutOnRebuiltApply = AboutPatcher::apply(panelCopy, true,
+                    AboutPatcher::Config{QStringLiteral("Conflict regression"), {}, true});
+                check(!aboutOnRebuiltSettings.supported && !aboutOnRebuiltApply.ok
+                          && read(panelCopy) == rebuiltBeforeAbout
+                          && aboutOnRebuiltApply.msg.contains(QStringLiteral("restore the Settings panel")),
+                      QStringLiteral("the real %1 Settings-owned About page refuses an independent About edit without changing the EXE")
+                          .arg(QFileInfo(input).fileName()));
                 const auto panelImage = read(panelCopy);
                 QString expectedLogoExtension;
                 for (const auto &file : QtResources::registeredFiles(original)) {
@@ -4842,6 +4918,36 @@ Window {
             check(read(input) == original,
                   QStringLiteral("the uploaded %1 reference remains byte-for-byte untouched")
                       .arg(QFileInfo(input).fileName()));
+        }
+
+        const auto gradientCatalog = GradientPatcher::analyze(original);
+        const bool hasHexGradient = std::any_of(gradientCatalog.targets.cbegin(), gradientCatalog.targets.cend(),
+            [](const GradientPatcher::Target &target) { return target.hexGradient; });
+        if (gradientCatalog.ok && hasHexGradient) {
+            QByteArray gradientCopy = original;
+            GradientPatcher::Spec realGradient;
+            realGradient.first = QStringLiteral("#3B6FFF");
+            realGradient.second = QStringLiteral("#22D3A6");
+            QString gradientError;
+            const bool gradientApplied = GradientPatcher::applySurfaces(
+                gradientCopy, GradientPatcher::allGradientKey(), realGradient, &gradientError);
+            check(gradientApplied && gradientCopy != original,
+                  QStringLiteral("the real %1 gradient catalog writes its loaded QML targets (%2)")
+                      .arg(QFileInfo(input).fileName(), gradientError));
+            if (gradientApplied) {
+                for (const auto &target : gradientCatalog.targets) {
+                    if (!target.hexGradient) continue;
+                    const QStringList names {target.resource};
+                    const int beforeMatches = QtResources::matchingUnits(original, names);
+                    if (beforeMatches == 0) continue;
+                    check(QtResources::activeUnits(gradientCopy, names) == 0,
+                          QStringLiteral("the real %1 gradient target %2 has no active matching compiled QML after its source change")
+                              .arg(QFileInfo(input).fileName(), target.resource));
+                }
+            }
+        } else {
+            ciNotice(QStringLiteral("real gradient target workflow skipped for %1: %2")
+                         .arg(QFileInfo(input).fileName(), gradientCatalog.message));
         }
 
         const auto first = ThemeEngine::findThemeZlib(original);
@@ -6068,6 +6174,22 @@ Window {
         check(renamedState.config.text == stock.config.text,
               QStringLiteral("the renamed row is read by the text it prints (%1)")
                   .arg(renamedState.config.text));
+
+        QString settingsOwnedAbout = about;
+        settingsOwnedAbout.prepend(QStringLiteral("// BSI CUSTOMIZER: redesigned About page v1\n"));
+        auto settingsOwnedFixture = resources(
+            {{QStringLiteral("PlrAboutSetting.qml"), settingsOwnedAbout}}, true, {});
+        addRegistration(settingsOwnedFixture, false);
+        const auto settingsOwnedState = AboutPatcher::analyze(settingsOwnedFixture.f.bytes);
+        check(!settingsOwnedState.supported
+                  && settingsOwnedState.detail.contains(QStringLiteral("restore the Settings panel")),
+              "the About editor gives a safe, actionable conflict when the Settings rebuild owns the page");
+        const QString conflictPath = temp.filePath(QStringLiteral("settings-about-conflict.exe"));
+        write(conflictPath, settingsOwnedFixture.f.bytes);
+        const auto conflictApply = AboutPatcher::apply(conflictPath, true, stock.config);
+        check(!conflictApply.ok && read(conflictPath) == settingsOwnedFixture.f.bytes
+                  && conflictApply.msg.contains(QStringLiteral("restore the Settings panel")),
+              "About edits refuse a Settings-owned page without changing the executable");
 
         const QString aboutPath = temp.filePath(QStringLiteral("about-page.exe"));
         write(aboutPath, original);

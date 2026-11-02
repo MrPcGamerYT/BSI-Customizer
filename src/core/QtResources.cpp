@@ -153,6 +153,24 @@ QStringList unitNeedles(const QStringList &sourceNames, const QStringList &ident
                                           QStringLiteral("About and other info"),
                                           QStringLiteral("iSupportEmailText") })
                 add(extra);
+        } else if (file.compare(QLatin1String("PlrSidebar.qml"), Qt::CaseInsensitive) == 0) {
+            // MSI's QV4 copy has an empty sourceFileIndex and no filename or
+            // PlrSidebar stem. These are structural identifiers in that unit.
+            for (const QString &extra : { QStringLiteral("fGetMacroBtnEnabled"),
+                                          QStringLiteral("fHandleInstallApkBtnClicked") })
+                add(extra);
+        } else if (file.compare(QLatin1String("PlrTopbar.qml"), Qt::CaseInsensitive) == 0) {
+            for (const QString &extra : { QStringLiteral("fOpenHamburgerPopup"),
+                                          QStringLiteral("fReloadTopbarElements") })
+                add(extra);
+        } else if (file.compare(QLatin1String("PlrNotificationBarWindow.qml"), Qt::CaseInsensitive) == 0) {
+            for (const QString &extra : { QStringLiteral("iNotificationBarLayout"),
+                                          QStringLiteral("iNotificationAnimation") })
+                add(extra);
+        } else if (file.compare(QLatin1String("UiButton.qml"), Qt::CaseInsensitive) == 0) {
+            for (const QString &extra : { QStringLiteral("defaultComp"),
+                                          QStringLiteral("gradientBorderComp") })
+                add(extra);
         }
     }
     for (const QString &identifier : identifiers)

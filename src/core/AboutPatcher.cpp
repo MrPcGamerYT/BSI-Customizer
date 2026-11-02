@@ -54,6 +54,7 @@ const QString kTextTag = QStringLiteral(" /* BSI CUSTOMIZER: about text:");
 const QString kHandlerTag = QStringLiteral(" /* BSI CUSTOMIZER: about handler:");
 const QString kHandlerMarker = QStringLiteral("// BSI CUSTOMIZER: about handler");
 const QString kConfigBegin = QStringLiteral("// BSI CUSTOMIZER: about-config ");
+const QString kSettingsAboutMarker = QStringLiteral("BSI CUSTOMIZER: redesigned About page v1");
 
 struct Edit
 {
@@ -2488,7 +2489,13 @@ State analyze(const QByteArray &image)
                               "%1, but not inside a string record this version can rewrite.")
             .arg(where.join(QStringLiteral(", ")));
     };
-    if (!findDoc(image, QStringLiteral("PlrAboutSetting.qml"), &doc, &error)) {
+    const bool hasQmlPage = findDoc(image, QStringLiteral("PlrAboutSetting.qml"), &doc, &error);
+    if (hasQmlPage && doc.qml.contains(kSettingsAboutMarker)) {
+        state.source = doc.qml;
+        state.detail = QStringLiteral("The Settings-panel rebuild owns this About page. The About editor cannot safely replace its links or compiled copy; restore the Settings panel first, then retry the About edit.");
+        return state;
+    }
+    if (!hasQmlPage) {
         if (!state.compiledPage) {
             state.detail = error + wideNote();
             return state;

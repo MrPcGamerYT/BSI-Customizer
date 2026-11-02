@@ -354,6 +354,16 @@ bool replaceResource(QByteArray &data, qint64 entry, const Link &snapshot,
     refreshTimestamp(changed, link);
     invalidateUnits(changed, link.sourceNames);
     if (!invalidateThemeCacheResources(changed, link, error)) return false;
+    // A source write is not enough when the player still has a matching
+    // compiled QV4 unit. Refuse the replacement unless every unit we can
+    // positively associate with this resource has been disabled. This keeps
+    // generic editors and feature patchers from reporting success for a QML
+    // change that the emulator will ignore.
+    const int compiledMatches = matchingUnits(changed, link.sourceNames);
+    const int compiledStillActive = activeUnits(changed, link.sourceNames);
+    if (compiledMatches > 0 && compiledStillActive > 0)
+        return refuse(QStringLiteral("The resource source was prepared, but %1 matching compiled QML unit(s) remain active; the player may ignore this edit. Nothing was written. Retry on a supported player build or restore its backup.")
+                          .arg(compiledStillActive));
     const auto verified = findLink(changed, destination, link.sourceName);
     if (!verified.found || verified.ambiguous || verified.nodes != link.nodes
         || verified.compression != link.compression

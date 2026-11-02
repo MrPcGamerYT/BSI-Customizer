@@ -39,6 +39,13 @@ const QStringList kAboutUnitIds {
     QStringLiteral("aboutSettings"), QStringLiteral("Important links"),
     QStringLiteral("About and other info"), QStringLiteral("iSupportEmailText")
 };
+const QStringList kAboutPatcherMarkers {
+    QStringLiteral("BSI CUSTOMIZER: about hidden"),
+    QStringLiteral("BSI CUSTOMIZER: about shown:"),
+    QStringLiteral("BSI CUSTOMIZER: about text:"),
+    QStringLiteral("BSI CUSTOMIZER: about handler:"),
+    QStringLiteral("BSI CUSTOMIZER: about-config ")
+};
 constexpr qint64 kMaxImage = 256LL * 1024 * 1024;
 constexpr qint64 kMaxQml = 8LL * 1024 * 1024;
 
@@ -59,6 +66,13 @@ struct TargetSources
     QString error;
     bool ok = false;
 };
+
+bool hasAboutPatcherEdits(const QString &qml)
+{
+    for (const QString &marker : kAboutPatcherMarkers)
+        if (qml.contains(marker)) return true;
+    return false;
+}
 
 QByteArray sha256(const QByteArray &bytes)
 {
@@ -716,11 +730,11 @@ QVariantMap applyResources(const QString &exePath, const QVariantList &operation
         dryRun.value(QStringLiteral("outputSha256")).toString());
     if (!applied.value(QStringLiteral("ok")).toBool()) return applied;
 
-    // The file-resource writer invalidates a compiled QML unit by filename,
-    // but MSI 5 units commonly have an empty sourceFileIndex and contain no
-    // filename in their string table. Apply the distinctive unit identifiers
-    // as a second, verified pass. Never tell the user "applied" while bytecode
-    // that still draws the original UI remains active.
+    // The file-resource writer can invalidate a compiled QML unit by filename
+    // or a known structural identifier, but MSI 5 units commonly have an empty
+    // sourceFileIndex and omit the filename. Apply this feature's full page-ID
+    // set as a second, verified pass. Never tell the user "applied" while
+    // bytecode that still draws the original UI remains active.
     QByteArray written;
     if (!readBounded(exePath, &written))
         return fail(QStringLiteral("The patched player could not be read back to verify its compiled Settings QML."));
@@ -787,6 +801,11 @@ State analyze(const QString &exePath)
     state.supported = true;
     state.settingsPageCount = sources.pageCount;
     state.settingsQmlResourceCount = sources.qmlClosureCount;
+    if (!sources.about.text.contains(kAboutMarker) && hasAboutPatcherEdits(sources.about.text)) {
+        state.supported = false;
+        state.detail = QStringLiteral("The About page already contains separate About-editor changes. Restore the About page to stock before rebuilding the Settings panel, so those links and text are not overwritten.");
+        return state;
+    }
     const bool windowPatched = sources.window.text.contains(kWindowMarker);
     const bool aboutPatched = sources.about.text.contains(kAboutMarker);
     state.compiledUnitsDetected = QtResources::matchingUnits(image,
@@ -835,6 +854,8 @@ QVariantMap apply(const QString &exePath, const QString &developerName,
         return fail(QStringLiteral("The selected executable is unreadable or exceeds the safe 256 MB limit."));
     const TargetSources current = readSources(exePath, image);
     if (!current.ok) return fail(current.error);
+    if (!current.about.text.contains(kAboutMarker) && hasAboutPatcherEdits(current.about.text))
+        return fail(QStringLiteral("The About page contains changes from the separate About editor. Restore that page to stock first; the Settings rebuild was not allowed to overwrite its links or text."));
     QVariantMap recovery = readRecovery(backup, exePath);
     const bool hadRecovery = !recovery.isEmpty();
 
