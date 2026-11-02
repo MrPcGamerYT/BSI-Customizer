@@ -749,6 +749,7 @@ State analyze(const QString &exePath)
         state.supported = false;
         state.detail = QStringLiteral("Only part of the custom Settings panel is present. Restore from the feature recovery snapshot before retrying.");
     } else if (state.applied && !state.restorable) {
+        state.supported = false;
         state.detail = QStringLiteral("The custom Settings panel is present, but its feature recovery snapshot is missing or invalid. Do not overwrite this executable.");
     } else if (state.applied) {
         state.detail = QStringLiteral("Custom Settings window and About page are installed. Original QML is backed up for a selective restore.");
