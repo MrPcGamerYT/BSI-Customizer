@@ -469,16 +469,17 @@ and checks actual pixels; it never executes QML extracted from the user's EXE.
 ## Boot screen and integrity
 
 The boot patch writes a self-contained `Assets/BootScreen.html` page and a small
-`Assets/BootVideo.qml` WebEngine loader; the patched player boot page simply
-loads that local HTML file. The HTML embeds the selected player's own logo and
-shows a glowing loading ring with **“Emulator is starting…”**. No BSI/customizer
-credit is added. In Custom MP4 mode, the page plays `Assets/Promo.mp4` silently
-behind the overlay; the chosen file is copied there and an existing video is
-preserved as `Promo.mp4.bak`. An existing HTML page is preserved as
+`Assets/BootVideo.qml` loader. It opens the HTML page through Qt WebEngine when
+that module is available; older player builds without WebEngine keep the same
+logo, glowing ring, and **“Emulator is starting…”** status using a native QtQuick
+fallback. No BSI/customizer credit is added. In Custom MP4 mode, the HTML page
+plays `Assets/Promo.mp4` silently behind the overlay; if WebEngine is absent,
+the loader tries the player's Qt Multimedia module before falling back to the
+static startup animation. The selected video is copied there and an existing
+video is preserved as `Promo.mp4.bak`. An existing HTML page is preserved as
 `BootScreen.html.bak`. Both files are written atomically; if the EXE write fails,
-previous contents are restored. The player must
-provide Qt WebEngine; the patch does not install modules or codecs. Close all
-emulator instances before patching.
+previous contents are restored. The patch does not install Qt modules or codecs.
+Close all emulator instances before patching.
 
 **Boot hold after ready** defaults to 3000 ms (0–15000); zero restores immediate
 handoff on supported boot hosts. Legacy forced GL-container experiments are

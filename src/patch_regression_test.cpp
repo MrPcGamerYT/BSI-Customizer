@@ -1017,7 +1017,7 @@ int runBootPlayerRuntimeTest(const QStringList &args)
     const int at = args.indexOf(QStringLiteral("--boot-runtime-test"));
     if (at < 0 || args.size() != at + 5) return 3;
     const QString provider = args.at(at + 3);
-    if (provider != QLatin1String("web")) return 3;
+    if (provider != QLatin1String("web") && provider != QLatin1String("fallback")) return 3;
     QQmlEngine engine;
     engine.addImportPath(args.at(at + 2));
     QObject::connect(&engine, &QQmlEngine::warnings, [](const QList<QQmlError> &warnings) {
@@ -1036,8 +1036,15 @@ int runBootPlayerRuntimeTest(const QStringList &args)
     timer.start();
     do {
         QCoreApplication::processEvents();
-        const auto player = object->findChild<QObject *>(QStringLiteral("bsiBootHtmlView"));
-        if (player && player->property("url").toUrl() == QUrl(args.at(at + 4))) return 0;
+        if (provider == QLatin1String("web")) {
+            const auto player = object->findChild<QObject *>(QStringLiteral("bsiBootHtmlView"));
+            if (player && player->property("url").toUrl() == QUrl(args.at(at + 4))) return 0;
+        } else {
+            const auto ring = object->findChild<QObject *>(QStringLiteral("bsiLoadingRing"));
+            const auto status = object->findChild<QObject *>(QStringLiteral("bsiBootStatus"));
+            if (ring && ring->property("visible").toBool() && status
+                && status->property("text").toString() == QStringLiteral("Emulator is starting…")) return 0;
+        }
         QThread::msleep(10);
     } while (timer.elapsed() < 5000);
     std::fprintf(stderr, "Boot fixture %s did not start with its expected URL\n", qPrintable(provider));
@@ -4557,6 +4564,12 @@ Window {
         const QUrl htmlUrl = QUrl::fromLocalFile(htmlPath);
         check(bootRuntimeInChild(helperPath, importRoot, QStringLiteral("web"), htmlUrl) == 0,
               "WebEngineView loads the installed local Assets/BootScreen.html URL");
+        QString fallbackQml = QString::fromUtf8(read(helperPath));
+        fallbackQml.replace(QLatin1String("BsiFixtureWebEngine"), QLatin1String("BsiMissingWebEngine"));
+        const QString fallbackPath = QDir(assets).filePath(QStringLiteral("BootVideoFallback.qml"));
+        check(write(fallbackPath, fallbackQml.toUtf8()), "write a boot helper with WebEngine unavailable");
+        check(bootRuntimeInChild(fallbackPath, importRoot, QStringLiteral("fallback"), htmlUrl) == 0,
+              "the native Quick ring and status remain visible on players without WebEngine");
         check(BootVideoPatcher::patch(path).ok, "HTML-based boot patch is safe to repatch");
         check(read(path + QStringLiteral(".bak")) == r.f.bytes,
               "HTML boot repatching preserves the first complete EXE backup");
@@ -4580,7 +4593,7 @@ Window {
         const auto playerPath=QDir(folder).filePath(QStringLiteral("Assets/BootVideo.qml"));
         const auto player=read(playerPath);
         check(player.contains("Qt.resolvedUrl(\"BootScreen.html\")") && player.contains("QtWebEngine")
-                  && player.contains("localContentCanAccessFileUrls: true"),
+                  && player.contains("localContentCanAccessFileUrls:true"),
               "boot wrapper loads the HTML asset with local-file access for its adjacent MP4");
         check(BootVideoPatcher::patch(path,4500).ok,"boot hold can be updated on a repatch");
         text=resourceText(read(path),r,QStringLiteral("plr.qml"));

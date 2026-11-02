@@ -274,20 +274,151 @@ __VIDEO_BACKGROUND__
     return html;
 }
 
-QString externalPlayer()
+QString externalPlayer(const QString &logoUrl, bool withVideo)
 {
-    return QString::fromUtf8(R"QML(import QtQuick 2.15
-import QtWebEngine
-WebEngineView {
+    QString qml = QString::fromUtf8(R"QML(import QtQuick
+Item {
     id: root
-    objectName: "bsiBootHtmlView"
+    objectName: "bsiBootHtmlWrapper"
     anchors.fill: parent
-    backgroundColor: "#050A10"
-    url: Qt.resolvedUrl("BootScreen.html")
-    settings.playbackRequiresUserGesture: false
-    settings.localContentCanAccessFileUrls: true
+    clip: true
+    objectName: "bsiBootHtmlWrapper"
+    property string logoUrl: "__BSI_EMULATOR_LOGO__"
+    property bool withVideo: __BSI_WITH_VIDEO__
+    property bool htmlLoaded: false
+
+    Rectangle {
+        z: -1
+        anchors.fill: parent
+        visible: !root.htmlLoaded
+        color: "#050A10"
+        gradient: Gradient {
+            GradientStop { position: 0.0; color: "#070D15" }
+            GradientStop { position: 0.54; color: "#0A1724" }
+            GradientStop { position: 1.0; color: "#050A10" }
+        }
+    }
+    Rectangle {
+        z: 1
+        visible: !root.htmlLoaded
+        width: Math.min(Math.min(root.width, root.height) * 0.72, 820)
+        height: width
+        radius: width / 2
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.verticalCenter: parent.verticalCenter
+        anchors.verticalCenterOffset: -root.height * 0.025
+        color: "#163B58"
+        SequentialAnimation on opacity {
+            loops: Animation.Infinite
+            NumberAnimation { from: 0.11; to: 0.19; duration: 2600; easing.type: Easing.InOutSine }
+            NumberAnimation { to: 0.11; duration: 2600; easing.type: Easing.InOutSine }
+        }
+    }
+    Rectangle {
+        id: loadingRingTrack
+        z: 2
+        visible: !root.htmlLoaded
+        width: Math.min(Math.min(root.width, root.height) * 0.42, 330)
+        height: width
+        radius: width / 2
+        anchors.centerIn: parent
+        anchors.verticalCenterOffset: -root.height * 0.045
+        color: "transparent"
+        border.width: Math.max(1, Math.min(root.width, root.height) * 0.002)
+        border.color: "#38536A"
+        opacity: 0.52
+    }
+    Canvas {
+        id: loadingRing
+        objectName: "bsiLoadingRing"
+        z: 3
+        visible: !root.htmlLoaded
+        width: loadingRingTrack.width
+        height: width
+        anchors.centerIn: loadingRingTrack
+        antialiasing: true
+        onPaint: {
+            var ctx = getContext("2d");
+            ctx.clearRect(0, 0, width, height);
+            ctx.beginPath();
+            ctx.lineWidth = Math.max(3, Math.min(root.width, root.height) * 0.009);
+            ctx.lineCap = "round";
+            ctx.strokeStyle = "#A9E7FF";
+            ctx.shadowColor = "#55CFFF";
+            ctx.shadowBlur = Math.max(10, Math.min(root.width, root.height) * 0.035);
+            ctx.arc(width / 2, height / 2, width / 2 - ctx.lineWidth, -Math.PI * 0.70, Math.PI * 0.88, false);
+            ctx.stroke();
+        }
+        RotationAnimation on rotation {
+            from: 0; to: 360; duration: 2450; loops: Animation.Infinite
+            easing.type: Easing.Linear
+        }
+        SequentialAnimation on opacity {
+            loops: Animation.Infinite
+            NumberAnimation { from: 0.72; to: 1.0; duration: 1350; easing.type: Easing.InOutSine }
+            NumberAnimation { to: 0.72; duration: 1350; easing.type: Easing.InOutSine }
+        }
+    }
+    Image {
+        id: emulatorLogo
+        objectName: "bsiEmulatorLogo"
+        z: 4
+        visible: !root.htmlLoaded
+        anchors.centerIn: loadingRingTrack
+        width: Math.min(Math.min(root.width, root.height) * 0.23, 190)
+        height: width
+        source: root.logoUrl
+        fillMode: Image.PreserveAspectFit
+        smooth: true
+        mipmap: true
+        SequentialAnimation on scale {
+            loops: Animation.Infinite
+            NumberAnimation { to: 1.018; duration: 2300; easing.type: Easing.InOutSine }
+            NumberAnimation { to: 1.0; duration: 2300; easing.type: Easing.InOutSine }
+        }
+    }
+    Text {
+        id: bootStatus
+        objectName: "bsiBootStatus"
+        z: 5
+        visible: !root.htmlLoaded
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.top: loadingRingTrack.bottom
+        anchors.topMargin: Math.max(14, Math.min(root.width, root.height) * 0.035)
+        text: "Emulator is starting…"
+        color: "#C7D9E6"
+        font.pixelSize: Math.min(Math.min(root.width, root.height) * 0.027, 16)
+        font.letterSpacing: 0.8
+        SequentialAnimation on opacity {
+            loops: Animation.Infinite
+            NumberAnimation { from: 0.68; to: 0.95; duration: 1700; easing.type: Easing.InOutSine }
+            NumberAnimation { to: 0.68; duration: 1700; easing.type: Easing.InOutSine }
+        }
+    }
+    Component.onCompleted: {
+        var htmlUrl = Qt.resolvedUrl("BootScreen.html").toString();
+        var web = 'import QtQuick;import QtWebEngine;WebEngineView{objectName:"bsiBootHtmlView";anchors.fill:parent;backgroundColor:"#050A10";url:'
+                + JSON.stringify(htmlUrl) + ';settings.playbackRequiresUserGesture:false;settings.localContentCanAccessFileUrls:true}';
+        try {
+            Qt.createQmlObject(web, root, "bsiHtmlBoot");
+            root.htmlLoaded = true;
+            return;
+        } catch(e) {}
+        if (!root.withVideo) return;
+        var mediaUrl = JSON.stringify(Qt.resolvedUrl("Promo.mp4").toString());
+        var q6 = 'import QtQuick;import QtMultimedia;Item{z:0;anchors.fill:parent;VideoOutput{id:v;anchors.fill:parent;fillMode:VideoOutput.PreserveAspectCrop}MediaPlayer{id:m;source:'
+               + mediaUrl + ';loops:MediaPlayer.Infinite;videoOutput:v;audioOutput:AudioOutput{muted:true}Component.onCompleted:play()}}';
+        try { Qt.createQmlObject(q6, root, "promo6"); return; } catch(e) {}
+        var q5 = 'import QtQuick;import QtMultimedia 5.15;Video{z:0;anchors.fill:parent;source:' + mediaUrl
+               + ';fillMode:VideoOutput.PreserveAspectCrop;loops:MediaPlayer.Infinite;muted:true;autoPlay:true;Component.onCompleted:play()}';
+        try { Qt.createQmlObject(q5, root, "promo5"); }
+        catch(e) { console.warn("This player has no HTML or supported Qt video runtime; showing the native startup animation only."); }
+    }
 }
 )QML");
+    qml.replace(QLatin1String("__BSI_EMULATOR_LOGO__"), logoUrl);
+    qml.replace(QLatin1String("__BSI_WITH_VIDEO__"), withVideo ? QLatin1String("true") : QLatin1String("false"));
+    return qml;
 }
 
 bool writeAsset(const QString &path, const QByteArray &bytes)
@@ -653,7 +784,7 @@ Result patch(const QString &exePath, int holdMs, const QString &requestedMode, c
         return { false, restored ? QStringLiteral("Cannot preserve the existing Assets/BootScreen.html as BootScreen.html.bak; no boot assets were replaced.")
                                  : QStringLiteral("Cannot preserve BootScreen.html, and the selected video could not be restored.") };
     }
-    const QByteArray helper = externalPlayer().toUtf8();
+    const QByteArray helper = externalPlayer(logoUrl, mode == QLatin1String("video")).toUtf8();
     if (!writeAsset(helperPath, helper)) {
         const bool restored = rollbackVideo();
         return { false, restored ? QStringLiteral("Cannot atomically write Assets/BootVideo.qml; no executable was written.")
