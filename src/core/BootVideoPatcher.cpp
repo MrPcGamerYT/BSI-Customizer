@@ -252,11 +252,10 @@ Item {
         fillMode: Image.PreserveAspectFit
         smooth: true
         mipmap: true
-        opacity: 0.94
         SequentialAnimation on opacity {
             loops: Animation.Infinite
+            NumberAnimation { from: 0.82; to: 0.94; duration: 1900; easing.type: Easing.InOutSine }
             NumberAnimation { to: 0.82; duration: 1900; easing.type: Easing.InOutSine }
-            NumberAnimation { to: 0.94; duration: 1900; easing.type: Easing.InOutSine }
         }
     }
     Rectangle {
@@ -331,10 +330,9 @@ Item {
         anchors.centerIn: parent
         anchors.verticalCenterOffset: -root.height * 0.025
         color: "#163B58"
-        opacity: 0.13
         SequentialAnimation on opacity {
             loops: Animation.Infinite
-            NumberAnimation { to: 0.19; duration: 2600; easing.type: Easing.InOutSine }
+            NumberAnimation { from: 0.11; to: 0.19; duration: 2600; easing.type: Easing.InOutSine }
             NumberAnimation { to: 0.11; duration: 2600; easing.type: Easing.InOutSine }
         }
     }
@@ -364,7 +362,6 @@ Item {
         fillMode: Image.PreserveAspectFit
         smooth: true
         mipmap: true
-        opacity: 0.96
         SequentialAnimation on scale {
             loops: Animation.Infinite
             NumberAnimation { to: 1.018; duration: 2300; easing.type: Easing.InOutSine }
@@ -372,8 +369,8 @@ Item {
         }
         SequentialAnimation on opacity {
             loops: Animation.Infinite
+            NumberAnimation { from: 0.82; to: 0.96; duration: 2500; easing.type: Easing.InOutSine }
             NumberAnimation { to: 0.82; duration: 2500; easing.type: Easing.InOutSine }
-            NumberAnimation { to: 0.96; duration: 2500; easing.type: Easing.InOutSine }
         }
     }
     Rectangle {

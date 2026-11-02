@@ -88,8 +88,7 @@ Item {
                         anchors.verticalCenter: parent.verticalCenter
                         anchors.verticalCenterOffset: -10
                         color: "#183246"
-                        opacity: 0.22
-                        SequentialAnimation on opacity { loops: Animation.Infinite; NumberAnimation { to: 0.30; duration: 2600; easing.type: Easing.InOutSine } NumberAnimation { to: 0.16; duration: 2600; easing.type: Easing.InOutSine } }
+                        SequentialAnimation on opacity { loops: Animation.Infinite; NumberAnimation { from: 0.16; to: 0.30; duration: 2600; easing.type: Easing.InOutSine } NumberAnimation { to: 0.16; duration: 2600; easing.type: Easing.InOutSine } }
                     }
                     Rectangle {
                         width: 122; height: 122; radius: 61
