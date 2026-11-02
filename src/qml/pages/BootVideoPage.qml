@@ -133,14 +133,14 @@ Item {
                     wrapMode: Text.Wrap
                     color: Theme.textDim
                     font.pixelSize: 12
-                    text: qsTr("The selected MP4 is copied to Assets/Promo.mp4. An existing video is preserved as Promo.mp4.bak. The emulator's own logo, a glowing loading ring, and the status “Emulator is starting…” are overlaid; playback still depends on the installed Qt/WebEngine runtime.")
+                    text: qsTr("The selected MP4 is copied to Assets/Promo.mp4. The boot page is written to Assets/BootScreen.html and loaded by HD-Player through WebEngine; that page overlays the emulator's own logo, glowing ring, and “Emulator is starting…” status. An existing video is preserved as Promo.mp4.bak.")
                 }
                 Text {
                     Layout.fillWidth: true
                     wrapMode: Text.Wrap
                     color: Theme.textDim
                     font.pixelSize: 12
-                    text: qsTr("The selected style replaces BlueStacks' stock loading artwork and progress panel with the player's own logo, a softly glowing loading ring, and the status “Emulator is starting…”. No BSI attribution is added. Native Android startup handoff and ads remain intact. The patcher validates the boot layout, refreshes QML caches, and keeps the original executable backup. Close BlueStacks before applying.")
+                    text: qsTr("The selected style writes the boot screen to Assets/BootScreen.html; the player boot page loads that HTML from disk. It shows the player's own logo, a softly glowing outer ring, and “Emulator is starting…”, with no BSI attribution. Native Android startup handoff and ads remain intact. The patcher validates the boot layout, refreshes QML caches, and keeps the original executable backup. Close BlueStacks before applying.")
                 }
 
                 RowLayout {

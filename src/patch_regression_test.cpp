@@ -368,16 +368,14 @@ void declarePoolBases(Fixture &f)
 }
 
 // QtWebEngine types can already be process-globally registered when the
-// executable links Chromium, even in a fresh test subprocess. Namespace only
-// these temporary synthetic providers so the test never selects a real codec
-// or GPU WebEngine view instead of its fixture API. Production player imports
-// are asserted separately before this fixture-only rewrite.
+// executable links Chromium, even in a fresh test subprocess. Namespace the
+// temporary synthetic WebEngine provider so this test verifies the HTML URL
+// without starting Chromium or selecting a GPU-backed real WebEngine view.
 bool prepareSyntheticBootPlayer(const QString &path)
 {
     auto source = read(path);
-    if (!source.contains("import QtMultimedia") || !source.contains("import QtWebEngine"))
+    if (!source.contains("import QtWebEngine"))
         return false;
-    source.replace("import QtMultimedia", "import BsiFixtureMultimedia");
     source.replace("import QtWebEngine", "import BsiFixtureWebEngine");
     return write(path, source);
 }
@@ -1019,8 +1017,7 @@ int runBootPlayerRuntimeTest(const QStringList &args)
     const int at = args.indexOf(QStringLiteral("--boot-runtime-test"));
     if (at < 0 || args.size() != at + 5) return 3;
     const QString provider = args.at(at + 3);
-    if (provider != QLatin1String("qt5") && provider != QLatin1String("qt6")
-        && provider != QLatin1String("web")) return 3;
+    if (provider != QLatin1String("web")) return 3;
     QQmlEngine engine;
     engine.addImportPath(args.at(at + 2));
     QObject::connect(&engine, &QQmlEngine::warnings, [](const QList<QQmlError> &warnings) {
@@ -1039,12 +1036,8 @@ int runBootPlayerRuntimeTest(const QStringList &args)
     timer.start();
     do {
         QCoreApplication::processEvents();
-        const bool web = provider == QLatin1String("web");
-        const auto player = object->findChild<QObject *>(web
-            ? QStringLiteral("bsiWebBootVideo") : QStringLiteral("bsiBootVideo"));
-        if (player && (web ? player->property("url").toUrl().scheme() == QLatin1String("data")
-                          : player->property("started").toBool()
-                            && player->property("source").toUrl() == QUrl(args.at(at + 4)))) return 0;
+        const auto player = object->findChild<QObject *>(QStringLiteral("bsiBootHtmlView"));
+        if (player && player->property("url").toUrl() == QUrl(args.at(at + 4))) return 0;
         QThread::msleep(10);
     } while (timer.elapsed() < 5000);
     std::fprintf(stderr, "Boot fixture %s did not start with its expected URL\n", qPrintable(provider));
@@ -4435,44 +4428,16 @@ Window {
         const auto modern = BootVideoPatcher::patch(modernPath, 3000, QStringLiteral("modern"));
         const QString modernAssets = QDir(QFileInfo(modernPath).absolutePath()).filePath(QStringLiteral("Assets"));
         const QByteArray modernHelper = read(QDir(modernAssets).filePath(QStringLiteral("BootVideo.qml")));
-        check(modern.ok && modernHelper.contains("bsiModernBoot")
-                  && modernHelper.contains("data:image/svg+xml;base64,")
-                  && modernHelper.contains("Emulator is starting…")
-                  && modernHelper.contains("bsiLoadingRing")
-                  && !modernHelper.contains("STARTING YOUR PLAYER")
-                  && !modernHelper.contains("BSI / PLAYER STARTUP")
-                  && !modernHelper.contains("CUSTOMIZER")
-                  && !modernHelper.contains("QtMultimedia") && !modernHelper.contains("QtWebEngine")
+        const QByteArray modernHtml = read(QDir(modernAssets).filePath(QStringLiteral("BootScreen.html")));
+        check(modern.ok && modernHelper.contains("import QtWebEngine")
+                  && modernHelper.contains("Qt.resolvedUrl(\"BootScreen.html\")")
+                  && modernHtml.contains("data:image/svg+xml;base64,")
+                  && modernHtml.contains("class=\"ring-track\"")
+                  && modernHtml.contains("Emulator is starting…")
+                  && !modernHtml.contains("Promo.mp4") && !modernHtml.contains("<video")
+                  && !modernHtml.contains("CUSTOMIZER")
                   && !QFile::exists(QDir(modernAssets).filePath(QStringLiteral("Promo.mp4"))),
-              "built-in modern mode embeds the player logo inside a glowing loading ring with one neutral status line and no BSI attribution");
-        const QString modernControllerPath = QDir(folder).filePath(QStringLiteral("modern-controller.qml"));
-        const QString modernControllerText = resourceText(read(modernPath), r, QStringLiteral("RenamedStartup.qml"));
-        const bool controllerWritten = !modernControllerText.isEmpty()
-            && write(modernControllerPath, modernControllerText.toUtf8());
-        QQmlEngine modernEngine;
-        QQmlComponent modernComponent(&modernEngine, QUrl::fromLocalFile(modernControllerPath));
-        QObject *modernRoot = controllerWritten ? modernComponent.create() : nullptr;
-        if (modernRoot) {
-            modernRoot->setProperty("width", 1280);
-            modernRoot->setProperty("height", 720);
-            QCoreApplication::processEvents();
-        } else {
-            for (const auto &error : modernComponent.errors())
-                std::printf("    modern boot QML: %s\n", qPrintable(error.toString()));
-        }
-        QObject *modernLoader = modernRoot ? modernRoot->findChild<QObject *>(QStringLiteral("bsiBootLoader")) : nullptr;
-        QObject *modernSplash = modernLoader ? modernLoader->property("item").value<QQuickItem *>() : nullptr;
-        QObject *modernLogo = modernSplash ? modernSplash->findChild<QObject *>(QStringLiteral("bsiEmulatorLogo")) : nullptr;
-        QObject *modernRing = modernSplash ? modernSplash->findChild<QObject *>(QStringLiteral("bsiLoadingRing")) : nullptr;
-        QObject *modernStatus = modernSplash ? modernSplash->findChild<QObject *>(QStringLiteral("bsiBootStatus")) : nullptr;
-        check(modernLoader && modernLoader->property("z").toDouble() >= 9999
-                  && modernLoader->property("visible").toBool() && modernSplash
-                  && modernSplash->objectName() == QLatin1String("bsiModernBoot")
-                  && modernLogo && modernLogo->property("source").toString().startsWith(QLatin1String("data:image/svg+xml;base64,"))
-                  && modernRing && modernStatus
-                  && modernStatus->property("text").toString() == QStringLiteral("Emulator is starting…"),
-              "built-in boot displays the real registered logo inside a glowing loading ring with the requested status text in Qt Quick");
-        delete modernRoot;
+              "built-in mode writes the logo, glowing ring, and neutral status to Assets/BootScreen.html");
         check(read(modernPath + QStringLiteral(".bak")) == image,
               "built-in modern mode preserves the complete original executable backup");
 
@@ -4487,17 +4452,20 @@ Window {
         write(QDir(customAssets).filePath(QStringLiteral("Promo.mp4")), previousMp4);
         const auto custom = BootVideoPatcher::patch(customPath, 2500, QStringLiteral("video"), customSource);
         const QByteArray customHelper = read(QDir(customAssets).filePath(QStringLiteral("BootVideo.qml")));
+        const QByteArray customHtml = read(QDir(customAssets).filePath(QStringLiteral("BootScreen.html")));
         check(custom.ok && read(QDir(customAssets).filePath(QStringLiteral("Promo.mp4"))) == selectedMp4
                   && read(QDir(customAssets).filePath(QStringLiteral("Promo.mp4.bak"))) == previousMp4,
               "custom mode installs the selected MP4 and preserves the previous startup video");
-        check(customHelper.contains("data:image/svg+xml;base64,")
-                  && customHelper.contains("bsiLoadingRing")
-                  && customHelper.contains("Emulator is starting…")
-                  && !customHelper.contains("BSI  /  STARTUP")
-                  && !customHelper.contains("BLUE STACKS")
-                  && !customHelper.contains("CUSTOMIZER")
-                  && customHelper.contains("QtMultimedia"),
-              "custom video keeps the real emulator logo, glowing ring, and one neutral status line as its overlay");
+        check(customHelper.contains("QtWebEngine")
+                  && customHelper.contains("Qt.resolvedUrl(\"BootScreen.html\")")
+                  && customHtml.contains("data:image/svg+xml;base64,")
+                  && customHtml.contains("class=\"ring-track\"")
+                  && customHtml.contains("Emulator is starting…")
+                  && customHtml.contains("src=\"Promo.mp4\"")
+                  && customHtml.contains("<video")
+                  && !customHtml.contains("BSI  /  STARTUP")
+                  && !customHtml.contains("CUSTOMIZER"),
+              "custom mode loads its HTML boot page with the logo, glowing ring, status, and selected MP4 backdrop");
         check(read(customPath + QStringLiteral(".bak")) == image,
               "custom mode preserves the complete original executable backup");
 
@@ -4534,77 +4502,67 @@ Window {
               "a player without a boot screen is refused and left untouched");
     }
 
-    std::printf("[boot-hold] the boot screen plays the user's video and is held on screen\n");
+    std::printf("[boot-html] external HTML boot page, local assets, and patch recovery\n");
     {
-        // The shape every current build has: the host swaps the boot screen for
-        // the black GL container the moment boot reports complete.
         const QString boot = QStringLiteral(
-            "/*\r\n * Copyright (C) 2020-2021 BlueStack Systems, Inc.\r\n */\r\n"
-            "import QtQuick\r\n"
-            "Item {\r\n"
-            "    width: 320; height: 200\r\n"
-            "    property bool bootBackgroundImage: true\r\n"
-            "    property bool pBootImageButtonVisible: true\r\n"
-            "    property bool pBootGridVisible: true\r\n"
-            "    Image { id: iBootImage; objectName: 'bootImage'; visible: true }\r\n"
-            "    Text { id: iBootLoadingText; objectName: 'loadingText'; visible: false }\r\n"
-            "    function fSetBootPromotion() { iBootImage.visible = true; pBootGridVisible = true;"
-            " iBootLoadingText.visible = false }\r\n"
-            "}\r\n");
+            "import QtQuick\nItem { width:320; height:200; property bool pBootImageButtonVisible:true; property bool pBootGridVisible:true;"
+            "Image { id:iBootImage; visible:true } Text { id:iBootLoadingText; visible:false }"
+            "function fSetBootPromotion(){iBootImage.visible=true;iBootLoadingText.visible=false} }\n");
         const QString host = QStringLiteral(
-            "/* (C) BlueStack Systems - the ApplicationWindow of the player */\r\n"
-            "import QtQuick\r\n"
-            "Item {\r\n"
-            "    id: iAppwin\r\n"
-            "    property bool pIsBootComplete: false\r\n"
-            "    property bool pShowAndroidAd: false\r\n"
-            "    Component { id: iBootProgressComponent; PlrBootProgressBar {} }\r\n"
-            "    Component { id: iGlContainerComponent; Rectangle { color: '#000000' } }\r\n"
-            "    Loader { id: iBootLoader; anchors.fill: parent\r\n"
-            "        sourceComponent: pIsBootComplete || pShowAndroidAd ? iGlContainerComponent : iBootProgressComponent }\r\n"
-            "}\r\n");
+            "import QtQuick\nItem { id:iAppwin; property bool pIsBootComplete:false; property bool pShowAndroidAd:false;"
+            "Component { id:iBootProgressComponent; PlrBootProgressBar {} }"
+            "Component { id:iGlContainerComponent; Rectangle { color:'#000000' } }"
+            "Loader { id:iBootLoader; anchors.fill:parent; sourceComponent:pIsBootComplete||pShowAndroidAd?iGlContainerComponent:iBootProgressComponent } }\n");
         auto r = resources({ { QStringLiteral("PlrBootProgressBar.qml"), boot },
-                                   { QStringLiteral("plr.qml"), host },
-                                   { QStringLiteral("Other.qml"), QStringLiteral("import QtQuick; QtObject {}") } },
-                                 false, {}, 256);
+                            { QStringLiteral("plr.qml"), host },
+                            { QStringLiteral("BlueStacks5Beta.svg"), QStringLiteral("<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 64 64\"><circle cx=\"32\" cy=\"32\" r=\"24\" fill=\"#55aaff\"/></svg>") } }, false, {}, 256);
         addRegistration(r, false);
-        const auto folder = temp.filePath(QStringLiteral("msi boot with spaces")); QDir().mkpath(folder);
-        const auto path = QDir(folder).filePath(QStringLiteral("HD-Player.exe")); write(path, r.f.bytes);
-
-        const auto outcome = BootVideoPatcher::patch(path);
-        if (!outcome.ok) std::printf("    %s\n", qPrintable(outcome.msg));
-        check(outcome.ok, "PlrBootProgressBar works without a stock BootVideo.qml or an import in the boot file");
+        const QString folder = temp.filePath(QStringLiteral("HTML boot Ω & spaces"));
+        QDir().mkpath(folder);
+        const QString assets = QDir(folder).filePath(QStringLiteral("Assets"));
+        QDir().mkpath(assets);
+        const QByteArray previousHtml("<html>user startup page</html>");
+        write(QDir(assets).filePath(QStringLiteral("BootScreen.html")), previousHtml);
+        const QString path = QDir(folder).filePath(QStringLiteral("HD-Player.exe"));
+        write(path, r.f.bytes);
+        const auto result = BootVideoPatcher::patch(path, 3000, QStringLiteral("modern"));
+        if (!result.ok) std::printf("    %s\n", qPrintable(result.msg));
+        check(result.ok, "HTML boot page patch succeeds on the linked active controller");
+        const QString helperPath = QDir(assets).filePath(QStringLiteral("BootVideo.qml"));
+        const QString htmlPath = QDir(assets).filePath(QStringLiteral("BootScreen.html"));
+        const QByteArray helper = read(helperPath);
+        const QByteArray html = read(htmlPath);
         const auto modified = resourceText(read(path), r, QStringLiteral("PlrBootProgressBar.qml"));
-        check(modified.contains(QLatin1String("bsiBootLoader"))
-                  && modified.contains(QUrl::fromLocalFile(QDir(folder).filePath(QStringLiteral("Assets/BootVideo.qml"))).toString(QUrl::FullyEncoded)),
-              "the controller loads an external QML player, never an MP4 or a hard QtMultimedia import");
-        // A tiny, explicitly synthetic QtMultimedia API validates the generated
-        // QML/argument flow without playing media or running extracted user QML.
-        const auto imports = QDir(folder).filePath(QStringLiteral("imports/BsiFixtureMultimedia")); QDir().mkpath(imports);
-        write(QDir(imports).filePath(QStringLiteral("qmldir")), "module BsiFixtureMultimedia\nVideo 5.15 Video.qml\nMediaPlayer 5.15 MediaPlayer.qml\nVideoOutput 5.15 VideoOutput.qml\n");
-        write(QDir(imports).filePath(QStringLiteral("Video.qml")), "import QtQuick\nItem{property url source;property int loops;property int fillMode;property bool muted:false;property bool autoPlay:false;property bool started:false;function play(){started=true}}\n");
-        write(QDir(imports).filePath(QStringLiteral("MediaPlayer.qml")), "import QtQuick\nQtObject{enum Loops{Infinite=1}}\n");
-        write(QDir(imports).filePath(QStringLiteral("VideoOutput.qml")), "import QtQuick\nQtObject{enum FillMode{PreserveAspectCrop=1}}\n");
-        const auto controller = QDir(folder).filePath(QStringLiteral("PlrBootProgressBar.qml"));
-        check(write(controller, modified.toUtf8()), "write generated boot controller fixture");
-        // QML module/type registrations outlive engines. A new process per
-        // provider prevents earlier real/fake QtMultimedia imports leaking in.
-        check(prepareSyntheticBootPlayer(QDir(folder).filePath(QStringLiteral("Assets/BootVideo.qml"))),
-              "isolate synthetic Qt5 boot provider from registered SDK types");
-        const int qt5Result = bootRuntimeInChild(controller,
-            QDir(folder).filePath(QStringLiteral("imports")), QStringLiteral("qt5"),
-            QUrl::fromLocalFile(QDir(folder).filePath(QStringLiteral("Assets/Promo.mp4"))));
-        check(qt5Result == 0 || qt5Result == 1,
-              "external boot player QML compiles with the synthetic multimedia API");
-        check(qt5Result == 0,
-              "the Qt5 fallback starts and receives the installation-relative media URL");
-        check(BootVideoPatcher::patch(path).ok && read(path + QStringLiteral(".bak")) == r.f.bytes,
-              "real-name boot repatching keeps one loader and preserves the original backup");
-        const auto twice = resourceText(read(path), r, QStringLiteral("PlrBootProgressBar.qml"));
-        check(twice.count(QLatin1String("objectName:\"bsiBootLoader\"")) == 1,
-              "repatching does not duplicate the custom video component");
+        check(modified.contains("bsiBootLoader")
+                  && modified.contains(QUrl::fromLocalFile(helperPath).toString(QUrl::FullyEncoded))
+                  && helper.contains("import QtWebEngine")
+                  && helper.contains("Qt.resolvedUrl(\"BootScreen.html\")"),
+              "the player boot component loads the external QML wrapper, which opens Assets/BootScreen.html");
+        check(html.contains("data:image/svg+xml;base64,")
+                  && html.contains("class=\"ring-track\"")
+                  && html.contains("Emulator is starting…")
+                  && !html.contains("<video") && !html.contains("CUSTOMIZER"),
+              "the generated standalone HTML contains the player logo, glowing ring, and neutral status without attribution");
+        check(read(QDir(assets).filePath(QStringLiteral("BootScreen.html.bak"))) == previousHtml,
+              "an existing user BootScreen.html is backed up before the generated page replaces it");
+
+        const QString importRoot = QDir(folder).filePath(QStringLiteral("imports"));
+        const QString webModule = QDir(importRoot).filePath(QStringLiteral("BsiFixtureWebEngine"));
+        QDir().mkpath(webModule);
+        write(QDir(webModule).filePath(QStringLiteral("qmldir")),
+              "module BsiFixtureWebEngine\nWebEngineView 1.0 WebEngineView.qml\n");
+        write(QDir(webModule).filePath(QStringLiteral("WebEngineView.qml")),
+              "import QtQuick\nItem{objectName:'bsiBootHtmlView';property url url;property color backgroundColor;property QtObject settings:QtObject{property bool playbackRequiresUserGesture:true;property bool localContentCanAccessFileUrls:false}}\n");
+        check(prepareSyntheticBootPlayer(helperPath), "use a synthetic WebEngine type for the generated HTML-loader test");
+        const QUrl htmlUrl = QUrl::fromLocalFile(htmlPath);
+        check(bootRuntimeInChild(helperPath, importRoot, QStringLiteral("web"), htmlUrl) == 0,
+              "WebEngineView loads the installed local Assets/BootScreen.html URL");
+        check(BootVideoPatcher::patch(path).ok, "HTML-based boot patch is safe to repatch");
+        check(read(path + QStringLiteral(".bak")) == r.f.bytes,
+              "HTML boot repatching preserves the first complete EXE backup");
     }
-    std::printf("[boot-script] adaptive player, hold, recovery and refusal paths\n");
+
+    std::printf("[boot-hold] HTML player handoff timer remains reversible\n");
     {
         const QString boot = QStringLiteral("import QtQuick\nItem{Image{id:iBootImage;visible:true}Text{id:iBootLoadingText;visible:false}function fSetBootPromotion(){iBootImage.visible=true;iBootLoadingText.visible=false}}\n");
         const QString host = QStringLiteral("import QtQuick\nItem{property bool pIsBootComplete:false;property bool pShowAndroidAd:false;Component{id:iBootProgressComponent;Boot{}}Component{id:iGlContainerComponent;Rectangle{color:'#000000'}}Loader{id:iBootLoader;sourceComponent:pIsBootComplete || pShowAndroidAd ? iGlContainerComponent : iBootProgressComponent}}\n");
@@ -4615,14 +4573,15 @@ Window {
               "invalid boot holds refuse without changing the executable");
         const auto applied=BootVideoPatcher::patch(path,3000);
         if(!applied.ok) std::printf("    %s\n",qPrintable(applied.msg));
-        check(applied.ok,"external adaptive player does not require an existing multimedia import");
+        check(applied.ok,"HTML-backed external player patch supports the active boot component");
         auto text=resourceText(read(path),r,QStringLiteral("plr.qml"));
         check(text.contains(QLatin1String("interval:3000")) && text.contains(QLatin1String("pIsBootComplete&&pBootVideoDone")),
               "the Android loader is held only after boot completion while ads retain their bypass");
-        const auto player=read(QDir(folder).filePath(QStringLiteral("Assets/BootVideo.qml")));
-        check(player.contains("import QtMultimedia;") && player.contains("import QtMultimedia 5.15;") && player.contains("import QtWebEngine;")
-                  && player.contains("JSON.stringify") && player.contains("Qt.resolvedUrl(\"Promo.mp4\")"),
-              "external player tries Qt6, Qt5 and WebEngine and quotes media URLs safely");
+        const auto playerPath=QDir(folder).filePath(QStringLiteral("Assets/BootVideo.qml"));
+        const auto player=read(playerPath);
+        check(player.contains("Qt.resolvedUrl(\"BootScreen.html\")") && player.contains("QtWebEngine")
+                  && player.contains("localContentCanAccessFileUrls: true"),
+              "boot wrapper loads the HTML asset with local-file access for its adjacent MP4");
         check(BootVideoPatcher::patch(path,4500).ok,"boot hold can be updated on a repatch");
         text=resourceText(read(path),r,QStringLiteral("plr.qml"));
         check(text.count(QLatin1String("id:bvDone"))==1 && text.contains(QLatin1String("interval:4500")),
@@ -4633,43 +4592,6 @@ Window {
                   && text.contains(QLatin1String("sourceComponent:pIsBootComplete||pShowAndroidAd?")),
               "disabling hold removes both timer and state");
         check(read(path+QStringLiteral(".bak"))==r.f.bytes,"all repatches preserve the first original backup");
-        // Validate dynamic Qt6 and WebEngine creation against deliberately
-        // synthetic APIs. Never load a real codec or extracted player QML.
-        const auto mediaImports=QDir(folder).filePath(QStringLiteral("qt6Imports/BsiFixtureMultimedia")); QDir().mkpath(mediaImports);
-        write(QDir(mediaImports).filePath(QStringLiteral("qmldir")),"module BsiFixtureMultimedia\nMediaPlayer 5.15 MediaPlayer.qml\nVideoOutput 5.15 VideoOutput.qml\nAudioOutput 5.15 AudioOutput.qml\n");
-        write(QDir(mediaImports).filePath(QStringLiteral("MediaPlayer.qml")),"import QtQuick\nQtObject{enum Loops{Infinite=1}property url source;property int loops;property var videoOutput;property var audioOutput;property bool started:false;function play(){started=true}}\n");
-        write(QDir(mediaImports).filePath(QStringLiteral("VideoOutput.qml")),"import QtQuick\nItem{enum FillMode{PreserveAspectCrop=1}property int fillMode}\n");
-        write(QDir(mediaImports).filePath(QStringLiteral("AudioOutput.qml")),"import QtQuick\nQtObject{property bool muted:false}\n");
-        check(prepareSyntheticBootPlayer(QDir(folder).filePath(QStringLiteral("Assets/BootVideo.qml"))),
-              "isolate synthetic Qt6 and WebEngine boot providers from registered SDK types");
-        check(bootRuntimeInChild(QDir(folder).filePath(QStringLiteral("Assets/BootVideo.qml")),
-                  QDir(folder).filePath(QStringLiteral("qt6Imports")), QStringLiteral("qt6"),
-                  QUrl::fromLocalFile(QDir(folder).filePath(QStringLiteral("Assets/Promo.mp4")))) == 0,
-              "the Qt6 adaptive branch compiles, starts and handles quoted Unicode installation paths");
-        const auto webImports=QDir(folder).filePath(QStringLiteral("webImports"));
-        QDir().mkpath(QDir(webImports).filePath(QStringLiteral("BsiFixtureMultimedia")));
-        QDir().mkpath(QDir(webImports).filePath(QStringLiteral("BsiFixtureWebEngine")));
-        // An empty qmldir can fall through to the SDK's real multimedia
-        // module. Export explicitly unavailable types so both imports are
-        // deterministically refused without loading real codecs.
-        write(QDir(webImports).filePath(QStringLiteral("BsiFixtureMultimedia/qmldir")),
-              "module BsiFixtureMultimedia\nMediaPlayer 5.15 Unavailable.qml\nVideo 5.15 Unavailable.qml\n");
-        write(QDir(webImports).filePath(QStringLiteral("BsiFixtureMultimedia/Unavailable.qml")),
-              "import QtQuick\nMissingSyntheticMultimediaApi {}\n");
-        write(QDir(webImports).filePath(QStringLiteral("BsiFixtureWebEngine/qmldir")),"module BsiFixtureWebEngine\nWebEngineView 1.0 WebEngineView.qml\n");
-        write(QDir(webImports).filePath(QStringLiteral("BsiFixtureWebEngine/WebEngineView.qml")),"import QtQuick\nItem{objectName:'bsiWebBootVideo';property url url}\n");
-        check(bootRuntimeInChild(QDir(folder).filePath(QStringLiteral("Assets/BootVideo.qml")),
-                  webImports, QStringLiteral("web"), QUrl()) == 0,
-              "missing multimedia APIs fall back to a WebEngine data-URL player");
-        // A previously forced stub can only recover from a uniquely linked
-        // original resource in the backup; it never guesses missing UI source.
-        const auto stub=resources({{QStringLiteral("Boot.qml"),QStringLiteral("import QtQuick\nItem{function fSetBootPromotion(a,b,c){}}\n")},{QStringLiteral("plr.qml"),host}},true);
-        const auto stubPath=QDir(folder).filePath(QStringLiteral("stub.exe")); write(stubPath,stub.f.bytes);
-        check(!BootVideoPatcher::patch(stubPath).ok && read(stubPath)==stub.f.bytes,
-              "a forced boot stub with no original backup is a non-writing error");
-        write(stubPath+QStringLiteral(".bak"),r.f.bytes);
-        check(BootVideoPatcher::patch(stubPath).ok && resourceText(read(stubPath),stub,QStringLiteral("Boot.qml")).contains(QLatin1String("iBootImage")),
-              "a linked backup repairs the boot stub without discarding unrelated executable edits");
     }
 
     std::printf("[gif-rpc] clean proxy validation, JSON escaping, configuration and restore\n");
@@ -5074,13 +4996,15 @@ Window {
         const auto modernBoot = BootVideoPatcher::patch(modernPath, 3000, QStringLiteral("modern"));
         const QString modernAssets = QDir(QFileInfo(modernPath).absolutePath()).filePath(QStringLiteral("Assets"));
         const QByteArray modernHelper = read(QDir(modernAssets).filePath(QStringLiteral("BootVideo.qml")));
-        check(modernBoot.ok && modernHelper.contains("bsiModernBoot")
-                  && modernHelper.contains("data:image/")
-                  && modernHelper.contains("bsiLoadingRing")
-                  && modernHelper.contains("Emulator is starting…")
-                  && !modernHelper.contains("QtMultimedia") && !modernHelper.contains("QtWebEngine")
+        const QByteArray modernHtml = read(QDir(modernAssets).filePath(QStringLiteral("BootScreen.html")));
+        check(modernBoot.ok && modernHelper.contains("QtWebEngine")
+                  && modernHelper.contains("BootScreen.html")
+                  && modernHtml.contains("data:image/")
+                  && modernHtml.contains("ring-track")
+                  && modernHtml.contains("Emulator is starting…")
+                  && !modernHtml.contains("Promo.mp4") && !modernHtml.contains("<video")
                   && !QFile::exists(QDir(modernAssets).filePath(QStringLiteral("Promo.mp4"))),
-              "built-in modern boot patches this real HD-Player version with its registered logo, glowing ring, and neutral startup text without media assets or codec imports");
+              "built-in modern boot writes the registered logo and requested startup UI into a standalone HTML asset for this real player");
         const int activeBootUnits = QtResources::activeUnits(read(modernPath), {}, {
             QStringLiteral("iBootImage"), QStringLiteral("iBootProgressContainer"),
             QStringLiteral("iBootProgressComponent"), QStringLiteral("iBootLoader") });
@@ -5100,14 +5024,15 @@ Window {
         write(QDir(customAssets).filePath(QStringLiteral("Promo.mp4")), previousVideo);
         const auto customBoot = BootVideoPatcher::patch(customPath, 2500, QStringLiteral("video"), customSource);
         const QByteArray customHelper = read(QDir(customAssets).filePath(QStringLiteral("BootVideo.qml")));
+        const QByteArray customHtml = read(QDir(customAssets).filePath(QStringLiteral("BootScreen.html")));
         check(customBoot.ok && read(QDir(customAssets).filePath(QStringLiteral("Promo.mp4"))) == selectedVideo
                   && read(QDir(customAssets).filePath(QStringLiteral("Promo.mp4.bak"))) == previousVideo,
               "custom boot installs a bounded synthetic MP4 and preserves the prior video on this real HD-Player copy");
-        check(customHelper.contains("data:image/") && customHelper.contains("bsiLoadingRing")
-                  && customHelper.contains("Emulator is starting…")
-                  && !customHelper.contains("BSI  /  STARTUP")
-                  && customHelper.contains("QtMultimedia"),
-              "custom boot uses the real emulator logo, glowing ring, and neutral startup status for this real HD-Player version");
+        check(customHelper.contains("QtWebEngine") && customHelper.contains("BootScreen.html")
+                  && customHtml.contains("data:image/") && customHtml.contains("ring-track")
+                  && customHtml.contains("Emulator is starting…") && customHtml.contains("Promo.mp4")
+                  && !customHtml.contains("BSI  /  STARTUP") && !customHtml.contains("CUSTOMIZER"),
+              "custom boot uses the real emulator logo and requested loading UI in its standalone HTML page with the selected video");
         check(read(customPath + QStringLiteral(".bak")) == original,
               "custom boot preserves the complete original of this HD-Player version");
         check(read(input) == original, "the supplied HD-Player reference remains byte-for-byte untouched");
@@ -5158,9 +5083,8 @@ Window {
               "Qt actually loads colors relocated into the appended PE section");
     }
     {
-        // The player's own pool still carries the file the old design edited.
-        // Nothing in it may be touched now: the tool writes its own player next
-        // to the EXE and points the boot screen at that.
+        // A resource-pool BootVideo.qml may be unrelated. Keep it untouched;
+        // the active boot controller loads the adjacent HTML-backed wrapper.
         const QString boot = QStringLiteral(
             "/*\r\n * Copyright (C) 2020-2021 BlueStack Systems, Inc.\r\n */\r\n"
             "import QtQuick\r\n"
@@ -5190,9 +5114,10 @@ Window {
         check(resourceText(read(path), r, QStringLiteral("BootVideo.qml")) == video,
               "an unrelated stock BootVideo.qml in the pool is left alone");
         check(!QFile::exists(QDir(folder).filePath(QStringLiteral("Assets/Promo.mp4")))
+                  && read(QDir(folder).filePath(QStringLiteral("Assets/BootScreen.html"))).contains("Promo.mp4")
                   && read(QDir(folder).filePath(QStringLiteral("Assets/BootVideo.qml")))
-                         .contains("Qt.resolvedUrl(\"Promo.mp4\")"),
-              "the player is written next to the EXE and resolves the video beside itself");
+                         .contains("Qt.resolvedUrl(\"BootScreen.html\")"),
+              "the HTML page and its QML loader are written next to the EXE and resolve adjacent assets");
         check(patch.msg.contains(QLatin1String("Promo.mp4")),
               "the report names the file the user has to supply");
         const auto repatch = BootVideoPatcher::patch(path);
