@@ -217,14 +217,29 @@
   function renderResources() {
     if (!$('#resource-rows')) return;
     const rows = BsiResourceSearch.filter(resourceIndex, filter, kind);
+    // In All files, put visual assets first so SVGs never appear to be missing
+    // just because a large alphabetic block of QML filled the first page.
+    if (kind === 0) {
+      const order = { svg: 0, image: 1, text: 2, binary: 3 };
+      rows.sort((a, b) => (order[a.kind] ?? 4) - (order[b.kind] ?? 4)
+        || String(a.path).localeCompare(String(b.path), undefined, { numeric: true, sensitivity: 'base' }));
+    }
     offset = Math.max(0, Math.min(offset, Math.max(0, Math.ceil(rows.length / 100) - 1) * 100));
-    $('#resource-rows').innerHTML = `<div class="resource-list-head"><b>Detected resources</b><span>${rows.length} shown · ${resources.length} total</span></div><div class="resource-list">${rows.slice(offset, offset + 100).map(r => `<button class="resource-row${r.index === selected?.index ? ' selected' : ''}" data-resource="${r.index}" ${enabled() ? '' : 'disabled'}><small>${esc(r.kind)} · ${esc(r.size)} B</small>${esc(r.path)}</button>`).join('')}</div>${rows.length > 100 ? `<div class="tools resource-pager"><button class="btn sm" data-paginate="-1" ${offset ? '' : 'disabled'}>Previous</button><span>${offset + 1}–${Math.min(offset + 100, rows.length)} of ${rows.length}</span><button class="btn sm" data-paginate="1" ${offset + 100 < rows.length ? '' : 'disabled'}>Next</button></div>` : ''}`;
+    const svgCount = resources.filter(row => row.kind === 'svg').length;
+    const icon = row => {
+      const thumb = typeof row.thumbnail === 'string' && /^data:image\/(?:png|jpe?g|webp|gif|bmp|svg\+xml);base64,/i.test(row.thumbnail)
+        ? `<img class="resource-thumb" src="${esc(row.thumbnail)}" alt="" loading="lazy" decoding="async">`
+        : `<span class="resource-type-mark ${esc(row.kind || 'binary')}" aria-hidden="true">${row.kind === 'svg' ? 'SVG' : row.kind === 'image' ? 'IMG' : row.kind === 'text' ? 'TXT' : 'BIN'}</span>`;
+      return `<span class="resource-row-icon">${thumb}</span>`;
+    };
+    const summary = kind === 0 ? `${rows.length} files · ${svgCount} SVGs · visual assets shown first` : `${rows.length} of ${resources.length} files`;
+    $('#resource-rows').innerHTML = `<div class="resource-list-head"><b>Detected resources</b><span>${summary}</span></div><div class="resource-list">${rows.slice(offset, offset + 100).map(r => `<button class="resource-row${r.index === selected?.index ? ' selected' : ''}" data-resource="${r.index}" aria-label="${esc(r.kind)} ${esc(r.path)}" ${enabled() ? '' : 'disabled'}>${icon(r)}<span class="resource-row-name">${esc(r.path)}</span><small>${esc(r.format || r.kind)} · ${esc(r.size)} B</small></button>`).join('')}</div>${rows.length > 100 ? `<div class="tools resource-pager"><button class="btn sm" data-paginate="-1" ${offset ? '' : 'disabled'}>Previous</button><span>${offset + 1}–${Math.min(offset + 100, rows.length)} of ${rows.length}</span><button class="btn sm" data-paginate="1" ${offset + 100 < rows.length ? '' : 'disabled'}>Next</button></div>` : ''}`;
   }
   function renderResourceEditor() {
     if (!$('#resource-editor')) return;
     const box = $('#resource-editor');
     if (!selected || !resourceData) { box.innerHTML = '<div class="empty">Select a scanned resource to inspect it.</div>'; return; }
-    const hasPreview = /^data:image\/(png|jpeg|webp|gif|bmp);base64,/i.test(resourceData.preview || '');
+    const hasPreview = /^data:image\/(?:png|jpe?g|webp|gif|bmp|svg\+xml);base64,/i.test(resourceData.preview || '');
     box.innerHTML = `<div class="resource-editor-head"><div><span class="section-label">Selected resource</span><h3>${esc(selected.path)}</h3></div><span class="pill">${esc(selected.kind)} · ${esc(selected.size)} B</span></div><p class="note" id="resource-budget"></p><div class="resource-detail-grid ${selected.text ? 'has-code' : ''}">${selected.text ? '<label class="resource-source"><span class="editor-field-title">Source editor</span><textarea class="inp" id="resource-code" spellcheck="false" aria-label="Resource source text"></textarea></label>' : ''}<div class="resource-preview-panel"><span class="editor-field-title">Preview</span><img id="resource-image" alt="Resource preview" ${hasPreview ? '' : 'hidden'}><p class="note" id="resource-note"></p></div></div><div class="button-grid">${selected.text ? button('Save resource text', 'saveResource', true) : ''}${button('Replace with file…', 'replaceResource')}${button('Extract…', 'extractResource')}</div>`;
     const budget = resourceData.budget || {};
     $('#resource-budget').textContent = `Decoded: ${selected.size} B · Stored: ${selected.stored} B · Capacity: ${budget.known ? budget.capacity + ' B' : 'unknown'} · ${budget.msg || 'Validated by native engine on save.'}`;

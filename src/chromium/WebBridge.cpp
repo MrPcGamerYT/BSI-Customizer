@@ -157,9 +157,9 @@ QVariantMap WebBridge::invoke(const QString &method, const QVariantMap &args)
     } else if (method == QLatin1String("listResources")) {
         QVariantList metadata;
         for (const auto &item : m_backend.resourceInfos()) {
-            auto row = item.toMap();
-            row.remove("thumbnail"); // The paginated web list does not render thumbnails.
-            metadata << row;
+            // Thumbnails are prepared and size-bounded by the explicit native scan.
+            // Keep them for the HTML file list; it never decodes an EXE entry itself.
+            metadata << item.toMap();
         }
         value = metadata;
     }

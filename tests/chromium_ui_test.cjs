@@ -91,7 +91,10 @@ const server = http.createServer((req, res) => {
       let profile = {}, operations = [];
       const state = { protocol: 1, authorized: true, busy: false, exeFound: true, exePath: 'C:\\fixture\\HD-Player.exe', version: 'test-only', resourceRevision: 0, workspaceRevision: 0, updates: { configured: true, state: 'idle' }, aboutProfile: { developerName: 'Fixture developer', tagline: 'Fixture tagline', links: [{kind:'github',title:'Source',url:'https://example.test/source'},{kind:'discord',title:'Community',url:'https://example.test/chat'},{kind:'youtube',title:'Video',url:'https://example.test/video'},{kind:'youtube',title:'More videos',url:'https://example.test/more'}] }, themeStatus: 'Fixture palette', themeMethod: 'qml' };
       const colors = [{ name: 'testAccent', value: '#123456', edit: '', purpose: 'Test fixture only' }];
+      const svgPreview = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI+PGNpcmNsZSBjeD0iMTIiIGN5PSIxMiIgcj0iOCIvPjwvc3ZnPg==';
       const rows = Array.from({ length: 250 }, (_, index) => ({ index, path: `qml/fixture-${index}.qml`, kind: 'text', text: true, size: 100, stored: 80, format: 'QML' }));
+      rows[248] = { index: 248, path: 'images/fixture-background.jpg', kind: 'image', text: false, size: 1234, stored: 1234, format: 'JPEG', thumbnail: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p6sAAAAASUVORK5CYII=' };
+      rows[249] = { index: 249, path: 'images/fixture-sidebar.svg', kind: 'svg', text: true, size: 128, stored: 128, format: 'SVG', thumbnail: svgPreview };
       const remote = {
         stateChanged: signal(), windowModeChanged: signal(), logMessage: signal(), fileSelected: signal(), videoStatus: signal(),
         windowAction(action) { (window.__windowActions ||= []).push(action); },
@@ -104,7 +107,9 @@ const server = http.createServer((req, res) => {
           if (method === 'setThemeEdit') colors[0].edit = args.value;
           if (method === 'scanResources') { ++state.resourceRevision; value = rows.length; }
           if (method === 'listResources') value = rows;
-          if (method === 'readResource') value = { text: 'Item { property string value: "<img src=x onerror=alert(1)>" }', preview: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p6sAAAAASUVORK5CYII=', budget: { known: true, capacity: 300, msg: 'Test only' } };
+          if (method === 'readResource') value = args.index === 249
+            ? { text: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/></svg>', preview: svgPreview, note: '', budget: { known: true, capacity: 300, msg: 'SVG fixture only' } }
+            : { text: 'Item { property string value: "<img src=x onerror=alert(1)>" }', preview: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p6sAAAAASUVORK5CYII=', budget: { known: true, capacity: 300, msg: 'Test only' } };
           if (method === 'saveResource') { ++state.resourceRevision; value = { ok: true, msg: 'Test fixture acknowledged save' }; }
           if (method === 'setAboutProfile') { state.aboutProfile = { ...args, links: args.links.map(link => ({...link})) }; value = true; }
           if (method === 'fpsPatch') value = { ok: false, msg: 'Fixture: target is unsupported; no write' };
@@ -190,6 +195,16 @@ const server = http.createServer((req, res) => {
     await page.waitForFunction(() => __calls.some(c => c.method === 'scanResources') && __calls.some(c => c.method === 'listResources'));
     await page.locator('[data-resource="0"]').waitFor();
     assert.equal(await page.locator('[data-resource]').count(), 100, 'Resource DOM must be paginated');
+    const svgListRow = page.locator('[data-resource="249"]');
+    assert.equal(await svgListRow.isVisible(), true, 'All files puts SVG resources on the first page instead of hiding them behind the SVG filter');
+    assert.ok((await svgListRow.locator('.resource-thumb').getAttribute('src')).startsWith('data:image/svg+xml;base64,'), 'SVG row shows its miniature preview before the filename');
+    await svgListRow.evaluate(el => el.click());
+    await page.locator('#resource-code').waitFor();
+    assert.match(await page.locator('#resource-code').inputValue(), /<svg/);
+    assert.equal(await page.locator('#resource-image').isVisible(), true, 'Selecting an SVG loads its large preview beside editable SVG source');
+    assert.ok((await page.locator('#resource-image').getAttribute('src')).startsWith('data:image/svg+xml;base64,'));
+    await page.locator('[data-resource="0"]').evaluate(el => el.click());
+    await page.waitForFunction(() => __calls.filter(c => c.method === 'readResource').length >= 2);
     assert.equal(await page.evaluate(() => __calls.filter(c => c.method === 'scanResources').length), 1);
     await page.locator('#resource-filter').fill('fixture-23 qml');
     await page.locator('[data-resource="23"]').evaluate(el => el.click());
