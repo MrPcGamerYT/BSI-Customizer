@@ -189,6 +189,7 @@ QVariantMap WebBridge::invoke(const QString &method, const QVariantMap &args)
     else if (method == QLatin1String("integrityCheck")) value = m_backend.integrityCheck();
     else if (method == QLatin1String("integrityPatch")) value = m_backend.integrityPatch();
     else if (method == QLatin1String("integrityRestore")) value = m_backend.integrityRestore();
+    else if (method == QLatin1String("bootLogoPreview")) value = m_backend.bootLogoPreview();
     else if (method == QLatin1String("bootPatch")) {
         bool valid = false; const int hold = args.value("holdMs").toInt(&valid);
         if (!valid || hold < 0 || hold > 15000) return failure(QStringLiteral("Hold duration must be between 0 and 15000 milliseconds."));

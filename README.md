@@ -466,27 +466,30 @@ modified. The initial editor supports two-stop linear gradients using QtQuick
 The regression suite renders synthetic horizontal/vertical/solid cases in Qt
 and checks actual pixels; it never executes QML extracted from the user's EXE.
 
-## Boot video and integrity
+## Boot screen and integrity
 
-Boot patching uses the selected installation's `Assets/Promo.mp4`. Adapted from
-Nova's supplied script, the fallback writes `Assets/BootVideo.qml` and tries Qt 6
-Multimedia, Qt 5 Multimedia, then a WebEngine HTML video. Playback is muted,
-looping and cropped to fill the boot background. The emulator must supply one
-of those modules and an MP4 codec; the patch does not install codecs or modify
-its Qt DLLs. A working stock Video/MediaPlayer resource is reused when available.
+The boot patch writes a self-contained `Assets/BootScreen.html` page and a small
+`Assets/BootVideo.qml` loader. It opens the HTML page through Qt WebEngine when
+that module is available; older player builds without WebEngine keep the same
+logo, glowing ring, and **“Emulator is starting…”** status using a native QtQuick
+fallback. No BSI/customizer credit is added. In Custom MP4 mode, the HTML page
+plays `Assets/Promo.mp4` silently behind the overlay; if WebEngine is absent,
+the loader tries the player's Qt Multimedia module before falling back to the
+static startup animation. The selected video is copied there and an existing
+video is preserved as `Promo.mp4.bak`. An existing HTML page is preserved as
+`BootScreen.html.bak`. Both files are written atomically; if the EXE write fails,
+previous contents are restored. The patch does not install Qt modules or codecs.
+Close all emulator instances before patching.
 
-The original loading/progress UI remains in place. **Boot hold after ready**
-defaults to 3000 ms (0–15000); zero restores immediate handoff on supported boot
-hosts. Legacy forced GL-container video experiments are repaired only when
-uniquely recognized, and an old empty boot stub requires a uniquely linked
-original resource in `.bak`. Unknown hosts are never guessed. The status reports
-when an extra hold cannot be applied. You can replace `Promo.mp4` later without
-patching again. Close all emulator instances before patching.
+**Boot hold after ready** defaults to 3000 ms (0–15000); zero restores immediate
+handoff on supported boot hosts. Legacy forced GL-container experiments are
+repaired only when uniquely recognized, and an old empty boot stub requires a
+uniquely linked original resource in `.bak`. Unknown hosts are never guessed.
+The status reports when an extra hold cannot be applied.
 
 Resource discovery, safe mapped growth, verified EXE writes and original-backup
 preservation remain in use; the script's heuristic timestamp/zero-padding writes
-are not used. An external player is written atomically and rolled back if the
-EXE write fails. No QML is executed while inspecting a target executable.
+are not used. No QML is executed while inspecting a target executable.
 
 ### Purge Cache
 

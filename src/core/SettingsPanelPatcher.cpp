@@ -179,7 +179,9 @@ TargetSources readSources(const QString &exePath, const QByteArray &image)
     }
     const QByteArray playerBytes = QtResources::readFile(image, *playerRoot, kMaxQml);
     const QString playerText = EmbeddedResources::decodeText(playerBytes);
-    const bool inlineSettingsModel = playerText.contains(QLatin1String("SettingElementModelList pSettingsItems"));
+    const QRegularExpression inlineSettingsModelPattern(
+        QStringLiteral("\\bproperty\\s+(?:[A-Za-z_][A-Za-z0-9_]*\\s+)*SettingElementModelList\\s+pSettingsItems\\b"));
+    const bool inlineSettingsModel = inlineSettingsModelPattern.match(playerText).hasMatch();
     // Newer MSI/BlueStacks builds keep the same native SettingElementModelList
     // inside a Component in plr.qml, then pass its created instance into the
     // dynamically created UiSettingsWindow. Validate that live connection, not
