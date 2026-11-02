@@ -25,19 +25,20 @@
   let palette = { entries: [], hex: [], presets: [], method: 'auto' };
   let resourceIndex = [], kind = 0, measureTimer = null, measureSequence = 0;
   let resources = [], selected = null, resourceData = null, dirty = false, filter = '', offset = 0;
-  let operationResult = '', logs = [], editors = null;
+  let operationResult = '', logs = [], editors = null, windowMaximized = false;
   const drafts = {};
   const enabled = () => !!transport && state.authorized && !state.busy && !pending;
   const panel = body => `<div class="panel"><div class="pscroll">${body}</div></div>`;
   const button = (label, action, primary = false, extra = '') => `<button class="btn${primary ? ' pri' : ''}" data-action="${action}" data-locked="${/^\s*disabled(?:\s|$)/.test(extra)}" ${extra} ${enabled() ? '' : 'disabled'}>${label}</button>`;
   const native = () => ''; // No second editor in the normal HTML workflow.
   const confirmDiscard = async () => !dirty || BsiEffects.confirm('Discard the unsaved resource text in this editor?');
-  function toast(message) {
-    $('#toast').textContent = message; $('#toast').style.display = 'block';
-    clearTimeout(toast.timer); toast.timer = setTimeout(() => { $('#toast').style.display = 'none'; }, 5000);
+  function toast(message, kind = 'error') {
+    const element = $('#toast');
+    element.textContent = message;
+    element.dataset.kind = kind;
+    element.style.display = 'block';
+    clearTimeout(toast.timer); toast.timer = setTimeout(() => { element.style.display = 'none'; }, 7000);
   }
-  function fit() { $('#stage').style.setProperty('--s', Math.min(innerWidth / 1480, innerHeight / 920, 1.6)); }
-  addEventListener('resize', fit); fit();
   addEventListener('beforeunload', event => { if (dirty) { event.preventDefault(); event.returnValue = ''; } });
   function useState(next, preserveResources = false) {
     const pathChanged = next.exePath !== state.exePath;
@@ -69,7 +70,9 @@
   }
   function markBusy() {
     document.body.classList.toggle('busy', !!state.busy || pending);
-    document.querySelectorAll('[data-window]').forEach(el => {el.disabled = !!state.busy || pending;});
+    document.querySelectorAll('[data-window]').forEach(el => {
+      el.disabled = !transport?.windowAction || (el.dataset.window === 'close' && (!!state.busy || pending));
+    });
     document.querySelectorAll('[data-action]').forEach(el => {
       el.disabled = !enabled() || el.dataset.locked === 'true';
     });
@@ -77,6 +80,88 @@
   function targetName() {
     const install = (state.installs || []).find(i => i.exe === state.exePath || i.exePath === state.exePath);
     return install?.profile || (state.exeFound ? 'BlueStacks Player' : 'No target selected');
+  }
+  const settingsIcons = {
+    appearance: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-1.8 1.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.5v.1h-2.6v-.1a1.7 1.7 0 0 0-1-1.5 1.7 1.7 0 0 0-1.9.3l-.1.1-1.8-1.8.1-.1a1.7 1.7 0 0 0 .3-1.9 1.7 1.7 0 0 0-1.5-1H6v-2.6h.1a1.7 1.7 0 0 0 1.5-1 1.7 1.7 0 0 0-.3-1.9l-.1-.1L9 6.6l.1.1a1.7 1.7 0 0 0 1.9.3 1.7 1.7 0 0 0 1-1.5v-.1h2.6v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.9-.3l.1-.1 1.8 1.8-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.5 1h.1V14h-.1a1.7 1.7 0 0 0-1.1 1z"/></svg>',
+    updates: '<svg viewBox="0 0 24 24"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M5.6 9a7 7 0 0 1 11.7-2L20 12M4 12l2.7 5a7 7 0 0 0 11.7-2"/></svg>',
+    about: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7v1"/></svg>'
+  };
+  let settingsTab = 'appearance';
+  function settingsAppearance() {
+    return `<div class="settings-section-head"><span class="settings-eyebrow">WORKSPACE</span><h3>Appearance & installation</h3><p>Choose how BSI looks and which BlueStacks files its tools should use.</p></div>
+      <section class="settings-card"><div class="settings-card-head"><div><b>Color mode</b><p>Choose a comfortable look for the app.</p></div><span class="settings-badge">SAVES INSTANTLY</span></div><div class="settings-mode-row"><label class="editor-field"><span>Theme</span><select class="inp" id="appearance-mode" aria-label="App theme">${['Dark','Light','System'].map((name,i)=>`<option value="${i}" ${state.appearance===i?'selected':''}>${name}</option>`).join('')}</select></label><label class="editor-field"><span>Accent color</span><input type="color" class="inp settings-color" id="accent" aria-label="App accent" value="${esc(state.accent||'#9ce9c1')}"></label>${button('Save appearance','appearance',true)}</div></section>
+      <section class="settings-card"><div class="settings-card-head"><div><b>BlueStacks locations</b><p>Set the player executable, helper DLL and configuration file.</p></div></div>${[['exe','HD-Player.exe'],['dll','QuickTemplates2 DLL'],['conf','bluestacks.conf']].map(([role,label])=>`<div class="settings-path"><label class="editor-field" for="path-${role}"><span>${label}</span><input class="inp mono" id="path-${role}" value="${esc(state[role+'Path']||'')}"></label>${button('Browse…','browse',false,`data-role="${role}"`)}${button('Set path','path',false,`data-role="${role}"`)}</div>`).join('')}<div class="button-grid">${button('Detect installations','detectInstalls')}${button('Restore EXE backup','restoreBackup')}</div>${(state.installs||[]).map((install,index)=>`<div class="settings-install"><span>${esc(install.profile||install.root)}</span>${button('Use installation','useInstall',false,`data-index="${index}"`)}</div>`).join('')}</section>`;
+  }
+  function settingsAboutData() {
+    const profile = state.aboutProfile || {};
+    const links = Array.isArray(profile.links) ? profile.links : [];
+    return {
+      developerName: profile.developerName || 'Mr.Pc Gamer & Romulos',
+      tagline: profile.tagline || 'BlueStacks tools · with contributor Nova',
+      links: Array.from({length:4}, (_, i) => ({ kind: links[i]?.kind || ['github','discord','youtube','youtube'][i], title: links[i]?.title || '', url: links[i]?.url || '' }))
+    };
+  }
+  function aboutPreview(data = settingsAboutData()) {
+    const links = data.links.filter(link => link.title && link.url);
+    return `<div class="about-profile-preview"><img src="icon.png" alt="BSI Customizer emulator icon"><b>BSI CUSTOMIZER</b><h3>${esc(data.developerName)}</h3><p>${esc(data.tagline||'')}</p><small>Version ${esc(state.version||'—')}</small><div class="about-profile-links">${links.map(link=>`<span class="about-link-chip"><i>${link.kind==='discord'?'D':link.kind==='youtube'?'▶':'GH'}</i>${esc(link.title)}</span>`).join('')||'<span class="about-empty">Add up to four links below</span>'}</div></div>`;
+  }
+  function settingsAbout() {
+    const data = settingsAboutData();
+    return `<div class="settings-section-head"><span class="settings-eyebrow">YOUR PROFILE</span><h3>About BSI Customizer</h3><p>Build the About card shown in this app. Your profile is saved on this PC.</p></div>
+      <div id="about-profile-preview-host">${aboutPreview(data)}</div>
+      <section class="settings-card about-profile-editor"><div class="settings-card-head"><div><b>Profile details</b><p>Your name, short description, and four optional social links.</p></div></div>
+      <div class="settings-about-fields"><label class="editor-field"><span>Developer name</span><input class="inp" maxlength="80" data-about-field="developerName" value="${esc(data.developerName)}"></label><label class="editor-field"><span>Tagline</span><input class="inp" maxlength="120" data-about-field="tagline" value="${esc(data.tagline)}"></label></div>
+      <div class="settings-link-list">${data.links.map((link,index)=>`<div class="settings-link-row" data-about-link="${index}"><span class="settings-link-index">0${index+1}</span><label class="editor-field"><span>Service</span><select class="inp" data-about-field="kind"><option value="github" ${link.kind==='github'?'selected':''}>GitHub</option><option value="discord" ${link.kind==='discord'?'selected':''}>Discord</option><option value="youtube" ${link.kind==='youtube'?'selected':''}>YouTube</option></select></label><label class="editor-field"><span>Link label</span><input class="inp" maxlength="64" data-about-field="title" value="${esc(link.title)}" placeholder="e.g. Project source"></label><label class="editor-field"><span>HTTP(S) URL</span><input class="inp" maxlength="512" data-about-field="url" value="${esc(link.url)}" placeholder="https://…"></label></div>`).join('')}</div>
+      <div class="button-grid">${button('Save About profile','settings-about-save',true)}${button('Restore defaults','settings-about-reset')}</div></section>`;
+  }
+  function renderSettingsTab() {
+    const dialog = $('#settings-dialog');
+    if (!dialog) return;
+    document.querySelectorAll('[data-settings-tab]').forEach(tab => {
+      const active = tab.dataset.settingsTab === settingsTab;
+      tab.classList.toggle('active', active);
+      tab.setAttribute('aria-selected', String(active));
+      const icon = tab.querySelector('.settings-tab-icon');
+      if (icon) icon.innerHTML = settingsIcons[tab.dataset.settingsTab] || '';
+    });
+    const content = $('#settings-content');
+    content.innerHTML = settingsTab === 'appearance' ? settingsAppearance()
+      : settingsTab === 'updates' ? `<div class="settings-section-head"><span class="settings-eyebrow">RELEASES</span><h3>Updates & recovery</h3><p>Review version, trust and download state before choosing an update action.</p></div>${editors.settingsUpdates()}`
+      : settingsAbout();
+    markBusy();
+  }
+  function openSettings(tab = settingsTab) {
+    if (!['appearance','updates','about'].includes(tab)) tab = 'appearance';
+    settingsTab = tab;
+    const dialog = $('#settings-dialog');
+    if (!dialog.open) dialog.showModal();
+    renderSettingsTab();
+  }
+  function refreshVisibleView() {
+    if ($('#settings-dialog')?.open) renderSettingsTab();
+    else renderView();
+  }
+  function updateAboutPreviewFromForm() {
+    const host = $('#about-profile-preview-host');
+    if (!host) return;
+    const read = (name, fallback='') => host.closest('#settings-dialog')?.querySelector(`[data-about-field="${name}"]`)?.value ?? fallback;
+    const links = Array.from(document.querySelectorAll('[data-about-link]')).map(row => ({
+      kind: row.querySelector('[data-about-field="kind"]')?.value || 'github',
+      title: row.querySelector('[data-about-field="title"]')?.value || '',
+      url: row.querySelector('[data-about-field="url"]')?.value || ''
+    }));
+    host.innerHTML = aboutPreview({developerName:read('developerName','Your name'),tagline:read('tagline',''),links});
+  }
+  function updateWindowMode(maximized) {
+    windowMaximized = !!maximized;
+    const button = document.querySelector('[data-window="max"]');
+    if (!button) return;
+    button.title = windowMaximized ? 'Restore down' : 'Maximize';
+    button.setAttribute('aria-label', button.title);
+    button.dataset.maximized = String(windowMaximized);
+    button.innerHTML = windowMaximized
+      ? '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M4.5 2.5h5v5"/><path d="M8.5 4.5v5h-5v-5z"/></svg>'
+      : '<svg viewBox="0 0 12 12" aria-hidden="true"><rect x="2.5" y="2.5" width="7" height="7" rx="1.6"/></svg>';
   }
   function chrome() {
     const current = pages[page];
@@ -93,7 +178,7 @@
     $('#stats').innerHTML = page === 0 ? `<div class="stats">${[['Profile', targetName(), 'Active target'], ['Executable', state.exeFound ? 'Found' : 'Missing', 'HD-Player.exe'], ['Colors', palette.entries.filter(c => !!c.edit).length, 'Staged edits'], ['Resources', resources.length || '—', 'Explicit scans only']].map(([k, v, hint]) => `<div class="stat"><small>${k}</small><b>${esc(v)}</b><span>${hint}</span></div>`).join('')}</div>` : '';
     const meters = [['Colors staged', palette.entries.filter(c => !!c.edit).length, palette.entries.length], ['Resources loaded', resources.length, Math.max(resources.length, 1)], ['Target selected', state.exeFound ? 1 : 0, 1]];
     $('#tele').innerHTML = `<div class="telemetry"><div class="section-label">Live overview</div><h2>System state</h2>${meters.map(([label, value, total], i) => `<div class="meter"><div class="meter-top"><span>${label}</span><b>${i === 2 ? (value ? 'Ready' : 'Not set') : value + ' / ' + total}</b></div><div class="bar ${i === 1 ? 'blue' : i === 2 ? 'white' : ''}"><i style="width:${total ? Math.min(100, value / total * 100) : 0}%"></i></div></div>`).join('')}<div class="divider"></div>${[['Session', preview ? 'Preview only' : state.authorized ? 'Discord verified' : 'Required'], ['Engine', state.busy || pending ? 'Working…' : 'Idle'], ['Version', state.version || '—']].map(([k, v]) => `<div class="mini-status"><span>${k}</span><b>${esc(v)}</b></div>`).join('')}<div class="tele-actions">${button('OPEN PATCH WORKSPACE', 'workspaceHome', true)}${button('RESTORE ORIGINAL', 'restoreBackup')}<div class="tools">${button('Sign out', 'signOut')}</div></div></div>`;
-    document.querySelectorAll('[data-window]').forEach(el => { el.disabled = !transport?.windowAction || !!state.busy || pending; });
+    updateWindowMode(windowMaximized);
     renderLogs(); markBusy();
   }
   function renderLogs() {
@@ -171,7 +256,7 @@
     try {
       const value = await transport.invoke(method, args);
       operationResult = typeof value === 'string' ? value : JSON.stringify(value ?? 'Native request completed.', null, 2);
-      if (value?.msg) toast(value.msg);
+      if (value?.msg) toast(value.msg, /no supported completion gate/i.test(value.msg) ? 'warning' : 'success');
       return value;
     } finally {
       let latest;
@@ -188,7 +273,9 @@
     resourceIndex = BsiResourceSearch.prepare(resources);
   }
   async function navigate(index) {
-    if (!Number.isInteger(index) || index < 0 || index >= pages.length || index === page) return;
+    if (!Number.isInteger(index) || index < 0 || index >= pages.length) return;
+    if (index === 8) { openSettings('appearance'); return; }
+    if (index === page) return;
     if (pending || state.busy || !await confirmDiscard()) return;
     if (dirty) { selected = null; resourceData = null; }
     $('#profile-menu').open = false;
@@ -215,10 +302,32 @@
       if (name === 'replaceResource' && !await BsiEffects.confirm('Replace the selected EXE resource with this file?')) return;
       await request(name, { index: selected.index, path });
       if (name === 'replaceResource') { dirty = false; await refreshResources(); resourceData = await request('readResource', { index: selected.index }); }
-    } else if (name === 'browse') { if (!await confirmDiscard()) return; const path = await transport.chooseFile(el.dataset.role); if (!path) return; }
+    } else if (name === 'browse') { if (!await confirmDiscard()) return; const path = await transport.chooseFile(el.dataset.role); if (!path) return; const input = $('#path-' + el.dataset.role); if (input) input.value = path; }
     else if (name === 'bootVideoBrowse') { const path = await transport.chooseFile('boot-video'); if (!path) return; drafts.bootVideo = path; }
     else if (name === 'path') { if (!await confirmDiscard()) return; const role = el.dataset.role; await request('setPaths', { [role]: $('#path-' + role).value }); }
     else if (name === 'appearance') await request('setAppearance', { theme: Number($('#appearance-mode').value), accent: $('#accent').value });
+    else if (name === 'settings-about-save' || name === 'settings-about-reset') {
+      const profile = name === 'settings-about-reset' ? {
+        developerName: 'Mr.Pc Gamer & Romulos', tagline: 'BlueStacks tools · with contributor Nova',
+        links: [
+          {kind:'github',title:'Open-source project',url:'https://github.com/MrPcGamerYT/BSI-Customizer'},
+          {kind:'discord',title:'Community Discord',url:'https://discord.gg/5qkKPRZkWa'},
+          {kind:'youtube',title:'Mr.Pc Gamer on YouTube',url:'https://www.youtube.com/@MR.PC_GAMER_YT?sub_confirmation=1'},
+          {kind:'youtube',title:'Romulos on YouTube',url:'https://www.youtube.com/@Romulus_FF?sub_confirmation=1'}
+        ]
+      } : {
+        developerName: $('#settings-dialog [data-about-field="developerName"]').value,
+        tagline: $('#settings-dialog [data-about-field="tagline"]').value,
+        links: Array.from(document.querySelectorAll('#settings-dialog [data-about-link]')).map(row => ({
+          kind: row.querySelector('[data-about-field="kind"]').value,
+          title: row.querySelector('[data-about-field="title"]').value,
+          url: row.querySelector('[data-about-field="url"]').value
+        }))
+      };
+      await request('setAboutProfile', profile);
+      if (name === 'settings-about-save') toast('About profile saved on this PC.', 'success');
+      else toast('Default About profile restored.', 'success');
+    }
     else if (name === 'detectInstalls') await request(name);
     else if (name === 'useInstall') { if (!await confirmDiscard()) return; await request(name, { index: Number(el.dataset.index) }); }
     else if (name === 'signOut') { if (await confirmDiscard()) await request(name); return; }
@@ -231,18 +340,56 @@
         await request(name, { holdMs: Number($('#boot-hold').value), mode, sourcePath: mode === 'video' ? drafts.bootVideo : '' });
       } else await request(name, name === 'fpsPatch' ? { limit: Number($('#fps-limit').value) } : {});
     }
-    renderView();
+    refreshVisibleView();
   }
+  $('#settings-close').addEventListener('click', () => $('#settings-dialog').close());
+  const settingsHandle = $('#settings-drag-handle');
+  const settingsDialog = $('#settings-dialog');
+  let settingsDrag = null;
+  settingsHandle.addEventListener('pointerdown', event => {
+    if (event.button !== 0 || event.target.closest('#settings-close')) return;
+    const rect = settingsDialog.getBoundingClientRect();
+    settingsDialog.style.left = `${rect.left}px`;
+    settingsDialog.style.top = `${rect.top}px`;
+    settingsDialog.style.transform = 'none';
+    settingsDrag = { id:event.pointerId, x:event.clientX, y:event.clientY, left:rect.left, top:rect.top, width:rect.width, height:rect.height };
+    settingsHandle.setPointerCapture(event.pointerId);
+  });
+  settingsHandle.addEventListener('pointermove', event => {
+    if (!settingsDrag || settingsDrag.id !== event.pointerId) return;
+    const left = Math.max(8, Math.min(innerWidth - settingsDrag.width - 8, settingsDrag.left + event.clientX - settingsDrag.x));
+    const top = Math.max(8, Math.min(innerHeight - settingsDrag.height - 8, settingsDrag.top + event.clientY - settingsDrag.y));
+    settingsDialog.style.left = `${left}px`;
+    settingsDialog.style.top = `${top}px`;
+  });
+  for (const eventName of ['pointerup','pointercancel']) settingsHandle.addEventListener(eventName, event => {
+    if (settingsDrag?.id === event.pointerId) settingsDrag = null;
+  });
   document.addEventListener('click', async event => {
     try {
       const windowButton = event.target.closest('[data-window]');
-      if (windowButton) { if (windowButton.dataset.window === 'close' && !await confirmDiscard()) return; if (!state.busy && !pending) await BsiEffects.windowAction(windowButton.dataset.window, action => transport?.windowAction?.(action)); return; }
+      if (windowButton) {
+        const action = windowButton.dataset.window;
+        if (action === 'close' && (!await confirmDiscard() || state.busy || pending)) return;
+        if (action !== 'close' || (!state.busy && !pending))
+          await BsiEffects.windowAction(action, selected => transport?.windowAction?.(selected));
+        return;
+      }
+      const settingsTabButton = event.target.closest('[data-settings-tab]');
+      if (settingsTabButton) { settingsTab = settingsTabButton.dataset.settingsTab; renderSettingsTab(); return; }
       const interfaceTab = event.target.closest('[data-interface-tab]');
       if (interfaceTab) { editors.selectInterfaceTab(interfaceTab.dataset.interfaceTab); renderView(); return; }
       const maintenanceTab = event.target.closest('[data-maint-tab]');
       if (maintenanceTab) { editors.selectMaintenanceTab(maintenanceTab.dataset.maintTab); renderView(); return; }
       const actionEl = event.target.closest('[data-action]');
-      if (actionEl) { if (actionEl.dataset.action === 'workspaceHome') await navigate(11); else await action(actionEl); return; }
+      if (actionEl) {
+        if (actionEl.dataset.action === 'workspaceHome') await navigate(11);
+        else if (actionEl.dataset.action.startsWith('editor:')) {
+          await editors.action(actionEl.dataset.action.slice(7), actionEl, settingsDialog.open ? 9 : page);
+          refreshVisibleView();
+        } else await action(actionEl);
+        return;
+      }
       const nav = event.target.closest('[data-page]');
       if (nav) { await navigate(Number(nav.dataset.page)); return; }
       const row = event.target.closest('[data-resource]');
@@ -263,6 +410,7 @@
   document.addEventListener('input', event => {
     const el = event.target;
     editors.input(el);
+    if (el.matches('[data-about-field]')) updateAboutPreviewFromForm();
     if (page === 6 && /^(about:|link:)/.test(el.dataset.editorField || '')) { const preview = $('#interface-about-preview'); if (preview) preview.innerHTML = editors.aboutPreview(); }
     if (el.id === 'resource-filter') { filter = el.value; offset = 0; renderResources(); }
     if (el.id === 'resource-code' && resourceData) { resourceData.text = el.value; dirty = true; scheduleMeasurement(); }
@@ -271,6 +419,7 @@
   document.addEventListener('change', async event => {
     const el = event.target;
     editors.input(el);
+    if (el.matches('[data-about-field]')) updateAboutPreviewFromForm();
     if (el.dataset.draft) drafts[el.dataset.draft] = el.value;
     if (el.id === 'boot-mode') { renderView(); return; }
     if (page === 6 && /^(about:|link:)/.test(el.dataset.editorField || '')) { const preview = $('#interface-about-preview'); if (preview) preview.innerHTML = editors.aboutPreview(); }
@@ -318,6 +467,7 @@
     try {
       transport = await BsiTransport.connect();
       transport.onState(useState);
+      transport.onWindowMode?.(updateWindowMode);
       transport.onVideo?.(message => editors.videoStatus(message));
       transport.onLog(message => { logs.push([new Date().toLocaleTimeString(), message]); if (logs.length > 500) logs.shift(); renderLogs(); });
       const initial = await transport.snapshot();

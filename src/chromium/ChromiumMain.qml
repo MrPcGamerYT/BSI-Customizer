@@ -71,6 +71,7 @@ ApplicationWindow {
         "FpsPage.qml", "IntegrityPage.qml", "BootVideoPage.qml", "UiPage.qml", "RpcidPage.qml",
         "AppearancePage.qml", "AboutPage.qml", "GifRpcPage.qml", "WorkspacePage.qml", "DebloatPage.qml"]
     onClosing: (close) => { if (backend.busy) close.accepted = false; }
+    onVisibilityChanged: rpc.windowModeChanged(visibility === Window.Maximized)
 
     QtObject {
         id: rpc
@@ -87,6 +88,7 @@ ApplicationWindow {
         function invoke(method, args) { return webBridge.invoke(method, args); }
         function requestFile(role) { webBridge.requestFile(role); }
         signal stateChanged(var state)
+        signal windowModeChanged(bool maximized)
         signal logMessage(string message, string color)
         signal fileSelected(string role, string path)
         signal videoStatus(string message)

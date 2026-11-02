@@ -66,6 +66,10 @@
         await refreshWorkspace(action === 'profile-load');
         return response;
       }
+      function settingsUpdates() {
+        const u = getState().updates || {};
+        return card('Release & recovery', `<div class="editor-grid">${[['Installed build', u.currentVersion || getState().version || '—'], ['Updater', u.configured ? 'Configured' : 'Not configured'], ['Status', u.state || 'Idle'], ['Latest release', u.latestVersion || '—'], ['Trust', u.trust || '—'], ['Download size', u.downloadSize || '—']].map(([k, v]) => `<div class="kv"><span>${k}</span><b>${esc(v)}</b></div>`).join('')}</div><p class="note">${esc(u.note || '')}</p>${check('updates:auto', 'Check for updates automatically', u.autoCheck !== false)}${actions(btn('Save preference', 'updates-auto') + btn('Check now', 'update-check', true) + btn('Download verified update', 'update-download') + btn('Apply & restart', 'update-apply') + btn('Cancel download', 'update-cancel') + btn(u.skipped ? 'Unskip release' : 'Skip optional release', u.skipped ? 'update-unskip' : 'update-skip') + btn('Open download page', 'update-openDownloadPage') + btn('Show staged file', 'update-showStagedFile') + btn('Read helper diagnostics', 'update-diagnostics') + btn('Open helper log', 'update-showHelperLog'))}<pre class="editor-result">${esc(u.releaseNotes || '')}</pre>`);
+      }
       function render(page) {
         if (page === 12) return maintenance.render() + result(page);
         if (page === 6) {
@@ -222,6 +226,7 @@
         selectInterfaceTab(tab) { if (['layout', 'about', 'remove'].includes(tab)) interfaceTab = tab; },
         selectMaintenanceTab(tab) { maintenance.selectTab(tab); },
         aboutPreview,
+        settingsUpdates,
         reset() { maintenance.reset(); videoSelected=false; videoStatus=''; interfaceTab='layout'; fields = {}; interfaceInfo = null; profile = {}; operations = []; plan = null; history = []; gradients = []; output = {}; rpcNames = []; instances = []; imageSource = ''; comparison = null; original = null; },
         async navigate(page) { if ([5, 10, 11].includes(page) && ctx.enabled()) await refreshWorkspace(); }
       };
