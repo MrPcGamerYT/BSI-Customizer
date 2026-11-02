@@ -12,6 +12,7 @@
 #include "ExtrasPatcher.h"
 #include "IntegrityPatcher.h"
 #include "AboutPatcher.h"
+#include "SettingsPanelPatcher.h"
 #include "DebloatPatcher.h"
 #include "LayoutPatcher.h"
 #include "RootVhd.h"
@@ -1950,6 +1951,28 @@ QString Backend::aboutPageReport()
     if (path.isEmpty() || !QFileInfo::exists(path))
         return QStringLiteral("Select the HD-Player.exe path first.");
     return AboutPatcher::summary(path);
+}
+
+QVariantMap Backend::settingsPanelRebuildState()
+{
+    const auto state = SettingsPanelPatcher::analyze(m_settings->exePath());
+    return {{QStringLiteral("supported"), state.supported},
+            {QStringLiteral("applied"), state.applied},
+            {QStringLiteral("restorable"), state.restorable},
+            {QStringLiteral("detail"), state.detail}};
+}
+
+QVariantMap Backend::applySettingsPanelRebuild(bool enabled)
+{
+    if (actionsLocked()) return lockedMap();
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) { return worker.applySettingsPanelRebuild(enabled); });
+    const auto response = SettingsPanelPatcher::apply(m_settings->exePath(),
+        m_settings->aboutDeveloperName(), m_settings->aboutLinks(), enabled);
+    if (response.value(QStringLiteral("ok")).toBool()) emit resourcesChanged();
+    return result(response.value(QStringLiteral("ok")).toBool(),
+                  response.value(QStringLiteral("msg")).toString(),
+                  response.value(QStringLiteral("ok")).toBool() ? QStringLiteral("green") : QStringLiteral("red"));
 }
 
 QVariantMap Backend::restoreBackup(const QString &path)

@@ -10,7 +10,7 @@
     ['Performance', 'FPS', 'More room to perform.', 'The same native FPS detection, analysis and patch engines.'],
     ['Integrity & safety', 'Integrity', 'Inspect before you change.', 'Native integrity checks, patching and restore.'],
     ['Boot experience', 'Boot', 'Make an entrance.', 'Configure the native boot patch or open the complete editor.'],
-    ['Player interface', 'Interface', 'Less noise. More you.', 'Removals, layout tweaks and editable player About text and links.'],
+    ['Player interface', 'Interface', 'Less noise. More you.', 'Removals, layout tweaks, the in-player Settings redesign and editable About pages.'],
     ['Discord presence', 'Presence', 'Your player, represented.', 'Keep the existing Rich Presence ID and version-resource utilities.'],
     ['Appearance', 'Settings', 'Your workspace.', 'App appearance and target paths. These are not player theme colors.'],
     ['About BSI', 'About', 'Built around your player.', 'Chromium presentation. C++ patch engines. Existing login and update verification.'],

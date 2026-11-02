@@ -230,7 +230,8 @@ QVariantMap WebBridge::invoke(const QString &method, const QVariantMap &args)
         value = true;
     } else if (method == QLatin1String("readInterface")) {
         value = QVariantMap{{"removals", m_backend.removalNames()}, {"layout", m_backend.layoutTweaks()},
-                            {"about", m_backend.aboutPageState()}};
+                            {"about", m_backend.aboutPageState()},
+                            {"settingsPanel", m_backend.settingsPanelRebuildState()}};
     } else if (method == QLatin1String("applyRemovals")) {
         QStringList names;
         for (const auto &name : args.value("names").toList()) names << name.toString();
@@ -240,6 +241,8 @@ QVariantMap WebBridge::invoke(const QString &method, const QVariantMap &args)
     } else if (method == QLatin1String("applyAboutPage")) {
         value = m_backend.applyAboutPage(text("text"), args.value("links").toList(),
             args.value("showSections", true).toBool(), args.value("enabled", true).toBool());
+    } else if (method == QLatin1String("applySettingsPanelRebuild")) {
+        value = m_backend.applySettingsPanelRebuild(args.value("enabled", true).toBool());
     } else if (method == QLatin1String("aboutPageReport")) value = m_backend.aboutPageReport();
     else if (method == QLatin1String("rpcidFind")) value = m_backend.rpcidFind(m_backend.exePath(), true);
     else if (method == QLatin1String("rpcidStatus")) value = m_backend.rpcidStatus(m_backend.exePath());

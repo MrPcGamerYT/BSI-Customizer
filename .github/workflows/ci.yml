@@ -51,6 +51,8 @@ jobs:
           node-version: '22'
       - name: Test resource search matching and large lists
         run: node tests/resource_search_test.mjs
+      - name: Test Chromium Settings-panel rebuild controls and profile flow
+        run: node tests/settings_panel_ui_test.mjs
       - name: Test adaptive application window placement across display sizes
         run: node tests/window_geometry_test.mjs
       - uses: actions/setup-python@v5

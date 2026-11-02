@@ -8,6 +8,7 @@
 #include "core/EmbeddedResources.h"
 #include "core/ExtrasPatcher.h"
 #include "core/AboutPatcher.h"
+#include "core/SettingsPanelPatcher.h"
 #include "core/AndroidCleanup.h"
 #include "core/rootdisk/RootDisk.h"
 #include "core/AdbClient.h"
@@ -4705,6 +4706,57 @@ Window {
         }
         ciNotice(QStringLiteral("real All files scan: %1 entries, %2 SVGs, %3 SVG thumbnails")
                      .arg(resourceCount).arg(svgCount).arg(svgThumbCount));
+
+        // Exercise the actual Settings-panel rebuild on a disposable copy of
+        // every uploaded player version. The source reference is only read;
+        // both the native settings window and About source are restored after
+        // the apply/update/restore cycle.
+        const auto panelState = SettingsPanelPatcher::analyze(input);
+        check(panelState.supported && !panelState.applied,
+              QStringLiteral("the real %1 exposes a unique editable Settings window and About page (%2)")
+                  .arg(QFileInfo(input).fileName(), panelState.detail));
+        if (panelState.supported && !panelState.applied) {
+            const QString panelDir = temp.filePath(QStringLiteral("settings-panel-")
+                                                    + QFileInfo(input).completeBaseName());
+            QDir().mkpath(panelDir);
+            const QString panelCopy = QDir(panelDir).filePath(QStringLiteral("HD-Player.exe"));
+            write(panelCopy, original);
+            QVariantList panelLinks {
+                QVariantMap{{QStringLiteral("title"), QStringLiteral("Regression source")},
+                            {QStringLiteral("url"), QStringLiteral("https://example.com/source")}},
+                QVariantMap{{QStringLiteral("title"), QStringLiteral("Regression community")},
+                            {QStringLiteral("url"), QStringLiteral("https://example.com/community")}},
+                QVariantMap{{QStringLiteral("title"), QStringLiteral("Regression video")},
+                            {QStringLiteral("url"), QStringLiteral("https://example.com/video")}}
+            };
+            const auto appliedPanel = SettingsPanelPatcher::apply(panelCopy,
+                QStringLiteral("BSI Panel Regression"), panelLinks, true);
+            check(appliedPanel.value(QStringLiteral("ok")).toBool(),
+                  QStringLiteral("the real %1 Settings panel rebuild applies to a disposable copy (%2)")
+                      .arg(QFileInfo(input).fileName(), appliedPanel.value(QStringLiteral("msg")).toString()));
+            if (appliedPanel.value(QStringLiteral("ok")).toBool()) {
+                const auto activePanel = SettingsPanelPatcher::analyze(panelCopy);
+                check(activePanel.supported && activePanel.applied && activePanel.restorable,
+                      QStringLiteral("the rebuilt %1 panel reads back and has a selective recovery snapshot")
+                          .arg(QFileInfo(input).fileName()));
+                const auto updatedPanel = SettingsPanelPatcher::apply(panelCopy,
+                    QStringLiteral("BSI Panel Regression Updated"), panelLinks, true);
+                check(updatedPanel.value(QStringLiteral("ok")).toBool(),
+                      QStringLiteral("the real %1 panel safely accepts an About profile update (%2)")
+                          .arg(QFileInfo(input).fileName(), updatedPanel.value(QStringLiteral("msg")).toString()));
+                const auto restoredPanel = SettingsPanelPatcher::apply(panelCopy, QString(), {}, false);
+                check(restoredPanel.value(QStringLiteral("ok")).toBool(),
+                      QStringLiteral("the real %1 panel restores only its two original QML sources (%2)")
+                          .arg(QFileInfo(input).fileName(), restoredPanel.value(QStringLiteral("msg")).toString()));
+                const auto finalPanel = SettingsPanelPatcher::analyze(panelCopy);
+                check(finalPanel.supported && !finalPanel.applied,
+                      QStringLiteral("the original %1 Settings window is recognized again after restore")
+                          .arg(QFileInfo(input).fileName()));
+            }
+            check(read(input) == original,
+                  QStringLiteral("the uploaded %1 reference remains byte-for-byte untouched")
+                      .arg(QFileInfo(input).fileName()));
+        }
 
         const auto first = ThemeEngine::findThemeZlib(original);
         check(first.found && first.hasQrcNode && !first.ambiguous, "the supplied EXE has a unique mapped theme resource");

@@ -105,6 +105,8 @@ assert.ok(webApp.includes('resource-detail-grid') && webApp.includes('resource-p
 assert.ok(webApp.includes("['All files', 'Pictures', 'SVG'"), 'The resource filter names the all-files state explicitly');
 const webEditors = read('src/web/editors.js');
 assert.ok(webEditors.includes('data-interface-tab') && webEditors.includes('About page') && webEditors.includes('aboutPreview'), 'Player Interface is grouped and has a live safe About preview');
+assert.ok(webEditors.includes("'settings-panel'") && webEditors.includes("'settings-panel-apply'") && webEditors.includes("'settings-panel-restore'"), 'The Chromium Player Interface exposes native Settings-panel apply and restore actions');
+assert.ok(bridge.includes('applySettingsPanelRebuild') && bridge.includes('"settingsPanel", m_backend.settingsPanelRebuildState()'), 'Native bridge reports and applies the real Settings-panel patcher');
 const webMaintenance = read('src/web/maintenance.js');
 assert.ok(webMaintenance.includes('data-maint-tab') && webMaintenance.includes('Root image file manager') && webMaintenance.includes('disk-manager') && webMaintenance.includes('disk-breadcrumbs'), 'Debloat modes are grouped and Root disk browsing uses a file-manager layout');
 assert.ok(webMaintenance.includes("disk?.writable") && webApp.includes("el.dataset.locked === 'true'"), 'Disk writes remain visibly gated by native writable status');

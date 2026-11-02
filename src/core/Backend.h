@@ -207,6 +207,8 @@ public:
     // What the About editor sees, in a few lines: what was located, what the
     // page prints now and why it is refused when it is.
     Q_INVOKABLE QString aboutPageReport();
+    Q_INVOKABLE QVariantMap settingsPanelRebuildState();
+    Q_INVOKABLE QVariantMap applySettingsPanelRebuild(bool enabled = true);
     Q_INVOKABLE QVariantMap restoreBackup(const QString &path);
 
     // ---- BlueStacks Debloat (config, hosts, cloud companions) ----
