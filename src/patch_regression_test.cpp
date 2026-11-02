@@ -4667,8 +4667,45 @@ Window {
         const auto original = read(input);
         std::printf("  Reference bytes: %lld; SHA256: %s\n", static_cast<long long>(original.size()),
                     QCryptographicHash::hash(original, QCryptographicHash::Sha256).toHex().constData());
-        ciNotice(QStringLiteral("reference EXE %1 (%2 bytes) - solid and gradient paths below run against it")
+        ciNotice(QStringLiteral("reference EXE %1 (%2 bytes) - solid, gradient, Resources, and boot paths run against it")
                      .arg(QFileInfo(input).fileName()).arg(original.size()));
+
+        // Exercise the exact All files snapshot used by the Resources tab on
+        // each uploaded HD-Player reference, without writing to that reference.
+        SettingsManager resourceSettings(nullptr, false);
+        resourceSettings.setFpsAutoDetect(false);
+        resourceSettings.setExePath(input);
+        Backend resourceBackend(&resourceSettings);
+        const int resourceCount = resourceBackend.scanResources(true);
+        const QVariantList resourceRows = resourceBackend.resourceInfos();
+        int svgCount = 0, svgThumbCount = 0;
+        bool editableSvg = false, selectedSvgPreview = false;
+        for (const auto &value : resourceRows) {
+            const QVariantMap row = value.toMap();
+            if (row.value(QStringLiteral("kind")).toString() != QLatin1String("svg"))
+                continue;
+            ++svgCount;
+            const int index = row.value(QStringLiteral("index")).toInt();
+            const QString thumbnail = row.value(QStringLiteral("thumbnail")).toString();
+            if (thumbnail.startsWith(QLatin1String("data:image/svg+xml;base64,")))
+                ++svgThumbCount;
+            if (!editableSvg) {
+                editableSvg = !resourceBackend.resourceTextAt(index).trimmed().isEmpty();
+                selectedSvgPreview = resourceBackend.resourcePreviewAt(index, 640)
+                                         .startsWith(QLatin1String("data:image/svg+xml;base64,"));
+            }
+        }
+        check(resourceCount > 0 && resourceRows.size() == resourceCount,
+              "the real HD-Player All files scan publishes every embedded resource");
+        if (svgCount > 0) {
+            check(svgThumbCount > 0,
+                  "the real HD-Player All files scan prepares at least one small SVG thumbnail");
+            check(editableSvg && selectedSvgPreview,
+                  "a selected real HD-Player SVG supplies editable source and a larger preview");
+        }
+        ciNotice(QStringLiteral("real All files scan: %1 entries, %2 SVGs, %3 SVG thumbnails")
+                     .arg(resourceCount).arg(svgCount).arg(svgThumbCount));
+
         const auto first = ThemeEngine::findThemeZlib(original);
         check(first.found && first.hasQrcNode && !first.ambiguous, "the supplied EXE has a unique mapped theme resource");
         if (!first.hasQrcNode) std::printf("    %s\n", qPrintable(first.resource.detail));

@@ -38,6 +38,13 @@ const server = http.createServer((req, res) => {
       await offline.locator(`#spine [data-page="${i}"]`).evaluate(el => el.click());
       assert.ok(await offline.locator('#main').innerText());
       assert.equal(await offline.locator('[data-action]:enabled').count(), 0, `Offline native action on page ${i}`);
+      if (i === 8) {
+        assert.equal(await offline.locator('#settings-dialog').evaluate(el => el.open), true, 'Settings opens as a modal rather than a sidebar page');
+        assert.equal(await offline.locator('[data-settings-tab]').count(), 3, 'Settings keeps Appearance, Updates and About in the top tab row');
+        await offline.locator('[data-settings-tab="about"]').click();
+        assert.equal(await offline.locator('#about-profile-preview-host img').count(), 1, 'About profile centers the application icon');
+        await offline.locator('#settings-close').click();
+      }
     }
     await offline.locator('#spine [data-page="0"]').evaluate(el => el.click());
     if (process.env.BSI_WEB_SCREENSHOT) await offline.screenshot({ path: process.env.BSI_WEB_SCREENSHOT });
@@ -48,11 +55,26 @@ const server = http.createServer((req, res) => {
     assert.equal(await offline.locator('#cmd').count(), 0, 'Duplicate quick navigation is removed');
     assert.equal(await offline.getByText('UI by @Floatz4Ever').count(), 0, 'Visible concept attribution is removed');
     assert.equal(await offline.locator('.orbs i').count(), 3);
-    for (const size of [{width: 1100, height: 700}, {width: 1920, height: 1080}]) {
+    for (const size of [{width: 918, height: 646}, {width: 1100, height: 700}, {width: 1920, height: 1080}]) {
       await offline.setViewportSize(size);
       const visible = await offline.locator('#main > .matrix').boundingBox();
       assert.ok(visible.x >= 0 && visible.y >= 0 && visible.x + visible.width <= size.width + 1 && visible.y + visible.height <= size.height + 1);
+      assert.equal(await offline.locator('#stage').evaluate(el => getComputedStyle(el).transform), 'none', 'Responsive layouts must not scale the whole interface down');
+      assert.equal(await offline.locator('body').evaluate(el => getComputedStyle(el).fontSize), '12px', 'Text keeps its readable CSS size at compact window dimensions');
     }
+    await offline.setViewportSize({width:918,height:646});
+    await offline.locator('#spine [data-page="8"]').evaluate(el => el.click());
+    const settingsBox = await offline.locator('#settings-dialog').boundingBox();
+    assert.ok(Math.abs(settingsBox.width - 918 * 0.70) < 2, 'Settings dialog is about 70% of a compact workspace width');
+    const settingsHead = await offline.locator('#settings-drag-handle').boundingBox();
+    await offline.mouse.move(settingsHead.x + 120, settingsHead.y + settingsHead.height / 2);
+    await offline.mouse.down();
+    await offline.mouse.move(settingsHead.x + 155, settingsHead.y + settingsHead.height / 2 + 24);
+    await offline.mouse.up();
+    const movedSettings = await offline.locator('#settings-dialog').boundingBox();
+    assert.ok(movedSettings.x > settingsBox.x + 20 && movedSettings.y > settingsBox.y + 10, 'Settings header drag moves the panel without losing it off-screen');
+    await offline.locator('#settings-close').click();
+    await offline.setViewportSize({width:1480,height:920});
     assert.deepEqual(errors, []);
     const page = offline;
     await page.mouse.move(700, 110);
@@ -67,11 +89,15 @@ const server = http.createServer((req, res) => {
       const signal = () => ({ handlers: [], connect(fn) { this.handlers.push(fn); }, emit(...args) { this.handlers.forEach(fn => fn(...args)); } });
       window.__calls = [];
       let profile = {}, operations = [];
-      const state = { protocol: 1, authorized: true, busy: false, exeFound: true, exePath: 'C:\\fixture\\HD-Player.exe', version: 'test-only', resourceRevision: 0, workspaceRevision: 0, updates: { configured: true, state: 'idle' }, themeStatus: 'Fixture palette', themeMethod: 'qml' };
+      const state = { protocol: 1, authorized: true, busy: false, exeFound: true, exePath: 'C:\\fixture\\HD-Player.exe', version: 'test-only', resourceRevision: 0, workspaceRevision: 0, updates: { configured: true, state: 'idle' }, aboutProfile: { developerName: 'Fixture developer', tagline: 'Fixture tagline', links: [{kind:'github',title:'Source',url:'https://example.test/source'},{kind:'discord',title:'Community',url:'https://example.test/chat'},{kind:'youtube',title:'Video',url:'https://example.test/video'},{kind:'youtube',title:'More videos',url:'https://example.test/more'}] }, themeStatus: 'Fixture palette', themeMethod: 'qml' };
       const colors = [{ name: 'testAccent', value: '#123456', edit: '', purpose: 'Test fixture only' }];
+      const svgPreview = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI+PGNpcmNsZSBjeD0iMTIiIGN5PSIxMiIgcj0iOCIvPjwvc3ZnPg==';
       const rows = Array.from({ length: 250 }, (_, index) => ({ index, path: `qml/fixture-${index}.qml`, kind: 'text', text: true, size: 100, stored: 80, format: 'QML' }));
+      rows[248] = { index: 248, path: 'images/fixture-background.jpg', kind: 'image', text: false, size: 1234, stored: 1234, format: 'JPEG', thumbnail: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p6sAAAAASUVORK5CYII=' };
+      rows[249] = { index: 249, path: 'images/fixture-sidebar.svg', kind: 'svg', text: true, size: 128, stored: 128, format: 'SVG', thumbnail: svgPreview };
       const remote = {
-        stateChanged: signal(), logMessage: signal(), fileSelected: signal(), videoStatus: signal(),
+        stateChanged: signal(), windowModeChanged: signal(), logMessage: signal(), fileSelected: signal(), videoStatus: signal(),
+        windowAction(action) { (window.__windowActions ||= []).push(action); },
         snapshot(callback) { callback({ ...state }); },
         requestFile(role) { const path = window.__nextFile || ''; window.__nextFile = ''; remote.fileSelected.emit(role, path); },
         invoke(method, args, callback) {
@@ -81,9 +107,13 @@ const server = http.createServer((req, res) => {
           if (method === 'setThemeEdit') colors[0].edit = args.value;
           if (method === 'scanResources') { ++state.resourceRevision; value = rows.length; }
           if (method === 'listResources') value = rows;
-          if (method === 'readResource') value = { text: 'Item { property string value: "<img src=x onerror=alert(1)>" }', preview: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p6sAAAAASUVORK5CYII=', budget: { known: true, capacity: 300, msg: 'Test only' } };
+          if (method === 'readResource') value = args.index === 249
+            ? { text: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/></svg>', preview: svgPreview, note: '', budget: { known: true, capacity: 300, msg: 'SVG fixture only' } }
+            : { text: 'Item { property string value: "<img src=x onerror=alert(1)>" }', preview: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p6sAAAAASUVORK5CYII=', budget: { known: true, capacity: 300, msg: 'Test only' } };
           if (method === 'saveResource') { ++state.resourceRevision; value = { ok: true, msg: 'Test fixture acknowledged save' }; }
+          if (method === 'setAboutProfile') { state.aboutProfile = { ...args, links: args.links.map(link => ({...link})) }; value = true; }
           if (method === 'fpsPatch') value = { ok: false, msg: 'Fixture: target is unsupported; no write' };
+          if (method === 'bootPatch') value = { ok: true, msg: 'Built-in modern boot screen installed; no supported completion gate was found; requested 4567 ms hold was not applied.' };
           if (method === 'readInterface') value = {
             removals: ['Fixture sidebar', 'Fixture banner'], layout: [{ id: 'test-layout', label: 'Fixture layout', supported: true, applied: false }],
             about: { supported: true, text: 'Original fixture About', showSections: true, links: [{ id: 'website', name: 'Website', label: 'Original label', url: 'https://example.test', hidden: false }] }
@@ -118,11 +148,46 @@ const server = http.createServer((req, res) => {
         }
       };
       window.__remote = remote;
+      window.__setBusy = busy => { state.busy = busy; remote.stateChanged.emit({ ...state }); };
       window.qt = { webChannelTransport: {} };
       window.QWebChannel = function (_, ready) { ready({ objects: { bsi: remote } }); };
     });
     await page.goto(url);
     await page.locator('#connection').waitFor({ state: 'hidden' });
+    const maxButton = page.locator('[data-window="max"]');
+    await maxButton.evaluate(el => el.click());
+    await page.waitForFunction(() => __windowActions?.includes('max'));
+    await page.evaluate(() => __remote.windowModeChanged.emit(true));
+    assert.equal(await maxButton.getAttribute('aria-label'), 'Restore down', 'Maximized window exposes a restore action');
+    await page.evaluate(() => __setBusy(true));
+    assert.equal(await page.locator('[data-window="min"]').isDisabled(), false, 'Minimize remains available during a native operation');
+    assert.equal(await page.locator('[data-window="max"]').isDisabled(), false, 'Maximize/restore remains available during a native operation');
+    assert.equal(await page.locator('[data-window="close"]').isDisabled(), true, 'Close stays guarded while native work is active');
+    await page.evaluate(() => __setBusy(false));
+    await page.locator('[data-window="max"]').evaluate(el => el.click());
+    await page.evaluate(() => __remote.windowModeChanged.emit(false));
+    assert.equal(await maxButton.getAttribute('aria-label'), 'Maximize', 'Restored window returns to the maximize affordance');
+    await page.locator('[data-window="min"]').evaluate(el => el.click());
+    await page.waitForFunction(() => __windowActions?.includes('min'));
+    await page.locator('#spine [data-page="8"]').evaluate(el => el.click());
+    await page.locator('[data-settings-tab="about"]').click();
+    await page.locator('[data-about-field="developerName"]').fill('Updated Fixture Developer');
+    await page.locator('[data-about-field="tagline"]').fill('A customized About panel');
+    await page.locator('[data-about-link="0"] [data-about-field="title"]').fill('My project');
+    await page.locator('[data-about-link="0"] [data-about-field="url"]').fill('https://example.test/my-project');
+    await page.locator('[data-action="settings-about-save"]').evaluate(el => el.click());
+    await page.waitForFunction(() => __calls.some(c => c.method === 'setAboutProfile'));
+    const profileCall = await page.evaluate(() => __calls.findLast(c => c.method === 'setAboutProfile'));
+    assert.equal(profileCall.args.developerName, 'Updated Fixture Developer');
+    assert.equal(profileCall.args.tagline, 'A customized About panel');
+    assert.equal(profileCall.args.links.length, 4, 'About profile always has four bounded link slots');
+    assert.match(await page.locator('#about-profile-preview-host').innerText(), /Updated Fixture Developer/);
+    await page.locator('[data-settings-tab="updates"]').click();
+    assert.match((await page.locator('#settings-content').innerText()).toLowerCase(), /release & recovery/);
+    await page.locator('[data-action="editor:updates-auto"]').evaluate(el => el.click());
+    await page.waitForFunction(() => __calls.some(c => c.method === 'updates' && c.args.action === 'autoCheck'));
+    await page.locator('[data-settings-tab="appearance"]').click();
+    await page.locator('#settings-close').click();
     await page.locator('#spine [data-page="2"]').evaluate(el => el.click());
     await page.waitForTimeout(800);
     assert.equal(await page.evaluate(() => __calls.filter(c => c.method === 'scanResources').length), 0, 'Navigation must never scan');
@@ -130,6 +195,16 @@ const server = http.createServer((req, res) => {
     await page.waitForFunction(() => __calls.some(c => c.method === 'scanResources') && __calls.some(c => c.method === 'listResources'));
     await page.locator('[data-resource="0"]').waitFor();
     assert.equal(await page.locator('[data-resource]').count(), 100, 'Resource DOM must be paginated');
+    const svgListRow = page.locator('[data-resource="249"]');
+    assert.equal(await svgListRow.isVisible(), true, 'All files puts SVG resources on the first page instead of hiding them behind the SVG filter');
+    assert.ok((await svgListRow.locator('.resource-thumb').getAttribute('src')).startsWith('data:image/svg+xml;base64,'), 'SVG row shows its miniature preview before the filename');
+    await svgListRow.evaluate(el => el.click());
+    await page.locator('#resource-code').waitFor();
+    assert.match(await page.locator('#resource-code').inputValue(), /<svg/);
+    assert.equal(await page.locator('#resource-image').isVisible(), true, 'Selecting an SVG loads its large preview beside editable SVG source');
+    assert.ok((await page.locator('#resource-image').getAttribute('src')).startsWith('data:image/svg+xml;base64,'));
+    await page.locator('[data-resource="0"]').evaluate(el => el.click());
+    await page.waitForFunction(() => __calls.filter(c => c.method === 'readResource').length >= 2);
     assert.equal(await page.evaluate(() => __calls.filter(c => c.method === 'scanResources').length), 1);
     await page.locator('#resource-filter').fill('fixture-23 qml');
     await page.locator('[data-resource="23"]').evaluate(el => el.click());
@@ -163,6 +238,7 @@ const server = http.createServer((req, res) => {
     for (let i = 0; i < 13; ++i) {
       await page.locator(`#spine [data-page="${i}"]`).evaluate(el => el.click());
       assert.ok(await page.locator('#main').innerText());
+      if (i === 8) await page.locator('#settings-close').click();
     }
     // New HTML editors must dispatch the original backend contracts rather
     // than opening a native-editor placeholder.
@@ -220,6 +296,8 @@ const server = http.createServer((req, res) => {
     await page.waitForFunction(() => __calls.some(c => c.method === 'bootPatch'));
     let bootCall = await last('bootPatch');
     assert.deepEqual(bootCall.args, { holdMs: 4567, mode: 'modern', sourcePath: '' });
+    await page.locator('#toast').filter({ hasText: 'no supported completion gate' }).waitFor();
+    assert.equal(await page.locator('#toast').getAttribute('data-kind'), 'warning', 'Installed boot screen with an unapplied hold is shown as a partial-success warning, not a red failure');
     await page.locator('#boot-mode').selectOption('video');
     await page.evaluate(()=>{window.__nextFile='C:\\fixture\\modern-boot.mp4';});
     await page.locator('[data-action="bootVideoBrowse"]').evaluate(el => el.click());
@@ -278,7 +356,13 @@ const server = http.createServer((req, res) => {
     assert.deepEqual(maintenanceCall.args.packages,['com.fixture.ad']);
     assert.equal(maintenanceCall.args.keepCopy,true);
     assert.equal(maintenanceCall.args.clearAppData,false);
+    await page.setViewportSize({ width: 918, height: 646 });
     await page.locator('[data-maint-tab="disk"]').evaluate(el => el.click());
+    const diskPathBox = await page.locator('.disk-open-controls .editor-field').boundingBox();
+    const diskActionsBox = await page.locator('.disk-open-controls .button-grid').boundingBox();
+    assert.ok(diskActionsBox.y >= diskPathBox.y + diskPathBox.height - 1, 'Compact Root image manager stacks path selection above its action buttons');
+    assert.equal(await page.locator('#stage').evaluate(el => getComputedStyle(el).transform), 'none', 'Compact Root image manager keeps normal-sized content');
+    await page.setViewportSize({ width: 1480, height: 920 });
     await click('maint-disk-find');
     await click('maint-disk-info');
     await page.locator('[data-action="editor:maint-disk-select"][data-index="0"]').evaluate(el => el.click());

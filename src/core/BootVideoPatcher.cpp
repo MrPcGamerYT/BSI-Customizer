@@ -719,9 +719,12 @@ Result patch(const QString &exePath, int holdMs, const QString &requestedMode, c
         ? QStringLiteral("Built-in modern boot screen installed; no extra video or codec is required.")
         : QStringLiteral("Custom boot video with the modern BSI overlay installed. Video: %1.%2")
             .arg(QDir::toNativeSeparators(movie), QFileInfo::exists(movie) ? QString() : QStringLiteral(" Copy Promo.mp4 into Assets before starting."));
-    return { true, QStringLiteral("%1 %2 Restart BlueStacks.")
-        .arg(modeMessage, holdApplied ? QStringLiteral("Extra boot hold: %1 ms.").arg(holdMs)
-                                     : QStringLiteral("No supported completion gate was found; no extra hold was applied.")) };
+    const QString holdMessage = holdApplied
+        ? QStringLiteral("Requested extra boot hold applied: %1 ms.").arg(holdMs)
+        : holdMs > 0
+            ? QStringLiteral("The boot screen was installed, but this player build has no supported completion gate; the requested %1 ms hold was not applied.").arg(holdMs)
+            : QStringLiteral("No extra boot hold was requested.");
+    return { true, QStringLiteral("%1 %2 Restart BlueStacks.").arg(modeMessage, holdMessage) };
 
 }
 } // namespace BootVideoPatcher

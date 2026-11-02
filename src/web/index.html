@@ -25,6 +25,21 @@
 <div class="progress"><i></i></div>
 <main class="canvas" id="canvas"><section id="hero"></section><section id="main"></section><section id="tele"></section><section id="stats"></section><section id="act"></section></main>
 </div>
+<dialog id="settings-dialog" class="settings-dialog" aria-labelledby="settings-title">
+  <div class="settings-frame">
+    <header class="settings-head" id="settings-drag-handle">
+      <div class="settings-brand"><img src="icon.png" alt="" width="38" height="38"><div><h2 id="settings-title">Settings</h2><p>Make your workspace feel like yours.</p></div></div>
+      <button class="settings-close" id="settings-close" type="button" aria-label="Close settings">×</button>
+    </header>
+    <nav class="settings-tabs" id="settings-tabs" role="tablist" aria-label="Settings sections">
+      <button type="button" data-settings-tab="appearance" role="tab" aria-selected="true"><span class="settings-tab-icon" aria-hidden="true"></span><span>Appearance</span></button>
+      <button type="button" data-settings-tab="updates" role="tab" aria-selected="false"><span class="settings-tab-icon" aria-hidden="true"></span><span>Updates</span></button>
+      <button type="button" data-settings-tab="about" role="tab" aria-selected="false"><span class="settings-tab-icon" aria-hidden="true"></span><span>About</span></button>
+    </nav>
+    <section class="settings-scroll" id="settings-content" role="tabpanel" tabindex="0"></section>
+    <footer class="settings-footer"><span>BSI CUSTOMIZER</span><span>Drag the header to move this window</span></footer>
+  </div>
+</dialog>
 <dialog id="confirm-dialog" class="mcard" aria-labelledby="confirm-title"><form method="dialog"><div class="mhead"><div class="mic">!</div><b id="confirm-title">Confirm BSI operation</b></div><div class="mmsg" id="confirm-message"></div><div class="mbtn"><button class="btn" id="confirm-cancel" value="no">Cancel</button><button class="btn pri" value="yes">Continue</button></div></form></dialog>
 <dialog id="color-dialog" class="cp" aria-label="Color studio picker"><form method="dialog"><div class="cp-sv" id="cpsv" tabindex="0" role="group" aria-label="Saturation and brightness; use arrow keys"><i id="cpsvh"></i></div><div class="cp-hue" id="cphue" tabindex="0" role="slider" aria-label="Hue" aria-valuemin="0" aria-valuemax="360" aria-valuenow="0"><i id="cphh"></i></div><div class="cp-row"><div class="cp-prev"><b id="cpold" title="Original color"></b><b id="cpnew"></b></div><input class="inp mono" id="cphex" maxlength="7" aria-label="HEX color" spellcheck="false"></div><button class="btn sm" type="button" id="cpeye" hidden>Pick from screen</button><p class="note" id="cp-rgb"></p><div class="cp-pal" id="cppal"></div><div class="mbtn"><button class="btn sm" value="no">Cancel</button><button class="btn pri sm" value="yes">Use color</button></div></form></dialog>
 <div id="toast" role="status" aria-live="polite"></div>

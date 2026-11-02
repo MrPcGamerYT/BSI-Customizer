@@ -10,6 +10,7 @@
 #include <QFileInfo>
 #include <QScopedValueRollback>
 #include <QTimer>
+#include <QUrl>
 #include <cmath>
 #include <exception>
 #include <new>
@@ -44,6 +45,7 @@ WebBridge::WebBridge(Backend &backend, AuthManager &auth, SettingsManager &setti
     connect(&updates, &UpdateChecker::stateChanged, this, &WebBridge::publish);
     connect(&backend, &Backend::workspaceChanged, this, [this] { ++m_workspaceRevision; publish(); });
     connect(&backend, &Backend::customizationProfileChanged, this, &WebBridge::publish);
+    connect(&settings, &SettingsManager::aboutProfileChanged, this, &WebBridge::publish);
     connect(&updates, &UpdateChecker::progressChanged, this, &WebBridge::publish);
     connect(&updates, &UpdateChecker::releaseChanged, this, &WebBridge::publish);
     connect(&updates, &UpdateChecker::autoCheckChanged, this, &WebBridge::publish);
@@ -79,6 +81,11 @@ QVariantMap WebBridge::snapshot() const
     state.insert("workspaceRevision", m_workspaceRevision);
     state.insert("updates", updateStatus());
     state.insert("fpsAutoDetect", m_settings.fpsAutoDetect());
+    state.insert("aboutProfile", QVariantMap {
+        {"developerName", m_settings.aboutDeveloperName()},
+        {"tagline", m_settings.aboutTagline()},
+        {"links", m_settings.aboutLinks()}
+    });
     state.insert("updateState", m_updates.property("state"));
     state.insert("updateNote", m_updates.property("note"));
     return state;
@@ -150,9 +157,9 @@ QVariantMap WebBridge::invoke(const QString &method, const QVariantMap &args)
     } else if (method == QLatin1String("listResources")) {
         QVariantList metadata;
         for (const auto &item : m_backend.resourceInfos()) {
-            auto row = item.toMap();
-            row.remove("thumbnail"); // The paginated web list does not render thumbnails.
-            metadata << row;
+            // Thumbnails are prepared and size-bounded by the explicit native scan.
+            // Keep them for the HTML file list; it never decodes an EXE entry itself.
+            metadata << item.toMap();
         }
         value = metadata;
     }
@@ -195,6 +202,32 @@ QVariantMap WebBridge::invoke(const QString &method, const QVariantMap &args)
         bool valid = false; const int theme = args.value("theme").toInt(&valid); const QColor accent(text("accent"));
         if (!valid || theme < 0 || theme > 2 || !accent.isValid()) return failure(QStringLiteral("Invalid appearance settings."));
         m_themes.setTheme(theme); m_themes.setAccentColor(accent);
+    } else if (method == QLatin1String("setAboutProfile")) {
+        const QString developer = text("developerName").trimmed();
+        const QString tagline = text("tagline").trimmed();
+        const QVariantList links = args.value("links").toList();
+        if (developer.isEmpty() || developer.size() > 80 || tagline.size() > 120 || links.size() != 4)
+            return failure(QStringLiteral("Enter a developer name (up to 80 characters), a tagline (up to 120), and exactly four link slots."));
+        for (const QVariant &entry : links) {
+            const QVariantMap link = entry.toMap();
+            const QString kind = link.value("kind").toString();
+            const QString title = link.value("title").toString().trimmed();
+            const QString urlText = link.value("url").toString().trimmed();
+            if ((kind != QLatin1String("github") && kind != QLatin1String("discord") && kind != QLatin1String("youtube"))
+                || title.size() > 64 || urlText.size() > 512 || title.isEmpty() != urlText.isEmpty())
+                return failure(QStringLiteral("Each About link must use GitHub, Discord or YouTube and have both a label and HTTP(S) URL, or leave both blank."));
+            if (!urlText.isEmpty()) {
+                const QUrl url(urlText, QUrl::StrictMode);
+                const QString scheme = url.scheme().toLower();
+                if (!url.isValid() || url.host().isEmpty()
+                    || (scheme != QLatin1String("http") && scheme != QLatin1String("https")))
+                    return failure(QStringLiteral("About links must be valid HTTP or HTTPS URLs."));
+            }
+        }
+        m_settings.setAboutDeveloperName(developer);
+        m_settings.setAboutTagline(tagline);
+        m_settings.setAboutLinks(links);
+        value = true;
     } else if (method == QLatin1String("readInterface")) {
         value = QVariantMap{{"removals", m_backend.removalNames()}, {"layout", m_backend.layoutTweaks()},
                             {"about", m_backend.aboutPageState()}};
