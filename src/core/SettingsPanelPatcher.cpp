@@ -10,6 +10,7 @@
 
 #include <QCryptographicHash>
 #include <QDir>
+#include <QHash>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonArray>
@@ -20,6 +21,7 @@
 #include <QSaveFile>
 #include <QStandardPaths>
 #include <QRegularExpression>
+#include <QSet>
 #include <QMap>
 #include <QUrl>
 
@@ -51,6 +53,9 @@ struct TargetSources
 {
     Source window;
     Source about;
+    int pageCount = 0;
+    int qmlClosureCount = 0;
+    QString aboutLogoExtension;
     QString error;
     bool ok = false;
 };
@@ -136,6 +141,126 @@ TargetSources readSources(const QString &exePath, const QByteArray &image)
     if (!sourceFor(image, exePath, kAboutLeaf, &out.about, &out.error)) return out;
     if (out.window.path == out.about.path) {
         out.error = QStringLiteral("The Settings window and About page resolve to the same resource; refusing an unsafe patch.");
+        return out;
+    }
+
+    // The in-emulator Settings screen is a resource graph, not one document:
+    // plr.qml declares the native tab model, UiSettingsWindow.qml loads each
+    // pQmlSource dynamically, and those pages in turn use shared QML controls.
+    // Validate that graph against the actual registered pool before offering a
+    // rebuild, so a matching leaf from a detached/ambiguous resource is not
+    // mistaken for the component the player actually loads.
+    QHash<QString, QList<QtResources::File>> qmlByLeaf;
+    for (const auto &file : QtResources::registeredFiles(image))
+        if (file.name.endsWith(QLatin1String(".qml"), Qt::CaseInsensitive))
+            qmlByLeaf[file.name.toCaseFolded()] << file;
+    const auto uniqueQml = [&qmlByLeaf](const QString &leaf) -> const QtResources::File * {
+        const auto it = qmlByLeaf.constFind(leaf.toCaseFolded());
+        return it != qmlByLeaf.cend() && it.value().size() == 1 ? &it.value().first() : nullptr;
+    };
+    const QtResources::File *playerRoot = uniqueQml(QStringLiteral("plr.qml"));
+    if (!playerRoot) {
+        out.error = QStringLiteral("The registered player root plr.qml is missing or ambiguous; Settings tabs cannot be resolved safely.");
+        return out;
+    }
+    const QByteArray playerBytes = QtResources::readFile(image, *playerRoot, kMaxQml);
+    const QString playerText = EmbeddedResources::decodeText(playerBytes);
+    if (playerText.isEmpty() || !playerText.contains(QLatin1String("SettingElementModelList pSettingsItems"))) {
+        out.error = QStringLiteral("The registered plr.qml does not expose the expected native Settings tab model; this player layout is unsupported.");
+        return out;
+    }
+    QSet<QString> pageNames;
+    const QRegularExpression pageSource(QStringLiteral("\\bpQmlSource\\s*:\\s*['\\\"]([^'\\\"]+\\.qml)['\\\"]"));
+    auto pageMatch = pageSource.globalMatch(playerText);
+    while (pageMatch.hasNext()) {
+        const QString page = pageMatch.next().captured(1);
+        const QString leaf = QFileInfo(page).fileName();
+        if (leaf.isEmpty() || pageNames.contains(leaf.toCaseFolded())) {
+            out.error = QStringLiteral("The Settings tab model contains an empty or duplicate QML page path; refusing to rebuild an ambiguous panel.");
+            return out;
+        }
+        if (!uniqueQml(leaf)) {
+            out.error = QStringLiteral("The Settings tab QML page %1 is missing or ambiguous in the registered player resources.").arg(leaf);
+            return out;
+        }
+        pageNames.insert(leaf.toCaseFolded());
+    }
+    if (pageNames.size() < 8 || !pageNames.contains(kAboutLeaf.toCaseFolded())) {
+        out.error = QStringLiteral("The player root exposes only %1 Settings page(s), or no About page; the native tab graph is incomplete.").arg(pageNames.size());
+        return out;
+    }
+    out.pageCount = pageNames.size();
+    if (!out.window.text.contains(QLatin1String("pSettingsItems.pSettingElements"))
+        || !out.window.text.contains(QLatin1String("setSource(model.modelData.pQmlSource"))
+        || !out.window.text.contains(QLatin1String("model.modelData.pComponentObj = item"))
+        || !out.window.text.contains(QLatin1String("fChangeSelectedSetting"))) {
+        out.error = QStringLiteral("UiSettingsWindow.qml no longer loads and retains the player’s native Settings pages; this layout cannot be safely replaced.");
+        return out;
+    }
+
+    // Resolve the QML-backed transitive component closure for the shell and
+    // all tab roots, rather than only checking UiSettingsWindow/About leaves.
+    // The generated panel uses the same native controls and these untouched
+    // pages rely on them remaining registered in this pool.
+    QSet<QString> pending { kWindowLeaf.toCaseFolded() };
+    for (const QString &page : pageNames) pending.insert(page);
+    QSet<QString> visited;
+    const QRegularExpression componentType(QStringLiteral("\\b([A-Z][A-Za-z0-9_]*)\\s*\\{"));
+    const QRegularExpression qmlPath(QStringLiteral("['\\\"](?:qrc:/)?([^'\\\"]+\\.qml)['\\\"]"), QRegularExpression::CaseInsensitiveOption);
+    while (!pending.isEmpty()) {
+        const QString key = *pending.cbegin();
+        pending.remove(key);
+        if (visited.contains(key)) continue;
+        const auto it = qmlByLeaf.constFind(key);
+        if (it == qmlByLeaf.cend() || it.value().size() != 1) continue;
+        visited.insert(key);
+        const QString text = EmbeddedResources::decodeText(QtResources::readFile(image, it.value().first(), kMaxQml));
+        if (text.isEmpty()) {
+            out.error = QStringLiteral("The registered Settings dependency %1 could not be decoded as QML.").arg(it.value().first().name);
+            return out;
+        }
+        auto types = componentType.globalMatch(text);
+        while (types.hasNext()) {
+            const QString component = types.next().captured(1).toCaseFolded() + QStringLiteral(".qml");
+            const auto found = qmlByLeaf.constFind(component);
+            if (found != qmlByLeaf.cend()) {
+                if (found.value().size() != 1) {
+                    out.error = QStringLiteral("The Settings dependency %1 is ambiguous in the registered player resources.").arg(component);
+                    return out;
+                }
+                pending.insert(component);
+            }
+        }
+        auto paths = qmlPath.globalMatch(text);
+        while (paths.hasNext()) {
+            const QString path = QFileInfo(paths.next().captured(1)).fileName().toCaseFolded();
+            if (qmlByLeaf.contains(path)) {
+                if (qmlByLeaf.value(path).size() != 1) {
+                    out.error = QStringLiteral("The Settings QML path %1 is ambiguous in the registered player resources.").arg(path);
+                    return out;
+                }
+                pending.insert(path);
+            }
+        }
+    }
+    out.qmlClosureCount = visited.size();
+
+    const auto assets = EmbeddedResources::list(image, true);
+    const auto hasAsset = [&assets](const QString &path) {
+        for (const auto &entry : assets)
+            if (entry.path.compare(path, Qt::CaseInsensitive) == 0) return true;
+        return false;
+    };
+    if (hasAsset(QStringLiteral("qrcAssets/BlueStacks5Beta.svg")))
+        out.aboutLogoExtension = QStringLiteral(".svg");
+    else if (hasAsset(QStringLiteral("qrcAssets/BlueStacks5Beta.png")))
+        out.aboutLogoExtension = QStringLiteral(".png");
+    else {
+        out.error = QStringLiteral("The About profile logo asset is missing; the regenerated page would show a broken image.");
+        return out;
+    }
+    if (!hasAsset(QStringLiteral("qrcAssets/Loader_bright.svg"))) {
+        out.error = QStringLiteral("The About page’s loading-indicator SVG is missing from the registered player resources.");
         return out;
     }
     out.ok = true;
@@ -251,7 +376,7 @@ QString buildWindow(const QString &stock)
     return out;
 }
 
-QString buildAbout(const QString &developerName, const QVariantList &links)
+QString buildAbout(const QString &developerName, const QVariantList &links, const QString &logoExtension)
 {
     QString rows;
     for (const QVariant &entry : links) {
@@ -299,6 +424,7 @@ Item {
                 Item { Layout.fillWidth: true; Layout.preferredHeight: 6 }
                 UiImage {
                     asset: "BlueStacks5Beta"
+                    extn: @@BSI_LOGO_EXTN@@
                     pImageWidth: 144
                     pImageHeight: 44
                     Layout.alignment: Qt.AlignHCenter
@@ -457,6 +583,7 @@ Item {
 )QML");
     generated.replace(QStringLiteral("@@BSI_DEVELOPER@@"), qDeveloper);
     generated.replace(QStringLiteral("@@BSI_LINKS@@"), rows);
+    generated.replace(QStringLiteral("@@BSI_LOGO_EXTN@@"), qmlString(logoExtension));
     return generated;
 }
 
@@ -658,8 +785,12 @@ State analyze(const QString &exePath)
         return state;
     }
     state.supported = true;
+    state.settingsPageCount = sources.pageCount;
+    state.settingsQmlResourceCount = sources.qmlClosureCount;
     const bool windowPatched = sources.window.text.contains(kWindowMarker);
     const bool aboutPatched = sources.about.text.contains(kAboutMarker);
+    state.compiledUnitsDetected = QtResources::matchingUnits(image,
+        {kWindowLeaf, kAboutLeaf}, kWindowUnitIds + kAboutUnitIds);
     state.compiledUnitsActive = QtResources::activeUnits(image,
         {kWindowLeaf, kAboutLeaf}, kWindowUnitIds + kAboutUnitIds);
     state.applied = windowPatched && aboutPatched && state.compiledUnitsActive == 0;
@@ -669,16 +800,21 @@ State analyze(const QString &exePath)
     if (windowPatched != aboutPatched) {
         state.supported = false;
         state.detail = QStringLiteral("Only part of the custom Settings panel is present. Restore from the feature recovery snapshot before retrying.");
-    } else if (state.applied && !state.restorable) {
+    } else if (windowPatched && aboutPatched && !state.restorable) {
         state.supported = false;
-        state.detail = QStringLiteral("The custom Settings panel is present, but its feature recovery snapshot is missing or invalid. Do not overwrite this executable.");
+        state.detail = QStringLiteral("The custom Settings/About sources are present, but their feature recovery snapshot is missing or invalid. Do not overwrite this executable.");
     } else if (windowPatched && aboutPatched && state.compiledUnitsActive > 0) {
-        state.detail = QStringLiteral("The Settings/About QML source is patched, but %1 embedded compiled unit(s) still take precedence. Reapply to invalidate those units; the previous success did not change the visible emulator UI.")
-            .arg(state.compiledUnitsActive);
+        state.detail = QStringLiteral("The Settings/About sources are patched and %1 native tab pages were resolved, but %2 matching embedded compiled unit(s) still take precedence. Reapply to invalidate them; the previous source write alone did not change the visible emulator UI.")
+            .arg(state.settingsPageCount).arg(state.compiledUnitsActive);
+    } else if (state.applied && state.compiledUnitsDetected > 0) {
+        state.detail = QStringLiteral("The rebuilt Settings/About sources and all %1 native tab pages were resolved; all %2 matching compiled QML unit(s) are inactive. Restart the player to test the appearance; live rendering has not been verified.")
+            .arg(state.settingsPageCount).arg(state.compiledUnitsDetected);
     } else if (state.applied) {
-        state.detail = QStringLiteral("Custom Settings window and About page are installed; no active embedded compiled copies remain. Original QML is backed up for a selective restore.");
+        state.detail = QStringLiteral("The rebuilt Settings/About sources and all %1 native tab pages were resolved across %2 QML resources. This executable has no recognizable embedded QV4 unit for the changed pages, so the visual result still requires a player restart/test.")
+            .arg(state.settingsPageCount).arg(state.settingsQmlResourceCount);
     } else {
-        state.detail = QStringLiteral("Editable Settings-window and About-page QML sources are present. The native settings tabs and save/discard logic can be preserved.");
+        state.detail = QStringLiteral("The Settings window has %1 native page roots and a verified %2-resource QML dependency closure. Source files are ready; no emulator UI change is claimed yet.")
+            .arg(state.settingsPageCount).arg(state.settingsQmlResourceCount);
     }
     return state;
 }
@@ -762,7 +898,7 @@ QVariantMap apply(const QString &exePath, const QString &developerName,
     const QString rebuiltWindow = buildWindow(originalWindowText);
     if (rebuiltWindow.isEmpty())
         return fail(QStringLiteral("This BlueStacks build's Settings-window structure is not recognized. No file was changed."));
-    const QString rebuiltAbout = buildAbout(developerName, links);
+    const QString rebuiltAbout = buildAbout(developerName, links, current.aboutLogoExtension);
     if (rebuiltAbout.isEmpty())
         return fail(QStringLiteral("The About page could not be generated; no file was changed."));
     QMap<QString, QByteArray> replacements {

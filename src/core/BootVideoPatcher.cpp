@@ -533,30 +533,33 @@ Result patch(const QString &exePath, int holdMs, const QString &requestedMode, c
         if (bootController(stream.text)) controllers << stream;
         if (stream.link.sourceName.compare(QLatin1String("BootVideo.qml"), Qt::CaseInsensitive) == 0) players << stream;
     }
-    if (controllers.size() > 1) {
-        // Several OEM/portrait variants may coexist. Use the type instantiated
-        // by the host's boot Component when it unambiguously identifies one.
-        QSet<qint64> referenced;
-        for (const auto &host : candidates) {
-            if (!bootHost(host.text)) continue;
-            for (const auto &component : objects(host.text)) {
-                if (component.id != QLatin1String("iBootProgressComponent")) continue;
-                const auto body = host.text.mid(component.body, component.end - component.body - 1);
-                const auto code = mask(body);
-                for (const auto &child : objects(body)) {
-                    if (depthAt(code, 0, child.begin) != 0) continue;
-                    for (const auto &controller : controllers)
-                        if (controller.link.sourceName == child.type + QStringLiteral(".qml")) referenced.insert(controller.entry);
-                }
-            }
-        }
-        if (referenced.size() == 1) {
-            const auto chosen = *referenced.cbegin();
-            for (int i = controllers.size() - 1; i >= 0; --i) if (controllers[i].entry != chosen) controllers.removeAt(i);
+    QList<Stream> hosts;
+    for (const auto &candidate : candidates) if (bootHost(candidate.text)) hosts << candidate;
+    if (hosts.size() != 1)
+        return { false, QStringLiteral("Found %1 linked player boot host(s). A unique host is required to prove which QML boot component is actually loaded; no executable was written.").arg(hosts.size()) };
+
+    // The resource tree can contain unused boot-looking QML. Only patch the
+    // component instantiated by plr.qml's iBootProgressComponent; content
+    // matching alone is not evidence that the player displays that file.
+    QSet<qint64> referenced;
+    for (const auto &component : objects(hosts.first().text)) {
+        if (component.id != QLatin1String("iBootProgressComponent")) continue;
+        const auto body = hosts.first().text.mid(component.body, component.end - component.body - 1);
+        const auto code = mask(body);
+        for (const auto &child : objects(body)) {
+            if (depthAt(code, 0, child.begin) != 0) continue;
+            for (const auto &controller : controllers)
+                if (controller.link.sourceName.compare(child.type + QStringLiteral(".qml"), Qt::CaseInsensitive) == 0)
+                    referenced.insert(controller.entry);
         }
     }
-    if (controllers.size() != 1 || players.size() > 1)
-        return { false, QStringLiteral("Found %1 linked boot screen/controller(s) and %2 stock player(s), but no unique supported boot layout. No EXE was written; an unrecognized version cannot be patched by guessing.").arg(controllers.size()).arg(players.size()) };
+    if (referenced.size() == 1) {
+        const auto chosen = *referenced.cbegin();
+        for (int i = controllers.size() - 1; i >= 0; --i)
+            if (controllers[i].entry != chosen) controllers.removeAt(i);
+    }
+    if (controllers.size() != 1 || !referenced.contains(controllers.first().entry) || players.size() > 1)
+        return { false, QStringLiteral("Found %1 boot-looking controller(s) and %2 stock player(s), but the registered player host does not uniquely instantiate a supported controller. No EXE was written.").arg(controllers.size()).arg(players.size()) };
     const auto controller = controllers.first();
     QString boot = controller.text;
     const QString movie = QDir(QFileInfo(exePath).absolutePath()).filePath(QStringLiteral("Assets/Promo.mp4"));
@@ -658,9 +661,6 @@ Result patch(const QString &exePath, int holdMs, const QString &requestedMode, c
     if (QtResources::activeUnits(data, controllerNames, controllerIds) > 0)
         return { false, QStringLiteral("The boot controller's embedded compiled QML is still active; no boot patch was committed.") };
     bool holdApplied = false;
-    QList<Stream> hosts;
-    for (const auto &candidate : candidates) if (bootHost(candidate.text)) hosts << candidate;
-    if (hosts.size() > 1) return { false, QStringLiteral("Multiple boot hosts were found; no executable was written.") };
     if (!hosts.isEmpty()) {
         QString host = hosts.first().text;
         if (!updateHost(host, holdMs, &holdApplied, &error)) return { false, error };

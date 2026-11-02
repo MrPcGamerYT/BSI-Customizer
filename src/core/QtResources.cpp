@@ -528,6 +528,12 @@ int invalidateUnits(QByteArray &data, const QStringList &sourceNames,
     return changed;
 }
 
+int matchingUnits(const QByteArray &data, const QStringList &sourceNames,
+                  const QStringList &identifiers)
+{
+    return matchingUnitOffsets(data, sourceNames, identifiers).size();
+}
+
 int activeUnits(const QByteArray &data, const QStringList &sourceNames,
                 const QStringList &identifiers)
 {

@@ -16,7 +16,10 @@ struct State
     bool supported = false;
     bool applied = false;
     bool restorable = false;
+    int compiledUnitsDetected = 0;
     int compiledUnitsActive = 0;
+    int settingsPageCount = 0;
+    int settingsQmlResourceCount = 0;
     QString detail;
 };
 

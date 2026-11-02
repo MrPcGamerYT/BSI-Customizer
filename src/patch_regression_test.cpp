@@ -2838,8 +2838,10 @@ int runPatchRegressionTests()
         putLe32(settingsWindow, 304, quint32(settingsId.size()));
         for (int i = 0; i < settingsId.size(); ++i)
             putLe16(settingsWindow, 324 + i * 2, settingsId.at(i).unicode());
-        check(QtResources::activeUnits(settingsWindow, { QStringLiteral("UiSettingsWindow.qml") }) == 1
+        check(QtResources::matchingUnits(settingsWindow, { QStringLiteral("UiSettingsWindow.qml") }) == 1
+                  && QtResources::activeUnits(settingsWindow, { QStringLiteral("UiSettingsWindow.qml") }) == 1
                   && QtResources::invalidateUnits(settingsWindow, { QStringLiteral("UiSettingsWindow.qml") }) == 1
+                  && QtResources::matchingUnits(settingsWindow, { QStringLiteral("UiSettingsWindow.qml") }) == 1
                   && QtResources::activeUnits(settingsWindow, { QStringLiteral("UiSettingsWindow.qml") }) == 0,
               "MSI Settings-window QV4 IDs invalidate even when the compiled unit omits its source filename");
 
@@ -4354,7 +4356,9 @@ Window {
             "    Loader { id: iBootLoader; anchors.fill: parent\r\n"
             "        sourceComponent: pIsBootComplete || pShowAndroidAd ? iGlContainerComponent : iBootProgressComponent }\r\n"
             "}\r\n");
+        const QString unusedController = controller.replace(QLatin1String("bootImage"), QLatin1String("unusedBootImage"));
         auto r = resources({ { QStringLiteral("RenamedStartup.qml"), controller },
+                             { QStringLiteral("UnusedStartup.qml"), unusedController },
                              { QStringLiteral("Shell.qml"), host },
                              { QStringLiteral("Other.qml"), QStringLiteral("import QtQuick; QtObject {}") } },
                            false, {}, 256);
@@ -4381,6 +4385,8 @@ Window {
                   && qml.contains(QLatin1String("z:10000"))
                   && qml.contains(QLatin1String("BootVideo.qml")) && stockProgressHidden,
               "the replacement splash is foregrounded and the old progress panel is hidden");
+        check(resourceText(patched, r, QStringLiteral("UnusedStartup.qml")) == unusedController,
+              "a boot-looking QML resource not instantiated by the player root is never patched");
         check(patched.mid(leftover, image.size() - leftover) == image.mid(leftover),
               "a record the tree does not point at is never rewritten");
         const auto again = BootVideoPatcher::patch(path);
@@ -4542,8 +4548,8 @@ Window {
     std::printf("[boot-script] adaptive player, hold, recovery and refusal paths\n");
     {
         const QString boot = QStringLiteral("import QtQuick\nItem{Image{id:iBootImage;visible:true}Text{id:iBootLoadingText;visible:false}function fSetBootPromotion(){iBootImage.visible=true;iBootLoadingText.visible=false}}\n");
-        const QString host = QStringLiteral("import QtQuick\nItem{property bool pIsBootComplete:false;property bool pShowAndroidAd:false;Component{id:iBootProgressComponent;Item{}}Component{id:iGlContainerComponent;Rectangle{color:'#000000'}}Loader{id:iBootLoader;sourceComponent:pIsBootComplete || pShowAndroidAd ? iGlContainerComponent : iBootProgressComponent}}\n");
-        const auto r = resources({{QStringLiteral("boot.qml"),boot},{QStringLiteral("plr.qml"),host}}, true);
+        const QString host = QStringLiteral("import QtQuick\nItem{property bool pIsBootComplete:false;property bool pShowAndroidAd:false;Component{id:iBootProgressComponent;Boot{}}Component{id:iGlContainerComponent;Rectangle{color:'#000000'}}Loader{id:iBootLoader;sourceComponent:pIsBootComplete || pShowAndroidAd ? iGlContainerComponent : iBootProgressComponent}}\n");
+        const auto r = resources({{QStringLiteral("Boot.qml"),boot},{QStringLiteral("plr.qml"),host}}, true);
         const auto folder = temp.filePath(QStringLiteral("adaptive boot ' & unicode Ω")); QDir().mkpath(folder);
         const auto path = QDir(folder).filePath(QStringLiteral("HD-Player.exe")); write(path,r.f.bytes);
         check(!BootVideoPatcher::patch(path,-1).ok && read(path)==r.f.bytes,
@@ -4598,12 +4604,12 @@ Window {
               "missing multimedia APIs fall back to a WebEngine data-URL player");
         // A previously forced stub can only recover from a uniquely linked
         // original resource in the backup; it never guesses missing UI source.
-        const auto stub=resources({{QStringLiteral("boot.qml"),QStringLiteral("import QtQuick\nItem{function fSetBootPromotion(a,b,c){}}\n")},{QStringLiteral("plr.qml"),host}},true);
+        const auto stub=resources({{QStringLiteral("Boot.qml"),QStringLiteral("import QtQuick\nItem{function fSetBootPromotion(a,b,c){}}\n")},{QStringLiteral("plr.qml"),host}},true);
         const auto stubPath=QDir(folder).filePath(QStringLiteral("stub.exe")); write(stubPath,stub.f.bytes);
         check(!BootVideoPatcher::patch(stubPath).ok && read(stubPath)==stub.f.bytes,
               "a forced boot stub with no original backup is a non-writing error");
         write(stubPath+QStringLiteral(".bak"),r.f.bytes);
-        check(BootVideoPatcher::patch(stubPath).ok && resourceText(read(stubPath),stub,QStringLiteral("boot.qml")).contains(QLatin1String("iBootImage")),
+        check(BootVideoPatcher::patch(stubPath).ok && resourceText(read(stubPath),stub,QStringLiteral("Boot.qml")).contains(QLatin1String("iBootImage")),
               "a linked backup repairs the boot stub without discarding unrelated executable edits");
     }
 
@@ -4769,9 +4775,11 @@ Window {
         // both the native settings window and About source are restored after
         // the apply/update/restore cycle.
         const auto panelState = SettingsPanelPatcher::analyze(input);
-        ciNotice(QStringLiteral("real Settings/About compiled QML units active before rebuild: %1")
-                     .arg(panelState.compiledUnitsActive));
-        check(panelState.supported && !panelState.applied,
+        ciNotice(QStringLiteral("real Settings graph: %1 native tabs, %2 QML dependencies; compiled QV4 units: %3 detected, %4 active")
+                     .arg(panelState.settingsPageCount).arg(panelState.settingsQmlResourceCount)
+                     .arg(panelState.compiledUnitsDetected).arg(panelState.compiledUnitsActive));
+        check(panelState.supported && !panelState.applied
+                  && panelState.settingsPageCount >= 8 && panelState.settingsQmlResourceCount > 0,
               QStringLiteral("the real %1 exposes a unique editable Settings window and About page (%2)")
                   .arg(QFileInfo(input).fileName(), panelState.detail));
         if (panelState.supported && !panelState.applied) {
@@ -4794,8 +4802,26 @@ Window {
                   QStringLiteral("the real %1 Settings panel rebuild applies to a disposable copy (%2)")
                       .arg(QFileInfo(input).fileName(), appliedPanel.value(QStringLiteral("msg")).toString()));
             if (appliedPanel.value(QStringLiteral("ok")).toBool()) {
+                const auto panelImage = read(panelCopy);
+                QString expectedLogoExtension;
+                for (const auto &file : QtResources::registeredFiles(original)) {
+                    if (file.path.compare(QLatin1String("qrcAssets/BlueStacks5Beta.svg"), Qt::CaseInsensitive) == 0)
+                        expectedLogoExtension = QStringLiteral(".svg");
+                    else if (file.path.compare(QLatin1String("qrcAssets/BlueStacks5Beta.png"), Qt::CaseInsensitive) == 0)
+                        expectedLogoExtension = QStringLiteral(".png");
+                }
+                QString rebuiltAbout;
+                for (const auto &file : QtResources::registeredFiles(panelImage)) {
+                    if (file.name.compare(QLatin1String("PlrAboutSetting.qml"), Qt::CaseInsensitive) == 0)
+                        rebuiltAbout = QString::fromUtf8(QtResources::readFile(panelImage, file));
+                }
+                check(!expectedLogoExtension.isEmpty()
+                          && rebuiltAbout.contains(QStringLiteral("extn: \"%1\"").arg(expectedLogoExtension)),
+                      QStringLiteral("the rebuilt %1 About page selects the logo format actually present in its resource pool")
+                          .arg(QFileInfo(input).fileName()));
                 const auto activePanel = SettingsPanelPatcher::analyze(panelCopy);
                 check(activePanel.supported && activePanel.applied && activePanel.restorable
+                          && activePanel.compiledUnitsDetected == panelState.compiledUnitsDetected
                           && activePanel.compiledUnitsActive == 0,
                       QStringLiteral("the rebuilt %1 panel reads back, retains a selective recovery snapshot, and has no active stale compiled QML")
                           .arg(QFileInfo(input).fileName()));
@@ -5012,7 +5038,9 @@ Window {
             "Text{id:iBootLoadingText;objectName:'loadingText';visible:false}"
             "function fSetBootPromotion(){iBootImage.visible=true;pBootGridVisible=true;iBootLoadingText.visible=false}}\r\n");
         const QString video = QStringLiteral("import QtQuick\nMediaPlayer { source:'x';objectName:'mediaPlayer' }\n");
+        const QString host = QStringLiteral("import QtQuick\nItem{property bool pIsBootComplete:false;property bool pShowAndroidAd:false;Component{id:iBootProgressComponent;Boot{}}Component{id:iGlContainerComponent;Rectangle{color:'#000000'}}Loader{id:iBootLoader;sourceComponent:pIsBootComplete || pShowAndroidAd ? iGlContainerComponent : iBootProgressComponent}}\n");
         const auto r = resources({ { QStringLiteral("Boot.qml"), boot }, { QStringLiteral("BootVideo.qml"), video },
+                                  { QStringLiteral("plr.qml"), host },
                                   { QStringLiteral("Other.qml"), QStringLiteral("import QtQuick; QtObject {}") } },
                                 false, {}, 256);
         const QString folder = temp.filePath(QStringLiteral("boot test with spaces")); QDir().mkpath(folder);
