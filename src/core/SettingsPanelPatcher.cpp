@@ -3,7 +3,10 @@
 #include "BsDetector.h"
 #include "CustomizationWorkspace.h"
 #include "EmbeddedResources.h"
+#include "PatchFile.h"
 #include "QmlText.h"
+#include "QtResources.h"
+#include "ThemeEngine.h"
 
 #include <QCryptographicHash>
 #include <QDir>
@@ -13,6 +16,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonParseError>
+#include <QLockFile>
 #include <QSaveFile>
 #include <QStandardPaths>
 #include <QRegularExpression>
@@ -26,6 +30,13 @@ const QString kAboutMarker = QStringLiteral("BSI CUSTOMIZER: redesigned About pa
 const QString kSchema = QStringLiteral("bsi.settings-panel.recovery");
 const QString kWindowLeaf = QStringLiteral("UiSettingsWindow.qml");
 const QString kAboutLeaf = QStringLiteral("PlrAboutSetting.qml");
+const QStringList kWindowUnitIds {
+    QStringLiteral("iSettingsWindowShadowContainer"), QStringLiteral("fChangeSelectedSetting")
+};
+const QStringList kAboutUnitIds {
+    QStringLiteral("aboutSettings"), QStringLiteral("Important links"),
+    QStringLiteral("About and other info"), QStringLiteral("iSupportEmailText")
+};
 constexpr qint64 kMaxImage = 256LL * 1024 * 1024;
 constexpr qint64 kMaxQml = 8LL * 1024 * 1024;
 
@@ -574,8 +585,52 @@ QVariantMap applyResources(const QString &exePath, const QVariantList &operation
     QByteArray prepared;
     const QVariantMap dryRun = CustomizationWorkspace::simulate(exePath, operations, inputHash, &prepared);
     if (!dryRun.value(QStringLiteral("ok")).toBool()) return dryRun;
-    return CustomizationWorkspace::apply(exePath, operations, inputHash,
-                                         dryRun.value(QStringLiteral("outputSha256")).toString());
+    QVariantMap applied = CustomizationWorkspace::apply(exePath, operations, inputHash,
+        dryRun.value(QStringLiteral("outputSha256")).toString());
+    if (!applied.value(QStringLiteral("ok")).toBool()) return applied;
+
+    // The file-resource writer invalidates a compiled QML unit by filename,
+    // but MSI 5 units commonly have an empty sourceFileIndex and contain no
+    // filename in their string table. Apply the distinctive unit identifiers
+    // as a second, verified pass. Never tell the user "applied" while bytecode
+    // that still draws the original UI remains active.
+    QByteArray written;
+    if (!readBounded(exePath, &written))
+        return fail(QStringLiteral("The patched player could not be read back to verify its compiled Settings QML."));
+    const int activeBefore = QtResources::activeUnits(written,
+        {kWindowLeaf, kAboutLeaf}, kWindowUnitIds + kAboutUnitIds);
+    const int invalidated = QtResources::invalidateUnits(written,
+        {kWindowLeaf, kAboutLeaf}, kWindowUnitIds + kAboutUnitIds);
+    const int activeAfter = QtResources::activeUnits(written,
+        {kWindowLeaf, kAboutLeaf}, kWindowUnitIds + kAboutUnitIds);
+    if (activeAfter > 0) {
+        QByteArray current;
+        QString rollbackError;
+        if (readBounded(exePath, &current) && current != image)
+            PatchFile::writeVerified(exePath, current, image, &rollbackError);
+        return fail(QStringLiteral("The Settings QML source was changed, but %1 active compiled unit(s) could not be disabled. The patch was rolled back where safe; restore the player backup if the rollback warning appears. %2")
+            .arg(activeAfter).arg(rollbackError));
+    }
+    if (written != prepared) {
+        QByteArray current;
+        QString error;
+        if (!readBounded(exePath, &current)
+            || !PatchFile::writeVerified(exePath, current, written, &error)) {
+            QByteArray afterFailure;
+            QString rollbackError;
+            if (readBounded(exePath, &afterFailure) && afterFailure != image)
+                PatchFile::writeVerified(exePath, afterFailure, image, &rollbackError);
+            return fail(QStringLiteral("The embedded compiled Settings units could not be committed safely. %1 %2")
+                .arg(error, rollbackError));
+        }
+        QtResources::clearPlayerQmlCache(exePath);
+    }
+    if (activeBefore > 0) {
+        QString message = applied.value(QStringLiteral("msg")).toString();
+        message += QStringLiteral(" Disabled %1 stale compiled Settings/About unit(s); verified the player will compile the rebuilt QML on restart.").arg(invalidated);
+        applied.insert(QStringLiteral("msg"), message);
+    }
+    return applied;
 }
 
 bool sourceHasMarker(const QByteArray &bytes, const QString &marker)
@@ -605,18 +660,23 @@ State analyze(const QString &exePath)
     state.supported = true;
     const bool windowPatched = sources.window.text.contains(kWindowMarker);
     const bool aboutPatched = sources.about.text.contains(kAboutMarker);
-    state.applied = windowPatched && aboutPatched;
+    state.compiledUnitsActive = QtResources::activeUnits(image,
+        {kWindowLeaf, kAboutLeaf}, kWindowUnitIds + kAboutUnitIds);
+    state.applied = windowPatched && aboutPatched && state.compiledUnitsActive == 0;
     const QString backup = sidecarPath(exePath);
     const QVariantMap recovery = backup.isEmpty() ? QVariantMap{} : readRecovery(backup, exePath);
-    state.restorable = state.applied && !recovery.isEmpty();
+    state.restorable = windowPatched && aboutPatched && !recovery.isEmpty();
     if (windowPatched != aboutPatched) {
         state.supported = false;
         state.detail = QStringLiteral("Only part of the custom Settings panel is present. Restore from the feature recovery snapshot before retrying.");
     } else if (state.applied && !state.restorable) {
         state.supported = false;
         state.detail = QStringLiteral("The custom Settings panel is present, but its feature recovery snapshot is missing or invalid. Do not overwrite this executable.");
+    } else if (windowPatched && aboutPatched && state.compiledUnitsActive > 0) {
+        state.detail = QStringLiteral("The Settings/About QML source is patched, but %1 embedded compiled unit(s) still take precedence. Reapply to invalidate those units; the previous success did not change the visible emulator UI.")
+            .arg(state.compiledUnitsActive);
     } else if (state.applied) {
-        state.detail = QStringLiteral("Custom Settings window and About page are installed. Original QML is backed up for a selective restore.");
+        state.detail = QStringLiteral("Custom Settings window and About page are installed; no active embedded compiled copies remain. Original QML is backed up for a selective restore.");
     } else {
         state.detail = QStringLiteral("Editable Settings-window and About-page QML sources are present. The native settings tabs and save/discard logic can be preserved.");
     }
@@ -713,9 +773,28 @@ QVariantMap apply(const QString &exePath, const QString &developerName,
         || !sourceHasMarker(replacements.value(current.about.path), kAboutMarker))
         return fail(QStringLiteral("Generated QML failed its marker check; no file was changed."));
     if (replacements.value(current.window.path) == current.window.bytes
-        && replacements.value(current.about.path) == current.about.bytes)
+        && replacements.value(current.about.path) == current.about.bytes) {
+        const int active = QtResources::activeUnits(image,
+            {kWindowLeaf, kAboutLeaf}, kWindowUnitIds + kAboutUnitIds);
+        if (active == 0)
+            return {{QStringLiteral("ok"), true},
+                    {QStringLiteral("msg"), QStringLiteral("The requested Settings-panel design is already applied and no stale compiled QML remains active.")}};
+        QByteArray invalidated = image;
+        QtResources::invalidateUnits(invalidated,
+            {kWindowLeaf, kAboutLeaf}, kWindowUnitIds + kAboutUnitIds);
+        if (QtResources::activeUnits(invalidated,
+                {kWindowLeaf, kAboutLeaf}, kWindowUnitIds + kAboutUnitIds) > 0)
+            return fail(QStringLiteral("The Settings/About sources already match, but their embedded compiled QML is still active and could not be disabled."));
+        QLockFile lock(canonical + QStringLiteral(".bsi-settings-panel.lock"));
+        if (!lock.tryLock(0))
+            return fail(QStringLiteral("Another Settings-panel writer is using this executable; retry after it finishes."));
+        QString error;
+        if (!ThemeEngine::backup(exePath) || !PatchFile::writeVerified(exePath, image, invalidated, &error))
+            return fail(QStringLiteral("Could not safely disable stale compiled Settings/About QML. %1").arg(error));
+        QtResources::clearPlayerQmlCache(exePath);
         return {{QStringLiteral("ok"), true},
-                {QStringLiteral("msg"), QStringLiteral("The requested Settings-panel design is already applied.")}};
+                {QStringLiteral("msg"), QStringLiteral("The Settings/About QML sources were already rebuilt; %1 stale compiled unit(s) were invalidated and verified. Restart BlueStacks to load the source.").arg(active)}};
+    }
 
     recovery.insert(QStringLiteral("sources"), sourceRecords(current, originals, replacements));
     recovery.insert(QStringLiteral("developerName"), developerName.trimmed());

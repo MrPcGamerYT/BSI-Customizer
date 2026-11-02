@@ -584,6 +584,14 @@ Result patch(const QString &exePath, int holdMs, const QString &requestedMode, c
                 property(player.text, object, QStringLiteral("source"), url, true);
                 QString error;
                 if (!QtResources::replaceResource(data, player.entry, player.link, player.text.toUtf8(), &error)) return { false, error };
+                QStringList playerNames = player.link.sourceNames;
+                if (!playerNames.contains(player.link.sourceName)) playerNames << player.link.sourceName;
+                QStringList playerIds { QStringLiteral("bsiBootVideo"), QStringLiteral("bsiModernBoot") };
+                for (const auto &candidate : objects(player.text))
+                    if (candidate.id.size() >= 5 && !playerIds.contains(candidate.id)) playerIds << candidate.id;
+                QtResources::invalidateUnits(data, playerNames, playerIds);
+                if (QtResources::activeUnits(data, playerNames, playerIds) > 0)
+                    return { false, QStringLiteral("The embedded boot-video compiled QML is still active; no boot patch was committed.") };
                 reusedPlayer = true; break;
             }
         }
@@ -641,6 +649,14 @@ Result patch(const QString &exePath, int holdMs, const QString &requestedMode, c
     }
     QString error;
     if (!QtResources::replaceResource(data, controller.entry, controller.link, boot.toUtf8(), &error)) return { false, error };
+    QStringList controllerNames = controller.link.sourceNames;
+    if (!controllerNames.contains(controller.link.sourceName)) controllerNames << controller.link.sourceName;
+    const QStringList controllerIds { QStringLiteral("iBootImage"), QStringLiteral("iBootProgressContainer"),
+                                      QStringLiteral("iBootLoadingText"), QStringLiteral("iBootTipstimer"),
+                                      QStringLiteral("pBootImageButtonVisible") };
+    QtResources::invalidateUnits(data, controllerNames, controllerIds);
+    if (QtResources::activeUnits(data, controllerNames, controllerIds) > 0)
+        return { false, QStringLiteral("The boot controller's embedded compiled QML is still active; no boot patch was committed.") };
     bool holdApplied = false;
     QList<Stream> hosts;
     for (const auto &candidate : candidates) if (bootHost(candidate.text)) hosts << candidate;
@@ -648,8 +664,18 @@ Result patch(const QString &exePath, int holdMs, const QString &requestedMode, c
     if (!hosts.isEmpty()) {
         QString host = hosts.first().text;
         if (!updateHost(host, holdMs, &holdApplied, &error)) return { false, error };
-        if (host != hosts.first().text && !QtResources::replaceResource(data, hosts.first().entry, hosts.first().link, host.toUtf8(), &error))
-            return { false, error };
+        if (host != hosts.first().text) {
+            const auto &hostStream = hosts.first();
+            if (!QtResources::replaceResource(data, hostStream.entry, hostStream.link, host.toUtf8(), &error))
+                return { false, error };
+            QStringList hostNames = hostStream.link.sourceNames;
+            if (!hostNames.contains(hostStream.link.sourceName)) hostNames << hostStream.link.sourceName;
+            const QStringList hostIds { QStringLiteral("iBootProgressComponent"), QStringLiteral("iBootLoader"),
+                                        QStringLiteral("iGlContainerComponent") };
+            QtResources::invalidateUnits(data, hostNames, hostIds);
+            if (QtResources::activeUnits(data, hostNames, hostIds) > 0)
+                return { false, QStringLiteral("The boot host's embedded compiled QML is still active; no boot patch was committed.") };
+        }
     }
     const QDir install(QFileInfo(exePath).absolutePath());
     const QString assets = install.filePath(QStringLiteral("Assets"));

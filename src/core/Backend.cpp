@@ -1962,6 +1962,7 @@ QVariantMap Backend::settingsPanelRebuildState()
     return {{QStringLiteral("supported"), state.supported},
             {QStringLiteral("applied"), state.applied},
             {QStringLiteral("restorable"), state.restorable},
+            {QStringLiteral("compiledUnitsActive"), state.compiledUnitsActive},
             {QStringLiteral("detail"), state.detail}};
 }
 

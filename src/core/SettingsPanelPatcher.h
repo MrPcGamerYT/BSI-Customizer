@@ -16,6 +16,7 @@ struct State
     bool supported = false;
     bool applied = false;
     bool restorable = false;
+    int compiledUnitsActive = 0;
     QString detail;
 };
 

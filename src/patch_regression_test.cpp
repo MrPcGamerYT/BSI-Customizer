@@ -2832,6 +2832,36 @@ int runPatchRegressionTests()
             putLe16(plr, 324 + i * 2, chromeId.at(i).unicode());
         check(QtResources::invalidateUnits(plr, { QStringLiteral("plr.qml") }) == 1,
               "plr.qml invalidation matches iSidebar in the compiled unit");
+
+        auto settingsWindow = unit;
+        const QString settingsId = QStringLiteral("iSettingsWindowShadowContainer");
+        putLe32(settingsWindow, 304, quint32(settingsId.size()));
+        for (int i = 0; i < settingsId.size(); ++i)
+            putLe16(settingsWindow, 324 + i * 2, settingsId.at(i).unicode());
+        check(QtResources::activeUnits(settingsWindow, { QStringLiteral("UiSettingsWindow.qml") }) == 1
+                  && QtResources::invalidateUnits(settingsWindow, { QStringLiteral("UiSettingsWindow.qml") }) == 1
+                  && QtResources::activeUnits(settingsWindow, { QStringLiteral("UiSettingsWindow.qml") }) == 0,
+              "MSI Settings-window QV4 IDs invalidate even when the compiled unit omits its source filename");
+
+        auto aboutUnit = unit;
+        const QString aboutId = QStringLiteral("Important links");
+        putLe32(aboutUnit, 304, quint32(aboutId.size()));
+        for (int i = 0; i < aboutId.size(); ++i)
+            putLe16(aboutUnit, 324 + i * 2, aboutId.at(i).unicode());
+        check(QtResources::activeUnits(aboutUnit, { QStringLiteral("PlrAboutSetting.qml") }) == 1
+                  && QtResources::invalidateUnits(aboutUnit, { QStringLiteral("PlrAboutSetting.qml") }) == 1
+                  && QtResources::activeUnits(aboutUnit, { QStringLiteral("PlrAboutSetting.qml") }) == 0,
+              "MSI About-page QV4 IDs invalidate the active compiled copy so new developer links can render");
+
+        auto bootControllerUnit = unit;
+        const QString bootControllerId = QStringLiteral("iBootProgressContainer");
+        putLe32(bootControllerUnit, 304, quint32(bootControllerId.size()));
+        for (int i = 0; i < bootControllerId.size(); ++i)
+            putLe16(bootControllerUnit, 324 + i * 2, bootControllerId.at(i).unicode());
+        check(QtResources::activeUnits(bootControllerUnit, {}, { QStringLiteral("iBootProgressContainer") }) == 1
+                  && QtResources::invalidateUnits(bootControllerUnit, {}, { QStringLiteral("iBootProgressContainer") }) == 1
+                  && QtResources::activeUnits(bootControllerUnit, {}, { QStringLiteral("iBootProgressContainer") }) == 0,
+              "boot controller compiled QML can be selected by an explicit structural identifier");
     }
 
     {
@@ -4739,6 +4769,8 @@ Window {
         // both the native settings window and About source are restored after
         // the apply/update/restore cycle.
         const auto panelState = SettingsPanelPatcher::analyze(input);
+        ciNotice(QStringLiteral("real Settings/About compiled QML units active before rebuild: %1")
+                     .arg(panelState.compiledUnitsActive));
         check(panelState.supported && !panelState.applied,
               QStringLiteral("the real %1 exposes a unique editable Settings window and About page (%2)")
                   .arg(QFileInfo(input).fileName(), panelState.detail));
@@ -4763,8 +4795,9 @@ Window {
                       .arg(QFileInfo(input).fileName(), appliedPanel.value(QStringLiteral("msg")).toString()));
             if (appliedPanel.value(QStringLiteral("ok")).toBool()) {
                 const auto activePanel = SettingsPanelPatcher::analyze(panelCopy);
-                check(activePanel.supported && activePanel.applied && activePanel.restorable,
-                      QStringLiteral("the rebuilt %1 panel reads back and has a selective recovery snapshot")
+                check(activePanel.supported && activePanel.applied && activePanel.restorable
+                          && activePanel.compiledUnitsActive == 0,
+                      QStringLiteral("the rebuilt %1 panel reads back, retains a selective recovery snapshot, and has no active stale compiled QML")
                           .arg(QFileInfo(input).fileName()));
                 const auto updatedPanel = SettingsPanelPatcher::apply(panelCopy,
                     QStringLiteral("BSI Panel Regression Updated"), panelLinks, true);
@@ -4892,6 +4925,11 @@ Window {
                   && !modernHelper.contains("QtMultimedia") && !modernHelper.contains("QtWebEngine")
                   && !QFile::exists(QDir(modernAssets).filePath(QStringLiteral("Promo.mp4"))),
               "built-in modern boot patches this real HD-Player version without media assets or codec imports");
+        const int activeBootUnits = QtResources::activeUnits(read(modernPath), {}, {
+            QStringLiteral("iBootImage"), QStringLiteral("iBootProgressContainer"),
+            QStringLiteral("iBootProgressComponent"), QStringLiteral("iBootLoader") });
+        check(modernBoot.ok && activeBootUnits == 0,
+              "built-in modern boot leaves no matching active compiled controller or host QML in the real player image");
         check(read(modernPath + QStringLiteral(".bak")) == original,
               "modern boot preserves the complete original of this HD-Player version");
 
