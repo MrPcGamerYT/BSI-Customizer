@@ -292,9 +292,9 @@ const server = http.createServer((req, res) => {
     await page.locator('#boot-hold').fill('4567');
     await click('boot-profile');
     assert.equal((await last('workspace')).args.options.value.holdMs, 4567);
-    assert.equal((await page.locator('.boot-preview').innerText()).trim(), '', 'boot preview has no added captions or credits');
+    assert.match((await page.locator('.boot-preview').innerText()).trim(), /^Emulator is starting…$/, 'boot preview shows only the requested neutral status');
     assert.ok((await page.locator('.boot-logo').getAttribute('src')).startsWith('data:image/svg+xml;base64,'), 'boot preview uses the selected player’s real logo');
-    assert.equal(await page.locator('.boot-track').count(), 1, 'boot preview shows the smooth indeterminate loading line');
+    assert.equal(await page.locator('.boot-ring').count(), 1, 'boot preview wraps the logo in a glowing animated loading ring');
     await page.locator('[data-action="bootPatch"]').evaluate(el => el.click());
     await page.waitForFunction(() => __calls.some(c => c.method === 'bootPatch'));
     let bootCall = await last('bootPatch');
@@ -305,7 +305,7 @@ const server = http.createServer((req, res) => {
     await page.evaluate(()=>{window.__nextFile='C:\\fixture\\modern-boot.mp4';});
     await page.locator('[data-action="bootVideoBrowse"]').evaluate(el => el.click());
     assert.match(await page.locator('#boot-video-selected').innerText(), /modern-boot\.mp4/);
-    assert.equal((await page.locator('.boot-preview').innerText()).trim(), '', 'custom-video preview also avoids overlaid text');
+    assert.match((await page.locator('.boot-preview').innerText()).trim(), /^Emulator is starting…$/, 'custom-video preview uses the same neutral startup label');
     await page.locator('[data-action="bootPatch"]').evaluate(el => el.click());
     await page.waitForFunction(() => __calls.filter(c => c.method === 'bootPatch').length === 2);
     bootCall = await last('bootPatch');

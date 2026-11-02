@@ -91,30 +91,40 @@ Item {
                         SequentialAnimation on opacity { loops: Animation.Infinite; NumberAnimation { from: 0.16; to: 0.30; duration: 2600; easing.type: Easing.InOutSine } NumberAnimation { to: 0.16; duration: 2600; easing.type: Easing.InOutSine } }
                     }
                     Rectangle {
-                        width: 122; height: 122; radius: 61
+                        id: previewRingTrack
+                        width: 112; height: 112; radius: 56
                         anchors.centerIn: previewAura
-                        color: "transparent"; border.width: 1; border.color: "#648097"; opacity: 0.3
-                        RotationAnimation on rotation { from: 0; to: 360; duration: 36000; loops: Animation.Infinite; easing.type: Easing.Linear }
+                        color: "transparent"; border.width: 1; border.color: "#526B80"; opacity: 0.45
+                    }
+                    Canvas {
+                        id: previewLoadingRing
+                        objectName: "bsiLoadingRing"
+                        width: previewRingTrack.width; height: width
+                        anchors.centerIn: previewRingTrack
+                        antialiasing: true
+                        onPaint: {
+                            var ctx = getContext("2d");
+                            ctx.clearRect(0, 0, width, height);
+                            ctx.beginPath(); ctx.lineWidth = 3; ctx.lineCap = "round";
+                            ctx.strokeStyle = "#A9E7FF"; ctx.shadowColor = "#55CFFF"; ctx.shadowBlur = 12;
+                            ctx.arc(width / 2, height / 2, width / 2 - ctx.lineWidth, -Math.PI * 0.70, Math.PI * 0.88, false);
+                            ctx.stroke();
+                        }
+                        RotationAnimation on rotation { from: 0; to: 360; duration: 2450; loops: Animation.Infinite; easing.type: Easing.Linear }
                     }
                     Image {
-                        anchors.centerIn: previewAura
-                        width: 110; height: 96
+                        anchors.centerIn: previewRingTrack
+                        width: 72; height: 72
                         source: page.bootLogoUrl
                         fillMode: Image.PreserveAspectFit
                         smooth: true; mipmap: true
-                        opacity: 0.95
                         SequentialAnimation on scale { loops: Animation.Infinite; NumberAnimation { to: 1.018; duration: 2300; easing.type: Easing.InOutSine } NumberAnimation { to: 1.0; duration: 2300; easing.type: Easing.InOutSine } }
                     }
-                    Rectangle {
-                        id: previewProgressTrack
+                    Text {
                         anchors.horizontalCenter: parent.horizontalCenter
-                        anchors.bottom: parent.bottom; anchors.bottomMargin: 23
-                        width: Math.min(parent.width * 0.34, 310); height: 3; radius: 2; color: "#293D4D"
-                        Rectangle {
-                            id: previewProgressLight
-                            width: parent.width * 0.28; height: parent.height; radius: 2; color: "#D5E7F3"
-                            NumberAnimation on x { from: 0; to: previewProgressTrack.width - previewProgressLight.width; duration: 2650; loops: Animation.Infinite; easing.type: Easing.InOutSine }
-                        }
+                        anchors.bottom: parent.bottom; anchors.bottomMargin: 15
+                        text: qsTr("Emulator is starting…")
+                        color: "#C7D9E6"; font.pixelSize: 11; font.letterSpacing: 0.5
                     }
                 }
                 Text {
@@ -123,14 +133,14 @@ Item {
                     wrapMode: Text.Wrap
                     color: Theme.textDim
                     font.pixelSize: 12
-                    text: qsTr("The selected MP4 is copied to Assets/Promo.mp4. An existing video is preserved as Promo.mp4.bak. The emulator's own logo and a quiet loading line are overlaid without labels or attribution; playback still depends on the installed Qt/WebEngine runtime.")
+                    text: qsTr("The selected MP4 is copied to Assets/Promo.mp4. An existing video is preserved as Promo.mp4.bak. The emulator's own logo, a glowing loading ring, and the status “Emulator is starting…” are overlaid; playback still depends on the installed Qt/WebEngine runtime.")
                 }
                 Text {
                     Layout.fillWidth: true
                     wrapMode: Text.Wrap
                     color: Theme.textDim
                     font.pixelSize: 12
-                    text: qsTr("The selected style replaces BlueStacks' stock loading artwork and progress panel with a quiet, animated screen using the player's own logo. No extra labels or credits are shown. Native Android startup handoff and ads remain intact. The patcher validates the boot layout, refreshes QML caches, and keeps the original executable backup. Close BlueStacks before applying.")
+                    text: qsTr("The selected style replaces BlueStacks' stock loading artwork and progress panel with the player's own logo, a softly glowing loading ring, and the status “Emulator is starting…”. No BSI attribution is added. Native Android startup handoff and ads remain intact. The patcher validates the boot layout, refreshes QML caches, and keeps the original executable backup. Close BlueStacks before applying.")
                 }
 
                 RowLayout {

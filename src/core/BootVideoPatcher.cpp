@@ -229,9 +229,8 @@ QString embeddedEmulatorLogo(const QByteArray &image)
 
 QString externalPlayer(const QString &logoUrl)
 {
-    // The video remains the only background content. The emulator's own logo
-    // and a quiet, indeterminate progress track are the complete overlay: no
-    // product slogans, status labels, or BSI attribution are shown.
+    // The selected video remains the background. The emulator's own logo is
+    // framed by a glowing ring, with one neutral startup status and no BSI credit.
     QString qml = QString::fromUtf8(R"QML(import QtQuick 2.15
 Item {
     id: root
@@ -239,15 +238,53 @@ Item {
     clip: true
     Rectangle { anchors.fill: parent; color: "#02060B" }
     Rectangle { z: 8; anchors.fill: parent; color: "#06101C"; opacity: 0.26 }
+    Rectangle {
+        id: videoRingTrack
+        z: 9
+        width: Math.min(Math.min(parent.width, parent.height) * 0.42, 330)
+        height: width
+        radius: width / 2
+        anchors.centerIn: parent
+        anchors.verticalCenterOffset: -parent.height * 0.045
+        color: "transparent"
+        border.width: Math.max(1, Math.min(parent.width, parent.height) * 0.002)
+        border.color: "#38536A"
+        opacity: 0.52
+    }
+    Canvas {
+        id: videoLoadingRing
+        objectName: "bsiLoadingRing"
+        z: 10
+        width: videoRingTrack.width
+        height: width
+        anchors.centerIn: videoRingTrack
+        antialiasing: true
+        onPaint: {
+            var ctx = getContext("2d");
+            ctx.clearRect(0, 0, width, height);
+            ctx.beginPath();
+            ctx.lineWidth = Math.max(3, Math.min(root.width, root.height) * 0.009);
+            ctx.lineCap = "round";
+            ctx.strokeStyle = "#A9E7FF";
+            ctx.shadowColor = "#55CFFF";
+            ctx.shadowBlur = Math.max(10, Math.min(root.width, root.height) * 0.035);
+            ctx.arc(width / 2, height / 2, width / 2 - ctx.lineWidth, -Math.PI * 0.70, Math.PI * 0.88, false);
+            ctx.stroke();
+        }
+        RotationAnimation on rotation { from: 0; to: 360; duration: 2450; loops: Animation.Infinite; easing.type: Easing.Linear }
+        SequentialAnimation on opacity {
+            loops: Animation.Infinite
+            NumberAnimation { from: 0.72; to: 1.0; duration: 1350; easing.type: Easing.InOutSine }
+            NumberAnimation { to: 0.72; duration: 1350; easing.type: Easing.InOutSine }
+        }
+    }
     Image {
         id: emulatorLogo
         objectName: "bsiEmulatorLogo"
-        z: 10
-        anchors.horizontalCenter: parent.horizontalCenter
-        anchors.verticalCenter: parent.verticalCenter
-        anchors.verticalCenterOffset: -parent.height * 0.055
-        width: Math.min(parent.width * 0.26, 280)
-        height: Math.min(parent.height * 0.25, 190)
+        z: 11
+        anchors.centerIn: videoRingTrack
+        width: Math.min(Math.min(parent.width, parent.height) * 0.23, 190)
+        height: width
         source: "__BSI_EMULATOR_LOGO__"
         fillMode: Image.PreserveAspectFit
         smooth: true
@@ -258,31 +295,21 @@ Item {
             NumberAnimation { to: 0.82; duration: 1900; easing.type: Easing.InOutSine }
         }
     }
-    Rectangle {
-        id: progressTrack
-        objectName: "bsiBootProgressTrack"
-        z: 11
+    Text {
+        id: videoBootStatus
+        objectName: "bsiBootStatus"
+        z: 12
         anchors.horizontalCenter: parent.horizontalCenter
-        anchors.bottom: parent.bottom
-        anchors.bottomMargin: Math.max(34, parent.height * 0.10)
-        width: Math.min(parent.width * 0.34, 340)
-        height: 3
-        radius: 2
-        color: "#35495A"
-        opacity: 0.68
-        Rectangle {
-            id: progressLight
-            width: parent.width * 0.28
-            height: parent.height
-            radius: 2
-            color: "#D5E8F6"
-            NumberAnimation on x {
-                from: 0
-                to: progressTrack.width - progressLight.width
-                duration: 2500
-                loops: Animation.Infinite
-                easing.type: Easing.InOutSine
-            }
+        anchors.top: videoRingTrack.bottom
+        anchors.topMargin: Math.max(14, Math.min(parent.width, parent.height) * 0.035)
+        text: "Emulator is starting…"
+        color: "#C7D9E6"
+        font.pixelSize: Math.min(Math.min(parent.width, parent.height) * 0.027, 16)
+        font.letterSpacing: 0.8
+        SequentialAnimation on opacity {
+            loops: Animation.Infinite
+            NumberAnimation { from: 0.68; to: 0.95; duration: 1700; easing.type: Easing.InOutSine }
+            NumberAnimation { to: 0.68; duration: 1700; easing.type: Easing.InOutSine }
         }
     }
     Component.onCompleted: {
@@ -307,8 +334,8 @@ Item {
 
 QString modernBootPlayer(const QString &logoUrl)
 {
-    // Quiet QtQuick-only splash: the real logo from this player build, smooth
-    // motion, and no text, external video, codecs, or network dependencies.
+    // QtQuick-only splash: use this player build's real logo, a glowing outer
+    // loading ring and neutral status, without video, codecs, or network access.
     QString qml = QString::fromUtf8(R"MODERN(import QtQuick 2.15
 Item {
     id: root
@@ -337,27 +364,52 @@ Item {
         }
     }
     Rectangle {
-        width: Math.min(root.side * 0.47, 480)
+        id: loadingRingTrack
+        width: Math.min(root.side * 0.42, 330)
         height: width
         radius: width / 2
         anchors.centerIn: parent
-        anchors.verticalCenterOffset: -root.height * 0.025
+        anchors.verticalCenterOffset: -root.height * 0.045
         color: "transparent"
-        border.width: 1
-        border.color: "#4A657B"
-        opacity: 0.28
+        border.width: Math.max(1, root.side * 0.002)
+        border.color: "#38536A"
+        opacity: 0.52
+    }
+    Canvas {
+        id: loadingRing
+        objectName: "bsiLoadingRing"
+        width: loadingRingTrack.width
+        height: width
+        anchors.centerIn: loadingRingTrack
+        antialiasing: true
+        onPaint: {
+            var ctx = getContext("2d");
+            ctx.clearRect(0, 0, width, height);
+            ctx.beginPath();
+            ctx.lineWidth = Math.max(3, root.side * 0.009);
+            ctx.lineCap = "round";
+            ctx.strokeStyle = "#A9E7FF";
+            ctx.shadowColor = "#55CFFF";
+            ctx.shadowBlur = Math.max(10, root.side * 0.035);
+            ctx.arc(width / 2, height / 2, width / 2 - ctx.lineWidth, -Math.PI * 0.70, Math.PI * 0.88, false);
+            ctx.stroke();
+        }
         RotationAnimation on rotation {
-            from: 0; to: 360; duration: 36000; loops: Animation.Infinite
+            from: 0; to: 360; duration: 2450; loops: Animation.Infinite
             easing.type: Easing.Linear
+        }
+        SequentialAnimation on opacity {
+            loops: Animation.Infinite
+            NumberAnimation { from: 0.72; to: 1.0; duration: 1350; easing.type: Easing.InOutSine }
+            NumberAnimation { to: 0.72; duration: 1350; easing.type: Easing.InOutSine }
         }
     }
     Image {
         id: emulatorLogo
         objectName: "bsiEmulatorLogo"
-        anchors.centerIn: parent
-        anchors.verticalCenterOffset: -root.height * 0.035
-        width: Math.min(root.width * 0.25, 270)
-        height: Math.min(root.height * 0.24, 180)
+        anchors.centerIn: loadingRingTrack
+        width: Math.min(root.side * 0.23, 190)
+        height: width
         source: "__BSI_EMULATOR_LOGO__"
         fillMode: Image.PreserveAspectFit
         smooth: true
@@ -373,37 +425,20 @@ Item {
             NumberAnimation { to: 0.82; duration: 2500; easing.type: Easing.InOutSine }
         }
     }
-    Rectangle {
-        id: progressTrack
-        objectName: "progressTrack"
+    Text {
+        id: bootStatus
+        objectName: "bsiBootStatus"
         anchors.horizontalCenter: parent.horizontalCenter
-        anchors.bottom: parent.bottom
-        anchors.bottomMargin: Math.max(34, root.height * 0.10)
-        width: Math.min(root.width * 0.34, 360)
-        height: 3
-        radius: 2
-        color: "#263747"
-        Rectangle {
-            id: progressGlow
-            width: parent.width * 0.28
-            height: parent.height
-            radius: 2
-            color: "#D8EBF9"
-            Rectangle {
-                anchors.centerIn: parent
-                width: parent.width * 1.8
-                height: 7
-                radius: 4
-                color: "#B8D9EE"
-                opacity: 0.16
-            }
-            NumberAnimation on x {
-                from: 0
-                to: progressTrack.width - progressGlow.width
-                duration: 2650
-                loops: Animation.Infinite
-                easing.type: Easing.InOutSine
-            }
+        anchors.top: loadingRingTrack.bottom
+        anchors.topMargin: Math.max(14, root.side * 0.035)
+        text: "Emulator is starting…"
+        color: "#C7D9E6"
+        font.pixelSize: Math.min(root.side * 0.027, 16)
+        font.letterSpacing: 0.8
+        SequentialAnimation on opacity {
+            loops: Animation.Infinite
+            NumberAnimation { from: 0.68; to: 0.95; duration: 1700; easing.type: Easing.InOutSine }
+            NumberAnimation { to: 0.68; duration: 1700; easing.type: Easing.InOutSine }
         }
     }
 }
