@@ -366,7 +366,6 @@ QString buildWindow(const QString &stock)
         y = Math.max(area.y, Math.min(area.y + area.height - height,
             transientParent.y + Math.round((transientParent.height - height) / 2)))
     }
-    Component.onCompleted: Qt.callLater(fBsiFitSettingsWindow)
     onVisibleChanged: if (visible) Qt.callLater(fBsiFitSettingsWindow)
 )QML");
     const int rootClose = out.lastIndexOf(QLatin1String("\n}"));
