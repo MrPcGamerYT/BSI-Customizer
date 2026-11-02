@@ -25,8 +25,8 @@ source = (Path(__file__).resolve().parents[1] / "src/core/BootVideoPatcher.cpp")
 qml = re.search(r'R"QML\((.*?)\)QML"', source, re.S).group(1)
 html = re.search(r'R"HTML\((.*?)\)HTML"', source, re.S).group(1)
 assert 'Qt.resolvedUrl("BootScreen.html")' in qml
-assert "localContentCanAccessFileUrls:true" in qml
-assert "playbackRequiresUserGesture:false" in qml
+assert "webView.settings.localContentCanAccessFileUrls = true" in qml
+assert "webView.settings.playbackRequiresUserGesture = false" in qml
 assert 'class="ring-track"' in html and "Emulator is starting…" in html
 assert "__BSI_EMULATOR_LOGO__" in qml and "__BSI_WITH_VIDEO__" in qml
 assert "Promo.mp4" in source and "__VIDEO_BACKGROUND__" in html

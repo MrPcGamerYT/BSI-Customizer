@@ -4595,7 +4595,7 @@ Window {
         const auto playerPath=QDir(folder).filePath(QStringLiteral("Assets/BootVideo.qml"));
         const auto player=read(playerPath);
         check(player.contains("Qt.resolvedUrl(\"BootScreen.html\")") && player.contains("QtWebEngine")
-                  && player.contains("localContentCanAccessFileUrls:true"),
+                  && player.contains("webView.settings.localContentCanAccessFileUrls = true"),
               "boot wrapper loads the HTML asset with local-file access for its adjacent MP4");
         check(BootVideoPatcher::patch(path,4500).ok,"boot hold can be updated on a repatch");
         text=resourceText(read(path),r,QStringLiteral("plr.qml"));
