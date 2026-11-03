@@ -2,7 +2,7 @@
 (() => {
   'use strict';
   const $ = selector => document.querySelector(selector);
-  const reduced = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const reduced = () => document.body.dataset.effects==='low' || matchMedia('(prefers-reduced-motion: reduce)').matches;
   const enter = element => {
     if (!reduced()) element.animate([{ opacity: 0, transform: 'translateY(10px)' }, { opacity: 1, transform: 'none' }], { duration: 280, easing: 'cubic-bezier(.2,.8,.2,1)' });
   };

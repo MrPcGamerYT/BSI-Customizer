@@ -29,6 +29,9 @@
 #include <QFileInfo>
 #include <QStringList>
 #include <QThread>
+#include <QUuid>
+#include <QSet>
+#include <QRegularExpression>
 
 #include <algorithm>
 #include <exception>
@@ -984,7 +987,7 @@ void Backend::rebuildResourceInfos(const QByteArray &image)
             && thumbnailBytes < maxThumbnails) {
             const auto bytes = QtResources::readFile(image, { entry.leaf, entry.entryOff, entry.flags },
                                                       4 * 1024 * 1024);
-            const auto preview = EmbeddedResources::previewDataUrl(bytes, entry.format, 64);
+            const auto preview = EmbeddedResources::previewDataUrl(bytes, entry.format, 64, true);
             const qsizetype cost = preview.size() * qsizetype(sizeof(QChar));
             if (cost <= maxThumbnail && thumbnailBytes + cost <= maxThumbnails) {
                 thumbnail = preview;
@@ -1058,6 +1061,86 @@ int Backend::scanResources(bool includeBinary)
     ++m_resourceRevision;
     emit resourcesChanged();
     return m_resources.size();
+}
+
+QVariantMap Backend::measureResourceDraft(int index,const QString &text,bool bom)
+{
+    if(actionsLocked())return lockedMap();
+    if(text.size()>8*1024*1024)return {{"ok",false},{"msg","Draft exceeds the 8 MiB measurement limit."}};
+    if(!m_backgroundWorker)return runBackground([=](Backend &worker){return worker.measureResourceDraft(index,text,bom);});
+    if(index<0 || index>=m_resources.size())return {{"ok",false},{"msg","Select a scanned resource."}};
+    const int decoded=resourceTextSize(text,bom);
+    if(decoded>8*1024*1024)return {{"ok",false},{"msg","UTF-8 draft exceeds the 8 MiB measurement limit."}};
+    return {{"ok",true},{"decoded",decoded},{"encoded",resourcePayloadSize(index,text,bom)}};
+}
+
+QVariantMap Backend::inspectResource(int index)
+{
+    if (actionsLocked()) return lockedMap();
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) { return worker.inspectResource(index); });
+    if (index<0 || index>=m_resources.size()) return {{"ok",false},{"msg","Select a scanned resource first."}};
+    const auto entry=m_resources.at(index);
+    if(entry.size>8*1024*1024) return {{"ok",false},{"msg","Too large for inline inspection (8 MiB limit). Extract this entry instead."}};
+    // One snapshot, hash validation, decoding and capacity lookup on the worker.
+    // No GUI-thread full-EXE reads or repeated image decoding for one selection.
+    const auto image=readExe();
+    if(image.isEmpty() || QCryptographicHash::hash(image,QCryptographicHash::Sha256)!=m_resourceFileHash)
+        return {{"ok",false},{"msg","EXE changed since the manual scan. Scan Resources again before inspecting offsets."}};
+    const auto bytes=QtResources::readFile(image,{entry.leaf,entry.entryOff,entry.flags},8*1024*1024);
+    if(bytes.isEmpty() && entry.size>0)return {{"ok",false},{"msg","Could not decode this resource safely. Extract it or rescan the source."}};
+    const auto room=EmbeddedResources::budget(image,entry.entryOff,entry.leaf,entry.scanned);
+    const auto preview=EmbeddedResources::previewDataUrl(bytes,entry.format,640,true);
+    QString hex;
+    for(int at=0;at<qMin(qsizetype(bytes.size()),qsizetype(256));at+=16) {
+        const auto row=bytes.mid(at,qMin(16,256-at));QString ascii;
+        for(char c:row)ascii+=(uchar(c)>=32 && uchar(c)<127)?QChar(uchar(c)):QChar('.');
+        hex+=QStringLiteral("%1  %2  %3\n").arg(at,4,16,QChar('0')).arg(QString::fromLatin1(row.toHex(' ')),-47).arg(ascii);
+    }
+    return {{"ok",true},{"text",entry.text?EmbeddedResources::decodeText(bytes):QString()},
+        {"preview",preview},{"hex",hex},{"note",preview.isEmpty()?QStringLiteral("No supported image preview. Inspect source / bytes or extract the file."):QString()},
+        {"budget",QVariantMap{{"known",room.known},{"capacity",room.capacity},{"used",room.used},
+            {"bom",bytes.startsWith(QByteArray::fromHex("efbbbf"))},{"msg",room.detail}}}};
+}
+
+QVariantMap Backend::exportResourceSelection(const QVariantList &indices,const QString &directory)
+{
+    if(actionsLocked())return lockedMap();
+    if(!m_backgroundWorker)return runBackground([=](Backend &worker){return worker.exportResourceSelection(indices,directory);});
+    if(indices.isEmpty() || indices.size()>500)return {{"ok",false},{"msg","Select between 1 and 500 resources."}};
+    if(!QDir::isAbsolutePath(directory) || !QFileInfo(directory).isDir())return {{"ok",false},{"msg","Choose an existing absolute output folder."}};
+    QSet<int> chosen; qint64 total=0;
+    for(const auto &value:indices) {
+        bool valid=false;const int index=value.toInt(&valid);
+        if(!valid || index<0 || index>=m_resources.size())return {{"ok",false},{"msg","The selection is no longer valid. Scan again."}};
+        if(chosen.contains(index))continue;
+        const auto &entry=m_resources.at(index);
+        if(entry.size<0 || entry.size>16*1024*1024)return {{"ok",false},{"msg","Selection export allows at most 16 MiB per resource."}};
+        total+=entry.size; chosen.insert(index);
+    }
+    if(total>128*1024*1024)return {{"ok",false},{"msg","Selection export is limited to 128 MiB decoded data."}};
+    const auto image=readExe();
+    if(image.isEmpty() || QCryptographicHash::hash(image,QCryptographicHash::Sha256)!=m_resourceFileHash)
+        return {{"ok",false},{"msg","EXE changed since Scan Resources. Scan again before exporting."}};
+    const QString name=QStringLiteral("BSI-resources-")+QUuid::createUuid().toString(QUuid::WithoutBraces);
+    QDir root(directory);
+    if(!root.mkdir(name))return {{"ok",false},{"msg","Could not create a fresh output folder."}};
+    const QString output=root.filePath(name);int count=0,failed=0;qint64 written=0;
+    for(int index:chosen) {
+        const auto &entry=m_resources.at(index);
+        QString leaf=entry.leaf;leaf.replace(QRegularExpression(QStringLiteral("[^A-Za-z0-9._-]")),QStringLiteral("_"));
+        // A numeric prefix avoids Windows reserved names and collisions. No
+        // untrusted folder segments, overwrites, or existing symlink trees.
+        leaf=QString::number(index)+QLatin1Char('-')+leaf.left(140);
+        const auto bytes=QtResources::readFile(image,{entry.leaf,entry.entryOff,entry.flags},16*1024*1024);
+        if((bytes.isEmpty() && entry.size>0) || written+bytes.size()>128*1024*1024){++failed;continue;}
+        QFile file(QDir(output).filePath(leaf));
+        if(!file.open(QIODevice::WriteOnly|QIODevice::NewOnly)){++failed;continue;}
+        if(file.write(bytes)!=bytes.size() || !file.flush()){file.close();file.remove();++failed;continue;}
+        written+=bytes.size();++count;
+    }
+    return {{"ok",failed==0},{"count",count},{"failed",failed},{"directory",output},
+        {"msg",QStringLiteral("Exported %1 resource(s); %2 failed. Output: %3. Source EXE unchanged.").arg(count).arg(failed).arg(output)}};
 }
 
 QString Backend::resourcePreviewAt(int index, int maxSide) const
@@ -1225,8 +1308,10 @@ QVariantMap Backend::extractResource(int index, const QString &targetPath)
     if (index < 0 || index >= m_resources.size())
         return result(false, QStringLiteral("Select an embedded file first."), QStringLiteral("red"));
     const EmbeddedResources::Entry &entry = m_resources.at(index);
-    const QByteArray bytes = EmbeddedResources::readEntry(m_settings->exePath(), entry.entryOff,
-                                                          entry.flags);
+    const auto image=readExe();
+    if(image.isEmpty() || QCryptographicHash::hash(image,QCryptographicHash::Sha256)!=m_resourceFileHash)
+        return result(false,QStringLiteral("EXE changed since Scan Resources. Scan again before extracting."),QStringLiteral("red"));
+    const QByteArray bytes=QtResources::readFile(image,{entry.leaf,entry.entryOff,entry.flags},32*1024*1024);
     if (bytes.isEmpty())
         return result(false, QStringLiteral("That entry could not be read from the EXE."),
                       QStringLiteral("red"));

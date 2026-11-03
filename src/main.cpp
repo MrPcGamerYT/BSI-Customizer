@@ -18,6 +18,7 @@
 #include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QTimer>
+#include <QWindow>
 
 #include <cstdio>
 #include <memory>
@@ -304,6 +305,15 @@ int main(int argc, char *argv[])
             const QString root = QDir::cleanPath(QCoreApplication::applicationDirPath());
             const QString prefix = QDir::cleanPath(QLibraryInfo::path(QLibraryInfo::PrefixPath));
             bool ok = root.compare(prefix, Qt::CaseInsensitive) == 0;
+#ifdef BSI_CHROMIUM_UI
+            if(chromiumUi) {
+                const auto *surface=qobject_cast<QWindow *>(engine.rootObjects().first());
+                if(!surface || surface->flags().testFlag(Qt::FramelessWindowHint)) {
+                    std::fprintf(stderr,"Studio must retain the OS window frame and resize borders.\n"); ok=false;
+                }
+                std::printf("DEPLOYMENT_WINDOW_FRAME=native\n");
+            }
+#endif
             if (!ok)
                 std::fprintf(stderr, "Qt prefix escaped the bundle: %s\n", qPrintable(prefix));
             for (const auto &path : engine.importPathList()) {

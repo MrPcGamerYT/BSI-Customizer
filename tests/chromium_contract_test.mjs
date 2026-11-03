@@ -28,7 +28,7 @@ for (const query of ['', 'file-22', '"folder 2"', 'qml min:2kb max:40kb', 'Folde
   }
 }
 const html = read('src/web/index.html'), cmake = read('CMakeLists.txt');
-for (const asset of ['styles.css', 'transport.js', 'resource-search.js', 'emulator-icons.js', 'editors.js', 'maintenance.js', 'binary-lab.js', 'effects.js', 'app.js']) {
+for (const asset of ['styles.css', 'studio.css', 'transport.js', 'resource-search.js', 'resource-workbench.js', 'emulator-icons.js', 'editors.js', 'maintenance.js', 'binary-lab.js', 'effects.js', 'app.js']) {
   assert.ok(html.includes(asset), 'Missing browser asset: ' + asset);
   assert.ok(cmake.includes('src/web/' + asset), 'Missing embedded desktop asset: ' + asset);
 }
@@ -91,9 +91,9 @@ for(const label of ['Dashboard','Color studio','Resources','Performance','Integr
 console.log('PASS: all 13 original native section names retained alongside Binary Lab.');
 
 assert.ok(bridge.includes('args.value("thumbnails", true)'));
-assert.ok(bridge.includes('resourceHexPreviewAt(index)'));
+assert.ok(bridge.includes('m_backend.inspectResource(index)'));
 assert.ok(webApp.includes('rasterPreview(r.thumbnail)'));
-assert.ok(webApp.includes('selected.text?')&&webApp.includes('resource-inspector'));
+assert.ok(webApp.includes('canEdit?')&&webApp.includes('resource-inspector'));
 const adb=read('src/core/AdbClient.cpp');
 assert.ok(adb.includes('QueryFullProcessImageNameW'));
 assert.ok(adb.includes('parent.compare(advertised'));
@@ -108,3 +108,12 @@ for(const file of ['adb.exe','AdbWinApi.dll','AdbWinUsbApi.dll','NOTICE.txt']) {
 assert.ok(installer.includes('WaitForExit(120000)'));
 assert.ok(read('.github/workflows/release.yml').includes('./scripts/Build-Installer.ps1'));
 console.log('PASS: cached raster resource previews, guarded system actions, declared frame profiles, parent-validated ADB lookup and explicit installer sidecar allowlist.');
+
+assert.ok(!shell.includes('Qt.FramelessWindowHint'),'Studio must keep OS resize/snap controls');
+assert.ok(bridge.includes('m_backend.measureResourceDraft(index'));
+assert.ok(!webApp.includes('function fit()'),'Do not scale a fixed desktop canvas');
+assert.ok(webApp.includes("windowButton.dataset.window!=='close'"),'Minimize/maximize must stay available during work');
+assert.ok(read('src/core/Backend.cpp').includes('QIODevice::NewOnly'));
+assert.ok(read('src/core/Backend.cpp').includes('readExe();'),'Native source checks retained');
+assert.ok(read('src/core/Backend.cpp').includes('entry.format,640,true'));
+console.log('PASS: OS-framed window, native-pixel Studio layout, worker-backed inspection/measurement and new-file-only bounded selected export.');

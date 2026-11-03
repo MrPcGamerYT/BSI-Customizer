@@ -139,3 +139,6 @@ parent process; cwd/PATH are not searched. Real ADB binaries are external. See
 [INSTALLER.md](INSTALLER.md) for exact installer commands and the optional ADB
 allowlist. New native tests exercise discovery and frame plans; real emulator /
 supplier-binary acceptance must still be performed on Windows.
+
+## Studio workbench upgrade
+See [STUDIO.md](STUDIO.md) for the adaptive window, worker-backed resource inspector, selected export limits, shortcuts and validation scope.

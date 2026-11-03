@@ -158,6 +158,9 @@ public:
     // a single byte: an oversized payload is rebuilt in free space the file
     // already has, or refused.
     Q_INVOKABLE int scanResources(bool includeBinary);
+    Q_INVOKABLE QVariantMap inspectResource(int index);
+    Q_INVOKABLE QVariantMap measureResourceDraft(int index, const QString &text, bool bom);
+    Q_INVOKABLE QVariantMap exportResourceSelection(const QVariantList &indices, const QString &directory);
     Q_INVOKABLE QString resourcePreviewAt(int index, int maxSide) const;
     // Empty when the preview is a picture; a sentence when it is not.
     Q_INVOKABLE QString resourcePreviewNote(int index) const;

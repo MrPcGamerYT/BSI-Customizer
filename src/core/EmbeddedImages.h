@@ -41,7 +41,7 @@ QByteArray readEntry(const QString &exePath, qint64 entryOff, quint16 flags,
 
 // A data: URL for QML's Image element, scaled to fit maxSide (0 = full size).
 // Empty when the bytes are not a picture Qt can decode.
-QString previewDataUrl(const QByteArray &bytes, const QString &family, int maxSide);
+QString previewDataUrl(const QByteArray &bytes, const QString &family, int maxSide, bool rasterSvg = false);
 
 // The same preview as a file:// URL, used when the data: URL cannot be built
 // or when QML refuses it. The bytes are written once per payload into the

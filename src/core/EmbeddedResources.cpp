@@ -490,9 +490,9 @@ QString decodeText(const QByteArray &bytes)
     return text;
 }
 
-QString previewDataUrl(const QByteArray &bytes, const QString &format, int maxSide)
+QString previewDataUrl(const QByteArray &bytes, const QString &format, int maxSide, bool rasterSvg)
 {
-    return EmbeddedImages::previewDataUrl(bytes, format, maxSide);
+    return EmbeddedImages::previewDataUrl(bytes, format, maxSide, rasterSvg);
 }
 
 QString previewFileUrl(const QByteArray &bytes, const QString &format)

@@ -37,13 +37,13 @@ Item {
     Image {
         anchors.left: parent.left; anchors.top: parent.top
         width: parent.width * 0.65; height: parent.height * 0.9
-        source: "img/orb-green.png"; opacity: Theme.dark ? 0.26 : 0.08
+        source: "img/orb-green.png"; opacity: Theme.dark ? 0.08 : 0.03
         fillMode: Image.PreserveAspectFit
     }
     Image {
         anchors.right: parent.right; anchors.bottom: parent.bottom
         width: parent.width * 0.6; height: parent.height * 0.8
-        source: "img/orb-green.png"; opacity: Theme.dark ? 0.16 : 0.06
+        source: "img/orb-green.png"; opacity: Theme.dark ? 0.04 : 0.02
         fillMode: Image.PreserveAspectFit
     }
 
@@ -79,7 +79,7 @@ Item {
             }
             Text {
                 anchors.verticalCenter: parent.verticalCenter
-                text: qsTr("BSI CUSTOMIZER")
+                text: qsTr("BSI STUDIO  /  NATIVE ENGINE")
                 color: Theme.soft
                 font.pixelSize: 11
                 font.weight: Font.Bold
@@ -88,6 +88,7 @@ Item {
         }
 
         WinControls {
+            visible: gate.appWindow && (gate.appWindow.flags & Qt.FramelessWindowHint) !== 0
             anchors.right: parent.right
             anchors.verticalCenter: parent.verticalCenter
             appWindow: gate.appWindow
@@ -115,7 +116,13 @@ Item {
     property real lastWindowClick: 0
 
     // ---- the login card (FalcoForge .login-card) ----
-    Item {
+    Flickable {
+        id: loginScroll
+        clip: true
+        contentWidth: width
+        contentHeight: Math.max(height, card.height + 48)
+        boundsBehavior: Flickable.StopAtBounds
+        ScrollBar.vertical: ScrollBar {}
         anchors.top: windowRow.bottom
         anchors.bottom: parent.bottom
         anchors.left: parent.left
@@ -123,10 +130,11 @@ Item {
 
         Rectangle {
             id: card
-            anchors.centerIn: parent
-            width: Math.min(480, gate.width - 44)
+            anchors.horizontalCenter: parent.horizontalCenter
+            y: Math.max(24, (loginScroll.height - height) / 2)
+            width: Math.min(500, gate.width - 44)
             height: cardColumn.implicitHeight + 44
-            radius: 20
+            radius: 12
             border.width: 1
             border.color: Theme.border
             color: Theme.card
@@ -165,9 +173,9 @@ Item {
 
                         Text {
                             Layout.fillWidth: true
-                            text: qsTr("Make it yours.")
+                            text: qsTr("Welcome to BSI Studio.")
                             color: Theme.text
-                            font.pixelSize: 17
+                            font.pixelSize: 19
                             font.weight: Font.Bold
                             elide: Text.ElideRight
                         }

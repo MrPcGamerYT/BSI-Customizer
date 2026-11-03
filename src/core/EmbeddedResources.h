@@ -61,7 +61,7 @@ QString decodeText(const QByteArray &bytes);
 
 // A data: URL for QML's Image element, scaled to fit maxSide (0 = full size).
 // Empty when the bytes are not a picture Qt can decode.
-QString previewDataUrl(const QByteArray &bytes, const QString &format, int maxSide);
+QString previewDataUrl(const QByteArray &bytes, const QString &format, int maxSide, bool rasterSvg = false);
 
 // The same picture as a file:// URL, for the cases where QML will not take a
 // data: URL (an extension-less format hint, an SVG the plugin only loads from

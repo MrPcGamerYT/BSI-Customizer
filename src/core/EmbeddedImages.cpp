@@ -250,7 +250,7 @@ bool looksLikeGzip(const QByteArray &bytes)
 
 } // namespace
 
-QString previewDataUrl(const QByteArray &bytes, const QString &family, int maxSide)
+QString previewDataUrl(const QByteArray &bytes, const QString &family, int maxSide, bool rasterSvg)
 {
     if (bytes.isEmpty() || bytes.size() > kMaxImage || looksLikeGzip(bytes)) return {};
     QString format = family.toLower();
@@ -258,7 +258,7 @@ QString previewDataUrl(const QByteArray &bytes, const QString &family, int maxSi
     // differently, and an entry with no extension must still preview.
     if (format != QLatin1String("svg") && looksLikeSvg(bytes))
         format = QStringLiteral("svg");
-    if (format == QLatin1String("svg")) {
+    if (format == QLatin1String("svg") && !rasterSvg) {
         // QML renders SVG data URLs itself; base64 keeps the markup intact
         // whatever quotes or whitespace it contains.
         if (!bytes.contains("<svg"))
@@ -273,7 +273,7 @@ QString previewDataUrl(const QByteArray &bytes, const QString &family, int maxSi
     reader.setAutoTransform(true);
     const QSize original = reader.size();
     if (maxSide > 0 && original.isValid()
-        && (original.width() > maxSide || original.height() > maxSide))
+        && ((rasterSvg && format == QLatin1String("svg")) || original.width() > maxSide || original.height() > maxSide))
         reader.setScaledSize(original.scaled(maxSide, maxSide, Qt::KeepAspectRatio));
     const QImage picture = reader.read();
     if (picture.isNull()) return {};

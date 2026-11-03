@@ -12,7 +12,7 @@ const { chromium } = require(process.env.BSI_PLAYWRIGHT || 'playwright');
 const root = path.resolve(__dirname, '../src/web');
 const server = http.createServer((req, res) => {
   const name = new URL(req.url, 'http://test').pathname.slice(1) || 'index.html';
-  if (!['index.html', 'styles.css', 'transport.js', 'editors.js', 'maintenance.js', 'binary-lab.js', 'resource-search.js', 'emulator-icons.js', 'effects.js', 'app.js', 'icon.png', 'fonts/manrope-latin.woff2', 'fonts/plus-jakarta-sans-latin.woff2'].includes(name)) { res.writeHead(404).end(); return; }
+  if (!['index.html', 'styles.css', 'studio.css', 'transport.js', 'editors.js', 'maintenance.js', 'binary-lab.js', 'resource-search.js', 'resource-workbench.js', 'emulator-icons.js', 'effects.js', 'app.js', 'icon.png', 'fonts/manrope-latin.woff2', 'fonts/plus-jakarta-sans-latin.woff2'].includes(name)) { res.writeHead(404).end(); return; }
   res.setHeader('Content-Type', name.endsWith('.js') ? 'text/javascript' : name.endsWith('.css') ? 'text/css' : name.endsWith('.woff2') ? 'font/woff2' : name.endsWith('.png') ? 'image/png' : 'text/html');
   res.end(fs.readFileSync(path.join(root, name)));
 });
@@ -48,7 +48,7 @@ const server = http.createServer((req, res) => {
     await offline.close();
 
     const page = await browser.newPage({ viewport: { width: 1480, height: 920 } });
-    page.on('pageerror', e => errors.push(e.message));
+    page.on('pageerror', e => {errors.push(e.message);console.error('PAGE ERROR:',e.message);});
     page.on('dialog', dialog => dialog.accept());
     await page.addInitScript(() => {
       // Accept DOM confirmation dialogs only in this isolated mock test page.
@@ -61,6 +61,7 @@ const server = http.createServer((req, res) => {
       const colors = [{ name: 'testAccent', value: '#123456', edit: '', purpose: 'Test fixture only' }];
       const rows = Array.from({ length: 250 }, (_, index) => ({ index, path: `qml/fixture-${index}.qml`, kind: 'text', text: true, size: 100, stored: 80, format: 'QML' }));
       const png='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aNc0AAAAASUVORK5CYII=';
+      rows[246]={index:246,path:'qml/fixture-big.qml',kind:'text',text:true,format:'QML',size:9*1024*1024,stored:1024};
       rows[247]={index:247,path:'fonts/fixture-font.ttf',kind:'binary',text:false,format:'TTF',size:100,stored:100,thumbnail:'data:image/svg+xml,<svg onload=alert(1)/>'};
       rows[248]={index:248,path:'images/fixture-image.png',kind:'image',text:false,format:'PNG',size:100,stored:100,thumbnail:png};
       rows[249]={index:249,path:'images/home-icon.svg',kind:'svg',text:true,format:'SVG',size:200,stored:200,thumbnail:png};
@@ -73,6 +74,7 @@ const server = http.createServer((req, res) => {
           let value = null;
           if (method === 'readTheme') value = { entries: colors.map(c => ({ ...c })), hex: [], presets: [], method: 'qml' };
           if (method === 'setThemeEdit') colors[0].edit = args.value;
+          if(method==='exportResourceSelection')value={ok:true,count:args.indices.length,directory:'C:\\exports\\fresh-output',msg:'Fixture export complete'};
           if (method === 'scanResources') { ++state.resourceRevision; value = rows.length; }
           if (method === 'listResources') value = rows;
           if (method === 'readResource') value = { text: 'Item { property string value: "<img src=x onerror=alert(1)>" }', preview: '', budget: { known: true, capacity: 300, msg: 'Test only' } };
@@ -121,7 +123,7 @@ const server = http.createServer((req, res) => {
           callback({ ok: true, value });
         }
       };
-      window.__remote = remote;
+      window.__state=state;window.__remote = remote;
       window.qt = { webChannelTransport: {} };
       window.QWebChannel = function (_, ready) { ready({ objects: { bsi: remote } }); };
     });
@@ -133,15 +135,69 @@ const server = http.createServer((req, res) => {
     await page.locator('[data-resource="0"]').waitFor();
     assert.equal(await page.locator('[data-resource]').count(), 100, 'Resource DOM must be paginated');
     assert.equal(await page.evaluate(() => __calls.filter(c => c.method === 'scanResources').length), 1);
+    const scanCount=await page.evaluate(()=>__calls.filter(c=>c.method==='scanResources').length);
+    await page.locator('[data-resource-folder="images"]').click();
+    assert.equal(await page.locator('[data-resource]').count(),2,'Folder scope uses the cached metadata');
+    await page.locator('[data-resource-view="gallery"]').click();
+    assert.equal(await page.locator('.resource-gallery').count(),1);
+    await page.locator('#resource-kind').selectOption('2');
+    assert.equal(await page.locator('[data-resource]').count(),1,'SVG filter combines with folder scope');
+    await page.locator('#resource-kind').selectOption('0');
+    await page.locator('[data-resource-folder=""]').first().click();
+    await page.locator('[data-resource-view="list"]').click();
+    await page.locator('#resource-sort').selectOption('size');
+    assert.equal(await page.locator('[data-resource]').first().getAttribute('data-resource'),'246','Largest sort retains the native index');
+    await page.locator('#resource-sort').selectOption('path');
+    await page.locator('[data-resource-check="247"]').check();
+    await page.locator('[data-resource-check="249"]').check();
+    await page.evaluate(()=>window.__nextFile='C:\\exports');
+    await page.locator('[data-action="exportSelection"]').click();
+    await page.waitForFunction(()=>__calls.some(c=>c.method==='exportResourceSelection')&&!document.body.classList.contains('busy'));
+    const exported=await page.evaluate(()=>__calls.findLast(c=>c.method==='exportResourceSelection').args);
+    assert.deepEqual(exported.indices,[247,249]);assert.equal(exported.directory,'C:\\exports');
+    assert.equal(await page.evaluate(()=>__calls.filter(c=>c.method==='scanResources').length),scanCount,'Folder/view/sort/export must not auto-scan');
+    await page.locator('[data-resource-local="clear-checks"]').click();
+    await page.keyboard.press('Control+k');
+    await page.locator('#command-search').fill('Resources');
+    assert.equal(await page.locator('[data-command-page="2"]').count(),1);
+    await page.keyboard.press('Escape');
+    await page.evaluate(()=>{__state.busy=true;__remote.stateChanged.emit({...__state});});
+    assert.equal(await page.locator('[data-window="min"]').isDisabled(),false,'Minimize remains available while native work runs');
+    assert.equal(await page.locator('[data-window="max"]').isDisabled(),false,'Maximize remains available while native work runs');
+    assert.equal(await page.locator('[data-window="close"]').isDisabled(),true,'Unsafe close stays blocked');
+    const readsWhileBusy=await page.evaluate(()=>__calls.filter(c=>c.method!=='videoControl').length);
+    await page.locator('#spine [data-page="13"]').click();
+    assert.equal(await page.locator('body').getAttribute('data-page'),'13','Sections remain browsable during native work');
+    await page.locator('#spine [data-page="2"]').click();
+    assert.equal(await page.evaluate(()=>__calls.filter(c=>c.method!=='videoControl').length),readsWhileBusy,'Browsing while busy must not issue more engine commands');
+    await page.evaluate(()=>{__state.busy=false;__remote.stateChanged.emit({...__state});});
+    await page.locator('#effects-toggle').click();
+    assert.equal(await page.locator('body').getAttribute('data-effects'),'low');
+    await page.locator('#effects-toggle').click();
     await page.locator('#resource-filter').fill('fixture-23 qml');
     await page.locator('[data-resource="23"]').click();
+    if(process.env.BSI_WEB_TRACE)console.log('RESOURCE DEBUG',await page.evaluate(()=>({calls:__calls.slice(-5),html:document.querySelector('#resource-editor').innerHTML,toast:document.querySelector('#toast').textContent})));
     await page.locator('#resource-code').waitFor();
     assert.equal(await page.locator('#resource-editor img').count(), 0, 'Resource source must not execute as HTML');
+    await page.locator('[data-resource-local="bookmark"]').click();
+    await page.locator('[data-resource-local="favorites"]').click();
+    assert.equal(await page.locator('[data-resource]').count(),1);
+    await page.locator('[data-resource-local="favorites"]').click();
+    await page.locator('#resource-find').fill('property');
+    await page.locator('[data-resource-local="find-next"]').click();
+    assert.equal(await page.locator('#resource-code').evaluate(el=>el.value.slice(el.selectionStart,el.selectionEnd)),'property');
     await page.locator('#resource-code').fill('Item { property string value: "edited fixture" }');
     await page.locator('[data-action="saveResource"]').click();
     await page.waitForFunction(() => __calls.some(c => c.method === 'saveResource'));
     assert.equal(await page.evaluate(() => __calls.find(c => c.method === 'saveResource').args.text), 'Item { property string value: "edited fixture" }');
+    await page.locator('#resource-filter').fill('fixture-big.qml');
+    await page.locator('[data-resource="246"]').waitFor();
+    await page.locator('[data-resource="246"]').click();
+    await page.locator('#resource-editor').filter({hasText:'Metadata-only inspection'}).waitFor();
+    assert.equal(await page.locator('#resource-code').count(),0,'Oversized text must never open as an empty editable draft');
+    assert.equal(await page.evaluate(()=>__calls.filter(c=>c.method==='readResource'&&c.args.index===246).length),0,'Metadata selection must skip oversized inline reads');
     await page.locator('#resource-filter').fill('fixture-image.png');
+    await page.locator('[data-resource="248"]').waitFor();
     assert.equal(await page.locator('[data-resource="248"] .resource-thumb img').count(),1,'Cached raster thumbnails are visible');
     await page.locator('[data-resource="248"]').click();
     await page.locator('#resource-image').waitFor();
@@ -151,6 +207,7 @@ const server = http.createServer((req, res) => {
     await page.locator('[data-resource-zoom="200"]').click();
     assert.equal(await page.locator('#resource-image').evaluate(el=>el.style.maxWidth),'none');
     await page.locator('#resource-filter').fill('fixture-font.ttf');
+    await page.locator('[data-resource="247"]').waitFor();
     assert.equal(await page.locator('[data-resource="247"] img').count(),0,'Untrusted SVG data URLs cannot become list thumbnails');
     await page.locator('[data-resource="247"]').click();
     await page.locator('.resource-byte-details > summary').click();
@@ -163,6 +220,7 @@ const server = http.createServer((req, res) => {
     await page.locator('#resource-image').waitFor();
     assert.equal(await page.locator('#resource-code').count(),1,'SVG preview and source editor are both visible');
     assert.equal(await page.locator('#resource-editor svg').count(),0,'Untrusted resource SVG is rasterized, never injected');
+    if(process.env.BSI_RESOURCE_SCREENSHOT)await page.screenshot({path:process.env.BSI_RESOURCE_SCREENSHOT});
     await page.locator('#emu-icon-details > summary').click();
     assert.equal(await page.locator('[data-emulator-icon]').count(),22);
     await page.locator('[data-emulator-icon="keymap"]').click();

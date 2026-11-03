@@ -12,13 +12,13 @@ import BSICustomizer
 // the original QML editors are retained only for explicit recovery.
 ApplicationWindow {
     id: window
-    width: 1480
-    height: 920
+    width: Math.min(1440, Screen.desktopAvailableWidth * 0.92)
+    height: Math.min(900, Screen.desktopAvailableHeight * 0.90)
     minimumWidth: 980
-    minimumHeight: 640
+    minimumHeight: Math.min(600, Screen.desktopAvailableHeight * 0.88)
     visible: true
-    flags: Qt.Window | Qt.FramelessWindowHint
-    title: qsTr("BSI Customizer — Chromium workspace")
+    flags: Qt.Window // OS resize borders, snapping, taskbar and system menu remain available.
+    title: qsTr("BSI Customizer — Studio")
     color: Theme.window
     property bool booted: false
     property int nativePage: -1
@@ -52,12 +52,25 @@ ApplicationWindow {
         target: backend
         function onBusyChanged() { if (backend.busy) bootPreview.pause(); }
     }
+    property bool editorDirty: false
     property bool browserReady: false
     property string browserFailure: ""
     readonly property var nativeSources: ["DashboardPage.qml", "ThemePage.qml", "ResourcesPage.qml",
         "FpsPage.qml", "IntegrityPage.qml", "BootVideoPage.qml", "UiPage.qml", "RpcidPage.qml",
         "AppearancePage.qml", "AboutPage.qml", "GifRpcPage.qml", "WorkspacePage.qml", "DebloatPage.qml"]
-    onClosing: (close) => { if (backend.busy) close.accepted = false; }
+    onClosing: (close) => {
+        if (backend.busy) { close.accepted = false; toast.show(qsTr("The native engine is still working. You can minimize while it finishes.")); }
+        else if (window.editorDirty && auth.authorized) { close.accepted = false; unsavedClose.open(); }
+    }
+    Dialog {
+        id: unsavedClose
+        anchors.centerIn: parent
+        modal: true
+        title: qsTr("Unsaved resource draft")
+        standardButtons: Dialog.Discard | Dialog.Cancel
+        contentItem: Label { text: qsTr("Discard the unsaved resource text and close BSI Studio?"); color: Theme.text; padding: 18 }
+        onDiscarded: { window.editorDirty = false; window.close(); }
+    }
 
     QtObject {
         id: rpc
@@ -70,6 +83,7 @@ ApplicationWindow {
             } else if (action === "close") window.close();
             else if (action === "move") window.startSystemMove();
         }
+        function setEditorDirty(value) { window.editorDirty = value === true; }
         function snapshot() { return webBridge.snapshot(); }
         function invoke(method, args) { return webBridge.invoke(method, args); }
         function requestFile(role) { webBridge.requestFile(role); }
@@ -196,9 +210,10 @@ ApplicationWindow {
     }
     FolderDialog {
         id: folderDialog
+        property string roleName: "disk-folder"
         title: qsTr("Choose a local folder")
-        onAccepted: webBridge.fileChosen("disk-folder", selectedFolder)
-        onRejected: webBridge.fileChosen("disk-folder", "")
+        onAccepted: webBridge.fileChosen(roleName, selectedFolder)
+        onRejected: webBridge.fileChosen(roleName, "")
     }
     Connections {
         target: webBridge
@@ -207,7 +222,7 @@ ApplicationWindow {
         function onVideoStatus(message) { rpc.videoStatus(message); }
         function onFileSelected(role, path) { rpc.fileSelected(role, path); }
         function onOpenFileRequested(role) {
-            if (role === "disk-folder") { folderDialog.open(); return; }
+            if (role === "disk-folder" || role === "resources-folder") { folderDialog.roleName = role; folderDialog.open(); return; }
             fileDialog.roleName = role; fileDialog.open();
         }
         function onNativeToolRequested(page) { window.nativePage = page; }
@@ -219,7 +234,7 @@ ApplicationWindow {
                 window.booted = true;
                 backend.detectInstalls();
             }
-            if (!auth.authorized) { bootPreview.stop(); bootPreview.source = ""; window.videoRect = ({x:0,y:0,width:0,height:0,clipX:0,clipY:0,clipWidth:0,clipHeight:0,visible:false}); folderDialog.close(); fileDialog.close(); window.nativePage = -1; }
+            if (!auth.authorized) { window.editorDirty = false; bootPreview.stop(); bootPreview.source = ""; window.videoRect = ({x:0,y:0,width:0,height:0,clipX:0,clipY:0,clipWidth:0,clipHeight:0,visible:false}); folderDialog.close(); fileDialog.close(); window.nativePage = -1; }
             // Do not destroy WebEngineView inside a WebChannel invocation
             // (e.g. sign-out). Let the native call and signal delivery unwind.
             Qt.callLater(function() {

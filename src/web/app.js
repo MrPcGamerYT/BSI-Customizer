@@ -36,11 +36,19 @@
   const svg = i => `<svg viewBox="0 0 24 24" aria-hidden="true">${icons[i]}</svg>`;
   let transport = null, preview = false, state = {}, page = 0, pending = false;
   let palette = { entries: [], hex: [], presets: [], method: 'auto' };
-  let resourceIndex = [], kind = 0, measureTimer = null, measureSequence = 0;
+  let kind = 0, measureTimer = null, measureSequence = 0;
   let resources = [], selected = null, resourceData = null, dirty = false, filter = '', offset = 0;
   let operationResult = '', logs = [], editors = null;
   let emulatorIcon='home', emulatorIconColor='#F1F5F9', emulatorIconStroke='1.7', iconStudioOpen=false;
   const drafts = {};
+  const explorer=BsiResourceWorkbench.create();
+  let resourceFolder='', resourceSort='path', resourceView='list', favoritesOnly=false;
+  let originalResourceText='', recentResources=[], searchFrame=0, logFrame=0;
+  let operationName='', operationStarted=0, lastDuration=0;
+  const htmlCache=new WeakMap();
+  const setHTML=(selector,html)=>{const el=$(selector);if(el&&htmlCache.get(el)!==html){el.innerHTML=html;htmlCache.set(el,html);}};
+  const resetExplorer=()=>{explorer.reset();resourceFolder='';recentResources=[];originalResourceText='';};
+
   const enabled = () => !!transport && state.authorized && !state.busy && !pending;
   const panel = body => `<div class="panel"><div class="pscroll">${body}</div></div>`;
   const button = (label, action, primary = false, extra = '') => `<button class="btn${primary ? ' pri' : ''}" data-action="${action}" ${extra} ${enabled() ? '' : 'disabled'}>${label}</button>`;
@@ -50,21 +58,20 @@
     $('#toast').textContent = message; $('#toast').style.display = 'block';
     clearTimeout(toast.timer); toast.timer = setTimeout(() => { $('#toast').style.display = 'none'; }, 5000);
   }
-  function fit() { $('#stage').style.setProperty('--s', Math.min(innerWidth / 1480, innerHeight / 920, 1.6)); }
-  addEventListener('resize', fit); fit();
+  // Native window pixels are CSS pixels. Layout reflows; never scale text/hit targets.
   addEventListener('beforeunload', event => { if (dirty) { event.preventDefault(); event.returnValue = ''; } });
   function useState(next, preserveResources = false) {
     const pathChanged = next.exePath !== state.exePath;
     const workspaceChanged = next.workspaceRevision !== state.workspaceRevision;
     const updateChanged = JSON.stringify(next.updates) !== JSON.stringify(state.updates);
     const resourcesChanged = next.resourceRevision !== state.resourceRevision;
-    state = next;
+    state = next;document.body.dataset.nativeFrame=String(state.nativeFrame===true);
     if (pathChanged || !state.authorized) {
       palette = { entries: [], hex: [], presets: [], method: 'auto' };
       resources = []; selected = null; resourceData = null; dirty = false;
-      editors?.reset(); resourceIndex = []; ++measureSequence; clearTimeout(measureTimer);
+      editors?.reset(); resetExplorer();  ++measureSequence; clearTimeout(measureTimer);
     } else if (resourcesChanged && !pending && !preserveResources) {
-      resources = []; resourceIndex = []; selected = null; resourceData = null; dirty = false;
+      resources = [];  selected = null; resourceData = null; dirty = false; resetExplorer();
     }
     if (!state.authorized && !preview) {
       $('#connection').hidden = false;
@@ -82,8 +89,13 @@
     markBusy();
   }
   function markBusy() {
-    document.body.classList.toggle('busy', !!state.busy || pending);
-    document.querySelectorAll('[data-window]').forEach(el => {el.disabled = !!state.busy || pending;});
+    document.body.classList.toggle('busy', !!state.busy || pending);transport?.setEditorDirty?.(dirty);
+    document.querySelectorAll('[data-window]').forEach(el => {el.disabled = !transport?.windowAction || el.dataset.window==='close' && (!!state.busy || pending);});
+    if($('#resource-code'))$('#resource-code').readOnly=pending;
+    const status=$('#engine-status');
+    status.classList.toggle('working',!!state.busy||pending);
+    status.querySelector('span').textContent=pending?operationName.replace(/([A-Z])/g,' $1'):state.busy?'Native engine working':'Engine idle';
+    status.querySelector('b').textContent=pending?'Window controls remain available':lastDuration?lastDuration+' ms · last operation':'';
     document.querySelectorAll('[data-action]').forEach(el => {
       el.disabled = !enabled();
     });
@@ -95,25 +107,29 @@
   function chrome() {
     const current = pages[page];
     $('#canvas').classList.toggle('page', page !== 0);
-    $('#spine').innerHTML = [['INSPECT & BUILD',[0,2,13,11]],['PLAYER PATCHERS',[1,3,4,5,6]],['SYSTEM & PRESENCE',[12,7,10]],['APPLICATION',[8,9]]].map(([label,items])=>`<div class="nav-group">${label}</div>${items.map(i=>`<button class="icon${page===i?' on':''}" data-page="${i}" title="${pages[i][0]}" aria-label="${pages[i][0]}" aria-current="${page===i?'page':'false'}">${svg(i)}<span>${pages[i][0]}</span>${i===13?'<em>NEW</em>':''}</button>`).join('')}`).join('');
-    $('#cmd').innerHTML = [2, 13, 12].map(i => `<button class="cmditem${page === i ? ' active' : ''}" data-page="${i}"><strong>${pages[i][1]}</strong></button>`).join('');
+    document.body.dataset.page=String(page);
+    setHTML('#spine', [['INSPECT & BUILD',[0,2,13,11]],['PLAYER PATCHERS',[1,3,4,5,6]],['SYSTEM & PRESENCE',[12,7,10]],['APPLICATION',[8,9]]].map(([label,items])=>`<div class="nav-group">${label}</div>${items.map(i=>`<button class="icon${page===i?' on':''}" data-page="${i}" title="${pages[i][0]}" aria-label="${pages[i][0]}" aria-current="${page===i?'page':'false'}">${svg(i)}<span>${pages[i][0]}</span>${i===13?'<em>NEW</em>':''}</button>`).join('')}`).join(''));
+    setHTML('#cmd', [2, 13, 12].map(i => `<button class="cmditem${page === i ? ' active' : ''}" data-page="${i}"><strong>${pages[i][1]}</strong></button>`).join(''));
     $('#session').className = 'session' + (state.busy || pending ? ' busy' : !state.exeFound ? ' bad' : '');
     $('#session').innerHTML = `<i></i><b>${esc(preview ? 'Design preview' : state.authorized ? 'Discord verified' : 'Sign-in required')}</b><span>${state.busy || pending ? 'WORKING' : state.exeFound ? 'READY' : 'NO TARGET'}</span><em></em>`;
-    $('#hero').innerHTML = `<div class="hero"><div class="hero-main"><div class="kicker">Control center / ${esc(current[1]).toLowerCase()}</div><h1>${esc(current[2])}</h1><p>${esc(current[3])}</p><div class="hero-line"></div></div><div class="target-card"><small>Active target</small><b>${esc(targetName())}</b><div class="ready${state.exeFound ? '' : ' bad'}"><i></i>${state.exeFound ? 'HD-Player.exe detected' : 'Select your player in Settings'}</div></div></div>`;
-    $('#profile-options').innerHTML = `<div class="pd-h">Target installations</div>${(state.installs || []).map((install, index) => `<button class="pd-opt" data-action="useInstall" data-index="${index}" ${enabled() ? '' : 'disabled'}><i></i>${esc(install.profile || install.root)}</button>`).join('') || '<p class="note">Detect your installations in Settings.</p>'}<button class="pd-opt" data-page="8">Manage targets ↗</button>`;
-    $('#stats').innerHTML = page === 0 ? `<div class="stats">${[['Profile', targetName(), 'Active target'], ['Executable', state.exeFound ? 'Found' : 'Missing', 'HD-Player.exe'], ['Colors', palette.entries.filter(c => !!c.edit).length, 'Staged edits'], ['Resources', resources.length || '—', 'Explicit scans only']].map(([k, v, hint]) => `<div class="stat"><small>${k}</small><b>${esc(v)}</b><span>${hint}</span></div>`).join('')}</div>` : '';
+    setHTML('#hero', `<div class="hero"><div class="hero-main"><div class="kicker">Control center / ${esc(current[1]).toLowerCase()}</div><h1>${esc(current[2])}</h1><p>${esc(current[3])}</p><div class="hero-line"></div></div><div class="target-card"><small>Active target</small><b>${esc(targetName())}</b><div class="ready${state.exeFound ? '' : ' bad'}"><i></i>${state.exeFound ? 'HD-Player.exe detected' : 'Select your player in Settings'}</div></div></div>`);
+    setHTML('#profile-options', `<div class="pd-h">Target installations</div>${(state.installs || []).map((install, index) => `<button class="pd-opt" data-action="useInstall" data-index="${index}" ${enabled() ? '' : 'disabled'}><i></i>${esc(install.profile || install.root)}</button>`).join('') || '<p class="note">Detect your installations in Settings.</p>'}<button class="pd-opt" data-page="8">Manage targets ↗</button>`);
+    setHTML('#stats', page === 0 ? `<div class="stats">${[['Profile', targetName(), 'Active target'], ['Executable', state.exeFound ? 'Found' : 'Missing', 'HD-Player.exe'], ['Colors', palette.entries.filter(c => !!c.edit).length, 'Staged edits'], ['Resources', resources.length || '—', 'Explicit scans only']].map(([k, v, hint]) => `<div class="stat"><small>${k}</small><b>${esc(v)}</b><span>${hint}</span></div>`).join('')}</div>` : '');
     const meters = [['Colors staged', palette.entries.filter(c => !!c.edit).length, palette.entries.length], ['Resources loaded', resources.length, Math.max(resources.length, 1)], ['Target selected', state.exeFound ? 1 : 0, 1]];
-    $('#tele').innerHTML = `<div class="telemetry"><div class="section-label">Live overview</div><h2>System state</h2>${meters.map(([label, value, total], i) => `<div class="meter"><div class="meter-top"><span>${label}</span><b>${i === 2 ? (value ? 'Ready' : 'Not set') : value + ' / ' + total}</b></div><div class="bar ${i === 1 ? 'blue' : i === 2 ? 'white' : ''}"><i style="width:${total ? Math.min(100, value / total * 100) : 0}%"></i></div></div>`).join('')}<div class="divider"></div>${[['Session', preview ? 'Preview only' : state.authorized ? 'Discord verified' : 'Required'], ['Engine', state.busy || pending ? 'Working…' : 'Idle'], ['Version', state.version || '—']].map(([k, v]) => `<div class="mini-status"><span>${k}</span><b>${esc(v)}</b></div>`).join('')}<div class="tele-actions">${button('OPEN PATCH WORKSPACE', 'workspaceHome', true)}${button('RESTORE ORIGINAL', 'restoreBackup')}<div class="tools">${button('Sign out', 'signOut')}</div></div></div>`;
-    document.querySelectorAll('[data-window]').forEach(el => { el.disabled = !transport?.windowAction || !!state.busy || pending; });
+    setHTML('#tele', `<div class="telemetry"><div class="section-label">Live overview</div><h2>System state</h2>${meters.map(([label, value, total], i) => `<div class="meter"><div class="meter-top"><span>${label}</span><b>${i === 2 ? (value ? 'Ready' : 'Not set') : value + ' / ' + total}</b></div><div class="bar ${i === 1 ? 'blue' : i === 2 ? 'white' : ''}"><i style="width:${total ? Math.min(100, value / total * 100) : 0}%"></i></div></div>`).join('')}<div class="divider"></div>${[['Session', preview ? 'Preview only' : state.authorized ? 'Discord verified' : 'Required'], ['Engine', state.busy || pending ? 'Working…' : 'Idle'], ['Version', state.version || '—']].map(([k, v]) => `<div class="mini-status"><span>${k}</span><b>${esc(v)}</b></div>`).join('')}<div class="tele-actions">${button('OPEN PATCH WORKSPACE', 'workspaceHome', true)}${button('RESTORE ORIGINAL', 'restoreBackup')}<div class="tools">${button('Sign out', 'signOut')}</div></div></div>`);
+    document.querySelectorAll('[data-window]').forEach(el => { el.disabled = !transport?.windowAction || el.dataset.window==='close' && (!!state.busy || pending); });
     renderLogs(); markBusy();
   }
   function renderLogs() {
-    $('#act').innerHTML = `<div class="activity"><div class="activity-head"><span>RECENT ACTIVITY</span><button id="clear-logs">Clear</button></div><div id="logs">${logs.length ? logs.slice(-150).reverse().map(([time, message]) => `<div class="log"><i>${esc(time)}</i>${esc(message)}</div>`).join('') : '<div class="log">No native activity yet.</div>'}</div></div>`;
+    setHTML('#act', `<div class="activity"><div class="activity-head"><span>RECENT ACTIVITY</span><button id="clear-logs">Clear</button></div><div id="logs">${logs.length ? logs.slice(-150).reverse().map(([time, message]) => `<div class="log"><i>${esc(time)}</i>${esc(message)}</div>`).join('') : '<div class="log">No native activity yet.</div>'}</div></div>`);
   }
+  let renderedPage=-1;const paneScroll=new Map();
   function renderView() {
+    if(renderedPage>=0)paneScroll.set(renderedPage,Object.fromEntries(['.pscroll','.resource-detail','#resource-tree','.resource-list'].map(selector=>[selector,$('#main '+selector)?.scrollTop||0])));
+    renderedPage=page;
     let html = '';
     if (page === 0) {
-      html = `<div class="matrix">${[[11, 'Patch workspace', 'Plan, validate and apply your changes safely.'], [1, 'Color studio', 'Edit your player palette and stage live selections.'], [6, 'UI removals', 'Select unwanted emulator controls.'], [8, 'Instance control', 'Manage targets, instances and player paths.']].map(([i, title, desc], n) => `<button class="tile${n === 0 ? ' primary' : ''}" data-page="${i}"><span class="num">0${n + 1}</span><span class="glyph">${svg(i)}</span><h3>${title}</h3><p>${desc}</p></button>`).join('')}</div>`;
+      html = `<div class="matrix">${[[2,'Resource workbench','Explore asset pools, preview vectors and images, inspect metadata and stage source edits.'],[11,'Patch workspace','Build hash-bound plans, review changes and apply with recoverable journals.'],[13,'Binary Lab','Inspect PE sections, imports, exports, strings and raw executable bytes.'],[12,'System & Android','Read system facts, tune frame profiles and manage selected Android instances.']].map(([i, title, desc], n) => `<button class="tile${n === 0 ? ' primary' : ''}" data-page="${i}"><span class="num">0${n + 1}</span><span class="glyph">${svg(i)}</span><h3>${title}</h3><p>${desc}</p></button>`).join('')}</div>`;
     } else if (page === 1) {
       const rows = palette.method === 'hex' ? palette.hex : palette.entries;
       html = panel(`<div class="sec"><div class="sec-h">Live player palette</div><div class="tools"><select class="inp" id="theme-mode"><option value="auto">Auto detect</option><option value="qml">QML (new)</option><option value="hex">Hex (old)</option></select>${button('Load theme', 'loadTheme', true)}${button('Apply staged colors', 'applyTheme')}${native(1)}</div><p class="note">${esc(state.themeStatus || 'Load the target theme to see real colors. No sample values are patched.')}</p><p class="note">${esc(state.themeDetection || '')}${state.themeStale ? ' · Target changed: reload before applying.' : ''}</p>${palette.presets.length ? `<div class="tools"><select class="inp" id="preset">${palette.presets.map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('')}</select>${button('Stage preset', 'preset')}</div>` : ''}<div class="color-list">${rows.length ? rows.map((row, index) => {
@@ -122,7 +138,7 @@
         return `<div class="color-row"><input type="checkbox" data-color-enabled="${index}" aria-label="Enable ${esc(row.name)}" ${(palette.method === 'hex' ? row.enabled : !!row.edit) ? 'checked' : ''} ${enabled() ? '' : 'disabled'}><div><b>${esc(row.name)}</b><small>${esc(row.purpose)}</small></div><input type="color" value="${esc(rgb)}" data-color="${index}" aria-label="Pick ${esc(row.name)}" ${enabled() ? '' : 'disabled'}><input class="inp mono" value="${esc(value)}" data-color="${index}" aria-label="Value for ${esc(row.name)}" ${enabled() ? '' : 'disabled'}></div>`;
       }).join('') : '<div class="empty">No palette loaded. Choose an executable, then click Load theme.</div>'}</div></div>`);
     } else if (page === 2) {
-      html = panel(`<div class="sec"><div class="sec-h">Resource explorer</div><div class="tools">${button('Scan Resources', 'scanResources', true)}${native(2)}<input class="inp grow" id="resource-filter" placeholder="Search paths (space-separated terms)" value="${esc(filter)}" aria-label="Search resource paths"></div><p class="note">Opening this page never scans. The backend enforces encoded storage capacity and refuses unsafe writes.</p><label class="editor-field"><span>Resource kind</span><select class="inp" id="resource-kind">${['All', 'Pictures', 'SVG', 'Code', 'Binary', 'Fonts', 'Modified vs backup'].map((label, index) => `<option value="${index}" ${kind === index ? 'selected' : ''}>${label}</option>`).join('')}</select></label><p class="note">Search supports quoted phrases and min: / max: byte sizes (e.g. min:2kb).</p><div id="emulator-icon-studio"></div><div id="resource-rows"></div><div id="resource-editor"></div></div>`);
+      html = `<div class="resource-workspace"><div class="resource-toolbar"><div class="resource-heading"><span class="eyebrow">ASSET WORKBENCH</span><h2>Resources <span id="resource-total"></span></h2></div>${button('Scan Resources','scanResources',true)}<input class="inp grow" id="resource-filter" placeholder='Search paths · "exact phrase" · min:2kb' value="${esc(filter)}" aria-label="Search resource paths"></div><div class="resource-controls"><select class="inp" id="resource-kind" aria-label="Resource kind">${['All files','Pictures','SVG','Code','Binary','Fonts','Modified vs backup'].map((label,i)=>`<option value="${i}" ${kind===i?'selected':''}>${label}</option>`).join('')}</select><select class="inp" id="resource-sort" aria-label="Sort resources">${[['path','Name · natural'],['size','Size · largest'],['type','File type']].map(([key,label])=>`<option value="${key}" ${resourceSort===key?'selected':''}>${label}</option>`).join('')}</select><div class="view-switch" aria-label="Resource layout"><button class="btn sm" data-resource-view="list" aria-pressed="${resourceView==='list'}">List</button><button class="btn sm" data-resource-view="gallery" aria-pressed="${resourceView==='gallery'}">Gallery</button></div><button class="btn sm" data-resource-local="favorites" aria-pressed="${favoritesOnly}">★ Bookmarks</button><button class="btn sm" data-resource-local="check-page">Select page</button><button class="btn sm" data-resource-local="clear-checks">Clear</button>${button('Export selection…','exportSelection',false,'id="resource-export"')}</div><div class="resource-recent" id="resource-recent"></div><div class="resource-layout"><aside id="resource-tree" aria-label="Resource folders"></aside><section class="resource-browser" aria-label="Scanned resources"><div id="resource-rows"></div></section><section class="resource-detail" aria-label="Resource inspector"><div id="resource-editor"></div><div id="emulator-icon-studio"></div><details class="resource-advanced"><summary>Bulk resource tools</summary>${editors.extra(2)}</details></section></div><footer class="resource-footer"><span>Manual scan only · ${esc(targetName())}</span><span>Qt-native raster previews · guarded writes · Ctrl+S saves draft</span></footer></div>`;
     } else if ([3, 4, 5].includes(page)) {
       const commands = page === 3 ? [['Detect FPS target', 'fpsDetect'], ['Analyze FPS', 'fpsAnalyze'], ['Apply FPS limit', 'fpsPatch'], ['Restore FPS', 'fpsRestore']]
         : page === 4 ? [['Check integrity', 'integrityCheck'], ['Apply integrity patch', 'integrityPatch'], ['Restore integrity', 'integrityRestore']]
@@ -134,34 +150,57 @@
       html = panel(editors.render(page));
     }
     $('#main').innerHTML = html;
-    const guide=toolGuides[page];
+    const guide=page===2?null:toolGuides[page];
     if(guide) $('#main .pscroll')?.insertAdjacentHTML('afterbegin',`<div class="tool-workflow"><div><span class="eyebrow">ENGINE WORKFLOW</span><h3>${esc(guide[0])}</h3><p>${esc(guide[1])}</p></div><ol>${guide.slice(2).map((step,i)=>`<li><b>0${i+1}</b><span>${esc(step)}</span></li>`).join('')}</ol></div>`);
     if (page !== 0) $('#main .pscroll')?.insertAdjacentHTML('beforeend', editors.extra(page) + (page === 8 ? editors.extra(0) : ''));
     if (page === 2) { renderResources(); renderResourceEditor(); }
     if ($('#operation-result')) $('#operation-result').textContent = operationResult;
+    for(const [selector,top]of Object.entries(paneScroll.get(page)||{})){const el=$('#main '+selector);if(el)el.scrollTop=top;}
     markBusy(); syncVideo();
   }
   const rasterPreview = value => /^data:image\/(png|jpeg|webp|gif|bmp);base64,/i.test(value||'');
   let resourcePreviewBackground='checker';
+  function visibleResources(){return explorer.query({text:filter,kind,folder:resourceFolder,sort:resourceSort,favorites:favoritesOnly});}
+  let lastResourceViewKey='';
   function renderResources() {
     if (!$('#resource-rows')) return;
-    const rows = BsiResourceSearch.filter(resourceIndex, filter, kind);
-    offset = Math.max(0, Math.min(offset, Math.max(0, Math.ceil(rows.length / 100) - 1) * 100));
-    $('#resource-rows').innerHTML = `<p class="note">${rows.length} matching / ${resources.length} scanned · ${resources.length ? 'Showing ' + (offset + 1) + '–' + Math.min(offset + 100, rows.length) : 'Click Scan Resources to begin'}</p><div class="resource-list">${rows.slice(offset, offset + 100).map(r => `<button class="resource-row${r.index === selected?.index ? ' selected' : ''}" data-resource="${r.index}" ${enabled() ? '' : 'disabled'}><span class="resource-thumb">${rasterPreview(r.thumbnail)?`<img src="${esc(r.thumbnail)}" loading="lazy" alt="${esc(r.name||r.path)} preview">`:`<b>${esc(r.format||r.kind)}</b>`}</span><span class="resource-row-info"><small>${esc(r.kind)} · ${esc(r.size)} B${r.width?` · ${r.width} × ${r.height}`:''}</small>${esc(r.path)}</span></button>`).join('')}</div>${rows.length > 100 ? `<div class="tools"><button class="btn sm" data-paginate="-1" ${offset ? '' : 'disabled'}>Previous</button><button class="btn sm" data-paginate="1" ${offset + 100 < rows.length ? '' : 'disabled'}>Next</button></div>` : ''}`;
+    const viewKey=JSON.stringify([filter,kind,resourceFolder,resourceSort,resourceView,favoritesOnly,offset]);
+    const oldTop=viewKey===lastResourceViewKey?$('.resource-list')?.scrollTop||0:0;lastResourceViewKey=viewKey;
+    const treeTop=$('#resource-tree')?.scrollTop||0;
+    const rows=visibleResources();
+    offset=Math.max(0,Math.min(offset,Math.max(0,Math.ceil(rows.length/100)-1)*100));
+    $('#resource-total').textContent=resources.length?resources.length.toLocaleString():'';
+    const children=explorer.children(resourceFolder), parent=resourceFolder.split('/').slice(0,-1).join('/');
+    $('#resource-tree').innerHTML=`<div class="tree-label">RESOURCE POOLS</div><button class="folder-row ${!resourceFolder?'on':''}" data-resource-folder="">▦ All resources <small>${resources.length}</small></button>${resourceFolder?`<button class="folder-row" data-resource-folder="${esc(parent)}">↰ Parent folder</button><p class="tree-current">${esc(resourceFolder)}</p>`:''}${children.slice(0,200).map(folder=>`<button class="folder-row" data-resource-folder="${esc(folder.path)}" title="${esc(folder.path)}"><span>▱ ${esc(folder.name)}</span><small>${folder.count}</small></button>`).join('')}${children.length>200?'<p class="note">First 200 folders. Use path search from All resources for others.</p>':''}<div class="tree-hint">Local index only<br>Search never scans your EXE.<br><br>Browse · inspect · stage · validate · save</div>`;
+    $('#resource-recent').innerHTML=recentResources.length?recentResources.map(path=>`<button class="recent-tab${path===selected?.path?' active':''}" data-resource-recent="${esc(path)}" title="${esc(path)}">${esc(path.split('/').pop())}${path===selected?.path&&dirty?' •':''}</button>`).join(''):'<span>Open a resource to start an inspection session. No files loaded automatically.</span>';
+    $('#resource-rows').innerHTML=`<div class="resource-result-bar"><b>${rows.length.toLocaleString()} matches</b><span>${rows.length?offset+1:0}–${Math.min(offset+100,rows.length)} · ${explorer.checked.size} selected</span></div><div class="resource-list ${resourceView==='gallery'?'resource-gallery':''}" role="group" aria-label="Resource results">${rows.slice(offset,offset+100).map(r=>`<div class="resource-item"><label class="resource-check"><input type="checkbox" data-resource-check="${r.index}" aria-label="Select ${esc(r.path)} for export" ${explorer.checked.has(r.path)?'checked':''}></label><button class="resource-row${r.index===selected?.index?' selected':''}" data-resource="${r.index}" ${enabled()?'':'disabled'} title="${esc(r.path)}"><span class="resource-thumb">${rasterPreview(r.thumbnail)?`<img src="${esc(r.thumbnail)}" loading="lazy" alt="${esc(r.name||r.path)} preview">`:`<b>${esc(r.format||r.kind)}</b>`}</span><span class="resource-row-info"><b>${esc(r.path.split('/').pop())}</b><small>${esc(r.format||r.kind)} · ${Number(r.size).toLocaleString()} B${r.modified?' · MODIFIED':''}${explorer.bookmarks.has(r.path)?' · ★':''}</small><span class="resource-row-path">${esc(r.path)}</span></span></button></div>`).join('')||`<div class="resource-empty"><span>▦</span><h3>${resources.length?'No matching resources':'Explore what’s inside.'}</h3><p>${resources.length?'Adjust your folder, type or search filter.':'Select an emulator executable in Settings, then Scan Resources. Code, vectors, images, fonts and binary records appear here.'}</p></div>`}</div><div class="resource-pagination"><button class="btn sm" data-paginate="-1" ${offset?'':'disabled'}>Previous</button><span>${rows.length?Math.floor(offset/100)+1:0} / ${Math.ceil(rows.length/100)}</span><button class="btn sm" data-paginate="1" ${offset+100<rows.length?'':'disabled'}>Next</button></div>`;
+    $('.resource-list').scrollTop=oldTop;$('#resource-tree').scrollTop=treeTop;
+    const exp=$('#resource-export');if(exp)exp.textContent=`Export ${explorer.checked.size||'selection'}…`;
+  }
+  async function selectResource(index){
+    if(!enabled()||!await confirmDiscard())return;
+    const candidate=resources.find(row=>row.index===index);if(!candidate)return;
+    const data=Number(candidate.size)>8*1024*1024?{metadataOnly:true,text:'',preview:'',hex:'',note:'Metadata-only inspection: inline previews are limited to 8 MiB. Use Extract to inspect this resource externally.',budget:{known:false,msg:'Inline inspection skipped; original bytes remain unchanged.'}}:await request('readResource',{index});
+    ++measureSequence;clearTimeout(measureTimer);
+    selected=resources.find(r=>r.index===index);if(!selected)return;
+    resourceData=data;originalResourceText=data.text||'';dirty=false;
+    recentResources=[...recentResources.filter(path=>path!==selected.path),selected.path].slice(-8);
+    renderResources();renderResourceEditor();
   }
   function renderEmulatorIcons() {
     const box=$('#emulator-icon-studio'); if(!box)return;
-    box.innerHTML=BsiEmulatorIcons.render({esc,button,selected,preview:resourceData?.preview,choice:emulatorIcon,color:emulatorIconColor,stroke:emulatorIconStroke});
+    box.innerHTML=BsiEmulatorIcons.render({esc,button,selected:resourceData?.metadataOnly?null:selected,preview:resourceData?.preview,choice:emulatorIcon,color:emulatorIconColor,stroke:emulatorIconStroke});
     $('#emu-icon-details').open=iconStudioOpen;
     markBusy();
   }
   function renderResourceEditor() {
+    transport?.setEditorDirty?.(dirty);
     renderEmulatorIcons();
     if (!$('#resource-editor')) return;
     const box = $('#resource-editor');
-    if (!selected || !resourceData) { box.innerHTML = '<div class="empty">Select a scanned resource to inspect it.</div>'; return; }
-    const picture=rasterPreview(resourceData.preview);
-    box.innerHTML = `<h3>${esc(selected.path)}</h3><p class="note" id="resource-budget"></p><div class="resource-inspector${picture?' has-picture':''}">${picture?`<div><div class="tools"><label class="note">Preview background <select class="inp" id="resource-preview-bg">${['checker','dark','light'].map(bg=>`<option value="${bg}" ${bg===resourcePreviewBackground?'selected':''}>${bg}</option>`).join('')}</select></label><button class="btn sm" data-resource-zoom="fit">Fit</button><button class="btn sm" data-resource-zoom="100">100%</button><button class="btn sm" data-resource-zoom="200">200%</button></div><div class="resource-picture" id="resource-picture" data-background="${resourcePreviewBackground}"><img id="resource-image" alt="Saved SVG / image rendered by the native Qt decoder"></div><p class="note">Saved/native raster preview (static frame for animated formats). SVG source is not injected into the page. Unsaved drafts are not rendered here.</p></div>`:''}<div>${selected.text?'<label class="lbl" for="resource-code">Source editor</label><textarea class="inp" id="resource-code" spellcheck="false" aria-label="Resource source text"></textarea>':`<p class="note">${esc(resourceData.note||'No supported image preview. Inspect bytes or extract the file.')}</p>`}<details class="resource-byte-details"><summary>Raw bytes · first 256 decoded bytes</summary><pre class="lab-hex" id="resource-hex"></pre><p class="note">Offsets are within the decoded resource, not EXE file offsets. Fonts/compiled data are not executed or loaded as code.</p></details></div></div><div class="button-grid">${selected.text?button('Save resource text','saveResource',true):''}${button('Replace with file…','replaceResource')}${button('Extract…','extractResource')}</div>`;
+    if (!selected || !resourceData) { box.innerHTML = '<div class="resource-empty inspector-empty"><span>⌕</span><h3>Inspector</h3><p>Choose an asset to preview its saved content, inspect storage metadata, edit source or export.</p><small>Nothing is executed as code.</small></div>'; return; }
+    const picture=rasterPreview(resourceData.preview),canEdit=selected.text&&!resourceData.metadataOnly;
+    box.innerHTML = `<div class="inspector-title"><span class="eyebrow">${esc(selected.format||selected.kind)} / INSPECTOR</span><span id="draft-indicator">${dirty?'Unsaved draft':'Saved resource'}</span></div><h3 class="inspector-name">${esc(selected.path.split('/').pop())}</h3><p class="inspector-path">${esc(selected.path)}</p><div class="tools"><button class="btn sm" data-resource-local="bookmark">${explorer.bookmarks.has(selected.path)?'★ Bookmarked':'☆ Bookmark'}</button><button class="btn sm" data-resource-local="copy-path">Copy path</button>${canEdit?'<button class="btn sm" data-resource-local="revert-draft">Reset draft</button>':''}</div><details class="resource-metadata"><summary>Storage & mapping metadata</summary><dl>${[['Path',selected.path],['Format',selected.format||selected.kind],['Decoded bytes',selected.size],['Stored bytes',selected.stored],['Compression',selected.compressed?'Compressed':'Uncompressed'],['EXE record offset',Number.isFinite(selected.entryOff)?'0x'+selected.entryOff.toString(16):'Unavailable'],['Dimensions',selected.width?selected.width+' × '+selected.height:'Not applicable'],['Modified vs backup',selected.modifiedKnown?(selected.modified?'Yes':'No'):'Not compared']].map(([key,value])=>`<dt>${esc(key)}</dt><dd>${esc(value)}</dd>`).join('')}</dl></details><p class="note" id="resource-budget"></p><div class="resource-inspector${picture?' has-picture':''}">${picture?`<div><div class="tools"><label class="note">Preview background <select class="inp" id="resource-preview-bg">${['checker','dark','light'].map(bg=>`<option value="${bg}" ${bg===resourcePreviewBackground?'selected':''}>${bg}</option>`).join('')}</select></label><button class="btn sm" data-resource-zoom="fit">Fit</button><button class="btn sm" data-resource-zoom="100">100%</button><button class="btn sm" data-resource-zoom="200">200%</button></div><div class="resource-picture" id="resource-picture" data-background="${resourcePreviewBackground}"><img id="resource-image" alt="Saved SVG / image rendered by the native Qt decoder"></div><p class="note">Saved/native raster preview (static frame for animated formats). SVG source is not injected into the page. Unsaved drafts are not rendered here.</p></div>`:''}<div>${canEdit?'<div class="source-toolbar"><label class="lbl" for="resource-code">Source editor</label><input class="inp" id="resource-find" placeholder="Find exact text…" aria-label="Find in resource source"><button class="btn sm" data-resource-local="find-next">Next</button></div><textarea class="inp" id="resource-code" maxlength="8388608" spellcheck="false" aria-label="Resource source text"></textarea>':`<p class="note">${esc(resourceData.note||'No supported image preview. Inspect bytes or extract the file.')}</p>`}<details class="resource-byte-details"><summary>Raw bytes · first 256 decoded bytes</summary><pre class="lab-hex" id="resource-hex"></pre><p class="note">Offsets are within the decoded resource, not EXE file offsets. Fonts/compiled data are not executed or loaded as code.</p></details></div></div><div class="button-grid">${canEdit?button('Save resource text','saveResource',true):''}${button('Replace with file…','replaceResource')}${button('Extract…','extractResource')}</div>`;
     const budget=resourceData.budget||{};
     $('#resource-budget').textContent=`${selected.format||selected.kind} · Decoded: ${selected.size} B · Stored: ${selected.stored} B · Capacity: ${budget.known?budget.capacity+' B':'unknown'} · ${budget.msg||'Validated by native engine on save.'}`;
     if($('#resource-code'))$('#resource-code').value=resourceData.text||'';
@@ -171,25 +210,30 @@
   function scheduleMeasurement() {
     const sequence = ++measureSequence;
     clearTimeout(measureTimer);
-    if (!selected || !resourceData || !enabled()) return;
+    if (!selected || !resourceData) return;
+    if($('#resource-budget'))$('#resource-budget').textContent='Draft changed · waiting for native payload measurement. No file has been written.';
     const index = selected.index, text = resourceData.text, path = state.exePath;
     measureTimer = setTimeout(async () => {
-      if (!enabled() || sequence !== measureSequence) return;
+      if(sequence!==measureSequence)return;
+      if(!enabled()){scheduleMeasurement();return;}
       try {
         // Native measurement uses cached compression metadata; never scans or saves.
         const size = await transport.invoke('measureResource', { index, text, bom: !!resourceData?.budget?.bom });
         if (sequence !== measureSequence || selected?.index !== index || state.exePath !== path || !$('#resource-budget')) return;
         const capacity = resourceData.budget?.capacity;
         $('#resource-budget').textContent = `Edited decoded: ${size.decoded} B · Encoded payload: ${size.encoded} B · Capacity: ${capacity ?? 'unknown'} B · ${size.encoded > capacity ? 'Needs verified relocation; native save may refuse.' : 'Native validation still required on save.'}`;
-      } catch (_) { /* Busy or changed selection: never guess an encoded budget. */ }
+      } catch (_) {if(sequence===measureSequence&&$('#resource-budget'))$('#resource-budget').textContent='Measurement unavailable; native Save still validates the actual payload. No estimate is assumed.';}
     }, 300);
   }
   async function request(method, args = {}) {
     if (!enabled()) throw new Error('Native operations require the desktop runtime, a verified Discord session and an idle engine.');
-    pending = true; chrome();
+    pending = true; operationName=method;operationStarted=performance.now();markBusy();
+    await new Promise(resolve=>{const fallback=setTimeout(resolve,40);requestAnimationFrame(()=>{clearTimeout(fallback);setTimeout(resolve,0);});});
     try {
       const value = await transport.invoke(method, args);
-      operationResult = typeof value === 'string' ? value : JSON.stringify(value ?? 'Native request completed.', null, 2);
+      // Do not stringify multi-megabyte images/source/thumbnail arrays into a hidden result box.
+      if(!['listResources','readResource','readTheme','readWorkspace'].includes(method))operationResult=typeof value==='string'?value:JSON.stringify(value??'Native request completed.',null,2);
+      lastDuration=Math.round(performance.now()-operationStarted);
       if (value?.msg) toast(value.msg);
       return value;
     } finally {
@@ -204,14 +248,16 @@
   async function refreshResources() {
     const list = await request('listResources');
     resources = list.map((r, i) => ({ ...r, index: i }));
-    resourceIndex = BsiResourceSearch.prepare(resources);
+    explorer.setRows(resources);
   }
   async function navigate(index) {
     if (!Number.isInteger(index) || index < 0 || index >= pages.length || index === page) return;
-    if (pending || state.busy || !await confirmDiscard()) return;
-    if (dirty) { selected = null; resourceData = null; }
+    const viewingWhileBusy=pending||state.busy;
+    if(viewingWhileBusy&&dirty){toast('Let the current operation finish before leaving this unsaved resource draft.');return;}
+    if(!viewingWhileBusy&&!await confirmDiscard())return;
+    if(!viewingWhileBusy&&dirty){selected=null;resourceData=null;dirty=false;}
     $('#profile-menu').open = false;
-    dirty = false; page = index; operationResult = ''; chrome(); renderView(); BsiEffects.enter($('#main'));
+    page = index; operationResult = ''; chrome(); renderView(); BsiEffects.enter($('#main'));
     // Reads only the already-loaded palette. Neither this nor Resources navigation scans files.
     if (page === 1 && enabled()) { await readPalette(); renderView(); }
     await editors.navigate(page);
@@ -222,7 +268,7 @@
     if (!enabled()) return;
     if (name.startsWith('editor:')) { await editors.action(name.slice(7), el, page); renderView(); return; }
     if (name === 'stageEmulatorIcon') {
-      if(!BsiEmulatorIcons.eligible(selected)||!resourceData)throw Error('Select a scanned, text-editable SVG button icon first.');
+      if(!BsiEmulatorIcons.eligible(selected)||!resourceData||resourceData.metadataOnly)throw Error('Select a scanned, text-editable SVG button icon first.');
       const icon=BsiEmulatorIcons.icons.find(i=>i.id===emulatorIcon);
       if(!await BsiEffects.confirm(`Stage ${icon.label} for ${selected.path}? This replaces the editor draft only. Button behavior stays unchanged. Use Save resource text separately to write.`))return;
       // Parsing XML in an inert document is not rendering arbitrary SVG markup.
@@ -237,15 +283,16 @@
     if (name === 'loadTheme') { await request('loadTheme', { mode: $('#theme-mode').value }); await readPalette(); }
     else if (name === 'applyTheme') { if (!await BsiEffects.confirm('Apply staged colors to the selected EXE using the native engine?')) return; await request(name); await readPalette(); }
     else if (name === 'preset') { await request('applyPreset', { id: $('#preset').value }); await readPalette(); }
-    else if (name === 'scanResources') { if (!await confirmDiscard()) return; dirty = false; selected = null; resourceData = null; await request(name); await refreshResources(); }
-    else if (name === 'saveResource') { if (!await BsiEffects.confirm('Save this resource into the selected EXE? The native engine will validate storage capacity.')) return; await request(name, { index: selected.index, text: resourceData.text }); dirty = false; await refreshResources(); resourceData = await request('readResource', { index: selected.index }); }
+    else if (name === 'exportSelection') {const indices=resources.filter(row=>explorer.checked.has(row.path)).map(row=>row.index);if(!indices.length)throw Error('Select resources using their checkboxes first.');const directory=await transport.chooseFile('resources-folder');if(!directory)return;if(!await BsiEffects.confirm(`Export ${indices.length} resources to a NEW subfolder? Source EXE remains unchanged. Limits: 500 entries, 16 MiB per entry, 128 MiB total. Filenames receive their native index to prevent collisions.`))return;await request('exportResourceSelection',{indices,directory});}
+    else if (name === 'scanResources') { if (!await confirmDiscard()) return; dirty = false; selected = null; resourceData = null; recentResources=[];resourceFolder='';await request(name); await refreshResources(); }
+    else if (name === 'saveResource') { if (!await BsiEffects.confirm('Save this resource into the selected EXE? The native engine will validate storage capacity.')) return; await request(name, { index: selected.index, text: resourceData.text }); dirty = false; await refreshResources(); resourceData = await request('readResource', { index: selected.index });originalResourceText=resourceData.text||''; }
     else if (name === 'replaceResource' || name === 'extractResource') {
       if (name === 'replaceResource' && !await confirmDiscard()) return;
       const path = await transport.chooseFile(name === 'replaceResource' ? 'replace' : 'extract');
       if (!path) return;
       if (name === 'replaceResource' && !await BsiEffects.confirm('Replace the selected EXE resource with this file?')) return;
       await request(name, { index: selected.index, path });
-      if (name === 'replaceResource') { dirty = false; await refreshResources(); resourceData = await request('readResource', { index: selected.index }); }
+      if (name === 'replaceResource') { dirty = false; await refreshResources(); resourceData = await request('readResource', { index: selected.index });originalResourceText=resourceData.text||''; }
     } else if (name === 'browse') { if (!await confirmDiscard()) return; const path = await transport.chooseFile(el.dataset.role); if (!path) return; }
     else if (name === 'path') { if (!await confirmDiscard()) return; const role = el.dataset.role; await request('setPaths', { [role]: $('#path-' + role).value }); }
     else if (name === 'appearance') await request('setAppearance', { theme: Number($('#appearance-mode').value), accent: $('#accent').value });
@@ -262,23 +309,31 @@
   document.addEventListener('click', async event => {
     try {
       const zoom=event.target.closest('[data-resource-zoom]');
-      if(zoom){const img=$('#resource-image');if(img){const n=zoom.dataset.resourceZoom;img.style.maxWidth=n==='fit'?'100%':'none';img.style.width=n==='fit'?'auto':img.naturalWidth*(Number(n)/100)+'px';}return;}
+      if(zoom){const img=$('#resource-image');if(img){const n=zoom.dataset.resourceZoom;img.style.maxWidth=n==='fit'?'100%':'none';img.style.maxHeight=n==='fit'?'100%':'none';img.style.width=n==='fit'?'auto':img.naturalWidth*(Number(n)/100)+'px';}return;}
       const iconChoice=event.target.closest('[data-emulator-icon]');
       if(iconChoice){if(BsiEmulatorIcons.icons.some(i=>i.id===iconChoice.dataset.emulatorIcon)){emulatorIcon=iconChoice.dataset.emulatorIcon;renderEmulatorIcons();}return;}
       const windowButton = event.target.closest('[data-window]');
-      if (windowButton) { if (windowButton.dataset.window === 'close' && !await confirmDiscard()) return; if (!state.busy && !pending) await BsiEffects.windowAction(windowButton.dataset.window, action => transport?.windowAction?.(action)); return; }
+      if (windowButton) { if (windowButton.dataset.window === 'close' && !await confirmDiscard()) return; if(windowButton.dataset.window!=='close'||!state.busy&&!pending) await BsiEffects.windowAction(windowButton.dataset.window, action => transport?.windowAction?.(action)); return; }
       const actionEl = event.target.closest('[data-action]');
       if (actionEl) { if (actionEl.dataset.action === 'workspaceHome') await navigate(11); else await action(actionEl); return; }
-      const nav = event.target.closest('[data-page]');
+      const nav = event.target.closest('button[data-page]');
       if (nav) { await navigate(Number(nav.dataset.page)); return; }
-      const row = event.target.closest('[data-resource]');
-      if (row && enabled() && await confirmDiscard()) {
-        const index = Number(row.dataset.resource);
-        const data = await request('readResource', { index });
-        ++measureSequence; clearTimeout(measureTimer);
-        selected = resources.find(r => r.index === index); resourceData = data; dirty = false;
-        renderResources(); renderResourceEditor(); return;
+      const local=event.target.closest('[data-resource-local]');
+      if(local){
+        const command=local.dataset.resourceLocal;
+        if(command==='favorites'){favoritesOnly=!favoritesOnly;local.setAttribute('aria-pressed',favoritesOnly);offset=0;renderResources();}
+        if(command==='check-page'){for(const row of visibleResources().slice(offset,offset+100))explorer.checked.add(row.path);renderResources();}
+        if(command==='clear-checks'){explorer.checked.clear();renderResources();}
+        if(command==='bookmark'&&selected){explorer.bookmark(selected.path);renderResources();renderResourceEditor();}
+        if(command==='revert-draft'&&resourceData&&await confirmDiscard()){resourceData.text=originalResourceText;dirty=false;renderResourceEditor();renderResources();scheduleMeasurement();}
+        if(command==='copy-path'&&selected){const copy=document.createElement('textarea');copy.value=selected.path;document.body.append(copy);copy.select();const ok=document.execCommand('copy');copy.remove();toast(ok?'Resource path copied.':'Clipboard unavailable; select the path in metadata and copy it.');}
+        if(command==='find-next'){const code=$('#resource-code'),query=$('#resource-find')?.value;if(code&&query){let at=code.value.indexOf(query,code.selectionEnd);if(at<0)at=code.value.indexOf(query);if(at<0)toast('No exact match in source.');else{code.focus();code.setSelectionRange(at,at+query.length);const line=code.value.slice(0,at).split('\n').length;code.scrollTop=Math.max(0,(line-4)*20);}}}
+        return;
       }
+      const folder=event.target.closest('[data-resource-folder]');if(folder){resourceFolder=folder.dataset.resourceFolder;offset=0;renderResources();return;}
+      const view=event.target.closest('[data-resource-view]');if(view){resourceView=view.dataset.resourceView;document.querySelectorAll('[data-resource-view]').forEach(el=>el.setAttribute('aria-pressed',el.dataset.resourceView===resourceView));renderResources();return;}
+      const recent=event.target.closest('[data-resource-recent]');if(recent){const row=resources.find(r=>r.path===recent.dataset.resourceRecent);if(row)await selectResource(row.index);return;}
+      const row=event.target.closest('[data-resource]');if(row){await selectResource(Number(row.dataset.resource));return;}
       const paginate = event.target.closest('[data-paginate]');
       if (paginate) { offset += Number(paginate.dataset.paginate) * 100; renderResources(); }
       if (event.target.closest('#clear-logs')) { logs = []; renderLogs(); }
@@ -291,8 +346,8 @@
     const el = event.target;
     editors.input(el);
     if(el.id==='emu-icon-color'&&/^#[0-9a-f]{6}$/i.test(el.value)){emulatorIconColor=el.value;renderEmulatorIcons();return;}
-    if (el.id === 'resource-filter') { filter = el.value; offset = 0; renderResources(); }
-    if (el.id === 'resource-code' && resourceData) { resourceData.text = el.value; dirty = true; scheduleMeasurement(); }
+    if (el.id === 'resource-filter') { filter = el.value; offset = 0; clearTimeout(searchFrame);searchFrame=setTimeout(renderResources,70); }
+    if (el.id === 'resource-code' && resourceData) { resourceData.text = el.value; dirty = true;transport?.setEditorDirty?.(true); if($('#draft-indicator'))$('#draft-indicator').textContent='Unsaved draft';scheduleMeasurement(); }
     if (el.dataset.draft) drafts[el.dataset.draft] = el.value;
   });
   document.addEventListener('change', async event => {
@@ -300,6 +355,8 @@
     editors.input(el);
     if(el.id==='resource-preview-bg'){resourcePreviewBackground=el.value;$('#resource-picture')?.setAttribute('data-background',el.value);return;}
     if(el.id==='emu-icon-stroke'&&['1.4','1.7','2'].includes(el.value)){emulatorIconStroke=el.value;renderEmulatorIcons();return;}
+    if(el.dataset.resourceCheck!==undefined){const row=resources.find(row=>row.index===Number(el.dataset.resourceCheck));if(row)explorer.check(row.path);renderResources();return;}
+    if(el.id==='resource-sort'){resourceSort=el.value;offset=0;renderResources();return;}
     if (el.id === 'resource-kind') { kind = Number(el.value); offset = 0; renderResources(); return; }
     const index = el.dataset.color ?? el.dataset.colorEnabled;
     if (index === undefined || !enabled()) return;
@@ -317,6 +374,19 @@
     preview = true; state = {}; $('#connection').hidden = true; $('#preview-note').hidden = false;
     chrome(); renderView();
   };
+  let lowEffects=false;try{lowEffects=localStorage.getItem('bsi.presentation.lowEffects')==='true';}catch(_){}
+  function applyEffects(){document.body.dataset.effects=lowEffects?'low':'full';$('#effects-toggle').setAttribute('aria-pressed',String(lowEffects));}
+  applyEffects();$('#effects-toggle').onclick=()=>{lowEffects=!lowEffects;applyEffects();try{localStorage.setItem('bsi.presentation.lowEffects',String(lowEffects));}catch(_){}};
+  function commandResults(){const needle=$('#command-search').value.toLowerCase();$('#command-results').innerHTML=pages.map((entry,i)=>({entry,i})).filter(({entry})=>entry.join(' ').toLowerCase().includes(needle)).map(({entry,i})=>`<button class="command-result" data-command-page="${i}">${svg(i)}<span><b>${esc(entry[0])}</b><small>${esc(entry[3])}</small></span><em>↵</em></button>`).join('')||'<p class="empty">No tools match. Try Resources, FPS, ADB or Binary.</p>';}
+  function openCommands(){commandResults();$('#command-dialog').showModal();$('#command-search').focus();}
+  $('#command-open').onclick=openCommands;$('#command-close').onclick=()=>$('#command-dialog').close();$('#command-search').oninput=commandResults;
+  $('#command-results').onclick=async event=>{const el=event.target.closest('[data-command-page]');if(!el)return;$('#command-dialog').close();await navigate(Number(el.dataset.commandPage));};
+  $('#command-dialog').addEventListener('keydown',event=>{if(event.key==='ArrowDown'||event.key==='ArrowUp'){event.preventDefault();const items=[...document.querySelectorAll('.command-result')];let at=items.indexOf(document.activeElement);items[(at+(event.key==='ArrowDown'?1:-1)+items.length)%items.length]?.focus();}if(event.key==='Enter'&&document.activeElement.id==='command-search'){event.preventDefault();$('.command-result')?.click();}});
+  document.addEventListener('keydown',async event=>{
+    if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='k'){event.preventDefault();if(!$('#command-dialog').open)openCommands();return;}
+    if((event.ctrlKey||event.metaKey)&&event.key.toLowerCase()==='s'&&page===2){event.preventDefault();if(dirty&&enabled())await action($('[data-action="saveResource"]'));return;}
+    if(event.key==='Tab'&&event.target.id==='resource-code'&&!event.target.readOnly){event.preventDefault();event.target.setRangeText('  ',event.target.selectionStart,event.target.selectionEnd,'end');event.target.dispatchEvent(new Event('input',{bubbles:true}));}
+  });
   let videoFrame=0, videoGeometry='';
   function syncVideo() {
     cancelAnimationFrame(videoFrame);
@@ -345,7 +415,7 @@
       transport = await BsiTransport.connect();
       transport.onState(useState);
       transport.onVideo?.(message => editors.videoStatus(message));
-      transport.onLog(message => { logs.push([new Date().toLocaleTimeString(), message]); if (logs.length > 500) logs.shift(); renderLogs(); });
+      transport.onLog(message => { logs.push([new Date().toLocaleTimeString(), message]); if (logs.length > 500) logs.shift(); if(!logFrame)logFrame=requestAnimationFrame(()=>{logFrame=0;renderLogs();}); });
       const initial = await transport.snapshot();
       if (initial.protocol !== 1) throw new Error('Unsupported native bridge protocol. Restart with --native-ui.');
       useState(initial);
@@ -359,7 +429,7 @@
   editors = BsiEditors.create({ esc, button, request, enabled,
     chooseFile: role => transport.chooseFile(role), getState: () => state,
     getResources: () => resources, refreshPalette: readPalette,
-    invalidateResources: () => { resources = []; resourceIndex = []; selected = null; resourceData = null; dirty = false; ++measureSequence; clearTimeout(measureTimer); },
+    invalidateResources: () => { resetExplorer(); resources = [];  selected = null; resourceData = null; dirty = false; ++measureSequence; clearTimeout(measureTimer); },
     setBootHold: hold => { drafts.hold = String(hold); }
   });
   start();

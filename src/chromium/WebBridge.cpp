@@ -31,7 +31,7 @@ bool fileRole(const QString &role) {
         || role == QLatin1String("report-save") || role == QLatin1String("image-open")
         || role == QLatin1String("image-save") || role == QLatin1String("video-open")
         || role == QLatin1String("disk-open") || role == QLatin1String("disk-source")
-        || role == QLatin1String("disk-extract") || role == QLatin1String("disk-folder");
+        || role == QLatin1String("disk-extract") || role == QLatin1String("disk-folder") || role == QLatin1String("resources-folder");
 }
 }
 
@@ -62,7 +62,7 @@ WebBridge::WebBridge(Backend &backend, AuthManager &auth, SettingsManager &setti
 
 QVariantMap WebBridge::snapshot() const
 {
-    QVariantMap state{{"protocol", 1}, {"authorized", m_auth.isAuthorized()}};
+    QVariantMap state{{"nativeFrame",true},{"protocol", 1}, {"authorized", m_auth.isAuthorized()}};
     if (!m_auth.isAuthorized()) return state;
     const QString path = m_backend.exePath();
     state.insert("busy", m_backend.busy() || m_dispatching);
@@ -173,10 +173,7 @@ QVariantMap WebBridge::invoke(const QString &method, const QVariantMap &args)
             const auto info = m_backend.resourceInfos().at(index).toMap();
             if (info.value("size").toLongLong() > 8 * 1024 * 1024)
                 return failure(QStringLiteral("This resource is too large for an inline preview. Extract it or use the full native tools."));
-            value = QVariantMap{
-            {"text", m_backend.resourceTextAt(index)}, {"preview", m_backend.resourcePreviewAt(index, 640)},
-            {"note", m_backend.resourcePreviewNote(index)}, {"budget", m_backend.resourceBudgetAt(index)},
-            {"hex", m_backend.resourceHexPreviewAt(index)}};
+            value = m_backend.inspectResource(index);
         }
         else if (method == QLatin1String("saveResource")) value = m_backend.saveResourceText(index, text("text"));
         else if (method == QLatin1String("replaceResource")) value = m_backend.replaceResourceWithFile(index, text("path"));
@@ -262,6 +259,7 @@ QVariantMap WebBridge::invoke(const QString &method, const QVariantMap &args)
     } else if (method == QLatin1String("previewHex")) value = m_backend.previewHex();
     else if (method == QLatin1String("recolorTogglesFromPreset")) value = m_backend.recolorTogglesFromPreset(text("id"));
     else if (method == QLatin1String("detectInstances")) value = m_backend.detectInstances();
+    else if (method == QLatin1String("exportResourceSelection")) value = m_backend.exportResourceSelection(args.value("indices").toList(),text("directory"));
     else if (method == QLatin1String("extractAllResources")) value = m_backend.extractAllResources();
     else if (method == QLatin1String("measureResource")) {
         bool valid = false; const int index = args.value("index").toInt(&valid);
@@ -269,8 +267,7 @@ QVariantMap WebBridge::invoke(const QString &method, const QVariantMap &args)
         // BOM comes from the selected entry budget; measurement is not a write.
         // Do not re-read the entire EXE for each editor keystroke.
         const bool bom = args.value("bom", false).toBool();
-        value = QVariantMap{{"decoded", m_backend.resourceTextSize(text("text"), bom)},
-                            {"encoded", m_backend.resourcePayloadSize(index, text("text"), bom)}};
+        value = m_backend.measureResourceDraft(index,text("text"),bom);
     } else if (method == QLatin1String("setFpsAutoDetect")) m_settings.setFpsAutoDetect(args.value("enabled").toBool());
     else if (method == QLatin1String("openExeFolder")) m_settings.openExeFolder();
     else if (method == QLatin1String("updates")) {

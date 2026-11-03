@@ -6268,12 +6268,36 @@ Window {
                 if (row.value(QStringLiteral("path")).toString() == QStringLiteral("images/logo.png"))
                     pngThumb = row.value(QStringLiteral("thumbnail")).toString().startsWith(QLatin1String("data:image/png"));
                 if (row.value(QStringLiteral("path")).toString() == QStringLiteral("icons/star.svg"))
-                    svgThumb = row.value(QStringLiteral("thumbnail")).toString().startsWith(QLatin1String("data:image/svg"));
+                    svgThumb = row.value(QStringLiteral("thumbnail")).toString().startsWith(QLatin1String("data:image/png"));
             }
             check(pngThumb && svgThumb, "scan worker prepares PNG and SVG thumbnails before publishing rows");
             const int before = notifications;
             backend.rpcidNames(cachedPath); // unrelated worker completion
             check(notifications == before, "unrelated operations do not reload the Resources editor");
+            int svgIndex=-1;
+            for(int i=0;i<snapshot.size();++i)if(snapshot.at(i).toMap().value("path").toString()==QLatin1String("icons/star.svg"))svgIndex=i;
+            const auto inspected=backend.inspectResource(svgIndex);
+            const auto preview=inspected.value("preview").toString();
+            const auto pixels=QImage::fromData(QByteArray::fromBase64(preview.section(QLatin1Char(','),1).toLatin1()));
+            check(inspected.value("ok").toBool() && inspected.value("text").toString()==svgSource
+                && preview.startsWith(QLatin1String("data:image/png;base64,")) && !pixels.isNull() && pixels.width()==640,
+                "worker inspection returns SVG source AND a real scaled PNG, never SVG markup to Chromium");
+            check(!backend.inspectResource(-1).value("ok").toBool(),"invalid inspection indexes are refused");
+            const auto measured=backend.measureResourceDraft(svgIndex,svgSource,false);
+            check(measured.value("ok").toBool() && measured.value("decoded").toInt()==svgSource.toUtf8().size(),"draft compression measurement runs through the worker facade");
+            check(!backend.exportResourceSelection({},temp.path()).value("ok").toBool(),"empty selected export is refused before creating output");
+            check(!backend.exportResourceSelection({-1},temp.path()).value("ok").toBool(),"invalid selected export is refused");
+            const auto exported=backend.exportResourceSelection({svgIndex,svgIndex},temp.path());
+            const auto output=exported.value("directory").toString();
+            const auto files=QDir(output).entryList(QDir::Files);
+            check(exported.value("ok").toBool() && exported.value("count").toInt()==1 && files.size()==1
+                && read(QDir(output).filePath(files.value(0)))==svgSource.toUtf8(),"selected export deduplicates indexes and writes original decoded bytes into a fresh folder");
+            const auto second=backend.exportResourceSelection({svgIndex},temp.path());
+            check(second.value("ok").toBool() && second.value("directory").toString()!=output
+                && read(cachedPath)==r.f.bytes,"repeated export never overwrites prior outputs or changes the source EXE");
+            auto changed=r.f.bytes;changed.append('x');write(cachedPath,changed);
+            check(!backend.inspectResource(svgIndex).value("ok").toBool()
+                && !backend.exportResourceSelection({svgIndex},temp.path()).value("ok").toBool(),"inspection/export refuse offsets from a stale manual scan");
             QFile::remove(cachedPath);
             check(backend.resourceInfos() == snapshot, "metadata reads use the snapshot, not disk I/O");
             settings.setExePath(temp.filePath(QStringLiteral("different-player.exe")));
