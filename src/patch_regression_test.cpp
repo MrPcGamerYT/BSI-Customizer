@@ -4561,7 +4561,7 @@ Window {
         write(QDir(webModule).filePath(QStringLiteral("qmldir")),
               "module BsiFixtureWebEngine\nWebEngineView 1.0 WebEngineView.qml\n");
         write(QDir(webModule).filePath(QStringLiteral("WebEngineView.qml")),
-              "import QtQuick\nItem{objectName:'bsiBootHtmlView';property url url;property color backgroundColor;property QtObject settings:QtObject{property bool playbackRequiresUserGesture:true;property bool localContentCanAccessFileUrls:false}}\n");
+              "import QtQuick\nItem{objectName:'bsiBootHtmlView';enum LoadStatus{LoadStartedStatus,LoadStoppedStatus,LoadSucceededStatus,LoadFailedStatus};signal loadingChanged(var request);signal renderProcessTerminated(var status,int exitCode);property url url;property color backgroundColor;property QtObject settings:QtObject{property bool playbackRequiresUserGesture:true;property bool localContentCanAccessFileUrls:false}}\n");
         check(prepareSyntheticBootPlayer(helperPath), "use a synthetic WebEngine type for the generated HTML-loader test");
         const QUrl htmlUrl = QUrl::fromLocalFile(htmlPath);
         check(bootRuntimeInChild(helperPath, importRoot, QStringLiteral("web"), htmlUrl) == 0,

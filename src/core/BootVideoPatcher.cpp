@@ -396,15 +396,18 @@ Item {
     }
     Component.onCompleted: {
         var htmlUrl = Qt.resolvedUrl("BootScreen.html").toString();
-        var web = 'import QtQuick;import QtWebEngine;WebEngineView{objectName:"bsiBootHtmlView";anchors.fill:parent;backgroundColor:"#050A10"}';
+        var web = 'import QtQuick;import QtWebEngine;WebEngineView{objectName:"bsiBootHtmlView";z:0;anchors.fill:parent;backgroundColor:"#050A10";onLoadingChanged:function(request){if(request.status===WebEngineView.LoadSucceededStatus)root.htmlLoaded=true;else if(request.status===WebEngineView.LoadFailedStatus){root.htmlLoaded=false;visible=false}};onRenderProcessTerminated:function(status,exitCode){root.htmlLoaded=false;visible=false}}';
+        var webView = null;
         try {
-            var webView = Qt.createQmlObject(web, root, "bsiHtmlBoot");
+            webView = Qt.createQmlObject(web, root, "bsiHtmlBoot");
             webView.settings.playbackRequiresUserGesture = false;
             webView.settings.localContentCanAccessFileUrls = true;
             webView.url = htmlUrl;
-            root.htmlLoaded = true;
             return;
-        } catch(e) { console.warn("WebEngine HTML loader unavailable: " + e); }
+        } catch(e) {
+            if (webView) webView.visible = false;
+            console.warn("WebEngine HTML loader unavailable: " + e);
+        }
         if (!root.withVideo) return;
         var mediaUrl = JSON.stringify(Qt.resolvedUrl("Promo.mp4").toString());
         var q6 = 'import QtQuick;import QtMultimedia;Item{z:0;anchors.fill:parent;VideoOutput{id:v;anchors.fill:parent;fillMode:VideoOutput.PreserveAspectCrop}MediaPlayer{id:m;source:'

@@ -7,7 +7,7 @@ import subprocess
 import sys
 
 if len(sys.argv) == 1:
-    for provider in ("web", "fallback"):
+    for provider in ("web", "webfail", "fallback"):
         subprocess.run([sys.executable, "-X", "faulthandler", "-u", __file__, provider], check=True)
     sys.exit(0)
 
@@ -19,7 +19,7 @@ from PySide6.QtQml import QQmlEngine, QQmlComponent
 from PySide6.QtTest import QTest
 
 provider = sys.argv[1]
-assert provider in ("web", "fallback")
+assert provider in ("web", "webfail", "fallback")
 app = QGuiApplication([])
 source = (Path(__file__).resolve().parents[1] / "src/core/BootVideoPatcher.cpp").read_text()
 qml = re.search(r'R"QML\((.*?)\)QML"', source, re.S).group(1)
@@ -27,6 +27,10 @@ html = re.search(r'R"HTML\((.*?)\)HTML"', source, re.S).group(1)
 assert 'Qt.resolvedUrl("BootScreen.html")' in qml
 assert "webView.settings.localContentCanAccessFileUrls = true" in qml
 assert "webView.settings.playbackRequiresUserGesture = false" in qml
+assert "request.status===WebEngineView.LoadSucceededStatus" in qml
+assert "request.status===WebEngineView.LoadFailedStatus" in qml
+assert "webView.url = htmlUrl;\n            return;" in qml
+
 assert 'class="ring-track"' in html and "Emulator is starting…" in html
 assert "__BSI_EMULATOR_LOGO__" in qml and "__BSI_WITH_VIDEO__" in qml
 assert "Promo.mp4" in source and "__VIDEO_BACKGROUND__" in html
@@ -42,12 +46,17 @@ with tempfile.TemporaryDirectory(prefix="boot html ' & Ω ") as tmp:
     module = imports / "BsiFixtureWebEngine"
     module.mkdir(parents=True)
     (module / "qmldir").write_text("module BsiFixtureWebEngine\nWebEngineView 1.0 WebEngineView.qml\n")
-    (module / "WebEngineView.qml").write_text(
+    fake_load_status = "LoadFailedStatus" if provider == "webfail" else "LoadSucceededStatus"
+    fake_web = (
         "import QtQuick\n"
-        "Item{objectName:'bsiBootHtmlView';property url url;property color backgroundColor;"
-        "property QtObject settings:QtObject{property bool playbackRequiresUserGesture:true;"
-        "property bool localContentCanAccessFileUrls:false}}"
+        "Item{objectName:'bsiBootHtmlView';enum LoadStatus{LoadStartedStatus,LoadStoppedStatus,LoadSucceededStatus,LoadFailedStatus};"
+        "signal loadingChanged(var request);signal renderProcessTerminated(var status,int exitCode);"
+        "property url url;property color backgroundColor;property QtObject settings:QtObject{"
+        "property bool playbackRequiresUserGesture:true;property bool localContentCanAccessFileUrls:false}"
+        f"Timer{{interval:10;running:true;onTriggered:loadingChanged({{status:{fake_load_status}}})}}"
+        "}"
     )
+    (module / "WebEngineView.qml").write_text(fake_web)
     assets = directory / "Assets"
     assets.mkdir()
     qml_path = assets / "BootVideo.qml"
@@ -69,18 +78,29 @@ with tempfile.TemporaryDirectory(prefix="boot html ' & Ω ") as tmp:
     QTest.qWait(30)
     try:
         assert obj is not None, [error.toString() for error in component.errors()]
-        if provider == "web":
+        ring = obj.findChild(QObject, "bsiLoadingRing")
+        status = obj.findChild(QObject, "bsiBootStatus")
+        assert ring is not None and status is not None, messages
+        if provider in ("web", "webfail"):
             view = obj.findChild(QObject, "bsiBootHtmlView")
             assert view is not None, messages
             assert view.property("url") == QUrl.fromLocalFile(str(html_path)), view.property("url")
             settings = view.property("settings")
             assert settings.property("playbackRequiresUserGesture") is False
             assert settings.property("localContentCanAccessFileUrls") is True
+            if provider == "web":
+                assert obj.property("htmlLoaded") is True
+                assert ring.property("visible") is False
+                assert view.property("visible") is True
+            else:
+                assert obj.property("htmlLoaded") is False
+                assert ring.property("visible") is True
+                assert status.property("visible") is True
+                assert status.property("text") == "Emulator is starting…"
+                assert view.property("visible") is False
         else:
-            ring = obj.findChild(QObject, "bsiLoadingRing")
-            status = obj.findChild(QObject, "bsiBootStatus")
-            assert ring is not None and ring.property("visible") is True, messages
-            assert status is not None and status.property("text") == "Emulator is starting…", messages
+            assert ring.property("visible") is True, messages
+            assert status.property("text") == "Emulator is starting…", messages
     except AssertionError as error:
         for line in [str(error)] + messages:
             escaped = line.replace("%", "%25").replace("\n", "%0A").replace("\r", "%0D")
