@@ -177,10 +177,14 @@
     $('.resource-list').scrollTop=oldTop;$('#resource-tree').scrollTop=treeTop;
     const exp=$('#resource-export');if(exp)exp.textContent=`Export ${explorer.checked.size||'selection'}…`;
   }
+  async function resourceInspection(index){
+    const candidate=resources.find(row=>row.index===index);
+    if(!candidate)throw Error('This resource is no longer in the scan. Scan Resources again.');
+    return Number(candidate.size)>8*1024*1024?{metadataOnly:true,text:'',preview:'',hex:'',note:'Metadata-only inspection: inline previews are limited to 8 MiB. Use Extract to inspect this resource externally.',budget:{known:false,msg:'Inline inspection skipped; original bytes remain unchanged.'}}:await request('readResource',{index});
+  }
   async function selectResource(index){
     if(!enabled()||!await confirmDiscard())return;
-    const candidate=resources.find(row=>row.index===index);if(!candidate)return;
-    const data=Number(candidate.size)>8*1024*1024?{metadataOnly:true,text:'',preview:'',hex:'',note:'Metadata-only inspection: inline previews are limited to 8 MiB. Use Extract to inspect this resource externally.',budget:{known:false,msg:'Inline inspection skipped; original bytes remain unchanged.'}}:await request('readResource',{index});
+    const data=await resourceInspection(index);
     ++measureSequence;clearTimeout(measureTimer);
     selected=resources.find(r=>r.index===index);if(!selected)return;
     resourceData=data;originalResourceText=data.text||'';dirty=false;
@@ -249,6 +253,7 @@
     const list = await request('listResources');
     resources = list.map((r, i) => ({ ...r, index: i }));
     explorer.setRows(resources);
+    if(selected){const path=selected.path;selected=resources.find(row=>row.index===selected.index&&row.path===path)||resources.find(row=>row.path===path)||null;if(!selected){resourceData=null;dirty=false;}}
   }
   async function navigate(index) {
     if (!Number.isInteger(index) || index < 0 || index >= pages.length || index === page) return;
@@ -285,14 +290,14 @@
     else if (name === 'preset') { await request('applyPreset', { id: $('#preset').value }); await readPalette(); }
     else if (name === 'exportSelection') {const indices=resources.filter(row=>explorer.checked.has(row.path)).map(row=>row.index);if(!indices.length)throw Error('Select resources using their checkboxes first.');const directory=await transport.chooseFile('resources-folder');if(!directory)return;if(!await BsiEffects.confirm(`Export ${indices.length} resources to a NEW subfolder? Source EXE remains unchanged. Limits: 500 entries, 16 MiB per entry, 128 MiB total. Filenames receive their native index to prevent collisions.`))return;await request('exportResourceSelection',{indices,directory});}
     else if (name === 'scanResources') { if (!await confirmDiscard()) return; dirty = false; selected = null; resourceData = null; recentResources=[];resourceFolder='';await request(name); await refreshResources(); }
-    else if (name === 'saveResource') { if (!await BsiEffects.confirm('Save this resource into the selected EXE? The native engine will validate storage capacity.')) return; await request(name, { index: selected.index, text: resourceData.text }); dirty = false; await refreshResources(); resourceData = await request('readResource', { index: selected.index });originalResourceText=resourceData.text||''; }
+    else if (name === 'saveResource') { if (!await BsiEffects.confirm('Save this resource into the selected EXE? The native engine will validate storage capacity.')) return; await request(name, { index: selected.index, text: resourceData.text }); dirty = false; await refreshResources(); resourceData = selected?await resourceInspection(selected.index):null;originalResourceText=resourceData?.text||''; }
     else if (name === 'replaceResource' || name === 'extractResource') {
       if (name === 'replaceResource' && !await confirmDiscard()) return;
       const path = await transport.chooseFile(name === 'replaceResource' ? 'replace' : 'extract');
       if (!path) return;
       if (name === 'replaceResource' && !await BsiEffects.confirm('Replace the selected EXE resource with this file?')) return;
       await request(name, { index: selected.index, path });
-      if (name === 'replaceResource') { dirty = false; await refreshResources(); resourceData = await request('readResource', { index: selected.index });originalResourceText=resourceData.text||''; }
+      if (name === 'replaceResource') { dirty = false; await refreshResources(); resourceData = selected?await resourceInspection(selected.index):null;originalResourceText=resourceData?.text||''; }
     } else if (name === 'browse') { if (!await confirmDiscard()) return; const path = await transport.chooseFile(el.dataset.role); if (!path) return; }
     else if (name === 'path') { if (!await confirmDiscard()) return; const role = el.dataset.role; await request('setPaths', { [role]: $('#path-' + role).value }); }
     else if (name === 'appearance') await request('setAppearance', { theme: Number($('#appearance-mode').value), accent: $('#accent').value });

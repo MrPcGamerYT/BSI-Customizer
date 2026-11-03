@@ -39,7 +39,7 @@ const server = http.createServer((req, res) => {
     assert.equal(await offline.locator('#main > .matrix > .tile').count(), 4, 'Reference dashboard remains an uncluttered 2x2 matrix');
     assert.equal(await offline.locator('#spine .icon svg').count(), 14, 'Sidebar uses line icons, not numbered placeholders');
     assert.equal(await offline.locator('.orbs i').count(), 3);
-    for (const size of [{width: 1100, height: 700}, {width: 1920, height: 1080}]) {
+    for (const size of [{width: 900, height: 540}, {width: 980, height: 600}, {width: 1100, height: 700}, {width: 1920, height: 1080}]) {
       await offline.setViewportSize(size);
       const visible = await offline.locator('#main > .matrix').boundingBox();
       assert.ok(visible.x >= 0 && visible.y >= 0 && visible.x + visible.width <= size.width + 1 && visible.y + visible.height <= size.height + 1);
@@ -196,6 +196,11 @@ const server = http.createServer((req, res) => {
     await page.locator('#resource-editor').filter({hasText:'Metadata-only inspection'}).waitFor();
     assert.equal(await page.locator('#resource-code').count(),0,'Oversized text must never open as an empty editable draft');
     assert.equal(await page.evaluate(()=>__calls.filter(c=>c.method==='readResource'&&c.args.index===246).length),0,'Metadata selection must skip oversized inline reads');
+    await page.evaluate(()=>window.__nextFile='C:\\fixture\\large.qml');
+    await page.locator('[data-action="replaceResource"]').click();
+    await page.waitForFunction(()=>__calls.some(c=>c.method==='replaceResource')&&!document.body.classList.contains('busy'));
+    await page.locator('#resource-editor').filter({hasText:'Metadata-only inspection'}).waitFor();
+    assert.equal(await page.evaluate(()=>__calls.filter(c=>c.method==='readResource'&&c.args.index===246).length),0,'Replacing a large file must not fail afterward on an inline-read limit');
     await page.locator('#resource-filter').fill('fixture-image.png');
     await page.locator('[data-resource="248"]').waitFor();
     assert.equal(await page.locator('[data-resource="248"] .resource-thumb img').count(),1,'Cached raster thumbnails are visible');

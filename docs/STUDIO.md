@@ -80,3 +80,13 @@ or persisted as executable offsets.
   emulator installations still require an interactive Windows acceptance pass.
 
 See [INSTALLER.md](INSTALLER.md) for installer/optional external ADB packaging.
+
+### Current verification status — 2026-11-03
+
+Local browser acceptance, metadata-model workload, icon checks and bridge/asset
+contracts pass. Browser viewport checks include 900×540, 980×600, 1100×700 and
+1920×1080. Browser engine calls use an explicit transport test double.
+
+**Native Windows compilation/deployment has not run for this Studio revision.**
+The new C++/QML behavior and actual OS interaction still need those checks.
+Earlier successful 3.0.1 artifacts predate Studio and do not verify this upgrade.

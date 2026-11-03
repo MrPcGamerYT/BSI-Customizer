@@ -14,7 +14,7 @@ ApplicationWindow {
     id: window
     width: Math.min(1440, Screen.desktopAvailableWidth * 0.92)
     height: Math.min(900, Screen.desktopAvailableHeight * 0.90)
-    minimumWidth: 980
+    minimumWidth: Math.min(980, Screen.desktopAvailableWidth * 0.92)
     minimumHeight: Math.min(600, Screen.desktopAvailableHeight * 0.88)
     visible: true
     flags: Qt.Window // OS resize borders, snapping, taskbar and system menu remain available.
