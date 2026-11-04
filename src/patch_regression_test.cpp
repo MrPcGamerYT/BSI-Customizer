@@ -1017,7 +1017,8 @@ int runBootPlayerRuntimeTest(const QStringList &args)
     const int at = args.indexOf(QStringLiteral("--boot-runtime-test"));
     if (at < 0 || args.size() != at + 5) return 3;
     const QString provider = args.at(at + 3);
-    if (provider != QLatin1String("web") && provider != QLatin1String("fallback")) return 3;
+    if (provider != QLatin1String("web") && provider != QLatin1String("fallback")
+        && provider != QLatin1String("controller") && provider != QLatin1String("controller-error")) return 3;
     QQmlEngine engine;
     engine.addImportPath(args.at(at + 2));
     QObject::connect(&engine, &QQmlEngine::warnings, [](const QList<QQmlError> &warnings) {
@@ -1041,11 +1042,26 @@ int runBootPlayerRuntimeTest(const QStringList &args)
         if (provider == QLatin1String("web")) {
             const auto player = object->findChild<QObject *>(QStringLiteral("bsiBootHtmlView"));
             if (player && player->property("url").toUrl() == QUrl(args.at(at + 4))) return 0;
-        } else {
+        } else if (provider == QLatin1String("fallback")) {
             const auto ring = object->findChild<QObject *>(QStringLiteral("bsiLoadingRing"));
             const auto status = object->findChild<QObject *>(QStringLiteral("bsiBootStatus"));
             if (ring && ring->property("visible").toBool() && status
                 && status->property("text").toString() == QStringLiteral("Emulator is starting…")) return 0;
+        } else if (provider == QLatin1String("controller")) {
+            const auto player = object->findChild<QObject *>(QStringLiteral("bsiBootHtmlView"));
+            const auto ring = object->findChild<QObject *>(QStringLiteral("bsiLoadingRing"));
+            const auto status = object->findChild<QObject *>(QStringLiteral("bsiBootStatus"));
+            const auto stock = object->findChild<QObject *>(QStringLiteral("bootImage"));
+            if (player && player->property("url").toUrl() == QUrl(args.at(at + 4))
+                && ring && ring->property("visible").toBool() && status
+                && status->property("visible").toBool() && stock && !stock->property("visible").toBool()) return 0;
+        } else {
+            const auto fallback = object->findChild<QObject *>(QStringLiteral("bsiNativeBootFallback"));
+            const auto status = object->findChild<QObject *>(QStringLiteral("bsiNativeBootStatus"));
+            const auto stock = object->findChild<QObject *>(QStringLiteral("bootImage"));
+            if (fallback && fallback->property("visible").toBool() && status
+                && status->property("text").toString() == QStringLiteral("Emulator is starting…")
+                && stock && !stock->property("visible").toBool()) return 0;
         }
         QThread::msleep(10);
     } while (timer.elapsed() < 5000);
@@ -4418,13 +4434,17 @@ Window {
         const auto patched = read(path);
         check(patched.size() == image.size(), "the patched player is exactly as large as the original");
         const auto qml = resourceText(patched, r, QStringLiteral("RenamedStartup.qml"));
-        const bool stockProgressHidden = QRegularExpression(
-            QStringLiteral("id\\s*:\\s*iBootProgressContainer[^}]*visible\\s*:\\s*false"))
+        const bool stockProgressWaitsForLoader = QRegularExpression(
+            QStringLiteral("id\\s*:\\s*iBootProgressContainer[^}]*visible\\s*:\\s*!pv\\.item"))
                 .match(qml).hasMatch();
         check(qml.contains(QLatin1String("objectName:\"bsiBootLoader\""))
                   && qml.contains(QLatin1String("z:10000"))
-                  && qml.contains(QLatin1String("BootVideo.qml")) && stockProgressHidden,
-              "the replacement splash is foregrounded and the old progress panel is hidden");
+                  && qml.contains(QLatin1String("BootVideo.qml")) && stockProgressWaitsForLoader
+                  && qml.contains(QLatin1String("bsiNativeStartupComponent"))
+                  && qml.contains(QLatin1String("bsiBootLoadWatchdog"))
+                  && qml.contains(QLatin1String("sourceComponent=bsiNativeStartupComponent"))
+                  && qml.contains(QLatin1String("onLoaded:")),
+              "the custom loader has an inline native fallback and does not blank the original boot while loading");
         check(resourceText(patched, r, QStringLiteral("UnusedStartup.qml")) == unusedController,
               "a boot-looking QML resource not instantiated by the player root is never patched");
         check(patched.mid(leftover, image.size() - leftover) == image.mid(leftover),
@@ -4515,7 +4535,7 @@ Window {
     {
         const QString boot = QStringLiteral(
             "import QtQuick\nItem { width:320; height:200; property bool pBootImageButtonVisible:true; property bool pBootGridVisible:true;"
-            "Image { id:iBootImage; visible:true } Text { id:iBootLoadingText; visible:false }"
+            "Image { id:iBootImage; objectName:'bootImage'; visible:true } Text { id:iBootLoadingText; visible:false }"
             "function fSetBootPromotion(){iBootImage.visible=true;iBootLoadingText.visible=false} }\n");
         const QString host = QStringLiteral(
             "import QtQuick\nItem { id:iAppwin; property bool pIsBootComplete:false; property bool pShowAndroidAd:false;"
@@ -4542,6 +4562,8 @@ Window {
         const QByteArray helper = read(helperPath);
         const QByteArray html = read(htmlPath);
         const auto modified = resourceText(read(path), r, QStringLiteral("PlrBootProgressBar.qml"));
+        const QString controllerPath = QDir(assets).filePath(QStringLiteral("BootController.qml"));
+        check(write(controllerPath, modified.toUtf8()), "write the patched boot controller as a local runtime fixture");
         check(modified.contains("bsiBootLoader")
                   && modified.contains(QUrl::fromLocalFile(helperPath).toString(QUrl::FullyEncoded))
                   && helper.contains("import QtWebEngine")
@@ -4577,6 +4599,13 @@ Window {
         const QUrl htmlUrl = QUrl::fromLocalFile(htmlPath);
         check(bootRuntimeInChild(helperPath, importRoot, QStringLiteral("web"), htmlUrl) == 0,
               "WebEngineView loads the installed local Assets/BootScreen.html URL");
+        check(bootRuntimeInChild(controllerPath, importRoot, QStringLiteral("controller"), htmlUrl) == 0,
+              "the patched controller loads its external HTML wrapper and keeps the native splash visible until HTML succeeds");
+        const QByteArray runtimeHelper = read(helperPath);
+        check(QFile::remove(helperPath), "remove the external QML helper to exercise the controller's load-error fallback");
+        check(bootRuntimeInChild(controllerPath, importRoot, QStringLiteral("controller-error"), htmlUrl) == 0,
+              "a missing external QML helper switches to the inline native splash instead of a black screen");
+        check(write(helperPath, runtimeHelper), "restore the external helper after the missing-file regression");
         QString fallbackQml = QString::fromUtf8(read(helperPath));
         fallbackQml.replace(QLatin1String("BsiFixtureWebEngine"), QLatin1String("BsiMissingWebEngine"));
         const QString fallbackPath = QDir(assets).filePath(QStringLiteral("BootVideoFallback.qml"));
