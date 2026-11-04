@@ -46,7 +46,7 @@ with tempfile.TemporaryDirectory(prefix="boot html ' & Ω ") as tmp:
     module = imports / "BsiFixtureWebEngine"
     module.mkdir(parents=True)
     (module / "qmldir").write_text("module BsiFixtureWebEngine\nWebEngineView 1.0 WebEngineView.qml\n")
-    fake_load_status = "LoadFailedStatus" if provider == "webfail" else "LoadSucceededStatus"
+    fake_load_status = "3" if provider == "webfail" else "2"
     fake_web = (
         "import QtQuick\n"
         "Item{objectName:'bsiBootHtmlView';enum LoadStatus{LoadStartedStatus,LoadStoppedStatus,LoadSucceededStatus,LoadFailedStatus};"
@@ -62,7 +62,7 @@ with tempfile.TemporaryDirectory(prefix="boot html ' & Ω ") as tmp:
     qml_path = assets / "BootVideo.qml"
     runtime_qml = qml.replace("__BSI_EMULATOR_LOGO__", "data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=")
     runtime_qml = runtime_qml.replace("__BSI_WITH_VIDEO__", "false")
-    if provider == "web":
+    if provider in ("web", "webfail"):
         runtime_qml = runtime_qml.replace("import QtWebEngine", "import BsiFixtureWebEngine")
     else:
         runtime_qml = runtime_qml.replace("import QtWebEngine", "import BsiMissingWebEngine")
