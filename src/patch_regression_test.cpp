@@ -4561,7 +4561,18 @@ Window {
         write(QDir(webModule).filePath(QStringLiteral("qmldir")),
               "module BsiFixtureWebEngine\nWebEngineView 1.0 WebEngineView.qml\n");
         write(QDir(webModule).filePath(QStringLiteral("WebEngineView.qml")),
-              "import QtQuick\nItem{objectName:'bsiBootHtmlView';enum LoadStatus{LoadStartedStatus,LoadStoppedStatus,LoadSucceededStatus,LoadFailedStatus};signal loadingChanged(var request);signal renderProcessTerminated(var status,int exitCode);property url url;property color backgroundColor;property QtObject settings:QtObject{property bool playbackRequiresUserGesture:true;property bool localContentCanAccessFileUrls:false}}\n");
+              "import QtQuick\nItem {\n"
+              "    objectName: 'bsiBootHtmlView'\n"
+              "    enum LoadStatus { LoadStartedStatus, LoadStoppedStatus, LoadSucceededStatus, LoadFailedStatus }\n"
+              "    signal loadingChanged(var request)\n"
+              "    signal renderProcessTerminated(var status, int exitCode)\n"
+              "    property url url\n"
+              "    property color backgroundColor\n"
+              "    property QtObject settings: QtObject {\n"
+              "        property bool playbackRequiresUserGesture: true\n"
+              "        property bool localContentCanAccessFileUrls: false\n"
+              "    }\n"
+              "}\n");
         check(prepareSyntheticBootPlayer(helperPath), "use a synthetic WebEngine type for the generated HTML-loader test");
         const QUrl htmlUrl = QUrl::fromLocalFile(htmlPath);
         check(bootRuntimeInChild(helperPath, importRoot, QStringLiteral("web"), htmlUrl) == 0,
