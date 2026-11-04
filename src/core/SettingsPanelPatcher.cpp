@@ -28,6 +28,7 @@
 namespace SettingsPanelPatcher {
 namespace {
 const QString kWindowMarker = QStringLiteral("BSI CUSTOMIZER: redesigned Settings window v1");
+const QString kWindowDesignMarker = QStringLiteral("BSI CUSTOMIZER: compact Settings refresh v2");
 const QString kAboutMarker = QStringLiteral("BSI CUSTOMIZER: redesigned About page v1");
 const QString kSchema = QStringLiteral("bsi.settings-panel.recovery");
 const QString kWindowLeaf = QStringLiteral("UiSettingsWindow.qml");
@@ -340,44 +341,148 @@ QString buildWindow(const QString &stock)
     // change/discard prompts, callbacks and the Loader model remain in place.
     const QString replacement = QStringLiteral(R"QML(
     UiShadowContainer {
-        // BSI CUSTOMIZER: redesigned Settings window v1
+        // BSI CUSTOMIZER: compact Settings refresh v2
         id: iSettingsWindowShadowContainer
         anchors.fill: parent
         Rectangle {
             anchors.fill: parent
+            radius: 14
             color: UiTheme.colors.primary80
-            MouseArea { width: parent.width - 54; height: 48; onPressed: iSettingsWindow.startSystemMove() }
-            UiImageButton {
-                asset: "CloseIcon"; pImageWidth: 16; pImageHeight: 16
-                anchors.top: parent.top; anchors.right: parent.right; anchors.margins: 14
-                onClicked: iSettingsWindow.close()
-            }
-            ListView {
-                x: 12; y: 52; width: parent.width - 24; height: 72; clip: true
-                orientation: ListView.Horizontal; spacing: 5
-                ScrollBar.horizontal: ScrollBar { policy: ScrollBar.AsNeeded }
-                model: pSettingsItems.pSettingElements
-                delegate: UiSettingsButton {
-                    width: 92; height: 64
-                    pSettingIdx: model.index
-                    pSettingBtnText: ["ϟ", "▣", "◈", "⌖", "◖", "♧", "⚙", "▯", "⌨", "◉", "⚒", "ⓘ"][model.index] + "\n" + model.modelData.pButtonText
-                    pSelected: model.index === pCurrentTabIndex
-                    pShowRedDot: model.modelData.pShowRedDot
-                    onSettingClicked: fChangeSelectedSetting(model.index)
+            border.width: 1
+            border.color: UiTheme.colors.primary60
+            clip: true
+
+            Rectangle {
+                anchors.left: parent.left
+                anchors.right: parent.right
+                anchors.top: parent.top
+                height: 2
+                gradient: Gradient {
+                    GradientStop { position: 0.0; color: UiTheme.colors.primary60 }
+                    GradientStop { position: 0.5; color: UiTheme.colors.accentNormal }
+                    GradientStop { position: 1.0; color: UiTheme.colors.primary60 }
                 }
             }
-            StackLayout {
-                id: iSelectedSettingControl
-                x: 12; y: 132; width: parent.width - 24; height: parent.height - 144
-                currentIndex: pCurrentTabIndex
-                Repeater {
-                    model: pSettingsItems.pSettingElements
-                    delegate: Loader {
-                        Component.onCompleted: {
-                            if (model.modelData.pComponentArgs !== null) setSource(model.modelData.pQmlSource, model.modelData.pComponentArgs)
-                            else setSource(model.modelData.pQmlSource)
+
+            Column {
+                anchors.fill: parent
+                anchors.margins: 14
+                spacing: 10
+
+                Item {
+                    width: parent.width
+                    height: 42
+                    MouseArea {
+                        width: parent.width - 48
+                        height: parent.height
+                        onPressed: iSettingsWindow.startSystemMove()
+                    }
+                    Column {
+                        anchors.left: parent.left
+                        anchors.leftMargin: 2
+                        anchors.verticalCenter: parent.verticalCenter
+                        spacing: 2
+                        Text {
+                            text: qsTranslate("QObject", "Settings")
+                            color: UiTheme.colors.primary10
+                            font: UiTheme.fonts.bodyLarge
                         }
-                        onLoaded: { model.modelData.pComponentObj = item; if (item.fOnQmlLoaded) item.fOnQmlLoaded() }
+                        Text {
+                            text: qsTranslate("QObject", "Choose a category")
+                            color: UiTheme.colors.primary30
+                            font: UiTheme.fonts.bodySmall
+                        }
+                    }
+                    UiImageButton {
+                        id: bsiSettingsClose
+                        asset: "CloseIcon"
+                        pImageWidth: 16
+                        pImageHeight: 16
+                        anchors.right: parent.right
+                        anchors.verticalCenter: parent.verticalCenter
+                        onClicked: iSettingsWindow.close()
+                    }
+                }
+
+                ListView {
+                    id: bsiSettingsCategoryTabs
+                    width: parent.width
+                    height: 76
+                    clip: true
+                    orientation: ListView.Horizontal
+                    spacing: 7
+                    currentIndex: pCurrentTabIndex
+                    model: pSettingsItems.pSettingElements
+                    ScrollBar.horizontal: ScrollBar { policy: ScrollBar.AsNeeded }
+                    delegate: Rectangle {
+                        width: 96
+                        height: 68
+                        radius: 10
+                        color: model.index === pCurrentTabIndex
+                               ? Qt.rgba(UiTheme.colors.accentNormal.r, UiTheme.colors.accentNormal.g,
+                                         UiTheme.colors.accentNormal.b, 0.17)
+                               : (bsiCategoryHover.containsMouse
+                                  ? UiTheme.colors.primary60 : Qt.rgba(0, 0, 0, 0))
+                        border.width: 1
+                        border.color: model.index === pCurrentTabIndex
+                                      ? UiTheme.colors.accentNormal : UiTheme.colors.primary60
+                        Behavior on color { ColorAnimation { duration: 140 } }
+
+                        Column {
+                            anchors.centerIn: parent
+                            width: parent.width - 10
+                            spacing: 4
+                            Text {
+                                anchors.horizontalCenter: parent.horizontalCenter
+                                text: ["ϟ", "▦", "◈", "⌖", "♫", "♧", "⚙", "▯", "⌨", "◉", "⚒", "ⓘ"][model.index % 12]
+                                color: model.index === pCurrentTabIndex
+                                       ? UiTheme.colors.accentNormal : UiTheme.colors.primary10
+                                font: UiTheme.fonts.bodyLarge
+                            }
+                            Text {
+                                width: parent.width
+                                text: model.modelData.pButtonText
+                                color: model.index === pCurrentTabIndex
+                                       ? UiTheme.colors.primary10 : UiTheme.colors.primary30
+                                font: UiTheme.fonts.bodySmall
+                                horizontalAlignment: Text.AlignHCenter
+                                elide: Text.ElideRight
+                            }
+                        }
+                        Rectangle {
+                            visible: model.modelData.pShowRedDot
+                            width: 7
+                            height: 7
+                            radius: 4
+                            color: UiTheme.colors.accentNormal
+                            anchors.top: parent.top
+                            anchors.right: parent.right
+                            anchors.margins: 7
+                        }
+                        MouseArea {
+                            id: bsiCategoryHover
+                            anchors.fill: parent
+                            hoverEnabled: true
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: fChangeSelectedSetting(model.index)
+                        }
+                    }
+                }
+
+                StackLayout {
+                    id: iSelectedSettingControl
+                    width: parent.width
+                    height: Math.max(120, parent.height - 42 - 76 - 20)
+                    currentIndex: pCurrentTabIndex
+                    Repeater {
+                        model: pSettingsItems.pSettingElements
+                        delegate: Loader {
+                            Component.onCompleted: {
+                                if (model.modelData.pComponentArgs !== null) setSource(model.modelData.pQmlSource, model.modelData.pComponentArgs)
+                                else setSource(model.modelData.pQmlSource)
+                            }
+                            onLoaded: { model.modelData.pComponentObj = item; if (item.fOnQmlLoaded) item.fOnQmlLoaded() }
+                        }
                     }
                 }
             }
@@ -399,7 +504,7 @@ QString buildWindow(const QString &stock)
     const int rootClose = out.lastIndexOf(QLatin1String("\n}"));
     if (rootClose < 0) return {};
     out.insert(rootClose, helper);
-    if (!out.contains(kWindowMarker)) return {};
+    if (!out.contains(kWindowDesignMarker)) return {};
     return out;
 }
 
@@ -792,6 +897,13 @@ bool sourceHasMarker(const QByteArray &bytes, const QString &marker)
     return EmbeddedResources::decodeText(bytes).contains(marker);
 }
 
+bool hasWindowMarker(const QString &text)
+{
+    // Keep recognizing v1 so users can update or safely restore a panel built
+    // by the previous Settings design.
+    return text.contains(kWindowMarker) || text.contains(kWindowDesignMarker);
+}
+
 } // namespace
 
 State analyze(const QString &exePath)
@@ -819,7 +931,7 @@ State analyze(const QString &exePath)
         state.detail = QStringLiteral("The About page already contains separate About-editor changes. Restore the About page to stock before rebuilding the Settings panel, so those links and text are not overwritten.");
         return state;
     }
-    const bool windowPatched = sources.window.text.contains(kWindowMarker);
+    const bool windowPatched = hasWindowMarker(sources.window.text);
     const bool aboutPatched = sources.about.text.contains(kAboutMarker);
     state.compiledUnitsDetected = QtResources::matchingUnits(image,
         {kWindowLeaf, kAboutLeaf}, kWindowUnitIds + kAboutUnitIds);
@@ -879,7 +991,7 @@ QVariantMap apply(const QString &exePath, const QString &developerName,
         if (originals.isEmpty()) return fail(recoveryError);
         if (originals.size() != 2 || !originals.contains(current.window.path) || !originals.contains(current.about.path))
             return fail(QStringLiteral("The executable's resource paths no longer match the saved Settings-panel snapshot; restore is blocked."));
-        if (!current.window.text.contains(kWindowMarker) || !current.about.text.contains(kAboutMarker))
+        if (!hasWindowMarker(current.window.text) || !current.about.text.contains(kAboutMarker))
             return fail(QStringLiteral("The Settings-panel sources have changed since this patch. Automatic restore is blocked to protect later edits."));
         const QVariantList records = recovery.value(QStringLiteral("sources")).toList();
         for (const QVariant &value : records) {
@@ -898,7 +1010,7 @@ QVariantMap apply(const QString &exePath, const QString &developerName,
 
     QString profileError;
     if (!validateProfile(developerName, links, &profileError)) return fail(profileError);
-    const bool hasPatchMarker = current.window.text.contains(kWindowMarker)
+    const bool hasPatchMarker = hasWindowMarker(current.window.text)
         || current.about.text.contains(kAboutMarker);
     QMap<QString, QByteArray> originals;
     if (!recovery.isEmpty()) {
@@ -939,7 +1051,7 @@ QVariantMap apply(const QString &exePath, const QString &developerName,
         {current.window.path, utf8PreservingBom(rebuiltWindow, originals.value(current.window.path))},
         {current.about.path, utf8PreservingBom(rebuiltAbout, originals.value(current.about.path))},
     };
-    if (!sourceHasMarker(replacements.value(current.window.path), kWindowMarker)
+    if (!hasWindowMarker(EmbeddedResources::decodeText(replacements.value(current.window.path)))
         || !sourceHasMarker(replacements.value(current.about.path), kAboutMarker))
         return fail(QStringLiteral("Generated QML failed its marker check; no file was changed."));
     if (replacements.value(current.window.path) == current.window.bytes

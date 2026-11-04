@@ -4884,6 +4884,20 @@ Window {
                       QStringLiteral("the real %1 Settings-owned About page refuses an independent About edit without changing the EXE")
                           .arg(QFileInfo(input).fileName()));
                 const auto panelImage = read(panelCopy);
+                QString rebuiltWindow;
+                for (const auto &file : QtResources::registeredFiles(panelImage)) {
+                    if (file.name.compare(QLatin1String("UiSettingsWindow.qml"), Qt::CaseInsensitive) == 0)
+                        rebuiltWindow = QString::fromUtf8(QtResources::readFile(panelImage, file));
+                }
+                check(rebuiltWindow.contains(QStringLiteral("compact Settings refresh v2"))
+                          && rebuiltWindow.contains(QStringLiteral("bsiSettingsCategoryTabs"))
+                          && rebuiltWindow.contains(QStringLiteral("bsiSettingsClose"))
+                          && rebuiltWindow.contains(QStringLiteral("fChangeSelectedSetting(model.index)"))
+                          && rebuiltWindow.contains(QStringLiteral("StackLayout"))
+                          && rebuiltWindow.contains(QStringLiteral("model.modelData.pComponentObj = item"))
+                          && rebuiltWindow.contains(QStringLiteral("iSettingsWindow.startSystemMove()")),
+                      QStringLiteral("the rebuilt %1 Settings window has the compact category UI and keeps native page loading, selection, dragging, and close behavior")
+                          .arg(QFileInfo(input).fileName()));
                 QString expectedLogoExtension;
                 for (const auto &file : QtResources::registeredFiles(original)) {
                     if (file.path.compare(QLatin1String("qrcAssets/BlueStacks5Beta.svg"), Qt::CaseInsensitive) == 0)
