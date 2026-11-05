@@ -354,10 +354,10 @@ UiImageButton{id:bsiSettingsClose;objectName:"bsiSettingsClose";asset:"CloseIcon
 }
 ListView{id:bsiSettingsCategoryTabs;objectName:"bsiSettingsCategoryTabs";width:parent.width;height:66;clip:true;orientation:ListView.Horizontal;spacing:6;currentIndex:pCurrentTabIndex;model:pSettingsItems.pSettingElements
 ScrollBar.horizontal:ScrollBar{policy:ScrollBar.AsNeeded}
-delegate:UiSettingsButton{width:92;height:60;pSettingIdx:model.index;pSettingBtnText:["ϟ","▦","◈","⌖","♫","♧","⚙","▯","⌨","◉","⚒","ⓘ"][model.index%12]+"\n"+model.modelData.pButtonText;pSelected:model.index===pCurrentTabIndex;pShowRedDot:model.modelData.pShowRedDot;onSettingClicked:fChangeSelectedSetting(model.index)}
+delegate:UiSettingsButton{width:92;height:60;pSettingBtnText:(model.index+1)+"\n"+model.modelData.pButtonText;pSelected:model.index===pCurrentTabIndex;pShowRedDot:model.modelData.pShowRedDot;onSettingClicked:fChangeSelectedSetting(model.index)}
 }
 StackLayout{id:iSelectedSettingControl;objectName:"bsiSettingsPageStack";width:parent.width;height:parent.height-118;currentIndex:pCurrentTabIndex
-Repeater{model:pSettingsItems.pSettingElements;delegate:Loader{Component.onCompleted:{if(model.modelData.pComponentArgs!==null)setSource(model.modelData.pQmlSource,model.modelData.pComponentArgs);else setSource(model.modelData.pQmlSource)}
+Repeater{model:pSettingsItems.pSettingElements;delegate:Loader{Component.onCompleted:setSource(model.modelData.pQmlSource,model.modelData.pComponentArgs)
 onLoaded:{model.modelData.pComponentObj=item;if(item.fOnQmlLoaded)item.fOnQmlLoaded()}}}
 }
 }
@@ -366,8 +366,8 @@ onLoaded:{model.modelData.pComponentObj=item;if(item.fOnQmlLoaded)item.fOnQmlLoa
 )QML");
     QString out = stock;
     out.replace(target.nameBegin, target.end - target.nameBegin, replacement);
-    // The toolbar changes with BlueStacks translations, so use stable model
-    // order to supply a distinct, legible icon for every stock category.
+    // The toolbar changes with BlueStacks translations; stable model order
+    // gives each category a compact marker without relying on its translated label.
     const QString helper = QStringLiteral(R"QML(
     onVisibleChanged: if (visible && transientParent) {
         width = transientParent.width * 0.72

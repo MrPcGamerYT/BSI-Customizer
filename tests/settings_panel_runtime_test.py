@@ -167,7 +167,11 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
     tabs = visual_named("bsiSettingsCategoryTabs")
     stack = visual_named("bsiSettingsPageStack")
     first_tab = next(
-        (item for item in visual_tree if item.property("pSettingIdx") == 1), None
+        (
+            item for item in visual_tree
+            if str(item.property("pSettingBtnText")).endswith("Graphics")
+        ),
+        None,
     )
     loaded_page = visual_named("runtimeSettingPage")
     drag = visual_named("bsiSettingsDragHandle")
