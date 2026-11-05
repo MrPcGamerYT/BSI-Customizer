@@ -344,8 +344,7 @@ UiShadowContainer {
 // BSI CUSTOMIZER: Settings v2
 id:iSettingsWindowShadowContainer;anchors.fill:parent
 Rectangle {
-anchors.fill:parent;color:UiTheme.colors.primary80;radius:12;border.width:1;border.color:UiTheme.colors.primary60;clip:true
-Rectangle{anchors.left:parent.left;anchors.right:parent.right;anchors.top:parent.top;height:2;color:UiTheme.colors.accentNormal}
+anchors.fill:parent;color:UiTheme.colors.primary80;radius:12;border.width:1;border.color:UiTheme.colors.accentNormal;clip:true
 Column{anchors.fill:parent;anchors.margins:12;spacing:8
 Item{width:parent.width;height:36
 MouseArea{objectName:"bsiSettingsDragHandle";width:parent.width-42;height:parent.height;onPressed:iSettingsWindow.startSystemMove()}
@@ -357,7 +356,7 @@ ScrollBar.horizontal:ScrollBar{policy:ScrollBar.AsNeeded}
 delegate:UiSettingsButton{width:92;height:60;pSettingBtnText:(model.index+1)+"\n"+model.modelData.pButtonText;pSelected:model.index===pCurrentTabIndex;pShowRedDot:model.modelData.pShowRedDot;onSettingClicked:fChangeSelectedSetting(model.index)}
 }
 StackLayout{id:iSelectedSettingControl;objectName:"bsiSettingsPageStack";width:parent.width;height:parent.height-118;currentIndex:pCurrentTabIndex
-Repeater{model:pSettingsItems.pSettingElements;delegate:Loader{Component.onCompleted:setSource(model.modelData.pQmlSource,model.modelData.pComponentArgs)
+Repeater{model:pSettingsItems.pSettingElements;delegate:Loader{Component.onCompleted:{var a=model.modelData.pComponentArgs;a?setSource(model.modelData.pQmlSource,a):setSource(model.modelData.pQmlSource)}
 onLoaded:{model.modelData.pComponentObj=item;if(item.fOnQmlLoaded)item.fOnQmlLoaded()}}}
 }
 }
