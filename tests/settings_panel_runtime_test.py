@@ -55,6 +55,7 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
         "module BsiSettingsFixture\n"
         "UiShadowContainer 1.0 UiShadowContainer.qml\n"
         "UiImageButton 1.0 UiImageButton.qml\n"
+        "UiSettingsButton 1.0 UiSettingsButton.qml\n"
         "singleton UiTheme 1.0 UiTheme.qml\n",
         encoding="utf-8",
     )
@@ -70,6 +71,21 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
         "    property int pImageHeight: 16\n"
         "    signal clicked()\n"
         "    MouseArea { anchors.fill: parent; onClicked: parent.clicked() }\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    (module / "UiSettingsButton.qml").write_text(
+        "import QtQuick 2.15\n"
+        "Rectangle {\n"
+        "    property int pSettingIdx: 0\n"
+        "    property string pSettingBtnText: \"\"\n"
+        "    property bool pSelected: false\n"
+        "    property bool pShowRedDot: false\n"
+        "    signal settingClicked(int index)\n"
+        "    radius: 8\n"
+        "    color: pSelected ? \"#203c55\" : \"#182635\"\n"
+        "    Text { anchors.fill: parent; text: pSettingBtnText; color: \"white\"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }\n"
+        "    MouseArea { anchors.fill: parent; onClicked: parent.settingClicked(parent.pSettingIdx) }\n"
         "}\n",
         encoding="utf-8",
     )
@@ -135,12 +151,25 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
     window.show()
     QTest.qWait(120)
 
-    tabs = obj.findChild(QQuickItem, "bsiSettingsCategoryTabs")
-    stack = obj.findChild(QQuickItem, "bsiSettingsPageStack")
-    first_loader = obj.findChild(QQuickItem, "bsiSettingsPageLoader0")
-    first_tab = obj.findChild(QQuickItem, "bsiSettingsCategoryTab1")
-    drag = obj.findChild(QQuickItem, "bsiSettingsDragHandle")
-    close = obj.findChild(QQuickItem, "bsiSettingsClose")
+    def visual_items(item):
+        found = []
+        pending = list(item.childItems())
+        while pending:
+            child = pending.pop()
+            found.append(child)
+            pending.extend(child.childItems())
+        return found
+
+    visual_tree = visual_items(obj)
+    def visual_named(name):
+        return next((item for item in visual_tree if item.objectName() == name), None)
+
+    tabs = visual_named("bsiSettingsCategoryTabs")
+    stack = visual_named("bsiSettingsPageStack")
+    first_loader = visual_named("bsiSettingsPageLoader0")
+    first_tab = visual_named("bsiSettingsCategoryTab1")
+    drag = visual_named("bsiSettingsDragHandle")
+    close = visual_named("bsiSettingsClose")
     controls = {
         "tabs": tabs,
         "stack": stack,
@@ -150,9 +179,7 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
         "close button": close,
     }
     missing = [name for name, item in controls.items() if item is None]
-    found_names = sorted(
-        child.objectName() for child in obj.findChildren(QObject) if child.objectName()
-    )
+    found_names = sorted(item.objectName() for item in visual_tree if item.objectName())
     assert not missing, f"Missing controls: {missing}; found object names: {found_names}"
     assert first_loader.property("item") is not None, "The native Settings page Loader did not load its page"
 

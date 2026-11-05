@@ -340,160 +340,28 @@ QString buildWindow(const QString &stock)
     // This is a visual-only replacement. The original root Window, its native
     // change/discard prompts, callbacks and the Loader model remain in place.
     const QString replacement = QStringLiteral(R"QML(
-    UiShadowContainer {
-        // BSI CUSTOMIZER: compact Settings refresh v2
-        id: iSettingsWindowShadowContainer
-        anchors.fill: parent
-        Rectangle {
-            anchors.fill: parent
-            radius: 14
-            color: UiTheme.colors.primary80
-            border.width: 1
-            border.color: UiTheme.colors.primary60
-            clip: true
-
-            Rectangle {
-                anchors.left: parent.left
-                anchors.right: parent.right
-                anchors.top: parent.top
-                height: 2
-                gradient: Gradient {
-                    GradientStop { position: 0.0; color: UiTheme.colors.primary60 }
-                    GradientStop { position: 0.5; color: UiTheme.colors.accentNormal }
-                    GradientStop { position: 1.0; color: UiTheme.colors.primary60 }
-                }
-            }
-
-            Column {
-                anchors.fill: parent
-                anchors.margins: 14
-                spacing: 10
-
-                Item {
-                    width: parent.width
-                    height: 42
-                    MouseArea {
-                        objectName: "bsiSettingsDragHandle"
-                        width: parent.width - 48
-                        height: parent.height
-                        onPressed: iSettingsWindow.startSystemMove()
-                    }
-                    Column {
-                        anchors.left: parent.left
-                        anchors.leftMargin: 2
-                        anchors.verticalCenter: parent.verticalCenter
-                        spacing: 2
-                        Text {
-                            text: qsTranslate("QObject", "Settings")
-                            color: UiTheme.colors.primary10
-                            font: UiTheme.fonts.bodyLarge
-                        }
-                        Text {
-                            text: qsTranslate("QObject", "Choose a category")
-                            color: UiTheme.colors.primary30
-                            font: UiTheme.fonts.bodySmall
-                        }
-                    }
-                    UiImageButton {
-                        id: bsiSettingsClose
-                        objectName: "bsiSettingsClose"
-                        asset: "CloseIcon"
-                        pImageWidth: 16
-                        pImageHeight: 16
-                        anchors.right: parent.right
-                        anchors.verticalCenter: parent.verticalCenter
-                        onClicked: iSettingsWindow.close()
-                    }
-                }
-
-                ListView {
-                    id: bsiSettingsCategoryTabs
-                    objectName: "bsiSettingsCategoryTabs"
-                    width: parent.width
-                    height: 76
-                    clip: true
-                    orientation: ListView.Horizontal
-                    spacing: 7
-                    currentIndex: pCurrentTabIndex
-                    model: pSettingsItems.pSettingElements
-                    ScrollBar.horizontal: ScrollBar { policy: ScrollBar.AsNeeded }
-                    delegate: Rectangle {
-                        objectName: "bsiSettingsCategoryTab" + model.index
-                        width: 96
-                        height: 68
-                        radius: 10
-                        color: model.index === pCurrentTabIndex
-                               ? Qt.rgba(UiTheme.colors.accentNormal.r, UiTheme.colors.accentNormal.g,
-                                         UiTheme.colors.accentNormal.b, 0.17)
-                               : (bsiCategoryHover.containsMouse
-                                  ? UiTheme.colors.primary60 : Qt.rgba(0, 0, 0, 0))
-                        border.width: 1
-                        border.color: model.index === pCurrentTabIndex
-                                      ? UiTheme.colors.accentNormal : UiTheme.colors.primary60
-                        Behavior on color { ColorAnimation { duration: 140 } }
-
-                        Column {
-                            anchors.centerIn: parent
-                            width: parent.width - 10
-                            spacing: 4
-                            Text {
-                                anchors.horizontalCenter: parent.horizontalCenter
-                                text: ["ϟ", "▦", "◈", "⌖", "♫", "♧", "⚙", "▯", "⌨", "◉", "⚒", "ⓘ"][model.index % 12]
-                                color: model.index === pCurrentTabIndex
-                                       ? UiTheme.colors.accentNormal : UiTheme.colors.primary10
-                                font: UiTheme.fonts.bodyLarge
-                            }
-                            Text {
-                                width: parent.width
-                                text: model.modelData.pButtonText
-                                color: model.index === pCurrentTabIndex
-                                       ? UiTheme.colors.primary10 : UiTheme.colors.primary30
-                                font: UiTheme.fonts.bodySmall
-                                horizontalAlignment: Text.AlignHCenter
-                                elide: Text.ElideRight
-                            }
-                        }
-                        Rectangle {
-                            visible: model.modelData.pShowRedDot
-                            width: 7
-                            height: 7
-                            radius: 4
-                            color: UiTheme.colors.accentNormal
-                            anchors.top: parent.top
-                            anchors.right: parent.right
-                            anchors.margins: 7
-                        }
-                        MouseArea {
-                            id: bsiCategoryHover
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            cursorShape: Qt.PointingHandCursor
-                            onClicked: fChangeSelectedSetting(model.index)
-                        }
-                    }
-                }
-
-                StackLayout {
-                    id: iSelectedSettingControl
-                    objectName: "bsiSettingsPageStack"
-                    width: parent.width
-                    height: Math.max(120, parent.height - 42 - 76 - 20)
-                    currentIndex: pCurrentTabIndex
-                    Repeater {
-                        model: pSettingsItems.pSettingElements
-                        delegate: Loader {
-                            objectName: "bsiSettingsPageLoader" + model.index
-                            Component.onCompleted: {
-                                if (model.modelData.pComponentArgs !== null) setSource(model.modelData.pQmlSource, model.modelData.pComponentArgs)
-                                else setSource(model.modelData.pQmlSource)
-                            }
-                            onLoaded: { model.modelData.pComponentObj = item; if (item.fOnQmlLoaded) item.fOnQmlLoaded() }
-                        }
-                    }
-                }
-            }
-        }
-    }
+UiShadowContainer {
+// BSI CUSTOMIZER: compact Settings refresh v2
+id:iSettingsWindowShadowContainer;anchors.fill:parent
+Rectangle {
+anchors.fill:parent;color:UiTheme.colors.primary80;radius:12;border.width:1;border.color:UiTheme.colors.primary60;clip:true
+Rectangle{anchors.left:parent.left;anchors.right:parent.right;anchors.top:parent.top;height:2;color:UiTheme.colors.accentNormal}
+Column{anchors.fill:parent;anchors.margins:12;spacing:8
+Item{width:parent.width;height:36
+MouseArea{objectName:"bsiSettingsDragHandle";width:parent.width-42;height:parent.height;onPressed:iSettingsWindow.startSystemMove()}
+Text{text:qsTranslate("QObject","Settings");color:UiTheme.colors.primary10;font:UiTheme.fonts.bodyLarge;anchors.left:parent.left;anchors.verticalCenter:parent.verticalCenter}
+UiImageButton{id:bsiSettingsClose;objectName:"bsiSettingsClose";asset:"CloseIcon";pImageWidth:16;pImageHeight:16;anchors.right:parent.right;anchors.verticalCenter:parent.verticalCenter;onClicked:iSettingsWindow.close()}
+}
+ListView{id:bsiSettingsCategoryTabs;objectName:"bsiSettingsCategoryTabs";width:parent.width;height:66;clip:true;orientation:ListView.Horizontal;spacing:6;currentIndex:pCurrentTabIndex;model:pSettingsItems.pSettingElements
+ScrollBar.horizontal:ScrollBar{policy:ScrollBar.AsNeeded}
+delegate:UiSettingsButton{objectName:"bsiSettingsCategoryTab"+model.index;width:92;height:60;pSettingIdx:model.index;pSettingBtnText:["ϟ","▦","◈","⌖","♫","♧","⚙","▯","⌨","◉","⚒","ⓘ"][model.index%12]+"\n"+model.modelData.pButtonText;pSelected:model.index===pCurrentTabIndex;pShowRedDot:model.modelData.pShowRedDot;onSettingClicked:fChangeSelectedSetting(model.index)}
+}
+StackLayout{id:iSelectedSettingControl;objectName:"bsiSettingsPageStack";width:parent.width;height:parent.height-118;currentIndex:pCurrentTabIndex
+Repeater{model:pSettingsItems.pSettingElements;delegate:Loader{objectName:"bsiSettingsPageLoader"+model.index;Component.onCompleted:{if(model.modelData.pComponentArgs!==null)setSource(model.modelData.pQmlSource,model.modelData.pComponentArgs);else setSource(model.modelData.pQmlSource)};onLoaded:{model.modelData.pComponentObj=item;if(item.fOnQmlLoaded)item.fOnQmlLoaded()}}}
+}
+}
+}
+}
 )QML");
     QString out = stock;
     out.replace(target.nameBegin, target.end - target.nameBegin, replacement);
