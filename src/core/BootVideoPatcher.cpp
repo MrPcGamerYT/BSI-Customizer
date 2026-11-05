@@ -174,16 +174,7 @@ QList<Stream> streams(const QByteArray &data)
         append(file.entryOff, qml, QtResources::findLink(data, file.entryOff, file.name));
     }
     // Keep the canonical legacy fallback for builds whose registration code is
-    // not recognized. Once the registered tree supplies both sides of the
-    // controller/host graph, unregistered old zlib copies left by an in-place
-    // resource move must not be mistaken for additional live boot controllers.
-    bool registeredController = false;
-    bool registeredHost = false;
-    for (const auto &stream : result) {
-        registeredController = registeredController || bootController(stream.text);
-        registeredHost = registeredHost || bootHost(stream.text);
-    }
-    if (registeredController && registeredHost) return result;
+    // not recognized. No arbitrary offsets or unlinked compressed blobs qualify.
     for (qint64 at : ZlibUtils::findMagicOffsets(data)) {
         if (at < 8 || seen.contains(at - 8)) continue;
         const quint32 stored = be32(data, at - 8), size = be32(data, at - 4);
