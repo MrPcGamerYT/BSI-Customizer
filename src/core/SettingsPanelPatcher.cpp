@@ -28,7 +28,7 @@
 namespace SettingsPanelPatcher {
 namespace {
 const QString kWindowMarker = QStringLiteral("BSI CUSTOMIZER: redesigned Settings window v1");
-const QString kWindowDesignMarker = QStringLiteral("BSI CUSTOMIZER: compact Settings refresh v2");
+const QString kWindowDesignMarker = QStringLiteral("BSI CUSTOMIZER: Settings v2");
 const QString kAboutMarker = QStringLiteral("BSI CUSTOMIZER: redesigned About page v1");
 const QString kSchema = QStringLiteral("bsi.settings-panel.recovery");
 const QString kWindowLeaf = QStringLiteral("UiSettingsWindow.qml");
@@ -341,7 +341,7 @@ QString buildWindow(const QString &stock)
     // change/discard prompts, callbacks and the Loader model remain in place.
     const QString replacement = QStringLiteral(R"QML(
 UiShadowContainer {
-// BSI CUSTOMIZER: compact Settings refresh v2
+// BSI CUSTOMIZER: Settings v2
 id:iSettingsWindowShadowContainer;anchors.fill:parent
 Rectangle {
 anchors.fill:parent;color:UiTheme.colors.primary80;radius:12;border.width:1;border.color:UiTheme.colors.primary60;clip:true
@@ -354,10 +354,11 @@ UiImageButton{id:bsiSettingsClose;objectName:"bsiSettingsClose";asset:"CloseIcon
 }
 ListView{id:bsiSettingsCategoryTabs;objectName:"bsiSettingsCategoryTabs";width:parent.width;height:66;clip:true;orientation:ListView.Horizontal;spacing:6;currentIndex:pCurrentTabIndex;model:pSettingsItems.pSettingElements
 ScrollBar.horizontal:ScrollBar{policy:ScrollBar.AsNeeded}
-delegate:UiSettingsButton{objectName:"bsiSettingsCategoryTab"+model.index;width:92;height:60;pSettingIdx:model.index;pSettingBtnText:["ϟ","▦","◈","⌖","♫","♧","⚙","▯","⌨","◉","⚒","ⓘ"][model.index%12]+"\n"+model.modelData.pButtonText;pSelected:model.index===pCurrentTabIndex;pShowRedDot:model.modelData.pShowRedDot;onSettingClicked:fChangeSelectedSetting(model.index)}
+delegate:UiSettingsButton{width:92;height:60;pSettingIdx:model.index;pSettingBtnText:["ϟ","▦","◈","⌖","♫","♧","⚙","▯","⌨","◉","⚒","ⓘ"][model.index%12]+"\n"+model.modelData.pButtonText;pSelected:model.index===pCurrentTabIndex;pShowRedDot:model.modelData.pShowRedDot;onSettingClicked:fChangeSelectedSetting(model.index)}
 }
 StackLayout{id:iSelectedSettingControl;objectName:"bsiSettingsPageStack";width:parent.width;height:parent.height-118;currentIndex:pCurrentTabIndex
-Repeater{model:pSettingsItems.pSettingElements;delegate:Loader{objectName:"bsiSettingsPageLoader"+model.index;Component.onCompleted:{if(model.modelData.pComponentArgs!==null)setSource(model.modelData.pQmlSource,model.modelData.pComponentArgs);else setSource(model.modelData.pQmlSource)};onLoaded:{model.modelData.pComponentObj=item;if(item.fOnQmlLoaded)item.fOnQmlLoaded()}}}
+Repeater{model:pSettingsItems.pSettingElements;delegate:Loader{Component.onCompleted:{if(model.modelData.pComponentArgs!==null)setSource(model.modelData.pQmlSource,model.modelData.pComponentArgs);else setSource(model.modelData.pQmlSource)}
+onLoaded:{model.modelData.pComponentObj=item;if(item.fOnQmlLoaded)item.fOnQmlLoaded()}}}
 }
 }
 }

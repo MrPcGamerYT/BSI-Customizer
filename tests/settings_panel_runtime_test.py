@@ -45,7 +45,7 @@ match = re.search(
 )
 assert match, "Could not find the generated Settings-window QML template"
 replacement = match.group(1)
-assert "compact Settings refresh v2" in replacement
+assert "BSI CUSTOMIZER: Settings v2" in replacement
 
 with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
     root = Path(temp)
@@ -166,14 +166,16 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
 
     tabs = visual_named("bsiSettingsCategoryTabs")
     stack = visual_named("bsiSettingsPageStack")
-    first_loader = visual_named("bsiSettingsPageLoader0")
-    first_tab = visual_named("bsiSettingsCategoryTab1")
+    first_tab = next(
+        (item for item in visual_tree if item.property("pSettingIdx") == 1), None
+    )
+    loaded_page = visual_named("runtimeSettingPage")
     drag = visual_named("bsiSettingsDragHandle")
     close = visual_named("bsiSettingsClose")
     controls = {
         "tabs": tabs,
         "stack": stack,
-        "page loader 0": first_loader,
+        "loaded native page": loaded_page,
         "category tab 1": first_tab,
         "drag handle": drag,
         "close button": close,
@@ -181,7 +183,7 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
     missing = [name for name, item in controls.items() if item is None]
     found_names = sorted(item.objectName() for item in visual_tree if item.objectName())
     assert not missing, f"Missing controls: {missing}; found object names: {found_names}"
-    assert first_loader.property("item") is not None, "The native Settings page Loader did not load its page"
+    assert loaded_page.objectName() == "runtimeSettingPage", "The native Settings page Loader did not load its page"
 
     tab_point = first_tab.mapToScene(QPointF(first_tab.width() / 2, first_tab.height() / 2)).toPoint()
     QTest.mouseClick(window, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, tab_point)

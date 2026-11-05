@@ -4889,7 +4889,7 @@ Window {
                     if (file.name.compare(QLatin1String("UiSettingsWindow.qml"), Qt::CaseInsensitive) == 0)
                         rebuiltWindow = QString::fromUtf8(QtResources::readFile(panelImage, file));
                 }
-                check(rebuiltWindow.contains(QStringLiteral("compact Settings refresh v2"))
+                check(rebuiltWindow.contains(QStringLiteral("BSI CUSTOMIZER: Settings v2"))
                           && rebuiltWindow.contains(QStringLiteral("bsiSettingsCategoryTabs"))
                           && rebuiltWindow.contains(QStringLiteral("bsiSettingsClose"))
                           && rebuiltWindow.contains(QStringLiteral("fChangeSelectedSetting(model.index)"))
