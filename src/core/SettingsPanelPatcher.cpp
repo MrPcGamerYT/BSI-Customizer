@@ -373,6 +373,7 @@ QString buildWindow(const QString &stock)
                     width: parent.width
                     height: 42
                     MouseArea {
+                        objectName: "bsiSettingsDragHandle"
                         width: parent.width - 48
                         height: parent.height
                         onPressed: iSettingsWindow.startSystemMove()
@@ -395,6 +396,7 @@ QString buildWindow(const QString &stock)
                     }
                     UiImageButton {
                         id: bsiSettingsClose
+                        objectName: "bsiSettingsClose"
                         asset: "CloseIcon"
                         pImageWidth: 16
                         pImageHeight: 16
@@ -406,6 +408,7 @@ QString buildWindow(const QString &stock)
 
                 ListView {
                     id: bsiSettingsCategoryTabs
+                    objectName: "bsiSettingsCategoryTabs"
                     width: parent.width
                     height: 76
                     clip: true
@@ -415,6 +418,7 @@ QString buildWindow(const QString &stock)
                     model: pSettingsItems.pSettingElements
                     ScrollBar.horizontal: ScrollBar { policy: ScrollBar.AsNeeded }
                     delegate: Rectangle {
+                        objectName: "bsiSettingsCategoryTab" + model.index
                         width: 96
                         height: 68
                         radius: 10
@@ -471,12 +475,14 @@ QString buildWindow(const QString &stock)
 
                 StackLayout {
                     id: iSelectedSettingControl
+                    objectName: "bsiSettingsPageStack"
                     width: parent.width
                     height: Math.max(120, parent.height - 42 - 76 - 20)
                     currentIndex: pCurrentTabIndex
                     Repeater {
                         model: pSettingsItems.pSettingElements
                         delegate: Loader {
+                            objectName: "bsiSettingsPageLoader" + model.index
                             Component.onCompleted: {
                                 if (model.modelData.pComponentArgs !== null) setSource(model.modelData.pQmlSource, model.modelData.pComponentArgs)
                                 else setSource(model.modelData.pQmlSource)

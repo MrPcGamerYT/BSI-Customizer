@@ -65,6 +65,8 @@ jobs:
           python -m pip install PySide6==6.8.3
       - name: Type-check Workspace and Theme QML against real Qt metadata
         run: python tests/workspace_qml_lint_test.py
+      - name: Instantiate rebuilt Settings shell and test its native interactions
+        run: python tests/run_qt_runtime_test.py tests/settings_panel_runtime_test.py
       - name: Exercise adaptive boot player against synthetic Qt6, Qt5 and WebEngine APIs
         run: python tests/run_qt_runtime_test.py tests/boot_player_runtime_test.py
       - name: Load the real Resources page with a counting backend
