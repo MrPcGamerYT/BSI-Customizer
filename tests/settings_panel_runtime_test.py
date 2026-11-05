@@ -141,7 +141,19 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
     first_tab = obj.findChild(QQuickItem, "bsiSettingsCategoryTab1")
     drag = obj.findChild(QQuickItem, "bsiSettingsDragHandle")
     close = obj.findChild(QQuickItem, "bsiSettingsClose")
-    assert all((tabs, stack, first_loader, first_tab, drag, close)), "A named Settings UI control is missing"
+    controls = {
+        "tabs": tabs,
+        "stack": stack,
+        "page loader 0": first_loader,
+        "category tab 1": first_tab,
+        "drag handle": drag,
+        "close button": close,
+    }
+    missing = [name for name, item in controls.items() if item is None]
+    found_names = sorted(
+        child.objectName() for child in obj.findChildren(QObject) if child.objectName()
+    )
+    assert not missing, f"Missing controls: {missing}; found object names: {found_names}"
     assert first_loader.property("item") is not None, "The native Settings page Loader did not load its page"
 
     tab_point = first_tab.mapToScene(QPointF(first_tab.width() / 2, first_tab.height() / 2)).toPoint()
