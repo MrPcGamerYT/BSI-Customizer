@@ -28,7 +28,8 @@
 namespace SettingsPanelPatcher {
 namespace {
 const QString kWindowMarker = QStringLiteral("BSI CUSTOMIZER: redesigned Settings window v1");
-const QString kWindowDesignMarker = QStringLiteral("BSI CUSTOMIZER: Settings v2");
+const QString kPreviousWindowDesignMarker = QStringLiteral("BSI CUSTOMIZER: Settings v2");
+const QString kWindowDesignMarker = QStringLiteral("BSI Settings v3");
 const QString kAboutMarker = QStringLiteral("BSI CUSTOMIZER: redesigned About page v1");
 const QString kSchema = QStringLiteral("bsi.settings-panel.recovery");
 const QString kWindowLeaf = QStringLiteral("UiSettingsWindow.qml");
@@ -442,23 +443,25 @@ QString buildWindow(const QString &stock)
     // change/discard prompts, callbacks and the Loader model remain in place.
     const QString replacement = QStringLiteral(R"QML(
 UiShadowContainer {
-// BSI CUSTOMIZER: Settings v2
+// BSI Settings v3
 id:iSettingsWindowShadowContainer;anchors.fill:parent
 Rectangle {
 anchors.fill:parent;color:UiTheme.colors.primary80;radius:12;border.width:1;border.color:UiTheme.colors.accentNormal;clip:true
 Column{anchors.fill:parent;anchors.margins:12;spacing:8
 Item{width:parent.width;height:36
-MouseArea{objectName:"bsiSettingsDragHandle";width:parent.width-42;height:parent.height;onPressed:iSettingsWindow.startSystemMove()}
+MouseArea{width:parent.width-42;height:parent.height;onPressed:iSettingsWindow.startSystemMove()}
 Text{text:qsTranslate("QObject","Settings");color:UiTheme.colors.primary10;font:UiTheme.fonts.bodyLarge;anchors.left:parent.left;anchors.verticalCenter:parent.verticalCenter}
-UiImageButton{id:bsiSettingsClose;objectName:"bsiSettingsClose";asset:"CloseIcon";pImageWidth:16;pImageHeight:16;anchors.right:parent.right;anchors.verticalCenter:parent.verticalCenter;onClicked:iSettingsWindow.close()}
+UiImageButton{asset:"CloseIcon";pImageWidth:16;pImageHeight:16;anchors.right:parent.right;anchors.verticalCenter:parent.verticalCenter;onClicked:iSettingsWindow.close()}
 }
-ListView{id:bsiSettingsCategoryTabs;objectName:"bsiSettingsCategoryTabs";width:parent.width;height:66;clip:true;orientation:ListView.Horizontal;spacing:6;currentIndex:pCurrentTabIndex;model:pSettingsItems.pSettingElements
-ScrollBar.horizontal:ScrollBar{policy:ScrollBar.AsNeeded}
-delegate:UiSettingsButton{width:92;height:60;pSettingBtnText:(model.index+1)+"\n"+model.modelData.pButtonText;pSelected:model.index===pCurrentTabIndex;pShowRedDot:model.modelData.pShowRedDot;onSettingClicked:fChangeSelectedSetting(model.index)}
+ListView{width:parent.width;height:76;clip:true;orientation:ListView.Horizontal;spacing:7;currentIndex:pCurrentTabIndex;model:pSettingsItems.pSettingElements
+delegate:UiSettingsButton{width:92;height:64;pSettingIdx:model.index;pSettingBtnText:"⚙▣◈♫⌨⌘☷ⓘ◉◇✦▧".charAt(model.index)+"\n"+model.modelData.pButtonText;pSelected:model.index===pCurrentTabIndex;pShowRedDot:model.modelData.pShowRedDot;onSettingClicked:fChangeSelectedSetting(pSettingIdx)}
 }
-StackLayout{id:iSelectedSettingControl;objectName:"bsiSettingsPageStack";width:parent.width;height:parent.height-118;currentIndex:pCurrentTabIndex
+Item{width:parent.width;height:parent.height-128
+Rectangle{anchors.fill:parent;radius:10;color:UiTheme.colors.primary70}
+StackLayout{id:iSelectedSettingControl;anchors.fill:parent;anchors.margins:6;currentIndex:pCurrentTabIndex
 Repeater{model:pSettingsItems.pSettingElements;delegate:Loader{Component.onCompleted:{var a=model.modelData.pComponentArgs;a?setSource(model.modelData.pQmlSource,a):setSource(model.modelData.pQmlSource)}
 onLoaded:{model.modelData.pComponentObj = item;if(item.fOnQmlLoaded)item.fOnQmlLoaded()}}}
+}
 }
 }
 }
@@ -466,12 +469,12 @@ onLoaded:{model.modelData.pComponentObj = item;if(item.fOnQmlLoaded)item.fOnQmlL
 )QML");
     QString out = stock;
     out.replace(target.nameBegin, target.end - target.nameBegin, replacement);
-    // The toolbar changes with BlueStacks translations; stable model order
-    // gives each category a compact marker without relying on its translated label.
+    // Category glyphs follow model order, so translations never affect the
+    // icon strip and pages without image assets still receive distinct artwork.
     const QString helper = QStringLiteral(R"QML(
     onVisibleChanged: if (visible && transientParent) {
-        width = transientParent.width * 0.72
-        height = transientParent.height * 0.8
+        width = transientParent.width * 0.70
+        height = transientParent.height * 0.70
         x = transientParent.x + (transientParent.width - width) / 2
         y = transientParent.y + (transientParent.height - height) / 2
     }
@@ -508,59 +511,39 @@ Item {
     property string pDownloadURL: ""
     property bool pIsInCompatibleUpdateVersion: false
     property string pParentWindow: ""
+    property string pShortDisplayName: ""
     property string pDeveloperName: @@BSI_DEVELOPER@@
     property var pDeveloperLinks: [@@BSI_LINKS@@
     ]
 
-    UiColumnLayout {
+    ColumnLayout {
         anchors.fill: parent
-        spacing: 12
-        UiScrollView {
+        spacing: 0
+        ScrollView {
             Layout.fillWidth: true
             Layout.fillHeight: true
+            background: Rectangle { color: "transparent" }
             contentWidth: iBsiAboutContent.width
-            contentHeight: iBsiAboutContent.implicitHeight + 20
+            contentHeight: iBsiAboutContent.implicitHeight + 48
             clip: true
 
-            UiColumnLayout {
+            ColumnLayout {
                 id: iBsiAboutContent
-                width: 548
+                width: Math.min(440, parent.width - 24)
                 Layout.alignment: Qt.AlignHCenter | Qt.AlignTop
-                spacing: 12
+                spacing: 16
 
-                Item { Layout.fillWidth: true; Layout.preferredHeight: 6 }
+                Item { Layout.fillWidth: true; Layout.preferredHeight: 28 }
                 Image {
+                    objectName: "bsiAboutEmulatorLogo"
                     source: @@BSI_LOGO_SOURCE@@
-                    width: 144
-                    height: 44
+                    width: 160
+                    height: 60
                     fillMode: Image.PreserveAspectFit
                     Layout.alignment: Qt.AlignHCenter
                 }
                 Text {
-                    text: qsTranslate("QObject", "%1 App Player").arg(uiBackend.productName)
-                    font: UiTheme.fonts.bodyLarge
-                    color: UiTheme.colors.primary10
-                    Layout.alignment: Qt.AlignHCenter
-                }
-                Text {
-                    id: iAndroidText
-                    text: plrBackend.version + " " + qsTranslate("QObject", uiBackend.getImageTrait(plrBackend.getVmName()).shortDisplayName)
-                    font: UiTheme.fonts.bodySmall
-                    color: UiTheme.colors.primary30
-                    Layout.alignment: Qt.AlignHCenter
-                }
-                Rectangle {
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: 1
-                    color: UiTheme.colors.primary60
-                }
-                Text {
-                    text: qsTranslate("QObject", "Developed by")
-                    font: UiTheme.fonts.bodySmall
-                    color: UiTheme.colors.primary30
-                    Layout.alignment: Qt.AlignHCenter
-                }
-                Text {
+                    objectName: "bsiAboutDeveloperName"
                     text: pDeveloperName
                     font: UiTheme.fonts.bodyLarge
                     color: UiTheme.colors.primary10
@@ -568,26 +551,51 @@ Item {
                     wrapMode: Text.Wrap
                     Layout.fillWidth: true
                 }
+                Rectangle {
+                    Layout.fillWidth: true
+                    Layout.preferredHeight: 1
+                    color: UiTheme.colors.primary60
+                }
                 Repeater {
                     model: pDeveloperLinks
                     delegate: Rectangle {
+                        objectName: "bsiAboutDeveloperLink"
                         Layout.fillWidth: true
-                        Layout.preferredHeight: 34
-                        radius: 8
-                        color: Qt.rgba(UiTheme.colors.primary60.r, UiTheme.colors.primary60.g,
-                                       UiTheme.colors.primary60.b, 0.38)
+                        Layout.preferredHeight: 42
+                        property bool hovered: false
+                        radius: 10
+                        color: hovered
+                            ? Qt.rgba(UiTheme.colors.accentNormal.r, UiTheme.colors.accentNormal.g,
+                                      UiTheme.colors.accentNormal.b, 0.16)
+                            : Qt.rgba(UiTheme.colors.primary60.r, UiTheme.colors.primary60.g,
+                                      UiTheme.colors.primary60.b, 0.42)
+                        border.width: 1
+                        border.color: hovered ? UiTheme.colors.accentNormal : UiTheme.colors.primary60
                         Text {
-                            anchors.fill: parent
-                            anchors.margins: 8
+                            anchors.left: parent.left
+                            anchors.right: parent.right
+                            anchors.leftMargin: 14
+                            anchors.rightMargin: 38
+                            anchors.verticalCenter: parent.verticalCenter
                             text: modelData.title
-                            color: UiTheme.colors.accentNormal
+                            color: parent.hovered ? UiTheme.colors.accentNormal : UiTheme.colors.primary10
                             font: UiTheme.fonts.bodyMedium
-                            verticalAlignment: Text.AlignVCenter
                             elide: Text.ElideRight
+                        }
+                        Text {
+                            anchors.right: parent.right
+                            anchors.rightMargin: 14
+                            anchors.verticalCenter: parent.verticalCenter
+                            text: "↗"
+                            color: UiTheme.colors.accentNormal
+                            font.pixelSize: 16
                         }
                         MouseArea {
                             anchors.fill: parent
+                            hoverEnabled: true
                             cursorShape: Qt.PointingHandCursor
+                            onEntered: parent.hovered = true
+                            onExited: parent.hovered = false
                             onClicked: {
                                 var target = String(modelData.url || "")
                                 if (/^https?:\/\//i.test(target)) Qt.openUrlExternally(target)
@@ -597,94 +605,37 @@ Item {
                 }
                 Text {
                     visible: pDeveloperLinks.length === 0
-                    text: qsTranslate("QObject", "No links configured")
+                    text: qsTranslate("QObject", "Add up to four developer links in BSI Customizer.")
                     color: UiTheme.colors.primary30
                     font: UiTheme.fonts.bodySmall
-                    Layout.alignment: Qt.AlignHCenter
-                }
-                Rectangle {
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: 1
-                    color: UiTheme.colors.primary60
-                }
-                UiButton {
-                    Layout.alignment: Qt.AlignHCenter
-                    Layout.preferredWidth: 168
-                    pSize: UiTheme.buttons.sizes.small
-                    pColor: UiTheme.buttons.colors.accent
-                    text: pUpdateAvailable ? qsTranslate("QObject", "Download Update") : qsTranslate("QObject", "Check for updates")
-                    visible: !iOnLatestVersion.visible && !pIsInCompatibleUpdateVersion
-                    onClicked: {
-                        if (pUpdateAvailable) Qt.openUrlExternally(pDownloadURL)
-                        else { iLoader.visible = true; plrBackend.checkForUpdate() }
-                    }
-                }
-                Text {
-                    id: iOnLatestVersion
-                    text: qsTranslate("QObject", "You are on the latest version")
-                    font: UiTheme.fonts.bodySmall
-                    color: UiTheme.colors.primary20
-                    visible: false
-                    Layout.alignment: Qt.AlignHCenter
-                }
-                UiTextUrl {
-                    visible: pUpdateAvailable && pIsInCompatibleUpdateVersion
-                    text: qsTranslate("QObject", "An update is available but may not be compatible. Open update information.")
-                    font: UiTheme.fonts.bodySmall
-                    color: UiTheme.colors.primary20
-                    linkColor: UiTheme.colors.accentNormal
+                    horizontalAlignment: Text.AlignHCenter
                     wrapMode: Text.Wrap
-                    onLinkActivated: Qt.openUrlExternally(pMoreInfoURL)
+                    Layout.fillWidth: true
                 }
-                UiImage {
-                    id: iLoader
-                    asset: "Loader_bright"
-                    pImageWidth: 16
-                    pImageHeight: 16
-                    visible: false
-                    cache: false
-                    Layout.alignment: Qt.AlignHCenter
-                    RotationAnimation on rotation {
-                        loops: Animation.Infinite
-                        duration: 1200
-                        from: 0
-                        to: 360
-                        running: iLoader.visible
-                    }
-                }
-                Text {
-                    text: qsTranslate("QObject", "Checking for updates…")
-                    color: UiTheme.colors.primary30
-                    font: UiTheme.fonts.bodySmall
-                    visible: iLoader.visible
-                    Layout.alignment: Qt.AlignHCenter
-                }
+                Item { Layout.fillWidth: true; Layout.preferredHeight: 28 }
             }
         }
     }
 
+    // Retain the native About-page callback surface for parent QML connections.
     function fCheckForUpdateCallback(apiCallStatus, jsonData) {
         if (apiCallStatus === 0) {
             var jsonObj = JSON.parse(jsonData)
             pUpdateAvailable = String(jsonObj.update_available).toLowerCase() === "true"
-            pIsInCompatibleUpdateVersion = false
-            iLoader.visible = false
+            pIsInCompatibleUpdateVersion = pUpdateAvailable
+                && String(jsonObj.update_details.is_build_compatible).toLowerCase() !== "true"
             if (pUpdateAvailable) {
                 pUpdateVersion = jsonObj.update_details.client_version
                 pMoreInfoURL = jsonObj.update_details.detailed_changelogs_url
                 pDownloadURL = jsonObj.update_details.download_url
-                pIsInCompatibleUpdateVersion = String(jsonObj.update_details.is_build_compatible).toLowerCase() !== "true"
-            } else {
-                iOnLatestVersion.visible = true
             }
         } else {
             pUpdateAvailable = false
-            iLoader.visible = false
             pIsInCompatibleUpdateVersion = false
         }
     }
     function fUpdateShortDisplayName(displayName) {
-        iAndroidText.text = plrBackend.version + " " + displayName
+        pShortDisplayName = String(displayName || "")
     }
 }
 )QML");
@@ -877,7 +828,8 @@ bool hasWindowMarker(const QString &text)
 {
     // Keep recognizing v1 so users can update or safely restore a panel built
     // by the previous Settings design.
-    return text.contains(kWindowMarker) || text.contains(kWindowDesignMarker);
+    return text.contains(kWindowMarker) || text.contains(kPreviousWindowDesignMarker)
+        || text.contains(kWindowDesignMarker);
 }
 
 } // namespace
