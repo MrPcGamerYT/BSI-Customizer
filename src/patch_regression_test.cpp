@@ -4976,13 +4976,12 @@ Window {
                         rebuiltWindow = QString::fromUtf8(QtResources::readFile(panelImage, file));
                 }
                 check(rebuiltWindow.contains(QStringLiteral("BSI Settings v3"))
-                          && rebuiltWindow.contains(QStringLiteral("bsiSettingsCategoryTabs"))
                           && rebuiltWindow.contains(QStringLiteral("⚙▣◈♫⌨⌘☷ⓘ◉◇✦▧"))
                           && rebuiltWindow.contains(QStringLiteral("pSettingBtnText"))
                           && rebuiltWindow.contains(QStringLiteral("pShowRedDot"))
                           && rebuiltWindow.contains(QStringLiteral("width = transientParent.width * 0.70"))
                           && rebuiltWindow.contains(QStringLiteral("height = transientParent.height * 0.70"))
-                          && rebuiltWindow.contains(QStringLiteral("bsiSettingsClose"))
+                          && rebuiltWindow.contains(QStringLiteral("asset:\"CloseIcon\""))
                           && rebuiltWindow.contains(QStringLiteral("fChangeSelectedSetting(pSettingIdx)"))
                           && rebuiltWindow.contains(QStringLiteral("StackLayout"))
                           && rebuiltWindow.contains(QStringLiteral("model.modelData.pComponentObj = item"))

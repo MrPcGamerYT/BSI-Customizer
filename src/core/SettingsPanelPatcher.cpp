@@ -449,16 +449,16 @@ Rectangle {
 anchors.fill:parent;color:UiTheme.colors.primary80;radius:12;border.width:1;border.color:UiTheme.colors.accentNormal;clip:true
 Column{anchors.fill:parent;anchors.margins:12;spacing:8
 Item{width:parent.width;height:36
-MouseArea{objectName:"bsiSettingsDragHandle";width:parent.width-42;height:parent.height;cursorShape:Qt.SizeAllCursor;onPressed:iSettingsWindow.startSystemMove()}
+MouseArea{width:parent.width-42;height:parent.height;onPressed:iSettingsWindow.startSystemMove()}
 Text{text:qsTranslate("QObject","Settings");color:UiTheme.colors.primary10;font:UiTheme.fonts.bodyLarge;anchors.left:parent.left;anchors.verticalCenter:parent.verticalCenter}
-UiImageButton{id:bsiSettingsClose;objectName:"bsiSettingsClose";asset:"CloseIcon";pImageWidth:16;pImageHeight:16;anchors.right:parent.right;anchors.verticalCenter:parent.verticalCenter;onClicked:iSettingsWindow.close()}
+UiImageButton{asset:"CloseIcon";pImageWidth:16;pImageHeight:16;anchors.right:parent.right;anchors.verticalCenter:parent.verticalCenter;onClicked:iSettingsWindow.close()}
 }
-ListView{id:bsiSettingsCategoryTabs;objectName:"bsiSettingsCategoryTabs";width:parent.width;height:76;clip:true;orientation:ListView.Horizontal;spacing:7;currentIndex:pCurrentTabIndex;model:pSettingsItems.pSettingElements
+ListView{width:parent.width;height:76;clip:true;orientation:ListView.Horizontal;spacing:7;currentIndex:pCurrentTabIndex;model:pSettingsItems.pSettingElements
 delegate:UiSettingsButton{width:92;height:64;pSettingIdx:model.index;pSettingBtnText:"⚙▣◈♫⌨⌘☷ⓘ◉◇✦▧".charAt(model.index)+"\n"+model.modelData.pButtonText;pSelected:model.index===pCurrentTabIndex;pShowRedDot:model.modelData.pShowRedDot;onSettingClicked:fChangeSelectedSetting(pSettingIdx)}
 }
 Item{width:parent.width;height:parent.height-128
 Rectangle{anchors.fill:parent;radius:10;color:UiTheme.colors.primary70}
-StackLayout{id:iSelectedSettingControl;objectName:"bsiSettingsPageStack";anchors.fill:parent;anchors.margins:6;currentIndex:pCurrentTabIndex
+StackLayout{id:iSelectedSettingControl;anchors.fill:parent;anchors.margins:6;currentIndex:pCurrentTabIndex
 Repeater{model:pSettingsItems.pSettingElements;delegate:Loader{Component.onCompleted:{var a=model.modelData.pComponentArgs;a?setSource(model.modelData.pQmlSource,a):setSource(model.modelData.pQmlSource)}
 onLoaded:{model.modelData.pComponentObj = item;if(item.fOnQmlLoaded)item.fOnQmlLoaded()}}}
 }

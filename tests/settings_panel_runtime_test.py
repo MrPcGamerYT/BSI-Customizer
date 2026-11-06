@@ -170,8 +170,21 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
     def visual_named(name):
         return next((item for item in visual_tree if item.objectName() == name), None)
 
-    tabs = visual_named("bsiSettingsCategoryTabs")
-    stack = visual_named("bsiSettingsPageStack")
+    tabs = next(
+        (
+            item for item in visual_tree
+            if item.property("orientation") is not None
+            and item.property("currentIndex") is not None
+        ),
+        None,
+    )
+    stack = next(
+        (
+            item for item in visual_tree
+            if item is not tabs and item.property("currentIndex") is not None
+        ),
+        None,
+    )
     first_tab = next(
         (
             item for item in visual_tree
@@ -180,8 +193,19 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
         None,
     )
     loaded_page = visual_named("runtimeSettingPage")
-    drag = visual_named("bsiSettingsDragHandle")
-    close = visual_named("bsiSettingsClose")
+    drag = next(
+        (
+            item for item in visual_tree
+            if item.metaObject().className().endswith("MouseArea")
+            and item.width() > window.width() * 0.7
+            and item.height() < 50
+        ),
+        None,
+    )
+    close = next(
+        (item for item in visual_tree if str(item.property("asset")) == "CloseIcon"),
+        None,
+    )
     controls = {
         "tabs": tabs,
         "stack": stack,
