@@ -445,10 +445,6 @@ QString buildWindow(const QString &stock)
 UiShadowContainer {
 // BSI CUSTOMIZER: Settings v3
 id:iSettingsWindowShadowContainer;anchors.fill:parent
-function fBsiSettingsTabIcon(index) {
-    var glyphs = ["⚙", "▣", "◈", "♫", "⌨", "⌘", "☷", "ⓘ", "◉", "◇", "✦", "▧"]
-    return glyphs[index % glyphs.length]
-}
 Rectangle {
 anchors.fill:parent;color:UiTheme.colors.primary80;radius:12;border.width:1;border.color:UiTheme.colors.accentNormal;clip:true
 Column{anchors.fill:parent;anchors.margins:12;spacing:8
@@ -458,8 +454,7 @@ Text{text:qsTranslate("QObject","Settings");color:UiTheme.colors.primary10;font:
 UiImageButton{id:bsiSettingsClose;objectName:"bsiSettingsClose";asset:"CloseIcon";pImageWidth:16;pImageHeight:16;anchors.right:parent.right;anchors.verticalCenter:parent.verticalCenter;onClicked:iSettingsWindow.close()}
 }
 ListView{id:bsiSettingsCategoryTabs;objectName:"bsiSettingsCategoryTabs";width:parent.width;height:76;clip:true;orientation:ListView.Horizontal;spacing:7;currentIndex:pCurrentTabIndex;model:pSettingsItems.pSettingElements
-ScrollBar.horizontal:ScrollBar{policy:ScrollBar.AsNeeded}
-delegate:UiSettingsButton{objectName:"bsiSettingsCategoryTab";width:92;height:64;pSettingBtnText:iSettingsWindowShadowContainer.fBsiSettingsTabIcon(model.index)+"\n"+model.modelData.pButtonText;pSelected:model.index===pCurrentTabIndex;pShowRedDot:model.modelData.pShowRedDot;onSettingClicked:fChangeSelectedSetting(model.index)}
+delegate:UiSettingsButton{width:92;height:64;pSettingIdx:model.index;pSettingBtnText:"⚙▣◈♫⌨⌘☷ⓘ◉◇✦▧".charAt(model.index)+"\n"+model.modelData.pButtonText;pSelected:model.index===pCurrentTabIndex;pShowRedDot:model.modelData.pShowRedDot;onSettingClicked:fChangeSelectedSetting(model.index)}
 }
 Item{id:bsiSettingsContentCard;objectName:"bsiSettingsContentCard";width:parent.width;height:parent.height-128
 Rectangle{anchors.fill:parent;radius:10;color:UiTheme.colors.primary70;border.width:1;border.color:UiTheme.colors.primary60}
