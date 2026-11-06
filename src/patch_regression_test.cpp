@@ -4977,8 +4977,9 @@ Window {
                 }
                 check(rebuiltWindow.contains(QStringLiteral("BSI CUSTOMIZER: Settings v3"))
                           && rebuiltWindow.contains(QStringLiteral("bsiSettingsCategoryTabs"))
-                          && rebuiltWindow.contains(QStringLiteral("bsiSettingsCategoryIcon"))
-                          && rebuiltWindow.contains(QStringLiteral("bsiSettingsCategoryLabel"))
+                          && rebuiltWindow.contains(QStringLiteral("fBsiSettingsTabIcon"))
+                          && rebuiltWindow.contains(QStringLiteral("pSettingBtnText"))
+                          && rebuiltWindow.contains(QStringLiteral("pShowRedDot"))
                           && rebuiltWindow.contains(QStringLiteral("bsiSettingsContentCard"))
                           && rebuiltWindow.contains(QStringLiteral("width = transientParent.width * 0.70"))
                           && rebuiltWindow.contains(QStringLiteral("height = transientParent.height * 0.70"))

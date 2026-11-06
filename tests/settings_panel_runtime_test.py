@@ -46,7 +46,7 @@ match = re.search(
 assert match, "Could not find the generated Settings-window QML template"
 replacement = match.group(1)
 assert "BSI CUSTOMIZER: Settings v3" in replacement
-assert "fBsiSettingsTabIcon" in replacement and "bsiSettingsCategoryIcon" in replacement
+assert "fBsiSettingsTabIcon" in replacement and "pSettingBtnText" in replacement
 assert "bsiSettingsContentCard" in replacement and "height:parent.height-128" in replacement
 assert "onPressed:iSettingsWindow.startSystemMove()" in replacement
 
@@ -172,17 +172,11 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
 
     tabs = visual_named("bsiSettingsCategoryTabs")
     stack = visual_named("bsiSettingsPageStack")
-    graphics_label = next(
+    first_tab = next(
         (
             item for item in visual_tree
-            if item.objectName() == "bsiSettingsCategoryLabel"
-            and item.property("text") == "Graphics"
+            if str(item.property("pSettingBtnText")).endswith("Graphics")
         ),
-        None,
-    )
-    first_tab = graphics_label.parentItem() if graphics_label is not None else None
-    category_icon = next(
-        (item for item in visual_tree if item.objectName() == "bsiSettingsCategoryIcon"),
         None,
     )
     loaded_page = visual_named("runtimeSettingPage")
@@ -193,7 +187,6 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
         "stack": stack,
         "loaded native page": loaded_page,
         "category tab 1": first_tab,
-        "category icon": category_icon,
         "drag handle": drag,
         "close button": close,
     }
@@ -201,7 +194,7 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
     found_names = sorted(item.objectName() for item in visual_tree if item.objectName())
     assert not missing, f"Missing controls: {missing}; found object names: {found_names}"
     assert loaded_page.objectName() == "runtimeSettingPage", "The native Settings page Loader did not load its page"
-    assert str(category_icon.property("text")), "Category tabs should show their own icon glyphs"
+    assert str(first_tab.property("pSettingBtnText")).splitlines()[0], "Category tabs should show their own icon glyphs"
 
     tab_point = first_tab.mapToScene(QPointF(first_tab.width() / 2, first_tab.height() / 2)).toPoint()
     QTest.mouseClick(window, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, tab_point)

@@ -445,22 +445,8 @@ QString buildWindow(const QString &stock)
 UiShadowContainer {
 // BSI CUSTOMIZER: Settings v3
 id:iSettingsWindowShadowContainer;anchors.fill:parent
-function fBsiSettingsTabIcon(index, source) {
-    var page = String(source || "").toLowerCase()
-    if (page.indexOf("general") >= 0) return "⚙"
-    if (page.indexOf("preference") >= 0) return "☷"
-    if (page.indexOf("display") >= 0) return "▣"
-    if (page.indexOf("screen") >= 0) return "▧"
-    if (page.indexOf("graphic") >= 0) return "◈"
-    if (page.indexOf("engine") >= 0) return "✦"
-    if (page.indexOf("audio") >= 0) return "♫"
-    if (page.indexOf("sound") >= 0) return "♪"
-    if (page.indexOf("keyboard") >= 0) return "⌨"
-    if (page.indexOf("shortcut") >= 0) return "⌘"
-    if (page.indexOf("control") >= 0) return "◇"
-    if (page.indexOf("game") >= 0) return "◉"
-    if (page.indexOf("about") >= 0) return "ⓘ"
-    var glyphs = ["⚙", "▣", "◈", "♫", "⌨", "⌘", "☷", "ⓘ", "◉", "◇", "▤", "✦", "▧", "♪", "⊙", "⌑"]
+function fBsiSettingsTabIcon(index) {
+    var glyphs = ["⚙", "▣", "◈", "♫", "⌨", "⌘", "☷", "ⓘ", "◉", "◇", "✦", "▧"]
     return glyphs[index % glyphs.length]
 }
 Rectangle {
@@ -473,14 +459,7 @@ UiImageButton{id:bsiSettingsClose;objectName:"bsiSettingsClose";asset:"CloseIcon
 }
 ListView{id:bsiSettingsCategoryTabs;objectName:"bsiSettingsCategoryTabs";width:parent.width;height:76;clip:true;orientation:ListView.Horizontal;spacing:7;currentIndex:pCurrentTabIndex;model:pSettingsItems.pSettingElements
 ScrollBar.horizontal:ScrollBar{policy:ScrollBar.AsNeeded}
-delegate:Item{objectName:"bsiSettingsCategoryTab";width:96;height:70
-property bool selected:model.index===pCurrentTabIndex
-Rectangle{anchors.fill:parent;radius:9;color:parent.selected?UiTheme.colors.primary60:UiTheme.colors.primary80;border.width:parent.selected?1:0;border.color:UiTheme.colors.accentNormal}
-Text{objectName:"bsiSettingsCategoryIcon";anchors.horizontalCenter:parent.horizontalCenter;anchors.top:parent.top;anchors.topMargin:7;text:iSettingsWindowShadowContainer.fBsiSettingsTabIcon(model.index,model.modelData.pQmlSource);font.pixelSize:22;color:parent.selected?UiTheme.colors.accentNormal:UiTheme.colors.primary20}
-Text{objectName:"bsiSettingsCategoryLabel";anchors.left:parent.left;anchors.right:parent.right;anchors.bottom:parent.bottom;anchors.bottomMargin:7;text:model.modelData.pButtonText;color:parent.selected?UiTheme.colors.primary10:UiTheme.colors.primary20;font:UiTheme.fonts.bodySmall;horizontalAlignment:Text.AlignHCenter;verticalAlignment:Text.AlignVCenter;elide:Text.ElideRight;wrapMode:Text.WordWrap}
-Rectangle{visible:model.modelData.pShowRedDot;width:7;height:7;radius:4;color:UiTheme.colors.accentNormal;anchors.top:parent.top;anchors.right:parent.right;anchors.topMargin:5;anchors.rightMargin:6}
-MouseArea{anchors.fill:parent;onClicked:fChangeSelectedSetting(model.index)}
-}
+delegate:UiSettingsButton{objectName:"bsiSettingsCategoryTab";width:92;height:64;pSettingBtnText:iSettingsWindowShadowContainer.fBsiSettingsTabIcon(model.index)+"\n"+model.modelData.pButtonText;pSelected:model.index===pCurrentTabIndex;pShowRedDot:model.modelData.pShowRedDot;onSettingClicked:fChangeSelectedSetting(model.index)}
 }
 Item{id:bsiSettingsContentCard;objectName:"bsiSettingsContentCard";width:parent.width;height:parent.height-128
 Rectangle{anchors.fill:parent;radius:10;color:UiTheme.colors.primary70;border.width:1;border.color:UiTheme.colors.primary60}
@@ -495,8 +474,8 @@ onLoaded:{model.modelData.pComponentObj = item;if(item.fOnQmlLoaded)item.fOnQmlL
 )QML");
     QString out = stock;
     out.replace(target.nameBegin, target.end - target.nameBegin, replacement);
-    // Category icons are selected by stable page identity, with a unique glyph
-    // fallback, so translated display labels never affect the top-tab artwork.
+    // Category glyphs follow model order, so translations never affect the
+    // icon strip and pages without image assets still receive distinct artwork.
     const QString helper = QStringLiteral(R"QML(
     onVisibleChanged: if (visible && transientParent) {
         width = transientParent.width * 0.70
