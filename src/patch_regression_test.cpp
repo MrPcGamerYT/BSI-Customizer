@@ -3016,9 +3016,9 @@ int runPatchRegressionTests()
         const QString componentPlayer = QStringLiteral(
             "import QtQuick\nItem {\n"
             " property var pSettingsWindow\n"
-            " function makeSettings() { pSettingsWindow = component.createObject(iMainWindow, {\"pSettingsItems\": iSettingsItems.createObject(iMainWindow)}) }\n"
-            " Component { id: component; Item { } }\n"
-            " Component { id: iSettingsItems\n"
+            " function makeSettings() { pSettingsWindow = settingsWindowFactory.createObject(iMainWindow, {pSettingsItems: settingsItemsFactory.createObject(iMainWindow)}) }\n"
+            " Component { id: settingsWindowFactory; Item { } }\n"
+            " Component { id: settingsItemsFactory\n"
             "  SettingElementModelList { id: pSettingsItems\n"
             "   pSettingElements: [\n%1   ]\n"
             "   SettingElementModelList { id: iNestedDecoy; pSettingElements: [\n%2   ] }\n"
@@ -4556,6 +4556,12 @@ Window {
                   && modernHtml.contains("Emulator is starting…")
                   && modernHelper.contains("bsiAuroraHalo")
                   && modernController.contains("bsiNativeBootGlowCore")
+                  && modernHelper.contains("width: Math.max(loadingRingTrack.width * 1.40,")
+                  && modernHelper.contains("loadingRingTrack.width / 2 - ctx.lineWidth")
+                  && modernController.contains("width: Math.max(bsiNativeRingTrack.width * 1.40,")
+                  && modernController.contains("bsiNativeRingTrack.width / 2 - ctx.lineWidth")
+                  && modernHelper.contains("objectName: \"bsiAuroraHalo\"")
+                  && modernController.contains("objectName: \"bsiNativeBootAura\"")
                   && modernHelper.contains("ctx.shadowBlur")
                   && !modernHtml.contains("Promo.mp4") && !modernHtml.contains("<video")
                   && !modernHtml.contains("CUSTOMIZER")
