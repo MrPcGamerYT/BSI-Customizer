@@ -1,0 +1,212 @@
+"""Instantiate the generated in-emulator Settings shell with real Qt Quick.
+
+This checks the patched shell's QML syntax, category selection, page loading,
+window drag and close callbacks. It uses a tiny host/model double; it does not
+launch the Android VM or claim a live HD-Player rendering test.
+Requires PySide6==6.8.3 and is run by run_qt_runtime_test.py.
+"""
+import os
+import re
+import tempfile
+from pathlib import Path
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+os.environ.setdefault("QSG_RHI_BACKEND", "software")
+
+from PySide6.QtCore import QObject, QPointF, Qt, Slot, QUrl
+from PySide6.QtGui import QGuiApplication
+from PySide6.QtQuick import QQuickItem, QQuickWindow
+from PySide6.QtQml import QQmlComponent, QQmlEngine
+from PySide6.QtTest import QTest
+
+
+class PlayerWindowDouble(QObject):
+    def __init__(self):
+        super().__init__()
+        self.move_requested = False
+        self.close_requested = False
+
+    @Slot()
+    def startSystemMove(self):
+        self.move_requested = True
+
+    @Slot()
+    def close(self):
+        self.close_requested = True
+
+
+app = QGuiApplication([])
+repo = Path(__file__).resolve().parents[1]
+cpp = (repo / "src/core/SettingsPanelPatcher.cpp").read_text(encoding="utf-8")
+match = re.search(
+    r'const QString replacement = QStringLiteral\(R"QML\((.*?)\)QML"\);',
+    cpp,
+    re.S,
+)
+assert match, "Could not find the generated Settings-window QML template"
+replacement = match.group(1)
+assert "BSI CUSTOMIZER: Settings v2" in replacement
+
+with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
+    root = Path(temp)
+    module = root / "BsiSettingsFixture"
+    module.mkdir()
+    (module / "qmldir").write_text(
+        "module BsiSettingsFixture\n"
+        "UiShadowContainer 1.0 UiShadowContainer.qml\n"
+        "UiImageButton 1.0 UiImageButton.qml\n"
+        "UiSettingsButton 1.0 UiSettingsButton.qml\n"
+        "singleton UiTheme 1.0 UiTheme.qml\n",
+        encoding="utf-8",
+    )
+    (module / "UiShadowContainer.qml").write_text(
+        "import QtQuick 2.15\nItem { }\n", encoding="utf-8"
+    )
+    (module / "UiImageButton.qml").write_text(
+        "import QtQuick 2.15\n"
+        "Item {\n"
+        "    width: 32; height: 32\n"
+        "    property string asset: \"\"\n"
+        "    property int pImageWidth: 16\n"
+        "    property int pImageHeight: 16\n"
+        "    signal clicked()\n"
+        "    MouseArea { anchors.fill: parent; onClicked: parent.clicked() }\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    (module / "UiSettingsButton.qml").write_text(
+        "import QtQuick 2.15\n"
+        "Rectangle {\n"
+        "    property int pSettingIdx: 0\n"
+        "    property string pSettingBtnText: \"\"\n"
+        "    property bool pSelected: false\n"
+        "    property bool pShowRedDot: false\n"
+        "    signal settingClicked(int index)\n"
+        "    radius: 8\n"
+        "    color: pSelected ? \"#203c55\" : \"#182635\"\n"
+        "    Text { anchors.fill: parent; text: pSettingBtnText; color: \"white\"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }\n"
+        "    MouseArea { anchors.fill: parent; onClicked: parent.settingClicked(parent.pSettingIdx) }\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    (module / "UiTheme.qml").write_text(
+        "pragma Singleton\n"
+        "import QtQuick 2.15\n"
+        "QtObject {\n"
+        "    property QtObject colors: QtObject {\n"
+        "        property color primary10: \"#f4f7fb\"\n"
+        "        property color primary30: \"#9eacbd\"\n"
+        "        property color primary60: \"#35465a\"\n"
+        "        property color primary80: \"#101a27\"\n"
+        "        property color accentNormal: \"#54c8ff\"\n"
+        "    }\n"
+        "    property QtObject fonts: QtObject {\n"
+        "        property font bodySmall: Qt.font({pixelSize: 11})\n"
+        "        property font bodyLarge: Qt.font({pixelSize: 17})\n"
+        "    }\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    (root / "SettingPage.qml").write_text(
+        "import QtQuick 2.15\n"
+        "Item {\n"
+        "    objectName: \"runtimeSettingPage\"\n"
+        "    function fOnQmlLoaded() { }\n"
+        "}\n",
+        encoding="utf-8",
+    )
+
+    host = root / "SettingsHost.qml"
+    host.write_text(
+        "import QtQuick 2.15\n"
+        "import QtQuick.Controls 2.15\n"
+        "import QtQuick.Layouts 1.15\n"
+        "import BsiSettingsFixture 1.0\n"
+        "Item {\n"
+        "    objectName: \"settingsTestHost\"\n"
+        "    width: 760; height: 520\n"
+        "    property int pCurrentTabIndex: 0\n"
+        "    property var pSettingsItems: ({ pSettingElements: [\n"
+        "        { pButtonText: \"Display\", pShowRedDot: false, pQmlSource: \"SettingPage.qml\", pComponentArgs: null, pComponentObj: null },\n"
+        "        { pButtonText: \"Graphics\", pShowRedDot: true, pQmlSource: \"SettingPage.qml\", pComponentArgs: null, pComponentObj: null }\n"
+        "    ] })\n"
+        "    function fChangeSelectedSetting(index) { pCurrentTabIndex = index }\n"
+        + replacement
+        + "\n}\n",
+        encoding="utf-8",
+    )
+
+    engine = QQmlEngine()
+    engine.addImportPath(str(root))
+    player = PlayerWindowDouble()
+    engine.rootContext().setContextProperty("iSettingsWindow", player)
+    component = QQmlComponent(engine, QUrl.fromLocalFile(str(host)))
+    obj = component.create()
+    if obj is None:
+        raise AssertionError("Settings QML failed to create: " + "\n".join(e.toString() for e in component.errors()))
+
+    window = QQuickWindow()
+    window.resize(760, 520)
+    obj.setParentItem(window.contentItem())
+    window.show()
+    QTest.qWait(120)
+
+    def visual_items(item):
+        found = []
+        pending = list(item.childItems())
+        while pending:
+            child = pending.pop()
+            found.append(child)
+            pending.extend(child.childItems())
+        return found
+
+    visual_tree = visual_items(obj)
+    def visual_named(name):
+        return next((item for item in visual_tree if item.objectName() == name), None)
+
+    tabs = visual_named("bsiSettingsCategoryTabs")
+    stack = visual_named("bsiSettingsPageStack")
+    first_tab = next(
+        (
+            item for item in visual_tree
+            if str(item.property("pSettingBtnText")).endswith("Graphics")
+        ),
+        None,
+    )
+    loaded_page = visual_named("runtimeSettingPage")
+    drag = visual_named("bsiSettingsDragHandle")
+    close = visual_named("bsiSettingsClose")
+    controls = {
+        "tabs": tabs,
+        "stack": stack,
+        "loaded native page": loaded_page,
+        "category tab 1": first_tab,
+        "drag handle": drag,
+        "close button": close,
+    }
+    missing = [name for name, item in controls.items() if item is None]
+    found_names = sorted(item.objectName() for item in visual_tree if item.objectName())
+    assert not missing, f"Missing controls: {missing}; found object names: {found_names}"
+    assert loaded_page.objectName() == "runtimeSettingPage", "The native Settings page Loader did not load its page"
+
+    tab_point = first_tab.mapToScene(QPointF(first_tab.width() / 2, first_tab.height() / 2)).toPoint()
+    QTest.mouseClick(window, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, tab_point)
+    QTest.qWait(60)
+    assert obj.property("pCurrentTabIndex") == 1, "Clicking a category did not call the native selection callback"
+    assert tabs.property("currentIndex") == 1 and stack.property("currentIndex") == 1, "Category selection did not update the page stack"
+
+    drag_point = drag.mapToScene(QPointF(8, 8)).toPoint()
+    QTest.mousePress(window, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, drag_point)
+    QTest.mouseRelease(window, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, drag_point)
+    assert player.move_requested, "The title bar did not invoke the native window-drag callback"
+
+    close_point = close.mapToScene(QPointF(close.width() / 2, close.height() / 2)).toPoint()
+    QTest.mouseClick(window, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, close_point)
+    assert player.close_requested, "The close button did not invoke the native window-close callback"
+
+    print("PASS: generated Settings QML instantiates, loads native pages, switches category, drags, and closes")
+    window.close()
+    obj.deleteLater()
+    component.deleteLater()
+    engine.deleteLater()
+    QTest.qWait(10)

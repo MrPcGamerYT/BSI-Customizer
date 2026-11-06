@@ -109,23 +109,28 @@ bool property(QString &text, const Object &object, const QString &name, const QS
     if (add) { text.insert(object.body, name + QLatin1Char(':') + value + QLatin1Char(';')); return true; }
     return false;
 }
-void visible(QString &qml, const QString &id, bool value)
+void visibleUntilCustomLoaderReady(QString &qml, const QString &id, const QString &loaderId)
 {
+    const QString expression = QStringLiteral("!%1.item").arg(loaderId);
     for (const auto &object : objects(qml)) {
-        if (object.id == id) { property(qml, object, QStringLiteral("visible"), value ? QStringLiteral("true") : QStringLiteral("false"), true); break; }
+        if (object.id == id) {
+            property(qml, object, QStringLiteral("visible"), expression, true);
+            break;
+        }
     }
 }
-void assignments(QString &qml)
+void assignments(QString &qml, const QString &loaderId)
 {
     const auto code = mask(qml);
     const QRegularExpression re(QStringLiteral("\\b(iBootImage\\.visible|pBootImageButtonVisible|pBootGridVisible|iBootLoadingText\\.visible)\\s*=\\s*(true|false)\\b"));
+    const QString expression = QStringLiteral("!%1.item").arg(loaderId);
     QList<QPair<int, QPair<int, QString>>> edits;
     auto matches = re.globalMatch(code);
     while (matches.hasNext()) {
         const auto m = matches.next();
-        // The modern/custom player supplies its own status text. Keep every
-        // stock boot overlay hidden if promotion callbacks run after patching.
-        edits << qMakePair(m.capturedStart(2), qMakePair(m.capturedLength(2), QStringLiteral("false")));
+        // Preserve the stock screen until our replacement component exists;
+        // after that, late promotion callbacks must not cover the custom UI.
+        edits << qMakePair(m.capturedStart(2), qMakePair(m.capturedLength(2), expression));
     }
     for (auto it = edits.crbegin(); it != edits.crend(); ++it) qml.replace(it->first, it->second.first, it->second.second);
 }
@@ -425,6 +430,81 @@ Item {
     return qml;
 }
 
+QString nativeFallbackComponent(const QString &logoUrl)
+{
+    QString qml = QString::fromUtf8(R"QML(Component {
+    id: bsiNativeStartupComponent
+    Item {
+        objectName: "bsiNativeBootFallback"
+        anchors.fill: parent
+        Rectangle {
+            anchors.fill: parent
+            gradient: Gradient {
+                GradientStop { position: 0.0; color: "#070D15" }
+                GradientStop { position: 0.54; color: "#0A1724" }
+                GradientStop { position: 1.0; color: "#050A10" }
+            }
+        }
+        Rectangle {
+            id: bsiNativeRingTrack
+            width: Math.min(Math.min(parent.width, parent.height) * 0.42, 330)
+            height: width
+            radius: width / 2
+            anchors.centerIn: parent
+            anchors.verticalCenterOffset: -parent.height * 0.045
+            color: "transparent"
+            border.width: Math.max(1, Math.min(parent.width, parent.height) * 0.002)
+            border.color: "#38536A"
+        }
+        Canvas {
+            objectName: "bsiNativeBootRing"
+            width: bsiNativeRingTrack.width
+            height: width
+            anchors.centerIn: bsiNativeRingTrack
+            antialiasing: true
+            onPaint: {
+                var ctx = getContext("2d");
+                ctx.clearRect(0, 0, width, height);
+                ctx.beginPath();
+                ctx.lineWidth = Math.max(3, Math.min(parent.width, parent.height) * 0.009);
+                ctx.lineCap = "round";
+                ctx.strokeStyle = "#A9E7FF";
+                ctx.shadowColor = "#55CFFF";
+                ctx.shadowBlur = Math.max(10, Math.min(parent.width, parent.height) * 0.035);
+                ctx.arc(width / 2, height / 2, width / 2 - ctx.lineWidth, -Math.PI * 0.70, Math.PI * 0.88, false);
+                ctx.stroke();
+            }
+            RotationAnimation on rotation {
+                from: 0; to: 360; duration: 2450; loops: Animation.Infinite
+                easing.type: Easing.Linear
+            }
+        }
+        Image {
+            objectName: "bsiNativeBootLogo"
+            anchors.centerIn: bsiNativeRingTrack
+            width: Math.min(Math.min(parent.width, parent.height) * 0.23, 190)
+            height: width
+            source: "__BSI_FALLBACK_LOGO__"
+            fillMode: Image.PreserveAspectFit
+            smooth: true
+            mipmap: true
+        }
+        Text {
+            objectName: "bsiNativeBootStatus"
+            anchors.horizontalCenter: parent.horizontalCenter
+            anchors.top: bsiNativeRingTrack.bottom
+            anchors.topMargin: Math.max(14, Math.min(parent.width, parent.height) * 0.035)
+            text: "Emulator is starting…"
+            color: "#C7D9E6"
+            font.pixelSize: Math.min(Math.min(parent.width, parent.height) * 0.027, 16)
+            font.letterSpacing: 0.8
+        }
+    }
+})QML");
+    qml.replace(QLatin1String("__BSI_FALLBACK_LOGO__"), logoUrl);
+    return qml;
+}
+
 bool writeAsset(const QString &path, const QByteArray &bytes)
 {
     QSaveFile file(path);
@@ -618,6 +698,24 @@ Result patch(const QString &exePath, int holdMs, const QString &requestedMode, c
                     referenced.insert(controller.entry);
         }
     }
+    if (referenced.size() > 1) {
+        // Legacy resource pools can leave an old compressed copy behind after
+        // a resource move. The fallback scanner may infer a plausible mapping
+        // for that orphan under a different resource-data base. When multiple
+        // same-named controllers match the host component, prefer the candidate
+        // that shares the host's validated tree and bases; otherwise stay
+        // conservative and let the ambiguity check below refuse the patch.
+        const auto &hostLink = hosts.first().link;
+        QSet<qint64> samePool;
+        for (const auto &controller : controllers) {
+            if (!referenced.contains(controller.entry)) continue;
+            if (controller.link.treeOff == hostLink.treeOff
+                && controller.link.dataBaseRva == hostLink.dataBaseRva
+                && controller.link.nameBaseRaw == hostLink.nameBaseRaw)
+                samePool.insert(controller.entry);
+        }
+        if (samePool.size() == 1) referenced = samePool;
+    }
     if (referenced.size() == 1) {
         const auto chosen = *referenced.cbegin();
         for (int i = controllers.size() - 1; i >= 0; --i)
@@ -639,30 +737,56 @@ Result patch(const QString &exePath, int holdMs, const QString &requestedMode, c
             || boot.mid(object.begin, object.end - object.begin).contains(QLatin1String("BootVideo.qml")))) loaders << object;
     }
     if (loaders.size() > 1) return { false, QStringLiteral("Multiple boot-video loaders were found; no partial patch was written.") };
-    const QString id = loaders.isEmpty() || loaders.first().id.isEmpty() ? QStringLiteral("pv") : loaders.first().id;
+    const QString loaderId = loaders.isEmpty() || loaders.first().id.isEmpty() ? QStringLiteral("pv") : loaders.first().id;
+    QString readyHide;
+    const QSet<QString> stockVisualIds { QStringLiteral("iBootImage"), QStringLiteral("iBootLoadingText"),
+                                         QStringLiteral("iBootProgressContainer"), QStringLiteral("iBootAppImage"),
+                                         QStringLiteral("iBootAppTitle"), QStringLiteral("iBootAppDetails"),
+                                         QStringLiteral("iPromotionInfoRect"), QStringLiteral("iBootImageBtn") };
+    for (const auto &object : objects(boot))
+        if (stockVisualIds.contains(object.id)) readyHide += object.id + QStringLiteral(".visible=false;");
+    const auto rootsBeforePatch = objects(boot);
+    if (!rootsBeforePatch.isEmpty()) {
+        QString probe = boot;
+        for (const auto &propertyName : { QStringLiteral("pBootImageButtonVisible"), QStringLiteral("pBootGridVisible") })
+            if (property(probe, rootsBeforePatch.first(), propertyName, QStringLiteral("false"), false))
+                readyHide += propertyName + QStringLiteral("=false;");
+    }
     // The external QML wrapper loads Assets/BootScreen.html via WebEngine.
-    // Keep it above the stock progress panel, promotion image and loading text.
-    const QString loader = QStringLiteral("Loader{id:%1;objectName:\"bsiBootLoader\";z:10000;anchors.fill:parent;source:%2}").arg(id, helperUrl);
+    // Keep the old screen visible until the wrapper is ready, then switch to an
+    // inline native fallback if the external QML file cannot be loaded.
+    const QString loader = QStringLiteral(
+        "Loader{id:%1;objectName:\"bsiBootLoader\";z:10000;anchors.fill:parent;source:%2;"
+        "onLoaded:{%3}"
+        "onStatusChanged:{if(status===Loader.Error){console.warn(\"External boot QML failed; using native splash\");source=\"\";sourceComponent=bsiNativeStartupComponent}}}"
+    ).arg(loaderId, helperUrl, readyHide)
+        + nativeFallbackComponent(logoUrl)
+        + QStringLiteral(
+            "Timer{id:bsiBootLoadWatchdog;interval:5000;repeat:false;running:%1.status===Loader.Loading;"
+            "onTriggered:{if(%1.status===Loader.Loading&&!%1.item){console.warn(\"External boot QML timed out; using native splash\");"
+            "%1.source=\"\";%1.sourceComponent=bsiNativeStartupComponent}}}"
+        ).arg(loaderId);
     if (!loaders.isEmpty()) boot.replace(loaders.first().begin, loaders.first().end-loaders.first().begin, loader);
     else {
         const auto all = objects(boot);
         if (all.isEmpty()) return { false, QStringLiteral("Cannot locate the boot QML root object.") };
         boot.insert(all.first().body, loader);
     }
-    for (const auto &id : { QStringLiteral("iBootImage"), QStringLiteral("iBootLoadingText"),
-                            QStringLiteral("iBootProgressContainer"), QStringLiteral("iBootAppImage"),
-                            QStringLiteral("iBootAppTitle"), QStringLiteral("iBootAppDetails"),
-                            QStringLiteral("iPromotionInfoRect"), QStringLiteral("iBootImageBtn") })
-        visible(boot, id, false);
+    for (const auto &visualId : { QStringLiteral("iBootImage"), QStringLiteral("iBootLoadingText"),
+                                  QStringLiteral("iBootProgressContainer"), QStringLiteral("iBootAppImage"),
+                                  QStringLiteral("iBootAppTitle"), QStringLiteral("iBootAppDetails"),
+                                  QStringLiteral("iPromotionInfoRect"), QStringLiteral("iBootImageBtn") })
+        visibleUntilCustomLoaderReady(boot, visualId, loaderId);
     for (const auto &id : { QStringLiteral("iTimer"), QStringLiteral("iBootTipstimer") }) {
         for (const auto &object : objects(boot)) {
             if (object.id == id) { property(boot, object, QStringLiteral("running"), QStringLiteral("false"), true); break; }
         }
     }
-    assignments(boot);
+    assignments(boot, loaderId);
+    const QString stockVisibility = QStringLiteral("!%1.item").arg(loaderId);
     for (const auto &name : {QStringLiteral("pBootImageButtonVisible"), QStringLiteral("pBootGridVisible")}) {
         const auto roots = objects(boot);
-        if (!roots.isEmpty()) property(boot, roots.first(), name, QStringLiteral("false"), false);
+        if (!roots.isEmpty()) property(boot, roots.first(), name, stockVisibility, false);
     }
     QString error;
     if (!QtResources::replaceResource(data, controller.entry, controller.link, boot.toUtf8(), &error)) return { false, error };
