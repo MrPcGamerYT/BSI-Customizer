@@ -1571,7 +1571,10 @@ QString configLine(const Config &config)
     }
     object.insert(QStringLiteral("links"), links);
     const QByteArray json = QJsonDocument(object).toJson(QJsonDocument::Compact);
-    return kConfigBegin + QString::fromLatin1(json.toBase64());
+    // Keep the state in readable compact JSON. Base64 made the QML text longer
+    // and, more importantly, turned a highly-compressible settings object into
+    // high-entropy bytes inside MSI 5's already-full resource record.
+    return kConfigBegin + QString::fromUtf8(json);
 }
 
 bool readConfig(const QString &qml, Config *config, bool *hasLinksField)
@@ -1583,12 +1586,19 @@ bool readConfig(const QString &qml, Config *config, bool *hasLinksField)
     QString encoded = qml.mid(at + kConfigBegin.size(), end - at - kConfigBegin.size());
     encoded.remove(QLatin1Char('\r'));
     encoded = encoded.trimmed();
-    const QByteArray latin = encoded.toLatin1();
-    const QByteArray bytes = QByteArray::fromBase64(latin);
-    if (bytes.isEmpty() || bytes.toBase64() != latin) return false;
+    QByteArray bytes = encoded.toUtf8();
     QJsonParseError error {};
-    const auto document = QJsonDocument::fromJson(bytes, &error);
-    if (error.error != QJsonParseError::NoError || !document.isObject()) return false;
+    auto document = QJsonDocument::fromJson(bytes, &error);
+    if (error.error != QJsonParseError::NoError || !document.isObject()) {
+        // Version 1 state used a Base64-wrapped JSON comment; keep it readable
+        // so existing About edits can still be inspected, updated and restored.
+        const QByteArray latin = encoded.toLatin1();
+        const QByteArray decoded = QByteArray::fromBase64(latin);
+        if (decoded.isEmpty() || decoded.toBase64() != latin) return false;
+        error = QJsonParseError{};
+        document = QJsonDocument::fromJson(decoded, &error);
+        if (error.error != QJsonParseError::NoError || !document.isObject()) return false;
+    }
     const auto object = document.object();
     if (hasLinksField) *hasLinksField = object.contains(QStringLiteral("links"));
     Config out;

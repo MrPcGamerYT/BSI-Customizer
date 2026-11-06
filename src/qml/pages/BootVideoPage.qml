@@ -9,7 +9,7 @@ Item {
 
     property string state: qsTr("Not patched yet")
     property string stateColorName: "gray"
-    property string bootMode: "modern"
+    property string bootMode: "aurora"
     property string videoPath: ""
     property string bootLogoUrl: ""
 
@@ -63,9 +63,9 @@ Item {
                     ComboBox {
                         id: bootStyle
                         Layout.preferredWidth: 270
-                        model: [qsTr("Built-in modern boot"), qsTr("Custom MP4")]
-                        currentIndex: page.bootMode === "modern" ? 0 : 1
-                        onActivated: page.bootMode = currentIndex === 0 ? "modern" : "video"
+                        model: [qsTr("Aurora glow"), qsTr("Orbit rings"), qsTr("Pulse wave"), qsTr("Solar flare"), qsTr("Custom MP4")]
+                        currentIndex: Math.max(0, ["aurora", "orbit", "pulse", "solar", "video"].indexOf(page.bootMode))
+                        onActivated: page.bootMode = ["aurora", "orbit", "pulse", "solar", "video"][currentIndex]
                     }
                     Item { Layout.fillWidth: true }
                     ActionButton {
@@ -87,14 +87,31 @@ Item {
                         anchors.horizontalCenter: parent.horizontalCenter
                         anchors.verticalCenter: parent.verticalCenter
                         anchors.verticalCenterOffset: -10
-                        color: "#183246"
-                        SequentialAnimation on opacity { loops: Animation.Infinite; NumberAnimation { from: 0.16; to: 0.30; duration: 2600; easing.type: Easing.InOutSine } NumberAnimation { to: 0.16; duration: 2600; easing.type: Easing.InOutSine } }
+                        color: page.bootMode === "solar" ? "#633C2F" : "#16496B"
+                        SequentialAnimation on opacity { loops: Animation.Infinite; NumberAnimation { from: 0.18; to: 0.40; duration: page.bootMode === "pulse" ? 1800 : 2900; easing.type: Easing.InOutSine } NumberAnimation { to: 0.18; duration: page.bootMode === "pulse" ? 1800 : 2900; easing.type: Easing.InOutSine } }
                     }
                     Rectangle {
                         id: previewRingTrack
                         width: 112; height: 112; radius: 56
                         anchors.centerIn: previewAura
-                        color: "transparent"; border.width: 1; border.color: "#526B80"; opacity: 0.45
+                        color: "transparent"; border.width: 1
+                        border.color: page.bootMode === "solar" ? "#745845" : "#6689A0"
+                        opacity: 0.64
+                    }
+                    Item {
+                        visible: page.bootMode === "orbit"
+                        width: previewRingTrack.width * 1.35; height: width
+                        anchors.centerIn: previewRingTrack
+                        RotationAnimation on rotation { from: 0; to: 360; duration: 8200; loops: Animation.Infinite; easing.type: Easing.Linear }
+                        Rectangle { width: 8; height: 8; radius: 4; anchors.horizontalCenter: parent.horizontalCenter; y: -4; color: "#B8EFFF"; border.color: "white"; border.width: 1 }
+                    }
+                    Rectangle {
+                        visible: page.bootMode === "pulse"
+                        width: previewRingTrack.width; height: width; radius: width / 2
+                        anchors.centerIn: previewRingTrack
+                        color: "transparent"; border.width: 2; border.color: "#75D9FF"
+                        SequentialAnimation on scale { loops: Animation.Infinite; NumberAnimation { from: 0.78; to: 1.5; duration: 2200; easing.type: Easing.OutCubic } }
+                        SequentialAnimation on opacity { loops: Animation.Infinite; NumberAnimation { from: 0.5; to: 0; duration: 2200; easing.type: Easing.OutCubic } }
                     }
                     Canvas {
                         id: previewLoadingRing
@@ -106,13 +123,23 @@ Item {
                             var ctx = getContext("2d");
                             ctx.clearRect(0, 0, width, height);
                             ctx.beginPath(); ctx.lineWidth = 3; ctx.lineCap = "round";
-                            ctx.strokeStyle = "#A9E7FF"; ctx.shadowColor = "#55CFFF"; ctx.shadowBlur = 12;
+                            ctx.strokeStyle = page.bootMode === "solar" ? "#FFE3BA" : "#B9EEFF";
+                            ctx.shadowColor = page.bootMode === "solar" ? "#FFAD66" : "#55CFFF"; ctx.shadowBlur = 16;
                             ctx.arc(width / 2, height / 2, width / 2 - ctx.lineWidth, -Math.PI * 0.70, Math.PI * 0.88, false);
                             ctx.stroke();
                         }
-                        RotationAnimation on rotation { from: 0; to: 360; duration: 2450; loops: Animation.Infinite; easing.type: Easing.Linear }
+                        RotationAnimation on rotation { from: 0; to: 360; duration: page.bootMode === "orbit" ? 4300 : page.bootMode === "pulse" ? 3600 : 3100; loops: Animation.Infinite; easing.type: Easing.Linear }
+                    }
+                    Rectangle {
+                        visible: page.bootLogoUrl.length === 0
+                        width: 58; height: 58; radius: 16
+                        anchors.centerIn: previewRingTrack
+                        rotation: 45
+                        color: "#183246"; border.color: "#B2DFF4"
+                        Text { anchors.centerIn: parent; rotation: -45; text: "BS"; color: "#D9F4FF"; font.pixelSize: 22; font.bold: true }
                     }
                     Image {
+                        visible: page.bootLogoUrl.length > 0
                         anchors.centerIn: previewRingTrack
                         width: 72; height: 72
                         source: page.bootLogoUrl
@@ -163,7 +190,11 @@ Item {
                     }
                     ActionButton {
                         accent: true
-                        text: page.bootMode === "modern" ? qsTr("Install Animated Modern Boot") : qsTr("Install Custom Video Boot")
+                        text: page.bootMode === "video" ? qsTr("Install Custom Video Boot")
+                            : page.bootMode === "orbit" ? qsTr("Install Orbit Rings Boot")
+                            : page.bootMode === "pulse" ? qsTr("Install Pulse Wave Boot")
+                            : page.bootMode === "solar" ? qsTr("Install Solar Flare Boot")
+                            : qsTr("Install Aurora Glow Boot")
                         onClicked: {
                             backend.exePath = bootPath.text;
                             if (page.bootMode === "video" && page.videoPath === "") {

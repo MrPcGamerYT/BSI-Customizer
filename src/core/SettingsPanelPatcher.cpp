@@ -149,6 +149,123 @@ bool sourceFor(const QByteArray &image, const QString &exePath, const QString &l
     return true;
 }
 
+bool literalQmlString(const QString &source, int begin, int end, QString *value)
+{
+    while (begin < end && source.at(begin).isSpace()) ++begin;
+    if (begin >= end || (source.at(begin) != QLatin1Char('\"')
+                         && source.at(begin) != QLatin1Char('\'')))
+        return false;
+    const QChar quote = source.at(begin++);
+    QString decoded;
+    bool closed = false;
+    while (begin < end) {
+        const QChar ch = source.at(begin++);
+        if (ch == quote) { closed = true; break; }
+        if (ch == QLatin1Char('\\')) {
+            if (begin >= end) return false;
+            const QChar escaped = source.at(begin++);
+            if (escaped == QLatin1Char('\\') || escaped == quote || escaped == QLatin1Char('/'))
+                decoded += escaped;
+            else if (escaped == QLatin1Char('n')) decoded += QLatin1Char('\n');
+            else if (escaped == QLatin1Char('r')) decoded += QLatin1Char('\r');
+            else if (escaped == QLatin1Char('t')) decoded += QLatin1Char('\t');
+            else return false;
+        } else {
+            if (ch == QLatin1Char('\n') || ch == QLatin1Char('\r')) return false;
+            decoded += ch;
+        }
+    }
+    if (!closed || !decoded.endsWith(QLatin1String(".qml"), Qt::CaseInsensitive)) return false;
+    *value = decoded;
+    return true;
+}
+
+bool readSettingsModelPages(const QString &playerText, const QHash<QString, QList<QtResources::File>> &qmlByLeaf,
+                            QSet<QString> *pageNames, QString *error)
+{
+    const QString masked = QmlText::mask(playerText);
+    const QRegularExpression inlineModelDeclaration(
+        QStringLiteral("\\bproperty\\s+(?:[A-Za-z_][A-Za-z0-9_]*\\s+)*SettingElementModelList\\s+pSettingsItems\\b"));
+    const bool inlineSettingsModel = inlineModelDeclaration.match(masked).hasMatch();
+    const QRegularExpression componentSettingsBindingPattern(
+        QStringLiteral("\\bpSettingsWindow\\s*=\\s*component\\.createObject\\s*\\([^;]*[\\\"']pSettingsItems[\\\"']\\s*:\\s*iSettingsItems\\.createObject\\s*\\("));
+    const bool liveComponentBinding = componentSettingsBindingPattern.match(playerText).hasMatch();
+
+    QList<QmlText::Object> settingsComponents;
+    if (liveComponentBinding) {
+        const QRegularExpression settingsId(QStringLiteral("\\bid\\s*:\\s*iSettingsItems\\b"));
+        for (const auto &component : QmlText::objects(masked, QStringLiteral("Component"))) {
+            const QString body = masked.mid(component.open, component.end - component.open);
+            if (settingsId.match(body).hasMatch()) settingsComponents << component;
+        }
+    }
+
+    QList<QmlText::Object> models;
+    for (const auto &model : QmlText::objects(masked, QStringLiteral("SettingElementModelList"))) {
+        QmlText::Binding elements;
+        if (!QmlText::binding(masked, model.open, model.end - 1,
+                              QStringLiteral("pSettingElements"), &elements))
+            continue;
+        const int contextStart = qMax(0, model.nameBegin - 320);
+        const QString beforeModel = masked.mid(contextStart, model.nameBegin - contextStart);
+        const bool inlineOwner = inlineSettingsModel
+            && inlineModelDeclaration.match(beforeModel).hasMatch();
+        bool componentOwner = false;
+        for (const auto &component : settingsComponents) {
+            if (model.nameBegin > component.open && model.end <= component.end) {
+                componentOwner = true;
+                break;
+            }
+        }
+        if (inlineOwner || componentOwner) models << model;
+    }
+    if (playerText.isEmpty() || models.size() != 1) {
+        *error = models.isEmpty()
+            ? QStringLiteral("The registered plr.qml does not expose a live native Settings tab model; this player layout is unsupported.")
+            : QStringLiteral("The registered plr.qml exposes multiple possible live Settings tab models; refusing to guess which panel is active.");
+        return false;
+    }
+
+    const auto &model = models.first();
+    QmlText::Binding elements;
+    if (!QmlText::binding(masked, model.open, model.end - 1,
+                          QStringLiteral("pSettingElements"), &elements)) {
+        *error = QStringLiteral("The live Settings tab model has no readable pSettingElements list.");
+        return false;
+    }
+    const QRegularExpression pageSource(QStringLiteral("\\bpQmlSource\\s*:"));
+    auto matches = pageSource.globalMatch(masked.mid(elements.valueBegin,
+                                                       elements.valueEnd - elements.valueBegin));
+    while (matches.hasNext()) {
+        const auto match = matches.next();
+        const int colon = elements.valueBegin + match.capturedEnd() - 1;
+        const int valueBegin = colon + 1;
+        if (valueBegin >= elements.valueEnd) break;
+        QString page;
+        if (!literalQmlString(playerText, valueBegin, elements.valueEnd, &page)) {
+            *error = QStringLiteral("A page in the live Settings tab model has a dynamic or malformed pQmlSource; it cannot be resolved safely.");
+            return false;
+        }
+        const QString leaf = QFileInfo(page).fileName();
+        const QString key = leaf.toCaseFolded();
+        if (leaf.isEmpty() || pageNames->contains(key)) {
+            *error = QStringLiteral("The live Settings tab model contains an empty or duplicate QML page path; refusing to rebuild an ambiguous panel.");
+            return false;
+        }
+        const auto found = qmlByLeaf.constFind(leaf.toCaseFolded());
+        if (found == qmlByLeaf.cend() || found.value().size() != 1) {
+            *error = QStringLiteral("The Settings tab QML page %1 is missing or ambiguous in the registered player resources.").arg(leaf);
+            return false;
+        }
+        pageNames->insert(key);
+    }
+    if (pageNames->isEmpty()) {
+        *error = QStringLiteral("The live Settings tab model contains no literal QML page paths.");
+        return false;
+    }
+    return true;
+}
+
 TargetSources readSources(const QString &exePath, const QByteArray &image)
 {
     TargetSources out;
@@ -180,41 +297,20 @@ TargetSources readSources(const QString &exePath, const QByteArray &image)
     }
     const QByteArray playerBytes = QtResources::readFile(image, *playerRoot, kMaxQml);
     const QString playerText = EmbeddedResources::decodeText(playerBytes);
-    const QRegularExpression inlineSettingsModelPattern(
-        QStringLiteral("\\bproperty\\s+(?:[A-Za-z_][A-Za-z0-9_]*\\s+)*SettingElementModelList\\s+pSettingsItems\\b"));
-    const bool inlineSettingsModel = inlineSettingsModelPattern.match(playerText).hasMatch();
-    // Newer MSI/BlueStacks builds keep the same native SettingElementModelList
-    // inside a Component in plr.qml, then pass its created instance into the
-    // dynamically created UiSettingsWindow. Validate that live connection, not
-    // just a similarly named orphan model.
-    const QRegularExpression componentSettingsModelPattern(
-        QStringLiteral("\\bComponent\\s*\\{\\s*id\\s*:\\s*iSettingsItems\\s+SettingElementModelList\\s*\\{"));
-    const QRegularExpression componentSettingsBindingPattern(
-        QStringLiteral("\\bpSettingsWindow\\s*=\\s*component\\.createObject\\s*\\([^;]*[\\\"']pSettingsItems[\\\"']\\s*:\\s*iSettingsItems\\.createObject\\s*\\("));
-    const bool componentSettingsModel = componentSettingsModelPattern.match(playerText).hasMatch()
-        && componentSettingsBindingPattern.match(playerText).hasMatch();
-    if (playerText.isEmpty() || (!inlineSettingsModel && !componentSettingsModel)) {
-        out.error = QStringLiteral("The registered plr.qml does not expose the expected native Settings tab model; this player layout is unsupported.");
-        return out;
-    }
+    // Only inspect literal page sources in the live SettingElementModelList.
+    // plr.qml also contains pQmlSource strings for dialogs, hidden prototypes
+    // and unrelated views; scanning the whole document counted those as tabs,
+    // and could reject an otherwise valid model for duplicate paths that are
+    // not Settings pages.
     QSet<QString> pageNames;
-    const QRegularExpression pageSource(QStringLiteral("\\bpQmlSource\\s*:\\s*['\\\"]([^'\\\"]+\\.qml)['\\\"]"));
-    auto pageMatch = pageSource.globalMatch(playerText);
-    while (pageMatch.hasNext()) {
-        const QString page = pageMatch.next().captured(1);
-        const QString leaf = QFileInfo(page).fileName();
-        if (leaf.isEmpty() || pageNames.contains(leaf.toCaseFolded())) {
-            out.error = QStringLiteral("The Settings tab model contains an empty or duplicate QML page path; refusing to rebuild an ambiguous panel.");
-            return out;
-        }
-        if (!uniqueQml(leaf)) {
-            out.error = QStringLiteral("The Settings tab QML page %1 is missing or ambiguous in the registered player resources.").arg(leaf);
-            return out;
-        }
-        pageNames.insert(leaf.toCaseFolded());
-    }
-    if (pageNames.size() < 8 || !pageNames.contains(kAboutLeaf.toCaseFolded())) {
-        out.error = QStringLiteral("The player root exposes only %1 Settings page(s), or no About page; the native tab graph is incomplete.").arg(pageNames.size());
+    if (!readSettingsModelPages(playerText, qmlByLeaf, &pageNames, &out.error))
+        return out;
+    bool hasAboutPage = false;
+    for (const QString &path : pageNames)
+        if (QFileInfo(path).fileName().compare(kAboutLeaf, Qt::CaseInsensitive) == 0)
+            hasAboutPage = true;
+    if (pageNames.size() < 8 || !hasAboutPage) {
+        out.error = QStringLiteral("The live player Settings model exposes only %1 page(s), or no About page; the native tab graph is incomplete.").arg(pageNames.size());
         return out;
     }
     out.pageCount = pageNames.size();
@@ -428,11 +524,11 @@ Item {
                 spacing: 12
 
                 Item { Layout.fillWidth: true; Layout.preferredHeight: 6 }
-                UiImage {
-                    asset: "BlueStacks5Beta"
-                    extn: @@BSI_LOGO_EXTN@@
-                    pImageWidth: 144
-                    pImageHeight: 44
+                Image {
+                    source: @@BSI_LOGO_SOURCE@@
+                    width: 144
+                    height: 44
+                    fillMode: Image.PreserveAspectFit
                     Layout.alignment: Qt.AlignHCenter
                 }
                 Text {
@@ -589,7 +685,8 @@ Item {
 )QML");
     generated.replace(QStringLiteral("@@BSI_DEVELOPER@@"), qDeveloper);
     generated.replace(QStringLiteral("@@BSI_LINKS@@"), rows);
-    generated.replace(QStringLiteral("@@BSI_LOGO_EXTN@@"), qmlString(logoExtension));
+    generated.replace(QStringLiteral("@@BSI_LOGO_SOURCE@@"),
+                      qmlString(QStringLiteral("qrc:/qrcAssets/BlueStacks5Beta") + logoExtension));
     return generated;
 }
 
