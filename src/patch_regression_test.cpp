@@ -4975,16 +4975,15 @@ Window {
                     if (file.name.compare(QLatin1String("UiSettingsWindow.qml"), Qt::CaseInsensitive) == 0)
                         rebuiltWindow = QString::fromUtf8(QtResources::readFile(panelImage, file));
                 }
-                check(rebuiltWindow.contains(QStringLiteral("BSI CUSTOMIZER: Settings v3"))
+                check(rebuiltWindow.contains(QStringLiteral("BSI Settings v3"))
                           && rebuiltWindow.contains(QStringLiteral("bsiSettingsCategoryTabs"))
                           && rebuiltWindow.contains(QStringLiteral("⚙▣◈♫⌨⌘☷ⓘ◉◇✦▧"))
                           && rebuiltWindow.contains(QStringLiteral("pSettingBtnText"))
                           && rebuiltWindow.contains(QStringLiteral("pShowRedDot"))
-                          && rebuiltWindow.contains(QStringLiteral("bsiSettingsContentCard"))
                           && rebuiltWindow.contains(QStringLiteral("width = transientParent.width * 0.70"))
                           && rebuiltWindow.contains(QStringLiteral("height = transientParent.height * 0.70"))
                           && rebuiltWindow.contains(QStringLiteral("bsiSettingsClose"))
-                          && rebuiltWindow.contains(QStringLiteral("fChangeSelectedSetting(model.index)"))
+                          && rebuiltWindow.contains(QStringLiteral("fChangeSelectedSetting(pSettingIdx)"))
                           && rebuiltWindow.contains(QStringLiteral("StackLayout"))
                           && rebuiltWindow.contains(QStringLiteral("model.modelData.pComponentObj = item"))
                           && rebuiltWindow.contains(QStringLiteral("iSettingsWindow.startSystemMove()")),

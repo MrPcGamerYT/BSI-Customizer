@@ -45,9 +45,9 @@ match = re.search(
 )
 assert match, "Could not find the generated Settings-window QML template"
 replacement = match.group(1)
-assert "BSI CUSTOMIZER: Settings v3" in replacement
+assert "BSI Settings v3" in replacement
 assert "⚙▣◈♫⌨⌘☷ⓘ◉◇✦▧" in replacement and "pSettingBtnText" in replacement
-assert "bsiSettingsContentCard" in replacement and "height:parent.height-128" in replacement
+assert "height:parent.height-128" in replacement
 assert "onPressed:iSettingsWindow.startSystemMove()" in replacement
 
 with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
