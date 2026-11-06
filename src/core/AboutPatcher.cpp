@@ -668,6 +668,13 @@ int invalidatePageUnits(QByteArray &image)
     return changed;
 }
 
+bool hasActivePageUnit(const QByteArray &image)
+{
+    for (const PageUnit &unit : pageUnits(image))
+        if (unit.version != 0) return true;
+    return false;
+}
+
 // Put the version back from the stock file, so a restored page is the page the
 // player shipped - compiled, not recompiled.
 int restorePageUnits(QByteArray &image, const QByteArray &backup)
@@ -2904,8 +2911,9 @@ Result apply(const QString &selectedPath, bool enabled, const Config &rawConfig)
     // A page that still carries the MSI visibility check is not "done", however
     // many tags it has: on that player the two bottom sections are invisible.
     const bool gatesPending = enabled && config.showSections && before.sectionsHidden;
-    if (enabled && before.applied && tableEdits.isEmpty() && !gatesPending
-        && (layout.valid() || sameConfig(before.config, config)) && !unitsPending)
+    if (enabled && before.applied && (tableEdits.isEmpty() || before.sourceEditable)
+        && !gatesPending && (layout.valid() || sameConfig(before.config, config))
+        && !unitsPending)
         return { true, QStringLiteral("This About page content is already applied.") };
     if (!enabled && !before.applied && !tablePatched && (!anyUnitOn || !before.qmlEditable))
         return { true, QStringLiteral("The stock About page is already in place.") };
@@ -2951,9 +2959,16 @@ Result apply(const QString &selectedPath, bool enabled, const Config &rawConfig)
 
     int strings = 0;
     if (layout.valid()) {
-        if (enabled) {
-            if (!applyTable(changed, layout, tableEdits, &strings, &error)) return refuse(error);
-        } else if (canRestore) {
+        if (enabled && (!qmlWritable || hasActivePageUnit(changed))) {
+            // If the source page is writable, its compiled QV4 unit was
+            // invalidated above and the player will compile the edited QML.
+            // Keep the compiled string table in sync when it is still active,
+            // but do not let an obsolete fixed-capacity slot block the source
+            // rewrite (some 5.x builds store mailto links in shorter slots).
+            // A compiled-only page must still fit and verify in its own table.
+            if (!applyTable(changed, layout, tableEdits, &strings, &error))
+                return refuse(error);
+        } else if (!enabled && canRestore) {
             // Each slot is restored by writing its own words back, not by
             // copying a byte span: a slot is as long as the text it holds, so
             // the span of a record that was shortened is not the span it had.
@@ -2991,14 +3006,14 @@ Result apply(const QString &selectedPath, bool enabled, const Config &rawConfig)
     // them.
     if (layout.valid()) {
         const Layout written = layoutOf(changed);
-        if (enabled) {
+        if (enabled && (!qmlWritable || hasActivePageUnit(changed))) {
             QList<SlotEdit> left;
             QStringList ignored;
             planTable(written, config, &left, &ignored);
             if (!left.isEmpty())
                 return refuse(QStringLiteral("The compiled About page did not read back with the new "
                                              "words; no file was written."));
-        } else if (canRestore) {
+        } else if (!enabled && canRestore) {
             if (written.records.size() != backupLayout.records.size())
                 return refuse(QStringLiteral("The compiled About page did not read back from the "
                                              "backup; no file was written."));
@@ -3027,7 +3042,8 @@ Result apply(const QString &selectedPath, bool enabled, const Config &rawConfig)
         diskOk = disk.applied == enabled;
         if (diskOk && enabled && !layout.valid()) diskOk = sameConfig(disk.config, config);
     }
-    if (diskOk && enabled && layout.valid()) {
+    if (diskOk && enabled && layout.valid()
+        && (!qmlWritable || hasActivePageUnit(onDisk))) {
         QList<SlotEdit> left;
         QStringList ignored;
         planTable(layoutOf(onDisk), config, &left, &ignored);
