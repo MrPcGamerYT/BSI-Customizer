@@ -45,7 +45,10 @@ match = re.search(
 )
 assert match, "Could not find the generated Settings-window QML template"
 replacement = match.group(1)
-assert "BSI CUSTOMIZER: Settings v2" in replacement
+assert "BSI CUSTOMIZER: Settings v3" in replacement
+assert "fBsiSettingsTabIcon" in replacement and "bsiSettingsCategoryIcon" in replacement
+assert "bsiSettingsContentCard" in replacement and "height:parent.height-128" in replacement
+assert "onPressed:iSettingsWindow.startSystemMove()" in replacement
 
 with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
     root = Path(temp)
@@ -95,13 +98,16 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
         "QtObject {\n"
         "    property QtObject colors: QtObject {\n"
         "        property color primary10: \"#f4f7fb\"\n"
+        "        property color primary20: \"#d2dae4\"\n"
         "        property color primary30: \"#9eacbd\"\n"
         "        property color primary60: \"#35465a\"\n"
+        "        property color primary70: \"#1b2838\"\n"
         "        property color primary80: \"#101a27\"\n"
         "        property color accentNormal: \"#54c8ff\"\n"
         "    }\n"
         "    property QtObject fonts: QtObject {\n"
         "        property font bodySmall: Qt.font({pixelSize: 11})\n"
+        "        property font bodyMedium: Qt.font({pixelSize: 13})\n"
         "        property font bodyLarge: Qt.font({pixelSize: 17})\n"
         "    }\n"
         "}\n",
@@ -166,11 +172,17 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
 
     tabs = visual_named("bsiSettingsCategoryTabs")
     stack = visual_named("bsiSettingsPageStack")
-    first_tab = next(
+    graphics_label = next(
         (
             item for item in visual_tree
-            if str(item.property("pSettingBtnText")).endswith("Graphics")
+            if item.objectName() == "bsiSettingsCategoryLabel"
+            and item.property("text") == "Graphics"
         ),
+        None,
+    )
+    first_tab = graphics_label.parentItem() if graphics_label is not None else None
+    category_icon = next(
+        (item for item in visual_tree if item.objectName() == "bsiSettingsCategoryIcon"),
         None,
     )
     loaded_page = visual_named("runtimeSettingPage")
@@ -181,6 +193,7 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
         "stack": stack,
         "loaded native page": loaded_page,
         "category tab 1": first_tab,
+        "category icon": category_icon,
         "drag handle": drag,
         "close button": close,
     }
@@ -188,6 +201,7 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
     found_names = sorted(item.objectName() for item in visual_tree if item.objectName())
     assert not missing, f"Missing controls: {missing}; found object names: {found_names}"
     assert loaded_page.objectName() == "runtimeSettingPage", "The native Settings page Loader did not load its page"
+    assert str(category_icon.property("text")), "Category tabs should show their own icon glyphs"
 
     tab_point = first_tab.mapToScene(QPointF(first_tab.width() / 2, first_tab.height() / 2)).toPoint()
     QTest.mouseClick(window, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, tab_point)
@@ -204,7 +218,35 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
     QTest.mouseClick(window, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, close_point)
     assert player.close_requested, "The close button did not invoke the native window-close callback"
 
-    print("PASS: generated Settings QML instantiates, loads native pages, switches category, drags, and closes")
+    about_match = re.search(r'QString generated = QStringLiteral\(R"QML\((.*?)\)QML"\);', cpp, re.S)
+    assert about_match, "Could not find the generated About-page QML template"
+    about_qml = about_match.group(1)
+    about_qml = about_qml.replace(
+        "import QtQuick.Layouts 1.15",
+        "import QtQuick.Layouts 1.15\nimport BsiSettingsFixture 1.0",
+    )
+    about_qml = about_qml.replace("@@BSI_DEVELOPER@@", '"Runtime Developer"')
+    about_qml = about_qml.replace(
+        "@@BSI_LINKS@@",
+        '{ title: "GitHub", url: "https://github.com/example" },\n'
+        '{ title: "Community", url: "https://example.com/community" },',
+    )
+    about_qml = about_qml.replace("@@BSI_LOGO_SOURCE@@", '""')
+    about_path = root / "AboutHost.qml"
+    about_path.write_text(about_qml, encoding="utf-8")
+    about_component = QQmlComponent(engine, QUrl.fromLocalFile(str(about_path)))
+    about_obj = about_component.create()
+    if about_obj is None:
+        raise AssertionError("About QML failed to create: " + "\n".join(e.toString() for e in about_component.errors()))
+    about_tree = visual_items(about_obj)
+    about_links = [item for item in about_tree if item.objectName() == "bsiAboutDeveloperLink"]
+    assert about_obj.property("pDeveloperName") == "Runtime Developer", "About page did not retain the customizable developer name"
+    assert len(about_links) == 2, "About page did not render the configured developer links"
+    assert any(item.objectName() == "bsiAboutEmulatorLogo" for item in about_tree), "About page did not create its centered emulator logo"
+
+    print("PASS: generated Settings and About QML instantiate, retain native page behavior, show custom tabs, and render profile links")
+    about_obj.deleteLater()
+    about_component.deleteLater()
     window.close()
     obj.deleteLater()
     component.deleteLater()

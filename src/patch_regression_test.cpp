@@ -4975,14 +4975,19 @@ Window {
                     if (file.name.compare(QLatin1String("UiSettingsWindow.qml"), Qt::CaseInsensitive) == 0)
                         rebuiltWindow = QString::fromUtf8(QtResources::readFile(panelImage, file));
                 }
-                check(rebuiltWindow.contains(QStringLiteral("BSI CUSTOMIZER: Settings v2"))
+                check(rebuiltWindow.contains(QStringLiteral("BSI CUSTOMIZER: Settings v3"))
                           && rebuiltWindow.contains(QStringLiteral("bsiSettingsCategoryTabs"))
+                          && rebuiltWindow.contains(QStringLiteral("bsiSettingsCategoryIcon"))
+                          && rebuiltWindow.contains(QStringLiteral("bsiSettingsCategoryLabel"))
+                          && rebuiltWindow.contains(QStringLiteral("bsiSettingsContentCard"))
+                          && rebuiltWindow.contains(QStringLiteral("width = transientParent.width * 0.70"))
+                          && rebuiltWindow.contains(QStringLiteral("height = transientParent.height * 0.70"))
                           && rebuiltWindow.contains(QStringLiteral("bsiSettingsClose"))
                           && rebuiltWindow.contains(QStringLiteral("fChangeSelectedSetting(model.index)"))
                           && rebuiltWindow.contains(QStringLiteral("StackLayout"))
                           && rebuiltWindow.contains(QStringLiteral("model.modelData.pComponentObj = item"))
                           && rebuiltWindow.contains(QStringLiteral("iSettingsWindow.startSystemMove()")),
-                      QStringLiteral("the rebuilt %1 Settings window has the compact category UI and keeps native page loading, selection, dragging, and close behavior")
+                      QStringLiteral("the rebuilt %1 Settings window has icon tabs, a 70% compact content card, and keeps native page loading, selection, dragging, and close behavior")
                           .arg(QFileInfo(input).fileName()));
                 QString expectedLogoSource;
                 for (const auto &entry : EmbeddedResources::list(original, true)) {
@@ -4999,8 +5004,16 @@ Window {
                             EmbeddedResources::readEntry(panelCopy, entry.entryOff, entry.flags, 8 * 1024 * 1024));
                 }
                 check(!expectedLogoSource.isEmpty()
-                          && rebuiltAbout.contains(QStringLiteral("source: \"%1\"").arg(expectedLogoSource)),
-                      QStringLiteral("the rebuilt %1 About page points directly at the logo resource that exists in the player")
+                          && rebuiltAbout.contains(QStringLiteral("source: \"%1\"").arg(expectedLogoSource))
+                          && rebuiltAbout.contains(QStringLiteral("objectName: \"bsiAboutEmulatorLogo\""))
+                          && rebuiltAbout.contains(QStringLiteral("objectName: \"bsiAboutDeveloperName\""))
+                          && rebuiltAbout.contains(QStringLiteral("text: pDeveloperName"))
+                          && rebuiltAbout.contains(QStringLiteral("BSI Panel Regression"))
+                          && rebuiltAbout.contains(QStringLiteral("Repeater"))
+                          && rebuiltAbout.contains(QStringLiteral("Regression source"))
+                          && rebuiltAbout.contains(QStringLiteral("Regression community"))
+                          && rebuiltAbout.contains(QStringLiteral("Regression video")),
+                      QStringLiteral("the rebuilt %1 About page centers the real emulator logo above its customizable developer name and links")
                           .arg(QFileInfo(input).fileName()));
                 const auto activePanel = SettingsPanelPatcher::analyze(panelCopy);
                 check(activePanel.supported && activePanel.applied && activePanel.restorable
