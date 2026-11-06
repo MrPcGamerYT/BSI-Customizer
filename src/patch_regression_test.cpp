@@ -3010,6 +3010,31 @@ int runPatchRegressionTests()
               QStringLiteral("duplicate pQmlSource outside the live model does not create a false Settings-tab duplicate (%1)")
                   .arg(scoped.detail));
 
+        QString componentRows;
+        for (const QString &page : pages)
+            componentRows += QStringLiteral("{ pQmlSource: \"%1\" },\n").arg(page);
+        const QString componentPlayer = QStringLiteral(
+            "import QtQuick\nItem {\n"
+            " property var pSettingsWindow\n"
+            " function makeSettings() { pSettingsWindow = component.createObject(iMainWindow, {\"pSettingsItems\": iSettingsItems.createObject(iMainWindow)}) }\n"
+            " Component { id: component; Item { } }\n"
+            " Component { id: iSettingsItems\n"
+            "  SettingElementModelList { id: pSettingsItems\n"
+            "   pSettingElements: [\n%1   ]\n"
+            "   SettingElementModelList { id: iNestedDecoy; pSettingElements: [\n%2   ] }\n"
+            "  }\n"
+            " }\n"
+            "}\n").arg(componentRows, componentRows);
+        files[0].second = componentPlayer.toUtf8();
+        auto componentModel = nestedResources(files);
+        addRegistration(componentModel, false);
+        const QString componentPath = temp.filePath(QStringLiteral("settings-model-component.exe"));
+        write(componentPath, componentModel.f.bytes);
+        const auto componentScoped = SettingsPanelPatcher::analyze(componentPath);
+        check(componentScoped.supported && componentScoped.settingsPageCount == pages.size(),
+              QStringLiteral("the root model passed to the live Settings window wins over nested complete model decoys (%1)")
+                  .arg(componentScoped.detail));
+
         files[0].second = makePlayer(true).toUtf8();
         auto duplicateModel = nestedResources(files);
         addRegistration(duplicateModel, false);
@@ -4520,6 +4545,8 @@ Window {
         const QString modernAssets = QDir(QFileInfo(modernPath).absolutePath()).filePath(QStringLiteral("Assets"));
         const QByteArray modernHelper = read(QDir(modernAssets).filePath(QStringLiteral("BootVideo.qml")));
         const QByteArray modernHtml = read(QDir(modernAssets).filePath(QStringLiteral("BootScreen.html")));
+        const QString modernController = resourceText(read(modernPath), r,
+                                                          QStringLiteral("RenamedStartup.qml"));
         check(modern.ok && modernHelper.contains("import QtWebEngine")
                   && modernHelper.contains("Qt.resolvedUrl(\"BootScreen.html\")")
                   && modernHtml.contains("data:image/svg+xml;base64,")
@@ -4527,6 +4554,9 @@ Window {
                   && modernHtml.contains("class=\"ring-track\"")
                   && modernHtml.contains("drop-shadow(0 0 22px")
                   && modernHtml.contains("Emulator is starting…")
+                  && modernHelper.contains("bsiAuroraHalo")
+                  && modernController.contains("bsiNativeBootGlowCore")
+                  && modernHelper.contains("ctx.shadowBlur")
                   && !modernHtml.contains("Promo.mp4") && !modernHtml.contains("<video")
                   && !modernHtml.contains("CUSTOMIZER")
                   && !QFile::exists(QDir(modernAssets).filePath(QStringLiteral("Promo.mp4"))),
@@ -4543,8 +4573,12 @@ Window {
             const QByteArray themedHelper = read(QDir(themedAssets).filePath(QStringLiteral("BootVideo.qml")));
             const QByteArray visualMarker = theme == QLatin1String("solar")
                 ? QByteArrayLiteral("#ffad66") : QByteArrayLiteral("theme-") + theme.toUtf8();
+            const QByteArray fallbackMarker = theme == QLatin1String("orbit")
+                ? QByteArrayLiteral("bsiFallbackOrbitTilt")
+                : theme == QLatin1String("pulse") ? QByteArrayLiteral("bsiFallbackPulse")
+                                                   : QByteArrayLiteral("#FFE3BA");
             check(themed.ok && themedHtml.contains(QStringLiteral("class=\"boot theme-%1\"").arg(theme).toUtf8())
-                      && themedHtml.contains(visualMarker)
+                      && themedHtml.contains(visualMarker) && themedHelper.contains(fallbackMarker)
                       && themedHelper.contains(QStringLiteral("property string bootTheme: \"%1\"").arg(theme).toUtf8()),
                   QStringLiteral("the %1 preset is written into the selected player's standalone Assets boot page and its native fallback")
                       .arg(theme));

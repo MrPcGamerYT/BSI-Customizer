@@ -236,6 +236,36 @@ bool readSettingsModelPages(const QString &playerText, const QHash<QString, QLis
     if (models.isEmpty() && allModels.size() == 1
         && (inlineSettingsModel || (liveComponentBinding && settingsComponents.size() == 1)))
         models << allModels.first();
+    // When plr.qml constructs the window with
+    // `pSettingsItems: iSettingsItems.createObject(...)`, that Component is
+    // the object actually passed to UiSettingsWindow. Prefer its root model
+    // (especially an explicitly named pSettingsItems model) over stale inline
+    // declarations and nested page-local models elsewhere in plr.qml.
+    if (models.size() > 1 && liveComponentBinding) {
+        QList<QmlText::Object> namedSettingsModels;
+        QList<QmlText::Object> componentRootModels;
+        for (const auto &model : models) {
+            for (const auto &component : settingsComponents) {
+                if (model.nameBegin <= component.open || model.end > component.end) continue;
+                int depth = 0;
+                for (int i = component.open + 1; i < model.nameBegin; ++i) {
+                    if (masked.at(i) == QLatin1Char('{')) ++depth;
+                    else if (masked.at(i) == QLatin1Char('}')) --depth;
+                }
+                if (depth != 0) continue;
+                componentRootModels << model;
+                QmlText::Binding idBinding;
+                if (QmlText::binding(masked, model.open, model.end - 1,
+                                     QStringLiteral("id"), &idBinding)
+                    && masked.mid(idBinding.valueBegin,
+                                  idBinding.valueEnd - idBinding.valueBegin).trimmed()
+                        == QLatin1String("pSettingsItems"))
+                    namedSettingsModels << model;
+            }
+        }
+        if (namedSettingsModels.size() == 1) models = namedSettingsModels;
+        else if (componentRootModels.size() == 1) models = componentRootModels;
+    }
     // A live Component can contain several nested SettingElementModelList
     // objects (for page subviews as well as the tab strip). Prefer the unique
     // model whose page list resolves to the About page and the full native tab
