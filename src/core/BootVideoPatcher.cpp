@@ -698,6 +698,24 @@ Result patch(const QString &exePath, int holdMs, const QString &requestedMode, c
                     referenced.insert(controller.entry);
         }
     }
+    if (referenced.size() > 1) {
+        // Legacy resource pools can leave an old compressed copy behind after
+        // a resource move. The fallback scanner may infer a plausible mapping
+        // for that orphan under a different resource-data base. When multiple
+        // same-named controllers match the host component, prefer the candidate
+        // that shares the host's validated tree and bases; otherwise stay
+        // conservative and let the ambiguity check below refuse the patch.
+        const auto &hostLink = hosts.first().link;
+        QSet<qint64> samePool;
+        for (const auto &controller : controllers) {
+            if (!referenced.contains(controller.entry)) continue;
+            if (controller.link.treeOff == hostLink.treeOff
+                && controller.link.dataBaseRva == hostLink.dataBaseRva
+                && controller.link.nameBaseRaw == hostLink.nameBaseRaw)
+                samePool.insert(controller.entry);
+        }
+        if (samePool.size() == 1) referenced = samePool;
+    }
     if (referenced.size() == 1) {
         const auto chosen = *referenced.cbegin();
         for (int i = controllers.size() - 1; i >= 0; --i)
