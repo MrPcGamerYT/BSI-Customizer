@@ -340,20 +340,59 @@ Item {
             GradientStop { position: 1.0; color: "#050A10" }
         }
     }
-    Rectangle {
+    Canvas {
+        objectName: "bsiAuroraHalo"
+        z: 1
+        visible: !root.htmlLoaded && (root.bootTheme === "aurora" || root.bootTheme === "solar")
+        width: Math.min(Math.min(root.width, root.height) * 0.82, 920)
+        height: width
+        anchors.centerIn: parent
+        anchors.verticalCenterOffset: -root.height * 0.045
+        opacity: root.bootTheme === "solar" ? 0.68 : 0.86
+        onPaint: {
+            var ctx = getContext("2d");
+            ctx.clearRect(0, 0, width, height);
+            var solar = root.bootTheme === "solar";
+            var gradient = ctx.createRadialGradient(width / 2, height / 2, 0,
+                                                    width / 2, height / 2, width / 2);
+            gradient.addColorStop(0, solar ? "rgba(255,165,92,0.52)" : "rgba(74,194,255,0.46)");
+            gradient.addColorStop(0.42, solar ? "rgba(228,110,63,0.24)" : "rgba(44,137,202,0.24)");
+            gradient.addColorStop(1, "rgba(0,0,0,0)");
+            ctx.fillStyle = gradient;
+            ctx.fillRect(0, 0, width, height);
+        }
+        SequentialAnimation on opacity {
+            loops: Animation.Infinite
+            NumberAnimation { from: root.bootTheme === "solar" ? 0.38 : 0.55; to: root.bootTheme === "solar" ? 0.82 : 1.0; duration: 2800; easing.type: Easing.InOutSine }
+            NumberAnimation { to: root.bootTheme === "solar" ? 0.38 : 0.55; duration: 2800; easing.type: Easing.InOutSine }
+        }
+    }
+    Canvas {
+        objectName: "bsiBootNativeAura"
         z: 1
         visible: !root.htmlLoaded
-        width: Math.min(Math.min(root.width, root.height) * 0.72, 820)
+        width: Math.min(Math.min(root.width, root.height) * 0.94, 1020)
         height: width
-        radius: width / 2
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.verticalCenter: parent.verticalCenter
         anchors.verticalCenterOffset: -root.height * 0.025
-        color: root.bootTheme === "solar" ? "#633C2F" : "#163B58"
+        opacity: 0.72
+        onPaint: {
+            var ctx = getContext("2d");
+            ctx.clearRect(0, 0, width, height);
+            var solar = root.bootTheme === "solar";
+            var gradient = ctx.createRadialGradient(width / 2, height / 2, 0,
+                                                    width / 2, height / 2, width / 2);
+            gradient.addColorStop(0, solar ? "rgba(192,105,64,0.42)" : "rgba(52,143,194,0.34)");
+            gradient.addColorStop(0.5, solar ? "rgba(126,63,61,0.20)" : "rgba(29,82,126,0.20)");
+            gradient.addColorStop(1, "rgba(0,0,0,0)");
+            ctx.fillStyle = gradient;
+            ctx.fillRect(0, 0, width, height);
+        }
         SequentialAnimation on opacity {
             loops: Animation.Infinite
-            NumberAnimation { from: 0.16; to: 0.38; duration: root.bootTheme === "pulse" ? 1800 : 2900; easing.type: Easing.InOutSine }
-            NumberAnimation { to: 0.16; duration: root.bootTheme === "pulse" ? 1800 : 2900; easing.type: Easing.InOutSine }
+            NumberAnimation { from: 0.35; to: root.bootTheme === "aurora" ? 0.88 : 0.65; duration: root.bootTheme === "pulse" ? 1800 : 2900; easing.type: Easing.InOutSine }
+            NumberAnimation { to: 0.35; duration: root.bootTheme === "pulse" ? 1800 : 2900; easing.type: Easing.InOutSine }
         }
     }
     Rectangle {
@@ -389,6 +428,24 @@ Item {
             border.width: 1
         }
     }
+    Item {
+        objectName: "bsiFallbackOrbitEllipse"
+        z: 2
+        visible: !root.htmlLoaded && root.bootTheme === "orbit"
+        width: loadingRingTrack.width * 1.72
+        height: loadingRingTrack.height * 0.72
+        anchors.centerIn: loadingRingTrack
+        rotation: -24
+        RotationAnimation on rotation { from: -24; to: 336; duration: 12000; loops: Animation.Infinite; easing.type: Easing.Linear }
+        Rectangle {
+            anchors.fill: parent
+            radius: height / 2
+            color: "transparent"
+            border.width: 1
+            border.color: "#75C5E8"
+            opacity: 0.52
+        }
+    }
     Rectangle {
         z: 2
         visible: !root.htmlLoaded && root.bootTheme === "pulse"
@@ -409,6 +466,75 @@ Item {
             NumberAnimation { from: 0.48; to: 0; duration: 2200; easing.type: Easing.OutCubic }
         }
     }
+    Item {
+        objectName: "bsiFallbackOrbit"
+        z: 2
+        visible: !root.htmlLoaded && root.bootTheme === "orbit"
+        width: loadingRingTrack.width * 1.42
+        height: width
+        anchors.centerIn: loadingRingTrack
+        RotationAnimation on rotation { from: 0; to: 360; duration: 8200; loops: Animation.Infinite; easing.type: Easing.Linear }
+        Rectangle {
+            anchors.fill: parent
+            radius: width / 2
+            color: "transparent"
+            border.width: 1
+            border.color: "#75C5E8"
+            opacity: 0.58
+        }
+        Rectangle {
+            width: 9; height: 9; radius: 5
+            anchors.horizontalCenter: parent.horizontalCenter
+            y: -height / 2
+            color: "#C9F5FF"
+            border.color: "#FFFFFF"
+            border.width: 1
+        }
+    }
+    Item {
+        objectName: "bsiFallbackOrbitTilt"
+        z: 2
+        visible: !root.htmlLoaded && root.bootTheme === "orbit"
+        width: loadingRingTrack.width * 1.72
+        height: loadingRingTrack.height * 0.72
+        anchors.centerIn: loadingRingTrack
+        rotation: -24
+        RotationAnimation on rotation { from: -24; to: 336; duration: 12000; loops: Animation.Infinite; easing.type: Easing.Linear }
+        Rectangle {
+            anchors.fill: parent
+            radius: height / 2
+            color: "transparent"
+            border.width: 1
+            border.color: "#73AFCF"
+            opacity: 0.42
+        }
+    }
+    Repeater {
+        model: root.bootTheme === "pulse" && !root.htmlLoaded ? 3 : 0
+        delegate: Rectangle {
+            id: fallbackPulseRing
+            objectName: "bsiFallbackPulse" + index
+            z: 2
+            width: loadingRingTrack.width
+            height: width
+            radius: width / 2
+            anchors.centerIn: loadingRingTrack
+            color: "transparent"
+            border.width: 2
+            border.color: "#91E5FF"
+            opacity: 0
+            scale: 0.72
+            SequentialAnimation {
+                running: true
+                loops: Animation.Infinite
+                PauseAnimation { duration: index * 850 }
+                ParallelAnimation {
+                    NumberAnimation { target: fallbackPulseRing; property: "scale"; from: 0.72; to: 1.62; duration: 2550; easing.type: Easing.OutCubic }
+                    NumberAnimation { target: fallbackPulseRing; property: "opacity"; from: 0.5; to: 0; duration: 2550; easing.type: Easing.OutCubic }
+                }
+            }
+        }
+    }
     Canvas {
         id: loadingRing
         objectName: "bsiLoadingRing"
@@ -424,9 +550,12 @@ Item {
             ctx.beginPath();
             ctx.lineWidth = Math.max(3, Math.min(root.width, root.height) * 0.009);
             ctx.lineCap = "round";
-            ctx.strokeStyle = root.bootTheme === "solar" ? "#FFE3BA" : "#B9EEFF";
+            ctx.strokeStyle = root.bootTheme === "solar" ? "#FFE3BA"
+                : root.bootTheme === "pulse" ? "#E2FAFF" : "#B9EEFF";
             ctx.shadowColor = root.bootTheme === "solar" ? "#FFAD66" : "#55CFFF";
-            ctx.shadowBlur = Math.max(14, Math.min(root.width, root.height) * 0.045);
+            ctx.shadowBlur = root.bootTheme === "aurora"
+                ? Math.max(22, Math.min(root.width, root.height) * 0.060)
+                : Math.max(14, Math.min(root.width, root.height) * 0.045);
             ctx.arc(width / 2, height / 2, width / 2 - ctx.lineWidth, -Math.PI * 0.70, Math.PI * 0.88, false);
             ctx.stroke();
         }
@@ -538,18 +667,55 @@ QString nativeFallbackComponent(const QString &logoUrl, const QString &theme)
                 GradientStop { position: 1.0; color: "#050A10" }
             }
         }
-        Rectangle {
-            width: Math.min(Math.min(parent.width, parent.height) * 0.82, 900)
+        Canvas {
+            objectName: "bsiNativeBootAura"
+            width: Math.min(Math.min(parent.width, parent.height) * 0.94, 1020)
             height: width
-            radius: width / 2
             anchors.centerIn: parent
             anchors.verticalCenterOffset: -parent.height * 0.025
-            color: nativeBootRoot.bootTheme === "solar" ? "#634333" : "#16496B"
-            opacity: 0.22
+            opacity: 0.72
+            onPaint: {
+                var ctx = getContext("2d");
+                ctx.clearRect(0, 0, width, height);
+                var solar = nativeBootRoot.bootTheme === "solar";
+                var gradient = ctx.createRadialGradient(width / 2, height / 2, 0,
+                                                        width / 2, height / 2, width / 2);
+                gradient.addColorStop(0, solar ? "rgba(192,105,64,0.42)" : "rgba(52,143,194,0.34)");
+                gradient.addColorStop(0.5, solar ? "rgba(126,63,61,0.20)" : "rgba(29,82,126,0.20)");
+                gradient.addColorStop(1, "rgba(0,0,0,0)");
+                ctx.fillStyle = gradient;
+                ctx.fillRect(0, 0, width, height);
+            }
             SequentialAnimation on opacity {
                 loops: Animation.Infinite
-                NumberAnimation { from: 0.14; to: 0.38; duration: nativeBootRoot.bootTheme === "pulse" ? 1700 : 3000; easing.type: Easing.InOutSine }
-                NumberAnimation { to: 0.14; duration: nativeBootRoot.bootTheme === "pulse" ? 1700 : 3000; easing.type: Easing.InOutSine }
+                NumberAnimation { from: 0.35; to: nativeBootRoot.bootTheme === "aurora" ? 0.88 : 0.65; duration: nativeBootRoot.bootTheme === "pulse" ? 1700 : 3000; easing.type: Easing.InOutSine }
+                NumberAnimation { to: 0.35; duration: nativeBootRoot.bootTheme === "pulse" ? 1700 : 3000; easing.type: Easing.InOutSine }
+            }
+        }
+        Canvas {
+            objectName: "bsiNativeBootGlowCore"
+            visible: nativeBootRoot.bootTheme === "aurora" || nativeBootRoot.bootTheme === "solar"
+            width: Math.min(Math.min(parent.width, parent.height) * 0.62, 720)
+            height: width
+            anchors.centerIn: parent
+            anchors.verticalCenterOffset: -parent.height * 0.045
+            opacity: nativeBootRoot.bootTheme === "solar" ? 0.68 : 0.86
+            onPaint: {
+                var ctx = getContext("2d");
+                ctx.clearRect(0, 0, width, height);
+                var solar = nativeBootRoot.bootTheme === "solar";
+                var gradient = ctx.createRadialGradient(width / 2, height / 2, 0,
+                                                        width / 2, height / 2, width / 2);
+                gradient.addColorStop(0, solar ? "rgba(255,165,92,0.52)" : "rgba(74,194,255,0.46)");
+                gradient.addColorStop(0.42, solar ? "rgba(228,110,63,0.24)" : "rgba(44,137,202,0.24)");
+                gradient.addColorStop(1, "rgba(0,0,0,0)");
+                ctx.fillStyle = gradient;
+                ctx.fillRect(0, 0, width, height);
+            }
+            SequentialAnimation on opacity {
+                loops: Animation.Infinite
+                NumberAnimation { from: nativeBootRoot.bootTheme === "solar" ? 0.38 : 0.55; to: nativeBootRoot.bootTheme === "solar" ? 0.82 : 1.0; duration: 2600; easing.type: Easing.InOutSine }
+                NumberAnimation { to: nativeBootRoot.bootTheme === "solar" ? 0.38 : 0.55; duration: 2600; easing.type: Easing.InOutSine }
             }
         }
         Rectangle {
@@ -561,7 +727,75 @@ QString nativeFallbackComponent(const QString &logoUrl, const QString &theme)
             anchors.verticalCenterOffset: -parent.height * 0.045
             color: "transparent"
             border.width: Math.max(1, Math.min(parent.width, parent.height) * 0.002)
-            border.color: "#38536A"
+            border.color: nativeBootRoot.bootTheme === "solar" ? "#B88359"
+                : nativeBootRoot.bootTheme === "orbit" ? "#6AB9DE" : "#4C87A8"
+        }
+        Item {
+            objectName: "bsiNativeOrbitRings"
+            visible: nativeBootRoot.bootTheme === "orbit"
+            width: bsiNativeRingTrack.width * 1.48
+            height: width
+            anchors.centerIn: bsiNativeRingTrack
+            RotationAnimation on rotation { from: 0; to: 360; duration: 8200; loops: Animation.Infinite; easing.type: Easing.Linear }
+            Rectangle {
+                anchors.fill: parent
+                radius: width / 2
+                color: "transparent"
+                border.width: 1
+                border.color: "#75C5E8"
+                opacity: 0.65
+            }
+            Rectangle {
+                width: 9; height: 9; radius: 5
+                anchors.horizontalCenter: parent.horizontalCenter
+                y: -height / 2
+                color: "#D7F8FF"
+                border.color: "#FFFFFF"
+                border.width: 1
+            }
+        }
+        Item {
+            objectName: "bsiNativeOrbitTilt"
+            visible: nativeBootRoot.bootTheme === "orbit"
+            width: bsiNativeRingTrack.width * 1.72
+            height: bsiNativeRingTrack.height * 0.72
+            anchors.centerIn: bsiNativeRingTrack
+            rotation: -24
+            RotationAnimation on rotation { from: -24; to: 336; duration: 12000; loops: Animation.Infinite; easing.type: Easing.Linear }
+            Rectangle {
+                anchors.fill: parent
+                radius: height / 2
+                color: "transparent"
+                border.width: 1
+                border.color: "#5795B8"
+                opacity: 0.48
+            }
+        }
+        Repeater {
+            model: nativeBootRoot.bootTheme === "pulse" ? 3 : 0
+            delegate: Rectangle {
+                id: nativePulseRing
+                objectName: "bsiNativePulse" + index
+                width: bsiNativeRingTrack.width
+                height: width
+                radius: width / 2
+                anchors.centerIn: bsiNativeRingTrack
+                color: "transparent"
+                border.width: 2
+                border.color: "#91E5FF"
+                opacity: 0
+                scale: 0.72
+                z: 1
+                SequentialAnimation {
+                    running: true
+                    loops: Animation.Infinite
+                    PauseAnimation { duration: index * 850 }
+                    ParallelAnimation {
+                        NumberAnimation { target: nativePulseRing; property: "scale"; from: 0.72; to: 1.62; duration: 2550; easing.type: Easing.OutCubic }
+                        NumberAnimation { target: nativePulseRing; property: "opacity"; from: 0.52; to: 0; duration: 2550; easing.type: Easing.OutCubic }
+                    }
+                }
+            }
         }
         Canvas {
             objectName: "bsiNativeBootRing"
@@ -575,14 +809,21 @@ QString nativeFallbackComponent(const QString &logoUrl, const QString &theme)
                 ctx.beginPath();
                 ctx.lineWidth = Math.max(3, Math.min(parent.width, parent.height) * 0.009);
                 ctx.lineCap = "round";
-                ctx.strokeStyle = "#A9E7FF";
-                ctx.shadowColor = "#55CFFF";
-                ctx.shadowBlur = Math.max(10, Math.min(parent.width, parent.height) * 0.035);
-                ctx.arc(width / 2, height / 2, width / 2 - ctx.lineWidth, -Math.PI * 0.70, Math.PI * 0.88, false);
+                ctx.strokeStyle = nativeBootRoot.bootTheme === "solar" ? "#FFD3A0"
+                    : nativeBootRoot.bootTheme === "pulse" ? "#E2FAFF" : "#B9EEFF";
+                ctx.shadowColor = nativeBootRoot.bootTheme === "solar" ? "#FF9B52" : "#55CFFF";
+                ctx.shadowBlur = nativeBootRoot.bootTheme === "aurora"
+                    ? Math.max(22, Math.min(parent.width, parent.height) * 0.060)
+                    : Math.max(12, Math.min(parent.width, parent.height) * 0.038);
+                var start = nativeBootRoot.bootTheme === "orbit" ? -Math.PI * 0.18 : -Math.PI * 0.70;
+                var finish = nativeBootRoot.bootTheme === "orbit" ? Math.PI * 1.78 : Math.PI * 0.88;
+                ctx.arc(width / 2, height / 2, width / 2 - ctx.lineWidth, start, finish, false);
                 ctx.stroke();
             }
             RotationAnimation on rotation {
-                from: 0; to: 360; duration: 2450; loops: Animation.Infinite
+                from: 0; to: 360; duration: nativeBootRoot.bootTheme === "orbit" ? 4300
+                    : nativeBootRoot.bootTheme === "pulse" ? 3600
+                    : nativeBootRoot.bootTheme === "solar" ? 3000 : 2450; loops: Animation.Infinite
                 easing.type: Easing.Linear
             }
         }
