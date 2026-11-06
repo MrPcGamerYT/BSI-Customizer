@@ -200,9 +200,23 @@ QList<Stream> streams(const QByteArray &data)
 
 QString embeddedEmulatorLogo(const QByteArray &image)
 {
+    // MSI 5 may keep the main QML/assets pool out of qRegisterResourceData.
+    // The theme detector already validates that pool's tree and data base, so
+    // use it as a second source instead of silently rendering an empty <img>.
+    QList<QtResources::File> files = QtResources::registeredFiles(image);
+    const auto theme = ThemeEngine::findThemeZlib(image);
+    if (theme.hasQrcNode) {
+        for (const auto &file : QtResources::filesInPool(image, theme.resource)) {
+            bool present = false;
+            for (const auto &known : files)
+                if (known.entryOff == file.entryOff && known.name == file.name) { present = true; break; }
+            if (!present) files << file;
+        }
+    }
     QList<QtResources::File> candidates;
-    for (const auto &file : QtResources::registeredFiles(image)) {
-        const QString leaf = file.name.toCaseFolded();
+    for (const auto &file : files) {
+        const QString leaf = (file.path.isEmpty() ? file.name : file.path)
+                                 .section(QLatin1Char('/'), -1).toCaseFolded();
         if (!leaf.contains(QStringLiteral("bluestacks"))) continue;
         if (!leaf.endsWith(QLatin1String(".svg")) && !leaf.endsWith(QLatin1String(".png"))) continue;
         candidates << file;
@@ -232,7 +246,7 @@ QString embeddedEmulatorLogo(const QByteArray &image)
     return {};
 }
 
-QString htmlBootPage(const QString &logoUrl, bool withVideo)
+QString htmlBootPage(const QString &logoUrl, bool withVideo, const QString &theme)
 {
     QString html = QString::fromUtf8(R"HTML(<!doctype html>
 <html lang="en">
@@ -244,28 +258,47 @@ QString htmlBootPage(const QString &logoUrl, bool withVideo)
 <style>
 *{box-sizing:border-box}
 html,body{width:100%;height:100%;margin:0;overflow:hidden;background:#050a10}
-body{color:#c7d9e6;font:16px/1.4 "Segoe UI",Arial,sans-serif}
-.boot{position:fixed;inset:0;overflow:hidden;background:linear-gradient(180deg,#070d15 0%,#0a1724 54%,#050a10 100%)}
+body{color:#d8e8f2;font:16px/1.4 "Segoe UI",Arial,sans-serif}
+.boot{position:fixed;inset:0;overflow:hidden;background:radial-gradient(ellipse at 50% 44%,#10263a 0%,#091522 45%,#04080d 100%)}
 .backdrop{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;background:#050a10}
-.shade{position:absolute;inset:0;background:rgba(3,9,15,.42)}
-.aura{position:absolute;left:50%;top:45.5%;width:min(72vmin,820px);aspect-ratio:1;transform:translate(-50%,-50%);border-radius:50%;background:#163b58;filter:blur(12px);animation:aura 5.2s ease-in-out infinite}
-.ring-track{position:absolute;left:50%;top:45.5%;width:min(42vmin,330px);aspect-ratio:1;transform:translate(-50%,-50%);border:1px solid rgba(125,166,195,.52);border-radius:50%}
-.ring{position:absolute;inset:-2px;border-radius:50%;background:conic-gradient(from -126deg,rgba(169,231,255,.08) 0deg,rgba(169,231,255,.42) 70deg,#d9f5ff 210deg,rgba(85,207,255,.85) 280deg,transparent 306deg 360deg);-webkit-mask:radial-gradient(farthest-side,transparent calc(100% - 5px),#000 calc(100% - 4px));mask:radial-gradient(farthest-side,transparent calc(100% - 5px),#000 calc(100% - 4px));filter:drop-shadow(0 0 10px rgba(85,207,255,.82));animation:rotate 2.45s linear infinite}
-.logo{position:absolute;left:50%;top:45.5%;width:min(23vmin,190px);height:min(23vmin,190px);transform:translate(-50%,-50%);object-fit:contain;filter:drop-shadow(0 8px 30px rgba(25,75,110,.18));animation:logo 4.6s ease-in-out infinite}
-.status{position:absolute;left:12px;right:12px;top:calc(45.5% + min(21vmin,165px) + 22px);text-align:center;color:#c7d9e6;font-size:clamp(12px,1.35vw,16px);letter-spacing:.8px;animation:status 3.4s ease-in-out infinite}
+.shade{position:absolute;inset:0;background:linear-gradient(180deg,rgba(3,9,15,.22),rgba(3,9,15,.58))}
+.aura{position:absolute;left:50%;top:45.5%;width:min(88vmin,960px);aspect-ratio:1;transform:translate(-50%,-50%);border-radius:50%;background:radial-gradient(circle,rgba(73,183,239,.32) 0%,rgba(39,125,182,.18) 34%,rgba(22,67,101,.08) 58%,transparent 73%);filter:blur(24px);animation:aura 5.8s ease-in-out infinite}
+.ring-track{position:absolute;left:50%;top:45.5%;width:min(42vmin,330px);aspect-ratio:1;transform:translate(-50%,-50%);border:1px solid rgba(150,198,225,.44);border-radius:50%;box-shadow:0 0 42px rgba(33,132,193,.12),inset 0 0 28px rgba(37,133,188,.06)}
+.ring{position:absolute;inset:-2px;border-radius:50%;background:conic-gradient(from -126deg,transparent 0deg 12deg,rgba(147,224,255,.24) 58deg,rgba(215,247,255,.98) 190deg,rgba(75,203,255,.95) 272deg,transparent 314deg 360deg);-webkit-mask:radial-gradient(farthest-side,transparent calc(100% - 5px),#000 calc(100% - 3px));mask:radial-gradient(farthest-side,transparent calc(100% - 5px),#000 calc(100% - 3px));filter:drop-shadow(0 0 8px rgba(97,219,255,.88)) drop-shadow(0 0 22px rgba(52,170,233,.44));animation:rotate 3.1s linear infinite}
+.logo{position:absolute;left:50%;top:45.5%;width:min(23vmin,190px);height:min(23vmin,190px);transform:translate(-50%,-50%);object-fit:contain;filter:drop-shadow(0 0 15px rgba(99,202,248,.28)) drop-shadow(0 8px 32px rgba(10,42,68,.42));animation:logo 4.6s ease-in-out infinite}
+.logo-fallback{position:absolute;left:50%;top:45.5%;width:min(18vmin,140px);height:min(18vmin,140px);transform:translate(-50%,-50%) rotate(45deg);display:grid;place-items:center;border:1px solid rgba(178,223,244,.78);border-radius:28%;background:linear-gradient(145deg,rgba(79,175,222,.2),rgba(9,26,42,.24));box-shadow:0 0 38px rgba(73,183,232,.32),inset 0 0 20px rgba(143,216,249,.12);animation:logo 4.6s ease-in-out infinite}
+.logo-fallback span{transform:rotate(-45deg);font:700 clamp(22px,5vmin,42px)/1 "Segoe UI",Arial,sans-serif;letter-spacing:-2px;color:#d9f4ff;text-shadow:0 0 18px rgba(104,210,250,.72)}
+.status{position:absolute;left:12px;right:12px;top:calc(45.5% + min(21vmin,165px) + 22px);text-align:center;color:#d1e5f1;font-size:clamp(12px,1.35vw,16px);letter-spacing:.8px;text-shadow:0 2px 16px rgba(52,177,234,.32);animation:status 3.4s ease-in-out infinite}
+.orbit{position:absolute;left:50%;top:45.5%;width:min(54vmin,420px);aspect-ratio:1;transform:translate(-50%,-50%);border:1px solid rgba(125,206,240,.18);border-radius:50%;opacity:0}
+.orbit:after{content:"";position:absolute;left:50%;top:-4px;width:7px;height:7px;margin-left:-3.5px;border-radius:50%;background:#b8efff;box-shadow:0 0 9px #70d6ff,0 0 24px rgba(87,197,255,.75)}
+.pulse{position:absolute;left:50%;top:45.5%;width:min(42vmin,330px);aspect-ratio:1;transform:translate(-50%,-50%) scale(.78);border:1px solid rgba(139,220,255,.45);border-radius:50%;opacity:0}
+.theme-orbit .orbit{opacity:1;animation:orbit 8s linear infinite}
+.theme-orbit .orbit-two{width:min(66vmin,510px);transform:translate(-50%,-50%) rotateX(68deg);animation-duration:12s;border-color:rgba(124,195,235,.14)}
+.theme-pulse .pulse{animation:pulse 3.6s ease-out infinite}
+.theme-pulse .pulse-two{animation-delay:1.2s}
+.theme-pulse .pulse-three{animation-delay:2.4s}
+.theme-solar{background:radial-gradient(ellipse at 50% 44%,#261b18 0%,#14151c 45%,#07090e 100%)}
+.theme-solar .aura{background:radial-gradient(circle,rgba(255,176,94,.32) 0%,rgba(213,103,69,.17) 36%,rgba(120,58,65,.07) 61%,transparent 74%)}
+.theme-solar .ring-track{border-color:rgba(255,206,157,.42);box-shadow:0 0 48px rgba(255,145,75,.13)}
+.theme-solar .ring{background:conic-gradient(from -126deg,transparent 0deg 10deg,rgba(255,214,170,.2) 58deg,#fff0d8 185deg,#ffad66 270deg,transparent 314deg 360deg);filter:drop-shadow(0 0 9px rgba(255,173,102,.85)) drop-shadow(0 0 24px rgba(245,121,66,.4))}
+.theme-solar .orbit:after{background:#ffe1b1;box-shadow:0 0 10px #ffad66,0 0 24px rgba(255,143,78,.8)}
 @keyframes rotate{to{transform:rotate(360deg)}}
-@keyframes aura{0%,100%{opacity:.11}50%{opacity:.19}}
-@keyframes logo{0%,100%{opacity:.82;transform:translate(-50%,-50%) scale(1)}50%{opacity:.96;transform:translate(-50%,-50%) scale(1.018)}}
-@keyframes status{50%{opacity:.68}}
+@keyframes orbit{to{transform:translate(-50%,-50%) rotate(360deg)}}
+@keyframes pulse{0%{opacity:.6;transform:translate(-50%,-50%) scale(.76)}100%{opacity:0;transform:translate(-50%,-50%) scale(1.5)}}
+@keyframes aura{0%,100%{opacity:.66;transform:translate(-50%,-50%) scale(.92)}50%{opacity:1;transform:translate(-50%,-50%) scale(1.05)}}
+@keyframes logo{0%,100%{opacity:.9;transform:translate(-50%,-50%) scale(1)}50%{opacity:1;transform:translate(-50%,-50%) scale(1.025)}}
+@keyframes status{50%{opacity:.76}}
 @media(prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important}}
 </style>
 </head>
 <body>
-<main class="boot" aria-label="Emulator startup">
+<main class="boot theme-__BSI_BOOT_THEME__" aria-label="Emulator startup">
 __VIDEO_BACKGROUND__
-<div class="aura"></div>
+<div class="aura" aria-hidden="true"></div>
+<div class="orbit" aria-hidden="true"></div><div class="orbit orbit-two" aria-hidden="true"></div>
+<div class="pulse" aria-hidden="true"></div><div class="pulse pulse-two" aria-hidden="true"></div><div class="pulse pulse-three" aria-hidden="true"></div>
 <div class="ring-track" aria-hidden="true"><div class="ring"></div></div>
-<img class="logo" src="__BSI_EMULATOR_LOGO__" alt="">
+__BSI_LOGO_ELEMENT__
 <div class="status">Emulator is starting…</div>
 </main>
 </body>
@@ -274,12 +307,16 @@ __VIDEO_BACKGROUND__
     const QString video = withVideo
         ? QStringLiteral("<video class=\"backdrop\" autoplay muted loop playsinline><source src=\"Promo.mp4\" type=\"video/mp4\"></video><div class=\"shade\"></div>")
         : QString();
+    const QString logo = logoUrl.isEmpty()
+        ? QStringLiteral("<div class=\"logo-fallback\" aria-label=\"Emulator logo unavailable\"><span>BS</span></div>")
+        : QStringLiteral("<img class=\"logo\" src=\"%1\" alt=\"\">").arg(logoUrl);
     html.replace(QLatin1String("__VIDEO_BACKGROUND__"), video);
-    html.replace(QLatin1String("__BSI_EMULATOR_LOGO__"), logoUrl);
+    html.replace(QLatin1String("__BSI_LOGO_ELEMENT__"), logo);
+    html.replace(QLatin1String("__BSI_BOOT_THEME__"), theme);
     return html;
 }
 
-QString externalPlayer(const QString &logoUrl, bool withVideo)
+QString externalPlayer(const QString &logoUrl, bool withVideo, const QString &theme)
 {
     QString qml = QString::fromUtf8(R"QML(import QtQuick
 Item {
@@ -288,6 +325,7 @@ Item {
     anchors.fill: parent
     clip: true
     property string logoUrl: "__BSI_EMULATOR_LOGO__"
+    property string bootTheme: "__BSI_BOOT_THEME__"
     property bool withVideo: __BSI_WITH_VIDEO__
     property bool htmlLoaded: false
 
@@ -311,11 +349,11 @@ Item {
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.verticalCenter: parent.verticalCenter
         anchors.verticalCenterOffset: -root.height * 0.025
-        color: "#163B58"
+        color: root.bootTheme === "solar" ? "#633C2F" : "#163B58"
         SequentialAnimation on opacity {
             loops: Animation.Infinite
-            NumberAnimation { from: 0.11; to: 0.19; duration: 2600; easing.type: Easing.InOutSine }
-            NumberAnimation { to: 0.11; duration: 2600; easing.type: Easing.InOutSine }
+            NumberAnimation { from: 0.16; to: 0.38; duration: root.bootTheme === "pulse" ? 1800 : 2900; easing.type: Easing.InOutSine }
+            NumberAnimation { to: 0.16; duration: root.bootTheme === "pulse" ? 1800 : 2900; easing.type: Easing.InOutSine }
         }
     }
     Rectangle {
@@ -329,8 +367,47 @@ Item {
         anchors.verticalCenterOffset: -root.height * 0.045
         color: "transparent"
         border.width: Math.max(1, Math.min(root.width, root.height) * 0.002)
-        border.color: "#38536A"
-        opacity: 0.52
+        border.color: root.bootTheme === "solar" ? "#745845" : "#54748A"
+        opacity: 0.62
+    }
+    Item {
+        z: 2
+        visible: !root.htmlLoaded && root.bootTheme === "orbit"
+        width: loadingRingTrack.width * 1.34
+        height: width
+        anchors.centerIn: loadingRingTrack
+        RotationAnimation on rotation {
+            from: 0; to: 360; duration: 8200; loops: Animation.Infinite
+            easing.type: Easing.Linear
+        }
+        Rectangle {
+            width: 8; height: 8; radius: 4
+            anchors.horizontalCenter: parent.horizontalCenter
+            y: -height / 2
+            color: root.bootTheme === "solar" ? "#FFE1B1" : "#B8EFFF"
+            border.color: "#FFFFFF"
+            border.width: 1
+        }
+    }
+    Rectangle {
+        z: 2
+        visible: !root.htmlLoaded && root.bootTheme === "pulse"
+        width: loadingRingTrack.width
+        height: width
+        radius: width / 2
+        anchors.centerIn: loadingRingTrack
+        color: "transparent"
+        border.width: 2
+        border.color: "#75D9FF"
+        scale: 0.78
+        SequentialAnimation on scale {
+            loops: Animation.Infinite
+            NumberAnimation { from: 0.78; to: 1.48; duration: 2200; easing.type: Easing.OutCubic }
+        }
+        SequentialAnimation on opacity {
+            loops: Animation.Infinite
+            NumberAnimation { from: 0.48; to: 0; duration: 2200; easing.type: Easing.OutCubic }
+        }
     }
     Canvas {
         id: loadingRing
@@ -347,14 +424,14 @@ Item {
             ctx.beginPath();
             ctx.lineWidth = Math.max(3, Math.min(root.width, root.height) * 0.009);
             ctx.lineCap = "round";
-            ctx.strokeStyle = "#A9E7FF";
-            ctx.shadowColor = "#55CFFF";
-            ctx.shadowBlur = Math.max(10, Math.min(root.width, root.height) * 0.035);
+            ctx.strokeStyle = root.bootTheme === "solar" ? "#FFE3BA" : "#B9EEFF";
+            ctx.shadowColor = root.bootTheme === "solar" ? "#FFAD66" : "#55CFFF";
+            ctx.shadowBlur = Math.max(14, Math.min(root.width, root.height) * 0.045);
             ctx.arc(width / 2, height / 2, width / 2 - ctx.lineWidth, -Math.PI * 0.70, Math.PI * 0.88, false);
             ctx.stroke();
         }
         RotationAnimation on rotation {
-            from: 0; to: 360; duration: 2450; loops: Animation.Infinite
+            from: 0; to: 360; duration: root.bootTheme === "orbit" ? 4300 : root.bootTheme === "pulse" ? 3600 : 3100; loops: Animation.Infinite
             easing.type: Easing.Linear
         }
         SequentialAnimation on opacity {
@@ -363,11 +440,24 @@ Item {
             NumberAnimation { to: 0.72; duration: 1350; easing.type: Easing.InOutSine }
         }
     }
+    Rectangle {
+        z: 4
+        visible: !root.htmlLoaded && root.logoUrl.length === 0
+        width: Math.min(Math.min(root.width, root.height) * 0.18, 140)
+        height: width
+        radius: width * 0.28
+        anchors.centerIn: loadingRingTrack
+        rotation: 45
+        color: "#183246"
+        border.color: "#B2DFF4"
+        border.width: 1
+        Text { anchors.centerIn: parent; rotation: -45; text: "BS"; color: "#D9F4FF"; font.pixelSize: parent.width * 0.34; font.bold: true }
+    }
     Image {
         id: emulatorLogo
         objectName: "bsiEmulatorLogo"
         z: 4
-        visible: !root.htmlLoaded
+        visible: !root.htmlLoaded && root.logoUrl.length > 0
         anchors.centerIn: loadingRingTrack
         width: Math.min(Math.min(root.width, root.height) * 0.23, 190)
         height: width
@@ -426,23 +516,40 @@ Item {
 }
 )QML");
     qml.replace(QLatin1String("__BSI_EMULATOR_LOGO__"), logoUrl);
+    qml.replace(QLatin1String("__BSI_BOOT_THEME__"), theme);
     qml.replace(QLatin1String("__BSI_WITH_VIDEO__"), withVideo ? QLatin1String("true") : QLatin1String("false"));
     return qml;
 }
 
-QString nativeFallbackComponent(const QString &logoUrl)
+QString nativeFallbackComponent(const QString &logoUrl, const QString &theme)
 {
     QString qml = QString::fromUtf8(R"QML(Component {
     id: bsiNativeStartupComponent
     Item {
+        id: nativeBootRoot
         objectName: "bsiNativeBootFallback"
         anchors.fill: parent
+        property string bootTheme: "__BSI_BOOT_THEME__"
         Rectangle {
             anchors.fill: parent
             gradient: Gradient {
-                GradientStop { position: 0.0; color: "#070D15" }
-                GradientStop { position: 0.54; color: "#0A1724" }
+                GradientStop { position: 0.0; color: nativeBootRoot.bootTheme === "solar" ? "#241814" : "#070D15" }
+                GradientStop { position: 0.54; color: nativeBootRoot.bootTheme === "solar" ? "#19151A" : "#0A1724" }
                 GradientStop { position: 1.0; color: "#050A10" }
+            }
+        }
+        Rectangle {
+            width: Math.min(Math.min(parent.width, parent.height) * 0.82, 900)
+            height: width
+            radius: width / 2
+            anchors.centerIn: parent
+            anchors.verticalCenterOffset: -parent.height * 0.025
+            color: nativeBootRoot.bootTheme === "solar" ? "#634333" : "#16496B"
+            opacity: 0.22
+            SequentialAnimation on opacity {
+                loops: Animation.Infinite
+                NumberAnimation { from: 0.14; to: 0.38; duration: nativeBootRoot.bootTheme === "pulse" ? 1700 : 3000; easing.type: Easing.InOutSine }
+                NumberAnimation { to: 0.14; duration: nativeBootRoot.bootTheme === "pulse" ? 1700 : 3000; easing.type: Easing.InOutSine }
             }
         }
         Rectangle {
@@ -479,8 +586,20 @@ QString nativeFallbackComponent(const QString &logoUrl)
                 easing.type: Easing.Linear
             }
         }
+        Rectangle {
+            visible: "__BSI_FALLBACK_LOGO__".length === 0
+            width: Math.min(Math.min(parent.width, parent.height) * 0.18, 140)
+            height: width
+            radius: width * 0.28
+            anchors.centerIn: bsiNativeRingTrack
+            rotation: 45
+            color: "#183246"
+            border.color: "#B2DFF4"
+            Text { anchors.centerIn: parent; rotation: -45; text: "BS"; color: "#D9F4FF"; font.pixelSize: parent.width * 0.34; font.bold: true }
+        }
         Image {
             objectName: "bsiNativeBootLogo"
+            visible: "__BSI_FALLBACK_LOGO__".length > 0
             anchors.centerIn: bsiNativeRingTrack
             width: Math.min(Math.min(parent.width, parent.height) * 0.23, 190)
             height: width
@@ -502,6 +621,7 @@ QString nativeFallbackComponent(const QString &logoUrl)
     }
 })QML");
     qml.replace(QLatin1String("__BSI_FALLBACK_LOGO__"), logoUrl);
+    qml.replace(QLatin1String("__BSI_BOOT_THEME__"), theme);
     return qml;
 }
 
@@ -631,13 +751,18 @@ QString logoPreviewDataUrl(const QString &exePath)
 
 Result patch(const QString &exePath, int holdMs, const QString &requestedMode, const QString &videoPath)
 {
-    const QString mode = requestedMode.isEmpty() ? QStringLiteral("video") : requestedMode;
-    if (mode != QLatin1String("video") && mode != QLatin1String("modern"))
-        return { false, QStringLiteral("Choose the built-in modern boot or custom MP4 mode.") };
+    QString mode = requestedMode.isEmpty() ? QStringLiteral("video") : requestedMode;
+    if (mode == QLatin1String("modern")) mode = QStringLiteral("aurora"); // v1 API alias
+    if (mode != QLatin1String("video") && mode != QLatin1String("aurora")
+        && mode != QLatin1String("orbit") && mode != QLatin1String("pulse")
+        && mode != QLatin1String("solar"))
+        return { false, QStringLiteral("Choose Aurora, Orbit, Pulse, Solar or custom MP4 boot.") };
+    const bool withVideo = mode == QLatin1String("video");
+    const QString theme = withVideo ? QStringLiteral("aurora") : mode;
     if (holdMs < 0 || holdMs > 15000)
         return { false, QStringLiteral("Boot hold must be between 0 and 15000 ms.") };
-    if (mode == QLatin1String("modern") && !videoPath.trimmed().isEmpty())
-        return { false, QStringLiteral("The built-in boot mode does not accept a video path.") };
+    if (!withVideo && !videoPath.trimmed().isEmpty())
+        return { false, QStringLiteral("A built-in boot animation does not accept a video path.") };
     QByteArray selectedVideo;
     bool copySelectedVideo = false;
     if (mode == QLatin1String("video") && !videoPath.trimmed().isEmpty()) {
@@ -760,7 +885,7 @@ Result patch(const QString &exePath, int holdMs, const QString &requestedMode, c
         "onLoaded:{%3}"
         "onStatusChanged:{if(status===Loader.Error){console.warn(\"External boot QML failed; using native splash\");source=\"\";sourceComponent=bsiNativeStartupComponent}}}"
     ).arg(loaderId, helperUrl, readyHide)
-        + nativeFallbackComponent(logoUrl)
+        + nativeFallbackComponent(logoUrl, theme)
         + QStringLiteral(
             "Timer{id:bsiBootLoadWatchdog;interval:5000;repeat:false;running:%1.status===Loader.Loading;"
             "onTriggered:{if(%1.status===Loader.Loading&&!%1.item){console.warn(\"External boot QML timed out; using native splash\");"
@@ -912,14 +1037,14 @@ Result patch(const QString &exePath, int holdMs, const QString &requestedMode, c
         return { false, restored ? QStringLiteral("Cannot preserve the existing Assets/BootScreen.html as BootScreen.html.bak; no boot assets were replaced.")
                                  : QStringLiteral("Cannot preserve BootScreen.html, and the selected video could not be restored.") };
     }
-    const QByteArray helper = externalPlayer(logoUrl, mode == QLatin1String("video")).toUtf8();
+    const QByteArray helper = externalPlayer(logoUrl, withVideo, theme).toUtf8();
     if (!writeAsset(helperPath, helper)) {
         const bool restored = rollbackVideo();
         return { false, restored ? QStringLiteral("Cannot atomically write Assets/BootVideo.qml; no executable was written.")
                                  : QStringLiteral("Cannot write Assets/BootVideo.qml, and the previous Promo.mp4 could not be restored.") };
     }
     helperWritten = true;
-    const QByteArray html = htmlBootPage(logoUrl, mode == QLatin1String("video")).toUtf8();
+    const QByteArray html = htmlBootPage(logoUrl, withVideo, theme).toUtf8();
     if (!writeAsset(htmlPath, html)) {
         const bool helperRestored = rollbackHelper();
         const bool videoRestored = rollbackVideo();
@@ -938,10 +1063,11 @@ Result patch(const QString &exePath, int holdMs, const QString &requestedMode, c
         return { false, error };
     }
     QtResources::clearPlayerQmlCache(exePath);
-    const QString modeMessage = mode == QLatin1String("modern")
-        ? QStringLiteral("Built-in HTML boot screen installed in Assets/BootScreen.html.")
-        : QStringLiteral("Custom HTML boot screen installed in Assets/BootScreen.html. Video: %1.%2")
-            .arg(QDir::toNativeSeparators(movie), QFileInfo::exists(movie) ? QString() : QStringLiteral(" Copy Promo.mp4 into Assets before starting."));
+    const QString modeMessage = withVideo
+        ? QStringLiteral("Custom HTML boot screen installed in Assets/BootScreen.html. Video: %1.%2")
+              .arg(QDir::toNativeSeparators(movie), QFileInfo::exists(movie) ? QString() : QStringLiteral(" Copy Promo.mp4 into Assets before starting."))
+        : QStringLiteral("Built-in %1 HTML boot animation installed in Assets/BootScreen.html.")
+              .arg(mode.left(1).toUpper() + mode.mid(1));
     const QString holdMessage = holdApplied
         ? QStringLiteral("Requested extra boot hold applied: %1 ms.").arg(holdMs)
         : holdMs > 0

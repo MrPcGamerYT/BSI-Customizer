@@ -2959,6 +2959,67 @@ int runPatchRegressionTests()
               "Hex (old) stays selectable as an informed override on a Qt 6 player");
     }
 
+    std::printf("[settings-model] scope page discovery to the live Settings model\n");
+    {
+        const QStringList pages {
+            QStringLiteral("General.qml"), QStringLiteral("Display.qml"),
+            QStringLiteral("Graphics.qml"), QStringLiteral("Audio.qml"),
+            QStringLiteral("Keyboard.qml"), QStringLiteral("Preferences.qml"),
+            QStringLiteral("Advanced.qml"), QStringLiteral("PlrAboutSetting.qml")
+        };
+        const auto makePlayer = [&](bool duplicateLivePage) {
+            QString rows;
+            for (const QString &page : pages)
+                rows += QStringLiteral("{ pQmlSource: \"%1\" },\n").arg(page);
+            if (duplicateLivePage)
+                rows += QStringLiteral("{ pQmlSource: \"General.qml\" },\n");
+            return QStringLiteral(
+                "import QtQuick\nItem {\n"
+                " property SettingElementModelList pSettingsItems: SettingElementModelList {\n"
+                "  pSettingElements: [\n%1  ]\n"
+                " }\n"
+                " Component { id: unrelatedPreview; Item { property string pQmlSource: \"General.qml\" } }\n"
+                "}\n").arg(rows);
+        };
+        const QString settingsWindow = QStringLiteral(
+            "import QtQuick\nUiShadowContainer { id: iSettingsWindowShadowContainer;\n"
+            " property var model: pSettingsItems.pSettingElements\n"
+            " function fChangeSelectedSetting(index) { setSource(model.modelData.pQmlSource); model.modelData.pComponentObj = item }\n"
+            "}\n");
+        QList<QPair<QString, QByteArray>> files {
+            { QStringLiteral("plr.qml"), makePlayer(false).toUtf8() },
+            { QStringLiteral("UiSettingsWindow.qml"), settingsWindow.toUtf8() },
+            { QStringLiteral("PlrAboutSetting.qml"), aboutPageFixture().toUtf8() },
+            { QStringLiteral("General.qml"), QByteArray("Item { }\n") },
+            { QStringLiteral("Display.qml"), QByteArray("Item { }\n") },
+            { QStringLiteral("Graphics.qml"), QByteArray("Item { }\n") },
+            { QStringLiteral("Audio.qml"), QByteArray("Item { }\n") },
+            { QStringLiteral("Keyboard.qml"), QByteArray("Item { }\n") },
+            { QStringLiteral("Preferences.qml"), QByteArray("Item { }\n") },
+            { QStringLiteral("Advanced.qml"), QByteArray("Item { }\n") },
+            { QStringLiteral("qrcAssets/BlueStacks5Beta.svg"), QByteArray("<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 64 64\"><circle cx=\"32\" cy=\"32\" r=\"24\"/></svg>") },
+            { QStringLiteral("qrcAssets/Loader_bright.svg"), QByteArray("<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 16 16\"><circle cx=\"8\" cy=\"8\" r=\"6\"/></svg>") }
+        };
+        auto validModel = nestedResources(files);
+        addRegistration(validModel, false);
+        const QString validPath = temp.filePath(QStringLiteral("settings-model-decoy.exe"));
+        write(validPath, validModel.f.bytes);
+        const auto scoped = SettingsPanelPatcher::analyze(validPath);
+        check(scoped.supported && scoped.settingsPageCount == pages.size(),
+              QStringLiteral("duplicate pQmlSource outside the live model does not create a false Settings-tab duplicate (%1)")
+                  .arg(scoped.detail));
+
+        files[0].second = makePlayer(true).toUtf8();
+        auto duplicateModel = nestedResources(files);
+        addRegistration(duplicateModel, false);
+        const QString duplicatePath = temp.filePath(QStringLiteral("settings-model-duplicate.exe"));
+        write(duplicatePath, duplicateModel.f.bytes);
+        const auto duplicate = SettingsPanelPatcher::analyze(duplicatePath);
+        check(!duplicate.supported && duplicate.detail.contains(QStringLiteral("duplicate QML page path")),
+              QStringLiteral("a repeated page in the live Settings model is still refused safely (%1)")
+                  .arg(duplicate.detail));
+    }
+
     std::printf("[settings-gradient] settings panel surface in both gradient editors\n");
     {
         // The settings window paints its whole panel with one full-window
@@ -4461,7 +4522,9 @@ Window {
         check(modern.ok && modernHelper.contains("import QtWebEngine")
                   && modernHelper.contains("Qt.resolvedUrl(\"BootScreen.html\")")
                   && modernHtml.contains("data:image/svg+xml;base64,")
+                  && modernHtml.contains("class=\"boot theme-aurora\"")
                   && modernHtml.contains("class=\"ring-track\"")
+                  && modernHtml.contains("drop-shadow(0 0 22px")
                   && modernHtml.contains("Emulator is starting…")
                   && !modernHtml.contains("Promo.mp4") && !modernHtml.contains("<video")
                   && !modernHtml.contains("CUSTOMIZER")
@@ -4469,6 +4532,24 @@ Window {
               "built-in mode writes the logo, glowing ring, and neutral status to Assets/BootScreen.html");
         check(read(modernPath + QStringLiteral(".bak")) == image,
               "built-in modern mode preserves the complete original executable backup");
+
+        for (const QString &theme : { QStringLiteral("orbit"), QStringLiteral("pulse"), QStringLiteral("solar") }) {
+            const QString themedPath = QDir(folder).filePath(QStringLiteral("HD-Player-%1.exe").arg(theme));
+            write(themedPath, image);
+            const auto themed = BootVideoPatcher::patch(themedPath, 3000, theme);
+            const QString themedAssets = QDir(QFileInfo(themedPath).absolutePath()).filePath(QStringLiteral("Assets"));
+            const QByteArray themedHtml = read(QDir(themedAssets).filePath(QStringLiteral("BootScreen.html")));
+            const QByteArray themedHelper = read(QDir(themedAssets).filePath(QStringLiteral("BootVideo.qml")));
+            const QByteArray visualMarker = theme == QLatin1String("solar")
+                ? QByteArrayLiteral("#ffad66") : QByteArrayLiteral("theme-") + theme.toUtf8();
+            check(themed.ok && themedHtml.contains(QStringLiteral("class=\"boot theme-%1\"").arg(theme).toUtf8())
+                      && themedHtml.contains(visualMarker)
+                      && themedHelper.contains(QStringLiteral("property string bootTheme: \"%1\"").arg(theme).toUtf8()),
+                  QStringLiteral("the %1 preset is written into the selected player's standalone Assets boot page and its native fallback")
+                      .arg(theme));
+            check(read(themedPath + QStringLiteral(".bak")) == image,
+                  QStringLiteral("the %1 preset keeps the full executable backup").arg(theme));
+        }
 
         const QString customPath = QDir(folder).filePath(QStringLiteral("HD-Player-custom.exe"));
         const QString customSource = QDir(folder).filePath(QStringLiteral("selected-startup.mp4"));
@@ -4805,6 +4886,11 @@ Window {
         }
         ciNotice(QStringLiteral("real All files scan: %1 entries, %2 SVGs, %3 SVG thumbnails")
                      .arg(resourceCount).arg(svgCount).arg(svgThumbCount));
+        const QString playerLogo = BootVideoPatcher::logoPreviewDataUrl(input);
+        check(playerLogo.startsWith(QLatin1String("data:image/svg+xml;base64,"))
+                  || playerLogo.startsWith(QLatin1String("data:image/png;base64,")),
+              QStringLiteral("the real %1 resolves its embedded emulator logo, including unregistered MSI resource pools")
+                  .arg(QFileInfo(input).fileName()));
 
         // Exercise the actual Settings-panel rebuild on a disposable copy of
         // every uploaded player version. The source reference is only read;
@@ -4898,21 +4984,23 @@ Window {
                           && rebuiltWindow.contains(QStringLiteral("iSettingsWindow.startSystemMove()")),
                       QStringLiteral("the rebuilt %1 Settings window has the compact category UI and keeps native page loading, selection, dragging, and close behavior")
                           .arg(QFileInfo(input).fileName()));
-                QString expectedLogoExtension;
-                for (const auto &file : QtResources::registeredFiles(original)) {
-                    if (file.path.compare(QLatin1String("qrcAssets/BlueStacks5Beta.svg"), Qt::CaseInsensitive) == 0)
-                        expectedLogoExtension = QStringLiteral(".svg");
-                    else if (file.path.compare(QLatin1String("qrcAssets/BlueStacks5Beta.png"), Qt::CaseInsensitive) == 0)
-                        expectedLogoExtension = QStringLiteral(".png");
+                QString expectedLogoSource;
+                for (const auto &entry : EmbeddedResources::list(original, true)) {
+                    if (entry.path.compare(QLatin1String("qrcAssets/BlueStacks5Beta.svg"), Qt::CaseInsensitive) == 0)
+                        expectedLogoSource = QStringLiteral("qrc:/") + entry.path;
+                    else if (entry.path.compare(QLatin1String("qrcAssets/BlueStacks5Beta.png"), Qt::CaseInsensitive) == 0
+                             && expectedLogoSource.isEmpty())
+                        expectedLogoSource = QStringLiteral("qrc:/") + entry.path;
                 }
                 QString rebuiltAbout;
-                for (const auto &file : QtResources::registeredFiles(panelImage)) {
-                    if (file.name.compare(QLatin1String("PlrAboutSetting.qml"), Qt::CaseInsensitive) == 0)
-                        rebuiltAbout = QString::fromUtf8(QtResources::readFile(panelImage, file));
+                for (const auto &entry : EmbeddedResources::list(panelImage, true)) {
+                    if (entry.leaf.compare(QLatin1String("PlrAboutSetting.qml"), Qt::CaseInsensitive) == 0)
+                        rebuiltAbout = EmbeddedResources::decodeText(
+                            EmbeddedResources::readEntry(panelCopy, entry.entryOff, entry.flags, 8 * 1024 * 1024));
                 }
-                check(!expectedLogoExtension.isEmpty()
-                          && rebuiltAbout.contains(QStringLiteral("extn: \"%1\"").arg(expectedLogoExtension)),
-                      QStringLiteral("the rebuilt %1 About page selects the logo format actually present in its resource pool")
+                check(!expectedLogoSource.isEmpty()
+                          && rebuiltAbout.contains(QStringLiteral("source: \"%1\"").arg(expectedLogoSource)),
+                      QStringLiteral("the rebuilt %1 About page points directly at the logo resource that exists in the player")
                           .arg(QFileInfo(input).fileName()));
                 const auto activePanel = SettingsPanelPatcher::analyze(panelCopy);
                 check(activePanel.supported && activePanel.applied && activePanel.restorable
@@ -6324,6 +6412,32 @@ Window {
                   && resourceText(read(aboutPath), r, QStringLiteral("PlrAboutSetting.qml"))
                          .count(QLatin1String("BSI CUSTOMIZER: about-config ")) == 1,
               "applying different content updates the same page instead of stacking edits");
+        const QString currentAbout = resourceText(read(aboutPath), r,
+                                                  QStringLiteral("PlrAboutSetting.qml"));
+        const QString configMarker = QStringLiteral("// BSI CUSTOMIZER: about-config ");
+        const int configAt = currentAbout.indexOf(configMarker);
+        int configEnd = configAt < 0 ? -1 : currentAbout.indexOf(QLatin1Char('\n'), configAt);
+        if (configAt >= 0 && configEnd < 0) configEnd = currentAbout.size();
+        const QString compactConfig = configAt < 0 || configEnd < 0
+            ? QString() : currentAbout.mid(configAt + configMarker.size(),
+                                           configEnd - configAt - configMarker.size());
+        check(!compactConfig.isEmpty() && compactConfig.startsWith(QLatin1Char('{'))
+                  && compactConfig.size() < QString::fromLatin1(
+                         compactConfig.toUtf8().toBase64()).size(),
+              "About-page state is stored as compact JSON rather than Base64 to reduce MSI resource pressure");
+        if (!compactConfig.isEmpty()) {
+            QString oldConfigAbout = currentAbout;
+            oldConfigAbout.replace(configAt + configMarker.size(), compactConfig.size(),
+                                   QString::fromLatin1(compactConfig.toUtf8().toBase64()));
+            auto oldConfigFixture = resources(
+                {{QStringLiteral("PlrAboutSetting.qml"), oldConfigAbout}}, true, {});
+            addRegistration(oldConfigFixture, false);
+            const auto oldConfigState = AboutPatcher::analyze(oldConfigFixture.f.bytes);
+            check(oldConfigState.supported && oldConfigState.applied
+                      && oldConfigState.config.text == config.text
+                      && oldConfigState.config.links.value(1).url == config.links.value(1).url,
+                  "previous Base64 About config comments remain readable for update and restore");
+        }
         check(resourceText(read(aboutPath), r, QStringLiteral("PlrAboutSetting.qml"))
                       .count(QLatin1String("visible: true/*msi5*/")) == 3,
               "the sections the stock page hides are switched on again after the page was left "

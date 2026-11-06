@@ -32,7 +32,9 @@ assert "request.status===WebEngineView.LoadFailedStatus" in qml
 assert "webView.url = htmlUrl;\n            return;" in qml
 
 assert 'class="ring-track"' in html and "Emulator is starting…" in html
-assert "__BSI_EMULATOR_LOGO__" in qml and "__BSI_WITH_VIDEO__" in qml
+assert "__BSI_LOGO_ELEMENT__" in html and "theme-__BSI_BOOT_THEME__" in html
+assert all(f".theme-{theme}" in html for theme in ("orbit", "pulse", "solar"))
+assert "__BSI_EMULATOR_LOGO__" in qml and "__BSI_WITH_VIDEO__" in qml and "__BSI_BOOT_THEME__" in qml
 assert "Promo.mp4" in source and "__VIDEO_BACKGROUND__" in html
 
 messages = []
