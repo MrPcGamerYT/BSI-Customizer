@@ -4545,6 +4545,8 @@ Window {
         const QString modernAssets = QDir(QFileInfo(modernPath).absolutePath()).filePath(QStringLiteral("Assets"));
         const QByteArray modernHelper = read(QDir(modernAssets).filePath(QStringLiteral("BootVideo.qml")));
         const QByteArray modernHtml = read(QDir(modernAssets).filePath(QStringLiteral("BootScreen.html")));
+        const QByteArray modernController = resourceText(read(modernPath), r,
+                                                          QStringLiteral("RenamedStartup.qml"));
         check(modern.ok && modernHelper.contains("import QtWebEngine")
                   && modernHelper.contains("Qt.resolvedUrl(\"BootScreen.html\")")
                   && modernHtml.contains("data:image/svg+xml;base64,")
@@ -4553,7 +4555,7 @@ Window {
                   && modernHtml.contains("drop-shadow(0 0 22px")
                   && modernHtml.contains("Emulator is starting…")
                   && modernHelper.contains("bsiAuroraHalo")
-                  && modernHelper.contains("bsiNativeBootGlowCore")
+                  && modernController.contains("bsiNativeBootGlowCore")
                   && modernHelper.contains("ctx.shadowBlur")
                   && !modernHtml.contains("Promo.mp4") && !modernHtml.contains("<video")
                   && !modernHtml.contains("CUSTOMIZER")
