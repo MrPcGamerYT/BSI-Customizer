@@ -133,6 +133,10 @@ bool sourceFor(const QByteArray &image, const QString &exePath, const QString &l
         return false;
     }
     const auto &entry = matches.first();
+    if (entry.scanned) {
+        *error = QStringLiteral("The Resources scan can see %1, but it has no verified Qt resource-tree node; the Settings rebuild cannot safely relink it.").arg(leaf);
+        return false;
+    }
     if (!entry.text || entry.size <= 0 || entry.size > kMaxQml) {
         *error = QStringLiteral("The %1 resource is not bounded editable UTF-8 QML.").arg(leaf);
         return false;
@@ -204,10 +208,18 @@ bool readSettingsModelPages(const QString &playerText, const QHash<QString, QLis
     const auto allModels = QmlText::objects(masked, QStringLiteral("SettingElementModelList"));
     QList<QmlText::Object> models;
     for (const auto &model : allModels) {
-        const int contextStart = qMax(0, model.nameBegin - 320);
-        const QString beforeModel = masked.mid(contextStart, model.nameBegin - contextStart);
-        const bool inlineOwner = inlineSettingsModel
-            && inlineModelDeclaration.match(beforeModel).hasMatch();
+        bool inlineOwner = false;
+        if (inlineSettingsModel) {
+            QRegularExpressionMatch nearestDeclaration;
+            auto declarations = inlineModelDeclaration.globalMatch(masked.left(model.nameBegin));
+            while (declarations.hasNext()) nearestDeclaration = declarations.next();
+            if (nearestDeclaration.hasMatch()) {
+                const QString between = masked.mid(nearestDeclaration.capturedEnd(),
+                                                   model.nameBegin - nearestDeclaration.capturedEnd());
+                inlineOwner = QRegularExpression(QStringLiteral("^\\s*:\\s*$"))
+                                  .match(between).hasMatch();
+            }
+        }
         bool componentOwner = false;
         for (const auto &component : settingsComponents) {
             if (model.nameBegin > component.open && model.end <= component.end) {
@@ -224,6 +236,41 @@ bool readSettingsModelPages(const QString &playerText, const QHash<QString, QLis
     if (models.isEmpty() && allModels.size() == 1
         && (inlineSettingsModel || (liveComponentBinding && settingsComponents.size() == 1)))
         models << allModels.first();
+    // A live Component can contain several nested SettingElementModelList
+    // objects (for page subviews as well as the tab strip). Prefer the unique
+    // model whose page list resolves to the About page and the full native tab
+    // set; unrelated page-local models must not make the actual Settings panel
+    // look unsupported.
+    if (models.size() > 1) {
+        QList<QmlText::Object> completeModels;
+        const QRegularExpression pageSource(QStringLiteral("\\bpQmlSource\\s*:"));
+        for (const auto &candidate : models) {
+            int begin = candidate.open;
+            int end = candidate.end - 1;
+            QmlText::Binding list;
+            if (QmlText::binding(masked, candidate.open, candidate.end - 1,
+                                 QStringLiteral("pSettingElements"), &list)) {
+                begin = list.valueBegin;
+                end = list.valueEnd;
+            }
+            int resolved = 0;
+            bool hasAbout = false;
+            auto sources = pageSource.globalMatch(masked.mid(begin, end - begin));
+            while (sources.hasNext()) {
+                const auto source = sources.next();
+                const int valueBegin = begin + source.capturedEnd();
+                QString path;
+                if (!literalQmlString(playerText, valueBegin, end, &path)) continue;
+                const QString leaf = QFileInfo(path).fileName();
+                const auto found = qmlByLeaf.constFind(leaf.toCaseFolded());
+                if (found == qmlByLeaf.cend() || found.value().size() != 1) continue;
+                ++resolved;
+                if (leaf.compare(kAboutLeaf, Qt::CaseInsensitive) == 0) hasAbout = true;
+            }
+            if (hasAbout && resolved >= 8) completeModels << candidate;
+        }
+        if (completeModels.size() == 1) models = completeModels;
+    }
     if (playerText.isEmpty() || models.size() != 1) {
         *error = models.isEmpty()
             ? QStringLiteral("The registered plr.qml does not expose a live native Settings tab model; this player layout is unsupported.")
@@ -289,9 +336,13 @@ TargetSources readSources(const QString &exePath, const QByteArray &image)
     // rebuild, so a matching leaf from a detached/ambiguous resource is not
     // mistaken for the component the player actually loads.
     QHash<QString, QList<QtResources::File>> qmlByLeaf;
-    for (const auto &file : QtResources::registeredFiles(image))
-        if (file.name.endsWith(QLatin1String(".qml"), Qt::CaseInsensitive))
-            qmlByLeaf[file.name.toCaseFolded()] << file;
+    for (const auto &entry : EmbeddedResources::list(image, true)) {
+        if (entry.scanned || entry.format.compare(QLatin1String("qml"), Qt::CaseInsensitive) != 0)
+            continue;
+        qmlByLeaf[entry.leaf.toCaseFolded()] << QtResources::File {
+            entry.leaf, entry.entryOff, entry.flags, entry.path
+        };
+    }
     const auto uniqueQml = [&qmlByLeaf](const QString &leaf) -> const QtResources::File * {
         const auto it = qmlByLeaf.constFind(leaf.toCaseFolded());
         return it != qmlByLeaf.cend() && it.value().size() == 1 ? &it.value().first() : nullptr;

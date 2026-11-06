@@ -194,7 +194,10 @@ QVariantMap WebBridge::invoke(const QString &method, const QVariantMap &args)
         bool valid = false; const int hold = args.value("holdMs").toInt(&valid);
         if (!valid || hold < 0 || hold > 15000) return failure(QStringLiteral("Hold duration must be between 0 and 15000 milliseconds."));
         const QString mode = text("mode").isEmpty() ? QStringLiteral("video") : text("mode");
-        if (mode != QLatin1String("modern") && mode != QLatin1String("video")) return failure(QStringLiteral("Invalid boot style."));
+        if (mode != QLatin1String("modern") && mode != QLatin1String("aurora")
+            && mode != QLatin1String("orbit") && mode != QLatin1String("pulse")
+            && mode != QLatin1String("solar") && mode != QLatin1String("video"))
+            return failure(QStringLiteral("Invalid boot style."));
         value = m_backend.bootPatch(hold, mode, text("sourcePath"));
     } else if (method == QLatin1String("purgePlayerCache")) value = m_backend.purgePlayerCache();
     else if (method == QLatin1String("restoreBackup")) value = m_backend.restoreBackup(m_backend.exePath());

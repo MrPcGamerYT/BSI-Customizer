@@ -9,6 +9,8 @@ const commands = [...bridge.matchAll(/method == QLatin1String\("([^"]+)"\)/g)].m
 const nativeGuardTests = test.slice(test.indexOf('const char *commands[]'), test.indexOf('for (const char *command'));
 for (const command of commands) assert.ok(nativeGuardTests.includes('"' + command + '"'), 'Missing unauthenticated native regression: ' + command);
 const invoke = bridge.slice(bridge.indexOf('QVariantMap WebBridge::invoke'));
+const bootDispatch = invoke.slice(invoke.indexOf('method == QLatin1String("bootPatch")'), invoke.indexOf('method == QLatin1String("purgePlayerCache")'));
+for (const mode of ['aurora', 'orbit', 'pulse', 'solar', 'video']) assert.ok(bootDispatch.includes(`QLatin1String("${mode}")`), `Native bridge must accept the UI boot mode: ${mode}`);
 assert.ok(invoke.indexOf('!m_auth.isAuthorized()') < invoke.indexOf('method == QLatin1String'));
 assert.ok(invoke.indexOf('m_backend.busy() || m_dispatching') < invoke.indexOf('method == QLatin1String'));
 assert.equal((bridge.match(/m_backend\.scanResources\(/g) || []).length, 1, 'Scan must have one explicit dispatch entry');

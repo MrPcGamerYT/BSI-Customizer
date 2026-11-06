@@ -2615,7 +2615,7 @@ State analyze(const QByteArray &image)
     if (state.compiledPage) {
         state.detail += QStringLiteral(" These are the %1 compiled strings of the page itself - the "
                                        "copy the window loads - and each one is rewritten in its own "
-                                       "slot, so the file never grows and nothing moves.")
+                                       "fixed-size slot without moving that compiled data.")
                             .arg(layout.records.size());
     }
     if (state.scanned && state.supported) {
@@ -2706,9 +2706,11 @@ bool replaceScannedDoc(QByteArray &image, const Doc &doc, const QByteArray &body
 // did nothing. Copies are re-located after each write, so a copy that had to be
 // moved into free space is followed instead of being patched at a stale offset.
 bool rewritePage(QByteArray &changed, bool enabled, const Config &config,
-                 int *patched, QString *error)
+                 int *patched, bool *grew, QString *error)
 {
     *patched = 0;
+    if (grew) *grew = false;
+    const qsizetype initialSize = changed.size();
     for (int pass = 0; pass < 8; ++pass) {
         QList<Doc> docs;
         QString whyNot;
@@ -2751,7 +2753,10 @@ bool rewritePage(QByteArray &changed, bool enabled, const Config &config,
                 break;
             }
         }
-        if (!next) return true;
+        if (!next) {
+            if (grew) *grew = changed.size() > initialSize;
+            return true;
+        }
         Doc doc = *next;
         QList<Edit> edits;
         if (enabled) {
@@ -2802,31 +2807,15 @@ bool rewritePage(QByteArray &changed, bool enabled, const Config &config,
             // where it already sits, inside its own room.
             written = replaceScannedDoc(changed, doc, body, error);
         } else {
-            // A page mapped by the tree is rewritten in place first. When the
-            // new text is longer than the room the record has - which is every
-            // change to an MSI page: its record is full - the record is built in
-            // space the file already has and the node is re-pointed at it. The
-            // file does not grow and nothing else moves.
-            QString why;
+            // Prefer the existing record and verified mapped slack. If neither
+            // can hold the rewritten About QML, the resource writer may append a
+            // checked non-executable PE section; it will refuse unknown overlays
+            // or a full PE header rather than writing an unsafe offset.
             QByteArray once = changed;
-            if (QtResources::replaceResource(once, doc.file.entryOff, doc.link, body, &why,
-                                             nullptr, false)) {
+            if (QtResources::replaceResource(once, doc.file.entryOff, doc.link, body,
+                                             error, nullptr, true)) {
                 changed = once;
                 written = true;
-            } else {
-                const qint64 need = 4 + qint64(qCompress(body, 9).size());
-                QString space;
-                const qint64 destination = QtResources::findFreeSpace(changed, doc.link, need, &space);
-                if (destination >= 0) {
-                    once = changed;
-                    why.clear();
-                    if (QtResources::replaceResource(once, doc.file.entryOff, doc.link, body, &why,
-                                                     nullptr, false, destination)) {
-                        changed = once;
-                        written = true;
-                    }
-                }
-                if (!written && error) *error = space.isEmpty() ? why : space;
             }
         }
         if (!written) return false;
@@ -2924,6 +2913,7 @@ Result apply(const QString &selectedPath, bool enabled, const Config &rawConfig)
     QByteArray changed = original;
     QString error;
     int patched = 0;
+    bool qmlGrew = false;
     // A build that keeps the page only as compiled code has no source to edit,
     // and one whose source is a shape the editor cannot parse is left alone on
     // apply (its compiled copy is still rewritten below). A page found by
@@ -2939,7 +2929,7 @@ Result apply(const QString &selectedPath, bool enabled, const Config &rawConfig)
                                      "editable page; no file was written. %1")
                           .arg(qmlError));
     if (qmlWritable
-        && !rewritePage(changed, enabled, config, &patched, &error))
+        && !rewritePage(changed, enabled, config, &patched, &qmlGrew, &error))
         return refuse(error.isEmpty() ? QStringLiteral("The About page could not be rewritten; "
                                                        "no file was written.") : error);
 
@@ -3066,6 +3056,9 @@ Result apply(const QString &selectedPath, bool enabled, const Config &rawConfig)
         : QStringLiteral("Stock About page restored%1 (text, every link row, section visibility, "
                          "the compiled page strings and the update button). Verified in the file on "
                          "disk. ").arg(pageCount);
+    if (qmlGrew)
+        msg += QStringLiteral("A verified PE resource section was added to hold the edited QML; the EXE grew by %1 bytes.")
+                   .arg(changed.size() - original.size());
     if (unitsOff > 0)
         msg += QStringLiteral(" The player's built-in compiled copy of this page was switched off "
                               "(%1 unit(s)), so the page it runs is the edited source - that is what "
