@@ -171,18 +171,11 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
         return next((item for item in visual_tree if item.objectName() == name), None)
 
     tabs = next(
-        (
-            item for item in visual_tree
-            if item.property("orientation") is not None
-            and item.property("currentIndex") is not None
-        ),
+        (item for item in visual_tree if item.metaObject().className().endswith("ListView")),
         None,
     )
     stack = next(
-        (
-            item for item in visual_tree
-            if item is not tabs and item.property("currentIndex") is not None
-        ),
+        (item for item in visual_tree if item.metaObject().className().endswith("StackLayout")),
         None,
     )
     first_tab = next(
