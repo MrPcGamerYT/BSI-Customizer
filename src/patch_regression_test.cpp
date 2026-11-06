@@ -4545,7 +4545,7 @@ Window {
         const QString modernAssets = QDir(QFileInfo(modernPath).absolutePath()).filePath(QStringLiteral("Assets"));
         const QByteArray modernHelper = read(QDir(modernAssets).filePath(QStringLiteral("BootVideo.qml")));
         const QByteArray modernHtml = read(QDir(modernAssets).filePath(QStringLiteral("BootScreen.html")));
-        const QByteArray modernController = resourceText(read(modernPath), r,
+        const QString modernController = resourceText(read(modernPath), r,
                                                           QStringLiteral("RenamedStartup.qml"));
         check(modern.ok && modernHelper.contains("import QtWebEngine")
                   && modernHelper.contains("Qt.resolvedUrl(\"BootScreen.html\")")
