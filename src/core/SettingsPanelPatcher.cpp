@@ -200,12 +200,9 @@ bool readSettingsModelPages(const QString &playerText, const QHash<QString, QLis
         }
     }
 
+    const auto allModels = QmlText::objects(masked, QStringLiteral("SettingElementModelList"));
     QList<QmlText::Object> models;
-    for (const auto &model : QmlText::objects(masked, QStringLiteral("SettingElementModelList"))) {
-        QmlText::Binding elements;
-        if (!QmlText::binding(masked, model.open, model.end - 1,
-                              QStringLiteral("pSettingElements"), &elements))
-            continue;
+    for (const auto &model : allModels) {
         const int contextStart = qMax(0, model.nameBegin - 320);
         const QString beforeModel = masked.mid(contextStart, model.nameBegin - contextStart);
         const bool inlineOwner = inlineSettingsModel
@@ -219,6 +216,13 @@ bool readSettingsModelPages(const QString &playerText, const QHash<QString, QLis
         }
         if (inlineOwner || componentOwner) models << model;
     }
+    // Some older Player QML packages declare the native model in plr.qml but
+    // inherit/compose its element list without a local pSettingElements
+    // binding. If there is exactly one model and a real Settings-window
+    // connection, it is still unambiguous; scope discovery to that model body.
+    if (models.isEmpty() && allModels.size() == 1
+        && (inlineSettingsModel || (liveComponentBinding && settingsComponents.size() == 1)))
+        models << allModels.first();
     if (playerText.isEmpty() || models.size() != 1) {
         *error = models.isEmpty()
             ? QStringLiteral("The registered plr.qml does not expose a live native Settings tab model; this player layout is unsupported.")
@@ -227,22 +231,23 @@ bool readSettingsModelPages(const QString &playerText, const QHash<QString, QLis
     }
 
     const auto &model = models.first();
+    int sourceBegin = model.open;
+    int sourceEnd = model.end - 1;
     QmlText::Binding elements;
-    if (!QmlText::binding(masked, model.open, model.end - 1,
-                          QStringLiteral("pSettingElements"), &elements)) {
-        *error = QStringLiteral("The live Settings tab model has no readable pSettingElements list.");
-        return false;
+    if (QmlText::binding(masked, model.open, model.end - 1,
+                         QStringLiteral("pSettingElements"), &elements)) {
+        sourceBegin = elements.valueBegin;
+        sourceEnd = elements.valueEnd;
     }
     const QRegularExpression pageSource(QStringLiteral("\\bpQmlSource\\s*:"));
-    auto matches = pageSource.globalMatch(masked.mid(elements.valueBegin,
-                                                       elements.valueEnd - elements.valueBegin));
+    auto matches = pageSource.globalMatch(masked.mid(sourceBegin, sourceEnd - sourceBegin));
     while (matches.hasNext()) {
         const auto match = matches.next();
-        const int colon = elements.valueBegin + match.capturedEnd() - 1;
+        const int colon = sourceBegin + match.capturedEnd() - 1;
         const int valueBegin = colon + 1;
-        if (valueBegin >= elements.valueEnd) break;
+        if (valueBegin >= sourceEnd) break;
         QString page;
-        if (!literalQmlString(playerText, valueBegin, elements.valueEnd, &page)) {
+        if (!literalQmlString(playerText, valueBegin, sourceEnd, &page)) {
             *error = QStringLiteral("A page in the live Settings tab model has a dynamic or malformed pQmlSource; it cannot be resolved safely.");
             return false;
         }
