@@ -2978,6 +2978,7 @@ int runPatchRegressionTests()
                 " property SettingElementModelList pSettingsItems: SettingElementModelList {\n"
                 "  pSettingElements: [\n%1  ]\n"
                 " }\n"
+                " property SettingElementModelList pPreviewItems: SettingElementModelList { pSettingElements: [{ pQmlSource: \"Preview.qml\" }] }\n"
                 " Component { id: unrelatedPreview; Item { property string pQmlSource: \"General.qml\" } }\n"
                 "}\n").arg(rows);
         };
@@ -6229,12 +6230,10 @@ Window {
     {
         const QString about = aboutPageFixture();
         auto r = resources({ { QStringLiteral("PlrAboutSetting.qml"), about } }, true, {});
-        // The edited page is longer than the record it sits in - it carries the
-        // tags that undo it and the config line - and this tool never grows the
-        // file, so the record has to move into space the file already has, the
-        // way it moves into the zero run of an MSI player. The fixture is filled
-        // with 0xa5 so that nothing is free by accident: the cave is punched on
-        // purpose, and the move is part of what these checks prove.
+        // The edited page is longer than its record. This fixture provides a
+        // verified in-file cave so the resource moves without adding a section;
+        // a separate no-slack case below verifies the safe PE-growth fallback.
+        // Fill the rest with 0xa5 so the cave is punched deliberately.
         r.f.bytes.replace(0x10000, 0x4000, QByteArray(0x4000, '\0'));
         addRegistration(r, false);
         // A Qt-compiled player carries a QV4 unit for this page next to its
@@ -6280,6 +6279,28 @@ Window {
                   && stock.config.links.value(2).url == QStringLiteral("http://www.bluestacks.com"),
               QStringLiteral("the website row keeps its name and handler URL (%1 -> %2)")
                   .arg(stock.config.links.value(2).name, stock.config.links.value(2).url));
+
+        // MSI executables can have a full About-QML record and no zero-filled
+        // mapped cave. The About editor must still succeed by asking the PE
+        // resource writer for a safe appended data section, not fail with a
+        // generic “no free space” message.
+        auto noSlack = resources({ { QStringLiteral("PlrAboutSetting.qml"), about } }, true, {});
+        addRegistration(noSlack, false);
+        const QString growthPath = temp.filePath(QStringLiteral("about-page-no-slack.exe"));
+        const QByteArray growthOriginal = noSlack.f.bytes;
+        write(growthPath, growthOriginal);
+        AboutPatcher::Config growthConfig = stock.config;
+        growthConfig.text = QStringLiteral("Customized About page with links");
+        const auto grown = AboutPatcher::apply(growthPath, true, growthConfig);
+        const QByteArray growthWritten = read(growthPath);
+        const auto growthState = AboutPatcher::analyze(growthWritten);
+        check(grown.ok && growthWritten.size() > growthOriginal.size()
+                  && PeUtils::sections(growthWritten).size() == PeUtils::sections(growthOriginal).size() + 1,
+              QStringLiteral("a full About resource with no mapped slack is patched using a verified PE data section (%1)")
+                  .arg(grown.msg));
+        check(growthState.supported && growthState.applied
+                  && growthState.config.text == growthConfig.text,
+              "the appended About QML resource reads back with the requested text");
 
         // A build that renames the copyright row (or never had the id) still has
         // to prefill: the line is located by the marker it prints, not by its id.

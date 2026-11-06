@@ -1426,7 +1426,7 @@ QVariantMap Backend::bootPatch(int holdMs, const QString &mode, const QString &v
     if (!m_backgroundWorker)
         return runBackground([=](Backend &worker) { return worker.bootPatch(holdMs, mode, videoPath); });
     const auto r = BootVideoPatcher::patch(m_settings->exePath(), holdMs, mode, videoPath);
-    return result(r.ok, r.msg, QStringLiteral("green"));
+    return result(r.ok, r.msg, r.ok ? QStringLiteral("green") : QStringLiteral("red"));
 }
 
 QVariantMap Backend::bootLogoPreview()
