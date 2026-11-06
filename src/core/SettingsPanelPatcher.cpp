@@ -193,12 +193,16 @@ bool readSettingsModelPages(const QString &playerText, const QHash<QString, QLis
         QStringLiteral("\\bproperty\\s+(?:[A-Za-z_][A-Za-z0-9_]*\\s+)*SettingElementModelList\\s+pSettingsItems\\b"));
     const bool inlineSettingsModel = inlineModelDeclaration.match(masked).hasMatch();
     const QRegularExpression componentSettingsBindingPattern(
-        QStringLiteral("\\bpSettingsWindow\\s*=\\s*component\\.createObject\\s*\\([^;]*[\\\"']pSettingsItems[\\\"']\\s*:\\s*iSettingsItems\\.createObject\\s*\\("));
-    const bool liveComponentBinding = componentSettingsBindingPattern.match(playerText).hasMatch();
+        QStringLiteral("\\bpSettingsWindow\\s*=\\s*[A-Za-z_][A-Za-z0-9_]*\\.createObject\\s*\\([^;]*(?:[\\\"']pSettingsItems[\\\"']|\\bpSettingsItems\\b)\\s*:\\s*([A-Za-z_][A-Za-z0-9_]*)"));
+    const QRegularExpressionMatch componentSettingsBinding = componentSettingsBindingPattern.match(playerText);
+    const bool liveComponentBinding = componentSettingsBinding.hasMatch();
+    const QString settingsComponentId = liveComponentBinding
+        ? componentSettingsBinding.captured(1) : QString();
 
     QList<QmlText::Object> settingsComponents;
     if (liveComponentBinding) {
-        const QRegularExpression settingsId(QStringLiteral("\\bid\\s*:\\s*iSettingsItems\\b"));
+        const QRegularExpression settingsId(
+            QStringLiteral("\\bid\\s*:\\s*%1\\b").arg(QRegularExpression::escape(settingsComponentId)));
         for (const auto &component : QmlText::objects(masked, QStringLiteral("Component"))) {
             const QString body = masked.mid(component.open, component.end - component.open);
             if (settingsId.match(body).hasMatch()) settingsComponents << component;
@@ -207,6 +211,7 @@ bool readSettingsModelPages(const QString &playerText, const QHash<QString, QLis
 
     const auto allModels = QmlText::objects(masked, QStringLiteral("SettingElementModelList"));
     QList<QmlText::Object> models;
+    QList<QmlText::Object> inlineSettingsModels;
     for (const auto &model : allModels) {
         bool inlineOwner = false;
         if (inlineSettingsModel) {
@@ -227,6 +232,7 @@ bool readSettingsModelPages(const QString &playerText, const QHash<QString, QLis
                 break;
             }
         }
+        if (inlineOwner) inlineSettingsModels << model;
         if (inlineOwner || componentOwner) models << model;
     }
     // Some older Player QML packages declare the native model in plr.qml but
@@ -236,8 +242,16 @@ bool readSettingsModelPages(const QString &playerText, const QHash<QString, QLis
     if (models.isEmpty() && allModels.size() == 1
         && (inlineSettingsModel || (liveComponentBinding && settingsComponents.size() == 1)))
         models << allModels.first();
+    // Older MSI player QML can declare several model objects, but the one
+    // directly initialized by the property named pSettingsItems is the model
+    // consumed by UiSettingsWindow. If no component binding is present, prefer
+    // that unique inline owner rather than rejecting it alongside nested
+    // models for subpages.
+    if (models.size() > 1 && !liveComponentBinding && inlineSettingsModels.size() == 1)
+        models = inlineSettingsModels;
+
     // When plr.qml constructs the window with
-    // `pSettingsItems: iSettingsItems.createObject(...)`, that Component is
+    // `pSettingsItems: someSettingsItems.createObject(...)`, that Component is
     // the object actually passed to UiSettingsWindow. Prefer its root model
     // (especially an explicitly named pSettingsItems model) over stale inline
     // declarations and nested page-local models elsewhere in plr.qml.
@@ -265,6 +279,19 @@ bool readSettingsModelPages(const QString &playerText, const QHash<QString, QLis
         }
         if (namedSettingsModels.size() == 1) models = namedSettingsModels;
         else if (componentRootModels.size() == 1) models = componentRootModels;
+    }
+    if (models.size() > 1) {
+        QList<QmlText::Object> explicitlyNamed;
+        for (const auto &candidate : models) {
+            QmlText::Binding idBinding;
+            if (QmlText::binding(masked, candidate.open, candidate.end - 1,
+                                 QStringLiteral("id"), &idBinding)
+                && masked.mid(idBinding.valueBegin,
+                              idBinding.valueEnd - idBinding.valueBegin).trimmed()
+                    == QLatin1String("pSettingsItems"))
+                explicitlyNamed << candidate;
+        }
+        if (explicitlyNamed.size() == 1) models = explicitlyNamed;
     }
     // A live Component can contain several nested SettingElementModelList
     // objects (for page subviews as well as the tab strip). Prefer the unique

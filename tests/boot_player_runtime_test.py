@@ -32,6 +32,11 @@ assert "request.status===WebEngineView.LoadFailedStatus" in qml
 assert "webView.url = htmlUrl;\n            return;" in qml
 
 assert 'class="ring-track"' in html and "Emulator is starting…" in html
+# The rotating Canvas has transparent padding beyond the arc/shadow so its
+# square item bounds cannot clip into a visible glow box.
+assert "width: Math.max(loadingRingTrack.width * 1.40," in qml
+assert "loadingRingTrack.width / 2 - ctx.lineWidth" in qml
+assert 'objectName: "bsiAuroraHalo"' in qml and "anchors.fill: parent" in qml
 assert "__BSI_LOGO_ELEMENT__" in html and "theme-__BSI_BOOT_THEME__" in html
 assert all(f".theme-{theme}" in html for theme in ("orbit", "pulse", "solar"))
 assert "__BSI_EMULATOR_LOGO__" in qml and "__BSI_WITH_VIDEO__" in qml and "__BSI_BOOT_THEME__" in qml

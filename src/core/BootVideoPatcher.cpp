@@ -344,17 +344,16 @@ Item {
         objectName: "bsiAuroraHalo"
         z: 1
         visible: !root.htmlLoaded && (root.bootTheme === "aurora" || root.bootTheme === "solar")
-        width: Math.min(Math.min(root.width, root.height) * 0.82, 920)
-        height: width
-        anchors.centerIn: parent
-        anchors.verticalCenterOffset: -root.height * 0.045
+        anchors.fill: parent
         opacity: root.bootTheme === "solar" ? 0.68 : 0.86
         onPaint: {
             var ctx = getContext("2d");
             ctx.clearRect(0, 0, width, height);
             var solar = root.bootTheme === "solar";
-            var gradient = ctx.createRadialGradient(width / 2, height / 2, 0,
-                                                    width / 2, height / 2, width / 2);
+            var cx = width / 2;
+            var cy = height * 0.455;
+            var radius = Math.min(width, height) * 0.78;
+            var gradient = ctx.createRadialGradient(cx, cy, 0, cx, cy, radius);
             gradient.addColorStop(0, solar ? "rgba(255,165,92,0.52)" : "rgba(74,194,255,0.46)");
             gradient.addColorStop(0.42, solar ? "rgba(228,110,63,0.24)" : "rgba(44,137,202,0.24)");
             gradient.addColorStop(1, "rgba(0,0,0,0)");
@@ -371,18 +370,16 @@ Item {
         objectName: "bsiBootNativeAura"
         z: 1
         visible: !root.htmlLoaded
-        width: Math.min(Math.min(root.width, root.height) * 0.94, 1020)
-        height: width
-        anchors.horizontalCenter: parent.horizontalCenter
-        anchors.verticalCenter: parent.verticalCenter
-        anchors.verticalCenterOffset: -root.height * 0.025
+        anchors.fill: parent
         opacity: 0.72
         onPaint: {
             var ctx = getContext("2d");
             ctx.clearRect(0, 0, width, height);
             var solar = root.bootTheme === "solar";
-            var gradient = ctx.createRadialGradient(width / 2, height / 2, 0,
-                                                    width / 2, height / 2, width / 2);
+            var cx = width / 2;
+            var cy = height * 0.475;
+            var radius = Math.min(width, height) * 0.82;
+            var gradient = ctx.createRadialGradient(cx, cy, 0, cx, cy, radius);
             gradient.addColorStop(0, solar ? "rgba(192,105,64,0.42)" : "rgba(52,143,194,0.34)");
             gradient.addColorStop(0.5, solar ? "rgba(126,63,61,0.20)" : "rgba(29,82,126,0.20)");
             gradient.addColorStop(1, "rgba(0,0,0,0)");
@@ -540,7 +537,8 @@ Item {
         objectName: "bsiLoadingRing"
         z: 3
         visible: !root.htmlLoaded
-        width: loadingRingTrack.width
+        width: Math.max(loadingRingTrack.width * 1.40,
+                        loadingRingTrack.width + Math.min(root.width, root.height) * 0.18)
         height: width
         anchors.centerIn: loadingRingTrack
         antialiasing: true
@@ -556,7 +554,7 @@ Item {
             ctx.shadowBlur = root.bootTheme === "aurora"
                 ? Math.max(22, Math.min(root.width, root.height) * 0.060)
                 : Math.max(14, Math.min(root.width, root.height) * 0.045);
-            ctx.arc(width / 2, height / 2, width / 2 - ctx.lineWidth, -Math.PI * 0.70, Math.PI * 0.88, false);
+            ctx.arc(width / 2, height / 2, loadingRingTrack.width / 2 - ctx.lineWidth, -Math.PI * 0.70, Math.PI * 0.88, false);
             ctx.stroke();
         }
         RotationAnimation on rotation {
@@ -669,17 +667,16 @@ QString nativeFallbackComponent(const QString &logoUrl, const QString &theme)
         }
         Canvas {
             objectName: "bsiNativeBootAura"
-            width: Math.min(Math.min(parent.width, parent.height) * 0.94, 1020)
-            height: width
-            anchors.centerIn: parent
-            anchors.verticalCenterOffset: -parent.height * 0.025
+            anchors.fill: parent
             opacity: 0.72
             onPaint: {
                 var ctx = getContext("2d");
                 ctx.clearRect(0, 0, width, height);
                 var solar = nativeBootRoot.bootTheme === "solar";
-                var gradient = ctx.createRadialGradient(width / 2, height / 2, 0,
-                                                        width / 2, height / 2, width / 2);
+                var cx = width / 2;
+                var cy = height * 0.475;
+                var radius = Math.min(width, height) * 0.82;
+                var gradient = ctx.createRadialGradient(cx, cy, 0, cx, cy, radius);
                 gradient.addColorStop(0, solar ? "rgba(192,105,64,0.42)" : "rgba(52,143,194,0.34)");
                 gradient.addColorStop(0.5, solar ? "rgba(126,63,61,0.20)" : "rgba(29,82,126,0.20)");
                 gradient.addColorStop(1, "rgba(0,0,0,0)");
@@ -695,17 +692,16 @@ QString nativeFallbackComponent(const QString &logoUrl, const QString &theme)
         Canvas {
             objectName: "bsiNativeBootGlowCore"
             visible: nativeBootRoot.bootTheme === "aurora" || nativeBootRoot.bootTheme === "solar"
-            width: Math.min(Math.min(parent.width, parent.height) * 0.62, 720)
-            height: width
-            anchors.centerIn: parent
-            anchors.verticalCenterOffset: -parent.height * 0.045
+            anchors.fill: parent
             opacity: nativeBootRoot.bootTheme === "solar" ? 0.68 : 0.86
             onPaint: {
                 var ctx = getContext("2d");
                 ctx.clearRect(0, 0, width, height);
                 var solar = nativeBootRoot.bootTheme === "solar";
-                var gradient = ctx.createRadialGradient(width / 2, height / 2, 0,
-                                                        width / 2, height / 2, width / 2);
+                var cx = width / 2;
+                var cy = height * 0.455;
+                var radius = Math.min(width, height) * 0.56;
+                var gradient = ctx.createRadialGradient(cx, cy, 0, cx, cy, radius);
                 gradient.addColorStop(0, solar ? "rgba(255,165,92,0.52)" : "rgba(74,194,255,0.46)");
                 gradient.addColorStop(0.42, solar ? "rgba(228,110,63,0.24)" : "rgba(44,137,202,0.24)");
                 gradient.addColorStop(1, "rgba(0,0,0,0)");
@@ -799,7 +795,8 @@ QString nativeFallbackComponent(const QString &logoUrl, const QString &theme)
         }
         Canvas {
             objectName: "bsiNativeBootRing"
-            width: bsiNativeRingTrack.width
+            width: Math.max(bsiNativeRingTrack.width * 1.40,
+                            bsiNativeRingTrack.width + Math.min(parent.width, parent.height) * 0.18)
             height: width
             anchors.centerIn: bsiNativeRingTrack
             antialiasing: true
@@ -817,7 +814,7 @@ QString nativeFallbackComponent(const QString &logoUrl, const QString &theme)
                     : Math.max(12, Math.min(parent.width, parent.height) * 0.038);
                 var start = nativeBootRoot.bootTheme === "orbit" ? -Math.PI * 0.18 : -Math.PI * 0.70;
                 var finish = nativeBootRoot.bootTheme === "orbit" ? Math.PI * 1.78 : Math.PI * 0.88;
-                ctx.arc(width / 2, height / 2, width / 2 - ctx.lineWidth, start, finish, false);
+                ctx.arc(width / 2, height / 2, bsiNativeRingTrack.width / 2 - ctx.lineWidth, start, finish, false);
                 ctx.stroke();
             }
             RotationAnimation on rotation {
