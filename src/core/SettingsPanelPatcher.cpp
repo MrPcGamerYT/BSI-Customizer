@@ -694,7 +694,7 @@ UiShadowContainer{
 id:iSettingsWindowShadowContainer;anchors.fill:parent
 property var bHidden:@@BSI_HIDDEN_TABS@@
 property var bIcons:@@BSI_TAB_ICONS@@
-function bKey(v){return String(v||"").split("/").pop().toLowerCase()}
+function bKey(v){return v.toLowerCase().split("/").pop()}
 Item{anchors.fill:parent
 MouseArea{width:parent.width-42;height:32;onPressed:iSettingsWindow.startSystemMove()}
 UiImageButton{asset:"CloseIcon";anchors.right:parent.right;onClicked:iSettingsWindow.close()}
