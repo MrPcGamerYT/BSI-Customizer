@@ -695,13 +695,11 @@ id:iSettingsWindowShadowContainer;anchors.fill:parent
 property var bHidden:@@BSI_HIDDEN_TABS@@
 property var bIcons:@@BSI_TAB_ICONS@@
 function bKey(v){return String(v||"").split("/").pop().toLowerCase()}
-property var bVisible:{var a=[],e=pSettingsItems.pSettingElements||[];for(var i=0;i<e.length;i++)if(bHidden.indexOf(bKey(e[i].pQmlSource))<0)a.push(i);return a}
-Component.onCompleted:if(bVisible.indexOf(pCurrentTabIndex)<0)fChangeSelectedSetting(bVisible[0])
 Item{anchors.fill:parent
 MouseArea{width:parent.width-42;height:32;onPressed:iSettingsWindow.startSystemMove()}
 UiImageButton{asset:"CloseIcon";anchors.right:parent.right;onClicked:iSettingsWindow.close()}
-ListView{width:parent.width;height:72;y:32;clip:true;orientation:ListView.Horizontal;model:iSettingsWindowShadowContainer.bVisible;currentIndex:iSettingsWindowShadowContainer.bVisible.indexOf(pCurrentTabIndex)
-delegate:Item{property int p:modelData;property var d:pSettingsItems.pSettingElements[p];property string k:iSettingsWindowShadowContainer.bKey(d.pQmlSource);property string icon:iSettingsWindowShadowContainer.bIcons[k]||"";width:92;height:64
+ListView{width:parent.width;height:72;y:32;clip:true;orientation:ListView.Horizontal;model:pSettingsItems.pSettingElements;currentIndex:pCurrentTabIndex
+delegate:Item{property int p:index;property var d:modelData;property string k:iSettingsWindowShadowContainer.bKey(d.pQmlSource);property string icon:iSettingsWindowShadowContainer.bIcons[k]||"";width:iSettingsWindowShadowContainer.bHidden.indexOf(k)<0?92:0;height:64;visible:width>0
 UiSettingsButton{anchors.fill:parent;pSettingBtnText:parent.d.pButtonText;pSelected:parent.p===pCurrentTabIndex;pShowRedDot:parent.d.pShowRedDot;onSettingClicked:fChangeSelectedSetting(parent.p)}
 Image{visible:parent.icon.length>0;source:parent.icon;width:18;height:18;anchors.horizontalCenter:parent.horizontalCenter;anchors.top:parent.top}}
 }
