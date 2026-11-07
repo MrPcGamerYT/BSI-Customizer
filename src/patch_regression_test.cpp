@@ -5236,7 +5236,7 @@ Window {
                         if (entry.leaf.compare(QLatin1String("PlrAboutSetting.qml"), Qt::CaseInsensitive) == 0)
                             updatedAbout = EmbeddedResources::decodeText(EmbeddedResources::readEntry(panelCopy, entry.entryOff, entry.flags, 8 * 1024 * 1024));
                     }
-                    check(updatedWindow.contains(QStringLiteral("iBsiHiddenTabIds"))
+                    check(updatedWindow.contains(QStringLiteral("bHidden"))
                               && (hiddenTabId.isEmpty() || updatedWindow.contains(hiddenTabId))
                               && updatedWindow.contains(QStringLiteral("data:image/svg+xml;base64,"))
                               && updatedAbout.contains(QStringLiteral("data:image/svg+xml;base64,"))
