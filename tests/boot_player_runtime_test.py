@@ -41,6 +41,8 @@ assert "__BSI_LOGO_ELEMENT__" in html and "theme-__BSI_BOOT_THEME__" in html
 assert all(f".theme-{theme}" in html for theme in ("orbit", "pulse", "solar"))
 assert "__BSI_EMULATOR_LOGO__" in qml and "__BSI_WITH_VIDEO__" in qml and "__BSI_BOOT_THEME__" in qml
 assert "Promo.mp4" in source and "__VIDEO_BACKGROUND__" in html
+assert 'Assets/BlueStacks.ico' in source and "<span>BS</span>" not in html
+assert 'text: "BS"' not in source
 
 messages = []
 def log(kind, context, message):

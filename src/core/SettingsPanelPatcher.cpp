@@ -193,8 +193,15 @@ bool readSettingsModelPages(const QString &playerText, const QHash<QString, QLis
         QStringLiteral("\\bproperty\\s+(?:[A-Za-z_][A-Za-z0-9_]*\\s+)*SettingElementModelList\\s+pSettingsItems\\b"));
     const bool inlineSettingsModel = inlineModelDeclaration.match(masked).hasMatch();
     const QRegularExpression componentSettingsBindingPattern(
-        QStringLiteral("\\bpSettingsWindow\\s*=\\s*[A-Za-z_][A-Za-z0-9_]*\\.createObject\\s*\\([^;]*(?:[\\\"']pSettingsItems[\\\"']|\\bpSettingsItems\\b)\\s*:\\s*([A-Za-z_][A-Za-z0-9_]*)"));
-    const QRegularExpressionMatch componentSettingsBinding = componentSettingsBindingPattern.match(playerText);
+        QStringLiteral("\\bpSettingsWindow\\s*(?:=|:)\\s*[A-Za-z_][A-Za-z0-9_]*\\.createObject\\s*\\([^;]*(?:[\\\"']pSettingsItems[\\\"']|\\bpSettingsItems\\b)\\s*:\\s*([A-Za-z_][A-Za-z0-9_]*)"));
+    QRegularExpressionMatch componentSettingsBinding = componentSettingsBindingPattern.match(playerText);
+    if (!componentSettingsBinding.hasMatch()) {
+        // Some MSI builds create UiSettingsWindow first and assign its model
+        // immediately afterward instead of passing it in createObject's map.
+        const QRegularExpression separateSettingsModelBinding(
+            QStringLiteral("\\bpSettingsWindow\\s*(?:\\.\\s*pSettingsItems|\\[\\s*[\\\"']pSettingsItems[\\\"']\\s*\\])\\s*=\\s*([A-Za-z_][A-Za-z0-9_]*)"));
+        componentSettingsBinding = separateSettingsModelBinding.match(playerText);
+    }
     const bool liveComponentBinding = componentSettingsBinding.hasMatch();
     const QString settingsComponentId = liveComponentBinding
         ? componentSettingsBinding.captured(1) : QString();
@@ -244,10 +251,10 @@ bool readSettingsModelPages(const QString &playerText, const QHash<QString, QLis
         models << allModels.first();
     // Older MSI player QML can declare several model objects, but the one
     // directly initialized by the property named pSettingsItems is the model
-    // consumed by UiSettingsWindow. If no component binding is present, prefer
-    // that unique inline owner rather than rejecting it alongside nested
+    // consumed by UiSettingsWindow. If no unique matching Component exists,
+    // prefer that unique inline owner rather than rejecting it alongside nested
     // models for subpages.
-    if (models.size() > 1 && !liveComponentBinding && inlineSettingsModels.size() == 1)
+    if (models.size() > 1 && settingsComponents.size() != 1 && inlineSettingsModels.size() == 1)
         models = inlineSettingsModels;
 
     // When plr.qml constructs the window with
@@ -329,9 +336,25 @@ bool readSettingsModelPages(const QString &playerText, const QHash<QString, QLis
         if (completeModels.size() == 1) models = completeModels;
     }
     if (playerText.isEmpty() || models.size() != 1) {
-        *error = models.isEmpty()
-            ? QStringLiteral("The registered plr.qml does not expose a live native Settings tab model; this player layout is unsupported.")
-            : QStringLiteral("The registered plr.qml exposes multiple possible live Settings tab models; refusing to guess which panel is active.");
+        if (models.isEmpty()) {
+            *error = QStringLiteral("The registered plr.qml does not expose a live native Settings tab model; this player layout is unsupported.");
+        } else {
+            QStringList candidateIds;
+            for (const auto &candidate : models) {
+                QmlText::Binding idBinding;
+                QString id = QStringLiteral("<anonymous>");
+                if (QmlText::binding(masked, candidate.open, candidate.end - 1,
+                                     QStringLiteral("id"), &idBinding))
+                    id = masked.mid(idBinding.valueBegin,
+                                    idBinding.valueEnd - idBinding.valueBegin).trimmed();
+                candidateIds << id;
+            }
+            const QString binding = liveComponentBinding
+                ? QStringLiteral("the pSettingsItems binding resolves to object id %1").arg(settingsComponentId)
+                : QStringLiteral("no pSettingsItems Component binding was resolved from pSettingsWindow");
+            *error = QStringLiteral("The registered plr.qml exposes multiple possible live Settings tab models (%1); refusing to guess. %2.")
+                         .arg(candidateIds.join(QStringLiteral(", ")), binding);
+        }
         return false;
     }
 

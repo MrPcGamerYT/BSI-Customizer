@@ -8,9 +8,13 @@
 #include "ThemeEngine.h"
 #include "ZlibUtils.h"
 
+#include <QBuffer>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QHash>
+#include <QImage>
+#include <QImageReader>
 #include <QRegularExpression>
 #include <QUrl>
 #include <QSet>
@@ -197,6 +201,20 @@ QList<Stream> streams(const QByteArray &data)
     return result;
 }
 
+bool verifyBootQml(const QByteArray &image, const QList<QPair<qint64, QString>> &expected)
+{
+    QHash<qint64, int> matches;
+    for (const auto &stream : streams(image)) {
+        for (const auto &source : expected) {
+            if (stream.entry != source.first) continue;
+            ++matches[source.first];
+            if (stream.text != source.second) return false;
+        }
+    }
+    for (const auto &source : expected)
+        if (matches.value(source.first) != 1) return false;
+    return !PeUtils::sections(image).isEmpty();
+}
 
 QString embeddedEmulatorLogo(const QByteArray &image)
 {
@@ -246,6 +264,103 @@ QString embeddedEmulatorLogo(const QByteArray &image)
     return {};
 }
 
+QString icoPngDataUrl(const QByteArray &icon)
+{
+    constexpr qint64 maxIconBytes = 4ll * 1024 * 1024;
+    const auto u16 = [&icon](int at) -> quint16 {
+        if (at < 0 || at + 2 > icon.size()) return 0;
+        return quint16(quint8(icon.at(at))) | (quint16(quint8(icon.at(at + 1))) << 8);
+    };
+    const auto u32 = [&icon](int at) -> quint32 {
+        if (at < 0 || at + 4 > icon.size()) return 0;
+        return quint32(quint8(icon.at(at))) | (quint32(quint8(icon.at(at + 1))) << 8)
+            | (quint32(quint8(icon.at(at + 2))) << 16) | (quint32(quint8(icon.at(at + 3))) << 24);
+    };
+    if (icon.size() < 22 || icon.size() > maxIconBytes || u16(0) != 0 || u16(2) != 1)
+        return {};
+    const quint16 count = u16(4);
+    if (!count || count > 256 || 6ll + qint64(count) * 16 > icon.size()) return {};
+
+    int bestEntry = -1;
+    quint64 bestArea = 0;
+    quint32 bestSize = 0;
+    quint32 bestOffset = 0;
+    for (quint16 i = 0; i < count; ++i) {
+        const int entry = 6 + int(i) * 16;
+        const quint32 width = icon.at(entry) ? quint8(icon.at(entry)) : 256;
+        const quint32 height = icon.at(entry + 1) ? quint8(icon.at(entry + 1)) : 256;
+        const quint32 size = u32(entry + 8);
+        const quint32 offset = u32(entry + 12);
+        if (!size || offset < 6 + quint32(count) * 16 || qint64(offset) + size > icon.size()) continue;
+        const quint64 area = quint64(width) * height;
+        if (area > bestArea) {
+            bestArea = area;
+            bestEntry = entry;
+            bestSize = size;
+            bestOffset = offset;
+        }
+    }
+    if (bestEntry < 0) return {};
+
+    const QByteArray pngSignature = QByteArray::fromHex("89504e470d0a1a0a");
+    const QByteArray bestFrame = icon.mid(bestOffset, bestSize);
+    if (bestFrame.startsWith(pngSignature))
+        return QStringLiteral("data:image/png;base64,") + QString::fromLatin1(bestFrame.toBase64());
+
+    QBuffer buffer;
+    buffer.setData(icon);
+    if (!buffer.open(QIODevice::ReadOnly)) return {};
+    QImageReader reader(&buffer, "ico");
+    reader.setAutoTransform(true);
+    QImage bestImage;
+    const int frameCount = qBound(1, reader.imageCount(), 256);
+    for (int i = 0; i < frameCount; ++i) {
+        if (i && !reader.jumpToImage(i)) break;
+        const QImage frame = reader.read();
+        if (!frame.isNull() && quint64(frame.width()) * frame.height()
+                > quint64(bestImage.width()) * bestImage.height())
+            bestImage = frame;
+    }
+    if (bestImage.isNull()) return {};
+    if (bestImage.width() > 512 || bestImage.height() > 512)
+        bestImage = bestImage.scaled(512, 512, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+    QByteArray png;
+    QBuffer output(&png);
+    if (!output.open(QIODevice::WriteOnly) || !bestImage.save(&output, "PNG")) return {};
+    return QStringLiteral("data:image/png;base64,") + QString::fromLatin1(png.toBase64());
+}
+
+QString playerEmulatorLogo(const QString &exePath, const QByteArray &image)
+{
+    constexpr qint64 maxIconBytes = 4ll * 1024 * 1024;
+    const QString iconPath = QDir(QFileInfo(exePath).absolutePath())
+                                 .filePath(QStringLiteral("Assets/BlueStacks.ico"));
+    const QFileInfo iconInfo(iconPath);
+    if (iconInfo.isFile() && !iconInfo.isSymLink() && !iconInfo.isJunction()
+        && iconInfo.size() > 0 && iconInfo.size() <= maxIconBytes) {
+        QFile iconFile(iconPath);
+        if (iconFile.open(QIODevice::ReadOnly)) {
+            const QByteArray icon = iconFile.read(maxIconBytes + 1);
+            if (!iconFile.error() && icon.size() == iconInfo.size()) {
+                const QString url = icoPngDataUrl(icon);
+                if (!url.isEmpty()) return url;
+            }
+        }
+    }
+
+    QList<EmbeddedResources::Entry> iconEntries;
+    for (const auto &entry : EmbeddedResources::list(image, true))
+        if (entry.leaf.compare(QLatin1String("BlueStacks.ico"), Qt::CaseInsensitive) == 0)
+            iconEntries << entry;
+    if (iconEntries.size() == 1) {
+        const QByteArray icon = EmbeddedResources::readEntry(exePath, iconEntries.first().entryOff,
+                                                              iconEntries.first().flags, maxIconBytes);
+        const QString url = icoPngDataUrl(icon);
+        if (!url.isEmpty()) return url;
+    }
+    return embeddedEmulatorLogo(image);
+}
+
 QString htmlBootPage(const QString &logoUrl, bool withVideo, const QString &theme)
 {
     QString html = QString::fromUtf8(R"HTML(<!doctype html>
@@ -266,8 +381,7 @@ body{color:#d8e8f2;font:16px/1.4 "Segoe UI",Arial,sans-serif}
 .ring-track{position:absolute;left:50%;top:45.5%;width:min(42vmin,330px);aspect-ratio:1;transform:translate(-50%,-50%);border:1px solid rgba(150,198,225,.44);border-radius:50%;box-shadow:0 0 42px rgba(33,132,193,.12),inset 0 0 28px rgba(37,133,188,.06)}
 .ring{position:absolute;inset:-2px;border-radius:50%;background:conic-gradient(from -126deg,transparent 0deg 12deg,rgba(147,224,255,.24) 58deg,rgba(215,247,255,.98) 190deg,rgba(75,203,255,.95) 272deg,transparent 314deg 360deg);-webkit-mask:radial-gradient(farthest-side,transparent calc(100% - 5px),#000 calc(100% - 3px));mask:radial-gradient(farthest-side,transparent calc(100% - 5px),#000 calc(100% - 3px));filter:drop-shadow(0 0 8px rgba(97,219,255,.88)) drop-shadow(0 0 22px rgba(52,170,233,.44));animation:rotate 3.1s linear infinite}
 .logo{position:absolute;left:50%;top:45.5%;width:min(23vmin,190px);height:min(23vmin,190px);transform:translate(-50%,-50%);object-fit:contain;filter:drop-shadow(0 0 15px rgba(99,202,248,.28)) drop-shadow(0 8px 32px rgba(10,42,68,.42));animation:logo 4.6s ease-in-out infinite}
-.logo-fallback{position:absolute;left:50%;top:45.5%;width:min(18vmin,140px);height:min(18vmin,140px);transform:translate(-50%,-50%) rotate(45deg);display:grid;place-items:center;border:1px solid rgba(178,223,244,.78);border-radius:28%;background:linear-gradient(145deg,rgba(79,175,222,.2),rgba(9,26,42,.24));box-shadow:0 0 38px rgba(73,183,232,.32),inset 0 0 20px rgba(143,216,249,.12);animation:logo 4.6s ease-in-out infinite}
-.logo-fallback span{transform:rotate(-45deg);font:700 clamp(22px,5vmin,42px)/1 "Segoe UI",Arial,sans-serif;letter-spacing:-2px;color:#d9f4ff;text-shadow:0 0 18px rgba(104,210,250,.72)}
+.logo-fallback{position:absolute;left:50%;top:45.5%;width:min(16vmin,112px);height:min(16vmin,112px);transform:translate(-50%,-50%);border:1px solid rgba(178,223,244,.68);border-radius:50%;background:radial-gradient(circle,rgba(89,190,235,.3),rgba(9,26,42,.08) 68%,transparent 72%);box-shadow:0 0 38px rgba(73,183,232,.24);animation:logo 4.6s ease-in-out infinite}
 .status{position:absolute;left:12px;right:12px;top:calc(45.5% + min(21vmin,165px) + 22px);text-align:center;color:#d1e5f1;font-size:clamp(12px,1.35vw,16px);letter-spacing:.8px;text-shadow:0 2px 16px rgba(52,177,234,.32);animation:status 3.4s ease-in-out infinite}
 .orbit{position:absolute;left:50%;top:45.5%;width:min(54vmin,420px);aspect-ratio:1;transform:translate(-50%,-50%);border:1px solid rgba(125,206,240,.18);border-radius:50%;opacity:0}
 .orbit:after{content:"";position:absolute;left:50%;top:-4px;width:7px;height:7px;margin-left:-3.5px;border-radius:50%;background:#b8efff;box-shadow:0 0 9px #70d6ff,0 0 24px rgba(87,197,255,.75)}
@@ -308,7 +422,7 @@ __BSI_LOGO_ELEMENT__
         ? QStringLiteral("<video class=\"backdrop\" autoplay muted loop playsinline><source src=\"Promo.mp4\" type=\"video/mp4\"></video><div class=\"shade\"></div>")
         : QString();
     const QString logo = logoUrl.isEmpty()
-        ? QStringLiteral("<div class=\"logo-fallback\" aria-label=\"Emulator logo unavailable\"><span>BS</span></div>")
+        ? QStringLiteral("<div class=\"logo-fallback\" aria-label=\"Emulator icon unavailable\"></div>")
         : QStringLiteral("<img class=\"logo\" src=\"%1\" alt=\"\">").arg(logoUrl);
     html.replace(QLatin1String("__VIDEO_BACKGROUND__"), video);
     html.replace(QLatin1String("__BSI_LOGO_ELEMENT__"), logo);
@@ -570,15 +684,13 @@ Item {
     Rectangle {
         z: 4
         visible: !root.htmlLoaded && root.logoUrl.length === 0
-        width: Math.min(Math.min(root.width, root.height) * 0.18, 140)
+        width: Math.min(Math.min(root.width, root.height) * 0.16, 112)
         height: width
-        radius: width * 0.28
+        radius: width / 2
         anchors.centerIn: loadingRingTrack
-        rotation: 45
         color: "#183246"
         border.color: "#B2DFF4"
         border.width: 1
-        Text { anchors.centerIn: parent; rotation: -45; text: "BS"; color: "#D9F4FF"; font.pixelSize: parent.width * 0.34; font.bold: true }
     }
     Image {
         id: emulatorLogo
@@ -826,14 +938,12 @@ QString nativeFallbackComponent(const QString &logoUrl, const QString &theme)
         }
         Rectangle {
             visible: "__BSI_FALLBACK_LOGO__".length === 0
-            width: Math.min(Math.min(parent.width, parent.height) * 0.18, 140)
+            width: Math.min(Math.min(parent.width, parent.height) * 0.16, 112)
             height: width
-            radius: width * 0.28
+            radius: width / 2
             anchors.centerIn: bsiNativeRingTrack
-            rotation: 45
             color: "#183246"
             border.color: "#B2DFF4"
-            Text { anchors.centerIn: parent; rotation: -45; text: "BS"; color: "#D9F4FF"; font.pixelSize: parent.width * 0.34; font.bold: true }
         }
         Image {
             objectName: "bsiNativeBootLogo"
@@ -984,7 +1094,7 @@ QString logoPreviewDataUrl(const QString &exePath)
         return {};
     const QByteArray image = file.readAll();
     if (file.error() != QFileDevice::NoError || image.size() != file.size()) return {};
-    return embeddedEmulatorLogo(image);
+    return playerEmulatorLogo(exePath, image);
 }
 
 Result patch(const QString &exePath, int holdMs, const QString &requestedMode, const QString &videoPath)
@@ -1022,7 +1132,7 @@ Result patch(const QString &exePath, int holdMs, const QString &requestedMode, c
     const QByteArray original = file.readAll(); file.close();
     if (PeUtils::sections(original).isEmpty())
         return {false, QStringLiteral("This file is not a player executable; nothing was written.")};
-    const QString logoUrl = embeddedEmulatorLogo(original);
+    const QString logoUrl = playerEmulatorLogo(exePath, original);
     auto candidates = streams(original);
     for (auto &stream : candidates) {
         if (!bootStub(stream.text)) continue;
@@ -1152,7 +1262,9 @@ Result patch(const QString &exePath, int holdMs, const QString &requestedMode, c
         if (!roots.isEmpty()) property(boot, roots.first(), name, stockVisibility, false);
     }
     QString error;
-    if (!QtResources::replaceResource(data, controller.entry, controller.link, boot.toUtf8(), &error)) return { false, error };
+    qint64 rewrittenControllerEntry = controller.entry;
+    if (!QtResources::replaceResource(data, controller.entry, controller.link, boot.toUtf8(),
+                                      &error, &rewrittenControllerEntry)) return { false, error };
     QStringList controllerNames = controller.link.sourceNames;
     if (!controllerNames.contains(controller.link.sourceName)) controllerNames << controller.link.sourceName;
     const QStringList controllerIds { QStringLiteral("iBootImage"), QStringLiteral("iBootProgressContainer"),
@@ -1161,13 +1273,18 @@ Result patch(const QString &exePath, int holdMs, const QString &requestedMode, c
     QtResources::invalidateUnits(data, controllerNames, controllerIds);
     if (QtResources::activeUnits(data, controllerNames, controllerIds) > 0)
         return { false, QStringLiteral("The boot controller's embedded compiled QML is still active; no boot patch was committed.") };
+    QList<QPair<qint64, QString>> expectedBootSources {
+        { rewrittenControllerEntry, boot }
+    };
     bool holdApplied = false;
     if (!hosts.isEmpty()) {
         QString host = hosts.first().text;
         if (!updateHost(host, holdMs, &holdApplied, &error)) return { false, error };
         if (host != hosts.first().text) {
             const auto &hostStream = hosts.first();
-            if (!QtResources::replaceResource(data, hostStream.entry, hostStream.link, host.toUtf8(), &error))
+            qint64 rewrittenHostEntry = hostStream.entry;
+            if (!QtResources::replaceResource(data, hostStream.entry, hostStream.link, host.toUtf8(),
+                                              &error, &rewrittenHostEntry))
                 return { false, error };
             QStringList hostNames = hostStream.link.sourceNames;
             if (!hostNames.contains(hostStream.link.sourceName)) hostNames << hostStream.link.sourceName;
@@ -1176,8 +1293,11 @@ Result patch(const QString &exePath, int holdMs, const QString &requestedMode, c
             QtResources::invalidateUnits(data, hostNames, hostIds);
             if (QtResources::activeUnits(data, hostNames, hostIds) > 0)
                 return { false, QStringLiteral("The boot host's embedded compiled QML is still active; no boot patch was committed.") };
+            expectedBootSources << qMakePair(rewrittenHostEntry, host);
         }
     }
+    if (!verifyBootQml(data, expectedBootSources))
+        return { false, QStringLiteral("A rewritten boot QML source failed resource read-back validation; the executable and boot assets were not changed.") };
     const QDir install(QFileInfo(exePath).absolutePath());
     const QString assets = install.filePath(QStringLiteral("Assets"));
     const QFileInfo assetInfo(assets);
