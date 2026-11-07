@@ -744,6 +744,27 @@ Item {
     return qml;
 }
 
+void removeGeneratedFallbackObjects(QString &boot)
+{
+    QList<QPair<int, int>> ranges;
+    for (const auto &object : objects(boot)) {
+        const QString body = boot.mid(object.body, object.end - object.body - 1);
+        const bool oldFallback = object.type == QLatin1String("Component")
+            && object.id == QLatin1String("bsiNativeStartupComponent")
+            && body.contains(QLatin1String("bsiNativeBootFallback"));
+        const bool oldWatchdog = object.type == QLatin1String("Timer")
+            && object.id == QLatin1String("bsiBootLoadWatchdog")
+            && body.contains(QLatin1String("bsiNativeStartupComponent"));
+        if (oldFallback || oldWatchdog)
+            ranges << qMakePair(object.begin, object.end - object.begin);
+    }
+    std::sort(ranges.begin(), ranges.end(), [](const auto &left, const auto &right) {
+        return left.first > right.first;
+    });
+    for (const auto &range : ranges)
+        boot.remove(range.first, range.second);
+}
+
 QString nativeFallbackComponent(const QString &logoUrl, const QString &theme)
 {
     QString qml = QString::fromUtf8(R"QML(Component {
@@ -1182,6 +1203,10 @@ Result patch(const QString &exePath, int holdMs, const QString &requestedMode, c
         return { false, QStringLiteral("Found %1 boot-looking controller(s) and %2 stock player(s), but the registered player host does not uniquely instantiate a supported controller. No EXE was written.").arg(controllers.size()).arg(players.size()) };
     const auto controller = controllers.first();
     QString boot = controller.text;
+    // A previous successful patch leaves a generated inline fallback and its
+    // watchdog next to the replaceable Loader. Repatch by theme must replace
+    // those objects, not append duplicate QML ids (which breaks component load).
+    removeGeneratedFallbackObjects(boot);
     const QString movie = QDir(QFileInfo(exePath).absolutePath()).filePath(QStringLiteral("Assets/Promo.mp4"));
     if (!selectedVideo.isEmpty())
         copySelectedVideo = !samePath(videoPath, movie);

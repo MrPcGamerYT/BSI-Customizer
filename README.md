@@ -901,6 +901,14 @@ own offline self-test (no network, no Qt, no interpreter):
 cmake -P cmake/tests/CollectQtNoticesTest.cmake
 ```
 
+To manually verify the Settings-panel rebuilder on the exact player you launch, double-click the Windows tester/launcher (it finds or prompts for the Customizer executable and prompts for the player when needed):
+
+```text
+scripts/Run-SettingsPanel-Manual.cmd
+```
+
+It reports the Customizer backend's real detection analysis and QML resource inventory, exercises apply on a temporary copy, and confirms the selected HD-Player.exe hash is unchanged. It then opens the GUI directly to **Interface → Settings panel rebuild** against a second disposable copy; the Apply/Test button remains clickable so backend diagnostics are visible instead of being hidden by a UI support gate. GUI apply/restore actions are restricted to that copy and temporary app settings. The CLI diagnostic is also available directly with `BSI-Customizer.exe --settings-panel-test <HD-Player.exe>`; see [the manual tester guide](docs/SETTINGS_PANEL_MANUAL_TEST.md).
+
 For an unsupported real EXE, collect a read-only diagnostic report:
 
 ```powershell

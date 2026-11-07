@@ -271,6 +271,19 @@ jobs:
             throw "self-test failed (exit code $($p.ExitCode))"
           }
 
+      - name: Manual Settings-panel tester (safe-copy apply)
+        if: matrix.label == 'MSI latest package'
+        shell: pwsh
+        env:
+          QT_QPA_PLATFORM: offscreen
+          # The app manifest requests elevation; this CLI-only tester operates
+          # on a temporary copy, so bypass UAC just like the regular CI self-test.
+          __COMPAT_LAYER: RUNASINVOKER
+        run: |
+          $target = Join-Path $env:GITHUB_WORKSPACE 'HD-Player.exe'
+          $manualTester = Join-Path $env:GITHUB_WORKSPACE 'scripts/Test-SettingsPanel-Manual.ps1'
+          & $manualTester -CustomizerPath $env:exe -PlayerPath $target -NoLaunch
+
       # A failing job's log cannot be read back through the API on this account,
       # and the annotations only carry the lines that mention failure. The whole
       # log is published as an artifact so the run can be read afterwards.
