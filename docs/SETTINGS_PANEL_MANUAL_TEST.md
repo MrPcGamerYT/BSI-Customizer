@@ -1,6 +1,6 @@
 # Manual Settings-panel check
 
-Use the Windows manual launcher when you want to inspect the **same HD-Player.exe that you actually launch** in the Customizer and verify the Settings-panel rebuilder without risking that executable.
+Use the Windows manual launcher to inspect the real Customizer Settings-panel flow against a copy of the selected HD-Player executable. The tester never gives the GUI the original executable path: both the command-line backend test and the interactive GUI use disposable copies.
 
 ## Run it
 
@@ -18,16 +18,16 @@ The script prompts for `BSI-Customizer.exe` and `HD-Player.exe` if it cannot fin
   -PlayerPath 'C:\Program Files\BlueStacks_nxt\HD-Player.exe'
 ```
 
-To run only the check and skip opening the UI, add `-NoLaunch`.
+To run only the safe-copy backend check and skip opening the GUI, add `-NoLaunch`.
 
 ## What it checks
 
-1. Reads the selected player's real Settings-panel state through `Backend::settingsPanelRebuildState()` and reports support, native tab count, QML dependencies, compiled units, and the analysis detail.
-2. Copies the executable to an automatically deleted temporary directory and calls `Backend::applySettingsPanelRebuild(true)` on that copy.
-3. Confirms the temporary copy reports the rebuild applied and hashes the selected original before and after to ensure it did not change.
-4. Unless `-NoLaunch` is used, starts the real Customizer with that HD-Player selected. In the UI, open **Interface → Settings panel rebuild** and compare its Support status and detail with the JSON report.
+1. Reads the selected player's Settings-panel state and reports its detection result, registered QML resource count/sample paths, native tab count, QML dependency count, compiled units, and detailed reason when detection cannot resolve the Settings model.
+2. Exercises `Backend::applySettingsPanelRebuild(true)` on a disposable copy and hashes the selected original before and after.
+3. Unless `-NoLaunch` is used, opens the real Customizer directly to **Interface → Settings panel rebuild**, with that screen wired to a second disposable HD-Player copy. The manual session has isolated preferences and only permits Settings-panel inspect/apply/restore bridge calls. Apply and Restore therefore test the GUI/backend flow without changing the selected original or other emulator files.
+4. Leaves the Apply/Test button available even when detection says unsupported, so the backend can show its real diagnostic instead of silently disabling the test. The visible detection status and QML inventory are not hidden.
 
-The script never applies the Settings rebuild to the selected original. To test applying it to an installed player, use the Customizer's Apply button yourself after reviewing the report and taking your normal backup.
+Keep the Customizer open while inspecting the GUI. Closing it ends the manual session and removes the disposable GUI copy and temporary settings. A GUI Apply/Restore operates only on that copy.
 
 The same safe-copy diagnostic is also available from a terminal:
 

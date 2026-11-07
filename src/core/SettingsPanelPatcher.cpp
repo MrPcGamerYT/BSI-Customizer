@@ -977,9 +977,23 @@ State analyze(const QString &exePath)
         state.detail = QStringLiteral("The selected executable is unreadable or exceeds the safe 256 MB limit.");
         return state;
     }
+    // Preserve a useful inventory even when the strict live-model walk fails.
+    // This makes the real GUI/test report distinguish "no QML was indexed" from
+    // "QML exists but this build's Settings resource graph uses another shape".
+    const auto qmlEntries = EmbeddedResources::list(image, true);
+    for (const auto &entry : qmlEntries) {
+        if (entry.format.compare(QLatin1String("qml"), Qt::CaseInsensitive) != 0 || entry.scanned)
+            continue;
+        ++state.embeddedQmlResourceCount;
+        if (state.qmlResourceSamples.size() < 32)
+            state.qmlResourceSamples << entry.path;
+    }
     const TargetSources sources = readSources(exePath, image);
     if (!sources.ok) {
-        state.detail = sources.error;
+        state.detail = QStringLiteral("%1 Registered QML resources: %2. %3")
+            .arg(state.embeddedQmlResourceCount)
+            .arg(state.qmlResourceSamples.isEmpty() ? QStringLiteral("none detected") : state.qmlResourceSamples.join(QStringLiteral(", ")))
+            .arg(sources.error);
         return state;
     }
     state.supported = true;

@@ -31,8 +31,10 @@ bool fileRole(const QString &role) {
 }
 
 WebBridge::WebBridge(Backend &backend, AuthManager &auth, SettingsManager &settings,
-                     ThemeManager &themes, UpdateChecker &updates, QObject *parent)
-    : QObject(parent), m_backend(backend), m_auth(auth), m_settings(settings), m_themes(themes), m_updates(updates)
+                     ThemeManager &themes, UpdateChecker &updates,
+                     bool settingsPanelManualTest, QObject *parent)
+    : QObject(parent), m_backend(backend), m_auth(auth), m_settings(settings), m_themes(themes),
+      m_updates(updates), m_settingsPanelManualTest(settingsPanelManualTest)
 {
     connect(&auth, &AuthManager::authorizedChanged, this, &WebBridge::publish);
     connect(&backend, &Backend::busyChanged, this, &WebBridge::publish);
@@ -58,7 +60,8 @@ WebBridge::WebBridge(Backend &backend, AuthManager &auth, SettingsManager &setti
 
 QVariantMap WebBridge::snapshot() const
 {
-    QVariantMap state{{"protocol", 1}, {"authorized", m_auth.isAuthorized()}};
+    QVariantMap state{{"protocol", 1}, {"authorized", m_auth.isAuthorized()},
+                      {"settingsPanelManualTest", m_settingsPanelManualTest}};
     if (!m_auth.isAuthorized()) return state;
     const QString path = m_backend.exePath();
     state.insert("busy", m_backend.busy() || m_dispatching);
@@ -118,6 +121,10 @@ QVariantMap WebBridge::invoke(const QString &method, const QVariantMap &args)
     // These guards precede EVERY command, including read-only file access,
     // path/settings changes and opening a native page. JS is not the gate.
     if (!m_auth.isAuthorized()) return failure(QStringLiteral("Sign in with Discord to unlock BSI Customizer."));
+    if (m_settingsPanelManualTest
+        && method != QLatin1String("readInterface")
+        && method != QLatin1String("applySettingsPanelRebuild"))
+        return failure(QStringLiteral("Manual test mode is restricted to inspecting, applying, or restoring the Settings-panel test on its disposable player copy."));
     if (m_backend.busy() || m_dispatching) return failure(QStringLiteral("An operation is already running. Please wait."));
     QScopedValueRollback<bool> dispatching(m_dispatching, true);
     publish();

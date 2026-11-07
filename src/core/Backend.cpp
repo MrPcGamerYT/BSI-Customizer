@@ -1974,6 +1974,8 @@ QVariantMap Backend::settingsPanelRebuildState()
             {QStringLiteral("compiledUnitsActive"), state.compiledUnitsActive},
             {QStringLiteral("settingsPageCount"), state.settingsPageCount},
             {QStringLiteral("settingsQmlResourceCount"), state.settingsQmlResourceCount},
+            {QStringLiteral("embeddedQmlResourceCount"), state.embeddedQmlResourceCount},
+            {QStringLiteral("qmlResourceSamples"), state.qmlResourceSamples},
             {QStringLiteral("detail"), state.detail}};
 }
 

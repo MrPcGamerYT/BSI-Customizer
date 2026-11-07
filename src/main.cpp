@@ -22,6 +22,7 @@
 #include <QStandardPaths>
 #include <QTemporaryDir>
 #include <QTimer>
+#include <QUuid>
 
 #include <cstdio>
 #include <memory>
@@ -180,6 +181,8 @@ int runSettingsPanelTest(const QString &target)
         {QStringLiteral("alreadyApplied"), targetState.value(QStringLiteral("applied")).toBool()},
         {QStringLiteral("nativeSettingsTabs"), targetState.value(QStringLiteral("settingsPageCount")).toInt()},
         {QStringLiteral("verifiedQmlDependencies"), targetState.value(QStringLiteral("settingsQmlResourceCount")).toInt()},
+        {QStringLiteral("embeddedQmlResourceCount"), targetState.value(QStringLiteral("embeddedQmlResourceCount")).toInt()},
+        {QStringLiteral("qmlResourceSamples"), QJsonArray::fromStringList(targetState.value(QStringLiteral("qmlResourceSamples")).toStringList())},
         {QStringLiteral("compiledUnitsDetected"), targetState.value(QStringLiteral("compiledUnitsDetected")).toInt()},
         {QStringLiteral("compiledUnitsActive"), targetState.value(QStringLiteral("compiledUnitsActive")).toInt()},
         {QStringLiteral("detail"), targetState.value(QStringLiteral("detail")).toString()},
@@ -217,6 +220,41 @@ int main(int argc, char *argv[])
     // Headless verification of the patcher engines + theme chain.
     // Used locally and by the GitHub Actions release workflow.
     const QStringList args = QCoreApplication::arguments();
+    const int settingsPanelManualTestAt = args.indexOf(QStringLiteral("--settings-panel-manual-test"));
+    const bool settingsPanelManualTest = settingsPanelManualTestAt >= 0;
+    QString settingsPanelManualPlayer;
+    std::unique_ptr<QTemporaryDir> settingsPanelManualSettings;
+    QString settingsPanelManualDataRoot;
+    QString settingsPanelManualAppDataRoot;
+    if (settingsPanelManualTest) {
+        if (settingsPanelManualTestAt + 1 >= args.size()
+            || !QFileInfo(args.at(settingsPanelManualTestAt + 1)).isFile()) {
+            ensureConsoleOutput();
+            std::fprintf(stderr, "usage: BSI-Customizer --settings-panel-manual-test <disposable-HD-Player.exe>\n");
+            return 2;
+        }
+        settingsPanelManualPlayer = args.at(settingsPanelManualTestAt + 1);
+        const QString originalAuthFile = QDir(QStandardPaths::writableLocation(QStandardPaths::AppDataLocation))
+            .filePath(QStringLiteral("auth.json"));
+        settingsPanelManualSettings = std::make_unique<QTemporaryDir>();
+        if (!settingsPanelManualSettings->isValid()) return 2;
+        // Keep the manual GUI session's selected path, recovery journal, and
+        // preferences isolated from the user's normal Customizer profile.
+        QCoreApplication::setApplicationName(QStringLiteral("BSI Settings Panel Test %1")
+            .arg(QUuid::createUuid().toString(QUuid::WithoutBraces)));
+        QSettings::setDefaultFormat(QSettings::IniFormat);
+        QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, settingsPanelManualSettings->path());
+        QSettings::setPath(QSettings::IniFormat, QSettings::SystemScope, settingsPanelManualSettings->path());
+        QStandardPaths::setTestModeEnabled(true);
+        settingsPanelManualDataRoot = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
+        settingsPanelManualAppDataRoot = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+        // Auth config is read-only during the UI session. If this installation
+        // relies on the user's AppData auth.json, copy it into the unique test
+        // profile so manual testing does not force a re-login or touch the file.
+        const QString isolatedAuthFile = QDir(settingsPanelManualAppDataRoot).filePath(QStringLiteral("auth.json"));
+        if (QFileInfo::exists(originalAuthFile) && QDir().mkpath(settingsPanelManualAppDataRoot))
+            QFile::copy(originalAuthFile, isolatedAuthFile);
+    }
     if (args.contains(QStringLiteral("--gradient-render-test"))) {
         ensureConsoleOutput();
         return runGradientRuntimeTest(args);
@@ -349,7 +387,9 @@ int main(int argc, char *argv[])
     // Manual diagnostic launcher: open the real UI with an explicit player
     // selected instead of relying on the previously saved installation.
     const int openPlayerAt = args.indexOf(QStringLiteral("--open-player"));
-    if (openPlayerAt >= 0) {
+    if (settingsPanelManualTest) {
+        settings.setExePath(settingsPanelManualPlayer);
+    } else if (openPlayerAt >= 0) {
         if (openPlayerAt + 1 >= args.size() || !QFileInfo(args.at(openPlayerAt + 1)).isFile()) {
             ensureConsoleOutput();
             std::fprintf(stderr, "usage: BSI-Customizer --open-player <path-to-HD-Player.exe>\n");
@@ -376,7 +416,7 @@ int main(int argc, char *argv[])
         auto *profile = QQuickWebEngineProfile::defaultProfile();
         profile->setUrlRequestInterceptor(new LocalContentPolicy(profile));
     }
-    WebBridge webBridge(backend, auth, settings, themes, updates);
+    WebBridge webBridge(backend, auth, settings, themes, updates, settingsPanelManualTest);
 #else
     if (args.contains(QStringLiteral("--web-ui"))) {
         std::fprintf(stderr, "Chromium UI is not compiled in. Reconfigure with -DBSI_CHROMIUM_UI=ON.\n");
@@ -472,5 +512,10 @@ int main(int argc, char *argv[])
             app.exit(ok ? 0 : 3);
         });
     }
-    return app.exec();
+    const int exitCode = app.exec();
+    if (settingsPanelManualTest && !settingsPanelManualDataRoot.isEmpty())
+        QDir(settingsPanelManualDataRoot).removeRecursively();
+    if (settingsPanelManualTest && !settingsPanelManualAppDataRoot.isEmpty())
+        QDir(settingsPanelManualAppDataRoot).removeRecursively();
+    return exitCode;
 }

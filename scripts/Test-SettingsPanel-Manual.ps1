@@ -85,8 +85,20 @@ try {
     if ($NoLaunch) {
         Write-Host 'GUI launch skipped (-NoLaunch).'
     } else {
-        Write-Host 'Opening BSI Customizer with this HD-Player selected. Open Interface, then Settings panel rebuild to inspect the visible status.'
-        Start-Process -FilePath $CustomizerPath -ArgumentList @('--open-player', ('"{0}"' -f $PlayerPath))
+        # The GUI gets its own disposable executable too. Even if Apply is
+        # clicked while inspecting the real interface, only this copy changes.
+        $guiSandbox = Join-Path $logRoot 'gui-sandbox'
+        New-Item -ItemType Directory -Path $guiSandbox | Out-Null
+        $guiPlayer = Join-Path $guiSandbox 'HD-Player.exe'
+        Copy-Item -LiteralPath $PlayerPath -Destination $guiPlayer
+        Write-Host 'Opening BSI Customizer directly on Interface → Settings panel in isolated manual-test mode.'
+        Write-Host 'The GUI targets a disposable HD-Player copy; its Apply/Restore actions cannot change the selected original.'
+        $gui = Start-Process -FilePath $CustomizerPath `
+            -ArgumentList @('--settings-panel-manual-test', ('"{0}"' -f $guiPlayer)) `
+            -Wait -PassThru
+        if ($gui.ExitCode -ne 0) {
+            throw "The manual-test GUI exited with code $($gui.ExitCode)."
+        }
     }
     if (-not $testPassed) {
         throw 'Settings-panel manual test failed. Inspect the Customizer UI and the JSON report above.'

@@ -18,7 +18,8 @@ class WebBridge final : public QObject
     Q_OBJECT
 public:
     WebBridge(Backend &backend, AuthManager &auth, SettingsManager &settings,
-              ThemeManager &themes, UpdateChecker &updates, QObject *parent = nullptr);
+              ThemeManager &themes, UpdateChecker &updates,
+              bool settingsPanelManualTest = false, QObject *parent = nullptr);
     Q_INVOKABLE QVariantMap snapshot() const;
     Q_INVOKABLE QVariantMap invoke(const QString &method, const QVariantMap &args);
     Q_INVOKABLE void requestFile(const QString &role);
@@ -46,4 +47,5 @@ private:
     quint64 m_resourceRevision = 0;
     bool m_publishPending = false;
     bool m_dispatching = false;
+    bool m_settingsPanelManualTest = false;
 };

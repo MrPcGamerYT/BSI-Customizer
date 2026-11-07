@@ -22,6 +22,7 @@
   icons.push(`<path d="M4 6h16M6 6l1 14h10l1-14M9 6V3h6v3M10 10v6M14 10v6"/>`);
   const svg = i => `<svg viewBox="0 0 24 24" aria-hidden="true">${icons[i]}</svg>`;
   let transport = null, preview = false, state = {}, page = 0, pending = false;
+  let settingsPanelManualTestRouted = false;
   let palette = { entries: [], hex: [], presets: [], method: 'auto' };
   let resourceIndex = [], kind = 0, measureTimer = null, measureSequence = 0;
   let resources = [], selected = null, resourceData = null, dirty = false, filter = '', offset = 0;
@@ -312,6 +313,15 @@
     }
     if ([5, 10, 11].includes(page)) renderView();
   }
+  async function routeSettingsPanelManualTest() {
+    if (!state.settingsPanelManualTest || !state.authorized || state.busy || pending
+        || settingsPanelManualTestRouted || !transport || !editors) return;
+    settingsPanelManualTestRouted = true;
+    editors.selectInterfaceTab('settings-panel');
+    if (page !== 6) await navigate(6);
+    await editors.action('interface-load', null, 6);
+    renderView();
+  }
   async function action(el) {
     const name = el.dataset.action;
     if (!enabled()) return;
@@ -493,7 +503,7 @@
     chrome(); renderView();
     try {
       transport = await BsiTransport.connect();
-      transport.onState(useState);
+      transport.onState(next => { useState(next); void routeSettingsPanelManualTest(); });
       transport.onWindowMode?.(updateWindowMode);
       transport.onVideo?.(message => editors.videoStatus(message));
       transport.onLog(message => { logs.push([new Date().toLocaleTimeString(), message]); if (logs.length > 500) logs.shift(); renderLogs(); });
@@ -502,6 +512,7 @@
       useState(initial);
       if (state.authorized) $('#connection').hidden = true;
       chrome(); renderView();
+      await routeSettingsPanelManualTest();
     } catch (error) {
       transport = null; $('#connection-message').textContent = error.message;
       $('#preview-button').hidden = false;

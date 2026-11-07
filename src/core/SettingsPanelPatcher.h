@@ -4,6 +4,7 @@
 #include <QVariantList>
 #include <QVariantMap>
 #include <QString>
+#include <QStringList>
 
 // Rebuilds the BlueStacks/HD-Player in-emulator Settings window while keeping
 // its original settings-page components and their native save/discard logic.
@@ -20,6 +21,8 @@ struct State
     int compiledUnitsActive = 0;
     int settingsPageCount = 0;
     int settingsQmlResourceCount = 0;
+    int embeddedQmlResourceCount = 0;
+    QStringList qmlResourceSamples;
     QString detail;
 };
 
