@@ -16,7 +16,8 @@ from PySide6.QtTest import QTest
 from PySide6.QtQuick import QQuickWindow
 
 ROOT=Path(__file__).resolve().parents[1]
-REFERENCE=bool(os.environ.get('BSI_SETTINGS_REFERENCE'))
+ANIMATED=bool(os.environ.get('BSI_SETTINGS_ANIMATED'))
+REFERENCE=bool(os.environ.get('BSI_SETTINGS_REFERENCE')) or ANIMATED
 app=QGuiApplication([])
 engine=QQmlEngine()
 warnings=[]
@@ -67,7 +68,9 @@ Item {
         from build_external import external_style,bridge
         (temp/'Assets').mkdir()
         external=temp/'Assets/BSISettingsOutline.qml'
-        external.write_text((ROOT/'assets/emulator-settings/ReferencePanel.qml').read_text() if REFERENCE else (ROOT/'assets/emulator-settings/MonochromePanel.qml').read_text() if os.environ.get('BSI_SETTINGS_MONOCHROME') else external_style(template),encoding='utf-8')
+        external.write_text((ROOT/'assets/emulator-settings/AnimatedPanel.qml').read_text() if ANIMATED else (ROOT/'assets/emulator-settings/ReferencePanel.qml').read_text() if REFERENCE else (ROOT/'assets/emulator-settings/MonochromePanel.qml').read_text() if os.environ.get('BSI_SETTINGS_MONOCHROME') else external_style(template),encoding='utf-8')
+        if ANIMATED:
+            (external.parent/'Icons.js').write_bytes((ROOT/'assets/emulator-settings/Icons.js').read_bytes())
         template=bridge(QUrl.fromLocalFile(str(external)).toString())
     entries=[]
     categories=[('engine','Performance'),('display','Display'),('graphics','Graphics'),('audio','Audio'),('gamepad','Gamepad'),('devices','Devices'),('preferences','Preferences'),('shortcuts','Shortcuts'),('advanceSettings','Advanced'),('about','About')]
@@ -126,6 +129,29 @@ ApplicationWindow {
     QTest.mouseClick(window,Qt.LeftButton,Qt.NoModifier,QPoint(round(point.x()),round(point.y())))
     app.processEvents()
     assert window.property('requestedTab')==2 and window.property('pCurrentTabIndex')==2
+    if ANIMATED:
+        def glyphs(item):
+            result=[]
+            if item.objectName()=="bsiSettingsSvgGlyph":result.append(item)
+            for child in item.childItems():result.extend(glyphs(child))
+            return result
+        rendered=glyphs(window.contentItem())
+        assert len(rendered)==len(categories)+1, 'Missing SVG icons/close glyph'
+        assert all(g.parentItem().property('ready') for g in rendered), 'SVG decoder did not load all icons'
+        icon=glyphs(tab)[0].parentItem()
+        QTest.mouseMove(window,QPoint(450,60))
+        QTest.mouseMove(window,QPoint(round(point.x()),round(point.y())))
+        for _ in range(30):app.processEvents();time.sleep(.01)
+        assert icon.property('scale')>1.08, 'Hover lift/scale animation did not finish'
+        QTest.mousePress(window,Qt.LeftButton,Qt.NoModifier,QPoint(round(point.x()),round(point.y())))
+        for _ in range(22):app.processEvents();time.sleep(.01)
+        assert icon.property('scale')<.95, 'Native pressed state did not animate SVG'
+        QTest.mouseRelease(window,Qt.LeftButton,Qt.NoModifier,QPoint(round(point.x()),round(point.y())))
+        for _ in range(22):app.processEvents();time.sleep(.01)
+        shell=visual('bsiSettingsShell');shell.setProperty('bsiAnimations',False)
+        QTest.mouseMove(window,QPoint(450,60));app.processEvents()
+        assert abs(icon.property('scale')-1.04)<.001, 'Reduced-motion update did not snap to native selected state'
+        shell.setProperty('bsiAnimations',True)
     window.setProperty('blockSwitch',True)
     visual('bsiSettingsTab_0').clicked.emit()
     app.processEvents()
@@ -140,6 +166,25 @@ ApplicationWindow {
         image=window.grabWindow()
         assert not image.isNull(),'Software preview capture failed'
         assert image.save(os.environ['BSI_SETTINGS_SCREENSHOT'])
+    if ANIMATED and os.environ.get('BSI_SETTINGS_ANIMATED_FRAMES'):
+        frames=Path(os.environ['BSI_SETTINGS_ANIMATED_FRAMES']);frames.mkdir(parents=True,exist_ok=True)
+        count=0
+        def capture(number):
+            global count
+            for _ in range(number):
+                app.processEvents();time.sleep(.065)
+                assert window.grabWindow().save(str(frames/f'{count:03d}.png'))
+                count+=1
+        def center(item):
+            p=item.mapToScene(QPointF(item.width()/2,item.height()/2))
+            return QPoint(round(p.x()),round(p.y()))
+        current=visual('bsiSettingsTab_'+str(window.property('pCurrentTabIndex')))
+        QTest.mouseMove(window,QPoint(450,60));capture(4)
+        QTest.mouseMove(window,center(visual('bsiSettingsTab_8')));capture(9)
+        QTest.mouseMove(window,center(current));capture(8)
+        QTest.mousePress(window,Qt.LeftButton,Qt.NoModifier,center(current));capture(5)
+        QTest.mouseRelease(window,Qt.LeftButton,Qt.NoModifier,center(current));capture(8)
+        QTest.mouseMove(window,QPoint(450,60));capture(6)
     for width,height in [(840,600),(700,480),(1200,760),(720,520),(719,520)]:
         window.setWidth(width);window.setHeight(height)
         for _ in range(5):app.processEvents()
@@ -152,4 +197,6 @@ ApplicationWindow {
     assert not warnings,'\n'.join(warnings)
     window.setProperty('visible',False)
     del window
+if ANIMATED:
+    print('PASS: actual SVG Images Ready, hover scale, native press feedback and reduced-motion snap; no live MSI integration claim')
 print('PASS: Qt Quick creation, vector painting, 10 original page loaders/arguments/callbacks, guarded navigation, close callback and compact layouts.')

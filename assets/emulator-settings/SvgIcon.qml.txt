@@ -1,0 +1,35 @@
+    // Passive SVG visual: the native ItemDelegate/ToolButton owns every click.
+    component BsiOutlineIcon: Item {
+        id: icon
+        property string kind: "preferences"
+        property color stroke: "#f4f4f7"
+        property bool hot: false
+        property bool downState: false
+        property bool active: false
+        property real hoverTwist: 0
+        readonly property bool ready: glyph.status === Image.Ready
+        implicitWidth: 24
+        implicitHeight: 24
+        scale: downState ? 0.88 : hot ? 1.13 : active ? 1.04 : 1
+        rotation: hot ? hoverTwist : 0
+        opacity: downState ? 0.8 : hot || active ? 1 : 0.76
+        Behavior on scale { enabled: shell.bsiAnimations; NumberAnimation { duration: 170; easing.type: Easing.OutBack; easing.overshoot: 1.1 } }
+        Behavior on rotation { enabled: shell.bsiAnimations; NumberAnimation { duration: 190; easing.type: Easing.OutCubic } }
+        Behavior on opacity { enabled: shell.bsiAnimations; NumberAnimation { duration: 140 } }
+        Image {
+            id: glyph
+            objectName: "bsiSettingsSvgGlyph"
+            anchors.fill: parent
+            source: Icons.url(icon.kind, icon.stroke.toString())
+            sourceSize.width: Math.max(1, Math.ceil(width * 2))
+            sourceSize.height: Math.max(1, Math.ceil(height * 2))
+            fillMode: Image.PreserveAspectFit
+            smooth: true
+            // Only the icon moves; native tab hitboxes and pages stay put.
+            transform: Translate {
+                y: icon.hot ? -1 : 0
+                Behavior on y { enabled: shell.bsiAnimations; NumberAnimation { duration: 150; easing.type: Easing.OutCubic } }
+            }
+            onStatusChanged: if (status === Image.Error) console.warn("Settings SVG could not load: " + icon.kind)
+        }
+    }
