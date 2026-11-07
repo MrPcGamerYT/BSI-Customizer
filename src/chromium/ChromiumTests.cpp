@@ -37,7 +37,8 @@ int runWebBridgeAccessTest()
     QObject::connect(&bridge, &WebBridge::openFileRequested, [&] { ++fileSignals; });
     QObject::connect(&bridge, &WebBridge::nativeToolRequested, [&] { ++nativeSignals; });
     const auto state = bridge.snapshot();
-    bool ok = !auth.isAuthorized() && state.size() == 2 && !state.value("authorized").toBool();
+    bool ok = !auth.isAuthorized() && state.size() == 3 && !state.value("authorized").toBool()
+        && !state.value("settingsPanelManualTest").toBool();
 #ifdef BSI_ENFORCE_EMBEDDED_AUTH
     // A downloadable Chromium bundle must be sign-in ready without a sidecar
     // auth.json or configure-time environment surviving on the user's PC.
