@@ -204,8 +204,8 @@ ApplicationWindow {
     FileDialog {
         id: fileDialog
         property string roleName: ""
-        title: roleName === "extract" ? qsTr("Extract resource to…") : roleName === "boot-video" ? qsTr("Choose a boot MP4") : qsTr("Select a local file")
-        nameFilters: roleName === "boot-video" ? [qsTr("MP4 video (*.mp4)")] : []
+        title: roleName === "extract" ? qsTr("Extract resource to…") : roleName === "boot-video" ? qsTr("Choose a boot MP4") : roleName === "settings-panel-svg" ? qsTr("Choose a self-contained SVG tab icon") : roleName === "settings-panel-logo" ? qsTr("Choose an About logo") : qsTr("Select a local file")
+        nameFilters: roleName === "boot-video" ? [qsTr("MP4 video (*.mp4)")] : roleName === "settings-panel-svg" ? [qsTr("SVG image (*.svg)")] : roleName === "settings-panel-logo" ? [qsTr("Logo image (*.svg *.png *.jpg *.jpeg *.webp)")] : []
         fileMode: ["extract", "profile-save", "report-save", "image-save", "disk-extract"].includes(roleName) ? FileDialog.SaveFile : FileDialog.OpenFile
         onAccepted: webBridge.fileChosen(roleName, selectedFile)
         onRejected: webBridge.fileChosen(roleName, "")

@@ -39,16 +39,21 @@ app = QGuiApplication([])
 repo = Path(__file__).resolve().parents[1]
 cpp = (repo / "src/core/SettingsPanelPatcher.cpp").read_text(encoding="utf-8")
 match = re.search(
-    r'const QString replacement = QStringLiteral\(R"QML\((.*?)\)QML"\);',
+    r'(?:const )?QString replacement = QStringLiteral\(R"QML\((.*?)\)QML"\);',
     cpp,
     re.S,
 )
 assert match, "Could not find the generated Settings-window QML template"
 replacement = match.group(1)
-assert "BSI Settings v3" in replacement
-assert "⚙▣◈♫⌨⌘☷ⓘ◉◇✦▧" in replacement and "pSettingBtnText" in replacement
-assert "height:parent.height-128" in replacement
+assert "BSI Settings v4" in replacement
+assert "pSettingsItems.pSettingElements" in replacement and "bHidden" in replacement
+assert "@@BSI_HIDDEN_TABS@@" in replacement and "@@BSI_TAB_ICONS@@" in replacement
+assert "parent.width*.86" in replacement
+assert "pSettingBtnText" in replacement and "pSelected" in replacement
+assert "anchors.topMargin:108" in replacement
 assert "onPressed:iSettingsWindow.startSystemMove()" in replacement
+replacement = replacement.replace("@@BSI_HIDDEN_TABS@@", "[]")
+replacement = replacement.replace("@@BSI_TAB_ICONS@@", "({})")
 
 with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
     root = Path(temp)
@@ -236,6 +241,7 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
         "import QtQuick.Layouts 1.15\nimport BsiSettingsFixture 1.0",
     )
     about_qml = about_qml.replace("@@BSI_DEVELOPER@@", '"Runtime Developer"')
+    about_qml = about_qml.replace("@@BSI_TAGLINE@@", '"Runtime subtitle"')
     about_qml = about_qml.replace(
         "@@BSI_LINKS@@",
         '{ title: "GitHub", url: "https://github.com/example" },\n'
@@ -251,6 +257,8 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
     about_tree = visual_items(about_obj)
     about_links = [item for item in about_tree if item.objectName() == "bsiAboutDeveloperLink"]
     assert about_obj.property("pDeveloperName") == "Runtime Developer", "About page did not retain the customizable developer name"
+    assert about_obj.property("pDeveloperTagline") == "Runtime subtitle", "About page did not render the customizable subtitle"
+    assert any(item.objectName() == "bsiAboutDeveloperTagline" for item in about_tree), "About page did not create its subtitle element"
     assert len(about_links) == 2, "About page did not render the configured developer links"
     assert any(item.objectName() == "bsiAboutEmulatorLogo" for item in about_tree), "About page did not create its centered emulator logo"
 

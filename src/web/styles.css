@@ -330,3 +330,16 @@ dialog.cp[open]{visibility:visible;opacity:1;transform:none;animation:rise .22s 
 @keyframes bootstatus{50%{opacity:.68}}
 @keyframes previewpulse{0%{opacity:.65;transform:translate(-50%,-50%) scale(.78)}100%{opacity:0;transform:translate(-50%,-50%) scale(1.55)}}
 @keyframes previeworbit{to{transform:translate(-50%,-50%) rotate(360deg)}}
+
+/* Settings-rebuilder controls stay together on the Interface subtab. */
+.settings-customization-card{max-width:980px;margin:18px auto;padding:18px;border:1px solid rgba(var(--tt),.09);border-radius:14px;background:rgba(var(--tt),.025)}
+.settings-customization-card>h3{margin:0 0 4px;font:700 14px var(--fh);text-align:center}.settings-customization-card>.note{text-align:center}
+.settings-tab-options{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin:14px auto 0}
+.settings-tab-option{display:flex;align-items:center;justify-content:space-between;gap:10px;min-width:0;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:rgba(var(--tt),.018)}
+.settings-tab-check{display:flex;align-items:center;gap:9px;min-width:0}.settings-tab-check>.editor-check{width:20px;height:20px;margin:0;flex:none}.settings-tab-check>.editor-check span{display:none}.settings-tab-check>span{display:grid;gap:3px;min-width:0}.settings-tab-check b{font-size:11px}.settings-tab-check small{overflow:hidden;color:var(--d);font-size:9px;text-overflow:ellipsis;white-space:nowrap}
+.settings-tab-art{display:flex;align-items:center;justify-content:flex-end;gap:6px;flex:none}.settings-tab-art>img{width:22px;height:22px;object-fit:contain}.settings-art-empty{color:var(--d);font-size:9px}
+.settings-tab-option .btn{padding:6px 9px;font-size:9px}.settings-about-identity{display:grid;grid-template-columns:84px minmax(0,1fr);gap:14px;align-items:center;max-width:760px;margin:10px auto}
+.settings-custom-logo,.settings-custom-logo-fallback{width:78px;height:78px;object-fit:contain;padding:7px;border:1px solid rgba(var(--a),.28);border-radius:15px;background:rgba(var(--a),.05)}
+.settings-custom-logo-fallback{display:grid;place-items:center;color:var(--mint);font:800 18px var(--fh);letter-spacing:1px}.settings-about-identity .button-grid{margin:8px 0 0}.settings-about-fields{max-width:760px;margin:auto}.settings-link-list{max-width:900px;margin:8px auto}.settings-link-row{grid-template-columns:24px minmax(110px,.7fr) minmax(130px,1fr) minmax(160px,1.2fr)}
+.settings-preview-tab img{width:16px;height:16px;object-fit:contain}.settings-rebuild-preview{margin-left:auto;margin-right:auto}.settings-preview-tabs{justify-content:center}
+@media(max-width:740px){.settings-tab-options{grid-template-columns:1fr}.settings-tab-option{align-items:flex-start;flex-direction:column}.settings-tab-art{width:100%;justify-content:flex-end}.settings-about-identity{grid-template-columns:70px minmax(0,1fr)}.settings-custom-logo,.settings-custom-logo-fallback{width:66px;height:66px}.settings-link-row{grid-template-columns:20px 1fr 1fr}.settings-link-row .editor-field:last-child{grid-column:2/-1}}
