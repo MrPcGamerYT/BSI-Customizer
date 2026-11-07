@@ -276,6 +276,9 @@ jobs:
         shell: pwsh
         env:
           QT_QPA_PLATFORM: offscreen
+          # The app manifest requests elevation; this CLI-only tester operates
+          # on a temporary copy, so bypass UAC just like the regular CI self-test.
+          __COMPAT_LAYER: RUNASINVOKER
         run: |
           $target = Join-Path $env:GITHUB_WORKSPACE 'HD-Player.exe'
           $manualTester = Join-Path $env:GITHUB_WORKSPACE 'scripts/Test-SettingsPanel-Manual.ps1'
