@@ -74,7 +74,7 @@ panelState = { ...panelState, supported: false, embeddedQmlResourceCount: 12, qm
 await editors.action('interface-load', null, 6);
 view = editors.render(6);
 assert.match(view, /Not supported/);
-assert.match(view, /Registered QML resources/);
+assert.match(view, /Verified QML resources/);
 assert.match(view, /UiSettingsWindow\.qml/);
 assert.doesNotMatch(view, /settings-panel-apply[^>]*disabled/);
 panelState = { ...panelState, supported: true };

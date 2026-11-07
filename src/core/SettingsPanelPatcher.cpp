@@ -626,7 +626,6 @@ TargetSources readSources(const QString &exePath, const QByteArray &image)
         out.aboutLogoSource = fallbackLogoDataUri();
         out.aboutLogoStatus = QStringLiteral("The expected BlueStacks logo resource is absent; a built-in fallback image is ready. You can replace it with your own logo below.");
     }
-    out.logoFallback = out.aboutLogoSource.startsWith(QLatin1String("data:image/"));
     out.ok = true;
     return out;
 }
