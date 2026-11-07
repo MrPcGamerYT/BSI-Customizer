@@ -1,0 +1,47 @@
+component BsiChromeFace: Item {
+    property string kind: "close"
+    property string stock: ""
+    property bool hot: false
+    property bool downState: false
+    property bool usable: true
+    readonly property bool ready: glyph.available
+    readonly property string drawing: kind === "resize" ? (/Restore/.test(stock) ? "restore" : "maximize") : kind === "sidebar" ? (/Expand/.test(stock) ? "expand" : "collapse") : kind
+    scale: downState ? 0.94 : 1
+    Behavior on scale { NumberAnimation { duration: 75 } }
+    Rectangle {
+        anchors.fill: parent; anchors.margins: 3; radius: 5
+        color: kind === "close" ? "#45242b" : "#2a2a30"
+        opacity: usable ? (downState ? 0.95 : hot ? 0.7 : 0) : 0
+        Behavior on opacity { NumberAnimation { duration: 100 } }
+    }
+    Canvas {
+        id: glyph
+        anchors.centerIn: parent; width: 16; height: 16
+        onAvailableChanged: requestPaint()
+        onPaint: {
+            var c = getContext("2d"); if (!c) return;
+            c.reset(); c.clearRect(0,0,width,height); c.save(); c.scale(width/24,height/24);
+            c.strokeStyle = usable ? (hot || downState ? "#ffffff" : "#d5d5de") : "#63636d";
+            c.lineWidth = 1.6; c.lineCap = "round"; c.lineJoin = "round";
+            function line(a,b,d,e) { c.moveTo(a,b); c.lineTo(d,e); }
+            c.beginPath();
+            switch (drawing) {
+            case "back": c.moveTo(13,5); c.lineTo(6,12); c.lineTo(13,19); line(6,12,20,12); break;
+            case "home": c.moveTo(3,10); c.lineTo(12,3); c.lineTo(21,10); c.moveTo(5,9); c.lineTo(5,21); c.lineTo(19,21); c.lineTo(19,9); c.moveTo(10,21); c.lineTo(10,14); c.lineTo(14,14); c.lineTo(14,21); break;
+            case "recent": c.rect(4,8,13,13); c.moveTo(8,4); c.lineTo(21,4); c.lineTo(21,17); break;
+            case "menu": line(5,6,19,6); line(5,12,19,12); line(5,18,19,18); break;
+            case "minimize": line(5,17,19,17); break;
+            case "maximize": c.rect(5,5,14,14); break;
+            case "restore": c.rect(4,8,12,12); c.moveTo(8,8); c.lineTo(8,4); c.lineTo(20,4); c.lineTo(20,16); c.lineTo(16,16); break;
+            case "collapse": c.moveTo(11,5); c.lineTo(5,12); c.lineTo(11,19); c.moveTo(19,5); c.lineTo(13,12); c.lineTo(19,19); break;
+            case "expand": c.moveTo(5,5); c.lineTo(11,12); c.lineTo(5,19); c.moveTo(13,5); c.lineTo(19,12); c.lineTo(13,19); break;
+            default: line(6,6,18,18); line(18,6,6,18); break;
+            }
+            c.stroke(); c.restore();
+        }
+    }
+    onDrawingChanged: glyph.requestPaint()
+    onHotChanged: glyph.requestPaint()
+    onDownStateChanged: glyph.requestPaint()
+    onUsableChanged: glyph.requestPaint()
+}

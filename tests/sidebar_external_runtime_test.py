@@ -42,6 +42,10 @@ def restyle(source, url):
     if INLINE and os.environ.get('BSI_SIDEBAR_COMPACT') == '1':
         from compact_inline import compact
         output = compact(output)
+    if INLINE and os.environ.get('BSI_SIDEBAR_BLACK') == '1':
+        sys.path.insert(0,str(ROOT/'tools/player-chrome'))
+        from build_sidebar_black import monochrome
+        output = monochrome(output)
     return output, buttons
 
 app = QGuiApplication([])

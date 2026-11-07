@@ -1,0 +1,35 @@
+const assert=require('node:assert/strict');
+const fs=require('node:fs');const path=require('node:path');
+const core=require('../tools/player-chrome/core.js');
+const root=path.resolve(__dirname,'..');
+const top=fs.readFileSync(path.join(__dirname,'fixtures/player-chrome/PlrTopbar.qml'),'utf8');
+const win=fs.readFileSync(path.join(__dirname,'fixtures/player-chrome/plr.qml'),'utf8');
+const face=fs.readFileSync(path.join(root,'assets/emulator-chrome/InlineFace.qml.txt'),'utf8');
+const a=core.patchTopbar(top,face),b=core.patchWindow(win);
+assert.equal(a.sites,8);assert.equal(b.sites,4);
+assert.deepEqual(core.nativeBodies(top),core.nativeBodies(a.text));
+assert.deepEqual(core.nativeBodies(win),core.nativeBodies(b.text));
+assert.ok(a.text.includes('visible: true // BSI CUSTOMIZER: clean player UI'));
+assert.ok(a.text.includes('pVisible: true /* BSI CUSTOMIZER: clean player UI'));
+assert.ok(a.text.includes('visible: false // BSI CUSTOMIZER: clean player UI')); // Help stays disabled.
+assert.ok(b.text.includes('property bool pBootVideoDone:false;Timer{id:bvDone;interval:3000'));
+assert.ok(b.text.includes('color: "#456789"')); // Same id in a popup is NOT a chrome target.
+assert.equal(b.text.match(/color: "#34343b"/g).length,1);
+assert.ok(b.text.includes('anchors.right: iSidebar.visible ? iSidebar.left : parent.right'));
+assert.ok(b.text.includes('height: 32'));
+assert.ok(!a.text.includes('file:///'));
+assert.equal(a.text.match(/MouseArea\s*{/g).length,top.match(/MouseArea\s*{/g).length);
+for(const code of [a.text,b.text])core.scan(code);
+assert.throws(()=>core.patchTopbar(a.text,face),/Already patched/);
+assert.throws(()=>core.patchWindow(b.text),/already patched/);
+assert.throws(()=>core.patchTopbar(top.replace('pIconSize: 32','pIconSize: 48'),face),/32px/);
+assert.throws(()=>core.patchTopbar(top.replace('id: iMinimizeBtn','id: unexpected'),face),/iMinimizeBtn/);
+const kept=core.patchTopbar(top,face,{restoreControls:false});
+assert.equal((kept.text.match(/visible: false \/\/ BSI CUSTOMIZER/g)||[]).length,3);
+const text='Item {\n    property string x: "first\n    second"\n    // comment\n    function a() {return /[{}"/]/.test("}")}\n}';
+assert.equal(core.fingerprint(text),core.fingerprint(core.compact(text)));
+assert.ok(core.compact(text).includes('"first\n    second"'));
+fs.mkdirSync(path.join(root,'.cache/player-chrome'),{recursive:true});
+fs.writeFileSync(path.join(root,'.cache/player-chrome/PlrTopbar.qml'),a.text);
+fs.writeFileSync(path.join(root,'.cache/player-chrome/plr.qml'),b.text);
+console.log('PASS: native function/handler preservation, only requested visibility restored, viewport/boot timer retained, scoped colors, no extra input handlers, unknown/already-patched layouts refused');

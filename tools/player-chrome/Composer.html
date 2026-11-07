@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'none'; img-src data:; base-uri 'none'; form-action 'none'">
+<title>BSI • Player Chrome</title>
+<style>
+:root{color-scheme:dark;font-family:Segoe UI,Arial,sans-serif;background:#09090b;color:#ededf1}*{box-sizing:border-box}body{margin:0;background:radial-gradient(ellipse at top,#202025 0,transparent 62%);min-height:100vh}main{max-width:1100px;margin:auto;padding:48px 24px}header{display:flex;justify-content:space-between;gap:24px;align-items:flex-start;margin-bottom:34px}.eyebrow{font-size:11px;letter-spacing:2px;color:#9e9ea8}h1{font-size:34px;letter-spacing:-1px;margin:10px 0 12px}p{font-size:14px;color:#a8a8b3;line-height:1.6}.pill{border:1px solid #41414a;padding:9px 12px;border-radius:24px;white-space:nowrap;font-size:11px;color:#d7d7df}.grid{display:grid;grid-template-columns:1fr 1fr;gap:18px}.card,.outputs{padding:24px;border:1px solid #33333b;border-radius:15px;background:linear-gradient(145deg,#19191e,#101014)}h2{font-size:17px;margin:0 0 8px}.step{display:inline-grid;place-items:center;border:1px solid #555560;width:24px;height:24px;font-size:12px;border-radius:7px;margin-right:8px}.card p{min-height:44px;font-size:12px}.field{display:block;font-size:12px;color:#bcbcc5;margin-top:18px}.field span{display:block;margin-bottom:8px}input[type=file]{font:12px Segoe UI;max-width:100%;padding:10px;border:1px dashed #555561;border-radius:8px;background:#0b0b0e;width:100%}input::file-selector-button{border:0;border-radius:5px;padding:8px;background:#34343d;color:white;margin-right:12px;cursor:pointer}input[type=number]{width:100%;padding:10px;border:1px solid #40404a;border-radius:7px;background:#0b0b0e;color:white}input:focus-visible,textarea:focus-visible,button:focus-visible{outline:2px solid #b7b7ca;outline-offset:3px}details{margin-top:16px;font-size:12px;color:#a8a8b3}summary{cursor:pointer}textarea{width:100%;min-height:135px;resize:vertical;margin-top:12px;border:1px solid #41414c;background:#09090d;color:#dedee7;border-radius:8px;padding:12px;font:11px/1.5 Consolas,monospace}.options{padding:22px 2px;display:flex;align-items:center;flex-wrap:wrap;gap:20px;font-size:12px}.options label{display:flex;align-items:center;gap:8px}button{font:600 12px Segoe UI,sans-serif;border:1px solid #5a5a65;border-radius:8px;background:#25252d;color:#eeeeF4;padding:11px 16px;cursor:pointer}button:hover{background:#373740}button.primary{background:#eeeeF3;color:#101014;border-color:#f7f7fa;padding:13px 23px}button.primary:hover{background:white}button:disabled{opacity:.4;cursor:not-allowed}.actions{display:flex;align-items:center;gap:18px;margin-bottom:22px}.status{font-size:13px;color:#b8b8c5;line-height:1.5}.error{color:#ffb3b9}.notice{margin:18px 0 24px;border:1px solid #5b5039;border-radius:9px;padding:13px 16px;color:#d7c5a7;background:#1b1812;font-size:12px;line-height:1.6}.outputs{margin-top:18px}.report{font:12px/1.8 Consolas,monospace;color:#c0c0cc;white-space:pre-wrap;overflow-wrap:anywhere;background:#0b0b0e;padding:14px;border-radius:7px;margin:16px 0}.output-head{display:flex;justify-content:space-between;gap:16px;align-items:center}.small-actions{display:flex;gap:8px}.outputs textarea{height:180px}.footer{font-size:11px;color:#777781;border-top:1px solid #292930;margin-top:28px;padding-top:18px;line-height:1.8}.guard{font-size:12px;color:#d9c9b2;padding:16px 0;display:block}.loaded{color:#bfbfc9;font-size:11px;min-height:16px;margin-top:10px}a{color:#e0e0ee}@media(max-width:750px){.grid{grid-template-columns:1fr}header{display:block}.pill{display:inline-block;margin-top:10px}h1{font-size:28px}.output-head{align-items:flex-start;flex-direction:column}.actions{align-items:flex-start;flex-direction:column}}
+</style>
+</head>
+<body><main>
+<header><div><div class="eyebrow">BSI / NATIVE EMULATOR CHROME</div><h1>Black frame. Clean outlines.</h1><p>Build complete patched QML from your original player resources.<br>No terminal, Python, EXE writing or internet connection required.</p></div><div class="pill">LOCAL FILES ONLY · NO UPLOAD</div></header>
+<div class="grid">
+<section class="card"><h2><span class="step">1</span>PlrTopbar.qml</h2><p>Original topbar resource. Keeps its native dragging, timers, menus, tooltips and window-action handlers.</p>
+<label class="field"><span>Choose the exported original QML</span><input id="topFile" type="file" accept=".qml,.txt" aria-label="Original PlrTopbar.qml"></label><div id="topLoaded" class="loaded">Or paste the original source below.</div>
+<details><summary>Paste original topbar code instead</summary><textarea id="topSource" spellcheck="false" aria-label="Original topbar source"></textarea></details>
+<label class="field"><span>Actual slot capacity, bytes — optional, NOT source size</span><input id="topCap" type="number" min="1" step="1" placeholder="Leave blank if unknown"></label></section>
+<section class="card"><h2><span class="step">2</span>plr.qml</h2><p>Original main-window resource. Changes four chrome colors only; retains the game viewport, boot timer, offsets and backend logic.</p>
+<label class="field"><span>Choose the exported original QML</span><input id="winFile" type="file" accept=".qml,.txt" aria-label="Original plr.qml"></label><div id="winLoaded" class="loaded">Or paste the original source below.</div>
+<details><summary>Paste original main-window code instead</summary><textarea id="winSource" spellcheck="false" aria-label="Original main-window source"></textarea></details>
+<label class="field"><span>Actual slot capacity, bytes — optional, NOT source size</span><input id="winCap" type="number" min="1" step="1" placeholder="Leave blank if unknown"></label></section>
+</div>
+<div class="options"><label><input id="restore" type="checkbox" checked> Show native hamburger + sidebar collapse buttons</label><label><input type="checkbox" checked disabled> Compact formatting; keep native handlers and newlines</label></div>
+<div class="actions"><button id="build" class="primary">Create patched QML</button><div id="status" class="status" role="status" aria-live="polite">Choose both originals, then create. Your files never leave this browser.</div></div>
+<div class="notice">Capacity values were not supplied for these two resources. This helper shows <strong>JavaScript zlib level-9 estimates</strong>, not a promise of fit in your Qt build. If the native writer refuses, stop and send its message. Never force-save, append, grow or truncate the EXE.</div>
+<section id="result" hidden>
+<label class="guard"><input id="ack" type="checkbox"> I understand the actual resource writer is authoritative. I will keep backups and will not force an oversized save.</label>
+<div id="capacityReport" class="report"></div>
+<div class="outputs"><div class="output-head"><h2>PlrTopbar.qml <small>· complete output</small></h2><div class="small-actions"><button id="copyTop" disabled>Copy all</button><button id="saveTop" disabled>Download QML</button></div></div><textarea id="topOutput" readonly spellcheck="false" aria-label="Complete patched topbar"></textarea></div>
+<div class="outputs"><div class="output-head"><h2>plr.qml <small>· complete output</small></h2><div class="small-actions"><button id="copyWin" disabled>Copy all</button><button id="saveWin" disabled>Download QML</button></div></div><textarea id="winOutput" readonly spellcheck="false" aria-label="Complete patched main window"></textarea></div>
+<p>Copy each output over the matching resource, not over another QML file. Do not Format/Beautify after copying. The matching <strong>PlrSidebar.qml</strong> is supplied separately in this package.</p>
+</section>
+<div class="footer">This helper never opens an EXE. It restores only the requested menu/collapse visibility; other cleaned flags, login, promotions and settings logic remain untouched. Native OS corners/shadows and game graphics are not modified. Unknown/already-patched layouts are refused rather than guessed. Tested with Qt6 layout/backend doubles, not live MSI Player.</div>
+</main>
+<script>/*PAKO*/</script>
+<script>/*CORE*/</script>
+<script>
+'use strict';
+const FACE=/*FACE*/;
+const $=id=>document.getElementById(id);
+let generated=null;
+function status(message,error=false){$('status').textContent=message;$('status').classList.toggle('error',error);}
+function locks(){for(const id of ['copyTop','saveTop','copyWin','saveWin'])$(id).disabled=!generated||!$('ack').checked;}
+function invalidate(){generated=null;$('result').hidden=true;$('ack').checked=false;locks();}
+for(const prefix of ['top','win']){
+ $(prefix+'File').addEventListener('change',async event=>{
+  invalidate();const file=event.target.files[0];if(!file)return;
+  try{if(file.size>3000000)throw Error('Choose a QML text resource, not an EXE (3 MB maximum).');
+   const text=await file.text();if(text.includes('\u0000'))throw Error('Binary file refused. Export QML as UTF-8 text.');
+   $(prefix+'Source').value=text;$(prefix+'Loaded').textContent=file.name+' · '+file.size.toLocaleString()+' bytes loaded locally';status('Original loaded. Choose the other file if needed.');
+  }catch(error){status(error.message,true);}
+ });
+ $(prefix+'Source').addEventListener('input',invalidate);$(prefix+'Cap').addEventListener('input',invalidate);
+}
+$('restore').addEventListener('change',invalidate);$('ack').addEventListener('change',locks);
+function bytes(text){return new TextEncoder().encode(text);}
+function estimated(text){return 4+pako.deflate(bytes(text),{level:9}).length;}
+function capacity(id){const raw=$(id).value.trim();if(!raw)return null;const n=Number(raw);if(!Number.isSafeInteger(n)||n<1)throw Error('Capacity must be a positive integer byte limit.');return n;}
+$('build').addEventListener('click',()=>{
+ invalidate();status('Checking original layouts and preserving native callbacks…');
+ try{
+  const top=$('topSource').value,win=$('winSource').value;if(!top.trim()||!win.trim())throw Error('Choose or paste BOTH original resources first.');
+  if(top.includes('\u0000')||win.includes('\u0000'))throw Error('Binary file refused. Use UTF-8 QML text.');
+  const topCapacity=capacity('topCap'),winCapacity=capacity('winCap');
+  const a=BsiChrome.patchTopbar(top,FACE,{restoreControls:$('restore').checked}),b=BsiChrome.patchWindow(win);
+  for(const [before,after]of [[top,a.text],[win,b.text]])if(JSON.stringify(BsiChrome.nativeBodies(before))!==JSON.stringify(BsiChrome.nativeBodies(after)))throw Error('Native callback preservation check failed. No output released.');
+  const topSize=estimated(a.text),winSize=estimated(b.text);
+  if(topCapacity!==null&&topSize>topCapacity)throw Error('Topbar estimate '+topSize+' exceeds '+topCapacity+' bytes. No outputs released. Send the actual writer capacity message.');
+  if(winCapacity!==null&&winSize>winCapacity)throw Error('Main-window estimate '+winSize+' exceeds '+winCapacity+' bytes. No outputs released. Send the actual writer capacity message.');
+  generated={top:a.text,win:b.text};$('topOutput').value=a.text;$('winOutput').value=b.text;
+  $('capacityReport').textContent='Estimated qCompress envelope (JS zlib9; real Qt writer remains final):\n\nPlrTopbar.qml  '+estimated(top)+' → '+topSize+' bytes   '+(topCapacity===null?'SLOT UNKNOWN — FIT UNVERIFIED':'supplied slot '+topCapacity+' bytes')+'\nplr.qml        '+estimated(win)+' → '+winSize+' bytes   '+(winCapacity===null?'SLOT UNKNOWN — FIT UNVERIFIED':'supplied slot '+winCapacity+' bytes')+'\n\nNative function/handler bodies: preservation check passed for BOTH inputs.\nMenu + collapse visibility: '+(a.restored?'restored, as requested':'original hidden flags retained')+'.\nNo EXE opened or written. No external QML assets required by these outputs.';
+  $('result').hidden=false;locks();status('Complete files created locally. Read the capacity report and acknowledge before copying/downloading.');
+ }catch(error){status(error.message,true);}
+});
+async function copyOutput(which){
+ if(!generated||!$('ack').checked)return;const text=generated[which],field=$(which==='top'?'topOutput':'winOutput');
+ try{await navigator.clipboard.writeText(text);status('Complete '+(which==='top'?'PlrTopbar.qml':'plr.qml')+' copied.');}
+ catch(_){field.focus();field.select();status(document.execCommand('copy')?'Complete QML copied.':'Text selected. Press Ctrl+C to copy all.');}
+}
+function saveOutput(which){
+ if(!generated||!$('ack').checked)return;const blob=new Blob([generated[which]],{type:'text/plain;charset=utf-8'}),url=URL.createObjectURL(blob),a=document.createElement('a');
+ a.href=url;a.download=which==='top'?'PlrTopbar.qml':'plr.qml';document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
+}
+$('copyTop').onclick=()=>copyOutput('top');$('copyWin').onclick=()=>copyOutput('win');$('saveTop').onclick=()=>saveOutput('top');$('saveWin').onclick=()=>saveOutput('win');
+</script></body></html>
