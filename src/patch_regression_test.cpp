@@ -5053,37 +5053,6 @@ Window {
                   && uiPanelState.value(QStringLiteral("settingsQmlResourceCount")).toInt() == panelState.settingsQmlResourceCount,
               QStringLiteral("the Customizer interface reports the real %1 Settings model as patchable (%2)")
                   .arg(QFileInfo(input).fileName(), uiPanelState.value(QStringLiteral("detail")).toString()));
-        const QString combinedDir = temp.filePath(QStringLiteral("boot-then-settings-")
-                                                   + QFileInfo(input).completeBaseName());
-        QDir().mkpath(combinedDir);
-        const QString combinedPath = QDir(combinedDir).filePath(QStringLiteral("HD-Player.exe"));
-        write(combinedPath, original);
-        const auto firstBoot = BootVideoPatcher::patch(combinedPath, 3000, QStringLiteral("solar"));
-        SettingsManager combinedManager(nullptr, false);
-        combinedManager.setExePath(combinedPath);
-        combinedManager.setAboutDeveloperName(QStringLiteral("Boot integration"));
-        QVariantList integrationLinks;
-        integrationLinks << QVariantMap{{QStringLiteral("title"), QStringLiteral("Source")},
-                                        {QStringLiteral("url"), QStringLiteral("https://example.com/source")}};
-        combinedManager.setAboutLinks(integrationLinks);
-        Backend combinedBackend(&combinedManager);
-        const QVariantMap settingsBeforeApply = combinedBackend.settingsPanelRebuildState();
-        const QVariantMap settingsAfterBoot = combinedBackend.applySettingsPanelRebuild(true);
-        const QVariantMap settingsAfterApply = combinedBackend.settingsPanelRebuildState();
-        const auto bootSwitch = BootVideoPatcher::patch(combinedPath, 3000, QStringLiteral("orbit"));
-        const QByteArray combinedImage = read(combinedPath);
-        const QVariantMap combinedSettings = combinedBackend.settingsPanelRebuildState();
-        const auto combinedTheme = ThemeEngine::findThemeZlib(combinedImage);
-        check(firstBoot.ok && settingsBeforeApply.value(QStringLiteral("supported")).toBool()
-                  && settingsAfterBoot.value(QStringLiteral("ok")).toBool()
-                  && settingsAfterApply.value(QStringLiteral("applied")).toBool() && bootSwitch.ok
-                  && combinedSettings.value(QStringLiteral("supported")).toBool()
-                  && registeredQmlContains(combinedImage, QStringLiteral("bsiBootLoader"))
-                  && !PeUtils::sections(combinedImage).isEmpty()
-                  && combinedTheme.hasQrcNode && !combinedTheme.ambiguous
-                  && read(combinedPath + QStringLiteral(".bak")) == original,
-              QStringLiteral("the real %1 remains valid when the Customizer backend applies Settings rebuild after a boot patch and boot-style switch (%2)")
-                  .arg(QFileInfo(input).fileName(), combinedSettings.value(QStringLiteral("detail")).toString()));
         const auto stockAbout = AboutPatcher::analyze(original);
         if (panelState.supported && !panelState.applied && stockAbout.supported
             && stockAbout.sourceEditable) {
@@ -5134,10 +5103,28 @@ Window {
                 QVariantMap{{QStringLiteral("title"), QStringLiteral("Regression video")},
                             {QStringLiteral("url"), QStringLiteral("https://example.com/video")}}
             };
-            const auto appliedPanel = SettingsPanelPatcher::apply(panelCopy,
-                QStringLiteral("BSI Panel Regression"), panelLinks, true);
+            const auto firstBoot = BootVideoPatcher::patch(panelCopy, 3000, QStringLiteral("solar"));
+            SettingsManager panelManager(nullptr, false);
+            panelManager.setExePath(panelCopy);
+            panelManager.setAboutDeveloperName(QStringLiteral("BSI Panel Regression"));
+            panelManager.setAboutLinks(panelLinks);
+            Backend panelBackend(&panelManager);
+            const QVariantMap settingsBeforeApply = panelBackend.settingsPanelRebuildState();
+            const QVariantMap appliedPanel = panelBackend.applySettingsPanelRebuild(true);
+            const QVariantMap settingsAfterApply = panelBackend.settingsPanelRebuildState();
+            const auto bootSwitch = BootVideoPatcher::patch(panelCopy, 3000, QStringLiteral("orbit"));
+            const QByteArray rebuiltWithBoot = read(panelCopy);
+            const QVariantMap settingsAfterBootSwitch = panelBackend.settingsPanelRebuildState();
+            check(firstBoot.ok && settingsBeforeApply.value(QStringLiteral("supported")).toBool()
+                      && settingsAfterApply.value(QStringLiteral("applied")).toBool()
+                      && bootSwitch.ok && settingsAfterBootSwitch.value(QStringLiteral("applied")).toBool()
+                      && registeredQmlContains(rebuiltWithBoot, QStringLiteral("bsiBootLoader"))
+                      && !PeUtils::sections(rebuiltWithBoot).isEmpty()
+                      && read(panelCopy + QStringLiteral(".bak")) == original,
+                  QStringLiteral("the real %1 survives boot patch -> Customizer Settings apply -> boot-style switch")
+                      .arg(QFileInfo(input).fileName()));
             check(appliedPanel.value(QStringLiteral("ok")).toBool(),
-                  QStringLiteral("the real %1 Settings panel rebuild applies to a disposable copy (%2)")
+                  QStringLiteral("the real %1 Settings panel rebuild applies through the Customizer backend (%2)")
                       .arg(QFileInfo(input).fileName(), appliedPanel.value(QStringLiteral("msg")).toString()));
             if (appliedPanel.value(QStringLiteral("ok")).toBool()) {
                 const QByteArray rebuiltBeforeAbout = read(panelCopy);

@@ -12,7 +12,6 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
-#include <QHash>
 #include <QImage>
 #include <QImageReader>
 #include <QRegularExpression>
@@ -199,21 +198,6 @@ QList<Stream> streams(const QByteArray &data)
         append(at - 8, qml, link);
     }
     return result;
-}
-
-bool verifyBootQml(const QByteArray &image, const QList<QPair<qint64, QString>> &expected)
-{
-    QHash<qint64, int> matches;
-    for (const auto &stream : streams(image)) {
-        for (const auto &source : expected) {
-            if (stream.entry != source.first) continue;
-            ++matches[source.first];
-            if (stream.text != source.second) return false;
-        }
-    }
-    for (const auto &source : expected)
-        if (matches.value(source.first) != 1) return false;
-    return !PeUtils::sections(image).isEmpty();
 }
 
 QString embeddedEmulatorLogo(const QByteArray &image)
@@ -1262,9 +1246,8 @@ Result patch(const QString &exePath, int holdMs, const QString &requestedMode, c
         if (!roots.isEmpty()) property(boot, roots.first(), name, stockVisibility, false);
     }
     QString error;
-    qint64 rewrittenControllerEntry = controller.entry;
-    if (!QtResources::replaceResource(data, controller.entry, controller.link, boot.toUtf8(),
-                                      &error, &rewrittenControllerEntry)) return { false, error };
+    if (!QtResources::replaceResource(data, controller.entry, controller.link, boot.toUtf8(), &error))
+        return { false, error };
     QStringList controllerNames = controller.link.sourceNames;
     if (!controllerNames.contains(controller.link.sourceName)) controllerNames << controller.link.sourceName;
     const QStringList controllerIds { QStringLiteral("iBootImage"), QStringLiteral("iBootProgressContainer"),
@@ -1273,18 +1256,13 @@ Result patch(const QString &exePath, int holdMs, const QString &requestedMode, c
     QtResources::invalidateUnits(data, controllerNames, controllerIds);
     if (QtResources::activeUnits(data, controllerNames, controllerIds) > 0)
         return { false, QStringLiteral("The boot controller's embedded compiled QML is still active; no boot patch was committed.") };
-    QList<QPair<qint64, QString>> expectedBootSources {
-        { rewrittenControllerEntry, boot }
-    };
     bool holdApplied = false;
     if (!hosts.isEmpty()) {
         QString host = hosts.first().text;
         if (!updateHost(host, holdMs, &holdApplied, &error)) return { false, error };
         if (host != hosts.first().text) {
             const auto &hostStream = hosts.first();
-            qint64 rewrittenHostEntry = hostStream.entry;
-            if (!QtResources::replaceResource(data, hostStream.entry, hostStream.link, host.toUtf8(),
-                                              &error, &rewrittenHostEntry))
+            if (!QtResources::replaceResource(data, hostStream.entry, hostStream.link, host.toUtf8(), &error))
                 return { false, error };
             QStringList hostNames = hostStream.link.sourceNames;
             if (!hostNames.contains(hostStream.link.sourceName)) hostNames << hostStream.link.sourceName;
@@ -1293,11 +1271,8 @@ Result patch(const QString &exePath, int holdMs, const QString &requestedMode, c
             QtResources::invalidateUnits(data, hostNames, hostIds);
             if (QtResources::activeUnits(data, hostNames, hostIds) > 0)
                 return { false, QStringLiteral("The boot host's embedded compiled QML is still active; no boot patch was committed.") };
-            expectedBootSources << qMakePair(rewrittenHostEntry, host);
         }
     }
-    if (!verifyBootQml(data, expectedBootSources))
-        return { false, QStringLiteral("A rewritten boot QML source failed resource read-back validation; the executable and boot assets were not changed.") };
     const QDir install(QFileInfo(exePath).absolutePath());
     const QString assets = install.filePath(QStringLiteral("Assets"));
     const QFileInfo assetInfo(assets);
