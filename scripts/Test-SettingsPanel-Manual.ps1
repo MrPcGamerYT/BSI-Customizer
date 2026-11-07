@@ -76,6 +76,17 @@ try {
     $testPassed = $process.ExitCode -eq 0 -and $report.ok -and $report.supported `
         -and $report.temporaryCopyApplyOk -and $report.temporaryCopyAppliedAfter `
         -and $report.originalUnchanged
+    $diagnostic = "Supported=$($report.supported); QML=$($report.embeddedQmlResourceCount); " +
+        "temporary apply=$($report.temporaryCopyApplyOk); applied after=$($report.temporaryCopyAppliedAfter); " +
+        "original unchanged=$($report.originalUnchanged). $($report.detail) $($report.temporaryCopyDetail)"
+    if ($env:GITHUB_STEP_SUMMARY) {
+        Add-Content -LiteralPath $env:GITHUB_STEP_SUMMARY -Value "## Settings-panel tester`n`n$diagnostic`n"
+    }
+    if (-not $testPassed -and $env:GITHUB_ACTIONS -eq 'true') {
+        $annotation = $diagnostic -replace '%', '%25' -replace "`r", ' ' -replace "`n", ' '
+        if ($annotation.Length -gt 400) { $annotation = $annotation.Substring(0, 400) }
+        Write-Host "::error::Settings-panel safe-copy test failed: $annotation"
+    }
     if ($testPassed) {
         Write-Host 'PASS: the selected player is reported Supported, and the Settings-panel apply succeeded on a temporary copy.' -ForegroundColor Green
     } else {
@@ -103,6 +114,14 @@ try {
     if (-not $testPassed) {
         throw 'Settings-panel manual test failed. Inspect the Customizer UI and the JSON report above.'
     }
+}
+catch {
+    if ($env:GITHUB_ACTIONS -eq 'true') {
+        $message = $_.Exception.Message -replace '%', '%25' -replace "`r", ' ' -replace "`n", ' '
+        if ($message.Length -gt 400) { $message = $message.Substring(0, 400) }
+        Write-Host "::error::Manual Settings-panel tester exception: $message"
+    }
+    throw
 }
 finally {
     Remove-Item -LiteralPath $logRoot -Recurse -Force -ErrorAction SilentlyContinue
