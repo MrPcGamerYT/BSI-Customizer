@@ -46,7 +46,7 @@ match = re.search(
 assert match, "Could not find the generated Settings-window QML template"
 replacement = match.group(1)
 assert "BSI Settings v4" in replacement
-assert "iBsiVisibleTabIndices" in replacement and "preferredHighlightBegin" in replacement
+assert "iBsiVisibleTabIndices" in replacement and "iBsiHiddenTabIds" in replacement
 assert "@@BSI_HIDDEN_TABS@@" in replacement and "@@BSI_TAB_ICONS@@" in replacement
 assert "width*0.86" in replacement
 assert "⚙▣◈♫⌨⌘☷ⓘ◉◇✦▧" in replacement and "pSettingBtnText" in replacement

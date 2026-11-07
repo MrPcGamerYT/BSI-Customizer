@@ -689,40 +689,30 @@ QString buildWindow(const QString &stock, const QStringList &hiddenTabs,
     // This is a visual-only replacement. The original root Window, its native
     // change/discard prompts, callbacks and the Loader model remain in place.
     QString replacement = QStringLiteral(R"QML(
-UiShadowContainer {
+UiShadowContainer{
 // BSI Settings v4
 id:iSettingsWindowShadowContainer;anchors.fill:parent
-property var iBsiHiddenTabIds: @@BSI_HIDDEN_TABS@@
-property var iBsiTabIcons: @@BSI_TAB_ICONS@@
-property var iBsiVisibleTabIndices: {
-var result=[];var elements=pSettingsItems.pSettingElements||[];
-for(var i=0;i<elements.length;++i){var source=String(elements[i].pQmlSource||"").replace(/\\\\/g,"/").split("/").pop().toLowerCase();if(iBsiHiddenTabIds.indexOf(source)<0)result.push(i)}
-return result;
-}
-Component.onCompleted: Qt.callLater(function(){if(iBsiVisibleTabIndices.length>0&&iBsiVisibleTabIndices.indexOf(pCurrentTabIndex)<0)fChangeSelectedSetting(iBsiVisibleTabIndices[0])})
-Rectangle {
-anchors.fill:parent;color:UiTheme.colors.primary80;radius:12;border.width:1;border.color:UiTheme.colors.accentNormal;clip:true
+property var iBsiHiddenTabIds:@@BSI_HIDDEN_TABS@@
+property var iBsiTabIcons:@@BSI_TAB_ICONS@@
+function iBsiKey(v){return String(v||"").replace(/\\/g,"/").split("/").pop().toLowerCase()}
+property var iBsiVisibleTabIndices:{var a=[],e=pSettingsItems.pSettingElements||[];for(var i=0;i<e.length;i++)if(iBsiHiddenTabIds.indexOf(iBsiKey(e[i].pQmlSource))<0)a.push(i);return a}
+Component.onCompleted:Qt.callLater(function(){var a=iSettingsWindowShadowContainer.iBsiVisibleTabIndices;if(a.length&&a.indexOf(pCurrentTabIndex)<0)fChangeSelectedSetting(a[0])})
+Rectangle{anchors.fill:parent;color:UiTheme.colors.primary80;radius:12;clip:true
 Column{anchors.fill:parent;anchors.margins:12;spacing:8
 Item{width:parent.width;height:36
 MouseArea{width:parent.width-42;height:parent.height;onPressed:iSettingsWindow.startSystemMove()}
 Text{text:qsTranslate("QObject","Settings");color:UiTheme.colors.primary10;font:UiTheme.fonts.bodyLarge;anchors.left:parent.left;anchors.verticalCenter:parent.verticalCenter}
-UiImageButton{asset:"CloseIcon";pImageWidth:16;pImageHeight:16;anchors.right:parent.right;anchors.verticalCenter:parent.verticalCenter;onClicked:iSettingsWindow.close()}
-}
-ListView{width:parent.width;height:76;clip:true;orientation:ListView.Horizontal;spacing:7;currentIndex:iBsiVisibleTabIndices.indexOf(pCurrentTabIndex);model:iBsiVisibleTabIndices;highlightRangeMode:ListView.StrictlyEnforceRange;preferredHighlightBegin:width/2-45;preferredHighlightEnd:width/2+45
-delegate:Item{id:bsiTabWrapper;property int bsiPageIndex:modelData;property var bsiPage:pSettingsItems.pSettingElements[bsiPageIndex];property string bsiPageKey:String(bsiPage.pQmlSource||"").replace(/\\\\/g,"/").split("/").pop().toLowerCase();property string bsiCustomIcon:iBsiTabIcons[bsiPageKey]||"";width:Math.max(66,Math.min(112,(ListView.view.width-7*(iBsiVisibleTabIndices.length-1))/Math.max(1,iBsiVisibleTabIndices.length)));height:64
-UiSettingsButton{anchors.fill:parent;pSettingIdx:bsiTabWrapper.bsiPageIndex;pSettingBtnText:(bsiTabWrapper.bsiCustomIcon.length?"\n":"⚙▣◈♫⌨⌘☷ⓘ◉◇✦▧".charAt(bsiTabWrapper.bsiPageIndex))+"\n"+String(bsiTabWrapper.bsiPage.pButtonText||"");pSelected:bsiTabWrapper.bsiPageIndex===pCurrentTabIndex;pShowRedDot:bsiTabWrapper.bsiPage.pShowRedDot;onSettingClicked:fChangeSelectedSetting(pSettingIdx)}
-Image{visible:bsiTabWrapper.bsiCustomIcon.length>0;source:bsiTabWrapper.bsiCustomIcon;width:18;height:18;anchors.horizontalCenter:parent.horizontalCenter;anchors.top:parent.top;anchors.topMargin:7;fillMode:Image.PreserveAspectFit;smooth:true}
-}
+UiImageButton{asset:"CloseIcon";pImageWidth:16;pImageHeight:16;anchors.right:parent.right;anchors.verticalCenter:parent.verticalCenter;onClicked:iSettingsWindow.close()}}
+ListView{width:parent.width;height:76;clip:true;orientation:ListView.Horizontal;spacing:7;currentIndex:iSettingsWindowShadowContainer.iBsiVisibleTabIndices.indexOf(pCurrentTabIndex);model:iSettingsWindowShadowContainer.iBsiVisibleTabIndices
+delegate:Item{property int p:modelData;property var d:pSettingsItems.pSettingElements[p];property string k:iSettingsWindowShadowContainer.iBsiKey(d.pQmlSource);property string icon:iSettingsWindowShadowContainer.iBsiTabIcons[k]||"";width:92;height:64
+UiSettingsButton{anchors.fill:parent;pSettingIdx:parent.p;pSettingBtnText:(parent.icon.length?"":"⚙▣◈♫⌨⌘☷ⓘ◉◇✦▧".charAt(parent.p))+"\n"+String(parent.d.pButtonText||"");pSelected:parent.p===pCurrentTabIndex;pShowRedDot:parent.d.pShowRedDot;onSettingClicked:fChangeSelectedSetting(pSettingIdx)}
+Image{visible:parent.icon.length>0;source:parent.icon;width:18;height:18;anchors.horizontalCenter:parent.horizontalCenter;anchors.top:parent.top;anchors.topMargin:7;fillMode:Image.PreserveAspectFit}}
 }
 Item{width:parent.width;height:parent.height-128
 Rectangle{anchors.fill:parent;radius:10;color:UiTheme.colors.primary70}
-StackLayout{id:iSelectedSettingControl;width:Math.max(0,Math.min(parent.width-16,parent.width*0.86));anchors.horizontalCenter:parent.horizontalCenter;anchors.top:parent.top;anchors.bottom:parent.bottom;anchors.topMargin:6;anchors.bottomMargin:6;currentIndex:pCurrentTabIndex
-Repeater{model:pSettingsItems.pSettingElements;delegate:Loader{Component.onCompleted:{var a=model.modelData.pComponentArgs;a?setSource(model.modelData.pQmlSource,a):setSource(model.modelData.pQmlSource)}
-onLoaded:{model.modelData.pComponentObj = item;if(item.fOnQmlLoaded)item.fOnQmlLoaded()}}}
-}
-}
-}
-}
+StackLayout{id:iSelectedSettingControl;width:parent.width*.86;anchors.horizontalCenter:parent.horizontalCenter;anchors.top:parent.top;anchors.bottom:parent.bottom;anchors.margins:6;currentIndex:pCurrentTabIndex
+Repeater{model:pSettingsItems.pSettingElements;delegate:Loader{Component.onCompleted:{var a=model.modelData.pComponentArgs;a?setSource(model.modelData.pQmlSource,a):setSource(model.modelData.pQmlSource)}onLoaded:{model.modelData.pComponentObj=item;if(item.fOnQmlLoaded)item.fOnQmlLoaded()}}}}
+}}
 }
 )QML");
     replacement.replace(QStringLiteral("@@BSI_HIDDEN_TABS@@"), hiddenLiteral);
