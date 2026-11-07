@@ -4665,9 +4665,21 @@ Window {
             const QByteArray switchedHtml = read(QDir(switchAssets).filePath(QStringLiteral("BootScreen.html")));
             const QByteArray switchedHelper = read(QDir(switchAssets).filePath(QStringLiteral("BootVideo.qml")));
             const QString switchedController = linkedResourceText(switchedImage, QStringLiteral("RenamedStartup.qml"));
+            const auto countMatches = [](const QString &text, const QString &pattern) {
+                int count = 0;
+                auto matches = QRegularExpression(pattern).globalMatch(text);
+                while (matches.hasNext()) { matches.next(); ++count; }
+                return count;
+            };
+            const int fallbackDefinitions = countMatches(switchedController,
+                QStringLiteral("\\bid\\s*:\\s*bsiNativeStartupComponent\\b"));
+            const int watchdogDefinitions = countMatches(switchedController,
+                QStringLiteral("\\bid\\s*:\\s*bsiBootLoadWatchdog\\b"));
             const bool intact = !PeUtils::sections(switchedImage).isEmpty()
                 && !QtResources::registeredFiles(switchedImage).isEmpty()
                 && switchedController.contains(QLatin1String("bsiBootLoader"))
+                && fallbackDefinitions == 1 && watchdogDefinitions == 1
+                && switchedController.contains(QStringLiteral("property string bootTheme: \"%1\"").arg(theme))
                 && switchedHtml.contains(QStringLiteral("class=\"boot theme-%1\"").arg(theme).toUtf8())
                 && switchedHelper.contains(QStringLiteral("property string bootTheme: \"%1\"").arg(theme).toUtf8())
                 && read(switchPath + QStringLiteral(".bak")) == image;
