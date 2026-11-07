@@ -651,6 +651,31 @@ QString resourceText(const QByteArray &bytes, const ResourceFixture &r, const QS
     return QString::fromUtf8(be16(bytes, node + 4) == 1 ? qUncompress(payload) : payload);
 }
 
+QString linkedResourceText(const QByteArray &image, const QString &leaf)
+{
+    QString result;
+    bool found = false;
+    for (const auto &file : QtResources::registeredFiles(image)) {
+        if (QFileInfo(file.path.isEmpty() ? file.name : file.path).fileName().compare(leaf, Qt::CaseInsensitive) != 0)
+            continue;
+        if (found) return {};
+        found = true;
+        result = EmbeddedResources::decodeText(QtResources::readFile(image, file, 8 * 1024 * 1024));
+    }
+    return result;
+}
+
+bool registeredQmlContains(const QByteArray &image, const QString &marker)
+{
+    for (const auto &file : QtResources::registeredFiles(image)) {
+        const QString path = file.path.isEmpty() ? file.name : file.path;
+        if (!path.endsWith(QLatin1String(".qml"), Qt::CaseInsensitive)) continue;
+        const QString source = EmbeddedResources::decodeText(QtResources::readFile(image, file, 8 * 1024 * 1024));
+        if (source.contains(marker)) return true;
+    }
+    return false;
+}
+
 QByteArray importedPlayer(const QStringList &normal, const QStringList &delay = {})
 {
     auto data = peFile();
@@ -3015,8 +3040,7 @@ int runPatchRegressionTests()
             componentRows += QStringLiteral("{ pQmlSource: \"%1\" },\n").arg(page);
         const QString componentPlayer = QStringLiteral(
             "import QtQuick\nItem {\n"
-            " property var pSettingsWindow\n"
-            " function makeSettings() { pSettingsWindow = settingsWindowFactory.createObject(iMainWindow, {pSettingsItems: settingsItemsFactory.createObject(iMainWindow)}) }\n"
+            " property var pSettingsWindow: settingsWindowFactory.createObject(iMainWindow, {pSettingsItems: settingsItemsFactory.createObject(iMainWindow)})\n"
             " Component { id: settingsWindowFactory; Item { } }\n"
             " Component { id: settingsItemsFactory\n"
             "  SettingElementModelList { id: pSettingsItems\n"
@@ -3034,6 +3058,21 @@ int runPatchRegressionTests()
         check(componentScoped.supported && componentScoped.settingsPageCount == pages.size(),
               QStringLiteral("the root model passed to the live Settings window wins over nested complete model decoys (%1)")
                   .arg(componentScoped.detail));
+
+        QString assignedComponentPlayer = componentPlayer;
+        assignedComponentPlayer.replace(
+            QStringLiteral(" property var pSettingsWindow: settingsWindowFactory.createObject(iMainWindow, {pSettingsItems: settingsItemsFactory.createObject(iMainWindow)})\n"),
+            QStringLiteral(" property var pSettingsWindow\n"
+                           " function makeSettings() { pSettingsWindow = settingsWindowFactory.createObject(iMainWindow); pSettingsWindow.pSettingsItems = settingsItemsFactory.createObject(iMainWindow); }\n"));
+        files[0].second = assignedComponentPlayer.toUtf8();
+        auto assignedComponentModel = nestedResources(files);
+        addRegistration(assignedComponentModel, false);
+        const QString assignedComponentPath = temp.filePath(QStringLiteral("settings-model-late-binding.exe"));
+        write(assignedComponentPath, assignedComponentModel.f.bytes);
+        const auto assignedComponent = SettingsPanelPatcher::analyze(assignedComponentPath);
+        check(assignedComponent.supported && assignedComponent.settingsPageCount == pages.size(),
+              QStringLiteral("an MSI-style post-create pSettingsItems assignment resolves the active component model (%1)")
+                  .arg(assignedComponent.detail));
 
         files[0].second = makePlayer(true).toUtf8();
         auto duplicateModel = nestedResources(files);
@@ -4541,15 +4580,36 @@ Window {
 
         const QString modernPath = QDir(folder).filePath(QStringLiteral("HD-Player-modern.exe"));
         write(modernPath, image);
-        const auto modern = BootVideoPatcher::patch(modernPath, 3000, QStringLiteral("modern"));
         const QString modernAssets = QDir(QFileInfo(modernPath).absolutePath()).filePath(QStringLiteral("Assets"));
+        QDir().mkpath(modernAssets);
+        QImage iconBitmap(48, 48, QImage::Format_ARGB32_Premultiplied);
+        iconBitmap.fill(QColor(QStringLiteral("#41B9EC")));
+        QByteArray iconPng;
+        QBuffer iconPngBuffer(&iconPng);
+        const bool iconPngReady = iconPngBuffer.open(QIODevice::WriteOnly) && iconBitmap.save(&iconPngBuffer, "PNG");
+        QByteArray iconFile = QByteArray::fromHex("0000010001000101000001002000");
+        const auto appendLe32 = [&iconFile](quint32 value) {
+            iconFile.append(char(value & 0xff)); iconFile.append(char((value >> 8) & 0xff));
+            iconFile.append(char((value >> 16) & 0xff)); iconFile.append(char((value >> 24) & 0xff));
+        };
+        appendLe32(quint32(iconPng.size()));
+        appendLe32(22);
+        iconFile += iconPng;
+        check(iconPngReady && write(QDir(modernAssets).filePath(QStringLiteral("BlueStacks.ico")), iconFile),
+              "prepare the selected player's Assets/BlueStacks.ico fixture");
+        const QString selectedIcon = BootVideoPatcher::logoPreviewDataUrl(modernPath);
+        check(selectedIcon.startsWith(QLatin1String("data:image/png;base64,")),
+              "the boot screen prefers and decodes Assets/BlueStacks.ico from the selected player");
+        const auto modern = BootVideoPatcher::patch(modernPath, 3000, QStringLiteral("modern"));
         const QByteArray modernHelper = read(QDir(modernAssets).filePath(QStringLiteral("BootVideo.qml")));
         const QByteArray modernHtml = read(QDir(modernAssets).filePath(QStringLiteral("BootScreen.html")));
         const QString modernController = resourceText(read(modernPath), r,
                                                           QStringLiteral("RenamedStartup.qml"));
         check(modern.ok && modernHelper.contains("import QtWebEngine")
                   && modernHelper.contains("Qt.resolvedUrl(\"BootScreen.html\")")
-                  && modernHtml.contains("data:image/svg+xml;base64,")
+                  && modernHtml.contains(selectedIcon.toUtf8())
+                  && modernHelper.contains(selectedIcon.toUtf8())
+                  && modernController.contains(selectedIcon.toUtf8())
                   && modernHtml.contains("class=\"boot theme-aurora\"")
                   && modernHtml.contains("class=\"ring-track\"")
                   && modernHtml.contains("drop-shadow(0 0 22px")
@@ -4562,6 +4622,7 @@ Window {
                   && modernController.contains("bsiNativeRingTrack.width / 2 - ctx.lineWidth")
                   && modernHelper.contains("objectName: \"bsiAuroraHalo\"")
                   && modernController.contains("objectName: \"bsiNativeBootAura\"")
+                  && !modernController.contains("text: \"BS\"")
                   && modernHelper.contains("ctx.shadowBlur")
                   && !modernHtml.contains("Promo.mp4") && !modernHtml.contains("<video")
                   && !modernHtml.contains("CUSTOMIZER")
@@ -4592,6 +4653,29 @@ Window {
                   QStringLiteral("the %1 preset keeps the full executable backup").arg(theme));
         }
 
+        const QString switchPath = QDir(folder).filePath(QStringLiteral("HD-Player-switch-theme.exe"));
+        write(switchPath, image);
+        bool switchSequenceOk = true;
+        for (const QString &theme : { QStringLiteral("aurora"), QStringLiteral("solar"),
+                                      QStringLiteral("orbit"), QStringLiteral("pulse"),
+                                      QStringLiteral("aurora") }) {
+            const auto switched = BootVideoPatcher::patch(switchPath, 3000, theme);
+            const QByteArray switchedImage = read(switchPath);
+            const QString switchAssets = QDir(QFileInfo(switchPath).absolutePath()).filePath(QStringLiteral("Assets"));
+            const QByteArray switchedHtml = read(QDir(switchAssets).filePath(QStringLiteral("BootScreen.html")));
+            const QByteArray switchedHelper = read(QDir(switchAssets).filePath(QStringLiteral("BootVideo.qml")));
+            const QString switchedController = linkedResourceText(switchedImage, QStringLiteral("RenamedStartup.qml"));
+            const bool intact = !PeUtils::sections(switchedImage).isEmpty()
+                && !QtResources::registeredFiles(switchedImage).isEmpty()
+                && switchedController.contains(QLatin1String("bsiBootLoader"))
+                && switchedHtml.contains(QStringLiteral("class=\"boot theme-%1\"").arg(theme).toUtf8())
+                && switchedHelper.contains(QStringLiteral("property string bootTheme: \"%1\"").arg(theme).toUtf8())
+                && read(switchPath + QStringLiteral(".bak")) == image;
+            switchSequenceOk = switchSequenceOk && switched.ok && intact;
+        }
+        check(switchSequenceOk,
+              "switching boot UI styles repeatedly patches intact PE/resource structures and preserves the original backup");
+
         const QString customPath = QDir(folder).filePath(QStringLiteral("HD-Player-custom.exe"));
         const QString customSource = QDir(folder).filePath(QStringLiteral("selected-startup.mp4"));
         const QString customAssets = QDir(QFileInfo(customPath).absolutePath()).filePath(QStringLiteral("Assets"));
@@ -4609,7 +4693,7 @@ Window {
               "custom mode installs the selected MP4 and preserves the previous startup video");
         check(customHelper.contains("QtWebEngine")
                   && customHelper.contains("Qt.resolvedUrl(\"BootScreen.html\")")
-                  && customHtml.contains("data:image/svg+xml;base64,")
+                  && customHtml.contains(selectedIcon.toUtf8())
                   && customHtml.contains("class=\"ring-track\"")
                   && customHtml.contains("Emulator is starting…")
                   && customHtml.contains("src=\"Promo.mp4\"")
@@ -4619,6 +4703,21 @@ Window {
               "custom mode loads its HTML boot page with the logo, glowing ring, status, and selected MP4 backdrop");
         check(read(customPath + QStringLiteral(".bak")) == image,
               "custom mode preserves the complete original executable backup");
+        const auto customToOrbit = BootVideoPatcher::patch(customPath, 2800, QStringLiteral("orbit"));
+        const QByteArray orbitAfterCustom = read(QDir(customAssets).filePath(QStringLiteral("BootScreen.html")));
+        check(customToOrbit.ok && !PeUtils::sections(read(customPath)).isEmpty()
+                  && orbitAfterCustom.contains("class=\"boot theme-orbit\"")
+                  && !orbitAfterCustom.contains("<video")
+                  && read(QDir(customAssets).filePath(QStringLiteral("Promo.mp4"))) == selectedMp4
+                  && read(customPath + QStringLiteral(".bak")) == image,
+              "switching from custom video to a built-in boot UI keeps the executable and selected video intact");
+        const auto orbitToVideo = BootVideoPatcher::patch(customPath, 3000, QStringLiteral("video"));
+        const QByteArray videoAfterOrbit = read(QDir(customAssets).filePath(QStringLiteral("BootScreen.html")));
+        check(orbitToVideo.ok && !PeUtils::sections(read(customPath)).isEmpty()
+                  && videoAfterOrbit.contains("<video") && videoAfterOrbit.contains("src=\"Promo.mp4\"")
+                  && read(QDir(customAssets).filePath(QStringLiteral("Promo.mp4"))) == selectedMp4
+                  && read(customPath + QStringLiteral(".bak")) == image,
+              "switching back to custom-video mode reuses the selected player asset without damaging the EXE");
 
         const QString refusedPath = QDir(folder).filePath(QStringLiteral("HD-Player-refused.exe"));
         const QString wrongFormat = QDir(folder).filePath(QStringLiteral("not-an-mp4.txt"));
@@ -4945,6 +5044,15 @@ Window {
                   && panelState.settingsPageCount >= 8 && panelState.settingsQmlResourceCount > 0,
               QStringLiteral("the real %1 exposes a unique editable Settings window and About page (%2)")
                   .arg(QFileInfo(input).fileName(), panelState.detail));
+        SettingsManager interfaceSettings(nullptr, false);
+        interfaceSettings.setExePath(input);
+        Backend interfaceBackend(&interfaceSettings);
+        const QVariantMap uiPanelState = interfaceBackend.settingsPanelRebuildState();
+        check(uiPanelState.value(QStringLiteral("supported")).toBool()
+                  && uiPanelState.value(QStringLiteral("settingsPageCount")).toInt() == panelState.settingsPageCount
+                  && uiPanelState.value(QStringLiteral("settingsQmlResourceCount")).toInt() == panelState.settingsQmlResourceCount,
+              QStringLiteral("the Customizer interface reports the real %1 Settings model as patchable (%2)")
+                  .arg(QFileInfo(input).fileName(), uiPanelState.value(QStringLiteral("detail")).toString()));
         const auto stockAbout = AboutPatcher::analyze(original);
         if (panelState.supported && !panelState.applied && stockAbout.supported
             && stockAbout.sourceEditable) {
@@ -4988,17 +5096,31 @@ Window {
             const QString panelCopy = QDir(panelDir).filePath(QStringLiteral("HD-Player.exe"));
             write(panelCopy, original);
             QVariantList panelLinks {
-                QVariantMap{{QStringLiteral("title"), QStringLiteral("Regression source")},
+                QVariantMap{{QStringLiteral("kind"), QStringLiteral("github")},
+                            {QStringLiteral("title"), QStringLiteral("Regression source")},
                             {QStringLiteral("url"), QStringLiteral("https://example.com/source")}},
-                QVariantMap{{QStringLiteral("title"), QStringLiteral("Regression community")},
+                QVariantMap{{QStringLiteral("kind"), QStringLiteral("discord")},
+                            {QStringLiteral("title"), QStringLiteral("Regression community")},
                             {QStringLiteral("url"), QStringLiteral("https://example.com/community")}},
-                QVariantMap{{QStringLiteral("title"), QStringLiteral("Regression video")},
-                            {QStringLiteral("url"), QStringLiteral("https://example.com/video")}}
+                QVariantMap{{QStringLiteral("kind"), QStringLiteral("youtube")},
+                            {QStringLiteral("title"), QStringLiteral("Regression video")},
+                            {QStringLiteral("url"), QStringLiteral("https://example.com/video")}},
+                QVariantMap{{QStringLiteral("kind"), QStringLiteral("github")},
+                            {QStringLiteral("title"), QStringLiteral("Regression extra")},
+                            {QStringLiteral("url"), QStringLiteral("https://example.com/extra")}}
             };
-            const auto appliedPanel = SettingsPanelPatcher::apply(panelCopy,
-                QStringLiteral("BSI Panel Regression"), panelLinks, true);
-            check(appliedPanel.value(QStringLiteral("ok")).toBool(),
-                  QStringLiteral("the real %1 Settings panel rebuild applies to a disposable copy (%2)")
+            SettingsManager panelManager(nullptr, false);
+            panelManager.setExePath(panelCopy);
+            panelManager.setAboutDeveloperName(QStringLiteral("BSI Panel Regression"));
+            panelManager.setAboutLinks(panelLinks);
+            Backend panelBackend(&panelManager);
+            const QVariantMap settingsBeforeApply = panelBackend.settingsPanelRebuildState();
+            const QVariantMap appliedPanel = panelBackend.applySettingsPanelRebuild(true);
+            const QVariantMap settingsAfterApply = panelBackend.settingsPanelRebuildState();
+            check(settingsBeforeApply.value(QStringLiteral("supported")).toBool()
+                      && appliedPanel.value(QStringLiteral("ok")).toBool()
+                      && settingsAfterApply.value(QStringLiteral("applied")).toBool(),
+                  QStringLiteral("the real %1 Settings panel is supported and applies through the Customizer backend (%2)")
                       .arg(QFileInfo(input).fileName(), appliedPanel.value(QStringLiteral("msg")).toString()));
             if (appliedPanel.value(QStringLiteral("ok")).toBool()) {
                 const QByteArray rebuiltBeforeAbout = read(panelCopy);
@@ -5144,6 +5266,26 @@ Window {
                 if (!boot.ok) std::printf("    Boot round %d: %s\n", round, qPrintable(boot.msg));
                 check(boot.ok, "boot patch/repatch succeeds on the supplied EXE copy without breaking theme mapping");
             }
+            bool bootThemeSwitchesIntact = true;
+            for (const QString &theme : { QStringLiteral("solar"), QStringLiteral("orbit"), QStringLiteral("pulse") }) {
+                const auto switchedBoot = BootVideoPatcher::patch(path, 3000, theme);
+                if (!switchedBoot.ok)
+                    std::printf("    Boot style switch %s: %s\n", qPrintable(theme), qPrintable(switchedBoot.msg));
+                const QByteArray switchedImage = read(path);
+                const QString switchedAssets = QDir(QFileInfo(path).absolutePath()).filePath(QStringLiteral("Assets"));
+                const QByteArray switchedHtml = read(QDir(switchedAssets).filePath(QStringLiteral("BootScreen.html")));
+                const auto switchedTheme = ThemeEngine::findThemeZlib(switchedImage);
+                bootThemeSwitchesIntact = bootThemeSwitchesIntact && switchedBoot.ok
+                    && !PeUtils::sections(switchedImage).isEmpty() && switchedTheme.hasQrcNode
+                    && !switchedTheme.ambiguous
+                    && switchedHtml.contains(QStringLiteral("class=\"boot theme-%1\"").arg(theme).toUtf8())
+                    && read(path + QStringLiteral(".bak")) == original;
+            }
+            bootThemeSwitchesIntact = bootThemeSwitchesIntact
+                && SettingsPanelPatcher::analyze(path).supported;
+            check(bootThemeSwitchesIntact,
+                  QStringLiteral("switching boot animation styles on the real %1 preserves its PE, Settings model, theme resource and original backup")
+                      .arg(QFileInfo(input).fileName()));
             const auto gradientTargets = GradientPatcher::analyze(read(path));
             std::printf("    Gradients: %d target(s), %d of %d QML file(s) parsed: %s\n",
                         static_cast<int>(gradientTargets.targets.size()), gradientTargets.parsed,

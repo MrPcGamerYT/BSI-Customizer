@@ -10,8 +10,8 @@ namespace BootVideoPatcher {
 
 struct Result { bool ok = false; QString msg; };
 
-// A data URL for the selected player's own BlueStacks logo, used by the Boot
-// page preview as well as the generated in-emulator boot screen.
+// A data URL for the selected player's Assets/BlueStacks.ico icon (falling
+// back to its embedded logo), used by the Boot preview and generated splash.
 QString logoPreviewDataUrl(const QString &exePath);
 
 Result patch(const QString &exePath, int holdMs = 3000,
