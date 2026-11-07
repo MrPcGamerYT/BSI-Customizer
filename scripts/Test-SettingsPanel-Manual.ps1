@@ -63,7 +63,7 @@ try {
 
     if (Test-Path -LiteralPath $stderrPath) {
         $diagnostic = Get-Content -LiteralPath $stderrPath -Raw
-        if ($diagnostic.Trim()) { Write-Host $diagnostic.Trim() }
+        if (-not [string]::IsNullOrWhiteSpace($diagnostic)) { Write-Host $diagnostic.Trim() }
     }
     if (-not (Test-Path -LiteralPath $stdoutPath)) {
         throw "The tester returned no report (exit code $($process.ExitCode))."
