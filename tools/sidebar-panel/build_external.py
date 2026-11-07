@@ -15,7 +15,7 @@ ROOT = (Path(__file__).resolve().parent/'../..').resolve()
 DEFAULT_URL = 'file:///C:/Program%20Files/BlueStacks_msi5/Assets/BSISidebarVisual.qml'
 
 
-def mask_qml(text):
+def mask_qml(text, protected=None):
     """Keep offsets/newlines; mask comments, quoted text and JS regex literals."""
     out = list(text)
     i = 0
@@ -72,6 +72,8 @@ def mask_qml(text):
         else:
             i += 1
             continue
+        if protected is not None:
+            protected.append(text[start:min(i, len(text))])
         for j in range(start, min(i, len(text))):
             if text[j] not in '\r\n':
                 out[j] = ' '
@@ -197,7 +199,7 @@ def restyle(source, asset_url=DEFAULT_URL):
         # UiImageButton may own its input area in its component definition rather
         # than exposing a MouseArea in this resource. Observe its pressed property
         # when available, otherwise omit press feedback. NEVER invent an input area.
-        pressed_expression = ('("pressed" in ' + native_id + ') ? !!' + native_id + '.pressed : false')
+        pressed_expression = ('("pressed" in ' + native_id + ' && typeof ' + native_id + '.pressed === "boolean") ? ' + native_id + '.pressed : false')
         if areas:
             area = areas[0]
             try:

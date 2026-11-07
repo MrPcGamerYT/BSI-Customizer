@@ -89,8 +89,8 @@ no_inline = source.replace('MouseArea { anchors.fill:parent; onPressed: navigati
                            'onHoveredChanged: { /* native component owns input */ }')
 no_inline_output, _ = build.restyle(no_inline)
 assert no_inline_output.count('MouseArea {') == no_inline.count('MouseArea {')
-assert '("pressed" in iBackBtn) ? !!iBackBtn.pressed : false' in no_inline_output
-assert '("pressed" in iHomeBtn) ? !!iHomeBtn.pressed : false' in no_inline_output
+assert '("pressed" in iBackBtn && typeof iBackBtn.pressed === "boolean") ? iBackBtn.pressed : false' in no_inline_output
+assert '("pressed" in iHomeBtn && typeof iHomeBtn.pressed === "boolean") ? iHomeBtn.pressed : false' in no_inline_output
 assert 'onHoveredChanged: { /* native component owns input */ }' in no_inline_output
 ambiguous = source.replace('id: iBackBtn', 'id: iBackBtn\n MouseArea { }')
 try:
