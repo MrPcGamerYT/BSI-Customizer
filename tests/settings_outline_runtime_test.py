@@ -16,6 +16,7 @@ from PySide6.QtTest import QTest
 from PySide6.QtQuick import QQuickWindow
 
 ROOT=Path(__file__).resolve().parents[1]
+REFERENCE=bool(os.environ.get('BSI_SETTINGS_REFERENCE'))
 app=QGuiApplication([])
 engine=QQmlEngine()
 warnings=[]
@@ -66,10 +67,12 @@ Item {
         from build_external import external_style,bridge
         (temp/'Assets').mkdir()
         external=temp/'Assets/BSISettingsOutline.qml'
-        external.write_text((ROOT/'assets/emulator-settings/MonochromePanel.qml').read_text() if os.environ.get('BSI_SETTINGS_MONOCHROME') else external_style(template),encoding='utf-8')
+        external.write_text((ROOT/'assets/emulator-settings/ReferencePanel.qml').read_text() if REFERENCE else (ROOT/'assets/emulator-settings/MonochromePanel.qml').read_text() if os.environ.get('BSI_SETTINGS_MONOCHROME') else external_style(template),encoding='utf-8')
         template=bridge(QUrl.fromLocalFile(str(external)).toString())
     entries=[]
     categories=[('engine','Performance'),('display','Display'),('graphics','Graphics'),('audio','Audio'),('gamepad','Gamepad'),('devices','Devices'),('preferences','Preferences'),('shortcuts','Shortcuts'),('advanceSettings','Advanced'),('about','About')]
+    if REFERENCE:
+        categories=[('engine','Performance'),('display','Display'),('graphics','Graphics'),('gameSettings','Game settings'),('gamepad','Gamepad'),('preferences','Preferences'),('phone','Phone'),('themes','Themes'),('advanceSettings','Advanced'),('about','About')]
     for entry_index,(key,label) in enumerate(categories):
         entries.append('QtObject { objectName:"nativeEntry_'+str(entry_index)+'";property string pButtonId:"'+key+'";property string pButtonText:"'+label+'"; property bool pShowRedDot:false;property var pComponentObj:null;property string pQmlSource:"Page.qml";property var pComponentArgs:({nativePageName:"'+label+'"}) }')
     wrapper='''import QtQuick 2.15
@@ -92,7 +95,11 @@ ApplicationWindow {
  TEMPLATE
 }'''.replace('ENTRIES',','.join(entries)).replace('TEMPLATE',template)
     if os.environ.get('BSI_SETTINGS_MONOCHROME'):
-        wrapper=wrapper.replace('width:1100;height:740', 'width:940;height:610')
+        wrapper=wrapper.replace('width:1100;height:740', 'width:940;height:540' if REFERENCE else 'width:940;height:610')
+    if REFERENCE:
+        at=wrapper.rfind('}')
+        caption='Text {z:1000;anchors.bottom:parent.bottom;anchors.bottomMargin:1;anchors.horizontalCenter:parent.horizontalCenter;text:"Qt fixture — native-page doubles, NOT live MSI";color:"#8a8a93";font.pixelSize:9}'
+        wrapper=wrapper[:at]+caption+'\n'+wrapper[at:]
     (temp/'Window.qml').write_text(wrapper)
     engine.addImportPath(str(temp))
     component=QQmlComponent(engine,QUrl.fromLocalFile(str(temp/'Window.qml')))
@@ -133,10 +140,12 @@ ApplicationWindow {
         image=window.grabWindow()
         assert not image.isNull(),'Software preview capture failed'
         assert image.save(os.environ['BSI_SETTINGS_SCREENSHOT'])
-    for width,height in [(840,600),(700,480),(1200,760)]:
+    for width,height in [(840,600),(700,480),(1200,760),(720,520),(719,520)]:
         window.setWidth(width);window.setHeight(height)
         for _ in range(5):app.processEvents()
-        assert visual('bsiSettingsShell').property('bsiCompact')==(width<880)
+        assert visual('bsiSettingsShell').property('bsiCompact')==(width<(720 if REFERENCE else 880))
+        if REFERENCE:
+            assert visual('bsiSettingsTab_0' if os.environ.get('BSI_SETTINGS_SCREENSHOT') else 'bsiSettingsTab_2').property('selected'), 'Shell selection diverged from native host'
     visual('bsiSettingsClose').clicked.emit()
     app.processEvents()
     assert window.property('closeRequested'),'Close button bypassed original Window.onClosing'
