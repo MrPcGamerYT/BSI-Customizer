@@ -5169,7 +5169,6 @@ Window {
                           && rebuiltWindow.contains(QStringLiteral("bHidden"))
                           && rebuiltWindow.contains(QStringLiteral("bIcons"))
                           && rebuiltWindow.contains(QStringLiteral("pSettingBtnText"))
-                          && rebuiltWindow.contains(QStringLiteral("pShowRedDot"))
                           && rebuiltWindow.contains(QStringLiteral("parent.width*.86"))
                           && rebuiltWindow.contains(QStringLiteral("Image{source:parent.icon"))
                           && rebuiltWindow.contains(QStringLiteral("asset:\"CloseIcon\""))

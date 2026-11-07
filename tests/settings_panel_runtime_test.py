@@ -49,7 +49,7 @@ assert "BSI Settings v4" in replacement
 assert "pSettingsItems.pSettingElements" in replacement and "bHidden" in replacement
 assert "@@BSI_HIDDEN_TABS@@" in replacement and "@@BSI_TAB_ICONS@@" in replacement
 assert "parent.width*.86" in replacement
-assert "pSettingBtnText" in replacement and "pShowRedDot" in replacement
+assert "pSettingBtnText" in replacement and "pSelected" in replacement
 assert "anchors.topMargin:108" in replacement
 assert "onPressed:iSettingsWindow.startSystemMove()" in replacement
 replacement = replacement.replace("@@BSI_HIDDEN_TABS@@", "[]")

@@ -700,7 +700,7 @@ MouseArea{width:parent.width-42;height:32;onPressed:iSettingsWindow.startSystemM
 UiImageButton{asset:"CloseIcon";anchors.right:parent.right;onClicked:iSettingsWindow.close()}
 ListView{width:parent.width;height:72;y:32;clip:true;orientation:ListView.Horizontal;model:pSettingsItems.pSettingElements;currentIndex:pCurrentTabIndex
 delegate:Item{property int p:index;property var d:modelData;property string k:iSettingsWindowShadowContainer.bKey(d.pQmlSource);property string icon:iSettingsWindowShadowContainer.bIcons[k]||"";width:iSettingsWindowShadowContainer.bHidden.indexOf(k)<0?92:0;height:64;visible:width>0
-UiSettingsButton{anchors.fill:parent;pSettingBtnText:parent.d.pButtonText;pSelected:parent.p===pCurrentTabIndex;pShowRedDot:parent.d.pShowRedDot;onSettingClicked:fChangeSelectedSetting(parent.p)}
+UiSettingsButton{anchors.fill:parent;pSettingBtnText:parent.d.pButtonText;pSelected:parent.p===pCurrentTabIndex;onSettingClicked:fChangeSelectedSetting(parent.p)}
 Image{source:parent.icon;width:18;height:18;anchors.horizontalCenter:parent.horizontalCenter}}
 }
 StackLayout{id:iSelectedSettingControl;width:parent.width*.86;anchors.horizontalCenter:parent.horizontalCenter;anchors.top:parent.top;anchors.bottom:parent.bottom;anchors.topMargin:108;currentIndex:pCurrentTabIndex
