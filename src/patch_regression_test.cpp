@@ -4693,7 +4693,7 @@ Window {
               "custom mode installs the selected MP4 and preserves the previous startup video");
         check(customHelper.contains("QtWebEngine")
                   && customHelper.contains("Qt.resolvedUrl(\"BootScreen.html\")")
-                  && customHtml.contains("data:image/svg+xml;base64,")
+                  && customHtml.contains(selectedIcon.toUtf8())
                   && customHtml.contains("class=\"ring-track\"")
                   && customHtml.contains("Emulator is starting…")
                   && customHtml.contains("src=\"Promo.mp4\"")
