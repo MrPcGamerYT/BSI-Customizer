@@ -2,6 +2,7 @@
 
 #include <QObject>
 #include <QVariantList>
+#include <QVariantMap>
 
 /**
  * SettingsManager — persisted app settings (QSettings).
@@ -19,6 +20,7 @@ class SettingsManager : public QObject
     Q_PROPERTY(QString aboutDeveloperName READ aboutDeveloperName WRITE setAboutDeveloperName NOTIFY aboutProfileChanged)
     Q_PROPERTY(QString aboutTagline READ aboutTagline WRITE setAboutTagline NOTIFY aboutProfileChanged)
     Q_PROPERTY(QVariantList aboutLinks READ aboutLinks WRITE setAboutLinks NOTIFY aboutProfileChanged)
+    Q_PROPERTY(QVariantMap settingsPanelProfile READ settingsPanelProfile WRITE setSettingsPanelProfile NOTIFY settingsPanelProfileChanged)
 
 public:
     explicit SettingsManager(QObject *parent = nullptr, bool initialize = true);
@@ -42,6 +44,8 @@ public:
     void setAboutTagline(const QString &tagline);
     QVariantList aboutLinks() const { return m_aboutLinks; }
     void setAboutLinks(const QVariantList &links);
+    QVariantMap settingsPanelProfile() const { return m_settingsPanelProfile; }
+    void setSettingsPanelProfile(const QVariantMap &profile);
 
     static QString version();
 
@@ -53,6 +57,7 @@ signals:
     void confPathChanged();
     void fpsAutoDetectChanged();
     void aboutProfileChanged();
+    void settingsPanelProfileChanged();
 
 private:
     friend class Backend; // isolated settings snapshot for background patch jobs
@@ -63,5 +68,6 @@ private:
     QString m_aboutDeveloperName;
     QString m_aboutTagline;
     QVariantList m_aboutLinks;
+    QVariantMap m_settingsPanelProfile;
     void refreshFpsPath();
 };

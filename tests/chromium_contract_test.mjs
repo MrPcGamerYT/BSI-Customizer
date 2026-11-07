@@ -109,7 +109,7 @@ const webEditors = read('src/web/editors.js');
 assert.ok(webEditors.includes('data-interface-tab') && webEditors.includes('About page') && webEditors.includes('aboutPreview'), 'Player Interface is grouped and has a live safe About preview');
 assert.ok(webEditors.includes("'settings-panel'") && webEditors.includes("'settings-panel-apply'") && webEditors.includes("'settings-panel-restore'"), 'The Chromium Player Interface exposes native Settings-panel apply and restore actions');
 assert.ok(bridge.includes('applySettingsPanelRebuild') && bridge.includes('"settingsPanel", m_backend.settingsPanelRebuildState()'), 'Native bridge reports and applies the real Settings-panel patcher');
-assert.ok(webEditors.includes("'Test / Apply Settings panel rebuild'") && webEditors.includes('embeddedQmlResourceCount'), 'Settings-panel testing stays clickable when detection fails and exposes the embedded QML inventory');
+assert.ok(webEditors.includes("'Apply Settings panel rebuild'") && webEditors.includes('embeddedQmlResourceCount') && webEditors.includes('settingsPanelManualTest'), 'Settings-panel apply stays clickable when detection fails and exposes embedded QML and manual-test diagnostics');
 assert.ok(webApp.includes('routeSettingsPanelManualTest') && bridge.includes('m_settingsPanelManualTest'), 'Manual GUI mode opens the Settings-panel view and restricts native actions to that disposable-copy test');
 const manualPanelScript = read('scripts/Test-SettingsPanel-Manual.ps1');
 assert.ok(manualPanelScript.includes("'gui-sandbox'") && manualPanelScript.includes('--settings-panel-manual-test') && manualPanelScript.includes('-Wait -PassThru'), 'The manual GUI tester keeps a disposable player copy alive only while the focused test window is open');

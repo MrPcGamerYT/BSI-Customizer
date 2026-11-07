@@ -4,7 +4,7 @@ name: Chromium workspace
 # this workflow does not publish a release.
 on:
   push:
-    branches: [arena/3f309c3c-bsi-customizer]
+    branches: [arena/3f309c3c-bsi-customizer, arena/c19d0730-bsi-customizer]
   workflow_dispatch:
   pull_request:
     paths:

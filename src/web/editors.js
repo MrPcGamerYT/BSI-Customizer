@@ -83,11 +83,31 @@
           if (info && interfaceTab === 'settings-panel') {
             const panelState = info.settingsPanel || {};
             const savedProfile = getState().aboutProfile || {};
-            const profileLinks = (savedProfile.links || []).filter(link => link.title && link.url);
-            const tabPreview = [['⚙', 'General'], ['▣', 'Display'], ['◈', 'Graphics'], ['♫', 'Audio'], ['⌨', 'Controls'], ['ⓘ', 'About']]
-              .map(([icon, label], index) => `<span class="settings-preview-tab${index === 0 ? ' active' : ''}"><i>${icon}</i>${label}</span>`).join('');
-            const panelPreview = `<div class="settings-rebuild-preview" role="img" aria-label="Preview: compact draggable Settings window with icon tabs"><div class="settings-preview-head"><b>Settings</b><span aria-hidden="true">—　×</span></div><nav class="settings-preview-tabs">${tabPreview}</nav><div class="settings-preview-page"><b>General</b><div class="settings-preview-row"><span>Language</span><i>System default</i></div><div class="settings-preview-row"><span>Startup</span><i>Enabled</i></div><div class="settings-preview-row"><span>Performance</span><i>Balanced</i></div></div></div>`;
-            section = card('Rebuild the BlueStacks Settings panel', `<p class="note">This changes the Settings window inside BlueStacks / HD-Player, not this customizer. It gives the window a compact 70% footprint, a draggable title bar, and horizontally scrollable top tabs with category icons. All native settings pages and their save/discard behavior remain intact. The About page is rebuilt around the emulator logo and your customizable developer profile.</p>${panelPreview}<div class="editor-grid"><div class="kv"><span>Patch support</span><b>${panelState.supported ? 'Supported' : 'Not supported'}</b></div><div class="kv"><span>Current panel</span><b>${panelState.applied ? 'Custom rebuild installed' : (Number(panelState.compiledUnitsActive || 0) > 0 && panelState.restorable ? 'Compiled copy still active' : 'Original panel')}</b></div><div class="kv"><span>Native Settings tabs</span><b>${Number(panelState.settingsPageCount || 0)}</b></div><div class="kv"><span>Verified QML dependencies</span><b>${Number(panelState.settingsQmlResourceCount || 0)}</b></div><div class="kv"><span>Embedded compiled QML</span><b>${Number(panelState.compiledUnitsDetected || 0)} found · ${Number(panelState.compiledUnitsActive || 0)} active</b></div><div class="kv"><span>Registered QML resources</span><b>${Number(panelState.embeddedQmlResourceCount || 0)}</b></div></div><p class="note">${esc(panelState.detail || 'Inspect the selected player UI to check its embedded QML resources.')}</p>${panelState.qmlResourceSamples?.length ? `<details class="note"><summary>QML resource paths detected</summary><code>${esc(panelState.qmlResourceSamples.join('\n'))}</code></details>` : ''}${getState().settingsPanelManualTest ? '<p class="note">Manual tester mode: this session targets a disposable HD-Player copy. Apply and Restore cannot change the selected original executable.</p>' : ''}<div class="about-live-preview"><div class="about-live-mark">BS</div><span class="section-label">Saved About profile</span><h3>${esc(savedProfile.developerName || 'No developer name saved')}</h3><div class="about-live-links">${profileLinks.map(link => `<span>${esc(link.title)}</span>`).join('') || '<span>No links saved</span>'}</div><p class="note">Edit this profile under About BSI → Customize About page, then apply the rebuild.</p></div>${actions(btn(panelState.applied ? 'Update rebuilt Settings panel' : 'Test / Apply Settings panel rebuild', 'settings-panel-apply', true) + btn('Restore original Settings panel', 'settings-panel-restore', false, panelState.restorable ? '' : 'disabled title="No safe feature-specific recovery snapshot is available"'))}`);
+            const options = getState().settingsPanelProfile || {};
+            const tabIcons = options.tabIcons || {};
+            const tabs = panelState.tabs || [];
+            const availableTabIds = new Set(tabs.map(tab => tab.id));
+            const hiddenTabs = new Set((options.hiddenTabs || []).filter(id => availableTabIds.has(id)));
+            const savedLinks = Array.from({ length: 4 }, (_, index) => savedProfile.links?.[index] || {
+              kind: ['github', 'discord', 'youtube', 'youtube'][index], title: '', url: ''
+            });
+            const logo = options.logo;
+            const logoPreview = logo?.mime && logo?.data
+              ? `<img class="settings-custom-logo" src="data:${esc(logo.mime)};base64,${esc(logo.data)}" alt="Selected About logo">`
+              : '<div class="settings-custom-logo-fallback">BSI</div>';
+            const tabPreview = tabs.slice(0, 9).map((tab, index) => {
+              const custom = tabIcons[tab.id];
+              const icon = custom?.data ? `<img src="data:image/svg+xml;base64,${esc(custom.data)}" alt="">` : `<i>${['⚙', '▣', '◈', '♫', '⌨', '☷', 'ⓘ'][index % 7]}</i>`;
+              return `<span class="settings-preview-tab${index === 0 ? ' active' : ''}">${icon}${esc(tab.label || tab.page)}</span>`;
+            }).join('');
+            const panelPreview = `<div class="settings-rebuild-preview" role="img" aria-label="Preview: centered Settings contents with editable SVG tab icons"><div class="settings-preview-head"><b>Settings</b><span aria-hidden="true">—　×</span></div><nav class="settings-preview-tabs">${tabPreview}</nav><div class="settings-preview-page"><b>${esc(tabs[0]?.label || 'Settings')}</b><div class="settings-preview-row"><span>Native settings page</span><i>Centered layout</i></div><div class="settings-preview-row"><span>About identity</span><i>${esc(savedProfile.developerName || 'Your name')}</i></div></div></div>`;
+            const tabOptions = tabs.map(tab => {
+              const icon = tabIcons[tab.id];
+              const visibleKey = `settings-panel:visible:${tab.id}`;
+              return `<div class="settings-tab-option"><div class="settings-tab-check">${check(visibleKey, '', !hiddenTabs.has(tab.id))}<span><b>${esc(tab.label || tab.page)}</b><small>${esc(tab.page || tab.id)}</small></span></div><div class="settings-tab-art">${icon?.data ? `<img src="data:image/svg+xml;base64,${esc(icon.data)}" alt="Custom icon">` : '<span class="settings-art-empty">Default</span>'}${btn(icon?.data ? 'Replace SVG' : 'Choose SVG', 'settings-panel-icon', false, `data-tab-id="${esc(tab.id)}"`)}${icon?.data ? btn('Clear', 'settings-panel-icon-clear', false, `data-tab-id="${esc(tab.id)}"`) : ''}</div></div>`;
+            }).join('');
+            const aboutLinks = savedLinks.map((link, index) => `<div class="settings-link-row"><span class="settings-link-index">0${index + 1}</span>${`<label class="editor-field"><span>Service</span><select class="inp" data-editor-field="settings-panel:link:${index}:kind"><option value="github" ${(value(`settings-panel:link:${index}:kind`, link.kind) === 'github') ? 'selected' : ''}>GitHub</option><option value="discord" ${(value(`settings-panel:link:${index}:kind`, link.kind) === 'discord') ? 'selected' : ''}>Discord</option><option value="youtube" ${(value(`settings-panel:link:${index}:kind`, link.kind) === 'youtube') ? 'selected' : ''}>YouTube</option></select></label>`}${field(`settings-panel:link:${index}:title`, 'Link label', link.title)}${field(`settings-panel:link:${index}:url`, 'HTTPS URL', link.url)}</div>`).join('');
+            section = card('Rebuild the BlueStacks Settings panel', `<p class="note">Customize the in-player Settings window here: center the native page content, choose which native tabs remain visible, upload an SVG icon for each tab, and edit the About logo, name and links. These choices are saved on this PC; the selected HD-Player.exe changes only when you apply.</p>${panelPreview}<div class="editor-grid"><div class="kv"><span>Patch support</span><b>${panelState.supported ? 'Supported' : 'Not supported'}</b></div><div class="kv"><span>Current panel</span><b>${panelState.applied ? 'Custom rebuild installed' : (Number(panelState.compiledUnitsActive || 0) > 0 && panelState.restorable ? 'Compiled copy still active' : 'Original panel')}</b></div><div class="kv"><span>Native Settings tabs</span><b>${Number(panelState.settingsPageCount || 0)} discovered · ${tabs.length - hiddenTabs.size} visible</b></div><div class="kv"><span>Verified QML dependencies</span><b>${Number(panelState.settingsQmlResourceCount || 0)}</b></div><div class="kv"><span>Embedded compiled QML</span><b>${Number(panelState.compiledUnitsDetected || 0)} found · ${Number(panelState.compiledUnitsActive || 0)} active</b></div><div class="kv"><span>Logo verification</span><b>${panelState.logoFallback ? 'Built-in fallback available' : (panelState.logoStatus ? 'Player logo found' : (panelState.supported ? 'Player logo found' : 'Not yet verified'))}</b></div></div><p class="note">${esc(panelState.detail || 'Inspect the selected player UI to check its embedded QML resources.')}</p>${panelState.qmlResourceSamples?.length ? `<details class="note"><summary>Verified QML resources (${Number(panelState.embeddedQmlResourceCount || 0)} registered)</summary><code>${esc(panelState.qmlResourceSamples.join('\n'))}</code></details>` : ''}${getState().settingsPanelManualTest ? '<p class="note">Manual tester mode: this session targets a disposable HD-Player copy. Apply and Restore cannot change the selected original executable.</p>' : ''}<section class="settings-customization-card"><h3>Native Settings tabs</h3><p class="note">Uncheck a tab to hide it. Custom SVGs are embedded into the rebuilt Settings window; only self-contained SVG files are accepted.</p>${tabs.length ? `<div class="settings-tab-options">${tabOptions}</div>` : '<p class="note">Inspect a supported player to list its live tabs.</p>'}</section><section class="settings-customization-card"><h3>About page identity</h3><p class="note">This is the About page inside the emulator’s rebuilt Settings window.</p><div class="settings-about-identity">${logoPreview}<div><b>About logo</b><p class="note">${esc(logo?.data ? 'A validated custom logo is selected in your local profile; apply the rebuild to write it to the player.' : (panelState.logoStatus || 'Choose a custom logo or use the safe built-in fallback.'))}</p><div class="button-grid">${btn(logo?.data ? 'Replace logo…' : 'Choose logo…', 'settings-panel-logo')}${logo?.data ? btn('Use player/fallback logo', 'settings-panel-logo-clear') : ''}</div></div></div><div class="settings-about-fields">${field('settings-panel:developerName', 'Name under logo', savedProfile.developerName || 'Mr.Pc Gamer & Romulos')}${field('settings-panel:tagline', 'Subtitle', savedProfile.tagline || 'BlueStacks tools · with contributor Nova')}</div><div class="settings-link-list">${aboutLinks}</div></section><div class="button-grid">${btn('Save Settings rebuild options', 'settings-panel-save', true)}${btn('Reset tab visibility & custom artwork', 'settings-panel-reset')}</div>${actions(btn(panelState.applied ? 'Update rebuilt Settings panel' : 'Apply Settings panel rebuild', 'settings-panel-apply', true) + btn('Restore original Settings panel', 'settings-panel-restore', false, panelState.restorable ? '' : 'disabled title="No safe feature-specific recovery snapshot is available"'))}`);
 
           }
           return card('Player interface', `<p class="note">Inspect once, then choose a focused task. No resources are scanned while navigating.</p>${actions(btn('Inspect player UI', 'interface-load', true) + btn('Export About report', 'about-report'))}${info ? `<p class="note">${esc(info.about?.detail || info.detail || 'Player UI capabilities loaded from the selected executable.')}</p>` : ''}`) + tabbar + section + result(page);
@@ -143,10 +163,50 @@
         } else if (name === 'about-profile') {
           if (!interfaceInfo) throw new Error('Inspect player UI first.');
           response = await workspace('profile-section', { section: 'about', value: aboutSettings() });
+        } else if (name === 'settings-panel-icon' || name === 'settings-panel-logo') {
+          const kind = name === 'settings-panel-icon' ? 'tab-icon' : 'logo';
+          const role = name === 'settings-panel-icon' ? 'settings-panel-svg' : 'settings-panel-logo';
+          const path = await ctx.chooseFile(role);
+          if (!path) return;
+          response = await request('setSettingsPanelAsset', { kind, id: el.dataset.tabId || '', path });
+        } else if (name === 'settings-panel-icon-clear' || name === 'settings-panel-logo-clear') {
+          const kind = name === 'settings-panel-icon-clear' ? 'tab-icon' : 'logo';
+          response = await request('clearSettingsPanelAsset', { kind, id: el.dataset.tabId || '' });
+        } else if (name === 'settings-panel-save' || name === 'settings-panel-reset') {
+          if (!interfaceInfo) throw new Error('Inspect player UI first.');
+          const options = getState().settingsPanelProfile || {};
+          const saved = getState().aboutProfile || {};
+          const savedLinks = Array.from({ length: 4 }, (_, index) => saved.links?.[index] || {
+            kind: ['github', 'discord', 'youtube', 'youtube'][index], title: '', url: ''
+          });
+          const linkValue = (index, name) => String(value(`settings-panel:link:${index}:${name}`, savedLinks[index][name] || ''));
+          if (name === 'settings-panel-reset') {
+            if (!await BsiEffects.confirm('Reset visible tabs and remove all custom Settings tab icons and the custom About logo? Your About name and links will be kept.')) return;
+            response = await request('saveSettingsPanelProfile', {
+              developerName: String(value('settings-panel:developerName', saved.developerName || 'Mr.Pc Gamer & Romulos')),
+              tagline: String(value('settings-panel:tagline', saved.tagline || '')),
+              links: savedLinks.map((link, index) => ({ kind: linkValue(index, 'kind'), title: linkValue(index, 'title'), url: linkValue(index, 'url') })),
+              hiddenTabs: []
+            });
+            for (const id of Object.keys(options.tabIcons || {}))
+              await request('clearSettingsPanelAsset', { kind: 'tab-icon', id });
+            if (options.logo?.data) await request('clearSettingsPanelAsset', { kind: 'logo' });
+            fields = {};
+          } else {
+            const tabs = interfaceInfo.settingsPanel?.tabs || [];
+            const previousHidden = new Set(options.hiddenTabs || []);
+            const hiddenTabs = tabs.filter(tab => !value(`settings-panel:visible:${tab.id}`, !previousHidden.has(tab.id))).map(tab => tab.id);
+            response = await request('saveSettingsPanelProfile', {
+              developerName: String(value('settings-panel:developerName', saved.developerName || '')),
+              tagline: String(value('settings-panel:tagline', saved.tagline || '')),
+              links: savedLinks.map((link, index) => ({ kind: linkValue(index, 'kind'), title: linkValue(index, 'title'), url: linkValue(index, 'url') })),
+              hiddenTabs
+            });
+          }
         } else if (name === 'settings-panel-apply' || name === 'settings-panel-restore') {
           if (!interfaceInfo) throw new Error('Inspect player UI first.');
           if (!await confirmWrite(name === 'settings-panel-apply'
-            ? 'Rebuild the Settings window inside the selected BlueStacks player using the saved About profile?'
+            ? 'Apply the centered Settings layout, selected tabs and saved About profile to the chosen BlueStacks player?'
             : 'Restore only the original Settings-window and About-page QML sources?')) return;
           response = await request('applySettingsPanelRebuild', { enabled: name === 'settings-panel-apply' });
           interfaceInfo = await request('readInterface');
