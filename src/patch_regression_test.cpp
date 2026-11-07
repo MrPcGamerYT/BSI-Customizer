@@ -5096,12 +5096,18 @@ Window {
             const QString panelCopy = QDir(panelDir).filePath(QStringLiteral("HD-Player.exe"));
             write(panelCopy, original);
             QVariantList panelLinks {
-                QVariantMap{{QStringLiteral("title"), QStringLiteral("Regression source")},
+                QVariantMap{{QStringLiteral("kind"), QStringLiteral("github")},
+                            {QStringLiteral("title"), QStringLiteral("Regression source")},
                             {QStringLiteral("url"), QStringLiteral("https://example.com/source")}},
-                QVariantMap{{QStringLiteral("title"), QStringLiteral("Regression community")},
+                QVariantMap{{QStringLiteral("kind"), QStringLiteral("discord")},
+                            {QStringLiteral("title"), QStringLiteral("Regression community")},
                             {QStringLiteral("url"), QStringLiteral("https://example.com/community")}},
-                QVariantMap{{QStringLiteral("title"), QStringLiteral("Regression video")},
-                            {QStringLiteral("url"), QStringLiteral("https://example.com/video")}}
+                QVariantMap{{QStringLiteral("kind"), QStringLiteral("youtube")},
+                            {QStringLiteral("title"), QStringLiteral("Regression video")},
+                            {QStringLiteral("url"), QStringLiteral("https://example.com/video")}},
+                QVariantMap{{QStringLiteral("kind"), QStringLiteral("github")},
+                            {QStringLiteral("title"), QStringLiteral("Regression extra")},
+                            {QStringLiteral("url"), QStringLiteral("https://example.com/extra")}}
             };
             SettingsManager panelManager(nullptr, false);
             panelManager.setExePath(panelCopy);
