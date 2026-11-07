@@ -67,6 +67,9 @@ URLs are accepted. Both skin files must be in that same Assets directory.
 - Original icons are hidden **only after** the replacement SVG reports Ready.
   Missing/broken sidecar or unrecognized native tools retain their original icons;
   the main column background may fall back to the original root color.
+- Buttons whose input lives inside the native UiImageButton component are also
+  supported; no inline MouseArea is required. If the component exposes no pressed
+  property, only its press animation is omitted; its native input stays unchanged.
 - The skin has no MouseArea, HoverHandler or TapHandler. Mouse input stays on the
   native buttons. It observes their existing hover/press/enabled state only.
 - Native memory-trim animation flags also animate the new glyph. Native busy

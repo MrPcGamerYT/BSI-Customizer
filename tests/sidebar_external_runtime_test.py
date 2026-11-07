@@ -160,6 +160,28 @@ Window {
         window.setHeight(height)
         pump()
         assert sidebar.width() == 32 and native('home').height() == 32
+    # Component-owned input: test both absence and presence of a pressed property.
+    native_input = source.replace(
+        'MouseArea { anchors.fill:parent; onPressed: navigationCount++; onReleased: releasedCount++ }',
+        'onHoveredChanged: { /* input belongs to native component */ }')
+    native_input = native_input.replace('id: iHomeBtn', 'id: iHomeBtn\n            property bool pressed: true')
+    native_input, _ = build.restyle(native_input, QUrl.fromLocalFile(str(temp/'Assets/BSISidebarVisual.qml')).toString())
+    (temp/'ComponentInput.qml').write_text(native_input)
+    native_component = QQmlComponent(engine, QUrl.fromLocalFile(str(temp/'ComponentInput.qml')))
+    native_root = native_component.create()
+    assert native_root is not None, '\n'.join(e.toString() for e in native_component.errors())
+    pump()
+    back = visual(native_root, 'native_back')
+    home = visual(native_root, 'native_home')
+    back_skin = visual(back, 'bsiOutlineGlyph').parentItem().parentItem()
+    home_skin = visual(home, 'bsiOutlineGlyph').parentItem().parentItem()
+    assert back_skin.property('known') and not back_skin.property('pressed')
+    assert home_skin.property('known') and home_skin.property('pressed')
+    home.setProperty('pressed', False)
+    pump()
+    assert not home_skin.property('pressed')
+    native_root.deleteLater()
+    pump()
     assert not warnings, '\n'.join(warnings)
     window.setVisible(False)
     # Missing sidecar: native glyphs must stay in place, not be blanked out.

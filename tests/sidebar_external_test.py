@@ -82,3 +82,21 @@ with tempfile.TemporaryDirectory() as temp:
         raise AssertionError('Existing output overwritten')
     assert original.read_text() == source
 print('PASS: native functions, handlers, model/flags, popups, fallback, geometry, safe capacity/no-overwrite')
+
+# Native button components may implement their own input. Preserve them as-is,
+# don't add a MouseArea, and observe pressed only if the component exposes it.
+no_inline = source.replace('MouseArea { anchors.fill:parent; onPressed: navigationCount++; onReleased: releasedCount++ }',
+                           'onHoveredChanged: { /* native component owns input */ }')
+no_inline_output, _ = build.restyle(no_inline)
+assert no_inline_output.count('MouseArea {') == no_inline.count('MouseArea {')
+assert '("pressed" in iBackBtn) ? !!iBackBtn.pressed : false' in no_inline_output
+assert '("pressed" in iHomeBtn) ? !!iHomeBtn.pressed : false' in no_inline_output
+assert 'onHoveredChanged: { /* native component owns input */ }' in no_inline_output
+ambiguous = source.replace('id: iBackBtn', 'id: iBackBtn\n MouseArea { }')
+try:
+    build.restyle(ambiguous)
+except ValueError as e:
+    assert 'iBackBtn' in str(e) and '2 direct MouseAreas' in str(e)
+else:
+    raise AssertionError('Ambiguous mouse areas were silently accepted')
+print('PASS: component-owned input preserved, absent pressed is guarded, ambiguous areas identify the button')

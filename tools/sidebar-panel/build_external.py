@@ -191,18 +191,25 @@ def restyle(source, asset_url=DEFAULT_URL):
             ao = code.index('{', opening + am.start())
             if levels[ao] == levels[opening] + 1:
                 areas.append(ao)
-        if len(areas) != 1:
-            raise ValueError('Expected one native MouseArea per main toolbar button.')
-        area = areas[0]
-        try:
-            _, _, area_id = own_binding(source, code, levels, area, pairs[area], 'id')
-        except ValueError as e:
-            if 'Expected one direct id' not in str(e):
-                raise
-            area_id = skin_id + 'Hit'
-            edits.append((area + 1, area + 1, '\n                id: ' + area_id + '\n'))
-        if not re.fullmatch(r'[a-z]\w*', area_id):
-            raise ValueError('Unsupported MouseArea id.')
+        if len(areas) > 1:
+            raise ValueError(f'Button {native_id}: found {len(areas)} direct MouseAreas; '
+                             'ambiguous input layout. No output written. Supply the original QML for inspection.')
+        # UiImageButton may own its input area in its component definition rather
+        # than exposing a MouseArea in this resource. Observe its pressed property
+        # when available, otherwise omit press feedback. NEVER invent an input area.
+        pressed_expression = ('("pressed" in ' + native_id + ') ? !!' + native_id + '.pressed : false')
+        if areas:
+            area = areas[0]
+            try:
+                _, _, area_id = own_binding(source, code, levels, area, pairs[area], 'id')
+            except ValueError as e:
+                if 'Expected one direct id' not in str(e):
+                    raise
+                area_id = skin_id + 'Hit'
+                edits.append((area + 1, area + 1, '\n                id: ' + area_id + '\n'))
+            if not re.fullmatch(r'[a-z]\w*', area_id):
+                raise ValueError('Unsupported MouseArea id.')
+            pressed_expression = area_id + '.pressed'
         # Keep original expression as an independent binding, not parent.asset (which loops).
         edits.append((a, b, ' ' + skin_id + '.status === Loader.Ready && ' + skin_id + '.item.known ? "" : (\n' + expression + '\n            )'))
         bridge = f'''\n            Loader {{
@@ -212,7 +219,7 @@ def restyle(source, asset_url=DEFAULT_URL):
                     item.elementId = Qt.binding(function() {{ return {element}; }});
                     item.assetName = Qt.binding(function() {{ return (\n{expression}\n                    ); }});
                     item.hovered = Qt.binding(function() {{ return {native_id}.hovered; }});
-                    item.pressed = Qt.binding(function() {{ return {area_id}.pressed; }});
+                    item.pressed = Qt.binding(function() {{ return {pressed_expression}; }});
                     item.available = Qt.binding(function() {{ return {native_id}.enabled; }});
                     item.active = Qt.binding(function() {{ return /Active/.test(item.assetName); }});
                     item.animating = Qt.binding(function() {{ return {animating}; }});
