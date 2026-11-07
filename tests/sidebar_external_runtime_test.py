@@ -32,6 +32,7 @@ ROOT = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location('sidebar_build', ROOT/'tools/sidebar-panel/build_external.py')
 build = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(build)
+ANIMATED = os.environ.get('BSI_SIDEBAR_ANIMATED') == '1'
 INLINE = os.environ.get('BSI_SIDEBAR_INLINE') == '1'
 if INLINE:
     sys.path.insert(0, str(ROOT/'tools/sidebar-panel'))
@@ -46,6 +47,10 @@ def restyle(source, url):
         sys.path.insert(0,str(ROOT/'tools/player-chrome'))
         from build_sidebar_black import monochrome
         output = monochrome(output)
+    if ANIMATED:
+        sys.path.insert(0,str(ROOT/'tools/sidebar-animated'))
+        from build import convert
+        output=convert(output,url)
     return output, buttons
 
 app = QGuiApplication([])
@@ -71,6 +76,9 @@ def visual(item, name):
 with tempfile.TemporaryDirectory() as temp:
     temp = Path(temp)
     shutil.copytree(ROOT/'assets/emulator-sidebar', temp/'Assets')
+    if ANIMATED:
+        shutil.copy(ROOT/'assets/emulator-sidebar/AnimatedVisual.qml',temp/'Assets/BSISidebarVisual.qml')
+        shutil.copy(ROOT/'assets/emulator-settings/Icons.js',temp/'Assets/Icons.js')
     (temp/'UiColumnLayout.qml').write_text('import QtQuick 2.15\nRectangle {}')
     # Native glyph, hover state and sizing are modeled; callbacks are kept in the input file.
     (temp/'UiImageButton.qml').write_text('''import QtQuick 2.15
@@ -87,9 +95,9 @@ Item {
     assert payload == build.qcompress(styled.encode())
     assert bytes(qUncompress(QByteArray(payload))) == styled.encode()
     (temp/'NativeSidebar.qml').write_text(styled)
-    if INLINE:
+    if INLINE and not ANIMATED:
         shutil.rmtree(temp/'Assets')  # Prove there is no external skin dependency.
-    (temp/'Window.qml').write_text('''import QtQuick 2.15
+    fixture='''import QtQuick 2.15
 import QtQuick.Window 2.15
 Window {
  width:540; height:494; visible:true; color:"#0e0d12"
@@ -105,7 +113,10 @@ Window {
   Text { x:16; anchors.bottom:parent.bottom; anchors.bottomMargin:16; text:"Qt test fixture — not a live emulator screenshot\\nTop window bar is unchanged by this package"; color:"#6d6478"; font.pixelSize:10; lineHeight:1.5 }
  }
  NativeSidebar { x:parent.width-width; y:34; height:parent.height-34 }
-}''')
+}'''
+    if ANIMATED:
+        fixture=fixture.replace('#0e0d12','#050506').replace('#29232e','#080809').replace('#101015','#050506').replace('#d6cddd','#eeeeF2').replace('#b9afc1','#bdbdc7').replace('#cab5df','#eeeeF2').replace('#877b94','#a6a6b0').replace('#6d6478','#888892').replace('Violet rail · Outline icons · 32px cells','Black rail · Icons.js · Animated 32px cells')
+    (temp/'Window.qml').write_text(fixture)
     component = QQmlComponent(engine, QUrl.fromLocalFile(str(temp/'Window.qml')))
     assert not component.isError(), '\n'.join(e.toString() for e in component.errors())
     window = component.create()
@@ -134,12 +145,25 @@ Window {
         return QPoint(round(p.x()), round(p.y()))
     QTest.mouseMove(window, point('fullscreen'))
     pump(150)
+    if ANIMATED:
+        assert glyph('fullscreen').property('scale')>1.08, 'SVG hover scale did not animate'
     assert native('fullscreen').property('hovered') is True
     assert glyph('fullscreen').parentItem().parentItem().property('hovered') is True
+    if ANIMATED:
+        fullscreen_skin=glyph('fullscreen').parentItem().parentItem()
+        fullscreen_skin.setProperty('motionEnabled',False)
+        QTest.mouseMove(window,QPoint(100,100));pump(15)
+        assert abs(glyph('fullscreen').property('scale')-1)<.001, 'Reduced-motion idle must snap'
+        QTest.mouseMove(window,point('fullscreen'));pump(15)
+        assert abs(glyph('fullscreen').property('scale')-1.12)<.001, 'Reduced-motion hover must snap'
+        fullscreen_skin.setProperty('motionEnabled',True)
+
     # Existing callback executes ON PRESS and ON RELEASE separately, with original modifiers.
     modifiers = Qt.ControlModifier | Qt.AltModifier
     QTest.mousePress(window, Qt.RightButton, modifiers, point('gameControl'))
     pump()
+    if ANIMATED:
+        assert glyph('gameControl').property('scale')<.98, 'SVG did not follow native press'
     assert sidebar.property('clickedCount') == 1 and sidebar.property('releasedCount') == 0
     assert sidebar.property('lastElement') == 'gameControl'
     assert sidebar.property('lastButton') == enum_value(Qt.RightButton)
@@ -224,9 +248,9 @@ Window {
     missing = missing_component.create()
     assert missing is not None
     pump()
-    assert visual(missing, 'native_volume').property('asset') == ('' if INLINE else 'SidebarVolume')
-    assert visual(missing, 'native_home').property('asset') == ('' if INLINE else 'NavBarHome')
+    assert visual(missing, 'native_volume').property('asset') == ('' if INLINE and not ANIMATED else 'SidebarVolume')
+    assert visual(missing, 'native_home').property('asset') == ('' if INLINE and not ANIMATED else 'NavBarHome')
     missing.deleteLater()
     window.deleteLater()
     pump()
-print(('INLINE: ' if INLINE else 'EXTERNAL: ') + 'PASS: actual Qt ' + QT_VERSION_STR + ' SVG rendering, qCompress equality, dynamic mute, right-click+Ctrl/Alt, native press/release, disabled tools, navigation, trim animation, geometry and missing-asset fallback.')
+print(('ANIMATED: ' if ANIMATED else 'INLINE: ' if INLINE else 'EXTERNAL: ') + 'PASS: actual Qt ' + QT_VERSION_STR + ' SVG rendering, qCompress equality, dynamic mute, right-click+Ctrl/Alt, native press/release, disabled tools, navigation, trim animation, geometry and missing-asset fallback.')
