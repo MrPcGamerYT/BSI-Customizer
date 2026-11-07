@@ -5171,7 +5171,7 @@ Window {
                           && rebuiltWindow.contains(QStringLiteral("pSettingBtnText"))
                           && rebuiltWindow.contains(QStringLiteral("pShowRedDot"))
                           && rebuiltWindow.contains(QStringLiteral("parent.width*.86"))
-                          && rebuiltWindow.contains(QStringLiteral("Image{visible:parent.icon.length>0"))
+                          && rebuiltWindow.contains(QStringLiteral("Image{source:parent.icon"))
                           && rebuiltWindow.contains(QStringLiteral("asset:\"CloseIcon\""))
                           && rebuiltWindow.contains(QStringLiteral("fChangeSelectedSetting(parent.p)"))
                           && rebuiltWindow.contains(QStringLiteral("StackLayout"))
