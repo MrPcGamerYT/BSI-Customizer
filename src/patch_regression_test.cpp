@@ -5172,14 +5172,12 @@ Window {
                           && rebuiltWindow.contains(QStringLiteral("pShowRedDot"))
                           && rebuiltWindow.contains(QStringLiteral("parent.width*.86"))
                           && rebuiltWindow.contains(QStringLiteral("Image{visible:parent.icon.length>0"))
-                          && rebuiltWindow.contains(QStringLiteral("width=transientParent.width*.7"))
-                          && rebuiltWindow.contains(QStringLiteral("height=transientParent.height*.7"))
                           && rebuiltWindow.contains(QStringLiteral("asset:\"CloseIcon\""))
                           && rebuiltWindow.contains(QStringLiteral("fChangeSelectedSetting(parent.p)"))
                           && rebuiltWindow.contains(QStringLiteral("StackLayout"))
                           && rebuiltWindow.contains(QStringLiteral("model.modelData.pComponentObj = item"))
                           && rebuiltWindow.contains(QStringLiteral("iSettingsWindow.startSystemMove()")),
-                      QStringLiteral("the rebuilt %1 Settings window has icon tabs, a 70% compact content card, and keeps native page loading, selection, dragging, and close behavior")
+                      QStringLiteral("the rebuilt %1 Settings window centers native page contents, supports custom tab icons, and keeps native page loading, selection, dragging, and close behavior")
                           .arg(QFileInfo(input).fileName()));
                 QString expectedLogoSource;
                 for (const auto &entry : EmbeddedResources::list(original, true)) {

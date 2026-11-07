@@ -714,14 +714,6 @@ Repeater{model:pSettingsItems.pSettingElements;delegate:Loader{Component.onCompl
     replacement.replace(QStringLiteral("@@BSI_TAB_ICONS@@"), iconLiteral);
     QString out = stock;
     out.replace(target.nameBegin, target.end - target.nameBegin, replacement);
-    // Category glyphs follow model order, so translations never affect the
-    // icon strip and pages without image assets still receive distinct artwork.
-    const QString helper = QStringLiteral(R"QML(
-onVisibleChanged:if(visible&&transientParent){width=transientParent.width*.7;height=transientParent.height*.7;x=transientParent.x+(transientParent.width-width)/2;y=transientParent.y+(transientParent.height-height)/2}
-)QML");
-    const int rootClose = out.lastIndexOf(QLatin1String("\n}"));
-    if (rootClose < 0) return {};
-    out.insert(rootClose, helper);
     if (!out.contains(kWindowDesignMarker)) return {};
     return out;
 }
