@@ -3,7 +3,10 @@
 #include <QQmlContext>
 #include <QQuickStyle>
 #include <QBuffer>
+#include <QCryptographicHash>
 #include <QDir>
+#include <QFile>
+#include <QFileInfo>
 #include <QImageReader>
 #include <QIcon>
 #include <QFontDatabase>
@@ -13,6 +16,7 @@
 #include <QQmlError>
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QJsonObject>
 #include <QLibraryInfo>
 #include <QSettings>
 #include <QStandardPaths>
@@ -27,6 +31,7 @@
 #include "core/CrashDiagnostics.h"
 #include "core/AuthManager.h"
 #include "core/SettingsManager.h"
+#include "core/SettingsPanelPatcher.h"
 #include "core/SysInfo.h"
 #include "core/ThemeEngine.h"
 #include "core/ThemeManager.h"
@@ -83,6 +88,108 @@ void ensureConsoleOutput()
     std::freopen("CONOUT$", "w", stderr);
 #endif
 #endif // Q_OS_WIN
+}
+
+QByteArray sha256File(const QString &path)
+{
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) return {};
+    QCryptographicHash hash(QCryptographicHash::Sha256);
+    while (!file.atEnd()) {
+        const QByteArray chunk = file.read(1024 * 1024);
+        if (chunk.isEmpty() && file.error() != QFileDevice::NoError) return {};
+        hash.addData(chunk);
+    }
+    return hash.result().toHex();
+}
+
+void writeJsonReport(const QJsonObject &report)
+{
+    const QByteArray json = QJsonDocument(report).toJson(QJsonDocument::Indented);
+    std::fwrite(json.constData(), 1, size_t(json.size()), stdout);
+    std::fputc('\n', stdout);
+    std::fflush(stdout);
+}
+
+int runSettingsPanelTest(const QString &target)
+{
+    ensureConsoleOutput();
+    const auto fail = [](const QString &message) {
+        writeJsonReport({{QStringLiteral("ok"), false},
+                         {QStringLiteral("error"), message}});
+        return 2;
+    };
+    const QFileInfo targetInfo(target);
+    if (target.trimmed().isEmpty() || !targetInfo.isFile())
+        return fail(QStringLiteral("Choose an existing HD-Player.exe file."));
+    const QByteArray originalHash = sha256File(target);
+    if (originalHash.isEmpty()) return fail(QStringLiteral("Cannot read the selected HD-Player.exe."));
+
+    // Keep this diagnostic isolated from the user's saved player path/profile.
+    QTemporaryDir isolatedSettings;
+    if (!isolatedSettings.isValid()) return fail(QStringLiteral("Cannot create temporary diagnostic settings."));
+    QSettings::setDefaultFormat(QSettings::IniFormat);
+    QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, isolatedSettings.path());
+    QSettings::setPath(QSettings::IniFormat, QSettings::SystemScope, isolatedSettings.path());
+
+    SettingsManager targetSettings(nullptr, false);
+    targetSettings.setExePath(target);
+    Backend targetBackend(&targetSettings);
+    const QVariantMap targetState = targetBackend.settingsPanelRebuildState();
+
+    QTemporaryDir workingCopy;
+    if (!workingCopy.isValid()) return fail(QStringLiteral("Cannot create a temporary HD-Player copy."));
+    const QString copyPath = QDir(workingCopy.path()).filePath(QStringLiteral("HD-Player.exe"));
+    if (!QFile::copy(target, copyPath))
+        return fail(QStringLiteral("Cannot copy HD-Player.exe into the temporary tester folder."));
+
+    SettingsManager copySettings(nullptr, false);
+    copySettings.setExePath(copyPath);
+    copySettings.setAboutDeveloperName(QStringLiteral("BSI Settings-panel diagnostic"));
+    QVariantList diagnosticLinks;
+    diagnosticLinks << QVariantMap{{QStringLiteral("kind"), QStringLiteral("github")},
+                                   {QStringLiteral("title"), QStringLiteral("Diagnostic source")},
+                                   {QStringLiteral("url"), QStringLiteral("https://example.com/source")}}
+                    << QVariantMap{{QStringLiteral("kind"), QStringLiteral("discord")},
+                                   {QStringLiteral("title"), QStringLiteral("Diagnostic community")},
+                                   {QStringLiteral("url"), QStringLiteral("https://example.com/community")}}
+                    << QVariantMap{{QStringLiteral("kind"), QStringLiteral("youtube")},
+                                   {QStringLiteral("title"), QStringLiteral("Diagnostic video")},
+                                   {QStringLiteral("url"), QStringLiteral("https://example.com/video")}}
+                    << QVariantMap{{QStringLiteral("kind"), QStringLiteral("github")},
+                                   {QStringLiteral("title"), QStringLiteral("Diagnostic extra")},
+                                   {QStringLiteral("url"), QStringLiteral("https://example.com/extra")}};
+    copySettings.setAboutLinks(diagnosticLinks);
+    Backend copyBackend(&copySettings);
+    const QVariantMap before = copyBackend.settingsPanelRebuildState();
+    const QVariantMap applied = copyBackend.applySettingsPanelRebuild(true);
+    const QVariantMap after = copyBackend.settingsPanelRebuildState();
+    const QByteArray finalOriginalHash = sha256File(target);
+    const bool originalUnchanged = !finalOriginalHash.isEmpty() && finalOriginalHash == originalHash;
+    const bool testPassed = targetState.value(QStringLiteral("supported")).toBool()
+        && before.value(QStringLiteral("supported")).toBool()
+        && applied.value(QStringLiteral("ok")).toBool()
+        && after.value(QStringLiteral("supported")).toBool()
+        && after.value(QStringLiteral("applied")).toBool()
+        && originalUnchanged;
+
+    writeJsonReport({
+        {QStringLiteral("ok"), testPassed},
+        {QStringLiteral("target"), QDir::toNativeSeparators(targetInfo.absoluteFilePath())},
+        {QStringLiteral("supported"), targetState.value(QStringLiteral("supported")).toBool()},
+        {QStringLiteral("alreadyApplied"), targetState.value(QStringLiteral("applied")).toBool()},
+        {QStringLiteral("nativeSettingsTabs"), targetState.value(QStringLiteral("settingsPageCount")).toInt()},
+        {QStringLiteral("verifiedQmlDependencies"), targetState.value(QStringLiteral("settingsQmlResourceCount")).toInt()},
+        {QStringLiteral("compiledUnitsDetected"), targetState.value(QStringLiteral("compiledUnitsDetected")).toInt()},
+        {QStringLiteral("compiledUnitsActive"), targetState.value(QStringLiteral("compiledUnitsActive")).toInt()},
+        {QStringLiteral("detail"), targetState.value(QStringLiteral("detail")).toString()},
+        {QStringLiteral("temporaryCopyApplyOk"), applied.value(QStringLiteral("ok")).toBool()},
+        {QStringLiteral("temporaryCopySupportedAfter"), after.value(QStringLiteral("supported")).toBool()},
+        {QStringLiteral("temporaryCopyAppliedAfter"), after.value(QStringLiteral("applied")).toBool()},
+        {QStringLiteral("temporaryCopyDetail"), after.value(QStringLiteral("detail")).toString()},
+        {QStringLiteral("originalUnchanged"), originalUnchanged}
+    });
+    return testPassed ? 0 : 1;
 }
 
 } // namespace
@@ -182,6 +289,21 @@ int main(int argc, char *argv[])
         return 0;
     }
 
+    // Safely test the exact Settings-panel state/apply backend path used by
+    // the Customizer UI. Analysis reads the selected EXE; apply runs only on a
+    // disposable temporary copy, and the original SHA-256 must remain stable.
+    //   BSI-Customizer.exe --settings-panel-test "C:\\...\\HD-Player.exe"
+    const int settingsPanelTestAt = args.indexOf(QStringLiteral("--settings-panel-test"));
+    if (settingsPanelTestAt >= 0) {
+        const QString target = settingsPanelTestAt + 1 < args.size() ? args.at(settingsPanelTestAt + 1) : QString();
+        if (target.isEmpty()) {
+            ensureConsoleOutput();
+            std::printf("usage: BSI-Customizer --settings-panel-test <path-to-HD-Player.exe>\n");
+            return 2;
+        }
+        return runSettingsPanelTest(target);
+    }
+
     // Self-update probe: reads the Discord releases channel the same way the
     // window does, so the bot/channel setup can be verified without a GUI.
     //   BSI-Customizer.exe --check-updates [--json] [--download] [--explain] [--timeout 25]
@@ -224,6 +346,17 @@ int main(int argc, char *argv[])
 
     ThemeManager themes;
     SettingsManager settings;
+    // Manual diagnostic launcher: open the real UI with an explicit player
+    // selected instead of relying on the previously saved installation.
+    const int openPlayerAt = args.indexOf(QStringLiteral("--open-player"));
+    if (openPlayerAt >= 0) {
+        if (openPlayerAt + 1 >= args.size() || !QFileInfo(args.at(openPlayerAt + 1)).isFile()) {
+            ensureConsoleOutput();
+            std::fprintf(stderr, "usage: BSI-Customizer --open-player <path-to-HD-Player.exe>\n");
+            return 2;
+        }
+        settings.setExePath(args.at(openPlayerAt + 1));
+    }
     Backend backend(&settings);
     SysInfo sysinfo;
     // The Discord sign-in gate (Premium-Optimizer login system). Backend
