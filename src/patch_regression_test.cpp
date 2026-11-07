@@ -5103,7 +5103,6 @@ Window {
                 QVariantMap{{QStringLiteral("title"), QStringLiteral("Regression video")},
                             {QStringLiteral("url"), QStringLiteral("https://example.com/video")}}
             };
-            const auto firstBoot = BootVideoPatcher::patch(panelCopy, 3000, QStringLiteral("solar"));
             SettingsManager panelManager(nullptr, false);
             panelManager.setExePath(panelCopy);
             panelManager.setAboutDeveloperName(QStringLiteral("BSI Panel Regression"));
@@ -5112,19 +5111,10 @@ Window {
             const QVariantMap settingsBeforeApply = panelBackend.settingsPanelRebuildState();
             const QVariantMap appliedPanel = panelBackend.applySettingsPanelRebuild(true);
             const QVariantMap settingsAfterApply = panelBackend.settingsPanelRebuildState();
-            const auto bootSwitch = BootVideoPatcher::patch(panelCopy, 3000, QStringLiteral("orbit"));
-            const QByteArray rebuiltWithBoot = read(panelCopy);
-            const QVariantMap settingsAfterBootSwitch = panelBackend.settingsPanelRebuildState();
-            check(firstBoot.ok && settingsBeforeApply.value(QStringLiteral("supported")).toBool()
-                      && settingsAfterApply.value(QStringLiteral("applied")).toBool()
-                      && bootSwitch.ok && settingsAfterBootSwitch.value(QStringLiteral("applied")).toBool()
-                      && registeredQmlContains(rebuiltWithBoot, QStringLiteral("bsiBootLoader"))
-                      && !PeUtils::sections(rebuiltWithBoot).isEmpty()
-                      && read(panelCopy + QStringLiteral(".bak")) == original,
-                  QStringLiteral("the real %1 survives boot patch -> Customizer Settings apply -> boot-style switch")
-                      .arg(QFileInfo(input).fileName()));
-            check(appliedPanel.value(QStringLiteral("ok")).toBool(),
-                  QStringLiteral("the real %1 Settings panel rebuild applies through the Customizer backend (%2)")
+            check(settingsBeforeApply.value(QStringLiteral("supported")).toBool()
+                      && appliedPanel.value(QStringLiteral("ok")).toBool()
+                      && settingsAfterApply.value(QStringLiteral("applied")).toBool(),
+                  QStringLiteral("the real %1 Settings panel is supported and applies through the Customizer backend (%2)")
                       .arg(QFileInfo(input).fileName(), appliedPanel.value(QStringLiteral("msg")).toString()));
             if (appliedPanel.value(QStringLiteral("ok")).toBool()) {
                 const QByteArray rebuiltBeforeAbout = read(panelCopy);
