@@ -5166,13 +5166,16 @@ Window {
                         rebuiltWindow = QString::fromUtf8(QtResources::readFile(panelImage, file));
                 }
                 check(rebuiltWindow.contains(QStringLiteral("BSI Settings v4"))
-                          && rebuiltWindow.contains(QStringLiteral("⚙▣◈♫⌨⌘☷ⓘ◉◇✦▧"))
+                          && rebuiltWindow.contains(QStringLiteral("bHidden"))
+                          && rebuiltWindow.contains(QStringLiteral("bIcons"))
                           && rebuiltWindow.contains(QStringLiteral("pSettingBtnText"))
                           && rebuiltWindow.contains(QStringLiteral("pShowRedDot"))
-                          && rebuiltWindow.contains(QStringLiteral("width = transientParent.width * 0.70"))
-                          && rebuiltWindow.contains(QStringLiteral("height = transientParent.height * 0.70"))
+                          && rebuiltWindow.contains(QStringLiteral("parent.width*.86"))
+                          && rebuiltWindow.contains(QStringLiteral("Image{visible:parent.icon.length>0"))
+                          && rebuiltWindow.contains(QStringLiteral("width=transientParent.width*.7"))
+                          && rebuiltWindow.contains(QStringLiteral("height=transientParent.height*.7"))
                           && rebuiltWindow.contains(QStringLiteral("asset:\"CloseIcon\""))
-                          && rebuiltWindow.contains(QStringLiteral("fChangeSelectedSetting(pSettingIdx)"))
+                          && rebuiltWindow.contains(QStringLiteral("fChangeSelectedSetting(parent.p)"))
                           && rebuiltWindow.contains(QStringLiteral("StackLayout"))
                           && rebuiltWindow.contains(QStringLiteral("model.modelData.pComponentObj = item"))
                           && rebuiltWindow.contains(QStringLiteral("iSettingsWindow.startSystemMove()")),

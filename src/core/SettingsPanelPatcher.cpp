@@ -702,11 +702,11 @@ MouseArea{width:parent.width-42;height:32;onPressed:iSettingsWindow.startSystemM
 UiImageButton{asset:"CloseIcon";anchors.right:parent.right;onClicked:iSettingsWindow.close()}
 ListView{width:parent.width;height:72;y:32;clip:true;orientation:ListView.Horizontal;model:iSettingsWindowShadowContainer.bVisible;currentIndex:iSettingsWindowShadowContainer.bVisible.indexOf(pCurrentTabIndex)
 delegate:Item{property int p:modelData;property var d:pSettingsItems.pSettingElements[p];property string k:iSettingsWindowShadowContainer.bKey(d.pQmlSource);property string icon:iSettingsWindowShadowContainer.bIcons[k]||"";width:92;height:64
-UiSettingsButton{anchors.fill:parent;pSettingIdx:parent.p;pSettingBtnText:parent.d.pButtonText;onSettingClicked:fChangeSelectedSetting(pSettingIdx)}
+UiSettingsButton{anchors.fill:parent;pSettingBtnText:parent.d.pButtonText;pSelected:parent.p===pCurrentTabIndex;pShowRedDot:parent.d.pShowRedDot;onSettingClicked:fChangeSelectedSetting(parent.p)}
 Image{visible:parent.icon.length>0;source:parent.icon;width:18;height:18;anchors.horizontalCenter:parent.horizontalCenter;anchors.top:parent.top}}
 }
 StackLayout{id:iSelectedSettingControl;width:parent.width*.86;anchors.horizontalCenter:parent.horizontalCenter;anchors.top:parent.top;anchors.bottom:parent.bottom;anchors.topMargin:108;currentIndex:pCurrentTabIndex
-Repeater{model:pSettingsItems.pSettingElements;delegate:Loader{Component.onCompleted:{var a=model.modelData.pComponentArgs;a?setSource(model.modelData.pQmlSource,a):setSource(model.modelData.pQmlSource)}onLoaded:{model.modelData.pComponentObj=item;if(item.fOnQmlLoaded)item.fOnQmlLoaded()}}}}
+Repeater{model:pSettingsItems.pSettingElements;delegate:Loader{Component.onCompleted:{var a=model.modelData.pComponentArgs;a?setSource(model.modelData.pQmlSource,a):setSource(model.modelData.pQmlSource)}onLoaded:{model.modelData.pComponentObj = item;if(item.fOnQmlLoaded)item.fOnQmlLoaded()}}}}
 }
 }
 )QML");
@@ -717,12 +717,7 @@ Repeater{model:pSettingsItems.pSettingElements;delegate:Loader{Component.onCompl
     // Category glyphs follow model order, so translations never affect the
     // icon strip and pages without image assets still receive distinct artwork.
     const QString helper = QStringLiteral(R"QML(
-    onVisibleChanged: if (visible && transientParent) {
-        width = transientParent.width * 0.70
-        height = transientParent.height * 0.70
-        x = transientParent.x + (transientParent.width - width) / 2
-        y = transientParent.y + (transientParent.height - height) / 2
-    }
+onVisibleChanged:if(visible&&transientParent){width=transientParent.width*.7;height=transientParent.height*.7;x=transientParent.x+(transientParent.width-width)/2;y=transientParent.y+(transientParent.height-height)/2}
 )QML");
     const int rootClose = out.lastIndexOf(QLatin1String("\n}"));
     if (rootClose < 0) return {};
