@@ -23,11 +23,15 @@ struct State
     int settingsQmlResourceCount = 0;
     int embeddedQmlResourceCount = 0;
     QStringList qmlResourceSamples;
+    QVariantList tabs;
+    bool logoFallback = false;
+    QString logoStatus;
     QString detail;
 };
 
 State analyze(const QString &exePath);
+QVariantMap readCustomAsset(const QString &path, const QString &kind);
 QVariantMap apply(const QString &exePath, const QString &developerName,
-                  const QVariantList &links, bool enabled);
+                  const QVariantList &links, const QVariantMap &profile, bool enabled);
 
 } // namespace SettingsPanelPatcher

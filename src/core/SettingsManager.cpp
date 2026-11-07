@@ -54,6 +54,7 @@ SettingsManager::SettingsManager(QObject *parent, bool initialize)
         m_aboutLinks = defaultAboutLinks();
         settings.setValue(QStringLiteral("about/links"), m_aboutLinks);
     }
+    m_settingsPanelProfile = settings.value(QStringLiteral("settingsPanel/profile")).toMap();
     if (!QFileInfo(m_exePath).isFile()) {
         const auto installs = BsDetector::findBlueStacks();
         if (installs.size() == 1) {
@@ -145,6 +146,15 @@ void SettingsManager::setAboutTagline(const QString &tagline)
     m_aboutTagline = clean;
     QSettings().setValue(QStringLiteral("about/tagline"), m_aboutTagline);
     emit aboutProfileChanged();
+}
+
+void SettingsManager::setSettingsPanelProfile(const QVariantMap &profile)
+{
+    if (profile == m_settingsPanelProfile)
+        return;
+    m_settingsPanelProfile = profile;
+    QSettings().setValue(QStringLiteral("settingsPanel/profile"), m_settingsPanelProfile);
+    emit settingsPanelProfileChanged();
 }
 
 void SettingsManager::setAboutLinks(const QVariantList &links)

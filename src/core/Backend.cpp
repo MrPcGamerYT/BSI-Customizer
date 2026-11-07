@@ -112,6 +112,7 @@ QVariantMap Backend::runBackground(const std::function<QVariantMap(Backend &)> &
     settings->m_aboutDeveloperName = m_settings->m_aboutDeveloperName;
     settings->m_aboutTagline = m_settings->m_aboutTagline;
     settings->m_aboutLinks = m_settings->m_aboutLinks;
+    settings->m_settingsPanelProfile = m_settings->m_settingsPanelProfile;
     auto *worker = new Backend(settings);
     settings->setParent(worker);
     worker->copyPatchState(*this);
@@ -1976,6 +1977,9 @@ QVariantMap Backend::settingsPanelRebuildState()
             {QStringLiteral("settingsQmlResourceCount"), state.settingsQmlResourceCount},
             {QStringLiteral("embeddedQmlResourceCount"), state.embeddedQmlResourceCount},
             {QStringLiteral("qmlResourceSamples"), state.qmlResourceSamples},
+            {QStringLiteral("tabs"), state.tabs},
+            {QStringLiteral("logoFallback"), state.logoFallback},
+            {QStringLiteral("logoStatus"), state.logoStatus},
             {QStringLiteral("detail"), state.detail}};
 }
 
@@ -1984,8 +1988,10 @@ QVariantMap Backend::applySettingsPanelRebuild(bool enabled)
     if (actionsLocked()) return lockedMap();
     if (!m_backgroundWorker)
         return runBackground([=](Backend &worker) { return worker.applySettingsPanelRebuild(enabled); });
+    QVariantMap panelProfile = m_settings->settingsPanelProfile();
+    panelProfile.insert(QStringLiteral("tagline"), m_settings->aboutTagline());
     const auto response = SettingsPanelPatcher::apply(m_settings->exePath(),
-        m_settings->aboutDeveloperName(), m_settings->aboutLinks(), enabled);
+        m_settings->aboutDeveloperName(), m_settings->aboutLinks(), panelProfile, enabled);
     if (response.value(QStringLiteral("ok")).toBool()) emit resourcesChanged();
     return result(response.value(QStringLiteral("ok")).toBool(),
                   response.value(QStringLiteral("msg")).toString(),

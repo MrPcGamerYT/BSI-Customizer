@@ -62,7 +62,8 @@ int runWebBridgeAccessTest()
         "recolorTogglesFromPreset", "replaceResource", "resetThemeEdits", "restoreBackup", "rpcidFind",
         "rpcidNames", "rpcidReplace", "rpcidSetName", "rpcidStatus", "rpcidUndo",
         "saveResource", "scanResources", "setAppearance", "setFpsAutoDetect", "setPaths",
-        "setThemeEdit", "signOut", "updates", "useInstall", "workspace",
+        "setThemeEdit", "saveSettingsPanelProfile", "setSettingsPanelAsset", "clearSettingsPanelAsset",
+        "signOut", "updates", "useInstall", "workspace",
         "maintenance", "setAboutProfile", "videoControl", "unknown"};
     for (const char *command : commands) {
         const auto result = bridge.invoke(QString::fromLatin1(command), {{"exe", "must-not-write.exe"}, {"page", 1}, {"index", 0}});

@@ -5062,7 +5062,9 @@ Window {
         const QVariantMap uiPanelState = interfaceBackend.settingsPanelRebuildState();
         check(uiPanelState.value(QStringLiteral("supported")).toBool()
                   && uiPanelState.value(QStringLiteral("settingsPageCount")).toInt() == panelState.settingsPageCount
-                  && uiPanelState.value(QStringLiteral("settingsQmlResourceCount")).toInt() == panelState.settingsQmlResourceCount,
+                  && uiPanelState.value(QStringLiteral("settingsQmlResourceCount")).toInt() == panelState.settingsQmlResourceCount
+                  && uiPanelState.value(QStringLiteral("tabs")).toList().size() == panelState.settingsPageCount
+                  && !uiPanelState.value(QStringLiteral("logoStatus")).toString().isEmpty(),
               QStringLiteral("the Customizer interface reports the real %1 Settings model as patchable (%2)")
                   .arg(QFileInfo(input).fileName(), uiPanelState.value(QStringLiteral("detail")).toString()));
         const auto stockAbout = AboutPatcher::analyze(original);
@@ -5089,7 +5091,7 @@ Window {
                 const QByteArray aboutFirstBytes = read(aboutFirstPath);
                 const auto settingsAfterAbout = SettingsPanelPatcher::analyze(aboutFirstPath);
                 const auto settingsApplyAfterAbout = SettingsPanelPatcher::apply(aboutFirstPath,
-                    QStringLiteral("Should be refused"), {}, true);
+                    QStringLiteral("Should be refused"), {}, {}, true);
                 check(!settingsAfterAbout.supported && !settingsApplyAfterAbout.value(QStringLiteral("ok")).toBool()
                           && read(aboutFirstPath) == aboutFirstBytes
                           && settingsApplyAfterAbout.value(QStringLiteral("msg")).toString()
@@ -5121,6 +5123,19 @@ Window {
                             {QStringLiteral("title"), QStringLiteral("Regression extra")},
                             {QStringLiteral("url"), QStringLiteral("https://example.com/extra")}}
             };
+            const QByteArray customPanelSvg = QByteArrayLiteral(
+                "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\"><circle cx=\"12\" cy=\"12\" r=\"9\" fill=\"#55aaff\"/></svg>");
+            const QString customPanelSvgPath = QDir(panelDir).filePath(QStringLiteral("custom-panel-icon.svg"));
+            write(customPanelSvgPath, customPanelSvg);
+            const QVariantMap safePanelSvg = SettingsPanelPatcher::readCustomAsset(customPanelSvgPath, QStringLiteral("tab-icon"));
+            const QVariantMap safePanelLogo = SettingsPanelPatcher::readCustomAsset(customPanelSvgPath, QStringLiteral("logo"));
+            check(safePanelSvg.value(QStringLiteral("ok")).toBool()
+                      && safePanelLogo.value(QStringLiteral("ok")).toBool(),
+                  QStringLiteral("the Settings rebuild accepts safe self-contained SVGs for icons and logos"));
+            const QString unsafePanelSvgPath = QDir(panelDir).filePath(QStringLiteral("unsafe-panel-icon.svg"));
+            write(unsafePanelSvgPath, QByteArrayLiteral("<svg xmlns=\"http://www.w3.org/2000/svg\"><script>alert(1)</script></svg>"));
+            check(!SettingsPanelPatcher::readCustomAsset(unsafePanelSvgPath, QStringLiteral("tab-icon")).value(QStringLiteral("ok")).toBool(),
+                  QStringLiteral("Settings rebuild rejects active-content or unsafe SVG uploads"));
             SettingsManager panelManager(nullptr, false);
             panelManager.setExePath(panelCopy);
             panelManager.setAboutDeveloperName(QStringLiteral("BSI Panel Regression"));
@@ -5150,7 +5165,7 @@ Window {
                     if (file.name.compare(QLatin1String("UiSettingsWindow.qml"), Qt::CaseInsensitive) == 0)
                         rebuiltWindow = QString::fromUtf8(QtResources::readFile(panelImage, file));
                 }
-                check(rebuiltWindow.contains(QStringLiteral("BSI Settings v3"))
+                check(rebuiltWindow.contains(QStringLiteral("BSI Settings v4"))
                           && rebuiltWindow.contains(QStringLiteral("⚙▣◈♫⌨⌘☷ⓘ◉◇✦▧"))
                           && rebuiltWindow.contains(QStringLiteral("pSettingBtnText"))
                           && rebuiltWindow.contains(QStringLiteral("pShowRedDot"))
@@ -5177,8 +5192,10 @@ Window {
                         rebuiltAbout = EmbeddedResources::decodeText(
                             EmbeddedResources::readEntry(panelCopy, entry.entryOff, entry.flags, 8 * 1024 * 1024));
                 }
-                check(!expectedLogoSource.isEmpty()
-                          && rebuiltAbout.contains(QStringLiteral("source: \"%1\"").arg(expectedLogoSource))
+                const bool logoSourceVerified = expectedLogoSource.isEmpty()
+                    ? rebuiltAbout.contains(QStringLiteral("source: \"data:image/svg+xml;base64,"))
+                    : rebuiltAbout.contains(QStringLiteral("source: \"%1\"").arg(expectedLogoSource));
+                check(logoSourceVerified
                           && rebuiltAbout.contains(QStringLiteral("objectName: \"bsiAboutEmulatorLogo\""))
                           && rebuiltAbout.contains(QStringLiteral("objectName: \"bsiAboutDeveloperName\""))
                           && rebuiltAbout.contains(QStringLiteral("text: pDeveloperName"))
@@ -5195,12 +5212,40 @@ Window {
                           && activePanel.compiledUnitsActive == 0,
                       QStringLiteral("the rebuilt %1 panel reads back, retains a selective recovery snapshot, and has no active stale compiled QML")
                           .arg(QFileInfo(input).fileName()));
+                const QVariantList liveTabs = panelState.tabs;
+                const QString hiddenTabId = liveTabs.size() > 1
+                    ? liveTabs.at(1).toMap().value(QStringLiteral("id")).toString() : QString();
+                const QVariantMap panelOptions {
+                    {QStringLiteral("tagline"), QStringLiteral("Regression subtitle")},
+                    {QStringLiteral("hiddenTabs"), hiddenTabId.isEmpty() ? QVariantList{} : QVariantList{hiddenTabId}},
+                    {QStringLiteral("tabIcons"), liveTabs.isEmpty() ? QVariantMap{} : QVariantMap{{
+                        liveTabs.first().toMap().value(QStringLiteral("id")).toString(), safePanelSvg.value(QStringLiteral("asset"))}}},
+                    {QStringLiteral("logo"), safePanelLogo.value(QStringLiteral("asset"))}
+                };
                 const auto updatedPanel = SettingsPanelPatcher::apply(panelCopy,
-                    QStringLiteral("BSI Panel Regression Updated"), panelLinks, true);
+                    QStringLiteral("BSI Panel Regression Updated"), panelLinks, panelOptions, true);
                 check(updatedPanel.value(QStringLiteral("ok")).toBool(),
-                      QStringLiteral("the real %1 panel safely accepts an About profile update (%2)")
+                      QStringLiteral("the real %1 panel safely accepts custom About profile and tab options (%2)")
                           .arg(QFileInfo(input).fileName(), updatedPanel.value(QStringLiteral("msg")).toString()));
-                const auto restoredPanel = SettingsPanelPatcher::apply(panelCopy, QString(), {}, false);
+                if (updatedPanel.value(QStringLiteral("ok")).toBool()) {
+                    QString updatedWindow, updatedAbout;
+                    const QByteArray updatedImage = read(panelCopy);
+                    for (const auto &entry : EmbeddedResources::list(updatedImage, true)) {
+                        if (entry.leaf.compare(QLatin1String("UiSettingsWindow.qml"), Qt::CaseInsensitive) == 0)
+                            updatedWindow = EmbeddedResources::decodeText(EmbeddedResources::readEntry(panelCopy, entry.entryOff, entry.flags, 8 * 1024 * 1024));
+                        if (entry.leaf.compare(QLatin1String("PlrAboutSetting.qml"), Qt::CaseInsensitive) == 0)
+                            updatedAbout = EmbeddedResources::decodeText(EmbeddedResources::readEntry(panelCopy, entry.entryOff, entry.flags, 8 * 1024 * 1024));
+                    }
+                    check(updatedWindow.contains(QStringLiteral("iBsiHiddenTabIds"))
+                              && (hiddenTabId.isEmpty() || updatedWindow.contains(hiddenTabId))
+                              && updatedWindow.contains(QStringLiteral("data:image/svg+xml;base64,"))
+                              && updatedAbout.contains(QStringLiteral("data:image/svg+xml;base64,"))
+                              && updatedAbout.contains(QStringLiteral("BSI Panel Regression Updated"))
+                              && updatedAbout.contains(QStringLiteral("Regression subtitle")),
+                          QStringLiteral("the real %1 Settings rebuild writes hidden tabs, custom SVG icons, and a custom About logo into regenerated QML")
+                              .arg(QFileInfo(input).fileName()));
+                }
+                const auto restoredPanel = SettingsPanelPatcher::apply(panelCopy, QString(), {}, {}, false);
                 check(restoredPanel.value(QStringLiteral("ok")).toBool(),
                       QStringLiteral("the real %1 panel restores only its two original QML sources (%2)")
                           .arg(QFileInfo(input).fileName(), restoredPanel.value(QStringLiteral("msg")).toString()));
