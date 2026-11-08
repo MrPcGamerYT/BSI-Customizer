@@ -48,9 +48,9 @@ replacement = match.group(1)
 assert "BSI Settings v5" in replacement
 assert "pSettingsItems.pSettingElements" in replacement and "property var h:" in replacement
 assert "@@BSI_HIDDEN_TABS@@" in replacement and "@@BSI_TAB_ICONS@@" in replacement
-assert "parent.width*.86" in replacement
-assert "width:parent.width*.70;height:parent.height*.70;anchors.centerIn:parent" in replacement
-assert "Math.min(parent.width*.86,760)" in replacement
+assert "width:Math.min(parent.width*.60,1100);height:Math.min(parent.height*.68,820);anchors.centerIn:parent" in replacement
+assert "Math.min(parent.width*.90,600)" in replacement
+assert "width:Math.min(parent.width,520);height:parent.height;anchors.centerIn:parent" in replacement
 assert "pSettingBtnText" in replacement and "pSelected" in replacement
 assert "anchors.topMargin:108" in replacement
 assert "onPressed:iSettingsWindow.startSystemMove()" in replacement
@@ -124,6 +124,7 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
         "import QtQuick 2.15\n"
         "Item {\n"
         "    objectName: \"runtimeSettingPage\"\n"
+        "    anchors.fill: parent\n"
         "    function fOnQmlLoaded() { }\n"
         "}\n",
         encoding="utf-8",
@@ -185,10 +186,16 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
         (item for item in visual_tree if item.metaObject().className().endswith("StackLayout")),
         None,
     )
+    page_loader = next(
+        (item for item in visual_tree
+         if item.metaObject().className().endswith("Loader")
+         and item.property("item") is not None),
+        None,
+    )
     panel = next(
         (item for item in visual_tree
-         if abs(item.width() - window.width() * 0.70) < 2
-         and abs(item.height() - window.height() * 0.70) < 2),
+         if abs(item.width() - window.width() * 0.60) < 2
+         and abs(item.height() - window.height() * 0.68) < 2),
         None,
     )
     first_tab = next(
@@ -214,6 +221,7 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
     )
     controls = {
         "compact centered panel": panel,
+        "centered native page loader": page_loader,
         "tabs": tabs,
         "stack": stack,
         "loaded native page": loaded_page,
@@ -225,10 +233,15 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
     found_names = sorted(item.objectName() for item in visual_tree if item.objectName())
     assert not missing, f"Missing controls: {missing}; found object names: {found_names}"
     assert abs(panel.x() + panel.width() / 2 - window.width() / 2) < 2, "Settings shell was not centered in its host"
-    assert abs(panel.width() - window.width() * 0.70) < 2, "Settings shell should remain at the compact 70% width"
+    assert abs(panel.width() - window.width() * 0.60) < 2, "Settings shell should remain compact at 60% width"
+    assert abs(panel.height() - window.height() * 0.68) < 2, "Settings shell should remain compact at 68% height"
     stack_center = stack.mapToItem(panel, QPointF(stack.width() / 2, stack.height() / 2))
     assert abs(stack_center.x() - panel.width() / 2) < 2, "The native page column was not centered inside the Settings shell"
-    assert stack.width() <= 760.1, "The native page column should use a readable maximum width"
+    assert stack.width() <= 600.1, "The native page stack should use a readable maximum width"
+    loader_center = page_loader.mapToItem(page_loader.parentItem(), QPointF(page_loader.width() / 2, page_loader.height() / 2))
+    assert abs(loader_center.x() - page_loader.parentItem().width() / 2) < 2, "The loaded native page was not centered inside its stack cell"
+    assert page_loader.width() <= 520.1, "The loaded native page should stay within the compact centered column"
+    assert abs(loaded_page.width() - page_loader.width()) < 2, "The loaded native page did not follow its centered loader width"
     assert loaded_page.objectName() == "runtimeSettingPage", "The native Settings page Loader did not load its page"
     assert str(first_tab.property("pSettingBtnText")).splitlines()[0], "Category tabs should show their own icon glyphs"
 

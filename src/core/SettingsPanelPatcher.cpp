@@ -692,7 +692,7 @@ QString buildWindow(const QString &stock, const QStringList &hiddenTabs,
     QString replacement = QStringLiteral(R"QML(
 UiShadowContainer{
 // BSI Settings v5
-id:iSettingsWindowShadowContainer;width:parent.width*.70;height:parent.height*.70;anchors.centerIn:parent
+id:iSettingsWindowShadowContainer;width:Math.min(parent.width*.60,1100);height:Math.min(parent.height*.68,820);anchors.centerIn:parent
 property var h:@@BSI_HIDDEN_TABS@@
 property var c:@@BSI_TAB_ICONS@@
 function k(v){return v.toLowerCase().split("/").pop()}
@@ -703,8 +703,8 @@ delegate:Item{property int p:index;property string k:iSettingsWindowShadowContai
 UiSettingsButton{anchors.fill:parent;pSettingBtnText:modelData.pButtonText;pSelected:index===pCurrentTabIndex;onSettingClicked:fChangeSelectedSetting(parent.p)}
 Image{source:iSettingsWindowShadowContainer.c[parent.k]||"";width:18;height:18;anchors.horizontalCenter:parent.horizontalCenter}}
 }
-StackLayout{width:Math.min(parent.width*.86,760);anchors.horizontalCenter:parent.horizontalCenter;anchors.top:parent.top;anchors.bottom:parent.bottom;anchors.topMargin:108;currentIndex:pCurrentTabIndex
-Repeater{model:pSettingsItems.pSettingElements;delegate:Loader{Component.onCompleted:{var a=model.modelData.pComponentArgs;a?setSource(model.modelData.pQmlSource,a):setSource(model.modelData.pQmlSource)}onLoaded:{model.modelData.pComponentObj = item;if(item.fOnQmlLoaded)item.fOnQmlLoaded()}}}}
+StackLayout{width:Math.min(parent.width*.90,600);anchors.horizontalCenter:parent.horizontalCenter;anchors.top:parent.top;anchors.bottom:parent.bottom;anchors.topMargin:108;currentIndex:pCurrentTabIndex
+Repeater{model:pSettingsItems.pSettingElements;delegate:Item{Loader{width:Math.min(parent.width,520);height:parent.height;anchors.centerIn:parent;Component.onCompleted:setSource(model.modelData.pQmlSource,model.modelData.pComponentArgs||({}));onLoaded:{var i=item;model.modelData.pComponentObj=i;i.fOnQmlLoaded&&i.fOnQmlLoaded()}}}}}
 }
 )QML");
     replacement.replace(QStringLiteral("@@BSI_HIDDEN_TABS@@"), hiddenLiteral);
