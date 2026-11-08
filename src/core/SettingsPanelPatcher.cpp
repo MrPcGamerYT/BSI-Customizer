@@ -662,8 +662,7 @@ QString qmlString(const QString &value)
     return out;
 }
 
-QString buildWindow(const QString &stock, const QStringList &hiddenTabs,
-                    const QVariantMap &tabIcons)
+QString buildWindow(const QString &stock, const QStringList &hiddenTabs)
 {
     const QString masked = QmlText::mask(stock);
     const auto objects = QmlText::objects(masked, QStringLiteral("UiShadowContainer"));
@@ -685,13 +684,6 @@ QString buildWindow(const QString &stock, const QStringList &hiddenTabs,
         hiddenLiteral += qmlString(page.toCaseFolded());
     }
     hiddenLiteral += QLatin1Char(']');
-    QString iconLiteral = QStringLiteral("({");
-    for (auto it = tabIcons.cbegin(); it != tabIcons.cend(); ++it) {
-        if (iconLiteral.size() > 2) iconLiteral += QLatin1Char(',');
-        iconLiteral += qmlString(it.key().toCaseFolded()) + QLatin1Char(':') + qmlString(it.value().toString());
-    }
-    iconLiteral += QStringLiteral("})");
-
     // Restore the working PR #88 shell; customization only changes the tab
     // list and About content, while native pages and callbacks remain intact.
     QString replacement = QStringLiteral(R"QML(
@@ -699,7 +691,7 @@ UiShadowContainer {
 // BSI Settings v7
 id:iSettingsWindowShadowContainer;anchors.fill:parent
 property var bHidden:@@BSI_HIDDEN_TABS@@
-property var bIcons:@@BSI_TAB_ICONS@@
+property var bIcons:({})
 function bKey(v){return v.toLowerCase().split("/").pop()}
 Rectangle{anchors.fill:parent;color:UiTheme.colors.primary80;radius:12;clip:true
 Column{anchors.fill:parent;anchors.margins:12;spacing:8
@@ -715,7 +707,7 @@ Image{source:parent.icon;width:18;height:18;anchors.horizontalCenter:parent.hori
 Item{width:parent.width;height:parent.height-128
 Rectangle{anchors.fill:parent;radius:10;color:UiTheme.colors.primary70
 StackLayout{id:iSelectedSettingControl;anchors.fill:parent;anchors.margins:6;currentIndex:pCurrentTabIndex
-Repeater{model:pSettingsItems.pSettingElements;delegate:Loader{width:iSelectedSettingControl.width;height:iSelectedSettingControl.height;Component.onCompleted:setSource(model.modelData.pQmlSource,model.modelData.pComponentArgs||{});onLoaded:{model.modelData.pComponentObj=item;if(item.fOnQmlLoaded)item.fOnQmlLoaded()}}}}
+Repeater{model:pSettingsItems.pSettingElements;delegate:Loader{width:iSelectedSettingControl.width;height:iSelectedSettingControl.height;Component.onCompleted:setSource(model.modelData.pQmlSource,model.modelData.pComponentArgs||{});onLoaded:{model.modelData.pComponentObj=item;if(item.bsiTabIcons)iSettingsWindowShadowContainer.bIcons=item.bsiTabIcons;if(item.fOnQmlLoaded)item.fOnQmlLoaded()}}}}
 }
 }
 }
@@ -723,7 +715,6 @@ Repeater{model:pSettingsItems.pSettingElements;delegate:Loader{width:iSelectedSe
 }
 )QML");
     replacement.replace(QStringLiteral("@@BSI_HIDDEN_TABS@@"), hiddenLiteral);
-    replacement.replace(QStringLiteral("@@BSI_TAB_ICONS@@"), iconLiteral);
     QString out = stock;
     out.replace(target.nameBegin, target.end - target.nameBegin, replacement);
     // Preserve PR #88's actual Settings-window resize and centered placement.
@@ -736,7 +727,8 @@ Repeater{model:pSettingsItems.pSettingElements;delegate:Loader{width:iSelectedSe
 }
 
 QString buildAbout(const QString &developerName, const QString &tagline,
-                   const QVariantList &links, const QString &logoSource)
+                   const QVariantList &links, const QString &logoSource,
+                   const QVariantMap &tabIcons)
 {
     QString rows;
     for (const QVariant &entry : links) {
@@ -747,6 +739,12 @@ QString buildAbout(const QString &developerName, const QString &tagline,
         rows += QStringLiteral("\n        { title: %1, url: %2 },")
             .arg(qmlString(label), qmlString(url));
     }
+    QString iconLiteral = QStringLiteral("({");
+    for (auto it = tabIcons.cbegin(); it != tabIcons.cend(); ++it) {
+        if (iconLiteral.size() > 2) iconLiteral += QLatin1Char(',');
+        iconLiteral += qmlString(it.key().toCaseFolded()) + QLatin1Char(':') + qmlString(it.value().toString());
+    }
+    iconLiteral += QStringLiteral("})");
     const QString qDeveloper = qmlString(developerName.trimmed());
     const QString qTagline = qmlString(tagline.trimmed());
     QString generated = QStringLiteral(R"QML(import QtQuick 2.15
@@ -765,6 +763,7 @@ Item {
     property string pShortDisplayName: ""
     property string pDeveloperName: @@BSI_DEVELOPER@@
     property string pDeveloperTagline: @@BSI_TAGLINE@@
+    property var bsiTabIcons: @@BSI_TAB_ICONS@@
     property var pDeveloperLinks: [@@BSI_LINKS@@
     ]
 
@@ -903,6 +902,7 @@ Item {
 )QML");
     generated.replace(QStringLiteral("@@BSI_DEVELOPER@@"), qDeveloper);
     generated.replace(QStringLiteral("@@BSI_TAGLINE@@"), qTagline);
+    generated.replace(QStringLiteral("@@BSI_TAB_ICONS@@"), iconLiteral);
     generated.replace(QStringLiteral("@@BSI_LINKS@@"), rows);
     generated.replace(QStringLiteral("@@BSI_LOGO_SOURCE@@"), qmlString(logoSource));
     return generated;
@@ -1314,10 +1314,10 @@ QVariantMap apply(const QString &exePath, const QString &developerName,
     const QString originalAboutText = EmbeddedResources::decodeText(originals.value(current.about.path));
     if (originalWindowText.isEmpty() || originalAboutText.isEmpty())
         return fail(QStringLiteral("A saved original QML source could not be decoded; the executable was not changed."));
-    const QString rebuiltWindow = buildWindow(originalWindowText, hiddenTabs, customTabIcons);
+    const QString rebuiltWindow = buildWindow(originalWindowText, hiddenTabs);
     if (rebuiltWindow.isEmpty())
         return fail(QStringLiteral("This BlueStacks build's Settings-window structure is not recognized. No file was changed."));
-    const QString rebuiltAbout = buildAbout(developerName, tagline, links, logoSource);
+    const QString rebuiltAbout = buildAbout(developerName, tagline, links, logoSource, customTabIcons);
     if (rebuiltAbout.isEmpty())
         return fail(QStringLiteral("The About page could not be generated; no file was changed."));
     QMap<QString, QByteArray> replacements {

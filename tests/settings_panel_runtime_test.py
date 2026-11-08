@@ -65,7 +65,9 @@ replacement = match.group(1)
 assert "BSI Settings v7" in replacement
 assert "pSettingsItems.pSettingElements" in replacement
 assert "property var bHidden:" in replacement and "property var bIcons:" in replacement
-assert "@@BSI_HIDDEN_TABS@@" in replacement and "@@BSI_TAB_ICONS@@" in replacement
+assert "@@BSI_HIDDEN_TABS@@" in replacement and "property var bIcons:({})" in replacement
+assert "if(item.bsiTabIcons)iSettingsWindowShadowContainer.bIcons=item.bsiTabIcons" in replacement
+assert "property var bsiTabIcons: @@BSI_TAB_ICONS@@" in cpp
 assert "Rectangle{anchors.fill:parent;color:UiTheme.colors.primary80;radius:12" in replacement
 assert "Column{anchors.fill:parent;anchors.margins:12;spacing:8" in replacement
 assert "height:parent.height-128" in replacement
