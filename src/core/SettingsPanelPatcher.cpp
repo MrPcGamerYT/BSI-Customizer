@@ -689,7 +689,7 @@ QString buildWindow(const QString &stock, const QStringList &hiddenTabs)
     QString replacement = QStringLiteral(R"QML(
 UiShadowContainer {
 // BSI Settings v7
-id:iSettingsWindowShadowContainer;anchors.fill:parent
+id:iSettingsWindowShadowContainer;objectName:"bsiSettingsShell";anchors.fill:parent
 property var bHidden:@@BSI_HIDDEN_TABS@@
 property var bIcons:({})
 function bKey(v){return v.toLowerCase().split("/").pop()}
@@ -707,7 +707,7 @@ Image{source:parent.icon;width:18;height:18;anchors.horizontalCenter:parent.hori
 Item{width:parent.width;height:parent.height-128
 Rectangle{anchors.fill:parent;radius:10;color:UiTheme.colors.primary70
 StackLayout{id:iSelectedSettingControl;anchors.fill:parent;anchors.margins:6;currentIndex:pCurrentTabIndex
-Repeater{model:pSettingsItems.pSettingElements;delegate:Loader{width:iSelectedSettingControl.width;height:iSelectedSettingControl.height;Component.onCompleted:setSource(model.modelData.pQmlSource,model.modelData.pComponentArgs||{});onLoaded:{model.modelData.pComponentObj=item;if(item.bsiTabIcons)iSettingsWindowShadowContainer.bIcons=item.bsiTabIcons;if(item.fOnQmlLoaded)item.fOnQmlLoaded()}}}}
+Repeater{model:pSettingsItems.pSettingElements;delegate:Loader{width:iSelectedSettingControl.width;height:iSelectedSettingControl.height;Component.onCompleted:setSource(model.modelData.pQmlSource,model.modelData.pComponentArgs||{});onLoaded:{model.modelData.pComponentObj=item;if(item.fOnQmlLoaded)item.fOnQmlLoaded()}}}}
 }
 }
 }
@@ -878,7 +878,8 @@ Item {
         }
     }
 
-    // Retain the native About-page callback surface for parent QML connections.
+    // Retain the native About-page callback surface and publish profile icons to the shell.
+    function fOnQmlLoaded(){var p=parent;while(p&&p.objectName!=="bsiSettingsShell")p=p.parent;if(p)p.bIcons=bsiTabIcons}
     function fCheckForUpdateCallback(apiCallStatus, jsonData) {
         if (apiCallStatus === 0) {
             var jsonObj = JSON.parse(jsonData)
