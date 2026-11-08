@@ -62,17 +62,19 @@ match = re.search(
 )
 assert match, "Could not find the generated Settings-window QML template"
 replacement = match.group(1)
-assert "BSI Settings v6" in replacement
+assert "BSI6" in replacement
 assert "pSettingsItems.pSettingElements" in replacement and "property var h:" in replacement
 assert "@@BSI_HIDDEN_TABS@@" in replacement and "@@BSI_TAB_ICONS@@" in replacement
 assert "anchors.fill:parent" in replacement
-assert "var w=iSettingsWindow,a=w.width,b=w.height" in replacement
-assert "w.width=Math.min(a*.6,1100)" in replacement
-assert "w.height=Math.min(b*.68,820)" in replacement
-assert "Math.min(parent.width*.90,600)" in replacement
+assert "iSettingsWindow.width*=.6" in replacement
+assert "iSettingsWindow.height*=.68" in replacement
+assert "iSettingsWindow.x+=iSettingsWindow.width/3" in replacement
+assert "iSettingsWindow.y+=iSettingsWindow.height*.235294" in replacement
+assert "Math.min(parent.width,600)" in replacement
+assert "x:(parent.width-width)/2;y:108;height:parent.height-108" in replacement
 assert "width:Math.min(parent.width,520);height:parent.height;anchors.centerIn:parent" in replacement
 assert "pSettingBtnText" in replacement and "pSelected" in replacement
-assert "anchors.topMargin:108" in replacement
+assert "fChangeSelectedSetting(index)" in replacement
 assert "onPressed:iSettingsWindow.startSystemMove()" in replacement
 replacement = replacement.replace("@@BSI_HIDDEN_TABS@@", "[]")
 replacement = replacement.replace("@@BSI_TAB_ICONS@@", "({})")

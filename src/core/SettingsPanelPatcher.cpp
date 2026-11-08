@@ -34,7 +34,7 @@ const QString kPreviousWindowDesignMarker = QStringLiteral("BSI CUSTOMIZER: Sett
 const QString kWindowDesignMarkerV3 = QStringLiteral("BSI Settings v3");
 const QString kWindowDesignMarkerV4 = QStringLiteral("BSI Settings v4");
 const QString kWindowDesignMarkerV5 = QStringLiteral("BSI Settings v5");
-const QString kWindowDesignMarker = QStringLiteral("BSI Settings v6");
+const QString kWindowDesignMarker = QStringLiteral("BSI6");
 const QString kAboutMarker = QStringLiteral("BSI CUSTOMIZER: redesigned About page v1");
 const QString kSchema = QStringLiteral("bsi.settings-panel.recovery");
 const QString kWindowLeaf = QStringLiteral("UiSettingsWindow.qml");
@@ -694,21 +694,21 @@ QString buildWindow(const QString &stock, const QStringList &hiddenTabs,
     // that window to a compact centered footprint and constrain its page loader.
     QString replacement = QStringLiteral(R"QML(
 UiShadowContainer{
-// BSI Settings v6
+//BSI6
 id:iSettingsWindowShadowContainer;anchors.fill:parent
 property var h:@@BSI_HIDDEN_TABS@@
 property var c:@@BSI_TAB_ICONS@@
 function k(v){return v.toLowerCase().split("/").pop()}
-Component.onCompleted:{var w=iSettingsWindow,a=w.width,b=w.height;w.width=Math.min(a*.6,1100);w.height=Math.min(b*.68,820);w.x+=(a-w.width)/2;w.y+=(b-w.height)/2}
+Component.onCompleted:{iSettingsWindow.width*=.6;iSettingsWindow.height*=.68;iSettingsWindow.x+=iSettingsWindow.width/3;iSettingsWindow.y+=iSettingsWindow.height*.235294}
 MouseArea{width:parent.width-42;height:32;onPressed:iSettingsWindow.startSystemMove()}
 UiImageButton{asset:"CloseIcon";anchors.right:parent.right;onClicked:iSettingsWindow.close()}
 ListView{width:parent.width;height:72;y:32;clip:true;orientation:ListView.Horizontal;model:pSettingsItems.pSettingElements;currentIndex:pCurrentTabIndex
-delegate:Item{property int p:index;property string k:iSettingsWindowShadowContainer.k(modelData.pQmlSource);width:iSettingsWindowShadowContainer.h.indexOf(k)<0?92:0;height:64;visible:width>0
-UiSettingsButton{anchors.fill:parent;pSettingBtnText:modelData.pButtonText;pSelected:index===pCurrentTabIndex;onSettingClicked:fChangeSelectedSetting(parent.p)}
+delegate:Item{property string k:iSettingsWindowShadowContainer.k(modelData.pQmlSource);width:iSettingsWindowShadowContainer.h.indexOf(k)<0?92:0;height:64;visible:width>0
+UiSettingsButton{anchors.fill:parent;pSettingBtnText:modelData.pButtonText;pSelected:index===pCurrentTabIndex;onSettingClicked:fChangeSelectedSetting(index)}
 Image{source:iSettingsWindowShadowContainer.c[parent.k]||"";width:18;height:18;anchors.horizontalCenter:parent.horizontalCenter}}
 }
-StackLayout{width:Math.min(parent.width*.90,600);anchors.horizontalCenter:parent.horizontalCenter;anchors.top:parent.top;anchors.bottom:parent.bottom;anchors.topMargin:108;currentIndex:pCurrentTabIndex
-Repeater{model:pSettingsItems.pSettingElements;delegate:Item{Loader{width:Math.min(parent.width,520);height:parent.height;anchors.centerIn:parent;Component.onCompleted:setSource(model.modelData.pQmlSource,model.modelData.pComponentArgs||({}));onLoaded:{var i=item;model.modelData.pComponentObj=i;i.fOnQmlLoaded&&i.fOnQmlLoaded()}}}}}
+StackLayout{width:Math.min(parent.width,600);x:(parent.width-width)/2;y:108;height:parent.height-108;currentIndex:pCurrentTabIndex
+Repeater{model:pSettingsItems.pSettingElements;delegate:Loader{width:Math.min(parent.width,520);height:parent.height;anchors.centerIn:parent;Component.onCompleted:setSource(model.modelData.pQmlSource,model.modelData.pComponentArgs||({}));onLoaded:{model.modelData.pComponentObj=item;item.fOnQmlLoaded&&item.fOnQmlLoaded()}}}}}
 }
 )QML");
     replacement.replace(QStringLiteral("@@BSI_HIDDEN_TABS@@"), hiddenLiteral);
