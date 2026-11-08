@@ -13,7 +13,7 @@ Search/scan performance findings, benchmarks and the optimization roadmap:
 [performance review](docs/PERFORMANCE.md).
 
 Tabs: **Dashboard**, **Theme**, **Resources**, **FPS**, **Integrity**, **Boot
-Video**, **UI** (clean-up, title-bar row and button order, removals, About page),
+Video**, **UI** (clean-up, title-bar row and button order, removals, About page, Appearance Studio),
 **Debloat** (live ADB debloat, the Deep Engine Image Debloater for `Root.vhd`
 and VHDX, and the ads/telemetry/cloud/hosts/companion switches),
 **Discord RPC**, **Appearance**, **About**.
@@ -55,6 +55,15 @@ license/DLL extraction. Every push and pull request builds the Windows x64 EXE
 on a GitHub-hosted runner, compiles the installer and runs the whole engine
 self-test there (`--selftest`), so a change is only mergeable when the real MSVC
 build is green.
+
+## Player Appearance Studio
+
+The **Player interface → Appearance studio** tab edits a small catalog of safe
+numeric QML design tokens: font sizes, button radius/density/spacing, recognized
+control dimensions and player chrome (`pSidebarWidth` / `pBorderWidth`). It uses
+the same inspected → staged → Dry Run → Apply Workspace transaction and recovery
+journal as palette/resource edits. It is not a raw QML/hex editor and does not
+install font/icon packs. See [docs/PLAYER-APPEARANCE-STUDIO.md](docs/PLAYER-APPEARANCE-STUDIO.md).
 
 ## Theme patching
 

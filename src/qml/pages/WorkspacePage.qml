@@ -68,7 +68,7 @@ Item {
                 Layout.fillWidth: true; Layout.leftMargin: 24; Layout.rightMargin: 24
                 ColumnLayout {
                     width: parent.width; spacing: 10
-                    Label { text: qsTr("Profiles: Theme + Boot + About + GIF RPC"); color: Theme.text; font.bold: true }
+                    Label { text: qsTr("Profiles: Theme + Boot + About + GIF RPC + Appearance"); color: Theme.text; font.bold: true }
                     Label { Layout.fillWidth: true; text: qsTr("Stage settings using the Save to profile buttons on each editor. Import never deploys files. Load the target theme first to match colors; unmatched properties are reported."); color: Theme.textDim; wrapMode: Text.Wrap }
                     RowLayout {
                         TextField { id: profileName; Layout.fillWidth: true; text: backend.customizationProfile.name || "My workspace"; placeholderText: qsTr("Profile name") }
@@ -116,7 +116,7 @@ Item {
                 ColumnLayout {
                     width: parent.width; spacing: 10
                     Label { text: qsTr("Batch plan / conflict checks / update protection"); color: Theme.text; font.bold: true }
-                    Label { Layout.fillWidth: true; color: Theme.textDim; wrapMode: Text.Wrap; text: qsTr("Theme and resource edits commit as one EXE replacement. Boot assets, DLLs and GIF RPC settings remain separate operations: no cross-file atomicity is claimed. Any EXE update invalidates the plan.") }
+                    Label { Layout.fillWidth: true; color: Theme.textDim; wrapMode: Text.Wrap; text: qsTr("Theme, resource and appearance edits commit as one EXE replacement. Boot assets, DLLs and GIF RPC settings remain separate operations: no cross-file atomicity is claimed. Any EXE update invalidates the plan.") }
                     RowLayout {
                         ActionButton { text: qsTr("Queue staged theme"); enabled: !backend.busy; onClicked: page.run("queue-theme") }
                         ActionButton { text: qsTr("Clear batch"); enabled: !backend.busy; onClicked: page.run("clear") }
@@ -125,7 +125,7 @@ Item {
                     }
                     Repeater {
                         model: backend.workspaceOperations
-                        Label { required property var modelData; required property int index; Layout.fillWidth: true; color: Theme.text; elide: Text.ElideMiddle; text: (index + 1) + ". " + modelData.kind + " — " + (modelData.path || qsTr("staged palette")) }
+                        Label { required property var modelData; required property int index; Layout.fillWidth: true; color: Theme.text; elide: Text.ElideMiddle; text: (index + 1) + ". " + modelData.kind + " — " + (modelData.path || (modelData.kind === "appearance" ? qsTr("staged appearance tokens") : qsTr("staged palette"))) }
                     }
                     TextArea { Layout.fillWidth: true; readOnly: true; selectByMouse: true; color: Theme.textDim; wrapMode: TextEdit.Wrap; text: page.plan.msg ? JSON.stringify(page.plan, null, 2) : "" }
                 }

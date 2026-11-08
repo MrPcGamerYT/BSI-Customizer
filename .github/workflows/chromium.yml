@@ -4,7 +4,7 @@ name: Chromium workspace
 # this workflow does not publish a release.
 on:
   push:
-    branches: [arena/3f309c3c-bsi-customizer, arena/c19d0730-bsi-customizer]
+    branches: [arena/3f309c3c-bsi-customizer, arena/c19d0730-bsi-customizer, arena/038fda0d-bsi-customizer]
   workflow_dispatch:
   pull_request:
     paths:
@@ -14,6 +14,7 @@ on:
       - 'CMakeLists.txt'
       - 'tests/chromium_ui_test.cjs'
       - 'tests/chromium_contract_test.mjs'
+      - 'tests/player_appearance_ui_test.mjs'
       - '.github/workflows/chromium.yml'
 permissions:
   contents: read
@@ -35,6 +36,7 @@ jobs:
       - run: npm install --prefix .cache/web-test --no-package-lock --no-audit --no-fund playwright@1.58.2
       - run: .cache/web-test/node_modules/.bin/playwright install --with-deps chromium
       - run: node tests/chromium_contract_test.mjs
+      - run: node tests/player_appearance_ui_test.mjs
       - run: node tests/chromium_ui_test.cjs
         env:
           BSI_PLAYWRIGHT: ../.cache/web-test/node_modules/playwright

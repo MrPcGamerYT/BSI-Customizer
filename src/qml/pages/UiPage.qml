@@ -35,6 +35,12 @@ Item {
     property string buttonOrderDetail: ""
     property int currentSection: 0
     property int aboutPreviewRevision: 0
+    // Player Appearance Studio (native fallback). The HTML workspace exposes
+    // the same catalog; both stage through backend.workspace so Dry Run and
+    // recovery stay native and identical.
+    property var appearanceRows: []
+    property string appearanceMsg: qsTr("Inspect the selected player to discover safe numeric appearance tokens.")
+    property var appearancePlan: ({})
 
     readonly property var previewLinks: {
         const revision = page.aboutPreviewRevision;
@@ -54,6 +60,74 @@ Item {
                 n++;
         }
         page.checkedCount = n;
+    }
+
+    function refreshAppearance() {
+        const r = backend.workspace("appearance-inspect", {});
+        page.appearanceMsg = r.msg || "";
+        page.appearancePlan = ({});
+        const rows = [];
+        if (r.ok) {
+            const staged = (backend.customizationProfile || {}).appearance || {};
+            for (const token of (r.tokens || [])) {
+                const row = token;
+                row.edit = staged[token.key] !== undefined ? staged[token.key] : token.value;
+                rows.push(row);
+            }
+        }
+        page.appearanceRows = rows;
+    }
+
+    function setAppearanceValue(index, value) {
+        if (index < 0 || index >= page.appearanceRows.length)
+            return;
+        const rows = page.appearanceRows.slice();
+        rows[index].edit = value;
+        page.appearanceRows = rows;
+    }
+
+    function collectAppearanceEdits(changedOnly) {
+        const edits = {};
+        for (const row of page.appearanceRows) {
+            if (!changedOnly || row.edit !== row.value)
+                edits[row.key] = row.edit;
+        }
+        return edits;
+    }
+
+    function stageAppearance() {
+        const edits = page.collectAppearanceEdits(true);
+        if (Object.keys(edits).length === 0) {
+            page.appearanceMsg = qsTr("No appearance values differ from the inspected player.");
+            return;
+        }
+        const r = backend.workspace("queue-appearance", { edits: edits });
+        page.appearanceMsg = r.msg || "";
+        page.appearancePlan = ({});
+        page.notify(page.appearanceMsg);
+    }
+
+    function dryRunAppearance() {
+        page.appearancePlan = backend.workspace("dry-run", {});
+        page.appearanceMsg = page.appearancePlan.msg || "";
+        page.notify(page.appearanceMsg);
+    }
+
+    function applyAppearance() {
+        if (!page.appearancePlan.ok || !page.appearancePlan.outputSha256)
+            return;
+        const r = backend.workspace("apply", { outputSha256: page.appearancePlan.outputSha256 });
+        page.appearanceMsg = r.msg || "";
+        page.appearancePlan = ({});
+        if (r.ok)
+            page.refreshAppearance();
+        page.notify(page.appearanceMsg);
+    }
+
+    function saveAppearanceProfile() {
+        const r = backend.workspace("profile-section", { section: "appearance", value: page.collectAppearanceEdits(false) });
+        page.appearanceMsg = r.msg || "";
+        page.notify(page.appearanceMsg);
     }
 
     function refreshLayout() {
@@ -184,6 +258,9 @@ Item {
         target: backend
         function onExePathChanged() {
             page.reloadAll();
+            page.appearanceRows = [];
+            page.appearancePlan = ({});
+            page.appearanceMsg = qsTr("Target changed. Inspect appearance tokens again.");
         }
         // A layout write happens in a worker; when it is done the row of
         // buttons has changed (or the title-bar move was reverted), so the
@@ -271,6 +348,7 @@ Item {
                     TabButton { text: qsTr("Layout & clean-up") }
                     TabButton { text: qsTr("About preview & editor") }
                     TabButton { text: qsTr("Remove items") }
+                    TabButton { text: qsTr("Appearance studio") }
                 }
 
                 // ---------------- one-click clean-up ----------------
@@ -769,6 +847,77 @@ Item {
                                     }
                                 }
                             }
+                        }
+                    }
+                }
+
+                // ---------------- Player Appearance Studio ----------------
+                Card {
+                    visible: page.currentSection === 3
+                    Layout.fillWidth: true
+                    pad: 18
+
+                    ColumnLayout {
+                        width: parent.width
+                        spacing: 10
+
+                        Text {
+                            text: qsTr("Player Appearance Studio")
+                            color: Theme.text
+                            font.pixelSize: 16
+                            font.bold: true
+                        }
+                        Text {
+                            Layout.fillWidth: true
+                            wrapMode: Text.Wrap
+                            color: Theme.textDim
+                            text: qsTr("Safe numeric QML tokens only: font sizes, button radius/density/spacing, control indicators and player chrome. Inspect, stage, Dry Run, then Apply through the same verified Workspace transaction. This is not a raw QML/hex editor and does not install font or icon packs.")
+                        }
+                        RowLayout {
+                            Layout.fillWidth: true
+                            ActionButton { text: qsTr("Inspect tokens"); enabled: !backend.busy; onClicked: page.refreshAppearance() }
+                            ActionButton { text: qsTr("Stage edits"); enabled: page.appearanceRows.length > 0 && !backend.busy; onClicked: page.stageAppearance() }
+                            ActionButton { text: qsTr("Dry Run"); enabled: backend.workspaceOperations.length > 0 && !backend.busy; onClicked: page.dryRunAppearance() }
+                            ActionButton { text: qsTr("Apply verified batch"); accent: true; enabled: !!page.appearancePlan.ok && !backend.busy; onClicked: appearanceApplyDialog.open() }
+                            ActionButton { text: qsTr("Save to profile"); enabled: page.appearanceRows.length > 0 && !backend.busy; onClicked: page.saveAppearanceProfile() }
+                        }
+                        Text {
+                            Layout.fillWidth: true
+                            wrapMode: Text.Wrap
+                            color: Theme.textDim
+                            text: page.appearanceMsg
+                        }
+                        Repeater {
+                            model: page.appearanceRows
+                            delegate: RowLayout {
+                                required property var modelData
+                                required property int index
+                                Layout.fillWidth: true
+                                spacing: 10
+                                ColumnLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 2
+                                    Text { text: modelData.label + " · " + modelData.group; color: Theme.text; font.pixelSize: 12 }
+                                    Text { text: modelData.key + " · current " + modelData.value; color: Theme.textDim; font.pixelSize: 10; elide: Text.ElideMiddle; Layout.fillWidth: true }
+                                }
+                                SpinBox {
+                                    from: modelData.minimum
+                                    to: modelData.maximum
+                                    stepSize: modelData.step || 1
+                                    value: modelData.edit
+                                    editable: true
+                                    onValueModified: page.setAppearanceValue(index, value)
+                                }
+                            }
+                        }
+                        TextArea {
+                            Layout.fillWidth: true
+                            Layout.preferredHeight: 120
+                            readOnly: true
+                            selectByMouse: true
+                            wrapMode: TextEdit.Wrap
+                            color: Theme.textDim
+                            text: page.appearancePlan.msg ? JSON.stringify(page.appearancePlan, null, 2) : ""
                         }
                     }
                 }
@@ -1338,5 +1487,18 @@ Item {
                 }
             }
         }
+    }
+    Dialog {
+        id: appearanceApplyDialog
+        anchors.centerIn: parent
+        modal: true
+        width: Math.min(520, page.width - 32)
+        title: qsTr("Apply the verified appearance batch?")
+        standardButtons: Dialog.Ok | Dialog.Cancel
+        contentItem: Label {
+            wrapMode: Text.Wrap
+            text: qsTr("Close all HD-Player instances. The current fingerprint and prepared output must still match Dry Run. A recovery snapshot is saved before the single EXE commit.\n\nOutput SHA-256: ") + (page.appearancePlan.outputSha256 || "")
+        }
+        onAccepted: page.applyAppearance()
     }
 }
