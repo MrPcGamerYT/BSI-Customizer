@@ -50,8 +50,7 @@ assert "pSettingsItems.pSettingElements" in replacement and "bHidden" in replace
 assert "@@BSI_HIDDEN_TABS@@" in replacement and "@@BSI_TAB_ICONS@@" in replacement
 assert "parent.width*.86" in replacement
 assert "width:parent.width*.70;height:parent.height*.70;anchors.centerIn:parent" in replacement
-assert "Layout.preferredWidth:Math.min(parent.width,760)" in replacement
-assert "Layout.alignment:Qt.AlignHCenter" in replacement
+assert "Math.min(parent.width*.86,760)" in replacement
 assert "pSettingBtnText" in replacement and "pSelected" in replacement
 assert "anchors.topMargin:108" in replacement
 assert "onPressed:iSettingsWindow.startSystemMove()" in replacement
@@ -192,12 +191,6 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
          and abs(item.height() - window.height() * 0.70) < 2),
         None,
     )
-    page_loader = next(
-        (item for item in visual_tree
-         if item.metaObject().className().endswith("Loader")
-         and item.property("item") is not None),
-        None,
-    )
     first_tab = next(
         (
             item for item in visual_tree
@@ -221,7 +214,6 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
     )
     controls = {
         "compact centered panel": panel,
-        "centered native page column": page_loader,
         "tabs": tabs,
         "stack": stack,
         "loaded native page": loaded_page,
@@ -234,9 +226,9 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
     assert not missing, f"Missing controls: {missing}; found object names: {found_names}"
     assert abs(panel.x() + panel.width() / 2 - window.width() / 2) < 2, "Settings shell was not centered in its host"
     assert abs(panel.width() - window.width() * 0.70) < 2, "Settings shell should remain at the compact 70% width"
-    loader_center = page_loader.mapToItem(stack, QPointF(page_loader.width() / 2, page_loader.height() / 2))
-    assert abs(loader_center.x() - stack.width() / 2) < 2, "The native page column was not centered inside the content stack"
-    assert page_loader.width() <= 760.1, "The native page column should use a readable maximum width"
+    stack_center = stack.mapToItem(panel, QPointF(stack.width() / 2, stack.height() / 2))
+    assert abs(stack_center.x() - panel.width() / 2) < 2, "The native page column was not centered inside the Settings shell"
+    assert stack.width() <= 760.1, "The native page column should use a readable maximum width"
     assert loaded_page.objectName() == "runtimeSettingPage", "The native Settings page Loader did not load its page"
     assert str(first_tab.property("pSettingBtnText")).splitlines()[0], "Category tabs should show their own icon glyphs"
 
