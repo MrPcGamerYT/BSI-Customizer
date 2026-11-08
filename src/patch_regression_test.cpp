@@ -5173,7 +5173,7 @@ Window {
                           && rebuiltWindow.contains(QStringLiteral("pShowRedDot:parent.d.pShowRedDot"))
                           && rebuiltWindow.contains(QStringLiteral("Image{source:parent.icon;width:18;height:18"))
                           && rebuiltWindow.contains(QStringLiteral("StackLayout{id:iSelectedSettingControl;anchors.fill:parent;anchors.margins:6"))
-                          && rebuiltWindow.contains(QStringLiteral("delegate:Item{Loader{width:parent.width;height:parent.height;"))
+                          && rebuiltWindow.contains(QStringLiteral("delegate:Loader{width:iSelectedSettingControl.width;height:iSelectedSettingControl.height;"))
                           && rebuiltWindow.contains(QStringLiteral("model.modelData.pComponentObj = item"))
                           && rebuiltWindow.contains(QStringLiteral("fChangeSelectedSetting(pSettingIdx)"))
                           && rebuiltWindow.contains(QStringLiteral("onVisibleChanged: if (visible && transientParent)"))

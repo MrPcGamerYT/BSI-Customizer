@@ -70,7 +70,7 @@ assert "Rectangle{anchors.fill:parent;color:UiTheme.colors.primary80;radius:12" 
 assert "Column{anchors.fill:parent;anchors.margins:12;spacing:8" in replacement
 assert "height:parent.height-128" in replacement
 assert "StackLayout{id:iSelectedSettingControl;anchors.fill:parent;anchors.margins:6" in replacement
-assert "delegate:Item{Loader{width:parent.width;height:parent.height;" in replacement
+assert "delegate:Loader{width:iSelectedSettingControl.width;height:iSelectedSettingControl.height;" in replacement
 assert "pSettingBtnText:" in replacement and "pSelected:" in replacement and "pShowRedDot:" in replacement
 assert "property int p:index" in replacement
 assert "fChangeSelectedSetting(pSettingIdx)" in replacement
