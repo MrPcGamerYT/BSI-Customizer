@@ -709,13 +709,13 @@ Text{text:qsTranslate("QObject","Settings");color:UiTheme.colors.primary10;font:
 UiImageButton{asset:"CloseIcon";pImageWidth:16;pImageHeight:16;anchors.right:parent.right;anchors.verticalCenter:parent.verticalCenter;onClicked:iSettingsWindow.close()}}
 ListView{width:parent.width;height:76;clip:true;orientation:ListView.Horizontal;spacing:7;currentIndex:pCurrentTabIndex;model:pSettingsItems.pSettingElements
 delegate:Item{property int p:index;property var d:modelData;property string k:iSettingsWindowShadowContainer.bKey(d.pQmlSource);property string icon:iSettingsWindowShadowContainer.bIcons[k]||"";width:iSettingsWindowShadowContainer.bHidden.indexOf(k)<0?92:0;height:64;visible:width>0
-UiSettingsButton{width:92;height:64;pSettingIdx:parent.p;pSettingBtnText:"⚙▣◈♫⌨⌘☷ⓘ◉◇✦▧".charAt(parent.p)+"\n"+parent.d.pButtonText;pSelected:parent.p===pCurrentTabIndex;pShowRedDot:parent.d.pShowRedDot;onSettingClicked:fChangeSelectedSetting(pSettingIdx)}
+UiSettingsButton{width:92;height:64;pSettingIdx:parent.p;pSettingBtnText:parent.d.pButtonText;pSelected:parent.p===pCurrentTabIndex;pShowRedDot:parent.d.pShowRedDot;onSettingClicked:fChangeSelectedSetting(pSettingIdx)}
 Image{source:parent.icon;width:18;height:18;anchors.horizontalCenter:parent.horizontalCenter}}
 }
 Item{width:parent.width;height:parent.height-128
 Rectangle{anchors.fill:parent;radius:10;color:UiTheme.colors.primary70
 StackLayout{id:iSelectedSettingControl;anchors.fill:parent;anchors.margins:6;currentIndex:pCurrentTabIndex
-Repeater{model:pSettingsItems.pSettingElements;delegate:Loader{width:iSelectedSettingControl.width;height:iSelectedSettingControl.height;Component.onCompleted:{var a=model.modelData.pComponentArgs;a?setSource(model.modelData.pQmlSource,a):setSource(model.modelData.pQmlSource)}onLoaded:{model.modelData.pComponentObj = item;if(item.fOnQmlLoaded)item.fOnQmlLoaded()}}}}
+Repeater{model:pSettingsItems.pSettingElements;delegate:Loader{width:iSelectedSettingControl.width;height:iSelectedSettingControl.height;Component.onCompleted:setSource(model.modelData.pQmlSource,model.modelData.pComponentArgs||{});onLoaded:{model.modelData.pComponentObj=item;if(item.fOnQmlLoaded)item.fOnQmlLoaded()}}}}
 }
 }
 }
@@ -727,14 +727,7 @@ Repeater{model:pSettingsItems.pSettingElements;delegate:Loader{width:iSelectedSe
     QString out = stock;
     out.replace(target.nameBegin, target.end - target.nameBegin, replacement);
     // Preserve PR #88's actual Settings-window resize and centered placement.
-    const QString helper = QStringLiteral(R"QML(
-    onVisibleChanged: if (visible && transientParent) {
-        width = transientParent.width * 0.70
-        height = transientParent.height * 0.70
-        x = transientParent.x + (transientParent.width - width) / 2
-        y = transientParent.y + (transientParent.height - height) / 2
-    }
-)QML");
+    const QString helper = QStringLiteral(R"QML(onVisibleChanged:if(visible&&transientParent){width=transientParent.width*.7;height=transientParent.height*.7;x=transientParent.x+(transientParent.width-width)/2;y=transientParent.y+(transientParent.height-height)/2})QML");
     const int rootClose = out.lastIndexOf(QLatin1String("\n}"));
     if (rootClose < 0) return {};
     out.insert(rootClose, helper);

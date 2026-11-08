@@ -82,11 +82,11 @@ helper_match = re.search(
 )
 assert helper_match, "Could not find the PR #88 Settings-window geometry helper"
 helper = helper_match.group(1)
-assert "onVisibleChanged: if (visible && transientParent)" in helper
-assert "width = transientParent.width * 0.70" in helper
-assert "height = transientParent.height * 0.70" in helper
-assert "(transientParent.width - width) / 2" in helper
-assert "(transientParent.height - height) / 2" in helper
+assert "onVisibleChanged:if(visible&&transientParent)" in helper
+assert "width=transientParent.width*.7" in helper
+assert "height=transientParent.height*.7" in helper
+assert "(transientParent.width-width)/2" in helper
+assert "(transientParent.height-height)/2" in helper
 replacement = replacement.replace("@@BSI_HIDDEN_TABS@@", "[]")
 replacement = replacement.replace("@@BSI_TAB_ICONS@@", "({})")
 
