@@ -554,7 +554,8 @@ TargetSources readSources(const QString &exePath, const QByteArray &image)
     }
     out.pageCount = pageNames.size();
     const bool retainsLoadedComponent = out.window.text.contains(QLatin1String("model.modelData.pComponentObj = item"))
-        || out.window.text.contains(QLatin1String("model.modelData.pComponentObj=i"));
+        || out.window.text.contains(QLatin1String("model.modelData.pComponentObj=i"))
+        || out.window.text.contains(QLatin1String("model.modelData.pComponentObj=item"));
     if (!out.window.text.contains(QLatin1String("pSettingsItems.pSettingElements"))
         || !out.window.text.contains(QLatin1String("setSource(model.modelData.pQmlSource"))
         || !retainsLoadedComponent
@@ -708,7 +709,7 @@ UiSettingsButton{anchors.fill:parent;pSettingBtnText:modelData.pButtonText;pSele
 Image{source:iSettingsWindowShadowContainer.c[parent.k]||"";width:18;height:18;anchors.horizontalCenter:parent.horizontalCenter}}
 }
 StackLayout{width:Math.min(parent.width,600);x:(parent.width-width)/2;y:108;height:parent.height-108;currentIndex:pCurrentTabIndex
-Repeater{model:pSettingsItems.pSettingElements;delegate:Loader{width:Math.min(parent.width,520);height:parent.height;anchors.centerIn:parent;Component.onCompleted:setSource(model.modelData.pQmlSource,model.modelData.pComponentArgs||({}));onLoaded:{model.modelData.pComponentObj=item;item.fOnQmlLoaded&&item.fOnQmlLoaded()}}}}}
+Repeater{model:pSettingsItems.pSettingElements;delegate:Loader{width:Math.min(parent.width,520);height:parent.height;anchors.centerIn:parent;Component.onCompleted:setSource(model.modelData.pQmlSource,model.modelData.pComponentArgs||({}));onLoaded:{model.modelData.pComponentObj=item;item.fOnQmlLoaded&&item.fOnQmlLoaded()}}}}
 }
 )QML");
     replacement.replace(QStringLiteral("@@BSI_HIDDEN_TABS@@"), hiddenLiteral);
