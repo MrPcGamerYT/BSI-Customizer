@@ -66,8 +66,9 @@ assert "BSI Settings v6" in replacement
 assert "pSettingsItems.pSettingElements" in replacement and "property var h:" in replacement
 assert "@@BSI_HIDDEN_TABS@@" in replacement and "@@BSI_TAB_ICONS@@" in replacement
 assert "anchors.fill:parent" in replacement
-assert "iSettingsWindow.width=Math.min(w*.60,1100)" in replacement
-assert "iSettingsWindow.height=Math.min(h*.68,820)" in replacement
+assert "var w=iSettingsWindow,a=w.width,b=w.height" in replacement
+assert "w.width=Math.min(a*.6,1100)" in replacement
+assert "w.height=Math.min(b*.68,820)" in replacement
 assert "Math.min(parent.width*.90,600)" in replacement
 assert "width:Math.min(parent.width,520);height:parent.height;anchors.centerIn:parent" in replacement
 assert "pSettingBtnText" in replacement and "pSelected" in replacement
