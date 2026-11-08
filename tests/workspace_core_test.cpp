@@ -133,7 +133,13 @@ int run()
     QVariantList conflict{appearanceOperations.first(),rawTheme.value("operation")};
     check(!W::simulate(exe,conflict,W::digest(original)).value("ok").toBool(),"appearance and raw replacement of the same payload conflict");
     QVariantList themeConflict{QVariantMap{{"kind","theme"},{"edits",QVariantMap{{"primary100","#abcdef"}}}},appearanceOperations.first()};
-    check(!W::simulate(exe,themeConflict,W::digest(original)).value("ok").toBool(),"appearance and palette edits of the same theme payload conflict");
+    const auto themeConflictResult=W::simulate(exe,themeConflict,W::digest(original));
+    check(!themeConflictResult.value("ok").toBool(),"appearance and palette edits of the same theme payload conflict");
+    check(themeConflictResult.value("msg").toString().contains(QStringLiteral("conflict"),Qt::CaseInsensitive),
+          "relocated theme payload is still recognized as a conflict, not accepted or failed for an unrelated reason");
+    auto reversedThemeConflict=themeConflict;std::reverse(reversedThemeConflict.begin(),reversedThemeConflict.end());
+    check(!W::simulate(exe,reversedThemeConflict,W::digest(original)).value("ok").toBool(),
+          "theme/appearance conflict is independent of operation order");
     {
         // "UiThemeObject" is matched by the writer's filename/stem table but is
         // NOT the precise identifier (pFontFamily). The writer would disable a

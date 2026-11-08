@@ -268,7 +268,11 @@ QVariantMap simulate(const QString &path, const QVariantList &operations, const 
             const QStringList affected = validation.value("resources").toStringList();
             for (const QString &resource : affected) {
                 int matches = 0; EmbeddedResources::Entry selected;
-                for (const auto &e : EmbeddedResources::list(working, true)) if (e.path == resource) { selected = e; ++matches; }
+                // Conflict identity belongs to the inspected original image. A
+                // preceding palette/resource write may legitimately relocate a
+                // record into a mapped gap; comparing that new offset with the
+                // original theme offset would miss a same-payload conflict.
+                for (const auto &e : EmbeddedResources::list(original, true)) if (e.path == resource) { selected = e; ++matches; }
                 if (matches != 1 || payloads.contains(selected.entryOff) || touched.contains(resource))
                     return fail(QStringLiteral("Appearance edits conflict with another staged edit of %1.").arg(resource));
                 if (touched.contains(QStringLiteral("@theme")) && selected.entryOff == theme.entryOff)
