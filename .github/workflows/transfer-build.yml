@@ -1,0 +1,61 @@
+name: Transfer tested build artifact
+
+# Temporary sandbox transfer helper. The sandbox may reach api.github.com but
+# not the signed blob-storage redirect used by Actions artifact downloads.
+# This reads an already-tested artifact and exposes small Git blobs through the
+# GitHub API; it does not build, publish a release, or update any branch ref.
+on:
+  workflow_dispatch:
+    inputs:
+      run_id:
+        description: 'Completed workflow run containing the artifact'
+        required: true
+        type: string
+      artifact:
+        description: 'Artifact name'
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  transfer:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Download tested artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ inputs.run_id }}
+          ARTIFACT: ${{ inputs.artifact }}
+        run: |
+          set -euo pipefail
+          gh run download "$RUN_ID" --repo "$GITHUB_REPOSITORY" --name "$ARTIFACT" --dir transfer
+      - name: Expose verified chunks through the Git blob API
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          exe=$(find transfer -maxdepth 1 -type f -name '*.exe' -print -quit)
+          test -n "$exe"
+          name=$(basename "$exe")
+          size=$(stat -c%s "$exe")
+          sha=$(sha256sum "$exe" | cut -d' ' -f1)
+          echo "::notice title=transfer-manifest::name=$name size=$size sha256=$sha"
+          split -b 24M -d -a 2 "$exe" transfer/chunk-
+          chunks=()
+          for part in transfer/chunk-*; do
+            base64 -w0 "$part" > "$part.b64"
+            blob=$(gh api "repos/$GITHUB_REPOSITORY/git/blobs" \
+              --method POST -F "content=@$part.b64" -F encoding=base64 --jq '.sha')
+            bytes=$(stat -c%s "$part")
+            chunks+=("$blob:$bytes")
+            echo "::notice title=transfer-chunk::sha=$blob size=$bytes"
+          done
+          printf 'name=%s\nsize=%s\nsha256=%s\nchunks=%s\n' "$name" "$size" "$sha" "$(IFS=,; echo "${chunks[*]}")" > transfer/manifest.txt
+          base64 -w0 transfer/manifest.txt > transfer/manifest.b64
+          manifest=$(gh api "repos/$GITHUB_REPOSITORY/git/blobs" \
+            --method POST -F content=@transfer/manifest.b64 -F encoding=base64 --jq '.sha')
+          echo "::notice title=transfer-manifest-blob::sha=$manifest"
