@@ -701,7 +701,7 @@ id:iSettingsWindowShadowContainer;anchors.fill:parent
 property var bHidden:@@BSI_HIDDEN_TABS@@
 property var bIcons:@@BSI_TAB_ICONS@@
 function bKey(v){return v.toLowerCase().split("/").pop()}
-Rectangle{anchors.fill:parent;color:UiTheme.colors.primary80;radius:12;border.width:1;border.color:UiTheme.colors.accentNormal;clip:true
+Rectangle{anchors.fill:parent;color:UiTheme.colors.primary80;radius:12;clip:true
 Column{anchors.fill:parent;anchors.margins:12;spacing:8
 Item{width:parent.width;height:36
 MouseArea{width:parent.width-42;height:parent.height;onPressed:iSettingsWindow.startSystemMove()}
