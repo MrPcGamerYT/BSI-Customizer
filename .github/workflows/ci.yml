@@ -24,48 +24,6 @@ env:
 
 jobs:
 
-  # Temporary sandbox transfer of an already-tested portable EXE. The sandbox
-  # can reach api.github.com but not Actions' signed blob-storage redirect.
-  # This job only re-exposes artifact bytes as Git blobs; it builds/publishes nothing.
-  transfer-tested-artifact:
-    name: Transfer tested portable artifact
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/arena/038fda0d-bsi-customizer'
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    permissions:
-      contents: write
-      actions: read
-    steps:
-      - name: Download tested artifact
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          gh run download 42490444642 --repo "$GITHUB_REPOSITORY"             --name BSI-Customizer-3.0.1-win64-42490444642 --dir transfer
-      - name: Expose verified chunks through the Git blob API
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          exe=$(find transfer -maxdepth 1 -type f -name '*.exe' -print -quit)
-          test -n "$exe"
-          name=$(basename "$exe")
-          size=$(stat -c%s "$exe")
-          sha=$(sha256sum "$exe" | cut -d' ' -f1)
-          echo "::notice title=transfer-manifest::name=$name size=$size sha256=$sha"
-          split -b 24M -d -a 2 "$exe" transfer/chunk-
-          chunks=()
-          for part in transfer/chunk-*; do
-            base64 -w0 "$part" > "$part.b64"
-            blob=$(gh api "repos/$GITHUB_REPOSITORY/git/blobs"               --method POST -F "content=@$part.b64" -F encoding=base64 --jq '.sha')
-            bytes=$(stat -c%s "$part")
-            chunks+=("$blob:$bytes")
-            echo "::notice title=transfer-chunk::sha=$blob size=$bytes"
-          done
-          printf 'name=%s\nsize=%s\nsha256=%s\nchunks=%s\n' "$name" "$size" "$sha" "$(IFS=,; echo "${chunks[*]}")" > transfer/manifest.txt
-          base64 -w0 transfer/manifest.txt > transfer/manifest.b64
-          manifest=$(gh api "repos/$GITHUB_REPOSITORY/git/blobs"             --method POST -F content=@transfer/manifest.b64 -F encoding=base64 --jq '.sha')
-          echo "::notice title=transfer-manifest-blob::sha=$manifest"
   rpc-scan-regression:
     name: RPC scan equivalence (Linux, Qt-free)
     runs-on: ubuntu-latest
