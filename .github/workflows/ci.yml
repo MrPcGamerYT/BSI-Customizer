@@ -23,7 +23,6 @@ env:
   BSI_NO_UPDATER: "1"
 
 jobs:
-
   rpc-scan-regression:
     name: RPC scan equivalence (Linux, Qt-free)
     runs-on: ubuntu-latest
