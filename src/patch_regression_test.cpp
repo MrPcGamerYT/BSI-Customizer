@@ -4631,6 +4631,31 @@ Window {
         check(read(modernPath + QStringLiteral(".bak")) == image,
               "built-in modern mode preserves the complete original executable backup");
 
+        // User text is data in all three generated surfaces, including the
+        // embedded fallback. Quotes, HTML and QML-looking content must not run.
+        const QString customDir = QDir(folder).filePath(QStringLiteral("custom-message"));
+        QDir().mkpath(customDir);
+        const QString customTextPath = QDir(customDir).filePath(QStringLiteral("HD-Player.exe"));
+        write(customTextPath, image);
+        const QString message = QStringLiteral("Evoria \"<boot>&\\ready __BSI_BOOT_THEME__");
+        const auto customMessage = BootVideoPatcher::patch(customTextPath, 0, QStringLiteral("aurora"), {}, message);
+        const QByteArray messageHtml = read(QDir(customDir).filePath(QStringLiteral("Assets/BootScreen.html")));
+        const QByteArray messageHelper = read(QDir(customDir).filePath(QStringLiteral("Assets/BootVideo.qml")));
+        const QString messageController = resourceText(read(customTextPath), r, QStringLiteral("RenamedStartup.qml"));
+        check(customMessage.ok && messageHtml.contains(message.toHtmlEscaped().toUtf8())
+                  && messageHelper.contains("textFormat: Text.PlainText")
+                  && messageHelper.contains("Evoria \\\"<boot>&\\\\ready __BSI_BOOT_THEME__")
+                  && messageController.contains(QLatin1String("Evoria \\\"<boot>&\\\\ready __BSI_BOOT_THEME__")),
+              "custom boot message is escaped for HTML and both QML fallbacks");
+        const QByteArray beforeInvalidMessage = read(customTextPath);
+        check(!BootVideoPatcher::patch(customTextPath, 0, QStringLiteral("aurora"), {}, QString(121, QLatin1Char('x'))).ok
+                  && !BootVideoPatcher::patch(customTextPath, 0, QStringLiteral("aurora"), {}, QStringLiteral("bad\ntext")).ok
+                  && read(customTextPath) == beforeInvalidMessage,
+              "invalid startup messages are rejected without writing the executable");
+        const auto defaultMessage = BootVideoPatcher::patch(customTextPath, 0, QStringLiteral("aurora"), {}, QStringLiteral("  "));
+        check(defaultMessage.ok && read(QDir(customDir).filePath(QStringLiteral("Assets/BootScreen.html"))).contains("Emulator is starting…"),
+              "blank startup message restores the default");
+
         for (const QString &theme : { QStringLiteral("orbit"), QStringLiteral("pulse"), QStringLiteral("solar") }) {
             const QString themedPath = QDir(folder).filePath(QStringLiteral("HD-Player-%1.exe").arg(theme));
             write(themedPath, image);

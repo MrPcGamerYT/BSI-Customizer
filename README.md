@@ -481,6 +481,12 @@ video is preserved as `Promo.mp4.bak`. An existing HTML page is preserved as
 previous contents are restored. The patch does not install Qt modules or codecs.
 Close all emulator instances before patching.
 
+Use **Startup message** to replace “Emulator is starting…” with your own text
+(for example, “Evoria is booting…”). Leave it blank to use the default. The
+message is plain text, limited to 120 characters, and applies to every boot
+style and its native fallback. Apply the boot patch to save the change; boot
+profiles currently save the hold duration only.
+
 **Boot hold after ready** defaults to 3000 ms (0–15000); zero restores immediate
 handoff on supported boot hosts. Legacy forced GL-container experiments are
 repaired only when uniquely recognized, and an old empty boot stub requires a

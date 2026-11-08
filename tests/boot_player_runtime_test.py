@@ -31,7 +31,7 @@ assert "request.status===WebEngineView.LoadSucceededStatus" in qml
 assert "request.status===WebEngineView.LoadFailedStatus" in qml
 assert "webView.url = htmlUrl;\n            return;" in qml
 
-assert 'class="ring-track"' in html and "Emulator is starting…" in html
+assert 'class="ring-track"' in html and "__BSI_STARTUP_TEXT__" in html
 # The rotating Canvas has transparent padding beyond the arc/shadow so its
 # square item bounds cannot clip into a visible glow box.
 assert "width: Math.max(loadingRingTrack.width * 1.40," in qml
@@ -76,7 +76,8 @@ with tempfile.TemporaryDirectory(prefix="boot html ' & Ω ") as tmp:
     assets = directory / "Assets"
     assets.mkdir()
     qml_path = assets / "BootVideo.qml"
-    runtime_qml = qml.replace("__BSI_EMULATOR_LOGO__", "data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=")
+    runtime_qml = qml.replace("__BSI_STARTUP_TEXT__", '"Evoria is booting…"')
+    runtime_qml = runtime_qml.replace("__BSI_EMULATOR_LOGO__", "data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=")
     runtime_qml = runtime_qml.replace("__BSI_WITH_VIDEO__", "false")
     if provider in ("web", "webfail"):
         runtime_qml = runtime_qml.replace("import QtWebEngine", "import BsiFixtureWebEngine")
@@ -85,7 +86,7 @@ with tempfile.TemporaryDirectory(prefix="boot html ' & Ω ") as tmp:
     qml_path.write_text(runtime_qml)
     html_path = assets / "BootScreen.html"
     html_path.write_text(html.replace("__BSI_EMULATOR_LOGO__", "data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=")
-                         .replace("__VIDEO_BACKGROUND__", ""))
+                         .replace("__VIDEO_BACKGROUND__", "").replace("__BSI_STARTUP_TEXT__", "Evoria is booting…"))
 
     engine = QQmlEngine()
     engine.addImportPath(str(imports))
@@ -97,6 +98,7 @@ with tempfile.TemporaryDirectory(prefix="boot html ' & Ω ") as tmp:
         ring = obj.findChild(QObject, "bsiLoadingRing")
         status = obj.findChild(QObject, "bsiBootStatus")
         assert ring is not None and status is not None, messages
+        assert status.property("text") == "Evoria is booting…"
         if provider in ("web", "webfail"):
             view = obj.findChild(QObject, "bsiBootHtmlView")
             assert view is not None, messages
@@ -112,11 +114,11 @@ with tempfile.TemporaryDirectory(prefix="boot html ' & Ω ") as tmp:
                 assert obj.property("htmlLoaded") is False
                 assert ring.property("visible") is True
                 assert status.property("visible") is True
-                assert status.property("text") == "Emulator is starting…"
+                assert status.property("text") == "Evoria is booting…"
                 assert view.property("visible") is False
         else:
             assert ring.property("visible") is True, messages
-            assert status.property("text") == "Emulator is starting…", messages
+            assert status.property("text") == "Evoria is booting…", messages
     except AssertionError as error:
         for line in [str(error)] + messages:
             escaped = line.replace("%", "%25").replace("\n", "%0A").replace("\r", "%0D")
