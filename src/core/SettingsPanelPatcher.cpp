@@ -715,7 +715,7 @@ Image{source:parent.icon;width:18;height:18;anchors.horizontalCenter:parent.hori
 Item{width:parent.width;height:parent.height-128
 Rectangle{anchors.fill:parent;radius:10;color:UiTheme.colors.primary70
 StackLayout{id:iSelectedSettingControl;anchors.fill:parent;anchors.margins:6;currentIndex:pCurrentTabIndex
-Repeater{model:pSettingsItems.pSettingElements;delegate:Loader{Component.onCompleted:{var a=model.modelData.pComponentArgs;a?setSource(model.modelData.pQmlSource,a):setSource(model.modelData.pQmlSource)}onLoaded:{model.modelData.pComponentObj = item;if(item.fOnQmlLoaded)item.fOnQmlLoaded()}}}}
+Repeater{model:pSettingsItems.pSettingElements;delegate:Item{Loader{width:parent.width;height:parent.height;Component.onCompleted:{var a=model.modelData.pComponentArgs;a?setSource(model.modelData.pQmlSource,a):setSource(model.modelData.pQmlSource)}onLoaded:{model.modelData.pComponentObj = item;if(item.fOnQmlLoaded)item.fOnQmlLoaded()}}}}}
 }
 }
 }
