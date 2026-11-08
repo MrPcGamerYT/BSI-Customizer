@@ -704,12 +704,12 @@ Component.onCompleted:{iSettingsWindow.width*=.6;iSettingsWindow.height*=.68;iSe
 MouseArea{width:parent.width-42;height:32;onPressed:iSettingsWindow.startSystemMove()}
 UiImageButton{asset:"CloseIcon";anchors.right:parent.right;onClicked:iSettingsWindow.close()}
 ListView{width:parent.width;height:72;y:32;clip:true;orientation:ListView.Horizontal;model:pSettingsItems.pSettingElements;currentIndex:pCurrentTabIndex
-delegate:Item{property string k:iSettingsWindowShadowContainer.k(modelData.pQmlSource);width:iSettingsWindowShadowContainer.h.indexOf(k)<0?92:0;height:64;visible:width>0
-UiSettingsButton{anchors.fill:parent;pSettingBtnText:modelData.pButtonText;pSelected:index===pCurrentTabIndex;onSettingClicked:fChangeSelectedSetting(index)}
+delegate:Item{property int p:index;property string k:iSettingsWindowShadowContainer.k(modelData.pQmlSource);width:iSettingsWindowShadowContainer.h.indexOf(k)<0?92:0;height:64;visible:width>0
+UiSettingsButton{anchors.fill:parent;pSettingBtnText:modelData.pButtonText;pSelected:index===pCurrentTabIndex;onSettingClicked:fChangeSelectedSetting(parent.p)}
 Image{source:iSettingsWindowShadowContainer.c[parent.k]||"";width:18;height:18;anchors.horizontalCenter:parent.horizontalCenter}}
 }
 StackLayout{width:Math.min(parent.width,600);x:(parent.width-width)/2;y:108;height:parent.height-108;currentIndex:pCurrentTabIndex
-Repeater{model:pSettingsItems.pSettingElements;delegate:Loader{width:Math.min(parent.width,520);height:parent.height;anchors.centerIn:parent;Component.onCompleted:setSource(model.modelData.pQmlSource,model.modelData.pComponentArgs||({}));onLoaded:{model.modelData.pComponentObj=item;item.fOnQmlLoaded&&item.fOnQmlLoaded()}}}}
+Repeater{model:pSettingsItems.pSettingElements;delegate:Item{Loader{width:Math.min(parent.width,520);height:parent.height;anchors.centerIn:parent;Component.onCompleted:setSource(model.modelData.pQmlSource,model.modelData.pComponentArgs||({}));onLoaded:{model.modelData.pComponentObj=item;item.fOnQmlLoaded&&item.fOnQmlLoaded()}}}}}
 }
 )QML");
     replacement.replace(QStringLiteral("@@BSI_HIDDEN_TABS@@"), hiddenLiteral);

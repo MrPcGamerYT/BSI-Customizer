@@ -5179,7 +5179,8 @@ Window {
                           && rebuiltWindow.contains(QStringLiteral("width:Math.min(parent.width,520);height:parent.height;anchors.centerIn:parent"))
                           && rebuiltWindow.contains(QStringLiteral("Image{source:iSettingsWindowShadowContainer.c[parent.k]"))
                           && rebuiltWindow.contains(QStringLiteral("asset:\"CloseIcon\""))
-                          && rebuiltWindow.contains(QStringLiteral("fChangeSelectedSetting(index)"))
+                          && rebuiltWindow.contains(QStringLiteral("property int p:index"))
+                          && rebuiltWindow.contains(QStringLiteral("fChangeSelectedSetting(parent.p)"))
                           && rebuiltWindow.contains(QStringLiteral("StackLayout"))
                           && rebuiltWindow.contains(QStringLiteral("model.modelData.pComponentObj=item"))
                           && rebuiltWindow.contains(QStringLiteral("iSettingsWindow.startSystemMove()")),

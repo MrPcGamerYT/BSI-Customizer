@@ -74,7 +74,8 @@ assert "Math.min(parent.width,600)" in replacement
 assert "x:(parent.width-width)/2;y:108;height:parent.height-108" in replacement
 assert "width:Math.min(parent.width,520);height:parent.height;anchors.centerIn:parent" in replacement
 assert "pSettingBtnText" in replacement and "pSelected" in replacement
-assert "fChangeSelectedSetting(index)" in replacement
+assert "property int p:index" in replacement
+assert "fChangeSelectedSetting(parent.p)" in replacement
 assert "onPressed:iSettingsWindow.startSystemMove()" in replacement
 replacement = replacement.replace("@@BSI_HIDDEN_TABS@@", "[]")
 replacement = replacement.replace("@@BSI_TAB_ICONS@@", "({})")
