@@ -5243,10 +5243,11 @@ Window {
                         if (entry.leaf.compare(QLatin1String("PlrAboutSetting.qml"), Qt::CaseInsensitive) == 0)
                             updatedAbout = EmbeddedResources::decodeText(EmbeddedResources::readEntry(panelCopy, entry.entryOff, entry.flags, 8 * 1024 * 1024));
                     }
-                    check(updatedWindow.contains(QStringLiteral("property var h:"))
-                              && (hiddenTabId.isEmpty() || updatedWindow.contains(hiddenTabId))
+                    check(updatedWindow.contains(QStringLiteral("property var bHidden:[]"))
+                              && updatedAbout.contains(QStringLiteral("property var bsiHiddenTabs:"))
+                              && (hiddenTabId.isEmpty() || updatedAbout.contains(hiddenTabId))
                               && updatedAbout.contains(QStringLiteral("property var bsiTabIcons:"))
-                              && updatedAbout.contains(QStringLiteral("function fOnQmlLoaded(){parent.parent.parent.parent.parent.parent.parent.bIcons=bsiTabIcons}"))
+                              && updatedAbout.contains(QStringLiteral("function fOnQmlLoaded(){parent.parent.parent.parent.parent.parent.parent.bHidden=bsiHiddenTabs;parent.parent.parent.parent.parent.parent.parent.bIcons=bsiTabIcons}"))
                               && updatedAbout.contains(QStringLiteral("data:image/svg+xml;base64,"))
                               && updatedAbout.contains(QStringLiteral("BSI Panel Regression Updated"))
                               && updatedAbout.contains(QStringLiteral("Regression subtitle")),

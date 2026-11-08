@@ -65,8 +65,9 @@ replacement = match.group(1)
 assert "BSI Settings v7" in replacement
 assert "pSettingsItems.pSettingElements" in replacement
 assert "property var bHidden:" in replacement and "property var bIcons:" in replacement
-assert "@@BSI_HIDDEN_TABS@@" in replacement and "property var bIcons:({})" in replacement
-assert "function fOnQmlLoaded(){parent.parent.parent.parent.parent.parent.parent.bIcons=bsiTabIcons}" in cpp
+assert "property var bHidden:[]" in replacement and "property var bIcons:({})" in replacement
+assert "function fOnQmlLoaded(){parent.parent.parent.parent.parent.parent.parent.bHidden=bsiHiddenTabs;parent.parent.parent.parent.parent.parent.parent.bIcons=bsiTabIcons}" in cpp
+assert "property var bsiHiddenTabs: @@BSI_HIDDEN_TABS@@" in cpp
 assert "property var bsiTabIcons: @@BSI_TAB_ICONS@@" in cpp
 assert "Rectangle{anchors.fill:parent;color:UiTheme.colors.primary80;radius:12" in replacement
 assert "Column{anchors.fill:parent;anchors.margins:12;spacing:8" in replacement
@@ -320,6 +321,7 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
         '{ title: "GitHub", url: "https://github.com/example" },\n'
         '{ title: "Community", url: "https://example.com/community" },',
     )
+    about_qml = about_qml.replace("@@BSI_HIDDEN_TABS@@", "[]")
     about_qml = about_qml.replace("@@BSI_TAB_ICONS@@", "({})")
     about_qml = about_qml.replace("@@BSI_LOGO_SOURCE@@", '""')
     about_path = root / "AboutHost.qml"

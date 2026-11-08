@@ -662,7 +662,7 @@ QString qmlString(const QString &value)
     return out;
 }
 
-QString buildWindow(const QString &stock, const QStringList &hiddenTabs)
+QString buildWindow(const QString &stock)
 {
     const QString masked = QmlText::mask(stock);
     const auto objects = QmlText::objects(masked, QStringLiteral("UiShadowContainer"));
@@ -678,19 +678,13 @@ QString buildWindow(const QString &stock, const QStringList &hiddenTabs)
     }
     if (!found) return {};
 
-    QString hiddenLiteral = QStringLiteral("[");
-    for (const QString &page : hiddenTabs) {
-        if (hiddenLiteral.size() > 1) hiddenLiteral += QLatin1Char(',');
-        hiddenLiteral += qmlString(page.toCaseFolded());
-    }
-    hiddenLiteral += QLatin1Char(']');
     // Restore the working PR #88 shell; customization only changes the tab
     // list and About content, while native pages and callbacks remain intact.
     QString replacement = QStringLiteral(R"QML(
 UiShadowContainer {
 // BSI Settings v7
 id:iSettingsWindowShadowContainer;anchors.fill:parent
-property var bHidden:@@BSI_HIDDEN_TABS@@
+property var bHidden:[]
 property var bIcons:({})
 function bKey(v){return v.toLowerCase().split("/").pop()}
 Rectangle{anchors.fill:parent;color:UiTheme.colors.primary80;radius:12;clip:true
@@ -714,7 +708,6 @@ Repeater{model:pSettingsItems.pSettingElements;delegate:Loader{width:iSelectedSe
 }
 }
 )QML");
-    replacement.replace(QStringLiteral("@@BSI_HIDDEN_TABS@@"), hiddenLiteral);
     QString out = stock;
     out.replace(target.nameBegin, target.end - target.nameBegin, replacement);
     // Preserve PR #88's actual Settings-window resize and centered placement.
@@ -728,7 +721,7 @@ Repeater{model:pSettingsItems.pSettingElements;delegate:Loader{width:iSelectedSe
 
 QString buildAbout(const QString &developerName, const QString &tagline,
                    const QVariantList &links, const QString &logoSource,
-                   const QVariantMap &tabIcons)
+                   const QStringList &hiddenTabs, const QVariantMap &tabIcons)
 {
     QString rows;
     for (const QVariant &entry : links) {
@@ -739,6 +732,12 @@ QString buildAbout(const QString &developerName, const QString &tagline,
         rows += QStringLiteral("\n        { title: %1, url: %2 },")
             .arg(qmlString(label), qmlString(url));
     }
+    QString hiddenLiteral = QStringLiteral("[");
+    for (const QString &page : hiddenTabs) {
+        if (hiddenLiteral.size() > 1) hiddenLiteral += QLatin1Char(',');
+        hiddenLiteral += qmlString(page.toCaseFolded());
+    }
+    hiddenLiteral += QLatin1Char(']');
     QString iconLiteral = QStringLiteral("({");
     for (auto it = tabIcons.cbegin(); it != tabIcons.cend(); ++it) {
         if (iconLiteral.size() > 2) iconLiteral += QLatin1Char(',');
@@ -763,6 +762,7 @@ Item {
     property string pShortDisplayName: ""
     property string pDeveloperName: @@BSI_DEVELOPER@@
     property string pDeveloperTagline: @@BSI_TAGLINE@@
+    property var bsiHiddenTabs: @@BSI_HIDDEN_TABS@@
     property var bsiTabIcons: @@BSI_TAB_ICONS@@
     property var pDeveloperLinks: [@@BSI_LINKS@@
     ]
@@ -879,7 +879,7 @@ Item {
     }
 
     // Retain the native About-page callback surface and publish profile icons to the shell.
-    function fOnQmlLoaded(){parent.parent.parent.parent.parent.parent.parent.bIcons=bsiTabIcons}
+    function fOnQmlLoaded(){parent.parent.parent.parent.parent.parent.parent.bHidden=bsiHiddenTabs;parent.parent.parent.parent.parent.parent.parent.bIcons=bsiTabIcons}
     function fCheckForUpdateCallback(apiCallStatus, jsonData) {
         if (apiCallStatus === 0) {
             var jsonObj = JSON.parse(jsonData)
@@ -903,6 +903,7 @@ Item {
 )QML");
     generated.replace(QStringLiteral("@@BSI_DEVELOPER@@"), qDeveloper);
     generated.replace(QStringLiteral("@@BSI_TAGLINE@@"), qTagline);
+    generated.replace(QStringLiteral("@@BSI_HIDDEN_TABS@@"), hiddenLiteral);
     generated.replace(QStringLiteral("@@BSI_TAB_ICONS@@"), iconLiteral);
     generated.replace(QStringLiteral("@@BSI_LINKS@@"), rows);
     generated.replace(QStringLiteral("@@BSI_LOGO_SOURCE@@"), qmlString(logoSource));
@@ -1315,10 +1316,10 @@ QVariantMap apply(const QString &exePath, const QString &developerName,
     const QString originalAboutText = EmbeddedResources::decodeText(originals.value(current.about.path));
     if (originalWindowText.isEmpty() || originalAboutText.isEmpty())
         return fail(QStringLiteral("A saved original QML source could not be decoded; the executable was not changed."));
-    const QString rebuiltWindow = buildWindow(originalWindowText, hiddenTabs);
+    const QString rebuiltWindow = buildWindow(originalWindowText);
     if (rebuiltWindow.isEmpty())
         return fail(QStringLiteral("This BlueStacks build's Settings-window structure is not recognized. No file was changed."));
-    const QString rebuiltAbout = buildAbout(developerName, tagline, links, logoSource, customTabIcons);
+    const QString rebuiltAbout = buildAbout(developerName, tagline, links, logoSource, hiddenTabs, customTabIcons);
     if (rebuiltAbout.isEmpty())
         return fail(QStringLiteral("The About page could not be generated; no file was changed."));
     QMap<QString, QByteArray> replacements {
