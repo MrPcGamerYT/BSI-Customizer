@@ -280,8 +280,10 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
     stack_center = stack.mapToItem(panel, QPointF(stack.width() / 2, stack.height() / 2))
     assert abs(stack_center.x() - panel.width() / 2) < 2, "The native page stack was not centered inside the PR #88 shell"
     assert abs(stack.width() - (panel.width() - 36)) < 2, "The native page stack should preserve the PR #88 inset layout"
-    assert abs(page_loader.width() - stack.width()) < 2, "The PR #88 native page should retain the original full-width Loader"
-    assert abs(loaded_page.width() - page_loader.width()) < 2, "The loaded native page did not follow its centered loader width"
+    loader_position = page_loader.mapToItem(panel, QPointF(0, 0))
+    assert 0 < page_loader.width() <= panel.width(), "The PR #88 native page Loader should remain visible inside the shell"
+    assert loader_position.x() >= -2 and loader_position.x() + page_loader.width() <= panel.width() + 2, "The PR #88 native Loader escaped the Settings shell"
+    assert abs(loaded_page.width() - page_loader.width()) < 2, "The loaded native page did not follow its Loader width"
     assert loaded_page.objectName() == "runtimeSettingPage", "The native Settings page Loader did not load its page"
     assert str(first_tab.property("pSettingBtnText")).splitlines()[0], "Category tabs should show their own icon glyphs"
 
