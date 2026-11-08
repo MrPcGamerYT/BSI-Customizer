@@ -280,8 +280,8 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
     stack_center = stack.mapToItem(panel, QPointF(stack.width() / 2, stack.height() / 2))
     assert abs(stack_center.x() - panel.width() / 2) < 2, "The native page stack was not centered inside the PR #88 shell"
     assert abs(stack.width() - (panel.width() - 36)) < 2, "The native page stack should preserve the PR #88 inset layout"
-    loader_center = page_loader.mapToItem(page_loader.parentItem(), QPointF(page_loader.width() / 2, page_loader.height() / 2))
-    assert abs(loader_center.x() - page_loader.parentItem().width() / 2) < 2, "The native page Loader did not fill its centered stack cell"
+    loader_center = page_loader.mapToItem(stack, QPointF(page_loader.width() / 2, page_loader.height() / 2))
+    assert abs(loader_center.x() - stack.width() / 2) < 2, "The PR #88 native page Loader is not centered in the stack"
     assert abs(page_loader.width() - stack.width()) < 2, "The PR #88 native page should retain the original full-width Loader"
     assert abs(loaded_page.width() - page_loader.width()) < 2, "The loaded native page did not follow its centered loader width"
     assert loaded_page.objectName() == "runtimeSettingPage", "The native Settings page Loader did not load its page"
