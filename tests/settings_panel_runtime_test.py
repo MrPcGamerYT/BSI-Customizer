@@ -69,7 +69,7 @@ assert "anchors.fill:parent" in replacement
 assert "iSettingsWindow.width*=.6" in replacement
 assert "iSettingsWindow.height*=.68" in replacement
 assert "iSettingsWindow.x+=iSettingsWindow.width/3" in replacement
-assert "iSettingsWindow.y+=iSettingsWindow.height*.235294" in replacement
+assert "iSettingsWindow.y+=iSettingsWindow.height*.2353" in replacement
 assert "Math.min(parent.width,520)" in replacement
 assert "x:(parent.width-width)/2;y:108;height:parent.height-108" in replacement
 assert "width:parent.width;height:parent.height" in replacement

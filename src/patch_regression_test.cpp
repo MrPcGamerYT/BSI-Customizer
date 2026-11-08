@@ -5173,7 +5173,7 @@ Window {
                           && rebuiltWindow.contains(QStringLiteral("iSettingsWindow.width*=.6"))
                           && rebuiltWindow.contains(QStringLiteral("iSettingsWindow.height*=.68"))
                           && rebuiltWindow.contains(QStringLiteral("iSettingsWindow.x+=iSettingsWindow.width/3"))
-                          && rebuiltWindow.contains(QStringLiteral("iSettingsWindow.y+=iSettingsWindow.height*.235294"))
+                          && rebuiltWindow.contains(QStringLiteral("iSettingsWindow.y+=iSettingsWindow.height*.2353"))
                           && rebuiltWindow.contains(QStringLiteral("Math.min(parent.width,520)"))
                           && rebuiltWindow.contains(QStringLiteral("x:(parent.width-width)/2;y:108;height:parent.height-108"))
                           && rebuiltWindow.contains(QStringLiteral("width:parent.width;height:parent.height"))

@@ -700,7 +700,7 @@ id:iSettingsWindowShadowContainer;anchors.fill:parent
 property var h:@@BSI_HIDDEN_TABS@@
 property var c:@@BSI_TAB_ICONS@@
 function k(v){return v.toLowerCase().split("/").pop()}
-Component.onCompleted:{iSettingsWindow.width*=.6;iSettingsWindow.height*=.68;iSettingsWindow.x+=iSettingsWindow.width/3;iSettingsWindow.y+=iSettingsWindow.height*.235294}
+Component.onCompleted:{iSettingsWindow.width*=.6;iSettingsWindow.height*=.68;iSettingsWindow.x+=iSettingsWindow.width/3;iSettingsWindow.y+=iSettingsWindow.height*.2353}
 MouseArea{width:parent.width-42;height:32;onPressed:iSettingsWindow.startSystemMove()}
 UiImageButton{asset:"CloseIcon";anchors.right:parent.right;onClicked:iSettingsWindow.close()}
 ListView{width:parent.width;height:72;y:32;clip:true;orientation:ListView.Horizontal;model:pSettingsItems.pSettingElements;currentIndex:pCurrentTabIndex
