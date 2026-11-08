@@ -45,10 +45,12 @@ match = re.search(
 )
 assert match, "Could not find the generated Settings-window QML template"
 replacement = match.group(1)
-assert "BSI Settings v4" in replacement
-assert "pSettingsItems.pSettingElements" in replacement and "bHidden" in replacement
+assert "BSI Settings v5" in replacement
+assert "pSettingsItems.pSettingElements" in replacement and "property var h:" in replacement
 assert "@@BSI_HIDDEN_TABS@@" in replacement and "@@BSI_TAB_ICONS@@" in replacement
 assert "parent.width*.86" in replacement
+assert "width:parent.width*.70;height:parent.height*.70;anchors.centerIn:parent" in replacement
+assert "Math.min(parent.width*.86,760)" in replacement
 assert "pSettingBtnText" in replacement and "pSelected" in replacement
 assert "anchors.topMargin:108" in replacement
 assert "onPressed:iSettingsWindow.startSystemMove()" in replacement
@@ -135,7 +137,7 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
         "import BsiSettingsFixture 1.0\n"
         "Item {\n"
         "    objectName: \"settingsTestHost\"\n"
-        "    width: 760; height: 520\n"
+        "    width: 1500; height: 900\n"
         "    property int pCurrentTabIndex: 0\n"
         "    property var pSettingsItems: ({ pSettingElements: [\n"
         "        { pButtonText: \"Display\", pShowRedDot: false, pQmlSource: \"SettingPage.qml\", pComponentArgs: null, pComponentObj: null },\n"
@@ -157,7 +159,7 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
         raise AssertionError("Settings QML failed to create: " + "\n".join(e.toString() for e in component.errors()))
 
     window = QQuickWindow()
-    window.resize(760, 520)
+    window.resize(1500, 900)
     obj.setParentItem(window.contentItem())
     window.show()
     QTest.qWait(120)
@@ -183,6 +185,12 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
         (item for item in visual_tree if item.metaObject().className().endswith("StackLayout")),
         None,
     )
+    panel = next(
+        (item for item in visual_tree
+         if abs(item.width() - window.width() * 0.70) < 2
+         and abs(item.height() - window.height() * 0.70) < 2),
+        None,
+    )
     first_tab = next(
         (
             item for item in visual_tree
@@ -195,7 +203,7 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
         (
             item for item in visual_tree
             if item.metaObject().className().endswith("MouseArea")
-            and item.width() > window.width() * 0.7
+            and item.width() > window.width() * 0.5
             and item.height() < 50
         ),
         None,
@@ -205,6 +213,7 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
         None,
     )
     controls = {
+        "compact centered panel": panel,
         "tabs": tabs,
         "stack": stack,
         "loaded native page": loaded_page,
@@ -215,6 +224,11 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
     missing = [name for name, item in controls.items() if item is None]
     found_names = sorted(item.objectName() for item in visual_tree if item.objectName())
     assert not missing, f"Missing controls: {missing}; found object names: {found_names}"
+    assert abs(panel.x() + panel.width() / 2 - window.width() / 2) < 2, "Settings shell was not centered in its host"
+    assert abs(panel.width() - window.width() * 0.70) < 2, "Settings shell should remain at the compact 70% width"
+    stack_center = stack.mapToItem(panel, QPointF(stack.width() / 2, stack.height() / 2))
+    assert abs(stack_center.x() - panel.width() / 2) < 2, "The native page column was not centered inside the Settings shell"
+    assert stack.width() <= 760.1, "The native page column should use a readable maximum width"
     assert loaded_page.objectName() == "runtimeSettingPage", "The native Settings page Loader did not load its page"
     assert str(first_tab.property("pSettingBtnText")).splitlines()[0], "Category tabs should show their own icon glyphs"
 
