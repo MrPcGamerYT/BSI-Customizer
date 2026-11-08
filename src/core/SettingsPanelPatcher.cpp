@@ -34,7 +34,8 @@ const QString kPreviousWindowDesignMarker = QStringLiteral("BSI CUSTOMIZER: Sett
 const QString kWindowDesignMarkerV3 = QStringLiteral("BSI Settings v3");
 const QString kWindowDesignMarkerV4 = QStringLiteral("BSI Settings v4");
 const QString kWindowDesignMarkerV5 = QStringLiteral("BSI Settings v5");
-const QString kWindowDesignMarker = QStringLiteral("BSI6");
+const QString kWindowDesignMarkerV6 = QStringLiteral("BSI6");
+const QString kWindowDesignMarker = QStringLiteral("BSI Settings v7");
 const QString kAboutMarker = QStringLiteral("BSI CUSTOMIZER: redesigned About page v1");
 const QString kSchema = QStringLiteral("bsi.settings-panel.recovery");
 const QString kWindowLeaf = QStringLiteral("UiSettingsWindow.qml");
@@ -691,31 +692,51 @@ QString buildWindow(const QString &stock, const QStringList &hiddenTabs,
     }
     iconLiteral += QStringLiteral("})");
 
-    // Keep the native root Window, prompts, callbacks and page model; resize
-    // that window to a compact centered footprint and constrain its page loader.
+    // Restore the working PR #88 shell; customization only changes the tab
+    // list and About content, while native pages and callbacks remain intact.
     QString replacement = QStringLiteral(R"QML(
-UiShadowContainer{
-//BSI6
+UiShadowContainer {
+// BSI Settings v7
 id:iSettingsWindowShadowContainer;anchors.fill:parent
-property var h:@@BSI_HIDDEN_TABS@@
-property var c:@@BSI_TAB_ICONS@@
-function k(v){return v.toLowerCase().split("/").pop()}
-Component.onCompleted:{iSettingsWindow.width*=.6;iSettingsWindow.height*=.68;iSettingsWindow.x+=iSettingsWindow.width/3;iSettingsWindow.y+=iSettingsWindow.height*.2353}
-MouseArea{width:parent.width-42;height:32;onPressed:iSettingsWindow.startSystemMove()}
-UiImageButton{asset:"CloseIcon";anchors.right:parent.right;onClicked:iSettingsWindow.close()}
-ListView{width:parent.width;height:72;y:32;clip:true;orientation:ListView.Horizontal;model:pSettingsItems.pSettingElements;currentIndex:pCurrentTabIndex
-delegate:Item{property int p:index;property string k:iSettingsWindowShadowContainer.k(modelData.pQmlSource);width:iSettingsWindowShadowContainer.h.indexOf(k)<0?92:0;height:64;visible:width>0
-UiSettingsButton{anchors.fill:parent;pSettingBtnText:modelData.pButtonText;pSelected:index===pCurrentTabIndex;onSettingClicked:fChangeSelectedSetting(parent.p)}
-Image{source:iSettingsWindowShadowContainer.c[parent.k]||"";width:18;height:18;anchors.horizontalCenter:parent.horizontalCenter}}
+property var bHidden:@@BSI_HIDDEN_TABS@@
+property var bIcons:@@BSI_TAB_ICONS@@
+function bKey(v){return v.toLowerCase().split("/").pop()}
+Rectangle{anchors.fill:parent;color:UiTheme.colors.primary80;radius:12;border.width:1;border.color:UiTheme.colors.accentNormal;clip:true
+Column{anchors.fill:parent;anchors.margins:12;spacing:8
+Item{width:parent.width;height:36
+MouseArea{width:parent.width-42;height:parent.height;onPressed:iSettingsWindow.startSystemMove()}
+Text{text:qsTranslate("QObject","Settings");color:UiTheme.colors.primary10;font:UiTheme.fonts.bodyLarge;anchors.left:parent.left;anchors.verticalCenter:parent.verticalCenter}
+UiImageButton{asset:"CloseIcon";pImageWidth:16;pImageHeight:16;anchors.right:parent.right;anchors.verticalCenter:parent.verticalCenter;onClicked:iSettingsWindow.close()}}
+ListView{width:parent.width;height:76;clip:true;orientation:ListView.Horizontal;spacing:7;currentIndex:pCurrentTabIndex;model:pSettingsItems.pSettingElements
+delegate:Item{property int p:index;property var d:modelData;property string k:iSettingsWindowShadowContainer.bKey(d.pQmlSource);property string icon:iSettingsWindowShadowContainer.bIcons[k]||"";width:iSettingsWindowShadowContainer.bHidden.indexOf(k)<0?92:0;height:64;visible:width>0
+UiSettingsButton{width:92;height:64;pSettingIdx:parent.p;pSettingBtnText:"⚙▣◈♫⌨⌘☷ⓘ◉◇✦▧".charAt(parent.p)+"\n"+parent.d.pButtonText;pSelected:parent.p===pCurrentTabIndex;pShowRedDot:parent.d.pShowRedDot;onSettingClicked:fChangeSelectedSetting(pSettingIdx)}
+Image{source:parent.icon;width:18;height:18;anchors.horizontalCenter:parent.horizontalCenter}}
+Item{width:parent.width;height:parent.height-128
+Rectangle{anchors.fill:parent;radius:10;color:UiTheme.colors.primary70
+StackLayout{id:iSelectedSettingControl;anchors.fill:parent;anchors.margins:6;currentIndex:pCurrentTabIndex
+Repeater{model:pSettingsItems.pSettingElements;delegate:Loader{Component.onCompleted:{var a=model.modelData.pComponentArgs;a?setSource(model.modelData.pQmlSource,a):setSource(model.modelData.pQmlSource)}onLoaded:{model.modelData.pComponentObj = item;if(item.fOnQmlLoaded)item.fOnQmlLoaded()}}}}
 }
-StackLayout{width:Math.min(parent.width,520);x:(parent.width-width)/2;y:108;height:parent.height-108;currentIndex:pCurrentTabIndex
-Repeater{model:pSettingsItems.pSettingElements;delegate:Item{Loader{width:parent.width;height:parent.height;Component.onCompleted:setSource(model.modelData.pQmlSource,model.modelData.pComponentArgs||({}));onLoaded:{model.modelData.pComponentObj=item;item.fOnQmlLoaded&&item.fOnQmlLoaded()}}}}}
+}
+}
+}
 }
 )QML");
     replacement.replace(QStringLiteral("@@BSI_HIDDEN_TABS@@"), hiddenLiteral);
     replacement.replace(QStringLiteral("@@BSI_TAB_ICONS@@"), iconLiteral);
     QString out = stock;
     out.replace(target.nameBegin, target.end - target.nameBegin, replacement);
+    // Preserve PR #88's actual Settings-window resize and centered placement.
+    const QString helper = QStringLiteral(R"QML(
+    onVisibleChanged: if (visible && transientParent) {
+        width = transientParent.width * 0.70
+        height = transientParent.height * 0.70
+        x = transientParent.x + (transientParent.width - width) / 2
+        y = transientParent.y + (transientParent.height - height) / 2
+    }
+)QML");
+    const int rootClose = out.lastIndexOf(QLatin1String("\n}"));
+    if (rootClose < 0) return {};
+    out.insert(rootClose, helper);
     if (!out.contains(kWindowDesignMarker)) return {};
     return out;
 }
@@ -1077,7 +1098,8 @@ bool hasWindowMarker(const QString &text)
     // by the previous Settings design.
     return text.contains(kWindowMarker) || text.contains(kPreviousWindowDesignMarker)
         || text.contains(kWindowDesignMarkerV3) || text.contains(kWindowDesignMarkerV4)
-        || text.contains(kWindowDesignMarkerV5) || text.contains(kWindowDesignMarker);
+        || text.contains(kWindowDesignMarkerV5) || text.contains(kWindowDesignMarkerV6)
+        || text.contains(kWindowDesignMarker);
 }
 
 } // namespace
