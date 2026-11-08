@@ -5166,13 +5166,13 @@ Window {
                         rebuiltWindow = QString::fromUtf8(QtResources::readFile(panelImage, file));
                 }
                 check(rebuiltWindow.contains(QStringLiteral("BSI Settings v5"))
-                          && rebuiltWindow.contains(QStringLiteral("bHidden"))
-                          && rebuiltWindow.contains(QStringLiteral("bIcons"))
+                          && rebuiltWindow.contains(QStringLiteral("property var h:"))
+                          && rebuiltWindow.contains(QStringLiteral("property var c:"))
                           && rebuiltWindow.contains(QStringLiteral("pSettingBtnText"))
                           && rebuiltWindow.contains(QStringLiteral("parent.width*.70"))
                           && rebuiltWindow.contains(QStringLiteral("anchors.centerIn:parent"))
                           && rebuiltWindow.contains(QStringLiteral("Math.min(parent.width*.86,760)"))
-                          && rebuiltWindow.contains(QStringLiteral("Image{source:iSettingsWindowShadowContainer.bIcons[parent.k]"))
+                          && rebuiltWindow.contains(QStringLiteral("Image{source:iSettingsWindowShadowContainer.c[parent.k]"))
                           && rebuiltWindow.contains(QStringLiteral("asset:\"CloseIcon\""))
                           && rebuiltWindow.contains(QStringLiteral("fChangeSelectedSetting(parent.p)"))
                           && rebuiltWindow.contains(QStringLiteral("StackLayout"))
@@ -5238,7 +5238,7 @@ Window {
                         if (entry.leaf.compare(QLatin1String("PlrAboutSetting.qml"), Qt::CaseInsensitive) == 0)
                             updatedAbout = EmbeddedResources::decodeText(EmbeddedResources::readEntry(panelCopy, entry.entryOff, entry.flags, 8 * 1024 * 1024));
                     }
-                    check(updatedWindow.contains(QStringLiteral("bHidden"))
+                    check(updatedWindow.contains(QStringLiteral("property var h:"))
                               && (hiddenTabId.isEmpty() || updatedWindow.contains(hiddenTabId))
                               && updatedWindow.contains(QStringLiteral("data:image/svg+xml;base64,"))
                               && updatedAbout.contains(QStringLiteral("data:image/svg+xml;base64,"))

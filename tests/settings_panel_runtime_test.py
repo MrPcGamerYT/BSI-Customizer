@@ -46,7 +46,7 @@ match = re.search(
 assert match, "Could not find the generated Settings-window QML template"
 replacement = match.group(1)
 assert "BSI Settings v5" in replacement
-assert "pSettingsItems.pSettingElements" in replacement and "bHidden" in replacement
+assert "pSettingsItems.pSettingElements" in replacement and "property var h:" in replacement
 assert "@@BSI_HIDDEN_TABS@@" in replacement and "@@BSI_TAB_ICONS@@" in replacement
 assert "parent.width*.86" in replacement
 assert "width:parent.width*.70;height:parent.height*.70;anchors.centerIn:parent" in replacement

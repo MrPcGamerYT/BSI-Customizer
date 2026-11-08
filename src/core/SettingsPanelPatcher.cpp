@@ -693,15 +693,15 @@ QString buildWindow(const QString &stock, const QStringList &hiddenTabs,
 UiShadowContainer{
 // BSI Settings v5
 id:iSettingsWindowShadowContainer;width:parent.width*.70;height:parent.height*.70;anchors.centerIn:parent
-property var bHidden:@@BSI_HIDDEN_TABS@@
-property var bIcons:@@BSI_TAB_ICONS@@
-function bKey(v){return v.toLowerCase().split("/").pop()}
+property var h:@@BSI_HIDDEN_TABS@@
+property var c:@@BSI_TAB_ICONS@@
+function k(v){return v.toLowerCase().split("/").pop()}
 MouseArea{width:parent.width-42;height:32;onPressed:iSettingsWindow.startSystemMove()}
 UiImageButton{asset:"CloseIcon";anchors.right:parent.right;onClicked:iSettingsWindow.close()}
 ListView{width:parent.width;height:72;y:32;clip:true;orientation:ListView.Horizontal;model:pSettingsItems.pSettingElements;currentIndex:pCurrentTabIndex
-delegate:Item{property int p:index;property var d:modelData;property string k:iSettingsWindowShadowContainer.bKey(d.pQmlSource);width:iSettingsWindowShadowContainer.bHidden.indexOf(k)<0?92:0;height:64;visible:width>0
-UiSettingsButton{anchors.fill:parent;pSettingBtnText:parent.d.pButtonText;pSelected:parent.p===pCurrentTabIndex;onSettingClicked:fChangeSelectedSetting(parent.p)}
-Image{source:iSettingsWindowShadowContainer.bIcons[parent.k]||"";width:18;height:18;anchors.horizontalCenter:parent.horizontalCenter}}
+delegate:Item{property int p:index;property string k:iSettingsWindowShadowContainer.k(modelData.pQmlSource);width:iSettingsWindowShadowContainer.h.indexOf(k)<0?92:0;height:64;visible:width>0
+UiSettingsButton{anchors.fill:parent;pSettingBtnText:modelData.pButtonText;pSelected:index===pCurrentTabIndex;onSettingClicked:fChangeSelectedSetting(parent.p)}
+Image{source:iSettingsWindowShadowContainer.c[parent.k]||"";width:18;height:18;anchors.horizontalCenter:parent.horizontalCenter}}
 }
 StackLayout{width:Math.min(parent.width*.86,760);anchors.horizontalCenter:parent.horizontalCenter;anchors.top:parent.top;anchors.bottom:parent.bottom;anchors.topMargin:108;currentIndex:pCurrentTabIndex
 Repeater{model:pSettingsItems.pSettingElements;delegate:Loader{Component.onCompleted:{var a=model.modelData.pComponentArgs;a?setSource(model.modelData.pQmlSource,a):setSource(model.modelData.pQmlSource)}onLoaded:{model.modelData.pComponentObj = item;if(item.fOnQmlLoaded)item.fOnQmlLoaded()}}}}
