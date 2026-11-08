@@ -156,6 +156,7 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
         "import QtQuick 2.15\n"
         "Item {\n"
         "    objectName: \"runtimeSettingPage\"\n"
+        "    implicitWidth: 520; implicitHeight: 360\n"
         "    anchors.fill: parent\n"
         "    function fOnQmlLoaded() { }\n"
         "}\n",
