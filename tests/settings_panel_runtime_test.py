@@ -13,7 +13,7 @@ from pathlib import Path
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("QSG_RHI_BACKEND", "software")
 
-from PySide6.QtCore import QObject, QPointF, Qt, Slot, QUrl
+from PySide6.QtCore import QObject, QPointF, Property, Qt, Slot, QUrl
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtQuick import QQuickItem, QQuickWindow
 from PySide6.QtQml import QQmlComponent, QQmlEngine
@@ -25,6 +25,23 @@ class PlayerWindowDouble(QObject):
         super().__init__()
         self.move_requested = False
         self.close_requested = False
+        self._width, self._height, self._x, self._y = 1500.0, 900.0, 0.0, 0.0
+
+    def get_width(self): return self._width
+    def set_width(self, value): self._width = float(value)
+    width = Property(float, get_width, set_width)
+
+    def get_height(self): return self._height
+    def set_height(self, value): self._height = float(value)
+    height = Property(float, get_height, set_height)
+
+    def get_x(self): return self._x
+    def set_x(self, value): self._x = float(value)
+    x = Property(float, get_x, set_x)
+
+    def get_y(self): return self._y
+    def set_y(self, value): self._y = float(value)
+    y = Property(float, get_y, set_y)
 
     @Slot()
     def startSystemMove(self):
@@ -45,10 +62,12 @@ match = re.search(
 )
 assert match, "Could not find the generated Settings-window QML template"
 replacement = match.group(1)
-assert "BSI Settings v5" in replacement
+assert "BSI Settings v6" in replacement
 assert "pSettingsItems.pSettingElements" in replacement and "property var h:" in replacement
 assert "@@BSI_HIDDEN_TABS@@" in replacement and "@@BSI_TAB_ICONS@@" in replacement
-assert "width:Math.min(parent.width*.60,1100);height:Math.min(parent.height*.68,820);anchors.centerIn:parent" in replacement
+assert "anchors.fill:parent" in replacement
+assert "iSettingsWindow.width=Math.min(w*.60,1100)" in replacement
+assert "iSettingsWindow.height=Math.min(h*.68,820)" in replacement
 assert "Math.min(parent.width*.90,600)" in replacement
 assert "width:Math.min(parent.width,520);height:parent.height;anchors.centerIn:parent" in replacement
 assert "pSettingBtnText" in replacement and "pSelected" in replacement
@@ -160,7 +179,9 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
         raise AssertionError("Settings QML failed to create: " + "\n".join(e.toString() for e in component.errors()))
 
     window = QQuickWindow()
-    window.resize(1500, 900)
+    window.resize(int(player.width), int(player.height))
+    obj.setWidth(player.width)
+    obj.setHeight(player.height)
     obj.setParentItem(window.contentItem())
     window.show()
     QTest.qWait(120)
@@ -194,8 +215,8 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
     )
     panel = next(
         (item for item in visual_tree
-         if abs(item.width() - window.width() * 0.60) < 2
-         and abs(item.height() - window.height() * 0.68) < 2),
+         if abs(item.width() - window.width()) < 2
+         and abs(item.height() - window.height()) < 2),
         None,
     )
     first_tab = next(
@@ -233,8 +254,9 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
     found_names = sorted(item.objectName() for item in visual_tree if item.objectName())
     assert not missing, f"Missing controls: {missing}; found object names: {found_names}"
     assert abs(panel.x() + panel.width() / 2 - window.width() / 2) < 2, "Settings shell was not centered in its host"
-    assert abs(panel.width() - window.width() * 0.60) < 2, "Settings shell should remain compact at 60% width"
-    assert abs(panel.height() - window.height() * 0.68) < 2, "Settings shell should remain compact at 68% height"
+    assert abs(player.width - 900) < 2 and abs(player.height - 612) < 2, "The actual Settings window should resize to a compact 60% by 68% footprint"
+    assert abs(player.x - 300) < 2 and abs(player.y - 144) < 2, "The resized Settings window should remain centered"
+    assert abs(panel.width() - window.width()) < 2 and abs(panel.height() - window.height()) < 2, "The Settings shell should fill the resized window"
     stack_center = stack.mapToItem(panel, QPointF(stack.width() / 2, stack.height() / 2))
     assert abs(stack_center.x() - panel.width() / 2) < 2, "The native page column was not centered inside the Settings shell"
     assert stack.width() <= 600.1, "The native page stack should use a readable maximum width"

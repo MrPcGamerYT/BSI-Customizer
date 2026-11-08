@@ -33,7 +33,8 @@ const QString kWindowMarker = QStringLiteral("BSI CUSTOMIZER: redesigned Setting
 const QString kPreviousWindowDesignMarker = QStringLiteral("BSI CUSTOMIZER: Settings v2");
 const QString kWindowDesignMarkerV3 = QStringLiteral("BSI Settings v3");
 const QString kWindowDesignMarkerV4 = QStringLiteral("BSI Settings v4");
-const QString kWindowDesignMarker = QStringLiteral("BSI Settings v5");
+const QString kWindowDesignMarkerV5 = QStringLiteral("BSI Settings v5");
+const QString kWindowDesignMarker = QStringLiteral("BSI Settings v6");
 const QString kAboutMarker = QStringLiteral("BSI CUSTOMIZER: redesigned About page v1");
 const QString kSchema = QStringLiteral("bsi.settings-panel.recovery");
 const QString kWindowLeaf = QStringLiteral("UiSettingsWindow.qml");
@@ -687,15 +688,16 @@ QString buildWindow(const QString &stock, const QStringList &hiddenTabs,
     }
     iconLiteral += QStringLiteral("})");
 
-    // This is a visual-only replacement. The original root Window, its native
-    // change/discard prompts, callbacks and the Loader model remain in place.
+    // Keep the native root Window, prompts, callbacks and page model; resize
+    // that window to a compact centered footprint and constrain its page loader.
     QString replacement = QStringLiteral(R"QML(
 UiShadowContainer{
-// BSI Settings v5
-id:iSettingsWindowShadowContainer;width:Math.min(parent.width*.60,1100);height:Math.min(parent.height*.68,820);anchors.centerIn:parent
+// BSI Settings v6
+id:iSettingsWindowShadowContainer;anchors.fill:parent
 property var h:@@BSI_HIDDEN_TABS@@
 property var c:@@BSI_TAB_ICONS@@
 function k(v){return v.toLowerCase().split("/").pop()}
+Component.onCompleted:{var w=iSettingsWindow.width,h=iSettingsWindow.height;iSettingsWindow.width=Math.min(w*.60,1100);iSettingsWindow.height=Math.min(h*.68,820);iSettingsWindow.x+=(w-iSettingsWindow.width)/2;iSettingsWindow.y+=(h-iSettingsWindow.height)/2}
 MouseArea{width:parent.width-42;height:32;onPressed:iSettingsWindow.startSystemMove()}
 UiImageButton{asset:"CloseIcon";anchors.right:parent.right;onClicked:iSettingsWindow.close()}
 ListView{width:parent.width;height:72;y:32;clip:true;orientation:ListView.Horizontal;model:pSettingsItems.pSettingElements;currentIndex:pCurrentTabIndex
@@ -1072,7 +1074,7 @@ bool hasWindowMarker(const QString &text)
     // by the previous Settings design.
     return text.contains(kWindowMarker) || text.contains(kPreviousWindowDesignMarker)
         || text.contains(kWindowDesignMarkerV3) || text.contains(kWindowDesignMarkerV4)
-        || text.contains(kWindowDesignMarker);
+        || text.contains(kWindowDesignMarkerV5) || text.contains(kWindowDesignMarker);
 }
 
 } // namespace
