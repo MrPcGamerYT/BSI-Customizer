@@ -15,6 +15,7 @@ struct Result { bool ok = false; QString msg; };
 QString logoPreviewDataUrl(const QString &exePath);
 
 Result patch(const QString &exePath, int holdMs = 3000,
-             const QString &mode = QString(), const QString &videoPath = QString());
+             const QString &mode = QString(), const QString &videoPath = QString(),
+             const QString &startupText = QString());
 
 } // namespace BootVideoPatcher

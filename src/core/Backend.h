@@ -187,7 +187,7 @@ public:
     Q_INVOKABLE QVariantMap integrityRestore();
 
     // ---- boot video ----
-    Q_INVOKABLE QVariantMap bootPatch(int holdMs = 3000, const QString &mode = QString(), const QString &videoPath = QString());
+    Q_INVOKABLE QVariantMap bootPatch(int holdMs = 3000, const QString &mode = QString(), const QString &videoPath = QString(), const QString &startupText = QString());
     Q_INVOKABLE QVariantMap bootLogoPreview();
     Q_INVOKABLE QVariantMap purgePlayerCache();
     Q_INVOKABLE QVariantMap gifRpcInspect(const QString &path);

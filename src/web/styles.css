@@ -314,7 +314,7 @@ dialog.cp[open]{visibility:visible;opacity:1;transform:none;animation:rise .22s 
 .boot-logo{position:relative;z-index:1;width:72px;height:72px;object-fit:contain;filter:drop-shadow(0 0 12px rgba(99,202,248,.3));animation:bootlogo 4.6s ease-in-out infinite}
 .boot-logo-placeholder{width:62px;height:62px;position:relative;z-index:1;border:1px solid rgba(178,207,226,.7);border-radius:19px;transform:rotate(45deg);box-shadow:0 0 34px rgba(74,183,232,.28);animation:bootlogo 4.6s ease-in-out infinite}
 .boot-logo-placeholder:after{content:"";position:absolute;inset:12px;border:1px solid rgba(178,207,226,.55);border-radius:12px}
-.boot-status{position:absolute;left:10px;right:10px;top:calc(43% + 74px);text-align:center;color:#d1e5f1;font-size:11px;letter-spacing:.6px;text-shadow:0 0 14px rgba(52,177,234,.35);animation:bootstatus 3.4s ease-in-out infinite}
+.boot-status{overflow-wrap:anywhere;position:absolute;left:10px;right:10px;top:calc(43% + 74px);text-align:center;color:#d1e5f1;font-size:11px;letter-spacing:.6px;text-shadow:0 0 14px rgba(52,177,234,.35);animation:bootstatus 3.4s ease-in-out infinite}
 .boot-preview-pulse,.boot-preview-orbit{position:absolute;top:43%;left:50%;width:126px;height:126px;transform:translate(-50%,-50%);border:1px solid rgba(139,220,255,.45);border-radius:50%;opacity:0;pointer-events:none}
 .boot-preview.theme-pulse .boot-preview-pulse{animation:previewpulse 3.6s ease-out infinite}
 .boot-preview.theme-orbit .boot-preview-orbit{width:164px;height:164px;border-color:rgba(125,206,240,.22);opacity:1;animation:previeworbit 8s linear infinite}

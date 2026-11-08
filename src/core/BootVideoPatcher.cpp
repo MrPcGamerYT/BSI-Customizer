@@ -14,6 +14,8 @@
 #include <QFileInfo>
 #include <QImage>
 #include <QImageReader>
+#include <QJsonArray>
+#include <QJsonDocument>
 #include <QRegularExpression>
 #include <QUrl>
 #include <QSet>
@@ -345,7 +347,14 @@ QString playerEmulatorLogo(const QString &exePath, const QByteArray &image)
     return embeddedEmulatorLogo(image);
 }
 
-QString htmlBootPage(const QString &logoUrl, bool withVideo, const QString &theme)
+// Serialize user text as a QML/JavaScript string literal, never as code.
+QString qmlStringLiteral(const QString &text)
+{
+    const QByteArray json = QJsonDocument(QJsonArray{ text }).toJson(QJsonDocument::Compact);
+    return QString::fromUtf8(json.mid(1, json.size() - 2));
+}
+
+QString htmlBootPage(const QString &logoUrl, bool withVideo, const QString &theme, const QString &startupText)
 {
     QString html = QString::fromUtf8(R"HTML(<!doctype html>
 <html lang="en">
@@ -366,7 +375,7 @@ body{color:#d8e8f2;font:16px/1.4 "Segoe UI",Arial,sans-serif}
 .ring{position:absolute;inset:-2px;border-radius:50%;background:conic-gradient(from -126deg,transparent 0deg 12deg,rgba(147,224,255,.24) 58deg,rgba(215,247,255,.98) 190deg,rgba(75,203,255,.95) 272deg,transparent 314deg 360deg);-webkit-mask:radial-gradient(farthest-side,transparent calc(100% - 5px),#000 calc(100% - 3px));mask:radial-gradient(farthest-side,transparent calc(100% - 5px),#000 calc(100% - 3px));filter:drop-shadow(0 0 8px rgba(97,219,255,.88)) drop-shadow(0 0 22px rgba(52,170,233,.44));animation:rotate 3.1s linear infinite}
 .logo{position:absolute;left:50%;top:45.5%;width:min(23vmin,190px);height:min(23vmin,190px);transform:translate(-50%,-50%);object-fit:contain;filter:drop-shadow(0 0 15px rgba(99,202,248,.28)) drop-shadow(0 8px 32px rgba(10,42,68,.42));animation:logo 4.6s ease-in-out infinite}
 .logo-fallback{position:absolute;left:50%;top:45.5%;width:min(16vmin,112px);height:min(16vmin,112px);transform:translate(-50%,-50%);border:1px solid rgba(178,223,244,.68);border-radius:50%;background:radial-gradient(circle,rgba(89,190,235,.3),rgba(9,26,42,.08) 68%,transparent 72%);box-shadow:0 0 38px rgba(73,183,232,.24);animation:logo 4.6s ease-in-out infinite}
-.status{position:absolute;left:12px;right:12px;top:calc(45.5% + min(21vmin,165px) + 22px);text-align:center;color:#d1e5f1;font-size:clamp(12px,1.35vw,16px);letter-spacing:.8px;text-shadow:0 2px 16px rgba(52,177,234,.32);animation:status 3.4s ease-in-out infinite}
+.status{position:absolute;left:12px;right:12px;top:calc(45.5% + min(21vmin,165px) + 22px);text-align:center;overflow-wrap:anywhere;color:#d1e5f1;font-size:clamp(12px,1.35vw,16px);letter-spacing:.8px;text-shadow:0 2px 16px rgba(52,177,234,.32);animation:status 3.4s ease-in-out infinite}
 .orbit{position:absolute;left:50%;top:45.5%;width:min(54vmin,420px);aspect-ratio:1;transform:translate(-50%,-50%);border:1px solid rgba(125,206,240,.18);border-radius:50%;opacity:0}
 .orbit:after{content:"";position:absolute;left:50%;top:-4px;width:7px;height:7px;margin-left:-3.5px;border-radius:50%;background:#b8efff;box-shadow:0 0 9px #70d6ff,0 0 24px rgba(87,197,255,.75)}
 .pulse{position:absolute;left:50%;top:45.5%;width:min(42vmin,330px);aspect-ratio:1;transform:translate(-50%,-50%) scale(.78);border:1px solid rgba(139,220,255,.45);border-radius:50%;opacity:0}
@@ -397,7 +406,7 @@ __VIDEO_BACKGROUND__
 <div class="pulse" aria-hidden="true"></div><div class="pulse pulse-two" aria-hidden="true"></div><div class="pulse pulse-three" aria-hidden="true"></div>
 <div class="ring-track" aria-hidden="true"><div class="ring"></div></div>
 __BSI_LOGO_ELEMENT__
-<div class="status">Emulator is starting…</div>
+<div class="status">__BSI_STARTUP_TEXT__</div>
 </main>
 </body>
 </html>
@@ -411,10 +420,11 @@ __BSI_LOGO_ELEMENT__
     html.replace(QLatin1String("__VIDEO_BACKGROUND__"), video);
     html.replace(QLatin1String("__BSI_LOGO_ELEMENT__"), logo);
     html.replace(QLatin1String("__BSI_BOOT_THEME__"), theme);
+    html.replace(QLatin1String("__BSI_STARTUP_TEXT__"), startupText.toHtmlEscaped());
     return html;
 }
 
-QString externalPlayer(const QString &logoUrl, bool withVideo, const QString &theme)
+QString externalPlayer(const QString &logoUrl, bool withVideo, const QString &theme, const QString &startupText)
 {
     QString qml = QString::fromUtf8(R"QML(import QtQuick
 Item {
@@ -702,7 +712,11 @@ Item {
         anchors.horizontalCenter: parent.horizontalCenter
         anchors.top: loadingRingTrack.bottom
         anchors.topMargin: Math.max(14, Math.min(root.width, root.height) * 0.035)
-        text: "Emulator is starting…"
+        text: __BSI_STARTUP_TEXT__
+        textFormat: Text.PlainText
+        width: Math.max(0, root.width - 24)
+        horizontalAlignment: Text.AlignHCenter
+        wrapMode: Text.Wrap
         color: "#C7D9E6"
         font.pixelSize: Math.min(Math.min(root.width, root.height) * 0.027, 16)
         font.letterSpacing: 0.8
@@ -741,6 +755,7 @@ Item {
     qml.replace(QLatin1String("__BSI_EMULATOR_LOGO__"), logoUrl);
     qml.replace(QLatin1String("__BSI_BOOT_THEME__"), theme);
     qml.replace(QLatin1String("__BSI_WITH_VIDEO__"), withVideo ? QLatin1String("true") : QLatin1String("false"));
+    qml.replace(QLatin1String("__BSI_STARTUP_TEXT__"), qmlStringLiteral(startupText));
     return qml;
 }
 
@@ -765,7 +780,7 @@ void removeGeneratedFallbackObjects(QString &boot)
         boot.remove(range.first, range.second);
 }
 
-QString nativeFallbackComponent(const QString &logoUrl, const QString &theme)
+QString nativeFallbackComponent(const QString &logoUrl, const QString &theme, const QString &startupText)
 {
     QString qml = QString::fromUtf8(R"QML(Component {
     id: bsiNativeStartupComponent
@@ -966,7 +981,11 @@ QString nativeFallbackComponent(const QString &logoUrl, const QString &theme)
             anchors.horizontalCenter: parent.horizontalCenter
             anchors.top: bsiNativeRingTrack.bottom
             anchors.topMargin: Math.max(14, Math.min(parent.width, parent.height) * 0.035)
-            text: "Emulator is starting…"
+            text: __BSI_STARTUP_TEXT__
+            textFormat: Text.PlainText
+            width: Math.max(0, parent.width - 24)
+            horizontalAlignment: Text.AlignHCenter
+            wrapMode: Text.Wrap
             color: "#C7D9E6"
             font.pixelSize: Math.min(Math.min(parent.width, parent.height) * 0.027, 16)
             font.letterSpacing: 0.8
@@ -975,6 +994,7 @@ QString nativeFallbackComponent(const QString &logoUrl, const QString &theme)
 })QML");
     qml.replace(QLatin1String("__BSI_FALLBACK_LOGO__"), logoUrl);
     qml.replace(QLatin1String("__BSI_BOOT_THEME__"), theme);
+    qml.replace(QLatin1String("__BSI_STARTUP_TEXT__"), qmlStringLiteral(startupText));
     return qml;
 }
 
@@ -1102,8 +1122,18 @@ QString logoPreviewDataUrl(const QString &exePath)
     return playerEmulatorLogo(exePath, image);
 }
 
-Result patch(const QString &exePath, int holdMs, const QString &requestedMode, const QString &videoPath)
+Result patch(const QString &exePath, int holdMs, const QString &requestedMode, const QString &videoPath,
+             const QString &requestedText)
 {
+    if (requestedText.size() > 120)
+        return { false, QStringLiteral("Startup text must be at most 120 characters.") };
+    for (const QChar ch : requestedText) {
+        const ushort c = ch.unicode();
+        if (c < 0x20 || (c >= 0x7f && c <= 0x9f) || c == 0x2028 || c == 0x2029)
+            return { false, QStringLiteral("Startup text must be a single line without control characters.") };
+    }
+    const QString startupText = requestedText.trimmed().isEmpty()
+        ? QStringLiteral("Emulator is starting…") : requestedText;
     QString mode = requestedMode.isEmpty() ? QStringLiteral("video") : requestedMode;
     if (mode == QLatin1String("modern")) mode = QStringLiteral("aurora"); // v1 API alias
     if (mode != QLatin1String("video") && mode != QLatin1String("aurora")
@@ -1242,7 +1272,7 @@ Result patch(const QString &exePath, int holdMs, const QString &requestedMode, c
         "onLoaded:{%3}"
         "onStatusChanged:{if(status===Loader.Error){console.warn(\"External boot QML failed; using native splash\");source=\"\";sourceComponent=bsiNativeStartupComponent}}}"
     ).arg(loaderId, helperUrl, readyHide)
-        + nativeFallbackComponent(logoUrl, theme)
+        + nativeFallbackComponent(logoUrl, theme, startupText)
         + QStringLiteral(
             "Timer{id:bsiBootLoadWatchdog;interval:5000;repeat:false;running:%1.status===Loader.Loading;"
             "onTriggered:{if(%1.status===Loader.Loading&&!%1.item){console.warn(\"External boot QML timed out; using native splash\");"
@@ -1395,14 +1425,14 @@ Result patch(const QString &exePath, int holdMs, const QString &requestedMode, c
         return { false, restored ? QStringLiteral("Cannot preserve the existing Assets/BootScreen.html as BootScreen.html.bak; no boot assets were replaced.")
                                  : QStringLiteral("Cannot preserve BootScreen.html, and the selected video could not be restored.") };
     }
-    const QByteArray helper = externalPlayer(logoUrl, withVideo, theme).toUtf8();
+    const QByteArray helper = externalPlayer(logoUrl, withVideo, theme, startupText).toUtf8();
     if (!writeAsset(helperPath, helper)) {
         const bool restored = rollbackVideo();
         return { false, restored ? QStringLiteral("Cannot atomically write Assets/BootVideo.qml; no executable was written.")
                                  : QStringLiteral("Cannot write Assets/BootVideo.qml, and the previous Promo.mp4 could not be restored.") };
     }
     helperWritten = true;
-    const QByteArray html = htmlBootPage(logoUrl, withVideo, theme).toUtf8();
+    const QByteArray html = htmlBootPage(logoUrl, withVideo, theme, startupText).toUtf8();
     if (!writeAsset(htmlPath, html)) {
         const bool helperRestored = rollbackHelper();
         const bool videoRestored = rollbackVideo();

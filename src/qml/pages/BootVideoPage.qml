@@ -31,9 +31,16 @@ Item {
         }
         function onExePathChanged() { page.refreshBootLogo(); }
     }
-    ColumnLayout {
+    ScrollView {
+        id: bootScroller
         anchors.fill: parent
-        anchors.margins: 24
+        contentWidth: availableWidth
+        contentHeight: bootBody.implicitHeight + 48
+        clip: true
+        ColumnLayout {
+        id: bootBody
+        x: 24; y: 24
+        width: Math.max(0, bootScroller.availableWidth - 48)
         spacing: 16
 
         Text {
@@ -73,6 +80,13 @@ Item {
                         text: qsTr("Choose MP4…")
                         onClicked: bootVideoDialog.open()
                     }
+                }
+                Label { text: qsTr("Startup message (leave blank for default)"); color: Theme.text }
+                TextField {
+                    id: bootStartupText
+                    Layout.fillWidth: true
+                    maximumLength: 120
+                    placeholderText: qsTr("Emulator is starting…")
                 }
                 Rectangle {
                     Layout.fillWidth: true
@@ -150,7 +164,9 @@ Item {
                     Text {
                         anchors.horizontalCenter: parent.horizontalCenter
                         anchors.bottom: parent.bottom; anchors.bottomMargin: 15
-                        text: qsTr("Emulator is starting…")
+                        text: bootStartupText.text.trim().length ? bootStartupText.text : qsTr("Emulator is starting…")
+                        textFormat: Text.PlainText
+                        width: parent.width - 20; horizontalAlignment: Text.AlignHCenter; elide: Text.ElideRight
                         color: "#C7D9E6"; font.pixelSize: 11; font.letterSpacing: 0.5
                     }
                 }
@@ -160,14 +176,14 @@ Item {
                     wrapMode: Text.Wrap
                     color: Theme.textDim
                     font.pixelSize: 12
-                    text: qsTr("The selected MP4 is copied to Assets/Promo.mp4. The boot page is written to Assets/BootScreen.html and loaded by HD-Player through WebEngine; that page overlays the emulator's own logo, glowing ring, and “Emulator is starting…” status. An existing video is preserved as Promo.mp4.bak.")
+                    text: qsTr("The selected MP4 is copied to Assets/Promo.mp4. The boot page is written to Assets/BootScreen.html and loaded by HD-Player through WebEngine; that page overlays the emulator's own logo, glowing ring, and your startup message. An existing video is preserved as Promo.mp4.bak.")
                 }
                 Text {
                     Layout.fillWidth: true
                     wrapMode: Text.Wrap
                     color: Theme.textDim
                     font.pixelSize: 12
-                    text: qsTr("The selected style writes the boot screen to Assets/BootScreen.html; the player boot page loads that HTML from disk. It shows the player's own logo, a softly glowing outer ring, and “Emulator is starting…”, with no BSI attribution. Native Android startup handoff and ads remain intact. The patcher validates the boot layout, refreshes QML caches, and keeps the original executable backup. Close BlueStacks before applying.")
+                    text: qsTr("The selected style writes the boot screen to Assets/BootScreen.html; the player boot page loads that HTML from disk. It shows the player's own logo, a softly glowing outer ring, and your startup message, with no BSI attribution. Native Android startup handoff and ads remain intact. The patcher validates the boot layout, refreshes QML caches, and keeps the original executable backup. Close BlueStacks before applying.")
                 }
 
                 RowLayout {
@@ -202,7 +218,7 @@ Item {
                                 page.stateColorName = "red";
                                 return;
                             }
-                            const r = backend.bootPatch(bootHold.value, page.bootMode, page.videoPath);
+                            const r = backend.bootPatch(bootHold.value, page.bootMode, page.bootMode === "video" ? page.videoPath : "", bootStartupText.text);
                             page.state = r.msg || "?";
                             page.stateColorName = r.ok ? "green" : "red";
                         }
@@ -211,7 +227,7 @@ Item {
             }
         }
 
-        Item { Layout.fillHeight: true }
+        }
     }
     FileDialog {
         id: bootVideoDialog

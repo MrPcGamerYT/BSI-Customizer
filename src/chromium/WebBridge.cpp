@@ -214,7 +214,7 @@ QVariantMap WebBridge::invoke(const QString &method, const QVariantMap &args)
             && mode != QLatin1String("orbit") && mode != QLatin1String("pulse")
             && mode != QLatin1String("solar") && mode != QLatin1String("video"))
             return failure(QStringLiteral("Invalid boot style."));
-        value = m_backend.bootPatch(hold, mode, text("sourcePath"));
+        value = m_backend.bootPatch(hold, mode, text("sourcePath"), text("startupText"));
     } else if (method == QLatin1String("purgePlayerCache")) value = m_backend.purgePlayerCache();
     else if (method == QLatin1String("restoreBackup")) value = m_backend.restoreBackup(m_backend.exePath());
     else if (method == QLatin1String("checkUpdates")) m_updates.check();
