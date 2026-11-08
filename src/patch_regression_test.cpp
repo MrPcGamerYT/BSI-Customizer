@@ -5175,7 +5175,6 @@ Window {
                           && rebuiltWindow.contains(QStringLiteral("StackLayout{id:iSelectedSettingControl;anchors.fill:parent;anchors.margins:6"))
                           && rebuiltWindow.contains(QStringLiteral("delegate:Loader{width:iSelectedSettingControl.width;height:iSelectedSettingControl.height;"))
                           && rebuiltWindow.contains(QStringLiteral("model.modelData.pComponentObj=item"))
-                          && rebuiltWindow.contains(QStringLiteral("objectName:\"bsiSettingsShell\""))
                           && rebuiltWindow.contains(QStringLiteral("fChangeSelectedSetting(pSettingIdx)"))
                           && rebuiltWindow.contains(QStringLiteral("onVisibleChanged:if(visible&&transientParent)"))
                           && rebuiltWindow.contains(QStringLiteral("width=transientParent.width*.7"))
@@ -5247,7 +5246,7 @@ Window {
                     check(updatedWindow.contains(QStringLiteral("property var h:"))
                               && (hiddenTabId.isEmpty() || updatedWindow.contains(hiddenTabId))
                               && updatedAbout.contains(QStringLiteral("property var bsiTabIcons:"))
-                              && updatedAbout.contains(QStringLiteral("function fOnQmlLoaded(){var p=parent;while(p&&p.objectName!==\"bsiSettingsShell\")p=p.parent;if(p)p.bIcons=bsiTabIcons}"))
+                              && updatedAbout.contains(QStringLiteral("function fOnQmlLoaded(){parent.parent.parent.parent.parent.parent.parent.bIcons=bsiTabIcons}"))
                               && updatedAbout.contains(QStringLiteral("data:image/svg+xml;base64,"))
                               && updatedAbout.contains(QStringLiteral("BSI Panel Regression Updated"))
                               && updatedAbout.contains(QStringLiteral("Regression subtitle")),

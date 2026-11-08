@@ -689,7 +689,7 @@ QString buildWindow(const QString &stock, const QStringList &hiddenTabs)
     QString replacement = QStringLiteral(R"QML(
 UiShadowContainer {
 // BSI Settings v7
-id:iSettingsWindowShadowContainer;objectName:"bsiSettingsShell";anchors.fill:parent
+id:iSettingsWindowShadowContainer;anchors.fill:parent
 property var bHidden:@@BSI_HIDDEN_TABS@@
 property var bIcons:({})
 function bKey(v){return v.toLowerCase().split("/").pop()}
@@ -879,7 +879,7 @@ Item {
     }
 
     // Retain the native About-page callback surface and publish profile icons to the shell.
-    function fOnQmlLoaded(){var p=parent;while(p&&p.objectName!=="bsiSettingsShell")p=p.parent;if(p)p.bIcons=bsiTabIcons}
+    function fOnQmlLoaded(){parent.parent.parent.parent.parent.parent.parent.bIcons=bsiTabIcons}
     function fCheckForUpdateCallback(apiCallStatus, jsonData) {
         if (apiCallStatus === 0) {
             var jsonObj = JSON.parse(jsonData)
