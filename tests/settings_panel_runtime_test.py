@@ -320,6 +320,7 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
         '{ title: "GitHub", url: "https://github.com/example" },\n'
         '{ title: "Community", url: "https://example.com/community" },',
     )
+    about_qml = about_qml.replace("@@BSI_TAB_ICONS@@", "({})")
     about_qml = about_qml.replace("@@BSI_LOGO_SOURCE@@", '""')
     about_path = root / "AboutHost.qml"
     about_path.write_text(about_qml, encoding="utf-8")
