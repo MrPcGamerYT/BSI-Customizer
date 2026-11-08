@@ -553,9 +553,11 @@ TargetSources readSources(const QString &exePath, const QByteArray &image)
         return out;
     }
     out.pageCount = pageNames.size();
+    const bool retainsLoadedComponent = out.window.text.contains(QLatin1String("model.modelData.pComponentObj = item"))
+        || out.window.text.contains(QLatin1String("model.modelData.pComponentObj=i"));
     if (!out.window.text.contains(QLatin1String("pSettingsItems.pSettingElements"))
         || !out.window.text.contains(QLatin1String("setSource(model.modelData.pQmlSource"))
-        || !out.window.text.contains(QLatin1String("model.modelData.pComponentObj = item"))
+        || !retainsLoadedComponent
         || !out.window.text.contains(QLatin1String("fChangeSelectedSetting"))) {
         out.error = QStringLiteral("UiSettingsWindow.qml no longer loads and retains the player’s native Settings pages; this layout cannot be safely replaced.");
         return out;
