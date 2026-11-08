@@ -708,8 +708,8 @@ MouseArea{width:parent.width-42;height:parent.height;onPressed:iSettingsWindow.s
 Text{text:qsTranslate("QObject","Settings");color:UiTheme.colors.primary10;font:UiTheme.fonts.bodyLarge;anchors.verticalCenter:parent.verticalCenter}
 UiImageButton{asset:"CloseIcon";pImageWidth:16;pImageHeight:16;anchors.right:parent.right;anchors.verticalCenter:parent.verticalCenter;onClicked:iSettingsWindow.close()}}
 ListView{width:parent.width;height:76;clip:true;orientation:ListView.Horizontal;spacing:7;currentIndex:pCurrentTabIndex;model:pSettingsItems.pSettingElements
-delegate:Item{property int p:index;property var d:modelData;property string k:iSettingsWindowShadowContainer.bKey(d.pQmlSource);property string icon:iSettingsWindowShadowContainer.bIcons[k]||"";width:iSettingsWindowShadowContainer.bHidden.indexOf(k)<0?92:0;height:64;visible:width>0
-UiSettingsButton{width:92;height:64;pSettingIdx:parent.p;pSettingBtnText:parent.d.pButtonText;pSelected:parent.p===pCurrentTabIndex;pShowRedDot:parent.d.pShowRedDot;onSettingClicked:fChangeSelectedSetting(pSettingIdx)}
+delegate:Item{property string k:iSettingsWindowShadowContainer.bKey(modelData.pQmlSource);property string icon:iSettingsWindowShadowContainer.bIcons[k]||"";width:iSettingsWindowShadowContainer.bHidden.indexOf(k)<0?92:0;height:64;visible:width>0
+UiSettingsButton{width:92;height:64;pSettingIdx:index;pSettingBtnText:modelData.pButtonText;pSelected:index===pCurrentTabIndex;pShowRedDot:modelData.pShowRedDot;onSettingClicked:fChangeSelectedSetting(pSettingIdx)}
 Image{source:parent.icon;width:18;height:18;anchors.horizontalCenter:parent.horizontalCenter}}
 }
 Item{width:parent.width;height:parent.height-128
@@ -727,7 +727,7 @@ Repeater{model:pSettingsItems.pSettingElements;delegate:Loader{width:iSelectedSe
     QString out = stock;
     out.replace(target.nameBegin, target.end - target.nameBegin, replacement);
     // Preserve PR #88's actual Settings-window resize and centered placement.
-    const QString helper = QStringLiteral(R"QML(onVisibleChanged:if(visible&&transientParent){width=transientParent.width*.7;height=transientParent.height*.7;x=transientParent.x+(transientParent.width-width)/2;y=transientParent.y+(transientParent.height-height)/2})QML");
+    const QString helper = QStringLiteral(R"QML(onVisibleChanged:if(visible&&transientParent){width=transientParent.width*.7;height=transientParent.height*.7;x=transientParent.x+transientParent.width*.15;y=transientParent.y+transientParent.height*.15})QML");
     const int rootClose = out.lastIndexOf(QLatin1String("\n}"));
     if (rootClose < 0) return {};
     out.insert(rootClose, helper);

@@ -71,8 +71,8 @@ assert "Column{anchors.fill:parent;anchors.margins:12;spacing:8" in replacement
 assert "height:parent.height-128" in replacement
 assert "StackLayout{id:iSelectedSettingControl;anchors.fill:parent;anchors.margins:6" in replacement
 assert "delegate:Loader{width:iSelectedSettingControl.width;height:iSelectedSettingControl.height;" in replacement
-assert "pSettingBtnText:" in replacement and "pSelected:" in replacement and "pShowRedDot:" in replacement
-assert "property int p:index" in replacement
+assert "pSettingBtnText:" in replacement and "pSelected:index===pCurrentTabIndex" in replacement and "pShowRedDot:modelData.pShowRedDot" in replacement
+assert "pSettingIdx:index" in replacement
 assert "fChangeSelectedSetting(pSettingIdx)" in replacement
 assert "onPressed:iSettingsWindow.startSystemMove()" in replacement
 helper_match = re.search(
@@ -85,8 +85,8 @@ helper = helper_match.group(1)
 assert "onVisibleChanged:if(visible&&transientParent)" in helper
 assert "width=transientParent.width*.7" in helper
 assert "height=transientParent.height*.7" in helper
-assert "(transientParent.width-width)/2" in helper
-assert "(transientParent.height-height)/2" in helper
+assert "x=transientParent.x+transientParent.width*.15" in helper
+assert "y=transientParent.y+transientParent.height*.15" in helper
 replacement = replacement.replace("@@BSI_HIDDEN_TABS@@", "[]")
 replacement = replacement.replace("@@BSI_TAB_ICONS@@", "({})")
 
