@@ -33,7 +33,8 @@ const QString kWindowMarker = QStringLiteral("BSI CUSTOMIZER: redesigned Setting
 const QString kPreviousWindowDesignMarker = QStringLiteral("BSI CUSTOMIZER: Settings v2");
 const QString kWindowDesignMarkerV3 = QStringLiteral("BSI Settings v3");
 const QString kWindowDesignMarkerV4 = QStringLiteral("BSI Settings v4");
-const QString kWindowDesignMarker = QStringLiteral("BSI Settings v5");
+const QString kWindowDesignMarkerV5 = QStringLiteral("BSI Settings v5");
+const QString kWindowDesignMarker = QStringLiteral("BSI6");
 const QString kAboutMarker = QStringLiteral("BSI CUSTOMIZER: redesigned About page v1");
 const QString kSchema = QStringLiteral("bsi.settings-panel.recovery");
 const QString kWindowLeaf = QStringLiteral("UiSettingsWindow.qml");
@@ -552,9 +553,12 @@ TargetSources readSources(const QString &exePath, const QByteArray &image)
         return out;
     }
     out.pageCount = pageNames.size();
+    const bool retainsLoadedComponent = out.window.text.contains(QLatin1String("model.modelData.pComponentObj = item"))
+        || out.window.text.contains(QLatin1String("model.modelData.pComponentObj=i"))
+        || out.window.text.contains(QLatin1String("model.modelData.pComponentObj=item"));
     if (!out.window.text.contains(QLatin1String("pSettingsItems.pSettingElements"))
         || !out.window.text.contains(QLatin1String("setSource(model.modelData.pQmlSource"))
-        || !out.window.text.contains(QLatin1String("model.modelData.pComponentObj = item"))
+        || !retainsLoadedComponent
         || !out.window.text.contains(QLatin1String("fChangeSelectedSetting"))) {
         out.error = QStringLiteral("UiSettingsWindow.qml no longer loads and retains the player’s native Settings pages; this layout cannot be safely replaced.");
         return out;
@@ -687,15 +691,16 @@ QString buildWindow(const QString &stock, const QStringList &hiddenTabs,
     }
     iconLiteral += QStringLiteral("})");
 
-    // This is a visual-only replacement. The original root Window, its native
-    // change/discard prompts, callbacks and the Loader model remain in place.
+    // Keep the native root Window, prompts, callbacks and page model; resize
+    // that window to a compact centered footprint and constrain its page loader.
     QString replacement = QStringLiteral(R"QML(
 UiShadowContainer{
-// BSI Settings v5
-id:iSettingsWindowShadowContainer;width:parent.width*.70;height:parent.height*.70;anchors.centerIn:parent
+//BSI6
+id:iSettingsWindowShadowContainer;anchors.fill:parent
 property var h:@@BSI_HIDDEN_TABS@@
 property var c:@@BSI_TAB_ICONS@@
 function k(v){return v.toLowerCase().split("/").pop()}
+Component.onCompleted:{iSettingsWindow.width*=.6;iSettingsWindow.height*=.68;iSettingsWindow.x+=iSettingsWindow.width/3;iSettingsWindow.y+=iSettingsWindow.height*.2353}
 MouseArea{width:parent.width-42;height:32;onPressed:iSettingsWindow.startSystemMove()}
 UiImageButton{asset:"CloseIcon";anchors.right:parent.right;onClicked:iSettingsWindow.close()}
 ListView{width:parent.width;height:72;y:32;clip:true;orientation:ListView.Horizontal;model:pSettingsItems.pSettingElements;currentIndex:pCurrentTabIndex
@@ -703,8 +708,8 @@ delegate:Item{property int p:index;property string k:iSettingsWindowShadowContai
 UiSettingsButton{anchors.fill:parent;pSettingBtnText:modelData.pButtonText;pSelected:index===pCurrentTabIndex;onSettingClicked:fChangeSelectedSetting(parent.p)}
 Image{source:iSettingsWindowShadowContainer.c[parent.k]||"";width:18;height:18;anchors.horizontalCenter:parent.horizontalCenter}}
 }
-StackLayout{width:Math.min(parent.width*.86,760);anchors.horizontalCenter:parent.horizontalCenter;anchors.top:parent.top;anchors.bottom:parent.bottom;anchors.topMargin:108;currentIndex:pCurrentTabIndex
-Repeater{model:pSettingsItems.pSettingElements;delegate:Loader{Component.onCompleted:{var a=model.modelData.pComponentArgs;a?setSource(model.modelData.pQmlSource,a):setSource(model.modelData.pQmlSource)}onLoaded:{model.modelData.pComponentObj = item;if(item.fOnQmlLoaded)item.fOnQmlLoaded()}}}}
+StackLayout{width:Math.min(parent.width,520);x:(parent.width-width)/2;y:108;height:parent.height-108;currentIndex:pCurrentTabIndex
+Repeater{model:pSettingsItems.pSettingElements;delegate:Item{Loader{width:parent.width;height:parent.height;Component.onCompleted:setSource(model.modelData.pQmlSource,model.modelData.pComponentArgs||({}));onLoaded:{model.modelData.pComponentObj=item;item.fOnQmlLoaded&&item.fOnQmlLoaded()}}}}}
 }
 )QML");
     replacement.replace(QStringLiteral("@@BSI_HIDDEN_TABS@@"), hiddenLiteral);
@@ -1072,7 +1077,7 @@ bool hasWindowMarker(const QString &text)
     // by the previous Settings design.
     return text.contains(kWindowMarker) || text.contains(kPreviousWindowDesignMarker)
         || text.contains(kWindowDesignMarkerV3) || text.contains(kWindowDesignMarkerV4)
-        || text.contains(kWindowDesignMarker);
+        || text.contains(kWindowDesignMarkerV5) || text.contains(kWindowDesignMarker);
 }
 
 } // namespace

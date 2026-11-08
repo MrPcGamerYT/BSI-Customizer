@@ -13,7 +13,7 @@ from pathlib import Path
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("QSG_RHI_BACKEND", "software")
 
-from PySide6.QtCore import QObject, QPointF, Qt, Slot, QUrl
+from PySide6.QtCore import QObject, QPointF, Property, Qt, Slot, QUrl
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtQuick import QQuickItem, QQuickWindow
 from PySide6.QtQml import QQmlComponent, QQmlEngine
@@ -25,6 +25,23 @@ class PlayerWindowDouble(QObject):
         super().__init__()
         self.move_requested = False
         self.close_requested = False
+        self._width, self._height, self._x, self._y = 1500.0, 900.0, 0.0, 0.0
+
+    def get_width(self): return self._width
+    def set_width(self, value): self._width = float(value)
+    width = Property(float, get_width, set_width)
+
+    def get_height(self): return self._height
+    def set_height(self, value): self._height = float(value)
+    height = Property(float, get_height, set_height)
+
+    def get_x(self): return self._x
+    def set_x(self, value): self._x = float(value)
+    x = Property(float, get_x, set_x)
+
+    def get_y(self): return self._y
+    def set_y(self, value): self._y = float(value)
+    y = Property(float, get_y, set_y)
 
     @Slot()
     def startSystemMove(self):
@@ -45,14 +62,20 @@ match = re.search(
 )
 assert match, "Could not find the generated Settings-window QML template"
 replacement = match.group(1)
-assert "BSI Settings v5" in replacement
+assert "BSI6" in replacement
 assert "pSettingsItems.pSettingElements" in replacement and "property var h:" in replacement
 assert "@@BSI_HIDDEN_TABS@@" in replacement and "@@BSI_TAB_ICONS@@" in replacement
-assert "parent.width*.86" in replacement
-assert "width:parent.width*.70;height:parent.height*.70;anchors.centerIn:parent" in replacement
-assert "Math.min(parent.width*.86,760)" in replacement
+assert "anchors.fill:parent" in replacement
+assert "iSettingsWindow.width*=.6" in replacement
+assert "iSettingsWindow.height*=.68" in replacement
+assert "iSettingsWindow.x+=iSettingsWindow.width/3" in replacement
+assert "iSettingsWindow.y+=iSettingsWindow.height*.2353" in replacement
+assert "Math.min(parent.width,520)" in replacement
+assert "x:(parent.width-width)/2;y:108;height:parent.height-108" in replacement
+assert "width:parent.width;height:parent.height" in replacement
 assert "pSettingBtnText" in replacement and "pSelected" in replacement
-assert "anchors.topMargin:108" in replacement
+assert "property int p:index" in replacement
+assert "fChangeSelectedSetting(parent.p)" in replacement
 assert "onPressed:iSettingsWindow.startSystemMove()" in replacement
 replacement = replacement.replace("@@BSI_HIDDEN_TABS@@", "[]")
 replacement = replacement.replace("@@BSI_TAB_ICONS@@", "({})")
@@ -124,6 +147,7 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
         "import QtQuick 2.15\n"
         "Item {\n"
         "    objectName: \"runtimeSettingPage\"\n"
+        "    anchors.fill: parent\n"
         "    function fOnQmlLoaded() { }\n"
         "}\n",
         encoding="utf-8",
@@ -159,7 +183,9 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
         raise AssertionError("Settings QML failed to create: " + "\n".join(e.toString() for e in component.errors()))
 
     window = QQuickWindow()
-    window.resize(1500, 900)
+    window.resize(int(player.width), int(player.height))
+    obj.setWidth(player.width)
+    obj.setHeight(player.height)
     obj.setParentItem(window.contentItem())
     window.show()
     QTest.qWait(120)
@@ -185,10 +211,16 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
         (item for item in visual_tree if item.metaObject().className().endswith("StackLayout")),
         None,
     )
+    page_loader = next(
+        (item for item in visual_tree
+         if item.metaObject().className().endswith("Loader")
+         and item.property("item") is not None),
+        None,
+    )
     panel = next(
         (item for item in visual_tree
-         if abs(item.width() - window.width() * 0.70) < 2
-         and abs(item.height() - window.height() * 0.70) < 2),
+         if abs(item.width() - window.width()) < 2
+         and abs(item.height() - window.height()) < 2),
         None,
     )
     first_tab = next(
@@ -214,6 +246,7 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
     )
     controls = {
         "compact centered panel": panel,
+        "centered native page loader": page_loader,
         "tabs": tabs,
         "stack": stack,
         "loaded native page": loaded_page,
@@ -225,10 +258,16 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
     found_names = sorted(item.objectName() for item in visual_tree if item.objectName())
     assert not missing, f"Missing controls: {missing}; found object names: {found_names}"
     assert abs(panel.x() + panel.width() / 2 - window.width() / 2) < 2, "Settings shell was not centered in its host"
-    assert abs(panel.width() - window.width() * 0.70) < 2, "Settings shell should remain at the compact 70% width"
+    assert abs(player.width - 900) < 2 and abs(player.height - 612) < 2, "The actual Settings window should resize to a compact 60% by 68% footprint"
+    assert abs(player.x - 300) < 2 and abs(player.y - 144) < 2, "The resized Settings window should remain centered"
+    assert abs(panel.width() - window.width()) < 2 and abs(panel.height() - window.height()) < 2, "The Settings shell should fill the resized window"
     stack_center = stack.mapToItem(panel, QPointF(stack.width() / 2, stack.height() / 2))
     assert abs(stack_center.x() - panel.width() / 2) < 2, "The native page column was not centered inside the Settings shell"
-    assert stack.width() <= 760.1, "The native page column should use a readable maximum width"
+    assert stack.width() <= 600.1, "The native page stack should use a readable maximum width"
+    loader_center = page_loader.mapToItem(page_loader.parentItem(), QPointF(page_loader.width() / 2, page_loader.height() / 2))
+    assert abs(loader_center.x() - page_loader.parentItem().width() / 2) < 2, "The loaded native page was not centered inside its stack cell"
+    assert page_loader.width() <= 520.1, "The loaded native page should stay within the compact centered column"
+    assert abs(loaded_page.width() - page_loader.width()) < 2, "The loaded native page did not follow its centered loader width"
     assert loaded_page.objectName() == "runtimeSettingPage", "The native Settings page Loader did not load its page"
     assert str(first_tab.property("pSettingBtnText")).splitlines()[0], "Category tabs should show their own icon glyphs"
 
