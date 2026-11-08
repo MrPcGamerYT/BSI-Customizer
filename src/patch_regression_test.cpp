@@ -5172,7 +5172,7 @@ Window {
                           && rebuiltWindow.contains(QStringLiteral("parent.width*.70"))
                           && rebuiltWindow.contains(QStringLiteral("anchors.centerIn:parent"))
                           && rebuiltWindow.contains(QStringLiteral("Math.min(parent.width*.86,760)"))
-                          && rebuiltWindow.contains(QStringLiteral("Image{source:parent.icon"))
+                          && rebuiltWindow.contains(QStringLiteral("Image{source:iSettingsWindowShadowContainer.bIcons[parent.k]"))
                           && rebuiltWindow.contains(QStringLiteral("asset:\"CloseIcon\""))
                           && rebuiltWindow.contains(QStringLiteral("fChangeSelectedSetting(parent.p)"))
                           && rebuiltWindow.contains(QStringLiteral("StackLayout"))

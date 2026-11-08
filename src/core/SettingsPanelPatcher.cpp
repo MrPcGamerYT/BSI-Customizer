@@ -696,17 +696,15 @@ id:iSettingsWindowShadowContainer;width:parent.width*.70;height:parent.height*.7
 property var bHidden:@@BSI_HIDDEN_TABS@@
 property var bIcons:@@BSI_TAB_ICONS@@
 function bKey(v){return v.toLowerCase().split("/").pop()}
-Item{anchors.fill:parent
 MouseArea{width:parent.width-42;height:32;onPressed:iSettingsWindow.startSystemMove()}
 UiImageButton{asset:"CloseIcon";anchors.right:parent.right;onClicked:iSettingsWindow.close()}
 ListView{width:parent.width;height:72;y:32;clip:true;orientation:ListView.Horizontal;model:pSettingsItems.pSettingElements;currentIndex:pCurrentTabIndex
-delegate:Item{property int p:index;property var d:modelData;property string k:iSettingsWindowShadowContainer.bKey(d.pQmlSource);property string icon:iSettingsWindowShadowContainer.bIcons[k]||"";width:iSettingsWindowShadowContainer.bHidden.indexOf(k)<0?92:0;height:64;visible:width>0
+delegate:Item{property int p:index;property var d:modelData;property string k:iSettingsWindowShadowContainer.bKey(d.pQmlSource);width:iSettingsWindowShadowContainer.bHidden.indexOf(k)<0?92:0;height:64;visible:width>0
 UiSettingsButton{anchors.fill:parent;pSettingBtnText:parent.d.pButtonText;pSelected:parent.p===pCurrentTabIndex;onSettingClicked:fChangeSelectedSetting(parent.p)}
-Image{source:parent.icon;width:18;height:18;anchors.horizontalCenter:parent.horizontalCenter}}
+Image{source:iSettingsWindowShadowContainer.bIcons[parent.k]||"";width:18;height:18;anchors.horizontalCenter:parent.horizontalCenter}}
 }
 StackLayout{width:Math.min(parent.width*.86,760);anchors.horizontalCenter:parent.horizontalCenter;anchors.top:parent.top;anchors.bottom:parent.bottom;anchors.topMargin:108;currentIndex:pCurrentTabIndex
 Repeater{model:pSettingsItems.pSettingElements;delegate:Loader{Component.onCompleted:{var a=model.modelData.pComponentArgs;a?setSource(model.modelData.pQmlSource,a):setSource(model.modelData.pQmlSource)}onLoaded:{model.modelData.pComponentObj = item;if(item.fOnQmlLoaded)item.fOnQmlLoaded()}}}}
-}
 }
 )QML");
     replacement.replace(QStringLiteral("@@BSI_HIDDEN_TABS@@"), hiddenLiteral);
