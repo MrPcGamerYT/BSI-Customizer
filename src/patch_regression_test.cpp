@@ -5165,18 +5165,22 @@ Window {
                     if (file.name.compare(QLatin1String("UiSettingsWindow.qml"), Qt::CaseInsensitive) == 0)
                         rebuiltWindow = QString::fromUtf8(QtResources::readFile(panelImage, file));
                 }
-                check(rebuiltWindow.contains(QStringLiteral("BSI Settings v4"))
+                check(rebuiltWindow.contains(QStringLiteral("BSI Settings v5"))
                           && rebuiltWindow.contains(QStringLiteral("bHidden"))
                           && rebuiltWindow.contains(QStringLiteral("bIcons"))
                           && rebuiltWindow.contains(QStringLiteral("pSettingBtnText"))
+                          && rebuiltWindow.contains(QStringLiteral("parent.width*.70"))
+                          && rebuiltWindow.contains(QStringLiteral("anchors.centerIn:parent"))
                           && rebuiltWindow.contains(QStringLiteral("parent.width*.86"))
+                          && rebuiltWindow.contains(QStringLiteral("Layout.preferredWidth:Math.min(parent.width,760)"))
+                          && rebuiltWindow.contains(QStringLiteral("Layout.alignment:Qt.AlignHCenter"))
                           && rebuiltWindow.contains(QStringLiteral("Image{source:parent.icon"))
                           && rebuiltWindow.contains(QStringLiteral("asset:\"CloseIcon\""))
                           && rebuiltWindow.contains(QStringLiteral("fChangeSelectedSetting(parent.p)"))
                           && rebuiltWindow.contains(QStringLiteral("StackLayout"))
                           && rebuiltWindow.contains(QStringLiteral("model.modelData.pComponentObj = item"))
                           && rebuiltWindow.contains(QStringLiteral("iSettingsWindow.startSystemMove()")),
-                      QStringLiteral("the rebuilt %1 Settings window centers native page contents, supports custom tab icons, and keeps native page loading, selection, dragging, and close behavior")
+                      QStringLiteral("the rebuilt %1 Settings window stays compact, centers its native page column, supports custom tab icons, and keeps native page loading, selection, dragging, and close behavior")
                           .arg(QFileInfo(input).fileName()));
                 QString expectedLogoSource;
                 for (const auto &entry : EmbeddedResources::list(original, true)) {

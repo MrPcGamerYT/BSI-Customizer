@@ -32,7 +32,8 @@ namespace {
 const QString kWindowMarker = QStringLiteral("BSI CUSTOMIZER: redesigned Settings window v1");
 const QString kPreviousWindowDesignMarker = QStringLiteral("BSI CUSTOMIZER: Settings v2");
 const QString kWindowDesignMarkerV3 = QStringLiteral("BSI Settings v3");
-const QString kWindowDesignMarker = QStringLiteral("BSI Settings v4");
+const QString kWindowDesignMarkerV4 = QStringLiteral("BSI Settings v4");
+const QString kWindowDesignMarker = QStringLiteral("BSI Settings v5");
 const QString kAboutMarker = QStringLiteral("BSI CUSTOMIZER: redesigned About page v1");
 const QString kSchema = QStringLiteral("bsi.settings-panel.recovery");
 const QString kWindowLeaf = QStringLiteral("UiSettingsWindow.qml");
@@ -690,8 +691,8 @@ QString buildWindow(const QString &stock, const QStringList &hiddenTabs,
     // change/discard prompts, callbacks and the Loader model remain in place.
     QString replacement = QStringLiteral(R"QML(
 UiShadowContainer{
-// BSI Settings v4
-id:iSettingsWindowShadowContainer;anchors.fill:parent
+// BSI Settings v5
+id:iSettingsWindowShadowContainer;width:parent.width*.70;height:parent.height*.70;anchors.centerIn:parent
 property var bHidden:@@BSI_HIDDEN_TABS@@
 property var bIcons:@@BSI_TAB_ICONS@@
 function bKey(v){return v.toLowerCase().split("/").pop()}
@@ -704,7 +705,7 @@ UiSettingsButton{anchors.fill:parent;pSettingBtnText:parent.d.pButtonText;pSelec
 Image{source:parent.icon;width:18;height:18;anchors.horizontalCenter:parent.horizontalCenter}}
 }
 StackLayout{width:parent.width*.86;anchors.horizontalCenter:parent.horizontalCenter;anchors.top:parent.top;anchors.bottom:parent.bottom;anchors.topMargin:108;currentIndex:pCurrentTabIndex
-Repeater{model:pSettingsItems.pSettingElements;delegate:Loader{Component.onCompleted:{var a=model.modelData.pComponentArgs;a?setSource(model.modelData.pQmlSource,a):setSource(model.modelData.pQmlSource)}onLoaded:{model.modelData.pComponentObj = item;if(item.fOnQmlLoaded)item.fOnQmlLoaded()}}}}
+Repeater{model:pSettingsItems.pSettingElements;delegate:Loader{Layout.fillWidth:false;Layout.fillHeight:true;Layout.preferredWidth:Math.min(parent.width,760);Layout.alignment:Qt.AlignHCenter;Component.onCompleted:{var a=model.modelData.pComponentArgs;a?setSource(model.modelData.pQmlSource,a):setSource(model.modelData.pQmlSource)}onLoaded:{model.modelData.pComponentObj = item;if(item.fOnQmlLoaded)item.fOnQmlLoaded()}}}}
 }
 }
 )QML");
@@ -1072,7 +1073,8 @@ bool hasWindowMarker(const QString &text)
     // Keep recognizing v1 so users can update or safely restore a panel built
     // by the previous Settings design.
     return text.contains(kWindowMarker) || text.contains(kPreviousWindowDesignMarker)
-        || text.contains(kWindowDesignMarkerV3) || text.contains(kWindowDesignMarker);
+        || text.contains(kWindowDesignMarkerV3) || text.contains(kWindowDesignMarkerV4)
+        || text.contains(kWindowDesignMarker);
 }
 
 } // namespace
