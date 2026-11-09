@@ -5200,7 +5200,7 @@ Window {
                           && rebuiltWindow.contains(QStringLiteral("ListView{id:v;"))
                           && rebuiltWindow.contains(QStringLiteral("orientation:ListView.Horizontal;model:pSettingsItems.pSettingElements"))
                           && rebuiltWindow.contains(QStringLiteral("item.anchors.fill=item.parent"))
-                          && rebuiltWindow.contains(QStringLiteral("Image{source:iSettingsWindowShadowContainer.bIcons[parent.k]||"";width:18;height:18"))
+                          && rebuiltWindow.contains(QStringLiteral("Image{source:iSettingsWindowShadowContainer.bIcons[parent.k]||\"\";width:18;height:18"))
                           && rebuiltWindow.contains(QStringLiteral("StackLayout{id:iSelectedSettingControl;anchors.fill:parent;anchors.margins:6"))
                           && rebuiltWindow.contains(QStringLiteral("delegate:Loader{width:iSelectedSettingControl.width;height:iSelectedSettingControl.height;"))
                           && rebuiltWindow.contains(QStringLiteral("model.modelData.pComponentObj=item"))
