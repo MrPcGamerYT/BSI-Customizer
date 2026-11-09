@@ -5197,7 +5197,7 @@ Window {
                           && rebuiltWindow.contains(QStringLiteral("Column{anchors.fill:parent;anchors.margins:12;spacing:8"))
                           && rebuiltWindow.contains(QStringLiteral("pShowRedDot:modelData.pShowRedDot"))
                           && rebuiltWindow.contains(QStringLiteral("anchors.centerIn:parent"))
-                          && rebuiltWindow.contains(QStringLiteral("ListView{id:t;"))
+                          && rebuiltWindow.contains(QStringLiteral("ListView{id:v;"))
                           && rebuiltWindow.contains(QStringLiteral("orientation:ListView.Horizontal;model:pSettingsItems.pSettingElements"))
                           && rebuiltWindow.contains(QStringLiteral("item.anchors.fill=item.parent"))
                           && rebuiltWindow.contains(QStringLiteral("Image{source:parent.i;width:18;height:18"))

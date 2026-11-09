@@ -72,10 +72,10 @@ assert "property var bsiTabIcons: @@BSI_TAB_ICONS@@" in cpp
 assert "Rectangle{anchors.fill:parent;color:UiTheme.colors.primary80;radius:12" in replacement
 assert "Column{anchors.fill:parent;anchors.margins:12;spacing:8" in replacement
 assert "anchors.centerIn:parent" in replacement
-assert "ListView{id:t;" in replacement
+assert "ListView{id:v;" in replacement
 assert "orientation:ListView.Horizontal;model:pSettingsItems.pSettingElements" in replacement
 assert "property var h:iSettingsWindowShadowContainer.bHidden" in replacement
-assert "width:t.width/t.count" in replacement
+assert "width:v.width/v.count" in replacement
 assert "visible:!~h.indexOf(k)" in replacement
 assert "item.anchors.fill=item.parent" in replacement
 assert "height:parent.height-128" in replacement
