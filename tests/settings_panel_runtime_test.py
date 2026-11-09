@@ -71,7 +71,7 @@ assert "property var bsiHiddenTabs: @@BSI_HIDDEN_TABS@@" in cpp
 assert "property var bsiTabIcons: @@BSI_TAB_ICONS@@" in cpp
 assert "Rectangle{anchors.fill:parent;color:UiTheme.colors.primary80;radius:12" in replacement
 assert "Column{anchors.fill:parent;anchors.margins:12;spacing:8" in replacement
-assert "x:(parent.width-width)/2" in replacement
+assert "anchors.centerIn:parent" in replacement
 assert "ListView{id:t;" in replacement and "spacing:0;" in replacement
 assert "t.width/(t.count-iSettingsWindowShadowContainer.bHidden.length)" in replacement
 assert "item.anchors.fill=item.parent" in replacement

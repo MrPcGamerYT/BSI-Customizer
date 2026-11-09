@@ -5196,7 +5196,7 @@ Window {
                           && rebuiltWindow.contains(QStringLiteral("Rectangle{anchors.fill:parent;color:UiTheme.colors.primary80;radius:12"))
                           && rebuiltWindow.contains(QStringLiteral("Column{anchors.fill:parent;anchors.margins:12;spacing:8"))
                           && rebuiltWindow.contains(QStringLiteral("pShowRedDot:modelData.pShowRedDot"))
-                          && rebuiltWindow.contains(QStringLiteral("x:(parent.width-width)/2"))
+                          && rebuiltWindow.contains(QStringLiteral("anchors.centerIn:parent"))
                           && rebuiltWindow.contains(QStringLiteral("ListView{id:t;"))
                           && rebuiltWindow.contains(QStringLiteral("spacing:0;currentIndex:pCurrentTabIndex"))
                           && rebuiltWindow.contains(QStringLiteral("item.anchors.fill=item.parent"))

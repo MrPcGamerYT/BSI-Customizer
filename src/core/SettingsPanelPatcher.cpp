@@ -691,7 +691,7 @@ Rectangle{anchors.fill:parent;color:UiTheme.colors.primary80;radius:12;clip:true
 Column{anchors.fill:parent;anchors.margins:12;spacing:8
 Item{width:parent.width;height:36
 MouseArea{width:parent.width-42;height:parent.height;onPressed:iSettingsWindow.startSystemMove()}
-Text{text:qsTranslate("QObject","Settings");color:UiTheme.colors.primary10;font:UiTheme.fonts.bodyLarge;x:(parent.width-width)/2;anchors.verticalCenter:parent.verticalCenter}
+Text{text:qsTranslate("QObject","Settings");color:UiTheme.colors.primary10;font:UiTheme.fonts.bodyLarge;anchors.centerIn:parent}
 UiImageButton{asset:"CloseIcon";pImageWidth:16;pImageHeight:16;anchors.right:parent.right;anchors.verticalCenter:parent.verticalCenter;onClicked:iSettingsWindow.close()}}
 ListView{id:t;width:parent.width;height:76;clip:true;orientation:ListView.Horizontal;spacing:0;currentIndex:pCurrentTabIndex;model:pSettingsItems.pSettingElements
 delegate:Item{property string k:iSettingsWindowShadowContainer.bKey(modelData.pQmlSource);property string icon:iSettingsWindowShadowContainer.bIcons[k]||"";width:iSettingsWindowShadowContainer.bHidden.indexOf(k)<0?t.width/(t.count-iSettingsWindowShadowContainer.bHidden.length):0;height:64;visible:width>0
