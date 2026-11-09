@@ -693,8 +693,8 @@ Item{width:parent.width;height:36
 MouseArea{width:parent.width-42;height:parent.height;onPressed:iSettingsWindow.startSystemMove()}
 Text{text:qsTranslate("QObject","Settings");color:UiTheme.colors.primary10;font:UiTheme.fonts.bodyLarge;anchors.centerIn:parent}
 UiImageButton{asset:"CloseIcon";pImageWidth:16;pImageHeight:16;anchors.right:parent.right;anchors.verticalCenter:parent.verticalCenter;onClicked:iSettingsWindow.close()}}
-ListView{id:t;width:parent.width;height:76;orientation:ListView.Horizontal;spacing:0;currentIndex:pCurrentTabIndex;model:pSettingsItems.pSettingElements;property var h:iSettingsWindowShadowContainer.bHidden
-delegate:Item{property var k:iSettingsWindowShadowContainer.bKey(modelData.pQmlSource);property var icon:iSettingsWindowShadowContainer.bIcons[k]||"";width:t.h.indexOf(k)<0?t.width/(t.count-t.h.length):0;height:64;visible:width>0
+ListView{id:t;width:parent.width;height:76;orientation:ListView.Horizontal;spacing:0;currentIndex:pCurrentTabIndex;model:pSettingsItems.pSettingElements
+delegate:Item{property string k:iSettingsWindowShadowContainer.bKey(modelData.pQmlSource);property var h:iSettingsWindowShadowContainer.bHidden;property string icon:iSettingsWindowShadowContainer.bIcons[k]||"";width:h.indexOf(k)<0?t.width/(t.count-h.length):0;height:64;visible:width>0
 UiSettingsButton{width:parent.width;height:64;pSettingIdx:index;pSettingBtnText:modelData.pButtonText;pSelected:index===pCurrentTabIndex;pShowRedDot:modelData.pShowRedDot;onSettingClicked:fChangeSelectedSetting(pSettingIdx)}
 Image{source:parent.icon;width:18;height:18;anchors.horizontalCenter:parent.horizontalCenter}}
 }
