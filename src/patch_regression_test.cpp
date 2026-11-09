@@ -5190,26 +5190,25 @@ Window {
                     if (file.name.compare(QLatin1String("UiSettingsWindow.qml"), Qt::CaseInsensitive) == 0)
                         rebuiltWindow = QString::fromUtf8(QtResources::readFile(panelImage, file));
                 }
-                check(rebuiltWindow.contains(QStringLiteral("BSI6"))
-                          && rebuiltWindow.contains(QStringLiteral("property var h:"))
-                          && rebuiltWindow.contains(QStringLiteral("property var c:"))
-                          && rebuiltWindow.contains(QStringLiteral("pSettingBtnText"))
-                          && rebuiltWindow.contains(QStringLiteral("anchors.fill:parent"))
-                          && rebuiltWindow.contains(QStringLiteral("iSettingsWindow.width*=.6"))
-                          && rebuiltWindow.contains(QStringLiteral("iSettingsWindow.height*=.68"))
-                          && rebuiltWindow.contains(QStringLiteral("iSettingsWindow.x+=iSettingsWindow.width/3"))
-                          && rebuiltWindow.contains(QStringLiteral("iSettingsWindow.y+=iSettingsWindow.height*.2353"))
-                          && rebuiltWindow.contains(QStringLiteral("Math.min(parent.width,520)"))
-                          && rebuiltWindow.contains(QStringLiteral("x:(parent.width-width)/2;y:108;height:parent.height-108"))
-                          && rebuiltWindow.contains(QStringLiteral("width:parent.width;height:parent.height"))
-                          && rebuiltWindow.contains(QStringLiteral("Image{source:iSettingsWindowShadowContainer.c[parent.k]"))
-                          && rebuiltWindow.contains(QStringLiteral("asset:\"CloseIcon\""))
-                          && rebuiltWindow.contains(QStringLiteral("property int p:index"))
-                          && rebuiltWindow.contains(QStringLiteral("fChangeSelectedSetting(parent.p)"))
-                          && rebuiltWindow.contains(QStringLiteral("StackLayout"))
+                check(rebuiltWindow.contains(QStringLiteral("BSI Settings v7"))
+                          && rebuiltWindow.contains(QStringLiteral("property var bHidden:"))
+                          && rebuiltWindow.contains(QStringLiteral("property var bIcons:"))
+                          && rebuiltWindow.contains(QStringLiteral("Rectangle{anchors.fill:parent;color:UiTheme.colors.primary80;radius:12"))
+                          && rebuiltWindow.contains(QStringLiteral("Column{anchors.fill:parent;anchors.margins:12;spacing:8"))
+                          && rebuiltWindow.contains(QStringLiteral("pShowRedDot:modelData.pShowRedDot"))
+                          && rebuiltWindow.contains(QStringLiteral("Image{source:parent.icon;width:18;height:18"))
+                          && rebuiltWindow.contains(QStringLiteral("StackLayout{id:iSelectedSettingControl;anchors.fill:parent;anchors.margins:6"))
+                          && rebuiltWindow.contains(QStringLiteral("delegate:Loader{width:iSelectedSettingControl.width;height:iSelectedSettingControl.height;"))
                           && rebuiltWindow.contains(QStringLiteral("model.modelData.pComponentObj=item"))
-                          && rebuiltWindow.contains(QStringLiteral("iSettingsWindow.startSystemMove()")),
-                      QStringLiteral("the rebuilt %1 Settings window stays compact, centers its native page column, supports custom tab icons, and keeps native page loading, selection, dragging, and close behavior")
+                          && rebuiltWindow.contains(QStringLiteral("fChangeSelectedSetting(pSettingIdx)"))
+                          && rebuiltWindow.contains(QStringLiteral("onVisibleChanged:if(visible&&transientParent)"))
+                          && rebuiltWindow.contains(QStringLiteral("width=transientParent.width*.7"))
+                          && rebuiltWindow.contains(QStringLiteral("height=transientParent.height*.7"))
+                          && rebuiltWindow.contains(QStringLiteral("x=transientParent.x+transientParent.width*.15"))
+                          && rebuiltWindow.contains(QStringLiteral("y=transientParent.y+transientParent.height*.15"))
+                          && rebuiltWindow.contains(QStringLiteral("iSettingsWindow.startSystemMove()"))
+                          && rebuiltWindow.contains(QStringLiteral("asset:\"CloseIcon\"")),
+                      QStringLiteral("the rebuilt %1 Settings panel restores the PR #88 shell and adds customizable tabs while preserving native pages, selection, dragging, and close behavior")
                           .arg(QFileInfo(input).fileName()));
                 QString expectedLogoSource;
                 for (const auto &entry : EmbeddedResources::list(original, true)) {
@@ -5269,9 +5268,11 @@ Window {
                         if (entry.leaf.compare(QLatin1String("PlrAboutSetting.qml"), Qt::CaseInsensitive) == 0)
                             updatedAbout = EmbeddedResources::decodeText(EmbeddedResources::readEntry(panelCopy, entry.entryOff, entry.flags, 8 * 1024 * 1024));
                     }
-                    check(updatedWindow.contains(QStringLiteral("property var h:"))
-                              && (hiddenTabId.isEmpty() || updatedWindow.contains(hiddenTabId))
-                              && updatedWindow.contains(QStringLiteral("data:image/svg+xml;base64,"))
+                    check(updatedWindow.contains(QStringLiteral("property var bHidden:[]"))
+                              && updatedAbout.contains(QStringLiteral("property var bsiHiddenTabs:"))
+                              && (hiddenTabId.isEmpty() || updatedAbout.contains(hiddenTabId))
+                              && updatedAbout.contains(QStringLiteral("property var bsiTabIcons:"))
+                              && updatedAbout.contains(QStringLiteral("function fOnQmlLoaded(){parent.parent.parent.parent.parent.parent.parent.bHidden=bsiHiddenTabs;parent.parent.parent.parent.parent.parent.parent.bIcons=bsiTabIcons}"))
                               && updatedAbout.contains(QStringLiteral("data:image/svg+xml;base64,"))
                               && updatedAbout.contains(QStringLiteral("BSI Panel Regression Updated"))
                               && updatedAbout.contains(QStringLiteral("Regression subtitle")),

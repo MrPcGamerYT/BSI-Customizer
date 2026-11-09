@@ -34,7 +34,8 @@ const QString kPreviousWindowDesignMarker = QStringLiteral("BSI CUSTOMIZER: Sett
 const QString kWindowDesignMarkerV3 = QStringLiteral("BSI Settings v3");
 const QString kWindowDesignMarkerV4 = QStringLiteral("BSI Settings v4");
 const QString kWindowDesignMarkerV5 = QStringLiteral("BSI Settings v5");
-const QString kWindowDesignMarker = QStringLiteral("BSI6");
+const QString kWindowDesignMarkerV6 = QStringLiteral("BSI6");
+const QString kWindowDesignMarker = QStringLiteral("BSI Settings v7");
 const QString kAboutMarker = QStringLiteral("BSI CUSTOMIZER: redesigned About page v1");
 const QString kSchema = QStringLiteral("bsi.settings-panel.recovery");
 const QString kWindowLeaf = QStringLiteral("UiSettingsWindow.qml");
@@ -661,8 +662,7 @@ QString qmlString(const QString &value)
     return out;
 }
 
-QString buildWindow(const QString &stock, const QStringList &hiddenTabs,
-                    const QVariantMap &tabIcons)
+QString buildWindow(const QString &stock)
 {
     const QString masked = QmlText::mask(stock);
     const auto objects = QmlText::objects(masked, QStringLiteral("UiShadowContainer"));
@@ -678,6 +678,60 @@ QString buildWindow(const QString &stock, const QStringList &hiddenTabs,
     }
     if (!found) return {};
 
+    // Restore the working PR #88 shell; customization only changes the tab
+    // list and About content, while native pages and callbacks remain intact.
+    QString replacement = QStringLiteral(R"QML(
+UiShadowContainer {
+// BSI Settings v7
+id:iSettingsWindowShadowContainer;anchors.fill:parent
+property var bHidden:[]
+property var bIcons:({})
+function bKey(v){return v.toLowerCase().split("/").pop()}
+Rectangle{anchors.fill:parent;color:UiTheme.colors.primary80;radius:12;clip:true
+Column{anchors.fill:parent;anchors.margins:12;spacing:8
+Item{width:parent.width;height:36
+MouseArea{width:parent.width-42;height:parent.height;onPressed:iSettingsWindow.startSystemMove()}
+Text{text:qsTranslate("QObject","Settings");color:UiTheme.colors.primary10;font:UiTheme.fonts.bodyLarge;anchors.verticalCenter:parent.verticalCenter}
+UiImageButton{asset:"CloseIcon";pImageWidth:16;pImageHeight:16;anchors.right:parent.right;anchors.verticalCenter:parent.verticalCenter;onClicked:iSettingsWindow.close()}}
+ListView{width:parent.width;height:76;clip:true;orientation:ListView.Horizontal;spacing:7;currentIndex:pCurrentTabIndex;model:pSettingsItems.pSettingElements
+delegate:Item{property string k:iSettingsWindowShadowContainer.bKey(modelData.pQmlSource);property string icon:iSettingsWindowShadowContainer.bIcons[k]||"";width:iSettingsWindowShadowContainer.bHidden.indexOf(k)<0?92:0;height:64;visible:width>0
+UiSettingsButton{width:92;height:64;pSettingIdx:index;pSettingBtnText:modelData.pButtonText;pSelected:index===pCurrentTabIndex;pShowRedDot:modelData.pShowRedDot;onSettingClicked:fChangeSelectedSetting(pSettingIdx)}
+Image{source:parent.icon;width:18;height:18;anchors.horizontalCenter:parent.horizontalCenter}}
+}
+Item{width:parent.width;height:parent.height-128
+Rectangle{anchors.fill:parent;radius:10;color:UiTheme.colors.primary70
+StackLayout{id:iSelectedSettingControl;anchors.fill:parent;anchors.margins:6;currentIndex:pCurrentTabIndex
+Repeater{model:pSettingsItems.pSettingElements;delegate:Loader{width:iSelectedSettingControl.width;height:iSelectedSettingControl.height;Component.onCompleted:setSource(model.modelData.pQmlSource,model.modelData.pComponentArgs||{});onLoaded:{model.modelData.pComponentObj=item;if(item.fOnQmlLoaded)item.fOnQmlLoaded()}}}}
+}
+}
+}
+}
+}
+)QML");
+    QString out = stock;
+    out.replace(target.nameBegin, target.end - target.nameBegin, replacement);
+    // Preserve PR #88's actual Settings-window resize and centered placement.
+    const QString helper = QStringLiteral(R"QML(onVisibleChanged:if(visible&&transientParent){width=transientParent.width*.7;height=transientParent.height*.7;x=transientParent.x+transientParent.width*.15;y=transientParent.y+transientParent.height*.15})QML");
+    const int rootClose = out.lastIndexOf(QLatin1String("\n}"));
+    if (rootClose < 0) return {};
+    out.insert(rootClose, helper);
+    if (!out.contains(kWindowDesignMarker)) return {};
+    return out;
+}
+
+QString buildAbout(const QString &developerName, const QString &tagline,
+                   const QVariantList &links, const QString &logoSource,
+                   const QStringList &hiddenTabs, const QVariantMap &tabIcons)
+{
+    QString rows;
+    for (const QVariant &entry : links) {
+        const QVariantMap link = entry.toMap();
+        const QString label = link.value(QStringLiteral("title")).toString().trimmed();
+        const QString url = link.value(QStringLiteral("url")).toString().trimmed();
+        if (label.isEmpty() || url.isEmpty()) continue;
+        rows += QStringLiteral("\n        { title: %1, url: %2 },")
+            .arg(qmlString(label), qmlString(url));
+    }
     QString hiddenLiteral = QStringLiteral("[");
     for (const QString &page : hiddenTabs) {
         if (hiddenLiteral.size() > 1) hiddenLiteral += QLatin1Char(',');
@@ -690,48 +744,6 @@ QString buildWindow(const QString &stock, const QStringList &hiddenTabs,
         iconLiteral += qmlString(it.key().toCaseFolded()) + QLatin1Char(':') + qmlString(it.value().toString());
     }
     iconLiteral += QStringLiteral("})");
-
-    // Keep the native root Window, prompts, callbacks and page model; resize
-    // that window to a compact centered footprint and constrain its page loader.
-    QString replacement = QStringLiteral(R"QML(
-UiShadowContainer{
-//BSI6
-id:iSettingsWindowShadowContainer;anchors.fill:parent
-property var h:@@BSI_HIDDEN_TABS@@
-property var c:@@BSI_TAB_ICONS@@
-function k(v){return v.toLowerCase().split("/").pop()}
-Component.onCompleted:{iSettingsWindow.width*=.6;iSettingsWindow.height*=.68;iSettingsWindow.x+=iSettingsWindow.width/3;iSettingsWindow.y+=iSettingsWindow.height*.2353}
-MouseArea{width:parent.width-42;height:32;onPressed:iSettingsWindow.startSystemMove()}
-UiImageButton{asset:"CloseIcon";anchors.right:parent.right;onClicked:iSettingsWindow.close()}
-ListView{width:parent.width;height:72;y:32;clip:true;orientation:ListView.Horizontal;model:pSettingsItems.pSettingElements;currentIndex:pCurrentTabIndex
-delegate:Item{property int p:index;property string k:iSettingsWindowShadowContainer.k(modelData.pQmlSource);width:iSettingsWindowShadowContainer.h.indexOf(k)<0?92:0;height:64;visible:width>0
-UiSettingsButton{anchors.fill:parent;pSettingBtnText:modelData.pButtonText;pSelected:index===pCurrentTabIndex;onSettingClicked:fChangeSelectedSetting(parent.p)}
-Image{source:iSettingsWindowShadowContainer.c[parent.k]||"";width:18;height:18;anchors.horizontalCenter:parent.horizontalCenter}}
-}
-StackLayout{width:Math.min(parent.width,520);x:(parent.width-width)/2;y:108;height:parent.height-108;currentIndex:pCurrentTabIndex
-Repeater{model:pSettingsItems.pSettingElements;delegate:Item{Loader{width:parent.width;height:parent.height;Component.onCompleted:setSource(model.modelData.pQmlSource,model.modelData.pComponentArgs||({}));onLoaded:{model.modelData.pComponentObj=item;item.fOnQmlLoaded&&item.fOnQmlLoaded()}}}}}
-}
-)QML");
-    replacement.replace(QStringLiteral("@@BSI_HIDDEN_TABS@@"), hiddenLiteral);
-    replacement.replace(QStringLiteral("@@BSI_TAB_ICONS@@"), iconLiteral);
-    QString out = stock;
-    out.replace(target.nameBegin, target.end - target.nameBegin, replacement);
-    if (!out.contains(kWindowDesignMarker)) return {};
-    return out;
-}
-
-QString buildAbout(const QString &developerName, const QString &tagline,
-                   const QVariantList &links, const QString &logoSource)
-{
-    QString rows;
-    for (const QVariant &entry : links) {
-        const QVariantMap link = entry.toMap();
-        const QString label = link.value(QStringLiteral("title")).toString().trimmed();
-        const QString url = link.value(QStringLiteral("url")).toString().trimmed();
-        if (label.isEmpty() || url.isEmpty()) continue;
-        rows += QStringLiteral("\n        { title: %1, url: %2 },")
-            .arg(qmlString(label), qmlString(url));
-    }
     const QString qDeveloper = qmlString(developerName.trimmed());
     const QString qTagline = qmlString(tagline.trimmed());
     QString generated = QStringLiteral(R"QML(import QtQuick 2.15
@@ -750,6 +762,8 @@ Item {
     property string pShortDisplayName: ""
     property string pDeveloperName: @@BSI_DEVELOPER@@
     property string pDeveloperTagline: @@BSI_TAGLINE@@
+    property var bsiHiddenTabs: @@BSI_HIDDEN_TABS@@
+    property var bsiTabIcons: @@BSI_TAB_ICONS@@
     property var pDeveloperLinks: [@@BSI_LINKS@@
     ]
 
@@ -864,7 +878,8 @@ Item {
         }
     }
 
-    // Retain the native About-page callback surface for parent QML connections.
+    // Retain the native About-page callback surface and publish profile icons to the shell.
+    function fOnQmlLoaded(){parent.parent.parent.parent.parent.parent.parent.bHidden=bsiHiddenTabs;parent.parent.parent.parent.parent.parent.parent.bIcons=bsiTabIcons}
     function fCheckForUpdateCallback(apiCallStatus, jsonData) {
         if (apiCallStatus === 0) {
             var jsonObj = JSON.parse(jsonData)
@@ -888,6 +903,8 @@ Item {
 )QML");
     generated.replace(QStringLiteral("@@BSI_DEVELOPER@@"), qDeveloper);
     generated.replace(QStringLiteral("@@BSI_TAGLINE@@"), qTagline);
+    generated.replace(QStringLiteral("@@BSI_HIDDEN_TABS@@"), hiddenLiteral);
+    generated.replace(QStringLiteral("@@BSI_TAB_ICONS@@"), iconLiteral);
     generated.replace(QStringLiteral("@@BSI_LINKS@@"), rows);
     generated.replace(QStringLiteral("@@BSI_LOGO_SOURCE@@"), qmlString(logoSource));
     return generated;
@@ -1077,7 +1094,8 @@ bool hasWindowMarker(const QString &text)
     // by the previous Settings design.
     return text.contains(kWindowMarker) || text.contains(kPreviousWindowDesignMarker)
         || text.contains(kWindowDesignMarkerV3) || text.contains(kWindowDesignMarkerV4)
-        || text.contains(kWindowDesignMarkerV5) || text.contains(kWindowDesignMarker);
+        || text.contains(kWindowDesignMarkerV5) || text.contains(kWindowDesignMarkerV6)
+        || text.contains(kWindowDesignMarker);
 }
 
 } // namespace
@@ -1298,10 +1316,10 @@ QVariantMap apply(const QString &exePath, const QString &developerName,
     const QString originalAboutText = EmbeddedResources::decodeText(originals.value(current.about.path));
     if (originalWindowText.isEmpty() || originalAboutText.isEmpty())
         return fail(QStringLiteral("A saved original QML source could not be decoded; the executable was not changed."));
-    const QString rebuiltWindow = buildWindow(originalWindowText, hiddenTabs, customTabIcons);
+    const QString rebuiltWindow = buildWindow(originalWindowText);
     if (rebuiltWindow.isEmpty())
         return fail(QStringLiteral("This BlueStacks build's Settings-window structure is not recognized. No file was changed."));
-    const QString rebuiltAbout = buildAbout(developerName, tagline, links, logoSource);
+    const QString rebuiltAbout = buildAbout(developerName, tagline, links, logoSource, hiddenTabs, customTabIcons);
     if (rebuiltAbout.isEmpty())
         return fail(QStringLiteral("The About page could not be generated; no file was changed."));
     QMap<QString, QByteArray> replacements {
