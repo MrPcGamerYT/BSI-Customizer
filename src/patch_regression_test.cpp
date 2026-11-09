@@ -5198,7 +5198,7 @@ Window {
                           && rebuiltWindow.contains(QStringLiteral("pShowRedDot:modelData.pShowRedDot"))
                           && rebuiltWindow.contains(QStringLiteral("anchors.centerIn:parent"))
                           && rebuiltWindow.contains(QStringLiteral("ListView{id:t;"))
-                          && rebuiltWindow.contains(QStringLiteral("spacing:0;currentIndex:pCurrentTabIndex"))
+                          && rebuiltWindow.contains(QStringLiteral("spacing:0;model:pSettingsItems.pSettingElements"))
                           && rebuiltWindow.contains(QStringLiteral("item.anchors.fill=item.parent"))
                           && rebuiltWindow.contains(QStringLiteral("Image{source:parent.icon;width:18;height:18"))
                           && rebuiltWindow.contains(QStringLiteral("StackLayout{id:iSelectedSettingControl;anchors.fill:parent;anchors.margins:6"))
