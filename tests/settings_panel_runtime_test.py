@@ -76,7 +76,7 @@ assert "ListView{id:t;" in replacement
 assert "orientation:ListView.Horizontal;model:pSettingsItems.pSettingElements" in replacement
 assert "property var h:iSettingsWindowShadowContainer.bHidden" in replacement
 assert "width:t.width/t.count" in replacement
-assert "visible:h.indexOf(k)<0" in replacement
+assert "visible:!~h.indexOf(k)" in replacement
 assert "item.anchors.fill=item.parent" in replacement
 assert "height:parent.height-128" in replacement
 assert "StackLayout{id:iSelectedSettingControl;anchors.fill:parent;anchors.margins:6" in replacement
