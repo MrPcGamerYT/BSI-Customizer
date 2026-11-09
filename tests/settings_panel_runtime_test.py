@@ -71,6 +71,10 @@ assert "property var bsiHiddenTabs: @@BSI_HIDDEN_TABS@@" in cpp
 assert "property var bsiTabIcons: @@BSI_TAB_ICONS@@" in cpp
 assert "Rectangle{anchors.fill:parent;color:UiTheme.colors.primary80;radius:12" in replacement
 assert "Column{anchors.fill:parent;anchors.margins:12;spacing:8" in replacement
+assert "anchors.horizontalCenter:parent.horizontalCenter" in replacement
+assert "ListView{id:iSettingsTabs;" in replacement and "spacing:0;" in replacement
+assert "iSettingsTabs.width/Math.max(1,iSettingsTabs.count-iSettingsWindowShadowContainer.bHidden.length)" in replacement
+assert "item.anchors.fill=item.parent" in replacement
 assert "height:parent.height-128" in replacement
 assert "StackLayout{id:iSelectedSettingControl;anchors.fill:parent;anchors.margins:6" in replacement
 assert "delegate:Loader{width:iSelectedSettingControl.width;height:iSelectedSettingControl.height;" in replacement
@@ -161,7 +165,7 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
         "Item {\n"
         "    objectName: \"runtimeSettingPage\"\n"
         "    implicitWidth: 520; implicitHeight: 360\n"
-        "    anchors.fill: parent\n"
+        "    width: parent.width * 0.55; height: parent.height\n"
         "    function fOnQmlLoaded() { }\n"
         "}\n",
         encoding="utf-8",
@@ -249,6 +253,10 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
         ),
         None,
     )
+    settings_title = next(
+        (item for item in visual_tree if str(item.property("text")) == "Settings"),
+        None,
+    )
     loaded_page = visual_named("runtimeSettingPage")
     drag = next(
         (
@@ -264,6 +272,7 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
         None,
     )
     controls = {
+        "centered Settings title": settings_title,
         "compact centered panel": panel,
         "centered native page loader": page_loader,
         "tabs": tabs,
@@ -280,6 +289,11 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
     assert abs(panel_center.x() - window.width() / 2) < 2 and abs(panel_center.y() - window.height() / 2) < 2, "The PR #88 Settings shell should stay centered in the player window"
     assert abs(obj.width() - 1050) < 2 and abs(obj.height() - 630) < 2, "The PR #88 Settings window should use its centered 70% footprint"
     assert abs(obj.x() - 225) < 2 and abs(obj.y() - 135) < 2, "The PR #88 Settings window should remain centered"
+    title_center = settings_title.mapToItem(obj, QPointF(settings_title.width() / 2, settings_title.height() / 2))
+    assert abs(title_center.x() - obj.width() / 2) < 2, "The Settings title should be centered in the title bar"
+    assert tabs.property("spacing") == 0, "Tab spacing should be controlled by equal-width slots"
+    tab_slots = [item for item in visual_tree if abs(item.height() - 64) < 1 and abs(item.width() - tabs.width() / tabs.property("count")) < 2]
+    assert len(tab_slots) >= 2, "Visible tabs should occupy equal-width slots across the full tab strip"
     assert abs(player.width - 1500) < 2 and abs(player.height - 900) < 2, "The shell should resize without changing the host player window"
     assert abs(panel.width() - obj.width()) < 2 and abs(panel.height() - obj.height()) < 2, "The PR #88 shell should fill its resized host"
     stack_center = stack.mapToItem(panel, QPointF(stack.width() / 2, stack.height() / 2))
