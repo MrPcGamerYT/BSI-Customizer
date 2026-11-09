@@ -73,7 +73,8 @@ assert "Rectangle{anchors.fill:parent;color:UiTheme.colors.primary80;radius:12" 
 assert "Column{anchors.fill:parent;anchors.margins:12;spacing:8" in replacement
 assert "anchors.centerIn:parent" in replacement
 assert "ListView{id:t;" in replacement and "spacing:0;" in replacement
-assert "t.width/(t.count-iSettingsWindowShadowContainer.bHidden.length)" in replacement
+assert "property var h:iSettingsWindowShadowContainer.bHidden" in replacement
+assert "t.width/(t.count-t.h.length)" in replacement
 assert "item.anchors.fill=item.parent" in replacement
 assert "height:parent.height-128" in replacement
 assert "StackLayout{id:iSelectedSettingControl;anchors.fill:parent;anchors.margins:6" in replacement
