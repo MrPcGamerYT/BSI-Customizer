@@ -81,7 +81,7 @@ assert "item.anchors.fill=item.parent" in replacement
 assert "height:parent.height-128" in replacement
 assert "StackLayout{id:iSelectedSettingControl;anchors.fill:parent;anchors.margins:6" in replacement
 assert "delegate:Loader{width:iSelectedSettingControl.width;height:iSelectedSettingControl.height;" in replacement
-assert "pSettingBtnText:" in replacement and "pSelected:index===pCurrentTabIndex" in replacement and "pShowRedDot:modelData.pShowRedDot" in replacement
+assert "pSettingBtnText:" in replacement and "pSelected:index==pCurrentTabIndex" in replacement and "pShowRedDot:modelData.pShowRedDot" in replacement
 assert "pSettingIdx:index" in replacement
 assert "fChangeSelectedSetting(pSettingIdx)" in replacement
 assert "onPressed:iSettingsWindow.startSystemMove()" in replacement
