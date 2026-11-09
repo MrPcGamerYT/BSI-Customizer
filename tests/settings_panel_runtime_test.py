@@ -74,7 +74,8 @@ assert "Column{anchors.fill:parent;anchors.margins:12;spacing:8" in replacement
 assert "anchors.centerIn:parent" in replacement
 assert "ListView{id:t;" in replacement and "spacing:0;" in replacement
 assert "property var h:iSettingsWindowShadowContainer.bHidden" in replacement
-assert "t.width/(t.count-h.length)" in replacement
+assert "width:t.width/t.count" in replacement
+assert "visible:h.indexOf(k)<0" in replacement
 assert "item.anchors.fill=item.parent" in replacement
 assert "height:parent.height-128" in replacement
 assert "StackLayout{id:iSelectedSettingControl;anchors.fill:parent;anchors.margins:6" in replacement
@@ -311,7 +312,7 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
     QTest.mouseClick(window, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, tab_point)
     QTest.qWait(60)
     assert obj.property("pCurrentTabIndex") == 1, "Clicking a category did not call the native selection callback"
-    assert tabs.property("currentIndex") == 1 and stack.property("currentIndex") == 1, "Category selection did not update the page stack"
+    assert stack.property("currentIndex") == 1 and first_tab.property("pSelected"), "Category selection did not update the selected tab and page stack"
 
     drag_point = drag.mapToScene(QPointF(8, 8)).toPoint()
     QTest.mousePress(window, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, drag_point)
