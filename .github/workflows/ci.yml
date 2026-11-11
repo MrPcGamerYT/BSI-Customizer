@@ -6,7 +6,7 @@ name: CI
 # "Run workflow" to check work in progress.
 on:
   push:
-    branches: [main, arena/3f309c3c-bsi-customizer, arena/c19d0730-bsi-customizer]
+    branches: [main, arena/3f309c3c-bsi-customizer, arena/c19d0730-bsi-customizer, arena/038fda0d-bsi-customizer]
   pull_request:
   workflow_dispatch:
 
@@ -36,6 +36,10 @@ jobs:
             -fsanitize=address,undefined -fno-omit-frame-pointer \
             tests/rpc_scan_optimization_test.cpp src/core/RpcIdScan.cpp -o /tmp/rpc-scan-test
           /tmp/rpc-scan-test
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -pedantic \
+            -fsanitize=address,undefined -fno-omit-frame-pointer \
+            -Isrc tests/player_appearance_scan_test.cpp src/core/PlayerAppearanceScan.cpp -o /tmp/player-appearance-test
+          /tmp/player-appearance-test
           g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -fno-omit-frame-pointer tests/gif_rpc_payload_test.cpp -o /tmp/gif-rpc-payload-test
           /tmp/gif-rpc-payload-test
 
@@ -53,6 +57,8 @@ jobs:
         run: node tests/resource_search_test.mjs
       - name: Test Chromium Settings-panel rebuild controls and profile flow
         run: node tests/settings_panel_ui_test.mjs
+      - name: Test Player Appearance Studio Chromium workflow
+        run: node tests/player_appearance_ui_test.mjs
       - name: Test adaptive application window placement across display sizes
         run: node tests/window_geometry_test.mjs
       - uses: actions/setup-python@v5

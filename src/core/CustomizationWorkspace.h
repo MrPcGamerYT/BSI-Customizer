@@ -13,6 +13,8 @@ QVariantMap validateProfile(const QVariantMap &profile);
 QVariantMap readProfile(const QString &path);
 QVariantMap saveProfile(const QString &path, const QVariantMap &profile);
 QVariantMap stageResource(const QString &path, const QString &replacement);
+QVariantMap inspectAppearance(const QString &path);
+QVariantMap stageAppearance(const QString &path, const QVariantMap &edits);
 QVariantMap simulate(const QString &path, const QVariantList &operations, const QString &expectedHash,
                      QByteArray *prepared = nullptr);
 QVariantMap apply(const QString &path, const QVariantList &operations, const QString &expectedHash,

@@ -5,6 +5,7 @@
 #include "EmbeddedResources.h"
 #include "GifRpc.h"
 #include "PatchFile.h"
+#include "PlayerAppearancePatcher.h"
 #include "PeUtils.h"
 #include "QtResources.h"
 #include "ThemeEngine.h"
@@ -133,11 +134,11 @@ QVariantMap inspect(const QString &path, const QVariantMap &edits)
 
 QVariantMap validateProfile(const QVariantMap &profile)
 {
-    const QSet<QString> allowed{QStringLiteral("schema"), QStringLiteral("version"), QStringLiteral("name"), QStringLiteral("sourceSha256"), QStringLiteral("theme"), QStringLiteral("boot"), QStringLiteral("gifRpc"), QStringLiteral("about")};
+    const QSet<QString> allowed{QStringLiteral("schema"), QStringLiteral("version"), QStringLiteral("name"), QStringLiteral("sourceSha256"), QStringLiteral("theme"), QStringLiteral("boot"), QStringLiteral("gifRpc"), QStringLiteral("about"), QStringLiteral("appearance")};
     for (auto it = profile.cbegin(); it != profile.cend(); ++it) if (!allowed.contains(it.key())) return fail(QStringLiteral("Unknown profile field: %1. Credentials and raw offsets are not accepted.").arg(it.key()));
     if (profile.value("schema").toString() != QLatin1String("bsi.customization.profile") || profile.value("version").toDouble() != 1.0 || profile.value("version").metaType().id() == QMetaType::Bool || profile.value("version").metaType().id() == QMetaType::QString) return fail(QStringLiteral("Unsupported profile schema/version."));
     if (json(profile).size() > 256 * 1024 || profile.value("name").toString().size() > 128) return fail(QStringLiteral("Profile exceeds the size limits."));
-    for (const QString &key : {QStringLiteral("theme"), QStringLiteral("boot"), QStringLiteral("gifRpc"), QStringLiteral("about")})
+    for (const QString &key : {QStringLiteral("theme"), QStringLiteral("boot"), QStringLiteral("gifRpc"), QStringLiteral("about"), QStringLiteral("appearance")})
         if (profile.contains(key) && profile.value(key).metaType().id() != QMetaType::QVariantMap) return fail(QStringLiteral("Profile section %1 must be an object.").arg(key));
     for (const QString &key : {QStringLiteral("schema"), QStringLiteral("name"), QStringLiteral("sourceSha256")})
         if (profile.contains(key) && profile.value(key).metaType().id() != QMetaType::QString) return fail(QStringLiteral("Profile %1 must be text.").arg(key));
@@ -146,6 +147,17 @@ QVariantMap validateProfile(const QVariantMap &profile)
     static const QRegularExpression name(QStringLiteral("^[A-Za-z_][A-Za-z0-9_]*$"));
     for (auto it = colors.cbegin(); it != colors.cend(); ++it)
         if (!name.match(it.key()).hasMatch() || it.value().metaType().id() != QMetaType::QString || !QColor(it.value().toString()).isValid()) return fail(QStringLiteral("Invalid profile color: %1.").arg(it.key()));
+    const auto appearance = profile.value("appearance").toMap();
+    if (appearance.size() > 512) return fail(QStringLiteral("Too many appearance tokens in one profile."));
+    static const QRegularExpression appearanceKey(QStringLiteral("^[^#\\s]{1,512}#root\\.[A-Za-z0-9_.]+$"));
+    for (auto it = appearance.cbegin(); it != appearance.cend(); ++it) {
+        if (!appearanceKey.match(it.key()).hasMatch() || it.key().contains(QStringLiteral("..")))
+            return fail(QStringLiteral("Invalid appearance token key: %1.").arg(it.key()));
+        const int type = it.value().metaType().id();
+        bool ok = false; const int number = it.value().toInt(&ok);
+        if (!ok || type == QMetaType::Bool || type == QMetaType::QString || it.value().toDouble() != number || number < 0 || number > 1000000)
+            return fail(QStringLiteral("Appearance profile values must be whole numbers: %1.").arg(it.key()));
+    }
     const auto boot = profile.value("boot").toMap();
     for (auto it = boot.cbegin(); it != boot.cend(); ++it) if (it.key() != QLatin1String("holdMs")) return fail(QStringLiteral("Unknown boot setting."));
     bool holdOk = true; if (boot.contains("holdMs")) boot.value("holdMs").toInt(&holdOk);
@@ -200,6 +212,28 @@ QVariantMap stageResource(const QString &path, const QString &replacement)
         {"preview", EmbeddedResources::previewDataUrl(data, QFileInfo(replacement).suffix(), 512)},
         {"text", EmbeddedResources::decodeText(data).left(16384)}, {"msg", QStringLiteral("Replacement staged in memory. Run Dry Run before applying.")}};
 }
+QVariantMap inspectAppearance(const QString &path)
+{
+    QByteArray bytes;
+    if (!safeTarget(path) || !readBounded(path, &bytes)) return fail(QStringLiteral("Select a readable, non-system EXE (maximum 256 MB)."));
+    if (PeUtils::sections(bytes).isEmpty()) return fail(QStringLiteral("Invalid PE section table."));
+    auto out = PlayerAppearancePatcher::toMap(PlayerAppearancePatcher::analyze(bytes));
+    out.insert(QStringLiteral("sha256"), digest(bytes));
+    return out;
+}
+QVariantMap stageAppearance(const QString &path, const QVariantMap &edits)
+{
+    QByteArray bytes;
+    if (!safeTarget(path) || !readBounded(path, &bytes)) return fail(QStringLiteral("Select a readable, non-system EXE (maximum 256 MB)."));
+    if (PeUtils::sections(bytes).isEmpty()) return fail(QStringLiteral("Invalid PE section table."));
+    const auto validation = PlayerAppearancePatcher::validateEdits(bytes, edits);
+    if (!validation.value(QStringLiteral("ok")).toBool()) return validation;
+    const auto normalized = validation.value(QStringLiteral("edits")).toMap();
+    return {{QStringLiteral("ok"), true},
+            {QStringLiteral("operation"), QVariantMap{{QStringLiteral("kind"), QStringLiteral("appearance")}, {QStringLiteral("edits"), normalized}}},
+            {QStringLiteral("resources"), validation.value(QStringLiteral("resources"))},
+            {QStringLiteral("msg"), QStringLiteral("Appearance edits staged in memory. Run Dry Run before applying.")}};
+}
 QVariantMap simulate(const QString &path, const QVariantList &operations, const QString &expectedHash, QByteArray *prepared)
 {
     if (prepared) prepared->clear();
@@ -209,13 +243,15 @@ QVariantMap simulate(const QString &path, const QVariantList &operations, const 
     QTemporaryDir tmp; if (!tmp.isValid()) return fail(QStringLiteral("Cannot create an isolated dry-run directory."));
     const QString stage = tmp.filePath(QStringLiteral("HD-Player.exe"));
     QByteArray working = original; QSet<QString> touched; QVariantList steps; qint64 total = 0;
-    // Only unique resource paths and one theme operation are accepted. Aliased
-    // records are checked by their payload offset too; raw theme + theme edits conflict.
+    // Only unique resource paths, one theme operation and one appearance
+    // operation are accepted. Aliased records are checked by payload offset too;
+    // raw theme + theme edits and appearance + same-payload edits conflict.
     QSet<qint64> payloads;
     const auto theme = ThemeEngine::detectTheme(original, QStringLiteral("qml"));
     for (const auto &v : operations) {
         const auto op = v.toMap(); const QString kind = op.value("kind").toString();
-        const QString key = kind == QLatin1String("theme") ? QStringLiteral("@theme") : op.value("path").toString();
+        const QString key = kind == QLatin1String("theme") ? QStringLiteral("@theme")
+            : (kind == QLatin1String("appearance") ? QStringLiteral("@appearance") : op.value("path").toString());
         if (touched.contains(key)) return fail(QStringLiteral("Conflicting duplicate operation: %1.").arg(key));
         touched.insert(key);
         if (!save(stage, working)) return fail(QStringLiteral("Could not stage the dry-run image."));
@@ -226,6 +262,29 @@ QVariantMap simulate(const QString &path, const QVariantList &operations, const 
             const auto info = ThemeEngine::detectTheme(working, QStringLiteral("qml"));
             const auto r = ThemeEngine::patchTheme(stage, info, ThemeEngine::parseQmlEntries(info.qml), colorMap(op.value("edits").toMap()), {}, &next);
             ok = r.ok; msg = r.msg;
+        } else if (kind == QLatin1String("appearance")) {
+            const auto validation = PlayerAppearancePatcher::validateEdits(working, op.value("edits").toMap());
+            if (!validation.value("ok").toBool()) return fail(validation.value("msg").toString());
+            const QStringList affected = validation.value("resources").toStringList();
+            for (const QString &resource : affected) {
+                int matches = 0; EmbeddedResources::Entry selected;
+                // Conflict identity belongs to the inspected original image. A
+                // preceding palette/resource write may legitimately relocate a
+                // record into a mapped gap; comparing that new offset with the
+                // original theme offset would miss a same-payload conflict.
+                for (const auto &e : EmbeddedResources::list(original, true)) if (e.path == resource) { selected = e; ++matches; }
+                if (matches != 1 || payloads.contains(selected.entryOff) || touched.contains(resource))
+                    return fail(QStringLiteral("Appearance edits conflict with another staged edit of %1.").arg(resource));
+                if (touched.contains(QStringLiteral("@theme")) && selected.entryOff == theme.entryOff)
+                    return fail(QStringLiteral("Appearance edits conflict with palette edits of the same theme payload."));
+                payloads.insert(selected.entryOff);
+                touched.insert(resource);
+            }
+            QByteArray preparedAppearance = working;
+            QString appearanceError;
+            ok = PlayerAppearancePatcher::apply(preparedAppearance, op.value("edits").toMap(), &appearanceError);
+            next = preparedAppearance;
+            msg = ok ? QStringLiteral("%1 appearance token(s) rewritten and read back in memory.").arg(op.value("edits").toMap().size()) : appearanceError;
         } else if (kind == QLatin1String("resource")) {
             const QString encoded = op.value("data").toString();
             if (encoded.size() > (maxResource * 4 / 3 + 8)) return fail(QStringLiteral("Encoded replacement exceeds 32 MB."));
@@ -239,7 +298,7 @@ QVariantMap simulate(const QString &path, const QVariantList &operations, const 
             payloads.insert(selected.entryOff);
             if (touched.contains(QStringLiteral("@theme")) && selected.entryOff == theme.entryOff) return fail(QStringLiteral("Raw theme replacement conflicts with palette edits."));
             const auto r = EmbeddedResources::replaceBytes(stage, key, data, &next); ok = r.ok; msg = r.msg;
-        } else return fail(QStringLiteral("Unsupported batch operation. Only theme and resource edits belong to this single-EXE transaction."));
+        } else return fail(QStringLiteral("Unsupported batch operation. Only theme, resource and appearance edits belong to this single-EXE transaction."));
         steps << QVariantMap{{"operation", key}, {"ok", ok}, {"msg", msg}};
         if (!ok || next.isEmpty()) return {{"ok", false}, {"msg", msg}, {"steps", steps}};
         if (next.size() > maxImage) return fail(QStringLiteral("Prepared EXE exceeds the 256 MB recovery limit; no files changed."));
@@ -282,6 +341,10 @@ QVariantMap apply(const QString &path, const QVariantList &operations, const QSt
             const QStringList names = op.value("edits").toMap().keys();
             description["colorCount"] = names.size();
             description["properties"] = names.mid(0,64);
+        } else if (op.value("kind").toString() == QLatin1String("appearance")) {
+            const QStringList names = op.value("edits").toMap().keys();
+            description["tokenCount"] = names.size();
+            description["tokens"] = names.mid(0,64);
         } else {
             description["path"] = op.value("path");
             description["replacementSha256"] = digest(QByteArray::fromBase64(op.value("data").toByteArray()));

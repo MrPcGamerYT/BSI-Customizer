@@ -30,7 +30,7 @@ work when configured without WebEngine.
 | FPS | Existing DLL detection, analysis, patch/restore and detection preference |
 | Integrity | Existing inspect, patch and restore |
 | Boot | Original timing patch, cache purge and profile staging |
-| Player UI | Original removals, layout tweaks, About text/link/visibility, sidebar row ordering/hiding/reset |
+| Player UI | Original removals, layout tweaks, About text/link/visibility, sidebar row ordering/hiding/reset, Appearance Studio numeric QML tokens through Workspace |
 | Discord IDs | Find/status/replace, dry run/undo, Windows resource names |
 | Interface | App theme/accent, target paths and installation selection |
 | Build | Update preference/check/download/verified apply, trust and helper diagnostics |

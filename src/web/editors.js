@@ -7,7 +7,7 @@
       const { esc, button, request, chooseFile, getState, getResources } = ctx;
       const maintenance = BsiMaintenance.create(ctx);
       let fields = {}, interfaceInfo = null, profile = {}, operations = [], plan = null;
-      let history = [], gradients = [], output = {}, rpcNames = [], instances = [];
+      let history = [], gradients = [], output = {}, rpcNames = [], instances = [], appearance = null;
       let videoSelected = false, videoStatus = '', interfaceTab = 'layout';
       let imageSource = '', comparison = null, original = null;
       const checked = key => !!fields[key];
@@ -41,6 +41,7 @@
         profile = next || {};
         if (profile.boot) { fields['boot:holdMs'] = profile.boot.holdMs; ctx.setBootHold(profile.boot.holdMs); }
         if (profile.gifRpc) Object.entries(profile.gifRpc).forEach(([key, v]) => { fields['gif:' + key] = v; });
+        if (profile.appearance) Object.entries(profile.appearance).forEach(([key, v]) => { fields['appearance:' + key] = v; });
         if (profile.about) {
           fields['about:text'] = profile.about.text || '';
           fields['about:sections'] = profile.about.showSections !== false;
@@ -66,6 +67,25 @@
         await refreshWorkspace(action === 'profile-load');
         return response;
       }
+      function appearanceTokens() { return appearance?.tokens || []; }
+      function appearanceEdits(changedOnly = true) {
+        const edits = {};
+        for (const token of appearanceTokens()) {
+          const raw = value('appearance:' + token.key, token.value);
+          const number = Number(raw);
+          if (!Number.isInteger(number) || number < token.minimum || number > token.maximum)
+            throw new Error(`${token.label} (${token.key}) must be a whole number from ${token.minimum} to ${token.maximum}.`);
+          if (!changedOnly || number !== token.value) edits[token.key] = number;
+        }
+        return edits;
+      }
+      function appearanceSection() {
+        const tokens = appearanceTokens();
+        const groups = [...new Set(tokens.map(token => token.group || 'Appearance'))];
+        const body = tokens.length ? groups.map(group => `<details class="sec editor-card" open><summary class="sec-h">${esc(group)}</summary><div class="editor-grid">${tokens.filter(token => (token.group || 'Appearance') === group).map(token => `<label class="editor-field"><span>${esc(token.label || token.property)} <small>${esc(token.path)}</small></span><input class="inp" data-editor-field="appearance:${esc(token.key)}" type="number" min="${token.minimum}" max="${token.maximum}" step="${token.step || 1}" value="${esc(value('appearance:' + token.key, token.value))}"><small class="note">${esc(token.resource)} · current ${token.value} · allowed ${token.minimum}–${token.maximum}</small></label>`).join('')}</div></details>`).join('') : '<div class="empty">Inspect the selected player to discover supported font, button, control and chrome tokens. Unsupported or ambiguous QML is refused, not guessed.</div>';
+        const planReady = plan?.outputSha256 && plan.revision === getState().workspaceRevision && plan.exePath === getState().exePath;
+        return card('Player Appearance Studio', `<p class="note">Safe numeric QML design tokens only: font sizes, button radius/density/spacing, control indicators and player chrome. This is not a raw QML/hex editor and does not install font/icon packs. Inspect → stage → Dry Run → Apply uses the same verified Workspace transaction and recovery journal as palette/resource edits.</p>${actions(btn('Inspect appearance tokens', 'appearance-inspect', true) + btn('Stage appearance edits', 'appearance-stage') + btn('Dry Run staged batch', 'appearance-dry') + btn('Apply verified batch', 'appearance-apply', true, planReady ? '' : 'disabled title="Run Dry Run for the current target and batch first"') + btn('Save appearance to profile', 'appearance-profile') + btn('Reset fields to inspected values', 'appearance-reset'))}${appearance?.msg ? `<p class="note">${esc(appearance.msg)}</p>` : ''}${body}`);
+      }
       function settingsUpdates() {
         const u = getState().updates || {};
         return card('Release & recovery', `<div class="editor-grid">${[['Installed build', u.currentVersion || getState().version || '—'], ['Updater', u.configured ? 'Configured' : 'Not configured'], ['Status', u.state || 'Idle'], ['Latest release', u.latestVersion || '—'], ['Trust', u.trust || '—'], ['Download size', u.downloadSize || '—']].map(([k, v]) => `<div class="kv"><span>${k}</span><b>${esc(v)}</b></div>`).join('')}</div><p class="note">${esc(u.note || '')}</p>${check('updates:auto', 'Check for updates automatically', u.autoCheck !== false)}${actions(btn('Save preference', 'updates-auto') + btn('Check now', 'update-check', true) + btn('Download verified update', 'update-download') + btn('Apply & restart', 'update-apply') + btn('Cancel download', 'update-cancel') + btn(u.skipped ? 'Unskip release' : 'Skip optional release', u.skipped ? 'update-unskip' : 'update-skip') + btn('Open download page', 'update-openDownloadPage') + btn('Show staged file', 'update-showStagedFile') + btn('Read helper diagnostics', 'update-diagnostics') + btn('Open helper log', 'update-showHelperLog'))}<pre class="editor-result">${esc(u.releaseNotes || '')}</pre>`);
@@ -74,9 +94,10 @@
         if (page === 12) return maintenance.render() + result(page);
         if (page === 6) {
           const info = interfaceInfo;
-          const tabs = [['layout', 'Layout & sidebar'], ['about', 'About page'], ['settings-panel', 'Settings panel rebuild'], ['remove', 'Remove controls']];
+          const tabs = [['layout', 'Layout & sidebar'], ['appearance', 'Appearance studio'], ['about', 'About page'], ['settings-panel', 'Settings panel rebuild'], ['remove', 'Remove controls']];
           const tabbar = `<div class="editor-tabs" role="tablist" aria-label="Player interface sections">${tabs.map(([id, label]) => `<button class="editor-tab${interfaceTab === id ? ' active' : ''}" role="tab" aria-selected="${interfaceTab === id}" data-interface-tab="${id}">${label}</button>`).join('')}</div>`;
           let section = '<div class="empty">Inspect the selected player UI to load supported controls and About bindings.</div>';
+          if (interfaceTab === 'appearance') section = appearanceSection();
           if (info && interfaceTab === 'layout') section = card('Player layout tweaks', `<p class="note">Apply only tweaks reported as supported for this executable. Each action remains individually reversible.</p>${(info.layout || []).map((t, i) => `<div class="editor-tweak"><b>${esc(t.label || t.id)}</b><p class="note">${esc(t.detail || '')} ${esc(t.state || '')}</p>${t.supported ? actions(btn(t.applied ? 'Restore this tweak' : 'Apply this tweak', 'layout', false, `data-index="${i}"`)) : '<span class="pill">Unsupported by this EXE</span>'}</div>`).join('') || '<p class="note">No layout tweaks reported for this executable.</p>'}`) + maintenance.sidebar();
           if (info && interfaceTab === 'remove') section = card('Remove selected controls', `<p class="note">Select only the unwanted controls; the native engine validates and backs up the executable before writing.</p><div class="editor-grid">${(info.removals || []).map((name, i) => check('remove:' + i, name)).join('') || '<p class="note">No supported removals were reported.</p>'}</div>${actions(btn('Apply selected removals', 'removals', true) + btn('Restore EXE backup', 'restore'))}`);
           if (info && interfaceTab === 'about') section = card('Player About page', `<p class="note">Edit the in-player About text and links. The preview is plain text and does not execute markup or URLs.</p><div class="about-editor-grid"><div>${area('about:text', 'About text', info.about?.text || '')}${check('about:sections', 'Show About/link sections', info.about?.showSections !== false)}${(info.about?.links || []).map((link, i) => `<div class="editor-link">${check('link:' + i + ':show', link.name || link.id || 'Show link', !link.hidden)}${field('link:' + i + ':label', 'Label', link.label || '')}${field('link:' + i + ':url', 'URL', link.url || '')}</div>`).join('')}${actions(btn('Apply About page', 'about-apply', true) + btn('Restore About bindings', 'about-restore') + btn('Save About to profile', 'about-profile'))}</div><div id="interface-about-preview">${aboutPreview()}</div></div>`);
@@ -124,7 +145,7 @@
           const validPlan = plan?.outputSha256 && plan.revision === getState().workspaceRevision && plan.exePath === getState().exePath;
           return card('Compatibility / capacity inspector', `<p class="note">Inspection is explicit. Static mapping verification does not prove runtime compatibility.</p>${actions(btn('Inspect selected EXE', 'ws-inspect', true) + btn('Export diagnostics…', 'ws-diagnostics') + btn('Refresh staged state', 'workspace-read'))}`)
             + card('Portable profiles', `${field('profile:name', 'Profile name', profile.name || 'My workspace')}${actions(btn('Import profile…', 'profile-load') + btn('Export profile…', 'profile-save'))}<pre class="editor-result">${esc(JSON.stringify(profile, null, 2))}</pre>`)
-            + card('Batch plan', `<p class="native-note">Queue current QML theme edits or replacements from an explicit Resources scan. Dry Run must succeed before Apply. Fingerprints and recovery journals remain validated by C++.</p>${actions(btn('Queue staged theme', 'ws-queue-theme') + btn('Clear batch', 'ws-clear') + btn('Dry Run', 'ws-dry-run', true) + (validPlan ? btn('Apply verified batch', 'ws-apply', true) : '<button class="btn" disabled title="Run a successful Dry Run for the current plan">Apply verified batch</button>'))}<ol>${operations.map(op => `<li>${esc(op.kind)} — ${esc(op.path || 'staged palette')}</li>`).join('')}</ol><pre class="editor-result">${esc(plan ? JSON.stringify(plan, null, 2) : 'No verified dry run for this target.')}</pre><label class="editor-field"><span>Scanned resource to replace</span><select class="inp" data-editor-field="workspace:resource">${getResources().map(r => `<option value="${r.index}" ${String(value('workspace:resource', '0')) === String(r.index) ? 'selected' : ''}>${esc(r.path)}</option>`).join('')}</select></label>${actions(btn('Choose replacement & queue…', 'ws-queue-resource'))}<p class="note">Scan Resources on the Resources page first. No scan is started here.</p>${comparison ? `<div class="editor-grid"><div><h4>Original</h4>${preview(original)}<pre class="editor-result">${esc((original?.text || '').slice(0, 16384))}</pre></div><div><h4>Staged replacement</h4>${preview(comparison)}<pre class="editor-result">${esc(comparison.text || comparison.msg || 'Replacement queued. Run Dry Run to validate the batch.')}</pre></div></div>` : ''}`)
+            + card('Batch plan', `<p class="native-note">Queue current QML theme edits, Appearance Studio tokens, or replacements from an explicit Resources scan. Dry Run must succeed before Apply. Fingerprints and recovery journals remain validated by C++.</p>${actions(btn('Queue staged theme', 'ws-queue-theme') + btn('Clear batch', 'ws-clear') + btn('Dry Run', 'ws-dry-run', true) + (validPlan ? btn('Apply verified batch', 'ws-apply', true) : '<button class="btn" disabled title="Run a successful Dry Run for the current plan">Apply verified batch</button>'))}<ol>${operations.map(op => `<li>${esc(op.kind)} — ${esc(op.path || (op.kind === 'appearance' ? 'staged appearance tokens' : 'staged palette'))}</li>`).join('')}</ol><pre class="editor-result">${esc(plan ? JSON.stringify(plan, null, 2) : 'No verified dry run for this target.')}</pre><label class="editor-field"><span>Scanned resource to replace</span><select class="inp" data-editor-field="workspace:resource">${getResources().map(r => `<option value="${r.index}" ${String(value('workspace:resource', '0')) === String(r.index) ? 'selected' : ''}>${esc(r.path)}</option>`).join('')}</select></label>${actions(btn('Choose replacement & queue…', 'ws-queue-resource'))}<p class="note">Scan Resources on the Resources page first. No scan is started here.</p>${comparison ? `<div class="editor-grid"><div><h4>Original</h4>${preview(original)}<pre class="editor-result">${esc((original?.text || '').slice(0, 16384))}</pre></div><div><h4>Staged replacement</h4>${preview(comparison)}<pre class="editor-result">${esc(comparison.text || comparison.msg || 'Replacement queued. Run Dry Run to validate the batch.')}</pre></div></div>` : ''}`)
             + card('Recovery history', `${actions(btn('Load recovery journals', 'ws-history'))}${history.map((entry, i) => `<div class="editor-tweak"><b>${esc(entry.id)}</b><p class="note">${esc(entry.path || entry.source || '')} ${esc(entry.state || '')}</p>${btn('Restore this journal', 'ws-restore', false, `data-index="${i}"`)}</div>`).join('')}`)
             + card('Image preparation', `<p class="note">Creates a new file, never silently replaces a player asset. JPEG alpha loss is refused; animation is not preserved.</p>${actions(btn('Choose source image…', 'image-open'))}<p class="note">${esc(imageSource || 'No source selected')}</p><div class="editor-grid">${field('image:width', 'Width', 512, 'number')}${field('image:height', 'Height', 512, 'number')}${field('image:quality', 'Quality 1–100', 95, 'number')}</div>${check('image:crop', 'Center crop (otherwise fit)')}${actions(btn('Prepare & save new image…', 'image-save'))}`)
             + card('Boot video / RPC diagnostics', `<p class="note">Inspect MP4 metadata with the existing engine. Playback in the actual emulator still requires target testing; no automatic encoder or conversion is claimed.</p>${actions(btn('Inspect MP4…', 'video-inspect') + (videoSelected ? btn('Play / Qt decoder check', 'video-play') + btn('Pause', 'video-pause') + btn('Toggle crop / fit', 'video-crop') : '') + btn('Check saved profile / Discord IPC', 'gif-diagnostics'))}${videoSelected ? '<div id="video-host" style="height:220px;background:#050807;border-radius:12px;overflow:hidden"></div><p id="video-status" class="note">' + esc(videoStatus) + '</p>' : ''}`) + result(page);
@@ -150,6 +171,31 @@
           if (!names.length) throw new Error('Select at least one removal.');
           if (!await confirmWrite('Apply the selected player UI removals?')) return;
           response = await request('applyRemovals', { names });
+        } else if (name === 'appearance-inspect') {
+          response = await workspace('appearance-inspect');
+          appearance = response;
+          if (response.ok) for (const token of response.tokens || []) fields['appearance:' + token.key] = token.value;
+        } else if (name === 'appearance-stage') {
+          if (!appearanceTokens().length) throw new Error('Inspect appearance tokens first.');
+          const edits = appearanceEdits(true);
+          if (!Object.keys(edits).length) throw new Error('No appearance values differ from the inspected player.');
+          response = await workspace('queue-appearance', { edits });
+        } else if (name === 'appearance-dry') {
+          plan = null;
+          response = await workspace('dry-run');
+          if (response.ok && response.outputSha256) plan = { ...response, revision: getState().workspaceRevision, exePath: getState().exePath };
+        } else if (name === 'appearance-apply') {
+          if (!plan?.outputSha256 || plan.revision !== getState().workspaceRevision || plan.exePath !== getState().exePath) throw new Error('Run Dry Run again for the current target and batch.');
+          if (!await confirmWrite('Apply this verified appearance batch? Output SHA-256:\n' + plan.outputSha256)) return;
+          const hash = plan.outputSha256; plan = null;
+          response = await workspace('apply', { outputSha256: hash });
+          if (response.ok) { appearance = null; for (const key of Object.keys(fields)) if (key.startsWith('appearance:')) delete fields[key]; }
+        } else if (name === 'appearance-profile') {
+          if (!appearanceTokens().length) throw new Error('Inspect appearance tokens first.');
+          response = await workspace('profile-section', { section: 'appearance', value: appearanceEdits(false) });
+        } else if (name === 'appearance-reset') {
+          for (const token of appearanceTokens()) fields['appearance:' + token.key] = token.value;
+          response = 'Appearance fields reset to the inspected values. No files were changed.';
         } else if (name === 'layout') {
           const tweak = interfaceInfo?.layout[Number(el.dataset.index)];
           if (!tweak?.supported) throw new Error('This layout tweak is not supported.');
@@ -301,11 +347,11 @@
         render, extra, action,
         videoStatus(message) { videoStatus=String(message).slice(0,2048); const node=document.querySelector('#video-status'); if(node)node.textContent=videoStatus; },
         input(el) { maintenance.input(el); if (el.dataset.editorField) fields[el.dataset.editorField] = el.type === 'checkbox' ? el.checked : el.value; },
-        selectInterfaceTab(tab) { if (['layout', 'about', 'settings-panel', 'remove'].includes(tab)) interfaceTab = tab; },
+        selectInterfaceTab(tab) { if (['layout', 'appearance', 'about', 'settings-panel', 'remove'].includes(tab)) interfaceTab = tab; },
         selectMaintenanceTab(tab) { maintenance.selectTab(tab); },
         aboutPreview,
         settingsUpdates,
-        reset() { maintenance.reset(); videoSelected=false; videoStatus=''; interfaceTab='layout'; fields = {}; interfaceInfo = null; profile = {}; operations = []; plan = null; history = []; gradients = []; output = {}; rpcNames = []; instances = []; imageSource = ''; comparison = null; original = null; },
+        reset() { maintenance.reset(); videoSelected=false; videoStatus=''; interfaceTab='layout'; fields = {}; interfaceInfo = null; appearance = null; profile = {}; operations = []; plan = null; history = []; gradients = []; output = {}; rpcNames = []; instances = []; imageSource = ''; comparison = null; original = null; },
         async navigate(page) { if ([5, 10, 11].includes(page) && ctx.enabled()) await refreshWorkspace(); }
       };
     }

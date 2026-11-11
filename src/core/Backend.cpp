@@ -7,6 +7,7 @@
 #include <QCryptographicHash>
 #include "BootVideoPatcher.h"
 #include "PlayerCache.h"
+#include "PlayerAppearancePatcher.h"
 #include "GifRpc.h"
 #include "BsDetector.h"
 #include "ExtrasPatcher.h"
@@ -38,7 +39,7 @@ Backend::Backend(SettingsManager *settings, QObject *parent)
     : QObject(parent)
     , m_settings(settings)
 {
-    m_customizationProfile = {{"schema", "bsi.customization.profile"}, {"version", 1}, {"name", "My workspace"}, {"theme", QVariantMap{}}, {"boot", QVariantMap{{"holdMs", 3000}}}, {"gifRpc", QVariantMap{}}, {"about", QVariantMap{}}};
+    m_customizationProfile = {{"schema", "bsi.customization.profile"}, {"version", 1}, {"name", "My workspace"}, {"theme", QVariantMap{}}, {"boot", QVariantMap{{"holdMs", 3000}}}, {"gifRpc", QVariantMap{}}, {"about", QVariantMap{}}, {"appearance", QVariantMap{}}};
     connect(settings, &SettingsManager::dllPathChanged, this, &Backend::dllPathChanged);
     connect(settings, &SettingsManager::confPathChanged, this, &Backend::confPathChanged);
     connect(settings, &SettingsManager::exePathChanged, this, [this] {
@@ -2111,6 +2112,7 @@ QVariantMap Backend::workspace(const QString &action, const QVariantMap &options
     QVariantMap edits; for (auto it = m_edits.cbegin(); it != m_edits.cend(); ++it) edits[it.key()] = it.value();
     QVariantMap r;
     if (action == QLatin1String("inspect")) r = W::inspect(path, edits);
+    else if (action == QLatin1String("appearance-inspect")) r = W::inspectAppearance(path);
     else if (action == QLatin1String("theme-dry-run")) {
         const auto bytes = readExe();
         if (m_themeFileHash != QCryptographicHash::hash(bytes, QCryptographicHash::Sha256) || edits.isEmpty()) r = {{"ok", false}, {"msg", "Load the current theme and stage edits first."}};
@@ -2150,7 +2152,7 @@ QVariantMap Backend::workspace(const QString &action, const QVariantMap &options
         if (r.value("ok").toBool()) m_customizationProfile = candidate;
     } else if (action == QLatin1String("clear")) {
         m_workspaceOperations.clear(); m_workspaceHash.clear(); r = {{"ok", true}, {"msg", "Batch cleared; no files changed."}};
-    } else if (action == QLatin1String("queue-theme") || action == QLatin1String("queue-resource")) {
+    } else if (action == QLatin1String("queue-theme") || action == QLatin1String("queue-resource") || action == QLatin1String("queue-appearance")) {
         const QByteArray current = readExe(); const QString hash = W::digest(current);
         if (current.isEmpty() || (!m_workspaceHash.isEmpty() && m_workspaceHash != hash)) r = {{"ok", false}, {"msg", "EXE changed. Clear the old batch, reload and inspect again."}};
         else if (m_workspaceOperations.size() >= 32) r = {{"ok", false}, {"msg", "Batch limit: 32 operations."}};
@@ -2159,6 +2161,9 @@ QVariantMap Backend::workspace(const QString &action, const QVariantMap &options
             if (action == QLatin1String("queue-theme")) {
                 if (edits.isEmpty() || m_themeFileHash != QCryptographicHash::hash(current, QCryptographicHash::Sha256)) r = {{"ok", false}, {"msg", "Load the current QML theme and stage valid color edits first."}};
                 else operation = {{"kind", "theme"}, {"edits", edits}};
+            } else if (action == QLatin1String("queue-appearance")) {
+                r = W::stageAppearance(path, options.value("edits").toMap());
+                if (r.value("ok").toBool()) operation = r.value("operation").toMap();
             } else {
                 if (m_resourceFileHash != QCryptographicHash::hash(current, QCryptographicHash::Sha256))
                     return result(false, QStringLiteral("Scan Resources manually for the current EXE before staging replacements."), QStringLiteral("red"));

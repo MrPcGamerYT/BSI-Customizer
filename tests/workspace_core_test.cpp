@@ -34,6 +34,37 @@ void check(bool yes, const char *msg)
 bool write(const QString &p, const QByteArray &b) { QFile f(p); return f.open(QIODevice::WriteOnly) && f.write(b) == b.size(); }
 QByteArray read(const QString &p) { QFile f(p); return f.open(QIODevice::ReadOnly) ? f.readAll() : QByteArray{}; }
 quint32 hash(const QString &s) { quint32 h = 0; for (const auto c : s) { h = (h << 4) + c.unicode(); h ^= (h & 0xf0000000) >> 23; h &= 0xfffffff; } return h; }
+// Minimal structurally valid Qt 5 QV4 compilation unit. matchingUnitOffsets()
+// only needs the header fields plus a string table; sourceFileIndex is left
+// out of range, exactly like the real MSI/BlueStacks Qt 5 units.
+QByteArray qv4Unit(const QStringList &strings)
+{
+    const int table = 248;
+    int cursor = table + strings.size() * 4;
+    QList<int> offsets;
+    QByteArray blob;
+    for (const auto &s : strings) {
+        offsets << cursor;
+        // Qt 5 QV4 string record: 24-byte QStringData header (length at +4),
+        // then UTF-16LE characters. unitString() reads exactly this layout.
+        QByteArray record(24, '\0');
+        putLe32(record, 4, quint32(s.size()));
+        for (const QChar c : s) { record.append(char(c.unicode() & 0xFF)); record.append(char(c.unicode() >> 8)); }
+        blob += record;
+        cursor += record.size();
+    }
+    QByteArray unit(cursor, '\0');
+    unit.replace(0, 8, QByteArray("qv4cdata", 8));
+    putLe32(unit, 8, 0x4A);              // non-zero format version => active
+    putLe32(unit, 12, (5u << 16) | 15u); // Qt 5.15
+    putLe32(unit, 24, quint32(unit.size()));
+    putLe32(unit, 112, quint32(strings.size()));
+    putLe32(unit, 116, quint32(table));
+    putLe32(unit, 236, quint32(strings.size())); // sourceFileIndex out of range
+    for (int i = 0; i < offsets.size(); ++i) putLe32(unit, table + i * 4, quint32(offsets[i]));
+    unit.replace(table + strings.size() * 4, blob.size(), blob);
+    return unit;
+}
 QByteArray fixture()
 {
     QByteArray b(0x20000, '\0'); b.replace(0,2,"MZ"); putLe32(b,0x3c,0x80); b.replace(0x80,4,QByteArray("PE\0\0",4));
@@ -41,7 +72,7 @@ QByteArray fixture()
     putLe32(b,0x98+32,0x1000); putLe32(b,0x98+36,0x200); putLe32(b,0x98+56,0x20000); putLe32(b,0x98+60,0x1000); putLe32(b,0x98+108,16);
     b.replace(0x188,8,QByteArray(".rdata\0\0",8)); putLe32(b,0x190,0x1f000); putLe32(b,0x194,0x1000); putLe32(b,0x198,0x1f000); putLe32(b,0x19c,0x1000); putLe32(b,0x1ac,0x40000040);
     b.replace(0x1100,4,"qres"); putBe32(b,0x1104,2); putBe32(b,0x1108,0x7000-0x1100); putBe32(b,0x110c,0x2000-0x1100); putBe32(b,0x1110,0x6000-0x1100);
-    const QByteArray theme("import QtQuick\nQtObject { property QtObject colors: QtObject { property color primary100: '#112233'; property color accentNormal: '#168bff' } }\n");
+    const QByteArray theme("import QtQuick\nQtObject { property QtObject colors: QtObject { property color primary100: '#112233'; property color accentNormal: '#168bff' } property QtObject fonts: QtObject { property font bodyMedium: Qt.font({ \"pixelSize\": 13 }) } property QtObject buttons: QtObject { property QtObject sizes: QtObject { property QtObject large: QtObject { property real radius: 0 } } } }\n");
     QList<QPair<QString,QByteArray>> files{{QStringLiteral("UiThemeObject.qml"),theme}, {QStringLiteral("panel.qml"),QByteArray("import QtQuick\nItem { width: 12 }\n")}};
     std::sort(files.begin(),files.end(),[](const auto &a,const auto &c){ return hash(a.first)<hash(c.first); });
     putBe16(b,0x7004,2); putBe32(b,0x7006,files.size()); putBe32(b,0x700a,1);
@@ -76,6 +107,68 @@ int run()
     bad=profile;bad["boot"]=QVariantMap{{"holdMs",3.5}};check(!W::validateProfile(bad).value("ok").toBool(),"fractional boot durations refused");
     bad=profile;bad["about"]=QVariantMap{{"links",QVariantList{QVariantMap{{"id","bad"},{"url","file:///C:/Windows/test.exe"}}}}};
     check(!W::validateProfile(bad).value("ok").toBool(),"unsafe About links refused");
+    auto appearanceProfile=profile;appearanceProfile["appearance"]=QVariantMap{{"UiThemeObject.qml#root.buttons.sizes.large.radius",8}};
+    check(W::validateProfile(appearanceProfile).value("ok").toBool(),"appearance profile section validated");
+    bad=appearanceProfile;bad["appearance"]=QVariantMap{{"UiThemeObject.qml#root.buttons.sizes.large.radius",true}};
+    check(!W::validateProfile(bad).value("ok").toBool(),"boolean appearance values rejected");
+    bad=appearanceProfile;bad["appearance"]=QVariantMap{{"../../offset#root.buttons.sizes.large.radius",8}};
+    check(!W::validateProfile(bad).value("ok").toBool(),"unsafe appearance profile keys rejected");
+    const auto appearanceInspection=W::inspectAppearance(exe);
+    check(appearanceInspection.value("ok").toBool() && appearanceInspection.value("tokens").toList().size()>=2,"appearance tokens inspected without writing");
+    const auto appearanceStage=W::stageAppearance(exe,{{"UiThemeObject.qml#root.buttons.sizes.large.radius",8}});
+    check(appearanceStage.value("ok").toBool() && appearanceStage.value("operation").toMap().value("kind").toString()=="appearance","appearance edits staged as a logical Workspace operation");
+    const QVariantList appearanceOperations{appearanceStage.value("operation")};
+    QByteArray appearancePrepared;
+    const auto appearanceDry=W::simulate(exe,appearanceOperations,W::digest(original),&appearancePrepared);
+    if (!appearanceDry.value("ok").toBool()) std::printf("appearance dry run: %s\n",qPrintable(appearanceDry.value("msg").toString()));
+    check(appearanceDry.value("ok").toBool() && !appearancePrepared.isEmpty() && read(exe)==original,"appearance dry run is isolated and verified");
+    bool appearanceReadBack=false;
+    for (const auto &file : QtResources::registeredFiles(appearancePrepared))
+        if (file.name == QLatin1String("UiThemeObject.qml"))
+            appearanceReadBack = QtResources::readFile(appearancePrepared,file).contains("property real radius: 8");
+    check(appearanceReadBack,"appearance rewrite reads back through the resource tree");
+    auto duplicateAppearance=appearanceOperations;duplicateAppearance<<appearanceOperations.first();
+    check(!W::simulate(exe,duplicateAppearance,W::digest(original)).value("ok").toBool(),"duplicate appearance operations refused");
+    const QString appearanceRawFile=temp.filePath(QStringLiteral("raw-theme.qml"));write(appearanceRawFile,"import QtQuick\nQtObject {}\n");const auto rawTheme=W::stageResource(QStringLiteral("UiThemeObject.qml"),appearanceRawFile);
+    QVariantList conflict{appearanceOperations.first(),rawTheme.value("operation")};
+    check(!W::simulate(exe,conflict,W::digest(original)).value("ok").toBool(),"appearance and raw replacement of the same payload conflict");
+    QVariantList themeConflict{QVariantMap{{"kind","theme"},{"edits",QVariantMap{{"primary100","#abcdef"}}}},appearanceOperations.first()};
+    const auto themeConflictResult=W::simulate(exe,themeConflict,W::digest(original));
+    check(!themeConflictResult.value("ok").toBool(),"appearance and palette edits of the same theme payload conflict");
+    check(themeConflictResult.value("msg").toString().contains(QStringLiteral("conflict"),Qt::CaseInsensitive),
+          "relocated theme payload is still recognized as a conflict, not accepted or failed for an unrelated reason");
+    auto reversedThemeConflict=themeConflict;std::reverse(reversedThemeConflict.begin(),reversedThemeConflict.end());
+    check(!W::simulate(exe,reversedThemeConflict,W::digest(original)).value("ok").toBool(),
+          "theme/appearance conflict is independent of operation order");
+    {
+        // "UiThemeObject" is matched by the writer's filename/stem table but is
+        // NOT the precise identifier (pFontFamily). The writer would disable a
+        // unit this feature cannot positively attribute, so the edit is refused.
+        QByteArray shadowed=original;
+        const QByteArray unit=qv4Unit({QStringLiteral("UiThemeObject"),QStringLiteral("someOtherComponent")});
+        shadowed.replace(0x9000,unit.size(),unit);
+        check(QtResources::matchingUnits(shadowed,{QStringLiteral("UiThemeObject.qml")},{QStringLiteral("pFontFamily")})==1
+              && QtResources::matchingUnits(shadowed,{},{QStringLiteral("pFontFamily")})==0,
+              "synthetic QV4 unit is matched broadly but not precisely");
+        const QString shadowExe=temp.filePath(QStringLiteral("shadowed.exe"));write(shadowExe,shadowed);
+        const auto shadowInspect=W::inspectAppearance(shadowExe);
+        check(!shadowInspect.value("ok").toBool(),"appearance inspection refuses an imprecise compiled-QML shadow");
+        check(!W::stageAppearance(shadowExe,{{"UiThemeObject.qml#root.buttons.sizes.large.radius",8}}).value("ok").toBool(),
+              "appearance staging refuses an imprecise compiled-QML shadow");
+        const QVariantList shadowOps{QVariantMap{{"kind","appearance"},{"edits",QVariantMap{{"UiThemeObject.qml#root.buttons.sizes.large.radius",8}}}}};
+        check(!W::simulate(shadowExe,shadowOps,W::digest(shadowed)).value("ok").toBool() && read(shadowExe)==shadowed,
+              "appearance dry run refuses an imprecise compiled-QML shadow without writing");
+        // Adding the precise identifier to the same unit makes the shadow safe.
+        QByteArray precise=original;
+        const QByteArray unit2=qv4Unit({QStringLiteral("UiThemeObject"),QStringLiteral("pFontFamily")});
+        precise.replace(0x9000,unit2.size(),unit2);
+        const QString preciseExe=temp.filePath(QStringLiteral("precise.exe"));write(preciseExe,precise);
+        check(W::inspectAppearance(preciseExe).value("ok").toBool(),"precisely identified compiled shadow still offers tokens");
+        QByteArray precisePrepared;
+        const auto preciseDry=W::simulate(preciseExe,shadowOps,W::digest(precise),&precisePrepared);
+        check(preciseDry.value("ok").toBool() && QtResources::activeUnits(precisePrepared,{},{QStringLiteral("pFontFamily")})==0,
+              "precise compiled shadow is invalidated by the verified appearance write");
+    }
     const QString sha=W::digest(original);
     QVariantList operations{QVariantMap{{"kind","theme"},{"edits",QVariantMap{{"primary100","#abcdef"}}}}};
     QByteArray next;const auto dry=W::simulate(exe,operations,sha,&next);
