@@ -6,10 +6,10 @@
 #include <QString>
 #include <QStringList>
 
-// Rebuilds the BlueStacks/HD-Player in-emulator Settings window while keeping
-// its original settings-page components and their native save/discard logic.
-// The original QML sources are stored as a feature-local recovery snapshot, so
-// restoring this panel never restores unrelated changes to the executable.
+// Rebuilds the BlueStacks/HD-Player in-emulator Settings window, widening the
+// fixed-width native tab content while keeping each page's controls and native
+// save/discard callbacks. Original QML sources are stored in a feature-local
+// recovery snapshot so restore never reverts unrelated executable changes.
 namespace SettingsPanelPatcher {
 
 struct State

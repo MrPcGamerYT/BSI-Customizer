@@ -5186,11 +5186,97 @@ Window {
                       QStringLiteral("the real %1 Settings-owned About page refuses an independent About edit without changing the EXE")
                           .arg(QFileInfo(input).fileName()));
                 const auto panelImage = read(panelCopy);
+                QString protectedPagePath;
+                QByteArray editedProtectedPage;
+                QByteArray imageWithExternalPageEdit;
+                for (const auto &entry : EmbeddedResources::list(panelImage, true)) {
+                    const QByteArray pageBytes = EmbeddedResources::readEntry(panelCopy, entry.entryOff, entry.flags, 8 * 1024 * 1024);
+                    const int pageMarker = pageBytes.indexOf("/* BSI-PAGE-WIDTH */");
+                    if (pageMarker < 0) continue;
+                    editedProtectedPage = pageBytes;
+                    editedProtectedPage[pageMarker + 2] = '\t'; // still-valid QML comment, changed bytes
+                    protectedPagePath = entry.path;
+                    const auto edited = EmbeddedResources::replaceBytes(panelCopy, protectedPagePath,
+                        editedProtectedPage, &imageWithExternalPageEdit);
+                    if (!edited.ok) protectedPagePath.clear();
+                    break;
+                }
+                bool pageConflictPreserved = false;
+                bool panelResetAfterConflict = false;
+                if (!protectedPagePath.isEmpty() && write(panelCopy, imageWithExternalPageEdit)) {
+                    const auto refusedPageReapply = SettingsPanelPatcher::apply(panelCopy,
+                        QStringLiteral("Should not overwrite edited page"), panelLinks, {}, true);
+                    const auto refusedPageRestore = SettingsPanelPatcher::apply(panelCopy, QString(), {}, {}, false);
+                    pageConflictPreserved = !refusedPageReapply.value(QStringLiteral("ok")).toBool()
+                        && !refusedPageRestore.value(QStringLiteral("ok")).toBool()
+                        && read(panelCopy) == imageWithExternalPageEdit;
+                    panelResetAfterConflict = write(panelCopy, panelImage);
+                }
+                check(pageConflictPreserved && panelResetAfterConflict,
+                      QStringLiteral("the real %1 patcher refuses to overwrite an externally edited native tab during both reapply and restore")
+                          .arg(QFileInfo(input).fileName()));
                 QString rebuiltWindow;
                 for (const auto &file : QtResources::registeredFiles(panelImage)) {
                     if (file.name.compare(QLatin1String("UiSettingsWindow.qml"), Qt::CaseInsensitive) == 0)
                         rebuiltWindow = QString::fromUtf8(QtResources::readFile(panelImage, file));
                 }
+                const auto hasFixedNativeContentWidth = [](const QString &source) {
+                    const QString masked = QmlText::mask(source);
+                    QList<QmlText::Object> scrollViews;
+                    for (const auto &scroll : QmlText::objects(masked, QStringLiteral("UiScrollView"))) {
+                        QmlText::Binding scrollId;
+                        if (QmlText::binding(masked, scroll.open, scroll.end - 1, QStringLiteral("id"), &scrollId)
+                            && masked.mid(scrollId.valueBegin, scrollId.valueEnd - scrollId.valueBegin).trimmed()
+                                == QLatin1String("iScrollView"))
+                            scrollViews << scroll;
+                    }
+                    for (const auto &object : QmlText::objects(masked, QStringLiteral("UiColumnLayout"))) {
+                        if (!scrollViews.isEmpty()) {
+                            bool inMainScroll = false;
+                            for (const auto &scroll : scrollViews)
+                                if (object.open > scroll.open && object.end < scroll.end) inMainScroll = true;
+                            if (!inMainScroll) continue;
+                        }
+                        QmlText::Binding idBinding, widthBinding;
+                        if (QmlText::binding(masked, object.open, object.end - 1, QStringLiteral("id"), &idBinding)
+                            && masked.mid(idBinding.valueBegin, idBinding.valueEnd - idBinding.valueBegin).trimmed()
+                                == QLatin1String("iContentLayout")
+                            && QmlText::binding(masked, object.open, object.end - 1, QStringLiteral("width"), &widthBinding)
+                            && masked.mid(widthBinding.valueBegin, widthBinding.valueEnd - widthBinding.valueBegin).trimmed()
+                                == QLatin1String("520"))
+                            return true;
+                    }
+                    return false;
+                };
+                int fixedNativePages = 0;
+                int widenedNativePages = 0;
+                const QString responsivePageMarker = QStringLiteral("BSI-PAGE-WIDTH");
+                const auto originalPageFiles = QtResources::registeredFiles(original);
+                const auto rebuiltPageFiles = QtResources::registeredFiles(panelImage);
+                for (const QVariant &tabValue : settingsBeforeApply.value(QStringLiteral("tabs")).toList()) {
+                    const QString leaf = QFileInfo(tabValue.toMap().value(QStringLiteral("page")).toString()).fileName();
+                    if (leaf.isEmpty() || leaf.compare(QLatin1String("PlrAboutSetting.qml"), Qt::CaseInsensitive) == 0)
+                        continue;
+                    QString stockPage, rebuiltPage;
+                    for (const auto &file : originalPageFiles)
+                        if (file.name.compare(leaf, Qt::CaseInsensitive) == 0)
+                            stockPage = EmbeddedResources::decodeText(QtResources::readFile(original, file));
+                    for (const auto &file : rebuiltPageFiles)
+                        if (file.name.compare(leaf, Qt::CaseInsensitive) == 0)
+                            rebuiltPage = EmbeddedResources::decodeText(QtResources::readFile(panelImage, file));
+                    if (stockPage.isEmpty() || rebuiltPage.isEmpty() || !hasFixedNativeContentWidth(stockPage))
+                        continue;
+                    ++fixedNativePages;
+                    QString revertedPage = rebuiltPage;
+                    revertedPage.replace(QStringLiteral("iScrollView.width /* %1 */").arg(responsivePageMarker), QStringLiteral("520"));
+                    revertedPage.replace(QStringLiteral("parent.width /* %1 */").arg(responsivePageMarker), QStringLiteral("520"));
+                    if (rebuiltPage.contains(responsivePageMarker) && !hasFixedNativeContentWidth(rebuiltPage)
+                        && revertedPage == stockPage)
+                        ++widenedNativePages;
+                }
+                check(fixedNativePages > 0 && widenedNativePages == fixedNativePages,
+                      QStringLiteral("the real %1 rebuild expands every fixed-width native Settings tab while changing only its content-width binding (%2/%3 pages)")
+                          .arg(QFileInfo(input).fileName()).arg(widenedNativePages).arg(fixedNativePages));
                 check(rebuiltWindow.contains(QStringLiteral("BSI Settings v8"))
                           && rebuiltWindow.contains(QStringLiteral("property var bHidden:"))
                           && rebuiltWindow.contains(QStringLiteral("property var bIcons:"))
@@ -5288,8 +5374,30 @@ Window {
                 }
                 const auto restoredPanel = SettingsPanelPatcher::apply(panelCopy, QString(), {}, {}, false);
                 check(restoredPanel.value(QStringLiteral("ok")).toBool(),
-                      QStringLiteral("the real %1 panel restores only its two original QML sources (%2)")
+                      QStringLiteral("the real %1 panel restores the original Settings shell, About page, and widened native tab sources (%2)")
                           .arg(QFileInfo(input).fileName(), restoredPanel.value(QStringLiteral("msg")).toString()));
+                const QByteArray restoredPanelImage = read(panelCopy);
+                const auto restoredPageFiles = QtResources::registeredFiles(restoredPanelImage);
+                bool allNativePagesRestoredExactly = true;
+                int nativePageRestoreCount = 0;
+                for (const QVariant &tabValue : settingsBeforeApply.value(QStringLiteral("tabs")).toList()) {
+                    const QString leaf = QFileInfo(tabValue.toMap().value(QStringLiteral("page")).toString()).fileName();
+                    if (leaf.isEmpty() || leaf.compare(QLatin1String("PlrAboutSetting.qml"), Qt::CaseInsensitive) == 0)
+                        continue;
+                    QByteArray stockBytes, restoredBytes;
+                    for (const auto &file : originalPageFiles)
+                        if (file.name.compare(leaf, Qt::CaseInsensitive) == 0)
+                            stockBytes = QtResources::readFile(original, file);
+                    for (const auto &file : restoredPageFiles)
+                        if (file.name.compare(leaf, Qt::CaseInsensitive) == 0)
+                            restoredBytes = QtResources::readFile(restoredPanelImage, file);
+                    ++nativePageRestoreCount;
+                    allNativePagesRestoredExactly = allNativePagesRestoredExactly
+                        && !stockBytes.isEmpty() && restoredBytes == stockBytes;
+                }
+                check(nativePageRestoreCount > 0 && allNativePagesRestoredExactly,
+                      QStringLiteral("the real %1 restore returns every native Settings tab source byte-for-byte to stock")
+                          .arg(QFileInfo(input).fileName()));
 
                 // A new HD-Player.exe can replace the old file at exactly the
                 // same path while its AppLocalData recovery sidecar survives.
@@ -5315,8 +5423,15 @@ Window {
                         sidecar.close();
                         QJsonObject recoveryObject = sidecarDoc.object();
                         QJsonArray sourceRecords = recoveryObject.value(QStringLiteral("sources")).toArray();
-                        if (sidecarError.error == QJsonParseError::NoError && sourceRecords.size() == 2) {
-                            QJsonObject oldWindow = sourceRecords.at(0).toObject();
+                        int windowRecordIndex = -1;
+                        for (int i = 0; i < sourceRecords.size(); ++i) {
+                            const QString path = sourceRecords.at(i).toObject().value(QStringLiteral("path")).toString();
+                            if (QFileInfo(path).fileName().compare(QLatin1String("UiSettingsWindow.qml"), Qt::CaseInsensitive) == 0)
+                                windowRecordIndex = i;
+                        }
+                        if (sidecarError.error == QJsonParseError::NoError && sourceRecords.size() >= 2
+                            && windowRecordIndex >= 0) {
+                            QJsonObject oldWindow = sourceRecords.at(windowRecordIndex).toObject();
                             QByteArray previousSource = QByteArray::fromBase64(
                                 oldWindow.value(QStringLiteral("original")).toString().toLatin1());
                             previousSource.append('\n'); // another valid stock-QML revision
@@ -5327,7 +5442,7 @@ Window {
                             QJsonArray previousAcceptedHashes;
                             previousAcceptedHashes.append(QString::fromLatin1(previousHash));
                             oldWindow.insert(QStringLiteral("acceptedSha256"), previousAcceptedHashes);
-                            sourceRecords.replace(0, oldWindow);
+                            sourceRecords.replace(windowRecordIndex, oldWindow);
                             recoveryObject.insert(QStringLiteral("sources"), sourceRecords);
                             const QByteArray staleJson = QJsonDocument(recoveryObject).toJson(QJsonDocument::Compact);
                             if (sidecar.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
