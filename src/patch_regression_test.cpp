@@ -5304,7 +5304,7 @@ Window {
                     if (entry.leaf.compare(QLatin1String("UiSettingsWindow.qml"), Qt::CaseInsensitive) == 0) {
                         freshWindowPath = entry.path;
                         freshWindowSource = EmbeddedResources::decodeText(
-                            EmbeddedResources::readEntry(freshInstallImage, entry.entryOff, entry.flags, 8 * 1024 * 1024));
+                            EmbeddedResources::readEntry(input, entry.entryOff, entry.flags, 8 * 1024 * 1024));
                         break;
                     }
                 }
