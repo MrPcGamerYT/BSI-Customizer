@@ -5308,12 +5308,21 @@ Window {
                         break;
                     }
                 }
-                const int stockWord = freshWindowSource.indexOf(QLatin1String("Settings"));
-                if (stockWord >= 0) freshWindowSource.replace(stockWord, 8, QStringLiteral("SETTINGS"));
+                const QString maskedFreshWindow = QmlText::mask(freshWindowSource);
+                const auto freshShellObjects = QmlText::objects(maskedFreshWindow, QStringLiteral("UiShadowContainer"));
+                const bool seedRecoverySucceeded = seedRecovery.value(QStringLiteral("ok")).toBool();
+                check(seedRecoverySucceeded,
+                      QStringLiteral("the stale-recovery regression creates an initial patch snapshot (%1)")
+                          .arg(seedRecovery.value(QStringLiteral("msg")).toString()));
+                const bool cleanExeWritten = seedRecoverySucceeded && write(panelCopy, original);
+                check(cleanExeWritten,
+                      "the clean reference is restored over the previously patched executable path");
+                if (!freshShellObjects.isEmpty())
+                    freshWindowSource.insert(freshShellObjects.first().open + 1,
+                                             QStringLiteral("\n// Fresh-install regression fixture\n"));
                 QString freshImageError;
-                bool freshImageReady = seedRecovery.value(QStringLiteral("ok")).toBool()
-                    && stockWord >= 0 && !freshWindowPath.isEmpty()
-                    && write(panelCopy, original);
+                bool freshImageReady = cleanExeWritten && !freshWindowPath.isEmpty()
+                    && !freshShellObjects.isEmpty();
                 if (freshImageReady) {
                     const auto changedFreshSource = EmbeddedResources::replaceBytes(
                         panelCopy, freshWindowPath, freshWindowSource.toUtf8(), &freshInstallImage);
