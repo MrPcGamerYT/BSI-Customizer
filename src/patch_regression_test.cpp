@@ -5190,9 +5190,16 @@ Window {
                 QString protectedPagePath;
                 QByteArray editedProtectedPage;
                 QByteArray imageWithExternalPageEdit;
+                QStringList nativePageLeaves;
+                for (const QVariant &tabValue : settingsBeforeApply.value(QStringLiteral("tabs")).toList()) {
+                    const QString leaf = QFileInfo(tabValue.toMap().value(QStringLiteral("page")).toString()).fileName();
+                    if (!leaf.isEmpty() && leaf.compare(QLatin1String("PlrAboutSetting.qml"), Qt::CaseInsensitive) != 0)
+                        nativePageLeaves << leaf;
+                }
                 const auto stockEntries = EmbeddedResources::list(original, true);
                 for (const auto &entry : EmbeddedResources::list(panelImage, true)) {
-                    if (entry.format.compare(QLatin1String("qml"), Qt::CaseInsensitive) != 0) continue;
+                    if (entry.format.compare(QLatin1String("qml"), Qt::CaseInsensitive) != 0
+                        || !nativePageLeaves.contains(entry.leaf, Qt::CaseInsensitive)) continue;
                     const QByteArray pageBytes = EmbeddedResources::readEntry(panelCopy, entry.entryOff, entry.flags, 8 * 1024 * 1024);
                     QByteArray stockPageBytes;
                     for (const auto &stockEntry : stockEntries) {
