@@ -16,10 +16,13 @@
     ['About BSI', 'About', 'Built around your player.', 'Chromium presentation. C++ patch engines. Existing login and update verification.'],
     ['Animated presence', 'Animated', 'Bring presence to life.', 'Configure the existing native GIF RPC plugin and restore flow.'],
     ['Patch workspace', 'Workspace', 'One deliberate change.', 'Portable profiles, queued changes, dry runs and recoverable batch apply.'],
-    ['Debloat & Android', 'Debloat', 'A cleaner player.', 'Original configuration cleanup, Android ADB and journalled Root.vhd tools.']
+    ['Debloat & Android', 'Debloat', 'A cleaner player.', 'Original configuration cleanup, Android ADB and journalled Root.vhd tools.'],
+    ['Backups', 'Recovery', 'A way back.', 'Hash-verified snapshots for Workspace and Add-ons changes.'],
+    ['Add-ons', 'Collection', 'Make it yours.', 'Six player palettes and button designs. Preview first. Apply deliberately.']
   ];
   const icons = [`<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>`, `<circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1"/>`, `<rect x="4" y="3" width="16" height="18" rx="2"/><path d="M8 8h8M8 12h8M8 16h4"/>`, `<path d="m4 16 5-7 4 4 7-9M15 4h5v5"/>`, `<path d="m12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6zM8 12l3 3 5-6"/>`, `<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m10 9 5 3-5 3z"/>`, `<path d="M5 7h14M5 12h14M5 17h14"/><circle cx="8" cy="7" r="1.5"/><circle cx="15" cy="12" r="1.5"/>`, `<path d="M4 5h16v12H8l-4 4zM8 10h8M8 13h5"/>`, `<circle cx="12" cy="12" r="4"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2"/>`, `<circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7v1"/>`, `<path d="m12 3 2.3 5.2L20 9l-4 4 .9 5.7-4.9-2.6-4.9 2.6L8 13 4 9l5.7-.8z"/>`, `<rect x="3" y="6" width="18" height="15" rx="2"/><path d="M8 6V3h8v3M3 11h18M10 11v3h4v-3"/>`];
   icons.push(`<path d="M4 6h16M6 6l1 14h10l1-14M9 6V3h6v3M10 10v6M14 10v6"/>`);
+  icons.push('<path d="M3 12a9 9 0 1 0 3-6M3 3v6h6M12 7v5l3 2"/>', '<rect x="3" y="3" width="7" height="7" rx="2"/><path d="M14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z"/>');
   const svg = i => `<svg viewBox="0 0 24 24" aria-hidden="true">${icons[i]}</svg>`;
   let transport = null, preview = false, state = {}, page = 0, pending = false;
   let settingsPanelManualTestRouted = false;
@@ -32,6 +35,7 @@
   const enabled = () => !!transport && state.authorized && !state.busy && !pending;
   const panel = body => `<div class="panel"><div class="pscroll">${body}</div></div>`;
   const button = (label, action, primary = false, extra = '') => `<button class="btn${primary ? ' pri' : ''}" data-action="${action}" data-locked="${/^\s*disabled(?:\s|$)/.test(extra)}" ${extra} ${enabled() ? '' : 'disabled'}>${label}</button>`;
+  const collection = BsiAddons.create({esc, button, request: (...args) => request(...args), getState: () => state});
   const native = () => ''; // No second editor in the normal HTML workflow.
   const confirmDiscard = async () => !dirty || BsiEffects.confirm('Discard the unsaved resource text in this editor?');
   function toast(message, kind = 'error') {
@@ -52,6 +56,7 @@
       palette = { entries: [], hex: [], presets: [], method: 'auto' };
       resources = []; selected = null; resourceData = null; dirty = false;
       bootLogoPreview = '';
+      collection.reset();
       editors?.reset(); resourceIndex = []; ++measureSequence; clearTimeout(measureTimer);
     } else if (resourcesChanged && !pending && !preserveResources) {
       resources = []; resourceIndex = []; selected = null; resourceData = null; dirty = false;
@@ -68,7 +73,7 @@
       document.documentElement.style.setProperty('--on', (rgb[0] * .299 + rgb[1] * .587 + rgb[2] * .114) > 127 ? '#10251b' : '#ffffff');
     }
     chrome();
-    if (pathChanged || resourcesChanged && !pending && !preserveResources || !pending && (page === 11 && workspaceChanged || page === 9 && updateChanged)) renderView();
+    if (pathChanged || resourcesChanged && !pending && !preserveResources || !pending && ((page === 11 || page === 14) && workspaceChanged || page === 9 && updateChanged)) renderView();
     markBusy();
   }
   function markBusy() {
@@ -171,9 +176,9 @@
     $('#canvas').classList.toggle('page', page !== 0);
     const groups = [
       ['HOME', [0]], ['CUSTOMIZE', [1, 2, 3, 4, 5, 6]],
-      ['PRESENCE', [7, 10]], ['APP', [8, 9]], ['TOOLS', [11, 12]]
+      ['PRESENCE', [7, 10]], ['APP', [8, 9]], ['TOOLS', [11, 12]], ['RECOVERY', [13]], ['COLLECTION', [14]]
     ];
-    $('#spine').innerHTML = groups.map(([label, items]) => `<div class="nav-group"><span class="nav-group-label">${label}</span>${items.map(i => `<button class="icon${page === i ? ' on' : ''}" data-page="${i}" aria-label="${pages[i][0]}" aria-current="${page === i ? 'page' : 'false'}"><span class="nav-glyph">${svg(i)}</span><span class="nav-label">${esc(pages[i][0])}</span></button>`).join('')}</div>`).join('');
+    $('#spine').innerHTML = groups.map(([label, items]) => `<div class="nav-group"><span class="nav-group-label">${label === 'CUSTOMIZE' ? 'PATCHER' : label}</span>${items.map(i => `<button class="icon${page === i ? ' on' : ''}" data-page="${i}" aria-label="${pages[i][0]}" aria-current="${page === i ? 'page' : 'false'}"><span class="nav-glyph">${svg(i)}</span><span class="nav-label">${esc(pages[i][0])}</span></button>`).join('')}</div>`).join('');
     $('#session').className = 'session' + (state.busy || pending ? ' busy' : !state.exeFound ? ' bad' : '');
     $('#session').innerHTML = `<i></i><b>${esc(preview ? 'Design preview' : state.authorized ? 'Discord verified' : 'Sign-in required')}</b><span>${state.busy || pending ? 'WORKING' : state.exeFound ? 'READY' : 'NO TARGET'}</span><em></em>`;
     $('#hero').innerHTML = `<div class="hero"><div class="hero-main"><div class="kicker">Control center / ${esc(current[1]).toLowerCase()}</div><h1>${esc(current[2])}</h1><p>${esc(current[3])}</p><div class="hero-line"></div></div><div class="target-card"><small>Active target</small><b>${esc(targetName())}</b><div class="ready${state.exeFound ? '' : ' bad'}"><i></i>${state.exeFound ? 'HD-Player.exe detected' : 'Select your player in Settings'}</div></div></div>`;
@@ -211,6 +216,8 @@
       html = panel(`<div class="sec"><div class="sec-h">${pages[page][0]}</div><p class="native-note">These commands call the existing engines directly. Close all emulator instances before changing files. Backups and validation stay in C++.</p>${page === 3 ? `<label class="lbl" for="fps-limit">FPS limit</label><input id="fps-limit" class="inp" type="number" min="1" max="10000" data-draft="fps" value="${esc(drafts.fps || '240')}">` : page === 5 ? `<label class="lbl" for="boot-hold">Boot hold (milliseconds)</label><input id="boot-hold" class="inp" type="number" min="0" max="15000" data-draft="hold" value="${esc(drafts.hold || '3000')}">${bootOptions}` : ''}<div class="button-grid">${commands.map(([label, action]) => button(label, action)).join('')}${native(page)}</div><pre id="operation-result"></pre></div>`);
     } else if (page === 8) {
       html = panel(`<div class="sec"><div class="sec-h">Application appearance</div><div class="tools"><select class="inp" id="appearance-mode" aria-label="App theme">${['Dark', 'Light', 'System'].map((v, i) => `<option value="${i}" ${state.appearance === i ? 'selected' : ''}>${v}</option>`).join('')}</select><input type="color" id="accent" aria-label="App accent" value="${esc(state.accent || '#9ce9c1')}">${button('Save appearance', 'appearance', true)}</div></div><div class="sec"><div class="sec-h">Native targets</div>${['exe', 'dll', 'conf'].map(role => `<label class="lbl" for="path-${role}">${{ exe: 'HD-Player.exe', dll: 'Qt5/Qt6 QuickTemplates2 DLL', conf: 'bluestacks.conf' }[role]}</label><div class="path-row"><input class="inp mono" id="path-${role}" value="${esc(state[role + 'Path'] || '')}">${button('Browse…', 'browse', false, `data-role="${role}"`)}${button('Set path', 'path', false, `data-role="${role}"`)}</div>`).join('')}<div class="button-grid">${button('Detect installations', 'detectInstalls')}${button('Restore EXE backup', 'restoreBackup')}</div>${(state.installs || []).map((install, index) => `<div class="kv"><span>${esc(install.profile || install.root)}</span>${button('Use installation', 'useInstall', false, `data-index="${index}"`)}</div>`).join('')}</div>`);
+    } else if (page === 13 || page === 14) {
+      html = panel(collection.render(page));
     } else {
       html = panel(editors.render(page));
     }
@@ -325,6 +332,7 @@
   async function action(el) {
     const name = el.dataset.action;
     if (!enabled()) return;
+    if (name.startsWith('addon:')) { await collection.action(name.slice(6), el); renderView(); return; }
     if (name.startsWith('editor:')) { await editors.action(name.slice(7), el, page); renderView(); return; }
     if (name === 'native') { if (await confirmDiscard()) { if (dirty) { selected = null; resourceData = null; } dirty = false; await request('openNativeTool', { page: Number(el.dataset.page) }); } return; }
     if (name === 'loadTheme') { await request('loadTheme', { mode: $('#theme-mode').value }); await readPalette(); }
@@ -418,6 +426,8 @@
       if (interfaceTab) { editors.selectInterfaceTab(interfaceTab.dataset.interfaceTab); renderView(); return; }
       const maintenanceTab = event.target.closest('[data-maint-tab]');
       if (maintenanceTab) { editors.selectMaintenanceTab(maintenanceTab.dataset.maintTab); renderView(); return; }
+      const replay = event.target.closest('[data-addon-preview]');
+      if (replay) { collection.select(replay.dataset.addonPreview); renderView(); return; }
       const actionEl = event.target.closest('[data-action]');
       if (actionEl) {
         if (actionEl.dataset.action === 'workspaceHome') await navigate(11);

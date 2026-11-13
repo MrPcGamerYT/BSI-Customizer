@@ -4,6 +4,7 @@
 #include "AndroidCleanup.h"
 #include "AuthManager.h"
 #include "CustomizationWorkspace.h"
+#include "AddonPacks.h"
 #include <QCryptographicHash>
 #include "BootVideoPatcher.h"
 #include "PlayerCache.h"
@@ -2112,6 +2113,27 @@ QVariantMap Backend::workspace(const QString &action, const QVariantMap &options
     QVariantMap edits; for (auto it = m_edits.cbegin(); it != m_edits.cend(); ++it) edits[it.key()] = it.value();
     QVariantMap r;
     if (action == QLatin1String("inspect")) r = W::inspect(path, edits);
+    else if (action == QLatin1String("queue-addon")) {
+        // A pack is an isolated, fixed catalog operation. Never discard the user's batch.
+        const auto *pack = AddonPacks::find(options.value("id").toString());
+        const auto *preset = pack ? ThemePresets::byId(QLatin1String(pack->preset)) : nullptr;
+        const QByteArray bytes = readExe();
+        const auto theme = ThemeEngine::detectTheme(bytes, QStringLiteral("qml"));
+        const auto entries = ThemeEngine::parseQmlEntries(theme.qml);
+        const auto colors = preset ? ThemePresets::matchEntries(*preset, entries) : QMap<QString, QString>();
+        const auto analysis = PlayerAppearancePatcher::analyze(bytes);
+        if (!pack || !preset) r = {{"ok", false}, {"msg", "Unknown add-on pack."}};
+        else if (!m_workspaceOperations.isEmpty()) r = {{"ok", false}, {"msg", "Review or clear your existing Workspace batch before staging an add-on. Nothing was discarded."}};
+        else if (colors.isEmpty() || !analysis.ok || AddonPacks::designEdits(*pack, analysis).isEmpty())
+            r = {{"ok", false}, {"msg", "This player does not expose both a supported QML palette and cataloged button design tokens. No pack was staged. Use Color studio for palette-only targets."}};
+        else {
+            QVariantMap matched;
+            for (auto it = colors.cbegin(); it != colors.cend(); ++it) matched[it.key()] = it.value();
+            m_workspaceOperations << QVariantMap{{"kind", "theme"}, {"pack", options.value("id")}, {"edits", matched}};
+            m_workspaceHash = W::digest(bytes);
+            r = {{"ok", true}, {"msg", "Pack palette and button geometry staged. Run Dry Run, then review Apply. Player animations, icons, boot and native dialogs are not changed."}};
+        }
+    }
     else if (action == QLatin1String("appearance-inspect")) r = W::inspectAppearance(path);
     else if (action == QLatin1String("theme-dry-run")) {
         const auto bytes = readExe();

@@ -10,7 +10,7 @@ ApplicationWindow {
     onClosing: (close) => { if (backend.busy) close.accepted = false; }
 
     id: window
-    width: 1480
+    width: 1420
     height: 920
     minimumWidth: 980
     minimumHeight: 640
@@ -27,93 +27,11 @@ ApplicationWindow {
     }
 
     function runSelftest() {
-        if (backend.busy) {
-            toast.show("Backend is busy, please wait.");
-            return;
-        }
-        let passed = 0;
-        let failed = 0;
-        const width = 40;
-
-        // Check 1: QML root objects exist
-        if (engine.rootObjects().length > 0) {
-            passed++;
-            toast.show("PASS: QML root object exists");
-        } else {
-            failed++;
-            toast.show("FAIL: QML root object missing");
-        }
-
-        // Check 2: Feature pages can be navigated
-        if (!backend.busy && Number.isInteger(window.navigatePage) && window.featurePages.length > 0) {
-            passed++;
-            toast.show("PASS: Feature pages accessible");
-        } else {
-            failed++;
-            toast.show("FAIL: Feature pages inaccessible");
-        }
-
-        // Check 3: Installs can be detected
-        if (!backend.busy) {
-            const installs = backend.detectInstalls();
-            if (installs.length > 0) {
-                passed++;
-                toast.show("PASS: BlueStacks installs detected (" + installs.length + ")");
-            } else {
-                failed++;
-                toast.show("WARN: No BlueStacks installs detected (may be normal if not installed)");
-            }
-        } else {
-            failed++;
-            toast.show("SKIP: Backend busy, skipping install detection");
-        }
-
-        // Check 4: Backend state is available
-        if (!backend.busy) {
-            const state = JSON.parse(backend.state());
-            if (state && state.sections) {
-                passed++;
-                toast.show("PASS: Backend state accessible (" + state.sections.length + " sections)");
-            } else {
-                failed++;
-                toast.show("FAIL: Backend state unavailable");
-            }
-        }
-
-        // Check 5: Theme is loadable
-        if (!backend.busy) {
-            const themeMode = backend.themeMode();
-            if (themeMode && themeMode !== "") {
-                passed++;
-                toast.show("PASS: Theme mode: " + themeMode);
-            } else {
-                failed++;
-                toast.show("WARN: No theme mode detected");
-            }
-        }
-
-        // Check 6: Gradient targets available
-        if (!backend.busy) {
-            const targets = backend.gradientTargets();
-            if (targets && targets.length > 0) {
-                passed++;
-                toast.show("PASS: Gradient targets available (" + targets.length + ")");
-            } else {
-                failed++;
-                toast.show("WARN: No gradient targets found");
-            }
-        }
-
-        // Summary
-        setTimeout(() => {
-            const summary = passed + "/" + (passed + failed) + " checks passed";
-            toast.show(summary);
-            if (failed === 0) {
-                toast.show("Selftest: ALL CHECKS PASSED", "green");
-            } else {
-                toast.show("Selftest: " + failed + " check(s) failed", "red");
-            }
-        }, 500);
+        // This is a shell check only; native engine tests live in --selftest.
+        const ok = typeof window.navigatePage === "function"
+                   && pages.count === window.featurePages.length;
+        toast.show(ok ? qsTr("Shell navigation check passed. Run --selftest for engine tests.")
+                      : qsTr("Shell navigation check failed."));
     }
     visible: true
     // Premium-Optimizer chrome: frameless window with the app's own topbar and
@@ -159,17 +77,19 @@ ApplicationWindow {
     // ONE production shell. Every page below is the original QML editor;
     // no HTML command adapter, parallel form state or native-editor switch.
     readonly property var featurePages: [
-        { label: qsTr("Dashboard"), section: qsTr("HOME"), icon: Icons.dashboard },
-        { label: qsTr("Color studio"), section: qsTr("CUSTOMIZE"), icon: Icons.theme },
-        { label: qsTr("Resources"), section: qsTr("CUSTOMIZE"), icon: Icons.images },
-        { label: qsTr("Performance"), section: qsTr("CUSTOMIZE"), icon: Icons.fps },
-        { label: qsTr("Integrity & safety"), section: qsTr("CUSTOMIZE"), icon: Icons.integrity },
-        { label: qsTr("Boot experience"), section: qsTr("CUSTOMIZE"), icon: Icons.boot },
-        { label: qsTr("Player interface"), section: qsTr("CUSTOMIZE"), icon: Icons.extras },
-        { label: qsTr("Discord presence"), section: qsTr("TOOLS"), icon: Icons.discord },
-        { label: qsTr("Animated presence"), section: qsTr("TOOLS"), icon: Icons.discord },
-        { label: qsTr("Patch workspace"), section: qsTr("TOOLS"), icon: Icons.extras },
-        { label: qsTr("Debloat & disk manager"), section: qsTr("TOOLS"), icon: Icons.debloat }
+        { label: qsTr("Overview"), section: qsTr("HOME"), icon: Icons.dashboard },
+        { label: qsTr("Color studio"), section: qsTr("PATCHER"), icon: Icons.theme },
+        { label: qsTr("Resources"), section: qsTr("PATCHER"), icon: Icons.images },
+        { label: qsTr("Performance"), section: qsTr("PATCHER"), icon: Icons.fps },
+        { label: qsTr("Integrity & safety"), section: qsTr("PATCHER"), icon: Icons.integrity },
+        { label: qsTr("Boot experience"), section: qsTr("PATCHER"), icon: Icons.boot },
+        { label: qsTr("Player interface"), section: qsTr("PATCHER"), icon: Icons.extras },
+        { label: qsTr("Discord presence"), section: qsTr("PATCHER"), icon: Icons.discord },
+        { label: qsTr("Animated presence"), section: qsTr("PATCHER"), icon: Icons.discord },
+        { label: qsTr("Patch workspace"), section: qsTr("PATCHER"), icon: Icons.extras },
+        { label: qsTr("Debloat & disk manager"), section: qsTr("PATCHER"), icon: Icons.debloat },
+        { label: qsTr("Backups"), section: qsTr("RECOVERY"), icon: Icons.integrity },
+        { label: qsTr("Add-ons"), section: qsTr("COLLECTION"), icon: Icons.theme }
     ]
     readonly property var pageNames: featurePages.map(p => p.label)
     property alias currentPage: pages.currentIndex
@@ -178,15 +98,13 @@ ApplicationWindow {
             pages.currentIndex = index;
     }
 
-    Image {
-        anchors.left: parent.left; anchors.top: parent.top
-        width: parent.width * 0.8; height: parent.height
-        source: "img/orb-green.png"; opacity: Theme.dark ? 0.24 : 0.06
-    }
-    Image {
-        anchors.right: parent.right; anchors.bottom: parent.bottom
-        width: parent.width * 0.6; height: parent.height * 0.85
-        source: "img/orb-green.png"; opacity: Theme.dark ? 0.16 : 0.05
+    Rectangle {
+        anchors.fill: parent
+        gradient: Gradient {
+            GradientStop { position: 0; color: Theme.dark ? "#17131e" : Theme.window }
+            GradientStop { position: 0.55; color: Theme.window }
+            GradientStop { position: 1; color: Theme.dark ? "#08070a" : Theme.window }
+        }
     }
 
     Rectangle {
@@ -395,48 +313,23 @@ ApplicationWindow {
         visible: auth.authorized
         spacing: 10
         UpdateBanner { Layout.fillWidth: true; Layout.preferredHeight: visible ? implicitHeight : 0 }
-        // Page stack matching main.py's 4-section structure
         StackLayout {
             id: pages
             objectName: "studioPageStack"
             Layout.fillWidth: true; Layout.fillHeight: true
-
-            // Section 0: Dashboard / Overview
             DashboardPage { objectName: "studioDashboard"; onNavigate: (index) => window.navigatePage(index) }
-
-            // Section 1: Settings (general)
-            SettingsPanel {
-                id: settingsPanelCentral
-                objectName: "settingsPanel"
-                onNotify: (message) => toast.show(message)
-                visible: pages.currentIndex === 1
-            }
-
-            // Section 2: Patcher (theme, fps, resources, etc.)
-            StackLayout {
-                id: patcherPages
-                Layout.fillWidth: true; Layout.fillHeight: true
-                ThemePage { objectName: "featureTheme" }
-                ResourcesPage { objectName: "featureResources" }
-                FpsPage { objectName: "featureFps" }
-                IntegrityPage { objectName: "featureIntegrity" }
-                BootVideoPage { objectName: "featureBoot" }
-                UiPage { objectName: "featureInterface"; onNotify: (msg) => toast.show(msg) }
-                RpcidPage { objectName: "featureRpc" }
-                GifRpcPage { objectName: "featureGif" }
-                WorkspacePage { objectName: "featureWorkspace"; onNavigate: (index) => window.navigatePage(index) }
-                DebloatPage { objectName: "featureDebloat"; onNotify: (msg) => toast.show(msg) }
-            }
-            visible: pages.currentIndex === 2
-
-            // Section 3: About / Backups
-            StackLayout {
-                id: backupPages
-                Layout.fillWidth: true; Layout.fillHeight: true
-                AboutPage { objectName: "aboutPage" }
-                UpdatesPage { objectName: "updatesPage" }
-            }
-            visible: pages.currentIndex === 3
+            ThemePage { objectName: "featureTheme" }
+            ResourcesPage { objectName: "featureResources" }
+            FpsPage { objectName: "featureFps" }
+            IntegrityPage { objectName: "featureIntegrity" }
+            BootVideoPage { objectName: "featureBoot" }
+            UiPage { objectName: "featureInterface"; onNotify: (msg) => toast.show(msg) }
+            RpcidPage { objectName: "featureRpc" }
+            GifRpcPage { objectName: "featureGif" }
+            WorkspacePage { objectName: "featureWorkspace"; onNavigate: (index) => window.navigatePage(index) }
+            DebloatPage { objectName: "featureDebloat"; onNotify: (msg) => toast.show(msg) }
+            BackupsPage { onNotify: (msg) => toast.show(msg) }
+            AddonsPage { onNotify: (msg) => toast.show(msg); onNavigate: (index) => window.navigatePage(index) }
         }
         LogPanel {
             id: logPanel

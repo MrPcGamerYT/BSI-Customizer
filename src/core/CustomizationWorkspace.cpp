@@ -6,6 +6,7 @@
 #include "GifRpc.h"
 #include "PatchFile.h"
 #include "PlayerAppearancePatcher.h"
+#include "AddonPacks.h"
 #include "PeUtils.h"
 #include "QtResources.h"
 #include "ThemeEngine.h"
@@ -262,6 +263,33 @@ QVariantMap simulate(const QString &path, const QVariantList &operations, const 
             const auto info = ThemeEngine::detectTheme(working, QStringLiteral("qml"));
             const auto r = ThemeEngine::patchTheme(stage, info, ThemeEngine::parseQmlEntries(info.qml), colorMap(op.value("edits").toMap()), {}, &next);
             ok = r.ok; msg = r.msg;
+            if (ok && op.contains("pack")) {
+                const auto *pack = AddonPacks::find(op.value("pack").toString());
+                if (!pack) return fail(QStringLiteral("Unknown add-on pack."));
+                const auto originalAnalysis = PlayerAppearancePatcher::analyze(original);
+                const auto originalEdits = AddonPacks::designEdits(*pack, originalAnalysis);
+                for (const auto &token : originalAnalysis.tokens) {
+                    if (!originalEdits.contains(token.key)) continue;
+                    int matches = 0; EmbeddedResources::Entry selected;
+                    for (const auto &e : EmbeddedResources::list(original, true))
+                        if (e.path == token.resource) { selected = e; ++matches; }
+                    if (matches != 1 || touched.contains(token.resource))
+                        return fail(QStringLiteral("Ambiguous or conflicting add-on design resource."));
+                    if (selected.entryOff != theme.entryOff && payloads.contains(selected.entryOff))
+                        return fail(QStringLiteral("Add-on design conflicts with an earlier resource edit."));
+                }
+                const auto design = AddonPacks::designEdits(*pack, PlayerAppearancePatcher::analyze(next));
+                if (design.isEmpty()) return fail(QStringLiteral("Supported add-on design tokens disappeared after palette preparation."));
+                QString error;
+                ok = PlayerAppearancePatcher::apply(next, design, &error);
+                if (!ok) msg = error;
+                else msg += QStringLiteral(" Add-on button geometry verified; animations and non-QML artwork unchanged.");
+                for (const auto &token : originalAnalysis.tokens) if (originalEdits.contains(token.key)) {
+                    for (const auto &e : EmbeddedResources::list(original, true))
+                        if (e.path == token.resource) payloads.insert(e.entryOff);
+                    touched.insert(token.resource);
+                }
+            }
         } else if (kind == QLatin1String("appearance")) {
             const auto validation = PlayerAppearancePatcher::validateEdits(working, op.value("edits").toMap());
             if (!validation.value("ok").toBool()) return fail(validation.value("msg").toString());
@@ -299,7 +327,9 @@ QVariantMap simulate(const QString &path, const QVariantList &operations, const 
             if (touched.contains(QStringLiteral("@theme")) && selected.entryOff == theme.entryOff) return fail(QStringLiteral("Raw theme replacement conflicts with palette edits."));
             const auto r = EmbeddedResources::replaceBytes(stage, key, data, &next); ok = r.ok; msg = r.msg;
         } else return fail(QStringLiteral("Unsupported batch operation. Only theme, resource and appearance edits belong to this single-EXE transaction."));
-        steps << QVariantMap{{"operation", key}, {"ok", ok}, {"msg", msg}};
+        QVariantMap step{{"operation", key}, {"ok", ok}, {"msg", msg}};
+        if (op.contains("pack")) step["pack"] = op.value("pack");
+        steps << step;
         if (!ok || next.isEmpty()) return {{"ok", false}, {"msg", msg}, {"steps", steps}};
         if (next.size() > maxImage) return fail(QStringLiteral("Prepared EXE exceeds the 256 MB recovery limit; no files changed."));
         working = next;
@@ -339,6 +369,7 @@ QVariantMap apply(const QString &path, const QVariantList &operations, const QSt
         QVariantMap description{{"kind",op.value("kind")}};
         if (op.value("kind").toString() == QLatin1String("theme")) {
             const QStringList names = op.value("edits").toMap().keys();
+            if (op.contains("pack")) description["pack"] = op.value("pack");
             description["colorCount"] = names.size();
             description["properties"] = names.mid(0,64);
         } else if (op.value("kind").toString() == QLatin1String("appearance")) {

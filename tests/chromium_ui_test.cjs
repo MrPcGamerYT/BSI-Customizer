@@ -12,7 +12,7 @@ const { chromium } = require(process.env.BSI_PLAYWRIGHT || 'playwright');
 const root = path.resolve(__dirname, '../src/web');
 const server = http.createServer((req, res) => {
   const name = new URL(req.url, 'http://test').pathname.slice(1) || 'index.html';
-  if (!['index.html', 'styles.css', 'transport.js', 'editors.js', 'maintenance.js', 'resource-search.js', 'effects.js', 'app.js', 'icon.png', 'fonts/manrope-latin.woff2', 'fonts/plus-jakarta-sans-latin.woff2'].includes(name)) { res.writeHead(404).end(); return; }
+  if (!['index.html', 'styles.css', 'transport.js', 'editors.js', 'maintenance.js', 'resource-search.js', 'effects.js', 'addons.js', 'app.js', 'icon.png', 'fonts/manrope-latin.woff2', 'fonts/plus-jakarta-sans-latin.woff2'].includes(name)) { res.writeHead(404).end(); return; }
   res.setHeader('Content-Type', name.endsWith('.js') ? 'text/javascript' : name.endsWith('.css') ? 'text/css' : name.endsWith('.woff2') ? 'font/woff2' : name.endsWith('.png') ? 'image/png' : 'text/html');
   res.end(fs.readFileSync(path.join(root, name)));
 });
@@ -29,12 +29,12 @@ const server = http.createServer((req, res) => {
     await offline.goto(url);
     await offline.locator('#preview-button').waitFor({ state: 'visible' });
     await offline.locator('#preview-button').click();
-    assert.equal(await offline.locator('#spine .nav-label').first().evaluate(el => getComputedStyle(el).opacity), '0', 'Sidebar labels start hidden');
+    assert.equal(await offline.locator('#spine .nav-label').first().evaluate(el => getComputedStyle(el).opacity), '1', 'Sidebar labels are always visible');
     await offline.locator('#spine [data-page="0"]').hover();
     await offline.waitForFunction(() => getComputedStyle(document.querySelector('#spine .nav-label')).opacity === '1');
     assert.ok(await offline.locator('.spine').evaluate(el => el.getBoundingClientRect().width > 200), 'Sustained hover expands the sidebar');
     await offline.locator('.hero-main').hover();
-    for (let i = 0; i < 13; ++i) {
+    for (let i = 0; i < 15; ++i) {
       await offline.locator(`#spine [data-page="${i}"]`).evaluate(el => el.click());
       assert.ok(await offline.locator('#main').innerText());
       assert.equal(await offline.locator('[data-action]:enabled').count(), 0, `Offline native action on page ${i}`);
@@ -46,12 +46,13 @@ const server = http.createServer((req, res) => {
         await offline.locator('#settings-close').click();
       }
     }
+    if (process.env.BSI_ADDONS_SCREENSHOT) await offline.screenshot({path:process.env.BSI_ADDONS_SCREENSHOT});
     await offline.locator('#spine [data-page="0"]').evaluate(el => el.click());
     if (process.env.BSI_WEB_SCREENSHOT) await offline.screenshot({ path: process.env.BSI_WEB_SCREENSHOT });
     assert.equal(await offline.locator('#main > .matrix > .tile').count(), 4, 'Reference dashboard remains an uncluttered 2x2 matrix');
-    assert.equal(await offline.locator('#spine .icon svg').count(), 13, 'Sidebar retains page glyphs');
-    assert.equal(await offline.locator('#spine .nav-label').count(), 13, 'Every destination is labeled');
-    assert.equal(await offline.locator('#spine .nav-group').count(), 5, 'Navigation destinations are grouped');
+    assert.equal(await offline.locator('#spine .icon svg').count(), 15, 'Sidebar retains page glyphs');
+    assert.equal(await offline.locator('#spine .nav-label').count(), 15, 'Every destination is labeled');
+    assert.equal(await offline.locator('#spine .nav-group').count(), 7, 'Navigation destinations are grouped');
     assert.equal(await offline.locator('#cmd').count(), 0, 'Duplicate quick navigation is removed');
     assert.equal(await offline.getByText('UI by @Floatz4Ever').count(), 0, 'Visible concept attribution is removed');
     assert.equal(await offline.locator('.orbs i').count(), 3);
@@ -140,6 +141,8 @@ const server = http.createServer((req, res) => {
             if (action === 'profile-section') profile[options.section] = options.value;
             if (action === 'profile-load') profile = { name: 'Imported fixture', boot: { holdMs: 4567 } };
             if (action === 'queue-theme') operations.push({ kind: 'theme' });
+            if (action === 'queue-addon') { if(operations.length) value={ok:false,msg:'Review your existing batch'}; else operations.push({kind:'theme',pack:options.id}); }
+            if (action === 'history') value={ok:true,entries:[{id:'fixture-recovery',path:state.exePath}]};
             if (action === 'clear' || action === 'apply') operations = [];
             if (action === 'dry-run') value = window.__failDryRun ? { ok: false, msg: 'Fixture dry run refused' } : { ok: true, outputSha256: 'fixture-output-sha256' };
           }
@@ -236,7 +239,7 @@ const server = http.createServer((req, res) => {
     await page.locator('#toast').filter({ hasText: 'unsupported; no write' }).waitFor();
     await page.locator('#spine [data-page="2"]').evaluate(el => el.click());
     assert.equal(await page.evaluate(() => __calls.filter(c => c.method === 'scanResources').length), 2, 'Returning to Resources must not scan');
-    for (let i = 0; i < 13; ++i) {
+    for (let i = 0; i < 15; ++i) {
       await page.locator(`#spine [data-page="${i}"]`).evaluate(el => el.click());
       assert.ok(await page.locator('#main').innerText());
       if (i === 8) await page.locator('#settings-close').click();
@@ -451,10 +454,33 @@ const server = http.createServer((req, res) => {
     assert.ok(motionDelay<140,'Reduced motion must skip the full window-animation delay');
     await page.emulateMedia({reducedMotion:'no-preference'});
     assert.equal(await page.evaluate(() => __calls.filter(c => c.method === 'openNativeTool').length), 0, 'Integrated editors must not use a native fallback as their main implementation');
+    await page.evaluate(()=>{window.__failDryRun=false;});
+    await nav(14);
+    assert.equal(await page.locator('.pack-card').count(),6);
+    for(const id of ['carbon','amethyst','arctic','ember','matrix','nord']) {
+      await page.locator(`.pack-card[data-addon-preview="${id}"]`).click();
+      assert.equal(await page.locator('.pack-card[aria-pressed="true"]').getAttribute('data-addon-preview'),id);
+    }
+    // Clear only in the explicit existing Workspace UI, never on Add-ons entry.
+    await nav(11); await click('ws-clear'); await nav(14);
+    await page.locator('[data-action="addon:stage"]').click();
+    await page.waitForFunction(()=>__calls.some(c=>c.method==='workspace'&&c.args.action==='queue-addon'));
+    await page.locator('[data-action="addon:dry"]').click();
+    await page.locator('[data-action="addon:apply"]').waitFor({state:'visible'}).catch(async e=>{console.log(await page.locator('#main').innerText(),await page.evaluate(()=>__calls.slice(-8)),await page.locator('#toast').innerText());throw e;});
+    // A changed workspace revision invalidates the renderer plan too.
+    await page.evaluate(()=>__setBusy(false));
+    await page.locator('[data-action="addon:apply"]').click();
+    await page.waitForFunction(()=>__calls.some(c=>c.method==='workspace'&&c.args.action==='apply'));
+    await nav(13);
+    await page.locator('[data-action="addon:history"]').click();
+    await page.locator('[data-action="addon:restore"]').waitFor({state:'visible'});
+    await page.locator('[data-action="addon:restore"]').click();
+    await page.waitForFunction(()=>__calls.some(c=>c.method==='workspace'&&c.args.action==='restore'&&c.args.options.id==='fixture-recovery'));
+    await nav(0);
     await page.locator('#tele [data-action="signOut"]').evaluate(el => el.click());
     await page.locator('#connection').waitFor({ state: 'visible' });
     assert.equal(await page.locator('[data-action]:enabled').count(), 0);
     assert.deepEqual(errors, []);
-    console.log('PASS: 13 routes; picker commit/cancel, styled cancellation and reduced-motion window effects; sidebar/debloat/ADB/disk requests; Qt preview controls; offline native actions disabled; manual scans; pagination/search; safe text rendering; real request arguments; failed-engine errors; integrated About/removal/RPC/GIF/boot/gradient/workspace/updater contracts; sign-out lock. UI test transport only.');
+    console.log('PASS: 15 routes including six Add-ons previews and stage/dry-run/apply/recovery; picker commit/cancel, styled cancellation and reduced-motion window effects; sidebar/debloat/ADB/disk requests; Qt preview controls; offline native actions disabled; manual scans; pagination/search; safe text rendering; real request arguments; failed-engine errors; integrated About/removal/RPC/GIF/boot/gradient/workspace/updater contracts; sign-out lock. UI test transport only.');
   } finally { await browser.close(); }
 })().then(() => server.close()).catch(error => { console.error(error); server.close(); process.exitCode = 1; });

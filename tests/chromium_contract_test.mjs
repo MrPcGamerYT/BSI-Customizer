@@ -30,7 +30,7 @@ for (const query of ['', 'file-22', '"folder 2"', 'qml min:2kb max:40kb', 'Folde
   }
 }
 const html = read('src/web/index.html'), cmake = read('CMakeLists.txt');
-for (const asset of ['styles.css', 'transport.js', 'resource-search.js', 'editors.js', 'maintenance.js', 'effects.js', 'app.js']) {
+for (const asset of ['styles.css', 'addons.js', 'transport.js', 'resource-search.js', 'editors.js', 'maintenance.js', 'effects.js', 'app.js']) {
   assert.ok(html.includes(asset), 'Missing browser asset: ' + asset);
   assert.ok(cmake.includes('src/web/' + asset), 'Missing embedded desktop asset: ' + asset);
 }

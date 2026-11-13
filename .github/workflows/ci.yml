@@ -53,6 +53,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - name: Test Add-ons catalog and guarded review flow
+        run: node tests/addons_test.mjs
       - name: Test resource search matching and large lists
         run: node tests/resource_search_test.mjs
       - name: Test Chromium Settings-panel rebuild controls and profile flow

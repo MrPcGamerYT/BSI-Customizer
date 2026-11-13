@@ -364,7 +364,7 @@ QVariantMap WebBridge::invoke(const QString &method, const QVariantMap &args)
     } else if (method == QLatin1String("workspace")) {
         const QString action = text("action");
         const QStringList allowed{ "inspect", "theme-dry-run", "diagnostics", "profile-load", "profile-save", "profile-section",
-            "clear", "queue-theme", "queue-resource", "queue-appearance", "appearance-inspect", "dry-run", "apply", "history", "restore", "image", "video", "rpc" };
+            "clear", "queue-addon", "queue-theme", "queue-resource", "queue-appearance", "appearance-inspect", "dry-run", "apply", "history", "restore", "image", "video", "rpc" };
         if (!allowed.contains(action)) return failure(QStringLiteral("Unknown workspace action."));
         auto response = m_backend.workspace(action, args.value("options").toMap());
         if (action == QLatin1String("video") && response.value("ok").toBool())

@@ -125,7 +125,7 @@ Item {
                     }
                     Repeater {
                         model: backend.workspaceOperations
-                        Label { required property var modelData; required property int index; Layout.fillWidth: true; color: Theme.text; elide: Text.ElideMiddle; text: (index + 1) + ". " + modelData.kind + " — " + (modelData.path || (modelData.kind === "appearance" ? qsTr("staged appearance tokens") : qsTr("staged palette"))) }
+                        Label { required property var modelData; required property int index; Layout.fillWidth: true; color: Theme.text; elide: Text.ElideMiddle; text: (index + 1) + ". " + modelData.kind + " — " + (modelData.pack || modelData.path || (modelData.kind === "appearance" ? qsTr("staged appearance tokens") : qsTr("staged palette"))) }
                     }
                     TextArea { Layout.fillWidth: true; readOnly: true; selectByMouse: true; color: Theme.textDim; wrapMode: TextEdit.Wrap; text: page.plan.msg ? JSON.stringify(page.plan, null, 2) : "" }
                 }
