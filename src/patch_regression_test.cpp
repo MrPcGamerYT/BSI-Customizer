@@ -5218,13 +5218,20 @@ Window {
                     int commentText = pageBytes.indexOf("BlueStack");
                     if (commentText < 0) commentText = pageBytes.indexOf("Copyright");
                     if (commentText < 0) continue;
-                    editedProtectedPage = pageBytes;
-                    editedProtectedPage[commentText] = 'X'; // still-valid QML comment, changed bytes
-                    protectedPagePath = entry.path;
-                    const auto edited = EmbeddedResources::replaceBytes(panelCopy, protectedPagePath,
-                        editedProtectedPage, &imageWithExternalPageEdit);
-                    if (!edited.ok) protectedPagePath.clear();
-                    break;
+                    for (const char changed : QByteArrayLiteral("XabcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")) {
+                        if (pageBytes.at(commentText) == changed) continue;
+                        QByteArray candidatePage = pageBytes;
+                        candidatePage[commentText] = changed; // still-valid QML comment, changed bytes
+                        QByteArray candidateImage;
+                        const auto edited = EmbeddedResources::replaceBytes(panelCopy, entry.path,
+                            candidatePage, &candidateImage);
+                        if (!edited.ok) continue; // Try another one-byte edit that stays within this resource's slot.
+                        editedProtectedPage = candidatePage;
+                        imageWithExternalPageEdit = candidateImage;
+                        protectedPagePath = entry.path;
+                        break;
+                    }
+                    if (!protectedPagePath.isEmpty()) break;
                 }
                 bool pageConflictPreserved = false;
                 bool panelResetAfterConflict = false;
