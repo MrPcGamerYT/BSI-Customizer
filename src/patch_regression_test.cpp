@@ -5191,10 +5191,12 @@ Window {
                 QByteArray imageWithExternalPageEdit;
                 for (const auto &entry : EmbeddedResources::list(panelImage, true)) {
                     const QByteArray pageBytes = EmbeddedResources::readEntry(panelCopy, entry.entryOff, entry.flags, 8 * 1024 * 1024);
-                    const int pageMarker = pageBytes.indexOf("/*BSI*/");
+                    int pageMarker = pageBytes.indexOf("parent.width//");
+                    if (pageMarker < 0)
+                        pageMarker = pageBytes.indexOf("iScrollView.width//");
                     if (pageMarker < 0) continue;
                     editedProtectedPage = pageBytes;
-                    editedProtectedPage[pageMarker + 2] = '\t'; // still-valid QML comment, changed bytes
+                    editedProtectedPage[pageMarker] = 'x'; // still-valid QML identifier syntax, changed bytes
                     protectedPagePath = entry.path;
                     const auto edited = EmbeddedResources::replaceBytes(panelCopy, protectedPagePath,
                         editedProtectedPage, &imageWithExternalPageEdit);
@@ -5250,7 +5252,7 @@ Window {
                 };
                 int fixedNativePages = 0;
                 int widenedNativePages = 0;
-                const QString responsivePageMarker = QStringLiteral("/*BSI*/");
+                const QString responsivePageMarker = QStringLiteral("//");
                 const auto originalPageFiles = QtResources::registeredFiles(original);
                 const auto rebuiltPageFiles = QtResources::registeredFiles(panelImage);
                 for (const QVariant &tabValue : settingsBeforeApply.value(QStringLiteral("tabs")).toList()) {
