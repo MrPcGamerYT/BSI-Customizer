@@ -327,8 +327,6 @@ qt_add_qml_module(BSICustomizer
         src/qml/components/SettingsPanel.qml
         src/qml/pages/DashboardPage.qml
         src/qml/pages/ThemePage.qml
-        src/qml/fonts/NotoSansMath-Regular.ttf
-        src/qml/fonts/NotoSansMath-LICENSE.txt
         src/qml/pages/AddonsPage.qml
         src/qml/pages/BackupsPage.qml
         src/qml/pages/ResourcesPage.qml
@@ -344,6 +342,8 @@ qt_add_qml_module(BSICustomizer
         src/qml/pages/UpdatesPage.qml
         src/qml/pages/AboutPage.qml
     RESOURCES
+        src/qml/fonts/NotoSansMath-Regular.ttf
+        src/qml/fonts/NotoSansMath-LICENSE.txt
         "BSI CUSTOMIZER.ico"
         src/qml/fonts/Manrope.ttf
         src/qml/fonts/PlusJakartaSans.ttf
