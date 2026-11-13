@@ -1,0 +1,11 @@
+#include <windows.h>
+
+// Embed the requireAdministrator manifest so the exe always gets UAC
+// elevation (patch targets live in Program Files / ProgramData).
+1 24 "app.manifest"
+
+// Brand icon. First icon resource in the image -> Explorer, taskbar, Alt-Tab
+// and the window chrome all use it. Kept at the repo root (BSI CUSTOMIZER.ico)
+// because the owner updates it there; rc finds it through the include dir
+// CMakeLists.txt passes for this file.
+IDI_ICON1 ICON DISCARDABLE "BSI CUSTOMIZER.ico"

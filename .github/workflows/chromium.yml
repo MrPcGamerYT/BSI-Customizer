@@ -1,0 +1,116 @@
+name: Chromium workspace
+
+# Dedicated guarded-bridge and renderer regression build. Artifacts only;
+# this workflow does not publish a release.
+on:
+  push:
+    branches: [arena/3f309c3c-bsi-customizer, arena/c19d0730-bsi-customizer, arena/038fda0d-bsi-customizer]
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'src/chromium/**'
+      - 'src/web/**'
+      - 'src/main.cpp'
+      - 'CMakeLists.txt'
+      - 'tests/chromium_ui_test.cjs'
+      - 'tests/chromium_contract_test.mjs'
+      - 'tests/player_appearance_ui_test.mjs'
+      - '.github/workflows/chromium.yml'
+permissions:
+  contents: read
+concurrency:
+  group: chromium-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - name: Verify matching Chromium notice collection
+        shell: pwsh
+        run: ./scripts/Collect-WebEngineNotices.ps1 -Version '6.8.3' -CacheDirectory (Join-Path $env:RUNNER_TEMP 'notice-cache') -OutputDirectory (Join-Path $env:RUNNER_TEMP 'notice-output')
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --prefix .cache/web-test --no-package-lock --no-audit --no-fund playwright@1.58.2
+      - run: .cache/web-test/node_modules/.bin/playwright install --with-deps chromium
+      - run: node tests/chromium_contract_test.mjs
+      - run: node tests/player_appearance_ui_test.mjs
+      - run: node tests/chromium_ui_test.cjs
+        env:
+          BSI_PLAYWRIGHT: ../.cache/web-test/node_modules/playwright
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    env:
+      BSI_NO_UPDATER: '1'
+    steps:
+      - uses: actions/checkout@v5
+      - name: Prepare matching Chromium source notices
+        shell: pwsh
+        run: ./scripts/Collect-WebEngineNotices.ps1 -Version '6.8.3' -CacheDirectory (Join-Path $env:RUNNER_TEMP 'chromium-notices') -OutputDirectory stage/licenses/Qt/Chromium
+      - uses: jurplel/install-qt-action@v4.3.1
+        with:
+          version: '6.8.3'
+          host: windows
+          target: desktop
+          arch: win64_msvc2022_64
+          modules: qtmultimedia qtwebengine qtwebchannel qtpositioning qtserialport
+          cache: true
+      - name: Configure Chromium build
+        env:
+          # Same public-client / server-role policy as the native release.
+          # Never upload an apparently usable bundle with sign-in unconfigured.
+          ZLP_AUTH_JSON: ${{ secrets.ZLP_AUTH_JSON || secrets.BSIC_AUTH_JSON }}
+        run: cmake -S . -B build-web -A x64 -DBSI_CHROMIUM_UI=ON -DBSI_TEST_QT5_REFERENCE=OFF -DBSI_BUILD_PORTABLE=OFF -DBSI_REQUIRE_EMBEDDED_AUTH=ON
+      - name: Build
+        run: cmake --build build-web --config Release --parallel
+      - name: Verify embedded sign-in policy and reject commands without sign-in
+        shell: pwsh
+        run: |
+          $p = Start-Process build-web/Release/BSI-Customizer.exe -ArgumentList '--web-bridge-test' -PassThru -Wait -NoNewWindow
+          if ($p.ExitCode -ne 0) { throw "Bridge guard test failed: $($p.ExitCode)" }
+      - name: Deploy complete Chromium runtime
+        shell: pwsh
+        run: |
+          trap {
+              $message = ($_.Exception.Message + "`n" + $_.ScriptStackTrace).Replace('%','%25').Replace("`r",'%0D').Replace("`n",'%0A')
+              Write-Host "::error::$message"
+              throw
+          }
+          New-Item -ItemType Directory -Force stage | Out-Null
+          Copy-Item build-web/Release/BSI-Customizer.exe stage/
+          windeployqt --release --qmldir src --compiler-runtime --dir stage stage/BSI-Customizer.exe
+          if ($LASTEXITCODE -ne 0) { throw 'windeployqt failed' }
+          @('[Paths]', 'Prefix=.', 'Plugins=.', 'QmlImports=qml') | Set-Content stage/qt.conf
+      - name: Verify deployed Chromium without the Qt SDK on PATH
+        shell: pwsh
+        run: |
+          $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
+          $env:QT_PLUGIN_PATH = ''
+          $env:QML_IMPORT_PATH = ''
+          $env:QML2_IMPORT_PATH = ''
+          $p = Start-Process stage/BSI-Customizer.exe -ArgumentList '--chromium-runtime-test' -PassThru
+          if (-not $p.WaitForExit(45000)) { $p.Kill(); throw 'Chromium test timed out' }
+          if ($p.ExitCode -ne 0) { throw "Chromium deployment test failed: $($p.ExitCode)" }
+      - name: Verify real default application shell without SDK on PATH
+        shell: pwsh
+        run: |
+          $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
+          $env:QT_PLUGIN_PATH = ''
+          $env:QML_IMPORT_PATH = ''
+          $env:QML2_IMPORT_PATH = ''
+          $p = Start-Process stage/BSI-Customizer.exe -ArgumentList '--deployment-test' -PassThru
+          if (-not $p.WaitForExit(45000)) { $p.Kill(); throw 'Application shell test timed out' }
+          if ($p.ExitCode -ne 0) { throw "Default shell test failed: $($p.ExitCode)" }
+      - name: Upload verified test bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: BSI-Customizer-3.0.1-Chromium-Windows-test
+          path: stage/
+          retention-days: 3
+          if-no-files-found: error
+      # Test artifact only; no release or installer replacement. Only the
+      # desktop public-client authorization policy is embedded, never OAuth
+      # client secrets, bot tokens, or user sessions.

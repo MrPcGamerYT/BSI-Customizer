@@ -1,0 +1,302 @@
+name: CI
+
+# Build + self-test on every push to main and on pull requests, so a broken
+# build (link errors, missing Qt module, failing patcher engine) is caught
+# long before a release tag is pushed.  Run it manually from any branch with
+# "Run workflow" to check work in progress.
+on:
+  push:
+    branches: [main, arena/3f309c3c-bsi-customizer, arena/c19d0730-bsi-customizer, arena/038fda0d-bsi-customizer]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  QT_VERSION: "6.8.3"
+  # The self-test must stay offline: the updater is disabled here on purpose.
+  BSI_NO_UPDATER: "1"
+
+jobs:
+  rpc-scan-regression:
+    name: RPC scan equivalence (Linux, Qt-free)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - name: Check optimized scan rules with sanitizers
+        run: |
+          g++ -std=c++17 -O1 -g -Wall -Wextra -pedantic \
+            -fsanitize=address,undefined -fno-omit-frame-pointer \
+            tests/rpc_scan_optimization_test.cpp src/core/RpcIdScan.cpp -o /tmp/rpc-scan-test
+          /tmp/rpc-scan-test
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -pedantic \
+            -fsanitize=address,undefined -fno-omit-frame-pointer \
+            -Isrc tests/player_appearance_scan_test.cpp src/core/PlayerAppearanceScan.cpp -o /tmp/player-appearance-test
+          /tmp/player-appearance-test
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -fsanitize=address,undefined -fno-omit-frame-pointer tests/gif_rpc_payload_test.cpp -o /tmp/gif-rpc-payload-test
+          /tmp/gif-rpc-payload-test
+
+  resources-ui-regression:
+    name: Resources manual scan and search (Qt 6.8)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Test resource search matching and large lists
+        run: node tests/resource_search_test.mjs
+      - name: Test Chromium Settings-panel rebuild controls and profile flow
+        run: node tests/settings_panel_ui_test.mjs
+      - name: Test Player Appearance Studio Chromium workflow
+        run: node tests/player_appearance_ui_test.mjs
+      - name: Test adaptive application window placement across display sizes
+        run: node tests/window_geometry_test.mjs
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install Qt runtime test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgl1 libegl1 libxkbcommon0 libdbus-1-3
+          python -m pip install PySide6==6.8.3
+      - name: Type-check Workspace and Theme QML against real Qt metadata
+        run: python tests/workspace_qml_lint_test.py
+      - name: Instantiate rebuilt Settings shell and test its native interactions
+        run: python tests/run_qt_runtime_test.py tests/settings_panel_runtime_test.py
+      - name: Exercise adaptive boot player against synthetic Qt6, Qt5 and WebEngine APIs
+        run: python tests/run_qt_runtime_test.py tests/boot_player_runtime_test.py
+      - name: Load the real Resources page with a counting backend
+        env:
+          QT_QPA_PLATFORM: offscreen
+          QSG_RHI_BACKEND: software
+        run: python tests/run_qt_runtime_test.py tests/resources_page_runtime_test.py
+
+  build-windows:
+    name: Build & self-test (Windows x64 · ${{ matrix.label }})
+    runs-on: windows-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: MSI latest package
+            reference-file: HD-Player MSI Latest version.zip
+          - label: MSI v5.9
+            reference-file: HD-Player MSI v5.9.exe
+          - label: BlueStacks 5 latest package
+            reference-file: HD-Player latest version Bluestacks 5.zip
+          - label: BlueStacks v5.10
+            reference-file: HD-Player v.5.10 bluestacks.exe
+
+    steps:
+      - name: Checkout BSI Customizer
+        uses: actions/checkout@v5
+
+      - name: Checkout pinned HD-Player reference images
+        uses: actions/checkout@v5
+        with:
+          repository: MrPcGamerYT/HD-Player
+          ref: 6e4dc894eb1b6956060b3f76d13fc438e5178d03
+          path: hd-player-reference
+          persist-credentials: false
+
+      - name: Prepare the selected HD-Player reference
+        shell: pwsh
+        env:
+          REFERENCE_FILE: ${{ matrix.reference-file }}
+        run: |
+          $source = Join-Path (Join-Path $env:GITHUB_WORKSPACE 'hd-player-reference') $env:REFERENCE_FILE
+          if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
+            throw "Reference file not found in pinned HD-Player repo: $env:REFERENCE_FILE"
+          }
+          if ($source.EndsWith('.zip', [StringComparison]::OrdinalIgnoreCase)) {
+            $extract = Join-Path $env:RUNNER_TEMP 'hd-player-extract'
+            Expand-Archive -LiteralPath $source -DestinationPath $extract -Force
+            $player = Get-ChildItem -LiteralPath $extract -Filter 'HD-Player.exe' -File -Recurse |
+                      Select-Object -First 1 -ExpandProperty FullName
+            if (-not $player) { throw "No HD-Player.exe found inside $env:REFERENCE_FILE" }
+          } else {
+            $player = $source
+          }
+          $target = Join-Path $env:GITHUB_WORKSPACE 'HD-Player.exe'
+          Copy-Item -LiteralPath $player -Destination $target -Force
+          $hash = (Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash.ToLowerInvariant()
+          "| $env:REFERENCE_FILE | $((Get-Item -LiteralPath $target).Length) | $hash |" |
+            Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          Write-Host "Reference copied as data only: $target (SHA256 $hash)"
+
+      - name: Install Qt 6
+        uses: jurplel/install-qt-action@v4.3.1
+        with:
+          version: ${{ env.QT_VERSION }}
+          host: windows
+          target: desktop
+          arch: win64_msvc2022_64
+          modules: qtmultimedia
+          cache: true
+
+      - name: Configure
+        env:
+          # Whole auth.json to embed at build time (falls back to the
+          # BSIC_AUTH_JSON secret name; empty = build without an embed).
+          ZLP_AUTH_JSON: ${{ secrets.ZLP_AUTH_JSON || secrets.BSIC_AUTH_JSON }}
+          BSI_EXE_TEST_FILE: ${{ github.workspace }}/HD-Player.exe
+        # Each matrix job compiles the same diagnostic against one real reference.
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -DBSI_CHROMIUM_UI=OFF "-DBSI_EXE_TEST_FILE=$env:BSI_EXE_TEST_FILE"
+
+      - name: Build
+        shell: pwsh
+        run: |
+          $log = Join-Path $env:RUNNER_TEMP 'build.log'
+          cmake --build build --config Release --parallel 2>&1 | Tee-Object -FilePath $log
+          if ($LASTEXITCODE -eq 0) { exit 0 }
+
+          # The job log of a failed run is not retrievable from the API on this
+          # account (the blob storage redirect answers EOF), so the compiler
+          # errors are republished as check-run annotations - they are.
+          $pattern = ': (error|fatal error) [A-Z]+[0-9]+'
+          $hits = Select-String -Path $log -Pattern $pattern -Context 0, 1
+          $count = 0
+          foreach ($hit in $hits) {
+            if ($count -ge 40) { break }
+            $text = $hit.Line.Trim()
+            if ($hit.Context.PostContext.Count -gt 0) {
+              $text += ' ' + ($hit.Context.PostContext -join ' ')
+            }
+            $text = $text -replace '%', '%25' -replace "`r", ' ' -replace "`n", ' '
+            if ($text.Length -gt 400) { $text = $text.Substring(0, 400) }
+            Write-Host "::error::$text"
+            $count++
+          }
+          if ($count -eq 0) {
+            $tail = Get-Content -LiteralPath $log -Tail 25
+            Write-Host '::error::build failed without a compiler error line; last lines:'
+            foreach ($line in $tail) {
+              $clean = $line -replace '%', '%25' -replace "`r", ' '
+              Write-Host "::error::$clean"
+            }
+          }
+          exit 1
+
+      - name: Locate build output
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem -Path build -Recurse -Filter 'BSI-Customizer.exe' -File |
+                 Select-Object -First 1 -ExpandProperty FullName
+          if (-not $exe) {
+            throw 'BSI-Customizer.exe not found under build/ - did the build step succeed?'
+          }
+          Write-Host "exe: $exe"
+          "exe=$exe" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Verify embedded UAC manifest
+        shell: pwsh
+        run: |
+          $sdk = Join-Path "${env:ProgramFiles(x86)}" 'Windows Kits\10\bin'
+          $mt = Get-ChildItem $sdk -Recurse -Filter mt.exe -File -ErrorAction SilentlyContinue |
+                Where-Object FullName -match '\\x64\\mt\.exe$' |
+                Sort-Object FullName | Select-Object -Last 1
+          if (-not $mt) {
+            Write-Warning 'mt.exe not found - skipping manifest verification'
+            exit 0
+          }
+
+          $out = Join-Path $env:RUNNER_TEMP 'embedded.manifest'
+          & $mt.FullName -nologo "-inputresource:$env:exe;#1" "-out:$out" | Out-Null
+          if ($LASTEXITCODE -ne 0 -or -not (Test-Path $out)) {
+            throw "No manifest resource (id 1) is embedded in $env:exe"
+          }
+          Get-Content $out
+          if (-not (Select-String -Path $out -Pattern 'requireAdministrator' -Quiet)) {
+            throw 'Embedded manifest does not request administrator rights'
+          }
+          Write-Host 'OK: requireAdministrator manifest is embedded'
+
+      - name: Packaging licence collector self-test (offline)
+        shell: pwsh
+        run: cmake -P cmake/tests/CollectQtNoticesTest.cmake
+
+      - name: Self-test (theme changer + config engine)
+        shell: pwsh
+        env:
+          QT_QPA_PLATFORM: offscreen
+          __COMPAT_LAYER: RUNASINVOKER
+        run: |
+          $log = Join-Path $env:RUNNER_TEMP 'selftest.log'
+          $err = Join-Path $env:RUNNER_TEMP 'selftest.err'
+
+          # Start-Process rather than '&': the exe is a GUI-subsystem app, so
+          # PowerShell would not wait for it, and we need its stdout captured.
+          $p = Start-Process -FilePath $env:exe -ArgumentList '--selftest' `
+                 -NoNewWindow -Wait -PassThru `
+                 -RedirectStandardOutput $log -RedirectStandardError $err
+
+          Get-Content $log -ErrorAction SilentlyContinue
+          Get-Content $err -ErrorAction SilentlyContinue
+
+          $passed = Select-String -Path $log -Pattern 'ALL TESTS PASSED' -Quiet
+          # A run that never printed its summary died before the end (a crash,
+          # an abort), and then the lines that mention "fail" say nothing about
+          # where it stopped: the tail of the log is what has to be published.
+          $summarised = Select-String -Path $log -Pattern 'SELF-TEST FAILED|ALL TESTS PASSED' -Quiet
+          if ($p.ExitCode -ne 0 -or -not $passed) {
+            # A failed job's log cannot be read back through the API on this
+            # account, so the lines that explain the failure are republished as
+            # annotations, which can.
+            $lines = @()
+            foreach ($file in @($log, $err)) {
+              if (Test-Path -LiteralPath $file) {
+                $lines += Get-Content -LiteralPath $file | Where-Object { $_ -match 'FAIL|failed|Failure' }
+              }
+            }
+            $count = 0
+            foreach ($line in $lines) {
+              if ($count -ge 40) { break }
+              $clean = $line.Trim() -replace '%', '%25' -replace "`r", ' '
+              if ($clean.Length -gt 400) { $clean = $clean.Substring(0, 400) }
+              Write-Host "::error::$clean"
+              $count++
+            }
+            if ($count -eq 0 -or -not $summarised) {
+              foreach ($line in (Get-Content -LiteralPath $log -Tail 30)) {
+                $clean = $line -replace '%', '%25' -replace "`r", ' '
+                if ($clean.Length -gt 400) { $clean = $clean.Substring(0, 400) }
+                Write-Host "::error::$clean"
+              }
+            }
+            throw "self-test failed (exit code $($p.ExitCode))"
+          }
+
+      - name: Manual Settings-panel tester (safe-copy apply)
+        if: matrix.label == 'MSI latest package'
+        shell: pwsh
+        env:
+          QT_QPA_PLATFORM: offscreen
+          # The app manifest requests elevation; this CLI-only tester operates
+          # on a temporary copy, so bypass UAC just like the regular CI self-test.
+          __COMPAT_LAYER: RUNASINVOKER
+        run: |
+          $target = Join-Path $env:GITHUB_WORKSPACE 'HD-Player.exe'
+          $manualTester = Join-Path $env:GITHUB_WORKSPACE 'scripts/Test-SettingsPanel-Manual.ps1'
+          & $manualTester -CustomizerPath $env:exe -PlayerPath $target -NoLaunch
+
+      # A failing job's log cannot be read back through the API on this account,
+      # and the annotations only carry the lines that mention failure. The whole
+      # log is published as an artifact so the run can be read afterwards.
+      - name: Upload self-test log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: selftest-log
+          path: ${{ runner.temp }}/selftest.log
+          if-no-files-found: ignore

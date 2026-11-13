@@ -1,0 +1,594 @@
+import QtQuick
+import QtQuick.Controls.Basic
+import QtQuick.Layouts
+import QtQuick.Window
+import BSICustomizer
+import "Icons.js" as Icons
+import "WindowGeometry.js" as WindowGeometry
+
+ApplicationWindow {
+    onClosing: (close) => { if (backend.busy) close.accepted = false; }
+
+    id: window
+    width: 1480
+    height: 920
+    minimumWidth: 980
+    minimumHeight: 640
+    function fitToAvailableScreen() {
+        const bounds = { x: Screen.virtualX, y: Screen.virtualY,
+                         width: Screen.desktopAvailableWidth, height: Screen.desktopAvailableHeight };
+        const fitted = WindowGeometry.initialGeometry(bounds);
+        minimumWidth = fitted.minimumWidth;
+        minimumHeight = fitted.minimumHeight;
+        width = fitted.width;
+        height = fitted.height;
+        x = fitted.x;
+        y = fitted.y;
+    }
+
+    function runSelftest() {
+        if (backend.busy) {
+            toast.show("Backend is busy, please wait.");
+            return;
+        }
+        let passed = 0;
+        let failed = 0;
+        const width = 40;
+
+        // Check 1: QML root objects exist
+        if (engine.rootObjects().length > 0) {
+            passed++;
+            toast.show("PASS: QML root object exists");
+        } else {
+            failed++;
+            toast.show("FAIL: QML root object missing");
+        }
+
+        // Check 2: Feature pages can be navigated
+        if (!backend.busy && Number.isInteger(window.navigatePage) && window.featurePages.length > 0) {
+            passed++;
+            toast.show("PASS: Feature pages accessible");
+        } else {
+            failed++;
+            toast.show("FAIL: Feature pages inaccessible");
+        }
+
+        // Check 3: Installs can be detected
+        if (!backend.busy) {
+            const installs = backend.detectInstalls();
+            if (installs.length > 0) {
+                passed++;
+                toast.show("PASS: BlueStacks installs detected (" + installs.length + ")");
+            } else {
+                failed++;
+                toast.show("WARN: No BlueStacks installs detected (may be normal if not installed)");
+            }
+        } else {
+            failed++;
+            toast.show("SKIP: Backend busy, skipping install detection");
+        }
+
+        // Check 4: Backend state is available
+        if (!backend.busy) {
+            const state = JSON.parse(backend.state());
+            if (state && state.sections) {
+                passed++;
+                toast.show("PASS: Backend state accessible (" + state.sections.length + " sections)");
+            } else {
+                failed++;
+                toast.show("FAIL: Backend state unavailable");
+            }
+        }
+
+        // Check 5: Theme is loadable
+        if (!backend.busy) {
+            const themeMode = backend.themeMode();
+            if (themeMode && themeMode !== "") {
+                passed++;
+                toast.show("PASS: Theme mode: " + themeMode);
+            } else {
+                failed++;
+                toast.show("WARN: No theme mode detected");
+            }
+        }
+
+        // Check 6: Gradient targets available
+        if (!backend.busy) {
+            const targets = backend.gradientTargets();
+            if (targets && targets.length > 0) {
+                passed++;
+                toast.show("PASS: Gradient targets available (" + targets.length + ")");
+            } else {
+                failed++;
+                toast.show("WARN: No gradient targets found");
+            }
+        }
+
+        // Summary
+        setTimeout(() => {
+            const summary = passed + "/" + (passed + failed) + " checks passed";
+            toast.show(summary);
+            if (failed === 0) {
+                toast.show("Selftest: ALL CHECKS PASSED", "green");
+            } else {
+                toast.show("Selftest: " + failed + " check(s) failed", "red");
+            }
+        }, 500);
+    }
+    visible: true
+    // Premium-Optimizer chrome: frameless window with the app's own topbar and
+    // control box (startSystemMove / startSystemResize keep native snap+resize).
+    flags: Qt.Window | Qt.FramelessWindowHint
+    title: qsTr("BlueStacks 5 / MSI 5 — BSI Customizer")
+    color: Theme.window
+    font.family: "Plus Jakarta Sans"
+    font.pixelSize: 13
+    palette.window: Theme.window
+    palette.windowText: Theme.text
+    palette.text: Theme.text
+    palette.base: Theme.cardLow
+    palette.button: Theme.card
+    palette.buttonText: Theme.text
+    palette.highlight: Theme.accent
+    palette.highlightedText: Theme.primaryText
+    palette.placeholderText: Theme.textDim
+
+    Dialog {
+        id: purgeCacheDialog
+        anchors.centerIn: parent
+        title: qsTr("Purge HD-Player cache?")
+        width: 440
+        modal: true
+        standardButtons: Dialog.Ok | Dialog.Cancel
+        contentItem: Label {
+            text: qsTr("Close all emulator instances first. This removes only HD-Player cache folders in AppData. Settings, installed apps and emulator disks are kept.")
+            wrapMode: Text.Wrap
+        }
+        onAccepted: {
+            const r = backend.purgePlayerCache();
+            toast.show(r.msg || qsTr("Cache purge finished."));
+        }
+    }
+
+    // ---- probes used by the C++ --selftest (do not remove) ----
+    property color testProbe: Theme.window
+    property color testProbeAccent: Theme.accent
+
+    property bool booted: false
+
+    // ONE production shell. Every page below is the original QML editor;
+    // no HTML command adapter, parallel form state or native-editor switch.
+    readonly property var featurePages: [
+        { label: qsTr("Dashboard"), section: qsTr("HOME"), icon: Icons.dashboard },
+        { label: qsTr("Color studio"), section: qsTr("CUSTOMIZE"), icon: Icons.theme },
+        { label: qsTr("Resources"), section: qsTr("CUSTOMIZE"), icon: Icons.images },
+        { label: qsTr("Performance"), section: qsTr("CUSTOMIZE"), icon: Icons.fps },
+        { label: qsTr("Integrity & safety"), section: qsTr("CUSTOMIZE"), icon: Icons.integrity },
+        { label: qsTr("Boot experience"), section: qsTr("CUSTOMIZE"), icon: Icons.boot },
+        { label: qsTr("Player interface"), section: qsTr("CUSTOMIZE"), icon: Icons.extras },
+        { label: qsTr("Discord presence"), section: qsTr("TOOLS"), icon: Icons.discord },
+        { label: qsTr("Animated presence"), section: qsTr("TOOLS"), icon: Icons.discord },
+        { label: qsTr("Patch workspace"), section: qsTr("TOOLS"), icon: Icons.extras },
+        { label: qsTr("Debloat & disk manager"), section: qsTr("TOOLS"), icon: Icons.debloat }
+    ]
+    readonly property var pageNames: featurePages.map(p => p.label)
+    property alias currentPage: pages.currentIndex
+    function navigatePage(index) {
+        if (!backend.busy && Number.isInteger(index) && index >= 0 && index < featurePages.length)
+            pages.currentIndex = index;
+    }
+
+    Image {
+        anchors.left: parent.left; anchors.top: parent.top
+        width: parent.width * 0.8; height: parent.height
+        source: "img/orb-green.png"; opacity: Theme.dark ? 0.24 : 0.06
+    }
+    Image {
+        anchors.right: parent.right; anchors.bottom: parent.bottom
+        width: parent.width * 0.6; height: parent.height * 0.85
+        source: "img/orb-green.png"; opacity: Theme.dark ? 0.16 : 0.05
+    }
+
+    Rectangle {
+        id: rail
+        objectName: "studioSidebar"
+        anchors.left: parent.left; anchors.top: parent.top; anchors.bottom: parent.bottom
+        width: 218
+        color: Theme.sidebar
+        visible: auth.authorized
+        Rectangle { anchors.right: parent.right; height: parent.height; width: 1; color: Theme.border }
+
+        RowLayout {
+            anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top
+            anchors.leftMargin: 16; anchors.rightMargin: 12; anchors.topMargin: 18
+            spacing: 10
+            Image { Layout.preferredWidth: 36; Layout.preferredHeight: 36; source: "img/app-icon.png" }
+            ColumnLayout {
+                Layout.fillWidth: true
+                spacing: 1
+                Text { text: qsTr("BSI Customizer"); color: Theme.text; font.family: Theme.headingFont; font.pixelSize: 12; font.weight: Font.Bold; elide: Text.ElideRight }
+                Text { text: qsTr("BlueStacks tools"); color: Theme.textDim; font.pixelSize: 9 }
+            }
+        }
+
+        ScrollView {
+            anchors.top: parent.top; anchors.topMargin: 72
+            anchors.bottom: railFooter.top; anchors.bottomMargin: 10
+            anchors.left: parent.left; anchors.right: parent.right
+            anchors.leftMargin: 8; anchors.rightMargin: 8
+            contentWidth: availableWidth
+            clip: true
+            ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+            ColumnLayout {
+                width: parent.width
+                spacing: 3
+                Repeater {
+                    model: window.featurePages
+                    delegate: ColumnLayout {
+                        id: navEntry
+                        required property var modelData
+                        required property int index
+                        Layout.fillWidth: true
+                        spacing: 2
+
+                        Text {
+                            Layout.fillWidth: true
+                            Layout.leftMargin: 10
+                            Layout.topMargin: navEntry.index === 0 ? 4 : 12
+                            visible: navEntry.index === 0
+                                     || window.featurePages[navEntry.index - 1].section !== navEntry.modelData.section
+                            text: navEntry.modelData.section
+                            color: Theme.textDim
+                            font.pixelSize: 9
+                            font.weight: Font.Bold
+                            font.letterSpacing: 1.1
+                        }
+
+                        AbstractButton {
+                            id: railButton
+                            objectName: "featureNav" + navEntry.index
+                            Layout.fillWidth: true
+                            implicitHeight: 38
+                            enabled: !backend.busy
+                            Accessible.name: navEntry.modelData.label
+                            background: Rectangle {
+                                radius: 9
+                                color: pages.currentIndex === navEntry.index ? Theme.accentSoft
+                                       : railButton.hovered ? Qt.alpha(Theme.text, 0.055) : "transparent"
+                                border.color: pages.currentIndex === navEntry.index || railButton.activeFocus
+                                              ? Theme.borderStrong : "transparent"
+                                Rectangle {
+                                    visible: pages.currentIndex === navEntry.index
+                                    width: 3; height: 20; radius: 1.5
+                                    anchors.left: parent.left; anchors.leftMargin: 1
+                                    anchors.verticalCenter: parent.verticalCenter
+                                    color: Theme.accent
+                                }
+                            }
+                            contentItem: RowLayout {
+                                spacing: 10
+                                Image {
+                                    Layout.leftMargin: 8
+                                    Layout.preferredWidth: 18; Layout.preferredHeight: 18
+                                    source: Icons.icon(navEntry.modelData.icon,
+                                                       pages.currentIndex === navEntry.index ? Theme.accentText : Theme.textDim)
+                                    sourceSize: Qt.size(18, 18)
+                                    fillMode: Image.Pad
+                                }
+                                Text {
+                                    Layout.fillWidth: true
+                                    text: navEntry.modelData.label
+                                    color: pages.currentIndex === navEntry.index ? Theme.text : Theme.soft
+                                    font.pixelSize: 11
+                                    font.weight: pages.currentIndex === navEntry.index ? Font.DemiBold : Font.Medium
+                                    elide: Text.ElideRight
+                                }
+                            }
+                            onClicked: window.navigatePage(navEntry.index)
+                        }
+                    }
+                }
+            }
+        }
+        Text {
+            id: railFooter
+            anchors.left: parent.left; anchors.bottom: parent.bottom
+            anchors.leftMargin: 18; anchors.bottomMargin: 16
+            text: qsTr("BSI 3.0.1")
+            color: Theme.textDim; font.pixelSize: 9; font.letterSpacing: 1
+        }
+    }
+
+    Item {
+        id: topbar
+        anchors.left: rail.right; anchors.right: parent.right; anchors.top: parent.top
+        anchors.leftMargin: 28; anchors.rightMargin: 22
+        height: 86
+        visible: auth.authorized
+        MouseArea {
+            anchors.fill: parent
+            onPressed: window.startSystemMove()
+            onDoubleClicked: window.visibility === Window.Maximized ? window.showNormal() : window.showMaximized()
+        }
+        RowLayout {
+            anchors.fill: parent
+            spacing: 16
+            ColumnLayout {
+                Layout.fillWidth: true; spacing: 4
+                Text { text: qsTr("BSI Customizer"); color: Theme.text; font.family: Theme.headingFont; font.pixelSize: 16; font.weight: Font.Bold }
+                Text { text: qsTr("Premium emulator control center"); color: Theme.textDim; font.pixelSize: 10 }
+            }
+            ComboBox {
+                id: targetPicker
+                objectName: "shellTargetPicker"
+                Layout.preferredWidth: Math.min(210, window.width * 0.17)
+                implicitHeight: 38
+                enabled: !backend.busy
+                model: backend.installs
+                currentIndex: {
+                    const found = backend.installs.findIndex(i => i.exe === backend.exePath);
+                    return found;
+                }
+                textRole: "profile"
+                displayText: currentText || qsTr("Select target")
+                onActivated: backend.useInstall(currentIndex)
+                ToolTip.visible: hovered
+                ToolTip.text: qsTr("Choose an existing installation; detect players on Dashboard")
+            }
+            AbstractButton {
+                id: settingsButton
+                objectName: "settingsButton"
+                implicitWidth: 38
+                implicitHeight: 34
+                enabled: !backend.busy
+                Accessible.name: qsTr("Open settings")
+                ToolTip.visible: hovered
+                ToolTip.text: qsTr("Appearance, updates and About")
+                background: Rectangle {
+                    radius: 10
+                    color: settingsButton.hovered ? Theme.accentSoft : "transparent"
+                    border.color: settingsButton.hovered || settingsButton.activeFocus ? Theme.borderStrong : Theme.border
+                }
+                contentItem: Image {
+                    source: Icons.icon(Icons.settings, settingsButton.hovered ? Theme.accentText : Theme.textDim)
+                    sourceSize: Qt.size(18, 18)
+                    fillMode: Image.Pad
+                }
+                onClicked: { settingsPanel.currentTab = 0; settingsPanel.open(); }
+            }
+            ActionButton { text: "⋯"; implicitWidth: 32; implicitHeight: 34; onClicked: appMenu.popup() }
+            WinControls { appWindow: window; barHeight: 40 }
+        }
+    }
+    Menu {
+        id: appMenu
+        MenuItem { text: qsTr("Purge player cache…"); enabled: !backend.busy; onTriggered: purgeCacheDialog.open() }
+        MenuItem {
+            text: qsTr("Settings")
+            enabled: !backend.busy
+            onTriggered: { settingsPanel.currentTab = 0; settingsPanel.open(); }
+        }
+        MenuItem {
+            text: qsTr("Updates")
+            enabled: !backend.busy
+            onTriggered: { settingsPanel.currentTab = 1; settingsPanel.open(); }
+        }
+        MenuItem {
+            text: qsTr("About")
+            enabled: !backend.busy
+            onTriggered: { settingsPanel.currentTab = 2; settingsPanel.open(); }
+        }
+        MenuItem {
+            text: qsTr("Selftest")
+            enabled: !backend.busy
+            onTriggered: runSelftest()
+        }
+        MenuSeparator {}
+        MenuItem { text: qsTr("Sign out"); enabled: !backend.busy; onTriggered: auth.signOut() }
+    }
+
+    ColumnLayout {
+        id: shell
+        anchors.top: topbar.bottom; anchors.bottom: parent.bottom
+        anchors.left: rail.right; anchors.right: parent.right
+        anchors.leftMargin: 20; anchors.rightMargin: 20; anchors.bottomMargin: 16
+        visible: auth.authorized
+        spacing: 10
+        UpdateBanner { Layout.fillWidth: true; Layout.preferredHeight: visible ? implicitHeight : 0 }
+        // Page stack matching main.py's 4-section structure
+        StackLayout {
+            id: pages
+            objectName: "studioPageStack"
+            Layout.fillWidth: true; Layout.fillHeight: true
+
+            // Section 0: Dashboard / Overview
+            DashboardPage { objectName: "studioDashboard"; onNavigate: (index) => window.navigatePage(index) }
+
+            // Section 1: Settings (general)
+            SettingsPanel {
+                id: settingsPanelCentral
+                objectName: "settingsPanel"
+                onNotify: (message) => toast.show(message)
+                visible: pages.currentIndex === 1
+            }
+
+            // Section 2: Patcher (theme, fps, resources, etc.)
+            StackLayout {
+                id: patcherPages
+                Layout.fillWidth: true; Layout.fillHeight: true
+                ThemePage { objectName: "featureTheme" }
+                ResourcesPage { objectName: "featureResources" }
+                FpsPage { objectName: "featureFps" }
+                IntegrityPage { objectName: "featureIntegrity" }
+                BootVideoPage { objectName: "featureBoot" }
+                UiPage { objectName: "featureInterface"; onNotify: (msg) => toast.show(msg) }
+                RpcidPage { objectName: "featureRpc" }
+                GifRpcPage { objectName: "featureGif" }
+                WorkspacePage { objectName: "featureWorkspace"; onNavigate: (index) => window.navigatePage(index) }
+                DebloatPage { objectName: "featureDebloat"; onNotify: (msg) => toast.show(msg) }
+            }
+            visible: pages.currentIndex === 2
+
+            // Section 3: About / Backups
+            StackLayout {
+                id: backupPages
+                Layout.fillWidth: true; Layout.fillHeight: true
+                AboutPage { objectName: "aboutPage" }
+                UpdatesPage { objectName: "updatesPage" }
+            }
+            visible: pages.currentIndex === 3
+        }
+        LogPanel {
+            id: logPanel
+            Layout.fillWidth: true
+            Layout.preferredHeight: logPanel.collapsed ? 40 : Math.min(150, window.height * 0.2)
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Resize edges for the frameless window (native edges while maximized).
+    // ------------------------------------------------------------------
+    MouseArea {
+        anchors.top: parent.top; anchors.left: parent.left; anchors.right: parent.right
+        height: 6
+        enabled: window.visibility !== Window.Maximized
+        cursorShape: Qt.SizeVerCursor
+        onPressed: window.startSystemResize(Qt.TopEdge)
+    }
+    MouseArea {
+        anchors.bottom: parent.bottom; anchors.left: parent.left; anchors.right: parent.right
+        height: 6
+        enabled: window.visibility !== Window.Maximized
+        cursorShape: Qt.SizeVerCursor
+        onPressed: window.startSystemResize(Qt.BottomEdge)
+    }
+    MouseArea {
+        anchors.left: parent.left; anchors.top: parent.top; anchors.bottom: parent.bottom
+        width: 6
+        enabled: window.visibility !== Window.Maximized
+        cursorShape: Qt.SizeHorCursor
+        onPressed: window.startSystemResize(Qt.LeftEdge)
+    }
+    MouseArea {
+        anchors.right: parent.right; anchors.top: parent.top; anchors.bottom: parent.bottom
+        width: 6
+        enabled: window.visibility !== Window.Maximized
+        cursorShape: Qt.SizeHorCursor
+        onPressed: window.startSystemResize(Qt.RightEdge)
+    }
+    MouseArea {
+        anchors.left: parent.left; anchors.top: parent.top
+        width: 12; height: 12
+        enabled: window.visibility !== Window.Maximized
+        cursorShape: Qt.SizeFDiagCursor
+        onPressed: window.startSystemResize(Qt.LeftEdge | Qt.TopEdge)
+    }
+    MouseArea {
+        anchors.right: parent.right; anchors.top: parent.top
+        width: 12; height: 12
+        enabled: window.visibility !== Window.Maximized
+        cursorShape: Qt.SizeBDiagCursor
+        onPressed: window.startSystemResize(Qt.RightEdge | Qt.TopEdge)
+    }
+    MouseArea {
+        anchors.left: parent.left; anchors.bottom: parent.bottom
+        width: 12; height: 12
+        enabled: window.visibility !== Window.Maximized
+        cursorShape: Qt.SizeBDiagCursor
+        onPressed: window.startSystemResize(Qt.LeftEdge | Qt.BottomEdge)
+    }
+    MouseArea {
+        anchors.right: parent.right; anchors.bottom: parent.bottom
+        width: 12; height: 12
+        enabled: window.visibility !== Window.Maximized
+        cursorShape: Qt.SizeFDiagCursor
+        onPressed: window.startSystemResize(Qt.RightEdge | Qt.BottomEdge)
+    }
+
+    // ------------------------------------------------------------------
+    // The sign-in gate. The card is up first; nothing behind it is usable
+    // until AuthManager verifies the Discord sign-in (and Backend refuses
+    // its actions either way).
+    // ------------------------------------------------------------------
+    LoginGate {
+        id: loginGate
+        anchors.fill: parent
+        appWindow: window
+        z: 3200
+        visible: opacity > 0.01
+        enabled: !auth.authorized
+        opacity: auth.authorized ? 0 : 1
+        Behavior on opacity { NumberAnimation { duration: 260 } }
+    }
+
+    // FalcoForge's boot, one to one: the gate closing starts the app's
+    // first pulls - saved sign-in alone never does.
+    Connections {
+        target: auth
+        function onAuthorizedChanged() {
+            if (auth.authorized && !window.booted) {
+                window.booted = true;
+                Qt.callLater(function() { if (auth.authorized && !backend.busy) backend.detectInstalls(); });
+            }
+        }
+    }
+
+    Toast {
+        id: toast
+        anchors.horizontalCenter: parent.horizontalCenter
+        anchors.bottom: parent.bottom
+        anchors.bottomMargin: 24
+    }
+
+    SettingsPanel {
+        id: settingsPanel
+        objectName: "settingsPanel"
+        onNotify: (message) => toast.show(message)
+    }
+
+    Connections {
+        target: backend
+        function onLog(message, color) { logPanel.append(message, color) }
+    }
+
+    // Modal while the isolated patch worker owns the selected files. The GUI
+    // keeps rendering; keyboard shortcuts and repeat clicks cannot start writes.
+    Popup {
+        parent: Overlay.overlay
+        anchors.centerIn: parent
+        width: 340
+        modal: true
+        dim: true
+        focus: true
+        closePolicy: Popup.NoAutoClose
+        visible: backend.busy
+        padding: 24
+        background: Rectangle {
+            color: Theme.card
+            radius: 16
+            border.color: Theme.neonFaint
+        }
+        contentItem: ColumnLayout {
+            spacing: 14
+            BusyIndicator {
+                Layout.alignment: Qt.AlignHCenter
+                running: backend.busy
+            }
+            Label {
+                Layout.alignment: Qt.AlignHCenter
+                text: qsTr("Working…")
+                color: Theme.text
+                font.pixelSize: 18
+                font.bold: true
+            }
+            Label {
+                Layout.fillWidth: true
+                text: qsTr("Please wait while the operation finishes.\nDo not close the app or start BlueStacks.")
+                color: Theme.textDim
+                horizontalAlignment: Text.AlignHCenter
+                wrapMode: Text.WordWrap
+            }
+        }
+    }
+
+}

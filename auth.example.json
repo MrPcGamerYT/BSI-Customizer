@@ -1,0 +1,88 @@
+{
+  "_readme": [
+    "BSI Customizer sign-in configuration template - the only version of this file",
+    "that is committed. For development builds, copy it to auth.json next to the EXE",
+    "(or point BSIC_AUTH_FILE at it) and fill it in; never commit the filled-in copy.",
+    "Official release builds use the embedded policy and ignore local auth overrides.",
+    "When a Discord role gate is configured, it is mandatory on every login:",
+    "the current member roles must grant access; allowUsers cannot bypass it.",
+    "discord.allowUsers is used only when no role gate is configured.",
+    "The role gate uses GET /users/@me/guilds/{guildId}/member, which needs the",
+    "guilds.members.read scope (added automatically when a role gate is configured,",
+    "so the identify-only scope below is enough).",
+    "discord.clientSecret is OPTIONAL for the public PKCE client.",
+    "Release builds require it to be empty because secrets in EXEs are extractable.",
+    "Configure Discord as a public client, or put confidential token exchange on a server.",
+    "The whole file can also be baked into the build from the ZLP_AUTH_JSON secret",
+    "(or passed as the ZLP_AUTH_JSON env blob) - see _embed below.",
+    "The optional `updater` object below makes the app self-update from a",
+    "Discord releases channel (the repository is private, so GitHub Releases",
+    "cannot be read by a shipped EXE). See docs/UPDATER.md; leave it empty",
+    "and the app simply has no self-updater."
+  ],
+  "discord": {
+    "clientId": "",
+    "clientSecret": "",
+    "scope": "identify",
+    "redirectPort": 43713,
+    "allowUsers": [
+      "PUT_YOUR_DISCORD_USER_ID_HERE"
+    ],
+    "guildId": "",
+    "requiredTier": "",
+    "roles": {
+      "PUT_A_ROLE_ID_HERE": {
+        "tier": "Dev",
+        "label": "Dev"
+      }
+    },
+    "inviteUrl": ""
+  },
+  "session": {
+    "rememberMe": true
+  },
+  "_env": {
+    "files": [
+      "BSIC_AUTH_FILE=/absolute/path/to/auth.json"
+    ],
+    "discord": [
+      "BSIC_DISCORD_CLIENT_ID",
+      "BSIC_DISCORD_CLIENT_SECRET",
+      "BSIC_DISCORD_SCOPE",
+      "BSIC_DISCORD_REDIRECT_PORT",
+      "BSIC_DISCORD_ALLOW_USERS  (comma/semicolon separated user IDs)",
+      "BSIC_DISCORD_GUILD_ID",
+      "BSIC_DISCORD_REQUIRED_TIER",
+      "BSIC_DISCORD_INVITE  (discord.roles comes from the file/blob)"
+    ],
+    "discord_portal": [
+      "Add a redirect URI in the Discord developer portal that matches exactly:",
+      "http://127.0.0.1:43713/auth/discord/callback",
+      "Scheme, host, port and path all have to match, and 127.0.0.1 is used",
+      "instead of localhost on purpose (localhost may resolve to ::1)."
+    ],
+    "_embed": [
+      "ZLP_AUTH_JSON (repository secret) = this whole auth.json as one blob,",
+      "embedded by GitHub Actions. The release workflow requires this secret",
+      "and ignores local auth.json / environment overrides for Discord policy.",
+      "Development builds without BSI_REQUIRE_EMBEDDED_AUTH accept local config",
+      "and env overrides; see docs/AUTH.md."
+    ],
+    "updater": [
+      "BSIC_UPDATE_CHANNEL_ID",
+      "BSIC_UPDATE_TOKEN  (view-channel + read-history only)",
+      "BSIC_UPDATE_API  (default https://discord.com/api/v10)",
+      "BSIC_UPDATE_MANIFEST  (default manifest.json)",
+      "BSIC_UPDATE_HMAC_KEY  (optional manifest signature)",
+      "BSI_NO_UPDATER=1 disables the updater entirely"
+    ]
+  },
+  "updater": {
+    "apiBase": "https://discord.com/api/v10",
+    "channelId": "",
+    "botToken": "",
+    "manifest": "manifest.json",
+    "hmacKey": "",
+    "enabled": true
+  }
+}

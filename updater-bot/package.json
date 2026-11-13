@@ -1,0 +1,19 @@
+{
+  "name": "bsi-customizer-updater-bot",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Publishes BSI Customizer builds to the Discord releases channel the app updates from",
+  "type": "module",
+  "bin": {
+    "bsi-publish": "./publish.mjs",
+    "bsi-update-check": "./setup.mjs"
+  },
+  "scripts": {
+    "publish": "node publish.mjs",
+    "dry-run": "node publish.mjs --dry-run",
+    "check": "node setup.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
