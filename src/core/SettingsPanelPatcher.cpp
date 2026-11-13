@@ -39,7 +39,6 @@ const QString kWindowDesignMarkerV5 = QStringLiteral("BSI Settings v5");
 const QString kWindowDesignMarkerV6 = QStringLiteral("BSI6");
 const QString kWindowDesignMarker = QStringLiteral("BSI Settings v8");
 const QString kAboutMarker = QStringLiteral("BSI CUSTOMIZER: redesigned About page v1");
-const QString kPageLayoutMarker = QStringLiteral("//");
 const QString kSchema = QStringLiteral("bsi.settings-panel.recovery");
 const QString kWindowLeaf = QStringLiteral("UiSettingsWindow.qml");
 const QString kAboutLeaf = QStringLiteral("PlrAboutSetting.qml");
@@ -133,8 +132,7 @@ QString responsiveSettingsPage(const QString &qml, bool *changed)
             // ID lookup. Nested containers use the explicit scroll-view width.
             const QString availableWidth = hasScrollView && !directMainScrollChild
                 ? QStringLiteral("iScrollView.width") : QStringLiteral("parent.width");
-            ranges << WidthEdit{widthBinding.valueBegin, widthBinding.valueEnd,
-                                availableWidth + kPageLayoutMarker};
+            ranges << WidthEdit{widthBinding.valueBegin, widthBinding.valueEnd, availableWidth};
         }
     };
     consider(QStringLiteral("UiColumnLayout"));
@@ -192,8 +190,11 @@ QStringList settingsUnitIds(const TargetSources &sources)
 
 bool hasResponsivePageMarker(const QString &qml)
 {
-    return qml.contains(QStringLiteral("parent.width") + kPageLayoutMarker)
-        || qml.contains(QStringLiteral("iScrollView.width") + kPageLayoutMarker);
+    // Recognize outputs from earlier unreleased revisions that added a QML
+    // marker. New builds track changed page paths in the recovery sidecar so
+    // the embedded source itself stays as small as possible.
+    return qml.contains(QStringLiteral("/*BSI*/"))
+        || qml.contains(QStringLiteral("/*BSI-PAGE-WIDTH*/"));
 }
 
 bool hasResponsivePageMarker(const TargetSources &sources)
@@ -1138,6 +1139,39 @@ bool recoveryAcceptsCurrent(const QVariantMap &record, const QByteArray &current
     return record.value(QStringLiteral("patchedSha256")).toString() == digest;
 }
 
+bool responsivePagesFromRecovery(const QVariantMap &recovery, const TargetSources &sources,
+                                 const QMap<QString, QByteArray> &originals,
+                                 QStringList *paths, QString *error)
+{
+    paths->clear();
+    if (recovery.contains(QStringLiteral("responsivePages"))) {
+        const QVariantList saved = recovery.value(QStringLiteral("responsivePages")).toList();
+        if (saved.size() > 62) {
+            *error = QStringLiteral("The Settings-panel recovery snapshot lists too many native pages; restore is blocked.");
+            return false;
+        }
+        for (const QVariant &value : saved) {
+            const QString path = value.toString();
+            if (path.isEmpty() || paths->contains(path)) {
+                *error = QStringLiteral("The Settings-panel recovery snapshot has an invalid native-page list; restore is blocked.");
+                return false;
+            }
+            paths->append(path);
+        }
+    } else {
+        // Compatibility with the early, unreleased marker-based snapshots.
+        for (const Source &page : sources.pages)
+            if (hasResponsivePageMarker(page.text)) paths->append(page.path);
+    }
+    for (const QString &path : *paths) {
+        if (!sourceForPath(sources, path) || !originals.contains(path)) {
+            *error = QStringLiteral("A widened native Settings page has no matching recovery source; restore is blocked.");
+            return false;
+        }
+    }
+    return true;
+}
+
 QVariantList operationsFor(const QMap<QString, QByteArray> &replacement)
 {
     QVariantList operations;
@@ -1386,9 +1420,11 @@ QVariantMap apply(const QString &exePath, const QString &developerName,
             return fail(QStringLiteral("The executable's resource paths no longer match the saved Settings-panel snapshot; restore is blocked."));
         if (!hasWindowMarker(current.window.text) || !current.about.text.contains(kAboutMarker))
             return fail(QStringLiteral("The Settings-panel sources have changed since this patch. Automatic restore is blocked to protect later edits."));
-        for (const Source &page : current.pages)
-            if (hasResponsivePageMarker(page.text) && !originals.contains(page.path))
-                return fail(QStringLiteral("A widened native Settings page has no matching recovery source; restore is blocked."));
+        QStringList responsivePagePaths;
+        QString responsivePagesError;
+        if (!responsivePagesFromRecovery(recovery, current, originals,
+                                         &responsivePagePaths, &responsivePagesError))
+            return fail(responsivePagesError);
         const QVariantList records = recovery.value(QStringLiteral("sources")).toList();
         for (const QVariant &value : records) {
             const QVariantMap record = value.toMap();
@@ -1467,12 +1503,11 @@ QVariantMap apply(const QString &exePath, const QString &developerName,
             }
         }
         if (recoveryMatchesCurrent) {
-            for (const Source &page : current.pages) {
-                if (hasResponsivePageMarker(page.text) && !originals.contains(page.path)) {
-                    recoveryMatchesCurrent = false;
-                    break;
-                }
-            }
+            QStringList responsivePagePaths;
+            QString responsivePagesError;
+            if (!responsivePagesFromRecovery(recovery, current, originals,
+                                             &responsivePagePaths, &responsivePagesError))
+                recoveryMatchesCurrent = false;
         }
         if (!recoveryMatchesCurrent && hasPatchMarker)
             return fail(QStringLiteral("A saved Settings-panel resource was changed by another patch. Restore or inspect it manually before rebuilding."));
@@ -1553,6 +1588,10 @@ QVariantMap apply(const QString &exePath, const QString &developerName,
     }
 
     recovery.insert(QStringLiteral("sources"), sourceRecords(current, originals, replacements));
+    QVariantList responsivePagePaths;
+    for (const Source &page : current.pages)
+        if (originals.contains(page.path)) responsivePagePaths << page.path;
+    recovery.insert(QStringLiteral("responsivePages"), responsivePagePaths);
     recovery.insert(QStringLiteral("developerName"), developerName.trimmed());
     if (!saveAtomic(backup, QJsonDocument::fromVariant(recovery).toJson(QJsonDocument::Compact)))
         return fail(QStringLiteral("Could not save the feature-specific recovery snapshot. No executable resources were changed."));

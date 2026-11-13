@@ -5191,12 +5191,17 @@ Window {
                 QByteArray imageWithExternalPageEdit;
                 for (const auto &entry : EmbeddedResources::list(panelImage, true)) {
                     const QByteArray pageBytes = EmbeddedResources::readEntry(panelCopy, entry.entryOff, entry.flags, 8 * 1024 * 1024);
-                    int pageMarker = pageBytes.indexOf("parent.width//");
-                    if (pageMarker < 0)
-                        pageMarker = pageBytes.indexOf("iScrollView.width//");
-                    if (pageMarker < 0) continue;
+                    const int contentId = pageBytes.indexOf("id: iContentLayout");
+                    if (contentId < 0) continue;
+                    int widenedWidth = pageBytes.indexOf("width: parent.width", contentId);
+                    if (widenedWidth < 0)
+                        widenedWidth = pageBytes.indexOf("width: iScrollView.width", contentId);
+                    if (widenedWidth < 0) continue;
+                    int commentText = pageBytes.indexOf("BlueStack");
+                    if (commentText < 0) commentText = pageBytes.indexOf("Copyright");
+                    if (commentText < 0) continue;
                     editedProtectedPage = pageBytes;
-                    editedProtectedPage[pageMarker] = 'x'; // still-valid QML identifier syntax, changed bytes
+                    editedProtectedPage[commentText] = 'X'; // still-valid QML comment, changed bytes
                     protectedPagePath = entry.path;
                     const auto edited = EmbeddedResources::replaceBytes(panelCopy, protectedPagePath,
                         editedProtectedPage, &imageWithExternalPageEdit);
@@ -5250,9 +5255,30 @@ Window {
                     }
                     return false;
                 };
+                const auto restoreWidenedNativeContentWidth = [](const QString &source, bool *widened) {
+                    *widened = false;
+                    const QString masked = QmlText::mask(source);
+                    for (const auto &object : QmlText::objects(masked, QStringLiteral("UiColumnLayout"))) {
+                        QmlText::Binding idBinding, widthBinding;
+                        if (!QmlText::binding(masked, object.open, object.end - 1, QStringLiteral("id"), &idBinding)
+                            || masked.mid(idBinding.valueBegin, idBinding.valueEnd - idBinding.valueBegin).trimmed()
+                                != QLatin1String("iContentLayout")
+                            || !QmlText::binding(masked, object.open, object.end - 1, QStringLiteral("width"), &widthBinding))
+                            continue;
+                        const QString width = masked.mid(widthBinding.valueBegin,
+                            widthBinding.valueEnd - widthBinding.valueBegin).trimmed();
+                        if (width != QLatin1String("parent.width") && width != QLatin1String("iScrollView.width"))
+                            continue;
+                        QString restored = source;
+                        restored.replace(widthBinding.valueBegin, widthBinding.valueEnd - widthBinding.valueBegin,
+                                         QStringLiteral("520"));
+                        *widened = true;
+                        return restored;
+                    }
+                    return source;
+                };
                 int fixedNativePages = 0;
                 int widenedNativePages = 0;
-                const QString responsivePageMarker = QStringLiteral("//");
                 const auto originalPageFiles = QtResources::registeredFiles(original);
                 const auto rebuiltPageFiles = QtResources::registeredFiles(panelImage);
                 for (const QVariant &tabValue : settingsBeforeApply.value(QStringLiteral("tabs")).toList()) {
@@ -5269,10 +5295,9 @@ Window {
                     if (stockPage.isEmpty() || rebuiltPage.isEmpty() || !hasFixedNativeContentWidth(stockPage))
                         continue;
                     ++fixedNativePages;
-                    QString revertedPage = rebuiltPage;
-                    revertedPage.replace(QStringLiteral("iScrollView.width%1").arg(responsivePageMarker), QStringLiteral("520"));
-                    revertedPage.replace(QStringLiteral("parent.width%1").arg(responsivePageMarker), QStringLiteral("520"));
-                    if (rebuiltPage.contains(responsivePageMarker) && !hasFixedNativeContentWidth(rebuiltPage)
+                    bool widenedBinding = false;
+                    const QString revertedPage = restoreWidenedNativeContentWidth(rebuiltPage, &widenedBinding);
+                    if (widenedBinding && !hasFixedNativeContentWidth(rebuiltPage)
                         && revertedPage == stockPage)
                         ++widenedNativePages;
                 }
