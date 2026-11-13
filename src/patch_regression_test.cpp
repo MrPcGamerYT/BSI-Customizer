@@ -50,6 +50,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QStandardPaths>
 #include <QLibraryInfo>
 #include <QProcess>
 #include <QProcessEnvironment>
@@ -5289,6 +5290,73 @@ Window {
                 check(restoredPanel.value(QStringLiteral("ok")).toBool(),
                       QStringLiteral("the real %1 panel restores only its two original QML sources (%2)")
                           .arg(QFileInfo(input).fileName(), restoredPanel.value(QStringLiteral("msg")).toString()));
+
+                // A new HD-Player.exe can replace the old file at exactly the
+                // same path while its AppLocalData recovery sidecar survives.
+                // Seed a valid old snapshot, make it describe a previous QML
+                // revision, then put the clean executable back at that path.
+                const auto seedRecovery = SettingsPanelPatcher::apply(panelCopy,
+                    QStringLiteral("Stale snapshot seed"), panelLinks, {}, true);
+                const bool seedRecoverySucceeded = seedRecovery.value(QStringLiteral("ok")).toBool();
+                check(seedRecoverySucceeded,
+                      QStringLiteral("the stale-recovery regression creates an initial patch snapshot (%1)")
+                          .arg(seedRecovery.value(QStringLiteral("msg")).toString()));
+                const QString canonicalPanelCopy = QFileInfo(panelCopy).canonicalFilePath();
+                const QString staleRecoveryPath = QDir(QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation)
+                    + QStringLiteral("/settings-panel-recovery"))
+                    .filePath(QString::fromLatin1(QCryptographicHash::hash(canonicalPanelCopy.toUtf8(),
+                        QCryptographicHash::Sha256).toHex()) + QStringLiteral(".json"));
+                bool staleSidecarPrepared = false;
+                if (seedRecoverySucceeded) {
+                    QFile sidecar(staleRecoveryPath);
+                    if (sidecar.open(QIODevice::ReadOnly)) {
+                        QJsonParseError sidecarError;
+                        const auto sidecarDoc = QJsonDocument::fromJson(sidecar.readAll(), &sidecarError);
+                        sidecar.close();
+                        QJsonObject recoveryObject = sidecarDoc.object();
+                        QJsonArray sourceRecords = recoveryObject.value(QStringLiteral("sources")).toArray();
+                        if (sidecarError.error == QJsonParseError::NoError && sourceRecords.size() == 2) {
+                            QJsonObject oldWindow = sourceRecords.at(0).toObject();
+                            QByteArray previousSource = QByteArray::fromBase64(
+                                oldWindow.value(QStringLiteral("original")).toString().toLatin1());
+                            previousSource.append('\n'); // another valid stock-QML revision
+                            const QByteArray previousHash = QCryptographicHash::hash(
+                                previousSource, QCryptographicHash::Sha256).toHex();
+                            oldWindow.insert(QStringLiteral("original"), QString::fromLatin1(previousSource.toBase64()));
+                            oldWindow.insert(QStringLiteral("originalSha256"), QString::fromLatin1(previousHash));
+                            QJsonArray previousAcceptedHashes;
+                            previousAcceptedHashes.append(QString::fromLatin1(previousHash));
+                            oldWindow.insert(QStringLiteral("acceptedSha256"), previousAcceptedHashes);
+                            sourceRecords.replace(0, oldWindow);
+                            recoveryObject.insert(QStringLiteral("sources"), sourceRecords);
+                            const QByteArray staleJson = QJsonDocument(recoveryObject).toJson(QJsonDocument::Compact);
+                            if (sidecar.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+                                staleSidecarPrepared = sidecar.write(staleJson) == staleJson.size();
+                                sidecar.close();
+                            }
+                        }
+                    }
+                }
+                check(staleSidecarPrepared,
+                      "a valid sidecar from the previous executable revision is staged at the same path");
+                const bool cleanExeWritten = write(panelCopy, original);
+                check(cleanExeWritten,
+                      "the clean reference is restored over the previously patched executable path");
+                if (cleanExeWritten && staleSidecarPrepared) {
+                    const auto appliedToFreshExe = SettingsPanelPatcher::apply(panelCopy,
+                        QStringLiteral("Fresh executable baseline"), panelLinks, {}, true);
+                    check(appliedToFreshExe.value(QStringLiteral("ok")).toBool(),
+                          QStringLiteral("a fresh executable at the old path ignores the stale recovery snapshot (%1)")
+                              .arg(appliedToFreshExe.value(QStringLiteral("msg")).toString()));
+                    if (appliedToFreshExe.value(QStringLiteral("ok")).toBool()) {
+                        const auto freshRestore = SettingsPanelPatcher::apply(panelCopy, QString(), {}, {}, false);
+                        const auto freshState = SettingsPanelPatcher::analyze(panelCopy);
+                        check(freshRestore.value(QStringLiteral("ok")).toBool()
+                                  && freshState.supported && !freshState.applied,
+                              QStringLiteral("the rebased recovery restores the clean executable sources (%1)")
+                                  .arg(freshRestore.value(QStringLiteral("msg")).toString()));
+                    }
+                }
                 const auto finalPanel = SettingsPanelPatcher::analyze(panelCopy);
                 check(finalPanel.supported && !finalPanel.applied,
                       QStringLiteral("the original %1 Settings window is recognized again after restore")
