@@ -39,7 +39,7 @@ const QString kWindowDesignMarkerV5 = QStringLiteral("BSI Settings v5");
 const QString kWindowDesignMarkerV6 = QStringLiteral("BSI6");
 const QString kWindowDesignMarker = QStringLiteral("BSI Settings v8");
 const QString kAboutMarker = QStringLiteral("BSI CUSTOMIZER: redesigned About page v1");
-const QString kPageLayoutMarker = QStringLiteral("BSI-PAGE-WIDTH");
+const QString kPageLayoutMarker = QStringLiteral("/*BSI*/");
 const QString kSchema = QStringLiteral("bsi.settings-panel.recovery");
 const QString kWindowLeaf = QStringLiteral("UiSettingsWindow.qml");
 const QString kAboutLeaf = QStringLiteral("PlrAboutSetting.qml");
@@ -129,8 +129,7 @@ QString responsiveSettingsPage(const QString &qml, bool *changed)
     consider(QStringLiteral("ColumnLayout"));
     std::sort(ranges.begin(), ranges.end(), [](const auto &a, const auto &b) { return a.first > b.first; });
     for (const auto &range : ranges) {
-        out.replace(range.first, range.second - range.first,
-                    availableWidth + QStringLiteral(" /* ") + kPageLayoutMarker + QStringLiteral(" */"));
+        out.replace(range.first, range.second - range.first, availableWidth + kPageLayoutMarker);
     }
     *changed = !ranges.isEmpty();
     return out;
