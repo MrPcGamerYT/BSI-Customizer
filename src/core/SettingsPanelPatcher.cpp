@@ -688,17 +688,16 @@ function bKey(v){return v.toLowerCase().split("/").pop()}
 Rectangle{anchors.fill:parent;color:"#0d0f14";radius:14;clip:true
 Column{anchors.fill:parent;spacing:0
 Item{width:parent.width;height:56
-Rectangle{anchors.fill:parent;color:"#0a0c10"}
-MouseArea{width:parent.width-42;height:parent.height;onPressed:iSettingsWindow.startSystemMove()}
+MouseArea{anchors.fill:parent;onPressed:iSettingsWindow.startSystemMove()}
 Text{text:qsTranslate("QObject","Settings");color:"white";font:UiTheme.fonts.bodyLarge;anchors.centerIn:parent}
 UiImageButton{asset:"CloseIcon";pImageWidth:16;pImageHeight:16;anchors.right:parent.right;anchors.verticalCenter:parent.verticalCenter;onClicked:iSettingsWindow.close()}}
 ListView{id:v;width:parent.width;height:48;orientation:ListView.Horizontal;model:pSettingsItems.pSettingElements;clip:true
-delegate:Item{property var k:iSettingsWindowShadowContainer.bKey(modelData.pQmlSource);property var h:iSettingsWindowShadowContainer.bHidden;width:(modelData.pButtonText.length*8+24)*(!~h.indexOf(k));height:44;visible:width>0
+delegate:Item{property var k:iSettingsWindowShadowContainer.bKey(modelData.pQmlSource);property var h:iSettingsWindowShadowContainer.bHidden;width:(modelData.pButtonText.length*8+24)*(!~h.indexOf(k));height:44
 UiSettingsButton{anchors.fill:parent;pSettingIdx:index;pSettingBtnText:modelData.pButtonText;pSelected:index==pCurrentTabIndex;pShowRedDot:modelData.pShowRedDot;onSettingClicked:fChangeSelectedSetting(pSettingIdx)}
-Image{source:iSettingsWindowShadowContainer.bIcons[parent.k]||"";width:18;height:18;anchors.horizontalCenter:parent.horizontalCenter}}
+Image{source:iSettingsWindowShadowContainer.bIcons[parent.k]||"";width:parent.width?18:0;height:18;anchors.centerIn:parent}}
 }
 Item{width:parent.width;height:parent.height-104
-StackLayout{id:iSelectedSettingControl;anchors.fill:parent;anchors.margins:6;currentIndex:pCurrentTabIndex
+StackLayout{id:iSelectedSettingControl;anchors.fill:parent;currentIndex:pCurrentTabIndex
 Repeater{model:pSettingsItems.pSettingElements;delegate:Loader{width:iSelectedSettingControl.width;height:iSelectedSettingControl.height;Component.onCompleted:setSource(model.modelData.pQmlSource,model.modelData.pComponentArgs||{});onLoaded:{item.anchors.fill=item.parent;model.modelData.pComponentObj=item;if(item.fOnQmlLoaded)item.fOnQmlLoaded()}}}}
 }
 }

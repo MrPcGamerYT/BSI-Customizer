@@ -70,16 +70,16 @@ assert "function fOnQmlLoaded(){parent.parent.parent.parent.parent.parent.parent
 assert "property var bsiHiddenTabs: @@BSI_HIDDEN_TABS@@" in cpp
 assert "property var bsiTabIcons: @@BSI_TAB_ICONS@@" in cpp
 assert 'Rectangle{anchors.fill:parent;color:"#0d0f14";radius:14' in replacement
-assert 'Rectangle{anchors.fill:parent;color:"#0a0c10"}' in replacement
 assert "Column{anchors.fill:parent;spacing:0" in replacement
+assert "MouseArea{anchors.fill:parent;onPressed:iSettingsWindow.startSystemMove()}" in replacement
 assert "anchors.centerIn:parent" in replacement
 assert "ListView{id:v;" in replacement
 assert "orientation:ListView.Horizontal;model:pSettingsItems.pSettingElements;clip:true" in replacement
 assert "property var h:iSettingsWindowShadowContainer.bHidden" in replacement
-assert "width:(modelData.pButtonText.length*8+24)*(!~h.indexOf(k));height:44;visible:width>0" in replacement
+assert "width:(modelData.pButtonText.length*8+24)*(!~h.indexOf(k));height:44" in replacement
 assert "item.anchors.fill=item.parent" in replacement
 assert "height:parent.height-104" in replacement
-assert "StackLayout{id:iSelectedSettingControl;anchors.fill:parent;anchors.margins:6" in replacement
+assert "StackLayout{id:iSelectedSettingControl;anchors.fill:parent;currentIndex:pCurrentTabIndex" in replacement
 assert "delegate:Loader{width:iSelectedSettingControl.width;height:iSelectedSettingControl.height;" in replacement
 assert "pSettingBtnText:" in replacement and "pSelected:index==pCurrentTabIndex" in replacement and "pShowRedDot:modelData.pShowRedDot" in replacement
 assert "pSettingIdx:index" in replacement
