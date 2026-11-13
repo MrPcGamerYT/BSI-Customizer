@@ -1554,18 +1554,17 @@ QVariantMap apply(const QString &exePath, const QString &developerName,
         QString fittingPage = rebuiltPage;
         QByteArray rebuiltBytes = utf8PreservingBom(fittingPage, original);
         QByteArray trialImage;
-        QVariantMap fit = EmbeddedResources::replaceBytes(exePath, page.path, rebuiltBytes, &trialImage);
+        EmbeddedResources::Result fit = EmbeddedResources::replaceBytes(exePath, page.path, rebuiltBytes, &trialImage);
         const QRegularExpression blankLine(QStringLiteral("(\\r?\\n)[ \\t]*\\r?\\n"));
-        while (!fit.value(QStringLiteral("ok")).toBool()
-               && fit.value(QStringLiteral("msg")).toString().contains(QStringLiteral("needs"))) {
+        while (!fit.ok && fit.msg.contains(QStringLiteral("needs"))) {
             const auto match = blankLine.match(fittingPage);
             if (!match.hasMatch()) break;
             fittingPage.replace(match.capturedStart(), match.capturedLength(), match.captured(1));
             rebuiltBytes = utf8PreservingBom(fittingPage, original);
             fit = EmbeddedResources::replaceBytes(exePath, page.path, rebuiltBytes, &trialImage);
         }
-        if (!fit.value(QStringLiteral("ok")).toBool())
-            return fail(fit.value(QStringLiteral("msg")).toString());
+        if (!fit.ok)
+            return fail(fit.msg);
         if (rebuiltBytes != page.bytes) replacements.insert(page.path, rebuiltBytes);
     }
     if (!hasWindowMarker(EmbeddedResources::decodeText(replacements.value(current.window.path)))
