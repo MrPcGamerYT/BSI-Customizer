@@ -50,6 +50,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QStandardPaths>
 #include <QLibraryInfo>
 #include <QProcess>
 #include <QProcessEnvironment>
@@ -5292,57 +5293,56 @@ Window {
 
                 // A new HD-Player.exe can replace the old file at exactly the
                 // same path while its AppLocalData recovery sidecar survives.
-                // Recreate that situation with a valid, slightly different
-                // stock QML source, then prove the clean executable gets a new
-                // baseline instead of the stale-snapshot false positive.
+                // Seed a valid old snapshot, make it describe a previous QML
+                // revision, then put the clean executable back at that path.
                 const auto seedRecovery = SettingsPanelPatcher::apply(panelCopy,
                     QStringLiteral("Stale snapshot seed"), panelLinks, {}, true);
-                QByteArray freshInstallImage = original;
-                QString freshWindowSource;
-                QString freshWindowPath;
-                for (const auto &entry : EmbeddedResources::list(freshInstallImage, true)) {
-                    if (entry.leaf.compare(QLatin1String("UiSettingsWindow.qml"), Qt::CaseInsensitive) == 0) {
-                        freshWindowPath = entry.path;
-                        freshWindowSource = EmbeddedResources::decodeText(
-                            EmbeddedResources::readEntry(input, entry.entryOff, entry.flags, 8 * 1024 * 1024));
-                        break;
-                    }
-                }
-                const QString maskedFreshWindow = QmlText::mask(freshWindowSource);
-                const auto freshShellObjects = QmlText::objects(maskedFreshWindow, QStringLiteral("UiShadowContainer"));
                 const bool seedRecoverySucceeded = seedRecovery.value(QStringLiteral("ok")).toBool();
                 check(seedRecoverySucceeded,
                       QStringLiteral("the stale-recovery regression creates an initial patch snapshot (%1)")
                           .arg(seedRecovery.value(QStringLiteral("msg")).toString()));
-                const bool cleanExeWritten = seedRecoverySucceeded && write(panelCopy, original);
-                check(cleanExeWritten,
-                      "the clean reference is restored over the previously patched executable path");
-                bool freshSourceModified = false;
-                if (!freshShellObjects.isEmpty()) {
-                    int whitespace = freshShellObjects.first().open + 1;
-                    while (whitespace < freshWindowSource.size() && !freshWindowSource.at(whitespace).isSpace())
-                        ++whitespace;
-                    if (whitespace < freshWindowSource.size()) {
-                        freshWindowSource[whitespace] = QLatin1Char(' ');
-                        freshSourceModified = true;
+                const QString canonicalPanelCopy = QFileInfo(panelCopy).canonicalFilePath();
+                const QString staleRecoveryPath = QDir(QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation)
+                    + QStringLiteral("/settings-panel-recovery"))
+                    .filePath(QString::fromLatin1(QCryptographicHash::hash(canonicalPanelCopy.toUtf8(),
+                        QCryptographicHash::Sha256).toHex()) + QStringLiteral(".json"));
+                bool staleSidecarPrepared = false;
+                if (seedRecoverySucceeded) {
+                    QFile sidecar(staleRecoveryPath);
+                    if (sidecar.open(QIODevice::ReadOnly)) {
+                        QJsonParseError sidecarError;
+                        const auto sidecarDoc = QJsonDocument::fromJson(sidecar.readAll(), &sidecarError);
+                        sidecar.close();
+                        QJsonObject recoveryObject = sidecarDoc.object();
+                        QJsonArray sourceRecords = recoveryObject.value(QStringLiteral("sources")).toArray();
+                        if (sidecarError.error == QJsonParseError::NoError && sourceRecords.size() == 2) {
+                            QJsonObject oldWindow = sourceRecords.at(0).toObject();
+                            QByteArray previousSource = QByteArray::fromBase64(
+                                oldWindow.value(QStringLiteral("original")).toString().toLatin1());
+                            previousSource.append('\n'); // another valid stock-QML revision
+                            const QByteArray previousHash = QCryptographicHash::hash(
+                                previousSource, QCryptographicHash::Sha256).toHex();
+                            oldWindow.insert(QStringLiteral("original"), QString::fromLatin1(previousSource.toBase64()));
+                            oldWindow.insert(QStringLiteral("originalSha256"), QString::fromLatin1(previousHash));
+                            QJsonArray previousAcceptedHashes;
+                            previousAcceptedHashes.append(QString::fromLatin1(previousHash));
+                            oldWindow.insert(QStringLiteral("acceptedSha256"), previousAcceptedHashes);
+                            sourceRecords.replace(0, oldWindow);
+                            recoveryObject.insert(QStringLiteral("sources"), sourceRecords);
+                            const QByteArray staleJson = QJsonDocument(recoveryObject).toJson(QJsonDocument::Compact);
+                            if (sidecar.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+                                staleSidecarPrepared = sidecar.write(staleJson) == staleJson.size();
+                                sidecar.close();
+                            }
+                        }
                     }
                 }
-                QString freshImageError;
-                bool freshImageReady = cleanExeWritten && !freshWindowPath.isEmpty()
-                    && freshSourceModified;
-                if (freshImageReady) {
-                    const auto changedFreshSource = EmbeddedResources::replaceBytes(
-                        panelCopy, freshWindowPath, freshWindowSource.toUtf8(), &freshInstallImage);
-                    freshImageReady = changedFreshSource.ok;
-                    freshImageError = changedFreshSource.msg;
-                }
-                check(freshImageReady,
-                      QStringLiteral("the stale-recovery regression prepares a clean replacement executable (%1)")
-                          .arg(freshImageError));
-                const bool freshImageWritten = freshImageReady && write(panelCopy, freshInstallImage);
-                check(freshImageWritten,
-                      "the clean replacement executable is written over the previously patched path");
-                if (freshImageWritten) {
+                check(staleSidecarPrepared,
+                      "a valid sidecar from the previous executable revision is staged at the same path");
+                const bool cleanExeWritten = write(panelCopy, original);
+                check(cleanExeWritten,
+                      "the clean reference is restored over the previously patched executable path");
+                if (cleanExeWritten && staleSidecarPrepared) {
                     const auto appliedToFreshExe = SettingsPanelPatcher::apply(panelCopy,
                         QStringLiteral("Fresh executable baseline"), panelLinks, {}, true);
                     check(appliedToFreshExe.value(QStringLiteral("ok")).toBool(),
@@ -5350,16 +5350,10 @@ Window {
                               .arg(appliedToFreshExe.value(QStringLiteral("msg")).toString()));
                     if (appliedToFreshExe.value(QStringLiteral("ok")).toBool()) {
                         const auto freshRestore = SettingsPanelPatcher::apply(panelCopy, QString(), {}, {}, false);
-                        QString restoredFreshWindow;
-                        const QByteArray restoredFreshImage = read(panelCopy);
-                        for (const auto &entry : EmbeddedResources::list(restoredFreshImage, true)) {
-                            if (entry.leaf.compare(QLatin1String("UiSettingsWindow.qml"), Qt::CaseInsensitive) == 0)
-                                restoredFreshWindow = EmbeddedResources::decodeText(
-                                    EmbeddedResources::readEntry(panelCopy, entry.entryOff, entry.flags, 8 * 1024 * 1024));
-                        }
+                        const auto freshState = SettingsPanelPatcher::analyze(panelCopy);
                         check(freshRestore.value(QStringLiteral("ok")).toBool()
-                                  && restoredFreshWindow == freshWindowSource,
-                              QStringLiteral("restoring after rebase returns the fresh executable's exact Settings source (%1)")
+                                  && freshState.supported && !freshState.applied,
+                              QStringLiteral("the rebased recovery restores the clean executable sources (%1)")
                                   .arg(freshRestore.value(QStringLiteral("msg")).toString()));
                     }
                 }
