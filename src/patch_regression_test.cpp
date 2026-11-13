@@ -5190,8 +5190,25 @@ Window {
                 QString protectedPagePath;
                 QByteArray editedProtectedPage;
                 QByteArray imageWithExternalPageEdit;
+                const auto stockEntries = EmbeddedResources::list(original, true);
                 for (const auto &entry : EmbeddedResources::list(panelImage, true)) {
+                    if (entry.format.compare(QLatin1String("qml"), Qt::CaseInsensitive) != 0) continue;
                     const QByteArray pageBytes = EmbeddedResources::readEntry(panelCopy, entry.entryOff, entry.flags, 8 * 1024 * 1024);
+                    QByteArray stockPageBytes;
+                    for (const auto &stockEntry : stockEntries) {
+                        if (stockEntry.path == entry.path) {
+                            stockPageBytes = EmbeddedResources::readEntry(original, stockEntry.entryOff,
+                                stockEntry.flags, 8 * 1024 * 1024);
+                            break;
+                        }
+                    }
+                    const int stockContentId = stockPageBytes.indexOf("id: iContentLayout");
+                    const int stockWidth = stockContentId >= 0
+                        ? stockPageBytes.indexOf("width:", stockContentId) : -1;
+                    const int stockLineEnd = stockWidth >= 0 ? stockPageBytes.indexOf('\n', stockWidth) : -1;
+                    if (stockWidth < 0 || stockLineEnd < 0
+                        || stockPageBytes.mid(stockWidth + 6, stockLineEnd - stockWidth - 6).trimmed() != "520")
+                        continue;
                     const int contentId = pageBytes.indexOf("id: iContentLayout");
                     if (contentId < 0) continue;
                     int widenedWidth = pageBytes.indexOf("width: parent.width", contentId);
