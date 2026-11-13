@@ -5202,7 +5202,7 @@ Window {
                           && rebuiltWindow.contains(QStringLiteral("orientation:ListView.Horizontal;model:pSettingsItems.pSettingElements;clip:true"))
                           && rebuiltWindow.contains(QStringLiteral("item.anchors.fill=item.parent"))
                           && rebuiltWindow.contains(QStringLiteral("Image{source:iSettingsWindowShadowContainer.bIcons[parent.k]||\"\";width:parent.width?18:0;height:18;anchors.centerIn:parent}"))
-                          && rebuiltWindow.contains(QStringLiteral("StackLayout{id:iSelectedSettingControl;anchors.fill:parent;currentIndex:pCurrentTabIndex"))
+                          && rebuiltWindow.contains(QStringLiteral("StackLayout{id:iSelectedSettingControl;anchors.fill:parent;anchors.margins:6"))
                           && rebuiltWindow.contains(QStringLiteral("delegate:Loader{width:iSelectedSettingControl.width;height:iSelectedSettingControl.height;"))
                           && rebuiltWindow.contains(QStringLiteral("model.modelData.pComponentObj=item"))
                           && rebuiltWindow.contains(QStringLiteral("fChangeSelectedSetting(pSettingIdx)"))
