@@ -71,7 +71,6 @@ assert "property var bsiHiddenTabs: @@BSI_HIDDEN_TABS@@" in cpp
 assert "property var bsiTabIcons: @@BSI_TAB_ICONS@@" in cpp
 assert 'Rectangle{anchors.fill:parent;color:"#0d0f14";radius:14' in replacement
 assert 'Rectangle{anchors.fill:parent;color:"#0a0c10"}' in replacement
-assert 'Rectangle{width:parent.width;height:48;color:"#0a0c10"' in replacement
 assert "Column{anchors.fill:parent;spacing:0" in replacement
 assert "anchors.centerIn:parent" in replacement
 assert "ListView{id:v;" in replacement

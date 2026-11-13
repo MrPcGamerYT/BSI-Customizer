@@ -5195,7 +5195,6 @@ Window {
                           && rebuiltWindow.contains(QStringLiteral("property var bIcons:"))
                           && rebuiltWindow.contains(QStringLiteral("Rectangle{anchors.fill:parent;color:\"#0d0f14\";radius:14"))
                           && rebuiltWindow.contains(QStringLiteral("Rectangle{anchors.fill:parent;color:\"#0a0c10\"}"))
-                          && rebuiltWindow.contains(QStringLiteral("Rectangle{width:parent.width;height:48;color:\"#0a0c10\""))
                           && rebuiltWindow.contains(QStringLiteral("Column{anchors.fill:parent;spacing:0"))
                           && rebuiltWindow.contains(QStringLiteral("pShowRedDot:modelData.pShowRedDot"))
                           && rebuiltWindow.contains(QStringLiteral("anchors.centerIn:parent"))
