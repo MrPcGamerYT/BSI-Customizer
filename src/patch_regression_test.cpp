@@ -5243,18 +5243,28 @@ Window {
                 }
                 bool pageConflictPreserved = false;
                 bool panelResetAfterConflict = false;
+                QString conflictDiagnostics = QStringLiteral("no eligible page found among %1 native tabs")
+                    .arg(nativePageLeaves.size());
                 if (!protectedPagePath.isEmpty() && write(panelCopy, imageWithExternalPageEdit)) {
                     const auto refusedPageReapply = SettingsPanelPatcher::apply(panelCopy,
                         QStringLiteral("Should not overwrite edited page"), panelLinks, {}, true);
                     const auto refusedPageRestore = SettingsPanelPatcher::apply(panelCopy, QString(), {}, {}, false);
-                    pageConflictPreserved = !refusedPageReapply.value(QStringLiteral("ok")).toBool()
-                        && !refusedPageRestore.value(QStringLiteral("ok")).toBool()
-                        && read(panelCopy) == imageWithExternalPageEdit;
+                    const bool bytesPreserved = read(panelCopy) == imageWithExternalPageEdit;
+                    const bool reapplyRefused = !refusedPageReapply.value(QStringLiteral("ok")).toBool();
+                    const bool restoreRefused = !refusedPageRestore.value(QStringLiteral("ok")).toBool();
+                    pageConflictPreserved = reapplyRefused && restoreRefused && bytesPreserved;
+                    conflictDiagnostics = QStringLiteral("page=%1; reapply=%2 (%3); restore=%4 (%5); bytes-preserved=%6")
+                        .arg(protectedPagePath,
+                             reapplyRefused ? QStringLiteral("refused") : QStringLiteral("accepted"),
+                             refusedPageReapply.value(QStringLiteral("msg")).toString(),
+                             restoreRefused ? QStringLiteral("refused") : QStringLiteral("accepted"),
+                             refusedPageRestore.value(QStringLiteral("msg")).toString(),
+                             bytesPreserved ? QStringLiteral("yes") : QStringLiteral("no"));
                     panelResetAfterConflict = write(panelCopy, panelImage);
                 }
                 check(pageConflictPreserved && panelResetAfterConflict,
-                      QStringLiteral("the real %1 patcher refuses to overwrite an externally edited native tab during both reapply and restore")
-                          .arg(QFileInfo(input).fileName()));
+                      QStringLiteral("the real %1 patcher refuses to overwrite an externally edited native tab during both reapply and restore (%2)")
+                          .arg(QFileInfo(input).fileName(), conflictDiagnostics));
                 QString rebuiltWindow;
                 for (const auto &file : QtResources::registeredFiles(panelImage)) {
                     if (file.name.compare(QLatin1String("UiSettingsWindow.qml"), Qt::CaseInsensitive) == 0)
