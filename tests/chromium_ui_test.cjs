@@ -12,8 +12,8 @@ const { chromium } = require(process.env.BSI_PLAYWRIGHT || 'playwright');
 const root = path.resolve(__dirname, '../src/web');
 const server = http.createServer((req, res) => {
   const name = new URL(req.url, 'http://test').pathname.slice(1) || 'index.html';
-  if (!['index.html', 'styles.css', 'transport.js', 'editors.js', 'maintenance.js', 'resource-search.js', 'effects.js', 'addons.js', 'app.js', 'icon.png', 'fonts/manrope-latin.woff2', 'fonts/plus-jakarta-sans-latin.woff2'].includes(name)) { res.writeHead(404).end(); return; }
-  res.setHeader('Content-Type', name.endsWith('.js') ? 'text/javascript' : name.endsWith('.css') ? 'text/css' : name.endsWith('.woff2') ? 'font/woff2' : name.endsWith('.png') ? 'image/png' : 'text/html');
+  if (!['index.html', 'styles.css', 'transport.js', 'editors.js', 'maintenance.js', 'resource-search.js', 'effects.js', 'addons.js', 'app.js', 'icon.png', 'fonts/NotoSansMath-Regular.ttf', 'fonts/manrope-latin.woff2', 'fonts/plus-jakarta-sans-latin.woff2'].includes(name)) { res.writeHead(404).end(); return; }
+  res.setHeader('Content-Type', name.endsWith('.js') ? 'text/javascript' : name.endsWith('.css') ? 'text/css' : name.endsWith('.ttf') ? 'font/ttf' : name.endsWith('.woff2') ? 'font/woff2' : name.endsWith('.png') ? 'image/png' : 'text/html');
   res.end(fs.readFileSync(path.join(root, name)));
 });
 (async () => {

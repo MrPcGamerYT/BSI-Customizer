@@ -12,7 +12,7 @@
     ['Boot experience', 'Boot', 'Make an entrance.', 'Configure the native boot patch or open the complete editor.'],
     ['Player interface', 'Interface', 'Less noise. More you.', 'Removals, layout tweaks, the in-player Settings redesign and editable About pages.'],
     ['Discord presence', 'Presence', 'Your player, represented.', 'Keep the existing Rich Presence ID and version-resource utilities.'],
-    ['Appearance', 'Settings', 'Your workspace.', 'App appearance and target paths. These are not player theme colors.'],
+    ['Settings', 'Settings', 'Your workspace.', 'App appearance and target paths. These are not player theme colors.'],
     ['About BSI', 'About', 'Built around your player.', 'Chromium presentation. C++ patch engines. Existing login and update verification.'],
     ['Animated presence', 'Animated', 'Bring presence to life.', 'Configure the existing native GIF RPC plugin and restore flow.'],
     ['Patch workspace', 'Workspace', 'One deliberate change.', 'Portable profiles, queued changes, dry runs and recoverable batch apply.'],

@@ -266,12 +266,13 @@ QVariantMap simulate(const QString &path, const QVariantList &operations, const 
             if (ok && op.contains("pack")) {
                 const auto *pack = AddonPacks::find(op.value("pack").toString());
                 if (!pack) return fail(QStringLiteral("Unknown add-on pack."));
+                const auto originalResources = EmbeddedResources::list(original, true);
                 const auto originalAnalysis = PlayerAppearancePatcher::analyze(original);
                 const auto originalEdits = AddonPacks::designEdits(*pack, originalAnalysis);
                 for (const auto &token : originalAnalysis.tokens) {
                     if (!originalEdits.contains(token.key)) continue;
                     int matches = 0; EmbeddedResources::Entry selected;
-                    for (const auto &e : EmbeddedResources::list(original, true))
+                    for (const auto &e : originalResources)
                         if (e.path == token.resource) { selected = e; ++matches; }
                     if (matches != 1 || touched.contains(token.resource))
                         return fail(QStringLiteral("Ambiguous or conflicting add-on design resource."));
@@ -285,7 +286,7 @@ QVariantMap simulate(const QString &path, const QVariantList &operations, const 
                 if (!ok) msg = error;
                 else msg += QStringLiteral(" Add-on button geometry verified; animations and non-QML artwork unchanged.");
                 for (const auto &token : originalAnalysis.tokens) if (originalEdits.contains(token.key)) {
-                    for (const auto &e : EmbeddedResources::list(original, true))
+                    for (const auto &e : originalResources)
                         if (e.path == token.resource) payloads.insert(e.entryOff);
                     touched.insert(token.resource);
                 }

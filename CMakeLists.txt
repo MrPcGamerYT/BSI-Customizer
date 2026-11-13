@@ -327,6 +327,8 @@ qt_add_qml_module(BSICustomizer
         src/qml/components/SettingsPanel.qml
         src/qml/pages/DashboardPage.qml
         src/qml/pages/ThemePage.qml
+        src/qml/fonts/NotoSansMath-Regular.ttf
+        src/qml/fonts/NotoSansMath-LICENSE.txt
         src/qml/pages/AddonsPage.qml
         src/qml/pages/BackupsPage.qml
         src/qml/pages/ResourcesPage.qml
@@ -409,6 +411,7 @@ if(BSI_CHROMIUM_UI)
         PREFIX "/bsi-web" BASE "src/web"
         FILES src/web/index.html src/web/styles.css src/web/transport.js src/web/resource-search.js src/web/editors.js src/web/maintenance.js src/web/effects.js src/web/addons.js src/web/app.js src/web/icon.png
             src/web/fonts/manrope-latin.woff2 src/web/fonts/plus-jakarta-sans-latin.woff2
+            src/web/fonts/NotoSansMath-Regular.ttf src/web/fonts/NotoSansMath-LICENSE.txt
             src/web/fonts/manrope-LICENSE.txt src/web/fonts/plus-jakarta-sans-LICENSE.txt)
 endif()
 

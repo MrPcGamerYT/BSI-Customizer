@@ -5,6 +5,7 @@ import BSICustomizer
 
 Item {
     id: page
+    FontLoader { id: brandingFont; source: "../fonts/NotoSansMath-Regular.ttf" }
     signal notify(string message)
     signal navigate(int index)
     readonly property var packs: [
@@ -37,7 +38,7 @@ Item {
                             Layout.fillWidth: true; Layout.preferredHeight: 96
                             color: "#0b0b0e"; radius: modelData.radius; border.color: modelData.color
                             Row { anchors.centerIn: parent; spacing: 16
-                                Label { text: "𝓥𝓞𝓘𝓓"; color: "#f3f3f5"; font.pixelSize: 24 }
+                                Label { text: "𝓥𝓞𝓘𝓓"; font.family: brandingFont.name; color: "#f3f3f5"; font.pixelSize: 24 }
                                 Rectangle { width: 92; height: 32; radius: modelData.radius; color: modelData.color
                                     Label { anchors.centerIn: parent; text: "Play"; color: "#09090b" }
                                 }
