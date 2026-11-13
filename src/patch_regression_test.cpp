@@ -5299,10 +5299,10 @@ Window {
                     QStringLiteral("Stale snapshot seed"), panelLinks, {}, true);
                 QByteArray freshInstallImage = original;
                 QString freshWindowSource;
-                qint64 freshWindowEntry = -1;
+                QString freshWindowPath;
                 for (const auto &entry : EmbeddedResources::list(freshInstallImage, true)) {
                     if (entry.leaf.compare(QLatin1String("UiSettingsWindow.qml"), Qt::CaseInsensitive) == 0) {
-                        freshWindowEntry = entry.entryOff;
+                        freshWindowPath = entry.path;
                         freshWindowSource = EmbeddedResources::decodeText(
                             EmbeddedResources::readEntry(freshInstallImage, entry.entryOff, entry.flags, 8 * 1024 * 1024));
                         break;
@@ -5311,14 +5311,15 @@ Window {
                 const int stockWord = freshWindowSource.indexOf(QLatin1String("Settings"));
                 if (stockWord >= 0) freshWindowSource.replace(stockWord, 8, QStringLiteral("SETTINGS"));
                 QString freshImageError;
-                const auto freshWindowLink = freshWindowEntry >= 0
-                    ? QtResources::findLink(freshInstallImage, freshWindowEntry, QStringLiteral("UiSettingsWindow.qml"))
-                    : QtResources::Link{};
-                const bool freshImageReady = seedRecovery.value(QStringLiteral("ok")).toBool()
-                    && stockWord >= 0 && freshWindowLink.found
-                    && QtResources::replaceResource(freshInstallImage, freshWindowEntry, freshWindowLink,
-                                                     freshWindowSource.toUtf8(), &freshImageError,
-                                                     nullptr, /*allowGrowth=*/true);
+                bool freshImageReady = seedRecovery.value(QStringLiteral("ok")).toBool()
+                    && stockWord >= 0 && !freshWindowPath.isEmpty()
+                    && write(panelCopy, original);
+                if (freshImageReady) {
+                    const auto changedFreshSource = EmbeddedResources::replaceBytes(
+                        panelCopy, freshWindowPath, freshWindowSource.toUtf8(), &freshInstallImage);
+                    freshImageReady = changedFreshSource.ok;
+                    freshImageError = changedFreshSource.msg;
+                }
                 check(freshImageReady,
                       QStringLiteral("the stale-recovery regression prepares a clean replacement executable (%1)")
                           .arg(freshImageError));
