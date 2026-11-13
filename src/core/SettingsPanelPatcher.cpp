@@ -1551,7 +1551,21 @@ QVariantMap apply(const QString &exePath, const QString &developerName,
         const QString rebuiltPage = responsiveSettingsPage(originalText, &changed);
         if (!changed) continue; // Already responsive, or the source has no fixed-width content root.
         if (!originals.contains(page.path)) originals.insert(page.path, original);
-        const QByteArray rebuiltBytes = utf8PreservingBom(rebuiltPage, original);
+        QString fittingPage = rebuiltPage;
+        QByteArray rebuiltBytes = utf8PreservingBom(fittingPage, original);
+        QByteArray trialImage;
+        QVariantMap fit = EmbeddedResources::replaceBytes(exePath, page.path, rebuiltBytes, &trialImage);
+        const QRegularExpression blankLine(QStringLiteral("(\\r?\\n)[ \\t]*\\r?\\n"));
+        while (!fit.value(QStringLiteral("ok")).toBool()
+               && fit.value(QStringLiteral("msg")).toString().contains(QStringLiteral("needs"))) {
+            const auto match = blankLine.match(fittingPage);
+            if (!match.hasMatch()) break;
+            fittingPage.replace(match.capturedStart(), match.capturedLength(), match.captured(1));
+            rebuiltBytes = utf8PreservingBom(fittingPage, original);
+            fit = EmbeddedResources::replaceBytes(exePath, page.path, rebuiltBytes, &trialImage);
+        }
+        if (!fit.value(QStringLiteral("ok")).toBool())
+            return fail(fit.value(QStringLiteral("msg")).toString());
         if (rebuiltBytes != page.bytes) replacements.insert(page.path, rebuiltBytes);
     }
     if (!hasWindowMarker(EmbeddedResources::decodeText(replacements.value(current.window.path)))

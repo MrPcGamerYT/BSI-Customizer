@@ -60,6 +60,7 @@
 #include <QSettings>
 #include <QSet>
 #include <QTemporaryDir>
+#include <QRegularExpression>
 
 #include <algorithm>
 #include <cmath>
@@ -5277,6 +5278,15 @@ Window {
                     }
                     return source;
                 };
+                const auto withoutBlankLines = [](QString source) {
+                    const QRegularExpression blankLine(QStringLiteral("(\\r?\\n)[ \\t]*\\r?\\n"));
+                    while (true) {
+                        const auto match = blankLine.match(source);
+                        if (!match.hasMatch()) break;
+                        source.replace(match.capturedStart(), match.capturedLength(), match.captured(1));
+                    }
+                    return source;
+                };
                 int fixedNativePages = 0;
                 int widenedNativePages = 0;
                 const auto originalPageFiles = QtResources::registeredFiles(original);
@@ -5298,11 +5308,11 @@ Window {
                     bool widenedBinding = false;
                     const QString revertedPage = restoreWidenedNativeContentWidth(rebuiltPage, &widenedBinding);
                     if (widenedBinding && !hasFixedNativeContentWidth(rebuiltPage)
-                        && revertedPage == stockPage)
+                        && withoutBlankLines(revertedPage) == withoutBlankLines(stockPage))
                         ++widenedNativePages;
                 }
                 check(fixedNativePages > 0 && widenedNativePages == fixedNativePages,
-                      QStringLiteral("the real %1 rebuild expands every fixed-width native Settings tab while changing only its content-width binding (%2/%3 pages)")
+                      QStringLiteral("the real %1 rebuild expands every fixed-width native Settings tab, preserving its QML content while compacting blank lines only when needed to fit the resource slot (%2/%3 pages)")
                           .arg(QFileInfo(input).fileName()).arg(widenedNativePages).arg(fixedNativePages));
                 check(rebuiltWindow.contains(QStringLiteral("BSI Settings v8"))
                           && rebuiltWindow.contains(QStringLiteral("property var bHidden:"))
