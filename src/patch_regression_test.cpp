@@ -5317,12 +5317,19 @@ Window {
                 const bool cleanExeWritten = seedRecoverySucceeded && write(panelCopy, original);
                 check(cleanExeWritten,
                       "the clean reference is restored over the previously patched executable path");
-                if (!freshShellObjects.isEmpty())
-                    freshWindowSource.insert(freshShellObjects.first().open + 1,
-                                             QStringLiteral("\n// Fresh-install regression fixture\n"));
+                bool freshSourceModified = false;
+                if (!freshShellObjects.isEmpty()) {
+                    int whitespace = freshShellObjects.first().open + 1;
+                    while (whitespace < freshWindowSource.size() && !freshWindowSource.at(whitespace).isSpace())
+                        ++whitespace;
+                    if (whitespace < freshWindowSource.size()) {
+                        freshWindowSource[whitespace] = QLatin1Char(' ');
+                        freshSourceModified = true;
+                    }
+                }
                 QString freshImageError;
                 bool freshImageReady = cleanExeWritten && !freshWindowPath.isEmpty()
-                    && !freshShellObjects.isEmpty();
+                    && freshSourceModified;
                 if (freshImageReady) {
                     const auto changedFreshSource = EmbeddedResources::replaceBytes(
                         panelCopy, freshWindowPath, freshWindowSource.toUtf8(), &freshInstallImage);
