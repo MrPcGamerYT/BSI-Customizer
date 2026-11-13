@@ -5198,12 +5198,13 @@ Window {
                 }
                 const auto stockEntries = EmbeddedResources::list(original, true);
                 for (const auto &entry : EmbeddedResources::list(panelImage, true)) {
-                    if (entry.format.compare(QLatin1String("qml"), Qt::CaseInsensitive) != 0
+                    if (entry.scanned
+                        || entry.format.compare(QLatin1String("qml"), Qt::CaseInsensitive) != 0
                         || !nativePageLeaves.contains(entry.leaf, Qt::CaseInsensitive)) continue;
                     const QByteArray pageBytes = EmbeddedResources::readEntry(panelCopy, entry.entryOff, entry.flags, 8 * 1024 * 1024);
                     QByteArray stockPageBytes;
                     for (const auto &stockEntry : stockEntries) {
-                        if (stockEntry.path == entry.path) {
+                        if (!stockEntry.scanned && stockEntry.path == entry.path) {
                             stockPageBytes = EmbeddedResources::readEntry(original, stockEntry.entryOff,
                                 stockEntry.flags, 8 * 1024 * 1024);
                             break;
