@@ -5289,6 +5289,63 @@ Window {
                 check(restoredPanel.value(QStringLiteral("ok")).toBool(),
                       QStringLiteral("the real %1 panel restores only its two original QML sources (%2)")
                           .arg(QFileInfo(input).fileName(), restoredPanel.value(QStringLiteral("msg")).toString()));
+
+                // A new HD-Player.exe can replace the old file at exactly the
+                // same path while its AppLocalData recovery sidecar survives.
+                // Recreate that situation with a valid, slightly different
+                // stock QML source, then prove the clean executable gets a new
+                // baseline instead of the stale-snapshot false positive.
+                const auto seedRecovery = SettingsPanelPatcher::apply(panelCopy,
+                    QStringLiteral("Stale snapshot seed"), panelLinks, {}, true);
+                QByteArray freshInstallImage = original;
+                QString freshWindowSource;
+                qint64 freshWindowEntry = -1;
+                for (const auto &entry : EmbeddedResources::list(freshInstallImage, true)) {
+                    if (entry.leaf.compare(QLatin1String("UiSettingsWindow.qml"), Qt::CaseInsensitive) == 0) {
+                        freshWindowEntry = entry.entryOff;
+                        freshWindowSource = EmbeddedResources::decodeText(
+                            EmbeddedResources::readEntry(freshInstallImage, entry.entryOff, entry.flags, 8 * 1024 * 1024));
+                        break;
+                    }
+                }
+                const int stockWord = freshWindowSource.indexOf(QLatin1String("Settings"));
+                if (stockWord >= 0) freshWindowSource.replace(stockWord, 8, QStringLiteral("SETTINGS"));
+                QString freshImageError;
+                const auto freshWindowLink = freshWindowEntry >= 0
+                    ? QtResources::findLink(freshInstallImage, freshWindowEntry, QStringLiteral("UiSettingsWindow.qml"))
+                    : QtResources::Link{};
+                const bool freshImageReady = seedRecovery.value(QStringLiteral("ok")).toBool()
+                    && stockWord >= 0 && freshWindowLink.found
+                    && QtResources::replaceResource(freshInstallImage, freshWindowEntry, freshWindowLink,
+                                                     freshWindowSource.toUtf8(), &freshImageError,
+                                                     nullptr, /*allowGrowth=*/true);
+                check(freshImageReady,
+                      QStringLiteral("the stale-recovery regression prepares a clean replacement executable (%1)")
+                          .arg(freshImageError));
+                const bool freshImageWritten = freshImageReady && write(panelCopy, freshInstallImage);
+                check(freshImageWritten,
+                      "the clean replacement executable is written over the previously patched path");
+                if (freshImageWritten) {
+                    const auto appliedToFreshExe = SettingsPanelPatcher::apply(panelCopy,
+                        QStringLiteral("Fresh executable baseline"), panelLinks, {}, true);
+                    check(appliedToFreshExe.value(QStringLiteral("ok")).toBool(),
+                          QStringLiteral("a fresh executable at the old path ignores the stale recovery snapshot (%1)")
+                              .arg(appliedToFreshExe.value(QStringLiteral("msg")).toString()));
+                    if (appliedToFreshExe.value(QStringLiteral("ok")).toBool()) {
+                        const auto freshRestore = SettingsPanelPatcher::apply(panelCopy, QString(), {}, {}, false);
+                        QString restoredFreshWindow;
+                        const QByteArray restoredFreshImage = read(panelCopy);
+                        for (const auto &entry : EmbeddedResources::list(restoredFreshImage, true)) {
+                            if (entry.leaf.compare(QLatin1String("UiSettingsWindow.qml"), Qt::CaseInsensitive) == 0)
+                                restoredFreshWindow = EmbeddedResources::decodeText(
+                                    EmbeddedResources::readEntry(panelCopy, entry.entryOff, entry.flags, 8 * 1024 * 1024));
+                        }
+                        check(freshRestore.value(QStringLiteral("ok")).toBool()
+                                  && restoredFreshWindow == freshWindowSource,
+                              QStringLiteral("restoring after rebase returns the fresh executable's exact Settings source (%1)")
+                                  .arg(freshRestore.value(QStringLiteral("msg")).toString()));
+                    }
+                }
                 const auto finalPanel = SettingsPanelPatcher::analyze(panelCopy);
                 check(finalPanel.supported && !finalPanel.applied,
                       QStringLiteral("the original %1 Settings window is recognized again after restore")

@@ -1284,23 +1284,37 @@ QVariantMap apply(const QString &exePath, const QString &developerName,
     const bool hasPatchMarker = hasWindowMarker(current.window.text)
         || current.about.text.contains(kAboutMarker);
     QMap<QString, QByteArray> originals;
+    bool recoveryMatchesCurrent = false;
     if (!recovery.isEmpty()) {
         QString recoveryError;
         originals = originalsFromRecovery(recovery, &recoveryError);
         if (originals.isEmpty()) return fail(recoveryError);
-        if (originals.size() != 2 || !originals.contains(current.window.path) || !originals.contains(current.about.path))
-            return fail(QStringLiteral("The executable's resource paths no longer match the saved Settings-panel snapshot; patch is blocked."));
-        const QVariantList records = recovery.value(QStringLiteral("sources")).toList();
-        for (const QVariant &value : records) {
-            const QVariantMap record = value.toMap();
-            const Source *source = record.value(QStringLiteral("path")).toString() == current.window.path
-                ? &current.window : &current.about;
-            if (!recoveryAcceptsCurrent(record, source->bytes))
-                return fail(QStringLiteral("A saved Settings-panel resource was changed by another patch. Restore or inspect it manually before rebuilding."));
+        recoveryMatchesCurrent = originals.size() == 2
+            && originals.contains(current.window.path) && originals.contains(current.about.path);
+        if (recoveryMatchesCurrent) {
+            const QVariantList records = recovery.value(QStringLiteral("sources")).toList();
+            for (const QVariant &value : records) {
+                const QVariantMap record = value.toMap();
+                const Source *source = record.value(QStringLiteral("path")).toString() == current.window.path
+                    ? &current.window : &current.about;
+                if (!recoveryAcceptsCurrent(record, source->bytes)) {
+                    recoveryMatchesCurrent = false;
+                    break;
+                }
+            }
         }
-    } else {
+        if (!recoveryMatchesCurrent && hasPatchMarker)
+            return fail(QStringLiteral("A saved Settings-panel resource was changed by another patch. Restore or inspect it manually before rebuilding."));
+    }
+    if (!recoveryMatchesCurrent) {
         if (hasPatchMarker)
-            return fail(QStringLiteral("A Settings-panel marker exists without its recovery snapshot. The executable was not overwritten."));
+            return fail(QStringLiteral("A Settings-panel marker exists without a matching recovery snapshot. The executable was not overwritten."));
+        // Recovery files are keyed by executable path. A clean reinstall can
+        // put a different, unpatched HD-Player.exe at that same path, leaving
+        // the previous install's hashes in AppLocalData. Do not mistake that
+        // stale sidecar for an edit to this executable: snapshot the exact
+        // current sources as the new baseline before applying the rebuild.
+        originals.clear();
         originals.insert(current.window.path, current.window.bytes);
         originals.insert(current.about.path, current.about.bytes);
         recovery = {{QStringLiteral("schema"), kSchema},
