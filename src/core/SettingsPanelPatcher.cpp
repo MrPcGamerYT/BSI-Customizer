@@ -35,7 +35,7 @@ const QString kWindowDesignMarkerV3 = QStringLiteral("BSI Settings v3");
 const QString kWindowDesignMarkerV4 = QStringLiteral("BSI Settings v4");
 const QString kWindowDesignMarkerV5 = QStringLiteral("BSI Settings v5");
 const QString kWindowDesignMarkerV6 = QStringLiteral("BSI6");
-const QString kWindowDesignMarker = QStringLiteral("BSI Settings v7");
+const QString kWindowDesignMarker = QStringLiteral("BSI Settings v8");
 const QString kAboutMarker = QStringLiteral("BSI CUSTOMIZER: redesigned About page v1");
 const QString kSchema = QStringLiteral("bsi.settings-panel.recovery");
 const QString kWindowLeaf = QStringLiteral("UiSettingsWindow.qml");
@@ -678,31 +678,26 @@ QString buildWindow(const QString &stock)
     }
     if (!found) return {};
 
-    // Restore the working PR #88 shell; customization only changes the tab
-    // list and About content, while native pages and callbacks remain intact.
+    // Redesign the native shell while retaining the player's live tabs, pages,
+    // callbacks and controls. Keep the embedded QML compact for older resource slots.
     QString replacement = QStringLiteral(R"QML(
-UiShadowContainer {
-// BSI Settings v7
+UiShadowContainer{// BSI Settings v8
 id:iSettingsWindowShadowContainer;anchors.fill:parent
-property var bHidden:[]
-property var bIcons:({})
-function bKey(v){return v.toLowerCase().split("/").pop()}
-Rectangle{anchors.fill:parent;color:UiTheme.colors.primary80;radius:12;clip:true
-Column{anchors.fill:parent;anchors.margins:12;spacing:8
-Item{width:parent.width;height:36
-MouseArea{width:parent.width-42;height:parent.height;onPressed:iSettingsWindow.startSystemMove()}
-Text{text:qsTranslate("QObject","Settings");color:UiTheme.colors.primary10;font:UiTheme.fonts.bodyLarge;anchors.centerIn:parent}
+property var bHidden:[];property var bIcons:({})
+Rectangle{anchors.fill:parent;color:"#0d0f14";radius:14;clip:true
+Column{anchors.fill:parent;spacing:0
+Item{width:parent.width;height:56
+MouseArea{anchors.fill:parent;onPressed:iSettingsWindow.startSystemMove()}
+Text{text:qsTranslate("QObject","Settings");color:"white";font:UiTheme.fonts.bodyLarge;anchors.centerIn:parent}
 UiImageButton{asset:"CloseIcon";pImageWidth:16;pImageHeight:16;anchors.right:parent.right;anchors.verticalCenter:parent.verticalCenter;onClicked:iSettingsWindow.close()}}
-ListView{id:v;width:parent.width;height:76;orientation:ListView.Horizontal;model:pSettingsItems.pSettingElements
-delegate:Item{property var k:iSettingsWindowShadowContainer.bKey(modelData.pQmlSource);property var h:iSettingsWindowShadowContainer.bHidden;width:v.width/v.count;height:64;visible:!~h.indexOf(k)
+ListView{id:v;width:parent.width;height:48;orientation:ListView.Horizontal;model:pSettingsItems.pSettingElements;clip:true
+delegate:Item{property var k:modelData.pQmlSource.toLowerCase().split("/").pop();property var h:iSettingsWindowShadowContainer.bHidden;width:(modelData.pButtonText.length*8+24)*(!~h.indexOf(k));height:44
 UiSettingsButton{anchors.fill:parent;pSettingIdx:index;pSettingBtnText:modelData.pButtonText;pSelected:index==pCurrentTabIndex;pShowRedDot:modelData.pShowRedDot;onSettingClicked:fChangeSelectedSetting(pSettingIdx)}
-Image{source:iSettingsWindowShadowContainer.bIcons[parent.k]||"";width:18;height:18;anchors.horizontalCenter:parent.horizontalCenter}}
+Image{source:iSettingsWindowShadowContainer.bIcons[parent.k]||"";width:parent.width?18:0;height:18;anchors.centerIn:parent}}
 }
-Item{width:parent.width;height:parent.height-128
-Rectangle{anchors.fill:parent;radius:10;color:UiTheme.colors.primary70
+Item{width:parent.width;height:parent.height-104
 StackLayout{id:iSelectedSettingControl;anchors.fill:parent;anchors.margins:6;currentIndex:pCurrentTabIndex
 Repeater{model:pSettingsItems.pSettingElements;delegate:Loader{width:iSelectedSettingControl.width;height:iSelectedSettingControl.height;Component.onCompleted:setSource(model.modelData.pQmlSource,model.modelData.pComponentArgs||{});onLoaded:{item.anchors.fill=item.parent;model.modelData.pComponentObj=item;if(item.fOnQmlLoaded)item.fOnQmlLoaded()}}}}
-}
 }
 }
 }
@@ -710,8 +705,9 @@ Repeater{model:pSettingsItems.pSettingElements;delegate:Loader{width:iSelectedSe
 )QML");
     QString out = stock;
     out.replace(target.nameBegin, target.end - target.nameBegin, replacement);
-    // Preserve PR #88's actual Settings-window resize and centered placement.
-    const QString helper = QStringLiteral(R"QML(onVisibleChanged:if(visible&&transientParent){width=transientParent.width*.7;height=transientParent.height*.7;x=transientParent.x+transientParent.width*.15;y=transientParent.y+transientParent.height*.15})QML");
+    // Make the redesigned Settings window use the available player viewport,
+    // with a comfortable desktop cap and centered placement on smaller screens.
+    const QString helper = QStringLiteral(R"QML(onVisibleChanged:if(visible&&transientParent){var t=transientParent;width=Math.min(t.width*.96,1120);height=Math.min(t.height*.94,670);x=t.x+t.width/2-width/2;y=t.y+t.height/2-height/2})QML");
     const int rootClose = out.lastIndexOf(QLatin1String("\n}"));
     if (rootClose < 0) return {};
     out.insert(rootClose, helper);

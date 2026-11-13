@@ -62,23 +62,23 @@ match = re.search(
 )
 assert match, "Could not find the generated Settings-window QML template"
 replacement = match.group(1)
-assert "BSI Settings v7" in replacement
+assert "BSI Settings v8" in replacement
 assert "pSettingsItems.pSettingElements" in replacement
 assert "property var bHidden:" in replacement and "property var bIcons:" in replacement
 assert "property var bHidden:[]" in replacement and "property var bIcons:({})" in replacement
 assert "function fOnQmlLoaded(){parent.parent.parent.parent.parent.parent.parent.bHidden=bsiHiddenTabs;parent.parent.parent.parent.parent.parent.parent.bIcons=bsiTabIcons}" in cpp
 assert "property var bsiHiddenTabs: @@BSI_HIDDEN_TABS@@" in cpp
 assert "property var bsiTabIcons: @@BSI_TAB_ICONS@@" in cpp
-assert "Rectangle{anchors.fill:parent;color:UiTheme.colors.primary80;radius:12" in replacement
-assert "Column{anchors.fill:parent;anchors.margins:12;spacing:8" in replacement
+assert 'Rectangle{anchors.fill:parent;color:"#0d0f14";radius:14' in replacement
+assert "Column{anchors.fill:parent;spacing:0" in replacement
+assert "MouseArea{anchors.fill:parent;onPressed:iSettingsWindow.startSystemMove()}" in replacement
 assert "anchors.centerIn:parent" in replacement
 assert "ListView{id:v;" in replacement
-assert "orientation:ListView.Horizontal;model:pSettingsItems.pSettingElements" in replacement
+assert "orientation:ListView.Horizontal;model:pSettingsItems.pSettingElements;clip:true" in replacement
 assert "property var h:iSettingsWindowShadowContainer.bHidden" in replacement
-assert "width:v.width/v.count" in replacement
-assert "visible:!~h.indexOf(k)" in replacement
+assert "width:(modelData.pButtonText.length*8+24)*(!~h.indexOf(k));height:44" in replacement
 assert "item.anchors.fill=item.parent" in replacement
-assert "height:parent.height-128" in replacement
+assert "height:parent.height-104" in replacement
 assert "StackLayout{id:iSelectedSettingControl;anchors.fill:parent;anchors.margins:6" in replacement
 assert "delegate:Loader{width:iSelectedSettingControl.width;height:iSelectedSettingControl.height;" in replacement
 assert "pSettingBtnText:" in replacement and "pSelected:index==pCurrentTabIndex" in replacement and "pShowRedDot:modelData.pShowRedDot" in replacement
@@ -93,10 +93,11 @@ helper_match = re.search(
 assert helper_match, "Could not find the PR #88 Settings-window geometry helper"
 helper = helper_match.group(1)
 assert "onVisibleChanged:if(visible&&transientParent)" in helper
-assert "width=transientParent.width*.7" in helper
-assert "height=transientParent.height*.7" in helper
-assert "x=transientParent.x+transientParent.width*.15" in helper
-assert "y=transientParent.y+transientParent.height*.15" in helper
+assert "var t=transientParent" in helper
+assert "width=Math.min(t.width*.96,1120)" in helper
+assert "height=Math.min(t.height*.94,670)" in helper
+assert "x=t.x+t.width/2-width/2" in helper
+assert "y=t.y+t.height/2-height/2" in helper
 replacement = replacement.replace("@@BSI_HIDDEN_TABS@@", "[]")
 replacement = replacement.replace("@@BSI_TAB_ICONS@@", "({})")
 
@@ -266,7 +267,7 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
             item for item in visual_tree
             if item.metaObject().className().endswith("MouseArea")
             and item.width() > window.width() * 0.5
-            and item.height() < 50
+            and item.height() < 70
         ),
         None,
     )
@@ -290,18 +291,19 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
     assert not missing, f"Missing controls: {missing}; found object names: {found_names}"
     panel_center = panel.mapToItem(window.contentItem(), QPointF(panel.width() / 2, panel.height() / 2))
     assert abs(panel_center.x() - window.width() / 2) < 2 and abs(panel_center.y() - window.height() / 2) < 2, "The PR #88 Settings shell should stay centered in the player window"
-    assert abs(obj.width() - 1050) < 2 and abs(obj.height() - 630) < 2, "The PR #88 Settings window should use its centered 70% footprint"
-    assert abs(obj.x() - 225) < 2 and abs(obj.y() - 135) < 2, "The PR #88 Settings window should remain centered"
+    assert abs(obj.width() - 1120) < 2 and abs(obj.height() - 670) < 2, "The redesigned Settings window should use the viewport-sized footprint, capped for desktop readability"
+    assert abs(obj.x() - 190) < 2 and abs(obj.y() - 115) < 2, "The larger Settings window should remain centered"
     title_center = settings_title.mapToItem(obj, QPointF(settings_title.width() / 2, settings_title.height() / 2))
     assert abs(title_center.x() - obj.width() / 2) < 2, "The Settings title should be centered in the title bar"
-    assert tabs.property("spacing") == 0, "Tab spacing should be controlled by equal-width slots"
-    tab_slots = [item for item in visual_tree if abs(item.height() - 64) < 1 and abs(item.width() - tabs.width() / tabs.property("count")) < 2]
-    assert len(tab_slots) >= 2, "Visible tabs should occupy equal-width slots across the full tab strip"
+    assert tabs.property("spacing") == 0, "The horizontal tab strip should rely on each label-sized tab slot for spacing"
+    tab_slots = [item for item in visual_tree if item.property("pSettingBtnText") is not None]
+    assert len(tab_slots) >= 2, "Visible native categories should each have a tab button"
+    assert len({round(item.width()) for item in tab_slots}) > 1, "Tab widths should follow label lengths rather than clipping categories into equal slots"
     assert abs(player.width - 1500) < 2 and abs(player.height - 900) < 2, "The shell should resize without changing the host player window"
     assert abs(panel.width() - obj.width()) < 2 and abs(panel.height() - obj.height()) < 2, "The PR #88 shell should fill its resized host"
     stack_center = stack.mapToItem(panel, QPointF(stack.width() / 2, stack.height() / 2))
     assert abs(stack_center.x() - panel.width() / 2) < 2, "The native page stack was not centered inside the PR #88 shell"
-    assert abs(stack.width() - (panel.width() - 36)) < 2, "The native page stack should preserve the PR #88 inset layout"
+    assert abs(stack.width() - (panel.width() - 12)) < 2, "The native page stack should fill the redesigned content card with a balanced inset"
     loader_position = page_loader.mapToItem(panel, QPointF(0, 0))
     assert 0 < page_loader.width() <= panel.width(), "The PR #88 native page Loader should remain visible inside the shell"
     assert loader_position.x() >= -2 and loader_position.x() + page_loader.width() <= panel.width() + 2, "The PR #88 native Loader escaped the Settings shell"
