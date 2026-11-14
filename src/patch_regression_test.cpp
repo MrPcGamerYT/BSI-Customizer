@@ -5417,22 +5417,29 @@ Window {
                               && SettingsPanelPatcher::analyze(panelCopy).applied,
                           QStringLiteral("an unusable recovery sidecar no longer blocks the rebuild of a clean player (%1)")
                               .arg(appliedOverStale.value(QStringLiteral("msg")).toString()));
-                    // Now the executable carries this feature's markers, so the
-                    // same unusable snapshot must refuse to write - and say why.
-                    // This path returns before touching the file, so it is free.
+                    // Now the executable carries this feature's markers, so an
+                    // unusable snapshot must refuse to write - and say why. Keep
+                    // the fresh snapshot the apply just wrote so restore can still
+                    // be exercised afterwards; this check itself writes nothing.
                     const QByteArray patchedBytes = read(panelCopy);
+                    const QString goodSnapshotPath = staleSidecarPath + QStringLiteral(".good");
+                    const bool keptGood = QFile::copy(staleSidecarPath, goodSnapshotPath);
                     QFile damaged(staleSidecarPath);
                     const bool damagedStaged = damaged.open(QIODevice::WriteOnly | QIODevice::Truncate)
                         && damaged.write(staleSnapshot) == staleSnapshot.size();
                     damaged.close();
                     const auto blockedApply = SettingsPanelPatcher::apply(panelCopy,
                         QStringLiteral("Blocked"), panelLinks, {}, true);
-                    check(damagedStaged && !blockedApply.value(QStringLiteral("ok")).toBool()
+                    check(keptGood && damagedStaged && !blockedApply.value(QStringLiteral("ok")).toBool()
                               && blockedApply.value(QStringLiteral("msg")).toString()
                                      .contains(QStringLiteral("recovery snapshot is unusable"))
                               && read(panelCopy) == patchedBytes,
                           QStringLiteral("a patched player with an unusable sidecar refuses to write (%1)")
                               .arg(blockedApply.value(QStringLiteral("msg")).toString()));
+                    if (keptGood) {
+                        QFile::remove(staleSidecarPath);
+                        QFile::rename(goodSnapshotPath, staleSidecarPath);
+                    }
                     const auto restoredOverStale = SettingsPanelPatcher::apply(panelCopy, QString(), {}, {}, false);
                     check(restoredOverStale.value(QStringLiteral("ok")).toBool(),
                           QStringLiteral("the rebuild applied over an unusable sidecar still restores (%1)")
