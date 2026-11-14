@@ -11,6 +11,8 @@ for (const tool of catalog.tools) {
 assert.equal(catalog.search('').length, 18);
 assert.equal(catalog.search('  BACKUP  ')[0].route, 11);
 assert.equal(catalog.search('fps')[0].route, 3);
+assert.equal(catalog.search('change Settings icons')[0].route, 6);
+assert.equal(catalog.search('how do I edit FPS')[0].route, 3);
 assert.equal(catalog.search('round corners')[0].route, 8);
 assert.equal(catalog.search('reduced motion')[0].tab, 0);
 assert.equal(catalog.search('impossiblequery').length, 0);

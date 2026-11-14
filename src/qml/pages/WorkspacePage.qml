@@ -31,7 +31,7 @@ Item {
     Connections {
         target: backend
         function onWorkspaceChanged() { page.plan = ({}); applyDialog.close(); }
-        function onExePathChanged() { page.plan = ({}); applyDialog.close(); page.inspection = ({}); page.historyRows = []; page.originalImage = ""; page.comparisonImage = ""; }
+        function onExePathChanged() { page.plan = ({}); applyDialog.close(); restoreDialog.close(); page.inspection = ({}); page.historyRows = []; page.originalImage = ""; page.comparisonImage = ""; }
     }
     MediaPlayer {
         id: videoPlayer
@@ -291,9 +291,27 @@ Item {
         }
     }
     Dialog {
-        id: restoreDialog; anchors.centerIn: parent; modal: true; width: Math.min(500, page.width - 32)
+        id: restoreDialog; objectName: "workspaceRestoreDialog"
+        anchors.centerIn: parent; modal: true; width: Math.min(500, page.width - 32)
+        height: Math.min(460, Overlay.overlay ? Overlay.overlay.height - 40 : 460)
+        property string snapshotId: ""
+        property string reviewedTarget: ""
         title: qsTr("Restore this recovery snapshot?"); standardButtons: Dialog.Ok | Dialog.Cancel
-        contentItem: Label { wrapMode: Text.Wrap; text: qsTr("Only the exact selected EXE with the recorded post-patch hash may be restored. Updates and unrelated modifications block automatic restore.") }
-        onAccepted: { const row = page.historyRows[recoveryChoice.currentIndex]; if (row) page.run("restore", {id: row.id}); }
+        onOpened: {
+            const row = page.historyRows[recoveryChoice.currentIndex];
+            snapshotId = row ? row.id : "";
+            reviewedTarget = backend.exePath;
+        }
+        contentItem: ScrollView {
+            contentWidth: availableWidth; clip: true
+            Label {
+                width: parent.width; wrapMode: Text.WrapAnywhere; textFormat: Text.PlainText
+                text: qsTr("Target: ") + restoreDialog.reviewedTarget + qsTr("\nSnapshot: ") + restoreDialog.snapshotId
+                    + qsTr("\n\nOnly the exact selected EXE with the recorded post-patch hash may be restored. Close all player instances. Updates and unrelated modifications block automatic restore.")
+            }
+        }
+        onAccepted: {
+            if (!backend.busy && snapshotId && reviewedTarget === backend.exePath) page.run("restore", {id: snapshotId});
+        }
     }
 }
