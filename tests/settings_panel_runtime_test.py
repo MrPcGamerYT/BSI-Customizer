@@ -89,8 +89,8 @@ assert "StackLayout{id:iSelectedSettingControl;anchors.fill:parent;anchors.margi
 # The embedded QML must stay inside the smallest player resource slot;
 # growing it past that is a hard patch failure on 5.9/5.10 players.
 # v8, which fitted every shipped player, was 1821 bytes of QML.
-assert len(replacement.encode()) <= 1830, f"shell grew to {len(replacement.encode())} bytes"
-assert "Rectangle{x:(parent.width-width)/2;width:Math.min(parent.width-32,568);" in replacement, "The page host must be horizontally centered in the shell"
+assert len(replacement.encode()) <= 1790, f"shell grew to {len(replacement.encode())} bytes"
+assert "Item{x:(parent.width-width)/2;width:Math.min(parent.width-32,568);" in replacement, "The page host must be horizontally centered in the shell"
 assert "width:Math.min(parent.width-32,568)" in replacement
 assert "delegate:Loader{width:iSelectedSettingControl.width;height:iSelectedSettingControl.height;" in replacement
 assert "pSettingBtnText:" in replacement and "pSelected:index==pCurrentTabIndex" in replacement and "pShowRedDot:modelData.pShowRedDot" in replacement
@@ -258,16 +258,12 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
     )
     # The page host is an id-carrying item, so it is reached through the QML
     # child tree rather than objectName.
-    page_frame = None
-    for candidate in visual_tree:
-        try:
-            if candidate.property("radius") == 12 and candidate.property("color") is not None:
-                page_frame = candidate
-        except RuntimeError:
-            page_frame = None
-        if page_frame is not None and candidate.width() < obj.width():
-            break
-        page_frame = None
+    page_frame = next(
+        (candidate for candidate in visual_tree
+         if abs(candidate.width() - min(obj.width() - 32, 568)) < 2
+         and candidate.height() > 50 and candidate is not obj),
+        None,
+    )
     panel = next(
         (item for item in visual_tree
          if abs(item.width() - obj.width()) < 2

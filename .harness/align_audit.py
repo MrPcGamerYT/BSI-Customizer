@@ -114,15 +114,20 @@ def audit(app, w, h, tabs=TABS, label=""):
     stack = next((i for i in tree if i.metaObject().className().endswith("StackLayout")), None)
     page = next((i for i in tree if i.objectName() == "auditPage"), None)
     loader = next((i for i in tree if i.metaObject().className().endswith("Loader") and i.property("item") is not None), None)
+    fw, fh = obj.width(), obj.height()
     card = None
     for i in tree:
         try:
-            if i.property("radius") == 12: card = i
-        except RuntimeError: pass
+            p0 = i.mapToItem(obj, QPointF(0, 0))
+            if (abs(i.width() - min(fw - 32, 568)) < 2 and i.height() > 50
+                    and p0.y() > 60 and i is not obj):
+                card = i
+                break
+        except RuntimeError:
+            pass
     if any(x is None for x in (lst, stack, page, loader, card)):
         return [("MISSING", f"list={lst} stack={stack} page={page} loader={loader} card={card}")]
 
-    fw, fh = obj.width(), obj.height()
     # --- card centering & bounds
     cx = card.mapToItem(obj, QPointF(card.width()/2, 0)).x()
     errs.append(("card centred", f"{cx:.1f} vs {fw/2:.1f}", abs(cx - fw/2) <= 1))

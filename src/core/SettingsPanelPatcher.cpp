@@ -714,7 +714,7 @@ delegate:Item{property var k:modelData.pQmlSource.toLowerCase().split("/").pop()
 UiSettingsButton{anchors.fill:parent;pSettingIdx:index;pSettingBtnText:modelData.pButtonText;pSelected:index==pCurrentTabIndex;pShowRedDot:modelData.pShowRedDot;onSettingClicked:fChangeSelectedSetting(pSettingIdx)}
 Image{source:iSettingsWindowShadowContainer.bIcons[parent.k]||"";width:18;height:18;anchors.centerIn:parent}}
 }
-Rectangle{x:(parent.width-width)/2;width:Math.min(parent.width-32,568);height:parent.height-118;color:"#14171e";radius:12;clip:true
+Item{x:(parent.width-width)/2;width:Math.min(parent.width-32,568);height:parent.height-118
 StackLayout{id:iSelectedSettingControl;anchors.fill:parent;anchors.margins:6;currentIndex:pCurrentTabIndex
 Repeater{model:pSettingsItems.pSettingElements;delegate:Loader{width:iSelectedSettingControl.width;height:iSelectedSettingControl.height;Component.onCompleted:setSource(model.modelData.pQmlSource,model.modelData.pComponentArgs||{});onLoaded:{item.anchors.fill=item.parent;model.modelData.pComponentObj=item;if(item.fOnQmlLoaded)item.fOnQmlLoaded()}}}}
 }

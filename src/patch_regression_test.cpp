@@ -5199,7 +5199,7 @@ Window {
                           // The bounded, centered page region: the stock pages are
                           // fixed-width, so stretching one across the shell leaves
                           // its content hugging the left edge.
-                          && rebuiltWindow.contains(QStringLiteral("Rectangle{x:(parent.width-width)/2;width:Math.min(parent.width-32,568);"))
+                          && rebuiltWindow.contains(QStringLiteral("Item{x:(parent.width-width)/2;width:Math.min(parent.width-32,568);"))
                           // Tabs divide the strip into equal slots so the last
                           // category is never half-clipped at the shell edge.
                           && rebuiltWindow.contains(QStringLiteral("ListView{id:v;width:parent.width-32;height:48;x:16;"))
@@ -5228,7 +5228,7 @@ Window {
                 // The embedded shell has to fit the smallest player resource slot;
                 // on the 5.9/5.10 references UiSettingsWindow.qml only has 2468
                 // bytes, and an oversized shell fails the whole apply.
-                check(rebuiltWindow.toUtf8().size() <= 2200,
+                check(rebuiltWindow.toUtf8().size() <= 2150,
                       QStringLiteral("the rebuilt %1 Settings shell (%2 bytes) still fits a compact player resource slot")
                           .arg(QFileInfo(input).fileName())
                           .arg(rebuiltWindow.toUtf8().size()));
