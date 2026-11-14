@@ -55,7 +55,7 @@ int runWebBridgeAccessTest()
         "aboutPageReport", "applyAboutPage", "applySettingsPanelRebuild", "applyGradient", "applyLayoutTweak", "applyPreset",
         "applyRemovals", "applyTheme", "bootLogoPreview", "bootPatch", "checkUpdates", "detectInstalls",
         "detectInstances", "extractAllResources", "extractResource", "fpsAnalyze", "fpsDetect",
-        "fpsPatch", "fpsRestore", "gifRpcApply", "gifRpcInspect", "gifRpcRestore",
+        "fpsPatch", "fpsRestore", "gifRpcApply", "gifRpcInspect", "gifRpcRestore", "gifRpcSetRoundCorners",
         "integrityCheck", "integrityPatch", "integrityRestore", "listResources", "loadGradients",
         "loadTheme", "measureResource", "openExeFolder", "openNativeTool", "previewHex",
         "purgePlayerCache", "readInterface", "readResource", "readTheme", "readWorkspace",
