@@ -5188,7 +5188,6 @@ Window {
                           .arg(QFileInfo(input).fileName()));
                 const auto panelImage = read(panelCopy);
                 QString protectedPagePath;
-                QByteArray editedProtectedPage;
                 QByteArray imageWithExternalPageEdit;
                 QStringList nativePageLeaves;
                 for (const QVariant &tabValue : settingsBeforeApply.value(QStringLiteral("tabs")).toList()) {
@@ -5196,48 +5195,47 @@ Window {
                     if (!leaf.isEmpty() && leaf.compare(QLatin1String("PlrAboutSetting.qml"), Qt::CaseInsensitive) != 0)
                         nativePageLeaves << leaf;
                 }
-                const auto stockEntries = EmbeddedResources::list(original, true);
-                for (const auto &entry : EmbeddedResources::list(panelImage, true)) {
-                    if (entry.scanned
-                        || entry.format.compare(QLatin1String("qml"), Qt::CaseInsensitive) != 0
-                        || !nativePageLeaves.contains(entry.leaf, Qt::CaseInsensitive)) continue;
-                    const QByteArray pageBytes = EmbeddedResources::readEntry(panelCopy, entry.entryOff, entry.flags, 8 * 1024 * 1024);
-                    QByteArray stockPageBytes;
-                    for (const auto &stockEntry : stockEntries) {
-                        if (!stockEntry.scanned && stockEntry.path == entry.path) {
-                            stockPageBytes = EmbeddedResources::readEntry(original, stockEntry.entryOff,
-                                stockEntry.flags, 8 * 1024 * 1024);
+                const auto stockConflictPageFiles = QtResources::registeredFiles(original);
+                const auto rebuiltConflictPageFiles = QtResources::registeredFiles(panelImage);
+                for (const QString &leaf : nativePageLeaves) {
+                    for (const auto &pageFile : rebuiltConflictPageFiles) {
+                        if (pageFile.name.compare(leaf, Qt::CaseInsensitive) != 0) continue;
+                        const QByteArray pageBytes = QtResources::readFile(panelImage, pageFile);
+                        QByteArray stockPageBytes;
+                        for (const auto &stockFile : stockConflictPageFiles) {
+                            if (stockFile.name.compare(leaf, Qt::CaseInsensitive) == 0
+                                && stockFile.path == pageFile.path) {
+                                stockPageBytes = QtResources::readFile(original, stockFile);
+                                break;
+                            }
+                        }
+                        // Only edit a native root whose source was actually rebuilt;
+                        // dependency QML can share a tab-like name but is not protected
+                        // by the feature's recovery records.
+                        if (pageBytes.isEmpty() || stockPageBytes.isEmpty() || pageBytes == stockPageBytes)
+                            continue;
+                        const int contentId = pageBytes.indexOf("id: iContentLayout");
+                        if (contentId < 0) continue;
+                        int widenedWidth = pageBytes.indexOf("width: parent.width", contentId);
+                        if (widenedWidth < 0)
+                            widenedWidth = pageBytes.indexOf("width: iScrollView.width", contentId);
+                        if (widenedWidth < 0) continue;
+                        int commentText = pageBytes.indexOf("BlueStack");
+                        if (commentText < 0) commentText = pageBytes.indexOf("Copyright");
+                        if (commentText < 0) continue;
+                        for (const char changed : QByteArrayLiteral("XabcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")) {
+                            if (pageBytes.at(commentText) == changed) continue;
+                            QByteArray candidatePage = pageBytes;
+                            candidatePage[commentText] = changed; // still-valid QML comment, changed bytes
+                            QByteArray candidateImage;
+                            const auto edited = EmbeddedResources::replaceBytes(panelCopy, pageFile.path,
+                                candidatePage, &candidateImage);
+                            if (!edited.ok) continue; // Try another one-byte edit that stays within this resource's slot.
+                            imageWithExternalPageEdit = candidateImage;
+                            protectedPagePath = pageFile.path;
                             break;
                         }
-                    }
-                    const int stockContentId = stockPageBytes.indexOf("id: iContentLayout");
-                    const int stockWidth = stockContentId >= 0
-                        ? stockPageBytes.indexOf("width:", stockContentId) : -1;
-                    const int stockLineEnd = stockWidth >= 0 ? stockPageBytes.indexOf('\n', stockWidth) : -1;
-                    if (stockWidth < 0 || stockLineEnd < 0
-                        || stockPageBytes.mid(stockWidth + 6, stockLineEnd - stockWidth - 6).trimmed() != "520")
-                        continue;
-                    const int contentId = pageBytes.indexOf("id: iContentLayout");
-                    if (contentId < 0) continue;
-                    int widenedWidth = pageBytes.indexOf("width: parent.width", contentId);
-                    if (widenedWidth < 0)
-                        widenedWidth = pageBytes.indexOf("width: iScrollView.width", contentId);
-                    if (widenedWidth < 0) continue;
-                    int commentText = pageBytes.indexOf("BlueStack");
-                    if (commentText < 0) commentText = pageBytes.indexOf("Copyright");
-                    if (commentText < 0) continue;
-                    for (const char changed : QByteArrayLiteral("XabcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")) {
-                        if (pageBytes.at(commentText) == changed) continue;
-                        QByteArray candidatePage = pageBytes;
-                        candidatePage[commentText] = changed; // still-valid QML comment, changed bytes
-                        QByteArray candidateImage;
-                        const auto edited = EmbeddedResources::replaceBytes(panelCopy, entry.path,
-                            candidatePage, &candidateImage);
-                        if (!edited.ok) continue; // Try another one-byte edit that stays within this resource's slot.
-                        editedProtectedPage = candidatePage;
-                        imageWithExternalPageEdit = candidateImage;
-                        protectedPagePath = entry.path;
-                        break;
+                        if (!protectedPagePath.isEmpty()) break;
                     }
                     if (!protectedPagePath.isEmpty()) break;
                 }
