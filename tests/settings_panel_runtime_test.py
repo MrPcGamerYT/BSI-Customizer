@@ -70,7 +70,7 @@ assert "function fOnQmlLoaded(){parent.parent.parent.parent.parent.parent.parent
 assert "property var bsiHiddenTabs: @@BSI_HIDDEN_TABS@@" in cpp
 assert "property var bsiTabIcons: @@BSI_TAB_ICONS@@" in cpp
 assert 'Rectangle{anchors.fill:parent;color:"#0d0f14";radius:14' in replacement
-assert "Item{id:iShellContent;anchors.fill:parent" in replacement
+assert "Column{anchors.fill:parent;spacing:0" in replacement
 assert "MouseArea{anchors.fill:parent;onPressed:iSettingsWindow.startSystemMove()}" in replacement
 assert "anchors.centerIn:parent" in replacement
 assert "ListView{id:v;" in replacement
@@ -78,17 +78,18 @@ assert "orientation:ListView.Horizontal;model:pSettingsItems.pSettingElements;cl
 assert "x:Math.max(16,(parent.width-width)/2)" in replacement, "The tab strip should be centered, not left-anchored"
 assert "width:Math.min(contentWidth,parent.width-32)" in replacement
 assert "property var h:iSettingsWindowShadowContainer.bHidden" in replacement
-assert "property int pSlot:iSettingsWindowShadowContainer.pTabSlot" in replacement
-assert "width:pSlot*(!~h.indexOf(k));height:44" in replacement
+assert "property var h:iSettingsWindowShadowContainer.bHidden" in replacement
+assert "width:Math.floor((iSettingsWindowShadowContainer.width-32)/Math.max(1,v.count-h.length))*(!~h.indexOf(k));height:44" in replacement
 # Every category must stay reachable: the strip divides the shell width into
 # equal slots instead of letting the last tab be half-clipped at the edge.
-assert "property int pTabSlot:Math.floor((width-32)/Math.max(1,v.count-(bHidden?bHidden.length:0)))" in replacement
 assert "item.anchors.fill=item.parent" in replacement
-assert "height:parent.height-148" in replacement and "y:130" in replacement
+assert "height:parent.height-118" in replacement
 assert "StackLayout{id:iSelectedSettingControl;anchors.fill:parent;anchors.margins:6" in replacement
-assert "property int pPageWidth:568" in replacement, "The page host should be a bounded card"
-assert "Rectangle{id:iPageFrame;x:(parent.width-width)/2;" in replacement, "The page host must be horizontally centered in the shell"
-assert "width:Math.min(parent.width-32,iSettingsWindowShadowContainer.pPageWidth)" in replacement
+# The embedded QML must stay inside the smallest player resource slot;
+# growing it past that is a hard patch failure on 5.9/5.10 players.
+assert len(replacement.encode()) <= 2300, f"shell grew to {len(replacement.encode())} bytes"
+assert "x:Math.max(16,(parent.width-Math.min(parent.width-32,568))/2)" in replacement, "The page host must be horizontally centered in the shell"
+assert "width:Math.min(parent.width-32,568)" in replacement
 assert "delegate:Loader{width:iSelectedSettingControl.width;height:iSelectedSettingControl.height;" in replacement
 assert "pSettingBtnText:" in replacement and "pSelected:index==pCurrentTabIndex" in replacement and "pShowRedDot:modelData.pShowRedDot" in replacement
 assert "pSettingIdx:index" in replacement

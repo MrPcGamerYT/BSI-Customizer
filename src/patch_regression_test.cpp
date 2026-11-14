@@ -5199,14 +5199,12 @@ Window {
                           // The bounded, centered page region: the stock pages are
                           // fixed-width, so stretching one across the shell leaves
                           // its content hugging the left edge.
-                          && rebuiltWindow.contains(QStringLiteral("property int pPageWidth:"))
-                          && rebuiltWindow.contains(QStringLiteral("Rectangle{id:iPageFrame;x:(parent.width-width)/2;"))
-                          && rebuiltWindow.contains(QStringLiteral("width:Math.min(parent.width-32,iSettingsWindowShadowContainer.pPageWidth)"))
+                          && rebuiltWindow.contains(QStringLiteral("x:Math.max(16,(parent.width-Math.min(parent.width-32,568))/2)"))
+                          && rebuiltWindow.contains(QStringLiteral("width:Math.min(parent.width-32,568)"))
                           && rebuiltWindow.contains(QStringLiteral("x:Math.max(16,(parent.width-width)/2)"))
                           // Tabs divide the strip into equal slots so the last
                           // category is never half-clipped at the shell edge.
-                          && rebuiltWindow.contains(QStringLiteral("property int pTabSlot:"))
-                          && rebuiltWindow.contains(QStringLiteral("width:pSlot*(!~h.indexOf(k))"))
+                          && rebuiltWindow.contains(QStringLiteral("Math.max(1,v.count-h.length)"))
                           && rebuiltWindow.contains(QStringLiteral("MouseArea{anchors.fill:parent;onPressed:iSettingsWindow.startSystemMove()}"))
                           && rebuiltWindow.contains(QStringLiteral("pShowRedDot:modelData.pShowRedDot"))
                           && rebuiltWindow.contains(QStringLiteral("anchors.centerIn:parent"))
@@ -5228,6 +5226,13 @@ Window {
                           && rebuiltWindow.contains(QStringLiteral("asset:\"CloseIcon\"")),
                       QStringLiteral("the rebuilt %1 Settings panel restores the PR #88 shell and adds customizable tabs while preserving native pages, selection, dragging, and close behavior")
                           .arg(QFileInfo(input).fileName()));
+                // The embedded shell has to fit the smallest player resource slot;
+                // on the 5.9/5.10 references UiSettingsWindow.qml only has 2468
+                // bytes, and an oversized shell fails the whole apply.
+                check(rebuiltWindow.toUtf8().size() <= 2400,
+                      QStringLiteral("the rebuilt %1 Settings shell (%2 bytes) still fits a compact player resource slot")
+                          .arg(QFileInfo(input).fileName())
+                          .arg(rebuiltWindow.toUtf8().size()));
                 QString expectedLogoSource;
                 for (const auto &entry : EmbeddedResources::list(original, true)) {
                     if (entry.path.compare(QLatin1String("qrcAssets/BlueStacks5Beta.svg"), Qt::CaseInsensitive) == 0)
