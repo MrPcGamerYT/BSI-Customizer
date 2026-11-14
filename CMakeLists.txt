@@ -406,6 +406,8 @@ if(WIN32 AND MSVC AND CMAKE_SIZEOF_VOID_P EQUAL 8)
     add_subdirectory(plugins/gif-rpc)
     add_dependencies(BSICustomizer BsiGifRpcSmoke)
     target_compile_definitions(BSICustomizer PRIVATE BSI_GIF_RPC_SMOKE="$<TARGET_FILE:BsiGifRpcSmoke>")
+    add_dependencies(BSICustomizer BsiGifRpcStaticTest)
+    target_compile_definitions(BSICustomizer PRIVATE BSI_GIF_RPC_STATIC_TEST="$<TARGET_FILE:BsiGifRpcStaticTest>")
     set(_gif_rc "${CMAKE_CURRENT_BINARY_DIR}/gif-rpc-payload-$<CONFIG>.rc")
     add_custom_command(OUTPUT "${_gif_rc}"
         COMMAND ${CMAKE_COMMAND} "-DDLL=$<TARGET_FILE:BsiGifRpcProxy>" "-DOUTPUT=${_gif_rc}"

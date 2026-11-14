@@ -1,5 +1,7 @@
 name: GIF RPC proxy compatibility
 on:
+  push:
+    branches: [arena/cee7044d-bsi-customizer]
   workflow_dispatch:
   pull_request:
     paths:

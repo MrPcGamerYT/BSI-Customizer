@@ -4989,6 +4989,17 @@ Window {
         check(read(QDir(folder).filePath(QStringLiteral("bsi-gif-rpc.log"))).contains("worker started"),
               "startup smoke actually executes the RPC worker, unlike the customizer host");
 #endif
+#ifdef BSI_GIF_RPC_STATIC_TEST
+        QProcess staticHost;
+        staticHost.setProcessChannelMode(QProcess::MergedChannels);
+        staticHost.start(QString::fromUtf8(BSI_GIF_RPC_STATIC_TEST),QStringList());
+        const bool staticStarted=staticHost.waitForStarted(5000);
+        const bool staticFinished=staticStarted&&staticHost.waitForFinished(10000);
+        if(!staticFinished){staticHost.kill();staticHost.waitForFinished(5000);}
+        std::printf("RPC static startup: %s\n",staticHost.readAll().constData());
+        check(staticFinished&&staticHost.exitStatus()==QProcess::NormalExit&&staticHost.exitCode()==0,
+              "statically imported proxy initializes before main on a small host stack");
+#endif
         check(GifRpc::restore(exe).value(QStringLiteral("ok")).toBool()&&!QFileInfo::exists(dll),
               "removing a new RPC deployment does not delete saved settings or unrelated files");
         const QByteArray original=peFile();write(dll,original);

@@ -7,11 +7,19 @@
 #include <vector>
 #include <thread>
 #include <atomic>
+#include <cstring>
+#include <cstdint>
 
 int wmain(int argc, wchar_t **argv) {
     if(argc!=2)return 2;
     HMODULE proxy=LoadLibraryW(argv[1]);
     if(!proxy){std::printf("LoadLibrary error: %lu\n",GetLastError());return 3;}
+    // Release immediately, before the worker has necessarily begun executing.
+    const auto schemaAddress=GetProcAddress(proxy,"BsiGifRpcSchema");
+    FreeLibrary(proxy);
+    HMODULE retained=nullptr;
+    if(!schemaAddress||!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS|GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+        reinterpret_cast<LPCWSTR>(schemaAddress),&retained)||retained!=proxy)return 13;
     wchar_t path[MAX_PATH];UINT n=GetSystemDirectoryW(path,MAX_PATH);
     if(!n||n+20>=MAX_PATH)return 4;
     wcscat_s(path,L"\\version.dll");
@@ -26,6 +34,14 @@ int wmain(int argc, wchar_t **argv) {
             ||GetProcAddress(system,names[i])!=GetProcAddress(system,ordinal)){
             std::printf("Export/ordinal mismatch: %s @%u\n",names[i],i+1);return 6;
         }
+        // Verify even undocumented APIs without guessing a signature or invoking
+        // them with unsafe arguments: each entry must be exactly a RIP-relative
+        // indirect tail jump to the corresponding original function.
+        const auto *code=reinterpret_cast<const unsigned char *>(GetProcAddress(proxy,names[i]));
+        if(code[0]!=0xff||code[1]!=0x25)return 14;
+        std::int32_t displacement=0;std::memcpy(&displacement,code+2,sizeof(displacement));
+        FARPROC target=nullptr;std::memcpy(&target,code+6+displacement,sizeof(target));
+        if(target!=GetProcAddress(system,names[i]))return 15;
     }
     using Size=DWORD(WINAPI*)(LPCWSTR,LPDWORD);
     using Info=BOOL(WINAPI*)(LPCWSTR,DWORD,DWORD,LPVOID);
@@ -69,8 +85,6 @@ int wmain(int argc, wchar_t **argv) {
     using InfoEx=BOOL(WINAPI*)(DWORD,LPCWSTR,DWORD,DWORD,LPVOID);
     const auto infoEx=reinterpret_cast<InfoEx>(GetProcAddress(proxy,"GetFileVersionInfoExW"));
     if(!infoEx(FILE_VER_GET_NEUTRAL,path,0,size,data.data()))return 12;
-    // Immediate FreeLibrary must not unmap code owned by a pending RPC thread.
-    FreeLibrary(proxy);
     // Includes delayed initialization, INI parsing, missing/available Discord
     // pipe handling and normal process exit, without needing an emulator/VM.
     Sleep(3500);
