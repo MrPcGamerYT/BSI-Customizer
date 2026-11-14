@@ -223,7 +223,7 @@ Item {
     FileDialog { id: openProfile; nameFilters: ["Skin profiles (*.json)"]; onAccepted: { const r = page.run("skin-load", {file: backend.localFilePath(selectedFile)}); if (r.ok) page.loadProfile(r.profile); } }
     FileDialog { id: saveProfile; fileMode: FileDialog.SaveFile; defaultSuffix: "json"; nameFilters: ["Skin profiles (*.json)"]; onAccepted: { try { page.run("skin-save", {file: backend.localFilePath(selectedFile), profile: page.profile()}); } catch (e) { page.notify(String(e)); } } }
     Dialog {
-        id: applyDialog; width: Math.min(470, page.width - 32); anchors.centerIn: parent; modal: true; title: qsTr("Apply verified skin batch?")
+        id: applyDialog; implicitHeight: 240; width: Math.min(470, page.width - 32); anchors.centerIn: parent; modal: true; title: qsTr("Apply verified skin batch?")
         standardButtons: Dialog.Ok | Dialog.Cancel
         contentItem: Item {
             implicitHeight: applyExplanation.implicitHeight
