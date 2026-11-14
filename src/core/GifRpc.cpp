@@ -226,7 +226,7 @@ QVariantMap apply(const QString &exe,const QVariantMap &s,bool replaceExisting) 
         const bool restored=hadIni?write(ini,oldIni):QFile::remove(ini);
         return reply(false,error.isEmpty()?QStringLiteral("Cannot install the DLL.%1").arg(restored?QString():QStringLiteral(" Settings rollback also failed.")):error);
     }
-    if(read(dll)!=payload||read(ini)!=encode(s))return reply(false,QStringLiteral("RPC files failed read-back verification. Do not start the emulator; restore the backup."));
+    if(read(dll)!=payload||read(ini)!=encode(effective))return reply(false,QStringLiteral("RPC files failed read-back verification. Do not start the emulator; restore the backup."));
     return reply(true,QStringLiteral("RPC-only version.dll and settings verified. Restart HD-Player with Discord Desktop running. Animated GIFs/external assets depend on Discord support; neither playback nor server acceptance is guaranteed."));
 }
 QVariantMap restore(const QString &exe) {
