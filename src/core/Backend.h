@@ -210,6 +210,19 @@ public:
     Q_INVOKABLE QString aboutPageReport();
     Q_INVOKABLE QVariantMap settingsPanelRebuildState();
     Q_INVOKABLE QVariantMap applySettingsPanelRebuild(bool enabled = true);
+    // The rebuild *options* (which native tabs stay visible, the About identity
+    // and the local artwork) as the native Player-interface page edits them.
+    // Validated exactly like the Chromium bridge and stored on this PC only:
+    // nothing reaches the player until applySettingsPanelRebuild() runs.
+    // `availableTabs` is what the page just inspected: validating against it
+    // keeps a checkbox click from re-reading the whole executable.
+    Q_INVOKABLE QVariantMap saveSettingsPanelProfile(const QString &developerName,
+                                                     const QString &tagline,
+                                                     const QStringList &hiddenTabs,
+                                                     const QStringList &availableTabs);
+    Q_INVOKABLE QVariantMap setSettingsPanelAsset(const QString &kind, const QString &id,
+                                                  const QString &path);
+    Q_INVOKABLE QVariantMap clearSettingsPanelAsset(const QString &kind, const QString &id);
     Q_INVOKABLE QVariantMap restoreBackup(const QString &path);
 
     // ---- BlueStacks Debloat (config, hosts, cloud companions) ----

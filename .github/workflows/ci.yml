@@ -114,6 +114,8 @@ jobs:
           QT_QPA_PLATFORM: offscreen
           QSG_RHI_BACKEND: software
         run: python tests/run_qt_runtime_test.py tests/resources_page_runtime_test.py
+      - name: Exercise the native Settings-panel rebuild tab in the Player interface
+        run: python tests/run_qt_runtime_test.py tests/ui_page_settings_panel_test.py
 
   build-windows:
     name: Build & self-test (Windows x64 · ${{ matrix.label }})
