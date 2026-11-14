@@ -35,7 +35,10 @@ const QString kWindowDesignMarkerV3 = QStringLiteral("BSI Settings v3");
 const QString kWindowDesignMarkerV4 = QStringLiteral("BSI Settings v4");
 const QString kWindowDesignMarkerV5 = QStringLiteral("BSI Settings v5");
 const QString kWindowDesignMarkerV6 = QStringLiteral("BSI6");
-const QString kWindowDesignMarker = QStringLiteral("BSI Settings v8");
+// v8 was the full-bleed shell that left the native fixed-width pages hugging
+// the left edge; v9 bounds the page region inside a centred frame.
+const QString kWindowDesignMarkerV8 = QStringLiteral("BSI Settings v8");
+const QString kWindowDesignMarker = QStringLiteral("BSI Settings v9");
 const QString kAboutMarker = QStringLiteral("BSI CUSTOMIZER: redesigned About page v1");
 const QString kSchema = QStringLiteral("bsi.settings-panel.recovery");
 const QString kWindowLeaf = QStringLiteral("UiSettingsWindow.qml");
@@ -680,22 +683,41 @@ QString buildWindow(const QString &stock)
 
     // Redesign the native shell while retaining the player's live tabs, pages,
     // callbacks and controls. Keep the embedded QML compact for older resource slots.
+    //
+    // Shape (v9). The stock pages are fixed-size surfaces: a ~520 px content
+    // column pinned to the top-left and a footer anchored to the bottom edge.
+    // Stretching such a page across the whole shell is what left everything
+    // hugging the left edge, and the footer landed outside the visible area.
+    // The shell therefore never stretches a page: it centres one bounded host
+    // card under the tab strip and lets the page inside it fill that card, so
+    // the page supplies its own surface and keeps the layout it was authored
+    // with, inside a frame that is balanced. The card is the only thing that
+    // changes size, and it shrinks with the player window instead of pushing
+    // tabs or the footer out of view.
+    // Every member the player's own QML reaches for (the
+    // iSelectedSettingControl StackLayout, its Loader delegates, the
+    // fChangeSelectedSetting callback and the six-level `parent` hop used by
+    // the rebuilt About page) keeps exactly the same depth, so page QML that
+    // was already shipped keeps resolving its bindings.
     QString replacement = QStringLiteral(R"QML(
-UiShadowContainer{// BSI Settings v8
+UiShadowContainer{// BSI Settings v9
 id:iSettingsWindowShadowContainer;anchors.fill:parent
 property var bHidden:[];property var bIcons:({})
+property int pPageWidth:568
 Rectangle{anchors.fill:parent;color:"#0d0f14";radius:14;clip:true
-Column{anchors.fill:parent;spacing:0
+Item{id:iShellContent;anchors.fill:parent
 Item{width:parent.width;height:56
 MouseArea{anchors.fill:parent;onPressed:iSettingsWindow.startSystemMove()}
 Text{text:qsTranslate("QObject","Settings");color:"white";font:UiTheme.fonts.bodyLarge;anchors.centerIn:parent}
 UiImageButton{asset:"CloseIcon";pImageWidth:16;pImageHeight:16;anchors.right:parent.right;anchors.verticalCenter:parent.verticalCenter;onClicked:iSettingsWindow.close()}}
-ListView{id:v;width:parent.width;height:48;orientation:ListView.Horizontal;model:pSettingsItems.pSettingElements;clip:true
-delegate:Item{property var k:modelData.pQmlSource.toLowerCase().split("/").pop();property var h:iSettingsWindowShadowContainer.bHidden;width:(modelData.pButtonText.length*8+24)*(!~h.indexOf(k));height:44
+Item{width:parent.width;height:62;y:56
+ListView{id:v;width:Math.min(contentWidth,parent.width-32);height:44;x:Math.max(16,(parent.width-width)/2);anchors.verticalCenter:parent.verticalCenter;orientation:ListView.Horizontal;model:pSettingsItems.pSettingElements;clip:true;spacing:0
+delegate:Item{property var k:modelData.pQmlSource.toLowerCase().split("/").pop();property var h:iSettingsWindowShadowContainer.bHidden;width:Math.max(64,modelData.pButtonText.length*8+24)*(!~h.indexOf(k));height:44
 UiSettingsButton{anchors.fill:parent;pSettingIdx:index;pSettingBtnText:modelData.pButtonText;pSelected:index==pCurrentTabIndex;pShowRedDot:modelData.pShowRedDot;onSettingClicked:fChangeSelectedSetting(pSettingIdx)}
 Image{source:iSettingsWindowShadowContainer.bIcons[parent.k]||"";width:parent.width?18:0;height:18;anchors.centerIn:parent}}
 }
-Item{width:parent.width;height:parent.height-104
+Rectangle{anchors.bottom:parent.bottom;width:parent.width;height:1;color:"#1e222c"}}
+Rectangle{id:iPageFrame;x:(parent.width-width)/2;y:130;width:Math.min(parent.width-32,iSettingsWindowShadowContainer.pPageWidth);height:parent.height-148;radius:12;color:"#14171e";border.color:"#242833";clip:true
 StackLayout{id:iSelectedSettingControl;anchors.fill:parent;anchors.margins:6;currentIndex:pCurrentTabIndex
 Repeater{model:pSettingsItems.pSettingElements;delegate:Loader{width:iSelectedSettingControl.width;height:iSelectedSettingControl.height;Component.onCompleted:setSource(model.modelData.pQmlSource,model.modelData.pComponentArgs||{});onLoaded:{item.anchors.fill=item.parent;model.modelData.pComponentObj=item;if(item.fOnQmlLoaded)item.fOnQmlLoaded()}}}}
 }
@@ -1091,7 +1113,7 @@ bool hasWindowMarker(const QString &text)
     return text.contains(kWindowMarker) || text.contains(kPreviousWindowDesignMarker)
         || text.contains(kWindowDesignMarkerV3) || text.contains(kWindowDesignMarkerV4)
         || text.contains(kWindowDesignMarkerV5) || text.contains(kWindowDesignMarkerV6)
-        || text.contains(kWindowDesignMarker);
+        || text.contains(kWindowDesignMarkerV8) || text.contains(kWindowDesignMarker);
 }
 
 } // namespace

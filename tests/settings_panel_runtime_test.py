@@ -62,7 +62,7 @@ match = re.search(
 )
 assert match, "Could not find the generated Settings-window QML template"
 replacement = match.group(1)
-assert "BSI Settings v8" in replacement
+assert "BSI Settings v9" in replacement
 assert "pSettingsItems.pSettingElements" in replacement
 assert "property var bHidden:" in replacement and "property var bIcons:" in replacement
 assert "property var bHidden:[]" in replacement and "property var bIcons:({})" in replacement
@@ -70,16 +70,21 @@ assert "function fOnQmlLoaded(){parent.parent.parent.parent.parent.parent.parent
 assert "property var bsiHiddenTabs: @@BSI_HIDDEN_TABS@@" in cpp
 assert "property var bsiTabIcons: @@BSI_TAB_ICONS@@" in cpp
 assert 'Rectangle{anchors.fill:parent;color:"#0d0f14";radius:14' in replacement
-assert "Column{anchors.fill:parent;spacing:0" in replacement
+assert "Item{id:iShellContent;anchors.fill:parent" in replacement
 assert "MouseArea{anchors.fill:parent;onPressed:iSettingsWindow.startSystemMove()}" in replacement
 assert "anchors.centerIn:parent" in replacement
 assert "ListView{id:v;" in replacement
 assert "orientation:ListView.Horizontal;model:pSettingsItems.pSettingElements;clip:true" in replacement
+assert "x:Math.max(16,(parent.width-width)/2)" in replacement, "The tab strip should be centered, not left-anchored"
+assert "width:Math.min(contentWidth,parent.width-32)" in replacement
 assert "property var h:iSettingsWindowShadowContainer.bHidden" in replacement
-assert "width:(modelData.pButtonText.length*8+24)*(!~h.indexOf(k));height:44" in replacement
+assert "width:Math.max(64,modelData.pButtonText.length*8+24)*(!~h.indexOf(k));height:44" in replacement
 assert "item.anchors.fill=item.parent" in replacement
-assert "height:parent.height-104" in replacement
+assert "height:parent.height-148" in replacement and "y:130" in replacement
 assert "StackLayout{id:iSelectedSettingControl;anchors.fill:parent;anchors.margins:6" in replacement
+assert "property int pPageWidth:568" in replacement, "The page host should be a bounded card"
+assert "Rectangle{id:iPageFrame;x:(parent.width-width)/2;" in replacement, "The page host must be horizontally centered in the shell"
+assert "width:Math.min(parent.width-32,iSettingsWindowShadowContainer.pPageWidth)" in replacement
 assert "delegate:Loader{width:iSelectedSettingControl.width;height:iSelectedSettingControl.height;" in replacement
 assert "pSettingBtnText:" in replacement and "pSelected:index==pCurrentTabIndex" in replacement and "pShowRedDot:modelData.pShowRedDot" in replacement
 assert "pSettingIdx:index" in replacement
@@ -244,6 +249,18 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
          and item.property("item") is not None),
         None,
     )
+    # The page host is an id-carrying item, so it is reached through the QML
+    # child tree rather than objectName.
+    page_frame = None
+    for candidate in visual_tree:
+        try:
+            if candidate.property("radius") == 12 and candidate.property("color") is not None:
+                page_frame = candidate
+        except RuntimeError:
+            page_frame = None
+        if page_frame is not None and candidate.width() < obj.width():
+            break
+        page_frame = None
     panel = next(
         (item for item in visual_tree
          if abs(item.width() - obj.width()) < 2
@@ -302,13 +319,37 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
     assert abs(player.width - 1500) < 2 and abs(player.height - 900) < 2, "The shell should resize without changing the host player window"
     assert abs(panel.width() - obj.width()) < 2 and abs(panel.height() - obj.height()) < 2, "The PR #88 shell should fill its resized host"
     stack_center = stack.mapToItem(panel, QPointF(stack.width() / 2, stack.height() / 2))
-    assert abs(stack_center.x() - panel.width() / 2) < 2, "The native page stack was not centered inside the PR #88 shell"
-    assert abs(stack.width() - (panel.width() - 12)) < 2, "The native page stack should fill the redesigned content card with a balanced inset"
+    assert abs(stack_center.x() - panel.width() / 2) < 2, "The native page stack was not centered inside the shell"
+    # The stock pages are fixed-width surfaces, so the shell bounds the page
+    # region instead of stretching a page across the whole window.
+    assert page_frame is not None, "The shell did not create its centered page host card"
+    frame_center = page_frame.mapToItem(panel, QPointF(page_frame.width() / 2, 0))
+    assert abs(frame_center.x() - panel.width() / 2) < 2, "The page host card should be centered in the shell"
+    assert abs(page_frame.width() - 568) < 2, "A wide player window should cap the page region at its bounded width"
+    assert page_frame.width() < panel.width() - 100, "The page region should no longer be stretched across the whole shell"
+    assert abs(stack.width() - (page_frame.width() - 12)) < 2, "The native page stack should fill its centered page card with a balanced inset"
     loader_position = page_loader.mapToItem(panel, QPointF(0, 0))
-    assert 0 < page_loader.width() <= panel.width(), "The PR #88 native page Loader should remain visible inside the shell"
-    assert loader_position.x() >= -2 and loader_position.x() + page_loader.width() <= panel.width() + 2, "The PR #88 native Loader escaped the Settings shell"
+    assert 0 < page_loader.width() <= page_frame.width(), "The native page Loader should stay inside the centered page card"
+    assert loader_position.x() >= frame_center.x() - page_frame.width() / 2 - 8, "The native Loader drifted out of its page card"
+    assert loader_position.x() + page_loader.width() <= frame_center.x() + page_frame.width() / 2 + 8, "The native Loader escaped its page card"
+    # Nothing should be clipped by the shell: the tab strip must sit fully
+    # inside the frame on the row above the card.
+    tabs_bottom = tabs.mapToItem(panel, QPointF(0, tabs.height())).y()
+    card_top = page_frame.mapToItem(panel, QPointF(0, 0)).y()
+    assert tabs_bottom <= card_top + 1, "The category strip was overlapped by the page card"
+    assert tabs.property("x") >= 0 and tabs.property("width") <= panel.width(), "The category strip overflowed the shell"
     assert abs(loaded_page.width() - page_loader.width()) < 2, "The loaded native page did not follow its Loader width"
     assert loaded_page.objectName() == "runtimeSettingPage", "The native Settings page Loader did not load its page"
+    # The rebuilt About page publishes its tab icons with
+    # `parent.parent.parent.parent.parent.parent.bHidden = ...`, so the number
+    # of visual parents between a page root and the shell is a contract with
+    # QML the player already ships. Keep it pinned.
+    node, hops = loaded_page, 0
+    while node is not None and node is not obj:
+        node = node.parentItem()
+        hops += 1
+    hops -= 1  # the final step arrives at the shell root itself
+    assert node is obj and hops == 6, f"A native page must reach the shell root in six parent hops (measured {hops})"
     assert str(first_tab.property("pSettingBtnText")).splitlines()[0], "Category tabs should show their own icon glyphs"
 
     tab_point = first_tab.mapToScene(QPointF(first_tab.width() / 2, first_tab.height() / 2)).toPoint()

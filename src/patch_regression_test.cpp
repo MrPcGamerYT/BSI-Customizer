@@ -5191,11 +5191,18 @@ Window {
                     if (file.name.compare(QLatin1String("UiSettingsWindow.qml"), Qt::CaseInsensitive) == 0)
                         rebuiltWindow = QString::fromUtf8(QtResources::readFile(panelImage, file));
                 }
-                check(rebuiltWindow.contains(QStringLiteral("BSI Settings v8"))
+                check(rebuiltWindow.contains(QStringLiteral("BSI Settings v9"))
                           && rebuiltWindow.contains(QStringLiteral("property var bHidden:"))
                           && rebuiltWindow.contains(QStringLiteral("property var bIcons:"))
                           && rebuiltWindow.contains(QStringLiteral("Rectangle{anchors.fill:parent;color:\"#0d0f14\";radius:14"))
                           && rebuiltWindow.contains(QStringLiteral("Column{anchors.fill:parent;spacing:0"))
+                          // The bounded, centered page region: the stock pages are
+                          // fixed-width, so stretching one across the shell leaves
+                          // its content hugging the left edge.
+                          && rebuiltWindow.contains(QStringLiteral("property int pPageWidth:"))
+                          && rebuiltWindow.contains(QStringLiteral("Rectangle{id:iPageFrame;x:(parent.width-width)/2;"))
+                          && rebuiltWindow.contains(QStringLiteral("width:Math.min(parent.width-32,iSettingsWindowShadowContainer.pPageWidth)"))
+                          && rebuiltWindow.contains(QStringLiteral("x:Math.max(16,(parent.width-width)/2)"))
                           && rebuiltWindow.contains(QStringLiteral("MouseArea{anchors.fill:parent;onPressed:iSettingsWindow.startSystemMove()}"))
                           && rebuiltWindow.contains(QStringLiteral("pShowRedDot:modelData.pShowRedDot"))
                           && rebuiltWindow.contains(QStringLiteral("anchors.centerIn:parent"))
