@@ -5195,7 +5195,7 @@ Window {
                           && rebuiltWindow.contains(QStringLiteral("property var bHidden:"))
                           && rebuiltWindow.contains(QStringLiteral("bIcons"))
                           && rebuiltWindow.contains(QStringLiteral("Rectangle{anchors.fill:parent;color:\"#0d0f14\";radius:14"))
-                          && rebuiltWindow.contains(QStringLiteral("Column{anchors.fill:parent;spacing:0"))
+                          && rebuiltWindow.contains(QStringLiteral("Column{anchors.fill:parent"))
                           // The bounded, centered page region: the stock pages are
                           // fixed-width, so stretching one across the shell leaves
                           // its content hugging the left edge.
@@ -5210,7 +5210,7 @@ Window {
                           && rebuiltWindow.contains(QStringLiteral("ListView{id:v;"))
                           && rebuiltWindow.contains(QStringLiteral("orientation:ListView.Horizontal;model:pSettingsItems.pSettingElements;clip:true"))
                           && rebuiltWindow.contains(QStringLiteral("item.anchors.fill=item.parent"))
-                          && rebuiltWindow.contains(QStringLiteral("Image{source:iSettingsWindowShadowContainer.bIcons[parent.k]||\"\";width:parent.width?18:0;height:18;anchors.centerIn:parent}"))
+                          && rebuiltWindow.contains(QStringLiteral("Image{source:iSettingsWindowShadowContainer.bIcons[parent.k]||\"\";width:18;height:18;anchors.centerIn:parent}"))
                           && rebuiltWindow.contains(QStringLiteral("StackLayout{id:iSelectedSettingControl;anchors.fill:parent;anchors.margins:6"))
                           && rebuiltWindow.contains(QStringLiteral("delegate:Loader{width:iSelectedSettingControl.width;height:iSelectedSettingControl.height;"))
                           && rebuiltWindow.contains(QStringLiteral("model.modelData.pComponentObj=item"))
