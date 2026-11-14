@@ -54,3 +54,5 @@ console.log('PASS: saved-settings startup is scan-free; explicit install/layout/
 
 assert.ok(read('src/qml/components/ActionButton.qml').includes('button.accent ? Theme.window : Theme.text'),'white pill labels remain readable while disabled');
 assert.ok(read('src/qml/components/LogPanel.qml').includes('logModel.clear()'),'expanded activity keeps the Clear workflow');
+
+assert.ok(read('src/qml/components/CollectionCard.qml').includes('property bool lifted: cardHover.hovered'),'stationary hover bounds avoid edge lift/unlift feedback');

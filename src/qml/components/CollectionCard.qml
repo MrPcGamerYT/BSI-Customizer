@@ -8,11 +8,13 @@ Item {
     property color tint: "#68538e"
     property bool feature: false
     property bool selected: false
-    property bool lifted: hit.hovered || play.hovered
+    property bool lifted: cardHover.hovered
     signal picked()
     signal played()
     implicitHeight: 176
     Accessible.name: title
+    // Hit testing stays on the stationary card, not on the lifted artwork.
+    HoverHandler { id: cardHover }
     Rectangle {
         id: face
         anchors.left: parent.left; anchors.right: parent.right
