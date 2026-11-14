@@ -10,7 +10,7 @@ ApplicationWindow {
     onClosing: (close) => { if (backend.busy) close.accepted = false; }
 
     id: window
-    width: 1480
+    width: 1420
     height: 920
     minimumWidth: 980
     minimumHeight: 640
@@ -25,7 +25,16 @@ ApplicationWindow {
         x = fitted.x;
         y = fitted.y;
     }
+
     Component.onCompleted: fitToAvailableScreen()
+
+    function runSelftest() {
+        // This is a shell check only; native engine tests live in --selftest.
+        const ok = typeof window.navigatePage === "function"
+                   && pages.count === window.featurePages.length;
+        toast.show(ok ? qsTr("Shell navigation check passed. Run --selftest for engine tests.")
+                      : qsTr("Shell navigation check failed."));
+    }
     visible: true
     // Premium-Optimizer chrome: frameless window with the app's own topbar and
     // control box (startSystemMove / startSystemResize keep native snap+resize).
@@ -70,17 +79,19 @@ ApplicationWindow {
     // ONE production shell. Every page below is the original QML editor;
     // no HTML command adapter, parallel form state or native-editor switch.
     readonly property var featurePages: [
-        { label: qsTr("Dashboard"), section: qsTr("HOME"), icon: Icons.dashboard },
-        { label: qsTr("Color studio"), section: qsTr("CUSTOMIZE"), icon: Icons.theme },
-        { label: qsTr("Resources"), section: qsTr("CUSTOMIZE"), icon: Icons.images },
-        { label: qsTr("Performance"), section: qsTr("CUSTOMIZE"), icon: Icons.fps },
-        { label: qsTr("Integrity & safety"), section: qsTr("CUSTOMIZE"), icon: Icons.integrity },
-        { label: qsTr("Boot experience"), section: qsTr("CUSTOMIZE"), icon: Icons.boot },
-        { label: qsTr("Player interface"), section: qsTr("CUSTOMIZE"), icon: Icons.extras },
-        { label: qsTr("Discord presence"), section: qsTr("TOOLS"), icon: Icons.discord },
-        { label: qsTr("Animated presence"), section: qsTr("TOOLS"), icon: Icons.discord },
-        { label: qsTr("Patch workspace"), section: qsTr("TOOLS"), icon: Icons.extras },
-        { label: qsTr("Debloat & disk manager"), section: qsTr("TOOLS"), icon: Icons.debloat }
+        { label: qsTr("Overview"), section: qsTr("HOME"), icon: Icons.dashboard },
+        { label: qsTr("Color studio"), section: qsTr("PATCHER"), icon: Icons.theme },
+        { label: qsTr("Resources"), section: qsTr("PATCHER"), icon: Icons.images },
+        { label: qsTr("Performance"), section: qsTr("PATCHER"), icon: Icons.fps },
+        { label: qsTr("Integrity & safety"), section: qsTr("PATCHER"), icon: Icons.integrity },
+        { label: qsTr("Boot experience"), section: qsTr("PATCHER"), icon: Icons.boot },
+        { label: qsTr("Player interface"), section: qsTr("PATCHER"), icon: Icons.extras },
+        { label: qsTr("Discord presence"), section: qsTr("PATCHER"), icon: Icons.discord },
+        { label: qsTr("Animated presence"), section: qsTr("PATCHER"), icon: Icons.discord },
+        { label: qsTr("Patch workspace"), section: qsTr("PATCHER"), icon: Icons.extras },
+        { label: qsTr("Debloat & disk manager"), section: qsTr("PATCHER"), icon: Icons.debloat },
+        { label: qsTr("Backups"), section: qsTr("RECOVERY"), icon: Icons.integrity },
+        { label: qsTr("Add-ons"), section: qsTr("COLLECTION"), icon: Icons.theme }
     ]
     readonly property var pageNames: featurePages.map(p => p.label)
     property alias currentPage: pages.currentIndex
@@ -89,15 +100,13 @@ ApplicationWindow {
             pages.currentIndex = index;
     }
 
-    Image {
-        anchors.left: parent.left; anchors.top: parent.top
-        width: parent.width * 0.8; height: parent.height
-        source: "img/orb-green.png"; opacity: Theme.dark ? 0.24 : 0.06
-    }
-    Image {
-        anchors.right: parent.right; anchors.bottom: parent.bottom
-        width: parent.width * 0.6; height: parent.height * 0.85
-        source: "img/orb-green.png"; opacity: Theme.dark ? 0.16 : 0.05
+    Rectangle {
+        anchors.fill: parent
+        gradient: Gradient {
+            GradientStop { position: 0; color: Theme.dark ? "#17131e" : Theme.window }
+            GradientStop { position: 0.55; color: Theme.window }
+            GradientStop { position: 1; color: Theme.dark ? "#08070a" : Theme.window }
+        }
     }
 
     Rectangle {
@@ -289,6 +298,11 @@ ApplicationWindow {
             enabled: !backend.busy
             onTriggered: { settingsPanel.currentTab = 2; settingsPanel.open(); }
         }
+        MenuItem {
+            text: qsTr("Selftest")
+            enabled: !backend.busy
+            onTriggered: runSelftest()
+        }
         MenuSeparator {}
         MenuItem { text: qsTr("Sign out"); enabled: !backend.busy; onTriggered: auth.signOut() }
     }
@@ -316,6 +330,8 @@ ApplicationWindow {
             GifRpcPage { objectName: "featureGif" }
             WorkspacePage { objectName: "featureWorkspace"; onNavigate: (index) => window.navigatePage(index) }
             DebloatPage { objectName: "featureDebloat"; onNotify: (msg) => toast.show(msg) }
+            BackupsPage { objectName: "featureBackups"; onNotify: (msg) => toast.show(msg) }
+            AddonsPage { objectName: "featureAddons"; onNotify: (msg) => toast.show(msg); onNavigate: (index) => window.navigatePage(index) }
         }
         LogPanel {
             id: logPanel

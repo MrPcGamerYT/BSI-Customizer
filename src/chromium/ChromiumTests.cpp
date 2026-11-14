@@ -120,7 +120,7 @@ Window {
     Timer {
         id: verify
         interval: 600
-        onTriggered: web.runJavaScript("(() => { const b=document.querySelector('#preview-button'); if(!b || b.hidden) return false; b.click(); return document.querySelectorAll('#spine [data-page]').length === 13 && document.querySelectorAll('[data-action]:enabled').length === 0 && document.styleSheets.length > 0 && typeof QWebChannel === 'function'; })()", function(ok) { Qt.exit(ok === true ? 0 : 3); })
+        onTriggered: web.runJavaScript("(() => { const b=document.querySelector('#preview-button'); if(!b || b.hidden) return false; b.click(); return document.querySelectorAll('#spine [data-page]').length === 15 && document.querySelector('#spine [data-page=\"13\"]') !== null && document.querySelector('#spine [data-page=\"14\"]') !== null && typeof BsiAddons === 'object' && BsiAddons.packs.length === 6 && document.querySelectorAll('[data-action]:enabled').length === 0 && document.styleSheets.length > 0 && typeof QWebChannel === 'function'; })()", function(ok) { Qt.exit(ok === true ? 0 : 3); })
     }
 }
 )QML", QUrl(QStringLiteral("qrc:/bsi-web-runtime-test.qml")));

@@ -350,8 +350,8 @@ int runSelfTest()
         if (root) {
             QObject *stack = root->findChild<QObject *>(QStringLiteral("studioPageStack"));
             QObject *dashboard = root->findChild<QObject *>(QStringLiteral("studioDashboard"));
-            check(stack && stack->property("count").toInt() == 11,
-                  "studio shell retains eleven feature pages including Debloat; app settings are in the modal panel");
+            check(stack && stack->property("count").toInt() == 13,
+                  "studio shell retains eleven original editors plus Backups and Add-ons; app settings remain in the modal panel");
             check(root->findChild<QObject *>(QStringLiteral("studioSidebar")) != nullptr,
                   "studio navigation sidebar is present");
             QObject *instanceFlow = root->findChild<QObject *>(QStringLiteral("studioInstanceFlow"));
@@ -381,9 +381,9 @@ int runSelfTest()
             const char *featureObjects[] = {
                 "studioDashboard", "featureTheme", "featureResources", "featureFps",
                 "featureIntegrity", "featureBoot", "featureInterface", "featureRpc",
-                "featureGif", "featureWorkspace", "featureDebloat"
+                "featureGif", "featureWorkspace", "featureDebloat", "featureBackups", "featureAddons"
             };
-            for (int index = 0; index < 11; ++index) {
+            for (int index = 0; index < int(sizeof(featureObjects) / sizeof(featureObjects[0])); ++index) {
                 const bool exists = root->findChild<QObject *>(QString::fromLatin1(featureObjects[index])) != nullptr;
                 const bool routed = QMetaObject::invokeMethod(root, "navigatePage", Q_ARG(QVariant, QVariant(index)));
                 check(exists && routed && stack && stack->property("currentIndex").toInt() == index,
@@ -391,7 +391,7 @@ int runSelfTest()
                           .arg(index).arg(QString::fromLatin1(featureObjects[index]))));
             }
             check(backend.resourceInfos().size() == resourceCount,
-                  "visiting all eleven feature pages does not auto-scan Resources");
+                  "visiting all thirteen shell pages does not auto-scan Resources");
             if (stack) stack->setProperty("currentIndex", 2);
             QMetaObject::invokeMethod(root, "navigatePage", Q_ARG(QVariant, QVariant(99)));
             check(stack && stack->property("currentIndex").toInt() == 2,

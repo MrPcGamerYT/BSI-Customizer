@@ -1,5 +1,6 @@
 // Standalone Qt Core/Gui/Network test; never executes an emulator or accesses Discord.
 #include "core/CustomizationWorkspace.h"
+#include "core/AddonPacks.h"
 #include "core/ThemeEngine.h"
 #include "core/EmbeddedResources.h"
 #include "core/QtResources.h"
@@ -107,6 +108,26 @@ int run()
     bad=profile;bad["boot"]=QVariantMap{{"holdMs",3.5}};check(!W::validateProfile(bad).value("ok").toBool(),"fractional boot durations refused");
     bad=profile;bad["about"]=QVariantMap{{"links",QVariantList{QVariantMap{{"id","bad"},{"url","file:///C:/Windows/test.exe"}}}}};
     check(!W::validateProfile(bad).value("ok").toBool(),"unsafe About links refused");
+    check(AddonPacks::find(QStringLiteral("unknown")) == nullptr, "unknown add-on refused");
+    for (const auto &id : {"carbon", "amethyst", "arctic", "ember", "matrix", "nord"}) {
+        const auto *pack = AddonPacks::find(QLatin1String(id));
+        check(pack && ThemePresets::byId(QLatin1String(pack->preset)), "pack references a real palette");
+        if (!pack) continue;
+        const QVariantList packOperations{QVariantMap{{"kind","theme"},{"pack",QLatin1String(id)},
+            {"edits",QVariantMap{{"primary100","#0b0b0e"},{"accentNormal","#abcdef"}}}}};
+        QByteArray packed;
+        const auto dry = W::simulate(exe,packOperations,W::digest(original),&packed);
+        if (!dry.value("ok").toBool()) std::printf("pack dry run %s: %s\n",id,qPrintable(dry.value("msg").toString()));
+        check(dry.value("ok").toBool() && read(exe)==original,"add-on palette and geometry prepare without writing");
+        bool designReadBack=false;
+        for (const auto &file : QtResources::registeredFiles(packed)) if (file.name==QLatin1String("UiThemeObject.qml"))
+            designReadBack=QtResources::readFile(packed,file).contains("property real radius: "+QByteArray::number(pack->radius));
+        check(designReadBack,"add-on radius read back through real Qt resource tree");
+        auto conflicting=packOperations;
+        conflicting << QVariantMap{{"kind","appearance"},{"edits",QVariantMap{{"UiThemeObject.qml#root.buttons.sizes.large.radius",8}}}};
+        check(!W::simulate(exe,conflicting,W::digest(original)).value("ok").toBool(),"add-on conflicts with later same-payload appearance edit");
+    }
+    check(!W::simulate(exe,{QVariantMap{{"kind","theme"},{"pack","unknown"},{"edits",QVariantMap{{"primary100","#abcdef"}}}}},W::digest(original)).value("ok").toBool(),"unknown pack dry run refused");
     auto appearanceProfile=profile;appearanceProfile["appearance"]=QVariantMap{{"UiThemeObject.qml#root.buttons.sizes.large.radius",8}};
     check(W::validateProfile(appearanceProfile).value("ok").toBool(),"appearance profile section validated");
     bad=appearanceProfile;bad["appearance"]=QVariantMap{{"UiThemeObject.qml#root.buttons.sizes.large.radius",true}};
