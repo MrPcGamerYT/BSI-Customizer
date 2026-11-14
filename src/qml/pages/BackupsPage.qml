@@ -111,11 +111,16 @@ Item {
         anchors.centerIn: parent; width: Math.min(560, page.width - 24); modal: true
         title: qsTr("Restore this exact snapshot?")
         standardButtons: Dialog.Ok | Dialog.Cancel
-        contentItem: Label {
+        height: Math.min(520, Overlay.overlay ? Overlay.overlay.height - 40 : 520)
+        contentItem: ScrollView {
+            contentWidth: availableWidth; clip: true
+            Label {
+                width: parent.width
             wrapMode: Text.WrapAnywhere; textFormat: Text.PlainText; color: Theme.text
             text: qsTr("Selected target: ") + page.restoreTarget + qsTr("\n\nSnapshot: ") + (page.pendingRestore.id || "")
                 + qsTr("\nRecorded target: ") + (page.pendingRestore.path || "")
                 + qsTr("\n\nClose all player instances. The engine will refuse a different target, missing/corrupt snapshot, or a current EXE that no longer matches the recorded post-patch hash. No automatic force-restore is offered.")
+            }
         }
         onAccepted: {
             if (backend.busy || backend.exePath !== page.restoreTarget || !page.pendingRestore.id) return;

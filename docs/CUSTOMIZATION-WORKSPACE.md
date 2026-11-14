@@ -58,3 +58,34 @@ cmake -P cmake/tests/CollectQtNoticesTest.cmake
 ```
 
 The native application self-test integrates `tests/workspace_core_test.cpp`. Qt Multimedia is an explicit build/deployment dependency, including its module notices; previews use the platform decoder, not a hidden conversion service.
+
+## Native navigation and review improvements
+
+- **Find a tool / Ctrl+K (also Ctrl+P)** searches a bundled catalog and navigates
+  to the existing native editor or Settings tab. It never scans a player, stages
+  operations or dispatches patches. Search is disabled while signed out and an
+  open finder closes on sign-out. Results describe the next explicit action,
+  not a promise that the target supports a patch.
+- Workspace shows readable operation cards (palette keys, appearance tokens or
+  logical resource paths) and each available Dry Run step result, without
+  displaying replacement binaries. The Apply dialog shows the selected target,
+  operation list, original/prepared hashes and sizes. An acknowledgment is
+  required. A changed queue/target closes the dialog; engine hash and recovery
+  checks remain authoritative. This is a structured plan review, not an
+  unrestricted visual/binary diff or a cross-file transaction.
+- Backups retains **manual Refresh** and the latest-200-journal limit, adding
+  searchable cards, path/state/time/operation metadata and a current-target
+  textual path filter. Disable the filter for path aliases. A listed journal is
+  not labelled restorable merely because it exists. The restore confirmation
+  captures the chosen snapshot ID and target, is cancelled by target changes,
+  and dispatches the existing hash-checked engine restore. Success clears stale
+  history; it does not silently rescan or choose another snapshot. Technical
+  JSON remains available on demand; legacy `.bak` editors are unchanged.
+
+The new Qt tests exercise these controls with mocked engines, including locked
+search, cancellation, missing acknowledgment, target/queue changes and exact
+restore/apply arguments. They do not certify emulator rendering or replace the
+native engine's file/hash tests. No proxy, boot, auth or patch-engine behavior is
+changed by these UI improvements. Named restore points, new icon-pack editing,
+additional RPC presets/radius controls and optimization profiles remain separate
+follow-up work; this iteration does not claim all suggested features are done.
