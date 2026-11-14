@@ -963,12 +963,23 @@ QVariantList sourceRecords(const TargetSources &sources, const QMap<QString, QBy
     return records;
 }
 
-QMap<QString, QByteArray> originalsFromRecovery(const QVariantMap &recovery, QString *error)
+// Why a saved snapshot cannot be used. The distinction matters: an unusable
+// snapshot on a *clean* executable is stale state we can safely replace, while
+// the same snapshot on an already-patched executable must block every write.
+enum class RecoveryProblem {
+    None,
+    Incomplete, // no two source records: truncated, half-written, older layout
+    Damaged,    // records present but a payload or its hash is unusable
+};
+
+QMap<QString, QByteArray> originalsFromRecovery(const QVariantMap &recovery,
+                                                RecoveryProblem *problem = nullptr)
 {
     QMap<QString, QByteArray> originals;
+    if (problem) *problem = RecoveryProblem::None;
     const QVariantList records = recovery.value(QStringLiteral("sources")).toList();
     if (records.size() != 2) {
-        *error = QStringLiteral("The Settings-panel recovery snapshot is incomplete; restore is blocked.");
+        if (problem) *problem = RecoveryProblem::Incomplete;
         return {};
     }
     for (const QVariant &value : records) {
@@ -978,8 +989,9 @@ QMap<QString, QByteArray> originalsFromRecovery(const QVariantMap &recovery, QSt
         if (path.isEmpty() || raw.isEmpty() || raw.size() > kMaxQml
             || QString::fromLatin1(sha256(raw)) != record.value(QStringLiteral("originalSha256")).toString()
             || originals.contains(path)) {
-            *error = QStringLiteral("The Settings-panel recovery snapshot failed its integrity check.");
-            return {};
+            if (problem) *problem = RecoveryProblem::Damaged;
+            originals.clear();
+            return originals;
         }
         originals.insert(path, raw);
     }
@@ -1140,6 +1152,11 @@ QVariantMap readCustomAsset(const QString &path, const QString &kind)
             {QStringLiteral("msg"), QStringLiteral("The safe local image is saved in the Settings-panel profile. It will be written only when you apply the rebuild.")}};
 }
 
+QString recoveryPathFor(const QString &exePath)
+{
+    return sidecarPath(exePath);
+}
+
 State analyze(const QString &exePath)
 {
     State state;
@@ -1238,9 +1255,15 @@ QVariantMap apply(const QString &exePath, const QString &developerName,
 
     if (!enabled) {
         if (recovery.isEmpty()) return fail(QStringLiteral("No verified Settings-panel recovery snapshot was found; nothing was changed."));
-        QString recoveryError;
-        const QMap<QString, QByteArray> originals = originalsFromRecovery(recovery, &recoveryError);
-        if (originals.isEmpty()) return fail(recoveryError);
+        RecoveryProblem restoreProblem = RecoveryProblem::None;
+        const QMap<QString, QByteArray> originals = originalsFromRecovery(recovery, &restoreProblem);
+        if (originals.isEmpty()) {
+            // Restore has nothing safe to write without a complete snapshot, so
+            // this stays blocked - but say which part is unusable.
+            return fail(restoreProblem == RecoveryProblem::Incomplete
+                ? QStringLiteral("The Settings-panel recovery snapshot is incomplete; restore is blocked. Rebuild the panel to save a fresh snapshot.")
+                : QStringLiteral("The Settings-panel recovery snapshot failed its integrity check; restore is blocked."));
+        }
         if (originals.size() != 2 || !originals.contains(current.window.path) || !originals.contains(current.about.path))
             return fail(QStringLiteral("The executable's resource paths no longer match the saved Settings-panel snapshot; restore is blocked."));
         if (!hasWindowMarker(current.window.text) || !current.about.text.contains(kAboutMarker))
@@ -1304,10 +1327,13 @@ QVariantMap apply(const QString &exePath, const QString &developerName,
         || current.about.text.contains(kAboutMarker);
     QMap<QString, QByteArray> originals;
     bool recoveryMatchesCurrent = false;
+    // An unusable snapshot is only fatal once the executable carries our
+    // markers; on clean sources it is stale state and the block below replaces
+    // it with a verified baseline (previously this aborted every apply with
+    // "snapshot is incomplete", including on untouched players).
+    RecoveryProblem applyProblem = RecoveryProblem::None;
     if (!recovery.isEmpty()) {
-        QString recoveryError;
-        originals = originalsFromRecovery(recovery, &recoveryError);
-        if (originals.isEmpty()) return fail(recoveryError);
+        originals = originalsFromRecovery(recovery, &applyProblem);
         recoveryMatchesCurrent = originals.size() == 2
             && originals.contains(current.window.path) && originals.contains(current.about.path);
         if (recoveryMatchesCurrent) {
@@ -1327,7 +1353,12 @@ QVariantMap apply(const QString &exePath, const QString &developerName,
     }
     if (!recoveryMatchesCurrent) {
         if (hasPatchMarker)
-            return fail(QStringLiteral("A Settings-panel marker exists without a matching recovery snapshot. The executable was not overwritten."));
+            return fail(applyProblem == RecoveryProblem::None
+                ? QStringLiteral("A Settings-panel marker exists without a matching recovery snapshot. The executable was not overwritten.")
+                : QStringLiteral("This player carries a Settings-panel patch, but its recovery snapshot is unusable (%1). The executable was not overwritten; restore the player backup before rebuilding.")
+                      .arg(applyProblem == RecoveryProblem::Incomplete
+                               ? QStringLiteral("incomplete")
+                               : QStringLiteral("failed its integrity check")));
         // Recovery files are keyed by executable path. A clean reinstall can
         // put a different, unpatched HD-Player.exe at that same path, leaving
         // the previous install's hashes in AppLocalData. Do not mistake that

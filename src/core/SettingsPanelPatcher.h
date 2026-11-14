@@ -29,6 +29,10 @@ struct State
     QString detail;
 };
 
+// Where the feature-local recovery snapshot for this executable lives. Exposed
+// so callers can report a damaged snapshot, and so regression tests can stage
+// stale state at the exact path the patcher reads.
+QString recoveryPathFor(const QString &exePath);
 State analyze(const QString &exePath);
 QVariantMap readCustomAsset(const QString &path, const QString &kind);
 QVariantMap apply(const QString &exePath, const QString &developerName,

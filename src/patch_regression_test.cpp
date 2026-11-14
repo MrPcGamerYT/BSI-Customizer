@@ -5386,6 +5386,77 @@ Window {
                                   .arg(freshRestore.value(QStringLiteral("msg")).toString()));
                     }
                 }
+                // Regression: a sidecar that exists but cannot be used must not
+                // abort the rebuild on a clean player. It used to return
+                // "The Settings-panel recovery snapshot is incomplete; restore is
+                // blocked." for every apply, so the patch never ran and users
+                // were stuck with a stale file keyed to the executable path.
+                // Each fixture is a *readable* snapshot for this exact executable
+                // (the patcher rejects a foreign target before reading sources),
+                // but with no usable source pair inside it.
+                const QString panelCanonical = QFileInfo(panelCopy).canonicalFilePath();
+                const QByteArray snapshotHead = QStringLiteral(
+                    "{\"schema\":\"bsi.settings-panel.recovery\",\"version\":1,\"target\":\"%1\"")
+                    .arg(panelCanonical).toUtf8();
+                const auto incompleteSnapshots = {
+                    snapshotHead + QByteArrayLiteral(",\"sources\":[]}"),
+                    snapshotHead + QByteArrayLiteral(",\"sources\":[{}]}"),
+                    snapshotHead + QByteArrayLiteral("}")};
+                int incompleteIndex = 0;
+                for (const QByteArray &incompleteJson : incompleteSnapshots) {
+                    ++incompleteIndex;
+                    if (!write(panelCopy, original)) continue;
+                    const QString sidecarPath = SettingsPanelPatcher::recoveryPathFor(panelCopy);
+                    bool sidecarWritten = false;
+                    {
+                        QDir().mkpath(QFileInfo(sidecarPath).absolutePath());
+                        QFile sidecar(sidecarPath);
+                        if (sidecar.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+                            sidecarWritten = sidecar.write(incompleteJson) == incompleteJson.size();
+                            sidecar.close();
+                        }
+                    }
+                    if (!sidecarWritten) continue;
+                    const auto appliedOverStale = SettingsPanelPatcher::apply(panelCopy,
+                        QStringLiteral("Stale snapshot recovery"), panelLinks, {}, true);
+                    const auto stateOverStale = SettingsPanelPatcher::analyze(panelCopy);
+                    check(appliedOverStale.value(QStringLiteral("ok")).toBool() && stateOverStale.applied,
+                          QStringLiteral("an unusable recovery sidecar (#%1: %2) no longer blocks the rebuild of a clean player (%3)")
+                              .arg(incompleteIndex)
+                              .arg(QString::fromUtf8(incompleteJson))
+                              .arg(appliedOverStale.value(QStringLiteral("msg")).toString()));
+                    const auto restoredOverStale = SettingsPanelPatcher::apply(panelCopy, QString(), {}, {}, false);
+                    check(restoredOverStale.value(QStringLiteral("ok")).toBool(),
+                          QStringLiteral("the rebuild applied over an unusable sidecar still restores (%1)")
+                              .arg(restoredOverStale.value(QStringLiteral("msg")).toString()));
+                }
+
+                // The same unusable sidecar must still block writes once the
+                // executable actually carries this feature's markers: there is
+                // no trustworthy original left to restore.
+                if (write(panelCopy, original)
+                    && SettingsPanelPatcher::apply(panelCopy, QStringLiteral("Blocked baseline"),
+                                                   panelLinks, {}, true).value(QStringLiteral("ok")).toBool()) {
+                    const QString corruptPath = SettingsPanelPatcher::recoveryPathFor(panelCopy);
+                    QFile corrupt(corruptPath);
+                    const bool cleared = corrupt.open(QIODevice::WriteOnly | QIODevice::Truncate);
+                    if (cleared) {
+                        corrupt.write(snapshotHead + QByteArrayLiteral(",\"sources\":[]}"));
+                        corrupt.close();
+                    }
+                    const auto reapplyBlocked = SettingsPanelPatcher::apply(panelCopy,
+                        QStringLiteral("Blocked baseline"), panelLinks, {}, true);
+                    check(cleared && !reapplyBlocked.value(QStringLiteral("ok")).toBool()
+                              && reapplyBlocked.value(QStringLiteral("msg")).toString().contains(
+                                  QStringLiteral("recovery snapshot is unusable")),
+                          QStringLiteral("a patched player with an unusable sidecar still refuses to write (%1)")
+                              .arg(reapplyBlocked.value(QStringLiteral("msg")).toString()));
+                    // Leave the fixture clean for the checks that follow: put the
+                    // reference bytes back and drop the snapshot we damaged.
+                    QFile::remove(corruptPath);
+                    write(panelCopy, original);
+                }
+
                 const auto finalPanel = SettingsPanelPatcher::analyze(panelCopy);
                 check(finalPanel.supported && !finalPanel.applied,
                       QStringLiteral("the original %1 Settings window is recognized again after restore")
