@@ -180,7 +180,15 @@ QVariantMap Backend::runBackground(const std::function<QVariantMap(Backend &)> &
 }
 
 QString Backend::exePath() const { return m_settings->exePath(); }
-void Backend::setExePath(const QString &p) { if (!m_busy) m_settings->setExePath(p); }
+void Backend::setExePath(const QString &p)
+{
+    if (actionsLocked()) return;
+    if (!m_backgroundWorker) {
+        runBackground([=](Backend &worker) { worker.setExePath(p); return QVariantMap{}; });
+        return;
+    }
+    m_settings->setExePath(p);
+}
 QString Backend::dllPath() const { return m_settings->dllPath(); }
 void Backend::setDllPath(const QString &p) { if (!m_busy) m_settings->setDllPath(p); }
 QString Backend::confPath() const { return m_settings->confPath(); }
@@ -277,6 +285,8 @@ QString Backend::localFilePath(const QUrl &url) const
 QVariantList Backend::detectInstalls()
 {
     if (actionsLocked()) return {};
+    if (!m_backgroundWorker)
+        return runBackground([](Backend &worker) { return QVariantMap{{QStringLiteral("rows"), worker.detectInstalls()}}; }).value(QStringLiteral("rows")).toList();
     m_installs = BsDetector::findBlueStacks();
     emit installsChanged();
     if (m_installs.isEmpty())
@@ -294,6 +304,10 @@ QVariantList Backend::detectInstalls()
 void Backend::useInstall(int index)
 {
     if (actionsLocked()) return;
+    if (!m_backgroundWorker) {
+        runBackground([=](Backend &worker) { worker.useInstall(index); return QVariantMap{}; });
+        return;
+    }
     if (index < 0 || index >= m_installs.size())
         return;
     const QVariantMap m = m_installs.at(index).toMap();

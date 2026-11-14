@@ -42,3 +42,12 @@ assert.ok(read('src/qml/components/CollectionCard.qml').includes('y: card.lifted
 for(const token of ['#0A0A0E','#111116','#17171D','#7C5CFF','#C8E86A']) assert.ok(read('src/qml/Theme.qml').includes(token));
 assert.ok(qml.includes('selectedDesignInspector') && qml.includes('collectionBento'));
 console.log('PASS: exact control-center tokens, lazy authenticated routes, no entry scans, nonmodal busy status and bounded hover-only card motion.');
+
+const settings=read('src/core/SettingsManager.cpp');
+const startup=settings.slice(settings.indexOf('SettingsManager::SettingsManager'),settings.indexOf('void SettingsManager::refreshFpsPath'));
+assert.ok(!startup.includes('findBlueStacks(') && !startup.includes('refreshFpsPath();'),'no install/DLL scans before first paint');
+for(const method of ['layoutTweaks','sidebarButtonRows','aboutPageState','detectInstalls','useInstall']) {
+ const text=backend.slice(backend.indexOf('Backend::'+method+'('));
+ assert.ok(text.slice(0,600).includes('!m_backgroundWorker'),method+' must not analyze files on the GUI thread');
+}
+console.log('PASS: saved-settings startup is scan-free; explicit install/layout/About reads use the isolated worker.');

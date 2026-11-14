@@ -202,7 +202,7 @@ Item {
         }
     }
     Drawer {
-        id: editor; objectName: "skinEditor"; edge: Qt.RightEdge
+        id: editor; objectName: "skinEditor"; implicitWidth: 760; implicitHeight: 600; edge: Qt.RightEdge
         width: Math.min(760,page.width); height: parent ? parent.height : page.height
         modal: true; dim: true; padding: 24
         background: Rectangle { color: Theme.card; border.color: Theme.border; radius: 20 }
