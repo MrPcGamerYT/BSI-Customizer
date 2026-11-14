@@ -124,6 +124,18 @@ int run()
     for(const auto &style:{"line","rounded","bold"})
         check(!SkinProfiles::icon("home",QLatin1String(style),"#aabbcc").isEmpty(),"three safe generated SVG icon styles");
     check(SkinProfiles::icon("unknown","line","#aabbcc").isEmpty(),"unknown glyph refused");
+    const QString svgFile=temp.filePath(QStringLiteral("custom.svg"));
+    write(svgFile,"<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M2 2h20v20H2z'/></svg>");
+    const auto importedIcon=SkinProfiles::readIcon(svgFile);
+    check(importedIcon.value("ok").toBool(),"user static SVG icons are importable");
+    const QVariantMap customIcon{{"path","ui/home.svg"},{"svg",importedIcon.value("svg")}};
+    check(!SkinProfiles::mappedIcon(customIcon,"line","#aabbcc").isEmpty(),"custom SVG bytes preserved in portable mapping");
+    write(svgFile,"<svg xmlns='http://www.w3.org/2000/svg'><script>alert(1)</script></svg>");
+    check(!SkinProfiles::readIcon(svgFile).value("ok").toBool(),"SVG scripts refused");
+    write(svgFile,"<svg xmlns='http://www.w3.org/2000/svg'><path fill='url(https://invalid.example/icon.svg)'/></svg>");
+    check(!SkinProfiles::readIcon(svgFile).value("ok").toBool(),"SVG external references refused");
+    write(svgFile,"<!DOCTYPE svg [<!ENTITY x SYSTEM 'file:///etc/passwd'>]><svg xmlns='http://www.w3.org/2000/svg'/>");
+    check(!SkinProfiles::readIcon(svgFile).value("ok").toBool(),"SVG DTD/entity declarations refused");
     const QString skinFile=temp.filePath(QStringLiteral("editable-skin.json"));
     check(SkinProfiles::save(skinFile,skin).value("ok").toBool() && SkinProfiles::read(skinFile).value("profile").toMap()==skin,"custom skin profile save/load round trip");
     check(!SkinProfiles::save(exe,skin).value("ok").toBool() && read(exe)==original,"skin export never overwrites the player");

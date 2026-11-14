@@ -2115,6 +2115,7 @@ QVariantMap Backend::workspace(const QString &action, const QVariantMap &options
     QVariantMap edits; for (auto it = m_edits.cbegin(); it != m_edits.cend(); ++it) edits[it.key()] = it.value();
     QVariantMap r;
     if (action == QLatin1String("inspect")) r = W::inspect(path, edits);
+    else if (action == QLatin1String("skin-icon-load")) r = SkinProfiles::readIcon(options.value("file").toString());
     else if (action == QLatin1String("skin-save")) r = SkinProfiles::save(options.value("file").toString(), options.value("profile").toMap());
     else if (action == QLatin1String("skin-load")) r = SkinProfiles::read(options.value("file").toString());
     else if (action == QLatin1String("queue-skin")) {
@@ -2155,7 +2156,7 @@ QVariantMap Backend::workspace(const QString &action, const QVariantMap &options
             const auto mapping=v.toMap();const QString resource=mapping.value("path").toString();
             int found=0;for(const auto &row:m_resourceInfos) if(row.toMap().value("path").toString()==resource) ++found;
             if(found!=1) return {{"ok",false},{"msg","An icon target is missing or ambiguous in your manual scan. No pack was queued."}};
-            const auto svg=SkinProfiles::icon(mapping.value("glyph").toString(),profile.value("iconStyle").toString(),profile.value("accent").toString());
+            const auto svg=SkinProfiles::mappedIcon(mapping,profile.value("iconStyle").toString(),profile.value("accent").toString());
             pending << QVariantMap{{"kind","resource"},{"path",resource},{"data",QString::fromLatin1(svg.toBase64())},{"sha256",W::digest(svg)}};
         }
         m_workspaceOperations=pending;m_workspaceHash=W::digest(bytes);

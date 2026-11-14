@@ -18,12 +18,13 @@ Item {
     property string tokenJson: "{}"
     property var inspected: []
     readonly property var svgResources: backend.resourceInfos.filter(x => x.path.toLowerCase().endsWith(".svg"))
+    property string customSvg: ""
     function addMapping() {
         try {
             const target = page.svgResources[iconTarget.currentIndex];
             if (!target) { page.notify(qsTr("Scan Resources manually first, then select an SVG target.")); return; }
             var icons = JSON.parse(page.mappingJson).filter(x => x.path !== target.path);
-            icons.push({path: target.path, glyph: iconGlyph.currentText});
+            icons.push(page.customSvg.length ? {path: target.path, svg: page.customSvg} : {path: target.path, glyph: iconGlyph.currentText});
             page.mappingJson = JSON.stringify(icons, null, 2); page.plan = {};
         } catch (e) { page.notify(String(e)); }
     }
@@ -187,7 +188,14 @@ Item {
                         Layout.fillWidth: true
                         ComboBox { id: iconTarget; Layout.fillWidth: true; model: page.svgResources; textRole: "path" }
                         ComboBox { id: iconGlyph; model: ["home", "play", "settings", "volume", "controls", "capture", "fullscreen", "back", "apps"] }
-                        ActionButton { text: qsTr("Map icon"); enabled: page.svgResources.length > 0; onClicked: page.addMapping() }
+                        ActionButton { text: qsTr("Custom SVG…"); enabled: !backend.busy; onClicked: openIcon.open() }
+                        ActionButton { text: page.customSvg.length ? qsTr("Map custom SVG") : qsTr("Map icon"); enabled: page.svgResources.length > 0; onClicked: page.addMapping() }
+                    }
+                    RowLayout {
+                        visible: page.customSvg.length > 0
+                        Image { Layout.preferredWidth: 28; Layout.preferredHeight: 28; source: page.customSvg.length ? "data:image/svg+xml;base64," + page.customSvg : "" }
+                        Label { text: qsTr("Custom static SVG ready. It retains its own colors."); color: Theme.textDim }
+                        ActionButton { text: qsTr("Use built-in icons"); onClicked: page.customSvg = "" }
                     }
                     TextArea { objectName: "skinIconMappings"; Layout.fillWidth: true; Layout.preferredHeight: 80; text: page.mappingJson; color: Theme.text; font.family: "Consolas"; selectByMouse: true; wrapMode: TextEdit.Wrap; onTextChanged: if (activeFocus) { page.mappingJson = text; page.plan = {}; } }
                 }
@@ -198,7 +206,7 @@ Item {
                     width: parent.width; spacing: 10
                     Label { text: qsTr("Review before you write"); color: Theme.text; font.pixelSize: 16; font.bold: true }
                     Flow {
-                        Layout.fillWidth: true; spacing: 10; implicitHeight: childrenRect.height
+                        Layout.fillWidth: true; spacing: 10
                         ActionButton { text: qsTr("1. Stage custom pack"); enabled: !backend.busy; onClicked: page.stage() }
                         ActionButton { text: qsTr("2. Verify Dry Run"); enabled: !backend.busy && backend.workspaceOperations.length > 0; onClicked: { page.plan = {}; const r = page.run("dry-run"); if (r.ok) { page.planPath = backend.exePath; page.plan = r; } } }
                         ActionButton { text: qsTr("3. Review & apply…"); accent: true; enabled: !backend.busy && !!page.plan.ok && page.planPath === backend.exePath; onClicked: applyDialog.open() }
@@ -211,6 +219,7 @@ Item {
         }
     }
     FontLoader { id: branding; source: "../fonts/NotoSansMath-Regular.ttf" }
+    FileDialog { id: openIcon; nameFilters: ["Static SVG icons (*.svg)"]; onAccepted: { const r = page.run("skin-icon-load", {file: backend.localFilePath(selectedFile)}); if (r.ok) page.customSvg = r.svg; } }
     FileDialog { id: openProfile; nameFilters: ["Skin profiles (*.json)"]; onAccepted: { const r = page.run("skin-load", {file: backend.localFilePath(selectedFile)}); if (r.ok) page.loadProfile(r.profile); } }
     FileDialog { id: saveProfile; fileMode: FileDialog.SaveFile; defaultSuffix: "json"; nameFilters: ["Skin profiles (*.json)"]; onAccepted: { try { page.run("skin-save", {file: backend.localFilePath(selectedFile), profile: page.profile()}); } catch (e) { page.notify(String(e)); } } }
     Dialog {

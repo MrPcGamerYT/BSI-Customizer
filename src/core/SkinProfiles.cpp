@@ -7,6 +7,7 @@
 #include <QJsonObject>
 #include <QRegularExpression>
 #include <QSet>
+#include <QXmlStreamReader>
 
 namespace SkinProfiles {
 namespace {
@@ -42,6 +43,40 @@ QByteArray icon(const QString &glyph, const QString &style, const QString &tint)
     return QStringLiteral("<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%1' stroke-width='%2' stroke-linecap='%3' stroke-linejoin='%3'>%4</svg>")
         .arg(tint, weight, cap, glyphs().value(glyph)).toUtf8();
 }
+namespace {
+bool safeSvg(const QByteArray &data) {
+    if (data.isEmpty() || data.size()>32768) return false;
+    QXmlStreamReader xml(data);int count=0;
+    const QSet<QString> tags{"svg","g","path","rect","circle","ellipse","line","polyline","polygon","defs","linearGradient","radialGradient","stop","clipPath"};
+    const QSet<QString> attributes{"xmlns","width","height","viewBox","fill","fill-rule","fill-opacity","stroke","stroke-width","stroke-linecap","stroke-linejoin","stroke-opacity","opacity","d","x","y","x1","x2","y1","y2","cx","cy","r","rx","ry","points","transform","id","clip-path","offset","stop-color","stop-opacity","gradientUnits","gradientTransform","spreadMethod","fx","fy"};
+    while(!xml.atEnd()) {
+        xml.readNext();
+        if(xml.isDTD() || xml.isEntityReference() || xml.isProcessingInstruction()) return false;
+        if(!xml.isStartElement()) continue;
+        const QString tag=xml.name().toString();
+        if(++count>2048 || !tags.contains(tag) || (count==1 && tag!=QLatin1String("svg"))) return false;
+        if(!xml.namespaceUri().isEmpty() && xml.namespaceUri()!=QLatin1String("http://www.w3.org/2000/svg")) return false;
+        for(const auto &a:xml.attributes()) {
+            const QString key=a.name().toString(),value=a.value().toString();
+            if(!attributes.contains(key) || !a.namespaceUri().isEmpty() || value.size()>16384 || value.contains("://") || value.contains("data:",Qt::CaseInsensitive)
+                || (value.contains("url",Qt::CaseInsensitive) && !QRegularExpression(QStringLiteral("^url\\(#[A-Za-z0-9_-]+\\)$")).match(value).hasMatch())) return false;
+        }
+    }
+    return !xml.hasError() && count>0;
+}
+}
+QVariantMap readIcon(const QString &file) {
+    QFile f(file);if(!f.open(QIODevice::ReadOnly)||f.size()>32768) return fail(QStringLiteral("Choose a static SVG icon up to 32 KB."));
+    const auto data=f.readAll();if(!safeSvg(data))return fail(QStringLiteral("SVG refused: use static vector shapes without scripts, external links, text, animation or embedded images."));
+    return {{"ok",true},{"svg",QString::fromLatin1(data.toBase64())},{"msg","Custom static SVG loaded into the draft only. Map an exact player resource before staging."}};
+}
+QByteArray mappedIcon(const QVariantMap &mapping,const QString &style,const QString &tint) {
+    if(mapping.contains("glyph") && !mapping.contains("svg")) return icon(mapping.value("glyph").toString(),style,tint);
+    if(!mapping.contains("svg") || mapping.contains("glyph") || mapping.value("svg").metaType().id()!=QMetaType::QString) return {};
+    const auto text=mapping.value("svg").toString();if(text.size()>44000)return {};
+    const auto decoded=QByteArray::fromBase64Encoding(text.toLatin1(),QByteArray::AbortOnBase64DecodingErrors);
+    return decoded && safeSvg(decoded.decoded) ? decoded.decoded : QByteArray();
+}
 QVariantMap validate(const QVariantMap &p) {
     const QSet<QString> keys{"schema","version","name","base","accent","surface","radius","height","padding","motion","duration","iconStyle","palette","tokens","icons"};
     for (auto it=p.cbegin();it!=p.cend();++it) if (!keys.contains(it.key())) return fail(QStringLiteral("Unknown skin field: %1").arg(it.key()));
@@ -71,8 +106,8 @@ QVariantMap validate(const QVariantMap &p) {
     for (const auto &v:icons) {
         if (v.metaType().id()!=QMetaType::QVariantMap) return fail(QStringLiteral("Invalid icon mapping."));
         const auto i=v.toMap();const QString path=i.value("path").toString();
-        if (i.size()!=2 || !i.contains("path") || !i.contains("glyph") || path.isEmpty() || path.size()>1024 || path.contains("..") || !path.endsWith(".svg",Qt::CaseInsensitive) || seen.contains(path)
-            || icon(i.value("glyph").toString(),p.value("iconStyle").toString(),p.value("accent").toString()).isEmpty()) return fail(QStringLiteral("Invalid or duplicate SVG mapping."));
+        if (i.size()!=2 || !i.contains("path") || (i.contains("glyph") == i.contains("svg")) || path.isEmpty() || path.size()>1024 || path.contains("..") || !path.endsWith(".svg",Qt::CaseInsensitive) || seen.contains(path)
+            || mappedIcon(i,p.value("iconStyle").toString(),p.value("accent").toString()).isEmpty()) return fail(QStringLiteral("Invalid or duplicate SVG mapping."));
         seen.insert(path);
     }
     if (QJsonDocument(QJsonObject::fromVariantMap(p)).toJson().size()>256*1024) return fail(QStringLiteral("Skin profile exceeds 256 KB."));

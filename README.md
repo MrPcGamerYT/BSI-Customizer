@@ -47,7 +47,9 @@ own pack name, accent, surface, geometry, icon family and preview motion. Save/i
 portable `bsi.skin` JSON profiles; imports do not apply anything. Advanced controls
 allow exact detected palette-property and numeric-token overrides. Map individual
 SVG resources from an **explicit manual resource scan** to built-in line, rounded
-or bold icons; generated replacements join the same verified EXE batch.
+or bold icons, or import a custom static SVG (up to 32 KB per icon). SVG scripts,
+external references, DTDs and unsupported elements are refused. Icon replacements
+join the same verified EXE batch.
 
 **Full emulator skins are not complete.** Names and motion settings are currently
 profile/preview metadata, not injected player branding or animations. The writer
