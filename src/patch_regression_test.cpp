@@ -5740,7 +5740,11 @@ Window {
         QSettings().setValue(QStringLiteral("fps/autoDetect"), true);
         SettingsManager settings;
         Backend backend(&settings);
-        check(settings.dllPath().endsWith(QLatin1String("Qt5QuickTemplates2.dll")), "startup corrects a stale saved Qt DLL target");
+        check(settings.dllPath() == qt6, "startup restores saved DLL metadata without parsing the player");
+        check(backend.fpsAnalyze().value(QStringLiteral("ok")).toBool()
+                  && settings.dllPath().endsWith(QLatin1String("Qt5QuickTemplates2.dll"))
+                  && read(qt5) == sliderDll(false) && read(qt6) == sliderDll(false),
+              "explicit Analyze corrects a stale saved Qt target without modifying either DLL");
         write(player, importedPlayer({ QStringLiteral("Qt6Core.dll") }));
         settings.setExePath(player);
         check(settings.dllPath().endsWith(QLatin1String("Qt6QuickTemplates2.dll")), "same-path in-place Qt upgrades refresh the selected DLL");
@@ -5961,10 +5965,13 @@ Window {
               "when both DLLs exist, player Qt6 dependency selects Qt6");
         QSettings().setValue(QStringLiteral("paths/exe"), exe);
         QSettings().setValue(QStringLiteral("paths/dll"), renderer);
+        QSettings().setValue(QStringLiteral("fps/autoDetect"), true);
         SettingsManager settings;
         Backend backend(&settings);
-        check(settings.dllPath().endsWith(QLatin1String("Qt6QuickTemplates2.dll")),
-              "old persisted OpenGL target migrates to the player's QuickTemplates2 DLL");
+        check(settings.dllPath().isEmpty(), "startup refuses a persisted renderer target without scanning DLLs");
+        backend.fpsAnalyze();
+        check(settings.dllPath().endsWith(QLatin1String("Qt6QuickTemplates2.dll")) && read(renderer) == sliderDll(false),
+              "explicit Analyze migrates the old OpenGL target without changing the renderer");
         int notifications = 0;
         QObject::connect(&backend, &Backend::dllPathChanged, [&notifications] { ++notifications; });
         settings.setDllPath(temp.filePath(QStringLiteral("Qt5QuickTemplates2.dll")));
