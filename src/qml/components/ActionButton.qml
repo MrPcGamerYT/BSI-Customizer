@@ -38,7 +38,7 @@ Rectangle {
         id: buttonLabel
         anchors.centerIn: parent
         text: button.text
-        color: button.accent && button.enabled ? Theme.window : Theme.text
+        color: button.accent ? Theme.window : Theme.text
         font.pixelSize: 12
         font.weight: Font.DemiBold
     }
