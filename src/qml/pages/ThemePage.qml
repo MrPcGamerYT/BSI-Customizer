@@ -246,7 +246,7 @@ Item {
                             spacing: 8
                             model: backend.themePresets
                             opacity: backend.themeFound ? 1.0 : 0.55
-                            Behavior on opacity { NumberAnimation { duration: 140 } }
+                            Behavior on opacity { NumberAnimation { duration: Theme.motionDuration } }
                             ScrollBar.horizontal: ScrollBar {}
 
                             delegate: Rectangle {
@@ -261,7 +261,7 @@ Item {
                                 border.width: 1
                                 border.color: chosen ? Theme.accent : Theme.border
 
-                                Behavior on color { ColorAnimation { duration: 120 } }
+                                Behavior on color { ColorAnimation { duration: Theme.motionDuration } }
 
                                 ColumnLayout {
                                     anchors.fill: parent
@@ -448,7 +448,7 @@ Item {
                             border.width: 1
                             border.color: modelData.edit !== "" ? Theme.accent : Theme.border
 
-                            Behavior on color { ColorAnimation { duration: 90 } }
+                            Behavior on color { ColorAnimation { duration: Theme.motionDuration } }
 
                             RowLayout {
                                 anchors.fill: parent
@@ -596,7 +596,7 @@ Item {
                             spacing: 8
                             model: backend.themePresets
                             opacity: backend.themeFound ? 1.0 : 0.55
-                            Behavior on opacity { NumberAnimation { duration: 140 } }
+                            Behavior on opacity { NumberAnimation { duration: Theme.motionDuration } }
                             ScrollBar.horizontal: ScrollBar {}
 
                             delegate: Rectangle {
@@ -611,7 +611,7 @@ Item {
                                 border.width: 1
                                 border.color: chosen ? Theme.accent : Theme.border
 
-                                Behavior on color { ColorAnimation { duration: 120 } }
+                                Behavior on color { ColorAnimation { duration: Theme.motionDuration } }
 
                                 ColumnLayout {
                                     anchors.fill: parent
@@ -780,7 +780,7 @@ Item {
                             border.width: 1
                             border.color: modelData.enabled ? Theme.accent : Theme.border
 
-                            Behavior on color { ColorAnimation { duration: 90 } }
+                            Behavior on color { ColorAnimation { duration: Theme.motionDuration } }
 
                             RowLayout {
                                 anchors.fill: parent

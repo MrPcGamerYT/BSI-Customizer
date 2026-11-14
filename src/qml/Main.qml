@@ -100,7 +100,10 @@ ApplicationWindow {
             pages.currentIndex = index;
     }
 
-    ControlCenterBackdrop { anchors.fill: parent }
+    ControlCenterBackdrop {
+        anchors.fill: parent
+        animationAllowed: window.visible && window.active && window.visibility !== Window.Minimized
+    }
 
     Rectangle {
         id: rail; objectName: "studioSidebar"
@@ -137,7 +140,9 @@ ApplicationWindow {
                             id: navButton; objectName: "navGroup" + navGroup.index
                             width: parent.width; height: 42; Accessible.name: navGroup.modelData.label
                             background: Rectangle {
-                                color: navButton.hovered ? Qt.alpha(Theme.text,.025) : "transparent"
+                                radius: 10
+                                color: navButton.hovered ? Theme.hoverFill : "transparent"
+                                Behavior on color { ColorAnimation { duration: Theme.motionDuration } }
                                 Rectangle { visible: navGroup.selected; x: 0; width: 2; height: 18; radius: 1; anchors.verticalCenter: parent.verticalCenter; color: Theme.accent }
                             }
                             contentItem: Item {
@@ -153,14 +158,22 @@ ApplicationWindow {
                             }
                         }
                         Column {
-                            width: parent.width; visible: navGroup.expanded; spacing: 2
+                            width: parent.width; visible: height > 0; spacing: 2; clip: true
+                            height: navGroup.expanded ? implicitHeight : 0
+                            opacity: navGroup.expanded ? 1 : 0
+                            enabled: navGroup.expanded
+                            Behavior on height { NumberAnimation { duration: Theme.revealDuration; easing.type: Easing.OutCubic } }
+                            Behavior on opacity { NumberAnimation { duration: Theme.motionDuration } }
                             Repeater {
                                 model: navGroup.modelData.children
                                 AbstractButton {
                                     id: subButton; required property int modelData
                                     objectName: "featureNav" + modelData
                                     width: parent.width; height: 33
-                                    background: Rectangle { color: subButton.hovered ? Theme.raised : "transparent" }
+                                    background: Rectangle {
+                                        radius: 8; color: subButton.hovered ? Theme.hoverFill : "transparent"
+                                        Behavior on color { ColorAnimation { duration: Theme.motionDuration } }
+                                    }
                                     contentItem: Text { leftPadding: 54; verticalAlignment: Text.AlignVCenter; text: window.featurePages[subButton.modelData].label; color: pages.currentIndex===subButton.modelData ? Theme.text : Theme.textDim; font.family: Theme.bodyFont; font.pixelSize: 11; elide: Text.ElideRight }
                                     onClicked: window.navigatePage(modelData)
                                 }
@@ -217,6 +230,8 @@ ApplicationWindow {
     }
     Menu {
         id: appMenu
+        enter: Transition { NumberAnimation { property: "opacity"; from: 0; to: 1; duration: Theme.motionDuration } }
+        exit: Transition { NumberAnimation { property: "opacity"; to: 0; duration: Theme.motionDuration } }
         MenuItem { text: qsTr("Purge player cache…"); enabled: !backend.busy; onTriggered: purgeCacheDialog.open() }
         MenuItem {
             text: qsTr("Settings")
@@ -238,9 +253,19 @@ ApplicationWindow {
             enabled: !backend.busy
             onTriggered: runSelftest()
         }
-        MenuItem { text: qsTr("Reduce motion"); checkable: true; checked: Theme.reduceMotion; onTriggered: Theme.reduceMotion = checked }
+        MenuItem { text: qsTr("Animated background"); checkable: true; checked: Theme.backgroundMotion; enabled: !Theme.reduceMotion; onTriggered: themes.backgroundMotion = checked }
+        MenuItem { text: qsTr("Reduce motion"); checkable: true; checked: Theme.reduceMotion; onTriggered: themes.reduceMotion = checked }
         MenuSeparator {}
         MenuItem { text: qsTr("Sign out"); enabled: !backend.busy; onTriggered: auth.signOut() }
+    }
+
+    LoadingStrip {
+        objectName: "shellLoadingStrip"
+        anchors.left: rail.right; anchors.right: parent.right; anchors.top: topbar.bottom
+        z: 10
+        busy: auth.authorized && (backend.busy ||
+              (pages.children[pages.currentIndex] && pages.children[pages.currentIndex].status === Loader.Loading))
+        animationAllowed: window.active && window.visibility !== Window.Minimized
     }
 
     ColumnLayout {
@@ -350,7 +375,7 @@ ApplicationWindow {
         visible: opacity > 0.01
         enabled: !auth.authorized
         opacity: auth.authorized ? 0 : 1
-        Behavior on opacity { NumberAnimation { duration: 260 } }
+        Behavior on opacity { NumberAnimation { duration: Theme.revealDuration } }
     }
 
     // Installation detection is an explicit Home action, not a startup scan.

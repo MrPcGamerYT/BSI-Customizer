@@ -55,8 +55,9 @@ Item {
         }
         Text { visible: !card.feature; x: 20; y: parent.height-45; text: card.title; color: "white"; font.family: Theme.headingFont; font.pixelSize: 23; font.weight: Font.DemiBold; font.letterSpacing: -0.65 }
         Rectangle {
-            anchors.fill: parent; radius: 16; color: "transparent"
-            border.width: 1; border.color: card.selected ? Theme.accent : card.lifted ? "#29ffffff" : "#12ffffff"
+            anchors.fill: parent; radius: 16; color: card.lifted ? Qt.alpha(Theme.accent, 0.07) : "transparent"
+            Behavior on color { ColorAnimation { duration: Theme.motionDuration } }
+            border.width: 1; border.color: card.selected ? Theme.accent : card.lifted ? Theme.hoverBorder : Theme.border
             Behavior on border.color { ColorAnimation { duration: Theme.motionDuration } }
         }
         AbstractButton {

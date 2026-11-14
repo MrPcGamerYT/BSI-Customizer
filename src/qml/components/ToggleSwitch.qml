@@ -48,8 +48,9 @@ RowLayout {
         radius: 13
         color: control.checked ? Theme.accent : Theme.raised
         border.width: 1
-        border.color: control.activeFocus ? Theme.accent : (control.checked ? "transparent" : Theme.border)
-        Behavior on opacity { NumberAnimation { duration: 150 } }
+        border.color: control.activeFocus ? Theme.accent : (toggleMouse.containsMouse ? Theme.hoverBorder : control.checked ? "transparent" : Theme.border)
+        Behavior on color { ColorAnimation { duration: Theme.motionDuration } }
+        Behavior on border.color { ColorAnimation { duration: Theme.motionDuration } }
 
         Rectangle {
             id: knob
@@ -59,10 +60,12 @@ RowLayout {
             y: 3
             x: control.checked ? track.width - width - 4 : 4
             color: control.checked ? Theme.primaryText : Theme.textDim
-            Behavior on x { NumberAnimation { duration: 150; easing.type: Easing.OutCubic } }
+            Behavior on x { NumberAnimation { duration: Theme.motionDuration; easing.type: Easing.OutCubic } }
         }
 
         MouseArea {
+            id: toggleMouse
+            hoverEnabled: true
             anchors.fill: parent
             cursorShape: Qt.PointingHandCursor
             onPressed: control.forceActiveFocus(Qt.MouseFocusReason)

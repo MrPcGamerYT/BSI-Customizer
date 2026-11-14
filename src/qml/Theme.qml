@@ -7,7 +7,11 @@ QtObject {
     readonly property string bodyFont: "Inter"
     readonly property string headingFont: "Inter"
     readonly property string monoFont: "JetBrains Mono"
-    property bool reduceMotion: false
+    readonly property bool reduceMotion: themes.reduceMotion
+    readonly property bool backgroundMotion: themes.backgroundMotion
+    readonly property int revealDuration: reduceMotion ? 0 : 220
+    readonly property color hoverFill: Qt.alpha(accent, dark ? 0.12 : 0.08)
+    readonly property color hoverBorder: Qt.alpha(accent, 0.45)
     readonly property int motionDuration: reduceMotion ? 0 : 150
     readonly property bool dark: themes.effectiveTheme === 0
     readonly property color defaultAccent: "#7C5CFF"

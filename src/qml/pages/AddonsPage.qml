@@ -205,6 +205,14 @@ Item {
         id: editor; objectName: "skinEditor"; implicitWidth: 760; implicitHeight: 600; edge: Qt.RightEdge
         width: Math.min(760,page.width); height: parent ? parent.height : page.height
         modal: true; dim: true; padding: 24
+        enter: Transition {
+            NumberAnimation { property: "position"; from: 0; to: 1; duration: Theme.revealDuration; easing.type: Easing.OutCubic }
+            NumberAnimation { property: "opacity"; from: 0; to: 1; duration: Theme.motionDuration }
+        }
+        exit: Transition {
+            NumberAnimation { property: "position"; to: 0; duration: Theme.motionDuration; easing.type: Easing.InCubic }
+            NumberAnimation { property: "opacity"; to: 0; duration: Theme.motionDuration }
+        }
         background: Rectangle { color: Theme.card; border.color: Theme.border; radius: 20 }
         contentItem: ScrollView {
             id: editorScroll; contentWidth: availableWidth; clip: true
@@ -246,7 +254,7 @@ Item {
                     RowLayout {
                         Label { text: qsTr("Preview duration (ms)"); color: Theme.textDim }
                         SpinBox { from: 0; to: 1200; stepSize: 20; editable: true; value: page.draft.duration; onValueModified: page.edit("duration", value) }
-                        CheckBox { text: qsTr("Reduce app motion"); checked: Theme.reduceMotion; onToggled: Theme.reduceMotion = checked }
+                        CheckBox { text: qsTr("Reduce app motion"); checked: Theme.reduceMotion; onToggled: themes.reduceMotion = checked }
                         ActionButton { text: qsTr("Replay"); onClicked: playerPreview.replay() }
                     }
                     Label { Layout.fillWidth: true; wrapMode: Text.Wrap; color: Theme.warn; text: qsTr("Player deployment currently supports mapped palette, safe numeric design tokens and explicitly mapped SVG icons. Motion and pack name are authoring/preview metadata, not injected player animations or branding. Full-window skins, native dialogs, optimizer and boot are not covered.") }

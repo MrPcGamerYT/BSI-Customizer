@@ -302,6 +302,16 @@ int runSelfTest()
 
         SettingsManager settings;
         ThemeManager themes;
+        const bool savedReduceMotion = themes.reduceMotion();
+        const bool savedBackgroundMotion = themes.backgroundMotion();
+        themes.setReduceMotion(!savedReduceMotion);
+        themes.setBackgroundMotion(!savedBackgroundMotion);
+        ThemeManager reloadedAppearance;
+        check(reloadedAppearance.reduceMotion() == !savedReduceMotion
+                  && reloadedAppearance.backgroundMotion() == !savedBackgroundMotion,
+              "motion preferences persist across ThemeManager instances");
+        themes.setReduceMotion(savedReduceMotion);
+        themes.setBackgroundMotion(savedBackgroundMotion);
         Backend backend(&settings);
         SysInfo sysinfo;
         UpdateChecker updates;

@@ -322,6 +322,7 @@ qt_add_qml_module(BSICustomizer
         src/qml/components/MiniPlayer.qml
         src/qml/components/CollectionCard.qml
         src/qml/components/ControlCenterBackdrop.qml
+        src/qml/components/LoadingStrip.qml
         src/qml/components/LazyFeature.qml
         src/qml/components/Card.qml
         src/qml/components/ActionButton.qml

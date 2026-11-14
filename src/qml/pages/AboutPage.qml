@@ -166,7 +166,7 @@ Item {
                                 color: linkArea.containsMouse ? Theme.accentSoft : Theme.cardLow
                                 border.width: 1
                                 border.color: linkArea.containsMouse ? Theme.borderStrong : Theme.border
-                                Behavior on color { ColorAnimation { duration: 120 } }
+                                Behavior on color { ColorAnimation { duration: Theme.motionDuration } }
 
                                 RowLayout {
                                     anchors.fill: parent

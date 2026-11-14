@@ -56,7 +56,7 @@ QtObject {
  function localFilePath(url) { return String(url); }
 }''')
     themes=create('''import QtQuick
-QtObject { property int effectiveTheme: 0; property color accentColor: "#7c5cff" }''')
+QtObject { property bool reduceMotion: false; property bool backgroundMotion: true; property int theme: 0; property int effectiveTheme: 0; property color accentColor: "#7c5cff" }''')
     auth=create('''import QtQuick
 QtObject {
  property bool busy: false
@@ -84,6 +84,8 @@ import QtQuick.Window
 import BSICustomizer
 Window {
  width:1420;height:920;visible:true
+ ControlCenterBackdrop { id:ambience; objectName:"testAmbience"; anchors.fill:parent }
+ LoadingStrip { objectName:"testLoading"; anchors.top:parent.top; width:parent.width; z:100 }
  AddonsPage { id:page;objectName:"testStudio";anchors.fill:parent }
  LoginGate { id:login;anchors.fill:parent;appWindow:parent;visible:false }
  function choose() { page.selectPack(3); page.edit("name","My custom pack"); }
@@ -104,6 +106,28 @@ Window {
             pending.extend(item.childItems())
         return None
     QTest.qWait(150)
+    # Motion has explicit off switches; no engine calls or blocking curtain.
+    ambience=window.findChild(QObject,"testAmbience")
+    strip=window.findChild(QObject,"testLoading")
+    assert ambience.property("moving") is True
+    strip.setProperty("busy",True);QTest.qWait(50)
+    assert strip.property("animating") is True
+    themes.setProperty("reduceMotion",True);QTest.qWait(30)
+    assert ambience.property("moving") is False
+    assert strip.property("animating") is False
+    motion=create("import QtQuick\nimport BSICustomizer\nQtObject { property int duration: Theme.motionDuration }")
+    assert motion.property("duration")==0
+    themes.setProperty("reduceMotion",False)
+    assert motion.property("duration")==150
+    themes.setProperty("backgroundMotion",False)
+    assert ambience.property("moving") is False
+    themes.setProperty("backgroundMotion",True)
+    ambience.setProperty("animationAllowed",False)
+    assert ambience.property("moving") is False
+    ambience.setProperty("animationAllowed",True)
+    strip.setProperty("animationAllowed",False)
+    assert strip.property("animating") is False
+    strip.setProperty("busy",False)
     assert calls()==[],"page creation must not scan or inspect"
     assert named("skinCollection5") is not None
     assert named("selectedDesignInspector") is not None
@@ -158,11 +182,15 @@ QtObject {
     QTest.qWait(250)
     if screenshots:
         assert shell.grabWindow().save(str(screenshots/"control-center-native.png"))
+    busyStrip=shell.findChild(QObject,"shellLoadingStrip")
+    assert busyStrip is not None and not busyStrip.property("busy")
     backend.setProperty("busy",True)
+    assert busyStrip.property("busy"), "real backend work drives the nonmodal loading strip"
     QMetaObject.invokeMethod(shell,"navigatePage",Q_ARG("QVariant",11))
     QTest.qWait(100)
     assert shell.property("currentPage")==11, "navigation stays responsive during serialized operations"
     backend.setProperty("busy",False)
+    assert not busyStrip.property("busy")
     auth.setProperty("authorized",False);QTest.qWait(100)
     assert all(loader.property("item") is None for loader in loaders), "sign-out unloads all editors"
     assert not errors,errors

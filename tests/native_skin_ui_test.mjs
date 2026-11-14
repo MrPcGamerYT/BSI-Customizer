@@ -41,7 +41,7 @@ assert.ok(!read('src/qml/components/CollectionCard.qml').includes('scale:'));
 assert.ok(read('src/qml/components/CollectionCard.qml').includes('y: card.lifted ? -2 : 0'));
 for(const token of ['#0A0A0E','#111116','#17171D','#7C5CFF','#C8E86A']) assert.ok(read('src/qml/Theme.qml').includes(token));
 assert.ok(qml.includes('selectedDesignInspector') && qml.includes('collectionBento'));
-console.log('PASS: exact control-center tokens, lazy authenticated routes, no entry scans, nonmodal busy status and bounded hover-only card motion.');
+console.log('PASS: exact control-center tokens, lazy authenticated routes, no entry scans, nonmodal busy status and bounded card interaction motion.');
 
 const settings=read('src/core/SettingsManager.cpp');
 const startup=settings.slice(settings.indexOf('SettingsManager::SettingsManager'),settings.indexOf('void SettingsManager::refreshFpsPath'));
@@ -56,3 +56,16 @@ assert.ok(read('src/qml/components/ActionButton.qml').includes('button.accent ? 
 assert.ok(read('src/qml/components/LogPanel.qml').includes('logModel.clear()'),'expanded activity keeps the Clear workflow');
 
 assert.ok(read('src/qml/components/CollectionCard.qml').includes('property bool lifted: cardHover.hovered'),'stationary hover bounds avoid edge lift/unlift feedback');
+
+const backdrop=read('src/qml/components/ControlCenterBackdrop.qml');
+assert.ok(backdrop.includes('Theme.backgroundMotion && !Theme.reduceMotion'));
+assert.ok(backdrop.includes('animationAllowed && visible'));
+assert.ok(!backdrop.includes('Timer {') && !backdrop.includes('onXChanged: requestPaint'));
+assert.ok(shell.includes('window.active && window.visibility !== Window.Minimized'));
+const strip=read('src/qml/components/LoadingStrip.qml');
+assert.ok(strip.includes('busy && visible && animationAllowed && !Theme.reduceMotion'));
+assert.ok(strip.includes('Theme.reduceMotion ? parent.width'));
+assert.ok(read('src/core/ThemeManager.cpp').includes('appearance/reduceMotion'));
+assert.ok(read('src/core/ThemeManager.cpp').includes('appearance/backgroundMotion'));
+assert.ok(read('src/qml/pages/AppearancePage.qml').includes('reduceMotionToggle'));
+console.log('PASS: persisted motion switches, inactive-window ambient guard, bounded cached background and nonmodal accessible loading strip.');

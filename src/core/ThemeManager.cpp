@@ -8,6 +8,8 @@ ThemeManager::ThemeManager(QObject *parent)
     : QObject(parent)
 {
     const QSettings s;
+    m_reduceMotion = s.value(QStringLiteral("appearance/reduceMotion"), false).toBool();
+    m_backgroundMotion = s.value(QStringLiteral("appearance/backgroundMotion"), true).toBool();
     m_theme = s.value(QStringLiteral("appearance/theme"), int(Dark)).toInt();
     if (m_theme < Dark || m_theme > System)
         m_theme = Dark;
@@ -60,4 +62,20 @@ void ThemeManager::setAccentColor(const QColor &color)
     m_accent = color;
     QSettings().setValue(QStringLiteral("appearance/accent"), m_accent.name());
     emit accentColorChanged(m_accent);
+}
+
+void ThemeManager::setReduceMotion(bool enabled)
+{
+    if (m_reduceMotion == enabled) return;
+    m_reduceMotion = enabled;
+    QSettings().setValue(QStringLiteral("appearance/reduceMotion"), enabled);
+    emit reduceMotionChanged();
+}
+
+void ThemeManager::setBackgroundMotion(bool enabled)
+{
+    if (m_backgroundMotion == enabled) return;
+    m_backgroundMotion = enabled;
+    QSettings().setValue(QStringLiteral("appearance/backgroundMotion"), enabled);
+    emit backgroundMotionChanged();
 }

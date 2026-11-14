@@ -15,6 +15,8 @@ class ThemeManager : public QObject
 {
     Q_OBJECT
     Q_PROPERTY(int theme READ theme WRITE setTheme NOTIFY themeChanged)
+    Q_PROPERTY(bool reduceMotion READ reduceMotion WRITE setReduceMotion NOTIFY reduceMotionChanged)
+    Q_PROPERTY(bool backgroundMotion READ backgroundMotion WRITE setBackgroundMotion NOTIFY backgroundMotionChanged)
     Q_PROPERTY(int effectiveTheme READ effectiveTheme NOTIFY effectiveThemeChanged)
     Q_PROPERTY(QColor accentColor READ accentColor WRITE setAccentColor NOTIFY accentColorChanged)
 
@@ -23,6 +25,11 @@ public:
     Q_ENUM(Theme)
 
     explicit ThemeManager(QObject *parent = nullptr);
+
+    bool reduceMotion() const { return m_reduceMotion; }
+    void setReduceMotion(bool enabled);
+    bool backgroundMotion() const { return m_backgroundMotion; }
+    void setBackgroundMotion(bool enabled);
 
     int theme() const { return m_theme; }
     void setTheme(int theme);
@@ -34,11 +41,15 @@ public:
     void setAccentColor(const QColor &color);
 
 signals:
+    void reduceMotionChanged();
+    void backgroundMotionChanged();
     void themeChanged(int theme);
     void effectiveThemeChanged();
     void accentColorChanged(const QColor &color);
 
 private:
+    bool m_reduceMotion = false;
+    bool m_backgroundMotion = true;
     int m_theme = Dark;
     QColor m_accent;
 };

@@ -39,6 +39,32 @@ Item {
                 }
             }
 
+            Card {
+                Layout.fillWidth: true
+                pad: 14
+                ColumnLayout {
+                    anchors.fill: parent; spacing: 14
+                    ToggleSwitch {
+                        objectName: "backgroundMotionToggle"
+                        Layout.fillWidth: true
+                        label: qsTr("Animated background")
+                        description: qsTr("Slow accent glows and floating points. Pauses when the window is inactive.")
+                        checked: Theme.backgroundMotion
+                        enabled: !Theme.reduceMotion
+                        opacity: enabled ? 1 : 0.5
+                        onToggled: themes.backgroundMotion = !checked
+                    }
+                    ToggleSwitch {
+                        objectName: "reduceMotionToggle"
+                        Layout.fillWidth: true
+                        label: qsTr("Reduce motion")
+                        description: qsTr("Disable background movement and interface transitions. Saved for the next launch.")
+                        checked: Theme.reduceMotion
+                        onToggled: themes.reduceMotion = !checked
+                    }
+                }
+            }
+
             // Three clear mode cards replace the small legacy chip row.
             Card {
                 Layout.fillWidth: true
@@ -83,7 +109,7 @@ Item {
                                        : modeMouse.containsMouse ? Theme.raised : Theme.cardLow
                                 border.width: 1
                                 border.color: themes.theme === index ? Theme.borderStrong : Theme.border
-                                Behavior on color { ColorAnimation { duration: 120 } }
+                                Behavior on color { ColorAnimation { duration: Theme.motionDuration } }
                                 ColumnLayout {
                                     anchors.fill: parent
                                     anchors.margins: 10

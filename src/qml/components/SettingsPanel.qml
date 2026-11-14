@@ -35,10 +35,10 @@ Popup {
     closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
 
     enter: Transition {
-        NumberAnimation { property: "opacity"; from: 0; to: 1; duration: 150 }
+        NumberAnimation { property: "opacity"; from: 0; to: 1; duration: Theme.revealDuration }
     }
     exit: Transition {
-        NumberAnimation { property: "opacity"; from: 1; to: 0; duration: 100 }
+        NumberAnimation { property: "opacity"; from: 1; to: 0; duration: Theme.motionDuration }
     }
 
     Overlay.modal: Rectangle { color: Qt.rgba(1 / 255, 5 / 255, 12 / 255, 0.72) }
@@ -193,7 +193,7 @@ Popup {
                     border.width: panel.currentTab === index ? 1 : 1
                     border.color: panel.currentTab === index ? Theme.borderStrong
                                                              : tabMouse.containsMouse ? Theme.border : "transparent"
-                    Behavior on color { ColorAnimation { duration: 130 } }
+                    Behavior on color { ColorAnimation { duration: Theme.motionDuration } }
 
                     Row {
                         anchors.centerIn: parent

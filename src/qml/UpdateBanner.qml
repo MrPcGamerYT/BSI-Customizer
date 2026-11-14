@@ -25,7 +25,7 @@ Rectangle {
     border.color: updates.noteKind === "bad" ? Theme.danger : Theme.accent
     clip: true
 
-    Behavior on implicitHeight { NumberAnimation { duration: 140 } }
+    Behavior on implicitHeight { NumberAnimation { duration: Theme.motionDuration } }
 
     ColumnLayout {
         anchors.fill: parent
@@ -131,7 +131,7 @@ Rectangle {
                 height: parent.height
                 radius: 2
                 color: Theme.accent
-                Behavior on width { NumberAnimation { duration: 120 } }
+                Behavior on width { NumberAnimation { duration: Theme.motionDuration } }
             }
         }
 

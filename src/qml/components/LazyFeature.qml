@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Layouts
+import BSICustomizer
 
 Loader {
     id: feature
@@ -20,7 +21,18 @@ Loader {
         if(dynamicItem && typeof dynamicItem.previewSelected === "function") dynamicItem.previewSelected();
     }
     onAuthorizedChanged: if (!authorized) visited = false
-    onLoaded: visited = true
+    function reveal() {
+        entry.stop();
+        opacity = 1;
+        if (!Theme.reduceMotion && visible && status === Loader.Ready) entry.start();
+    }
+    onVisibleChanged: if (visible) reveal()
+    onLoaded: { visited = true; reveal(); }
+    NumberAnimation { id: entry; target: feature; property: "opacity"; from: 0; to: 1; duration: Theme.revealDuration; easing.type: Easing.OutCubic }
+    Connections {
+        target: Theme
+        function onReduceMotionChanged() { if (Theme.reduceMotion) { entry.stop(); feature.opacity = 1; } }
+    }
     Connections {
         target: feature.item
         ignoreUnknownSignals: true

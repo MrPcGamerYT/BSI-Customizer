@@ -19,13 +19,14 @@ Rectangle {
     implicitHeight: 36
     radius: height / 2
 
-    // No scale or idle animation: interaction is a short color transition only.
+    // Press feedback stays inside the hit target; no layout scaling or delays.
+    Behavior on border.color { ColorAnimation { duration: Theme.motionDuration } }
     Behavior on color { ColorAnimation { duration: Theme.motionDuration } }
     color: button.accent ? (buttonArea.pressed ? "#d8d8df" : Theme.text)
-                         : (buttonArea.pressed || buttonArea.containsMouse ? Theme.raised : "transparent")
+                         : (buttonArea.pressed || buttonArea.containsMouse ? Theme.hoverFill : "transparent")
     border.width: 1
     border.color: button.activeFocus ? Theme.accent
-                  : (button.accent ? Theme.text : (buttonArea.containsMouse ? Theme.borderStrong : Theme.border))
+                  : (button.accent ? Theme.text : (buttonArea.containsMouse ? Theme.hoverBorder : Theme.border))
     activeFocusOnTab: true
     Accessible.role: Accessible.Button
     Accessible.name: button.text
@@ -34,6 +35,12 @@ Rectangle {
     opacity: button.enabled ? 1.0 : 0.45
     Behavior on opacity { NumberAnimation { duration: Theme.motionDuration } }
 
+    Rectangle {
+        anchors.fill: parent; radius: parent.radius
+        color: Qt.alpha(Theme.accent, button.accent ? 0.16 : 0.08)
+        opacity: buttonArea.pressed ? 1 : 0
+        Behavior on opacity { NumberAnimation { duration: Theme.motionDuration } }
+    }
     Text {
         id: buttonLabel
         anchors.centerIn: parent

@@ -12,8 +12,9 @@ AbstractButton {
     ToolTip.text: text
     background: Rectangle {
         radius: width / 2
-        color: control.filled ? (control.down ? "#cfcfd9" : "#f2f2f5") : control.hovered ? Theme.raised : "transparent"
-        border.color: control.activeFocus ? Theme.accent : control.filled ? "transparent" : Theme.border
+        color: control.filled ? (control.down ? "#cfcfd9" : "#f2f2f5") : control.hovered || control.down ? Theme.hoverFill : "transparent"
+        border.color: control.activeFocus ? Theme.accent : control.filled ? "transparent" : control.hovered ? Theme.hoverBorder : Theme.border
+        Behavior on border.color { ColorAnimation { duration: Theme.motionDuration } }
         Behavior on color { ColorAnimation { duration: Theme.motionDuration } }
     }
     contentItem: Image {
