@@ -23,7 +23,7 @@ int main(int argc,char **argv) {
             const auto source=f.readAll();
             const auto r=PlayerSkinCompiler::compile(leaf,source,profile);
             if(!r.value("ok").toBool()) {
-                std::printf("FAIL %s / %s: %s\n",qPrintable(id),qPrintable(leaf),qPrintable(r.value("msg").toString()));++failures;continue;
+                std::printf("::error::FAIL %s / %s: %s\n",qPrintable(id),qPrintable(leaf),qPrintable(r.value("msg").toString()));++failures;continue;
             }
             const auto bytes=r.value("source").toByteArray();
             QFile target(output.filePath(leaf));

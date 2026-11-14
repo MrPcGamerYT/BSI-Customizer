@@ -107,7 +107,7 @@ QVariantMap compile(const QString &leaf,const QByteArray &source,const QVariantM
         s.replace(image,"        implicitWidth: 42; implicitHeight: 24\n        width: implicitWidth; height: implicitHeight; radius: height / 2\n        color: iControl.checked ? bsiSkinAccent : '#38383f'\n        Rectangle { width: 18; height: 18; radius: 9; y: 3\n            x: iControl.checked ? parent.width - width - 3 : 3\n            color: '#f2f2f5'\n            Behavior on x { NumberAnimation { duration: bsiSkinDuration; easing.type: Easing.OutCubic } }\n        }\n"+behavior("color")+"\n");
     } else if(leaf=="UiDialog.qml") {
         if(s.contains("enter:")||s.contains("exit:"))ok=false;
-        replace("background: Rectangle {","background: Rectangle {\n        radius: bsiSkinRadius");
+        replace("background: Rectangle {\n        color: iControl.pColor.background","background: Rectangle {\n        radius: bsiSkinRadius\n        color: iControl.pColor.background");
         replace("id: iControl","id: iControl\n"+transitions());
     } else if(leaf=="UiSettingsWindow.qml") {
         replace("color: UiTheme.colors.primary80","radius: bsiSkinRadius\n            color: bsiSkinSurface");
