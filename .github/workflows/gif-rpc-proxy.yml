@@ -12,7 +12,11 @@ permissions:
   contents: read
 jobs:
   proxy:
-    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, windows-latest]
+    runs-on: ${{ matrix.os }}
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
@@ -43,7 +47,7 @@ jobs:
           if (-not (Select-String -Quiet -Path ./rpc-build/gif-rpc/Release/bsi-gif-rpc.log -Pattern 'V3: worker started')) { throw 'RPC worker did not run' }
       - uses: actions/upload-artifact@v4
         with:
-          name: gif-rpc-v3-tests-${{ github.run_id }}
+          name: gif-rpc-v3-tests-${{ matrix.os }}-${{ github.run_id }}
           path: |
             rpc-build/gif-rpc/Release/version.dll
             rpc-build/gif-rpc/Release/bsi-gif-rpc.log
