@@ -120,7 +120,11 @@ jobs:
   build-windows:
     name: Build & self-test (Windows x64 · ${{ matrix.label }})
     runs-on: windows-latest
-    timeout-minutes: 60
+    # The two "latest package" jobs legitimately run ~58 minutes (build + the
+    # full self-test against every reference player), which left no room for a
+    # single new check: a 60 minute cap turned a green suite into a timeout.
+    # Keep a margin so added coverage fails on its assertion, never on the clock.
+    timeout-minutes: 120
     strategy:
       fail-fast: false
       matrix:

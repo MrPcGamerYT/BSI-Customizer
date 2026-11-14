@@ -53,6 +53,9 @@ Item {
     // hiddenTabs/tabIcons come from the saved profile, not from the player.
     property var panelProfile: ({ hiddenTabs: [], tabIcons: {}, logo: null })
     property string panelMsg: ""
+    // True when the player carries a patch whose recovery snapshot is unusable,
+    // so only the stock .bak can unblock a rebuild.
+    property bool panelNeedsBackup: false
     // false until the player was actually read: the card then explains what it
     // needs instead of printing a wall of zeros.
     property bool panelReady: false
@@ -359,6 +362,12 @@ Item {
         page.refreshPanel();
         if (result && result.msg)
             page.notify(result.msg);
+        // A player patched by an older run whose snapshot was lost needs a
+        // clean base before this rebuild can write again. The stock backup the
+        // tool takes before its first write is exactly that base, and it is
+        // the only recovery path this page can offer from here.
+        const stuck = result && !result.ok && (result.msg || "").indexOf("recovery snapshot is unusable") >= 0;
+        page.panelNeedsBackup = !!stuck;
     }
 
     function panelLabel() {
@@ -2100,6 +2109,7 @@ Item {
                         }
 
                         Text {
+                            objectName: "settingsPanelMsg"
                             Layout.fillWidth: true
                             wrapMode: Text.Wrap
                             visible: page.panelMsg.length > 0
@@ -2107,6 +2117,36 @@ Item {
                             color: page.panel.applied ? Theme.green : Theme.textDim
                             font.pixelSize: 11
                             font.weight: Font.DemiBold
+                        }
+
+                        // Only shown when this player is patched but its snapshot
+                        // is unusable: restoring the stock backup is the one way
+                        // out, and it is already a button on this page.
+                        RowLayout {
+                            objectName: "settingsPanelBackupHint"
+                            Layout.fillWidth: true
+                            spacing: 10
+                            visible: page.panelNeedsBackup
+                            Text {
+                                Layout.fillWidth: true
+                                wrapMode: Text.Wrap
+                                text: qsTr("This player was patched by an earlier run and its recovery " +
+                                           "snapshot is damaged, so a rebuild cannot record the originals. " +
+                                           "Press “Restore Backup” above to put the stock HD-Player.exe " +
+                                           "back (the .bak the tool saved before its first write), then apply again.")
+                                color: Theme.warn
+                                font.pixelSize: 11
+                            }
+                            ActionButton {
+                                implicitHeight: 30
+                                text: qsTr("Restore Backup")
+                                enabled: !backend.busy
+                                onClicked: {
+                                    backend.restoreBackup(backend.exePath);
+                                    page.panelNeedsBackup = false;
+                                    page.refreshPanel();
+                                }
+                            }
                         }
 
                         Text {

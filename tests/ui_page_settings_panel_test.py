@@ -121,9 +121,21 @@ QtObject {
         calls = calls.concat(["clearSettingsPanelAsset:" + kind + ":" + id]);
         return {ok: true, msg: "Asset cleared."};
     }
+    // Mirrors the real patcher's answers: normally ok, but a player patched by
+    // an older run with a damaged snapshot is refused until its backup returns.
+    property bool recoveryBlocked: false
     function applySettingsPanelRebuild(enabled) {
         calls = calls.concat(["applySettingsPanelRebuild:" + enabled]);
+        if (recoveryBlocked)
+            return {ok: false, msg: "This player carries a Settings-panel patch, but its "
+                    + "recovery snapshot is unusable (incomplete). The executable was not "
+                    + "overwritten; restore the player backup before rebuilding."};
         return {ok: true, msg: enabled ? "Applied." : "Restored."};
+    }
+    function restoreBackup(path) {
+        calls = calls.concat(["restoreBackup:" + path]);
+        recoveryBlocked = false;
+        return {ok: true, msg: "Restored from backup."};
     }
     function layoutTweaks() { return []; }
     function sidebarButtonRows() { return {supported: false, applied: false, buttons: [], detail: ""}; }
@@ -257,6 +269,24 @@ Window {
     QTest.qWait(50)
     calls = backend.property("calls").toVariant()
     assert "applySettingsPanelRebuild:true" in calls and "applySettingsPanelRebuild:false" in calls, calls
+
+    # A blocked rebuild must explain itself and offer the only way out: the
+    # stock backup. In the normal case the hint stays out of the way entirely.
+    hint = page.findChild(QObject, "settingsPanelBackupHint")
+    assert hint is not None, "the backup hint must exist"
+    assert not hint.property("visible"), "the backup hint must stay hidden when apply works"
+    backend.setProperty("recoveryBlocked", True)
+    QMetaObject.invokeMethod(page, "applyPanel",
+                             __import__("PySide6.QtCore", fromlist=["Q_ARG"]).Q_ARG("QVariant", True))
+    QTest.qWait(100)
+    assert page.property("panelNeedsBackup"), "a blocked apply must surface the backup path"
+    assert hint.property("visible"), "the backup hint must show when the snapshot is unusable"
+    backend.setProperty("recoveryBlocked", False)
+    QMetaObject.invokeMethod(page, "applyPanel",
+                             __import__("PySide6.QtCore", fromlist=["Q_ARG"]).Q_ARG("QVariant", True))
+    QTest.qWait(100)
+    assert not page.property("panelNeedsBackup") and not hint.property("visible"), \
+        "a successful apply must clear the backup hint"
 
     # The rendered card carries the readouts and the actions of the section.
     def texts(root):
