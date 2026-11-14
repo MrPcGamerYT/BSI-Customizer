@@ -27,6 +27,8 @@
 #include <QMap>
 #include <QUrl>
 
+#include <algorithm>
+
 namespace SettingsPanelPatcher {
 namespace {
 const QString kWindowMarker = QStringLiteral("BSI CUSTOMIZER: redesigned Settings window v1");
@@ -57,6 +59,8 @@ const QStringList kAboutPatcherMarkers {
 constexpr qint64 kMaxImage = 256LL * 1024 * 1024;
 constexpr qint64 kMaxQml = 8LL * 1024 * 1024;
 
+bool literalQmlString(const QString &source, int begin, int end, QString *value);
+
 struct Source
 {
     QString path;
@@ -68,6 +72,7 @@ struct TargetSources
 {
     Source window;
     Source about;
+    QList<Source> pages;
     int pageCount = 0;
     int qmlClosureCount = 0;
     QString aboutLogoSource;
@@ -76,6 +81,138 @@ struct TargetSources
     QString error;
     bool ok = false;
 };
+
+QString responsiveSettingsPage(const QString &qml, bool *changed)
+{
+    *changed = false;
+    const QString masked = QmlText::mask(qml);
+    QList<QmlText::Object> scrollViews;
+    for (const auto &scroll : QmlText::objects(masked, QStringLiteral("UiScrollView"))) {
+        QmlText::Binding idBinding;
+        if (QmlText::binding(masked, scroll.open, scroll.end - 1, QStringLiteral("id"), &idBinding)
+            && masked.mid(idBinding.valueBegin, idBinding.valueEnd - idBinding.valueBegin).trimmed()
+                == QLatin1String("iScrollView"))
+            scrollViews << scroll;
+    }
+    const bool hasScrollView = !scrollViews.isEmpty();
+    struct WidthEdit { int begin; int end; QString value; };
+    QList<WidthEdit> ranges;
+    QString out = qml;
+    const auto consider = [&](const QString &type) {
+        for (const auto &object : QmlText::objects(masked, type)) {
+            bool directMainScrollChild = false;
+            if (hasScrollView) {
+                bool belongsToMainScroll = false;
+                for (const auto &scroll : scrollViews) {
+                    if (object.open > scroll.open && object.end < scroll.end) {
+                        belongsToMainScroll = true;
+                        int nestedBraces = 0;
+                        for (int i = scroll.open + 1; i < object.open; ++i) {
+                            if (masked.at(i) == QLatin1Char('{')) ++nestedBraces;
+                            else if (masked.at(i) == QLatin1Char('}') && nestedBraces > 0) --nestedBraces;
+                        }
+                        directMainScrollChild = nestedBraces == 0;
+                        break;
+                    }
+                }
+                if (!belongsToMainScroll) continue;
+            }
+            QmlText::Binding idBinding;
+            if (!QmlText::binding(masked, object.open, object.end - 1, QStringLiteral("id"), &idBinding)
+                || masked.mid(idBinding.valueBegin, idBinding.valueEnd - idBinding.valueBegin).trimmed()
+                    != QLatin1String("iContentLayout"))
+                continue;
+            QmlText::Binding widthBinding;
+            if (!QmlText::binding(masked, object.open, object.end - 1, QStringLiteral("width"), &widthBinding)
+                || masked.mid(widthBinding.valueBegin, widthBinding.valueEnd - widthBinding.valueBegin).trimmed()
+                    != QLatin1String("520"))
+                continue;
+            // ScrollView reparents its direct child into the viewport content
+            // item, so parent.width tracks the visible width without the longer
+            // ID lookup. Nested containers use the explicit scroll-view width.
+            const QString availableWidth = hasScrollView && !directMainScrollChild
+                ? QStringLiteral("iScrollView.width") : QStringLiteral("parent.width");
+            ranges << WidthEdit{widthBinding.valueBegin, widthBinding.valueEnd, availableWidth};
+        }
+    };
+    consider(QStringLiteral("UiColumnLayout"));
+    consider(QStringLiteral("ColumnLayout"));
+    std::sort(ranges.begin(), ranges.end(), [](const auto &a, const auto &b) { return a.begin > b.begin; });
+    for (const auto &range : ranges) {
+        out.replace(range.begin, range.end - range.begin, range.value);
+    }
+    *changed = !ranges.isEmpty();
+    return out;
+}
+
+const Source *sourceForPath(const TargetSources &sources, const QString &path)
+{
+    if (sources.window.path == path) return &sources.window;
+    if (sources.about.path == path) return &sources.about;
+    for (const Source &page : sources.pages)
+        if (page.path == path) return &page;
+    return nullptr;
+}
+
+QStringList settingsUnitNames(const TargetSources &sources)
+{
+    QStringList names { kWindowLeaf, kAboutLeaf };
+    for (const Source &page : sources.pages) {
+        const QString leaf = QFileInfo(page.path).fileName();
+        if (!leaf.isEmpty() && !names.contains(leaf, Qt::CaseInsensitive)) names << leaf;
+    }
+    return names;
+}
+
+QStringList settingsUnitIds(const TargetSources &sources)
+{
+    QStringList ids = kWindowUnitIds + kAboutUnitIds;
+    for (const Source *source : {&sources.window, &sources.about}) {
+        const QString masked = QmlText::mask(source->text);
+        QmlText::Binding objectName;
+        QString value;
+        if (QmlText::binding(masked, 0, masked.size(), QStringLiteral("objectName"), &objectName)
+            && literalQmlString(source->text, objectName.valueBegin, objectName.valueEnd, &value)
+            && !value.isEmpty() && !ids.contains(value))
+            ids << value;
+    }
+    for (const Source &source : sources.pages) {
+        const QString masked = QmlText::mask(source.text);
+        QmlText::Binding objectName;
+        QString value;
+        if (QmlText::binding(masked, 0, masked.size(), QStringLiteral("objectName"), &objectName)
+            && literalQmlString(source.text, objectName.valueBegin, objectName.valueEnd, &value)
+            && !value.isEmpty() && !ids.contains(value))
+            ids << value;
+    }
+    return ids;
+}
+
+bool hasResponsivePageMarker(const QString &qml)
+{
+    // Recognize outputs from earlier unreleased revisions that added a QML
+    // marker. New builds track changed page paths in the recovery sidecar so
+    // the embedded source itself stays as small as possible.
+    return qml.contains(QStringLiteral("/*BSI*/"))
+        || qml.contains(QStringLiteral("/*BSI-PAGE-WIDTH*/"));
+}
+
+bool hasResponsivePageMarker(const TargetSources &sources)
+{
+    for (const Source &page : sources.pages)
+        if (hasResponsivePageMarker(page.text)) return true;
+    return false;
+}
+
+bool nativePagesNeedLayoutPatch(const TargetSources &sources)
+{
+    for (const Source &page : sources.pages) {
+        bool needsPatch = false;
+        responsiveSettingsPage(page.text, &needsPatch);
+        if (needsPatch) return true;
+    }
+    return false;
+}
 
 bool hasAboutPatcherEdits(const QString &qml)
 {
@@ -554,6 +691,25 @@ TargetSources readSources(const QString &exePath, const QByteArray &image)
         return out;
     }
     out.pageCount = pageNames.size();
+    for (const QVariant &tabValue : out.tabs) {
+        const QVariantMap tab = tabValue.toMap();
+        const QString sourcePath = tab.value(QStringLiteral("source")).toString();
+        const QString leaf = QFileInfo(sourcePath).fileName();
+        if (leaf.isEmpty() || leaf.compare(kAboutLeaf, Qt::CaseInsensitive) == 0)
+            continue; // The customizable About page has its own intentionally centered layout.
+        const QtResources::File *entry = uniqueQml(leaf);
+        if (!entry) {
+            out.error = QStringLiteral("The registered Settings page %1 could not be uniquely resolved for responsive layout.").arg(leaf);
+            return out;
+        }
+        const QByteArray bytes = QtResources::readFile(image, *entry, kMaxQml);
+        const QString text = EmbeddedResources::decodeText(bytes);
+        if (bytes.isEmpty() || text.isEmpty()) {
+            out.error = QStringLiteral("The registered Settings page %1 could not be decoded for responsive layout.").arg(leaf);
+            return out;
+        }
+        out.pages << Source{entry->path, bytes, text};
+    }
     const bool retainsLoadedComponent = out.window.text.contains(QLatin1String("model.modelData.pComponentObj = item"))
         || out.window.text.contains(QLatin1String("model.modelData.pComponentObj=i"))
         || out.window.text.contains(QLatin1String("model.modelData.pComponentObj=item"));
@@ -926,9 +1082,12 @@ QVariantList sourceRecords(const TargetSources &sources, const QMap<QString, QBy
                            const QMap<QString, QByteArray> &patched = {})
 {
     QVariantList records;
-    for (const Source *source : {&sources.window, &sources.about}) {
+    QList<const Source *> tracked {&sources.window, &sources.about};
+    for (const Source &page : sources.pages)
+        if (originals.contains(page.path)) tracked << &page;
+    for (const Source *source : tracked) {
         const QByteArray original = originals.value(source->path);
-        const QByteArray replacement = patched.value(source->path);
+        const QByteArray replacement = patched.value(source->path, source->bytes);
         QVariantList acceptedHashes;
         const QString currentHash = QString::fromLatin1(sha256(source->bytes));
         const QString replacementHash = QString::fromLatin1(sha256(replacement));
@@ -948,8 +1107,8 @@ QMap<QString, QByteArray> originalsFromRecovery(const QVariantMap &recovery, QSt
 {
     QMap<QString, QByteArray> originals;
     const QVariantList records = recovery.value(QStringLiteral("sources")).toList();
-    if (records.size() != 2) {
-        *error = QStringLiteral("The Settings-panel recovery snapshot is incomplete; restore is blocked.");
+    if (records.size() < 2 || records.size() > 64) {
+        *error = QStringLiteral("The Settings-panel recovery snapshot is incomplete or exceeds the safe resource count; restore is blocked.");
         return {};
     }
     for (const QVariant &value : records) {
@@ -978,6 +1137,39 @@ bool recoveryAcceptsCurrent(const QVariantMap &record, const QByteArray &current
     }
     // Read the first, not-yet-deployed schema during an in-place upgrade.
     return record.value(QStringLiteral("patchedSha256")).toString() == digest;
+}
+
+bool responsivePagesFromRecovery(const QVariantMap &recovery, const TargetSources &sources,
+                                 const QMap<QString, QByteArray> &originals,
+                                 QStringList *paths, QString *error)
+{
+    paths->clear();
+    if (recovery.contains(QStringLiteral("responsivePages"))) {
+        const QVariantList saved = recovery.value(QStringLiteral("responsivePages")).toList();
+        if (saved.size() > 62) {
+            *error = QStringLiteral("The Settings-panel recovery snapshot lists too many native pages; restore is blocked.");
+            return false;
+        }
+        for (const QVariant &value : saved) {
+            const QString path = value.toString();
+            if (path.isEmpty() || paths->contains(path)) {
+                *error = QStringLiteral("The Settings-panel recovery snapshot has an invalid native-page list; restore is blocked.");
+                return false;
+            }
+            paths->append(path);
+        }
+    } else {
+        // Compatibility with the early, unreleased marker-based snapshots.
+        for (const Source &page : sources.pages)
+            if (hasResponsivePageMarker(page.text)) paths->append(page.path);
+    }
+    for (const QString &path : *paths) {
+        if (!sourceForPath(sources, path) || !originals.contains(path)) {
+            *error = QStringLiteral("A widened native Settings page has no matching recovery source; restore is blocked.");
+            return false;
+        }
+    }
+    return true;
 }
 
 QVariantList operationsFor(const QMap<QString, QByteArray> &replacement)
@@ -1022,7 +1214,8 @@ bool validateProfile(const QString &developerName, const QVariantList &links, QS
     return true;
 }
 
-QVariantMap applyResources(const QString &exePath, const QVariantList &operations)
+QVariantMap applyResources(const QString &exePath, const QVariantList &operations,
+                           const QStringList &sourceNames, const QStringList &unitIds)
 {
     QByteArray image;
     if (!readBounded(exePath, &image))
@@ -1043,12 +1236,9 @@ QVariantMap applyResources(const QString &exePath, const QVariantList &operation
     QByteArray written;
     if (!readBounded(exePath, &written))
         return fail(QStringLiteral("The patched player could not be read back to verify its compiled Settings QML."));
-    const int activeBefore = QtResources::activeUnits(written,
-        {kWindowLeaf, kAboutLeaf}, kWindowUnitIds + kAboutUnitIds);
-    const int invalidated = QtResources::invalidateUnits(written,
-        {kWindowLeaf, kAboutLeaf}, kWindowUnitIds + kAboutUnitIds);
-    const int activeAfter = QtResources::activeUnits(written,
-        {kWindowLeaf, kAboutLeaf}, kWindowUnitIds + kAboutUnitIds);
+    const int activeBefore = QtResources::activeUnits(written, sourceNames, unitIds);
+    const int invalidated = QtResources::invalidateUnits(written, sourceNames, unitIds);
+    const int activeAfter = QtResources::activeUnits(written, sourceNames, unitIds);
     if (activeAfter > 0) {
         QByteArray current;
         QString rollbackError;
@@ -1073,7 +1263,7 @@ QVariantMap applyResources(const QString &exePath, const QVariantList &operation
     }
     if (activeBefore > 0) {
         QString message = applied.value(QStringLiteral("msg")).toString();
-        message += QStringLiteral(" Disabled %1 stale compiled Settings/About unit(s); verified the player will compile the rebuilt QML on restart.").arg(invalidated);
+        message += QStringLiteral(" Disabled %1 stale compiled Settings-page unit(s); verified the player will compile the rebuilt QML on restart.").arg(invalidated);
         applied.insert(QStringLiteral("msg"), message);
     }
     return applied;
@@ -1165,11 +1355,13 @@ State analyze(const QString &exePath)
     }
     const bool windowPatched = hasWindowMarker(sources.window.text);
     const bool aboutPatched = sources.about.text.contains(kAboutMarker);
-    state.compiledUnitsDetected = QtResources::matchingUnits(image,
-        {kWindowLeaf, kAboutLeaf}, kWindowUnitIds + kAboutUnitIds);
-    state.compiledUnitsActive = QtResources::activeUnits(image,
-        {kWindowLeaf, kAboutLeaf}, kWindowUnitIds + kAboutUnitIds);
-    state.applied = windowPatched && aboutPatched && state.compiledUnitsActive == 0;
+    const bool pagesResponsive = !nativePagesNeedLayoutPatch(sources);
+    const QStringList unitNames = settingsUnitNames(sources);
+    const QStringList unitIds = settingsUnitIds(sources);
+    state.compiledUnitsDetected = QtResources::matchingUnits(image, unitNames, unitIds);
+    state.compiledUnitsActive = QtResources::activeUnits(image, unitNames, unitIds);
+    state.applied = windowPatched && aboutPatched && pagesResponsive
+        && state.compiledUnitsActive == 0;
     const QString backup = sidecarPath(exePath);
     const QVariantMap recovery = backup.isEmpty() ? QVariantMap{} : readRecovery(backup, exePath);
     state.restorable = windowPatched && aboutPatched && !recovery.isEmpty();
@@ -1179,6 +1371,8 @@ State analyze(const QString &exePath)
     } else if (windowPatched && aboutPatched && !state.restorable) {
         state.supported = false;
         state.detail = QStringLiteral("The custom Settings/About sources are present, but their feature recovery snapshot is missing or invalid. Do not overwrite this executable.");
+    } else if (windowPatched && aboutPatched && !pagesResponsive) {
+        state.detail = QStringLiteral("The Settings shell is patched, but one or more native tab pages still use fixed-width content. Reapply the responsive layout rebuild to expand every affected Settings tab.");
     } else if (windowPatched && aboutPatched && state.compiledUnitsActive > 0) {
         state.detail = QStringLiteral("The Settings/About sources are patched and %1 native tab pages were resolved, but %2 matching embedded compiled unit(s) still take precedence. Reapply to invalidate them; the previous source write alone did not change the visible emulator UI.")
             .arg(state.settingsPageCount).arg(state.compiledUnitsActive);
@@ -1222,19 +1416,24 @@ QVariantMap apply(const QString &exePath, const QString &developerName,
         QString recoveryError;
         const QMap<QString, QByteArray> originals = originalsFromRecovery(recovery, &recoveryError);
         if (originals.isEmpty()) return fail(recoveryError);
-        if (originals.size() != 2 || !originals.contains(current.window.path) || !originals.contains(current.about.path))
+        if (!originals.contains(current.window.path) || !originals.contains(current.about.path))
             return fail(QStringLiteral("The executable's resource paths no longer match the saved Settings-panel snapshot; restore is blocked."));
         if (!hasWindowMarker(current.window.text) || !current.about.text.contains(kAboutMarker))
             return fail(QStringLiteral("The Settings-panel sources have changed since this patch. Automatic restore is blocked to protect later edits."));
+        QStringList responsivePagePaths;
+        QString responsivePagesError;
+        if (!responsivePagesFromRecovery(recovery, current, originals,
+                                         &responsivePagePaths, &responsivePagesError))
+            return fail(responsivePagesError);
         const QVariantList records = recovery.value(QStringLiteral("sources")).toList();
         for (const QVariant &value : records) {
             const QVariantMap record = value.toMap();
-            const Source *source = record.value(QStringLiteral("path")).toString() == current.window.path
-                ? &current.window : &current.about;
-            if (!recoveryAcceptsCurrent(record, source->bytes))
+            const Source *source = sourceForPath(current, record.value(QStringLiteral("path")).toString());
+            if (!source || !recoveryAcceptsCurrent(record, source->bytes))
                 return fail(QStringLiteral("A Settings-panel resource was edited after patching; restore is blocked rather than overwriting that change."));
         }
-        const auto restored = applyResources(exePath, operationsFor(originals));
+        const auto restored = applyResources(exePath, operationsFor(originals),
+            settingsUnitNames(current), settingsUnitIds(current));
         if (!restored.value(QStringLiteral("ok")).toBool()) return restored;
         QFile::remove(backup);
         return {{QStringLiteral("ok"), true},
@@ -1282,26 +1481,33 @@ QVariantMap apply(const QString &exePath, const QString &developerName,
             return fail(assetError);
     }
     const bool hasPatchMarker = hasWindowMarker(current.window.text)
-        || current.about.text.contains(kAboutMarker);
+        || current.about.text.contains(kAboutMarker)
+        || hasResponsivePageMarker(current);
     QMap<QString, QByteArray> originals;
     bool recoveryMatchesCurrent = false;
     if (!recovery.isEmpty()) {
         QString recoveryError;
         originals = originalsFromRecovery(recovery, &recoveryError);
         if (originals.isEmpty()) return fail(recoveryError);
-        recoveryMatchesCurrent = originals.size() == 2
-            && originals.contains(current.window.path) && originals.contains(current.about.path);
+        recoveryMatchesCurrent = originals.contains(current.window.path)
+            && originals.contains(current.about.path);
         if (recoveryMatchesCurrent) {
             const QVariantList records = recovery.value(QStringLiteral("sources")).toList();
             for (const QVariant &value : records) {
                 const QVariantMap record = value.toMap();
-                const Source *source = record.value(QStringLiteral("path")).toString() == current.window.path
-                    ? &current.window : &current.about;
-                if (!recoveryAcceptsCurrent(record, source->bytes)) {
+                const Source *source = sourceForPath(current, record.value(QStringLiteral("path")).toString());
+                if (!source || !recoveryAcceptsCurrent(record, source->bytes)) {
                     recoveryMatchesCurrent = false;
                     break;
                 }
             }
+        }
+        if (recoveryMatchesCurrent) {
+            QStringList responsivePagePaths;
+            QString responsivePagesError;
+            if (!responsivePagesFromRecovery(recovery, current, originals,
+                                             &responsivePagePaths, &responsivePagesError))
+                recoveryMatchesCurrent = false;
         }
         if (!recoveryMatchesCurrent && hasPatchMarker)
             return fail(QStringLiteral("A saved Settings-panel resource was changed by another patch. Restore or inspect it manually before rebuilding."));
@@ -1336,39 +1542,74 @@ QVariantMap apply(const QString &exePath, const QString &developerName,
         {current.window.path, utf8PreservingBom(rebuiltWindow, originals.value(current.window.path))},
         {current.about.path, utf8PreservingBom(rebuiltAbout, originals.value(current.about.path))},
     };
+    for (const Source &page : current.pages) {
+        const QByteArray original = originals.value(page.path, page.bytes);
+        const QString originalText = EmbeddedResources::decodeText(original);
+        if (originalText.isEmpty())
+            return fail(QStringLiteral("A native Settings page could not be decoded for responsive layout; no resources were changed."));
+        bool changed = false;
+        const QString rebuiltPage = responsiveSettingsPage(originalText, &changed);
+        if (!changed) continue; // Already responsive, or the source has no fixed-width content root.
+        if (!originals.contains(page.path)) originals.insert(page.path, original);
+        QString fittingPage = rebuiltPage;
+        QByteArray rebuiltBytes = utf8PreservingBom(fittingPage, original);
+        QByteArray trialImage;
+        EmbeddedResources::Result fit = EmbeddedResources::replaceBytes(exePath, page.path, rebuiltBytes, &trialImage);
+        const QRegularExpression blankLine(QStringLiteral("(\\r?\\n)[ \\t]*\\r?\\n"));
+        while (!fit.ok && fit.msg.contains(QStringLiteral("needs"))) {
+            const auto match = blankLine.match(fittingPage);
+            if (!match.hasMatch()) break;
+            fittingPage.replace(match.capturedStart(), match.capturedLength(), match.captured(1));
+            rebuiltBytes = utf8PreservingBom(fittingPage, original);
+            fit = EmbeddedResources::replaceBytes(exePath, page.path, rebuiltBytes, &trialImage);
+        }
+        if (!fit.ok)
+            return fail(fit.msg);
+        if (rebuiltBytes != page.bytes) replacements.insert(page.path, rebuiltBytes);
+    }
     if (!hasWindowMarker(EmbeddedResources::decodeText(replacements.value(current.window.path)))
         || !sourceHasMarker(replacements.value(current.about.path), kAboutMarker))
         return fail(QStringLiteral("Generated QML failed its marker check; no file was changed."));
-    if (replacements.value(current.window.path) == current.window.bytes
-        && replacements.value(current.about.path) == current.about.bytes) {
-        const int active = QtResources::activeUnits(image,
-            {kWindowLeaf, kAboutLeaf}, kWindowUnitIds + kAboutUnitIds);
+    bool sourcesChanged = false;
+    for (auto it = replacements.cbegin(); it != replacements.cend(); ++it) {
+        const Source *source = sourceForPath(current, it.key());
+        if (!source || it.value() != source->bytes) {
+            sourcesChanged = true;
+            break;
+        }
+    }
+    const QStringList unitNames = settingsUnitNames(current);
+    const QStringList unitIds = settingsUnitIds(current);
+    if (!sourcesChanged) {
+        const int active = QtResources::activeUnits(image, unitNames, unitIds);
         if (active == 0)
             return {{QStringLiteral("ok"), true},
                     {QStringLiteral("msg"), QStringLiteral("The requested Settings-panel design is already applied and no stale compiled QML remains active.")}};
         QByteArray invalidated = image;
-        QtResources::invalidateUnits(invalidated,
-            {kWindowLeaf, kAboutLeaf}, kWindowUnitIds + kAboutUnitIds);
-        if (QtResources::activeUnits(invalidated,
-                {kWindowLeaf, kAboutLeaf}, kWindowUnitIds + kAboutUnitIds) > 0)
-            return fail(QStringLiteral("The Settings/About sources already match, but their embedded compiled QML is still active and could not be disabled."));
+        QtResources::invalidateUnits(invalidated, unitNames, unitIds);
+        if (QtResources::activeUnits(invalidated, unitNames, unitIds) > 0)
+            return fail(QStringLiteral("The Settings sources already match, but embedded compiled QML for one or more native tabs is still active and could not be disabled."));
         QLockFile lock(canonical + QStringLiteral(".bsi-settings-panel.lock"));
         if (!lock.tryLock(0))
             return fail(QStringLiteral("Another Settings-panel writer is using this executable; retry after it finishes."));
         QString error;
         if (!ThemeEngine::backup(exePath) || !PatchFile::writeVerified(exePath, image, invalidated, &error))
-            return fail(QStringLiteral("Could not safely disable stale compiled Settings/About QML. %1").arg(error));
+            return fail(QStringLiteral("Could not safely disable stale compiled Settings-tab QML. %1").arg(error));
         QtResources::clearPlayerQmlCache(exePath);
         return {{QStringLiteral("ok"), true},
-                {QStringLiteral("msg"), QStringLiteral("The Settings/About QML sources were already rebuilt; %1 stale compiled unit(s) were invalidated and verified. Restart BlueStacks to load the source.").arg(active)}};
+                {QStringLiteral("msg"), QStringLiteral("The Settings QML sources were already rebuilt; %1 stale compiled tab unit(s) were invalidated and verified. Restart BlueStacks to load the source.").arg(active)}};
     }
 
     recovery.insert(QStringLiteral("sources"), sourceRecords(current, originals, replacements));
+    QVariantList responsivePagePaths;
+    for (const Source &page : current.pages)
+        if (originals.contains(page.path)) responsivePagePaths << page.path;
+    recovery.insert(QStringLiteral("responsivePages"), responsivePagePaths);
     recovery.insert(QStringLiteral("developerName"), developerName.trimmed());
     if (!saveAtomic(backup, QJsonDocument::fromVariant(recovery).toJson(QJsonDocument::Compact)))
         return fail(QStringLiteral("Could not save the feature-specific recovery snapshot. No executable resources were changed."));
 
-    const QVariantMap result = applyResources(exePath, operationsFor(replacements));
+    const QVariantMap result = applyResources(exePath, operationsFor(replacements), unitNames, unitIds);
     if (!result.value(QStringLiteral("ok")).toBool()) {
         // Preserve an existing valid recovery file; remove only the one created
         // by this attempt, so a failed first apply cannot masquerade as active.
@@ -1376,7 +1617,7 @@ QVariantMap apply(const QString &exePath, const QString &developerName,
         return result;
     }
     return {{QStringLiteral("ok"), true},
-            {QStringLiteral("msg"), QStringLiteral("The compact, draggable Settings window, icon tabs and customizable About page were applied. A selective recovery snapshot was saved; restart BlueStacks to see it.")},
+            {QStringLiteral("msg"), QStringLiteral("The Settings window, responsive full-width native tabs, icon options and customizable About page were applied. A selective recovery snapshot was saved; restart BlueStacks to see the layout across every tab.")},
             {QStringLiteral("recovery"), result.value(QStringLiteral("id"))}};
 }
 
