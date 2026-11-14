@@ -4936,6 +4936,14 @@ Window {
         const auto bytes=GifRpc::bundledProxy();
         check(GifRpc::isOurProxy(bytes,&error),QStringLiteral("embedded RPC-only DLL has a valid x64 PE/DLL header, schema and all forwarding exports: %1").arg(error));
         check(!GifRpc::isOurProxy(bytes.left(128),&error),"truncated RPC DLLs are refused");
+        auto corruptOrdinal=bytes;
+        const auto exportOffset=PeUtils::rvaToRaw(PeUtils::sections(bytes),PeUtils::exportRva(bytes));
+        const auto ordinalOffset=PeUtils::rvaToRaw(PeUtils::sections(bytes),ByteUtils::le32(bytes,exportOffset+36));
+        if(ordinalOffset>=0 && ordinalOffset+2<=corruptOrdinal.size()) {
+            ByteUtils::putLe16(corruptOrdinal,ordinalOffset,0xffff);
+            check(!GifRpc::isOurProxy(corruptOrdinal,&error),"V2 proxy with a corrupt API ordinal is refused before deployment");
+        } else check(false,"bundled V2 ordinal table is readable");
+
         const auto folder=temp.filePath(QStringLiteral("gif-rpc-install"));QDir().mkpath(folder);
         const auto exe=QDir(folder).filePath(QStringLiteral("HD-Player.exe"));write(exe,peFile());
         const auto dll=QDir(folder).filePath(QStringLiteral("version.dll"));

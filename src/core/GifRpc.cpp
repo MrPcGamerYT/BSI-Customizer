@@ -11,6 +11,7 @@
 #include <QRegularExpression>
 #include <QUrl>
 #include <QSet>
+#include <QMap>
 #ifdef Q_OS_WIN
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
@@ -90,11 +91,23 @@ bool isOurProxy(const QByteArray &d,QString *error) {
     const qint64 names=PeUtils::rvaToRaw(sections,ByteUtils::le32(d,table+32));
     if(count>4096||names<0||!ByteUtils::inRange(d,names,qint64(count)*4))return fail(QStringLiteral("Invalid DLL export names."));
     QSet<QByteArray> found;
+    QMap<QByteArray,quint32> ordinals;
+    const bool v2=d.contains("BSI_GIF_RPC_PROXY_V2");
+    const quint32 base=ByteUtils::le32(d,table+16),functions=ByteUtils::le32(d,table+20);
+    const qint64 ordinalTable=PeUtils::rvaToRaw(sections,ByteUtils::le32(d,table+36));
+    if(v2 && (functions>65536 || ordinalTable<0 || !ByteUtils::inRange(d,ordinalTable,qint64(count)*2)))
+        return fail(QStringLiteral("Invalid V2 ordinal table."));
     for(quint32 i=0;i<count;++i) {
         const qint64 at=PeUtils::rvaToRaw(sections,ByteUtils::le32(d,names+i*4));
         if(at<0||!ByteUtils::inRange(d,at,1))return fail(QStringLiteral("Invalid exported name pointer."));
         const auto end=d.indexOf('\0',at);if(end<at||end-at>256)return fail(QStringLiteral("Invalid exported name."));
-        found.insert(d.mid(at,end-at));
+        const auto name=d.mid(at,end-at);
+        found.insert(name);
+        if(v2) {
+            const quint32 index=ByteUtils::le16(d,ordinalTable+i*2);
+            if(index>=functions)return fail(QStringLiteral("Invalid V2 export ordinal index."));
+            ordinals[name]=base+index;
+        }
     }
     const QList<QByteArray> required={"BsiGifRpcSchema","GetFileVersionInfoSizeA","GetFileVersionInfoSizeW","GetFileVersionInfoSizeExA","GetFileVersionInfoSizeExW","GetFileVersionInfoA","GetFileVersionInfoW","GetFileVersionInfoExA","GetFileVersionInfoExW","VerQueryValueA","VerQueryValueW","VerInstallFileA","VerInstallFileW","VerFindFileA","VerFindFileW","VerLanguageNameA","VerLanguageNameW"};
     // Keep V1 recognition for safe removal/upgrading, but V2 adds the missing
@@ -102,6 +115,14 @@ bool isOurProxy(const QByteArray &d,QString *error) {
     if(d.contains("BSI_GIF_RPC_PROXY_V2")&&!found.contains("GetFileVersionInfoByHandle"))
         return fail(QStringLiteral("Incomplete V2 proxy: missing GetFileVersionInfoByHandle."));
     for(const auto &name:required)if(!found.contains(name))return fail(QStringLiteral("Required DLL export missing: %1").arg(QString::fromLatin1(name)));
+    if(v2) {
+        const QList<QByteArray> windowsOrder={"GetFileVersionInfoA","GetFileVersionInfoByHandle","GetFileVersionInfoExA","GetFileVersionInfoExW",
+            "GetFileVersionInfoSizeA","GetFileVersionInfoSizeExA","GetFileVersionInfoSizeExW","GetFileVersionInfoSizeW","GetFileVersionInfoW",
+            "VerFindFileA","VerFindFileW","VerInstallFileA","VerInstallFileW","VerLanguageNameA","VerLanguageNameW","VerQueryValueA","VerQueryValueW"};
+        for(int i=0;i<windowsOrder.size();++i)if(ordinals.value(windowsOrder[i])!=quint32(i+1))
+            return fail(QStringLiteral("V2 Windows API ordinal mismatch: %1.").arg(QString::fromLatin1(windowsOrder[i])));
+        if(ordinals.value("BsiGifRpcSchema")!=1000)return fail(QStringLiteral("The schema export must not occupy a Windows API ordinal."));
+    }
     return true;
 }
 bool validate(const QVariantMap &s,QString *error) {

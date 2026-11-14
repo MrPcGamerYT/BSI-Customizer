@@ -82,9 +82,9 @@ QVariantMap compile(const QString &leaf,const QByteArray &source,const QVariantM
     for(const auto &id:identifiers().value(leaf)) if(!s.contains(id))return fail("Player component contract differs: "+leaf+" / "+id);
     // Only exact known declarations are touched. If a future OEM implementation
     // differs, report unsupported instead of rewriting arbitrary QML by regex.
-    bool ok=true;
+    bool ok=true; QString mismatch;
     const auto replace=[&](const QString &from,const QString &to,int expected=1){
-        if(s.count(from)!=expected){ok=false;return;}s.replace(from,to);
+        if(s.count(from)!=expected){ok=false; mismatch=QStringLiteral("Expected %1 occurrence(s), found %2: %3").arg(expected).arg(s.count(from)).arg(from.left(90));return;}s.replace(from,to);
     };
     if(leaf=="UiButton.qml") {
         replace("radius: iControl.pSize.radius","radius: bsiSkinRadius",3);
@@ -108,7 +108,7 @@ QVariantMap compile(const QString &leaf,const QByteArray &source,const QVariantM
     } else if(leaf=="UiDialog.qml") {
         if(s.contains("enter:")||s.contains("exit:"))ok=false;
         replace("background: Rectangle {\n        color: iControl.pColor.background","background: Rectangle {\n        radius: bsiSkinRadius\n        color: iControl.pColor.background");
-        replace("id: iControl","id: iControl\n"+transitions());
+        replace("id: iControl\n","id: iControl\n"+transitions());
     } else if(leaf=="UiSettingsWindow.qml") {
         replace("color: UiTheme.colors.primary80","radius: bsiSkinRadius\n            color: bsiSkinSurface");
     } else if(leaf=="UiShadowContainer.qml") {
@@ -127,7 +127,7 @@ QVariantMap compile(const QString &leaf,const QByteArray &source,const QVariantM
         if(QRegularExpression("\\n    radius\\s*:").match(s).hasMatch())ok=false;
         replace("id: "+id,"id: "+id+"\n    radius: bsiSkinRadius");
     }
-    if(!ok)return fail("Unrecognized/modified component shape: "+leaf+". No replacement generated.");
+    if(!ok)return fail("Unrecognized/modified component shape: "+leaf+". No replacement generated. "+mismatch);
     const QRegularExpression root("(?m)^(Button|TextField|ComboBox|Slider|Switch|Dialog|Window|Item|Rectangle|UiRowLayout)\\s*\\{");
     const auto m=root.match(s);if(!m.hasMatch())return fail("Unsupported component root: "+leaf);
     s.insert(m.capturedEnd(),"\n    "+settings(profile)+"\n");
