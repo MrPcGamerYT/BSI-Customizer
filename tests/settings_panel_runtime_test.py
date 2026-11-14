@@ -89,7 +89,7 @@ assert "StackLayout{id:iSelectedSettingControl;anchors.fill:parent;anchors.margi
 # The embedded QML must stay inside the smallest player resource slot;
 # growing it past that is a hard patch failure on 5.9/5.10 players.
 # v8, which fitted every shipped player, was 1821 bytes of QML.
-assert len(replacement.encode()) <= 1835, f"shell grew to {len(replacement.encode())} bytes"
+assert len(replacement.encode()) <= 1830, f"shell grew to {len(replacement.encode())} bytes"
 assert "Rectangle{x:(parent.width-width)/2;width:Math.min(parent.width-32,568);" in replacement, "The page host must be horizontally centered in the shell"
 assert "width:Math.min(parent.width-32,568)" in replacement
 assert "delegate:Loader{width:iSelectedSettingControl.width;height:iSelectedSettingControl.height;" in replacement
