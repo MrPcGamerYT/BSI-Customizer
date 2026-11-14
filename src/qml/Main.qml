@@ -26,6 +26,8 @@ ApplicationWindow {
         y = fitted.y;
     }
 
+    Component.onCompleted: fitToAvailableScreen()
+
     function runSelftest() {
         // This is a shell check only; native engine tests live in --selftest.
         const ok = typeof window.navigatePage === "function"
