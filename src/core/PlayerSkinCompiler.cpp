@@ -62,7 +62,16 @@ QString glyph(QString leaf) {
     static const QMap<QString,QString> map{{"SidebarHome","home"},{"SidebarBack","back"},{"SidebarRecents","apps"},
         {"SidebarSettings","settings"},{"SidebarFullScreen","fullscreen"},{"FullScreen","fullscreen"},
         {"SidebarScreenshot","capture"},{"Screenshot","capture"},{"Volume","volume"},
-        {"SidebarVolume","volume"},{"Keyboard","controls"},{"SidebarGameControls","controls"}};
+        {"SidebarVolume","volume"},{"VolumeMute","volume-muted"},{"Keyboard","controls"},{"SidebarGameControls","controls"},
+        {"SidebarControls","controls"},{"SidebarChat","chat"},{"SidebarInstallApk","apk"},
+        {"SidebarInstanceManager","instances"},{"SidebarLocation","location"},{"SidebarMacro","macro"},
+        {"SidebarMediaFolder","gallery"},{"SidebarMemoryTrim","memory"},{"SidebarRotate","rotate"},
+        {"SidebarShake","shake"},{"SidebarSidePanel","sidepanel"},{"MediaGallery","gallery"},
+        {"RecordingIcon","record"},{"StopRecordingBright","stop"},{"StopSmall","stop"},
+        {"TitlebarClose","close"},{"CloseIcon","close"},{"CloseSmall","close"},
+        {"TitlebarMinimize","minimize"},{"TitlebarMaximize","maximize"},{"TitlebarMenu","menu"},
+        {"TitlebarHelp","help"},{"MenuHelp","help"},{"TitlebarDisablePinTop","pin"},
+        {"AccountLoggedIn","account"},{"Play","play"}};
     return map.value(leaf);
 }
 }
@@ -152,7 +161,7 @@ QVariantMap plan(const QByteArray &image,const QVariantMap &profile,const QStrin
             rows<<QVariantMap{{"path",file.path},{"feature","corners / controls / motion"}};
         } else if(file.name.endsWith(".svg",Qt::CaseInsensitive)) {
             QString tint=profile.value("accent").toString();
-            if(file.name.contains("_hover"))tint="#f2f2f5";
+            if(file.name.contains("_hover") || file.name.contains("_click"))tint=g=="close"?"#f18b8b":"#f2f2f5";
             if(file.name.contains("_disabled"))tint="#656570";
             const auto svg=SkinProfiles::icon(g,profile.value("iconStyle").toString(),tint);
             ops<<operation("resource",file.path,svg);glyphs.insert(g);

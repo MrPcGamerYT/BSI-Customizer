@@ -144,6 +144,8 @@ int run()
     for(const auto &style:{"line","rounded","bold"})
         check(!SkinProfiles::icon("home",QLatin1String(style),"#aabbcc").isEmpty(),"three safe generated SVG icon styles");
     check(SkinProfiles::icon("unknown","line","#aabbcc").isEmpty(),"unknown glyph refused");
+    for(const auto &glyph:{"close","minimize","maximize","menu","chat","help","gallery","record","stop","rotate","shake","location","apk","instances","macro","memory","pin","account","volume-muted","sidepanel"})
+        check(!SkinProfiles::icon(QLatin1String(glyph),"rounded","#aabbcc").isEmpty(),"generated sidebar/topbar function glyph preserves a distinct semantic symbol");
     const QString svgFile=temp.filePath(QStringLiteral("custom.svg"));
     write(svgFile,"<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M2 2h20v20H2z'/></svg>");
     const auto importedIcon=SkinProfiles::readIcon(svgFile);
