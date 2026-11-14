@@ -110,6 +110,10 @@ assert.ok(webEditors.includes("'settings-panel'") && webEditors.includes("'setti
 assert.ok(webEditors.includes("'appearance'") && webEditors.includes('Player Appearance Studio') && webEditors.includes("'appearance-inspect'") && webEditors.includes("'appearance-stage'") && webEditors.includes("'appearance-dry'") && webEditors.includes("'appearance-apply'"), 'Player Appearance Studio uses the authenticated Workspace inspect/stage/dry-run/apply flow');
 assert.ok(bridge.includes('"queue-appearance"') && bridge.includes('"appearance-inspect"') && read('src/core/CustomizationWorkspace.cpp').includes('PlayerAppearancePatcher::apply'), 'Appearance edits are native Workspace operations, not renderer-side QML surgery');
 assert.ok(read('src/qml/pages/UiPage.qml').includes('Appearance studio') && read('src/qml/pages/UiPage.qml').includes('queue-appearance'), 'Native fallback exposes the same Player Appearance Studio staging path');
+const nativeUiPage = read('src/qml/pages/UiPage.qml');
+assert.ok(nativeUiPage.includes('Settings panel') && nativeUiPage.includes('applySettingsPanelRebuild')
+          && nativeUiPage.includes('saveSettingsPanelProfile') && nativeUiPage.includes('settingsPanelRebuildState'),
+          'Native Player interface keeps the Settings-panel rebuild controls the Chromium tab has');
 assert.ok(bridge.includes('applySettingsPanelRebuild') && bridge.includes('"settingsPanel", m_backend.settingsPanelRebuildState()'), 'Native bridge reports and applies the real Settings-panel patcher');
 assert.ok(webEditors.includes("'Apply Settings panel rebuild'") && webEditors.includes('embeddedQmlResourceCount') && webEditors.includes('settingsPanelManualTest'), 'Settings-panel apply stays clickable when detection fails and exposes embedded QML and manual-test diagnostics');
 assert.ok(webApp.includes('routeSettingsPanelManualTest') && bridge.includes('m_settingsPanelManualTest'), 'Manual GUI mode opens the Settings-panel view and restricts native actions to that disposable-copy test');

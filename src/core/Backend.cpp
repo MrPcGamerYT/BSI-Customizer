@@ -33,6 +33,7 @@
 #include <QEventLoop>
 #include <QFile>
 #include <QFileInfo>
+#include <QRegularExpression>
 #include <QStringList>
 #include <QThread>
 
@@ -2027,6 +2028,107 @@ QVariantMap Backend::applySettingsPanelRebuild(bool enabled)
     return result(response.value(QStringLiteral("ok")).toBool(),
                   response.value(QStringLiteral("msg")).toString(),
                   response.value(QStringLiteral("ok")).toBool() ? QStringLiteral("green") : QStringLiteral("red"));
+}
+
+namespace {
+// Shared by the native Player-interface page and (through the same rules) the
+// Chromium bridge: which native tabs may be hidden, and in what form.
+bool validPanelTabId(const QString &id)
+{
+    static const QRegularExpression pattern(QStringLiteral("^[a-z0-9_.-]{1,128}$"));
+    return pattern.match(id).hasMatch();
+}
+} // namespace
+
+QVariantMap Backend::saveSettingsPanelProfile(const QString &developerName,
+                                              const QString &tagline,
+                                              const QStringList &hiddenTabs,
+                                              const QStringList &availableTabs)
+{
+    if (actionsLocked()) return lockedMap();
+    const QString developer = developerName.trimmed();
+    const QString subtitle = tagline.trimmed();
+    if (developer.isEmpty() || developer.size() > 80)
+        return result(false, QStringLiteral("Enter a name under the logo (up to 80 characters)."),
+                      QStringLiteral("red"));
+    if (subtitle.size() > 120
+        || QRegularExpression(QStringLiteral("[\\x00-\\x1f\\x7f]")).match(subtitle).hasMatch())
+        return result(false, QStringLiteral("The About subtitle must be no longer than 120 characters "
+                                            "and contain no control characters."),
+                      QStringLiteral("red"));
+    // Only tabs of the player that is selected now: a stale id from another
+    // version must never turn into a hidden page after an update. The ids are
+    // the ones the page inspected, not a fresh multi-MB EXE read per click.
+    QSet<QString> available;
+    for (const QString &id : availableTabs)
+        available.insert(id.trimmed().toCaseFolded());
+    QStringList cleaned;
+    for (const QString &entry : hiddenTabs) {
+        const QString id = entry.trimmed().toCaseFolded();
+        if (!validPanelTabId(id) || cleaned.contains(id))
+            return result(false, QStringLiteral("The hidden Settings-tab selection is invalid or "
+                                                "duplicated."), QStringLiteral("red"));
+        if (!available.isEmpty() && !available.contains(id))
+            return result(false, QStringLiteral("A hidden tab does not belong to the selected player. "
+                                                "Inspect the player UI again."), QStringLiteral("red"));
+        cleaned << id;
+    }
+    if (!available.isEmpty() && cleaned.size() >= available.size())
+        return result(false, QStringLiteral("Keep at least one native Settings tab visible."),
+                      QStringLiteral("red"));
+    m_settings->setAboutDeveloperName(developer);
+    m_settings->setAboutTagline(subtitle);
+    QVariantMap panelProfile = m_settings->settingsPanelProfile();
+    panelProfile.insert(QStringLiteral("hiddenTabs"), cleaned);
+    m_settings->setSettingsPanelProfile(panelProfile);
+    return result(true, QStringLiteral("Settings-panel options saved on this PC. Apply the rebuild "
+                                       "to write them into the selected player."),
+                  QStringLiteral("green"));
+}
+
+QVariantMap Backend::setSettingsPanelAsset(const QString &kind, const QString &id,
+                                           const QString &path)
+{
+    if (actionsLocked()) return lockedMap();
+    const QString assetId = id.trimmed().toCaseFolded();
+    if (kind == QLatin1String("tab-icon") && !validPanelTabId(assetId))
+        return result(false, QStringLiteral("Choose a tab from the inspected player first."),
+                      QStringLiteral("red"));
+    const QVariantMap loaded = SettingsPanelPatcher::readCustomAsset(path, kind);
+    if (!loaded.value(QStringLiteral("ok")).toBool())
+        return result(false, loaded.value(QStringLiteral("msg")).toString(), QStringLiteral("red"));
+    QVariantMap panelProfile = m_settings->settingsPanelProfile();
+    if (kind == QLatin1String("tab-icon")) {
+        QVariantMap icons = panelProfile.value(QStringLiteral("tabIcons")).toMap();
+        icons.insert(assetId, loaded.value(QStringLiteral("asset")));
+        panelProfile.insert(QStringLiteral("tabIcons"), icons);
+    } else if (kind == QLatin1String("logo")) {
+        panelProfile.insert(QStringLiteral("logo"), loaded.value(QStringLiteral("asset")));
+    } else {
+        return result(false, QStringLiteral("Choose a tab SVG icon or an About logo image."),
+                      QStringLiteral("red"));
+    }
+    m_settings->setSettingsPanelProfile(panelProfile);
+    return result(true, loaded.value(QStringLiteral("msg")).toString(), QStringLiteral("green"));
+}
+
+QVariantMap Backend::clearSettingsPanelAsset(const QString &kind, const QString &id)
+{
+    if (actionsLocked()) return lockedMap();
+    QVariantMap panelProfile = m_settings->settingsPanelProfile();
+    if (kind == QLatin1String("tab-icon")) {
+        QVariantMap icons = panelProfile.value(QStringLiteral("tabIcons")).toMap();
+        icons.remove(id.trimmed().toCaseFolded());
+        panelProfile.insert(QStringLiteral("tabIcons"), icons);
+    } else if (kind == QLatin1String("logo")) {
+        panelProfile.remove(QStringLiteral("logo"));
+    } else {
+        return result(false, QStringLiteral("Choose a tab icon or a logo to clear."),
+                      QStringLiteral("red"));
+    }
+    m_settings->setSettingsPanelProfile(panelProfile);
+    return result(true, QStringLiteral("Custom artwork cleared. Apply the rebuild to update the "
+                                       "selected player."), QStringLiteral("green"));
 }
 
 QVariantMap Backend::restoreBackup(const QString &path)
