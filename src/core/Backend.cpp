@@ -5,6 +5,7 @@
 #include "AuthManager.h"
 #include "CustomizationWorkspace.h"
 #include "AddonPacks.h"
+#include "SkinProfiles.h"
 #include <QCryptographicHash>
 #include "BootVideoPatcher.h"
 #include "PlayerCache.h"
@@ -25,6 +26,7 @@
 #include "ThemePresets.h"
 
 #include <QColor>
+#include <QSet>
 #include <QDateTime>
 #include <QDir>
 #include <QEventLoop>
@@ -2113,6 +2115,52 @@ QVariantMap Backend::workspace(const QString &action, const QVariantMap &options
     QVariantMap edits; for (auto it = m_edits.cbegin(); it != m_edits.cend(); ++it) edits[it.key()] = it.value();
     QVariantMap r;
     if (action == QLatin1String("inspect")) r = W::inspect(path, edits);
+    else if (action == QLatin1String("skin-save")) r = SkinProfiles::save(options.value("file").toString(), options.value("profile").toMap());
+    else if (action == QLatin1String("skin-load")) r = SkinProfiles::read(options.value("file").toString());
+    else if (action == QLatin1String("queue-skin")) {
+        const auto profile = options.value("profile").toMap();
+        r = SkinProfiles::validate(profile);
+        if (!r.value("ok").toBool()) return r;
+        if (!m_workspaceOperations.isEmpty()) return {{"ok",false},{"msg","Review or clear your existing Workspace batch first. Nothing was discarded."}};
+        const QByteArray bytes = readExe();
+        const auto *base = AddonPacks::find(profile.value("base").toString());
+        const auto *preset = ThemePresets::byId(QLatin1String(base->preset));
+        const auto info = ThemeEngine::detectTheme(bytes, QStringLiteral("qml"));
+        const auto entries = ThemeEngine::parseQmlEntries(info.qml);
+        const auto analysis = PlayerAppearancePatcher::analyze(bytes);
+        if (entries.isEmpty() || !analysis.ok) return {{"ok",false},{"msg","This player does not expose verified palette and design sources. No skin was staged."}};
+        auto colors = ThemePresets::matchEntries(*preset,entries);
+        const auto overrides = profile.value("palette").toMap();
+        QSet<QString> matched;
+        for (const auto &entry : entries) {
+            const QString normalized = ThemePresets::normalize(entry.name);
+            if (normalized == QLatin1String("accentnormal")) colors[entry.name]=profile.value("accent").toString();
+            if (normalized == QLatin1String("primary100")) colors[entry.name]=profile.value("surface").toString();
+            if (overrides.contains(entry.name)) { colors[entry.name]=overrides.value(entry.name).toString(); matched.insert(entry.name); }
+        }
+        if (matched.size()!=overrides.size()) return {{"ok",false},{"msg","Some palette override names are not present in this player. Inspect and correct them; no edits were discarded."}};
+        AddonPacks::Pack custom = *base;
+        custom.radius=profile.value("radius").toInt(); custom.height=profile.value("height").toInt(); custom.padding=profile.value("padding").toInt();
+        auto design = AddonPacks::designEdits(custom,analysis);
+        const auto tokens=profile.value("tokens").toMap();
+        for (auto it=tokens.cbegin();it!=tokens.cend();++it) design[it.key()]=it.value();
+        const auto validation = PlayerAppearancePatcher::validateEdits(bytes,design);
+        if (!validation.value("ok").toBool()) return validation;
+        QVariantMap palette;for(auto it=colors.cbegin();it!=colors.cend();++it) palette[it.key()]=it.value();
+        QVariantList pending{QVariantMap{{"kind","theme"},{"pack",profile.value("base")},{"name",profile.value("name")},{"edits",palette},{"design",design}}};
+        const auto icons=profile.value("icons").toList();
+        if (!icons.isEmpty() && m_resourceFileHash != QCryptographicHash::hash(bytes,QCryptographicHash::Sha256))
+            return {{"ok",false},{"msg","Scan Resources manually for this exact EXE before staging mapped icons."}};
+        for (const auto &v:icons) {
+            const auto mapping=v.toMap();const QString resource=mapping.value("path").toString();
+            int found=0;for(const auto &row:m_resourceInfos) if(row.toMap().value("path").toString()==resource) ++found;
+            if(found!=1) return {{"ok",false},{"msg","An icon target is missing or ambiguous in your manual scan. No pack was queued."}};
+            const auto svg=SkinProfiles::icon(mapping.value("glyph").toString(),profile.value("iconStyle").toString(),profile.value("accent").toString());
+            pending << QVariantMap{{"kind","resource"},{"path",resource},{"data",QString::fromLatin1(svg.toBase64())},{"sha256",W::digest(svg)}};
+        }
+        m_workspaceOperations=pending;m_workspaceHash=W::digest(bytes);
+        r={{"ok",true},{"msg","Custom palette, design tokens and explicitly mapped SVG icons staged together. Dry Run verifies storage/conflicts before Apply. Motion is preview-only; player QML animations, native dialogs, optimizer and boot are not installed."}};
+    }
     else if (action == QLatin1String("queue-addon")) {
         // A pack is an isolated, fixed catalog operation. Never discard the user's batch.
         const auto *pack = AddonPacks::find(options.value("id").toString());

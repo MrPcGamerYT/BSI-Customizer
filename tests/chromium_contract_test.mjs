@@ -55,7 +55,7 @@ assert.ok(bridge.includes('8 * 1024 * 1024'), 'Inline resource previews must be 
 for (const asset of ['icon.png', 'fonts/manrope-latin.woff2', 'fonts/plus-jakarta-sans-latin.woff2']) {
   assert.ok(cmake.includes('src/web/' + asset), 'Missing embedded reference asset: ' + asset);
 }
-assert.ok(read('src/main.cpp').includes('const bool chromiumUi = !args.contains(QStringLiteral("--native-ui"))'));
+assert.ok(read('src/main.cpp').includes('const bool chromiumUi = args.contains(QStringLiteral("--web-ui")) && !args.contains(QStringLiteral("--native-ui"))'));
 console.log('PASS: optional Chromium workspace, local assets, bounded previews, exception boundary and renderer recovery guards.');
 
 const nativeShell = read('src/qml/Main.qml');
@@ -79,12 +79,11 @@ assert.ok(debloatPage.includes('objectName: "debloatModeTabs"') && debloatPage.i
 assert.ok(debloatPage.includes('page.mode = 1;') && debloatPage.includes('RootVhdBrowser {'), 'Opening an image switches directly to its file manager');
 assert.ok(settingsPanel.includes('panel.dragOffsetX') && settingsPanel.includes('panel.dragOffsetY'), 'Settings dragging updates bounded panel offsets');
 assert.ok(!nativeShell.includes('WebEngineView'), 'Normal app must not switch between duplicated editor implementations');
-assert.ok(read('src/main.cpp').includes('const bool chromiumUi = !args.contains(QStringLiteral("--native-ui"))'));
+assert.ok(read('src/main.cpp').includes('const bool chromiumUi = args.contains(QStringLiteral("--web-ui")) && !args.contains(QStringLiteral("--native-ui"))'));
 console.log('PASS: native shell retains eleven feature editors; Appearance, Updates and About are single-instance settings tabs with drag support.');
 
-// The ordinary deliverable must actually contain the HTML frontend, not merely
-// hide missing-feature escape buttons over a native-only installer.
-assert.ok(read('.github/workflows/release.yml').includes('-DBSI_CHROMIUM_UI=ON'));
+// 4.0.1 ships the native QML frontend. Legacy Chromium stays explicitly opt-in.
+assert.ok(read('.github/workflows/release.yml').includes('-DBSI_CHROMIUM_UI=OFF'));
 assert.ok(read('scripts/Build-SingleExe.ps1').includes("src/chromium"));
 assert.ok(read('scripts/Test-SingleExe.ps1').includes('--chromium-runtime-test'));
 assert.ok(read('src/web/app.js').includes("['Debloat & Android'"));
@@ -95,7 +94,7 @@ for (const operation of ['sidebar-read','sidebar-apply','debloat-read','debloat-
 assert.ok(read('src/chromium/ChromiumMain.qml').includes('MediaPlayer {'));
 assert.ok(read('src/web/editors.js').includes("'video-play'"));
 assert.ok(read('src/web/transport.js').includes('videoStatus'));
-console.log('PASS: normal HTML packaging, 13th maintenance area and original Qt decoder control contracts.');
+console.log('PASS: native default packaging, optional Chromium maintenance area and original Qt decoder control contracts.');
 const webApp = read('src/web/app.js'), webHtml = read('src/web/index.html');
 assert.ok(!webHtml.includes('id="cmd"') && !webApp.includes("$('#cmd')"), 'Chromium shell must not duplicate navigation in a quick-link strip');
 assert.ok(webApp.includes("['CUSTOMIZE', [1, 2, 3, 4, 5, 6]]") && webApp.includes('nav-group-label') && webApp.includes('nav-label'), 'Chromium destinations are visibly grouped and labeled');

@@ -209,7 +209,13 @@ int main(int argc, char *argv[])
     installCrashDiagnostics();
     QFontDatabase::addApplicationFont(QStringLiteral(":/qt/qml/BSICustomizer/src/qml/fonts/Manrope.ttf"));
     QFontDatabase::addApplicationFont(QStringLiteral(":/qt/qml/BSICustomizer/src/qml/fonts/PlusJakartaSans.ttf"));
-    app.setFont(QFont(QStringLiteral("Plus Jakarta Sans")));
+    #ifdef Q_OS_WIN
+    const QString uiFont = QFontDatabase::families().contains(QStringLiteral("Segoe UI Variable Text"))
+        ? QStringLiteral("Segoe UI Variable Text") : QStringLiteral("Segoe UI");
+#else
+    const QString uiFont = QStringLiteral("Plus Jakarta Sans");
+#endif
+    app.setFont(QFont(uiFont));
 
     // Brand icon for every window/dialog the app raises (taskbar, Alt-Tab,
     // title bar). The .ico lives at the repo root; CMake maps it into the
@@ -411,7 +417,7 @@ int main(int argc, char *argv[])
     QObject::connect(&updates, &UpdateChecker::restartRequested, &app, &QGuiApplication::quit);
 
 #ifdef BSI_CHROMIUM_UI
-    const bool chromiumUi = !args.contains(QStringLiteral("--native-ui"));
+    const bool chromiumUi = args.contains(QStringLiteral("--web-ui")) && !args.contains(QStringLiteral("--native-ui"));
     if (chromiumUi) {
         auto *profile = QQuickWebEngineProfile::defaultProfile();
         profile->setUrlRequestInterceptor(new LocalContentPolicy(profile));

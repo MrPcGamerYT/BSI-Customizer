@@ -17,7 +17,11 @@ Rectangle {
 
     implicitWidth: buttonLabel.implicitWidth + 30
     implicitHeight: 36
-    radius: 10
+    radius: 9
+
+    scale: buttonArea.pressed ? 0.985 : 1
+    Behavior on scale { NumberAnimation { duration: Theme.motionDuration; easing.type: Easing.OutCubic } }
+    Behavior on color { ColorAnimation { duration: Theme.motionDuration } }
 
     color: button.accent ? (buttonArea.pressed ? Qt.darker(Theme.accent, 1.12) : Theme.accent)
                          : (buttonArea.pressed || buttonArea.containsMouse ? Theme.raised : Theme.card)
@@ -30,7 +34,7 @@ Rectangle {
     Keys.onReturnPressed: if (button.enabled) button.clicked()
     Keys.onSpacePressed: if (button.enabled) button.clicked()
     opacity: button.enabled ? 1.0 : 0.45
-    Behavior on opacity { NumberAnimation { duration: 120 } }
+    Behavior on opacity { NumberAnimation { duration: Theme.motionDuration } }
 
     Text {
         id: buttonLabel

@@ -1,0 +1,30 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import vm from 'node:vm';
+const read = p => fs.readFileSync(new URL('../'+p,import.meta.url),'utf8');
+const ctx={};vm.createContext(ctx);vm.runInContext(read('src/qml/SkinCatalog.js').replace('.pragma library',''),ctx);
+assert.equal(ctx.packs.length,6);
+for(let i=0;i<6;i++) {
+ const p=ctx.create(i);assert.equal(p.schema,'bsi.skin');assert.equal(p.base,ctx.packs[i].id);
+ p.name='My custom name';p.radius=19;assert.equal(ctx.create(i).name,ctx.packs[i].name,'drafts must not mutate the catalog');
+}
+const icons={};vm.createContext(icons);vm.runInContext(read('src/qml/Icons.js').replace('.pragma library',''),icons);
+const a=decodeURIComponent(icons.icon(icons.dashboard,'#aabbcc','line'));
+const b=decodeURIComponent(icons.icon(icons.dashboard,'#aabbcc','bold'));
+assert.ok(a.includes("stroke-width='1.7'"));assert.ok(b.includes("stroke-width='2.8'"));assert.notEqual(a,b);
+const cmake=read('CMakeLists.txt'),main=read('src/main.cpp'),qml=read('src/qml/pages/AddonsPage.qml');
+assert.ok(cmake.includes('VERSION 4.0.1'));assert.ok(cmake.includes('"Build optional legacy Chromium workspace" OFF'));
+assert.ok(main.includes('args.contains(QStringLiteral("--web-ui")) && !args.contains(QStringLiteral("--native-ui"))'));
+assert.ok(read('.github/workflows/release.yml').includes('-DBSI_CHROMIUM_UI=OFF'));
+for(const name of ['SkinProfiles.cpp','SkinPreview.qml','SkinCatalog.js'])assert.ok(cmake.includes(name));
+assert.ok(qml.includes('onExePathChanged'));assert.ok(!qml.includes('onPathsChanged'));
+for(const action of ['skin-save','skin-load','queue-skin','dry-run','apply'])assert.ok(qml.includes('"'+action+'"'));
+assert.ok(!qml.includes('backend.scanResources('),'entry must never scan');
+assert.ok(qml.includes('onWorkspaceChanged() { page.plan = {}; }'),'revision changes invalidate the plan');
+const backend=read('src/core/Backend.cpp');assert.ok(backend.indexOf('if (actionsLocked()) return lockedMap();',backend.indexOf('QVariantMap Backend::workspace'))<backend.indexOf('action == QLatin1String("queue-skin")'));
+assert.ok(backend.includes('m_resourceFileHash != QCryptographicHash::hash(bytes,QCryptographicHash::Sha256)'));
+assert.ok(backend.includes('m_workspaceOperations=pending'),'custom skin batches commit to queue only after validation');
+assert.ok(qml.includes('Motion and pack name are authoring/preview metadata'));
+const login=read('src/qml/LoginGate.qml');for(const call of ['auth.startDiscord()','auth.continueSaved()','auth.completeManual(','auth.forgetSaved()']) assert.ok(login.includes(call));
+assert.ok(!login.includes('authorized = true'));assert.ok(read('src/qml/Theme.qml').includes('Segoe UI Variable'));
+console.log('PASS: native 4.0.1 defaults, six independent editable drafts, icon variants, authorization/manual callback retention, explicit mapping guard and stale-plan invalidation.');

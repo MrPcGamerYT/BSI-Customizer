@@ -2,15 +2,17 @@
 
 // Minimal inline SVG icon set (lucide-style paths, no external files).
 
-function icon(inner, color) {
+function icon(inner, color, style) {
     // Stroke icons (default): lucide-style outlines tinted via stroke color.
     // Brand marks (Discord): solid-fill shapes; their markup carries a $C
     // placeholder that is replaced with the tint color, and no stroke is used.
+    var weight = style === "bold" ? "2.8" : "1.7";
+    var cap = style === "line" ? "square" : "round";
     var filled = inner.indexOf("$C") >= 0;
     var svg = "<svg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24'"
             + (filled
                ? " fill='none' stroke='none'>"
-               : " fill='none' stroke='" + color + "' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'>")
+               : " fill='none' stroke='" + color + "' stroke-width='" + weight + "' stroke-linecap='" + cap + "' stroke-linejoin='" + cap + "'>")
             + (filled ? inner.split("$C").join(color) : inner)
             + "</svg>";
     return "data:image/svg+xml," + encodeURIComponent(svg);

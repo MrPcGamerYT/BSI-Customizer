@@ -5,22 +5,25 @@ import QtQuick
 // the existing ThemeManager, including saved accents and the system theme.
 QtObject {
     id: theme
-    readonly property string headingFont: "Manrope"
+    readonly property string bodyFont: Qt.platform.os === "windows" ? "Segoe UI Variable Text" : "Plus Jakarta Sans"
+    readonly property string headingFont: Qt.platform.os === "windows" ? "Segoe UI Variable Display" : "Manrope"
+    property bool reduceMotion: false
+    readonly property int motionDuration: reduceMotion ? 0 : 220
 
     readonly property bool dark: themes.effectiveTheme === 0
     readonly property color accent: dark ? themes.accentColor : Qt.darker(themes.accentColor, 1.65)
     readonly property color accentSoft: Qt.alpha(accent, dark ? 0.10 : 0.08)
     readonly property color accentText: dark ? accent : Qt.darker(accent, 1.1)
 
-    readonly property color window: dark ? "#0d0c10" : "#f4f6fa"
-    readonly property color sidebar: dark ? "#111015" : "#ffffff"
-    readonly property color topbar: dark ? "#0d0c10" : "#f4f6fa"
-    readonly property color card: dark ? "#19171e" : "#ffffff"
-    readonly property color cardLow: dark ? "#131117" : "#f6f8fc"
-    readonly property color raised: dark ? "#24212b" : "#eef1f7"
-    readonly property color border: dark ? "#302c38" : "#dce2ec"
-    readonly property color borderStrong: dark ? "#514959" : "#aab6c8"
-    readonly property color hairline: dark ? "#25212d" : "#e7ebf2"
+    readonly property color window: dark ? "#101012" : "#f4f6fa"
+    readonly property color sidebar: dark ? "#171719" : "#ffffff"
+    readonly property color topbar: dark ? "#101012" : "#f4f6fa"
+    readonly property color card: dark ? "#1d1d20" : "#ffffff"
+    readonly property color cardLow: dark ? "#151517" : "#f6f8fc"
+    readonly property color raised: dark ? "#29292d" : "#eef1f7"
+    readonly property color border: dark ? "#35353a" : "#dce2ec"
+    readonly property color borderStrong: dark ? "#606069" : "#aab6c8"
+    readonly property color hairline: dark ? "#2b2b2f" : "#e7ebf2"
     readonly property color text: dark ? "#f5f8f6" : "#1b263a"
     readonly property color textDim: dark ? "#a39baa" : "#5c6880"
     readonly property color soft: dark ? "#c8c1d0" : "#3c4658"

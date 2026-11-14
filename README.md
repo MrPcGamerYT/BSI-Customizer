@@ -1,22 +1,25 @@
-# BSI Customizer 3.0.1
+# BSI Customizer 4.0.1
 
 [![CI](https://github.com/MrPcGamerYT/BSI-Customizer/actions/workflows/ci.yml/badge.svg)](https://github.com/MrPcGamerYT/BSI-Customizer/actions/workflows/ci.yml)
 
 Windows desktop customizer for **BlueStacks / MSI App Player**, with a
 Forge-inspired dark workspace, the existing C++ patch engines and Discord sign-in.
-The source version is **3.0.1**; that label does not mean this exact source snapshot
+The source version is **4.0.1**; that label does not mean this exact source snapshot
 has been published as a release. Check the build's commit and verification results
 before downloading.
 
 ## GUI and navigation
 
-- **Default frontend:** HTML, CSS and JavaScript rendered inside **Qt 6 WebEngine
-  (Chromium)**. No `--web-ui` flag or native-editor switching is required.
-- **Native frontend:** **QML + Qt Quick Controls**, selected with `--native-ui`.
-  It remains a compatibility fallback; the app has not switched to a QML-only UI.
-- **Backend:** C++ handles authorization, target detection, patching, diagnostics
-  and recovery in both frontends. A browser-only design preview cannot patch files
-  or bypass Discord sign-in.
+- **Default frontend (4.0.1): QML + Qt Quick Controls**, backed by C++.
+  Standard portable/installer builds set `BSI_CHROMIUM_UI=OFF`; no HTML renderer
+  or Chromium runtime is required for the Customizer UI.
+- **Windows typography:** installed Segoe UI Variable / Segoe UI fonts. Microsoft
+  font binaries are not redistributed. Non-Windows tests retain bundled fallbacks.
+- **Legacy frontend:** the HTML workspace is retained for compatibility development
+  only. Build with `BSI_CHROMIUM_UI=ON` and explicitly launch `--web-ui` to use it;
+  `--native-ui` still forces the native shell.
+- **Authorization:** the redesigned native login retains Discord, saved-session
+  revalidation and manual callback flows. UI styling does not bypass backend guards.
 
 The shell has a stable labelled sidebar, graphite surfaces, a subtle gradient
 background, backend activity logs and these navigation groups:
@@ -31,11 +34,26 @@ background, backend activity logs and these navigation groups:
 | Recovery | Backups |
 | Collection | Add-ons |
 
-This table describes the default Chromium frontend. Customizer **Settings** opens
+This table describes the legacy Chromium navigation; native editors remain available through the labelled QML sidebar. Customizer **Settings** opens
 as a modal with Appearance, Updates and About tabs; it is separate from the
 emulator's Settings-panel rebuild. The native shell retains its eleven original
 editors plus Backups and Add-ons. **Resource scans are manual**: opening a page
 does not start Scan Resources.
+
+### Native Skin Studio (4.0.1)
+
+The screenshot-inspired native collection grid opens six editable bases. Set your
+own pack name, accent, surface, geometry, icon family and preview motion. Save/import
+portable `bsi.skin` JSON profiles; imports do not apply anything. Advanced controls
+allow exact detected palette-property and numeric-token overrides. Map individual
+SVG resources from an **explicit manual resource scan** to built-in line, rounded
+or bold icons; generated replacements join the same verified EXE batch.
+
+**Full emulator skins are not complete.** Names and motion settings are currently
+profile/preview metadata, not injected player branding or animations. The writer
+supports verified palette/design tokens and explicitly mapped SVG resources, not
+all MSI windows, native dialogs, raster art, optimizer, boot or arbitrary QML.
+Unsupported properties are refused, never silently reported as installed.
 
 ### Add-ons: six player collections
 
@@ -112,8 +130,9 @@ for the commit you want. A manual dispatch with `publish_release=false` produces
 test artifacts without publishing a public release. Artifacts expire and may
 require a GitHub sign-in to download; published release assets are separate.
 
-The portable launcher bundles the application runtime, including Qt/QML plugins,
-Chromium, SVG support and VC runtime dependencies. It extracts into a private
+The portable launcher bundles the native application runtime, including Qt/QML
+plugins, SVG support and VC runtime dependencies. Chromium is bundled only in
+explicitly enabled legacy builds. It extracts into a private
 temporary directory and cleans up on normal exit; it does not download the runtime
 on launch. This is **not** an offline authorization bypass: Discord sign-in still
 requires network access. The running portable EXE cannot overwrite itself; the
@@ -960,7 +979,7 @@ the intent, mention the bot in the message, or let `publish.mjs` post it).
 
 ## Build and verify
 
-Requires CMake 3.21+, C++17, and Qt 6.5+ with Core, Gui, Network, Qml, Quick, QuickControls2, Svg and Multimedia. The default frontend additionally requires WebEngineQuick and WebChannel; standard Windows packaging uses Qt 6.8.3 with WebEngine, WebChannel, Positioning and SerialPort modules. **Qt 6 builds the customizer UI; it does not limit FPS patching to Qt 6 installations. Qt 5 and Qt 6 target DLLs use the same patching engine.**
+Requires CMake 3.21+, C++17, and Qt 6.5+ with Core, Gui, Network, Qml, Quick, QuickControls2, Svg and Multimedia. The optional legacy frontend additionally requires WebEngineQuick and WebChannel. Standard 4.0.1 Windows packaging uses native Qt 6.8.3 with Multimedia. **Qt 6 builds the customizer UI; it does not limit FPS patching to Qt 6 installations. Qt 5 and Qt 6 target DLLs use the same patching engine.**
 
 ```sh
 cmake -B build -DCMAKE_BUILD_TYPE=Release
@@ -1142,11 +1161,11 @@ Compatibility is version-adaptive, not a guarantee for every past/future build: 
 
 ### Frontend build options
 
-The HTML frontend is the default (`BSI_CHROMIUM_UI=ON`). Install
+The QML frontend is the default (`BSI_CHROMIUM_UI=OFF`). To build the optional legacy HTML frontend, explicitly enable `BSI_CHROMIUM_UI=ON`. Install
 Qt WebEngine, WebChannel, Positioning, SerialPort (Positioning plugin dependency)
 and Multimedia development modules when
 building it locally. The existing Discord login and C++ engines are unchanged.
 The standard portable/installer workflows include the complete runtime.
-`--native-ui` selects the emergency recovery shell; `BSI_CHROMIUM_UI=OFF` is an
+`--web-ui` selects the legacy frontend when compiled in; `--native-ui` forces QML; `BSI_CHROMIUM_UI=OFF` is an
 explicit native-only developer build. See [UI/engine mapping](docs/UNIFIED-UI.md)
 and [deployment requirements and verification](docs/CHROMIUM-UI.md).

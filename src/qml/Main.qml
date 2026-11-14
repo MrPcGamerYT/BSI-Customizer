@@ -41,7 +41,7 @@ ApplicationWindow {
     flags: Qt.Window | Qt.FramelessWindowHint
     title: qsTr("BlueStacks 5 / MSI 5 — BSI Customizer")
     color: Theme.window
-    font.family: "Plus Jakarta Sans"
+    font.family: Theme.bodyFont
     font.pixelSize: 13
     palette.window: Theme.window
     palette.windowText: Theme.text
@@ -103,9 +103,9 @@ ApplicationWindow {
     Rectangle {
         anchors.fill: parent
         gradient: Gradient {
-            GradientStop { position: 0; color: Theme.dark ? "#17131e" : Theme.window }
+            GradientStop { position: 0; color: Theme.dark ? "#171719" : Theme.window }
             GradientStop { position: 0.55; color: Theme.window }
-            GradientStop { position: 1; color: Theme.dark ? "#08070a" : Theme.window }
+            GradientStop { position: 1; color: Theme.dark ? "#0d0d0f" : Theme.window }
         }
     }
 
@@ -199,7 +199,7 @@ ApplicationWindow {
                                     Layout.fillWidth: true
                                     text: navEntry.modelData.label
                                     color: pages.currentIndex === navEntry.index ? Theme.text : Theme.soft
-                                    font.pixelSize: 11
+                                    font.pixelSize: 12
                                     font.weight: pages.currentIndex === navEntry.index ? Font.DemiBold : Font.Medium
                                     elide: Text.ElideRight
                                 }
@@ -214,7 +214,7 @@ ApplicationWindow {
             id: railFooter
             anchors.left: parent.left; anchors.bottom: parent.bottom
             anchors.leftMargin: 18; anchors.bottomMargin: 16
-            text: qsTr("BSI 3.0.1")
+            text: qsTr("BSI 4.0.1 · NATIVE QML")
             color: Theme.textDim; font.pixelSize: 9; font.letterSpacing: 1
         }
     }
@@ -236,7 +236,7 @@ ApplicationWindow {
             ColumnLayout {
                 Layout.fillWidth: true; spacing: 4
                 Text { text: qsTr("BSI Customizer"); color: Theme.text; font.family: Theme.headingFont; font.pixelSize: 16; font.weight: Font.Bold }
-                Text { text: qsTr("Premium emulator control center"); color: Theme.textDim; font.pixelSize: 10 }
+                Text { text: qsTr("Your player, thoughtfully customized · 4.0.1"); color: Theme.textDim; font.pixelSize: 10 }
             }
             ComboBox {
                 id: targetPicker
@@ -303,6 +303,7 @@ ApplicationWindow {
             enabled: !backend.busy
             onTriggered: runSelftest()
         }
+        MenuItem { text: qsTr("Reduce motion"); checkable: true; checked: Theme.reduceMotion; onTriggered: Theme.reduceMotion = checked }
         MenuSeparator {}
         MenuItem { text: qsTr("Sign out"); enabled: !backend.busy; onTriggered: auth.signOut() }
     }
@@ -317,6 +318,7 @@ ApplicationWindow {
         UpdateBanner { Layout.fillWidth: true; Layout.preferredHeight: visible ? implicitHeight : 0 }
         StackLayout {
             id: pages
+            onCurrentIndexChanged: if (!Theme.reduceMotion) pageEntrance.restart()
             objectName: "studioPageStack"
             Layout.fillWidth: true; Layout.fillHeight: true
             DashboardPage { objectName: "studioDashboard"; onNavigate: (index) => window.navigatePage(index) }
@@ -333,6 +335,7 @@ ApplicationWindow {
             BackupsPage { objectName: "featureBackups"; onNotify: (msg) => toast.show(msg) }
             AddonsPage { objectName: "featureAddons"; onNotify: (msg) => toast.show(msg); onNavigate: (index) => window.navigatePage(index) }
         }
+        NumberAnimation { id: pageEntrance; target: pages; property: "opacity"; from: 0.45; to: 1; duration: Theme.motionDuration; easing.type: Easing.OutCubic }
         LogPanel {
             id: logPanel
             Layout.fillWidth: true

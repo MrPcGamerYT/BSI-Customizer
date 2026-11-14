@@ -268,7 +268,9 @@ QVariantMap simulate(const QString &path, const QVariantList &operations, const 
                 if (!pack) return fail(QStringLiteral("Unknown add-on pack."));
                 const auto originalResources = EmbeddedResources::list(original, true);
                 const auto originalAnalysis = PlayerAppearancePatcher::analyze(original);
-                const auto originalEdits = AddonPacks::designEdits(*pack, originalAnalysis);
+                const auto originalEdits = op.contains("design") ? op.value("design").toMap() : AddonPacks::designEdits(*pack, originalAnalysis);
+                const auto customValidation = PlayerAppearancePatcher::validateEdits(original, originalEdits);
+                if (!customValidation.value("ok").toBool()) return fail(customValidation.value("msg").toString());
                 for (const auto &token : originalAnalysis.tokens) {
                     if (!originalEdits.contains(token.key)) continue;
                     int matches = 0; EmbeddedResources::Entry selected;
@@ -279,7 +281,7 @@ QVariantMap simulate(const QString &path, const QVariantList &operations, const 
                     if (selected.entryOff != theme.entryOff && payloads.contains(selected.entryOff))
                         return fail(QStringLiteral("Add-on design conflicts with an earlier resource edit."));
                 }
-                const auto design = AddonPacks::designEdits(*pack, PlayerAppearancePatcher::analyze(next));
+                const auto design = op.contains("design") ? op.value("design").toMap() : AddonPacks::designEdits(*pack, PlayerAppearancePatcher::analyze(next));
                 if (design.isEmpty()) return fail(QStringLiteral("Supported add-on design tokens disappeared after palette preparation."));
                 QString error;
                 ok = PlayerAppearancePatcher::apply(next, design, &error);
@@ -330,6 +332,7 @@ QVariantMap simulate(const QString &path, const QVariantList &operations, const 
         } else return fail(QStringLiteral("Unsupported batch operation. Only theme, resource and appearance edits belong to this single-EXE transaction."));
         QVariantMap step{{"operation", key}, {"ok", ok}, {"msg", msg}};
         if (op.contains("pack")) step["pack"] = op.value("pack");
+        if (op.contains("name")) step["name"] = op.value("name");
         steps << step;
         if (!ok || next.isEmpty()) return {{"ok", false}, {"msg", msg}, {"steps", steps}};
         if (next.size() > maxImage) return fail(QStringLiteral("Prepared EXE exceeds the 256 MB recovery limit; no files changed."));
@@ -371,6 +374,7 @@ QVariantMap apply(const QString &path, const QVariantList &operations, const QSt
         if (op.value("kind").toString() == QLatin1String("theme")) {
             const QStringList names = op.value("edits").toMap().keys();
             if (op.contains("pack")) description["pack"] = op.value("pack");
+            if (op.contains("name")) description["name"] = op.value("name");
             description["colorCount"] = names.size();
             description["properties"] = names.mid(0,64);
         } else if (op.value("kind").toString() == QLatin1String("appearance")) {
