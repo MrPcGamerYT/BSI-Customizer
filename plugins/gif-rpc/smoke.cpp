@@ -9,6 +9,8 @@
 #include <atomic>
 #include <cstring>
 #include <cstdint>
+#define BSI_WIDEN_IMPL(x) L##x
+#define BSI_WIDEN(x) BSI_WIDEN_IMPL(x)
 
 int wmain(int argc, wchar_t **argv) {
     if(argc!=2)return 2;
@@ -55,7 +57,7 @@ int wmain(int argc, wchar_t **argv) {
     if(!reinterpret_cast<Query>(GetProcAddress(proxy,"VerQueryValueW"))(data.data(),L"\\",&result,&length)||!length)return 9;
     // The proxy is already mapped when Windows resolves this DLL's imports.
     // Its DllMain calls version APIs before LoadLibrary returns.
-    HMODULE dependent=LoadLibraryW(BSI_LOADER_TEST);
+    HMODULE dependent=LoadLibraryW(BSI_WIDEN(BSI_LOADER_TEST));
     using Passed=BOOL(*)();
     const auto passed=dependent?reinterpret_cast<Passed>(GetProcAddress(dependent,"BsiLoaderTestPassed")):nullptr;
     if(!passed||!passed()){std::printf("Dependent DLL init failed: %lu\n",GetLastError());return 10;}
