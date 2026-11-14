@@ -1348,17 +1348,28 @@ QVariantMap apply(const QString &exePath, const QString &developerName,
                 }
             }
         }
-        if (!recoveryMatchesCurrent && hasPatchMarker)
-            return fail(QStringLiteral("A saved Settings-panel resource was changed by another patch. Restore or inspect it manually before rebuilding."));
+        // No early return here: a patched player must still reach the guard
+        // below, which separates "another patch changed the source" from
+        // "the snapshot itself is unusable" and gives the matching advice.
     }
     if (!recoveryMatchesCurrent) {
-        if (hasPatchMarker)
-            return fail(applyProblem == RecoveryProblem::None
-                ? QStringLiteral("A Settings-panel marker exists without a matching recovery snapshot. The executable was not overwritten.")
-                : QStringLiteral("This player carries a Settings-panel patch, but its recovery snapshot is unusable (%1). The executable was not overwritten; restore the player backup before rebuilding.")
-                      .arg(applyProblem == RecoveryProblem::Incomplete
-                               ? QStringLiteral("incomplete")
-                               : QStringLiteral("failed its integrity check")));
+        if (hasPatchMarker) {
+            // Three different situations reach here and they need different
+            // advice: a usable snapshot that disagrees with the file means
+            // another patch ran on top; an unusable snapshot means the stock
+            // backup is the only way back; and a snapshot for other resource
+            // paths means this is a different executable altogether.
+            const bool snapshotCoversThisExe = originals.size() == 2
+                && originals.contains(current.window.path) && originals.contains(current.about.path);
+            if (snapshotCoversThisExe)
+                return fail(QStringLiteral("A Settings-panel resource was changed by another patch. Restore or inspect it manually before rebuilding."));
+            if (applyProblem != RecoveryProblem::None)
+                return fail(QStringLiteral("This player carries a Settings-panel patch, but its recovery snapshot is unusable (%1). The executable was not overwritten; restore the player backup before rebuilding.")
+                    .arg(applyProblem == RecoveryProblem::Incomplete
+                             ? QStringLiteral("incomplete")
+                             : QStringLiteral("failed its integrity check")));
+            return fail(QStringLiteral("A Settings-panel marker exists without a matching recovery snapshot. The executable was not overwritten."));
+        }
         // Recovery files are keyed by executable path. A clean reinstall can
         // put a different, unpatched HD-Player.exe at that same path, leaving
         // the previous install's hashes in AppLocalData. Do not mistake that
