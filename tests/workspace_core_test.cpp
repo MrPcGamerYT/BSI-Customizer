@@ -2,6 +2,7 @@
 #include "core/CustomizationWorkspace.h"
 #include "core/AddonPacks.h"
 #include "core/SkinProfiles.h"
+#include "core/PlayerSkinCompiler.h"
 #include "core/ThemeEngine.h"
 #include "core/EmbeddedResources.h"
 #include "core/QtResources.h"
@@ -136,6 +137,34 @@ int run()
     check(!SkinProfiles::readIcon(svgFile).value("ok").toBool(),"SVG external references refused");
     write(svgFile,"<!DOCTYPE svg [<!ENTITY x SYSTEM 'file:///etc/passwd'>]><svg xmlns='http://www.w3.org/2000/svg'/>");
     check(!SkinProfiles::readIcon(svgFile).value("ok").toBool(),"SVG DTD/entity declarations refused");
+    auto uiSkin=skin;uiSkin["playerUi"]=true;
+    check(SkinProfiles::validate(uiSkin).value("ok").toBool(),"strict player GUI deployment is a typed profile option");
+    auto badUiSkin=uiSkin;badUiSkin["playerUi"]="true";
+    check(!SkinProfiles::validate(badUiSkin).value("ok").toBool(),"string GUI deployment flag refused");
+    check(!PlayerSkinCompiler::plan(original,uiSkin,{}).value("ok").toBool(),"incomplete EXE cannot report a full GUI pack success");
+    check(!PlayerSkinCompiler::compile("Unknown.qml","Item {}",uiSkin).value("ok").toBool(),"unknown player source refused");
+    const QString sourceDir=qEnvironmentVariable("BSI_SKIN_REFERENCE_DIR");
+    if(!sourceDir.isEmpty()) {
+        for(const auto &leaf:PlayerSkinCompiler::components()) {
+            const auto source=read(QDir(sourceDir).filePath(leaf));
+            check(!source.isEmpty(),qPrintable("pinned player UI source present: "+leaf));
+            for(const auto &id:QStringList{"carbon","amethyst","arctic","matrix","ember","nord"}) {
+                auto generatedProfile=uiSkin;generatedProfile["base"]=id;
+                generatedProfile["radius"]=AddonPacks::find(id)->radius;
+                const auto generated=PlayerSkinCompiler::compile(leaf,source,generatedProfile);
+                if(!generated.value("ok").toBool())std::printf("compiler: %s\n",qPrintable(generated.value("msg").toString()));
+                check(generated.value("ok").toBool(),qPrintable("compile player component: "+leaf+" / "+id));
+                const auto output=generated.value("source").toByteArray();
+                if(output.isEmpty())continue;
+                auto changed=generatedProfile;changed["radius"]=19;changed["duration"]=0;
+                const auto second=PlayerSkinCompiler::compile(leaf,output,changed);
+                check(second.value("ok").toBool() && second.value("source").toByteArray().count("BSI_PLAYER_SKIN_V1_BEGIN")==1,
+                      "switching packs updates settings without stacking behaviors");
+                check(output.count("onClicked:")==source.count("onClicked:") && output.count("onClosing:")==source.count("onClosing:"),
+                      "player actions and close handlers survive style compilation");
+            }
+        }
+    }
     const QString skinFile=temp.filePath(QStringLiteral("editable-skin.json"));
     check(SkinProfiles::save(skinFile,skin).value("ok").toBool() && SkinProfiles::read(skinFile).value("profile").toMap()==skin,"custom skin profile save/load round trip");
     check(!SkinProfiles::save(exe,skin).value("ok").toBool() && read(exe)==original,"skin export never overwrites the player");

@@ -562,7 +562,7 @@ Item {
         RowLayout {
             Layout.fillWidth: true
             spacing: 8
-            TextField {
+            StudioTextField {
                 id: filterField
                 Layout.preferredWidth: 300
                 placeholderText: qsTr("Filter this folder — or search the whole image")
@@ -993,7 +993,7 @@ Item {
                 color: Theme.textDim
                 font.pixelSize: 11
             }
-            TextField {
+            StudioTextField {
                 id: copyNameField
                 Layout.fillWidth: true
                 text: browser.copyNameText
@@ -1001,7 +1001,7 @@ Item {
                 selectByMouse: true
                 onTextChanged: browser.copyNameText = text
             }
-            TextField {
+            StudioTextField {
                 id: copyDestinationField
                 Layout.fillWidth: true
                 text: browser.destinationText
@@ -1066,7 +1066,7 @@ Item {
                 color: Theme.textDim
                 font.pixelSize: 11
             }
-            TextField {
+            StudioTextField {
                 id: moveDestinationField
                 Layout.fillWidth: true
                 text: browser.destinationText
@@ -1120,7 +1120,7 @@ Item {
                 font.pixelSize: 13
                 font.weight: Font.DemiBold
             }
-            TextField {
+            StudioTextField {
                 id: renameNameField
                 Layout.fillWidth: true
                 text: browser.renameText
@@ -1225,7 +1225,7 @@ Item {
                 font.pixelSize: 13
                 font.weight: Font.DemiBold
             }
-            TextField {
+            StudioTextField {
                 id: folderName
                 Layout.fillWidth: true
                 placeholderText: qsTr("folder name")

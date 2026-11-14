@@ -78,7 +78,7 @@ QByteArray mappedIcon(const QVariantMap &mapping,const QString &style,const QStr
     return decoded && safeSvg(decoded.decoded) ? decoded.decoded : QByteArray();
 }
 QVariantMap validate(const QVariantMap &p) {
-    const QSet<QString> keys{"schema","version","name","base","accent","surface","radius","height","padding","motion","duration","iconStyle","palette","tokens","icons"};
+    const QSet<QString> keys{"schema","version","name","base","accent","surface","radius","height","padding","motion","duration","iconStyle","palette","tokens","icons","playerUi"};
     for (auto it=p.cbegin();it!=p.cend();++it) if (!keys.contains(it.key())) return fail(QStringLiteral("Unknown skin field: %1").arg(it.key()));
     if (p.value("schema").toString()!=QLatin1String("bsi.skin") || !whole(p.value("version"),1,1)) return fail(QStringLiteral("Unsupported skin schema/version."));
     const QString name=p.value("name").toString();
@@ -89,6 +89,7 @@ QVariantMap validate(const QVariantMap &p) {
         || !whole(p.value("duration"),0,1200)) return fail(QStringLiteral("Invalid geometry or preview duration."));
     if (!QStringList{"none","fade","rise","slide","scale"}.contains(p.value("motion").toString())
         || !QStringList{"line","rounded","bold"}.contains(p.value("iconStyle").toString())) return fail(QStringLiteral("Unknown motion or icon style."));
+    if (p.contains("playerUi") && p.value("playerUi").metaType().id()!=QMetaType::Bool) return fail(QStringLiteral("playerUi must be a boolean."));
     // Accept typed color/token data only, never QML expressions or offsets.
     if (p.contains("palette") && p.value("palette").metaType().id()!=QMetaType::QVariantMap) return fail(QStringLiteral("Palette must be an object."));
     if (p.contains("tokens") && p.value("tokens").metaType().id()!=QMetaType::QVariantMap) return fail(QStringLiteral("Tokens must be an object."));

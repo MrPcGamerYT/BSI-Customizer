@@ -1,19 +1,20 @@
 LIBRARY version
 EXPORTS
-    GetFileVersionInfoSizeA=BSI_GetFileVersionInfoSizeA
-    GetFileVersionInfoSizeW=BSI_GetFileVersionInfoSizeW
-    GetFileVersionInfoSizeExA=BSI_GetFileVersionInfoSizeExA
-    GetFileVersionInfoSizeExW=BSI_GetFileVersionInfoSizeExW
-    GetFileVersionInfoA=BSI_GetFileVersionInfoA
-    GetFileVersionInfoW=BSI_GetFileVersionInfoW
-    GetFileVersionInfoExA=BSI_GetFileVersionInfoExA
-    GetFileVersionInfoExW=BSI_GetFileVersionInfoExW
-    VerQueryValueA=BSI_VerQueryValueA
-    VerQueryValueW=BSI_VerQueryValueW
-    VerInstallFileA=BSI_VerInstallFileA
-    VerInstallFileW=BSI_VerInstallFileW
-    VerFindFileA=BSI_VerFindFileA
-    VerFindFileW=BSI_VerFindFileW
-    VerLanguageNameA=BSI_VerLanguageNameA
-    VerLanguageNameW=BSI_VerLanguageNameW
-    BsiGifRpcSchema
+    GetFileVersionInfoA=BSI_GetFileVersionInfoA @1
+    GetFileVersionInfoByHandle=BSI_GetFileVersionInfoByHandle @2
+    GetFileVersionInfoExA=BSI_GetFileVersionInfoExA @3
+    GetFileVersionInfoExW=BSI_GetFileVersionInfoExW @4
+    GetFileVersionInfoSizeA=BSI_GetFileVersionInfoSizeA @5
+    GetFileVersionInfoSizeExA=BSI_GetFileVersionInfoSizeExA @6
+    GetFileVersionInfoSizeExW=BSI_GetFileVersionInfoSizeExW @7
+    GetFileVersionInfoSizeW=BSI_GetFileVersionInfoSizeW @8
+    GetFileVersionInfoW=BSI_GetFileVersionInfoW @9
+    VerFindFileA=BSI_VerFindFileA @10
+    VerFindFileW=BSI_VerFindFileW @11
+    VerInstallFileA=BSI_VerInstallFileA @12
+    VerInstallFileW=BSI_VerInstallFileW @13
+    VerLanguageNameA=BSI_VerLanguageNameA @14
+    VerLanguageNameW=BSI_VerLanguageNameW @15
+    VerQueryValueA=BSI_VerQueryValueA @16
+    VerQueryValueW=BSI_VerQueryValueW @17
+    BsiGifRpcSchema @1000

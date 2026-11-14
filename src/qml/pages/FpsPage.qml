@@ -36,7 +36,7 @@ Item {
 
         RowLayout {
             Layout.fillWidth: true
-            CheckBox {
+            StudioCheckBox {
                 text: qsTr("Automatically select the Qt slider DLL for this installation")
                 checked: settings.fpsAutoDetect
                 onToggled: settings.fpsAutoDetect = checked
@@ -107,7 +107,7 @@ Item {
                     Layout.preferredHeight: Math.max(56, Math.min(160, statusText.contentHeight + 24))
                     clip: true
                     ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
-                    TextArea {
+                    StudioTextArea {
                         id: statusText
                         width: statusView.availableWidth
                         readOnly: true

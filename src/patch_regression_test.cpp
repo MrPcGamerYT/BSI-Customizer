@@ -4956,10 +4956,23 @@ Window {
             const auto size=reinterpret_cast<Size>(GetProcAddress(proxy,"GetFileVersionInfoSizeW"));
             wchar_t windows[MAX_PATH];GetSystemDirectoryW(windows,MAX_PATH);
             const QString kernel=QDir(QString::fromWCharArray(windows)).filePath(QStringLiteral("kernel32.dll"));DWORD handle=0;
-            check(schema&&QByteArray(schema())=="BSI_GIF_RPC_PROXY_V1"&&size&&size(reinterpret_cast<LPCWSTR>(kernel.utf16()),&handle)>0,
+            check(schema&&QByteArray(schema())=="BSI_GIF_RPC_PROXY_V2"&&size&&size(reinterpret_cast<LPCWSTR>(kernel.utf16()),&handle)>0,
                   "proxy schema and actual System32 version API forwarding work");
             FreeLibrary(proxy);
         }
+#ifdef BSI_GIF_RPC_SMOKE
+        QProcess rpcHost;
+        rpcHost.setProcessChannelMode(QProcess::MergedChannels);
+        rpcHost.start(QString::fromUtf8(BSI_GIF_RPC_SMOKE),{dll});
+        const bool started=rpcHost.waitForStarted(5000);
+        bool finished=started && rpcHost.waitForFinished(12000);
+        if(!finished){rpcHost.kill();rpcHost.waitForFinished(5000);}
+        std::printf("RPC startup smoke: %s\n",rpcHost.readAll().constData());
+        check(finished && rpcHost.exitStatus()==QProcess::NormalExit && rpcHost.exitCode()==0,
+              "HD-Player-named host survives proxy worker startup and named/ordinal version queries");
+        check(read(QDir(folder).filePath(QStringLiteral("bsi-gif-rpc.log"))).contains("worker started"),
+              "startup smoke actually executes the RPC worker, unlike the customizer host");
+#endif
         check(GifRpc::restore(exe).value(QStringLiteral("ok")).toBool()&&!QFileInfo::exists(dll),
               "removing a new RPC deployment does not delete saved settings or unrelated files");
         const QByteArray original=peFile();write(dll,original);

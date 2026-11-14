@@ -111,7 +111,7 @@ Item {
                     RowLayout {
                         Layout.fillWidth: true
                         spacing: 12
-                        CheckBox {
+                        StudioCheckBox {
                             id: offline
                             text: qsTr("Offline scan (do not query Discord)")
                             checked: true
@@ -236,7 +236,7 @@ Item {
                     RowLayout {
                         Layout.fillWidth: true
                         spacing: 10
-                        TextField {
+                        StudioTextField {
                             id: newId
                             Layout.fillWidth: true
                             placeholderText: qsTr("17–20 digit Discord Application ID")
@@ -286,7 +286,7 @@ Item {
                     RowLayout {
                         Layout.fillWidth: true
                         spacing: 8
-                        CheckBox {
+                        StudioCheckBox {
                             id: advanced
                             text: qsTr("Advanced: override the ID to search for")
                             palette.text: Theme.textDim
@@ -304,7 +304,7 @@ Item {
                             font.pixelSize: 12
                             Layout.preferredWidth: 60
                         }
-                        TextField {
+                        StudioTextField {
                             id: oldId
                             Layout.fillWidth: true
                             placeholderText: qsTr("Leave empty to use the detected / previously patched ID")
@@ -406,7 +406,7 @@ Item {
                     RowLayout {
                         Layout.fillWidth: true
                         spacing: 10
-                        TextField {
+                        StudioTextField {
                             id: newName
                             Layout.fillWidth: true
                             enabled: page.nameEntries.length > 0
@@ -472,7 +472,7 @@ Item {
                             anchors.fill: parent
                             anchors.margins: 10
                             clip: true
-                            TextArea {
+                            StudioTextArea {
                                 readOnly: true
                                 selectByMouse: true
                                 wrapMode: TextArea.Wrap

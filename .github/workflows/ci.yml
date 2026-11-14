@@ -21,6 +21,7 @@ env:
   QT_VERSION: "6.8.3"
   # The self-test must stay offline: the updater is disabled here on purpose.
   BSI_NO_UPDATER: "1"
+  BSI_SKIN_REFERENCE_DIR: ${{ github.workspace }}/player-ui-source
 
 jobs:
   rpc-scan-regression:
@@ -149,6 +150,16 @@ jobs:
           "| $env:REFERENCE_FILE | $((Get-Item -LiteralPath $target).Length) | $hash |" |
             Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
           Write-Host "Reference copied as data only: $target (SHA256 $hash)"
+
+      - name: Checkout pinned player UI source contracts (data only)
+        uses: actions/checkout@v5
+        with:
+          repository: husainprime20/src-code
+          ref: ee557954ee9e1a251f20fe667d2bbcc1f711d26b
+          path: player-ui-source
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: '/*.qml'
 
       - name: Install Qt 6
         uses: jurplel/install-qt-action@v4.3.1

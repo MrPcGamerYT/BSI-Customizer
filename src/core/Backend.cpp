@@ -6,6 +6,7 @@
 #include "CustomizationWorkspace.h"
 #include "AddonPacks.h"
 #include "SkinProfiles.h"
+#include "PlayerSkinCompiler.h"
 #include <QCryptographicHash>
 #include "BootVideoPatcher.h"
 #include "PlayerCache.h"
@@ -2144,6 +2145,14 @@ QVariantMap Backend::workspace(const QString &action, const QVariantMap &options
     else if (action == QLatin1String("skin-icon-load")) r = SkinProfiles::readIcon(options.value("file").toString());
     else if (action == QLatin1String("skin-save")) r = SkinProfiles::save(options.value("file").toString(), options.value("profile").toMap());
     else if (action == QLatin1String("skin-load")) r = SkinProfiles::read(options.value("file").toString());
+    else if (action == QLatin1String("skin-plan")) {
+        const auto bytes=readExe();
+        if(m_resourceFileHash!=QCryptographicHash::hash(bytes,QCryptographicHash::Sha256))
+            return {{"ok",false},{"msg","Scan Resources manually for this exact EXE first."}};
+        QStringList paths;for(const auto &v:m_resourceInfos)paths<<v.toMap().value("path").toString();
+        r=PlayerSkinCompiler::plan(bytes,options.value("profile").toMap(),paths);
+        r.remove("operations"); // inspection never queues or exports raw source
+    }
     else if (action == QLatin1String("queue-skin")) {
         const auto profile = options.value("profile").toMap();
         r = SkinProfiles::validate(profile);
@@ -2175,6 +2184,15 @@ QVariantMap Backend::workspace(const QString &action, const QVariantMap &options
         if (!validation.value("ok").toBool()) return validation;
         QVariantMap palette;for(auto it=colors.cbegin();it!=colors.cend();++it) palette[it.key()]=it.value();
         QVariantList pending{QVariantMap{{"kind","theme"},{"pack",profile.value("base")},{"name",profile.value("name")},{"edits",palette},{"design",design}}};
+        QVariantList coverage;
+        if(profile.value("playerUi",false).toBool()) {
+            if(m_resourceFileHash!=QCryptographicHash::hash(bytes,QCryptographicHash::Sha256))
+                return {{"ok",false},{"msg","Scan Resources manually before staging the player GUI components and icons."}};
+            QStringList paths;for(const auto &v:m_resourceInfos)paths<<v.toMap().value("path").toString();
+            const auto gui=PlayerSkinCompiler::plan(bytes,profile,paths);
+            if(!gui.value("ok").toBool())return gui;
+            pending.append(gui.value("operations").toList());coverage=gui.value("coverage").toList();
+        }
         const auto icons=profile.value("icons").toList();
         if (!icons.isEmpty() && m_resourceFileHash != QCryptographicHash::hash(bytes,QCryptographicHash::Sha256))
             return {{"ok",false},{"msg","Scan Resources manually for this exact EXE before staging mapped icons."}};
@@ -2183,10 +2201,15 @@ QVariantMap Backend::workspace(const QString &action, const QVariantMap &options
             int found=0;for(const auto &row:m_resourceInfos) if(row.toMap().value("path").toString()==resource) ++found;
             if(found!=1) return {{"ok",false},{"msg","An icon target is missing or ambiguous in your manual scan. No pack was queued."}};
             const auto svg=SkinProfiles::mappedIcon(mapping,profile.value("iconStyle").toString(),profile.value("accent").toString());
+            // Explicit user mappings override generated icon-family defaults.
+            for(int i=pending.size()-1;i>=0;--i)if(pending[i].toMap().value("path").toString()==resource)pending.removeAt(i);
             pending << QVariantMap{{"kind","resource"},{"path",resource},{"data",QString::fromLatin1(svg.toBase64())},{"sha256",W::digest(svg)}};
         }
+        if(pending.size()>128)return {{"ok",false},{"msg","Pack exceeds the 128-operation limit. No edits were queued."}};
         m_workspaceOperations=pending;m_workspaceHash=W::digest(bytes);
-        r={{"ok",true},{"msg","Custom palette, design tokens and explicitly mapped SVG icons staged together. Dry Run verifies storage/conflicts before Apply. Motion is preview-only; player QML animations, native dialogs, optimizer and boot are not installed."}};
+        r={{"ok",true},{"coverage",coverage},{"msg",profile.value("playerUi",false).toBool()
+            ? "Player palette, geometry, rounded QML controls, interaction/popup animations and icon families staged together. Dry Run is required. Native/Android windows, raster art, external DLLs/RCCs and boot remain unchanged."
+            : "Palette, numeric tokens and mapped icons staged. Player GUI deployment is off; motion is preview-only."}};
     }
     else if (action == QLatin1String("queue-addon")) {
         // A pack is an isolated, fixed catalog operation. Never discard the user's batch.

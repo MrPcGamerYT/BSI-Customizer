@@ -81,7 +81,7 @@ bool isOurProxy(const QByteArray &d,QString *error) {
     const auto fail=[&](const QString &msg){if(error)*error=msg;return false;};
     const int pe=PeUtils::peHeaderOffset(d);
     if(pe<0||!ByteUtils::inRange(d,pe,24)||PeUtils::machine(d)!=0x8664||!PeUtils::isPe32Plus(d)
-        ||!(ByteUtils::le16(d,pe+22)&0x2000)||!d.contains("BSI_GIF_RPC_PROXY_V1"))
+        ||!(ByteUtils::le16(d,pe+22)&0x2000)||(!d.contains("BSI_GIF_RPC_PROXY_V1")&&!d.contains("BSI_GIF_RPC_PROXY_V2")))
         return fail(QStringLiteral("Not a compatible BSI RPC-only Windows x64 DLL."));
     const auto sections=PeUtils::sections(d);
     const qint64 table=PeUtils::rvaToRaw(sections,PeUtils::exportRva(d));
@@ -97,6 +97,10 @@ bool isOurProxy(const QByteArray &d,QString *error) {
         found.insert(d.mid(at,end-at));
     }
     const QList<QByteArray> required={"BsiGifRpcSchema","GetFileVersionInfoSizeA","GetFileVersionInfoSizeW","GetFileVersionInfoSizeExA","GetFileVersionInfoSizeExW","GetFileVersionInfoA","GetFileVersionInfoW","GetFileVersionInfoExA","GetFileVersionInfoExW","VerQueryValueA","VerQueryValueW","VerInstallFileA","VerInstallFileW","VerFindFileA","VerFindFileW","VerLanguageNameA","VerLanguageNameW"};
+    // Keep V1 recognition for safe removal/upgrading, but V2 adds the missing
+    // Windows export. Never make old crash recovery depend on new exports.
+    if(d.contains("BSI_GIF_RPC_PROXY_V2")&&!found.contains("GetFileVersionInfoByHandle"))
+        return fail(QStringLiteral("Incomplete V2 proxy: missing GetFileVersionInfoByHandle."));
     for(const auto &name:required)if(!found.contains(name))return fail(QStringLiteral("Required DLL export missing: %1").arg(QString::fromLatin1(name)));
     return true;
 }

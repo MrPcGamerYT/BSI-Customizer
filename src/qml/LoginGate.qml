@@ -78,11 +78,11 @@ Item {
                 ActionButton { objectName: "nativeDiscordLogin"; Layout.fillWidth: true; implicitHeight: 44; text: auth.busy ? qsTr("Verifying Discord…") : qsTr("Continue with Discord →"); accent: true; enabled: !auth.busy; onClicked: gate.startDiscord() }
                 ProgressBar { Layout.fillWidth: true; visible: auth.busy; indeterminate: auth.progressIndeterminate; value: auth.progress }
                 Label { Layout.fillWidth: true; visible: auth.note.length > 0; text: auth.note; textFormat: Text.PlainText; wrapMode: Text.Wrap; color: auth.noteKind === "bad" ? Theme.danger : Theme.textDim; font.pixelSize: 12 }
-                CheckBox { text: qsTr("Use manual callback"); checked: gate.manualMode; onToggled: gate.manualMode = checked }
+                StudioCheckBox { text: qsTr("Use manual callback"); checked: gate.manualMode; onToggled: gate.manualMode = checked }
                 ColumnLayout {
                     visible: gate.manualMode; Layout.fillWidth: true; spacing: 8
                     Label { text: qsTr("Paste the Discord callback URL or code"); color: Theme.textDim; font.pixelSize: 12 }
-                    TextField { id: callbackInput; Layout.fillWidth: true; placeholderText: qsTr("Authorization callback"); selectByMouse: true; onAccepted: gate.finishManual() }
+                    StudioTextField { id: callbackInput; Layout.fillWidth: true; placeholderText: qsTr("Authorization callback"); selectByMouse: true; onAccepted: gate.finishManual() }
                     ActionButton { text: qsTr("Finish sign-in"); enabled: callbackInput.text.trim().length > 0; onClicked: gate.finishManual() }
                 }
                 Label { Layout.fillWidth: true; visible: auth.inviteUrl.length > 0; text: qsTr("Need access? Join the configured Discord server."); color: Theme.accentText; font.pixelSize: 12; wrapMode: Text.Wrap

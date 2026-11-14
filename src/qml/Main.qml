@@ -125,7 +125,6 @@ ApplicationWindow {
                         {label:"PRESENCE",icon:Icons.discord,route:7,children:[7,8]},
                         {label:"APP",icon:Icons.settings,route:-1,children:[]},
                         {label:"TOOLS",icon:Icons.debloat,route:9,children:[9,10]},
-                        {label:"+",icon:"<path d='M12 5v14M5 12h14'/>",route:0,children:[]},
                         {label:"RECOVERY",icon:Icons.integrity,route:11,children:[]},
                         {label:"COLLECTION",icon:Icons.images,route:12,children:[]}
                     ]
@@ -186,7 +185,7 @@ ApplicationWindow {
         ColumnLayout {
             id: railFooter; anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; anchors.margins: 20; spacing: 15
             MicroLabel { text: qsTr("ACTIVE TARGET"); font.pixelSize: 8; color: Theme.tertiary }
-            ComboBox {
+            StudioComboBox {
                 id: targetPicker; objectName: "shellTargetPicker"; Layout.fillWidth: true; implicitHeight: 30; font.pixelSize: 10
                 enabled: !backend.busy; model: backend.installs; textRole: "profile"
                 currentIndex: backend.installs.findIndex(i => i.exe === backend.exePath)

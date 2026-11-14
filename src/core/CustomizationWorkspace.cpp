@@ -7,6 +7,7 @@
 #include "PatchFile.h"
 #include "PlayerAppearancePatcher.h"
 #include "AddonPacks.h"
+#include "PlayerSkinCompiler.h"
 #include "PeUtils.h"
 #include "QtResources.h"
 #include "ThemeEngine.h"
@@ -240,7 +241,7 @@ QVariantMap simulate(const QString &path, const QVariantList &operations, const 
     if (prepared) prepared->clear();
     QByteArray original; if (!safeTarget(path) || !readBounded(path, &original)) return fail(QStringLiteral("The selected EXE is not a safe readable target."));
     if (!validHash(expectedHash) || digest(original) != expectedHash) return fail(QStringLiteral("The EXE changed or has not been inspected. Inspect again and rebuild the plan."));
-    if (operations.isEmpty() || operations.size() > 32) return fail(QStringLiteral("A batch must contain 1–32 operations."));
+    if (operations.isEmpty() || operations.size() > 128) return fail(QStringLiteral("A batch must contain 1–128 operations."));
     QTemporaryDir tmp; if (!tmp.isValid()) return fail(QStringLiteral("Cannot create an isolated dry-run directory."));
     const QString stage = tmp.filePath(QStringLiteral("HD-Player.exe"));
     QByteArray working = original; QSet<QString> touched; QVariantList steps; qint64 total = 0;
@@ -249,6 +250,7 @@ QVariantMap simulate(const QString &path, const QVariantList &operations, const 
     // raw theme + theme edits and appearance + same-payload edits conflict.
     QSet<qint64> payloads;
     const auto theme = ThemeEngine::detectTheme(original, QStringLiteral("qml"));
+    const auto originalFiles = EmbeddedResources::list(original, true);
     for (const auto &v : operations) {
         const auto op = v.toMap(); const QString kind = op.value("kind").toString();
         const QString key = kind == QLatin1String("theme") ? QStringLiteral("@theme")
@@ -316,7 +318,7 @@ QVariantMap simulate(const QString &path, const QVariantList &operations, const 
             ok = PlayerAppearancePatcher::apply(preparedAppearance, op.value("edits").toMap(), &appearanceError);
             next = preparedAppearance;
             msg = ok ? QStringLiteral("%1 appearance token(s) rewritten and read back in memory.").arg(op.value("edits").toMap().size()) : appearanceError;
-        } else if (kind == QLatin1String("resource")) {
+        } else if (kind == QLatin1String("resource") || kind == QLatin1String("player-qml")) {
             const QString encoded = op.value("data").toString();
             if (encoded.size() > (maxResource * 4 / 3 + 8)) return fail(QStringLiteral("Encoded replacement exceeds 32 MB."));
             const auto decoded = QByteArray::fromBase64Encoding(encoded.toLatin1(), QByteArray::AbortOnBase64DecodingErrors);
@@ -324,11 +326,17 @@ QVariantMap simulate(const QString &path, const QVariantList &operations, const 
             total += data.size();
             if (!decoded || data.isEmpty() || data.size() > maxResource || total > 64 * 1024 * 1024 || digest(data) != op.value("sha256").toString()) return fail(QStringLiteral("Invalid or oversized staged replacement."));
             int matches = 0; EmbeddedResources::Entry selected;
-            for (const auto &e : EmbeddedResources::list(original, true)) if (e.path == key) { selected = e; ++matches; }
+            for (const auto &e : originalFiles) if (e.path == key) { selected = e; ++matches; }
             if (matches != 1 || payloads.contains(selected.entryOff)) return fail(QStringLiteral("Missing, ambiguous or aliased resource conflict: %1.").arg(key));
             payloads.insert(selected.entryOff);
             if (touched.contains(QStringLiteral("@theme")) && selected.entryOff == theme.entryOff) return fail(QStringLiteral("Raw theme replacement conflicts with palette edits."));
-            const auto r = EmbeddedResources::replaceBytes(stage, key, data, &next); ok = r.ok; msg = r.msg;
+            if(kind==QLatin1String("player-qml")) {
+                next=working;
+                ok=PlayerSkinCompiler::replace(next,key,data,&msg);
+                if(ok)msg=QStringLiteral("Player component rewritten with exact-source cache invalidation and verified read-back.");
+            } else {
+                const auto r = EmbeddedResources::replaceBytes(stage, key, data, &next); ok = r.ok; msg = r.msg;
+            }
         } else return fail(QStringLiteral("Unsupported batch operation. Only theme, resource and appearance edits belong to this single-EXE transaction."));
         QVariantMap step{{"operation", key}, {"ok", ok}, {"msg", msg}};
         if (op.contains("pack")) step["pack"] = op.value("pack");

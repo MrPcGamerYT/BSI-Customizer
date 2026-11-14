@@ -235,7 +235,7 @@ Item {
                             color: Theme.textDim
                             font.pixelSize: 10
                         }
-                        TextField {
+                        StudioTextField {
                             id: customHex
                             Layout.preferredWidth: 120
                             placeholderText: "#RRGGBB"

@@ -255,7 +255,7 @@ Item {
                         columns: width < 560 ? 1 : 2
                         columnSpacing: 10
                         rowSpacing: 8
-                        TextField {
+                        StudioTextField {
                             id: developerNameInput
                             Layout.fillWidth: true
                             placeholderText: qsTr("Developer name")
@@ -263,7 +263,7 @@ Item {
                             font.pixelSize: 11
                             background: Rectangle { color: Theme.cardLow; radius: 8; border.color: Theme.border }
                         }
-                        TextField {
+                        StudioTextField {
                             id: taglineInput
                             Layout.fillWidth: true
                             placeholderText: qsTr("Short tagline")
@@ -281,7 +281,7 @@ Item {
                             required property int index
                             Layout.fillWidth: true
                             spacing: 8
-                            TextField {
+                            StudioTextField {
                                 id: linkTitleInput
                                 property alias value: linkTitleInput.text
                                 Layout.preferredWidth: 205
@@ -292,7 +292,7 @@ Item {
                                 font.pixelSize: 10
                                 background: Rectangle { color: Theme.cardLow; radius: 7; border.color: Theme.border }
                             }
-                            TextField {
+                            StudioTextField {
                                 id: linkUrlInput
                                 property alias value: linkUrlInput.text
                                 Layout.fillWidth: true
