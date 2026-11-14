@@ -328,8 +328,8 @@ ApplicationWindow {
             GifRpcPage { objectName: "featureGif" }
             WorkspacePage { objectName: "featureWorkspace"; onNavigate: (index) => window.navigatePage(index) }
             DebloatPage { objectName: "featureDebloat"; onNotify: (msg) => toast.show(msg) }
-            BackupsPage { onNotify: (msg) => toast.show(msg) }
-            AddonsPage { onNotify: (msg) => toast.show(msg); onNavigate: (index) => window.navigatePage(index) }
+            BackupsPage { objectName: "featureBackups"; onNotify: (msg) => toast.show(msg) }
+            AddonsPage { objectName: "featureAddons"; onNotify: (msg) => toast.show(msg); onNavigate: (index) => window.navigatePage(index) }
         }
         LogPanel {
             id: logPanel

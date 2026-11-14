@@ -90,3 +90,15 @@ assert.ok(read("CMakeLists.txt").includes("src/web/addons.js"));
 console.log(
   "PASS: six catalog entries; no entry-time operations; busy backend remains authoritative; queue refusal; stale target/revision; confirmation cancellation; dry-run failure invalidation; exact apply/restore arguments; no implicit clear; one modal settings.",
 );
+
+// Native deployment smoke tests must evolve with the actual shell routes too.
+const nativeSelftest = read("src/selftest.cpp");
+assert.ok(nativeSelftest.includes('stack->property("count").toInt() == 13'));
+for (const name of ["featureBackups", "featureAddons"]) {
+  assert.ok(main.includes('objectName: "' + name + '"'));
+  assert.ok(nativeSelftest.includes('"' + name + '"'));
+}
+const deployed = read("src/chromium/ChromiumTests.cpp");
+assert.ok(deployed.includes("document.querySelectorAll('#spine [data-page]').length === 15"));
+assert.ok(deployed.includes("BsiAddons.packs.length === 6"));
+console.log("PASS: native selftest covers thirteen shell pages; deployed Chromium smoke test expects fifteen routes and the six-pack catalog.");
