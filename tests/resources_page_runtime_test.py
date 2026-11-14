@@ -85,7 +85,7 @@ QtObject {
     function resourceTextSize(text, bom) { return text.length; }
 }''')
     themes = create('''import QtQuick
-QtObject { property int effectiveTheme: 0; property color accentColor: "#23e3ff" }''')
+QtObject { property bool reduceMotion: false; property bool backgroundMotion: true; property int effectiveTheme: 0; property color accentColor: "#23e3ff" }''')
     engine.rootContext().setContextProperty("backend", backend)
     engine.rootContext().setContextProperty("themes", themes)
     window = create('''import QtQuick

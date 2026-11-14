@@ -41,7 +41,7 @@ ApplicationWindow {
     flags: Qt.Window | Qt.FramelessWindowHint
     title: qsTr("BlueStacks 5 / MSI 5 — BSI Customizer")
     color: Theme.window
-    font.family: "Plus Jakarta Sans"
+    font.family: Theme.bodyFont
     font.pixelSize: 13
     palette.window: Theme.window
     palette.windowText: Theme.text
@@ -96,192 +96,142 @@ ApplicationWindow {
     readonly property var pageNames: featurePages.map(p => p.label)
     property alias currentPage: pages.currentIndex
     function navigatePage(index) {
-        if (!backend.busy && Number.isInteger(index) && index >= 0 && index < featurePages.length)
+        if (Number.isInteger(index) && index >= 0 && index < featurePages.length)
             pages.currentIndex = index;
     }
 
-    Rectangle {
+    ControlCenterBackdrop {
         anchors.fill: parent
-        gradient: Gradient {
-            GradientStop { position: 0; color: Theme.dark ? "#17131e" : Theme.window }
-            GradientStop { position: 0.55; color: Theme.window }
-            GradientStop { position: 1; color: Theme.dark ? "#08070a" : Theme.window }
-        }
+        animationAllowed: window.visible && window.active && window.visibility !== Window.Minimized
     }
 
     Rectangle {
-        id: rail
-        objectName: "studioSidebar"
+        id: rail; objectName: "studioSidebar"
         anchors.left: parent.left; anchors.top: parent.top; anchors.bottom: parent.bottom
-        width: 218
-        color: Theme.sidebar
-        visible: auth.authorized
-        Rectangle { anchors.right: parent.right; height: parent.height; width: 1; color: Theme.border }
-
-        RowLayout {
-            anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top
-            anchors.leftMargin: 16; anchors.rightMargin: 12; anchors.topMargin: 18
-            spacing: 10
-            Image { Layout.preferredWidth: 36; Layout.preferredHeight: 36; source: "img/app-icon.png" }
-            ColumnLayout {
-                Layout.fillWidth: true
-                spacing: 1
-                Text { text: qsTr("BSI Customizer"); color: Theme.text; font.family: Theme.headingFont; font.pixelSize: 12; font.weight: Font.Bold; elide: Text.ElideRight }
-                Text { text: qsTr("BlueStacks tools"); color: Theme.textDim; font.pixelSize: 9 }
-            }
-        }
-
+        width: 200; color: "transparent"; visible: auth.authorized
+        Rectangle { anchors.right: parent.right; width: 1; height: parent.height; color: Theme.border }
+        MicroLabel { x: 26; y: 37; text: "BSI / 4.0.1"; color: Theme.tertiary; font.pixelSize: 9 }
         ScrollView {
-            anchors.top: parent.top; anchors.topMargin: 72
-            anchors.bottom: railFooter.top; anchors.bottomMargin: 10
+            id: navScroll
+            anchors.top: parent.top; anchors.topMargin: 105; anchors.bottom: railFooter.top; anchors.bottomMargin: 20
             anchors.left: parent.left; anchors.right: parent.right
-            anchors.leftMargin: 8; anchors.rightMargin: 8
-            contentWidth: availableWidth
-            clip: true
-            ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
-            ColumnLayout {
-                width: parent.width
-                spacing: 3
+            contentWidth: availableWidth; clip: true; ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
+            Column {
+                width: navScroll.availableWidth; spacing: 7
                 Repeater {
-                    model: window.featurePages
-                    delegate: ColumnLayout {
-                        id: navEntry
+                    model: [
+                        {label:"HOME",icon:Icons.dashboard,route:0,children:[]},
+                        {label:"PATCHER",icon:Icons.theme,route:1,children:[1,2,3,4,5,6]},
+                        {label:"PRESENCE",icon:Icons.discord,route:7,children:[7,8]},
+                        {label:"APP",icon:Icons.settings,route:-1,children:[]},
+                        {label:"TOOLS",icon:Icons.debloat,route:9,children:[9,10]},
+                        {label:"+",icon:"<path d='M12 5v14M5 12h14'/>",route:0,children:[]},
+                        {label:"RECOVERY",icon:Icons.integrity,route:11,children:[]},
+                        {label:"COLLECTION",icon:Icons.images,route:12,children:[]}
+                    ]
+                    delegate: Column {
+                        id: navGroup
                         required property var modelData
                         required property int index
-                        Layout.fillWidth: true
-                        spacing: 2
-
-                        Text {
-                            Layout.fillWidth: true
-                            Layout.leftMargin: 10
-                            Layout.topMargin: navEntry.index === 0 ? 4 : 12
-                            visible: navEntry.index === 0
-                                     || window.featurePages[navEntry.index - 1].section !== navEntry.modelData.section
-                            text: navEntry.modelData.section
-                            color: Theme.textDim
-                            font.pixelSize: 9
-                            font.weight: Font.Bold
-                            font.letterSpacing: 1.1
-                        }
-
+                        property bool expanded: false
+                        readonly property bool selected: pages.currentIndex === modelData.route || modelData.children.indexOf(pages.currentIndex)>=0
+                        width: parent.width; spacing: 3
                         AbstractButton {
-                            id: railButton
-                            objectName: "featureNav" + navEntry.index
-                            Layout.fillWidth: true
-                            implicitHeight: 38
-                            enabled: !backend.busy
-                            Accessible.name: navEntry.modelData.label
+                            id: navButton; objectName: "navGroup" + navGroup.index
+                            width: parent.width; height: 42; Accessible.name: navGroup.modelData.label
                             background: Rectangle {
-                                radius: 9
-                                color: pages.currentIndex === navEntry.index ? Theme.accentSoft
-                                       : railButton.hovered ? Qt.alpha(Theme.text, 0.055) : "transparent"
-                                border.color: pages.currentIndex === navEntry.index || railButton.activeFocus
-                                              ? Theme.borderStrong : "transparent"
-                                Rectangle {
-                                    visible: pages.currentIndex === navEntry.index
-                                    width: 3; height: 20; radius: 1.5
-                                    anchors.left: parent.left; anchors.leftMargin: 1
-                                    anchors.verticalCenter: parent.verticalCenter
-                                    color: Theme.accent
+                                radius: 10
+                                color: navButton.hovered ? Theme.hoverFill : "transparent"
+                                Behavior on color { ColorAnimation { duration: Theme.motionDuration } }
+                                Rectangle { visible: navGroup.selected; x: 0; width: 2; height: 18; radius: 1; anchors.verticalCenter: parent.verticalCenter; color: Theme.accent }
+                            }
+                            contentItem: Item {
+                                Image { x: 26; anchors.verticalCenter: parent.verticalCenter; width: 16; height: 16; source: Icons.icon(navGroup.modelData.icon,navGroup.selected ? Theme.text : Theme.tertiary); sourceSize: Qt.size(16,16) }
+                                MicroLabel { x: 54; anchors.verticalCenter: parent.verticalCenter; text: navGroup.modelData.label; color: navGroup.selected ? Theme.text : Theme.textDim; font.pixelSize: 10 }
+                                Rectangle { visible: navGroup.modelData.route===11; width: 4; height: 4; radius: 2; x: 158; anchors.verticalCenter: parent.verticalCenter; color: Theme.accent }
+                                Text { visible: navGroup.modelData.route===12 || navGroup.modelData.children.length>0; anchors.right: parent.right; anchors.rightMargin: 19; anchors.verticalCenter: parent.verticalCenter; text: navGroup.selected || navGroup.expanded ? "⌄" : "›"; color: Theme.tertiary; font.pixelSize: 12 }
+                            }
+                            onClicked: {
+                                if(navGroup.modelData.route===-1) { settingsPanel.currentTab=0; settingsPanel.open(); }
+                                else if(navGroup.modelData.children.length>0) { navGroup.expanded=!navGroup.expanded; if(!navGroup.selected) window.navigatePage(navGroup.modelData.route); }
+                                else window.navigatePage(navGroup.modelData.route);
+                            }
+                        }
+                        Column {
+                            width: parent.width; visible: height > 0; spacing: 2; clip: true
+                            height: navGroup.expanded ? implicitHeight : 0
+                            opacity: navGroup.expanded ? 1 : 0
+                            enabled: navGroup.expanded
+                            Behavior on height { NumberAnimation { duration: Theme.revealDuration; easing.type: Easing.OutCubic } }
+                            Behavior on opacity { NumberAnimation { duration: Theme.motionDuration } }
+                            Repeater {
+                                model: navGroup.modelData.children
+                                AbstractButton {
+                                    id: subButton; required property int modelData
+                                    objectName: "featureNav" + modelData
+                                    width: parent.width; height: 33
+                                    background: Rectangle {
+                                        radius: 8; color: subButton.hovered ? Theme.hoverFill : "transparent"
+                                        Behavior on color { ColorAnimation { duration: Theme.motionDuration } }
+                                    }
+                                    contentItem: Text { leftPadding: 54; verticalAlignment: Text.AlignVCenter; text: window.featurePages[subButton.modelData].label; color: pages.currentIndex===subButton.modelData ? Theme.text : Theme.textDim; font.family: Theme.bodyFont; font.pixelSize: 11; elide: Text.ElideRight }
+                                    onClicked: window.navigatePage(modelData)
                                 }
                             }
-                            contentItem: RowLayout {
-                                spacing: 10
-                                Image {
-                                    Layout.leftMargin: 8
-                                    Layout.preferredWidth: 18; Layout.preferredHeight: 18
-                                    source: Icons.icon(navEntry.modelData.icon,
-                                                       pages.currentIndex === navEntry.index ? Theme.accentText : Theme.textDim)
-                                    sourceSize: Qt.size(18, 18)
-                                    fillMode: Image.Pad
-                                }
-                                Text {
-                                    Layout.fillWidth: true
-                                    text: navEntry.modelData.label
-                                    color: pages.currentIndex === navEntry.index ? Theme.text : Theme.soft
-                                    font.pixelSize: 11
-                                    font.weight: pages.currentIndex === navEntry.index ? Font.DemiBold : Font.Medium
-                                    elide: Text.ElideRight
-                                }
-                            }
-                            onClicked: window.navigatePage(navEntry.index)
                         }
                     }
                 }
             }
         }
-        Text {
-            id: railFooter
-            anchors.left: parent.left; anchors.bottom: parent.bottom
-            anchors.leftMargin: 18; anchors.bottomMargin: 16
-            text: qsTr("BSI 3.0.1")
-            color: Theme.textDim; font.pixelSize: 9; font.letterSpacing: 1
+        ColumnLayout {
+            id: railFooter; anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; anchors.margins: 20; spacing: 15
+            MicroLabel { text: qsTr("ACTIVE TARGET"); font.pixelSize: 8; color: Theme.tertiary }
+            ComboBox {
+                id: targetPicker; objectName: "shellTargetPicker"; Layout.fillWidth: true; implicitHeight: 30; font.pixelSize: 10
+                enabled: !backend.busy; model: backend.installs; textRole: "profile"
+                currentIndex: backend.installs.findIndex(i => i.exe === backend.exePath)
+                displayText: currentText || qsTr("Select target on Home")
+                onActivated: backend.useInstall(currentIndex)
+            }
+            RowLayout {
+                Layout.fillWidth: true
+                CircleButton { id: settingsButton; objectName: "settingsButton"; text: qsTr("Open settings"); glyph: Icons.settings; onClicked: { settingsPanel.currentTab=0; settingsPanel.open(); } }
+                Item { Layout.fillWidth: true }
+                CircleButton { text: qsTr("Application menu"); glyph: "<circle cx='5' cy='12' r='1'/><circle cx='12' cy='12' r='1'/><circle cx='19' cy='12' r='1'/>"; onClicked: appMenu.popup() }
+            }
         }
     }
-
     Item {
         id: topbar
         anchors.left: rail.right; anchors.right: parent.right; anchors.top: parent.top
-        anchors.leftMargin: 28; anchors.rightMargin: 22
-        height: 86
-        visible: auth.authorized
-        MouseArea {
-            anchors.fill: parent
-            onPressed: window.startSystemMove()
-            onDoubleClicked: window.visibility === Window.Maximized ? window.showNormal() : window.showMaximized()
-        }
+        anchors.leftMargin: 32; anchors.rightMargin: 32; height: 104; visible: auth.authorized
+        MouseArea { anchors.fill: parent; onPressed: window.startSystemMove(); onDoubleClicked: window.visibility===Window.Maximized ? window.showNormal() : window.showMaximized() }
         RowLayout {
-            anchors.fill: parent
-            spacing: 16
+            anchors.fill: parent; spacing: 12
+            Rectangle { Layout.preferredWidth: 33; Layout.preferredHeight: 29; radius: 7; color: "transparent"; border.color: Theme.border
+                MicroLabel { anchors.centerIn: parent; text: "BSI"; color: Theme.textDim; font.pixelSize: 9; font.letterSpacing: .5 }
+            }
             ColumnLayout {
-                Layout.fillWidth: true; spacing: 4
-                Text { text: qsTr("BSI Customizer"); color: Theme.text; font.family: Theme.headingFont; font.pixelSize: 16; font.weight: Font.Bold }
-                Text { text: qsTr("Premium emulator control center"); color: Theme.textDim; font.pixelSize: 10 }
+                Layout.fillWidth: true; spacing: 5
+                Text { text: qsTr("BSI Customizer"); color: Theme.text; font.family: Theme.headingFont; font.pixelSize: 17; font.weight: Font.DemiBold; font.letterSpacing: -.4 }
+                Text { text: qsTr("Your player, thoughtfully customized"); color: Theme.tertiary; font.pixelSize: 11 }
             }
-            ComboBox {
-                id: targetPicker
-                objectName: "shellTargetPicker"
-                Layout.preferredWidth: Math.min(210, window.width * 0.17)
-                implicitHeight: 38
-                enabled: !backend.busy
-                model: backend.installs
-                currentIndex: {
-                    const found = backend.installs.findIndex(i => i.exe === backend.exePath);
-                    return found;
+            Rectangle {
+                Layout.preferredWidth: 78; Layout.preferredHeight: 28; radius: 14
+                color: backend.busy ? Theme.raised : "#0cc8e86a"; border.color: backend.busy ? Theme.border : "#24c8e86a"
+                Row { anchors.centerIn: parent; spacing: 6
+                    Rectangle { width: 4; height: 4; radius: 2; color: backend.busy ? Theme.textDim : Theme.ready; anchors.verticalCenter: parent.verticalCenter }
+                    MicroLabel { text: backend.busy ? qsTr("BUSY") : qsTr("READY"); font.pixelSize: 8; font.letterSpacing: .8; color: backend.busy ? Theme.textDim : Theme.ready }
                 }
-                textRole: "profile"
-                displayText: currentText || qsTr("Select target")
-                onActivated: backend.useInstall(currentIndex)
-                ToolTip.visible: hovered
-                ToolTip.text: qsTr("Choose an existing installation; detect players on Dashboard")
             }
-            AbstractButton {
-                id: settingsButton
-                objectName: "settingsButton"
-                implicitWidth: 38
-                implicitHeight: 34
-                enabled: !backend.busy
-                Accessible.name: qsTr("Open settings")
-                ToolTip.visible: hovered
-                ToolTip.text: qsTr("Appearance, updates and About")
-                background: Rectangle {
-                    radius: 10
-                    color: settingsButton.hovered ? Theme.accentSoft : "transparent"
-                    border.color: settingsButton.hovered || settingsButton.activeFocus ? Theme.borderStrong : Theme.border
-                }
-                contentItem: Image {
-                    source: Icons.icon(Icons.settings, settingsButton.hovered ? Theme.accentText : Theme.textDim)
-                    sourceSize: Qt.size(18, 18)
-                    fillMode: Image.Pad
-                }
-                onClicked: { settingsPanel.currentTab = 0; settingsPanel.open(); }
-            }
-            ActionButton { text: "⋯"; implicitWidth: 32; implicitHeight: 34; onClicked: appMenu.popup() }
-            WinControls { appWindow: window; barHeight: 40 }
+            CircleButton { text: qsTr("Preview collection"); onClicked: { window.navigatePage(12); collectionPage.preview(); } }
+            CircleButton { text: qsTr("Close window"); glyph: "<path d='m7 7 10 10M7 17 17 7'/>"; onClicked: window.close() }
         }
     }
     Menu {
         id: appMenu
+        enter: Transition { NumberAnimation { property: "opacity"; from: 0; to: 1; duration: Theme.motionDuration } }
+        exit: Transition { NumberAnimation { property: "opacity"; to: 0; duration: Theme.motionDuration } }
         MenuItem { text: qsTr("Purge player cache…"); enabled: !backend.busy; onTriggered: purgeCacheDialog.open() }
         MenuItem {
             text: qsTr("Settings")
@@ -303,40 +253,52 @@ ApplicationWindow {
             enabled: !backend.busy
             onTriggered: runSelftest()
         }
+        MenuItem { text: qsTr("Animated background"); checkable: true; checked: Theme.backgroundMotion; enabled: !Theme.reduceMotion; onTriggered: themes.backgroundMotion = checked }
+        MenuItem { text: qsTr("Reduce motion"); checkable: true; checked: Theme.reduceMotion; onTriggered: themes.reduceMotion = checked }
         MenuSeparator {}
         MenuItem { text: qsTr("Sign out"); enabled: !backend.busy; onTriggered: auth.signOut() }
+    }
+
+    LoadingStrip {
+        objectName: "shellLoadingStrip"
+        anchors.left: rail.right; anchors.right: parent.right; anchors.top: topbar.bottom
+        z: 10
+        busy: auth.authorized && (backend.busy ||
+              (pages.children[pages.currentIndex] && pages.children[pages.currentIndex].status === Loader.Loading))
+        animationAllowed: window.active && window.visibility !== Window.Minimized
     }
 
     ColumnLayout {
         id: shell
         anchors.top: topbar.bottom; anchors.bottom: parent.bottom
         anchors.left: rail.right; anchors.right: parent.right
-        anchors.leftMargin: 20; anchors.rightMargin: 20; anchors.bottomMargin: 16
+        anchors.leftMargin: 32; anchors.rightMargin: 32; anchors.bottomMargin: 22
         visible: auth.authorized
         spacing: 10
         UpdateBanner { Layout.fillWidth: true; Layout.preferredHeight: visible ? implicitHeight : 0 }
         StackLayout {
             id: pages
+            currentIndex: 12
             objectName: "studioPageStack"
             Layout.fillWidth: true; Layout.fillHeight: true
-            DashboardPage { objectName: "studioDashboard"; onNavigate: (index) => window.navigatePage(index) }
-            ThemePage { objectName: "featureTheme" }
-            ResourcesPage { objectName: "featureResources" }
-            FpsPage { objectName: "featureFps" }
-            IntegrityPage { objectName: "featureIntegrity" }
-            BootVideoPage { objectName: "featureBoot" }
-            UiPage { objectName: "featureInterface"; onNotify: (msg) => toast.show(msg) }
-            RpcidPage { objectName: "featureRpc" }
-            GifRpcPage { objectName: "featureGif" }
-            WorkspacePage { objectName: "featureWorkspace"; onNavigate: (index) => window.navigatePage(index) }
-            DebloatPage { objectName: "featureDebloat"; onNotify: (msg) => toast.show(msg) }
-            BackupsPage { objectName: "featureBackups"; onNotify: (msg) => toast.show(msg) }
-            AddonsPage { objectName: "featureAddons"; onNotify: (msg) => toast.show(msg); onNavigate: (index) => window.navigatePage(index) }
+            LazyFeature { objectName: "studioDashboardLoader"; pageIndex: 0; currentPage: pages.currentIndex; authorized: auth.authorized; pageSource: Qt.resolvedUrl("pages/DashboardPage.qml"); onNotify: (msg) => toast.show(msg); onNavigate: (index) => window.navigatePage(index) }
+            LazyFeature { objectName: "featureTheme"; pageIndex: 1; currentPage: pages.currentIndex; authorized: auth.authorized; pageSource: Qt.resolvedUrl("pages/ThemePage.qml"); onNotify: (msg) => toast.show(msg); onNavigate: (index) => window.navigatePage(index) }
+            LazyFeature { objectName: "featureResources"; pageIndex: 2; currentPage: pages.currentIndex; authorized: auth.authorized; pageSource: Qt.resolvedUrl("pages/ResourcesPage.qml"); onNotify: (msg) => toast.show(msg); onNavigate: (index) => window.navigatePage(index) }
+            LazyFeature { objectName: "featureFps"; pageIndex: 3; currentPage: pages.currentIndex; authorized: auth.authorized; pageSource: Qt.resolvedUrl("pages/FpsPage.qml"); onNotify: (msg) => toast.show(msg); onNavigate: (index) => window.navigatePage(index) }
+            LazyFeature { objectName: "featureIntegrity"; pageIndex: 4; currentPage: pages.currentIndex; authorized: auth.authorized; pageSource: Qt.resolvedUrl("pages/IntegrityPage.qml"); onNotify: (msg) => toast.show(msg); onNavigate: (index) => window.navigatePage(index) }
+            LazyFeature { objectName: "featureBoot"; pageIndex: 5; currentPage: pages.currentIndex; authorized: auth.authorized; pageSource: Qt.resolvedUrl("pages/BootVideoPage.qml"); onNotify: (msg) => toast.show(msg); onNavigate: (index) => window.navigatePage(index) }
+            LazyFeature { objectName: "featureInterface"; pageIndex: 6; currentPage: pages.currentIndex; authorized: auth.authorized; pageSource: Qt.resolvedUrl("pages/UiPage.qml"); onNotify: (msg) => toast.show(msg); onNavigate: (index) => window.navigatePage(index) }
+            LazyFeature { objectName: "featureRpc"; pageIndex: 7; currentPage: pages.currentIndex; authorized: auth.authorized; pageSource: Qt.resolvedUrl("pages/RpcidPage.qml"); onNotify: (msg) => toast.show(msg); onNavigate: (index) => window.navigatePage(index) }
+            LazyFeature { objectName: "featureGif"; pageIndex: 8; currentPage: pages.currentIndex; authorized: auth.authorized; pageSource: Qt.resolvedUrl("pages/GifRpcPage.qml"); onNotify: (msg) => toast.show(msg); onNavigate: (index) => window.navigatePage(index) }
+            LazyFeature { objectName: "featureWorkspace"; pageIndex: 9; currentPage: pages.currentIndex; authorized: auth.authorized; pageSource: Qt.resolvedUrl("pages/WorkspacePage.qml"); onNotify: (msg) => toast.show(msg); onNavigate: (index) => window.navigatePage(index) }
+            LazyFeature { objectName: "featureDebloat"; pageIndex: 10; currentPage: pages.currentIndex; authorized: auth.authorized; pageSource: Qt.resolvedUrl("pages/DebloatPage.qml"); onNotify: (msg) => toast.show(msg); onNavigate: (index) => window.navigatePage(index) }
+            LazyFeature { objectName: "featureBackups"; pageIndex: 11; currentPage: pages.currentIndex; authorized: auth.authorized; pageSource: Qt.resolvedUrl("pages/BackupsPage.qml"); onNotify: (msg) => toast.show(msg); onNavigate: (index) => window.navigatePage(index) }
+            LazyFeature { id: collectionPage; objectName: "featureAddons"; pageIndex: 12; currentPage: pages.currentIndex; authorized: auth.authorized; pageSource: Qt.resolvedUrl("pages/AddonsPage.qml"); onNotify: (msg) => toast.show(msg); onNavigate: (index) => window.navigatePage(index) }
         }
         LogPanel {
             id: logPanel
             Layout.fillWidth: true
-            Layout.preferredHeight: logPanel.collapsed ? 40 : Math.min(150, window.height * 0.2)
+            Layout.preferredHeight: logPanel.collapsed ? 83 : Math.min(190, window.height * 0.24)
         }
     }
 
@@ -413,20 +375,10 @@ ApplicationWindow {
         visible: opacity > 0.01
         enabled: !auth.authorized
         opacity: auth.authorized ? 0 : 1
-        Behavior on opacity { NumberAnimation { duration: 260 } }
+        Behavior on opacity { NumberAnimation { duration: Theme.revealDuration } }
     }
 
-    // FalcoForge's boot, one to one: the gate closing starts the app's
-    // first pulls - saved sign-in alone never does.
-    Connections {
-        target: auth
-        function onAuthorizedChanged() {
-            if (auth.authorized && !window.booted) {
-                window.booted = true;
-                Qt.callLater(function() { if (auth.authorized && !backend.busy) backend.detectInstalls(); });
-            }
-        }
-    }
+    // Installation detection is an explicit Home action, not a startup scan.
 
     Toast {
         id: toast
@@ -446,44 +398,6 @@ ApplicationWindow {
         function onLog(message, color) { logPanel.append(message, color) }
     }
 
-    // Modal while the isolated patch worker owns the selected files. The GUI
-    // keeps rendering; keyboard shortcuts and repeat clicks cannot start writes.
-    Popup {
-        parent: Overlay.overlay
-        anchors.centerIn: parent
-        width: 340
-        modal: true
-        dim: true
-        focus: true
-        closePolicy: Popup.NoAutoClose
-        visible: backend.busy
-        padding: 24
-        background: Rectangle {
-            color: Theme.card
-            radius: 16
-            border.color: Theme.neonFaint
-        }
-        contentItem: ColumnLayout {
-            spacing: 14
-            BusyIndicator {
-                Layout.alignment: Qt.AlignHCenter
-                running: backend.busy
-            }
-            Label {
-                Layout.alignment: Qt.AlignHCenter
-                text: qsTr("Working…")
-                color: Theme.text
-                font.pixelSize: 18
-                font.bold: true
-            }
-            Label {
-                Layout.fillWidth: true
-                text: qsTr("Please wait while the operation finishes.\nDo not close the app or start BlueStacks.")
-                color: Theme.textDim
-                horizontalAlignment: Text.AlignHCenter
-                wrapMode: Text.WordWrap
-            }
-        }
-    }
-
+    // Busy is visible in the header. Engine serialization and per-action guards
+    // remain authoritative; scrolling/navigation/reading never need a modal.
 }

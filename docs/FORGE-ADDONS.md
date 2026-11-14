@@ -1,6 +1,6 @@
 # Forge-inspired shell and Add-ons
 
-The normal Chromium frontend and the `--native-ui` fallback share the original
+As of 4.0.1 the normal frontend is native QML. The optional legacy Chromium frontend shares the original
 C++ authentication, patching and recovery engines. The shell uses a stable,
 labelled navigation rail, graphite surfaces, gradient background and backend logs.
 The incomplete imported four-page QML routing is replaced with one working
@@ -41,8 +41,11 @@ the shell is reference-inspired, not a pixel-exact Forge import.
 6. Open **Backups**, refresh journals and confirm Restore. Only an exact post-patch
    target can be restored. Updates or unrelated writes invalidate recovery.
 
-The native Add-ons page routes to the existing Patch Workspace for dry run/apply;
-the normal HTML frontend exposes those actions in the collection detail too.
+The native Skin Studio now exposes stage, dry-run and apply alongside profile
+import/export, user names, geometry, palette overrides and explicit SVG mappings.
+Motion and pack names remain authoring metadata, not player animation/branding
+injection. Full-emulator skin coverage is unfinished. The legacy HTML frontend
+retains its earlier fixed-collection workflow.
 Preview selection is not deployment: it never replaces an already staged pack.
 
 ## Validation

@@ -207,9 +207,11 @@ int main(int argc, char *argv[])
     QCoreApplication::setApplicationName(QStringLiteral("BSI Customizer"));
     QCoreApplication::setApplicationVersion(QStringLiteral(BSI_VERSION));
     installCrashDiagnostics();
-    QFontDatabase::addApplicationFont(QStringLiteral(":/qt/qml/BSICustomizer/src/qml/fonts/Manrope.ttf"));
-    QFontDatabase::addApplicationFont(QStringLiteral(":/qt/qml/BSICustomizer/src/qml/fonts/PlusJakartaSans.ttf"));
-    app.setFont(QFont(QStringLiteral("Plus Jakarta Sans")));
+    QFontDatabase::addApplicationFont(QStringLiteral(":/qt/qml/BSICustomizer/src/qml/fonts/Inter.ttf"));
+    QFontDatabase::addApplicationFont(QStringLiteral(":/qt/qml/BSICustomizer/src/qml/fonts/JetBrainsMono.ttf"));
+    // OFL-licensed geometric UI + mono labels, bundled for consistent metrics.
+    app.setFont(QFont(QStringLiteral("Inter")));
+
 
     // Brand icon for every window/dialog the app raises (taskbar, Alt-Tab,
     // title bar). The .ico lives at the repo root; CMake maps it into the
@@ -411,7 +413,7 @@ int main(int argc, char *argv[])
     QObject::connect(&updates, &UpdateChecker::restartRequested, &app, &QGuiApplication::quit);
 
 #ifdef BSI_CHROMIUM_UI
-    const bool chromiumUi = !args.contains(QStringLiteral("--native-ui"));
+    const bool chromiumUi = args.contains(QStringLiteral("--web-ui")) && !args.contains(QStringLiteral("--native-ui"));
     if (chromiumUi) {
         auto *profile = QQuickWebEngineProfile::defaultProfile();
         profile->setUrlRequestInterceptor(new LocalContentPolicy(profile));

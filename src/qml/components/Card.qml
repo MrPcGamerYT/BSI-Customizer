@@ -39,7 +39,7 @@ Rectangle {
     }
 
     color: Theme.card
-    radius: 16
+    radius: 18
     border.width: 1
     border.color: Theme.border
 

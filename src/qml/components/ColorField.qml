@@ -65,7 +65,8 @@ RowLayout {
         font.family: "Consolas"
         background: Rectangle {
             color: Theme.raised
-            border.color: hexInput.activeFocus ? Theme.accent : Theme.border
+            border.color: hexInput.activeFocus ? Theme.accent : hexInput.hovered ? Theme.hoverBorder : Theme.border
+            Behavior on border.color { ColorAnimation { duration: Theme.motionDuration } }
             radius: 8
         }
         onAccepted: commit()
@@ -85,6 +86,8 @@ RowLayout {
     Popup {
         id: picker
         property string hexText: "#7c5cff"
+        enter: Transition { NumberAnimation { property: "opacity"; from: 0; to: 1; duration: Theme.revealDuration } }
+        exit: Transition { NumberAnimation { property: "opacity"; to: 0; duration: Theme.motionDuration } }
 
         modal: true
         focus: true

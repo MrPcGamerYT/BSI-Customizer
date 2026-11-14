@@ -53,6 +53,8 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+      - name: Test native 4.0.1 Skin Studio contracts
+        run: node tests/native_skin_ui_test.mjs
       - name: Test Add-ons catalog and guarded review flow
         run: node tests/addons_test.mjs
       - name: Test resource search matching and large lists
@@ -73,6 +75,17 @@ jobs:
           python -m pip install PySide6==6.8.3
       - name: Type-check Workspace and Theme QML against real Qt metadata
         run: python tests/workspace_qml_lint_test.py
+      - name: Exercise native Skin Studio and redesigned login
+        env:
+          BSI_UI_SCREENSHOT_DIR: ${{ runner.temp }}/control-center-ui
+        run: python tests/run_qt_runtime_test.py tests/native_skin_runtime_test.py
+      - name: Upload actual native control-center screenshots (mock services)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-control-center-${{ github.run_id }}
+          path: ${{ runner.temp }}/control-center-ui/*.png
+          if-no-files-found: ignore
       - name: Instantiate rebuilt Settings shell and test its native interactions
         run: python tests/run_qt_runtime_test.py tests/settings_panel_runtime_test.py
       - name: Exercise adaptive boot player against synthetic Qt6, Qt5 and WebEngine APIs

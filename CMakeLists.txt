@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.21)
 
-project(BSICustomizer VERSION 3.0.1 LANGUAGES C CXX)
+project(BSICustomizer VERSION 4.0.1 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -41,7 +41,7 @@ qt_standard_project_setup(REQUIRES 6.5)
 # Staged UI migration: keep native builds/deployment unchanged unless requested.
 # Qt WebEngine ships Chromium helpers, locales and .pak data; it is not a
 # system-browser/localhost service and needs a complete Qt deployment.
-option(BSI_CHROMIUM_UI "Build the animated HTML desktop workspace" ON)
+option(BSI_CHROMIUM_UI "Build optional legacy Chromium workspace" OFF)
 if(BSI_CHROMIUM_UI)
     find_package(Qt6 6.5 REQUIRED COMPONENTS WebEngineQuick WebChannel)
 endif()
@@ -135,6 +135,8 @@ qt_add_executable(BSICustomizer
     src/core/BsDetector.cpp
     src/core/CustomizationWorkspace.h
     src/core/CustomizationWorkspace.cpp
+    src/core/SkinProfiles.h
+    src/core/SkinProfiles.cpp
     src/core/Backend.h
     src/core/CrashDiagnostics.cpp src/core/CrashDiagnostics.h
     src/core/Backend.cpp
@@ -305,6 +307,7 @@ qt_add_qml_module(BSICustomizer
     QML_FILES
         src/qml/Main.qml
         src/qml/Theme.qml
+        src/qml/SkinCatalog.js
         src/qml/Icons.js
         src/qml/WindowGeometry.js
         src/qml/ResourceSearch.js
@@ -312,6 +315,15 @@ qt_add_qml_module(BSICustomizer
         src/qml/UpdateBanner.qml
         src/qml/components/SidebarButton.qml
         src/qml/components/WinControls.qml
+        src/qml/components/SkinPreview.qml
+        src/qml/components/MicroLabel.qml
+        src/qml/components/CircleButton.qml
+        src/qml/components/FrameCorners.qml
+        src/qml/components/MiniPlayer.qml
+        src/qml/components/CollectionCard.qml
+        src/qml/components/ControlCenterBackdrop.qml
+        src/qml/components/LoadingStrip.qml
+        src/qml/components/LazyFeature.qml
         src/qml/components/Card.qml
         src/qml/components/ActionButton.qml
         src/qml/components/ToggleSwitch.qml
@@ -345,6 +357,10 @@ qt_add_qml_module(BSICustomizer
         src/qml/fonts/NotoSansMath-Regular.ttf
         src/qml/fonts/NotoSansMath-LICENSE.txt
         "BSI CUSTOMIZER.ico"
+        src/qml/fonts/Inter.ttf
+        src/qml/fonts/Inter-OFL.txt
+        src/qml/fonts/JetBrainsMono.ttf
+        src/qml/fonts/JetBrainsMono-OFL.txt
         src/qml/fonts/Manrope.ttf
         src/qml/fonts/PlusJakartaSans.ttf
         src/qml/fonts/Manrope-OFL.txt

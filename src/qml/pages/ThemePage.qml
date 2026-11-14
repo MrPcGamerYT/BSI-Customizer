@@ -60,21 +60,8 @@ Item {
         page.fileChanged = backend.themeFileChanged();
     }
 
-    // Load on the first visit, and re-read the EXE whenever it changed on disk
-    // (another theme tool patched it, BlueStacks updated itself, a restore
-    // happened).  Only then - so pending color edits survive a page switch, and
-    // never thrown away silently: with edits pending we show the stale banner
-    // instead and let the user press Reload.
-    // Without this the list keeps showing the colors from the last load, which
-    // is exactly "the tool shows a color I applied previously".
-    onVisibleChanged: {
-        if (!visible)
-            return;
-        if (!backend.themeFound)
-            page.reload();
-        else if (page.fileChanged && page.editedCount === 0)
-            page.reload();
-    }
+    // Loading is explicit. Merely opening Color studio must not read/parse the EXE
+    // or silently discard unsaved color edits. The existing Load/Reload stays.
 
     // Catch an external change while the page is open on screen.
     Timer {
@@ -259,7 +246,7 @@ Item {
                             spacing: 8
                             model: backend.themePresets
                             opacity: backend.themeFound ? 1.0 : 0.55
-                            Behavior on opacity { NumberAnimation { duration: 140 } }
+                            Behavior on opacity { NumberAnimation { duration: Theme.motionDuration } }
                             ScrollBar.horizontal: ScrollBar {}
 
                             delegate: Rectangle {
@@ -274,7 +261,7 @@ Item {
                                 border.width: 1
                                 border.color: chosen ? Theme.accent : Theme.border
 
-                                Behavior on color { ColorAnimation { duration: 120 } }
+                                Behavior on color { ColorAnimation { duration: Theme.motionDuration } }
 
                                 ColumnLayout {
                                     anchors.fill: parent
@@ -461,7 +448,7 @@ Item {
                             border.width: 1
                             border.color: modelData.edit !== "" ? Theme.accent : Theme.border
 
-                            Behavior on color { ColorAnimation { duration: 90 } }
+                            Behavior on color { ColorAnimation { duration: Theme.motionDuration } }
 
                             RowLayout {
                                 anchors.fill: parent
@@ -609,7 +596,7 @@ Item {
                             spacing: 8
                             model: backend.themePresets
                             opacity: backend.themeFound ? 1.0 : 0.55
-                            Behavior on opacity { NumberAnimation { duration: 140 } }
+                            Behavior on opacity { NumberAnimation { duration: Theme.motionDuration } }
                             ScrollBar.horizontal: ScrollBar {}
 
                             delegate: Rectangle {
@@ -624,7 +611,7 @@ Item {
                                 border.width: 1
                                 border.color: chosen ? Theme.accent : Theme.border
 
-                                Behavior on color { ColorAnimation { duration: 120 } }
+                                Behavior on color { ColorAnimation { duration: Theme.motionDuration } }
 
                                 ColumnLayout {
                                     anchors.fill: parent
@@ -793,7 +780,7 @@ Item {
                             border.width: 1
                             border.color: modelData.enabled ? Theme.accent : Theme.border
 
-                            Behavior on color { ColorAnimation { duration: 90 } }
+                            Behavior on color { ColorAnimation { duration: Theme.motionDuration } }
 
                             RowLayout {
                                 anchors.fill: parent

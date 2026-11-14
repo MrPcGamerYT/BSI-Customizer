@@ -393,16 +393,11 @@ Item {
             page.imageMsg = sourceMessage + " " + page.imageMsg;
     }
 
-    Component.onCompleted: {
-        refresh();
-        findImage();
-    }
-    onVisibleChanged: if (visible) refresh()
-
+    // A disk image must not be found/mounted just by opening this page.
     Connections {
         target: backend
-        function onExePathChanged() { page.refresh(); page.findImage(); }
-        function onConfPathChanged() { page.refresh(); }
+        function onExePathChanged() { page.state = {}; page.ready = false; page.imageOk = false; page.imagePath = ""; }
+        function onConfPathChanged() { page.state = {}; page.ready = false; }
     }
 
     readonly property string engineUrl: "https://ak-build.bluestacks.com/public/app-player/windows/msi5/5.21.151.6303/4aa785df8f4801455294736aa16b0e8c/Android/Pie64/Pie64.exe?oem=msi5"
@@ -444,6 +439,8 @@ Item {
                     }
                 }
             }
+
+            ActionButton { text: qsTr("Load installation status"); enabled: !backend.busy; onClicked: page.refresh() }
 
             // ---- nothing to talk to yet ----
             Rectangle {

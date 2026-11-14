@@ -1,6 +1,7 @@
 // Standalone Qt Core/Gui/Network test; never executes an emulator or accesses Discord.
 #include "core/CustomizationWorkspace.h"
 #include "core/AddonPacks.h"
+#include "core/SkinProfiles.h"
 #include "core/ThemeEngine.h"
 #include "core/EmbeddedResources.h"
 #include "core/QtResources.h"
@@ -108,6 +109,46 @@ int run()
     bad=profile;bad["boot"]=QVariantMap{{"holdMs",3.5}};check(!W::validateProfile(bad).value("ok").toBool(),"fractional boot durations refused");
     bad=profile;bad["about"]=QVariantMap{{"links",QVariantList{QVariantMap{{"id","bad"},{"url","file:///C:/Windows/test.exe"}}}}};
     check(!W::validateProfile(bad).value("ok").toBool(),"unsafe About links refused");
+    QVariantMap skin{{"schema","bsi.skin"},{"version",1},{"name","My editable skin"},{"base","carbon"},
+        {"accent","#aabbcc"},{"surface","#101012"},{"radius",7},{"height",35},{"padding",14},
+        {"motion","rise"},{"duration",240},{"iconStyle","rounded"},{"palette",QVariantMap{}},{"tokens",QVariantMap{}},{"icons",QVariantList{}}};
+    check(SkinProfiles::validate(skin).value("ok").toBool(),"custom names and geometry are not locked to a built-in pack");
+    auto invalidSkin=skin;invalidSkin["radius"]=true;
+    check(!SkinProfiles::validate(invalidSkin).value("ok").toBool(),"boolean geometry refused");
+    invalidSkin=skin;invalidSkin["script"]="run()";
+    check(!SkinProfiles::validate(invalidSkin).value("ok").toBool(),"skin imports refuse scripts and unknown fields");
+    invalidSkin=skin;invalidSkin["palette"]=QVariantMap{{"primary100","#fff; bad()"}};
+    check(!SkinProfiles::validate(invalidSkin).value("ok").toBool(),"skin palette cannot inject QML expressions");
+    invalidSkin=skin;invalidSkin["icons"]=QVariantList{QVariantMap{{"path","../unsafe.svg"},{"glyph","home"}}};
+    check(!SkinProfiles::validate(invalidSkin).value("ok").toBool(),"skin SVG mappings reject traversal");
+    for(const auto &style:{"line","rounded","bold"})
+        check(!SkinProfiles::icon("home",QLatin1String(style),"#aabbcc").isEmpty(),"three safe generated SVG icon styles");
+    check(SkinProfiles::icon("unknown","line","#aabbcc").isEmpty(),"unknown glyph refused");
+    const QString svgFile=temp.filePath(QStringLiteral("custom.svg"));
+    write(svgFile,"<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M2 2h20v20H2z'/></svg>");
+    const auto importedIcon=SkinProfiles::readIcon(svgFile);
+    check(importedIcon.value("ok").toBool(),"user static SVG icons are importable");
+    const QVariantMap customIcon{{"path","ui/home.svg"},{"svg",importedIcon.value("svg")}};
+    check(!SkinProfiles::mappedIcon(customIcon,"line","#aabbcc").isEmpty(),"custom SVG bytes preserved in portable mapping");
+    write(svgFile,"<svg xmlns='http://www.w3.org/2000/svg'><script>alert(1)</script></svg>");
+    check(!SkinProfiles::readIcon(svgFile).value("ok").toBool(),"SVG scripts refused");
+    write(svgFile,"<svg xmlns='http://www.w3.org/2000/svg'><path fill='url(https://invalid.example/icon.svg)'/></svg>");
+    check(!SkinProfiles::readIcon(svgFile).value("ok").toBool(),"SVG external references refused");
+    write(svgFile,"<!DOCTYPE svg [<!ENTITY x SYSTEM 'file:///etc/passwd'>]><svg xmlns='http://www.w3.org/2000/svg'/>");
+    check(!SkinProfiles::readIcon(svgFile).value("ok").toBool(),"SVG DTD/entity declarations refused");
+    const QString skinFile=temp.filePath(QStringLiteral("editable-skin.json"));
+    check(SkinProfiles::save(skinFile,skin).value("ok").toBool() && SkinProfiles::read(skinFile).value("profile").toMap()==skin,"custom skin profile save/load round trip");
+    check(!SkinProfiles::save(exe,skin).value("ok").toBool() && read(exe)==original,"skin export never overwrites the player");
+    const QVariantList customOps{QVariantMap{{"kind","theme"},{"pack","carbon"},{"name","Renamed skin"},
+        {"edits",QVariantMap{{"primary100","#101012"}}},
+        {"design",QVariantMap{{"UiThemeObject.qml#root.buttons.sizes.large.radius",7}}}}};
+    QByteArray customPrepared;
+    const auto customDry=W::simulate(exe,customOps,W::digest(original),&customPrepared);
+    check(customDry.value("ok").toBool() && read(exe)==original,"custom skin palette and user geometry prepare together without writes");
+    bool customReadback=false;
+    for(const auto &file:QtResources::registeredFiles(customPrepared)) if(file.name==QLatin1String("UiThemeObject.qml"))
+        customReadback=QtResources::readFile(customPrepared,file).contains("property real radius: 7");
+    check(customReadback,"user-defined geometry reads back from the real Qt resource tree");
     check(AddonPacks::find(QStringLiteral("unknown")) == nullptr, "unknown add-on refused");
     for (const auto &id : {"carbon", "amethyst", "arctic", "ember", "matrix", "nord"}) {
         const auto *pack = AddonPacks::find(QLatin1String(id));

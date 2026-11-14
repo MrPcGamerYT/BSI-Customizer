@@ -55,34 +55,12 @@ SettingsManager::SettingsManager(QObject *parent, bool initialize)
         settings.setValue(QStringLiteral("about/links"), m_aboutLinks);
     }
     m_settingsPanelProfile = settings.value(QStringLiteral("settingsPanel/profile")).toMap();
-    if (!QFileInfo(m_exePath).isFile()) {
-        const auto installs = BsDetector::findBlueStacks();
-        if (installs.size() == 1) {
-            const auto install = installs.first().toMap();
-            m_exePath = install.value(QStringLiteral("exe")).toString();
-            m_confPath = install.value(QStringLiteral("conf")).toString();
-            settings.setValue(QStringLiteral("paths/exe"), m_exePath);
-            settings.setValue(QStringLiteral("paths/conf"), m_confPath);
-        }
-        // Never choose a random installation when several are present.
-    }
-    if (m_confPath.isEmpty() && QFileInfo(m_exePath).isFile()) {
-        const QString root = QFileInfo(m_exePath).absolutePath();
-        for (const auto &value : BsDetector::findBlueStacks()) {
-            const auto install = value.toMap();
-            if (QDir::cleanPath(install.value(QStringLiteral("root")).toString()).compare(QDir::cleanPath(root), Qt::CaseInsensitive) == 0) {
-                m_confPath = install.value(QStringLiteral("conf")).toString();
-                break;
-            }
-        }
-        if (m_confPath.isEmpty()) {
-            const auto base = QProcessEnvironment::systemEnvironment().value(QStringLiteral("ProgramData"), QStringLiteral("C:/ProgramData"));
-            m_confPath = QDir(base).filePath(root.contains(QLatin1String("msi"), Qt::CaseInsensitive)
-                         ? QStringLiteral("BlueStacks_msi5/bluestacks.conf") : QStringLiteral("BlueStacks_nxt/bluestacks.conf"));
-        }
-    }
-    if (m_fpsAutoDetect) refreshFpsPath();
-    else if (!FpsPatcher::isSupportedPath(m_dllPath) || !QFileInfo(m_dllPath).isFile()) setDllPath({});
+    // Startup restores preferences only. Registry/install discovery and DLL
+    // parsing used to happen here, before the first window could even paint.
+    // Home's explicit Detect/Use actions do that work through Backend's worker.
+    if (!m_dllPath.isEmpty() && (!FpsPatcher::isSupportedPath(m_dllPath) || !QFileInfo(m_dllPath).isFile()))
+        setDllPath({});
+
 }
 
 void SettingsManager::refreshFpsPath()

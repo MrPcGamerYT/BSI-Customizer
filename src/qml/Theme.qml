@@ -1,32 +1,40 @@
 pragma Singleton
 import QtQuick
 
-// Shared graphite/mint design tokens. Bindings keep every screen in sync with
-// the existing ThemeManager, including saved accents and the system theme.
+// Quiet control-center tokens. System light mode remains supported in Settings.
 QtObject {
     id: theme
-    readonly property string headingFont: "Manrope"
-
+    readonly property string bodyFont: "Inter"
+    readonly property string headingFont: "Inter"
+    readonly property string monoFont: "JetBrains Mono"
+    readonly property bool reduceMotion: themes.reduceMotion
+    readonly property bool backgroundMotion: themes.backgroundMotion
+    readonly property int revealDuration: reduceMotion ? 0 : 220
+    readonly property color hoverFill: Qt.alpha(accent, dark ? 0.12 : 0.08)
+    readonly property color hoverBorder: Qt.alpha(accent, 0.45)
+    readonly property int motionDuration: reduceMotion ? 0 : 150
     readonly property bool dark: themes.effectiveTheme === 0
-    readonly property color accent: dark ? themes.accentColor : Qt.darker(themes.accentColor, 1.65)
-    readonly property color accentSoft: Qt.alpha(accent, dark ? 0.10 : 0.08)
-    readonly property color accentText: dark ? accent : Qt.darker(accent, 1.1)
-
-    readonly property color window: dark ? "#0d0c10" : "#f4f6fa"
-    readonly property color sidebar: dark ? "#111015" : "#ffffff"
-    readonly property color topbar: dark ? "#0d0c10" : "#f4f6fa"
-    readonly property color card: dark ? "#19171e" : "#ffffff"
-    readonly property color cardLow: dark ? "#131117" : "#f6f8fc"
-    readonly property color raised: dark ? "#24212b" : "#eef1f7"
-    readonly property color border: dark ? "#302c38" : "#dce2ec"
-    readonly property color borderStrong: dark ? "#514959" : "#aab6c8"
-    readonly property color hairline: dark ? "#25212d" : "#e7ebf2"
-    readonly property color text: dark ? "#f5f8f6" : "#1b263a"
-    readonly property color textDim: dark ? "#a39baa" : "#5c6880"
-    readonly property color soft: dark ? "#c8c1d0" : "#3c4658"
-    readonly property color danger: dark ? "#fa9a9a" : "#b73652"
-    readonly property color ok: dark ? "#6ce6d0" : "#167565"
-    readonly property color warn: dark ? "#e8bd7b" : "#8d611b"
+    readonly property color defaultAccent: "#7C5CFF"
+    readonly property color accent: themes.accentColor
+    readonly property color accentSoft: Qt.alpha(accent, 0.08)
+    readonly property color accentText: dark ? "#c3b6ff" : "#6143da"
+    readonly property color window: dark ? "#0A0A0E" : "#f4f4f8"
+    readonly property color sidebar: window
+    readonly property color topbar: window
+    readonly property color card: dark ? "#111116" : "#ffffff"
+    readonly property color cardLow: dark ? "#0D0D12" : "#f7f7fa"
+    readonly property color raised: dark ? "#17171D" : "#eeeeF4"
+    readonly property color border: dark ? "#12ffffff" : "#16000000"
+    readonly property color borderStrong: dark ? "#29ffffff" : "#30000000"
+    readonly property color hairline: border
+    readonly property color text: dark ? "#F2F2F5" : "#17171d"
+    readonly property color textDim: dark ? "#8A8A96" : "#63636f"
+    readonly property color tertiary: dark ? "#5C5C68" : "#777783"
+    readonly property color soft: dark ? "#b1b1bd" : "#494955"
+    readonly property color danger: dark ? "#e59797" : "#ac3549"
+    readonly property color ok: dark ? "#c1c1cc" : "#53604b"
+    readonly property color ready: "#C8E86A"
+    readonly property color warn: dark ? "#d2b18d" : "#886339"
 
     // Compatibility aliases used by existing editors and the sign-in gate.
     readonly property color neon: accent
@@ -58,6 +66,6 @@ QtObject {
             return ("#" + s.substring(3)).toUpperCase();
         if (/^#[0-9a-fA-F]{6}$/.test(s))
             return s.toUpperCase();
-        return "#6CE6D0";
+        return "#7C5CFF";
     }
 }
