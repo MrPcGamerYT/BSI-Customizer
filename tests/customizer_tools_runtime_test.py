@@ -6,7 +6,7 @@ from pathlib import Path
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 os.environ.setdefault('QSG_RHI_BACKEND', 'software')
 from PySide6.QtCore import QObject, QUrl, QMetaObject, Q_ARG
-from PySide6.QtGui import QGuiApplication
+from PySide6.QtGui import QGuiApplication, QWindow
 from PySide6.QtQml import QQmlEngine, QQmlComponent
 from PySide6.QtTest import QTest
 app = QGuiApplication([])
@@ -18,10 +18,12 @@ with tempfile.TemporaryDirectory() as temp:
     warnings = []; engine.warnings.connect(lambda es: warnings.extend(e.toString() for e in es))
     components = []; objects = []
     def create(text):
-        c = QQmlComponent(engine); components.append(c)
+        c = QQmlComponent(engine); c.setParent(engine); components.append(c)
         c.setData(text.encode(), QUrl.fromLocalFile(str(Path(temp)/'fixture.qml')))
         o = c.create(); assert o is not None, [e.toString() for e in c.errors()]
-        QQmlEngine.setObjectOwnership(o, QQmlEngine.CppOwnership); objects.append(o); return o
+        QQmlEngine.setObjectOwnership(o, QQmlEngine.CppOwnership)
+        if not isinstance(o, QWindow): o.setParent(engine)
+        objects.append(o); return o
     def invoke(o, method, *args):
         assert QMetaObject.invokeMethod(o, method, *[Q_ARG('QVariant', a) for a in args])
         QTest.qWait(30)
@@ -96,6 +98,7 @@ Window {
     calls = val(backend, 'calls')
     assert calls[-1] == {'action':'restore','options':{'id':'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'}}
     assert not recovery.property('loaded'), 'successful restore invalidates displayed history'
+    print("UX progress: search and recovery assertions passed", flush=True)
     host.close()
     # Instantiate the real Workspace page, then exercise its confirmation guard.
     backend.setProperty('calls', [])
@@ -106,6 +109,7 @@ Window { width:1100;height:800;visible:true
  WorkspacePage { id:workspace;objectName:"workspacePage";anchors.fill:parent }
  function prepare(){workspace.plan={ok:true,sha256:"before",outputSha256:"after",bytesBefore:1024,bytesAfter:2048,steps:[{ok:true,msg:"Mock verified"}]};}
 }''')
+    print("UX progress: Workspace created", flush=True)
     QTest.qWait(120)
     workspace = workspace_host.findChild(QObject, 'workspacePage')
     review = workspace.findChild(QObject, 'workspaceReviewDialog')
@@ -128,6 +132,8 @@ Window { width:1100;height:800;visible:true
     invoke(workspace_host, 'prepare'); invoke(review, 'open'); acknowledged.setProperty('checked', True)
     invoke(review, 'accept')
     assert val(backend, 'calls') == [{'action':'apply','options':{'outputSha256':'after'}}]
+    print("UX progress: all action assertions passed", flush=True)
     assert not warnings, warnings
     workspace_host.close(); objects.clear(); engine.deleteLater(); QTest.qWait(10)
+    print("UX progress: Qt teardown completed", flush=True)
 print('PASS: real Qt tool finder, locked navigation, explicit history, cancel/target-safe restores, acknowledged/frozen batch review and no entry scans (mock engines).')
