@@ -4,6 +4,7 @@ import QtQuick.Layouts
 import QtQuick.Dialogs
 import QtMultimedia
 import BSICustomizer
+import "../ToolCatalog.js" as Catalog
 
 Item {
     id: page
@@ -29,8 +30,8 @@ Item {
     function run(action, options) { return show(backend.workspace(action, options || {})); }
     Connections {
         target: backend
-        function onWorkspaceChanged() { page.plan = ({}); }
-        function onExePathChanged() { page.inspection = ({}); page.historyRows = []; page.originalImage = ""; page.comparisonImage = ""; }
+        function onWorkspaceChanged() { page.plan = ({}); applyDialog.close(); }
+        function onExePathChanged() { page.plan = ({}); applyDialog.close(); page.inspection = ({}); page.historyRows = []; page.originalImage = ""; page.comparisonImage = ""; }
     }
     MediaPlayer {
         id: videoPlayer
@@ -125,7 +126,24 @@ Item {
                     }
                     Repeater {
                         model: backend.workspaceOperations
-                        Label { required property var modelData; required property int index; Layout.fillWidth: true; color: Theme.text; elide: Text.ElideMiddle; text: (index + 1) + ". " + modelData.kind + " — " + (modelData.name || modelData.pack || modelData.path || (modelData.kind === "appearance" ? qsTr("staged appearance tokens") : qsTr("staged palette"))) }
+                        Rectangle {
+                            required property var modelData
+                            required property int index
+                            readonly property var summary: Catalog.operation(modelData)
+                            Layout.fillWidth: true; implicitHeight: operationInfo.implicitHeight + 22
+                            radius: 10; color: Theme.cardLow; border.color: Theme.border
+                            ColumnLayout {
+                                id: operationInfo
+                                anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top; anchors.margins: 11; spacing: 4
+                                Label { Layout.fillWidth: true; color: Theme.text; textFormat: Text.PlainText; wrapMode: Text.WrapAnywhere; text: (index + 1) + ". " + summary.title }
+                                Label { Layout.fillWidth: true; color: Theme.textDim; textFormat: Text.PlainText; wrapMode: Text.Wrap; text: summary.detail }
+                                Label {
+                                    Layout.fillWidth: true; wrapMode: Text.Wrap; textFormat: Text.PlainText
+                                    color: page.plan.steps && page.plan.steps[index] && page.plan.steps[index].ok ? Theme.accentText : Theme.textDim
+                                    text: page.plan.steps && page.plan.steps[index] ? page.plan.steps[index].msg : qsTr("Pending Dry Run — not applied")
+                                }
+                            }
+                        }
                     }
                     StudioTextArea { Layout.fillWidth: true; readOnly: true; selectByMouse: true; color: Theme.textDim; wrapMode: TextEdit.Wrap; text: page.plan.msg ? JSON.stringify(page.plan, null, 2) : "" }
                 }
@@ -219,10 +237,58 @@ Item {
     }
     FileDialog { id: videoDialog; nameFilters: ["MP4 video (*.mp4)"]; onAccepted: { const r = page.run("video", {file: backend.localFilePath(selectedFile)}); if (r.ok) page.videoUrl = selectedFile; } }
     Dialog {
-        id: applyDialog; anchors.centerIn: parent; modal: true; width: Math.min(520, page.width - 32)
-        title: qsTr("Apply the verified batch?"); standardButtons: Dialog.Ok | Dialog.Cancel
-        contentItem: Label { wrapMode: Text.Wrap; text: qsTr("Close all HD-Player instances. The current fingerprint and prepared output must still match Dry Run. A recovery snapshot is saved before the single EXE commit.\n\nOutput SHA-256: ") + (page.plan.outputSha256 || "") }
-        onAccepted: page.run("apply", {outputSha256: page.plan.outputSha256 || ""})
+        id: applyDialog; objectName: "workspaceReviewDialog"; anchors.centerIn: parent; modal: true; width: Math.min(520, page.width - 32)
+        title: qsTr("Review verified changes")
+        property string reviewedPath: ""
+        property string reviewedOutput: ""
+        onOpened: {
+            reviewedPath = backend.exePath;
+            reviewedOutput = page.plan.outputSha256 || "";
+            reviewAcknowledged.checked = false;
+        }
+        function stillValid() {
+            return !!page.plan.ok && !!reviewedOutput && reviewedOutput === page.plan.outputSha256
+                && reviewedPath === backend.exePath && !backend.busy;
+        }
+        onAboutToShow: reviewAcknowledged.checked = false
+        height: Math.min(640, Overlay.overlay ? Overlay.overlay.height - 40 : 640)
+        contentItem: ScrollView {
+            contentWidth: availableWidth; clip: true
+            ColumnLayout {
+                width: parent.width; spacing: 12
+                Label { Layout.fillWidth: true; text: qsTr("Target: ") + applyDialog.reviewedPath; textFormat: Text.PlainText; wrapMode: Text.WrapAnywhere; color: Theme.text }
+                Label { Layout.fillWidth: true; wrapMode: Text.Wrap; color: Theme.textDim; text: backend.workspaceOperations.length + qsTr(" queued operation(s). This transaction changes one EXE only; DLLs, boot assets and RPC settings are separate.") }
+                Label { Layout.fillWidth: true; color: Theme.text; text: qsTr("Size: ") + Catalog.bytes(page.plan.bytesBefore) + " → " + Catalog.bytes(page.plan.bytesAfter) }
+                Label { Layout.fillWidth: true; text: qsTr("Before SHA-256: ") + (page.plan.sha256 || qsTr("Not verified")); textFormat: Text.PlainText; wrapMode: Text.WrapAnywhere; color: Theme.textDim; font.family: Theme.monoFont; font.pixelSize: 11 }
+                Label { Layout.fillWidth: true; text: qsTr("Prepared SHA-256: ") + applyDialog.reviewedOutput; textFormat: Text.PlainText; wrapMode: Text.WrapAnywhere; color: Theme.textDim; font.family: Theme.monoFont; font.pixelSize: 11 }
+                Label { Layout.fillWidth: true; wrapMode: Text.Wrap; color: Theme.textDim; text: qsTr("A hash-verified recovery snapshot is required before committing. The engine rechecks the target and prepared output; an emulator update or changed batch blocks Apply.") }
+                StudioCheckBox { Layout.fillWidth: true; id: reviewAcknowledged; objectName: "workspaceReviewAcknowledged"; text: qsTr("I reviewed the staged changes and closed all player instances.") }
+                Repeater {
+                    model: backend.workspaceOperations
+                    Label {
+                        required property var modelData
+                        required property int index
+                        Layout.fillWidth: true; wrapMode: Text.WrapAnywhere; color: Theme.textDim; textFormat: Text.PlainText
+                        text: (index + 1) + ". " + Catalog.operation(modelData).title
+                    }
+                }
+            }
+        }
+        footer: RowLayout {
+            spacing: 10
+            Item { Layout.fillWidth: true }
+            ActionButton { text: qsTr("Cancel"); onClicked: applyDialog.reject() }
+            ActionButton {
+                objectName: "workspaceConfirmApply"
+                text: qsTr("Apply verified batch"); accent: true
+                enabled: reviewAcknowledged.checked && applyDialog.stillValid()
+                onClicked: applyDialog.accept()
+            }
+            Item { Layout.preferredWidth: 12 }
+        }
+        onAccepted: {
+            if (reviewAcknowledged.checked && stillValid()) page.run("apply", {outputSha256: reviewedOutput});
+        }
     }
     Dialog {
         id: restoreDialog; anchors.centerIn: parent; modal: true; width: Math.min(500, page.width - 32)

@@ -311,6 +311,7 @@ qt_add_qml_module(BSICustomizer
         src/qml/Theme.qml
         src/qml/SkinCatalog.js
         src/qml/Icons.js
+        src/qml/ToolCatalog.js
         src/qml/WindowGeometry.js
         src/qml/ResourceSearch.js
         src/qml/LoginGate.qml
@@ -345,6 +346,7 @@ qt_add_qml_module(BSICustomizer
         src/qml/components/ThemePreview.qml
         src/qml/components/GradientEditor.qml
         src/qml/components/LogPanel.qml
+        src/qml/components/ToolFinder.qml
         src/qml/components/SettingsPanel.qml
         src/qml/pages/DashboardPage.qml
         src/qml/pages/ThemePage.qml

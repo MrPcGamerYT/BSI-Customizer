@@ -100,6 +100,18 @@ ApplicationWindow {
             pages.currentIndex = index;
     }
 
+    Shortcut {
+        sequences: ["Ctrl+K", "Ctrl+P"]
+        enabled: auth.authorized
+        onActivated: toolFinder.open()
+    }
+    ToolFinder {
+        id: toolFinder
+        authorized: auth.authorized
+        onNavigate: (route) => window.navigatePage(route)
+        onSettings: (tab) => { settingsPanel.currentTab = tab; settingsPanel.open(); }
+    }
+
     ControlCenterBackdrop {
         anchors.fill: parent
         animationAllowed: window.visible && window.active && window.visibility !== Window.Minimized
@@ -215,6 +227,7 @@ ApplicationWindow {
                 Text { text: qsTr("BSI Customizer"); color: Theme.text; font.family: Theme.headingFont; font.pixelSize: 17; font.weight: Font.DemiBold; font.letterSpacing: -.4 }
                 Text { text: qsTr("Your player, thoughtfully customized"); color: Theme.tertiary; font.pixelSize: 11 }
             }
+            ActionButton { objectName: "openToolFinder"; text: qsTr("Find a tool · Ctrl+K"); onClicked: toolFinder.open() }
             Rectangle {
                 Layout.preferredWidth: 78; Layout.preferredHeight: 28; radius: 14
                 color: backend.busy ? Theme.raised : "#0cc8e86a"; border.color: backend.busy ? Theme.border : "#24c8e86a"
