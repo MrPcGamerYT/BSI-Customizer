@@ -80,7 +80,7 @@ assert "orientation:ListView.Horizontal;model:pSettingsItems.pSettingElements;cl
 assert "ListView{id:v;width:parent.width-32;height:48;x:16;" in replacement
 assert "property var h:iSettingsWindowShadowContainer.bHidden" in replacement
 assert "property var h:iSettingsWindowShadowContainer.bHidden" in replacement
-assert "((iSettingsWindowShadowContainer.width-32)/(v.count-h.length||1)|0)*(h.indexOf(k)<0);height:44" in replacement
+assert "((v.parent.width-32)/(v.count-h.length||1)|0)*(h.indexOf(k)<0);height:44" in replacement
 # Every category must stay reachable: the strip divides the shell width into
 # equal slots instead of letting the last tab be half-clipped at the edge.
 assert "item.anchors.fill=item.parent" in replacement
@@ -88,8 +88,9 @@ assert "height:parent.height-118" in replacement
 assert "StackLayout{id:iSelectedSettingControl;anchors.fill:parent;anchors.margins:6" in replacement
 # The embedded QML must stay inside the smallest player resource slot;
 # growing it past that is a hard patch failure on 5.9/5.10 players.
-assert len(replacement.encode()) <= 1900, f"shell grew to {len(replacement.encode())} bytes"
-assert "Rectangle{x:(parent.width-Math.min(parent.width-32,568))/2;" in replacement, "The page host must be horizontally centered in the shell"
+# v8, which fitted every shipped player, was 1821 bytes of QML.
+assert len(replacement.encode()) <= 1850, f"shell grew to {len(replacement.encode())} bytes"
+assert "Rectangle{x:(parent.width-width)/2;width:Math.min(parent.width-32,568);" in replacement, "The page host must be horizontally centered in the shell"
 assert "width:Math.min(parent.width-32,568)" in replacement
 assert "delegate:Loader{width:iSelectedSettingControl.width;height:iSelectedSettingControl.height;" in replacement
 assert "pSettingBtnText:" in replacement and "pSelected:index==pCurrentTabIndex" in replacement and "pShowRedDot:modelData.pShowRedDot" in replacement
