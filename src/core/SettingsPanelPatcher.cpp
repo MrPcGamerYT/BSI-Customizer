@@ -704,17 +704,17 @@ UiShadowContainer{// BSI Settings v9
 id:iSettingsWindowShadowContainer;anchors.fill:parent
 property var bHidden:[];property var bIcons:({})
 Rectangle{anchors.fill:parent;color:"#0d0f14";radius:14;clip:true
-Column{anchors.fill:parent;spacing:0
+Column{anchors.fill:parent
 Item{width:parent.width;height:56
 MouseArea{anchors.fill:parent;onPressed:iSettingsWindow.startSystemMove()}
 Text{text:qsTranslate("QObject","Settings");color:"white";font:UiTheme.fonts.bodyLarge;anchors.centerIn:parent}
-UiImageButton{asset:"CloseIcon";pImageWidth:16;pImageHeight:16;anchors.right:parent.right;anchors.verticalCenter:parent.verticalCenter;onClicked:iSettingsWindow.close()}}
-ListView{id:v;width:Math.min(contentWidth,parent.width-32);height:48;x:Math.max(16,(parent.width-width)/2);orientation:ListView.Horizontal;model:pSettingsItems.pSettingElements;clip:true
-delegate:Item{property var k:modelData.pQmlSource.toLowerCase().split("/").pop();property var h:iSettingsWindowShadowContainer.bHidden;width:Math.floor((iSettingsWindowShadowContainer.width-32)/Math.max(1,v.count-h.length))*(!~h.indexOf(k));height:44
+UiImageButton{asset:"CloseIcon";pImageWidth:16;pImageHeight:16;x:parent.width-32;y:12;onClicked:iSettingsWindow.close()}}
+ListView{id:v;width:parent.width-32;height:48;x:16;orientation:ListView.Horizontal;model:pSettingsItems.pSettingElements;clip:true
+delegate:Item{property var k:modelData.pQmlSource.toLowerCase().split("/").pop();property var h:iSettingsWindowShadowContainer.bHidden;width:((iSettingsWindowShadowContainer.width-32)/(v.count-h.length||1)|0)*(h.indexOf(k)<0);height:44
 UiSettingsButton{anchors.fill:parent;pSettingIdx:index;pSettingBtnText:modelData.pButtonText;pSelected:index==pCurrentTabIndex;pShowRedDot:modelData.pShowRedDot;onSettingClicked:fChangeSelectedSetting(pSettingIdx)}
-Image{source:iSettingsWindowShadowContainer.bIcons[parent.k]||"";width:parent.width?18:0;height:18;anchors.centerIn:parent}}
+Image{source:iSettingsWindowShadowContainer.bIcons[parent.k]||"";width:18;height:18;anchors.centerIn:parent}}
 }
-Rectangle{x:Math.max(16,(parent.width-Math.min(parent.width-32,568))/2);width:Math.min(parent.width-32,568);height:parent.height-118;color:"#14171e";radius:12;clip:true
+Rectangle{x:(parent.width-Math.min(parent.width-32,568))/2;width:Math.min(parent.width-32,568);height:parent.height-118;color:"#14171e";radius:12;clip:true
 StackLayout{id:iSelectedSettingControl;anchors.fill:parent;anchors.margins:6;currentIndex:pCurrentTabIndex
 Repeater{model:pSettingsItems.pSettingElements;delegate:Loader{width:iSelectedSettingControl.width;height:iSelectedSettingControl.height;Component.onCompleted:setSource(model.modelData.pQmlSource,model.modelData.pComponentArgs||{});onLoaded:{item.anchors.fill=item.parent;model.modelData.pComponentObj=item;if(item.fOnQmlLoaded)item.fOnQmlLoaded()}}}}
 }
