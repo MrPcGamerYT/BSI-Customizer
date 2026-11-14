@@ -702,7 +702,7 @@ QString buildWindow(const QString &stock)
     QString replacement = QStringLiteral(R"QML(
 UiShadowContainer{// BSI Settings v9
 id:iSettingsWindowShadowContainer;anchors.fill:parent
-property var bHidden:[];property var bIcons:({})
+property var bHidden:[]
 Rectangle{anchors.fill:parent;color:"#0d0f14";radius:14;clip:true
 Column{anchors.fill:parent
 Item{width:parent.width;height:56
@@ -712,7 +712,7 @@ UiImageButton{asset:"CloseIcon";pImageWidth:16;pImageHeight:16;x:parent.width-32
 ListView{id:v;width:parent.width-32;height:48;x:16;orientation:ListView.Horizontal;model:pSettingsItems.pSettingElements;clip:true
 delegate:Item{property var k:modelData.pQmlSource.toLowerCase().split("/").pop();property var h:iSettingsWindowShadowContainer.bHidden;width:((v.parent.width-32)/(v.count-h.length||1)|0)*(h.indexOf(k)<0);height:44
 UiSettingsButton{anchors.fill:parent;pSettingIdx:index;pSettingBtnText:modelData.pButtonText;pSelected:index==pCurrentTabIndex;pShowRedDot:modelData.pShowRedDot;onSettingClicked:fChangeSelectedSetting(pSettingIdx)}
-Image{source:iSettingsWindowShadowContainer.bIcons[parent.k]||"";width:18;height:18;anchors.centerIn:parent}}
+Image{source:parent.parent.bIcons?parent.parent.bIcons[parent.k]:"";width:18;height:18;anchors.centerIn:parent}}
 }
 Rectangle{x:(parent.width-width)/2;width:Math.min(parent.width-32,568);height:parent.height-118;color:"#14171e";radius:12;clip:true
 StackLayout{id:iSelectedSettingControl;anchors.fill:parent;anchors.margins:6;currentIndex:pCurrentTabIndex

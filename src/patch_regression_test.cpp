@@ -5193,7 +5193,7 @@ Window {
                 }
                 check(rebuiltWindow.contains(QStringLiteral("BSI Settings v9"))
                           && rebuiltWindow.contains(QStringLiteral("property var bHidden:"))
-                          && rebuiltWindow.contains(QStringLiteral("property var bIcons:"))
+                          && rebuiltWindow.contains(QStringLiteral("bIcons"))
                           && rebuiltWindow.contains(QStringLiteral("Rectangle{anchors.fill:parent;color:\"#0d0f14\";radius:14"))
                           && rebuiltWindow.contains(QStringLiteral("Column{anchors.fill:parent;spacing:0"))
                           // The bounded, centered page region: the stock pages are
@@ -5228,7 +5228,7 @@ Window {
                 // The embedded shell has to fit the smallest player resource slot;
                 // on the 5.9/5.10 references UiSettingsWindow.qml only has 2468
                 // bytes, and an oversized shell fails the whole apply.
-                check(rebuiltWindow.toUtf8().size() <= 2250,
+                check(rebuiltWindow.toUtf8().size() <= 2200,
                       QStringLiteral("the rebuilt %1 Settings shell (%2 bytes) still fits a compact player resource slot")
                           .arg(QFileInfo(input).fileName())
                           .arg(rebuiltWindow.toUtf8().size()));
