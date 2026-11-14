@@ -53,6 +53,8 @@ Item {
     // hiddenTabs/tabIcons come from the saved profile, not from the player.
     property var panelProfile: ({ hiddenTabs: [], tabIcons: {}, logo: null })
     property string panelMsg: ""
+    // false until the player was actually read: the card then explains what it
+    // needs instead of printing a wall of zeros.
     property bool panelReady: false
 
     readonly property var previewLinks: {
@@ -1701,6 +1703,7 @@ Item {
                         // ---- what the player holds right now --------------
                         ColumnLayout {
                             Layout.fillWidth: true
+                            visible: page.panelReady
                             spacing: 6
 
                             RowLayout {
@@ -1779,10 +1782,15 @@ Item {
                         Text {
                             Layout.fillWidth: true
                             wrapMode: Text.Wrap
-                            text: page.panel.detail
-                                   || qsTr("Inspect the selected player UI to check its embedded QML "
-                                           + "resources.")
-                            color: page.panel.supported ? Theme.textDim : Theme.warn
+                            text: !page.panelReady
+                                  ? qsTr("No player has been read yet. Press “Load player UI” to "
+                                         + "inspect the selected HD-Player.exe and list its live "
+                                         + "Settings tabs.")
+                                  : (page.panel.detail
+                                     || qsTr("Inspect the selected player UI to check its embedded "
+                                             + "QML resources."))
+                            color: !page.panelReady ? Theme.textDim
+                                                    : (page.panel.supported ? Theme.textDim : Theme.warn)
                             font.pixelSize: 11
                         }
 
@@ -1790,7 +1798,7 @@ Item {
                         // Chromium tab shows behind its details disclosure.
                         Rectangle {
                             Layout.fillWidth: true
-                            visible: (page.panel.qmlResourceSamples || []).length > 0
+                            visible: page.panelReady && (page.panel.qmlResourceSamples || []).length > 0
                             implicitHeight: panelSamples.implicitHeight + 16
                             radius: 8
                             color: Theme.raised
@@ -1815,6 +1823,7 @@ Item {
 
                         // ---- native tab visibility + per-tab artwork --------
                         Text {
+                            visible: page.panelReady
                             text: qsTr("Native Settings tabs")
                             color: Theme.text
                             font.pixelSize: 13
@@ -1823,6 +1832,7 @@ Item {
                         Text {
                             Layout.fillWidth: true
                             wrapMode: Text.Wrap
+                            visible: page.panelReady
                             text: qsTr("Untick a tab to hide it — at least one native tab always stays "
                                        + "visible. Custom SVGs are embedded into the rebuilt window; "
                                        + "only self-contained SVG files are accepted.")
@@ -1833,7 +1843,7 @@ Item {
                         Text {
                             Layout.fillWidth: true
                             wrapMode: Text.Wrap
-                            visible: (page.panel.tabs || []).length === 0
+                            visible: page.panelReady && (page.panel.tabs || []).length === 0
                             text: qsTr("Inspect a supported player to list its live tabs.")
                             color: Theme.textDim
                             font.pixelSize: 11
