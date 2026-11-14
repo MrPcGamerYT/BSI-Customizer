@@ -27,15 +27,17 @@ Item {
         Label { anchors.left: parent.left; anchors.leftMargin: 24; anchors.verticalCenter: parent.verticalCenter; text: "BSI Customizer / 4.0.1"; color: Theme.textDim; font.pixelSize: 12 }
         WinControls { anchors.right: parent.right; appWindow: gate.appWindow; barHeight: 48 }
     }
-    ScrollView {
+    Flickable {
         id: loginScroll; anchors.fill: parent; anchors.topMargin: 54; clip: true
-        contentWidth: availableWidth
-        contentHeight: Math.max(availableHeight, loginRow.implicitHeight + 48)
+        contentWidth: width
+        contentHeight: Math.max(height, loginRow.implicitHeight + 48)
+        boundsBehavior: Flickable.StopAtBounds
+        ScrollBar.vertical: ScrollBar {}
     RowLayout {
         id: loginRow
-        x: (loginScroll.availableWidth - width) / 2
-        y: Math.max(24, (loginScroll.availableHeight - height) / 2)
-        width: Math.min(1040, loginScroll.availableWidth - 48)
+        x: (loginScroll.width - width) / 2
+        y: Math.max(24, (loginScroll.height - height) / 2)
+        width: Math.min(1040, loginScroll.width - 48)
         height: implicitHeight
         spacing: 40
         ColumnLayout {

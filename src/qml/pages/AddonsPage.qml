@@ -223,9 +223,9 @@ Item {
     FileDialog { id: openProfile; nameFilters: ["Skin profiles (*.json)"]; onAccepted: { const r = page.run("skin-load", {file: backend.localFilePath(selectedFile)}); if (r.ok) page.loadProfile(r.profile); } }
     FileDialog { id: saveProfile; fileMode: FileDialog.SaveFile; defaultSuffix: "json"; nameFilters: ["Skin profiles (*.json)"]; onAccepted: { try { page.run("skin-save", {file: backend.localFilePath(selectedFile), profile: page.profile()}); } catch (e) { page.notify(String(e)); } } }
     Dialog {
-        id: applyDialog; anchors.centerIn: parent; modal: true; title: qsTr("Apply verified skin batch?")
+        id: applyDialog; width: Math.min(470, page.width - 32); anchors.centerIn: parent; modal: true; title: qsTr("Apply verified skin batch?")
         standardButtons: Dialog.Ok | Dialog.Cancel
-        contentItem: Label { text: qsTr("Review the plan below first. Only supported palette/design values and your explicit icon mappings are written. Close all emulator instances. A recovery snapshot is retained."); wrapMode: Text.Wrap; width: 410 }
+        contentItem: Label { text: qsTr("Review the plan below first. Only supported palette/design values and your explicit icon mappings are written. Close all emulator instances. A recovery snapshot is retained."); wrapMode: Text.Wrap }
         onAccepted: { if (page.plan.ok && page.planPath === backend.exePath) { const hash = page.plan.outputSha256; page.plan = {}; page.run("apply", {outputSha256: hash}); } }
     }
 }

@@ -78,11 +78,19 @@ Window {
  function invalid() { page.paletteJson = "not JSON"; page.stage(); }
  function showLogin() { page.visible=false; login.visible=true; }
 }''')
+    def named(name):
+        # Repeater delegates have visual parents, not necessarily QObject parents.
+        pending=[window.contentItem()]
+        while pending:
+            item=pending.pop()
+            if item.objectName()==name: return item
+            pending.extend(item.childItems())
+        return None
     QTest.qWait(150)
     assert backend.property("calls").toVariant()==[],"page creation must not scan or inspect"
-    assert window.findChild(QObject,"skinCollection5") is not None
+    assert named("skinCollection5") is not None
     QMetaObject.invokeMethod(window,"choose");QTest.qWait(50)
-    assert window.findChild(QObject,"skinPackName").property("text")=="My custom pack"
+    assert named("skinPackName").property("text")=="My custom pack"
     QMetaObject.invokeMethod(window,"stage")
     assert backend.property("calls").toVariant()==["queue-skin"]
     QMetaObject.invokeMethod(window,"invalid")
@@ -91,7 +99,7 @@ Window {
     for w,h in [(1100,720),(1420,920),(980,640)]:
         window.resize(w,h);QTest.qWait(50)
     QMetaObject.invokeMethod(window,"showLogin");QTest.qWait(50)
-    assert window.findChild(QObject,"nativeDiscordLogin") is not None
+    assert named("nativeDiscordLogin") is not None
     assert not errors,errors
     # Avoid leaving QML contexts bound to dead Python objects during teardown.
     window.close();objects.clear();engine.deleteLater();QTest.qWait(10)

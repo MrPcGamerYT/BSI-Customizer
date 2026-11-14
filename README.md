@@ -1169,5 +1169,5 @@ and Multimedia development modules when
 building it locally. The existing Discord login and C++ engines are unchanged.
 The standard portable/installer workflows include the complete runtime.
 `--web-ui` selects the legacy frontend when compiled in; `--native-ui` forces QML; `BSI_CHROMIUM_UI=OFF` is an
-explicit native-only developer build. See [UI/engine mapping](docs/UNIFIED-UI.md)
+native-only build (the standard distribution default). See [UI/engine mapping](docs/UNIFIED-UI.md)
 and [deployment requirements and verification](docs/CHROMIUM-UI.md).
