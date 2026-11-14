@@ -74,6 +74,24 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libgl1 libegl1 libxkbcommon0 libdbus-1-3
           python -m pip install PySide6==6.8.3
+      - name: Checkout pinned player UI contracts for source compilation
+        uses: actions/checkout@v5
+        with:
+          repository: husainprime20/src-code
+          ref: ee557954ee9e1a251f20fe667d2bbcc1f711d26b
+          path: player-ui-source
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: '/*.qml'
+      - name: Compile and parse every player component for all six packs
+        run: |
+          sudo apt-get install -y qt6-base-dev pkg-config
+          g++ -std=c++17 -O1 -ffunction-sections -fdata-sections -Wl,--gc-sections -Isrc \
+            $(pkg-config --cflags Qt6Core) tests/player_skin_compile_test.cpp \
+            src/core/PlayerSkinCompiler.cpp src/core/SkinProfiles.cpp \
+            $(pkg-config --libs Qt6Core) -o /tmp/player-skin-compile-test
+          /tmp/player-skin-compile-test player-ui-source "${{ runner.temp }}/generated-player-skins"
+          python tests/player_skin_syntax_test.py "${{ runner.temp }}/generated-player-skins"
       - name: Type-check Workspace and Theme QML against real Qt metadata
         run: python tests/workspace_qml_lint_test.py
       - name: Exercise native Skin Studio and redesigned login
