@@ -10,6 +10,7 @@
 #include <cwchar>
 #include <cstring>
 #include "RpcPayload.h"
+#include "WindowCorners.h"
 
 // Marker + explicit export identify OUR app-local payload. No other version.dll
 // is modified implicitly. No Discord SDK, optimizer, hooks or hotkeys are used.
@@ -60,6 +61,8 @@ static GifRpcPayload::Config config(const std::wstring &path) {
     c.appId.assign(id.begin(),id.end());
     c.enabled=value(path,L"Schema")==L"1"&&value(path,L"Enabled")==L"1"&&id.size()>=17&&id.size()<=20
         &&std::all_of(id.begin(),id.end(),[](wchar_t ch){return ch>='0'&&ch<='9';});
+    const auto corners=value(path,L"RoundCorners");
+    c.roundCorners=corners==L"1"?1:corners==L"0"?0:-1;
     c.timestamp=value(path,L"Timestamp",L"1")==L"1";
     c.interval=std::clamp<unsigned>(GetPrivateProfileIntW(L"RPC",L"Interval",5,path.c_str()),5,60);
     c.state=utf8Hex(path,L"State");c.largeImage=utf8Hex(path,L"LargeImage");c.largeText=utf8Hex(path,L"LargeText");
@@ -94,11 +97,16 @@ static unsigned workerImpl(void *module) {
     std::wstring settings(filename,length);settings.resize(settings.find_last_of(L"\\/")+1);settings+=L"bsi-gif-rpc.ini";
     std::wstring logPath=settings.substr(0,settings.find_last_of(L"\\/")+1)+L"bsi-gif-rpc.log";
     diagnostic(logPath,"BSI GIF RPC V3: worker started; proxy forwarding remains independent.\r\n");
+    diagnostic(logPath,"BSI_GIF_RPC_CORNERS_V1: optional native corner preference supported.\r\n");
     if(WaitForSingleObject(stopEvent,1500)!=WAIT_TIMEOUT)return 0;
     HANDLE pipe=INVALID_HANDLE_VALUE;std::string activeId,buffer;bool ready=false;unsigned index=0,nonce=0;
     ULONGLONG next=0,handshakeDeadline=0,reload=0; GifRpcPayload::Config current;const auto start=static_cast<std::int64_t>(std::time(nullptr));
+    GifRpcCorners::Controller corners;
     while(WaitForSingleObject(stopEvent,250)==WAIT_TIMEOUT) {
-        if(GetTickCount64()>=reload){current=config(settings);reload=GetTickCount64()+5000;}
+        if(GetTickCount64()>=reload){
+            current=config(settings);reload=GetTickCount64()+5000;
+            corners.refresh(current.roundCorners); // Independent of Discord Enabled/AppId.
+        }
         const auto &c=current;
         if(!c.enabled||c.appId!=activeId){if(pipe!=INVALID_HANDLE_VALUE)CloseHandle(pipe);pipe=INVALID_HANDLE_VALUE;ready=false;buffer.clear();activeId=c.appId;}
         if(!c.enabled)continue;

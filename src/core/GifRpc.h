@@ -8,6 +8,8 @@ bool isOurProxy(const QByteArray &data, QString *error = nullptr);
 QVariantMap inspect(const QString &exePath);
 QVariantMap apply(const QString &exePath, const QVariantMap &settings, bool replaceExisting = false);
 QVariantMap restore(const QString &exePath);
+// Atomic config-only update: never rewrites a running emulator or its DLL.
+QVariantMap setRoundCorners(const QString &exePath, bool enabled);
 // Public for offline regression tests; rejects invalid IDs, URL schemes and
 // oversized text before touching an executable, DLL, config or backup.
 bool validate(const QVariantMap &settings, QString *error);

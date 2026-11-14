@@ -9,9 +9,41 @@
 #include <atomic>
 #include <cstring>
 #include <cstdint>
+#include "WindowCorners.h"
 #define BSI_WIDEN_IMPL(x) L##x
 #define BSI_WIDEN(x) BSI_WIDEN_IMPL(x)
 
+static unsigned cornerCalls=0;
+static int lastPreference=-1;
+static HRESULT WINAPI fakeCornerAttribute(HWND, DWORD attribute, LPCVOID data, DWORD size) {
+    if(attribute!=33||size!=sizeof(int))return E_INVALIDARG;
+    ++cornerCalls;lastPreference=*static_cast<const int *>(data);return S_OK;
+}
+static bool testCornerFiltering() {
+    HWND window=CreateWindowExW(0,L"STATIC",L"BSI corner test",WS_OVERLAPPEDWINDOW,
+        0,0,320,240,nullptr,nullptr,GetModuleHandleW(nullptr),nullptr);
+    if(!window)return false;
+    GifRpcCorners::Context c{GetCurrentProcessId(),fakeCornerAttribute,GifRpcCorners::preference(1)};
+    GifRpcCorners::visit(window,reinterpret_cast<LPARAM>(&c)); // Hidden: untouched.
+    bool ok=cornerCalls==0;
+    ShowWindow(window,SW_SHOWNOACTIVATE);
+    GifRpcCorners::visit(window,reinterpret_cast<LPARAM>(&c));
+    ok=ok&&cornerCalls==1&&lastPreference==2;
+    c.preference=GifRpcCorners::preference(0);
+    GifRpcCorners::visit(window,reinterpret_cast<LPARAM>(&c));
+    ok=ok&&cornerCalls==2&&lastPreference==1;
+    c.preference=GifRpcCorners::preference(-1);
+    GifRpcCorners::visit(window,reinterpret_cast<LPARAM>(&c));
+    ok=ok&&cornerCalls==3&&lastPreference==0;
+    GifRpcCorners::visit(GetDesktopWindow(),reinterpret_cast<LPARAM>(&c)); // Foreign process.
+    ok=ok&&cornerCalls==3;
+    HWND owned=CreateWindowExW(0,L"STATIC",L"Owned popup",WS_POPUP|WS_VISIBLE,
+        0,0,200,200,window,nullptr,GetModuleHandleW(nullptr),nullptr);
+    if(owned){GifRpcCorners::visit(owned,reinterpret_cast<LPARAM>(&c));DestroyWindow(owned);}else ok=false;
+    ok=ok&&cornerCalls==3;
+    DestroyWindow(window);
+    return ok;
+}
 int wmain(int argc, wchar_t **argv) {
     if(argc!=2)return 2;
     HMODULE proxy=LoadLibraryW(argv[1]);
@@ -87,6 +119,7 @@ int wmain(int argc, wchar_t **argv) {
     using InfoEx=BOOL(WINAPI*)(DWORD,LPCWSTR,DWORD,DWORD,LPVOID);
     const auto infoEx=reinterpret_cast<InfoEx>(GetProcAddress(proxy,"GetFileVersionInfoExW"));
     if(!infoEx(FILE_VER_GET_NEUTRAL,path,0,size,data.data()))return 12;
+    if(!testCornerFiltering())return 16;
     // Includes delayed initialization, INI parsing, missing/available Discord
     // pipe handling and normal process exit, without needing an emulator/VM.
     Sleep(3500);

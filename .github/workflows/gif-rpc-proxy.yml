@@ -34,7 +34,7 @@ jobs:
           $dll = (Resolve-Path ./rpc-build/gif-rpc/Release/version.dll).Path
           $ini = Join-Path (Split-Path $dll) bsi-gif-rpc.ini
           foreach ($enabled in @(0,1)) {
-            @("[RPC]", "Schema=1", "Enabled=$enabled", "AppId=1542174289523122330", "DetailCount=1", "Detail0=74657374") | Set-Content -Encoding ascii $ini
+            @("[RPC]", "Schema=1", "Enabled=$enabled", "AppId=1542174289523122330", "DetailCount=1", "Detail0=74657374", "RoundCorners=$enabled") | Set-Content -Encoding ascii $ini
             & ./rpc-build/gif-rpc-smoke/Release/HD-Player.exe $dll
             if ($LASTEXITCODE) { exit $LASTEXITCODE }
           }

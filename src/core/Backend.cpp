@@ -1487,6 +1487,15 @@ QVariantMap Backend::gifRpcApply(const QString &path, const QVariantMap &setting
     doLog(r.value(QStringLiteral("msg")).toString(), r.value(QStringLiteral("ok")).toBool() ? QStringLiteral("green") : QStringLiteral("red"));
     return r;
 }
+QVariantMap Backend::gifRpcSetRoundCorners(const QString &path, bool enabled)
+{
+    if (actionsLocked()) return lockedMap();
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) { return worker.gifRpcSetRoundCorners(path, enabled); });
+    const auto r = GifRpc::setRoundCorners(path, enabled);
+    doLog(r.value(QStringLiteral("msg")).toString(), r.value(QStringLiteral("ok")).toBool() ? QStringLiteral("green") : QStringLiteral("red"));
+    return r;
+}
 QVariantMap Backend::gifRpcRestore(const QString &path)
 {
     if (actionsLocked()) return lockedMap();

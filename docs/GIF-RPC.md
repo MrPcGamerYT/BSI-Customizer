@@ -116,3 +116,22 @@ exercise live Discord. The exact reported emulator version and its Windows
 Application Error event (faulting module, exception code, offset), or a crash
 dump, are still needed to confirm the reported failure is resolved. Keep the
 known-crashing DLL removed until a replacement is tested on that installation.
+
+## Round corners — Enable / Disable
+
+After installing this updated DLL once with the emulator closed, the GIF RPC
+page's **Round corners → Enable / Disable** buttons atomically save a preference
+in the existing INI. The DLL checks it within five seconds, including when RPC
+is disabled or Discord is absent. No running EXE/DLL is rewritten by these
+buttons. Ordinary RPC Apply calls preserve an existing corner preference when
+the caller omits it; profiles can explicitly store the `RoundCorners` boolean.
+
+This uses **Windows 11 build 22000+ native DWM** preferences: Enable requests
+rounded corners, Disable requests square corners. Older Windows reports an
+unsupported message without modifying files. DWM can ignore the preference for
+fullscreen, maximized or custom-region windows; the UI reports the saved setting,
+not a guarantee of rendering. Only visible, unowned top-level windows belonging
+to the player process are eligible, not child controls, popups owned by another
+window or other processes. New eligible windows are picked up on later refreshes.
+There are no hooks, subclassing, clipping regions, window-style changes or new
+DllMain work. When the INI key is absent, native corners are left unchanged.

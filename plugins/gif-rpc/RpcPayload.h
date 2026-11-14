@@ -15,6 +15,7 @@ inline std::string quote(const std::string &s) {
 }
 struct Config {
     bool enabled=false, timestamp=true;
+    int roundCorners=-1; // -1: do not change the host's native preference.
     unsigned interval=5;
     std::string appId,state,largeImage,largeText,smallImage,smallText;
     std::vector<std::string> details;

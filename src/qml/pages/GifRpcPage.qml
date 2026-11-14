@@ -7,6 +7,12 @@ Item {
     id: page
     property string report: qsTr("Select HD-Player.exe, check its files, then install/configure the RPC-only DLL.")
     property var status: ({})
+    property int cornerPreference: -1
+    function setCorners(enabled) {
+        const r = backend.gifRpcSetRoundCorners(target.text, enabled);
+        page.show(r);
+        if (r.ok) page.cornerPreference = enabled ? 1 : 0;
+    }
     function show(result) { page.report = result.msg || ""; }
     function checkFiles() {
         const r = backend.gifRpcInspect(target.text);
@@ -14,6 +20,7 @@ Item {
         page.show(r);
         if (!r.ok || !r.installed) return;
         const s = r.settings;
+        cornerPreference = s.RoundCorners === undefined ? -1 : (s.RoundCorners ? 1 : 0);
         appId.text = s.AppId || ""; stateField.text = s.State || "";
         detailField.text = s.Details || ""; largeImage.text = s.LargeImage || "";
         largeText.text = s.LargeText || ""; smallImage.text = s.SmallImage || "";
@@ -22,20 +29,24 @@ Item {
         rpcEnabled.checked = s.Enabled; timestamp.checked = s.Timestamp; rotation.value = s.Interval || 5;
     }
     function configuration() {
-        return {AppId: appId.text.trim(), State: stateField.text, Details: detailField.text,
+        const s = {AppId: appId.text.trim(), State: stateField.text, Details: detailField.text,
                 LargeImage: largeImage.text.trim(), LargeText: largeText.text,
                 SmallImage: smallImage.text.trim(), SmallText: smallText.text,
                 Button1Label: button1.text, Button1Url: url1.text.trim(),
                 Button2Label: button2.text, Button2Url: url2.text.trim(),
                 Enabled: rpcEnabled.checked, Timestamp: timestamp.checked, Interval: rotation.value};
+        if (cornerPreference >= 0) s.RoundCorners = cornerPreference === 1;
+        return s;
     }
     property string lastProfileRpc: JSON.stringify((backend.customizationProfile || {}).gifRpc || {})
     Connections {
         target: backend
+        function onExePathChanged() { page.cornerPreference = -1; }
         function onCustomizationProfileChanged() {
             const s = (backend.customizationProfile || {}).gifRpc || {};
             const value = JSON.stringify(s); if (value === page.lastProfileRpc) return;
             page.lastProfileRpc = value;
+            page.cornerPreference = s.RoundCorners === undefined ? -1 : (s.RoundCorners ? 1 : 0);
             appId.text = s.AppId || ""; stateField.text = s.State || ""; detailField.text = s.Details || "";
             largeImage.text = s.LargeImage || ""; largeText.text = s.LargeText || "";
             smallImage.text = s.SmallImage || ""; smallText.text = s.SmallText || "";
@@ -55,7 +66,7 @@ Item {
             Label {
                 Layout.fillWidth: true; Layout.leftMargin: 24; Layout.rightMargin: 24
                 color: Theme.textDim; wrapMode: Text.Wrap
-                text: qsTr("A clean RPC-only version.dll for Windows x64 HD-Player. No optimizer, RAM cleaner, hotkeys, overlays or window hooks. Discord Desktop must be running. GIF animation/external image URLs depend on Discord; an asset key may display as a static image.")
+                text: qsTr("A clean RPC version.dll for Windows x64 HD-Player, with optional Windows 11 rounded window corners. No optimizer, RAM cleaner, hotkeys, overlays or window hooks. Discord Desktop must be running. GIF animation/external image URLs depend on Discord; an asset key may display as a static image.")
             }
             Card {
                 Layout.fillWidth: true; Layout.leftMargin: 24; Layout.rightMargin: 24
@@ -93,6 +104,20 @@ Item {
                         Label { text: qsTr("Rotate every (seconds)"); color: Theme.text }
                         StudioSpinBox { id: rotation; from: 5; to: 60; value: 5; editable: true }
                     }
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Label { text: qsTr("Round corners"); color: Theme.text; font.bold: true }
+                        ActionButton { text: qsTr("Enable"); accent: page.cornerPreference === 1; enabled: !backend.busy; onClicked: page.setCorners(true) }
+                        ActionButton { text: qsTr("Disable"); enabled: !backend.busy; onClicked: page.setCorners(false) }
+                        Label {
+                            text: page.cornerPreference < 0 ? qsTr("Unchanged") : page.cornerPreference === 1 ? qsTr("Enabled (saved)") : qsTr("Disabled (saved)")
+                            color: Theme.textDim
+                        }
+                    }
+                    Label {
+                        Layout.fillWidth: true; wrapMode: Text.Wrap; color: Theme.textDim
+                        text: qsTr("Windows 11 native emulator-window corners. Install this updated DLL once, then enable/disable live; allow up to 5 seconds. Works even with RPC off. Fullscreen, maximized or custom-shaped windows may ignore Windows' corner preference.")
+                    }
                     StudioCheckBox {
                         id: replaceExisting
                         text: qsTr("Replace an existing third-party app-local version.dll (original backup required)")
@@ -106,14 +131,7 @@ Item {
                         ActionButton {
                             text: qsTr("Install / Apply GIF RPC"); accent: true; enabled: !backend.busy
                             onClicked: {
-                                page.show(backend.gifRpcApply(target.text, {
-                                    AppId: appId.text.trim(), State: stateField.text, Details: detailField.text,
-                                    LargeImage: largeImage.text.trim(), LargeText: largeText.text,
-                                    SmallImage: smallImage.text.trim(), SmallText: smallText.text,
-                                    Button1Label: button1.text, Button1Url: url1.text.trim(),
-                                    Button2Label: button2.text, Button2Url: url2.text.trim(),
-                                    Enabled: rpcEnabled.checked, Timestamp: timestamp.checked, Interval: rotation.value
-                                }, replaceExisting.checked));
+                                page.show(backend.gifRpcApply(target.text, page.configuration(), replaceExisting.checked));
                             }
                         }
                         ActionButton { text: qsTr("Remove / Restore original"); enabled: !backend.busy; onClicked: restoreDialog.open() }

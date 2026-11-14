@@ -165,9 +165,9 @@ QVariantMap validateProfile(const QVariantMap &profile)
     bool holdOk = true; if (boot.contains("holdMs")) boot.value("holdMs").toInt(&holdOk);
     if (boot.contains("holdMs") && (!holdOk || boot.value("holdMs").metaType().id() == QMetaType::QString || boot.value("holdMs").metaType().id() == QMetaType::Bool || boot.value("holdMs").toDouble() != boot.value("holdMs").toInt() || boot.value("holdMs").toInt() < 0 || boot.value("holdMs").toInt() > 15000)) return fail(QStringLiteral("Boot hold must be 0–15000 ms."));
     const auto rpc = profile.value("gifRpc").toMap(); QString why;
-    const QSet<QString> rpcKeys{ "AppId", "State", "Details", "LargeImage", "LargeText", "SmallImage", "SmallText", "Button1Label", "Button1Url", "Button2Label", "Button2Url", "Enabled", "Timestamp", "Interval" };
+    const QSet<QString> rpcKeys{ "AppId", "State", "Details", "LargeImage", "LargeText", "SmallImage", "SmallText", "Button1Label", "Button1Url", "Button2Label", "Button2Url", "Enabled", "Timestamp", "Interval", "RoundCorners" };
     for (auto it = rpc.cbegin(); it != rpc.cend(); ++it) if (!rpcKeys.contains(it.key())) return fail(QStringLiteral("Unknown GIF RPC setting: %1.").arg(it.key()));
-    for (const QString &key : {QStringLiteral("Enabled"), QStringLiteral("Timestamp")})
+    for (const QString &key : {QStringLiteral("Enabled"), QStringLiteral("Timestamp"), QStringLiteral("RoundCorners")})
         if (rpc.contains(key) && rpc.value(key).metaType().id() != QMetaType::Bool) return fail(QStringLiteral("RPC boolean settings must be true/false."));
     if (rpc.contains("AppId") && rpc.value("AppId").metaType().id() != QMetaType::QString) return fail(QStringLiteral("Store Discord application IDs as strings to avoid numeric precision loss."));
     if (rpc.contains("Interval") && (rpc.value("Interval").metaType().id() == QMetaType::Bool || rpc.value("Interval").metaType().id() == QMetaType::QString || rpc.value("Interval").toDouble() != rpc.value("Interval").toInt())) return fail(QStringLiteral("RPC interval must be a whole number."));

@@ -4962,6 +4962,22 @@ Window {
         check(inspected.value(QStringLiteral("installed")).toBool()
                   && inspected.value(QStringLiteral("settings")).toMap().value(QStringLiteral("State")).toString()==QStringLiteral("Nova Ω"),
               "installed RPC settings round-trip Unicode without binary string-slot patching");
+        const auto beforeCornersDll=read(dll),beforeCornersIni=read(ini);
+        const auto roundOn=GifRpc::setRoundCorners(exe,true);
+        if(roundOn.value(QStringLiteral("ok")).toBool()) {
+            auto loaded=GifRpc::inspect(exe).value(QStringLiteral("settings")).toMap();
+            check(loaded.value(QStringLiteral("RoundCorners")).toBool()&&loaded.value(QStringLiteral("State"))==config.value(QStringLiteral("State"))
+                      &&read(dll)==beforeCornersDll,"enabling corners only updates config and preserves RPC text and DLL");
+            check(GifRpc::apply(exe,config).value(QStringLiteral("ok")).toBool()
+                      &&GifRpc::inspect(exe).value(QStringLiteral("settings")).toMap().value(QStringLiteral("RoundCorners")).toBool(),
+                  "applying RPC settings without a corner field preserves the saved preference");
+            check(GifRpc::setRoundCorners(exe,false).value(QStringLiteral("ok")).toBool()
+                      &&!GifRpc::inspect(exe).value(QStringLiteral("settings")).toMap().value(QStringLiteral("RoundCorners")).toBool()
+                      &&read(dll)==beforeCornersDll,"disabling corners persists square preference without rewriting the DLL");
+        } else {
+            check(roundOn.value(QStringLiteral("msg")).toString().contains(QLatin1String("Windows 11"))
+                      &&read(ini)==beforeCornersIni&&read(dll)==beforeCornersDll,"unsupported Windows rejects corners without changing files");
+        }
         // Loading only OUR verified payload in the customizer test process must
         // forward version APIs without starting RPC (host is not HD-Player).
         HMODULE proxy=LoadLibraryW(reinterpret_cast<LPCWSTR>(dll.utf16()));

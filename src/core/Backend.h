@@ -193,6 +193,7 @@ public:
     Q_INVOKABLE QVariantMap gifRpcInspect(const QString &path);
     Q_INVOKABLE QVariantMap gifRpcApply(const QString &path, const QVariantMap &settings, bool replaceExisting = false);
     Q_INVOKABLE QVariantMap gifRpcRestore(const QString &path);
+    Q_INVOKABLE QVariantMap gifRpcSetRoundCorners(const QString &path, bool enabled);
 
     // ---- extras ----
     Q_INVOKABLE QVariantMap applyRemovals(const QStringList &names);

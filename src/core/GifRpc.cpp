@@ -51,6 +51,7 @@ QByteArray encode(const QVariantMap &s) {
         +"\nAppId="+s.value(QStringLiteral("AppId")).toString().toLatin1()+"\nTimestamp="
         +QByteArray(s.value(QStringLiteral("Timestamp"),true).toBool()?"1":"0")+"\nInterval="
         +QByteArray::number(s.value(QStringLiteral("Interval"),5).toInt())+'\n';
+    if(s.contains(QStringLiteral("RoundCorners")))out+="RoundCorners="+QByteArray(s.value(QStringLiteral("RoundCorners")).toBool()?"1":"0")+'\n';
     for(const auto &key:fields)out+=key.toLatin1()+'='+s.value(key).toString().toUtf8().toHex()+'\n';
     const auto rows=details(s);out+="DetailCount="+QByteArray::number(rows.size())+'\n';
     for(int i=0;i<rows.size();++i)out+="Detail"+QByteArray::number(i)+'='+rows[i].toUtf8().toHex()+'\n';
@@ -61,6 +62,7 @@ QVariantMap settings(const QString &path) {
     s[QStringLiteral("AppId")]=file.value(QStringLiteral("AppId")).toString();
     s[QStringLiteral("Enabled")]=file.value(QStringLiteral("Enabled"),false).toBool();
     s[QStringLiteral("Timestamp")]=file.value(QStringLiteral("Timestamp"),true).toBool();
+    if(file.contains(QStringLiteral("RoundCorners")))s[QStringLiteral("RoundCorners")]=file.value(QStringLiteral("RoundCorners")).toBool();
     s[QStringLiteral("Interval")]=file.value(QStringLiteral("Interval"),5).toInt();
     for(const auto &key:fields)s[key]=QString::fromUtf8(QByteArray::fromHex(file.value(key).toByteArray()));
     QStringList rows;for(int i=0;i<qBound(0,file.value(QStringLiteral("DetailCount"),0).toInt(),10);++i)
@@ -168,9 +170,35 @@ QVariantMap inspect(const QString &exe) {
     auto out=reply(true,bytes.isEmpty()?QStringLiteral("No app-local version.dll installed."):
         isOurProxy(bytes)?QStringLiteral("Validated BSI RPC-only x64 version.dll and its forwarding exports."):
             QStringLiteral("An existing non-BSI version.dll is present. It will not be replaced without explicit permission."));
+    out[QStringLiteral("supportsRoundCorners")]=isOurProxy(bytes)&&bytes.contains("BSI_GIF_RPC_CORNERS_V1");
     out[QStringLiteral("installed")]=isOurProxy(bytes);out[QStringLiteral("existing")]=QFileInfo::exists(dll);
     out[QStringLiteral("hasBackup")]=QFileInfo::exists(dll+QStringLiteral(".bsi-gif-rpc.bak"));
     out[QStringLiteral("settings")]=settings(pathFor(exe,QStringLiteral("bsi-gif-rpc.ini")));return out;
+}
+QVariantMap setRoundCorners(const QString &exe,bool enabled) {
+    const auto error=targetError(exe);if(!error.isEmpty())return reply(false,error);
+#ifdef Q_OS_WIN
+    // RtlGetVersion is not affected by the application's compatibility manifest.
+    using VersionFn=LONG (WINAPI *)(OSVERSIONINFOW *);
+    const auto version=reinterpret_cast<VersionFn>(GetProcAddress(GetModuleHandleW(L"ntdll.dll"),"RtlGetVersion"));
+    OSVERSIONINFOW os{};os.dwOSVersionInfoSize=sizeof(os);
+    if(!version||version(&os)!=0||os.dwMajorVersion<10||os.dwBuildNumber<22000)
+        return reply(false,QStringLiteral("Native round corners require Windows 11 (build 22000+) or newer. No window styles were changed."));
+#else
+    return reply(false,QStringLiteral("Native round corners require Windows 11."));
+#endif
+    const auto dll=read(pathFor(exe,QStringLiteral("version.dll")));
+    if(!isOurProxy(dll)||!dll.contains("BSI_GIF_RPC_CORNERS_V1"))
+        return reply(false,QStringLiteral("Close the emulator and Install / Apply the updated GIF RPC DLL once, then use Round corners. Other DLLs are never replaced by this button."));
+    const auto ini=pathFor(exe,QStringLiteral("bsi-gif-rpc.ini"));
+    if(!QFileInfo::exists(ini)||read(ini).isEmpty())return reply(false,QStringLiteral("RPC settings are missing or unreadable; Install / Apply first."));
+    auto s=settings(ini);s[QStringLiteral("RoundCorners")]=enabled;
+    if(!write(ini,encode(s)))return reply(false,QStringLiteral("Could not save the corner preference. Check emulator folder permissions."));
+    auto out=reply(true,enabled
+        ?QStringLiteral("Round corners enabled. The running emulator applies the preference within 5 seconds, or on its next start.")
+        :QStringLiteral("Round corners disabled (square corners). The running emulator applies the preference within 5 seconds, or on its next start."));
+    out[QStringLiteral("roundCorners")]=enabled;
+    return out;
 }
 QVariantMap apply(const QString &exe,const QVariantMap &s,bool replaceExisting) {
     QString error=targetError(exe);if(error.isEmpty()&&!validate(s,&error))return reply(false,error);
@@ -187,7 +215,12 @@ QVariantMap apply(const QString &exe,const QVariantMap &s,bool replaceExisting) 
     }
     if((hadDll&&previous.isEmpty())||(hadIni&&oldIni.isEmpty()))return reply(false,QStringLiteral("An existing RPC file is empty or unreadable; no files were changed."));
     // Commit settings first; if the DLL cannot be committed, roll settings back.
-    if(!write(ini,encode(s)))return reply(false,QStringLiteral("Cannot write RPC settings. Run as administrator and check folder permissions."));
+    auto effective=s;
+    if(!effective.contains(QStringLiteral("RoundCorners"))) {
+        const auto previousSettings=settings(ini);
+        if(previousSettings.contains(QStringLiteral("RoundCorners")))effective[QStringLiteral("RoundCorners")]=previousSettings.value(QStringLiteral("RoundCorners"));
+    }
+    if(!write(ini,encode(effective)))return reply(false,QStringLiteral("Cannot write RPC settings. Run as administrator and check folder permissions."));
     bool written=hadDll?PatchFile::writeVerified(dll,previous,payload,&error):write(dll,payload);
     if(!written) {
         const bool restored=hadIni?write(ini,oldIni):QFile::remove(ini);

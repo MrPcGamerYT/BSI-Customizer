@@ -352,6 +352,8 @@ QVariantMap WebBridge::invoke(const QString &method, const QVariantMap &args)
     } else if (method == QLatin1String("gifRpcInspect")) value = m_backend.gifRpcInspect(m_backend.exePath());
     else if (method == QLatin1String("gifRpcApply")) {
         value = m_backend.gifRpcApply(m_backend.exePath(), args.value("settings").toMap(), args.value("replaceExisting", false).toBool());
+    } else if (method == QLatin1String("gifRpcSetRoundCorners")) {
+        value = m_backend.gifRpcSetRoundCorners(m_backend.exePath(), args.value("enabled").toBool());
     } else if (method == QLatin1String("gifRpcRestore")) value = m_backend.gifRpcRestore(m_backend.exePath());
     else if (method == QLatin1String("readWorkspace")) {
         QVariantList summary;
