@@ -259,13 +259,28 @@ class Studio:
         index = next((i for s, _l, i in PAGES if s == slug), None)
         if index is None:
             return None
-        QMetaObject.invokeMethod(self.window, "navigatePage", Q_ARG("QVariant", index))
+        section_index = None
         if slug == "interface":
-            bar = self._find(self.interface, "playerUiSections")
             positions = {s: i for s, _l, i in SECTIONS}
-            QMetaObject.invokeMethod(bar, "setCurrentIndex",
-                                     Q_ARG("int", positions.get(section or "layout", 0)))
-        QTest.qWait(500)
+            section_index = positions.get(section or "layout", 0)
+        # Navigating and switching tabs are animated/queued, so retry until the
+        # app really is on the requested page+section - a single wait-and-grab
+        # served the previous frame as the first image of a session.
+        for attempt in range(12):
+            QMetaObject.invokeMethod(self.window, "navigatePage", Q_ARG("QVariant", index))
+            if section_index is not None:
+                bar = self._find(self.interface, "playerUiSections")
+                if bar is not None:
+                    QMetaObject.invokeMethod(bar, "setCurrentIndex", Q_ARG("int", section_index))
+            QTest.qWait(220)
+            if self.current_slug() != slug:
+                continue
+            if section_index is not None:
+                inner = self.interface.property("item") if self.interface else None
+                if inner is None or inner.property("currentSection") != section_index:
+                    continue
+            QTest.qWait(120)
+            return self._grab()
         return self._grab()
 
 
@@ -437,6 +452,8 @@ def main():
     them. Rendering from an HTTP thread silently returns stale frames.
     """
     studio = Studio()
+    # Warm the pipeline once so the first served frame is never a blank window.
+    studio.render("home")
     jobs = queue.Queue()
     html = build_html().encode()
 

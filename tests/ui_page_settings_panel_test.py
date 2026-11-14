@@ -190,6 +190,21 @@ Window {
     # Opening the tab is the only thing that inspects the player.
     assert "settingsPanelRebuildState" not in backend.property("calls").toVariant()
 
+    # Before anything is inspected the section must read as "nothing loaded yet",
+    # never as a player that reports a row of zeros everywhere.
+    assert not page.property("panelReady"), "nothing is inspected yet"
+    _empty = page.findChild(QObject, "settingsPanelEmptyHint")
+    assert _empty is not None, "the not-yet-loaded hint must exist"
+    assert "No player has been read yet" in (_empty.property("text") or ""), \
+        _empty.property("text")
+    # The live readouts and the tab list stay hidden until a player is read, so
+    # the section never shows a player-shaped row of zeros with no player.
+    for gated in ("settingsPanelReadouts", "settingsPanelTabList"):
+        gated_block = page.findChild(QObject, gated)
+        assert gated_block is not None, f"{gated} must exist"
+        assert not gated_block.property("visible"), \
+            f"{gated} must stay hidden before inspection"
+
     # The user reaches this section by clicking the tab, so click the tab itself
     # rather than assigning currentSection: an unreachable or zero-size tab
     # would pass a property assignment but never reachable with a mouse, which is

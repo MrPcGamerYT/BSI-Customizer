@@ -1702,6 +1702,7 @@ Item {
 
                         // ---- what the player holds right now --------------
                         ColumnLayout {
+                            objectName: "settingsPanelReadouts"
                             Layout.fillWidth: true
                             visible: page.panelReady
                             spacing: 6
@@ -1780,6 +1781,7 @@ Item {
                         }
 
                         Text {
+                            objectName: "settingsPanelEmptyHint"
                             Layout.fillWidth: true
                             wrapMode: Text.Wrap
                             text: !page.panelReady
@@ -1823,6 +1825,7 @@ Item {
 
                         // ---- native tab visibility + per-tab artwork --------
                         Text {
+                            objectName: "settingsPanelTabList"
                             visible: page.panelReady
                             text: qsTr("Native Settings tabs")
                             color: Theme.text
