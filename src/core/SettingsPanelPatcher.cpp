@@ -704,6 +704,10 @@ UiShadowContainer{// BSI Settings v9
 id:iSettingsWindowShadowContainer;anchors.fill:parent
 property var bHidden:[];property var bIcons:({})
 property int pPageWidth:568
+// Never let a category be half-clipped at the shell edge: when the labels do
+// not fit, every tab shrinks by the same amount instead of the strip being cut
+// off. `v.count` is the live tab count and bHidden removes hidden categories.
+property int pTabSlot:Math.floor((width-32)/Math.max(1,v.count-(bHidden?bHidden.length:0)))
 Rectangle{anchors.fill:parent;color:"#0d0f14";radius:14;clip:true
 Item{id:iShellContent;anchors.fill:parent
 Item{width:parent.width;height:56
@@ -712,9 +716,9 @@ Text{text:qsTranslate("QObject","Settings");color:"white";font:UiTheme.fonts.bod
 UiImageButton{asset:"CloseIcon";pImageWidth:16;pImageHeight:16;anchors.right:parent.right;anchors.verticalCenter:parent.verticalCenter;onClicked:iSettingsWindow.close()}}
 Item{width:parent.width;height:62;y:56
 ListView{id:v;width:Math.min(contentWidth,parent.width-32);height:44;x:Math.max(16,(parent.width-width)/2);anchors.verticalCenter:parent.verticalCenter;orientation:ListView.Horizontal;model:pSettingsItems.pSettingElements;clip:true;spacing:0
-delegate:Item{property var k:modelData.pQmlSource.toLowerCase().split("/").pop();property var h:iSettingsWindowShadowContainer.bHidden;width:Math.max(64,modelData.pButtonText.length*8+24)*(!~h.indexOf(k));height:44
+delegate:Item{property var k:modelData.pQmlSource.toLowerCase().split("/").pop();property var h:iSettingsWindowShadowContainer.bHidden;property int pNat:Math.max(64,modelData.pButtonText.length*8+24);property int pSlot:iSettingsWindowShadowContainer.pTabSlot;width:pSlot*(!~h.indexOf(k));height:44
 UiSettingsButton{anchors.fill:parent;pSettingIdx:index;pSettingBtnText:modelData.pButtonText;pSelected:index==pCurrentTabIndex;pShowRedDot:modelData.pShowRedDot;onSettingClicked:fChangeSelectedSetting(pSettingIdx)}
-Image{source:iSettingsWindowShadowContainer.bIcons[parent.k]||"";width:parent.width?18:0;height:18;anchors.centerIn:parent}}
+Image{source:iSettingsWindowShadowContainer.bIcons[parent.k]||"";width:18;height:18;anchors.centerIn:parent}}
 }
 Rectangle{anchors.bottom:parent.bottom;width:parent.width;height:1;color:"#1e222c"}}
 Rectangle{id:iPageFrame;x:(parent.width-width)/2;y:130;width:Math.min(parent.width-32,iSettingsWindowShadowContainer.pPageWidth);height:parent.height-148;radius:12;color:"#14171e";border.color:"#242833";clip:true

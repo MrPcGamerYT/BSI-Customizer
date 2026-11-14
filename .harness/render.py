@@ -140,7 +140,11 @@ def run(out_path, width, height):
 
     engine = QQmlEngine()
     engine.addImportPath(str(root))
+    # The generated shell sizes itself from `transientParent`, so the player
+    # double must be the viewport being rendered -- pinning it at one size made
+    # every render claim a 1120x670 shell regardless of the window.
     player = Player()
+    player._w, player._h = float(width), float(height)
     engine.rootContext().setContextProperty("iSettingsWindow", player)
     comp = QQmlComponent(engine, QUrl.fromLocalFile(str(host)))
     obj = comp.create()

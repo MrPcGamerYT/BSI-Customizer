@@ -5203,6 +5203,10 @@ Window {
                           && rebuiltWindow.contains(QStringLiteral("Rectangle{id:iPageFrame;x:(parent.width-width)/2;"))
                           && rebuiltWindow.contains(QStringLiteral("width:Math.min(parent.width-32,iSettingsWindowShadowContainer.pPageWidth)"))
                           && rebuiltWindow.contains(QStringLiteral("x:Math.max(16,(parent.width-width)/2)"))
+                          // Tabs divide the strip into equal slots so the last
+                          // category is never half-clipped at the shell edge.
+                          && rebuiltWindow.contains(QStringLiteral("property int pTabSlot:"))
+                          && rebuiltWindow.contains(QStringLiteral("width:pSlot*(!~h.indexOf(k))"))
                           && rebuiltWindow.contains(QStringLiteral("MouseArea{anchors.fill:parent;onPressed:iSettingsWindow.startSystemMove()}"))
                           && rebuiltWindow.contains(QStringLiteral("pShowRedDot:modelData.pShowRedDot"))
                           && rebuiltWindow.contains(QStringLiteral("anchors.centerIn:parent"))

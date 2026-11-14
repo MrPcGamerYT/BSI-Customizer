@@ -78,7 +78,11 @@ assert "orientation:ListView.Horizontal;model:pSettingsItems.pSettingElements;cl
 assert "x:Math.max(16,(parent.width-width)/2)" in replacement, "The tab strip should be centered, not left-anchored"
 assert "width:Math.min(contentWidth,parent.width-32)" in replacement
 assert "property var h:iSettingsWindowShadowContainer.bHidden" in replacement
-assert "width:Math.max(64,modelData.pButtonText.length*8+24)*(!~h.indexOf(k));height:44" in replacement
+assert "property int pSlot:iSettingsWindowShadowContainer.pTabSlot" in replacement
+assert "width:pSlot*(!~h.indexOf(k));height:44" in replacement
+# Every category must stay reachable: the strip divides the shell width into
+# equal slots instead of letting the last tab be half-clipped at the edge.
+assert "property int pTabSlot:Math.floor((width-32)/Math.max(1,v.count-(bHidden?bHidden.length:0)))" in replacement
 assert "item.anchors.fill=item.parent" in replacement
 assert "height:parent.height-148" in replacement and "y:130" in replacement
 assert "StackLayout{id:iSelectedSettingControl;anchors.fill:parent;anchors.margins:6" in replacement
@@ -315,7 +319,11 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
     assert tabs.property("spacing") == 0, "The horizontal tab strip should rely on each label-sized tab slot for spacing"
     tab_slots = [item for item in visual_tree if item.property("pSettingBtnText") is not None]
     assert len(tab_slots) >= 2, "Visible native categories should each have a tab button"
-    assert len({round(item.width()) for item in tab_slots}) > 1, "Tab widths should follow label lengths rather than clipping categories into equal slots"
+    # Every category must be reachable and fully drawn. The strip divides the
+    # available width into equal slots so the last tab is never half-clipped at
+    # the shell edge, which is what a label-length strip did on narrow windows.
+    assert len({round(item.width()) for item in tab_slots}) == 1, "Category slots should be uniform so no tab is clipped at the shell edge"
+    assert all(item.width() >= 40 for item in tab_slots), "Category slots must stay wide enough to read"
     assert abs(player.width - 1500) < 2 and abs(player.height - 900) < 2, "The shell should resize without changing the host player window"
     assert abs(panel.width() - obj.width()) < 2 and abs(panel.height() - obj.height()) < 2, "The PR #88 shell should fill its resized host"
     stack_center = stack.mapToItem(panel, QPointF(stack.width() / 2, stack.height() / 2))
