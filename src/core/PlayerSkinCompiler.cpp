@@ -159,7 +159,7 @@ QVariantMap plan(const QByteArray &image,const QVariantMap &profile,const QStrin
             rows<<QVariantMap{{"path",file.path},{"feature","icon / "+g}};
         }
     }
-    const QStringList required{"UiButton.qml","UiImageButton.qml","UiTextField.qml","UiComboBox.qml","UiDialog.qml","PlrSidebar.qml","PlrTopbar.qml"};
+    const QStringList required=components();
     QStringList missing;for(const auto &name:required)if(!found.contains(name))missing<<name;
     for(const auto &g:QStringList{"home","back","settings","controls","volume"})if(!glyphs.contains(g))missing<<"icon:"+g;
     if(!missing.isEmpty())return {{"ok",false},{"coverage",rows},{"missing",missing},{"msg","Full GUI pack refused: required resources are not in this EXE: "+missing.join(", ")+". They may be compiled-only or stored in companion UI DLLs/RCCs. No palette-only success was staged."}};

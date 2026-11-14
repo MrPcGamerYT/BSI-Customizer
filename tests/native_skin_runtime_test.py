@@ -190,6 +190,14 @@ QtObject {
     QTest.qWait(100)
     assert shell.property("currentPage")==11, "navigation stays responsive during serialized operations"
     backend.setProperty("busy",False)
+    # The newly navigated page can still be loading after backend work ends.
+    # Busy strip represents BOTH conditions; do not assume a 100ms load budget.
+    recovery=shell.findChild(QObject,"featureBackups")
+    for _ in range(150):
+        if recovery.property("item") is not None: break
+        QTest.qWait(20)
+    assert recovery.property("item") is not None
+    QTest.qWait(30)
     assert not busyStrip.property("busy")
     auth.setProperty("authorized",False);QTest.qWait(100)
     assert all(loader.property("item") is None for loader in loaders), "sign-out unloads all editors"
