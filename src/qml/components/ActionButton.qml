@@ -17,17 +17,15 @@ Rectangle {
 
     implicitWidth: buttonLabel.implicitWidth + 30
     implicitHeight: 36
-    radius: 9
+    radius: height / 2
 
-    scale: buttonArea.pressed ? 0.985 : 1
-    Behavior on scale { NumberAnimation { duration: Theme.motionDuration; easing.type: Easing.OutCubic } }
+    // No scale or idle animation: interaction is a short color transition only.
     Behavior on color { ColorAnimation { duration: Theme.motionDuration } }
-
-    color: button.accent ? (buttonArea.pressed ? Qt.darker(Theme.accent, 1.12) : Theme.accent)
-                         : (buttonArea.pressed || buttonArea.containsMouse ? Theme.raised : Theme.card)
+    color: button.accent ? (buttonArea.pressed ? "#d8d8df" : Theme.text)
+                         : (buttonArea.pressed || buttonArea.containsMouse ? Theme.raised : "transparent")
     border.width: 1
     border.color: button.activeFocus ? Theme.accent
-                  : (button.accent ? Theme.accent : (buttonArea.containsMouse ? Theme.borderStrong : Theme.border))
+                  : (button.accent ? Theme.text : (buttonArea.containsMouse ? Theme.borderStrong : Theme.border))
     activeFocusOnTab: true
     Accessible.role: Accessible.Button
     Accessible.name: button.text
@@ -40,7 +38,7 @@ Rectangle {
         id: buttonLabel
         anchors.centerIn: parent
         text: button.text
-        color: button.accent && button.enabled ? Theme.primaryText : Theme.text
+        color: button.accent && button.enabled ? Theme.window : Theme.text
         font.pixelSize: 12
         font.weight: Font.DemiBold
     }

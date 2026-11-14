@@ -47,12 +47,7 @@ Rectangle {
                 radius: 5
                 color: Theme.accent
 
-                SequentialAnimation on opacity {
-                    running: banner.visible
-                    loops: Animation.Infinite
-                    NumberAnimation { to: 0.35; duration: 900; easing.type: Easing.InOutQuad }
-                    NumberAnimation { to: 1.0; duration: 900; easing.type: Easing.InOutQuad }
-                }
+
             }
 
             ColumnLayout {

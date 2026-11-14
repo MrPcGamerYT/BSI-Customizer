@@ -13,7 +13,7 @@ before downloading.
 - **Default frontend (4.0.1): QML + Qt Quick Controls**, backed by C++.
   Standard portable/installer builds set `BSI_CHROMIUM_UI=OFF`; no HTML renderer
   or Chromium runtime is required for the Customizer UI.
-- **Windows typography:** installed Segoe UI Variable / Segoe UI fonts. Microsoft
+- **Windows typography:** installed Inter / JetBrains Mono fonts. Microsoft
   font binaries are not redistributed. Non-Windows tests retain bundled fallbacks.
 - **Legacy frontend:** the HTML workspace is retained for compatibility development
   only. Build with `BSI_CHROMIUM_UI=ON` and explicitly launch `--web-ui` to use it;
@@ -1171,3 +1171,23 @@ The standard portable/installer workflows include the complete runtime.
 `--web-ui` selects the legacy frontend when compiled in; `--native-ui` forces QML; `BSI_CHROMIUM_UI=OFF` is an
 native-only build (the standard distribution default). See [UI/engine mapping](docs/UNIFIED-UI.md)
 and [deployment requirements and verification](docs/CHROMIUM-UI.md).
+
+### Quiet control-center redesign and startup behavior
+
+The native Collection uses a 200px grouped navigation rail, violet/cobalt/terracotta/
+salmon/teal bento art, a fixed 280px selected-design inspector, a framed preview,
+and recent activity. Inter and JetBrains Mono are bundled under their OFL licenses.
+Only cards lift 2px on hover (150ms); there are no automatic preview animations,
+shader blurs, glow pulses or page-wide entrance effects. Small screens move the
+inspector below the collection instead of crushing three columns beside it.
+
+Feature pages are loaded asynchronously on first authenticated use, retaining
+unsaved edits while navigating. No emulator/disk/installation detection happens
+at shell startup. Use **Detect installations** on Home; **Load player UI**,
+**Load/Reload**, **Refresh**, and **Load installation status** explicitly inspect
+their targets. Boot preview playback is opt-in and pauses offscreen; this does
+not change the installed player's boot behavior. Busy operations remain serialized
+and target/write guards stay in C++, but no modal curtain blocks reading/scrolling.
+
+Palette/design/SVG deployment is still verified and bounded; animations are
+preview-only, not full-emulator runtime skin injection.

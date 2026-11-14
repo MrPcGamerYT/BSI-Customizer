@@ -14,13 +14,8 @@ Item {
     property bool manualMode: false
     function startDiscord() { const r = auth.startDiscord(); manualMode = r.Manual === true; }
     function finishManual() { if (callbackInput.text.trim().length) auth.completeManual(callbackInput.text.trim()); }
-    Rectangle {
-        anchors.fill: parent
-        gradient: Gradient {
-            GradientStop { position: 0; color: Theme.dark ? "#252529" : "#ececf1" }
-            GradientStop { position: 1; color: Theme.window }
-        }
-    }
+    Rectangle { anchors.fill: parent; color: Theme.window }
+    ControlCenterBackdrop { anchors.fill: parent }
     Item {
         height: 54; anchors.left: parent.left; anchors.right: parent.right; anchors.top: parent.top
         MouseArea { anchors.fill: parent; onPressed: if (gate.appWindow) gate.appWindow.startSystemMove() }
@@ -43,20 +38,14 @@ Item {
         ColumnLayout {
             visible: gate.width >= 1100
             Layout.fillWidth: true; Layout.preferredWidth: 500; spacing: 20
-            Label { text: "BSI / NATIVE STUDIO"; color: Theme.accentText; font.pixelSize: 11; font.letterSpacing: 2 }
-            Label { Layout.fillWidth: true; text: qsTr("Your player.\nYour identity."); color: Theme.text; font.family: Theme.headingFont; font.pixelSize: 48; font.weight: Font.DemiBold; lineHeight: 1.05 }
+            Label { text: "BSI / NATIVE STUDIO"; color: Theme.tertiary; font.family: Theme.monoFont; font.pixelSize: 10; font.letterSpacing: 2 }
+            Label { Layout.fillWidth: true; text: qsTr("Your player.\nYour identity."); color: Theme.text; font.family: Theme.headingFont; font.pixelSize: 46; font.letterSpacing: -1.6; font.weight: Font.DemiBold; lineHeight: 1.05 }
             Label { Layout.fillWidth: true; text: qsTr("A quieter workspace. A deeper level of control.\nCreate a collection that feels like you."); color: Theme.textDim; font.pixelSize: 15; wrapMode: Text.Wrap; lineHeight: 1.5 }
-            GridLayout {
-                Layout.fillWidth: true; columns: 3; columnSpacing: 10; rowSpacing: 10
-                Repeater {
-                    model: Catalog.packs
-                    Rectangle {
-                        required property var modelData
-                        Layout.fillWidth: true; Layout.preferredHeight: 85; radius: 13; color: modelData.tint
-                        Image { anchors.left: parent.left; anchors.top: parent.top; anchors.margins: 13; width: 18; height: 18; source: Icons.icon(Icons.theme, "#ffffff") }
-                        Label { anchors.left: parent.left; anchors.bottom: parent.bottom; anchors.margins: 13; text: modelData.name; color: "white"; font.pixelSize: 10 }
-                    }
-                }
+            Rectangle {
+                Layout.fillWidth: true; Layout.preferredHeight: 205
+                color: Theme.card; radius: 18; border.color: Theme.border
+                FrameCorners { anchors.fill: parent; anchors.margins: 20; tint: Theme.tertiary }
+                MiniPlayer { width: 240; height: 140; anchors.centerIn: parent; tint: "#74688d" }
             }
             Label { text: qsTr("QML + C++  •  Local tools  •  Verified recovery"); color: Theme.textDim; font.pixelSize: 11 }
         }
@@ -70,7 +59,7 @@ Item {
                 id: loginColumn
                 anchors.fill: parent; anchors.margins: 28; spacing: 16
                 Image { Layout.preferredWidth: 48; Layout.preferredHeight: 48; source: "img/app-icon.png" }
-                Label { text: qsTr("Welcome to your workspace."); color: Theme.text; font.family: Theme.headingFont; font.pixelSize: 25; font.weight: Font.DemiBold; wrapMode: Text.Wrap; Layout.fillWidth: true }
+                Label { text: qsTr("Welcome to your workspace."); color: Theme.text; font.family: Theme.headingFont; font.pixelSize: 25; font.letterSpacing: -.8; font.weight: Font.DemiBold; wrapMode: Text.Wrap; Layout.fillWidth: true }
                 Label { Layout.fillWidth: true; text: qsTr("Sign in with Discord to verify your access. Your saved session is checked again before the tools unlock."); color: Theme.textDim; font.pixelSize: 13; wrapMode: Text.Wrap; lineHeight: 1.4 }
                 Rectangle {
                     visible: auth.hasSavedSession && !gate.hideResume

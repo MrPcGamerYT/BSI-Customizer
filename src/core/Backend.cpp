@@ -1437,6 +1437,9 @@ QVariantMap Backend::bootPatch(int holdMs, const QString &mode, const QString &v
 QVariantMap Backend::bootLogoPreview()
 {
     if (actionsLocked()) return lockedMap();
+    if (!m_backgroundWorker)
+        return runBackground([](Backend &worker) { return worker.bootLogoPreview(); });
+    if (actionsLocked()) return lockedMap();
     const QString logo = BootVideoPatcher::logoPreviewDataUrl(m_settings->exePath());
     return {{QStringLiteral("available"), !logo.isEmpty()},
             {QStringLiteral("logo"), logo}};
@@ -1778,6 +1781,9 @@ QVariantMap Backend::applyRemovals(const QStringList &names)
 
 QVariantList Backend::layoutTweaks()
 {
+    if (actionsLocked()) return {};
+    if (!m_backgroundWorker)
+        return runBackground([](Backend &worker) { return QVariantMap{{QStringLiteral("rows"), worker.layoutTweaks()}}; }).value(QStringLiteral("rows")).toList();
     QVariantList out;
     QByteArray image;
     const QString path = m_settings->exePath();
@@ -1811,6 +1817,9 @@ QVariantList Backend::layoutTweaks()
 
 QVariantMap Backend::sidebarButtonRows()
 {
+    if (actionsLocked()) return lockedMap();
+    if (!m_backgroundWorker)
+        return runBackground([](Backend &worker) { return worker.sidebarButtonRows(); });
     const auto state = LayoutPatcher::buttonRows(readExe());
     QVariantList buttons;
     for (const auto &button : state.buttons) {
@@ -1849,6 +1858,9 @@ QVariantMap Backend::applyLayoutTweak(const QString &id, bool enabled)
 
 QVariantMap Backend::aboutPageState()
 {
+    if (actionsLocked()) return lockedMap();
+    if (!m_backgroundWorker)
+        return runBackground([](Backend &worker) { return worker.aboutPageState(); });
     QVariantMap map {
         { QStringLiteral("supported"), false },
         { QStringLiteral("applied"), false },

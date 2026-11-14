@@ -26,5 +26,19 @@ assert.ok(backend.includes('m_resourceFileHash != QCryptographicHash::hash(bytes
 assert.ok(backend.includes('m_workspaceOperations=pending'),'custom skin batches commit to queue only after validation');
 assert.ok(qml.includes('Motion and pack name are authoring/preview metadata'));
 const login=read('src/qml/LoginGate.qml');for(const call of ['auth.startDiscord()','auth.continueSaved()','auth.completeManual(','auth.forgetSaved()']) assert.ok(login.includes(call));
-assert.ok(!login.includes('authorized = true'));assert.ok(read('src/qml/Theme.qml').includes('Segoe UI Variable'));
+assert.ok(!login.includes('authorized = true'));assert.ok(read('src/qml/Theme.qml').includes('JetBrains Mono'));assert.ok(read('src/qml/Theme.qml').includes('Inter')); 
 console.log('PASS: native 4.0.1 defaults, six independent editable drafts, icon variants, authorization/manual callback retention, explicit mapping guard and stale-plan invalidation.');
+
+const shell=read('src/qml/Main.qml'),lazy=read('src/qml/components/LazyFeature.qml');
+assert.equal((shell.match(/LazyFeature \{/g)||[]).length,13,'all tools keep a lazy route');
+assert.ok(lazy.includes('active: authorized && (currentPage === pageIndex || visited)'));
+assert.ok(lazy.includes('asynchronous: true'));
+assert.ok(!shell.includes('backend.detectInstalls()'),'installation detection must be explicit on Home');
+assert.ok(!shell.includes('visible: backend.busy'),'no modal busy curtain');
+assert.ok(!read('src/qml/pages/UiPage.qml').includes('Component.onCompleted: reloadAll()'));
+assert.ok(!read('src/qml/pages/ThemePage.qml').includes('page.reload();\n    }'));
+assert.ok(!read('src/qml/components/CollectionCard.qml').includes('scale:'));
+assert.ok(read('src/qml/components/CollectionCard.qml').includes('y: card.lifted ? -2 : 0'));
+for(const token of ['#0A0A0E','#111116','#17171D','#7C5CFF','#C8E86A']) assert.ok(read('src/qml/Theme.qml').includes(token));
+assert.ok(qml.includes('selectedDesignInspector') && qml.includes('collectionBento'));
+console.log('PASS: exact control-center tokens, lazy authenticated routes, no entry scans, nonmodal busy status and bounded hover-only card motion.');

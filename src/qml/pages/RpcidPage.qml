@@ -49,7 +49,7 @@ Item {
         page.busy = false
     }
 
-    Component.onCompleted: page.refresh()
+    // Inspect is explicit; the existing Refresh button reads the selected EXE.
 
     ScrollView {
         anchors.fill: parent

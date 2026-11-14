@@ -36,7 +36,6 @@ Popup {
 
     enter: Transition {
         NumberAnimation { property: "opacity"; from: 0; to: 1; duration: 150 }
-        NumberAnimation { property: "scale"; from: 0.97; to: 1; duration: 150; easing.type: Easing.OutCubic }
     }
     exit: Transition {
         NumberAnimation { property: "opacity"; from: 1; to: 0; duration: 100 }
@@ -241,15 +240,9 @@ Popup {
             currentIndex: panel.currentTab
             clip: true
 
-            AppearancePage {
-                onNotify: (message) => panel.notify(message)
-            }
-            UpdatesPage {
-                onNotify: (message) => panel.notify(message)
-            }
-            AboutPage {
-                onNotify: (message) => panel.notify(message)
-            }
+            LazyFeature { pageIndex: 0; currentPage: panel.currentTab; authorized: panel.visible; pageSource: "../pages/AppearancePage.qml"; onNotify: (message) => panel.notify(message) }
+            LazyFeature { pageIndex: 1; currentPage: panel.currentTab; authorized: panel.visible; pageSource: "../pages/UpdatesPage.qml"; onNotify: (message) => panel.notify(message) }
+            LazyFeature { pageIndex: 2; currentPage: panel.currentTab; authorized: panel.visible; pageSource: "../pages/AboutPage.qml"; onNotify: (message) => panel.notify(message) }
         }
 
         Rectangle {

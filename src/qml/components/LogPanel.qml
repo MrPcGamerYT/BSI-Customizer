@@ -2,106 +2,36 @@ import QtQuick
 import QtQuick.Controls.Basic
 import QtQuick.Layouts
 import BSICustomizer
-
+import "../Icons.js" as Icons
 Rectangle {
     id: panel
-
-    // Main.qml binds the panel height to this, so a collapsed log hands its
-    // ~110 px back to whatever page is on screen.
     property bool collapsed: true
-
-    color: Theme.sidebar
-
+    property string latest: qsTr("Workspace ready. No changes applied.")
+    color: Theme.card; radius: 16; border.color: Theme.border
     function append(msg, colorName) {
-        logModel.append({ msg: msg, col: colorName || "gray" });
-        if (colorName === "red") panel.collapsed = false;
-        if (logModel.count > 400)
-            logModel.remove(0);
-        view.positionViewAtEnd();
+        latest=msg; logModel.append({msg:msg,col:colorName || "gray"});
+        if(logModel.count>400) logModel.remove(0);
+        if(!collapsed) Qt.callLater(function() { view.positionViewAtEnd(); });
     }
-
-    Rectangle {
-        anchors.top: parent.top
-        width: parent.width
-        height: 1
-        color: Theme.border
-    }
-
     ListModel { id: logModel }
-
     ColumnLayout {
-        anchors.fill: parent
-        anchors.margins: 8
-        spacing: 4
-
+        anchors.fill: parent; anchors.margins: 18; spacing: 10
         RowLayout {
-            Layout.fillWidth: true
-            spacing: 8
-
-            Text {
-                text: qsTr("ACTIVITY LOG")
-                color: Theme.accentText
-                font.pixelSize: 11
-                font.weight: Font.Bold
-            }
-            Text {
-                visible: !panel.collapsed && logModel.count > 0
-                text: qsTr("%1 lines").arg(logModel.count)
-                color: Theme.textDim
-                font.pixelSize: 10
-            }
-            Item { Layout.fillWidth: true }
-            ActionButton {
-                text: qsTr("Clear")
-                implicitHeight: 26
-                enabled: !panel.collapsed && logModel.count > 0
-                onClicked: logModel.clear()
-            }
-            Rectangle {
-                Layout.preferredWidth: 26
-                Layout.preferredHeight: 26
-                radius: 7
-                color: collapseArea.containsMouse ? Theme.raised : "transparent"
-                border.width: 1
-                border.color: Theme.border
-
-                Text {
-                    anchors.centerIn: parent
-                    text: panel.collapsed ? "\u25b2" : "\u25bc"
-                    color: Theme.textDim
-                    font.pixelSize: 9
-                }
-                MouseArea {
-                    id: collapseArea
-                    anchors.fill: parent
-                    hoverEnabled: true
-                    cursorShape: Qt.PointingHandCursor
-                    onClicked: panel.collapsed = !panel.collapsed
-                }
+            Layout.fillWidth: true; spacing: 9
+            Image { source: Icons.icon("<path d='M8 6h13M8 12h13M8 18h13M3 6h1M3 12h1M3 18h1'/>",Theme.tertiary); sourceSize: Qt.size(13,13); Layout.preferredWidth: 13; Layout.preferredHeight: 13 }
+            MicroLabel { text: qsTr("RECENT ACTIVITY"); font.pixelSize: 9; color: Theme.tertiary; Layout.fillWidth: true }
+            AbstractButton {
+                id: toggle; implicitWidth: 20; implicitHeight: 16; text: panel.collapsed ? "⌃" : "⌄"
+                Accessible.name: panel.collapsed ? qsTr("Expand activity log") : qsTr("Collapse activity log")
+                contentItem: Text { text: toggle.text; color: Theme.textDim; horizontalAlignment: Text.AlignHCenter }
+                onClicked: panel.collapsed=!panel.collapsed
             }
         }
-
+        Text { visible: panel.collapsed; Layout.fillWidth: true; text: panel.latest; textFormat: Text.PlainText; color: Theme.textDim; font.family: Theme.bodyFont; font.pixelSize: 11; elide: Text.ElideRight }
         ListView {
-            id: view
-            visible: !panel.collapsed
-            Layout.fillWidth: true
-            Layout.fillHeight: true
-            clip: true
-            model: logModel
-            boundsBehavior: Flickable.StopAtBounds
-
-            ScrollBar.vertical: ScrollBar {}
-
-            delegate: Text {
-                required property string msg
-                required property string col
-                width: ListView.view.width
-                text: msg
-                color: Theme.logColor(col)
-                font.family: "Consolas"
-                font.pixelSize: 12
-                wrapMode: Text.Wrap
-            }
+            id: view; visible: !panel.collapsed; Layout.fillWidth: true; Layout.fillHeight: true; clip: true
+            model: logModel; boundsBehavior: Flickable.StopAtBounds; ScrollBar.vertical: ScrollBar {}
+            delegate: Text { required property string msg; required property string col; width: ListView.view.width; text: msg; textFormat: Text.PlainText; color: Theme.logColor(col); font.family: Theme.monoFont; font.pixelSize: 10; wrapMode: Text.Wrap }
         }
     }
 }

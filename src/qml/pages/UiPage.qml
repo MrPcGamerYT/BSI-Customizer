@@ -244,35 +244,29 @@ Item {
             page.notify(result.msg);
     }
 
+    property bool inspectionStale: true
     function reloadAll() {
+        if (backend.busy) return;
         refreshLayout();
         refreshButtonRows();
         refreshAbout(true);
+        inspectionStale = false;
     }
 
-    Component.onCompleted: reloadAll()
-
-    onVisibleChanged: if (visible) reloadAll()
+    // Explicit inspection only: never re-read multi-MB EXEs on page entry.
 
     Connections {
         target: backend
         function onExePathChanged() {
-            page.reloadAll();
+            page.inspectionStale = true;
+            page.layoutTweaks = []; page.buttonRows = []; page.buttonOrderReady = false;
+            page.aboutLinks = []; page.about = {supported:false,applied:false,detail:qsTr("Load the selected player UI to inspect it.")};
             page.appearanceRows = [];
             page.appearancePlan = ({});
             page.appearanceMsg = qsTr("Target changed. Inspect appearance tokens again.");
         }
-        // A layout write happens in a worker; when it is done the row of
-        // buttons has changed (or the title-bar move was reverted), so the
-        // order card follows without asking the user to reopen the tab.
-        function onBusyChanged() {
-            if (backend.busy)
-                return;
-            // Only the two card states that depend on the file: the About
-            // editor keeps whatever the user has typed.
-            page.refreshLayout();
-            page.refreshButtonRows();
-        }
+        // Worker completion marks stale, never starts another synchronous scan.
+        function onBusyChanged() { if (!backend.busy) page.inspectionStale = true; }
     }
 
     ScrollView {
@@ -320,6 +314,12 @@ Item {
                         }
                     }
 
+                    ActionButton {
+                        Layout.alignment: Qt.AlignTop
+                        text: page.inspectionStale ? qsTr("Load player UI") : qsTr("Refresh UI")
+                        enabled: !backend.busy
+                        onClicked: page.reloadAll()
+                    }
                     ActionButton {
                         Layout.alignment: Qt.AlignTop
                         text: qsTr("Open Folder")

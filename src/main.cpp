@@ -207,15 +207,11 @@ int main(int argc, char *argv[])
     QCoreApplication::setApplicationName(QStringLiteral("BSI Customizer"));
     QCoreApplication::setApplicationVersion(QStringLiteral(BSI_VERSION));
     installCrashDiagnostics();
-    QFontDatabase::addApplicationFont(QStringLiteral(":/qt/qml/BSICustomizer/src/qml/fonts/Manrope.ttf"));
-    QFontDatabase::addApplicationFont(QStringLiteral(":/qt/qml/BSICustomizer/src/qml/fonts/PlusJakartaSans.ttf"));
-    #ifdef Q_OS_WIN
-    const QString uiFont = QFontDatabase::families().contains(QStringLiteral("Segoe UI Variable Text"))
-        ? QStringLiteral("Segoe UI Variable Text") : QStringLiteral("Segoe UI");
-#else
-    const QString uiFont = QStringLiteral("Plus Jakarta Sans");
-#endif
-    app.setFont(QFont(uiFont));
+    QFontDatabase::addApplicationFont(QStringLiteral(":/qt/qml/BSICustomizer/src/qml/fonts/Inter.ttf"));
+    QFontDatabase::addApplicationFont(QStringLiteral(":/qt/qml/BSICustomizer/src/qml/fonts/JetBrainsMono.ttf"));
+    // OFL-licensed geometric UI + mono labels, bundled for consistent metrics.
+    app.setFont(QFont(QStringLiteral("Inter")));
+
 
     // Brand icon for every window/dialog the app raises (taskbar, Alt-Tab,
     // title bar). The .ico lives at the repo root; CMake maps it into the

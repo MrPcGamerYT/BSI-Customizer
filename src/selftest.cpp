@@ -343,13 +343,24 @@ int runSelfTest()
                 QCoreApplication::processEvents();
             }
         }
-        check(QFontDatabase::families().contains(QStringLiteral("Manrope"))
-                  && QFontDatabase::families().contains(QStringLiteral("Plus Jakarta Sans")),
+        check(QFontDatabase::families().contains(QStringLiteral("Inter"))
+                  && QFontDatabase::families().contains(QStringLiteral("JetBrains Mono")),
               "reference UI fonts are embedded and load without a font CDN");
 
         if (root) {
             QObject *stack = root->findChild<QObject *>(QStringLiteral("studioPageStack"));
-            QObject *dashboard = root->findChild<QObject *>(QStringLiteral("studioDashboard"));
+            QObject *dashboardLoader = root->findChild<QObject *>(QStringLiteral("studioDashboardLoader"));
+            check(dashboardLoader && !dashboardLoader->property("active").toBool()
+                      && !dashboardLoader->property("item").value<QObject *>(),
+                  "locked startup never creates or scans a hidden Dashboard");
+            // Exercise this one presentation fixture without authorizing Backend.
+            // Only the test-local Loader flag changes, never AuthManager.
+            if (dashboardLoader) {
+                dashboardLoader->setProperty("asynchronous", false);
+                dashboardLoader->setProperty("authorized", true);
+                dashboardLoader->setProperty("currentPage", 0);
+            }
+            QObject *dashboard = dashboardLoader ? dashboardLoader->property("item").value<QObject *>() : nullptr;
             check(stack && stack->property("count").toInt() == 13,
                   "studio shell retains eleven original editors plus Backups and Add-ons; app settings remain in the modal panel");
             check(root->findChild<QObject *>(QStringLiteral("studioSidebar")) != nullptr,
@@ -370,6 +381,8 @@ int runSelfTest()
             check(instanceFlow && instanceFlow->property("implicitHeight").toReal() == 0,
                   "dashboard Flow releases its height when instance chips are removed");
             const auto resourceCount = backend.resourceInfos().size();
+            QObject *resourceLoader = root->findChild<QObject *>(QStringLiteral("featureResources"));
+            if (resourceLoader) { resourceLoader->setProperty("asynchronous", false); resourceLoader->setProperty("authorized", true); }
             const bool navigated = dashboard && QMetaObject::invokeMethod(dashboard, "navigate", Q_ARG(int, 2));
             check(navigated && stack && stack->property("currentIndex").toInt() == 2,
                   "dashboard toolkit navigation opens the real Resources page");
@@ -379,7 +392,7 @@ int runSelfTest()
             // Keep every feature editor in this single QML stack; settings are
             // hosted by the separate three-tab modal panel above.
             const char *featureObjects[] = {
-                "studioDashboard", "featureTheme", "featureResources", "featureFps",
+                "studioDashboardLoader", "featureTheme", "featureResources", "featureFps",
                 "featureIntegrity", "featureBoot", "featureInterface", "featureRpc",
                 "featureGif", "featureWorkspace", "featureDebloat", "featureBackups", "featureAddons"
             };

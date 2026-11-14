@@ -1,73 +1,36 @@
 import QtQuick
-import QtQuick.Controls.Basic
-import QtQuick.Layouts
 import BSICustomizer
-import "../Icons.js" as Icons
 
 Rectangle {
     id: preview
     property string packName: "VOID / Carbon"
-    property color accentColor: "#d8faec"
+    property color accentColor: "#7c5cff"
     property color surfaceColor: "#101012"
     property int cornerRadius: 4
     property string motion: "fade"
     property int duration: 240
     property string iconStyle: "line"
     property int controlHeight: 32
-    implicitHeight: 250
-    color: surfaceColor
-    radius: 14
-    border.color: "#39393e"
-    clip: true
+    implicitHeight: 130
+    color: surfaceColor; radius: 6; border.color: "#35333f"
     function replay() {
-        entrance.stop(); content.opacity = 1; content.y = 22; content.x = 22; content.scale = 1;
-        if (!Theme.reduceMotion && preview.motion !== "none") entrance.start();
+        entrance.stop(); body.opacity=1;
+        if (!Theme.reduceMotion && preview.motion !== "none") entrance.restart();
     }
-    ParallelAnimation {
-        id: entrance
-        NumberAnimation { target: content; property: "opacity"; from: 0; to: 1; duration: preview.duration }
-        NumberAnimation { target: content; property: "y"; from: preview.motion === "rise" ? 38 : 22; to: 22; duration: preview.duration; easing.type: Easing.OutCubic }
-        NumberAnimation { target: content; property: "x"; from: preview.motion === "slide" ? 42 : 22; to: 22; duration: preview.duration; easing.type: Easing.OutCubic }
-        NumberAnimation { target: content; property: "scale"; from: preview.motion === "scale" ? 0.94 : 1; to: 1; duration: preview.duration; easing.type: Easing.OutCubic }
-    }
-    ColumnLayout {
-        anchors.fill: parent; spacing: 0
-        Rectangle {
-            Layout.fillWidth: true; Layout.preferredHeight: 36; color: "#18181b"
-            RowLayout { anchors.fill: parent; anchors.leftMargin: 14; anchors.rightMargin: 12
-                Label { text: preview.packName; color: "#ededf0"; font.pixelSize: 11; Layout.fillWidth: true; elide: Text.ElideRight }
-                Label { text: "—   □   ×"; color: "#9b9ba3"; font.pixelSize: 11 }
-            }
+    // Explicit playback only. Nothing animates on creation/selection or at idle.
+    NumberAnimation { id: entrance; target: body; property: "opacity"; from: .15; to: 1; duration: Math.min(400,preview.duration); easing.type: Easing.OutCubic }
+    Item {
+        id: body; anchors.fill: parent
+        Rectangle { x: 1; y: 1; width: parent.width-2; height: 18; radius: 5; color: "#1a1920"
+            Text { x: 8; anchors.verticalCenter: parent.verticalCenter; width: parent.width-38; text: preview.packName; color: "#b1acbb"; font.family: Theme.bodyFont; font.pixelSize: 7; elide: Text.ElideRight; textFormat: Text.PlainText }
+            Text { anchors.right: parent.right; anchors.rightMargin: 7; anchors.verticalCenter: parent.verticalCenter; text: "−  ×"; color: "#77717f"; font.pixelSize: 8 }
         }
-        RowLayout {
-            Layout.fillWidth: true; Layout.fillHeight: true; spacing: 0
-            Rectangle {
-                Layout.preferredWidth: 40; Layout.fillHeight: true; color: "#1b1b1e"
-                Column { anchors.horizontalCenter: parent.horizontalCenter; anchors.top: parent.top; anchors.topMargin: 16; spacing: 16
-                    Repeater { model: [Icons.dashboard, Icons.images, Icons.settings]
-                        Image { required property string modelData; width: 17; height: 17; source: Icons.icon(modelData, preview.accentColor, preview.iconStyle); sourceSize: Qt.size(24,24) }
-                    }
-                }
-            }
-            Item {
-                Layout.fillWidth: true; Layout.fillHeight: true
-                Item {
-                    id: content; x: 22; y: 22; width: parent.width - 44; height: parent.height - 44
-                    ColumnLayout {
-                        anchors.fill: parent; spacing: 8
-                        Label { text: qsTr("YOUR PLAYER. YOUR IDENTITY."); color: "#9999a3"; font.pixelSize: 8; font.letterSpacing: 1.5 }
-                        Label { Layout.fillWidth: true; text: preview.packName; textFormat: Text.PlainText; color: "#f4f4f5"; font.pixelSize: 23; font.family: Theme.headingFont; font.bold: true; elide: Text.ElideRight }
-                        Label { text: "Developed By NOVA XIS"; color: "#aaaab3"; font.pixelSize: 10 }
-                        Rectangle {
-                            width: 116; height: preview.controlHeight; radius: preview.cornerRadius; color: preview.accentColor
-                            Label { anchors.centerIn: parent; text: qsTr("▶  Replay"); color: "#111114"; font.pixelSize: 11; font.bold: true }
-                            TapHandler { onTapped: preview.replay() }
-                        }
-                        Item { Layout.fillHeight: true }
-                        Label { text: "youtube.com/@nova_xis20"; color: "#8f8f99"; font.pixelSize: 9 }
-                    }
-                }
-            }
+        Rectangle { x: 1; y: 19; width: 21; height: parent.height-20; color: "#14131b"; radius: 3 }
+        Column { x: 9; y: 28; spacing: 10
+            Repeater { model: 3; Rectangle { width: 5; height: 5; radius: 1; color: Qt.alpha(preview.accentColor,.55) } }
         }
+        Text { x: 35; y: 30; width: parent.width-48; text: preview.packName; textFormat: Text.PlainText; color: "#c6c1cf"; font.family: Theme.headingFont; font.pixelSize: 11; font.weight: Font.DemiBold; elide: Text.ElideRight }
+        Rectangle { x: 35; y: 49; width: Math.max(1,parent.width-85); height: 2; color: "#302d3a" }
+        Rectangle { x: 35; y: parent.height-30; width: 47; height: 14; radius: Math.min(preview.cornerRadius,7); color: Qt.alpha(preview.accentColor,.5) }
     }
 }

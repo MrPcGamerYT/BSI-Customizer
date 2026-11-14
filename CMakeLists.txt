@@ -316,6 +316,13 @@ qt_add_qml_module(BSICustomizer
         src/qml/components/SidebarButton.qml
         src/qml/components/WinControls.qml
         src/qml/components/SkinPreview.qml
+        src/qml/components/MicroLabel.qml
+        src/qml/components/CircleButton.qml
+        src/qml/components/FrameCorners.qml
+        src/qml/components/MiniPlayer.qml
+        src/qml/components/CollectionCard.qml
+        src/qml/components/ControlCenterBackdrop.qml
+        src/qml/components/LazyFeature.qml
         src/qml/components/Card.qml
         src/qml/components/ActionButton.qml
         src/qml/components/ToggleSwitch.qml
@@ -349,6 +356,10 @@ qt_add_qml_module(BSICustomizer
         src/qml/fonts/NotoSansMath-Regular.ttf
         src/qml/fonts/NotoSansMath-LICENSE.txt
         "BSI CUSTOMIZER.ico"
+        src/qml/fonts/Inter.ttf
+        src/qml/fonts/Inter-OFL.txt
+        src/qml/fonts/JetBrainsMono.ttf
+        src/qml/fonts/JetBrainsMono-OFL.txt
         src/qml/fonts/Manrope.ttf
         src/qml/fonts/PlusJakartaSans.ttf
         src/qml/fonts/Manrope-OFL.txt

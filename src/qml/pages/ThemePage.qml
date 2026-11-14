@@ -60,21 +60,8 @@ Item {
         page.fileChanged = backend.themeFileChanged();
     }
 
-    // Load on the first visit, and re-read the EXE whenever it changed on disk
-    // (another theme tool patched it, BlueStacks updated itself, a restore
-    // happened).  Only then - so pending color edits survive a page switch, and
-    // never thrown away silently: with edits pending we show the stale banner
-    // instead and let the user press Reload.
-    // Without this the list keeps showing the colors from the last load, which
-    // is exactly "the tool shows a color I applied previously".
-    onVisibleChanged: {
-        if (!visible)
-            return;
-        if (!backend.themeFound)
-            page.reload();
-        else if (page.fileChanged && page.editedCount === 0)
-            page.reload();
-    }
+    // Loading is explicit. Merely opening Color studio must not read/parse the EXE
+    // or silently discard unsaved color edits. The existing Load/Reload stays.
 
     // Catch an external change while the page is open on screen.
     Timer {
