@@ -26,7 +26,7 @@ assert.ok(backend.includes('m_resourceFileHash != QCryptographicHash::hash(bytes
 assert.ok(backend.includes('m_workspaceOperations=pending'),'custom skin batches commit to queue only after validation');
 assert.ok(qml.includes('Motion and pack name are authoring/preview metadata'));
 const login=read('src/qml/LoginGate.qml');for(const call of ['auth.startDiscord()','auth.continueSaved()','auth.completeManual(','auth.forgetSaved()']) assert.ok(login.includes(call));
-assert.ok(!login.includes('authorized = true'));assert.ok(read('src/qml/Theme.qml').includes('JetBrains Mono'));assert.ok(read('src/qml/Theme.qml').includes('Inter')); 
+assert.ok(!login.includes('authorized = true'));assert.ok(read('src/qml/Theme.qml').includes('JetBrains Mono'));assert.ok(read('src/qml/Theme.qml').includes('Inter'));
 console.log('PASS: native 4.0.1 defaults, six independent editable drafts, icon variants, authorization/manual callback retention, explicit mapping guard and stale-plan invalidation.');
 
 const shell=read('src/qml/Main.qml'),lazy=read('src/qml/components/LazyFeature.qml');

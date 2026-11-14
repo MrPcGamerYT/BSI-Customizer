@@ -7,7 +7,7 @@ Loader {
     required property int currentPage
     required property bool authorized
     property bool visited: false
-    property string pageSource
+    property url pageSource
     signal notify(string message)
     signal navigate(int index)
     Layout.fillWidth: true; Layout.fillHeight: true

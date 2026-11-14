@@ -240,9 +240,9 @@ Popup {
             currentIndex: panel.currentTab
             clip: true
 
-            LazyFeature { pageIndex: 0; currentPage: panel.currentTab; authorized: panel.visible; pageSource: "../pages/AppearancePage.qml"; onNotify: (message) => panel.notify(message) }
-            LazyFeature { pageIndex: 1; currentPage: panel.currentTab; authorized: panel.visible; pageSource: "../pages/UpdatesPage.qml"; onNotify: (message) => panel.notify(message) }
-            LazyFeature { pageIndex: 2; currentPage: panel.currentTab; authorized: panel.visible; pageSource: "../pages/AboutPage.qml"; onNotify: (message) => panel.notify(message) }
+            LazyFeature { pageIndex: 0; currentPage: panel.currentTab; authorized: panel.visible; pageSource: Qt.resolvedUrl("../pages/AppearancePage.qml"); onNotify: (message) => panel.notify(message) }
+            LazyFeature { pageIndex: 1; currentPage: panel.currentTab; authorized: panel.visible; pageSource: Qt.resolvedUrl("../pages/UpdatesPage.qml"); onNotify: (message) => panel.notify(message) }
+            LazyFeature { pageIndex: 2; currentPage: panel.currentTab; authorized: panel.visible; pageSource: Qt.resolvedUrl("../pages/AboutPage.qml"); onNotify: (message) => panel.notify(message) }
         }
 
         Rectangle {

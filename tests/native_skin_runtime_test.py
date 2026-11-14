@@ -33,6 +33,9 @@ with tempfile.TemporaryDirectory() as temp:
         QQmlEngine.setObjectOwnership(obj,QQmlEngine.CppOwnership)
         if not isinstance(obj,QWindow):obj.setParent(engine)
         objects.append(obj);return obj
+    def calls():
+        value=backend.property("calls")
+        return value.toVariant() if hasattr(value,"toVariant") else value
     backend=create('''import QtQuick
 QtObject {
  property bool busy: false
@@ -101,7 +104,7 @@ Window {
             pending.extend(item.childItems())
         return None
     QTest.qWait(150)
-    assert backend.property("calls").toVariant()==[],"page creation must not scan or inspect"
+    assert calls()==[],"page creation must not scan or inspect"
     assert named("skinCollection5") is not None
     assert named("selectedDesignInspector") is not None
     if screenshots:
@@ -114,9 +117,9 @@ Window {
     QMetaObject.invokeMethod(window,"returnToCustom")
     assert named("selectedDesignName").property("text")=="My custom pack", "per-pack drafts survive selection"
     QMetaObject.invokeMethod(window,"stage")
-    assert backend.property("calls").toVariant()==["queue-skin"]
+    assert calls()==["queue-skin"]
     QMetaObject.invokeMethod(window,"invalid")
-    assert backend.property("calls").toVariant()==["queue-skin"],"invalid JSON never reaches the native queue"
+    assert calls()==["queue-skin"],"invalid JSON never reaches the native queue"
     backend.setProperty("exePath","another.exe");QTest.qWait(50)
     for w,h in [(1100,720),(1420,920),(980,640)]:
         window.resize(w,h);QTest.qWait(50)
@@ -151,7 +154,7 @@ QtObject {
         if loaders[-1].property("item") is not None: break
     assert loaders[-1].property("item") is not None, "authorized Collection loads on demand"
     assert all(loader.property("item") is None for loader in loaders[:-1]), "other editors stay uncreated"
-    assert backend.property("calls").toVariant()==[], "shell creation/authorization never triggers scan/inspection"
+    assert calls()==[], "shell creation/authorization never triggers scan/inspection"
     QTest.qWait(250)
     if screenshots:
         assert shell.grabWindow().save(str(screenshots/"control-center-native.png"))
