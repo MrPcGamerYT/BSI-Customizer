@@ -465,14 +465,14 @@ Item {
             }
 
             // The two workflows are direct, visible tabs instead of large choice cards.
-            TabBar {
+            StudioTabBar {
                 id: debloatTabs
                 objectName: "debloatModeTabs"
                 Layout.fillWidth: true
                 currentIndex: page.mode
                 onCurrentIndexChanged: page.mode = currentIndex
-                TabButton { text: qsTr("Live ADB apps") }
-                TabButton { text: qsTr("Root disk file manager") }
+                StudioTabButton { text: qsTr("Live ADB apps") }
+                StudioTabButton { text: qsTr("Root disk file manager") }
             }
 
             // =================================================================
@@ -513,7 +513,7 @@ Item {
                                     font.pixelSize: 10
                                 }
                             }
-                            ComboBox {
+                            StudioComboBox {
                                 id: instanceBox
                                 Layout.preferredWidth: 180
                                 model: page.state.instances || []
@@ -544,7 +544,7 @@ Item {
                             Layout.fillWidth: true
                             spacing: 8
                             visible: page.androidApps.length > 0
-                            TextField {
+                            StudioTextField {
                                 id: androidAppSearch
                                 Layout.fillWidth: true
                                 placeholderText: qsTr("Search installed apps or package names…")
@@ -597,7 +597,7 @@ Item {
                                         anchors.fill: parent
                                         anchors.margins: 10
                                         spacing: 10
-                                        CheckBox {
+                                        StudioCheckBox {
                                             id: appTick
                                             checked: modelData.checked
                                             enabled: !page.androidBusy && modelData.installed
@@ -720,13 +720,13 @@ Item {
                         RowLayout {
                             Layout.fillWidth: true
                             spacing: 14
-                            CheckBox {
+                            StudioCheckBox {
                                 id: wipeDownloads
                                 text: qsTr("Empty /sdcard/Download")
                                 checked: true
                                 palette.text: Theme.text
                             }
-                            CheckBox {
+                            StudioCheckBox {
                                 id: keepCopyBox
                                 text: qsTr("Keep a copy on this PC first")
                                 checked: page.keepCopy
@@ -734,7 +734,7 @@ Item {
                                 palette.text: Theme.textDim
                                 onToggled: page.keepCopy = checked
                             }
-                            CheckBox {
+                            StudioCheckBox {
                                 id: clearAppDataBox
                                 text: qsTr("Also clear Android/data and Android/obb")
                                 checked: false
@@ -1022,7 +1022,7 @@ Item {
                                     anchors.fill: parent
                                     anchors.margins: 10
                                     spacing: 10
-                                    CheckBox {
+                                    StudioCheckBox {
                                         id: tick
                                         checked: modelData.checked
                                         enabled: page.ready && !page.running

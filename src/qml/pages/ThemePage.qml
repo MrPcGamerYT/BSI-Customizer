@@ -325,7 +325,7 @@ Item {
                     Layout.fillWidth: true
                     spacing: 8
 
-                    TextField {
+                    StudioTextField {
                         id: filterField
                         Layout.preferredWidth: 240
                         placeholderText: qsTr("search every color")

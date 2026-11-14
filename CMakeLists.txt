@@ -137,6 +137,8 @@ qt_add_executable(BSICustomizer
     src/core/CustomizationWorkspace.cpp
     src/core/SkinProfiles.h
     src/core/SkinProfiles.cpp
+    src/core/PlayerSkinCompiler.h
+    src/core/PlayerSkinCompiler.cpp
     src/core/Backend.h
     src/core/CrashDiagnostics.cpp src/core/CrashDiagnostics.h
     src/core/Backend.cpp
@@ -326,6 +328,13 @@ qt_add_qml_module(BSICustomizer
         src/qml/components/LazyFeature.qml
         src/qml/components/Card.qml
         src/qml/components/ActionButton.qml
+        src/qml/components/StudioTextField.qml
+        src/qml/components/StudioTextArea.qml
+        src/qml/components/StudioComboBox.qml
+        src/qml/components/StudioSpinBox.qml
+        src/qml/components/StudioCheckBox.qml
+        src/qml/components/StudioTabBar.qml
+        src/qml/components/StudioTabButton.qml
         src/qml/components/ToggleSwitch.qml
         src/qml/components/Stepper.qml
         src/qml/components/ChoiceChips.qml
@@ -399,6 +408,12 @@ if(WIN32 AND MSVC AND CMAKE_SIZEOF_VOID_P EQUAL 8)
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/gif-rpc"
         MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
     target_compile_features(BsiGifRpcProxy PRIVATE cxx_std_17)
+    add_executable(BsiGifRpcSmoke plugins/gif-rpc/smoke.cpp)
+    set_target_properties(BsiGifRpcSmoke PROPERTIES AUTOMOC OFF AUTOUIC OFF AUTORCC OFF
+        OUTPUT_NAME HD-Player RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/gif-rpc-smoke"
+        MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+    add_dependencies(BSICustomizer BsiGifRpcSmoke)
+    target_compile_definitions(BSICustomizer PRIVATE BSI_GIF_RPC_SMOKE="$<TARGET_FILE:BsiGifRpcSmoke>")
     set(_gif_rc "${CMAKE_CURRENT_BINARY_DIR}/gif-rpc-payload-$<CONFIG>.rc")
     add_custom_command(OUTPUT "${_gif_rc}"
         COMMAND ${CMAKE_COMMAND} "-DDLL=$<TARGET_FILE:BsiGifRpcProxy>" "-DOUTPUT=${_gif_rc}"

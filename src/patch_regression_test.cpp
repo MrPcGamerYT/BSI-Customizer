@@ -4936,6 +4936,14 @@ Window {
         const auto bytes=GifRpc::bundledProxy();
         check(GifRpc::isOurProxy(bytes,&error),QStringLiteral("embedded RPC-only DLL has a valid x64 PE/DLL header, schema and all forwarding exports: %1").arg(error));
         check(!GifRpc::isOurProxy(bytes.left(128),&error),"truncated RPC DLLs are refused");
+        auto corruptOrdinal=bytes;
+        const auto exportOffset=PeUtils::rvaToRaw(PeUtils::sections(bytes),PeUtils::exportRva(bytes));
+        const auto ordinalOffset=PeUtils::rvaToRaw(PeUtils::sections(bytes),ByteUtils::le32(bytes,exportOffset+36));
+        if(ordinalOffset>=0 && ordinalOffset+2<=corruptOrdinal.size()) {
+            ByteUtils::putLe16(corruptOrdinal,ordinalOffset,0xffff);
+            check(!GifRpc::isOurProxy(corruptOrdinal,&error),"V2 proxy with a corrupt API ordinal is refused before deployment");
+        } else check(false,"bundled V2 ordinal table is readable");
+
         const auto folder=temp.filePath(QStringLiteral("gif-rpc-install"));QDir().mkpath(folder);
         const auto exe=QDir(folder).filePath(QStringLiteral("HD-Player.exe"));write(exe,peFile());
         const auto dll=QDir(folder).filePath(QStringLiteral("version.dll"));
@@ -4956,10 +4964,23 @@ Window {
             const auto size=reinterpret_cast<Size>(GetProcAddress(proxy,"GetFileVersionInfoSizeW"));
             wchar_t windows[MAX_PATH];GetSystemDirectoryW(windows,MAX_PATH);
             const QString kernel=QDir(QString::fromWCharArray(windows)).filePath(QStringLiteral("kernel32.dll"));DWORD handle=0;
-            check(schema&&QByteArray(schema())=="BSI_GIF_RPC_PROXY_V1"&&size&&size(reinterpret_cast<LPCWSTR>(kernel.utf16()),&handle)>0,
+            check(schema&&QByteArray(schema())=="BSI_GIF_RPC_PROXY_V2"&&size&&size(reinterpret_cast<LPCWSTR>(kernel.utf16()),&handle)>0,
                   "proxy schema and actual System32 version API forwarding work");
             FreeLibrary(proxy);
         }
+#ifdef BSI_GIF_RPC_SMOKE
+        QProcess rpcHost;
+        rpcHost.setProcessChannelMode(QProcess::MergedChannels);
+        rpcHost.start(QString::fromUtf8(BSI_GIF_RPC_SMOKE),{dll});
+        const bool started=rpcHost.waitForStarted(5000);
+        bool finished=started && rpcHost.waitForFinished(12000);
+        if(!finished){rpcHost.kill();rpcHost.waitForFinished(5000);}
+        std::printf("RPC startup smoke: %s\n",rpcHost.readAll().constData());
+        check(finished && rpcHost.exitStatus()==QProcess::NormalExit && rpcHost.exitCode()==0,
+              "HD-Player-named host survives proxy worker startup and named/ordinal version queries");
+        check(read(QDir(folder).filePath(QStringLiteral("bsi-gif-rpc.log"))).contains("worker started"),
+              "startup smoke actually executes the RPC worker, unlike the customizer host");
+#endif
         check(GifRpc::restore(exe).value(QStringLiteral("ok")).toBool()&&!QFileInfo::exists(dll),
               "removing a new RPC deployment does not delete saved settings or unrelated files");
         const QByteArray original=peFile();write(dll,original);

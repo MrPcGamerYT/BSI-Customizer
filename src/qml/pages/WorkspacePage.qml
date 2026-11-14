@@ -61,7 +61,7 @@ Item {
                         ActionButton { text: qsTr("Export diagnostics…"); enabled: !backend.busy; onClicked: reportDialog.open() }
                     }
                     Label { Layout.fillWidth: true; color: page.inspection.themeSupported ? Theme.accentText : Theme.textDim; wrapMode: Text.Wrap; text: page.inspection.msg || qsTr("Inspection is manual. Static mapping verification does not prove runtime compatibility.") }
-                    TextArea { Layout.fillWidth: true; readOnly: true; selectByMouse: true; color: Theme.textDim; wrapMode: TextEdit.Wrap; text: page.inspection.sha256 ? "SHA-256: " + page.inspection.sha256 + "\nQt imports: " + (page.inspection.qtMajor || "unknown") + " · encoded size: " + page.inspection.required + " · capacity: " + page.inspection.capacity + "\nDecoded original / replacement: " + page.inspection.originalDecodedBytes + " / " + page.inspection.replacementDecodedBytes + " · compressed original / replacement: " + page.inspection.originalCompressedBytes + " / " + page.inspection.replacementCompressedBytes + "\nRelocation: " + page.inspection.relocationSupport + "\n" + (page.inspection.mapping || "") : "" }
+                    StudioTextArea { Layout.fillWidth: true; readOnly: true; selectByMouse: true; color: Theme.textDim; wrapMode: TextEdit.Wrap; text: page.inspection.sha256 ? "SHA-256: " + page.inspection.sha256 + "\nQt imports: " + (page.inspection.qtMajor || "unknown") + " · encoded size: " + page.inspection.required + " · capacity: " + page.inspection.capacity + "\nDecoded original / replacement: " + page.inspection.originalDecodedBytes + " / " + page.inspection.replacementDecodedBytes + " · compressed original / replacement: " + page.inspection.originalCompressedBytes + " / " + page.inspection.replacementCompressedBytes + "\nRelocation: " + page.inspection.relocationSupport + "\n" + (page.inspection.mapping || "") : "" }
                 }
             }
             Card {
@@ -71,11 +71,11 @@ Item {
                     Label { text: qsTr("Profiles: Theme + Boot + About + GIF RPC + Appearance"); color: Theme.text; font.bold: true }
                     Label { Layout.fillWidth: true; text: qsTr("Stage settings using the Save to profile buttons on each editor. Import never deploys files. Load the target theme first to match colors; unmatched properties are reported."); color: Theme.textDim; wrapMode: Text.Wrap }
                     RowLayout {
-                        TextField { id: profileName; Layout.fillWidth: true; text: backend.customizationProfile.name || "My workspace"; placeholderText: qsTr("Profile name") }
+                        StudioTextField { id: profileName; Layout.fillWidth: true; text: backend.customizationProfile.name || "My workspace"; placeholderText: qsTr("Profile name") }
                         ActionButton { text: qsTr("Import…"); onClicked: loadProfileDialog.open() }
                         ActionButton { text: qsTr("Export…"); onClicked: saveProfileDialog.open() }
                     }
-                    TextArea { Layout.fillWidth: true; Layout.preferredHeight: 130; readOnly: true; selectByMouse: true; wrapMode: TextEdit.Wrap; color: Theme.textDim; text: JSON.stringify(backend.customizationProfile, null, 2) }
+                    StudioTextArea { Layout.fillWidth: true; Layout.preferredHeight: 130; readOnly: true; selectByMouse: true; wrapMode: TextEdit.Wrap; color: Theme.textDim; text: JSON.stringify(backend.customizationProfile, null, 2) }
                 }
             }
             Card {
@@ -87,9 +87,9 @@ Item {
                     RowLayout {
                         ActionButton { text: qsTr("Resources →"); onClicked: page.navigate(2) }
                         ActionButton { text: qsTr("About text / links →"); onClicked: page.navigate(6) }
-                        CheckBox { text: qsTr("Branding names only"); checked: page.brandingOnly; onToggled: page.brandingOnly = checked }
+                        StudioCheckBox { text: qsTr("Branding names only"); checked: page.brandingOnly; onToggled: page.brandingOnly = checked }
                     }
-                    ComboBox { id: resourceChoice; Layout.fillWidth: true; model: page.assets; textRole: "path" }
+                    StudioComboBox { id: resourceChoice; Layout.fillWidth: true; model: page.assets; textRole: "path" }
                     ActionButton {
                         text: qsTr("Choose replacement & queue…"); enabled: page.assets.length > 0 && !backend.busy
                         onClicked: replacementDialog.open()
@@ -100,13 +100,13 @@ Item {
                             Layout.fillWidth: true
                             Label { text: qsTr("Original"); color: Theme.textDim }
                             Image { Layout.fillWidth: true; Layout.preferredHeight: 150; source: page.originalImage; fillMode: Image.PreserveAspectFit }
-                            TextArea { Layout.fillWidth: true; Layout.preferredHeight: 100; readOnly: true; text: page.originalText; color: Theme.textDim; wrapMode: TextEdit.Wrap }
+                            StudioTextArea { Layout.fillWidth: true; Layout.preferredHeight: 100; readOnly: true; text: page.originalText; color: Theme.textDim; wrapMode: TextEdit.Wrap }
                         }
                         ColumnLayout {
                             Layout.fillWidth: true
                             Label { text: qsTr("Staged replacement"); color: Theme.textDim }
                             Image { Layout.fillWidth: true; Layout.preferredHeight: 150; source: page.comparisonImage; fillMode: Image.PreserveAspectFit }
-                            TextArea { Layout.fillWidth: true; Layout.preferredHeight: 100; readOnly: true; text: page.comparisonText; color: Theme.textDim; wrapMode: TextEdit.Wrap }
+                            StudioTextArea { Layout.fillWidth: true; Layout.preferredHeight: 100; readOnly: true; text: page.comparisonText; color: Theme.textDim; wrapMode: TextEdit.Wrap }
                         }
                     }
                 }
@@ -127,7 +127,7 @@ Item {
                         model: backend.workspaceOperations
                         Label { required property var modelData; required property int index; Layout.fillWidth: true; color: Theme.text; elide: Text.ElideMiddle; text: (index + 1) + ". " + modelData.kind + " — " + (modelData.name || modelData.pack || modelData.path || (modelData.kind === "appearance" ? qsTr("staged appearance tokens") : qsTr("staged palette"))) }
                     }
-                    TextArea { Layout.fillWidth: true; readOnly: true; selectByMouse: true; color: Theme.textDim; wrapMode: TextEdit.Wrap; text: page.plan.msg ? JSON.stringify(page.plan, null, 2) : "" }
+                    StudioTextArea { Layout.fillWidth: true; readOnly: true; selectByMouse: true; color: Theme.textDim; wrapMode: TextEdit.Wrap; text: page.plan.msg ? JSON.stringify(page.plan, null, 2) : "" }
                 }
             }
             Card {
@@ -136,8 +136,8 @@ Item {
                     width: parent.width; spacing: 10
                     Label { text: qsTr("Recovery center"); color: Theme.text; font.bold: true }
                     ActionButton { text: qsTr("Refresh patch history"); enabled: !backend.busy; onClicked: { const r = page.run("history"); page.historyRows = r.entries || []; } }
-                    ComboBox { id: recoveryChoice; Layout.fillWidth: true; model: page.historyRows; textRole: "id" }
-                    TextArea { Layout.fillWidth: true; readOnly: true; selectByMouse: true; color: Theme.textDim; wrapMode: TextEdit.Wrap; text: recoveryChoice.currentIndex >= 0 ? JSON.stringify(page.historyRows[recoveryChoice.currentIndex], null, 2) : qsTr("Workspace batches retain hash-verified recovery snapshots in AppData. Earlier editor operations still use their original .bak backups.") }
+                    StudioComboBox { id: recoveryChoice; Layout.fillWidth: true; model: page.historyRows; textRole: "id" }
+                    StudioTextArea { Layout.fillWidth: true; readOnly: true; selectByMouse: true; color: Theme.textDim; wrapMode: TextEdit.Wrap; text: recoveryChoice.currentIndex >= 0 ? JSON.stringify(page.historyRows[recoveryChoice.currentIndex], null, 2) : qsTr("Workspace batches retain hash-verified recovery snapshots in AppData. Earlier editor operations still use their original .bak backups.") }
                     ActionButton { text: qsTr("Restore selected snapshot…"); enabled: recoveryChoice.currentIndex >= 0 && !backend.busy; onClicked: restoreDialog.open() }
                 }
             }
@@ -152,11 +152,11 @@ Item {
                     }
                     RowLayout {
                         Label { text: qsTr("Width / height"); color: Theme.textDim }
-                        SpinBox { id: imageWidth; from: 1; to: 8192; value: 512; editable: true }
-                        SpinBox { id: imageHeight; from: 1; to: 8192; value: 512; editable: true }
-                        CheckBox { id: imageCrop; text: qsTr("Center crop"); checked: false }
+                        StudioSpinBox { id: imageWidth; from: 1; to: 8192; value: 512; editable: true }
+                        StudioSpinBox { id: imageHeight; from: 1; to: 8192; value: 512; editable: true }
+                        StudioCheckBox { id: imageCrop; text: qsTr("Center crop"); checked: false }
                         Label { text: qsTr("Quality"); color: Theme.textDim }
-                        SpinBox { id: quality; from: 1; to: 100; value: 95; editable: true }
+                        StudioSpinBox { id: quality; from: 1; to: 100; value: 95; editable: true }
                     }
                     Label { Layout.fillWidth: true; color: Theme.textDim; wrapMode: Text.Wrap; text: qsTr("Fit preserves aspect ratio; crop fills the requested size. PNG/WebP preserve transparency. JPEG export is refused when it would discard alpha. Animation is not preserved by image preparation.") }
                     ActionButton { text: qsTr("Prepare & save new image…"); enabled: page.imageSource !== "" && !backend.busy; onClicked: preparedImageDialog.open() }
@@ -175,7 +175,7 @@ Item {
                         ActionButton { text: qsTr("Inspect MP4…"); enabled: !backend.busy; onClicked: videoDialog.open() }
                         ActionButton { text: qsTr("Play / decoder check"); enabled: page.videoUrl.toString() !== ""; onClicked: videoPlayer.play() }
                         ActionButton { text: qsTr("Pause"); onClicked: videoPlayer.pause() }
-                        CheckBox { id: videoCrop; text: qsTr("Crop preview"); checked: true }
+                        StudioCheckBox { id: videoCrop; text: qsTr("Crop preview"); checked: true }
                         ActionButton { text: qsTr("Boot editor →"); onClicked: page.navigate(5) }
                     }
                     VideoOutput { id: videoOutput; Layout.fillWidth: true; Layout.preferredHeight: 220; fillMode: videoCrop.checked ? VideoOutput.PreserveAspectCrop : VideoOutput.PreserveAspectFit }
@@ -194,7 +194,7 @@ Item {
                     Label { Layout.fillWidth: true; color: Theme.textDim; wrapMode: Text.Wrap; text: qsTr("Reachability and proxy-file inspection are separate from a successful activity connection. The tool does not claim live GIF animation or server acceptance without observing it.") }
                 }
             }
-            TextArea { Layout.fillWidth: true; Layout.leftMargin: 24; Layout.rightMargin: 24; readOnly: true; selectByMouse: true; wrapMode: TextEdit.Wrap; text: page.report; color: Theme.text }
+            StudioTextArea { Layout.fillWidth: true; Layout.leftMargin: 24; Layout.rightMargin: 24; readOnly: true; selectByMouse: true; wrapMode: TextEdit.Wrap; text: page.report; color: Theme.text }
             Item { Layout.preferredHeight: 24 }
         }
     }

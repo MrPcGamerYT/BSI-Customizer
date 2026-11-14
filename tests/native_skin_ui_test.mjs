@@ -24,7 +24,10 @@ assert.ok(qml.includes('onWorkspaceChanged() { page.plan = {}; }'),'revision cha
 const backend=read('src/core/Backend.cpp');assert.ok(backend.indexOf('if (actionsLocked()) return lockedMap();',backend.indexOf('QVariantMap Backend::workspace'))<backend.indexOf('action == QLatin1String("queue-skin")'));
 assert.ok(backend.includes('m_resourceFileHash != QCryptographicHash::hash(bytes,QCryptographicHash::Sha256)'));
 assert.ok(backend.includes('m_workspaceOperations=pending'),'custom skin batches commit to queue only after validation');
-assert.ok(qml.includes('Motion and pack name are authoring/preview metadata'));
+assert.ok(qml.includes('Deploy player GUI components and icon families'));
+assert.ok(ctx.create(0).playerUi);
+assert.ok(qml.includes('skin-plan'));
+assert.ok(read('src/core/PlayerSkinCompiler.cpp').includes('No palette-only success was staged'));
 const login=read('src/qml/LoginGate.qml');for(const call of ['auth.startDiscord()','auth.continueSaved()','auth.completeManual(','auth.forgetSaved()']) assert.ok(login.includes(call));
 assert.ok(!login.includes('authorized = true'));assert.ok(read('src/qml/Theme.qml').includes('JetBrains Mono'));assert.ok(read('src/qml/Theme.qml').includes('Inter'));
 console.log('PASS: native 4.0.1 defaults, six independent editable drafts, icon variants, authorization/manual callback retention, explicit mapping guard and stale-plan invalidation.');
@@ -69,3 +72,12 @@ assert.ok(read('src/core/ThemeManager.cpp').includes('appearance/reduceMotion'))
 assert.ok(read('src/core/ThemeManager.cpp').includes('appearance/backgroundMotion'));
 assert.ok(read('src/qml/pages/AppearancePage.qml').includes('reduceMotionToggle'));
 console.log('PASS: persisted motion switches, inactive-window ambient guard, bounded cached background and nonmodal accessible loading strip.');
+
+assert.ok(!shell.includes('label:"+"'), 'no duplicate lower Home shortcut');
+assert.ok(!shell.includes('id: settingsButton'), 'no duplicate lower Settings shortcut');
+assert.ok(!shell.includes('if(!navGroup.selected) window.navigatePage'), 'group headings do not duplicate the first child destination');
+for (const name of ['TextField','TextArea','ComboBox','SpinBox','CheckBox','TabBar','TabButton']) {
+ assert.ok(cmake.includes('Studio'+name+'.qml'));
+ assert.ok(read('src/qml/components/Studio'+name+'.qml').includes('Theme.'));
+}
+console.log('PASS: unique sidebar destinations and shared rounded native form controls.');

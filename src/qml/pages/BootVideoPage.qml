@@ -69,7 +69,7 @@ Item {
                     ActionButton { text: page.previewPlaying ? qsTr("Pause preview") : qsTr("Play preview"); onClicked: page.previewPlaying = !page.previewPlaying }
                     ActionButton { text: qsTr("Load logo"); enabled: !backend.busy; onClicked: page.refreshBootLogo() }
                     Text { text: qsTr("Boot style"); color: Theme.text; font.weight: Font.DemiBold }
-                    ComboBox {
+                    StudioComboBox {
                         id: bootStyle
                         Layout.preferredWidth: 270
                         model: [qsTr("Aurora glow"), qsTr("Orbit rings"), qsTr("Pulse wave"), qsTr("Solar flare"), qsTr("Custom MP4")]
@@ -84,7 +84,7 @@ Item {
                     }
                 }
                 Label { text: qsTr("Startup message (leave blank for default)"); color: Theme.text }
-                TextField {
+                StudioTextField {
                     id: bootStartupText
                     Layout.fillWidth: true
                     maximumLength: 120
@@ -190,14 +190,14 @@ Item {
 
                 RowLayout {
                     Label { text: qsTr("Boot hold after ready (ms)"); color: Theme.text }
-                    SpinBox { id: bootHold; from: 0; to: 15000; value: 3000; stepSize: 500; editable: true }
+                    StudioSpinBox { id: bootHold; from: 0; to: 15000; value: 3000; stepSize: 500; editable: true }
                     Label { text: qsTr("0 disables the extra delay"); color: Theme.textDim }
                     ActionButton { text: qsTr("Save to profile"); onClicked: { const r = backend.workspace("profile-section", {section: "boot", value: {holdMs: bootHold.value}}); page.state = r.msg || ""; } }
                 }
 
                 RowLayout {
                     Layout.fillWidth: true
-                    TextArea {
+                    StudioTextArea {
                         Layout.fillWidth: true
                         readOnly: true
                         selectByMouse: true

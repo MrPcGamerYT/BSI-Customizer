@@ -243,7 +243,7 @@ Item {
             Layout.fillWidth: true
             spacing: 10
 
-            TextField {
+            StudioTextField {
                 id: filterField
                 objectName: "resourceSearchField"
                 Layout.fillWidth: true
@@ -264,7 +264,7 @@ Item {
             }
 
             Text { text: qsTr("Show"); color: Theme.textDim; font.pixelSize: 11 }
-            ComboBox {
+            StudioComboBox {
                 id: resourceKindPicker
                 objectName: "resourceKindPicker"
                 Layout.preferredWidth: 190
@@ -524,7 +524,7 @@ Item {
                             anchors.margins: 4
                             clip: true
 
-                            TextArea {
+                            StudioTextArea {
                                 id: codeArea
                                 text: page.code
                                 wrapMode: TextArea.NoWrap

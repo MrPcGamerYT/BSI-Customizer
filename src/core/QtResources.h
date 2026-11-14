@@ -84,6 +84,11 @@ int activeUnits(const QByteArray &data, const QStringList &sourceNames,
 // Also drop the on-disk qmlcache next to HD-Player.exe (BlueStacks uses
 // <install>/cache/qmlcache). Only qmlcache-named folders are removed.
 int clearPlayerQmlCache(const QString &exePath);
+// Exact source filename, or ALL distinctive identifiers when sourceFileIndex is
+// empty. Unlike the legacy broad matcher, this never matches component imports.
+int sourceUnits(QByteArray &data, const QStringList &names, const QStringList &ids,
+                bool invalidate = false, bool activeOnly = false);
+
 // Grow only a validated PE's mapped, read-only resource storage. Never append
 // an unmapped blob or overwrite an arbitrary copy of an offset.
 qint64 appendStorage(QByteArray &data, qint64 size, QString *error);
@@ -112,7 +117,8 @@ qint64 findFreeSpace(const QByteArray &data, const Link &link, qint64 need,
 // change because the destination is inside the mapped section already.
 bool replaceResource(QByteArray &data, qint64 entry, const Link &link,
                      const QByteArray &source, QString *error, qint64 *newEntry = nullptr,
-                     bool allowGrowth = true, qint64 forcedDestination = -1);
+                     bool allowGrowth = true, qint64 forcedDestination = -1,
+                     const QStringList &preciseIdentifiers = {});
 bool replaceCompressed(QByteArray &data, qint64 entry, const Link &link,
                        const QByteArray &source, QString *error, qint64 *newEntry = nullptr);
 bool invalidateThemeCacheResources(QByteArray &data, const Link &link, QString *error);

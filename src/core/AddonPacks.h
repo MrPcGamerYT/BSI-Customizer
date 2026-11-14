@@ -6,11 +6,11 @@ namespace AddonPacks {
 struct Pack { const char *id; const char *preset; int radius; int height; int padding; };
 inline const Pack *find(const QString &id) {
     static const Pack packs[] = {
-        {"carbon", "oled_neutral", 4, 32, 12},
+        {"carbon", "oled_neutral", 8, 32, 12},
         {"amethyst", "amethyst", 12, 36, 18},
         {"arctic", "dark_blue", 8, 34, 16},
-        {"ember", "red_dark", 2, 32, 12},
-        {"matrix", "green_matrix", 0, 30, 10},
+        {"ember", "red_dark", 6, 32, 12},
+        {"matrix", "green_matrix", 4, 30, 10},
         {"nord", "nord", 10, 38, 20}
     };
     for (const auto &pack : packs) if (id == QLatin1String(pack.id)) return &pack;

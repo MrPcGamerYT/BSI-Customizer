@@ -52,7 +52,7 @@ RowLayout {
         }
     }
 
-    TextField {
+    StudioTextField {
         id: hexInput
         Layout.preferredWidth: 92
         Layout.fillWidth: true
@@ -146,7 +146,7 @@ RowLayout {
                 }
             }
 
-            TextField {
+            StudioTextField {
                 id: pickerHex
                 Layout.fillWidth: true
                 text: picker.hexText

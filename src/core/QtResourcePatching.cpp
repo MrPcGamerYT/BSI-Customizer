@@ -290,7 +290,7 @@ qint64 findFreeSpace(const QByteArray &data, const Link &link, qint64 need, QStr
 
 bool replaceResource(QByteArray &data, qint64 entry, const Link &snapshot,
                      const QByteArray &source, QString *error, qint64 *newEntry,
-                     bool allowGrowth, qint64 forcedDestination)
+                     bool allowGrowth, qint64 forcedDestination, const QStringList &preciseIdentifiers)
 {
     const auto refuse = [&](const QString &message) { if (error) *error = message; return false; };
     if (!snapshot.found || snapshot.ambiguous || source.isEmpty() || source.size() > 50000000)
@@ -352,15 +352,16 @@ bool replaceResource(QByteArray &data, qint64 entry, const Link &snapshot,
     if (destination == entry && record.size() < 4 + stored)
         changed.replace(entry + record.size(), 4 + stored - record.size(), QByteArray(4 + stored - record.size(), '\0'));
     refreshTimestamp(changed, link);
-    invalidateUnits(changed, link.sourceNames);
+    if (preciseIdentifiers.isEmpty()) invalidateUnits(changed, link.sourceNames);
+    else sourceUnits(changed, link.sourceNames, preciseIdentifiers, true);
     if (!invalidateThemeCacheResources(changed, link, error)) return false;
     // A source write is not enough when the player still has a matching
     // compiled QV4 unit. Refuse the replacement unless every unit we can
     // positively associate with this resource has been disabled. This keeps
     // generic editors and feature patchers from reporting success for a QML
     // change that the emulator will ignore.
-    const int compiledMatches = matchingUnits(changed, link.sourceNames);
-    const int compiledStillActive = activeUnits(changed, link.sourceNames);
+    const int compiledMatches = preciseIdentifiers.isEmpty() ? matchingUnits(changed, link.sourceNames) : sourceUnits(changed,link.sourceNames,preciseIdentifiers);
+    const int compiledStillActive = preciseIdentifiers.isEmpty() ? activeUnits(changed, link.sourceNames) : sourceUnits(changed,link.sourceNames,preciseIdentifiers,false,true);
     if (compiledMatches > 0 && compiledStillActive > 0)
         return refuse(QStringLiteral("The resource source was prepared, but %1 matching compiled QML unit(s) remain active; the player may ignore this edit. Nothing was written. Retry on a supported player build or restore its backup.")
                           .arg(compiledStillActive));

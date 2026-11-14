@@ -19,13 +19,15 @@ Item {
     property string tokenJson: "{}"
     property string mappingJson: "[]"
     property var inspected: []
+    property var coverage: []
+    property string coverageNote: ""
     property string customSvg: ""
     readonly property bool wide: width >= 1010
     // Scan results are consumed only while the user opens the advanced editor.
     readonly property var svgResources: editor.opened ? backend.resourceInfos.filter(x => x.path.toLowerCase().endsWith(".svg")) : []
     readonly property color previewAccent: /^#[0-9a-fA-F]{6}$/.test(draft.accent) ? draft.accent : "#7c5cff"
     readonly property color previewSurface: /^#[0-9a-fA-F]{6}$/.test(draft.surface) ? draft.surface : "#101012"
-    function edit(key, value) { var next = Object.assign({}, draft); next[key] = value; draft = next; plan = {}; }
+    function edit(key, value) { var next = Object.assign({}, draft); next[key] = value; draft = next; plan = {}; coverage = []; coverageNote = ""; }
     function selectPack(index) {
         // Keep each pack's independent edits, including invalid JSON in progress.
         var saved = Object.assign({}, drafts);
@@ -47,9 +49,15 @@ Item {
     function openEditor() { editor.open(); }
     function closeEditor() { editor.close(); }
     function previewSelected() { playerPreview.replay(); }
+    function inspectCoverage() {
+        try {
+            const r=run("skin-plan", {profile: profile()});
+            coverage=r.coverage || []; coverageNote=r.msg || "";
+        } catch(e) { page.notify(String(e)); }
+    }
     function stage() {
         plan = {};
-        try { run("queue-skin", { profile: profile() }); }
+        try { const r=run("queue-skin", { profile: profile() }); coverage=r.coverage || []; coverageNote=r.msg || ""; }
         catch (e) { page.notify(qsTr("Invalid profile JSON: ") + String(e)); }
     }
     function verify() {
@@ -73,7 +81,7 @@ Item {
     Connections {
         target: backend
         function onWorkspaceChanged() { page.plan = {}; }
-        function onExePathChanged() { page.plan = {}; page.inspected = []; }
+        function onExePathChanged() { page.plan = {}; page.inspected = []; page.coverage=[]; page.coverageNote=""; }
     }
     ScrollView {
         id: scroll; anchors.fill: parent; contentWidth: availableWidth; clip: true
@@ -166,7 +174,7 @@ Item {
                         ColumnLayout {
                             Layout.fillWidth: true; spacing: 0
                             Repeater {
-                                model: [ [qsTr("CORNERS"), page.draft.radius + "px"], [qsTr("HEIGHT"), page.draft.height + "px"], [qsTr("PADDING"),page.draft.padding + "px / " + page.draft.padding + "px"], [qsTr("BORDERS"),qsTr("Hairline 1px")], [qsTr("MOTION"),qsTr("Preview only")] ]
+                                model: [ [qsTr("CORNERS"), page.draft.radius + "px"], [qsTr("HEIGHT"), page.draft.height + "px"], [qsTr("PADDING"),page.draft.padding + "px / " + page.draft.padding + "px"], [qsTr("BORDERS"),qsTr("Hairline 1px")], [qsTr("MOTION"),page.draft.playerUi ? qsTr("Player controls / fade") : qsTr("Preview only")] ]
                                 ColumnLayout {
                                     required property var modelData
                                     Layout.fillWidth: true; spacing: 0
@@ -184,7 +192,7 @@ Item {
                             ActionButton { objectName: "stageSkin"; Layout.fillWidth: true; implicitHeight: 40; text: qsTr("1. Stage this pack"); accent: true; enabled: !backend.busy; onClicked: page.stage() }
                             ActionButton { objectName: "verifySkin"; Layout.fillWidth: true; implicitHeight: 40; text: qsTr("2. Verify Dry Run"); enabled: !backend.busy && backend.workspaceOperations.length > 0; onClicked: page.verify() }
                             ActionButton { objectName: "applySkin"; Layout.fillWidth: true; implicitHeight: 40; text: qsTr("3. Review & apply"); enabled: !backend.busy && !!page.plan.ok && page.planPath === backend.exePath; onClicked: applyDialog.open() }
-                            Label { Layout.fillWidth: true; Layout.topMargin: 3; text: qsTr("Supported palette and icon geometry only.\nAnimations are preview-only."); horizontalAlignment: Text.AlignHCenter; color: Theme.tertiary; font.pixelSize: 10; wrapMode: Text.Wrap; lineHeight: 1.5 }
+                            Label { Layout.fillWidth: true; Layout.topMargin: 3; text: qsTr("GUI packs need a manual Resources scan.\nCheck coverage before staging."); horizontalAlignment: Text.AlignHCenter; color: Theme.tertiary; font.pixelSize: 10; wrapMode: Text.Wrap; lineHeight: 1.5 }
                         }
                         ColumnLayout {
                             Layout.fillWidth: true; spacing: 12
@@ -216,8 +224,9 @@ Item {
         background: Rectangle { color: Theme.card; border.color: Theme.border; radius: 20 }
         contentItem: ScrollView {
             id: editorScroll; contentWidth: availableWidth; clip: true
+            bottomPadding: 16
             ColumnLayout {
-                width: editorScroll.availableWidth; spacing: 18
+                width: editorScroll.availableWidth - 32; x: 16; y: 16; spacing: 18
                 RowLayout {
                     Layout.fillWidth: true
                     Label { Layout.fillWidth: true; text: qsTr("Your design, in detail."); font.family: Theme.headingFont; font.pixelSize: 24; font.weight: Font.DemiBold; color: Theme.text }
@@ -227,38 +236,49 @@ Item {
                     GridLayout {
                         Layout.fillWidth: true; columns: editorScroll.availableWidth < 720 ? 2 : 4; columnSpacing: 14; rowSpacing: 10
                         ColumnLayout { Layout.fillWidth: true; Label { text: qsTr("Pack name"); color: Theme.textDim }
-                            TextField { objectName: "skinPackName"; Layout.fillWidth: true; text: page.draft.name; maximumLength: 80; onTextEdited: page.edit("name", text) }
+                            StudioTextField { objectName: "skinPackName"; Layout.fillWidth: true; text: page.draft.name; maximumLength: 80; onTextEdited: page.edit("name", text) }
                         }
                         ColumnLayout { Layout.fillWidth: true; Label { text: qsTr("Accent / icons (#RRGGBB)"); color: Theme.textDim }
-                            TextField { objectName: "skinAccent"; Layout.fillWidth: true; text: page.draft.accent; maximumLength: 7; onTextEdited: page.edit("accent", text) }
+                            StudioTextField { objectName: "skinAccent"; Layout.fillWidth: true; text: page.draft.accent; maximumLength: 7; onTextEdited: page.edit("accent", text) }
                         }
                         ColumnLayout { Layout.fillWidth: true; Label { text: qsTr("Player surface (#RRGGBB)"); color: Theme.textDim }
-                            TextField { Layout.fillWidth: true; text: page.draft.surface; maximumLength: 7; onTextEdited: page.edit("surface", text) }
+                            StudioTextField { Layout.fillWidth: true; text: page.draft.surface; maximumLength: 7; onTextEdited: page.edit("surface", text) }
                         }
                         ColumnLayout { Layout.fillWidth: true; Label { text: qsTr("Icon family"); color: Theme.textDim }
-                            ComboBox { Layout.fillWidth: true; model: ["line", "rounded", "bold"]; currentIndex: model.indexOf(page.draft.iconStyle); onActivated: page.edit("iconStyle", currentText) }
+                            StudioComboBox { Layout.fillWidth: true; model: ["line", "rounded", "bold"]; currentIndex: model.indexOf(page.draft.iconStyle); onActivated: page.edit("iconStyle", currentText) }
                         }
                         ColumnLayout { Label { text: qsTr("Button corners"); color: Theme.textDim }
-                            SpinBox { from: 0; to: 32; editable: true; value: page.draft.radius; onValueModified: page.edit("radius", value) }
+                            StudioSpinBox { from: 0; to: 32; editable: true; value: page.draft.radius; onValueModified: page.edit("radius", value) }
                         }
                         ColumnLayout { Label { text: qsTr("Button height"); color: Theme.textDim }
-                            SpinBox { from: 16; to: 96; editable: true; value: page.draft.height; onValueModified: page.edit("height", value) }
+                            StudioSpinBox { from: 16; to: 96; editable: true; value: page.draft.height; onValueModified: page.edit("height", value) }
                         }
                         ColumnLayout { Label { text: qsTr("Horizontal padding"); color: Theme.textDim }
-                            SpinBox { from: 0; to: 64; editable: true; value: page.draft.padding; onValueModified: page.edit("padding", value) }
+                            StudioSpinBox { from: 0; to: 64; editable: true; value: page.draft.padding; onValueModified: page.edit("padding", value) }
                         }
                         ColumnLayout { Label { text: qsTr("Preview motion"); color: Theme.textDim }
-                            ComboBox { model: ["none", "fade", "rise", "slide", "scale"]; currentIndex: model.indexOf(page.draft.motion); onActivated: page.edit("motion", currentText) }
+                            StudioComboBox { model: ["none", "fade", "rise", "slide", "scale"]; currentIndex: model.indexOf(page.draft.motion); onActivated: page.edit("motion", currentText) }
                         }
                     }
                     RowLayout {
                         Label { text: qsTr("Preview duration (ms)"); color: Theme.textDim }
-                        SpinBox { from: 0; to: 1200; stepSize: 20; editable: true; value: page.draft.duration; onValueModified: page.edit("duration", value) }
-                        CheckBox { text: qsTr("Reduce app motion"); checked: Theme.reduceMotion; onToggled: themes.reduceMotion = checked }
+                        StudioSpinBox { from: 0; to: 1200; stepSize: 20; editable: true; value: page.draft.duration; onValueModified: page.edit("duration", value) }
+                        StudioCheckBox { text: qsTr("Reduce app motion"); checked: Theme.reduceMotion; onToggled: themes.reduceMotion = checked }
                         ActionButton { text: qsTr("Replay"); onClicked: playerPreview.replay() }
                     }
-                    Label { Layout.fillWidth: true; wrapMode: Text.Wrap; color: Theme.warn; text: qsTr("Player deployment currently supports mapped palette, safe numeric design tokens and explicitly mapped SVG icons. Motion and pack name are authoring/preview metadata, not injected player animations or branding. Full-window skins, native dialogs, optimizer and boot are not covered.") }
+                    Label { Layout.fillWidth: true; wrapMode: Text.Wrap; color: Theme.warn; text: qsTr("Player deployment currently supports mapped palette, safe numeric design tokens and explicitly mapped SVG icons. Player GUI mode deploys generated rounded controls, hover transitions, popup fades and known icon families where verified QML sources exist. Other preview motion styles and pack names are not emulator animations/branding. Native/Android surfaces, external DLLs/RCCs, raster artwork and boot are not covered.") }
 
+                    StudioCheckBox {
+                        text: qsTr("Deploy player GUI components and icon families (strict coverage)")
+                        checked: !!page.draft.playerUi
+                        onToggled: page.edit("playerUi", checked)
+                    }
+                    ActionButton { text: qsTr("Check player GUI coverage"); enabled: !backend.busy; onClicked: page.inspectCoverage() }
+                    Label { Layout.fillWidth: true; wrapMode: Text.Wrap; color: Theme.warn; text: page.coverageNote; textFormat: Text.PlainText }
+                    Repeater {
+                        model: page.coverage
+                        Label { required property var modelData; Layout.fillWidth: true; text: modelData.path + " — " + modelData.feature; color: Theme.textDim; elide: Text.ElideMiddle; textFormat: Text.PlainText }
+                    }
                     Label { text: qsTr("Advanced / no locked preset values"); color: Theme.text; font.pixelSize: 16; font.bold: true }
                     Label { Layout.fillWidth: true; wrapMode: Text.Wrap; color: Theme.textDim; text: qsTr("Override any detected palette property or supported design token. JSON imports are data only: scripts, raw offsets and unknown properties are refused. Inspect is manual; icons require a separate manual Scan Resources.") }
                     RowLayout {
@@ -269,20 +289,20 @@ Item {
                     RowLayout {
                         Layout.fillWidth: true
                         ActionButton { text: qsTr("Load target palette"); enabled: !backend.busy; onClicked: backend.loadTheme("qml") }
-                        ComboBox { id: paletteTarget; Layout.fillWidth: true; model: backend.themeEntries; textRole: "name" }
-                        TextField { id: paletteValue; Layout.preferredWidth: 100; placeholderText: "#RRGGBB"; maximumLength: 7 }
+                        StudioComboBox { id: paletteTarget; Layout.fillWidth: true; model: backend.themeEntries; textRole: "name" }
+                        StudioTextField { id: paletteValue; Layout.preferredWidth: 100; placeholderText: "#RRGGBB"; maximumLength: 7 }
                         ActionButton { text: qsTr("Set color"); enabled: paletteTarget.currentIndex >= 0; onClicked: { try { var colors = JSON.parse(page.paletteJson); colors[backend.themeEntries[paletteTarget.currentIndex].name] = paletteValue.text; page.paletteJson = JSON.stringify(colors,null,2); page.plan = {}; } catch (e) { page.notify(String(e)); } } }
                     }
                     Label { text: qsTr("Exact palette-name → #RRGGBB overrides"); color: Theme.textDim }
-                    TextArea { objectName: "skinPaletteOverrides"; Layout.fillWidth: true; Layout.preferredHeight: 80; text: page.paletteJson; font.family: Theme.monoFont; color: Theme.text; selectByMouse: true; wrapMode: TextEdit.Wrap; onTextChanged: if (activeFocus) { page.paletteJson = text; page.plan = {}; } }
+                    StudioTextArea { objectName: "skinPaletteOverrides"; Layout.fillWidth: true; Layout.preferredHeight: 80; text: page.paletteJson; font.family: Theme.monoFont; color: Theme.text; selectByMouse: true; wrapMode: TextEdit.Wrap; onTextChanged: if (activeFocus) { page.paletteJson = text; page.plan = {}; } }
                     Label { text: qsTr("Exact design-token key → integer overrides"); color: Theme.textDim }
-                    TextArea { Layout.fillWidth: true; Layout.preferredHeight: 80; text: page.tokenJson; font.family: Theme.monoFont; color: Theme.text; selectByMouse: true; wrapMode: TextEdit.Wrap; onTextChanged: if (activeFocus) { page.tokenJson = text; page.plan = {}; } }
-                    TextArea { Layout.fillWidth: true; Layout.preferredHeight: page.inspected.length ? 130 : 0; visible: page.inspected.length > 0; readOnly: true; selectByMouse: true; color: Theme.textDim; text: JSON.stringify(page.inspected, null, 2) }
+                    StudioTextArea { Layout.fillWidth: true; Layout.preferredHeight: 80; text: page.tokenJson; font.family: Theme.monoFont; color: Theme.text; selectByMouse: true; wrapMode: TextEdit.Wrap; onTextChanged: if (activeFocus) { page.tokenJson = text; page.plan = {}; } }
+                    StudioTextArea { Layout.fillWidth: true; Layout.preferredHeight: page.inspected.length ? 130 : 0; visible: page.inspected.length > 0; readOnly: true; selectByMouse: true; color: Theme.textDim; text: JSON.stringify(page.inspected, null, 2) }
                     Label { Layout.fillWidth: true; wrapMode: Text.Wrap; text: qsTr("SVG mappings: [{\"path\":\"exact/scanned/resource.svg\",\"glyph\":\"home\"}]. Glyphs: home, play, settings, volume, controls, capture, fullscreen, back, apps. Icons use the chosen family and accent. Verify your target mapping; replacing an image does not add a functional sidebar button."); color: Theme.textDim }
                     RowLayout {
                         Layout.fillWidth: true
-                        ComboBox { id: iconTarget; Layout.fillWidth: true; model: page.svgResources; textRole: "path" }
-                        ComboBox { id: iconGlyph; model: ["home", "play", "settings", "volume", "controls", "capture", "fullscreen", "back", "apps"] }
+                        StudioComboBox { id: iconTarget; Layout.fillWidth: true; model: page.svgResources; textRole: "path" }
+                        StudioComboBox { id: iconGlyph; model: ["home", "play", "settings", "volume", "controls", "capture", "fullscreen", "back", "apps"] }
                         ActionButton { text: qsTr("Custom SVG…"); enabled: !backend.busy; onClicked: openIcon.open() }
                         ActionButton { text: page.customSvg.length ? qsTr("Map custom SVG") : qsTr("Map icon"); enabled: page.svgResources.length > 0; onClicked: page.addMapping() }
                     }
@@ -292,7 +312,7 @@ Item {
                         Label { text: qsTr("Custom static SVG ready. It retains its own colors."); color: Theme.textDim }
                         ActionButton { text: qsTr("Use built-in icons"); onClicked: page.customSvg = "" }
                     }
-                    TextArea { objectName: "skinIconMappings"; Layout.fillWidth: true; Layout.preferredHeight: 80; text: page.mappingJson; color: Theme.text; font.family: Theme.monoFont; selectByMouse: true; wrapMode: TextEdit.Wrap; onTextChanged: if (activeFocus) { page.mappingJson = text; page.plan = {}; } }
+                    StudioTextArea { objectName: "skinIconMappings"; Layout.fillWidth: true; Layout.preferredHeight: 80; text: page.mappingJson; color: Theme.text; font.family: Theme.monoFont; selectByMouse: true; wrapMode: TextEdit.Wrap; onTextChanged: if (activeFocus) { page.mappingJson = text; page.plan = {}; } }
                 Item { Layout.preferredHeight: 10 }
             }
         }
@@ -305,7 +325,7 @@ Item {
         title: qsTr("Review verified skin batch"); standardButtons: Dialog.Ok | Dialog.Cancel
         contentItem: ScrollView {
             clip: true; contentWidth: availableWidth
-            TextArea { readOnly: true; selectByMouse: true; wrapMode: TextEdit.Wrap; color: Theme.textDim
+            StudioTextArea { readOnly: true; selectByMouse: true; wrapMode: TextEdit.Wrap; color: Theme.textDim
                 text: qsTr("Close every emulator instance first. Only the verified queued operations below will be applied. A recovery snapshot is retained.\n\n") + JSON.stringify(page.plan,null,2)
             }
         }

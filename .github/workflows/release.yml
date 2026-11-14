@@ -53,6 +53,7 @@ env:
   # that only builds and verifies the EXE (the publish step below uses the
   # script directly).
   BSI_NO_UPDATER: "1"
+  BSI_SKIN_REFERENCE_DIR: ${{ github.workspace }}/player-ui-source
 
 jobs:
   build-windows:
@@ -129,6 +130,16 @@ jobs:
           "commit=$commit" >> $env:GITHUB_OUTPUT
           "exe_name=BSI-Customizer-$version-win64.exe" >> $env:GITHUB_OUTPUT
           "setup_name=BSI-Customizer-$version-setup.exe" >> $env:GITHUB_OUTPUT
+
+      - name: Checkout pinned player UI source contracts (data only)
+        uses: actions/checkout@v5
+        with:
+          repository: husainprime20/src-code
+          ref: ee557954ee9e1a251f20fe667d2bbcc1f711d26b
+          path: player-ui-source
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: '/*.qml'
 
       - name: Install Qt 6 build tools
         uses: jurplel/install-qt-action@v4.3.1

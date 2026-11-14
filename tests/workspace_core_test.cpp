@@ -2,6 +2,7 @@
 #include "core/CustomizationWorkspace.h"
 #include "core/AddonPacks.h"
 #include "core/SkinProfiles.h"
+#include "core/PlayerSkinCompiler.h"
 #include "core/ThemeEngine.h"
 #include "core/EmbeddedResources.h"
 #include "core/QtResources.h"
@@ -94,6 +95,25 @@ int run()
 {
     failures = 0;
     QTemporaryDir temp; check(temp.isValid(),"isolated test directory");
+    {
+        const QStringList ids{"pMaxDropDownHeight","pVisibilityRole","pContentRightPadding"};
+        const auto target=qv4Unit(ids);
+        const auto imported=qv4Unit({"UiComboBox","pMaxDropDownHeight"});
+        const auto substring=qv4Unit({"xpMaxDropDownHeight","xpVisibilityRole","xpContentRightPadding"});
+        auto bytes=target+imported+substring;
+        check(QtResources::sourceUnits(bytes,{"UiComboBox.qml"},ids)==1,
+              "exact source matching requires all full identifiers, not an importing component or substring");
+        check(QtResources::sourceUnits(bytes,{"UiComboBox.qml"},ids,true)==1
+                  && le32(bytes,8)==0 && le32(bytes,target.size()+8)!=0,
+              "precise cache invalidation leaves importing/unrelated QML units active");
+        auto named=qv4Unit({":/qml/OtherWindow.qml","pMaxDropDownHeight","pVisibilityRole","pContentRightPadding"});
+        putLe32(named,236,0);
+        check(QtResources::sourceUnits(named,{"UiComboBox.qml"},ids)==0,
+              "a known different source filename never falls back to property identifiers");
+        auto duplicate=target+target;
+        check(QtResources::sourceUnits(duplicate,{"UiComboBox.qml"},ids)==2,
+              "duplicate compiled source identities remain detectable and cannot masquerade as one");
+    }
     const auto original=fixture(); const QString exe=temp.filePath(QStringLiteral("HD-Player.exe")); write(exe,original);
     auto inspection=W::inspect(exe,{{"primary100","#abcdef"}});
     if (!inspection.value("themeSupported").toBool()) std::printf("inspection: %s\n",qPrintable(inspection.value("msg").toString()));
@@ -124,6 +144,8 @@ int run()
     for(const auto &style:{"line","rounded","bold"})
         check(!SkinProfiles::icon("home",QLatin1String(style),"#aabbcc").isEmpty(),"three safe generated SVG icon styles");
     check(SkinProfiles::icon("unknown","line","#aabbcc").isEmpty(),"unknown glyph refused");
+    for(const auto &glyph:{"close","minimize","maximize","menu","chat","help","gallery","record","stop","rotate","shake","location","apk","instances","macro","memory","pin","account","volume-muted","sidepanel"})
+        check(!SkinProfiles::icon(QLatin1String(glyph),"rounded","#aabbcc").isEmpty(),"generated sidebar/topbar function glyph preserves a distinct semantic symbol");
     const QString svgFile=temp.filePath(QStringLiteral("custom.svg"));
     write(svgFile,"<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M2 2h20v20H2z'/></svg>");
     const auto importedIcon=SkinProfiles::readIcon(svgFile);
@@ -136,6 +158,34 @@ int run()
     check(!SkinProfiles::readIcon(svgFile).value("ok").toBool(),"SVG external references refused");
     write(svgFile,"<!DOCTYPE svg [<!ENTITY x SYSTEM 'file:///etc/passwd'>]><svg xmlns='http://www.w3.org/2000/svg'/>");
     check(!SkinProfiles::readIcon(svgFile).value("ok").toBool(),"SVG DTD/entity declarations refused");
+    auto uiSkin=skin;uiSkin["playerUi"]=true;
+    check(SkinProfiles::validate(uiSkin).value("ok").toBool(),"strict player GUI deployment is a typed profile option");
+    auto badUiSkin=uiSkin;badUiSkin["playerUi"]="true";
+    check(!SkinProfiles::validate(badUiSkin).value("ok").toBool(),"string GUI deployment flag refused");
+    check(!PlayerSkinCompiler::plan(original,uiSkin,{}).value("ok").toBool(),"incomplete EXE cannot report a full GUI pack success");
+    check(!PlayerSkinCompiler::compile("Unknown.qml","Item {}",uiSkin).value("ok").toBool(),"unknown player source refused");
+    const QString sourceDir=qEnvironmentVariable("BSI_SKIN_REFERENCE_DIR");
+    if(!sourceDir.isEmpty()) {
+        for(const auto &leaf:PlayerSkinCompiler::components()) {
+            const auto source=read(QDir(sourceDir).filePath(leaf));
+            check(!source.isEmpty(),qPrintable("pinned player UI source present: "+leaf));
+            for(const auto &id:QStringList{"carbon","amethyst","arctic","matrix","ember","nord"}) {
+                auto generatedProfile=uiSkin;generatedProfile["base"]=id;
+                generatedProfile["radius"]=AddonPacks::find(id)->radius;
+                const auto generated=PlayerSkinCompiler::compile(leaf,source,generatedProfile);
+                if(!generated.value("ok").toBool())std::printf("compiler: %s\n",qPrintable(generated.value("msg").toString()));
+                check(generated.value("ok").toBool(),qPrintable("compile player component: "+leaf+" / "+id));
+                const auto output=generated.value("source").toByteArray();
+                if(output.isEmpty())continue;
+                auto changed=generatedProfile;changed["radius"]=19;changed["duration"]=0;
+                const auto second=PlayerSkinCompiler::compile(leaf,output,changed);
+                check(second.value("ok").toBool() && second.value("source").toByteArray().count("BSI_PLAYER_SKIN_V1_BEGIN")==1,
+                      "switching packs updates settings without stacking behaviors");
+                check(output.count("onClicked:")==source.count("onClicked:") && output.count("onClosing:")==source.count("onClosing:"),
+                      "player actions and close handlers survive style compilation");
+            }
+        }
+    }
     const QString skinFile=temp.filePath(QStringLiteral("editable-skin.json"));
     check(SkinProfiles::save(skinFile,skin).value("ok").toBool() && SkinProfiles::read(skinFile).value("profile").toMap()==skin,"custom skin profile save/load round trip");
     check(!SkinProfiles::save(exe,skin).value("ok").toBool() && read(exe)==original,"skin export never overwrites the player");

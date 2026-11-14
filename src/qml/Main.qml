@@ -125,7 +125,6 @@ ApplicationWindow {
                         {label:"PRESENCE",icon:Icons.discord,route:7,children:[7,8]},
                         {label:"APP",icon:Icons.settings,route:-1,children:[]},
                         {label:"TOOLS",icon:Icons.debloat,route:9,children:[9,10]},
-                        {label:"+",icon:"<path d='M12 5v14M5 12h14'/>",route:0,children:[]},
                         {label:"RECOVERY",icon:Icons.integrity,route:11,children:[]},
                         {label:"COLLECTION",icon:Icons.images,route:12,children:[]}
                     ]
@@ -153,7 +152,7 @@ ApplicationWindow {
                             }
                             onClicked: {
                                 if(navGroup.modelData.route===-1) { settingsPanel.currentTab=0; settingsPanel.open(); }
-                                else if(navGroup.modelData.children.length>0) { navGroup.expanded=!navGroup.expanded; if(!navGroup.selected) window.navigatePage(navGroup.modelData.route); }
+                                else if(navGroup.modelData.children.length>0) { navGroup.expanded=!navGroup.expanded; }
                                 else window.navigatePage(navGroup.modelData.route);
                             }
                         }
@@ -186,7 +185,7 @@ ApplicationWindow {
         ColumnLayout {
             id: railFooter; anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom; anchors.margins: 20; spacing: 15
             MicroLabel { text: qsTr("ACTIVE TARGET"); font.pixelSize: 8; color: Theme.tertiary }
-            ComboBox {
+            StudioComboBox {
                 id: targetPicker; objectName: "shellTargetPicker"; Layout.fillWidth: true; implicitHeight: 30; font.pixelSize: 10
                 enabled: !backend.busy; model: backend.installs; textRole: "profile"
                 currentIndex: backend.installs.findIndex(i => i.exe === backend.exePath)
@@ -195,7 +194,7 @@ ApplicationWindow {
             }
             RowLayout {
                 Layout.fillWidth: true
-                CircleButton { id: settingsButton; objectName: "settingsButton"; text: qsTr("Open settings"); glyph: Icons.settings; onClicked: { settingsPanel.currentTab=0; settingsPanel.open(); } }
+                // Settings has one sidebar destination: APP above; no duplicate footer shortcut.
                 Item { Layout.fillWidth: true }
                 CircleButton { text: qsTr("Application menu"); glyph: "<circle cx='5' cy='12' r='1'/><circle cx='12' cy='12' r='1'/><circle cx='19' cy='12' r='1'/>"; onClicked: appMenu.popup() }
             }

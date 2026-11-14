@@ -339,16 +339,16 @@ Item {
                     onLoad: backend.exePath = text
                 }
 
-                TabBar {
+                StudioTabBar {
                     id: uiSections
                     objectName: "playerUiSections"
                     Layout.fillWidth: true
                     currentIndex: page.currentSection
                     onCurrentIndexChanged: page.currentSection = currentIndex
-                    TabButton { text: qsTr("Layout & clean-up") }
-                    TabButton { text: qsTr("About preview & editor") }
-                    TabButton { text: qsTr("Remove items") }
-                    TabButton { text: qsTr("Appearance studio") }
+                    StudioTabButton { text: qsTr("Layout & clean-up") }
+                    StudioTabButton { text: qsTr("About preview & editor") }
+                    StudioTabButton { text: qsTr("Remove items") }
+                    StudioTabButton { text: qsTr("Appearance studio") }
                 }
 
                 // ---------------- one-click clean-up ----------------
@@ -479,7 +479,7 @@ Item {
                                 // A tick means "this is the state I want". It starts
                                 // from what the EXE currently has, so an applied tweak
                                 // unticks to "restore" and a stock one ticks to apply.
-                                CheckBox {
+                                StudioCheckBox {
                                     id: tweakCheck
                                     Layout.alignment: Qt.AlignTop
                                     checked: !!modelData.applied
@@ -661,7 +661,7 @@ Item {
                                     enabled: page.buttonOrderReady && index < page.buttonRows.length - 1
                                     onClicked: page.moveButtonRow(index, 1)
                                 }
-                                CheckBox {
+                                StudioCheckBox {
                                     id: showCheck
                                     visible: modelData.canHide
                                     enabled: page.buttonOrderReady
@@ -900,7 +900,7 @@ Item {
                                     Text { text: modelData.label + " · " + modelData.group; color: Theme.text; font.pixelSize: 12 }
                                     Text { text: modelData.key + " · current " + modelData.value; color: Theme.textDim; font.pixelSize: 10; elide: Text.ElideMiddle; Layout.fillWidth: true }
                                 }
-                                SpinBox {
+                                StudioSpinBox {
                                     from: modelData.minimum
                                     to: modelData.maximum
                                     stepSize: modelData.step || 1
@@ -910,7 +910,7 @@ Item {
                                 }
                             }
                         }
-                        TextArea {
+                        StudioTextArea {
                             Layout.fillWidth: true
                             Layout.preferredHeight: 120
                             readOnly: true
@@ -1073,7 +1073,7 @@ Item {
                             Layout.preferredHeight: 210
                             spacing: 10
 
-                            TextArea {
+                            StudioTextArea {
                                 id: aboutText
                                 Layout.fillWidth: true
                                 Layout.fillHeight: true
@@ -1265,7 +1265,7 @@ Item {
                                     Layout.fillWidth: true
                                     spacing: 8
 
-                                    CheckBox {
+                                    StudioCheckBox {
                                         id: linkShow
                                         text: qsTr("Show")
                                         checked: !modelData.hidden
@@ -1275,7 +1275,7 @@ Item {
                                         palette.buttonText: Theme.text
                                         property bool checkedToggle: checked
                                     }
-                                    TextField {
+                                    StudioTextField {
                                         id: linkNameField
                                         Layout.preferredWidth: 190
                                         // The page's record for this row cannot
@@ -1296,7 +1296,7 @@ Item {
                                             border.color: linkNameField.activeFocus ? Theme.accent : Theme.border
                                         }
                                     }
-                                    TextField {
+                                    StudioTextField {
                                         id: linkLabelField
                                         Layout.preferredWidth: 190
                                         maximumLength: modelData.labelMax > 0 ? modelData.labelMax
@@ -1314,7 +1314,7 @@ Item {
                                             border.color: linkLabelField.activeFocus ? Theme.accent : Theme.border
                                         }
                                     }
-                                    TextField {
+                                    StudioTextField {
                                         id: linkUrlField
                                         Layout.fillWidth: true
                                         maximumLength: modelData.urlMax > 0 ? modelData.urlMax : 32767

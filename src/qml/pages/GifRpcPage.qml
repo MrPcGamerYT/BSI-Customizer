@@ -65,35 +65,35 @@ Item {
                     ActionButton { text: qsTr("Save settings to profile"); enabled: !backend.busy; onClicked: page.show(backend.workspace("profile-section", {section: "gifRpc", value: page.configuration()})) }
                     ActionButton { text: qsTr("Check DLL / Load settings"); enabled: !backend.busy; onClicked: page.checkFiles() }
                     Label { text: qsTr("Application ID (your Discord application)"); color: Theme.text }
-                    TextField { id: appId; Layout.fillWidth: true; placeholderText: "17–20 digit application ID"; maximumLength: 20; selectByMouse: true }
+                    StudioTextField { id: appId; Layout.fillWidth: true; placeholderText: "17–20 digit application ID"; maximumLength: 20; selectByMouse: true }
                     Label { text: qsTr("State"); color: Theme.text }
-                    TextField { id: stateField; Layout.fillWidth: true; maximumLength: 128; selectByMouse: true }
+                    StudioTextField { id: stateField; Layout.fillWidth: true; maximumLength: 128; selectByMouse: true }
                     Label { text: qsTr("Rotating details — one per line, maximum 10"); color: Theme.text }
-                    TextArea { id: detailField; Layout.fillWidth: true; Layout.preferredHeight: 90; placeholderText: qsTr("Playing BlueStacks\nCustom presence"); selectByMouse: true; wrapMode: TextEdit.Wrap }
+                    StudioTextArea { id: detailField; Layout.fillWidth: true; Layout.preferredHeight: 90; placeholderText: qsTr("Playing BlueStacks\nCustom presence"); selectByMouse: true; wrapMode: TextEdit.Wrap }
                     Label { text: qsTr("Large image / GIF HTTPS URL or uploaded asset key"); color: Theme.text }
-                    TextField { id: largeImage; Layout.fillWidth: true; selectByMouse: true; maximumLength: 2048 }
-                    TextField { id: largeText; Layout.fillWidth: true; placeholderText: qsTr("Large image tooltip"); selectByMouse: true; maximumLength: 128 }
+                    StudioTextField { id: largeImage; Layout.fillWidth: true; selectByMouse: true; maximumLength: 2048 }
+                    StudioTextField { id: largeText; Layout.fillWidth: true; placeholderText: qsTr("Large image tooltip"); selectByMouse: true; maximumLength: 128 }
                     Label { text: qsTr("Small image HTTPS URL or asset key (optional)"); color: Theme.text }
-                    TextField { id: smallImage; Layout.fillWidth: true; selectByMouse: true; maximumLength: 2048 }
-                    TextField { id: smallText; Layout.fillWidth: true; placeholderText: qsTr("Small image tooltip"); selectByMouse: true; maximumLength: 128 }
+                    StudioTextField { id: smallImage; Layout.fillWidth: true; selectByMouse: true; maximumLength: 2048 }
+                    StudioTextField { id: smallText; Layout.fillWidth: true; placeholderText: qsTr("Small image tooltip"); selectByMouse: true; maximumLength: 128 }
                     Label { text: qsTr("Buttons (optional; each needs both a label and HTTPS URL)"); color: Theme.text }
                     RowLayout {
                         Layout.fillWidth: true
-                        TextField { id: button1; Layout.preferredWidth: 160; placeholderText: qsTr("Button 1 label"); maximumLength: 32 }
-                        TextField { id: url1; Layout.fillWidth: true; placeholderText: "https://..."; selectByMouse: true; maximumLength: 2048 }
+                        StudioTextField { id: button1; Layout.preferredWidth: 160; placeholderText: qsTr("Button 1 label"); maximumLength: 32 }
+                        StudioTextField { id: url1; Layout.fillWidth: true; placeholderText: "https://..."; selectByMouse: true; maximumLength: 2048 }
                     }
                     RowLayout {
                         Layout.fillWidth: true
-                        TextField { id: button2; Layout.preferredWidth: 160; placeholderText: qsTr("Button 2 label"); maximumLength: 32 }
-                        TextField { id: url2; Layout.fillWidth: true; placeholderText: "https://..."; selectByMouse: true; maximumLength: 2048 }
+                        StudioTextField { id: button2; Layout.preferredWidth: 160; placeholderText: qsTr("Button 2 label"); maximumLength: 32 }
+                        StudioTextField { id: url2; Layout.fillWidth: true; placeholderText: "https://..."; selectByMouse: true; maximumLength: 2048 }
                     }
                     RowLayout {
-                        CheckBox { id: rpcEnabled; text: qsTr("Enable RPC"); checked: true }
-                        CheckBox { id: timestamp; text: qsTr("Elapsed time"); checked: true }
+                        StudioCheckBox { id: rpcEnabled; text: qsTr("Enable RPC"); checked: true }
+                        StudioCheckBox { id: timestamp; text: qsTr("Elapsed time"); checked: true }
                         Label { text: qsTr("Rotate every (seconds)"); color: Theme.text }
-                        SpinBox { id: rotation; from: 5; to: 60; value: 5; editable: true }
+                        StudioSpinBox { id: rotation; from: 5; to: 60; value: 5; editable: true }
                     }
-                    CheckBox {
+                    StudioCheckBox {
                         id: replaceExisting
                         text: qsTr("Replace an existing third-party app-local version.dll (original backup required)")
                         checked: false
@@ -118,7 +118,7 @@ Item {
                         }
                         ActionButton { text: qsTr("Remove / Restore original"); enabled: !backend.busy; onClicked: restoreDialog.open() }
                     }
-                    TextArea { Layout.fillWidth: true; text: page.report; readOnly: true; selectByMouse: true; wrapMode: TextEdit.Wrap; color: Theme.text }
+                    StudioTextArea { Layout.fillWidth: true; text: page.report; readOnly: true; selectByMouse: true; wrapMode: TextEdit.Wrap; color: Theme.text }
                 }
             }
             Item { Layout.preferredHeight: 24 }
