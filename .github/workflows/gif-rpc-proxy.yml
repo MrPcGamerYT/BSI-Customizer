@@ -16,6 +16,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
+      - name: Test round-corner button and profile state
+        run: node tests/gif_rpc_corners_ui_test.mjs
       - name: Build standalone MSVC x64 proxy and loader hosts (no Qt)
         shell: pwsh
         run: |
