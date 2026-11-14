@@ -119,19 +119,41 @@ known-crashing DLL removed until a replacement is tested on that installation.
 
 ## Round corners — Enable / Disable
 
-After installing this updated DLL once with the emulator closed, the GIF RPC
-page's **Round corners → Enable / Disable** buttons atomically save a preference
-in the existing INI. The DLL checks it within five seconds, including when RPC
-is disabled or Discord is absent. No running EXE/DLL is rewritten by these
-buttons. Ordinary RPC Apply calls preserve an existing corner preference when
-the caller omits it; profiles can explicitly store the `RoundCorners` boolean.
+The first implementation only requested native DWM corners; the reporter found
+that the emulator remained square. Corner capability V2 adds **actual rounded
+window-region clipping** for frameless windows, in addition to the DWM preference
+when available. Install/Apply the updated DLL with the player stopped once. Old
+native-only DLLs are explicitly refused by the new corner buttons until updated.
 
-This uses **Windows 11 build 22000+ native DWM** preferences: Enable requests
-rounded corners, Disable requests square corners. Older Windows reports an
-unsupported message without modifying files. DWM can ignore the preference for
-fullscreen, maximized or custom-region windows; the UI reports the saved setting,
-not a guarantee of rendering. Only visible, unowned top-level windows belonging
-to the player process are eligible, not child controls, popups owned by another
-window or other processes. New eligible windows are picked up on later refreshes.
-There are no hooks, subclassing, clipping regions, window-style changes or new
-DllMain work. When the INI key is absent, native corners are left unchanged.
+Enable/Disable atomically saves `RoundCorners` in the INI; the worker picks up the
+setting in about five seconds, independently of Discord/RPC. Window geometry is
+checked every 250 ms without hooks, subclassing or window-style changes. Native
+rounding is optional: clipping also works on Windows 10. The normal-window radius
+is 12 logical pixels, DPI-scaled. Maximize, minimize and borderless fullscreen
+restore the captured original region; returning to a normal window rounds again.
+Disable and controller shutdown restore the original region, not an arbitrary
+rectangle. Pre-existing custom regions are intersected with the rounded region
+and restored exactly on disable. A pre-existing fixed-size custom region can
+still constrain resizing; the tool does not rewrite the application's own shape.
+
+Only visible, unowned top-level windows of the current player process are
+eligible. Window ownership properties prevent restoring a saved region onto a
+reused HWND. Region handles are retained/returned/freed according to Win32
+ownership rules. Unchanged shapes are not reapplied (no repeated WM_SIZE churn).
+The bounded RPC log reports whether any eligible normal window has clipping
+applied. The UI says the preference is **saved**, not that a specific emulator's
+rendering was verified. There is no additional DllMain work.
+
+Windows tests now verify real frameless-window regions, excluded corner pixels,
+retained interior pixels, resize, fullscreen restoration, original custom-region
+restoration, shutdown cleanup, and bounded GDI handle use. A message-pumping
+frameless host additionally checks geometry applied by the actual DLL worker,
+including with RPC disabled. This is still not a live emulator boot/render test.
+
+## Discord name/status icon versus activity images
+
+The avatar/icon/emoji beside your Discord name or personal status is controlled
+by Discord's own profile or **Set Custom Status → emoji** UI, not SET_ACTIVITY.
+The customizer explains this beside its image fields. It does not use user tokens,
+self-bots, client modifications, or claim to change that icon. Large/small image
+fields affect only the Rich Presence activity card, not the personal status area.

@@ -170,33 +170,26 @@ QVariantMap inspect(const QString &exe) {
     auto out=reply(true,bytes.isEmpty()?QStringLiteral("No app-local version.dll installed."):
         isOurProxy(bytes)?QStringLiteral("Validated BSI RPC-only x64 version.dll and its forwarding exports."):
             QStringLiteral("An existing non-BSI version.dll is present. It will not be replaced without explicit permission."));
-    out[QStringLiteral("supportsRoundCorners")]=isOurProxy(bytes)&&bytes.contains("BSI_GIF_RPC_CORNERS_V1");
+    out[QStringLiteral("supportsRoundCorners")]=isOurProxy(bytes)&&bytes.contains("BSI_GIF_RPC_CORNERS_V2");
     out[QStringLiteral("installed")]=isOurProxy(bytes);out[QStringLiteral("existing")]=QFileInfo::exists(dll);
     out[QStringLiteral("hasBackup")]=QFileInfo::exists(dll+QStringLiteral(".bsi-gif-rpc.bak"));
     out[QStringLiteral("settings")]=settings(pathFor(exe,QStringLiteral("bsi-gif-rpc.ini")));return out;
 }
 QVariantMap setRoundCorners(const QString &exe,bool enabled) {
     const auto error=targetError(exe);if(!error.isEmpty())return reply(false,error);
-#ifdef Q_OS_WIN
-    // RtlGetVersion is not affected by the application's compatibility manifest.
-    using VersionFn=LONG (WINAPI *)(OSVERSIONINFOW *);
-    const auto version=reinterpret_cast<VersionFn>(GetProcAddress(GetModuleHandleW(L"ntdll.dll"),"RtlGetVersion"));
-    OSVERSIONINFOW os{};os.dwOSVersionInfoSize=sizeof(os);
-    if(!version||version(&os)!=0||os.dwMajorVersion<10||os.dwBuildNumber<22000)
-        return reply(false,QStringLiteral("Native round corners require Windows 11 (build 22000+) or newer. No window styles were changed."));
-#else
-    return reply(false,QStringLiteral("Native round corners require Windows 11."));
+#ifndef Q_OS_WIN
+    return reply(false,QStringLiteral("Emulator window corners require Windows."));
 #endif
     const auto dll=read(pathFor(exe,QStringLiteral("version.dll")));
-    if(!isOurProxy(dll)||!dll.contains("BSI_GIF_RPC_CORNERS_V1"))
+    if(!isOurProxy(dll)||!dll.contains("BSI_GIF_RPC_CORNERS_V2"))
         return reply(false,QStringLiteral("Close the emulator and Install / Apply the updated GIF RPC DLL once, then use Round corners. Other DLLs are never replaced by this button."));
     const auto ini=pathFor(exe,QStringLiteral("bsi-gif-rpc.ini"));
     if(!QFileInfo::exists(ini)||read(ini).isEmpty())return reply(false,QStringLiteral("RPC settings are missing or unreadable; Install / Apply first."));
     auto s=settings(ini);s[QStringLiteral("RoundCorners")]=enabled;
     if(!write(ini,encode(s)))return reply(false,QStringLiteral("Could not save the corner preference. Check emulator folder permissions."));
     auto out=reply(true,enabled
-        ?QStringLiteral("Round corners enabled. The running emulator applies the preference within 5 seconds, or on its next start.")
-        :QStringLiteral("Round corners disabled (square corners). The running emulator applies the preference within 5 seconds, or on its next start."));
+        ?QStringLiteral("Round corners saved: enabled with rounded clipping. Allow about 5 seconds; use a normal, non-maximized emulator window.")
+        :QStringLiteral("Round corners saved: disabled. The DLL restores the original window region within about 5 seconds, or on its next start."));
     out[QStringLiteral("roundCorners")]=enabled;
     return out;
 }

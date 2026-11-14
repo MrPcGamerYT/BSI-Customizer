@@ -97,20 +97,29 @@ static unsigned workerImpl(void *module) {
     std::wstring settings(filename,length);settings.resize(settings.find_last_of(L"\\/")+1);settings+=L"bsi-gif-rpc.ini";
     std::wstring logPath=settings.substr(0,settings.find_last_of(L"\\/")+1)+L"bsi-gif-rpc.log";
     diagnostic(logPath,"BSI GIF RPC V3: worker started; proxy forwarding remains independent.\r\n");
-    diagnostic(logPath,"BSI_GIF_RPC_CORNERS_V1: optional native corner preference supported.\r\n");
+    diagnostic(logPath,"BSI_GIF_RPC_CORNERS_V2: native preference plus reversible rounded clipping supported.\r\n");
     if(WaitForSingleObject(stopEvent,1500)!=WAIT_TIMEOUT)return 0;
     HANDLE pipe=INVALID_HANDLE_VALUE;std::string activeId,buffer;bool ready=false;unsigned index=0,nonce=0;
-    ULONGLONG next=0,handshakeDeadline=0,reload=0; GifRpcPayload::Config current;const auto start=static_cast<std::int64_t>(std::time(nullptr));
+    ULONGLONG next=0,handshakeDeadline=0,reload=0,reconnect=0; GifRpcPayload::Config current;const auto start=static_cast<std::int64_t>(std::time(nullptr));
     GifRpcCorners::Controller corners;
     while(WaitForSingleObject(stopEvent,250)==WAIT_TIMEOUT) {
         if(GetTickCount64()>=reload){
             current=config(settings);reload=GetTickCount64()+5000;
-            corners.refresh(current.roundCorners); // Independent of Discord Enabled/AppId.
         }
+        // Refresh geometry independently of INI/Discord state, without hooks.
+        const auto clipped=corners.refresh(current.roundCorners);
+        static unsigned previousClipped=~0u;
+        if(current.roundCorners==1&&clipped!=previousClipped) {
+            diagnostic(logPath,clipped?"Corners: rounded clipping applied to a normal player window.\r\n"
+                :"Corners: waiting for an eligible normal player window (not fullscreen/maximized).\r\n");
+        }
+        previousClipped=clipped;
         const auto &c=current;
         if(!c.enabled||c.appId!=activeId){if(pipe!=INVALID_HANDLE_VALUE)CloseHandle(pipe);pipe=INVALID_HANDLE_VALUE;ready=false;buffer.clear();activeId=c.appId;}
         if(!c.enabled)continue;
         if(pipe==INVALID_HANDLE_VALUE) {
+            if(GetTickCount64()<reconnect)continue;
+            reconnect=GetTickCount64()+1250;
             for(unsigned i=0;i<10;++i) {
                 const auto name=L"\\\\.\\pipe\\discord-ipc-"+std::to_wstring(i);
                 pipe=CreateFileW(name.c_str(),GENERIC_READ|GENERIC_WRITE,0,nullptr,OPEN_EXISTING,0,nullptr);
@@ -121,7 +130,7 @@ static unsigned workerImpl(void *module) {
                 }
                 ready=false;buffer.clear();handshakeDeadline=GetTickCount64()+10000;next=0;break;
             }
-            if(pipe==INVALID_HANDLE_VALUE){WaitForSingleObject(stopEvent,1000);continue;}
+            if(pipe==INVALID_HANDLE_VALUE){continue;}
         }
         bool valid=true;DWORD available=0;
         if(!PeekNamedPipe(pipe,nullptr,0,nullptr,&available,nullptr))valid=false;
@@ -143,7 +152,7 @@ static unsigned workerImpl(void *module) {
         }
         if(!ready&&GetTickCount64()>handshakeDeadline)valid=false;
         if(valid&&ready&&GetTickCount64()>=next){valid=frame(pipe,1,GifRpcPayload::activity(c,index++,GetCurrentProcessId(),start,++nonce));next=GetTickCount64()+c.interval*1000ULL;}
-        if(!valid){CloseHandle(pipe);pipe=INVALID_HANDLE_VALUE;ready=false;buffer.clear();WaitForSingleObject(stopEvent,1000);}
+        if(!valid){CloseHandle(pipe);pipe=INVALID_HANDLE_VALUE;ready=false;buffer.clear();reconnect=GetTickCount64()+1250;}
     }
     if(pipe!=INVALID_HANDLE_VALUE)CloseHandle(pipe);
     return 0;

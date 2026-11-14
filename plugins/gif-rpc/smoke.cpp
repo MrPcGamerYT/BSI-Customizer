@@ -44,6 +44,59 @@ static bool testCornerFiltering() {
     DestroyWindow(window);
     return ok;
 }
+static bool roundedRegion(HWND h,int centerX=120,int centerY=90) {
+    HRGN r=CreateRectRgn(0,0,0,0);
+    const bool ok=r&&GetWindowRgn(h,r)!=ERROR&&!PtInRegion(r,0,0)&&PtInRegion(r,centerX,centerY);
+    if(r)DeleteObject(r);return ok;
+}
+static bool noRegion(HWND h) {
+    HRGN r=CreateRectRgn(0,0,0,0);const bool ok=r&&GetWindowRgn(h,r)==ERROR;
+    if(r)DeleteObject(r);return ok;
+}
+static HWND frameless() {
+    return CreateWindowExW(0,L"STATIC",L"BSI frameless corner test",WS_POPUP|WS_VISIBLE,
+        40,40,320,240,nullptr,nullptr,GetModuleHandleW(nullptr),nullptr);
+}
+static bool testRealRegions() {
+    HWND window=frameless();if(!window)return false;
+    bool ok=noRegion(window);
+    {
+        GifRpcCorners::Controller controller;
+        controller.refresh(-1);ok=ok&&noRegion(window);
+        controller.refresh(1);ok=ok&&roundedRegion(window);
+        const DWORD resources=GetGuiResources(GetCurrentProcess(),GR_GDIOBJECTS);
+        for(int i=0;i<100;++i)controller.refresh(1);
+        ok=ok&&GetGuiResources(GetCurrentProcess(),GR_GDIOBJECTS)<=resources+3;
+        SetWindowPos(window,nullptr,40,40,480,360,SWP_NOZORDER|SWP_NOACTIVATE);
+        controller.refresh(1);ok=ok&&roundedRegion(window,450,180);
+        // Borderless fullscreen must restore the original region, not clip games.
+        MONITORINFO monitor{};monitor.cbSize=sizeof(monitor);
+        if(GetMonitorInfoW(MonitorFromWindow(window,MONITOR_DEFAULTTONEAREST),&monitor)) {
+            const auto &r=monitor.rcMonitor;
+            SetWindowPos(window,nullptr,r.left,r.top,r.right-r.left,r.bottom-r.top,SWP_NOZORDER|SWP_NOACTIVATE);
+            controller.refresh(1);ok=ok&&noRegion(window);
+        } else ok=false;
+        SetWindowPos(window,nullptr,40,40,320,240,SWP_NOZORDER|SWP_NOACTIVATE);
+        controller.refresh(1);ok=ok&&roundedRegion(window);
+        controller.refresh(0);ok=ok&&noRegion(window);
+        // Existing nonrectangular regions must survive enable/disable exactly.
+        HRGN original=CreateEllipticRgn(0,0,320,240);
+        HRGN copy=CreateEllipticRgn(0,0,320,240);
+        if(!original||!copy||!SetWindowRgn(window,copy,TRUE)) {
+            if(copy)DeleteObject(copy);ok=false;
+        } else {
+            controller.refresh(1);controller.refresh(0);
+            HRGN actual=CreateRectRgn(0,0,0,0);
+            ok=ok&&actual&&GetWindowRgn(window,actual)!=ERROR&&EqualRgn(actual,original);
+            if(actual)DeleteObject(actual);
+        }
+        if(original)DeleteObject(original);
+        SetWindowRgn(window,nullptr,TRUE);
+        controller.refresh(1);ok=ok&&roundedRegion(window);
+    }
+    ok=ok&&noRegion(window); // Controller shutdown restores original shape.
+    DestroyWindow(window);return ok;
+}
 int wmain(int argc, wchar_t **argv) {
     if(argc!=2)return 2;
     HMODULE proxy=LoadLibraryW(argv[1]);
@@ -120,9 +173,31 @@ int wmain(int argc, wchar_t **argv) {
     const auto infoEx=reinterpret_cast<InfoEx>(GetProcAddress(proxy,"GetFileVersionInfoExW"));
     if(!infoEx(FILE_VER_GET_NEUTRAL,path,0,size,data.data()))return 12;
     if(!testCornerFiltering())return 16;
+    if(!testRealRegions()){std::puts("FAIL: reversible real window regions");return 17;}
     // Includes delayed initialization, INI parsing, missing/available Discord
     // pipe handling and normal process exit, without needing an emulator/VM.
-    Sleep(3500);
+    HWND liveWindow=frameless();if(!liveWindow)return 18;
+    const auto until=GetTickCount64()+3500;
+    while(GetTickCount64()<until) {
+        MSG msg;
+        while(PeekMessageW(&msg,nullptr,0,0,PM_REMOVE)){TranslateMessage(&msg);DispatchMessageW(&msg);}
+        MsgWaitForMultipleObjects(0,nullptr,FALSE,25,QS_ALLINPUT);
+    }
+    wchar_t dllPath[32768];
+    const DWORD pathLength=GetModuleFileNameW(proxy,dllPath,32768);
+    bool liveOk=pathLength&&pathLength<32768;
+    if(liveOk) {
+        wchar_t *base=wcsrchr(dllPath,L'\\');
+        if(!base)liveOk=false;
+        else {
+            wcscpy_s(base+1,32768-(base+1-dllPath),L"bsi-gif-rpc.ini");
+            const int requested=GetPrivateProfileIntW(L"RPC",L"RoundCorners",-1,dllPath);
+            if(requested==1)liveOk=roundedRegion(liveWindow);
+            else if(requested==0)liveOk=noRegion(liveWindow);
+        }
+    }
+    DestroyWindow(liveWindow);
+    if(!liveOk){std::puts("FAIL: real worker did not apply window geometry");return 19;}
     std::puts("PASS: x64 names/ordinals, dependent DllMain, concurrent error parity, stack arguments, unload and worker startup.");
     return 0;
 }

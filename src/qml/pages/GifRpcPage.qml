@@ -66,7 +66,7 @@ Item {
             Label {
                 Layout.fillWidth: true; Layout.leftMargin: 24; Layout.rightMargin: 24
                 color: Theme.textDim; wrapMode: Text.Wrap
-                text: qsTr("A clean RPC version.dll for Windows x64 HD-Player, with optional Windows 11 rounded window corners. No optimizer, RAM cleaner, hotkeys, overlays or window hooks. Discord Desktop must be running. GIF animation/external image URLs depend on Discord; an asset key may display as a static image.")
+                text: qsTr("A clean RPC version.dll for Windows x64 HD-Player, with optional rounded emulator-window clipping. No optimizer, RAM cleaner, hotkeys, overlays or window hooks. Discord Desktop must be running. GIF animation/external image URLs depend on Discord; an asset key may display as a static image.")
             }
             Card {
                 Layout.fillWidth: true; Layout.leftMargin: 24; Layout.rightMargin: 24
@@ -81,6 +81,10 @@ Item {
                     StudioTextField { id: stateField; Layout.fillWidth: true; maximumLength: 128; selectByMouse: true }
                     Label { text: qsTr("Rotating details — one per line, maximum 10"); color: Theme.text }
                     StudioTextArea { id: detailField; Layout.fillWidth: true; Layout.preferredHeight: 90; placeholderText: qsTr("Playing BlueStacks\nCustom presence"); selectByMouse: true; wrapMode: TextEdit.Wrap }
+                    Label {
+                        Layout.fillWidth: true; wrapMode: Text.Wrap; color: Theme.textDim
+                        text: qsTr("Icon beside your Discord name/status: change it in Discord itself (avatar/profile or Set Custom Status → emoji). RPC cannot edit that area. Large/small images below only change the activity card.")
+                    }
                     Label { text: qsTr("Large image / GIF HTTPS URL or uploaded asset key"); color: Theme.text }
                     StudioTextField { id: largeImage; Layout.fillWidth: true; selectByMouse: true; maximumLength: 2048 }
                     StudioTextField { id: largeText; Layout.fillWidth: true; placeholderText: qsTr("Large image tooltip"); selectByMouse: true; maximumLength: 128 }
@@ -116,7 +120,7 @@ Item {
                     }
                     Label {
                         Layout.fillWidth: true; wrapMode: Text.Wrap; color: Theme.textDim
-                        text: qsTr("Windows 11 native emulator-window corners. Install this updated DLL once, then enable/disable live; allow up to 5 seconds. Works even with RPC off. Fullscreen, maximized or custom-shaped windows may ignore Windows' corner preference.")
+                        text: qsTr("Rounds the actual emulator window using reversible clipping, plus native Windows rounding when available. Install this updated DLL once, then enable/disable live; allow about 5 seconds. Works with RPC off. Maximize/fullscreen temporarily restores the original shape; return to windowed mode for rounded corners.")
                     }
                     StudioCheckBox {
                         id: replaceExisting

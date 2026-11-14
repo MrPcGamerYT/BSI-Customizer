@@ -11,10 +11,13 @@ set_target_properties(BsiGifRpcProxy PROPERTIES AUTOMOC OFF AUTOUIC OFF AUTORCC 
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/gif-rpc"
     MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 target_compile_features(BsiGifRpcProxy PRIVATE cxx_std_17)
+target_link_libraries(BsiGifRpcProxy PRIVATE user32 gdi32)
 add_executable(BsiGifRpcSmoke smoke.cpp)
 set_target_properties(BsiGifRpcSmoke PROPERTIES AUTOMOC OFF AUTOUIC OFF AUTORCC OFF
     OUTPUT_NAME HD-Player RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/gif-rpc-smoke"
     MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+target_compile_features(BsiGifRpcSmoke PRIVATE cxx_std_17)
+target_link_libraries(BsiGifRpcSmoke PRIVATE user32 gdi32)
 add_library(BsiGifRpcLoaderTest SHARED loader-test.cpp)
 set_target_properties(BsiGifRpcLoaderTest PROPERTIES AUTOMOC OFF AUTOUIC OFF AUTORCC OFF
     RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/gif-rpc-smoke"
