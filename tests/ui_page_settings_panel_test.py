@@ -16,7 +16,7 @@ from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("QSG_RHI_BACKEND", "software")
-from PySide6.QtCore import QObject, QUrl, QCoreApplication, QEvent, QMetaObject
+from PySide6.QtCore import QObject, QUrl, QCoreApplication, QEvent, QMetaObject, QPoint, QPointF, Qt
 from PySide6.QtGui import QGuiApplication, QWindow
 from PySide6.QtQml import QQmlComponent, QQmlEngine
 from PySide6.QtQuick import QQuickItem
@@ -189,9 +189,38 @@ Window {
 
     # Opening the tab is the only thing that inspects the player.
     assert "settingsPanelRebuildState" not in backend.property("calls").toVariant()
-    QMetaObject.invokeMethod(window, "openPanel")
+
+    # Before anything is inspected the section must read as "nothing loaded yet",
+    # never as a player that reports a row of zeros everywhere.
+    assert not page.property("panelReady"), "nothing is inspected yet"
+    _empty = page.findChild(QObject, "settingsPanelEmptyHint")
+    assert _empty is not None, "the not-yet-loaded hint must exist"
+    assert "No player has been read yet" in (_empty.property("text") or ""), \
+        _empty.property("text")
+    # The live readouts and the tab list stay hidden until a player is read, so
+    # the section never shows a player-shaped row of zeros with no player.
+    for gated in ("settingsPanelReadouts", "settingsPanelTabList"):
+        gated_block = page.findChild(QObject, gated)
+        assert gated_block is not None, f"{gated} must exist"
+        assert not gated_block.property("visible"), \
+            f"{gated} must stay hidden before inspection"
+
+    # The user reaches this section by clicking the tab, so click the tab itself
+    # rather than assigning currentSection: an unreachable or zero-size tab
+    # would pass a property assignment but never reachable with a mouse, which is
+    # exactly how this section once became invisible.
     QTest.qWait(150)
-    assert page.property("currentSection") == 4
+    assert tab.property("width") > 8 and tab.property("height") > 8, (
+        "the Settings-panel tab must have a real clickable size")
+    target = tab.mapToScene(QPointF(tab.property("width") / 2, tab.property("height") / 2))
+    assert 0 <= target.x() < 1200 and 0 <= target.y() < 800, (
+        f"the Settings-panel tab is outside the window: {target.x()},{target.y()}")
+    QTest.mouseClick(window, Qt.LeftButton, Qt.NoModifier,
+                     QPoint(int(target.x()), int(target.y())))
+    QTest.qWait(200)
+    assert page.property("currentSection") == 4, (
+        f"clicking the Settings-panel tab must open it, got section "
+        f"{page.property('currentSection')}")
     assert "settingsPanelRebuildState" in backend.property("calls").toVariant()
     panel = page.property("panel").toVariant()
     assert panel["supported"] and panel["settingsPageCount"] == 7
