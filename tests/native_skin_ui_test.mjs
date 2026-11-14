@@ -72,3 +72,12 @@ assert.ok(read('src/core/ThemeManager.cpp').includes('appearance/reduceMotion'))
 assert.ok(read('src/core/ThemeManager.cpp').includes('appearance/backgroundMotion'));
 assert.ok(read('src/qml/pages/AppearancePage.qml').includes('reduceMotionToggle'));
 console.log('PASS: persisted motion switches, inactive-window ambient guard, bounded cached background and nonmodal accessible loading strip.');
+
+assert.ok(!shell.includes('label:"+"'), 'no duplicate lower Home shortcut');
+assert.ok(!shell.includes('id: settingsButton'), 'no duplicate lower Settings shortcut');
+assert.ok(!shell.includes('if(!navGroup.selected) window.navigatePage'), 'group headings do not duplicate the first child destination');
+for (const name of ['TextField','TextArea','ComboBox','SpinBox','CheckBox','TabBar','TabButton']) {
+ assert.ok(cmake.includes('Studio'+name+'.qml'));
+ assert.ok(read('src/qml/components/Studio'+name+'.qml').includes('Theme.'));
+}
+console.log('PASS: unique sidebar destinations and shared rounded native form controls.');

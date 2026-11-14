@@ -152,7 +152,7 @@ ApplicationWindow {
                             }
                             onClicked: {
                                 if(navGroup.modelData.route===-1) { settingsPanel.currentTab=0; settingsPanel.open(); }
-                                else if(navGroup.modelData.children.length>0) { navGroup.expanded=!navGroup.expanded; if(!navGroup.selected) window.navigatePage(navGroup.modelData.route); }
+                                else if(navGroup.modelData.children.length>0) { navGroup.expanded=!navGroup.expanded; }
                                 else window.navigatePage(navGroup.modelData.route);
                             }
                         }
@@ -194,7 +194,7 @@ ApplicationWindow {
             }
             RowLayout {
                 Layout.fillWidth: true
-                CircleButton { id: settingsButton; objectName: "settingsButton"; text: qsTr("Open settings"); glyph: Icons.settings; onClicked: { settingsPanel.currentTab=0; settingsPanel.open(); } }
+                // Settings has one sidebar destination: APP above; no duplicate footer shortcut.
                 Item { Layout.fillWidth: true }
                 CircleButton { text: qsTr("Application menu"); glyph: "<circle cx='5' cy='12' r='1'/><circle cx='12' cy='12' r='1'/><circle cx='19' cy='12' r='1'/>"; onClicked: appMenu.popup() }
             }

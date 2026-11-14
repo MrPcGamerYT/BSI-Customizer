@@ -95,6 +95,25 @@ int run()
 {
     failures = 0;
     QTemporaryDir temp; check(temp.isValid(),"isolated test directory");
+    {
+        const QStringList ids{"pMaxDropDownHeight","pVisibilityRole","pContentRightPadding"};
+        const auto target=qv4Unit(ids);
+        const auto imported=qv4Unit({"UiComboBox","pMaxDropDownHeight"});
+        const auto substring=qv4Unit({"xpMaxDropDownHeight","xpVisibilityRole","xpContentRightPadding"});
+        auto bytes=target+imported+substring;
+        check(QtResources::sourceUnits(bytes,{"UiComboBox.qml"},ids)==1,
+              "exact source matching requires all full identifiers, not an importing component or substring");
+        check(QtResources::sourceUnits(bytes,{"UiComboBox.qml"},ids,true)==1
+                  && le32(bytes,8)==0 && le32(bytes,target.size()+8)!=0,
+              "precise cache invalidation leaves importing/unrelated QML units active");
+        auto named=qv4Unit({":/qml/OtherWindow.qml","pMaxDropDownHeight","pVisibilityRole","pContentRightPadding"});
+        putLe32(named,236,0);
+        check(QtResources::sourceUnits(named,{"UiComboBox.qml"},ids)==0,
+              "a known different source filename never falls back to property identifiers");
+        auto duplicate=target+target;
+        check(QtResources::sourceUnits(duplicate,{"UiComboBox.qml"},ids)==2,
+              "duplicate compiled source identities remain detectable and cannot masquerade as one");
+    }
     const auto original=fixture(); const QString exe=temp.filePath(QStringLiteral("HD-Player.exe")); write(exe,original);
     auto inspection=W::inspect(exe,{{"primary100","#abcdef"}});
     if (!inspection.value("themeSupported").toBool()) std::printf("inspection: %s\n",qPrintable(inspection.value("msg").toString()));

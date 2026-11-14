@@ -195,6 +195,35 @@ QtObject {
     assert all(loader.property("item") is None for loader in loaders), "sign-out unloads all editors"
     assert not errors,errors
     shell.close()
+    controls=create('''import QtQuick
+import QtQuick.Window
+import QtQuick.Layouts
+import BSICustomizer
+Window {
+ width:700;height:150;visible:true
+ property int modifications: 0
+ RowLayout {
+  anchors.centerIn:parent;spacing:10
+  StudioTextField { objectName:"formText"; text:"Editable" }
+  StudioSpinBox { id:number; objectName:"formNumber"; from:0;to:32;value:8;editable:true; onValueModified:modifications++ }
+  StudioComboBox { id:choice;objectName:"formChoice";model:["line","rounded","bold"] }
+  StudioCheckBox { id:tick;objectName:"formTick";text:"Motion" }
+ }
+ function openChoice() { choice.popup.open(); }
+ function closeChoice() { choice.popup.close(); }
+ function exercise() { number.increase(); choice.currentIndex=2; tick.toggle(); }
+}''')
+    QTest.qWait(100)
+    QMetaObject.invokeMethod(controls,"openChoice");QTest.qWait(180)
+    QMetaObject.invokeMethod(controls,"closeChoice");QTest.qWait(180)
+    QMetaObject.invokeMethod(controls,"exercise");QTest.qWait(50)
+    assert controls.findChild(QObject,"formNumber").property("value")==9
+    assert controls.findChild(QObject,"formChoice").property("currentIndex")==2
+    assert controls.findChild(QObject,"formTick").property("checked") is True
+    if screenshots:
+        assert controls.grabWindow().save(str(screenshots/"native-form-controls.png"))
+    controls.close()
+    assert not errors,errors
     # Avoid leaving QML contexts bound to dead Python objects during teardown.
     window.close();objects.clear();engine.deleteLater();QTest.qWait(10)
 print("PASS: native bento/inspector, editable retained drafts, safe staging, resize, login, lazy locked/authenticated shell, responsive busy navigation and sign-out teardown")
