@@ -9,6 +9,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("QSG_RHI_BACKEND", "software")
 from PySide6.QtCore import QObject, QUrl, QMetaObject
 from PySide6.QtGui import QGuiApplication, QWindow
+from PySide6.QtQuick import QQuickWindow, QQuickItem
 from PySide6.QtQml import QQmlEngine, QQmlComponent
 from PySide6.QtTest import QTest
 app=QGuiApplication([])

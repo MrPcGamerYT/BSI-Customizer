@@ -225,7 +225,14 @@ Item {
     Dialog {
         id: applyDialog; width: Math.min(470, page.width - 32); anchors.centerIn: parent; modal: true; title: qsTr("Apply verified skin batch?")
         standardButtons: Dialog.Ok | Dialog.Cancel
-        contentItem: Label { text: qsTr("Review the plan below first. Only supported palette/design values and your explicit icon mappings are written. Close all emulator instances. A recovery snapshot is retained."); wrapMode: Text.Wrap }
+        contentItem: Item {
+            implicitHeight: applyExplanation.implicitHeight
+            Label {
+                id: applyExplanation; width: parent.width
+                text: qsTr("Review the plan below first. Only supported palette/design values and your explicit icon mappings are written. Close all emulator instances. A recovery snapshot is retained.")
+                wrapMode: Text.Wrap
+            }
+        }
         onAccepted: { if (page.plan.ok && page.planPath === backend.exePath) { const hash = page.plan.outputSha256; page.plan = {}; page.run("apply", {outputSha256: hash}); } }
     }
 }
