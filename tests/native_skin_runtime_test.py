@@ -7,7 +7,7 @@ import tempfile
 from pathlib import Path
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("QSG_RHI_BACKEND", "software")
-from PySide6.QtCore import QObject, QUrl, QMetaObject, Q_ARG
+from PySide6.QtCore import QObject, QUrl, QMetaObject, Q_ARG, QPointF
 from PySide6.QtGui import QGuiApplication, QWindow, QFontDatabase, QFont
 from PySide6.QtQuick import QQuickWindow, QQuickItem
 from PySide6.QtQml import QQmlEngine, QQmlComponent
@@ -182,6 +182,13 @@ QtObject {
     QTest.qWait(250)
     if screenshots:
         assert shell.grabWindow().save(str(screenshots/"control-center-native.png"))
+    shell.resize(700,700);QTest.qWait(60)
+    searchButton=shell.findChild(QQuickItem,"openToolFinder")
+    closeButton=shell.findChild(QQuickItem,"shellCloseWindow")
+    assert searchButton is not None and closeButton is not None
+    assert searchButton.property("text")=="Find", "small windows use compact search chrome"
+    assert closeButton.mapToScene(QPointF(closeButton.width(),0)).x() <= shell.width(), "close control stays inside narrow windows"
+    shell.resize(1440,930);QTest.qWait(30)
     busyStrip=shell.findChild(QObject,"shellLoadingStrip")
     assert busyStrip is not None and not busyStrip.property("busy")
     backend.setProperty("busy",True)

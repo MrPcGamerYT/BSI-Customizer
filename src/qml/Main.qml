@@ -224,10 +224,15 @@ ApplicationWindow {
             }
             ColumnLayout {
                 Layout.fillWidth: true; spacing: 5
-                Text { text: qsTr("BSI Customizer"); color: Theme.text; font.family: Theme.headingFont; font.pixelSize: 17; font.weight: Font.DemiBold; font.letterSpacing: -.4 }
-                Text { text: qsTr("Your player, thoughtfully customized"); color: Theme.tertiary; font.pixelSize: 11 }
+                Text { Layout.fillWidth: true; elide: Text.ElideRight; text: qsTr("BSI Customizer"); color: Theme.text; font.family: Theme.headingFont; font.pixelSize: 17; font.weight: Font.DemiBold; font.letterSpacing: -.4 }
+                Text { Layout.fillWidth: true; visible: topbar.width >= 600; elide: Text.ElideRight; text: qsTr("Your player, thoughtfully customized"); color: Theme.tertiary; font.pixelSize: 11 }
             }
-            ActionButton { objectName: "openToolFinder"; text: qsTr("Find a tool · Ctrl+K"); onClicked: toolFinder.open() }
+            ActionButton {
+                objectName: "openToolFinder"
+                text: topbar.width < 650 ? qsTr("Find") : qsTr("Find a tool · Ctrl+K")
+                ToolTip.visible: hovered; ToolTip.text: qsTr("Find a tool (Ctrl+K)")
+                onClicked: toolFinder.open()
+            }
             Rectangle {
                 Layout.preferredWidth: 78; Layout.preferredHeight: 28; radius: 14
                 color: backend.busy ? Theme.raised : "#0cc8e86a"; border.color: backend.busy ? Theme.border : "#24c8e86a"
@@ -237,7 +242,7 @@ ApplicationWindow {
                 }
             }
             CircleButton { text: qsTr("Preview collection"); onClicked: { window.navigatePage(12); collectionPage.preview(); } }
-            CircleButton { text: qsTr("Close window"); glyph: "<path d='m7 7 10 10M7 17 17 7'/>"; onClicked: window.close() }
+            CircleButton { objectName: "shellCloseWindow"; text: qsTr("Close window"); glyph: "<path d='m7 7 10 10M7 17 17 7'/>"; onClicked: window.close() }
         }
     }
     Menu {
