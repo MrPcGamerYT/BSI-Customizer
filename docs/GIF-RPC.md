@@ -40,9 +40,11 @@ our validated proxy and preserves the saved configuration/backup. Do not deploy
 to the Windows directory. A third-party DLL can contain functionality the clean
 proxy does not preserve: review the replacement checkbox carefully.
 
-The worker does not join threads or perform IPC/LoadLibrary in DllMain. It pins
-its module for the host's lifetime, has a stop event, reconnects when the app ID
-changes and forwards through guarded function pointers. Once loaded it must be
+The worker does not join threads or perform IPC in DllMain. The proxy resolves
+the absolute System32 library during process attach, before dependent DLL
+initializers can call its exports. It pins its module before starting its worker,
+has a stop event and reconnects when the app ID changes. API exports are x64
+tail jumps, not C++ wrappers. Once loaded it must be
 reconfigured with HD-Player stopped; restart the emulator after editing.
 
 ## Installer diagnostics
@@ -84,3 +86,33 @@ against the deployed proxy. It checks all named exports and ordinal identities
 against System32, makes real version-resource queries, parses an enabled INI,
 and survives worker startup/normal exit. This is not a live emulator boot or
 Discord GIF acceptance test. Leave the old DLL removed until testing the V2 build.
+
+
+## V3 forwarding repair (not yet live-emulator certified)
+
+The released V2 still crashes on the reported PC; its isolated test was not
+proof of emulator compatibility. V3 removes typed wrappers (including the guessed
+undocumented `GetFileVersionInfoByHandle` prototype) and uses MASM x64 tail jumps
+for all 17 exports. Registers, stack arguments, return values and last-error
+semantics are left to the original Windows implementation. It removes lazy
+`InitOnce`/`LoadLibrary` resolution from forwarded calls, eliminating that
+additional lock order when calls occur in another DLL's initializer. The fixed
+ordinal contract remains 1–17, with schema at 1000.
+
+The module is pinned **before** a worker address is handed to another thread,
+not after it starts. The RPC thread reserves its own 1 MiB stack instead of
+inheriting an arbitrary host default. Process-attach filename storage is reduced
+from 64 KiB to MAX_PATH; an overlong host path safely skips RPC but still forwards
+Windows APIs. V3 deployment validation additionally checks that named export
+addresses reference executable, file-backed code. V1/V2 recognition is retained
+for removal and upgrades.
+
+The Qt-free Windows workflow builds the same targets as the main app and tests:
+static imports before main on a 128 KiB stack; API calls from a dependent DLL's
+DllMain; concurrent forwarding/error parity with System32; a fifth stack-passed
+argument; FreeLibrary while the worker may still be pending; enabled/disabled
+INI settings and worker startup. These tests do **not** boot BlueStacks/MSI or
+exercise live Discord. The exact reported emulator version and its Windows
+Application Error event (faulting module, exception code, offset), or a crash
+dump, are still needed to confirm the reported failure is resolved. Keep the
+known-crashing DLL removed until a replacement is tested on that installation.

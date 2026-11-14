@@ -5,6 +5,8 @@
 #include <cstdio>
 #include <cwchar>
 #include <vector>
+#include <thread>
+#include <atomic>
 
 int wmain(int argc, wchar_t **argv) {
     if(argc!=2)return 2;
@@ -35,9 +37,43 @@ int wmain(int argc, wchar_t **argv) {
     if(!reinterpret_cast<Info>(GetProcAddress(proxy,"GetFileVersionInfoW"))(path,0,size,data.data()))return 8;
     LPVOID result=nullptr;UINT length=0;
     if(!reinterpret_cast<Query>(GetProcAddress(proxy,"VerQueryValueW"))(data.data(),L"\\",&result,&length)||!length)return 9;
+    // The proxy is already mapped when Windows resolves this DLL's imports.
+    // Its DllMain calls version APIs before LoadLibrary returns.
+    HMODULE dependent=LoadLibraryW(BSI_LOADER_TEST);
+    using Passed=BOOL(*)();
+    const auto passed=dependent?reinterpret_cast<Passed>(GetProcAddress(dependent,"BsiLoaderTestPassed")):nullptr;
+    if(!passed||!passed()){std::printf("Dependent DLL init failed: %lu\n",GetLastError());return 10;}
+    FreeLibrary(dependent);
+
+    // Compare error behavior to System32 concurrently. In particular the proxy
+    // must not change last-error merely by resolving its forwarding target.
+    auto proxySize=reinterpret_cast<Size>(GetProcAddress(proxy,"GetFileVersionInfoSizeW"));
+    auto systemSize=reinterpret_cast<Size>(GetProcAddress(system,"GetFileVersionInfoSizeW"));
+    std::atomic<bool> equivalent{true};
+    std::vector<std::thread> threads;
+    for(unsigned t=0;t<8;++t)threads.emplace_back([&] {
+        for(unsigned i=0;i<100;++i) {
+            DWORD a=0,b=0;
+            SetLastError(0x12345678);const auto sa=systemSize(path,&a);const auto ea=GetLastError();
+            SetLastError(0x12345678);const auto sb=proxySize(path,&b);const auto eb=GetLastError();
+            if(sa!=sb||a!=b||ea!=eb)equivalent=false;
+            SetLastError(0x12345678);const auto fa=systemSize(L"Z:\\bsi-nonexistent-file.dll",&a);const auto e1=GetLastError();
+            SetLastError(0x12345678);const auto fb=proxySize(L"Z:\\bsi-nonexistent-file.dll",&b);const auto e2=GetLastError();
+            if(fa!=fb||a!=b||e1!=e2)equivalent=false;
+        }
+    });
+    for(auto &thread:threads)thread.join();
+    if(!equivalent)return 11;
+
+    // Exercise a stack-passed fifth argument (x64 register-only tests miss it).
+    using InfoEx=BOOL(WINAPI*)(DWORD,LPCWSTR,DWORD,DWORD,LPVOID);
+    const auto infoEx=reinterpret_cast<InfoEx>(GetProcAddress(proxy,"GetFileVersionInfoExW"));
+    if(!infoEx(FILE_VER_GET_NEUTRAL,path,0,size,data.data()))return 12;
+    // Immediate FreeLibrary must not unmap code owned by a pending RPC thread.
+    FreeLibrary(proxy);
     // Includes delayed initialization, INI parsing, missing/available Discord
     // pipe handling and normal process exit, without needing an emulator/VM.
     Sleep(3500);
-    std::puts("PASS: x64 proxy names/ordinals, real version queries and HD-Player-named worker survive.");
+    std::puts("PASS: x64 names/ordinals, dependent DllMain, concurrent error parity, stack arguments, unload and worker startup.");
     return 0;
 }

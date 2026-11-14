@@ -82,7 +82,7 @@ bool isOurProxy(const QByteArray &d,QString *error) {
     const auto fail=[&](const QString &msg){if(error)*error=msg;return false;};
     const int pe=PeUtils::peHeaderOffset(d);
     if(pe<0||!ByteUtils::inRange(d,pe,24)||PeUtils::machine(d)!=0x8664||!PeUtils::isPe32Plus(d)
-        ||!(ByteUtils::le16(d,pe+22)&0x2000)||(!d.contains("BSI_GIF_RPC_PROXY_V1")&&!d.contains("BSI_GIF_RPC_PROXY_V2")))
+        ||!(ByteUtils::le16(d,pe+22)&0x2000)||(!d.contains("BSI_GIF_RPC_PROXY_V1")&&!d.contains("BSI_GIF_RPC_PROXY_V2")&&!d.contains("BSI_GIF_RPC_PROXY_V3")))
         return fail(QStringLiteral("Not a compatible BSI RPC-only Windows x64 DLL."));
     const auto sections=PeUtils::sections(d);
     const qint64 table=PeUtils::rvaToRaw(sections,PeUtils::exportRva(d));
@@ -92,35 +92,46 @@ bool isOurProxy(const QByteArray &d,QString *error) {
     if(count>4096||names<0||!ByteUtils::inRange(d,names,qint64(count)*4))return fail(QStringLiteral("Invalid DLL export names."));
     QSet<QByteArray> found;
     QMap<QByteArray,quint32> ordinals;
-    const bool v2=d.contains("BSI_GIF_RPC_PROXY_V2");
+    const bool fixedOrdinals=d.contains("BSI_GIF_RPC_PROXY_V2")||d.contains("BSI_GIF_RPC_PROXY_V3");
     const quint32 base=ByteUtils::le32(d,table+16),functions=ByteUtils::le32(d,table+20);
     const qint64 ordinalTable=PeUtils::rvaToRaw(sections,ByteUtils::le32(d,table+36));
-    if(v2 && (functions>65536 || ordinalTable<0 || !ByteUtils::inRange(d,ordinalTable,qint64(count)*2)))
-        return fail(QStringLiteral("Invalid V2 ordinal table."));
+    if(fixedOrdinals && (functions>65536 || ordinalTable<0 || !ByteUtils::inRange(d,ordinalTable,qint64(count)*2)))
+        return fail(QStringLiteral("Invalid proxy ordinal table."));
+    const bool v3=d.contains("BSI_GIF_RPC_PROXY_V3");
+    const qint64 addressTable=PeUtils::rvaToRaw(sections,ByteUtils::le32(d,table+28));
+    if(v3 && (addressTable<0||!ByteUtils::inRange(d,addressTable,qint64(functions)*4)))
+        return fail(QStringLiteral("Invalid proxy export address table."));
     for(quint32 i=0;i<count;++i) {
         const qint64 at=PeUtils::rvaToRaw(sections,ByteUtils::le32(d,names+i*4));
         if(at<0||!ByteUtils::inRange(d,at,1))return fail(QStringLiteral("Invalid exported name pointer."));
         const auto end=d.indexOf('\0',at);if(end<at||end-at>256)return fail(QStringLiteral("Invalid exported name."));
         const auto name=d.mid(at,end-at);
         found.insert(name);
-        if(v2) {
+        if(fixedOrdinals) {
             const quint32 index=ByteUtils::le16(d,ordinalTable+i*2);
-            if(index>=functions)return fail(QStringLiteral("Invalid V2 export ordinal index."));
+            if(index>=functions)return fail(QStringLiteral("Invalid proxy export ordinal index."));
             ordinals[name]=base+index;
+            if(v3) {
+                const quint32 rva=ByteUtils::le32(d,addressTable+qint64(index)*4);
+                const qint64 raw=PeUtils::rvaToRaw(sections,rva);
+                const auto *section=PeUtils::sectionForRaw(sections,raw);
+                if(!rva||raw<0||!ByteUtils::inRange(d,raw,1)||!section||!(section->chars&0x20000000))
+                    return fail(QStringLiteral("Proxy export does not point to executable code: %1.").arg(QString::fromLatin1(name)));
+            }
         }
     }
     const QList<QByteArray> required={"BsiGifRpcSchema","GetFileVersionInfoSizeA","GetFileVersionInfoSizeW","GetFileVersionInfoSizeExA","GetFileVersionInfoSizeExW","GetFileVersionInfoA","GetFileVersionInfoW","GetFileVersionInfoExA","GetFileVersionInfoExW","VerQueryValueA","VerQueryValueW","VerInstallFileA","VerInstallFileW","VerFindFileA","VerFindFileW","VerLanguageNameA","VerLanguageNameW"};
     // Keep V1 recognition for safe removal/upgrading, but V2 adds the missing
     // Windows export. Never make old crash recovery depend on new exports.
-    if(d.contains("BSI_GIF_RPC_PROXY_V2")&&!found.contains("GetFileVersionInfoByHandle"))
-        return fail(QStringLiteral("Incomplete V2 proxy: missing GetFileVersionInfoByHandle."));
+    if(fixedOrdinals&&!found.contains("GetFileVersionInfoByHandle"))
+        return fail(QStringLiteral("Incomplete proxy: missing GetFileVersionInfoByHandle."));
     for(const auto &name:required)if(!found.contains(name))return fail(QStringLiteral("Required DLL export missing: %1").arg(QString::fromLatin1(name)));
-    if(v2) {
+    if(fixedOrdinals) {
         const QList<QByteArray> windowsOrder={"GetFileVersionInfoA","GetFileVersionInfoByHandle","GetFileVersionInfoExA","GetFileVersionInfoExW",
             "GetFileVersionInfoSizeA","GetFileVersionInfoSizeExA","GetFileVersionInfoSizeExW","GetFileVersionInfoSizeW","GetFileVersionInfoW",
             "VerFindFileA","VerFindFileW","VerInstallFileA","VerInstallFileW","VerLanguageNameA","VerLanguageNameW","VerQueryValueA","VerQueryValueW"};
         for(int i=0;i<windowsOrder.size();++i)if(ordinals.value(windowsOrder[i])!=quint32(i+1))
-            return fail(QStringLiteral("V2 Windows API ordinal mismatch: %1.").arg(QString::fromLatin1(windowsOrder[i])));
+            return fail(QStringLiteral("Proxy Windows API ordinal mismatch: %1.").arg(QString::fromLatin1(windowsOrder[i])));
         if(ordinals.value("BsiGifRpcSchema")!=1000)return fail(QStringLiteral("The schema export must not occupy a Windows API ordinal."));
     }
     return true;

@@ -13,43 +13,36 @@
 
 // Marker + explicit export identify OUR app-local payload. No other version.dll
 // is modified implicitly. No Discord SDK, optimizer, hooks or hotkeys are used.
-extern "C" __declspec(dllexport) const char *BsiGifRpcSchema() { return "BSI_GIF_RPC_PROXY_V2"; }
+extern "C" __declspec(dllexport) const char *BsiGifRpcSchema() { return "BSI_GIF_RPC_PROXY_V3"; }
+// Filled once during process attach, before any dependent DLL may call us.
+// exports.asm tail-jumps through this table: no guessed undocumented prototype,
+// argument marshalling, last-error side effects or lazy-init lock in API calls.
+extern "C" { FARPROC bsiVersionExports[17] = {}; }
 static HMODULE systemVersion=nullptr;
-static INIT_ONCE versionOnce=INIT_ONCE_STATIC_INIT;
 static HANDLE stopEvent=nullptr;
-static BOOL CALLBACK loadSystemVersion(PINIT_ONCE, PVOID, PVOID*) {
+static bool loadSystemVersion() noexcept {
     wchar_t path[MAX_PATH];
     const UINT n=GetSystemDirectoryW(path,MAX_PATH);
-    if(!n||n+13>=MAX_PATH) return FALSE;
-    std::wstring absolute(path,n);absolute+=L"\\version.dll";
-    systemVersion=LoadLibraryExW(absolute.c_str(),nullptr,LOAD_LIBRARY_SEARCH_SYSTEM32);
-    return systemVersion!=nullptr;
+    if(!n||n+13>=MAX_PATH) return false;
+    constexpr wchar_t suffix[]=L"\\version.dll";
+    memcpy(path+n,suffix,sizeof(suffix));
+    // Fully qualified path only; never recurse into the app-local proxy.
+    systemVersion=LoadLibraryExW(path,nullptr,LOAD_LIBRARY_SEARCH_SYSTEM32);
+    if(!systemVersion) return false;
+    const char *names[]={"GetFileVersionInfoA","GetFileVersionInfoByHandle","GetFileVersionInfoExA","GetFileVersionInfoExW",
+        "GetFileVersionInfoSizeA","GetFileVersionInfoSizeExA","GetFileVersionInfoSizeExW","GetFileVersionInfoSizeW",
+        "GetFileVersionInfoW","VerFindFileA","VerFindFileW","VerInstallFileA","VerInstallFileW",
+        "VerLanguageNameA","VerLanguageNameW","VerQueryValueA","VerQueryValueW"};
+    for(unsigned i=0;i<17;++i) {
+        bsiVersionExports[i]=GetProcAddress(systemVersion,names[i]);
+        if(!bsiVersionExports[i]) {
+            FreeLibrary(systemVersion);systemVersion=nullptr;
+            SetLastError(ERROR_PROC_NOT_FOUND);return false;
+        }
+    }
+    // Keep the library reference for the process lifetime, like our pinned proxy.
+    return true;
 }
-static FARPROC original(const char *name) {
-    if(!InitOnceExecuteOnce(&versionOnce,loadSystemVersion,nullptr,nullptr)) return nullptr;
-    FARPROC proc=GetProcAddress(systemVersion,name);
-    if(!proc) SetLastError(ERROR_PROC_NOT_FOUND);
-    return proc;
-}
-#define FWD(ret,name,args,callargs) extern "C" ret WINAPI BSI_##name args { \
-    using Fn=ret (WINAPI*)args; auto fn=reinterpret_cast<Fn>(original(#name));return fn?fn callargs:ret(0); }
-FWD(BOOL,GetFileVersionInfoByHandle,(DWORD a,HANDLE b,DWORD c,LPVOID d),(a,b,c,d))
-FWD(DWORD,GetFileVersionInfoSizeA,(LPCSTR a,LPDWORD b),(a,b))
-FWD(DWORD,GetFileVersionInfoSizeW,(LPCWSTR a,LPDWORD b),(a,b))
-FWD(DWORD,GetFileVersionInfoSizeExA,(DWORD a,LPCSTR b,LPDWORD c),(a,b,c))
-FWD(DWORD,GetFileVersionInfoSizeExW,(DWORD a,LPCWSTR b,LPDWORD c),(a,b,c))
-FWD(BOOL,GetFileVersionInfoA,(LPCSTR a,DWORD b,DWORD c,LPVOID d),(a,b,c,d))
-FWD(BOOL,GetFileVersionInfoW,(LPCWSTR a,DWORD b,DWORD c,LPVOID d),(a,b,c,d))
-FWD(BOOL,GetFileVersionInfoExA,(DWORD a,LPCSTR b,DWORD c,DWORD d,LPVOID e),(a,b,c,d,e))
-FWD(BOOL,GetFileVersionInfoExW,(DWORD a,LPCWSTR b,DWORD c,DWORD d,LPVOID e),(a,b,c,d,e))
-FWD(BOOL,VerQueryValueA,(LPCVOID a,LPCSTR b,LPVOID *c,PUINT d),(a,b,c,d))
-FWD(BOOL,VerQueryValueW,(LPCVOID a,LPCWSTR b,LPVOID *c,PUINT d),(a,b,c,d))
-FWD(DWORD,VerInstallFileA,(DWORD a,LPSTR b,LPSTR c,LPSTR d,LPSTR e,LPSTR f,LPSTR g,PUINT h),(a,b,c,d,e,f,g,h))
-FWD(DWORD,VerInstallFileW,(DWORD a,LPWSTR b,LPWSTR c,LPWSTR d,LPWSTR e,LPWSTR f,LPWSTR g,PUINT h),(a,b,c,d,e,f,g,h))
-FWD(DWORD,VerFindFileA,(DWORD a,LPSTR b,LPSTR c,LPSTR d,LPSTR e,PUINT f,LPSTR g,PUINT h),(a,b,c,d,e,f,g,h))
-FWD(DWORD,VerFindFileW,(DWORD a,LPWSTR b,LPWSTR c,LPWSTR d,LPWSTR e,PUINT f,LPWSTR g,PUINT h),(a,b,c,d,e,f,g,h))
-FWD(DWORD,VerLanguageNameA,(DWORD a,LPSTR b,DWORD c),(a,b,c))
-FWD(DWORD,VerLanguageNameW,(DWORD a,LPWSTR b,DWORD c),(a,b,c))
 
 static std::wstring value(const std::wstring &path,const wchar_t *key,const wchar_t *fallback=L"") {
     wchar_t text[32768];GetPrivateProfileStringW(L"RPC",key,fallback,text,32768,path.c_str());return text;
@@ -96,16 +89,11 @@ static void diagnostic(const std::wstring &path, const char *message) noexcept {
     DWORD written=0;WriteFile(file,message,static_cast<DWORD>(strlen(message)),&written,nullptr);CloseHandle(file);
 }
 static unsigned workerImpl(void *module) {
-    // Prevent explicit unload while our worker is running. No joins, waits,
-    // LoadLibrary, IPC or C++ thread objects execute inside DllMain.
-    HMODULE pinned=nullptr;
-    if(!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS|GET_MODULE_HANDLE_EX_FLAG_PIN,
-        reinterpret_cast<LPCWSTR>(&BsiGifRpcSchema),&pinned)) return 0;
     wchar_t filename[32768];const DWORD length=GetModuleFileNameW(static_cast<HMODULE>(module),filename,32768);
     if(!length||length==32768) return 0;
     std::wstring settings(filename,length);settings.resize(settings.find_last_of(L"\\/")+1);settings+=L"bsi-gif-rpc.ini";
     std::wstring logPath=settings.substr(0,settings.find_last_of(L"\\/")+1)+L"bsi-gif-rpc.log";
-    diagnostic(logPath,"BSI GIF RPC V2: worker started; proxy forwarding remains independent.\r\n");
+    diagnostic(logPath,"BSI GIF RPC V3: worker started; proxy forwarding remains independent.\r\n");
     if(WaitForSingleObject(stopEvent,1500)!=WAIT_TIMEOUT)return 0;
     HANDLE pipe=INVALID_HANDLE_VALUE;std::string activeId,buffer;bool ready=false;unsigned index=0,nonce=0;
     ULONGLONG next=0,handshakeDeadline=0,reload=0; GifRpcPayload::Config current;const auto start=static_cast<std::int64_t>(std::time(nullptr));
@@ -159,13 +147,21 @@ static unsigned __stdcall worker(void *module) noexcept {
 }
 BOOL WINAPI DllMain(HINSTANCE module,DWORD reason,LPVOID) {
     if(reason==DLL_PROCESS_ATTACH) {
+        // Bind before dependent DllMain callbacks. Lazy InitOnce + LoadLibrary
+        // in a forwarded call introduces a lock-order inversion with the loader.
+        if(!loadSystemVersion())return FALSE;
         // Keep CRT thread notifications: this proxy uses the static CRT (/MT).
-        wchar_t host[32768];const DWORD n=GetModuleFileNameW(nullptr,host,32768);
-        if(!n||n==32768)return TRUE;
+        wchar_t host[MAX_PATH];const DWORD n=GetModuleFileNameW(nullptr,host,MAX_PATH);
+        if(!n||n==MAX_PATH)return TRUE;
         const wchar_t *base=host;for(const wchar_t *p=host;*p;++p)if(*p==L'\\'||*p==L'/')base=p+1;
         if(_wcsicmp(base,L"HD-Player.exe")!=0)return TRUE;
+        // Pin BEFORE publishing a worker entry address. Pinning inside the
+        // worker left a FreeLibrary race between thread creation and execution.
+        HMODULE pinned=nullptr;
+        if(!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS|GET_MODULE_HANDLE_EX_FLAG_PIN,
+            reinterpret_cast<LPCWSTR>(&BsiGifRpcSchema),&pinned))return TRUE;
         stopEvent=CreateEventW(nullptr,TRUE,FALSE,nullptr);
-        if(stopEvent){uintptr_t thread=_beginthreadex(nullptr,0,worker,module,0,nullptr);if(thread)CloseHandle(reinterpret_cast<HANDLE>(thread));}
+        if(stopEvent){uintptr_t thread=_beginthreadex(nullptr,1024*1024,worker,module,STACK_SIZE_PARAM_IS_A_RESERVATION,nullptr);if(thread)CloseHandle(reinterpret_cast<HANDLE>(thread));}
     } else if(reason==DLL_PROCESS_DETACH&&stopEvent)SetEvent(stopEvent);
     return TRUE;
 }

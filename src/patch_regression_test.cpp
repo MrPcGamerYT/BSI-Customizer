@@ -4941,8 +4941,16 @@ Window {
         const auto ordinalOffset=PeUtils::rvaToRaw(PeUtils::sections(bytes),ByteUtils::le32(bytes,exportOffset+36));
         if(ordinalOffset>=0 && ordinalOffset+2<=corruptOrdinal.size()) {
             ByteUtils::putLe16(corruptOrdinal,ordinalOffset,0xffff);
-            check(!GifRpc::isOurProxy(corruptOrdinal,&error),"V2 proxy with a corrupt API ordinal is refused before deployment");
-        } else check(false,"bundled V2 ordinal table is readable");
+            check(!GifRpc::isOurProxy(corruptOrdinal,&error),"Proxy with a corrupt API ordinal is refused before deployment");
+        } else check(false,"bundled proxy ordinal table is readable");
+
+        const auto addressOffset=PeUtils::rvaToRaw(PeUtils::sections(bytes),ByteUtils::le32(bytes,exportOffset+28));
+        if(addressOffset>=0 && ordinalOffset>=0) {
+            auto corruptAddress=bytes;
+            const auto index=ByteUtils::le16(bytes,ordinalOffset);
+            ByteUtils::putLe32(corruptAddress,addressOffset+qint64(index)*4,0);
+            check(!GifRpc::isOurProxy(corruptAddress,&error),"proxy with a null exported entry point is refused before deployment");
+        } else check(false,"bundled proxy export address table is readable");
 
         const auto folder=temp.filePath(QStringLiteral("gif-rpc-install"));QDir().mkpath(folder);
         const auto exe=QDir(folder).filePath(QStringLiteral("HD-Player.exe"));write(exe,peFile());
@@ -4964,7 +4972,7 @@ Window {
             const auto size=reinterpret_cast<Size>(GetProcAddress(proxy,"GetFileVersionInfoSizeW"));
             wchar_t windows[MAX_PATH];GetSystemDirectoryW(windows,MAX_PATH);
             const QString kernel=QDir(QString::fromWCharArray(windows)).filePath(QStringLiteral("kernel32.dll"));DWORD handle=0;
-            check(schema&&QByteArray(schema())=="BSI_GIF_RPC_PROXY_V2"&&size&&size(reinterpret_cast<LPCWSTR>(kernel.utf16()),&handle)>0,
+            check(schema&&QByteArray(schema())=="BSI_GIF_RPC_PROXY_V3"&&size&&size(reinterpret_cast<LPCWSTR>(kernel.utf16()),&handle)>0,
                   "proxy schema and actual System32 version API forwarding work");
             FreeLibrary(proxy);
         }

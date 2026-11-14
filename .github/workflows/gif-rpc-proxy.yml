@@ -1,0 +1,46 @@
+name: GIF RPC proxy compatibility
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'plugins/gif-rpc/**'
+      - 'src/core/GifRpc.cpp'
+      - '.github/workflows/gif-rpc-proxy.yml'
+permissions:
+  contents: read
+jobs:
+  proxy:
+    runs-on: windows-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - name: Build standalone MSVC x64 proxy and loader hosts (no Qt)
+        shell: pwsh
+        run: |
+          cmake -S plugins/gif-rpc -B rpc-build -A x64
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          cmake --build rpc-build --config Release --parallel
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Test static imports before main on a small host stack
+        shell: pwsh
+        run: |
+          & ./rpc-build/gif-rpc-static/Release/HD-Player.exe
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+      - name: Test dependent DllMain, concurrent forwarding and worker with enabled and disabled settings
+        shell: pwsh
+        run: |
+          $dll = (Resolve-Path ./rpc-build/gif-rpc/Release/version.dll).Path
+          $ini = Join-Path (Split-Path $dll) bsi-gif-rpc.ini
+          foreach ($enabled in @(0,1)) {
+            @("[RPC]", "Schema=1", "Enabled=$enabled", "AppId=1542174289523122330", "DetailCount=1", "Detail0=74657374") | Set-Content -Encoding ascii $ini
+            & ./rpc-build/gif-rpc-smoke/Release/HD-Player.exe $dll
+            if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          }
+          if (-not (Select-String -Quiet -Path ./rpc-build/gif-rpc/Release/bsi-gif-rpc.log -Pattern 'V3: worker started')) { throw 'RPC worker did not run' }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gif-rpc-v3-tests-${{ github.run_id }}
+          path: |
+            rpc-build/gif-rpc/Release/version.dll
+            rpc-build/gif-rpc/Release/bsi-gif-rpc.log
+          if-no-files-found: error
