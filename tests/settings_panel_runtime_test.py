@@ -123,6 +123,16 @@ about_doc = (about_source
              .replace("@@BSI_TAB_ICONS@@",
                       '({"display":"data:image/svg+xml;base64,'
                       + "A" * 512 + '"})'))
+# The generated page is validated against kAboutMarker before it is written, so
+# the marker text inside the template must match that constant exactly -
+# otherwise every apply fails its own marker check.
+about_marker = re.search(
+    r'const QString kAboutMarker = QStringLiteral\("([^"]+)"\);', cpp)
+assert about_marker, "Could not find kAboutMarker"
+assert about_marker.group(1) in about_doc, (
+    f"the generated About page must contain its own marker {about_marker.group(1)!r}; "
+    "the rebuild refuses to write a page that fails this check")
+
 about_payload = len(zlib.compress(about_doc.encode(), 9))
 assert about_payload <= 1700, (
     f"the About page compresses to {about_payload} bytes with one embedded icon; "

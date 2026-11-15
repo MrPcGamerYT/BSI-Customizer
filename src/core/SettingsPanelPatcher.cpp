@@ -784,7 +784,7 @@ property string pDeveloperTagline:@@BSI_TAGLINE@@
 property var bsiHiddenTabs:@@BSI_HIDDEN_TABS@@
 property var bsiTabIcons:@@BSI_TAB_ICONS@@
 property var pDeveloperLinks:[@@BSI_LINKS@@]
-// BSI CUSTOMIZER: redesigned About page v2
+// BSI CUSTOMIZER: redesigned About page v1
 ColumnLayout{anchors.fill:parent;spacing:0
 ScrollView{Layout.fillWidth:true;Layout.fillHeight:true;clip:true
 background:Rectangle{color:"transparent"}
