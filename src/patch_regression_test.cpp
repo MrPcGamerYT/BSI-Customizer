@@ -5215,16 +5215,24 @@ Window {
                 check(rebuiltWindow.contains(QStringLiteral("BSI Settings v9"))
                           && rebuiltWindow.contains(QStringLiteral("property var bHidden:"))
                           && rebuiltWindow.contains(QStringLiteral("bIcons"))
-                          && rebuiltWindow.contains(QStringLiteral("Rectangle{anchors.fill:parent;color:\"#0d0f14\";radius:14"))
+                          // The rebuilt shell paints with the player's own palette
+                          // (the same UiTheme.colors the stock window uses) instead
+                          // of a colour baked into the patch, so it keeps following
+                          // whatever theme the emulator currently has.
+                          && rebuiltWindow.contains(QStringLiteral("Rectangle{anchors.fill:parent;color:UiTheme.colors.primary80;radius:14"))
+                          && rebuiltWindow.contains(QStringLiteral("color:UiTheme.colors.primary10"))
+                          && !rebuiltWindow.contains(QStringLiteral("#0d0f14"))
                           && rebuiltWindow.contains(QStringLiteral("Column{anchors.fill:parent"))
                           // The bounded, centered page region: the stock pages are
                           // fixed-width, so stretching one across the shell leaves
                           // its content hugging the left edge.
-                          && rebuiltWindow.contains(QStringLiteral("Item{x:(parent.width-width)/2;width:Math.min(parent.width-32,568);"))
+                          && rebuiltWindow.contains(QStringLiteral("Item{width:Math.min(parent.width-64,568);x:(parent.width-width)/2;"))
                           // Tabs divide the strip into equal slots so the last
-                          // category is never half-clipped at the shell edge.
-                          && rebuiltWindow.contains(QStringLiteral("ListView{id:v;width:parent.width-32;height:48;x:16;"))
-                          && rebuiltWindow.contains(QStringLiteral("(v.count-h.length||1)|0)"))
+                          // category is never half-clipped at the shell edge, and
+                          // the 32 px inset is symmetric so the row keeps the same
+                          // gap from the window edge on both sides.
+                          && rebuiltWindow.contains(QStringLiteral("ListView{id:v;width:parent.width-64;height:48;x:32;"))
+                          && rebuiltWindow.contains(QStringLiteral("width:v.width/(v.count-h.length||1)"))
                           && rebuiltWindow.contains(QStringLiteral("MouseArea{anchors.fill:parent;onPressed:iSettingsWindow.startSystemMove()}"))
                           && rebuiltWindow.contains(QStringLiteral("pShowRedDot:modelData.pShowRedDot"))
                           && rebuiltWindow.contains(QStringLiteral("anchors.centerIn:parent"))
