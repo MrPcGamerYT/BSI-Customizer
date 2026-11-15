@@ -7,6 +7,9 @@ import tempfile
 from urllib.parse import urlsplit, parse_qs
 os.environ.setdefault('QT_QPA_PLATFORM','offscreen')
 os.environ.setdefault('QSG_RHI_BACKEND','software')
+# The OEM Qt 5 player uses customizable Controls; Qt 6 on Windows defaults to
+# a native style that deliberately rejects custom backgrounds/indicators.
+os.environ.setdefault('QT_QUICK_CONTROLS_STYLE','Basic')
 from PySide6.QtCore import QUrl, QMetaObject
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtQml import QQmlEngine, QQmlComponent
