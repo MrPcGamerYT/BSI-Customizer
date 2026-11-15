@@ -5257,7 +5257,7 @@ Window {
                           // The page lives in a rounded, bordered card inset from
                           // every window edge, so the content surface reads as a
                           // separate panel instead of a bare background.
-                          && rebuiltWindow.contains(QStringLiteral("Item{x:20;y:90;width:parent.width-40;height:parent.height-110"))
+                          && rebuiltWindow.contains(QStringLiteral("Rectangle{x:20;y:90;width:parent.width-40;height:parent.height-110;"))
                           && rebuiltWindow.contains(QStringLiteral("color:UiTheme.colors.primary70;radius:12;border.color:UiTheme.colors.primary60"))
                           // The selected tab carries its own accent underline below
                           // the pill the native button already paints.
@@ -5282,8 +5282,8 @@ Window {
                           && rebuiltWindow.contains(QStringLiteral("ListView{id:v;width:parent.width-48;height:40;y:50;x:24;"))
                           // A custom icon sits centred in the tab, with the native
                           // label lifted to the top instead of being painted over.
-                          && rebuiltWindow.contains(QStringLiteral("anchors.bottomMargin:p.bIcons[k]?22:0"))
-                          && rebuiltWindow.contains(QStringLiteral("Image{source:p.bIcons[k];width:16;height:16;x:parent.width/2-8;y:20}"))
+                          && rebuiltWindow.contains(QStringLiteral("anchors.bottomMargin:c?22:0"))
+                          && rebuiltWindow.contains(QStringLiteral("Image{source:c;width:16;height:16;x:parent.width/2-8;y:20}"))
                           && rebuiltWindow.contains(QStringLiteral("StackLayout{id:iSelectedSettingControl;anchors.fill:parent;currentIndex:pCurrentTabIndex"))
                           && rebuiltWindow.contains(QStringLiteral("delegate:Loader{width:parent.width;height:parent.height;"))
                           && rebuiltWindow.contains(QStringLiteral("modelData.pComponentObj=item"))

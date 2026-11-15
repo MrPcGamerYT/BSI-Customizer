@@ -108,8 +108,8 @@ assert "width:v.width/(v.count-p.bHidden.length||1)*(p.bHidden.indexOf(k)<0);hei
 # the window edge and every tab keeps the same gap.
 # A custom icon sits centred in the tab with the native label lifted to the top,
 # instead of being painted over the text.
-assert "anchors.bottomMargin:p.bIcons[k]?22:0" in replacement, "the label must move up when an icon is shown"
-assert "Image{source:p.bIcons[k];width:16;height:16;x:parent.width/2-8;y:20}" in replacement, \
+assert "anchors.bottomMargin:c?22:0" in replacement, "the label must move up when an icon is shown"
+assert "Image{source:c;width:16;height:16;x:parent.width/2-8;y:20}" in replacement, \
     "the icon must be centred in the tab"
 # Every category must stay reachable: the strip divides the shell width into
 # equal slots instead of letting the last tab be half-clipped at the edge.
@@ -123,13 +123,18 @@ assert "height:parent.height-110" in replacement, \
 assert "Rectangle{visible:s;y:38;width:parent.width;height:2;color:UiTheme.colors.accentNormal" in replacement, \
     "the selected tab must carry an accent underline"
 assert "StackLayout{id:iSelectedSettingControl;anchors.fill:parent;currentIndex:pCurrentTabIndex" in replacement
-# The embedded QML must stay inside the smallest player resource slot;
-# growing it past that is a hard patch failure on 5.9/5.10 players.
-# v8, which fitted every shipped player, was 1821 bytes of QML. That is the
-# measured ceiling this shell has ever been applied at, so hold the redesign
-# under it (v12 adds the page card and the selected-tab underline and lands
-# below v8, leaving headroom rather than eating it).
-assert len(replacement.encode()) <= 1821, f"shell grew to {len(replacement.encode())} bytes"
+# The whole UiSettingsWindow.qml has to fit one resource slot in the player EXE,
+# and it can never be moved once the file is larger than the slot. A shipped
+# BlueStacks 5.10 build reports 2468 bytes there and a real apply of an earlier
+# draft of this shell needed 2479 ("needs 2479 bytes but its slot only holds
+# 2468"), which is the hard failure this test exists to prevent. Keep the
+# template far enough under that ceiling that the surrounding marker check, the
+# BOM handling and any future stock prefix still fit: 1900 leaves ~570 bytes of
+# headroom against the measured slot.
+assert len(replacement.encode()) <= 1900, (
+    f"shell grew to {len(replacement.encode())} bytes; the tightest known "
+    "UiSettingsWindow.qml slot is 2468 bytes"
+)
 
 # The About page lives in its own player resource slot, compressed, and a custom
 # tab icon or logo is embedded straight into it. That slot is small (one shipped
@@ -171,7 +176,7 @@ assert "bsiAboutDeveloperName" in about_doc and "bsiAboutDeveloperLink" in about
     "compacting the About page must keep its object names"
 assert "fCheckForUpdateCallback" in about_doc and "fUpdateShortDisplayName" in about_doc, \
     "the native About callbacks must survive compaction"
-assert "Item{x:20;y:90;width:parent.width-40;height:parent.height-110" in replacement, \
+assert "Rectangle{x:20;y:90;width:parent.width-40;height:parent.height-110;" in replacement, \
     "the page card must be inset from both window edges"
 assert "delegate:Loader{width:parent.width;height:parent.height;Component.onCompleted:setSource(modelData.pQmlSource" in replacement
 assert "pSettingBtnText:" in replacement and "pSelected:s" in replacement and "pShowRedDot:modelData.pShowRedDot" in replacement
@@ -430,16 +435,17 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
     assert tabs.property("x") >= 0 and tabs.property("width") <= panel.width(), "The category strip overflowed the shell"
     assert abs(loaded_page.width() - page_loader.width()) < 2, "The loaded native page did not follow its Loader width"
     assert loaded_page.objectName() == "runtimeSettingPage", "The native Settings page Loader did not load its page"
-    # The rebuilt About page publishes its tab icons with
-    # `parent.parent.parent.parent.parent.parent.bHidden = ...`, so the number
-    # of visual parents between a page root and the shell is a contract with
-    # QML the player already ships. Keep it pinned.
-    node, hops = loaded_page, 0
-    while node is not None and node is not obj:
+    # The rebuilt About page publishes its tab icons by walking up until it sees
+    # `bIcons`, so what matters is that the shell is reachable at all - not that
+    # it is a fixed number of hops away. Pinning a count here used to force a
+    # layout-only wrapper Item into the shell, which cost bytes in a resource
+    # slot that is already the binding constraint.
+    node = loaded_page
+    while node is not None and node is not obj and (
+        not hasattr(node, "property") or node.property("bIcons") is None
+    ):
         node = node.parentItem()
-        hops += 1
-    hops -= 1  # the final step arrives at the shell root itself
-    assert node is obj and hops == 6, f"A native page must reach the shell root in six parent hops (measured {hops})"
+    assert node is not None, "a native page cannot reach the shell by walking up"
     assert str(first_tab.property("pSettingBtnText")).splitlines()[0], "Category tabs should show their own icon glyphs"
 
     tab_point = first_tab.mapToScene(QPointF(first_tab.width() / 2, first_tab.height() / 2)).toPoint()
