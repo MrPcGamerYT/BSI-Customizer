@@ -8,6 +8,7 @@ Requires PySide6==6.8.3 and is run by run_qt_runtime_test.py.
 import os
 import re
 import tempfile
+import urllib.parse
 import zlib
 from pathlib import Path
 
@@ -611,3 +612,43 @@ for hostile in ("<svg><script>alert(1)</script></svg>",
         "the hostile fixture must still be rejected by validateAssetBytes"
 
 print("PASS: tab icons are compacted before they are embedded in the About document")
+
+
+# A tab icon the user picks is often far bigger than the slot the About page
+# lives in (a 150-path icon is ~8.7 KB of markup against a 2337-byte slot), and
+# refusing the upload is not an answer: the SVG is valid and only the container
+# is small. Such an icon is drawn once at the size the strip uses and stored as a
+# PNG instead, which is what makes "set 2+ custom icons" apply at all.
+def _page_payload(icons_literal):
+    doc = about_source
+    for token, value in (
+        ("@@BSI_DEVELOPER@@", '"Mr.Pc Gamer"'),
+        ("@@BSI_TAGLINE@@", '"BlueStacks tools"'),
+        ("@@BSI_HIDDEN_TABS@@", "[]"),
+        ("@@BSI_LINKS@@", '{"title":"GitHub","url":"https://github.com/x"}'),
+        ("@@BSI_LOGO_SOURCE@@", '"qrc:/qrcAssets/BlueStacks5Beta.svg"'),
+        ("@@BSI_TAB_ICONS@@", icons_literal),
+    ):
+        doc = doc.replace(token, value)
+    return len(zlib.compress(doc.encode(), 9))
+
+
+def _icon_svg(paths: int) -> str:
+    body = "".join(
+        f'<path d="M{i} 2h8a2 2 0 0 1 2 2v{i}l-3 4z" fill="#54c8ff"/>' for i in range(paths))
+    return f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">{body}</svg>'
+
+
+# The case that used to fail: several large icons at once.
+big_icon = urllib.parse.quote(_icon_svg(150), safe="")
+as_svg = "({" + ",".join(
+    f'"{i}":"data:image/svg+xml,{big_icon}"' for i in range(4)) + "})"
+assert _page_payload(as_svg) > 2337, (
+    "the fixture must reproduce the over-slot case, otherwise this test proves nothing")
+# After the raster fallback the same four icons are a few hundred bytes each.
+assert "rasterizeSvg" in cpp and "artworkBudget" in cpp, \
+    "a tab icon that cannot fit its slot must be drawn down, not refused"
+assert "image/png" in cpp, "the drawn-down icon is stored as PNG"
+assert "for (int box : {32, 24, 18})" in cpp, \
+    "the fallback should try progressively smaller squares until it fits"
+print("PASS: oversized tab icons are drawn down instead of failing the apply")

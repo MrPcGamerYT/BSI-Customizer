@@ -18,7 +18,10 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonParseError>
+#include <QImage>
 #include <QImageReader>
+#include <QPainter>
+#include <QSvgRenderer>
 #include <QLockFile>
 #include <QSaveFile>
 #include <QStandardPaths>
@@ -1098,6 +1101,60 @@ QString minifySvg(const QString &source)
     return text;
 }
 
+// Defined below; readCustomAsset measures the generated page against the slot.
+QString buildAbout(const QString &developerName, const QString &tagline,
+                   const QVariantList &links, const QString &logoSource,
+                   const QStringList &hiddenTabs, const QVariantMap &tabIcons);
+
+// The About document is the only place a custom tab icon can live (it is the
+// page that publishes them to the shell), and its slot is small: one shipped
+// player reports 2337 bytes for the whole page, compressed. Every icon is
+// inserted there as a data URI, so an SVG saved with thousands of paths simply
+// cannot fit no matter how well it is minified. Draw it once at the size the
+// strip actually uses and store a compact PNG instead: at 18 px an icon with
+// hundreds of paths is visually identical to one with a handful, and the file
+// becomes a couple of hundred bytes.
+QByteArray rasterizeSvg(const QByteArray &svg, int box)
+{
+    QSvgRenderer renderer(svg);
+    if (!renderer.isValid()) return {};
+    // Keep the drawing's own aspect ratio inside a square tile so a wide or tall
+    // icon is never stretched.
+    QSizeF natural = renderer.defaultSize();
+    if (natural.isEmpty()) natural = QSizeF(box, box);
+    const QSizeF scaled = natural.scaled(QSizeF(box, box), Qt::KeepAspectRatio);
+    const int side = qMax(8, qRound(qMax(scaled.width(), scaled.height())));
+    QImage image(side, side, QImage::Format_ARGB32_Premultiplied);
+    image.fill(Qt::transparent);
+    QPainter painter(&image);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
+    const QRectF target((side - scaled.width()) / 2.0, (side - scaled.height()) / 2.0,
+                        scaled.width(), scaled.height());
+    renderer.render(&painter, target);
+    painter.end();
+    QByteArray png;
+    QBuffer buffer(&png);
+    if (!buffer.open(QIODevice::WriteOnly)) return {};
+    return image.save(&buffer, "PNG") ? png : QByteArray();
+}
+
+// How many bytes of tab artwork the About page can carry. The document is
+// compressed into a fixed slot, so this is measured, not guessed: build the page
+// with no artwork, see what it compresses to, and keep a reserve for the logo
+// and for the compressor's inability to pack incompressible data.
+constexpr int kAboutSlotFloor = 2337;
+constexpr int kArtworkReserve = 320;
+
+// `plainPage` is the generated About document built with no custom artwork. Its
+// compressed size is what competes for the slot, so measure exactly that.
+int artworkBudget(const QByteArray &plainPage)
+{
+    if (plainPage.isEmpty()) return kAboutSlotFloor - kArtworkReserve - 1600;
+    const int used = int(EmbeddedResources::payloadSizeFor(plainPage, 1));
+    return qMax(0, kAboutSlotFloor - used - kArtworkReserve);
+}
+
 QVariantMap readCustomAsset(const QString &path, const QString &kind)
 {
     if (kind != QLatin1String("tab-icon") && kind != QLatin1String("logo"))
@@ -1127,6 +1184,28 @@ QVariantMap readCustomAsset(const QString &path, const QString &kind)
                                   "in-player Settings resource slot.")
                        .arg(bytes.size()).arg(minified.toUtf8().size());
             stored = minified.toUtf8();
+        }
+        // Still too big for the About page's slot? Draw it at the size the strip
+        // uses and store that instead. Refusing the upload is worse: the user's
+        // SVG is valid and only the container is small.
+        const int budget = artworkBudget(
+            buildAbout(QString(), QString(), {}, QString(), QStringList(), {}).toUtf8());
+        if (budget > 0) {
+            const int dataUriSize = int(stored.toBase64().size()) + 28;
+            for (int box : {32, 24, 18}) {
+                if (dataUriSize <= budget) break;
+                const QByteArray png = rasterizeSvg(stored, box);
+                if (png.isEmpty()) break;
+                const int pngUri = int(png.toBase64().size()) + 22;
+                if (pngUri >= dataUriSize) break;
+                stored = png;
+                mime = QStringLiteral("image/png");
+                error.clear();
+                note = QStringLiteral(" Drawn at %1 px (%2 -> %3 bytes) because this "
+                                      "player's About-page slot cannot hold the full "
+                                      "SVG.")
+                           .arg(box).arg(bytes.size()).arg(png.size());
+            }
         }
     }
     return {{QStringLiteral("ok"), true},
