@@ -91,14 +91,14 @@ assert "#0d0f14" not in replacement and 'color:"white"' not in replacement, \
 assert 'color:"' not in replacement, "no literal colours may be baked into the shell"
 assert "MouseArea{width:parent.width;height:50;onPressed:iSettingsWindow.startSystemMove()}" in replacement, \
     "the whole header band must drag the window"
-assert "x:(parent.width-width)/2;y:14" in replacement, \
+assert "x:parent.width/2-width/2;y:14" in replacement, \
     "the title must be centred in the header band, not behind the card"
 assert "ListView{id:v;" in replacement
 assert "orientation:ListView.Horizontal;model:pSettingsItems.pSettingElements" in replacement
 # The strip spans the shell with a symmetric 24 px inset, and its slots divide
 # that width evenly, so the row is balanced without any label-length raggedness
 # and the last tab never sits against the window edge.
-assert "ListView{id:v;width:parent.width-48;height:40;y:50;x:24;" in replacement
+assert "ListView{id:v;width:parent.width-48;y:50;x:24;" in replacement
 assert "property var p:iSettingsWindowShadowContainer" in replacement
 # Slots divide the strip's real width (no integer truncation, which left the
 # row short of the right inset and overlapped long neighbour labels).
@@ -130,10 +130,10 @@ assert "StackLayout{id:iSelectedSettingControl;anchors.fill:parent;currentIndex:
 # 2468"), which is the hard failure this test exists to prevent. Keep the
 # template far enough under that ceiling that the surrounding marker check, the
 # BOM handling and any future stock prefix still fit: 1900 leaves ~570 bytes of
-# headroom against the measured slot. The current shell is 1742 bytes, i.e.
-# 2468 in that slot - exactly the tightest player we have seen, so treat any
-# growth as a regression rather than headroom.
-assert len(replacement.encode()) <= 1742, (
+# headroom against the measured slot. The measured surrounding overhead is 727
+# bytes, so 2468 - 727 = 1741 is the hard limit for this template; it currently
+# sits at 1732 (2459 in the slot), which is the whole margin there is.
+assert len(replacement.encode()) <= 1741, (
     f"shell grew to {len(replacement.encode())} bytes; the tightest known "
     "UiSettingsWindow.qml slot is 2468 bytes"
 )

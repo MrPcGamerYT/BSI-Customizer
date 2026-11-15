@@ -719,17 +719,17 @@ property var bHidden:[]
 property var bIcons:({})
 Rectangle{anchors.fill:parent;color:UiTheme.colors.primary80
 MouseArea{width:parent.width;height:50;onPressed:iSettingsWindow.startSystemMove()}
-Text{text:qsTr('Settings');color:UiTheme.colors.primary10;font:UiTheme.fonts.bodyLarge;x:(parent.width-width)/2;y:14}
+Text{text:qsTr('Settings');color:UiTheme.colors.primary10;font:UiTheme.fonts.bodyLarge;x:parent.width/2-width/2;y:14}
 UiImageButton{asset:'CloseIcon';x:parent.width-32;onClicked:iSettingsWindow.close()}
-ListView{id:v;width:parent.width-48;height:40;y:50;x:24;orientation:ListView.Horizontal;model:pSettingsItems.pSettingElements
+ListView{id:v;width:parent.width-48;y:50;x:24;orientation:ListView.Horizontal;model:pSettingsItems.pSettingElements
 delegate:Item{property var s:index==pCurrentTabIndex;property var p:iSettingsWindowShadowContainer;property var k:modelData.pQmlSource.split('/').pop().toLowerCase();width:v.width/(v.count-p.bHidden.length||1)*(p.bHidden.indexOf(k)<0);height:40
 UiSettingsButton{anchors.fill:parent;anchors.bottomMargin:p.bIcons[k]?22:0;pSettingIdx:index;pSettingBtnText:modelData.pButtonText;pSelected:s;pShowRedDot:modelData.pShowRedDot;onSettingClicked:fChangeSelectedSetting(pSettingIdx)}
 Image{source:p.bIcons[k];width:16;height:16;x:parent.width/2-8;y:20}
 Rectangle{visible:s;y:38;width:parent.width;height:2;color:UiTheme.colors.accentNormal}}}
 Rectangle{x:20;y:90;width:parent.width-40;height:parent.height-110;color:UiTheme.colors.primary70;radius:12;border.color:UiTheme.colors.primary60
 StackLayout{id:iSelectedSettingControl;anchors.fill:parent;currentIndex:pCurrentTabIndex
-Repeater{model:v.model;delegate:Loader{width:parent.width;Component.onCompleted:setSource(modelData.pQmlSource,modelData.pComponentArgs||{});onLoaded:{item.anchors.fill=item.parent;modelData.pComponentObj=item;if(item.fOnQmlLoaded)item.fOnQmlLoaded()}}}}
-}}})QML");
+Repeater{model:v.model;delegate:Loader{width:parent.width;Component.onCompleted:setSource(modelData.pQmlSource,modelData.pComponentArgs||{});onLoaded:{item.anchors.fill=item.parent;modelData.pComponentObj=item;if(item.fOnQmlLoaded)item.fOnQmlLoaded()}}}}}}
+})QML");
     QString out = stock;
     out.replace(target.nameBegin, target.end - target.nameBegin, replacement);
     // Make the redesigned Settings window use the available player viewport,

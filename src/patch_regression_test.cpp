@@ -5279,7 +5279,7 @@ Window {
                           // The strip is inset the same 24 px on both sides and its
                           // slots divide exactly that width, so every tab keeps the
                           // same gap and the last one never touches the edge.
-                          && rebuiltWindow.contains(QStringLiteral("ListView{id:v;width:parent.width-48;height:40;y:50;x:24;"))
+                          && rebuiltWindow.contains(QStringLiteral("ListView{id:v;width:parent.width-48;y:50;x:24;"))
                           // A custom icon sits centred in the tab, with the native
                           // label lifted to the top instead of being painted over.
                           && rebuiltWindow.contains(QStringLiteral("anchors.bottomMargin:p.bIcons[k]?22:0"))
