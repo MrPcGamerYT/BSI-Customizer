@@ -44,7 +44,7 @@ Item {
         source: "VoidOptimizerUI/icons/" + kind + ".png"
         sourceSize.width: 48; sourceSize.height: 48
         fillMode: Image.PreserveAspectFit; smooth: true
-        implicitWidth: 20; implicitHeight: 20
+        width: 20; height: 20
     }
     component Action: Button {
         id: action
