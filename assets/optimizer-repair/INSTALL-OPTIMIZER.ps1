@@ -72,12 +72,14 @@ function Main {
         foreach ($entry in $manifest.files) {
             if ($entry.path -notin $allowed -or $seen.ContainsKey($entry.path)) { throw 'Invalid/duplicate backup path.' }
             $seen[$entry.path]=$true
-            if ((Current (Join-Path $root $entry.path)) -ne $entry.after) { throw "Changed since install; restore stopped before writing: $($entry.path)" }
+            if ((Current (Join-Path $root $entry.path)) -notin @($entry.after,$entry.before)) { throw "Changed since install; restore stopped before writing: $($entry.path)" }
             if ($entry.before -ne 'ABSENT' -and (Current (Join-Path $backup $entry.path)) -ne $entry.before) { throw "Backup hash mismatch: $($entry.path)" }
         }
         foreach ($entry in $manifest.files) {
             $target=Join-Path $root $entry.path
-            if ((Current $target) -ne $entry.after) { throw 'File changed during restore. Backup retained.' }
+            $observed=Current $target
+            if ($observed -eq $entry.before) { continue }
+            if ($observed -ne $entry.after) { throw 'File changed during restore. Backup retained.' }
             if ($entry.before -eq 'ABSENT') { if (Test-Path -LiteralPath $target) { Remove-Item -LiteralPath $target } }
             else { Write-Atomic $target (Read-Small (Join-Path $backup $entry.path)) }
             if ((Current $target) -ne $entry.before) { throw 'Restore read-back failed. Backup retained.' }
@@ -144,7 +146,10 @@ function Main {
         if ($rel -eq $relativeState -and $before -ne (Digest $stateBytes)) { throw 'State changed during preflight.' }
         $entry=[pscustomobject]@{path=$rel;before=$before;after=(Digest $desired[$rel])}
         $entries+= $entry
-        if ($before -ne 'ABSENT') { Write-Atomic (Join-Path $backup $rel) (Read-Small $target) }
+        if ($before -ne 'ABSENT') {
+            Write-Atomic (Join-Path $backup $rel) (Read-Small $target)
+            if ((Current (Join-Path $backup $rel)) -ne $before) { throw 'Backup read-back mismatch; install stopped before changing UI.' }
+        }
     }
     Write-Atomic (Join-Path $backup 'manifest.json') (Json-Bytes ([pscustomobject]@{format=1;root=$root;files=$entries}))
     Write-Host "BACKUP (keep): $backup"

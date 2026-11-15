@@ -41,6 +41,9 @@ try {
     Run @('-Mode','Install','-ConfirmInstall') 1
     $state.assets_url=([Uri]($assets+'\')).AbsoluteUri
     [IO.File]::WriteAllText($stateFile,($state|ConvertTo-Json -Depth 15),$utf8)
+    # Snapshot the exact valid state we just rewrote, immediately before install.
+    [IO.File]::AppendAllText($stateFile,"`r`n  `r`n")
+    $originalState=Hash $stateFile
     Run @('-Mode','Install','-ConfirmInstall') 0
     Need ((Hash $page) -eq (Hash (Join-Path $pack 'Assets/OptimizerPage.qml'))) 'Wrong page installed'
     Need ((Hash (Join-Path $root 'Assets/OptimizerPage.qml')) -eq $wrong) 'Top-level decoy touched'
@@ -62,6 +65,8 @@ try {
     Run @('-Mode','Restore','-BackupFolder',$backup) 0
     Need ((Hash $page) -eq $originalPage) 'Page not restored exactly'
     Need ((Hash $stateFile) -eq $originalState) 'State not restored byte-for-byte'
+    Run @('-Mode','Restore','-BackupFolder',$backup) 0
+    Need ((Hash $stateFile) -eq $originalState) 'Repeat restore must be safe'
     Need (!(Test-Path (Join-Path $assets 'VoidOptimizerUI/icons/power.png'))) 'Added icon not removed'
     Write-Host 'PASS: actual Windows install/read-back, stale-state/wrong-root refusal, state field preservation, decoy isolation, changed-file restore refusal and exact restore. No real emulator/helper/registry activity.'
 } catch {
