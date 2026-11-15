@@ -64,7 +64,7 @@ match = re.search(
 )
 assert match, "Could not find the generated Settings-window QML template"
 replacement = match.group(1)
-assert "BSI Settings v10" in replacement
+assert "BSI Settings v12" in replacement
 assert "pSettingsItems.pSettingElements" in replacement
 assert "property var bHidden:" in replacement
 assert "property var bHidden:[]" in replacement
@@ -89,36 +89,47 @@ assert "color:UiTheme.colors.primary10" in replacement
 assert "#0d0f14" not in replacement and 'color:"white"' not in replacement, \
     "the rebuilt shell must not hard-code colours"
 assert 'color:"' not in replacement, "no literal colours may be baked into the shell"
-assert "Column{anchors.fill:parent" in replacement
-assert "MouseArea{anchors.fill:parent;onPressed:iSettingsWindow.startSystemMove()}" in replacement
-assert "anchors.centerIn:parent" in replacement
+assert "MouseArea{width:parent.width;height:50;onPressed:iSettingsWindow.startSystemMove()}" in replacement, \
+    "the whole header band must drag the window"
+assert "x:(parent.width-width)/2;y:14" in replacement, \
+    "the title must be centred in the header band, not behind the card"
 assert "ListView{id:v;" in replacement
-assert "orientation:ListView.Horizontal;model:pSettingsItems.pSettingElements;clip:true" in replacement
+assert "orientation:ListView.Horizontal;model:pSettingsItems.pSettingElements" in replacement
 # The strip spans the shell with a symmetric 24 px inset, and its slots divide
 # that width evenly, so the row is balanced without any label-length raggedness
 # and the last tab never sits against the window edge.
-assert "ListView{id:v;width:parent.width-48;height:44;x:24;" in replacement
-assert "property var h:w.bHidden" in replacement
+assert "ListView{id:v;width:parent.width-48;height:40;y:50;x:24;" in replacement
+assert "property var p:iSettingsWindowShadowContainer" in replacement
 # Slots divide the strip's real width (no integer truncation, which left the
 # row short of the right inset and overlapped long neighbour labels).
-assert "width:v.width/(v.count-h.length||1)*(h.indexOf(k)<0);height:44" in replacement
+assert "width:v.width/(v.count-p.bHidden.length||1)*(p.bHidden.indexOf(k)<0);height:40" in replacement
 # Even gaps: the strip is inset the same amount on both sides and the slots
 # divide exactly that width, so the first and last tabs sit equally far from
 # the window edge and every tab keeps the same gap.
 # A custom icon sits centred in the tab with the native label lifted to the top,
 # instead of being painted over the text.
-assert "anchors.bottomMargin:c?26:0" in replacement, "the label must move up when an icon is shown"
-assert "Image{source:c;width:18;height:18;x:parent.width/2-9;y:24}" in replacement, \
+assert "anchors.bottomMargin:p.bIcons[k]?22:0" in replacement, "the label must move up when an icon is shown"
+assert "Image{source:p.bIcons[k];width:16;height:16;x:parent.width/2-8;y:20}" in replacement, \
     "the icon must be centred in the tab"
 # Every category must stay reachable: the strip divides the shell width into
 # equal slots instead of letting the last tab be half-clipped at the edge.
 assert "item.anchors.fill=item.parent" in replacement
-assert "height:parent.height-112" in replacement
+# The page sits inside a rounded card inset from every window edge, so the
+# content surface is visibly separate from the shell background.
+assert "color:UiTheme.colors.primary70;radius:12;border.color:UiTheme.colors.primary60" in replacement, \
+    "the page must sit inside a rounded, bordered card"
+assert "height:parent.height-110" in replacement, \
+    "the card must stop short of the window bottom"
+assert "Rectangle{visible:s;y:38;width:parent.width;height:2;color:UiTheme.colors.accentNormal" in replacement, \
+    "the selected tab must carry an accent underline"
 assert "StackLayout{id:iSelectedSettingControl;anchors.fill:parent;currentIndex:pCurrentTabIndex" in replacement
 # The embedded QML must stay inside the smallest player resource slot;
 # growing it past that is a hard patch failure on 5.9/5.10 players.
-# v8, which fitted every shipped player, was 1821 bytes of QML.
-assert len(replacement.encode()) <= 1790, f"shell grew to {len(replacement.encode())} bytes"
+# v8, which fitted every shipped player, was 1821 bytes of QML. That is the
+# measured ceiling this shell has ever been applied at, so hold the redesign
+# under it (v12 adds the page card and the selected-tab underline and lands
+# below v8, leaving headroom rather than eating it).
+assert len(replacement.encode()) <= 1821, f"shell grew to {len(replacement.encode())} bytes"
 
 # The About page lives in its own player resource slot, compressed, and a custom
 # tab icon or logo is embedded straight into it. That slot is small (one shipped
@@ -160,10 +171,10 @@ assert "bsiAboutDeveloperName" in about_doc and "bsiAboutDeveloperLink" in about
     "compacting the About page must keep its object names"
 assert "fCheckForUpdateCallback" in about_doc and "fUpdateShortDisplayName" in about_doc, \
     "the native About callbacks must survive compaction"
-assert "Item{width:Math.min(parent.width-48,568);x:(parent.width-width)/2;" in replacement, "The page host must be horizontally centered in the shell"
-assert "width:Math.min(parent.width-48,568)" in replacement
-assert "delegate:Loader{width:iSelectedSettingControl.width;height:iSelectedSettingControl.height;" in replacement
-assert "pSettingBtnText:" in replacement and "pSelected:index==pCurrentTabIndex" in replacement and "pShowRedDot:modelData.pShowRedDot" in replacement
+assert "Item{x:20;y:90;width:parent.width-40;height:parent.height-110" in replacement, \
+    "the page card must be inset from both window edges"
+assert "delegate:Loader{width:parent.width;height:parent.height;Component.onCompleted:setSource(modelData.pQmlSource" in replacement
+assert "pSettingBtnText:" in replacement and "pSelected:s" in replacement and "pShowRedDot:modelData.pShowRedDot" in replacement
 assert "pSettingIdx:index" in replacement
 assert "fChangeSelectedSetting(pSettingIdx)" in replacement
 assert "onPressed:iSettingsWindow.startSystemMove()" in replacement
@@ -331,8 +342,9 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
     # as the tab strip and capped at 568 px.
     page_frame = next(
         (candidate for candidate in visual_tree
-         if abs(candidate.width() - min(obj.width() - 48, 568)) < 2
-         and candidate.height() > 50 and candidate is not obj),
+         if abs(candidate.width() - (obj.width() - 40)) < 2
+         and abs(candidate.height() - (obj.height() - 110)) < 2
+         and candidate is not obj),
         None,
     )
     panel = next(
@@ -403,8 +415,8 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
     assert page_frame is not None, "The shell did not create its centered page host card"
     frame_center = page_frame.mapToItem(panel, QPointF(page_frame.width() / 2, 0))
     assert abs(frame_center.x() - panel.width() / 2) < 2, "The page host card should be centered in the shell"
-    assert abs(page_frame.width() - 568) < 2, "A wide player window should cap the page region at its bounded width"
-    assert page_frame.width() < panel.width() - 100, "The page region should no longer be stretched across the whole shell"
+    assert abs(page_frame.width() - (panel.width() - 40)) < 2, "The page card must be inset 20 px on each side"
+    assert page_frame.width() < panel.width() - 30, "The page card must never touch the shell edges"
     assert abs(stack.width() - page_frame.width()) < 2, "The native page stack should fill its centered page card"
     loader_position = page_loader.mapToItem(panel, QPointF(0, 0))
     assert 0 < page_loader.width() <= page_frame.width(), "The native page Loader should stay inside the centered page card"

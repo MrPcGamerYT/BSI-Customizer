@@ -107,6 +107,8 @@ jobs:
           if-no-files-found: ignore
       - name: Instantiate rebuilt Settings shell and test its native interactions
         run: python tests/run_qt_runtime_test.py tests/settings_panel_runtime_test.py
+      - name: Verify the drawn post-patch Settings design in a real Qt scene
+        run: python tests/run_qt_runtime_test.py tests/settings_panel_post_patch_gui_test.py
       - name: Exercise adaptive boot player against synthetic Qt6, Qt5 and WebEngine APIs
         run: python tests/run_qt_runtime_test.py tests/boot_player_runtime_test.py
       - name: Load the real Resources page with a counting backend

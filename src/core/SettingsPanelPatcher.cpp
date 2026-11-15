@@ -42,7 +42,8 @@ const QString kWindowDesignMarkerV6 = QStringLiteral("BSI6");
 // the left edge; v9 bounds the page region inside a centred frame.
 const QString kWindowDesignMarkerV8 = QStringLiteral("BSI Settings v8");
 const QString kWindowDesignMarkerV9 = QStringLiteral("BSI Settings v9");
-const QString kWindowDesignMarker = QStringLiteral("BSI Settings v10");
+const QString kWindowDesignMarkerV10 = QStringLiteral("BSI Settings v10");
+const QString kWindowDesignMarker = QStringLiteral("BSI Settings v12");
 const QString kAboutMarker = QStringLiteral("BSI CUSTOMIZER: redesigned About page v1");
 const QString kSchema = QStringLiteral("bsi.settings-panel.recovery");
 const QString kWindowLeaf = QStringLiteral("UiSettingsWindow.qml");
@@ -712,27 +713,26 @@ QString buildWindow(const QString &stock)
     // place, vertically centred: it used to be painted over the centred text
     // (unreadable) inside a bare Item, which is not a visual element, so it
     // could not be shown at all.
-    QString replacement = QStringLiteral(R"QML(
-UiShadowContainer{// BSI Settings v10
+    QString replacement = QStringLiteral(R"QML(UiShadowContainer{//BSI Settings v12
 id:iSettingsWindowShadowContainer;anchors.fill:parent
 property var bHidden:[]
 property var bIcons:({})
-Rectangle{anchors.fill:parent;color:UiTheme.colors.primary80;radius:14;clip:true
-Column{anchors.fill:parent
-Item{width:parent.width;height:56
-MouseArea{anchors.fill:parent;onPressed:iSettingsWindow.startSystemMove()}
-Text{text:qsTr("Settings");color:UiTheme.colors.primary10;font:UiTheme.fonts.bodyLarge;anchors.centerIn:parent}
-UiImageButton{asset:"CloseIcon";x:parent.width-32;y:12;onClicked:iSettingsWindow.close()}}
-ListView{id:v;width:parent.width-48;height:44;x:24;orientation:ListView.Horizontal;model:pSettingsItems.pSettingElements;clip:true
-delegate:Item{property var w:iSettingsWindowShadowContainer;property var k:modelData.pQmlSource.toLowerCase().split("/").pop();property var h:w.bHidden;property var c:w.bIcons[k];width:v.width/(v.count-h.length||1)*(h.indexOf(k)<0);height:44
-UiSettingsButton{anchors.fill:parent;anchors.bottomMargin:c?26:0;pSettingIdx:index;pSettingBtnText:modelData.pButtonText;pSelected:index==pCurrentTabIndex;pShowRedDot:modelData.pShowRedDot;onSettingClicked:fChangeSelectedSetting(pSettingIdx)}
-Image{source:c;width:18;height:18;x:parent.width/2-9;y:24}}}
-Item{width:Math.min(parent.width-48,568);x:(parent.width-width)/2;height:parent.height-112
+Rectangle{anchors.fill:parent;color:UiTheme.colors.primary80
+MouseArea{width:parent.width;height:50;onPressed:iSettingsWindow.startSystemMove()}
+Text{text:qsTr('Settings');color:UiTheme.colors.primary10;font:UiTheme.fonts.bodyLarge;x:(parent.width-width)/2;y:14}
+UiImageButton{asset:'CloseIcon';x:parent.width-32;onClicked:iSettingsWindow.close()}
+ListView{id:v;width:parent.width-48;height:40;y:50;x:24;orientation:ListView.Horizontal;model:pSettingsItems.pSettingElements
+delegate:Item{property var p:iSettingsWindowShadowContainer;property var k:modelData.pQmlSource.split('/').pop().toLowerCase();property bool s:index==pCurrentTabIndex;width:v.width/(v.count-p.bHidden.length||1)*(p.bHidden.indexOf(k)<0);height:40
+UiSettingsButton{anchors.fill:parent;anchors.bottomMargin:p.bIcons[k]?22:0;pSettingIdx:index;pSettingBtnText:modelData.pButtonText;pSelected:s;pShowRedDot:modelData.pShowRedDot;onSettingClicked:fChangeSelectedSetting(pSettingIdx)}
+Image{source:p.bIcons[k];width:16;height:16;x:parent.width/2-8;y:20}
+Rectangle{visible:s;y:38;width:parent.width;height:2;color:UiTheme.colors.accentNormal}}}
+Item{x:20;y:90;width:parent.width-40;height:parent.height-110
+Rectangle{anchors.fill:parent;color:UiTheme.colors.primary70;radius:12;border.color:UiTheme.colors.primary60}
+Item{anchors.fill:parent
 StackLayout{id:iSelectedSettingControl;anchors.fill:parent;currentIndex:pCurrentTabIndex
-Repeater{model:pSettingsItems.pSettingElements;delegate:Loader{width:iSelectedSettingControl.width;height:iSelectedSettingControl.height;Component.onCompleted:setSource(model.modelData.pQmlSource,model.modelData.pComponentArgs||{});onLoaded:{item.anchors.fill=item.parent;model.modelData.pComponentObj=item;if(item.fOnQmlLoaded)item.fOnQmlLoaded()}}}}}
-}
-}
-}
+Repeater{model:v.model;delegate:Loader{width:parent.width;height:parent.height;Component.onCompleted:setSource(modelData.pQmlSource,modelData.pComponentArgs||{});onLoaded:{item.anchors.fill=item.parent;modelData.pComponentObj=item;if(item.fOnQmlLoaded)item.fOnQmlLoaded()}}}}
+}}
+}}
 )QML");
     QString out = stock;
     out.replace(target.nameBegin, target.end - target.nameBegin, replacement);
@@ -1066,7 +1066,7 @@ bool hasWindowMarker(const QString &text)
         || text.contains(kWindowDesignMarkerV3) || text.contains(kWindowDesignMarkerV4)
         || text.contains(kWindowDesignMarkerV5) || text.contains(kWindowDesignMarkerV6)
         || text.contains(kWindowDesignMarkerV8) || text.contains(kWindowDesignMarkerV9)
-        || text.contains(kWindowDesignMarker);
+        || text.contains(kWindowDesignMarkerV10) || text.contains(kWindowDesignMarker);
 }
 
 } // namespace
@@ -1154,6 +1154,47 @@ int artworkBudget(int plainPayload)
     return qMax(0, kAboutSlotFloor - plainPayload - kArtworkReserve);
 }
 
+// Shrink one stored asset so the page can carry it. The About document is
+// compressed into a fixed slot, so artwork has a hard byte budget: the saved
+// SVG is minified, and if that still does not fit it is drawn at the size the
+// strip uses and stored as a compact PNG. Keeping this in one place matters -
+// readCustomAsset() runs when an icon is picked (and updates the profile), but
+// apply() re-reads every icon from the profile, and artwork saved by an earlier
+// build is already in the drawer. Both paths have to shrink, or an icon that
+// "saved fine" fails the apply with "needs 2347 bytes but its slot only holds
+// 2337" seconds later.
+QVariantMap shrinkAsset(QVariantMap asset, const QString &kind, int budget)
+{
+    const QByteArray bytes = QByteArray::fromBase64(asset.value(QStringLiteral("data")).toString().toLatin1());
+    if (bytes.isEmpty() || asset.value(QStringLiteral("mime")).toString() != QLatin1String("image/svg+xml"))
+        return asset;
+    QString error;
+    QString mime = QStringLiteral("image/svg+xml");
+    QByteArray stored = bytes;
+    const QString minified = minifySvg(QString::fromUtf8(bytes));
+    if (!minified.isEmpty() && minified.toUtf8().size() < bytes.size()
+        && validateAssetBytes(minified.toUtf8(), kind, &mime, &error))
+        stored = minified.toUtf8();
+    // Still too big for the slot? Draw it down. Refusing is worse: the SVG is
+    // valid, only the container is small.
+    int uriSize = int(stored.toBase64().size()) + 28;
+    if (budget > 0 && uriSize > budget) {
+        for (int box : {32, 24, 18}) {
+            if (uriSize <= budget) break;
+            const QByteArray png = rasterizeSvg(stored, box);
+            if (png.isEmpty()) break;
+            const int pngUri = int(png.toBase64().size()) + 22;
+            if (pngUri >= uriSize) break;
+            stored = png;
+            mime = QStringLiteral("image/png");
+            uriSize = pngUri;
+        }
+    }
+    asset.insert(QStringLiteral("mime"), mime);
+    asset.insert(QStringLiteral("data"), QString::fromLatin1(stored.toBase64()));
+    return asset;
+}
+
 QVariantMap readCustomAsset(const QString &path, const QString &kind)
 {
     if (kind != QLatin1String("tab-icon") && kind != QLatin1String("logo"))
@@ -1172,40 +1213,18 @@ QVariantMap readCustomAsset(const QString &path, const QString &kind)
     QString error;
     if (bytes.isEmpty() || bytes.size() > limit || !validateAssetBytes(bytes, kind, &mime, &error))
         return fail(error.isEmpty() ? QStringLiteral("The selected image is invalid.") : error);
-    QByteArray stored = bytes;
+    const QVariantMap shrunk = shrinkAsset(
+        {{QStringLiteral("mime"), mime},
+         {QStringLiteral("data"), QString::fromLatin1(bytes.toBase64())}},
+        kind, artworkBudget(emptyPagePayload()));
+    const QByteArray stored = QByteArray::fromBase64(
+        shrunk.value(QStringLiteral("data")).toString().toLatin1());
+    mime = shrunk.value(QStringLiteral("mime")).toString();
     QString note;
-    if (mime == QLatin1String("image/svg+xml")) {
-        const QString minified = minifySvg(QString::fromUtf8(bytes));
-        // Only ever store the smaller form, and only if it still validates.
-        if (!minified.isEmpty() && minified.toUtf8().size() < bytes.size()
-            && validateAssetBytes(minified.toUtf8(), kind, &mime, &error)) {
-            note = QStringLiteral(" Minified from %1 to %2 bytes so it fits the "
-                                  "in-player Settings resource slot.")
-                       .arg(bytes.size()).arg(minified.toUtf8().size());
-            stored = minified.toUtf8();
-        }
-        // Still too big for the About page's slot? Draw it at the size the strip
-        // uses and store that instead. Refusing the upload is worse: the user's
-        // SVG is valid and only the container is small.
-        const int budget = artworkBudget(emptyPagePayload());
-        if (budget > 0) {
-            const int dataUriSize = int(stored.toBase64().size()) + 28;
-            for (int box : {32, 24, 18}) {
-                if (dataUriSize <= budget) break;
-                const QByteArray png = rasterizeSvg(stored, box);
-                if (png.isEmpty()) break;
-                const int pngUri = int(png.toBase64().size()) + 22;
-                if (pngUri >= dataUriSize) break;
-                stored = png;
-                mime = QStringLiteral("image/png");
-                error.clear();
-                note = QStringLiteral(" Drawn at %1 px (%2 -> %3 bytes) because this "
-                                      "player's About-page slot cannot hold the full "
-                                      "SVG.")
-                           .arg(box).arg(bytes.size()).arg(png.size());
-            }
-        }
-    }
+    if (stored.size() < bytes.size())
+        note = QStringLiteral(" Stored at %1 bytes (from %2) so it fits the in-player "
+                              "Settings resource slot.")
+                   .arg(stored.size()).arg(bytes.size());
     return {{QStringLiteral("ok"), true},
             {QStringLiteral("asset"), QVariantMap{
                 {QStringLiteral("mime"), mime},
@@ -1417,15 +1436,22 @@ QVariantMap apply(const QString &exePath, const QString &developerName,
         if (!availableTabs.contains(id)) continue; // stale option from another player version
         QString source;
         QString assetError;
-        if (!storedAssetSource(it.value().toMap(), QStringLiteral("tab-icon"), &source, &assetError))
+        // Artwork saved by an earlier build never went through shrinkAsset(), so
+        // shrink it again here: the budget is a property of this player's slot,
+        // not of when the icon was picked.
+        const QVariantMap shrunk = shrinkAsset(it.value().toMap(), QStringLiteral("tab-icon"),
+                                               artworkBudget(emptyPagePayload()));
+        if (!storedAssetSource(shrunk, QStringLiteral("tab-icon"), &source, &assetError))
             return fail(assetError);
         customTabIcons.insert(id, source);
     }
     QString logoSource = current.aboutLogoSource;
     if (profile.contains(QStringLiteral("logo"))) {
         QString assetError;
-        if (!storedAssetSource(profile.value(QStringLiteral("logo")).toMap(),
-                               QStringLiteral("logo"), &logoSource, &assetError))
+        const QVariantMap shrunkLogo = shrinkAsset(profile.value(QStringLiteral("logo")).toMap(),
+                                                   QStringLiteral("logo"),
+                                                   artworkBudget(emptyPagePayload()));
+        if (!storedAssetSource(shrunkLogo, QStringLiteral("logo"), &logoSource, &assetError))
             return fail(assetError);
     }
     const bool hasPatchMarker = hasWindowMarker(current.window.text)
