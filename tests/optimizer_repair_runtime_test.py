@@ -10,7 +10,7 @@ os.environ.setdefault('QSG_RHI_BACKEND','software')
 # The OEM Qt 5 player uses customizable Controls; Qt 6 on Windows defaults to
 # a native style that deliberately rejects custom backgrounds/indicators.
 os.environ.setdefault('QT_QUICK_CONTROLS_STYLE','Basic')
-from PySide6.QtCore import QUrl, QMetaObject
+from PySide6.QtCore import QUrl, QMetaObject, QPointF, Qt
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtQml import QQmlEngine, QQmlComponent
 from PySide6.QtQuick import QQuickWindow, QQuickItem
@@ -21,20 +21,7 @@ app=QGuiApplication([])
 with tempfile.TemporaryDirectory() as directory:
     base=Path(directory)
     shutil.copyfile(root/'assets/optimizer-repair/Assets/OptimizerPage.qml',base/'OptimizerPage.qml')
-    # Palette fixture only: preserve runtime page code and the actual shared icon API.
-    shutil.copyfile(root/'assets/settings-icons-repair/Shared-Recovery/Icons.js',base/'Icons.js')
-    (base/'qmldir').write_text('singleton Theme 1.0 Theme.qml\n')
-    (base/'Theme.qml').write_text('''pragma Singleton
-import QtQuick 2.15
-QtObject {
- readonly property color background: "#080809"
- readonly property color surface: "#111114"
- readonly property color raised: "#26262e"
- readonly property color border: "#45454f"
- readonly property color muted: "#94949f"
- readonly property color accent: "#f4f4f7"
- readonly property color text: "#f4f4f7"
-}''')
+    shutil.copytree(root/'assets/optimizer-repair/Assets/VoidOptimizerUI',base/'VoidOptimizerUI')
     engine=QQmlEngine();errors=[]
     engine.warnings.connect(lambda values: errors.extend(v.toString() for v in values))
     component=QQmlComponent(engine,QUrl.fromLocalFile(str(base/'OptimizerPage.qml')))
@@ -43,8 +30,42 @@ QtObject {
     window=QQuickWindow();window.setGeometry(0,0,1000,760)
     page.setParentItem(window.contentItem());page.setWidth(1000);page.setHeight(760)
     window.show();QTest.qWait(100)
+    # Exercise actual delegate controls instead of only mutating page properties.
+    def find(item, name):
+        if item.objectName() == name: return item
+        for child in item.childItems():
+            found = find(child, name)
+            if found is not None: return found
+        return None
+    def click(name):
+        item = find(page, name)
+        assert item is not None, name
+        position = item.mapToScene(QPointF(item.width()/2, item.height()/2)).toPoint()
+        QTest.mouseClick(window, Qt.LeftButton, Qt.NoModifier, position)
+        QTest.qWait(200)
+    click('voidProfile_performance')
+    assert page.property('profile') == 'performance'
+    click('voidTimer_5000')
+    assert page.property('timer100ns') == 5000
+    click('voidEmbeddedPowerControl')
+    assert page.property('highPerformancePower') is True
+    # Footer remains reachable while the content scrolls; screenshot wide/narrow.
+    for width,height in [(1000,760),(650,540),(420,420)]:
+        window.resize(width,height);page.setWidth(width);page.setHeight(height)
+        QTest.qWait(250)
+        button = find(page,'voidEmbeddedReview')
+        point = button.mapToScene(QPointF(0,0))
+        assert 0 <= point.y() and point.y()+button.height() <= height
+        assert button.width()>0 and point.x()+button.width()<=width
+        screenshot = root/'.cache/optimizer-repair'/('studio04-%sx%s.png'%(width,height))
+        screenshot.parent.mkdir(parents=True,exist_ok=True)
+        assert window.grabWindow().save(str(screenshot))
+    window.resize(1000,760);page.setWidth(1000);page.setHeight(760)
     requests=[];page.reviewRequested.connect(lambda value: requests.append(value))
     assert not requests,'page creation must not launch a request'
+    click('voidEmbeddedReview')
+    assert len(requests)==1 and 'profile=performance' in requests[-1] and 'timer=5000' in requests[-1]
+    requests.clear()
     for profile,timer,flags in itertools.product(('balanced','performance','eco'),(0,5000,10000),itertools.product((False,True),repeat=4)):
         page.setProperty('profile',profile);page.setProperty('timer100ns',timer)
         for name,value in zip(('highPerformancePower','disableCapture','keepAwake','autoRestore'),flags):page.setProperty(name,value)
