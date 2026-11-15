@@ -7,7 +7,8 @@ $utf8=New-Object Text.UTF8Encoding($false)
 function Need($Condition,[string]$Message) { if (!$Condition) { throw $Message } }
 function Hash([string]$Path) { (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant() }
 function Run([string[]]$Options,[int]$Expected) {
-    & powershell.exe -NoLogo -NoProfile -File $scriptPath -EmulatorRoot $root @Options
+    $script:lastOutput=(& powershell.exe -NoLogo -NoProfile -File $scriptPath -EmulatorRoot $root @Options 2>&1 | Out-String)
+    Write-Host $script:lastOutput
     Need ($LASTEXITCODE -eq $Expected) ('Unexpected installer exit '+$LASTEXITCODE+' for '+($Options -join ' '))
 }
 try {
@@ -63,4 +64,8 @@ try {
     Need ((Hash $stateFile) -eq $originalState) 'State not restored byte-for-byte'
     Need (!(Test-Path (Join-Path $assets 'VoidOptimizerUI/icons/power.png'))) 'Added icon not removed'
     Write-Host 'PASS: actual Windows install/read-back, stale-state/wrong-root refusal, state field preservation, decoy isolation, changed-file restore refusal and exact restore. No real emulator/helper/registry activity.'
+} catch {
+    $details=($_.Exception.Message+"`n"+$script:lastOutput).Replace('%','%25').Replace("`r",'%0D').Replace("`n",'%0A')
+    Write-Host ('::error::'+$details)
+    throw
 } finally { if (Test-Path $root) { Remove-Item -LiteralPath $root -Recurse -Force } }
