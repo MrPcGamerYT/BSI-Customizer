@@ -1,3 +1,75 @@
+VOID OPTIMIZER / HELPER 05 UPDATE
+Developed By NOVA XIS
+
+YOUR STUDIO04 PAGE IS ALREADY LOADING (AS IN YOUR SCREENSHOT)
+This update redesigns the SEPARATE Windows helper, not just the embedded page.
+The protocol remains voidoptimizer-v3 and existing session recovery stays
+compatible. There is no need to reinstall the embedded page if Studio04 is visible.
+
+UPGRADE AN ALREADY-REGISTERED HELPER (RECOMMENDED)
+1. Restore the session in the old helper, then CLOSE it. Do not force-kill it.
+2. Extract this new ZIP to a temporary review folder first.
+3. Open the permanent helper-pack folder you previously registered. Back up
+   its VOID-Optimizer.exe and BUILD-REPORT.json. Replace those TWO files with
+   the new copies, keeping exactly the SAME folder and EXE filename. No registry
+   change is required. Also retain the new README and Source for reference.
+4. Run that permanent folder's CHECK-INSTALL.cmd for the same emulator root.
+   It must report PAGE OK and LINK OK with the new build-report hash.
+5. Open that folder's VOID-Optimizer.exe (or Review in helper in Settings).
+   The redesigned header must show HELPER 05. Click Refresh, then explicitly
+   choose a verified player instance. Nothing applies during scanning.
+If you want to MOVE the helper to a different permanent folder instead, Restore
+and close it, run REMOVE-HELPER-LINK.cmd in the OLD folder, then SETUP-HELPER.cmd
+in the NEW folder. The ownership guard is retained; never force a registry edit.
+Do not replace the EXE while a session/helper is running.
+
+DETECTION / WHY THE OLD LIST COULD BE EMPTY
+The old code read Process.MainModule and silently dropped inaccessible entries.
+New discovery uses OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION),
+QueryFullProcessImageName, creation time and the process owner's token. It does
+not enumerate modules or request all-access. It works across x86/x64 players.
+The same query-based identity check is used again for priority read/write;
+only a priority write requests PROCESS_SET_INFORMATION, on the matched handle.
+No debug privilege, automatic elevation or cross-user workaround is used.
+
+Refresh reports ready, blocked and exited candidates. Open Diagnostics for
+Windows error codes and image paths. If no candidate is found, verify the exact
+process name in Task Manager > Details while Android is running. You may enter
+its PID and press Inspect PID; only a running, same-user HD-Player.exe with a
+readable image/creation time/owner can be offered. Then select it explicitly.
+Renamed players and arbitrary PIDs are deliberately refused, not guessed.
+For Access Denied, match elevation under the SAME Windows account, or restart
+the emulator normally. If Windows/security policy still refuses access, send
+the diagnostic text. The helper does not disable security controls.
+
+UI / SAFETY
+Dark rounded sections, custom dark choice menus/toggles/buttons, readable
+inactive states, DPI-aware layout, scrollable content and pinned review/status
+area replace the old white dropdowns and huge empty log. Diagnostics are now a
+separate copyable dialog. Inspect/Refresh never starts tuning; explicit player
+selection, exact confirmation, same-user identity checks and durable recovery
+are retained. The helper still offers only Normal/AboveNormal/BelowNormal.
+The title remains 'VOID Optimizer v3 - session helper' for existing activation;
+HELPER 05 identifies the new UI/detector, not a new URI protocol.
+
+WINDOWS VERIFICATION
+Tests include real harmless x86 and x64 HD-Player-name fixture processes,
+query-only discovery and priority reads, wrong/exited identity rejection,
+manual PID whitelist, and deterministic denied/other-user/empty diagnostics.
+UI smoke tests render the actual WinForms window with a FAKE target/session;
+helper05-preview.png and helper05-compact.png show this actual rendered form.
+No real emulator tuning, registration, power/timer or priority WRITES happen
+in tests. Live OEM emulator detection/permissions still require your check.
+BUILD-REPORT.json includes EXE and all C# source hashes. The helper is unsigned.
+Source/helper.manifest plus Source/*.cs can be built using the Windows .NET
+Framework x64 csc compiler with /target:winexe /platform:x64 /codepage:65001
+/win32manifest:helper.manifest and references to System.Windows.Forms.dll,
+System.Drawing.dll, System.Xml.dll and System.Core.dll.
+
+The following retained Studio04 instructions apply ONLY if installing the
+embedded optimizer page for the first time, not for the helper-only upgrade.
+
+--------------------------------------------------------------------------
 VOID OPTIMIZER / STUDIO 04
 Developed By NOVA XIS
 https://www.youtube.com/@nova_xis20
