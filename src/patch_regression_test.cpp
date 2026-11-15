@@ -5282,10 +5282,10 @@ Window {
                           && rebuiltWindow.contains(QStringLiteral("ListView{id:v;width:parent.width-48;height:40;y:50;x:24;"))
                           // A custom icon sits centred in the tab, with the native
                           // label lifted to the top instead of being painted over.
-                          && rebuiltWindow.contains(QStringLiteral("anchors.bottomMargin:c?22:0"))
-                          && rebuiltWindow.contains(QStringLiteral("Image{source:c;width:16;height:16;x:parent.width/2-8;y:20}"))
+                          && rebuiltWindow.contains(QStringLiteral("anchors.bottomMargin:p.bIcons[k]?22:0"))
+                          && rebuiltWindow.contains(QStringLiteral("Image{source:p.bIcons[k];width:16;height:16;x:parent.width/2-8;y:20}"))
                           && rebuiltWindow.contains(QStringLiteral("StackLayout{id:iSelectedSettingControl;anchors.fill:parent;currentIndex:pCurrentTabIndex"))
-                          && rebuiltWindow.contains(QStringLiteral("delegate:Loader{width:parent.width;height:parent.height;"))
+                          && rebuiltWindow.contains(QStringLiteral("delegate:Loader{width:parent.width;"))
                           && rebuiltWindow.contains(QStringLiteral("modelData.pComponentObj=item"))
                           && rebuiltWindow.contains(QStringLiteral("fChangeSelectedSetting(pSettingIdx)"))
                           && rebuiltWindow.contains(QStringLiteral("onVisibleChanged:if(visible&&transientParent)"))

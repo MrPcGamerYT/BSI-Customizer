@@ -108,8 +108,8 @@ assert "width:v.width/(v.count-p.bHidden.length||1)*(p.bHidden.indexOf(k)<0);hei
 # the window edge and every tab keeps the same gap.
 # A custom icon sits centred in the tab with the native label lifted to the top,
 # instead of being painted over the text.
-assert "anchors.bottomMargin:c?22:0" in replacement, "the label must move up when an icon is shown"
-assert "Image{source:c;width:16;height:16;x:parent.width/2-8;y:20}" in replacement, \
+assert "anchors.bottomMargin:p.bIcons[k]?22:0" in replacement, "the label must move up when an icon is shown"
+assert "Image{source:p.bIcons[k];width:16;height:16;x:parent.width/2-8;y:20}" in replacement, \
     "the icon must be centred in the tab"
 # Every category must stay reachable: the strip divides the shell width into
 # equal slots instead of letting the last tab be half-clipped at the edge.
@@ -178,7 +178,7 @@ assert "fCheckForUpdateCallback" in about_doc and "fUpdateShortDisplayName" in a
     "the native About callbacks must survive compaction"
 assert "Rectangle{x:20;y:90;width:parent.width-40;height:parent.height-110;" in replacement, \
     "the page card must be inset from both window edges"
-assert "delegate:Loader{width:parent.width;height:parent.height;Component.onCompleted:setSource(modelData.pQmlSource" in replacement
+assert "delegate:Loader{width:parent.width;Component.onCompleted:setSource(modelData.pQmlSource" in replacement
 assert "pSettingBtnText:" in replacement and "pSelected:s" in replacement and "pShowRedDot:modelData.pShowRedDot" in replacement
 assert "pSettingIdx:index" in replacement
 assert "fChangeSelectedSetting(pSettingIdx)" in replacement
