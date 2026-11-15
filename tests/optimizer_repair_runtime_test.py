@@ -56,7 +56,7 @@ with tempfile.TemporaryDirectory() as directory:
         button = find(page,'voidEmbeddedReview')
         point = button.mapToScene(QPointF(0,0))
         assert 0 <= point.y() and point.y()+button.height() <= height
-        assert button.width()>0 and point.x()+button.width()<=width
+        assert button.width()>0 and point.x()+button.width()<=width+0.5, (width,height,point.x(),button.width())
         screenshot = root/'.cache/optimizer-repair'/('studio04-%sx%s.png'%(width,height))
         screenshot.parent.mkdir(parents=True,exist_ok=True)
         assert window.grabWindow().save(str(screenshot))

@@ -30,6 +30,7 @@ jobs:
       - name: Verify real QML request matrix without launching the helper
         run: python tests/run_qt_runtime_test.py tests/optimizer_repair_runtime_test.py
       - name: Test targeted install and exact restore on real Windows files
+        if: ${{ !cancelled() }}
         shell: powershell
         run: ./tests/optimizer_repair_install_test.ps1
       - uses: actions/upload-artifact@v4

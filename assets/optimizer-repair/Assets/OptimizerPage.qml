@@ -75,9 +75,9 @@ Item {
         signal edited(bool value)
         spacing: 12
         ColumnLayout {
-            Layout.fillWidth: true; spacing: 4
-            Label { Layout.fillWidth: true; text: option.title; font.pixelSize: 12; font.weight: Font.Medium }
-            Label { Layout.fillWidth: true; text: option.detail; font.pixelSize: 11; color: "#858591" }
+            Layout.fillWidth: true; Layout.minimumWidth: 0; spacing: 4
+            Label { Layout.fillWidth: true; Layout.minimumWidth: 0; text: option.title; font.pixelSize: 12; font.weight: Font.Medium }
+            Label { Layout.fillWidth: true; Layout.minimumWidth: 0; text: option.detail; font.pixelSize: 11; color: "#858591" }
         }
         Switch {
             id: toggle
@@ -104,7 +104,7 @@ Item {
     ColumnLayout {
         anchors.fill: parent; spacing: 14
         RowLayout {
-            Layout.fillWidth: true; spacing: 12
+            Layout.fillWidth: true; Layout.minimumWidth: 0; spacing: 12
             Rectangle {
                 Layout.preferredWidth: 44; Layout.preferredHeight: 44; radius: 13
                 gradient: Gradient { GradientStop { position: 0; color: "#25252d" } GradientStop { position: 1; color: "#111116" } }
@@ -112,7 +112,7 @@ Item {
                 Glyph { anchors.centerIn: parent; width: 23; height: 23; kind: "power" }
             }
             ColumnLayout {
-                Layout.fillWidth: true; spacing: 3
+                Layout.fillWidth: true; Layout.minimumWidth: 0; spacing: 3
                 Label { text: "VOID  /  SESSION CONTROL"; font.pixelSize: 10; font.letterSpacing: 1.8; color: "#9898a6" }
                 Label { text: "Optimizer"; font.pixelSize: 27; font.weight: Font.DemiBold }
             }
@@ -127,26 +127,26 @@ Item {
         }
         ScrollView {
             id: scroll
-            Layout.fillWidth: true; Layout.fillHeight: true; Layout.minimumHeight: 70
+            Layout.fillWidth: true; Layout.minimumWidth: 0; Layout.fillHeight: true; Layout.minimumHeight: 70
             clip: true; contentWidth: availableWidth
             ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
             ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded; width: 5 }
             ColumnLayout {
                 width: scroll.availableWidth; spacing: 12
                 Rectangle {
-                    Layout.fillWidth: true; implicitHeight: profilesBody.implicitHeight + 32
+                    Layout.fillWidth: true; Layout.minimumWidth: 0; implicitHeight: profilesBody.implicitHeight + 32
                     radius: 15; color: "#101014"; border.color: "#292931"
                     ColumnLayout {
                         id: profilesBody
                         anchors.fill: parent; anchors.margins: 16; spacing: 12
                         RowLayout {
-                            Layout.fillWidth: true
+                            Layout.fillWidth: true; Layout.minimumWidth: 0
                             Label { text: "01  /  PROCESS PROFILE"; font.pixelSize: 10; font.letterSpacing: 1.2; color: "#9696a3" }
-                            Item { Layout.fillWidth: true }
+                            Item { Layout.fillWidth: true; Layout.minimumWidth: 0 }
                             Label { text: "One player instance"; font.pixelSize: 10; color: "#666674" }
                         }
                         GridLayout {
-                            Layout.fillWidth: true; columns: panel.width >= 500 ? 3 : 1
+                            Layout.fillWidth: true; Layout.minimumWidth: 0; columns: panel.width >= 500 ? 3 : 1
                             columnSpacing: 9; rowSpacing: 9
                             Repeater {
                                 model: [
@@ -159,16 +159,16 @@ Item {
                                     objectName: "voidProfile_" + modelData.key
                                     property var info: modelData
                                     readonly property bool selected: panel.profile === info.key
-                                    Layout.fillWidth: true; implicitHeight: 108
+                                    Layout.fillWidth: true; Layout.minimumWidth: 0; implicitHeight: 108
                                     padding: 13; hoverEnabled: true; focusPolicy: Qt.StrongFocus
                                     Accessible.name: info.title + ", " + info.note
                                     onClicked: panel.profile = info.key
                                     contentItem: ColumnLayout {
                                         spacing: 6
                                         RowLayout {
-                                            Layout.fillWidth: true
+                                            Layout.fillWidth: true; Layout.minimumWidth: 0
                                             Glyph { kind: profileCard.info.icon; Layout.preferredWidth: 20; Layout.preferredHeight: 20; opacity: profileCard.selected ? 1 : 0.65 }
-                                            Item { Layout.fillWidth: true }
+                                            Item { Layout.fillWidth: true; Layout.minimumWidth: 0 }
                                             Rectangle {
                                                 width: 13; height: 13; radius: 6.5
                                                 color: profileCard.selected ? "#efeff5" : "transparent"
@@ -177,7 +177,7 @@ Item {
                                             }
                                         }
                                         Label { text: profileCard.info.title; font.pixelSize: 14; font.weight: Font.DemiBold }
-                                        Label { Layout.fillWidth: true; text: profileCard.info.note; font.pixelSize: 10; color: "#8a8a98" }
+                                        Label { Layout.fillWidth: true; Layout.minimumWidth: 0; text: profileCard.info.note; font.pixelSize: 10; color: "#8a8a98" }
                                     }
                                     background: Rectangle {
                                         radius: 11
@@ -191,14 +191,14 @@ Item {
                                 }
                             }
                         }
-                        Label { Layout.fillWidth: true; text: "The helper will ask you to select a running HD-Player. This is not a live FPS preset or a game-memory tweak."; font.pixelSize: 10; color: "#777785" }
+                        Label { Layout.fillWidth: true; Layout.minimumWidth: 0; text: "The helper will ask you to select a running HD-Player. This is not a live FPS preset or a game-memory tweak."; font.pixelSize: 10; color: "#777785" }
                     }
                 }
                 GridLayout {
-                    Layout.fillWidth: true; columns: panel.width >= 720 ? 2 : 1
+                    Layout.fillWidth: true; Layout.minimumWidth: 0; columns: panel.width >= 720 ? 2 : 1
                     columnSpacing: 12; rowSpacing: 12
                     Rectangle {
-                        Layout.fillWidth: true; Layout.fillHeight: true
+                        Layout.fillWidth: true; Layout.minimumWidth: 0; Layout.fillHeight: true
                         implicitHeight: sessionBody.implicitHeight + 32
                         radius: 15; color: "#101014"; border.color: "#292931"
                         ColumnLayout {
@@ -208,18 +208,18 @@ Item {
                                 Glyph { kind: "session"; Layout.preferredWidth: 17; Layout.preferredHeight: 17; opacity: 0.8 }
                                 Label { text: "02  /  WINDOWS SESSION"; font.pixelSize: 10; font.letterSpacing: 1; color: "#a2a2ae" }
                             }
-                            Option { objectName:"voidEmbeddedPower"; Layout.fillWidth:true; title:"High performance plan"; detail:"Use an existing Windows plan. More heat and battery use is possible."; value:panel.highPerformancePower; onEdited:panel.highPerformancePower=value }
-                            Rectangle { Layout.fillWidth:true; implicitHeight:1; color:"#25252e" }
-                            Option { objectName:"voidEmbeddedCapture"; Layout.fillWidth:true; title:"Pause Windows game capture"; detail:"Change this user's Game DVR preferences. Windows clips may stop."; value:panel.disableCapture; onEdited:panel.disableCapture=value }
+                            Option { objectName:"voidEmbeddedPower"; Layout.fillWidth:true; Layout.minimumWidth:0; title:"High performance plan"; detail:"Use an existing Windows plan. More heat and battery use is possible."; value:panel.highPerformancePower; onEdited:panel.highPerformancePower=value }
+                            Rectangle { Layout.fillWidth:true; Layout.minimumWidth:0; implicitHeight:1; color:"#25252e" }
+                            Option { objectName:"voidEmbeddedCapture"; Layout.fillWidth:true; Layout.minimumWidth:0; title:"Pause Windows game capture"; detail:"Change this user's Game DVR preferences. Windows clips may stop."; value:panel.disableCapture; onEdited:panel.disableCapture=value }
                             Item { Layout.fillHeight:true; implicitHeight:0 }
                             Rectangle {
-                                Layout.fillWidth:true; implicitHeight: safetyNote.implicitHeight + 18; radius:8; color:"#17171e"
+                                Layout.fillWidth:true; Layout.minimumWidth:0; implicitHeight: safetyNote.implicitHeight + 18; radius:8; color:"#17171e"
                                 Label { id:safetyNote; anchors.fill:parent; anchors.margins:9; text:"No process killing, services, affinity, injection or boot edits."; font.pixelSize:10; color:"#8f8f9d" }
                             }
                         }
                     }
                     Rectangle {
-                        Layout.fillWidth: true; Layout.fillHeight: true
+                        Layout.fillWidth: true; Layout.minimumWidth: 0; Layout.fillHeight: true
                         implicitHeight: timingBody.implicitHeight + 32
                         radius: 15; color: "#101014"; border.color: "#292931"
                         ColumnLayout {
@@ -231,7 +231,7 @@ Item {
                             }
                             Label { text:"Native timer request"; font.pixelSize:12; font.weight:Font.Medium }
                             RowLayout {
-                                Layout.fillWidth:true; spacing:5
+                                Layout.fillWidth:true; Layout.minimumWidth:0; spacing:5
                                 Repeater {
                                     model: [{label:"Default",value:0},{label:"1.0 ms",value:10000},{label:"0.5 ms",value:5000}]
                                     Button {
@@ -239,7 +239,7 @@ Item {
                                         objectName:"voidTimer_"+modelData.value
                                         property var info:modelData
                                         readonly property bool selected:panel.timer100ns===info.value
-                                        Layout.fillWidth:true; implicitHeight:30; padding:4
+                                        Layout.fillWidth:true; Layout.minimumWidth:0; implicitHeight:30; padding:4
                                         hoverEnabled:true; focusPolicy:Qt.StrongFocus
                                         Accessible.name:"Timer request "+info.label
                                         onClicked:panel.timer100ns=info.value
@@ -248,39 +248,39 @@ Item {
                                     }
                                 }
                             }
-                            Label { Layout.fillWidth:true; text:"Held by the helper, not injected into the player. Windows may scope or ignore it. No FPS guarantee."; color:"#777785"; font.pixelSize:10 }
-                            Rectangle { Layout.fillWidth:true; implicitHeight:1; color:"#25252e" }
-                            Option { objectName:"voidEmbeddedAwake"; Layout.fillWidth:true; title:"Keep system awake"; detail:"Prevent idle sleep for this session. Display policy stays unchanged."; value:panel.keepAwake; onEdited:panel.keepAwake=value }
-                            Option { objectName:"voidEmbeddedAutoRestore"; Layout.fillWidth:true; title:"Restore on instance exit"; detail:"Monitor PID, start time, image and user. Keep the helper open."; value:panel.autoRestore; onEdited:panel.autoRestore=value }
+                            Label { Layout.fillWidth:true; Layout.minimumWidth:0; text:"Held by the helper, not injected into the player. Windows may scope or ignore it. No FPS guarantee."; color:"#777785"; font.pixelSize:10 }
+                            Rectangle { Layout.fillWidth:true; Layout.minimumWidth:0; implicitHeight:1; color:"#25252e" }
+                            Option { objectName:"voidEmbeddedAwake"; Layout.fillWidth:true; Layout.minimumWidth:0; title:"Keep system awake"; detail:"Prevent idle sleep for this session. Display policy stays unchanged."; value:panel.keepAwake; onEdited:panel.keepAwake=value }
+                            Option { objectName:"voidEmbeddedAutoRestore"; Layout.fillWidth:true; Layout.minimumWidth:0; title:"Restore on instance exit"; detail:"Monitor PID, start time, image and user. Keep the helper open."; value:panel.autoRestore; onEdited:panel.autoRestore=value }
                         }
                     }
                 }
-                Label { Layout.fillWidth:true; text:"Session changes can affect heat, battery use and Windows recordings. Review the exact process and actions in the helper before confirming."; font.pixelSize:10; color:"#71717f"; Layout.bottomMargin:4 }
+                Label { Layout.fillWidth:true; Layout.minimumWidth:0; text:"Session changes can affect heat, battery use and Windows recordings. Review the exact process and actions in the helper before confirming."; font.pixelSize:10; color:"#71717f"; Layout.bottomMargin:4 }
             }
         }
         Rectangle {
-            Layout.fillWidth:true; implicitHeight: footerBody.implicitHeight + 24
+            Layout.fillWidth:true; Layout.minimumWidth:0; implicitHeight: footerBody.implicitHeight + 24
             radius:13; color:"#131318"; border.color:"#34343f"
             ColumnLayout {
                 id:footerBody
                 anchors.fill:parent; anchors.margins:12; spacing:8
                 RowLayout {
-                    Layout.fillWidth:true; spacing:10
+                    Layout.fillWidth:true; Layout.minimumWidth:0; spacing:10
                     ColumnLayout {
-                        Layout.fillWidth:true; spacing:3
+                        Layout.fillWidth:true; Layout.minimumWidth:0; spacing:3
                         Label { text:panel.reviewActions+" action"+(panel.reviewActions===1?"":"s")+" to review"; font.pixelSize:13; font.weight:Font.DemiBold }
-                        Label { Layout.fillWidth:true; text:panel.priorityLabel+"  /  "+panel.timerLabel+"  /  "+(panel.autoRestore?"Auto restore":"Manual restore"); font.pixelSize:10; color:"#9292a0" }
+                        Label { Layout.fillWidth:true; Layout.minimumWidth:0; text:panel.priorityLabel+"  /  "+panel.timerLabel+"  /  "+(panel.autoRestore?"Auto restore":"Manual restore"); font.pixelSize:10; color:"#9292a0" }
                     }
                     Action { text:"Open helper"; visible:panel.width>=570; onClicked:if(!panel.previewOnly) { var opened=Qt.openUrlExternally("voidoptimizer-v3://open"); panel.feedback=opened?"Helper open requested — use its Restore control for an active session.":"Helper unavailable. Run CHECK-INSTALL.cmd from the Studio pack." } }
                     Action { objectName:"voidEmbeddedReview"; text:"Review in helper  →"; primary:true; onClicked:panel.review() }
                 }
-                Label { objectName:"voidOptimizerFeedback"; Layout.fillWidth:true; text:panel.feedback; color:"#81818f"; font.pixelSize:10 }
+                Label { objectName:"voidOptimizerFeedback"; Layout.fillWidth:true; Layout.minimumWidth:0; text:panel.feedback; color:"#81818f"; font.pixelSize:10 }
             }
         }
         RowLayout {
-            Layout.fillWidth:true
+            Layout.fillWidth:true; Layout.minimumWidth:0
             Label { text:"Developed By NOVA XIS"; font.pixelSize:9; color:"#60606d" }
-            Item { Layout.fillWidth:true }
+            Item { Layout.fillWidth:true; Layout.minimumWidth:0 }
             Label { text:"LOCAL SESSION  ·  NO CHANGES ON ENTRY"; font.pixelSize:8; color:"#60606d"; visible:panel.width>500 }
         }
     }
