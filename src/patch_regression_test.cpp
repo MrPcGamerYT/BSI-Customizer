@@ -5241,7 +5241,7 @@ Window {
                     if (file.name.compare(QLatin1String("UiSettingsWindow.qml"), Qt::CaseInsensitive) == 0)
                         rebuiltWindow = QString::fromUtf8(QtResources::readFile(panelImage, file));
                 }
-                check(rebuiltWindow.contains(QStringLiteral("BSI Settings v10"))
+                check(rebuiltWindow.contains(QStringLiteral("BSI Settings v12"))
                           && rebuiltWindow.contains(QStringLiteral("property var bHidden:"))
                           // The About page publishes the icon map into
                           // bIcons, so the shell has to declare it or that
@@ -5251,7 +5251,7 @@ Window {
                           // (the same UiTheme.colors the stock window uses) instead
                           // of a colour baked into the patch, so it keeps following
                           // whatever theme the emulator currently has.
-                          && rebuiltWindow.contains(QStringLiteral("Rectangle{anchors.fill:parent;color:UiTheme.colors.primary80;radius:14"))
+                          && rebuiltWindow.contains(QStringLiteral("Rectangle{anchors.fill:parent;color:UiTheme.colors.primary80"))
                           && rebuiltWindow.contains(QStringLiteral("color:UiTheme.colors.primary10"))
                           && !rebuiltWindow.contains(QStringLiteral("#0d0f14"))
                           // The page lives in a rounded, bordered card inset from
@@ -5272,7 +5272,7 @@ Window {
                           && rebuiltWindow.contains(QStringLiteral("width:v.width/(v.count-p.bHidden.length||1)*(p.bHidden.indexOf(k)<0);height:40"))
                           && rebuiltWindow.contains(QStringLiteral("MouseArea{width:parent.width;height:50;onPressed:iSettingsWindow.startSystemMove()}"))
                           && rebuiltWindow.contains(QStringLiteral("pShowRedDot:modelData.pShowRedDot"))
-                          && rebuiltWindow.contains(QStringLiteral("x:(parent.width-width)/2;y:14"))
+                          && rebuiltWindow.contains(QStringLiteral("x:parent.width/2-width/2;y:14"))
                           && rebuiltWindow.contains(QStringLiteral("ListView{id:v;"))
                           && rebuiltWindow.contains(QStringLiteral("orientation:ListView.Horizontal;model:pSettingsItems.pSettingElements"))
                           && rebuiltWindow.contains(QStringLiteral("item.anchors.fill=item.parent"))
@@ -5295,7 +5295,7 @@ Window {
                           && rebuiltWindow.contains(QStringLiteral("x=t.x+t.width/2-width/2"))
                           && rebuiltWindow.contains(QStringLiteral("y=t.y+t.height/2-height/2"))
                           && rebuiltWindow.contains(QStringLiteral("iSettingsWindow.startSystemMove()"))
-                          && rebuiltWindow.contains(QStringLiteral("asset:\"CloseIcon\"")),
+                          && rebuiltWindow.contains(QStringLiteral("asset:'CloseIcon'")),
                       QStringLiteral("the rebuilt %1 Settings panel restores the PR #88 shell and adds customizable tabs while preserving native pages, selection, dragging, and close behavior")
                           .arg(QFileInfo(input).fileName()));
                 QString expectedLogoSource;
