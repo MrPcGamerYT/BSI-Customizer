@@ -8,6 +8,8 @@ Requires PySide6==6.8.3 and is run by run_qt_runtime_test.py.
 import os
 import re
 import tempfile
+import urllib.parse
+import zlib
 from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -62,13 +64,23 @@ match = re.search(
 )
 assert match, "Could not find the generated Settings-window QML template"
 replacement = match.group(1)
-assert "BSI Settings v9" in replacement
+assert "BSI Settings v10" in replacement
 assert "pSettingsItems.pSettingElements" in replacement
 assert "property var bHidden:" in replacement
 assert "property var bHidden:[]" in replacement
-assert "function fOnQmlLoaded(){parent.parent.parent.parent.parent.parent.parent.bHidden=bsiHiddenTabs;parent.parent.parent.parent.parent.parent.parent.bIcons=bsiTabIcons}" in cpp
-assert "property var bsiHiddenTabs: @@BSI_HIDDEN_TABS@@" in cpp
-assert "property var bsiTabIcons: @@BSI_TAB_ICONS@@" in cpp
+# The About page publishes the hidden-tab list and the icon map to the shell.
+# It must find that shell by walking up: counting parents landed on the window
+# instead of the UiShadowContainer, which threw
+# "Cannot assign to non-existent property bHidden" and silently dropped every
+# custom tab icon (the file applied, nothing ever showed).
+assert "function fOnQmlLoaded(){var p=parent;while(p&&p.bIcons===undefined)p=p.parent;if(p){p.bHidden=bsiHiddenTabs;p.bIcons=bsiTabIcons}}" in cpp, \
+    "the About page must walk up to the shell, not count parents"
+# ...and the shell has to declare both of those properties, or the assignment
+# above has nowhere to land.
+assert "property var bHidden:[]" in replacement, "the shell must declare bHidden"
+assert "property var bIcons:({})" in replacement, "the shell must declare bIcons"
+assert "property var bsiHiddenTabs:@@BSI_HIDDEN_TABS@@" in cpp
+assert "property var bsiTabIcons:@@BSI_TAB_ICONS@@" in cpp
 # The shell must not ship its own palette: it paints with the player's own
 # theme object, exactly like the stock Settings window, so it follows whatever
 # the emulator currently looks like instead of a colour frozen into the patch.
@@ -82,27 +94,74 @@ assert "MouseArea{anchors.fill:parent;onPressed:iSettingsWindow.startSystemMove(
 assert "anchors.centerIn:parent" in replacement
 assert "ListView{id:v;" in replacement
 assert "orientation:ListView.Horizontal;model:pSettingsItems.pSettingElements;clip:true" in replacement
-# The strip spans the shell with a symmetric 16 px inset, and its slots divide
-# that width evenly, so the row is balanced without any label-length raggedness.
-# A symmetric inset leaves the same gap at both ends of the strip, so the last
-# tab no longer sits against the window edge.
-assert "ListView{id:v;width:parent.width-64;height:48;x:32;" in replacement
-assert "property var h:iSettingsWindowShadowContainer.bHidden" in replacement
-assert "property var h:iSettingsWindowShadowContainer.bHidden" in replacement
+# The strip spans the shell with a symmetric 24 px inset, and its slots divide
+# that width evenly, so the row is balanced without any label-length raggedness
+# and the last tab never sits against the window edge.
+assert "ListView{id:v;width:parent.width-48;height:44;x:24;" in replacement
+assert "property var h:w.bHidden" in replacement
 # Slots divide the strip's real width (no integer truncation, which left the
 # row short of the right inset and overlapped long neighbour labels).
 assert "width:v.width/(v.count-h.length||1)*(h.indexOf(k)<0);height:44" in replacement
+# Even gaps: the strip is inset the same amount on both sides and the slots
+# divide exactly that width, so the first and last tabs sit equally far from
+# the window edge and every tab keeps the same gap.
+# A custom icon sits centred in the tab with the native label lifted to the top,
+# instead of being painted over the text.
+assert "anchors.bottomMargin:c?26:0" in replacement, "the label must move up when an icon is shown"
+assert "Image{source:c;width:18;height:18;x:parent.width/2-9;y:24}" in replacement, \
+    "the icon must be centred in the tab"
 # Every category must stay reachable: the strip divides the shell width into
 # equal slots instead of letting the last tab be half-clipped at the edge.
 assert "item.anchors.fill=item.parent" in replacement
-assert "height:parent.height-118" in replacement
-assert "StackLayout{id:iSelectedSettingControl;anchors.fill:parent;anchors.margins:6" in replacement
+assert "height:parent.height-112" in replacement
+assert "StackLayout{id:iSelectedSettingControl;anchors.fill:parent;currentIndex:pCurrentTabIndex" in replacement
 # The embedded QML must stay inside the smallest player resource slot;
 # growing it past that is a hard patch failure on 5.9/5.10 players.
 # v8, which fitted every shipped player, was 1821 bytes of QML.
 assert len(replacement.encode()) <= 1790, f"shell grew to {len(replacement.encode())} bytes"
-assert "Item{width:Math.min(parent.width-64,568);x:(parent.width-width)/2;" in replacement, "The page host must be horizontally centered in the shell"
-assert "width:Math.min(parent.width-64,568)" in replacement
+
+# The About page lives in its own player resource slot, compressed, and a custom
+# tab icon or logo is embedded straight into it. That slot is small (one shipped
+# player reports 2337 bytes of capacity) and the EXE never grows, so a bloated
+# About template is not cosmetic: it makes every icon upload fail with
+# "needs N bytes but its slot only holds M". Keep the compressed payload well
+# inside the smallest slot we have seen, counting one embedded SVG icon.
+about_template = re.search(
+    r'QString generated = QStringLiteral\(R"QML\((.*?)\)QML"\);', cpp, re.S
+)
+assert about_template, "Could not find the generated About-page QML template"
+about_source = about_template.group(1)
+about_doc = (about_source
+             .replace("@@BSI_DEVELOPER@@", '"Mr.Pc Gamer"')
+             .replace("@@BSI_TAGLINE@@", '"BlueStacks tools"')
+             .replace("@@BSI_HIDDEN_TABS@@", "[]")
+             .replace("@@BSI_LINKS@@", '\n{"title":"GitHub","url":"https://github.com/x"}')
+             .replace("@@BSI_LOGO_SOURCE@@", '""')
+             .replace("@@BSI_TAB_ICONS@@",
+                      '({"display":"data:image/svg+xml;base64,'
+                      + "A" * 512 + '"})'))
+# The generated page is validated against kAboutMarker before it is written, so
+# the marker text inside the template must match that constant exactly -
+# otherwise every apply fails its own marker check.
+about_marker = re.search(
+    r'const QString kAboutMarker = QStringLiteral\("([^"]+)"\);', cpp)
+assert about_marker, "Could not find kAboutMarker"
+assert about_marker.group(1) in about_doc, (
+    f"the generated About page must contain its own marker {about_marker.group(1)!r}; "
+    "the rebuild refuses to write a page that fails this check")
+
+about_payload = len(zlib.compress(about_doc.encode(), 9))
+assert about_payload <= 1700, (
+    f"the About page compresses to {about_payload} bytes with one embedded icon; "
+    "the smallest known player slot is 2337 bytes and a logo goes in the same "
+    "document, so keep it comfortably below that"
+)
+assert "bsiAboutDeveloperName" in about_doc and "bsiAboutDeveloperLink" in about_doc, \
+    "compacting the About page must keep its object names"
+assert "fCheckForUpdateCallback" in about_doc and "fUpdateShortDisplayName" in about_doc, \
+    "the native About callbacks must survive compaction"
+assert "Item{width:Math.min(parent.width-48,568);x:(parent.width-width)/2;" in replacement, "The page host must be horizontally centered in the shell"
+assert "width:Math.min(parent.width-48,568)" in replacement
 assert "delegate:Loader{width:iSelectedSettingControl.width;height:iSelectedSettingControl.height;" in replacement
 assert "pSettingBtnText:" in replacement and "pSelected:index==pCurrentTabIndex" in replacement and "pShowRedDot:modelData.pShowRedDot" in replacement
 assert "pSettingIdx:index" in replacement
@@ -268,10 +327,11 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
         None,
     )
     # The page host is an id-carrying item, so it is reached through the QML
-    # child tree rather than objectName.
+    # child tree rather than objectName. It is inset the same 24 px on each side
+    # as the tab strip and capped at 568 px.
     page_frame = next(
         (candidate for candidate in visual_tree
-         if abs(candidate.width() - min(obj.width() - 32, 568)) < 2
+         if abs(candidate.width() - min(obj.width() - 48, 568)) < 2
          and candidate.height() > 50 and candidate is not obj),
         None,
     )
@@ -345,7 +405,7 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
     assert abs(frame_center.x() - panel.width() / 2) < 2, "The page host card should be centered in the shell"
     assert abs(page_frame.width() - 568) < 2, "A wide player window should cap the page region at its bounded width"
     assert page_frame.width() < panel.width() - 100, "The page region should no longer be stretched across the whole shell"
-    assert abs(stack.width() - (page_frame.width() - 12)) < 2, "The native page stack should fill its centered page card with a balanced inset"
+    assert abs(stack.width() - page_frame.width()) < 2, "The native page stack should fill its centered page card"
     loader_position = page_loader.mapToItem(panel, QPointF(0, 0))
     assert 0 < page_loader.width() <= page_frame.width(), "The native page Loader should stay inside the centered page card"
     assert loader_position.x() >= frame_center.x() - page_frame.width() / 2 - 8, "The native Loader drifted out of its page card"
@@ -400,7 +460,12 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
         '{ title: "Community", url: "https://example.com/community" },',
     )
     about_qml = about_qml.replace("@@BSI_HIDDEN_TABS@@", "[]")
-    about_qml = about_qml.replace("@@BSI_TAB_ICONS@@", "({})")
+    about_icon = ("data:image/svg+xml;base64," + __import__("base64").b64encode(
+        b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">'
+        b'<circle cx="12" cy="12" r="9" fill="#63e6be"/></svg>').decode())
+    about_qml = about_qml.replace(
+        "@@BSI_TAB_ICONS@@",
+        '({"settingpage.qml":"' + about_icon + '"})')
     about_qml = about_qml.replace("@@BSI_LOGO_SOURCE@@", '""')
     about_path = root / "AboutHost.qml"
     about_path.write_text(about_qml, encoding="utf-8")
@@ -418,9 +483,172 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
 
     print("PASS: generated Settings and About QML instantiate, retain native page behavior, show custom tabs, and render profile links")
     about_obj.deleteLater()
+    # Now the part that was broken in the field: a custom tab icon must reach
+    # the shell and be drawn. The About page publishes bHidden/bIcons by walking
+    # up from itself, so load the real generated page as a child of the shell
+    # and check that the assignment lands - counting parents used to land on the
+    # window instead, throw "Cannot assign to non-existent property", and leave
+    # every icon undisplayed even though the patch applied cleanly.
+    mounted_component = QQmlComponent(engine, QUrl.fromLocalFile(str(about_path)))
+    about_child = mounted_component.create()
+    assert about_child is not None, "The generated About page did not load inside the shell"
+    about_child.setParentItem(page_loader)
+    QTest.qWait(30)
+    # The player's Loader calls this after loading; do the same.
+    from PySide6.QtCore import QMetaObject
+    assert QMetaObject.invokeMethod(about_child, "fOnQmlLoaded"), \
+        "The About page must expose fOnQmlLoaded for the player's Loader to call"
+    QTest.qWait(30)
+    shell_root = None
+    probe = page_loader.parentItem()
+    while probe is not None:
+        try:
+            if probe.property("bIcons") is not None:
+                shell_root = probe
+                break
+        except (RuntimeError, TypeError):
+            pass
+        probe = probe.parentItem()
+    assert shell_root is not None, "The About page could not reach the shell's bIcons property"
+    published_icons = shell_root.property("bIcons")
+    assert published_icons is not None, \
+        "The shell must declare bIcons for the About page to publish into"
+    if hasattr(published_icons, "toVariant"):
+        published_icons = published_icons.toVariant()
+    assert isinstance(published_icons, dict) and published_icons.get("settingpage.qml"), \
+        f"The About page did not publish its tab icons to the shell (got {published_icons!r})"
+    published_hidden = shell_root.property("bHidden")
+    if hasattr(published_hidden, "toVariant"):
+        published_hidden = published_hidden.toVariant()
+    assert published_hidden == [], "The About page did not publish its hidden-tab list"
+    published_icon = published_icons["settingpage.qml"]
+    assert published_icon.startswith("data:image/svg+xml;base64,"), \
+        "The published tab icon must be a self-contained SVG data URI"
+    # And the strip must actually paint it, centred, with the label lifted clear.
+    strip_items = visual_items(tabs)
+
+    def source_of(item):
+        # Image.source is a QUrl; compare the data URI itself, not its repr.
+        try:
+            if item.metaObject().indexOfProperty("source") <= 0:
+                return None
+        except (RuntimeError, TypeError):
+            return None
+        value = item.property("source")
+        text = value.toString() if hasattr(value, "toString") else str(value or "")
+        return text
+
+    painted = [source_of(item) for item in strip_items]
+    icon_items = [item for item in strip_items if source_of(item) == published_icon]
+    assert icon_items, "The published icon is not painted by any tab"
+    assert sum(1 for src in painted if src) >= 1, "No tab painted a custom icon"
+    icon_mid = icon_items[0].mapToItem(first_tab, QPointF(icon_items[0].width() / 2, 0)).x()
+    assert abs(icon_mid - first_tab.width() / 2) < 2, \
+        "A custom icon must be horizontally centred in its tab"
+
     about_component.deleteLater()
+    mounted_component.deleteLater()
     window.close()
     obj.deleteLater()
     component.deleteLater()
     engine.deleteLater()
     QTest.qWait(10)
+
+
+# The About document has to hold every embedded tab icon, and the player's slot
+# for it is small, so an icon the user picks must be compacted before it is
+# pasted in as base64. This mirrors SettingsPanelPatcher::minifySvg(): comments,
+# the XML prolog, metadata, doctype and insignificant whitespace are dropped and
+# nothing else is touched. Checked here because the C++ version cannot run on
+# this platform.
+def _minify_svg(source: str) -> str:
+    source = re.sub(r"<!--.*?-->", "", source, flags=re.S)
+    source = re.sub(r"<metadata\b.*?</metadata\s*>", "", source, flags=re.S | re.I)
+    source = re.sub(r"<!DOCTYPE[^>]*>", "", source, flags=re.I)
+    source = re.sub(r"^\s*<\?xml[^>]*\?>", "", source, flags=re.I)
+    source = re.sub(r">\s+<", "><", source)
+    source = re.sub(r"\s+", " ", source)
+    source = re.sub(r"<\s+", "<", source)
+    source = re.sub(r"\s+/?>", ">", source)
+    source = source.strip()
+    if not source.endswith("/>"):
+        source = re.sub(r"\s+/>", "/>", source)
+    return source
+
+
+editor_icon = '''<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- Created with Inkscape (http://www.inkscape.org/) -->
+<svg
+   xmlns:dc="http://purl.org/dc/elements/1.1/"
+   width="24"
+   height="24"
+   viewBox="0 0 24 24"
+   version="1.1">
+  <metadata id="metadata5">
+    <rdf:RDF><cc:Work rdf:about=""><dc:format>image/svg+xml</dc:format></cc:Work></rdf:RDF>
+  </metadata>
+  <g id="layer1" transform="translate(0,-8)">
+    <path
+       style="fill:#54c8ff;stroke:none"
+       d="M 4,12 H 20 V 20 H 4 Z"
+       id="rect1" />
+  </g>
+</svg>
+'''
+compacted = _minify_svg(editor_icon)
+assert len(compacted.encode()) < len(editor_icon.encode()) * 0.6, (
+    "an editor-emitted tab icon must shrink substantially before it is embedded "
+    f"({len(editor_icon.encode())} -> {len(compacted.encode())} bytes)")
+assert 'd="M 4,12 H 20 V 20 H 4 Z"' in compacted, "the drawing itself must be preserved"
+assert "inkscape" not in compacted.lower() and "<metadata" not in compacted, \
+    "comments and metadata must be dropped"
+assert not re.search(r"\s{2,}", compacted) and "\n" not in compacted, \
+    "insignificant whitespace must be collapsed"
+# Safety must survive compaction: a script or external reference still refuses.
+for hostile in ("<svg><script>alert(1)</script></svg>",
+                '<svg><image href="http://evil.example/x.png"/></svg>',
+                '<svg><a onclick="x()"/></svg>'):
+    assert re.search(r"<\s*(script|foreignObject)\b|\bon[a-z]+\s*=|href\s*=", hostile, re.I), \
+        "the hostile fixture must still be rejected by validateAssetBytes"
+
+print("PASS: tab icons are compacted before they are embedded in the About document")
+
+
+# A tab icon the user picks is often far bigger than the slot the About page
+# lives in (a 150-path icon is ~8.7 KB of markup against a 2337-byte slot), and
+# refusing the upload is not an answer: the SVG is valid and only the container
+# is small. Such an icon is drawn once at the size the strip uses and stored as a
+# PNG instead, which is what makes "set 2+ custom icons" apply at all.
+def _page_payload(icons_literal):
+    doc = about_source
+    for token, value in (
+        ("@@BSI_DEVELOPER@@", '"Mr.Pc Gamer"'),
+        ("@@BSI_TAGLINE@@", '"BlueStacks tools"'),
+        ("@@BSI_HIDDEN_TABS@@", "[]"),
+        ("@@BSI_LINKS@@", '{"title":"GitHub","url":"https://github.com/x"}'),
+        ("@@BSI_LOGO_SOURCE@@", '"qrc:/qrcAssets/BlueStacks5Beta.svg"'),
+        ("@@BSI_TAB_ICONS@@", icons_literal),
+    ):
+        doc = doc.replace(token, value)
+    return len(zlib.compress(doc.encode(), 9))
+
+
+def _icon_svg(paths: int) -> str:
+    body = "".join(
+        f'<path d="M{i} 2h8a2 2 0 0 1 2 2v{i}l-3 4z" fill="#54c8ff"/>' for i in range(paths))
+    return f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">{body}</svg>'
+
+
+# The case that used to fail: several large icons at once.
+big_icon = urllib.parse.quote(_icon_svg(150), safe="")
+as_svg = "({" + ",".join(
+    f'"{i}":"data:image/svg+xml,{big_icon}"' for i in range(4)) + "})"
+assert _page_payload(as_svg) > 2337, (
+    "the fixture must reproduce the over-slot case, otherwise this test proves nothing")
+# After the raster fallback the same four icons are a few hundred bytes each.
+assert "rasterizeSvg" in cpp and "artworkBudget" in cpp, \
+    "a tab icon that cannot fit its slot must be drawn down, not refused"
+assert "image/png" in cpp, "the drawn-down icon is stored as PNG"
+assert "for (int box : {32, 24, 18})" in cpp, \
+    "the fallback should try progressively smaller squares until it fits"
+print("PASS: oversized tab icons are drawn down instead of failing the apply")

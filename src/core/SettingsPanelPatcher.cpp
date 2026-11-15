@@ -18,7 +18,10 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QJsonParseError>
+#include <QImage>
 #include <QImageReader>
+#include <QPainter>
+#include <QSvgRenderer>
 #include <QLockFile>
 #include <QSaveFile>
 #include <QStandardPaths>
@@ -38,7 +41,8 @@ const QString kWindowDesignMarkerV6 = QStringLiteral("BSI6");
 // v8 was the full-bleed shell that left the native fixed-width pages hugging
 // the left edge; v9 bounds the page region inside a centred frame.
 const QString kWindowDesignMarkerV8 = QStringLiteral("BSI Settings v8");
-const QString kWindowDesignMarker = QStringLiteral("BSI Settings v9");
+const QString kWindowDesignMarkerV9 = QStringLiteral("BSI Settings v9");
+const QString kWindowDesignMarker = QStringLiteral("BSI Settings v10");
 const QString kAboutMarker = QStringLiteral("BSI CUSTOMIZER: redesigned About page v1");
 const QString kSchema = QStringLiteral("bsi.settings-panel.recovery");
 const QString kWindowLeaf = QStringLiteral("UiSettingsWindow.qml");
@@ -699,25 +703,33 @@ QString buildWindow(const QString &stock)
     // fChangeSelectedSetting callback and the six-level `parent` hop used by
     // the rebuilt About page) keeps exactly the same depth, so page QML that
     // was already shipped keeps resolving its bindings.
+    //
+    // The tab strip is inset 24 px on both sides and the slots divide that width
+    // exactly, so every tab keeps the same gap and the first and last slots sit
+    // the same distance from the window edge. The Column is closed before the
+    // page host, so the host fills the area below the header instead of being
+    // laid out inside the 56 px bar. A custom icon now replaces the label's
+    // place, vertically centred: it used to be painted over the centred text
+    // (unreadable) inside a bare Item, which is not a visual element, so it
+    // could not be shown at all.
     QString replacement = QStringLiteral(R"QML(
-UiShadowContainer{// BSI Settings v9
+UiShadowContainer{// BSI Settings v10
 id:iSettingsWindowShadowContainer;anchors.fill:parent
 property var bHidden:[]
+property var bIcons:({})
 Rectangle{anchors.fill:parent;color:UiTheme.colors.primary80;radius:14;clip:true
 Column{anchors.fill:parent
 Item{width:parent.width;height:56
 MouseArea{anchors.fill:parent;onPressed:iSettingsWindow.startSystemMove()}
 Text{text:qsTr("Settings");color:UiTheme.colors.primary10;font:UiTheme.fonts.bodyLarge;anchors.centerIn:parent}
-UiImageButton{asset:"CloseIcon";pImageWidth:16;pImageHeight:16;x:parent.width-32;y:12;onClicked:iSettingsWindow.close()}}
-ListView{id:v;width:parent.width-64;height:48;x:32;orientation:ListView.Horizontal;model:pSettingsItems.pSettingElements;clip:true
-delegate:Item{property var k:modelData.pQmlSource.toLowerCase().split("/").pop();property var h:iSettingsWindowShadowContainer.bHidden;width:v.width/(v.count-h.length||1)*(h.indexOf(k)<0);height:44
-UiSettingsButton{anchors.fill:parent;pSettingIdx:index;pSettingBtnText:modelData.pButtonText;pSelected:index==pCurrentTabIndex;pShowRedDot:modelData.pShowRedDot;onSettingClicked:fChangeSelectedSetting(pSettingIdx)}
-Image{source:iSettingsWindowShadowContainer.bIcons[parent.k]||"";width:18;height:18;anchors.centerIn:parent}}
-}
-Item{width:Math.min(parent.width-64,568);x:(parent.width-width)/2;height:parent.height-118
-StackLayout{id:iSelectedSettingControl;anchors.fill:parent;anchors.margins:6;currentIndex:pCurrentTabIndex
-Repeater{model:pSettingsItems.pSettingElements;delegate:Loader{width:iSelectedSettingControl.width;height:iSelectedSettingControl.height;Component.onCompleted:setSource(model.modelData.pQmlSource,model.modelData.pComponentArgs||{});onLoaded:{item.anchors.fill=item.parent;model.modelData.pComponentObj=item;if(item.fOnQmlLoaded)item.fOnQmlLoaded()}}}}
-}
+UiImageButton{asset:"CloseIcon";x:parent.width-32;y:12;onClicked:iSettingsWindow.close()}}
+ListView{id:v;width:parent.width-48;height:44;x:24;orientation:ListView.Horizontal;model:pSettingsItems.pSettingElements;clip:true
+delegate:Item{property var w:iSettingsWindowShadowContainer;property var k:modelData.pQmlSource.toLowerCase().split("/").pop();property var h:w.bHidden;property var c:w.bIcons[k];width:v.width/(v.count-h.length||1)*(h.indexOf(k)<0);height:44
+UiSettingsButton{anchors.fill:parent;anchors.bottomMargin:c?26:0;pSettingIdx:index;pSettingBtnText:modelData.pButtonText;pSelected:index==pCurrentTabIndex;pShowRedDot:modelData.pShowRedDot;onSettingClicked:fChangeSelectedSetting(pSettingIdx)}
+Image{source:c;width:18;height:18;x:parent.width/2-9;y:24}}}
+Item{width:Math.min(parent.width-48,568);x:(parent.width-width)/2;height:parent.height-112
+StackLayout{id:iSelectedSettingControl;anchors.fill:parent;currentIndex:pCurrentTabIndex
+Repeater{model:pSettingsItems.pSettingElements;delegate:Loader{width:iSelectedSettingControl.width;height:iSelectedSettingControl.height;Component.onCompleted:setSource(model.modelData.pQmlSource,model.modelData.pComponentArgs||{});onLoaded:{item.anchors.fill=item.parent;model.modelData.pComponentObj=item;if(item.fOnQmlLoaded)item.fOnQmlLoaded()}}}}}
 }
 }
 }
@@ -761,159 +773,82 @@ QString buildAbout(const QString &developerName, const QString &tagline,
     iconLiteral += QStringLiteral("})");
     const QString qDeveloper = qmlString(developerName.trimmed());
     const QString qTagline = qmlString(tagline.trimmed());
+    // The About page is not free-form: the player's own QML resource slot for
+    // PlrAboutSetting.qml has to hold this document, compressed, and the EXE is
+    // never allowed to grow. A custom tab icon or logo is embedded in here too,
+    // so every unused byte of markup eats into what the user can upload. Keep it
+    // compact - whitespace and repeated token spellings are the difference
+    // between "the icon applies" and "needs 2495 bytes but its slot only holds
+    // 2337".
     QString generated = QStringLiteral(R"QML(import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
+Item{objectName:"aboutSettings"
+property bool pUpdateAvailable:false
+property string pUpdateVersion:""
+property string pMoreInfoURL:""
+property string pDownloadURL:""
+property bool pIsInCompatibleUpdateVersion:false
+property string pParentWindow:""
+property string pShortDisplayName:""
+property string pDeveloperName:@@BSI_DEVELOPER@@
+property string pDeveloperTagline:@@BSI_TAGLINE@@
+property var bsiHiddenTabs:@@BSI_HIDDEN_TABS@@
+property var bsiTabIcons:@@BSI_TAB_ICONS@@
+property var pDeveloperLinks:[@@BSI_LINKS@@]
+// BSI CUSTOMIZER: redesigned About page v1
+ColumnLayout{anchors.fill:parent;spacing:0
+ScrollView{Layout.fillWidth:true;Layout.fillHeight:true;clip:true
+background:Rectangle{color:"transparent"}
+contentWidth:iAboutD.width;contentHeight:iAboutD.implicitHeight+48
+ColumnLayout{id:iAboutD;width:Math.min(440,parent.width-24)
+Layout.alignment:Qt.AlignHCenter|Qt.AlignTop;spacing:16
+Item{Layout.fillWidth:true;Layout.preferredHeight:28}
+Image{objectName:"bsiAboutEmulatorLogo";source:@@BSI_LOGO_SOURCE@@
+width:160;height:60;fillMode:Image.PreserveAspectFit;Layout.alignment:Qt.AlignHCenter}
+Text{objectName:"bsiAboutDeveloperName";text:pDeveloperName;font:UiTheme.fonts.bodyLarge
+color:UiTheme.colors.primary10;horizontalAlignment:Text.AlignHCenter
+wrapMode:Text.Wrap;Layout.fillWidth:true}
+Text{objectName:"bsiAboutDeveloperTagline";visible:pDeveloperTagline.length>0
+text:pDeveloperTagline;font:UiTheme.fonts.bodySmall;color:UiTheme.colors.primary30
+horizontalAlignment:Text.AlignHCenter;wrapMode:Text.Wrap;Layout.fillWidth:true}
+Rectangle{Layout.fillWidth:true;Layout.preferredHeight:1;color:UiTheme.colors.primary60}
+Repeater{model:pDeveloperLinks
+delegate:Rectangle{objectName:"bsiAboutDeveloperLink"
+Layout.fillWidth:true;Layout.preferredHeight:42
+property bool hovered:false
+radius:10;border.width:1
+color:hovered?Qt.rgba(UiTheme.colors.accentNormal.r,UiTheme.colors.accentNormal.g,UiTheme.colors.accentNormal.b,.16)
+:Qt.rgba(UiTheme.colors.primary60.r,UiTheme.colors.primary60.g,UiTheme.colors.primary60.b,.42)
+border.color:hovered?UiTheme.colors.accentNormal:UiTheme.colors.primary60
+Text{anchors.left:parent.left;anchors.right:parent.right;anchors.leftMargin:14
+anchors.rightMargin:38;anchors.verticalCenter:parent.verticalCenter
+text:modelData.title;font:UiTheme.fonts.bodyMedium;elide:Text.ElideRight
+color:parent.hovered?UiTheme.colors.accentNormal:UiTheme.colors.primary10}
+Text{anchors.right:parent.right;anchors.rightMargin:14
+anchors.verticalCenter:parent.verticalCenter;text:"\u2197"
+color:UiTheme.colors.accentNormal;font.pixelSize:16}
+MouseArea{anchors.fill:parent;hoverEnabled:true;cursorShape:Qt.PointingHandCursor
+onEntered:parent.hovered=true;onExited:parent.hovered=false
+onClicked:{var t=String(modelData.url||"");if(/^https?:\/\//i.test(t))Qt.openUrlExternally(t)}}}}
+Text{visible:pDeveloperLinks.length===0
+text:qsTranslate("QObject","Add up to four developer links in BSI Customizer.")
+color:UiTheme.colors.primary30;font:UiTheme.fonts.bodySmall
+horizontalAlignment:Text.AlignHCenter;wrapMode:Text.Wrap;Layout.fillWidth:true}
+Item{Layout.fillWidth:true;Layout.preferredHeight:28}}}}
 
-Item {
-    // BSI CUSTOMIZER: redesigned About page v1
-    objectName: "aboutSettings"
-    property bool pUpdateAvailable: false
-    property string pUpdateVersion: ""
-    property string pMoreInfoURL: ""
-    property string pDownloadURL: ""
-    property bool pIsInCompatibleUpdateVersion: false
-    property string pParentWindow: ""
-    property string pShortDisplayName: ""
-    property string pDeveloperName: @@BSI_DEVELOPER@@
-    property string pDeveloperTagline: @@BSI_TAGLINE@@
-    property var bsiHiddenTabs: @@BSI_HIDDEN_TABS@@
-    property var bsiTabIcons: @@BSI_TAB_ICONS@@
-    property var pDeveloperLinks: [@@BSI_LINKS@@
-    ]
-
-    ColumnLayout {
-        anchors.fill: parent
-        spacing: 0
-        ScrollView {
-            Layout.fillWidth: true
-            Layout.fillHeight: true
-            background: Rectangle { color: "transparent" }
-            contentWidth: iBsiAboutContent.width
-            contentHeight: iBsiAboutContent.implicitHeight + 48
-            clip: true
-
-            ColumnLayout {
-                id: iBsiAboutContent
-                width: Math.min(440, parent.width - 24)
-                Layout.alignment: Qt.AlignHCenter | Qt.AlignTop
-                spacing: 16
-
-                Item { Layout.fillWidth: true; Layout.preferredHeight: 28 }
-                Image {
-                    objectName: "bsiAboutEmulatorLogo"
-                    source: @@BSI_LOGO_SOURCE@@
-                    width: 160
-                    height: 60
-                    fillMode: Image.PreserveAspectFit
-                    Layout.alignment: Qt.AlignHCenter
-                }
-                Text {
-                    objectName: "bsiAboutDeveloperName"
-                    text: pDeveloperName
-                    font: UiTheme.fonts.bodyLarge
-                    color: UiTheme.colors.primary10
-                    horizontalAlignment: Text.AlignHCenter
-                    wrapMode: Text.Wrap
-                    Layout.fillWidth: true
-                }
-                Text {
-                    objectName: "bsiAboutDeveloperTagline"
-                    visible: pDeveloperTagline.length > 0
-                    text: pDeveloperTagline
-                    font: UiTheme.fonts.bodySmall
-                    color: UiTheme.colors.primary30
-                    horizontalAlignment: Text.AlignHCenter
-                    wrapMode: Text.Wrap
-                    Layout.fillWidth: true
-                }
-                Rectangle {
-                    Layout.fillWidth: true
-                    Layout.preferredHeight: 1
-                    color: UiTheme.colors.primary60
-                }
-                Repeater {
-                    model: pDeveloperLinks
-                    delegate: Rectangle {
-                        objectName: "bsiAboutDeveloperLink"
-                        Layout.fillWidth: true
-                        Layout.preferredHeight: 42
-                        property bool hovered: false
-                        radius: 10
-                        color: hovered
-                            ? Qt.rgba(UiTheme.colors.accentNormal.r, UiTheme.colors.accentNormal.g,
-                                      UiTheme.colors.accentNormal.b, 0.16)
-                            : Qt.rgba(UiTheme.colors.primary60.r, UiTheme.colors.primary60.g,
-                                      UiTheme.colors.primary60.b, 0.42)
-                        border.width: 1
-                        border.color: hovered ? UiTheme.colors.accentNormal : UiTheme.colors.primary60
-                        Text {
-                            anchors.left: parent.left
-                            anchors.right: parent.right
-                            anchors.leftMargin: 14
-                            anchors.rightMargin: 38
-                            anchors.verticalCenter: parent.verticalCenter
-                            text: modelData.title
-                            color: parent.hovered ? UiTheme.colors.accentNormal : UiTheme.colors.primary10
-                            font: UiTheme.fonts.bodyMedium
-                            elide: Text.ElideRight
-                        }
-                        Text {
-                            anchors.right: parent.right
-                            anchors.rightMargin: 14
-                            anchors.verticalCenter: parent.verticalCenter
-                            text: "↗"
-                            color: UiTheme.colors.accentNormal
-                            font.pixelSize: 16
-                        }
-                        MouseArea {
-                            anchors.fill: parent
-                            hoverEnabled: true
-                            cursorShape: Qt.PointingHandCursor
-                            onEntered: parent.hovered = true
-                            onExited: parent.hovered = false
-                            onClicked: {
-                                var target = String(modelData.url || "")
-                                if (/^https?:\/\//i.test(target)) Qt.openUrlExternally(target)
-                            }
-                        }
-                    }
-                }
-                Text {
-                    visible: pDeveloperLinks.length === 0
-                    text: qsTranslate("QObject", "Add up to four developer links in BSI Customizer.")
-                    color: UiTheme.colors.primary30
-                    font: UiTheme.fonts.bodySmall
-                    horizontalAlignment: Text.AlignHCenter
-                    wrapMode: Text.Wrap
-                    Layout.fillWidth: true
-                }
-                Item { Layout.fillWidth: true; Layout.preferredHeight: 28 }
-            }
-        }
-    }
-
-    // Retain the native About-page callback surface and publish profile icons to the shell.
-    function fOnQmlLoaded(){parent.parent.parent.parent.parent.parent.parent.bHidden=bsiHiddenTabs;parent.parent.parent.parent.parent.parent.parent.bIcons=bsiTabIcons}
-    function fCheckForUpdateCallback(apiCallStatus, jsonData) {
-        if (apiCallStatus === 0) {
-            var jsonObj = JSON.parse(jsonData)
-            pUpdateAvailable = String(jsonObj.update_available).toLowerCase() === "true"
-            pIsInCompatibleUpdateVersion = pUpdateAvailable
-                && String(jsonObj.update_details.is_build_compatible).toLowerCase() !== "true"
-            if (pUpdateAvailable) {
-                pUpdateVersion = jsonObj.update_details.client_version
-                pMoreInfoURL = jsonObj.update_details.detailed_changelogs_url
-                pDownloadURL = jsonObj.update_details.download_url
-            }
-        } else {
-            pUpdateAvailable = false
-            pIsInCompatibleUpdateVersion = false
-        }
-    }
-    function fUpdateShortDisplayName(displayName) {
-        pShortDisplayName = String(displayName || "")
-    }
+// Publish the hidden tabs and icons to the shell. Walk up instead of counting
+// parents: one hop too many lands on the window and the assignment throws.
+function fOnQmlLoaded(){var p=parent;while(p&&p.bIcons===undefined)p=p.parent;if(p){p.bHidden=bsiHiddenTabs;p.bIcons=bsiTabIcons}}
+function fCheckForUpdateCallback(apiCallStatus,jsonData){
+if(apiCallStatus===0){var j=JSON.parse(jsonData)
+pUpdateAvailable=String(j.update_available).toLowerCase()==="true"
+pIsInCompatibleUpdateVersion=pUpdateAvailable&&String(j.update_details.is_build_compatible).toLowerCase()!=="true"
+if(pUpdateAvailable){pUpdateVersion=j.update_details.client_version
+pMoreInfoURL=j.update_details.detailed_changelogs_url
+pDownloadURL=j.update_details.download_url}}
+else{pUpdateAvailable=false;pIsInCompatibleUpdateVersion=false}}
+function fUpdateShortDisplayName(n){pShortDisplayName=String(n||"")}
 }
 )QML");
     generated.replace(QStringLiteral("@@BSI_DEVELOPER@@"), qDeveloper);
@@ -923,6 +858,14 @@ Item {
     generated.replace(QStringLiteral("@@BSI_LINKS@@"), rows);
     generated.replace(QStringLiteral("@@BSI_LOGO_SOURCE@@"), qmlString(logoSource));
     return generated;
+}
+
+// The page as it is generated with no custom artwork, compressed. This is the
+// baseline the icon budget is measured against.
+int emptyPagePayload()
+{
+    return int(EmbeddedResources::payloadSizeFor(
+        buildAbout(QString(), QString(), {}, QString(), QStringList(), {}).toUtf8(), 1));
 }
 
 QVariantMap readRecovery(const QString &path, const QString &exePath)
@@ -1122,10 +1065,94 @@ bool hasWindowMarker(const QString &text)
     return text.contains(kWindowMarker) || text.contains(kPreviousWindowDesignMarker)
         || text.contains(kWindowDesignMarkerV3) || text.contains(kWindowDesignMarkerV4)
         || text.contains(kWindowDesignMarkerV5) || text.contains(kWindowDesignMarkerV6)
-        || text.contains(kWindowDesignMarkerV8) || text.contains(kWindowDesignMarker);
+        || text.contains(kWindowDesignMarkerV8) || text.contains(kWindowDesignMarkerV9)
+        || text.contains(kWindowDesignMarker);
 }
 
 } // namespace
+
+// A tab icon is pasted, base64-encoded, into the About page document, which has
+// to fit a small resource slot inside the player EXE (one shipped build reports
+// 2337 bytes of capacity for the whole page). Editors routinely emit several KB
+// of comments, metadata and indentation for a 400-byte drawing, so store the
+// minified form: comments, the XML declaration, metadata blocks, doctype,
+// inter-tag whitespace and attribute padding all go. Only whitespace and
+// comments are removed - no attribute, element or value is ever rewritten -
+// and the result is re-validated by the caller, which also rejects any SVG that
+// contains a URL, script or event handler.
+QString minifySvg(const QString &source)
+{
+    QString text = source;
+    static const QRegularExpression comment(QStringLiteral("<!--.*?-->"),
+                                            QRegularExpression::DotMatchesEverythingOption);
+    static const QRegularExpression metadata(
+        QStringLiteral("<metadata\\b.*?</metadata\\s*>"),
+        QRegularExpression::DotMatchesEverythingOption | QRegularExpression::CaseInsensitiveOption);
+    static const QRegularExpression prolog(
+        QStringLiteral("^\\s*<\\?xml[^>]*\\?>"), QRegularExpression::CaseInsensitiveOption);
+    static const QRegularExpression doctype(
+        QStringLiteral("<!DOCTYPE[^>]*>"), QRegularExpression::CaseInsensitiveOption);
+    text.remove(comment);
+    text.remove(metadata);
+    text.remove(doctype);
+    text.remove(prolog);
+    // Whitespace between tags carries no meaning in SVG.
+    text.replace(QRegularExpression(QStringLiteral(">\\s+<")), QStringLiteral("><"));
+    // Leading/trailing padding inside a tag, and the newlines that remain in
+    // attribute lists, are also insignificant.
+    text.replace(QRegularExpression(QStringLiteral("\\s+")), QStringLiteral(" "));
+    text.replace(QRegularExpression(QStringLiteral("<\\s+")), QStringLiteral("<"));
+    text.replace(QRegularExpression(QStringLiteral("\\s+/?>")), QStringLiteral(">"));
+    text = text.trimmed();
+    if (!text.endsWith(QLatin1String("/>")))
+        text.replace(QRegularExpression(QStringLiteral("\\s+/>")), QStringLiteral("/>"));
+    return text;
+}
+
+// The About document is the only place a custom tab icon can live (it is the
+// page that publishes them to the shell), and its slot is small: one shipped
+// player reports 2337 bytes for the whole page, compressed. Every icon is
+// inserted there as a data URI, so an SVG saved with thousands of paths simply
+// cannot fit no matter how well it is minified. Draw it once at the size the
+// strip actually uses and store a compact PNG instead: at 18 px an icon with
+// hundreds of paths is visually identical to one with a handful, and the file
+// becomes a couple of hundred bytes.
+QByteArray rasterizeSvg(const QByteArray &svg, int box)
+{
+    QSvgRenderer renderer(svg);
+    if (!renderer.isValid()) return {};
+    // Keep the drawing's own aspect ratio inside a square tile so a wide or tall
+    // icon is never stretched.
+    QSizeF natural = renderer.defaultSize();
+    if (natural.isEmpty()) natural = QSizeF(box, box);
+    const QSizeF scaled = natural.scaled(QSizeF(box, box), Qt::KeepAspectRatio);
+    const int side = qMax(8, qRound(qMax(scaled.width(), scaled.height())));
+    QImage image(side, side, QImage::Format_ARGB32_Premultiplied);
+    image.fill(Qt::transparent);
+    QPainter painter(&image);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
+    const QRectF target((side - scaled.width()) / 2.0, (side - scaled.height()) / 2.0,
+                        scaled.width(), scaled.height());
+    renderer.render(&painter, target);
+    painter.end();
+    QByteArray png;
+    QBuffer buffer(&png);
+    if (!buffer.open(QIODevice::WriteOnly)) return {};
+    return image.save(&buffer, "PNG") ? png : QByteArray();
+}
+
+// How many bytes of tab artwork the About page can carry. The document is
+// compressed into a fixed slot, so this is measured, not guessed: the compressed
+// size of the page with no artwork is compared against the slot floor, with a
+// reserve for the logo and for data the compressor cannot pack.
+constexpr int kAboutSlotFloor = 2337;
+constexpr int kArtworkReserve = 320;
+
+int artworkBudget(int plainPayload)
+{
+    return qMax(0, kAboutSlotFloor - plainPayload - kArtworkReserve);
+}
 
 QVariantMap readCustomAsset(const QString &path, const QString &kind)
 {
@@ -1145,11 +1172,45 @@ QVariantMap readCustomAsset(const QString &path, const QString &kind)
     QString error;
     if (bytes.isEmpty() || bytes.size() > limit || !validateAssetBytes(bytes, kind, &mime, &error))
         return fail(error.isEmpty() ? QStringLiteral("The selected image is invalid.") : error);
+    QByteArray stored = bytes;
+    QString note;
+    if (mime == QLatin1String("image/svg+xml")) {
+        const QString minified = minifySvg(QString::fromUtf8(bytes));
+        // Only ever store the smaller form, and only if it still validates.
+        if (!minified.isEmpty() && minified.toUtf8().size() < bytes.size()
+            && validateAssetBytes(minified.toUtf8(), kind, &mime, &error)) {
+            note = QStringLiteral(" Minified from %1 to %2 bytes so it fits the "
+                                  "in-player Settings resource slot.")
+                       .arg(bytes.size()).arg(minified.toUtf8().size());
+            stored = minified.toUtf8();
+        }
+        // Still too big for the About page's slot? Draw it at the size the strip
+        // uses and store that instead. Refusing the upload is worse: the user's
+        // SVG is valid and only the container is small.
+        const int budget = artworkBudget(emptyPagePayload());
+        if (budget > 0) {
+            const int dataUriSize = int(stored.toBase64().size()) + 28;
+            for (int box : {32, 24, 18}) {
+                if (dataUriSize <= budget) break;
+                const QByteArray png = rasterizeSvg(stored, box);
+                if (png.isEmpty()) break;
+                const int pngUri = int(png.toBase64().size()) + 22;
+                if (pngUri >= dataUriSize) break;
+                stored = png;
+                mime = QStringLiteral("image/png");
+                error.clear();
+                note = QStringLiteral(" Drawn at %1 px (%2 -> %3 bytes) because this "
+                                      "player's About-page slot cannot hold the full "
+                                      "SVG.")
+                           .arg(box).arg(bytes.size()).arg(png.size());
+            }
+        }
+    }
     return {{QStringLiteral("ok"), true},
             {QStringLiteral("asset"), QVariantMap{
                 {QStringLiteral("mime"), mime},
-                {QStringLiteral("data"), QString::fromLatin1(bytes.toBase64())}}},
-            {QStringLiteral("msg"), QStringLiteral("The safe local image is saved in the Settings-panel profile. It will be written only when you apply the rebuild.")}};
+                {QStringLiteral("data"), QString::fromLatin1(stored.toBase64())}}},
+            {QStringLiteral("msg"), QStringLiteral("The safe local image is saved in the Settings-panel profile. It will be written only when you apply the rebuild.") + note}};
 }
 
 QString recoveryPathFor(const QString &exePath)
@@ -1230,6 +1291,50 @@ State analyze(const QString &exePath)
     }
     if (!state.logoStatus.isEmpty()) state.detail += QLatin1Char(' ') + state.logoStatus;
     return state;
+}
+
+// The About page is one resource record with a fixed slot in the player EXE, and
+// a custom tab icon or logo is base64-pasted into that same document. The writer
+// can only rewrite a record in place or move it into space that is already free
+// inside the file (the EXE never grows), so an oversized About page fails the
+// whole apply. Measure it first and name the culprits: "needs 2495 bytes but its
+// slot only holds 2337" leaves the user with no idea which icon caused it.
+QString aboutCapacityProblem(const QByteArray &image, const QByteArray &aboutBytes,
+                             const QVariantMap &customTabIcons, bool customLogo)
+{
+    QList<EmbeddedResources::Entry> matches;
+    for (const auto &entry : EmbeddedResources::list(image, true)) {
+        if (entry.format.compare(QLatin1String("qml"), Qt::CaseInsensitive) == 0
+            && entry.leaf.compare(kAboutLeaf, Qt::CaseInsensitive) == 0)
+            matches << entry;
+    }
+    if (matches.size() != 1 || matches.first().scanned) return {};
+    const auto &entry = matches.first();
+    const auto link = QtResources::findLink(image, entry.entryOff, entry.leaf);
+    if (!link.found || link.ambiguous) return {};
+    const EmbeddedResources::Budget room = EmbeddedResources::budget(image, entry.entryOff, entry.leaf);
+    if (!room.known) return {};
+    const qint64 payload = EmbeddedResources::payloadSizeFor(aboutBytes, entry.flags);
+    if (payload <= room.capacity) return {};
+    QString error;
+    if (QtResources::findFreeSpace(image, link, payload, &error) >= 0) return {};
+    QStringList culprits;
+    for (auto it = customTabIcons.cbegin(); it != customTabIcons.cend(); ++it)
+        culprits << QStringLiteral("%1 (%2 KB)")
+                        .arg(it.key())
+                        .arg(QString::number(it.value().toString().toLatin1().size() / 1024.0, 'f', 1));
+    if (customLogo) culprits << QStringLiteral("the About logo");
+    return QStringLiteral(
+               "The About page needs %1 bytes but its slot in this player only holds %2, and the "
+               "rest of the EXE has no verified free space to move it to. Nothing was written. "
+               "The About page has to carry every custom tab icon and logo inside it, so the "
+               "artwork is what pushed it over.%3 Remove a custom icon or the logo, or choose a "
+               "smaller SVG, then rebuild.")
+        .arg(payload)
+        .arg(room.capacity)
+        .arg(culprits.isEmpty() ? QString()
+                                : QStringLiteral(" Currently embedded: %1.").arg(culprits.join(
+                                      QStringLiteral(", "))));
 }
 
 QVariantMap apply(const QString &exePath, const QString &developerName,
@@ -1428,6 +1533,14 @@ QVariantMap apply(const QString &exePath, const QString &developerName,
     recovery.insert(QStringLiteral("developerName"), developerName.trimmed());
     if (!saveAtomic(backup, QJsonDocument::fromVariant(recovery).toJson(QJsonDocument::Compact)))
         return fail(QStringLiteral("Could not save the feature-specific recovery snapshot. No executable resources were changed."));
+
+    const QString capacityProblem = aboutCapacityProblem(
+        image, replacements.value(current.about.path), customTabIcons,
+        profile.contains(QStringLiteral("logo")));
+    if (!capacityProblem.isEmpty()) {
+        if (!hadRecovery) QFile::remove(backup);
+        return fail(capacityProblem);
+    }
 
     const QVariantMap result = applyResources(exePath, operationsFor(replacements));
     if (!result.value(QStringLiteral("ok")).toBool()) {
