@@ -63,11 +63,21 @@ match = re.search(
 )
 assert match, "Could not find the generated Settings-window QML template"
 replacement = match.group(1)
-assert "BSI Settings v9" in replacement
+assert "BSI Settings v10" in replacement
 assert "pSettingsItems.pSettingElements" in replacement
 assert "property var bHidden:" in replacement
 assert "property var bHidden:[]" in replacement
-assert "function fOnQmlLoaded(){parent.parent.parent.parent.parent.parent.parent.bHidden=bsiHiddenTabs;parent.parent.parent.parent.parent.parent.parent.bIcons=bsiTabIcons}" in cpp
+# The About page publishes the hidden-tab list and the icon map to the shell.
+# It must find that shell by walking up: counting parents landed on the window
+# instead of the UiShadowContainer, which threw
+# "Cannot assign to non-existent property bHidden" and silently dropped every
+# custom tab icon (the file applied, nothing ever showed).
+assert "function fOnQmlLoaded(){var p=parent;while(p&&p.bIcons===undefined)p=p.parent;if(p){p.bHidden=bsiHiddenTabs;p.bIcons=bsiTabIcons}}" in cpp, \
+    "the About page must walk up to the shell, not count parents"
+# ...and the shell has to declare both of those properties, or the assignment
+# above has nowhere to land.
+assert "property var bHidden:[]" in replacement, "the shell must declare bHidden"
+assert "property var bIcons:({})" in replacement, "the shell must declare bIcons"
 assert "property var bsiHiddenTabs:@@BSI_HIDDEN_TABS@@" in cpp
 assert "property var bsiTabIcons:@@BSI_TAB_ICONS@@" in cpp
 # The shell must not ship its own palette: it paints with the player's own
@@ -83,21 +93,27 @@ assert "MouseArea{anchors.fill:parent;onPressed:iSettingsWindow.startSystemMove(
 assert "anchors.centerIn:parent" in replacement
 assert "ListView{id:v;" in replacement
 assert "orientation:ListView.Horizontal;model:pSettingsItems.pSettingElements;clip:true" in replacement
-# The strip spans the shell with a symmetric 16 px inset, and its slots divide
-# that width evenly, so the row is balanced without any label-length raggedness.
-# A symmetric inset leaves the same gap at both ends of the strip, so the last
-# tab no longer sits against the window edge.
-assert "ListView{id:v;width:parent.width-64;height:48;x:32;" in replacement
-assert "property var h:iSettingsWindowShadowContainer.bHidden" in replacement
-assert "property var h:iSettingsWindowShadowContainer.bHidden" in replacement
+# The strip spans the shell with a symmetric 24 px inset, and its slots divide
+# that width evenly, so the row is balanced without any label-length raggedness
+# and the last tab never sits against the window edge.
+assert "ListView{id:v;width:parent.width-48;height:44;x:24;" in replacement
+assert "property var h:w.bHidden" in replacement
 # Slots divide the strip's real width (no integer truncation, which left the
 # row short of the right inset and overlapped long neighbour labels).
 assert "width:v.width/(v.count-h.length||1)*(h.indexOf(k)<0);height:44" in replacement
+# Even gaps: the strip is inset the same amount on both sides and the slots
+# divide exactly that width, so the first and last tabs sit equally far from
+# the window edge and every tab keeps the same gap.
+# A custom icon sits centred in the tab with the native label lifted to the top,
+# instead of being painted over the text.
+assert "anchors.bottomMargin:c?26:0" in replacement, "the label must move up when an icon is shown"
+assert "Image{source:c;width:18;height:18;x:parent.width/2-9;y:24}" in replacement, \
+    "the icon must be centred in the tab"
 # Every category must stay reachable: the strip divides the shell width into
 # equal slots instead of letting the last tab be half-clipped at the edge.
 assert "item.anchors.fill=item.parent" in replacement
-assert "height:parent.height-118" in replacement
-assert "StackLayout{id:iSelectedSettingControl;anchors.fill:parent;anchors.margins:6" in replacement
+assert "height:parent.height-112" in replacement
+assert "StackLayout{id:iSelectedSettingControl;anchors.fill:parent;currentIndex:pCurrentTabIndex" in replacement
 # The embedded QML must stay inside the smallest player resource slot;
 # growing it past that is a hard patch failure on 5.9/5.10 players.
 # v8, which fitted every shipped player, was 1821 bytes of QML.
@@ -143,8 +159,8 @@ assert "bsiAboutDeveloperName" in about_doc and "bsiAboutDeveloperLink" in about
     "compacting the About page must keep its object names"
 assert "fCheckForUpdateCallback" in about_doc and "fUpdateShortDisplayName" in about_doc, \
     "the native About callbacks must survive compaction"
-assert "Item{width:Math.min(parent.width-64,568);x:(parent.width-width)/2;" in replacement, "The page host must be horizontally centered in the shell"
-assert "width:Math.min(parent.width-64,568)" in replacement
+assert "Item{width:Math.min(parent.width-48,568);x:(parent.width-width)/2;" in replacement, "The page host must be horizontally centered in the shell"
+assert "width:Math.min(parent.width-48,568)" in replacement
 assert "delegate:Loader{width:iSelectedSettingControl.width;height:iSelectedSettingControl.height;" in replacement
 assert "pSettingBtnText:" in replacement and "pSelected:index==pCurrentTabIndex" in replacement and "pShowRedDot:modelData.pShowRedDot" in replacement
 assert "pSettingIdx:index" in replacement
@@ -310,10 +326,11 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
         None,
     )
     # The page host is an id-carrying item, so it is reached through the QML
-    # child tree rather than objectName.
+    # child tree rather than objectName. It is inset the same 24 px on each side
+    # as the tab strip and capped at 568 px.
     page_frame = next(
         (candidate for candidate in visual_tree
-         if abs(candidate.width() - min(obj.width() - 32, 568)) < 2
+         if abs(candidate.width() - min(obj.width() - 48, 568)) < 2
          and candidate.height() > 50 and candidate is not obj),
         None,
     )
@@ -387,7 +404,7 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
     assert abs(frame_center.x() - panel.width() / 2) < 2, "The page host card should be centered in the shell"
     assert abs(page_frame.width() - 568) < 2, "A wide player window should cap the page region at its bounded width"
     assert page_frame.width() < panel.width() - 100, "The page region should no longer be stretched across the whole shell"
-    assert abs(stack.width() - (page_frame.width() - 12)) < 2, "The native page stack should fill its centered page card with a balanced inset"
+    assert abs(stack.width() - page_frame.width()) < 2, "The native page stack should fill its centered page card"
     loader_position = page_loader.mapToItem(panel, QPointF(0, 0))
     assert 0 < page_loader.width() <= page_frame.width(), "The native page Loader should stay inside the centered page card"
     assert loader_position.x() >= frame_center.x() - page_frame.width() / 2 - 8, "The native Loader drifted out of its page card"
@@ -442,7 +459,12 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
         '{ title: "Community", url: "https://example.com/community" },',
     )
     about_qml = about_qml.replace("@@BSI_HIDDEN_TABS@@", "[]")
-    about_qml = about_qml.replace("@@BSI_TAB_ICONS@@", "({})")
+    about_icon = ("data:image/svg+xml;base64," + __import__("base64").b64encode(
+        b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">'
+        b'<circle cx="12" cy="12" r="9" fill="#63e6be"/></svg>').decode())
+    about_qml = about_qml.replace(
+        "@@BSI_TAB_ICONS@@",
+        '({"settingpage.qml":"' + about_icon + '"})')
     about_qml = about_qml.replace("@@BSI_LOGO_SOURCE@@", '""')
     about_path = root / "AboutHost.qml"
     about_path.write_text(about_qml, encoding="utf-8")
@@ -460,7 +482,71 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
 
     print("PASS: generated Settings and About QML instantiate, retain native page behavior, show custom tabs, and render profile links")
     about_obj.deleteLater()
+    # Now the part that was broken in the field: a custom tab icon must reach
+    # the shell and be drawn. The About page publishes bHidden/bIcons by walking
+    # up from itself, so load the real generated page as a child of the shell
+    # and check that the assignment lands - counting parents used to land on the
+    # window instead, throw "Cannot assign to non-existent property", and leave
+    # every icon undisplayed even though the patch applied cleanly.
+    mounted_component = QQmlComponent(engine, QUrl.fromLocalFile(str(about_path)))
+    about_child = mounted_component.create()
+    assert about_child is not None, "The generated About page did not load inside the shell"
+    about_child.setParentItem(page_loader)
+    QTest.qWait(30)
+    # The player's Loader calls this after loading; do the same.
+    from PySide6.QtCore import QMetaObject
+    assert QMetaObject.invokeMethod(about_child, "fOnQmlLoaded"), \
+        "The About page must expose fOnQmlLoaded for the player's Loader to call"
+    QTest.qWait(30)
+    shell_root = None
+    probe = page_loader.parentItem()
+    while probe is not None:
+        try:
+            if probe.property("bIcons") is not None:
+                shell_root = probe
+                break
+        except (RuntimeError, TypeError):
+            pass
+        probe = probe.parentItem()
+    assert shell_root is not None, "The About page could not reach the shell's bIcons property"
+    published_icons = shell_root.property("bIcons")
+    assert published_icons is not None, \
+        "The shell must declare bIcons for the About page to publish into"
+    if hasattr(published_icons, "toVariant"):
+        published_icons = published_icons.toVariant()
+    assert isinstance(published_icons, dict) and published_icons.get("settingpage.qml"), \
+        f"The About page did not publish its tab icons to the shell (got {published_icons!r})"
+    published_hidden = shell_root.property("bHidden")
+    if hasattr(published_hidden, "toVariant"):
+        published_hidden = published_hidden.toVariant()
+    assert published_hidden == [], "The About page did not publish its hidden-tab list"
+    published_icon = published_icons["settingpage.qml"]
+    assert published_icon.startswith("data:image/svg+xml;base64,"), \
+        "The published tab icon must be a self-contained SVG data URI"
+    # And the strip must actually paint it, centred, with the label lifted clear.
+    strip_items = visual_items(tabs)
+
+    def source_of(item):
+        # Image.source is a QUrl; compare the data URI itself, not its repr.
+        try:
+            if item.metaObject().indexOfProperty("source") <= 0:
+                return None
+        except (RuntimeError, TypeError):
+            return None
+        value = item.property("source")
+        text = value.toString() if hasattr(value, "toString") else str(value or "")
+        return text
+
+    painted = [source_of(item) for item in strip_items]
+    icon_items = [item for item in strip_items if source_of(item) == published_icon]
+    assert icon_items, "The published icon is not painted by any tab"
+    assert sum(1 for src in painted if src) >= 1, "No tab painted a custom icon"
+    icon_mid = icon_items[0].mapToItem(first_tab, QPointF(icon_items[0].width() / 2, 0)).x()
+    assert abs(icon_mid - first_tab.width() / 2) < 2, \
+        "A custom icon must be horizontally centred in its tab"
+
     about_component.deleteLater()
+    mounted_component.deleteLater()
     window.close()
     obj.deleteLater()
     component.deleteLater()

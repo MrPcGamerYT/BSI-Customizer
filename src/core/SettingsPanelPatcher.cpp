@@ -38,7 +38,8 @@ const QString kWindowDesignMarkerV6 = QStringLiteral("BSI6");
 // v8 was the full-bleed shell that left the native fixed-width pages hugging
 // the left edge; v9 bounds the page region inside a centred frame.
 const QString kWindowDesignMarkerV8 = QStringLiteral("BSI Settings v8");
-const QString kWindowDesignMarker = QStringLiteral("BSI Settings v9");
+const QString kWindowDesignMarkerV9 = QStringLiteral("BSI Settings v9");
+const QString kWindowDesignMarker = QStringLiteral("BSI Settings v10");
 const QString kAboutMarker = QStringLiteral("BSI CUSTOMIZER: redesigned About page v1");
 const QString kSchema = QStringLiteral("bsi.settings-panel.recovery");
 const QString kWindowLeaf = QStringLiteral("UiSettingsWindow.qml");
@@ -699,25 +700,33 @@ QString buildWindow(const QString &stock)
     // fChangeSelectedSetting callback and the six-level `parent` hop used by
     // the rebuilt About page) keeps exactly the same depth, so page QML that
     // was already shipped keeps resolving its bindings.
+    //
+    // The tab strip is inset 24 px on both sides and the slots divide that width
+    // exactly, so every tab keeps the same gap and the first and last slots sit
+    // the same distance from the window edge. The Column is closed before the
+    // page host, so the host fills the area below the header instead of being
+    // laid out inside the 56 px bar. A custom icon now replaces the label's
+    // place, vertically centred: it used to be painted over the centred text
+    // (unreadable) inside a bare Item, which is not a visual element, so it
+    // could not be shown at all.
     QString replacement = QStringLiteral(R"QML(
-UiShadowContainer{// BSI Settings v9
+UiShadowContainer{// BSI Settings v10
 id:iSettingsWindowShadowContainer;anchors.fill:parent
 property var bHidden:[]
+property var bIcons:({})
 Rectangle{anchors.fill:parent;color:UiTheme.colors.primary80;radius:14;clip:true
 Column{anchors.fill:parent
 Item{width:parent.width;height:56
 MouseArea{anchors.fill:parent;onPressed:iSettingsWindow.startSystemMove()}
 Text{text:qsTr("Settings");color:UiTheme.colors.primary10;font:UiTheme.fonts.bodyLarge;anchors.centerIn:parent}
-UiImageButton{asset:"CloseIcon";pImageWidth:16;pImageHeight:16;x:parent.width-32;y:12;onClicked:iSettingsWindow.close()}}
-ListView{id:v;width:parent.width-64;height:48;x:32;orientation:ListView.Horizontal;model:pSettingsItems.pSettingElements;clip:true
-delegate:Item{property var k:modelData.pQmlSource.toLowerCase().split("/").pop();property var h:iSettingsWindowShadowContainer.bHidden;width:v.width/(v.count-h.length||1)*(h.indexOf(k)<0);height:44
-UiSettingsButton{anchors.fill:parent;pSettingIdx:index;pSettingBtnText:modelData.pButtonText;pSelected:index==pCurrentTabIndex;pShowRedDot:modelData.pShowRedDot;onSettingClicked:fChangeSelectedSetting(pSettingIdx)}
-Image{source:iSettingsWindowShadowContainer.bIcons[parent.k]||"";width:18;height:18;anchors.centerIn:parent}}
-}
-Item{width:Math.min(parent.width-64,568);x:(parent.width-width)/2;height:parent.height-118
-StackLayout{id:iSelectedSettingControl;anchors.fill:parent;anchors.margins:6;currentIndex:pCurrentTabIndex
-Repeater{model:pSettingsItems.pSettingElements;delegate:Loader{width:iSelectedSettingControl.width;height:iSelectedSettingControl.height;Component.onCompleted:setSource(model.modelData.pQmlSource,model.modelData.pComponentArgs||{});onLoaded:{item.anchors.fill=item.parent;model.modelData.pComponentObj=item;if(item.fOnQmlLoaded)item.fOnQmlLoaded()}}}}
-}
+UiImageButton{asset:"CloseIcon";x:parent.width-32;y:12;onClicked:iSettingsWindow.close()}}
+ListView{id:v;width:parent.width-48;height:44;x:24;orientation:ListView.Horizontal;model:pSettingsItems.pSettingElements;clip:true
+delegate:Item{property var w:iSettingsWindowShadowContainer;property var k:modelData.pQmlSource.toLowerCase().split("/").pop();property var h:w.bHidden;property var c:w.bIcons[k];width:v.width/(v.count-h.length||1)*(h.indexOf(k)<0);height:44
+UiSettingsButton{anchors.fill:parent;anchors.bottomMargin:c?26:0;pSettingIdx:index;pSettingBtnText:modelData.pButtonText;pSelected:index==pCurrentTabIndex;pShowRedDot:modelData.pShowRedDot;onSettingClicked:fChangeSelectedSetting(pSettingIdx)}
+Image{source:c;width:18;height:18;x:parent.width/2-9;y:24}}}
+Item{width:Math.min(parent.width-48,568);x:(parent.width-width)/2;height:parent.height-112
+StackLayout{id:iSelectedSettingControl;anchors.fill:parent;currentIndex:pCurrentTabIndex
+Repeater{model:pSettingsItems.pSettingElements;delegate:Loader{width:iSelectedSettingControl.width;height:iSelectedSettingControl.height;Component.onCompleted:setSource(model.modelData.pQmlSource,model.modelData.pComponentArgs||{});onLoaded:{item.anchors.fill=item.parent;model.modelData.pComponentObj=item;if(item.fOnQmlLoaded)item.fOnQmlLoaded()}}}}}
 }
 }
 }
@@ -825,8 +834,9 @@ color:UiTheme.colors.primary30;font:UiTheme.fonts.bodySmall
 horizontalAlignment:Text.AlignHCenter;wrapMode:Text.Wrap;Layout.fillWidth:true}
 Item{Layout.fillWidth:true;Layout.preferredHeight:28}}}}
 
-// Retain the native About-page callback surface and publish profile icons to the shell.
-function fOnQmlLoaded(){parent.parent.parent.parent.parent.parent.parent.bHidden=bsiHiddenTabs;parent.parent.parent.parent.parent.parent.parent.bIcons=bsiTabIcons}
+// Publish the hidden tabs and icons to the shell. Walk up instead of counting
+// parents: one hop too many lands on the window and the assignment throws.
+function fOnQmlLoaded(){var p=parent;while(p&&p.bIcons===undefined)p=p.parent;if(p){p.bHidden=bsiHiddenTabs;p.bIcons=bsiTabIcons}}
 function fCheckForUpdateCallback(apiCallStatus,jsonData){
 if(apiCallStatus===0){var j=JSON.parse(jsonData)
 pUpdateAvailable=String(j.update_available).toLowerCase()==="true"
@@ -1044,7 +1054,8 @@ bool hasWindowMarker(const QString &text)
     return text.contains(kWindowMarker) || text.contains(kPreviousWindowDesignMarker)
         || text.contains(kWindowDesignMarkerV3) || text.contains(kWindowDesignMarkerV4)
         || text.contains(kWindowDesignMarkerV5) || text.contains(kWindowDesignMarkerV6)
-        || text.contains(kWindowDesignMarkerV8) || text.contains(kWindowDesignMarker);
+        || text.contains(kWindowDesignMarkerV8) || text.contains(kWindowDesignMarkerV9)
+        || text.contains(kWindowDesignMarker);
 }
 
 } // namespace

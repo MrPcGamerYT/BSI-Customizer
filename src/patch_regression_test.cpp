@@ -5241,9 +5241,12 @@ Window {
                     if (file.name.compare(QLatin1String("UiSettingsWindow.qml"), Qt::CaseInsensitive) == 0)
                         rebuiltWindow = QString::fromUtf8(QtResources::readFile(panelImage, file));
                 }
-                check(rebuiltWindow.contains(QStringLiteral("BSI Settings v9"))
+                check(rebuiltWindow.contains(QStringLiteral("BSI Settings v10"))
                           && rebuiltWindow.contains(QStringLiteral("property var bHidden:"))
-                          && rebuiltWindow.contains(QStringLiteral("bIcons"))
+                          // The About page publishes the icon map into
+                          // bIcons, so the shell has to declare it or that
+                          // assignment silently throws and no icon is drawn.
+                          && rebuiltWindow.contains(QStringLiteral("property var bIcons:({})"))
                           // The rebuilt shell paints with the player's own palette
                           // (the same UiTheme.colors the stock window uses) instead
                           // of a colour baked into the patch, so it keeps following
@@ -5268,8 +5271,15 @@ Window {
                           && rebuiltWindow.contains(QStringLiteral("ListView{id:v;"))
                           && rebuiltWindow.contains(QStringLiteral("orientation:ListView.Horizontal;model:pSettingsItems.pSettingElements;clip:true"))
                           && rebuiltWindow.contains(QStringLiteral("item.anchors.fill=item.parent"))
-                          && rebuiltWindow.contains(QStringLiteral("Image{source:iSettingsWindowShadowContainer.bIcons[parent.k]||\"\";width:18;height:18;anchors.centerIn:parent}"))
-                          && rebuiltWindow.contains(QStringLiteral("StackLayout{id:iSelectedSettingControl;anchors.fill:parent;anchors.margins:6"))
+                          // The strip is inset the same 24 px on both sides and its
+                          // slots divide exactly that width, so every tab keeps the
+                          // same gap and the last one never touches the edge.
+                          && rebuiltWindow.contains(QStringLiteral("ListView{id:v;width:parent.width-48;height:44;x:24;"))
+                          // A custom icon sits centred in the tab, with the native
+                          // label lifted to the top instead of being painted over.
+                          && rebuiltWindow.contains(QStringLiteral("anchors.bottomMargin:c?26:0"))
+                          && rebuiltWindow.contains(QStringLiteral("Image{source:c;width:18;height:18;x:parent.width/2-9;y:24}"))
+                          && rebuiltWindow.contains(QStringLiteral("StackLayout{id:iSelectedSettingControl;anchors.fill:parent;currentIndex:pCurrentTabIndex"))
                           && rebuiltWindow.contains(QStringLiteral("delegate:Loader{width:iSelectedSettingControl.width;height:iSelectedSettingControl.height;"))
                           && rebuiltWindow.contains(QStringLiteral("model.modelData.pComponentObj=item"))
                           && rebuiltWindow.contains(QStringLiteral("fChangeSelectedSetting(pSettingIdx)"))
@@ -5353,7 +5363,11 @@ Window {
                               && updatedAbout.contains(QStringLiteral("property var bsiHiddenTabs:"))
                               && (hiddenTabId.isEmpty() || updatedAbout.contains(hiddenTabId))
                               && updatedAbout.contains(QStringLiteral("property var bsiTabIcons:"))
-                              && updatedAbout.contains(QStringLiteral("function fOnQmlLoaded(){parent.parent.parent.parent.parent.parent.parent.bHidden=bsiHiddenTabs;parent.parent.parent.parent.parent.parent.parent.bIcons=bsiTabIcons}"))
+                              // The page must find the shell by walking up: counting parents reached
+                              // the window and threw "Cannot assign to non-existent
+                              // property bHidden", which is exactly why a saved custom
+                              // tab icon applied and then never appeared.
+                              && updatedAbout.contains(QStringLiteral("function fOnQmlLoaded(){var p=parent;while(p&&p.bIcons===undefined)p=p.parent;if(p){p.bHidden=bsiHiddenTabs;p.bIcons=bsiTabIcons}}"))
                               && updatedAbout.contains(QStringLiteral("data:image/svg+xml;base64,"))
                               && updatedAbout.contains(QStringLiteral("BSI Panel Regression Updated"))
                               && updatedAbout.contains(QStringLiteral("Regression subtitle")),
