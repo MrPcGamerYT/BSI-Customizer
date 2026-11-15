@@ -3,6 +3,7 @@
 #include "core/AddonPacks.h"
 #include "core/SkinProfiles.h"
 #include "core/PlayerSkinCompiler.h"
+#include "core/EmulatorUiStudio.h"
 #include "core/ThemeEngine.h"
 #include "core/EmbeddedResources.h"
 #include "core/QtResources.h"
@@ -298,6 +299,17 @@ int run()
     check(combinedDry.value("ok").toBool()&&read(exe)==original,"combined palette and resource dry run is isolated");
     QThread::msleep(5);
     check(W::simulate(exe,combined,sha).value("outputSha256")==combinedDry.value("outputSha256"),"repeated dry runs have deterministic output despite wall-clock changes");
+    const auto studioExport=EmulatorUiStudio::publish(temp.filePath("Assets/BSIStudio"),uiSkin);
+    check(studioExport.value("ok").toBool(),"Studio publishes its immutable Assets before the EXE transaction");
+    auto dependent=staged.value("operation").toMap();
+    dependent["studioDirectory"]=studioExport.value("directory");dependent["studioHashes"]=studioExport.value("hashes");
+    const auto studioDry=W::simulate(exe,{dependent},sha);
+    check(studioDry.value("ok").toBool()&&read(exe)==original,"valid Studio Assets dependency passes isolated dry run");
+    const QString themeAsset=QDir(studioExport.value("directory").toString()).filePath("Theme.qml");
+    write(themeAsset,read(themeAsset)+"// externally changed\n");
+    const auto missingAssets=W::simulate(exe,{dependent},sha);
+    check(!missingAssets.value("ok").toBool()&&missingAssets.value("msg").toString().contains("Studio Assets")&&read(exe)==original,"changed Studio Assets block dry run without modifying EXE");
+    check(!W::apply(exe,{dependent},sha,studioDry.value("outputSha256").toString(),temp.filePath("studio-history")).value("ok").toBool()&&read(exe)==original&&W::history(temp.filePath("studio-history")).isEmpty(),"Assets changed after review block Apply before recovery/EXE writes");
     const auto root=temp.filePath(QStringLiteral("history"));
     check(!W::apply(exe,operations,sha,QString(64,QLatin1Char('0')),root).value("ok").toBool()&&read(exe)==original,"unreviewed output fingerprint rejected");
     {

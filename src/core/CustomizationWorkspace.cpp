@@ -396,6 +396,7 @@ QVariantMap apply(const QString &path, const QVariantList &operations, const QSt
             description["path"] = op.value("path");
             description["replacementSha256"] = digest(QByteArray::fromBase64(op.value("data").toByteArray()));
         }
+        if(op.contains("studioDirectory")) { description["studioDirectory"]=op.value("studioDirectory"); description["studioAssetCount"]=op.value("studioHashes").toMap().size(); }
         summary.append(description);
     }
     QVariantMap entry{{"id", id}, {"path", QFileInfo(path).canonicalFilePath()}, {"before", expectedHash}, {"after", expectedOutputHash},

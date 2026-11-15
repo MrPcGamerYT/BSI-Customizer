@@ -43,7 +43,7 @@ function operation(op) {
     var keys = Object.keys(op.edits || {}).sort();
     if (kind === "theme") return { title: op.name || "Theme palette", detail: keys.length + " color edit(s): " + keys.slice(0,8).join(", "), kind: kind };
     if (kind === "appearance") return { title: "Player appearance", detail: keys.length + " token edit(s): " + keys.slice(0,8).join(", "), kind: kind };
-    if (kind === "resource" || kind === "player-qml") return { title: op.path || "Embedded resource", detail: kind === "player-qml" ? "Compiled player QML component" : "Embedded resource replacement", kind: kind };
+    if (kind === "resource" || kind === "player-qml") return { title: op.path || "Embedded resource", detail: op.studioDirectory ? "Assets-linked native QML: " + filename(op.studioDirectory) : kind === "player-qml" ? "Compiled player QML component" : "Embedded resource replacement", kind: kind };
     return { title: op.name || op.path || kind, detail: "Inspect this operation in Workspace.", kind: kind };
 }
 function normalizedPath(value) {
