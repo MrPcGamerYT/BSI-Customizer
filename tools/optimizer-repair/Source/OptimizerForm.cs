@@ -12,6 +12,7 @@ namespace VoidOptimizer {
         readonly StudioChoice targets=new StudioChoice(),profile=new StudioChoice(),timerResolution=new StudioChoice();
         readonly StudioToggle power=new StudioToggle(),capture=new StudioToggle(),awake=new StudioToggle(),autoRestore=new StudioToggle();
         readonly StudioButton apply=new StudioButton(),restore=new StudioButton(),refresh=new StudioButton(),inspect=new StudioButton();
+        readonly StudioScroll scroll=new StudioScroll();
         readonly TextBox pidInput=new TextBox(),log=new TextBox();
         readonly Label scanStatus=new Label();
         readonly System.Windows.Forms.Timer monitor=new System.Windows.Forms.Timer { Interval=2000 };
@@ -36,8 +37,8 @@ namespace VoidOptimizer {
             Add(header,Words("Session helper",23,Skin.Text));
             Add(header,Words("Developed By NOVA XIS  ·  Review first. Keep open during play; close restores.",9,Skin.Muted));
             frame.Controls.Add(header,0,0);
-            Panel scroll=new Panel { Dock=DockStyle.Fill,AutoScroll=true,BackColor=Skin.Background,Margin=new Padding(0) };
-            TableLayoutPanel content=Stack();content.Padding=new Padding(0,0,8,0);scroll.Controls.Add(content); frame.Controls.Add(scroll,0,1);
+            scroll.Dock=DockStyle.Fill;scroll.Margin=new Padding(0);
+            TableLayoutPanel content=Stack();content.Padding=new Padding(0,0,2,0);scroll.SetBody(content); frame.Controls.Add(scroll,0,1);
             TableLayoutPanel player=Section(content,"01   /   PLAYER INSTANCE");
             TableLayoutPanel targetRow=Row(116); targets.Dock=DockStyle.Fill;targets.Placeholder="Select a verified HD-Player instance";targets.AccessibleName="Player instance";
             refresh.Text="Refresh";refresh.Dock=DockStyle.Fill;refresh.Click+=delegate { RefreshTargets(); };
@@ -91,7 +92,7 @@ namespace VoidOptimizer {
         }
         static TableLayoutPanel Stack() { TableLayoutPanel table=new TableLayoutPanel { ColumnCount=1,AutoSize=true,AutoSizeMode=AutoSizeMode.GrowAndShrink,Dock=DockStyle.Top,Margin=new Padding(0),Padding=new Padding(0),BackColor=Color.Transparent };table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));return table; }
         static void Add(TableLayoutPanel table,Control child) { int row=table.RowCount++;table.RowStyles.Add(new RowStyle(SizeType.AutoSize));table.Controls.Add(child,0,row); }
-        static Label Words(string text,float size,Color color) { return new Label { Text=text,AutoSize=true,Font=new Font("Segoe UI",size),ForeColor=color,BackColor=Color.Transparent,Margin=new Padding(0,0,0,6) }; }
+        static Label Words(string text,float size,Color color) { return new Label { Text=text,UseMnemonic=false,AutoSize=true,Font=new Font("Segoe UI",size),ForeColor=color,BackColor=Color.Transparent,Margin=new Padding(0,0,0,6) }; }
         static TableLayoutPanel Row(int rightWidth) { TableLayoutPanel table=new TableLayoutPanel { ColumnCount=2,RowCount=1,Dock=DockStyle.Top,Height=44,Margin=new Padding(0) };table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));table.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute,rightWidth));return table; }
         static TableLayoutPanel Section(TableLayoutPanel parent,string title) { CardPanel card=new CardPanel();TableLayoutPanel body=Stack();card.Controls.Add(body);Add(body,Words(title,9,Skin.Muted));Add(parent,card);return body; }
         static void Toggle(TableLayoutPanel parent,StudioToggle control,string title,string detail,bool value) { control.Text=title;control.Detail=detail;control.Checked=value;control.AccessibleName=title;Add(parent,control); }
@@ -147,6 +148,7 @@ namespace VoidOptimizer {
         bool Restore() { try { log.Text=session.Restore();monitoring=false;UpdateState();return true; } catch(Exception error) { log.Text="RESTORE FAILED: "+error.Message+" Recovery retained; retry Restore.";UpdateState();return false; } }
         public void SavePreview(string path) {
             LayoutAssertions();
+            if(path.Contains("compact"))scroll.ScrollToBottom();
             targets.SelectedIndex=targets.Items.Count>0?0:-1;UpdateState();
             using(Bitmap image=new Bitmap(Width,Height)) { DrawToBitmap(image,new Rectangle(0,0,Width,Height));image.Save(path,System.Drawing.Imaging.ImageFormat.Png); }
         }

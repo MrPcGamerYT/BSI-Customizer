@@ -17,6 +17,39 @@ namespace VoidOptimizer {
             using(GraphicsPath path=Round(box,radius)) using(SolidBrush brush=new SolidBrush(fill)) using(Pen pen=new Pen(border)) { g.FillPath(brush,path);g.DrawPath(pen,path); }
         }
     }
+    // Native AutoScroll paints a bright system scrollbar on older/classic hosts.
+    // Keep the viewport and thumb fully theme-owned; all content remains real controls.
+    sealed class StudioScroll : Panel {
+        Control body;
+        int offset,extent,dragStart,dragOffset;
+        bool dragging,layingOut;
+        public StudioScroll() { DoubleBuffered=true;BackColor=Skin.Background;TabStop=true;SetStyle(ControlStyles.ResizeRedraw,true); }
+        public void SetBody(Control value) { body=value;body.Dock=DockStyle.None;body.Anchor=AnchorStyles.Top|AnchorStyles.Left;body.AutoSize=false;Controls.Add(body);PerformLayout(); }
+        protected override void OnLayout(LayoutEventArgs e) {
+            base.OnLayout(e);if(body==null||layingOut)return;layingOut=true;
+            try {
+                int width=Math.Max(1,ClientSize.Width-14);
+                body.Width=width;
+                extent=body.GetPreferredSize(new Size(width,0)).Height;
+                body.Size=new Size(width,Math.Max(1,extent));
+                SetOffset(offset);
+            } finally { layingOut=false; }
+        }
+        void SetOffset(int value) { offset=Math.Max(0,Math.Min(value,Math.Max(0,extent-ClientSize.Height)));if(body!=null)body.Location=new Point(0,-offset);Invalidate(); }
+        public void ScrollToBottom() { PerformLayout();SetOffset(extent); }
+        protected override void OnMouseWheel(MouseEventArgs e) { SetOffset(offset-e.Delta/120*60);base.OnMouseWheel(e); }
+        protected override bool IsInputKey(Keys keyData) { return keyData==Keys.Down||keyData==Keys.Up||keyData==Keys.PageDown||keyData==Keys.PageUp||base.IsInputKey(keyData); }
+        protected override void OnKeyDown(KeyEventArgs e) { if(e.KeyCode==Keys.Down)SetOffset(offset+40);else if(e.KeyCode==Keys.Up)SetOffset(offset-40);else if(e.KeyCode==Keys.PageDown)SetOffset(offset+Height-30);else if(e.KeyCode==Keys.PageUp)SetOffset(offset-Height+30);base.OnKeyDown(e); }
+        protected override void OnPaint(PaintEventArgs e) {
+            base.OnPaint(e);if(extent<=ClientSize.Height||ClientSize.Height<1)return;
+            int height=Math.Max(26,ClientSize.Height*ClientSize.Height/extent);
+            int y=(int)((long)offset*(ClientSize.Height-height)/Math.Max(1,extent-ClientSize.Height));
+            Skin.Box(e.Graphics,new Rectangle(Width-7,y,4,Math.Max(2,height-1)),Skin.Muted,Skin.Muted,2);
+        }
+        protected override void OnMouseDown(MouseEventArgs e) { if(e.X>=Width-14&&extent>Height) { dragging=true;dragStart=e.Y;dragOffset=offset;Capture=true; }base.OnMouseDown(e); }
+        protected override void OnMouseMove(MouseEventArgs e) { if(dragging)SetOffset(dragOffset+(e.Y-dragStart)*extent/Math.Max(1,Height));base.OnMouseMove(e); }
+        protected override void OnMouseUp(MouseEventArgs e) { dragging=false;Capture=false;base.OnMouseUp(e); }
+    }
     sealed class CardPanel : Panel {
         public CardPanel() { DoubleBuffered=true; BackColor=Skin.Background; Padding=new Padding(16); AutoSize=true; AutoSizeMode=AutoSizeMode.GrowAndShrink; Margin=new Padding(0,0,0,12); Dock=DockStyle.Top; }
         protected override void OnPaintBackground(PaintEventArgs e) { e.Graphics.Clear(BackColor); if(Width>2&&Height>2)Skin.Box(e.Graphics,new Rectangle(0,0,Width-1,Height-1),Skin.Surface,Skin.Border,14); }
@@ -33,7 +66,7 @@ namespace VoidOptimizer {
         protected override void OnEnabledChanged(EventArgs e) { Invalidate(); base.OnEnabledChanged(e); }
         protected override void OnGotFocus(EventArgs e) { Invalidate(); base.OnGotFocus(e); }
         protected override void OnLostFocus(EventArgs e) { Invalidate(); base.OnLostFocus(e); }
-        protected virtual void DrawContent(Graphics g,Color text) { TextRenderer.DrawText(g,Text,Font,new Rectangle(12,0,Width-24,Height),text,TextFormatFlags.HorizontalCenter|TextFormatFlags.VerticalCenter|TextFormatFlags.EndEllipsis|TextFormatFlags.SingleLine); }
+        protected virtual void DrawContent(Graphics g,Color text) { TextRenderer.DrawText(g,Text,Font,new Rectangle(12,0,Width-24,Height),text,TextFormatFlags.HorizontalCenter|TextFormatFlags.VerticalCenter|TextFormatFlags.EndEllipsis|TextFormatFlags.SingleLine|TextFormatFlags.NoPrefix); }
         protected override void OnPaint(PaintEventArgs e) {
             if(Width<3||Height<3)return;
             Color fill=!Enabled?Color.FromArgb(24,24,30):Primary?(hot?Color.White:Color.FromArgb(230,230,239)):hot?Color.FromArgb(36,36,46):Skin.Surface;
@@ -51,7 +84,7 @@ namespace VoidOptimizer {
         public string Placeholder="Choose an option";
         protected override void DrawContent(Graphics g,Color text) {
             string label=SelectedItem==null?Placeholder:SelectedItem.ToString();
-            TextRenderer.DrawText(g,label,Font,new Rectangle(12,0,Width-44,Height),SelectedItem==null?Skin.Muted:text,TextFormatFlags.Left|TextFormatFlags.VerticalCenter|TextFormatFlags.EndEllipsis|TextFormatFlags.SingleLine);
+            TextRenderer.DrawText(g,label,Font,new Rectangle(12,0,Width-44,Height),SelectedItem==null?Skin.Muted:text,TextFormatFlags.Left|TextFormatFlags.VerticalCenter|TextFormatFlags.EndEllipsis|TextFormatFlags.SingleLine|TextFormatFlags.NoPrefix);
             using(Pen pen=new Pen(text,1.4f))g.DrawLines(pen,new Point[]{new Point(Width-25,Height/2-2),new Point(Width-20,Height/2+3),new Point(Width-15,Height/2-2)});
         }
         protected override void OnClick(EventArgs e) {
@@ -82,7 +115,7 @@ namespace VoidOptimizer {
         protected override void OnPaint(PaintEventArgs e) {
             Color ink=Enabled?Skin.Text:Skin.Muted;
             TextRenderer.DrawText(e.Graphics,Text,Font,new Rectangle(0,4,Math.Max(10,Width-60),24),ink,TextFormatFlags.Left|TextFormatFlags.VerticalCenter|TextFormatFlags.EndEllipsis);
-            using(Font small=new Font(Font.FontFamily,8.5f))TextRenderer.DrawText(e.Graphics,Detail,small,new Rectangle(0,29,Math.Max(10,Width-60),25),Skin.Muted,TextFormatFlags.Left|TextFormatFlags.WordBreak|TextFormatFlags.EndEllipsis);
+            using(Font small=new Font(Font.FontFamily,8.5f))TextRenderer.DrawText(e.Graphics,Detail,small,new Rectangle(0,29,Math.Max(10,Width-60),25),Skin.Muted,TextFormatFlags.Left|TextFormatFlags.WordBreak|TextFormatFlags.EndEllipsis|TextFormatFlags.NoPrefix);
             Rectangle track=new Rectangle(Width-40,19,36,20);
             Skin.Box(e.Graphics,track,Checked?Color.FromArgb(228,228,239):Color.FromArgb(42,42,53),Focused?Color.White:Skin.Border,10);
             e.Graphics.SmoothingMode=SmoothingMode.AntiAlias;
