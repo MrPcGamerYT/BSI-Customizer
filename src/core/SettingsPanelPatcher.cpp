@@ -562,11 +562,21 @@ TargetSources readSources(const QString &exePath, const QByteArray &image)
         return out;
     }
     out.pageCount = pageNames.size();
-    const bool retainsLoadedComponent = out.window.text.contains(QLatin1String("model.modelData.pComponentObj = item"))
-        || out.window.text.contains(QLatin1String("model.modelData.pComponentObj=i"))
-        || out.window.text.contains(QLatin1String("model.modelData.pComponentObj=item"));
+    // The rebuilt shell's Repeater delegate sees the model data directly, so it
+    // stores the loaded component as `modelData.pComponentObj=item`; the stock
+    // shell spells the same assignment `model.modelData....`. The shorter needle
+    // matches both, because it is a suffix of the longer one.
+    const bool retainsLoadedComponent = out.window.text.contains(QLatin1String("modelData.pComponentObj=item"))
+        || out.window.text.contains(QLatin1String("model.modelData.pComponentObj = item"))
+        || out.window.text.contains(QLatin1String("model.modelData.pComponentObj=i"));
+    // The stock shell reaches the page through `model.modelData`, while the
+    // rebuilt shell's Repeater delegate has the model data directly in scope and
+    // uses `modelData`. Both feed the same pQmlSource to setSource; accept either
+    // so re-applying over an already-patched player is not mistaken for damage.
+    const bool loadsNativePage = out.window.text.contains(QLatin1String("setSource(model.modelData.pQmlSource"))
+        || out.window.text.contains(QLatin1String("setSource(modelData.pQmlSource"));
     if (!out.window.text.contains(QLatin1String("pSettingsItems.pSettingElements"))
-        || !out.window.text.contains(QLatin1String("setSource(model.modelData.pQmlSource"))
+        || !loadsNativePage
         || !retainsLoadedComponent
         || !out.window.text.contains(QLatin1String("fChangeSelectedSetting"))) {
         out.error = QStringLiteral("UiSettingsWindow.qml no longer loads and retains the player’s native Settings pages; this layout cannot be safely replaced.");

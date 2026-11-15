@@ -6,6 +6,7 @@ launch the Android VM or claim a live HD-Player rendering test.
 Requires PySide6==6.8.3 and is run by run_qt_runtime_test.py.
 """
 import os
+import pathlib
 import re
 import tempfile
 import urllib.parse
@@ -184,6 +185,21 @@ assert "delegate:Loader{width:parent.width;Component.onCompleted:setSource(model
 assert "pSettingBtnText:" in replacement and "pSelected:s" in replacement and "pShowRedDot:modelData.pShowRedDot" in replacement
 assert "pSettingIdx:index" in replacement
 assert "fChangeSelectedSetting(pSettingIdx)" in replacement
+
+# The runtime validator that decides whether a player may be rebuilt must accept
+# the rebuilt shell's own spelling. It used to look only for the stock
+# `model.modelData` form, so re-applying over an already-patched player was
+# rejected as "no longer loads" even though the document was fine.
+_patcher = pathlib.Path(__file__).resolve().parent.parent / "src" / "core" / "SettingsPanelPatcher.cpp"
+_patcher_src = _patcher.read_text()
+assert "setSource(modelData.pQmlSource" in replacement
+assert "modelData.pComponentObj=item" in replacement
+assert "setSource(modelData.pQmlSource" in _patcher_src, (
+    "the validator must accept the rebuilt shell's setSource spelling"
+)
+assert 'QLatin1String("modelData.pComponentObj=item")' in _patcher_src, (
+    "the validator must accept the rebuilt shell's component-store spelling"
+)
 assert "onPressed:iSettingsWindow.startSystemMove()" in replacement
 helper_match = re.search(
     r'const QString helper = QStringLiteral\(R"QML\((.*?)\)QML"\);',
