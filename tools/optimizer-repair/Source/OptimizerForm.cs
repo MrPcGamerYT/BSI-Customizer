@@ -109,7 +109,7 @@ namespace VoidOptimizer {
                 targets.Placeholder=report.Players.Count==0?"No verified player — open Diagnostics":"Choose a player instance";
                 log.Text=report.Players.Count==0?report.Details:"Scan complete. Select a player explicitly; nothing applied.";
             } catch(Exception error) { scanStatus.Text="Scan failed — open Diagnostics";discoveryDetails=error.ToString();log.Text="SCAN FAILED: "+error.Message; }
-            targets.Invalidate();UpdateState();
+            targets.Invalidate();scroll.PerformLayout();UpdateState();
         }
         void InspectPid() {
             if(session.Active)return;
@@ -148,7 +148,11 @@ namespace VoidOptimizer {
         bool Restore() { try { log.Text=session.Restore();monitoring=false;UpdateState();return true; } catch(Exception error) { log.Text="RESTORE FAILED: "+error.Message+" Recovery retained; retry Restore.";UpdateState();return false; } }
         public void SavePreview(string path) {
             LayoutAssertions();
-            if(path.Contains("compact"))scroll.ScrollToBottom();
+            bool compact=path.Contains("compact");
+            if(compact)scroll.ScrollToBottom();
+            Control visible=compact?(Control)autoRestore:targets;
+            Point point=scroll.PointToClient(visible.PointToScreen(Point.Empty));
+            if(point.Y<0||point.Y+visible.Height>scroll.Height)throw new Exception("Scrollable controls not reachable: "+visible.AccessibleName+" "+point+" in "+scroll.ClientSize);
             targets.SelectedIndex=targets.Items.Count>0?0:-1;UpdateState();
             using(Bitmap image=new Bitmap(Width,Height)) { DrawToBitmap(image,new Rectangle(0,0,Width,Height));image.Save(path,System.Drawing.Imaging.ImageFormat.Png); }
         }
