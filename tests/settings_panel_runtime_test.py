@@ -69,7 +69,14 @@ assert "property var bHidden:[]" in replacement
 assert "function fOnQmlLoaded(){parent.parent.parent.parent.parent.parent.parent.bHidden=bsiHiddenTabs;parent.parent.parent.parent.parent.parent.parent.bIcons=bsiTabIcons}" in cpp
 assert "property var bsiHiddenTabs: @@BSI_HIDDEN_TABS@@" in cpp
 assert "property var bsiTabIcons: @@BSI_TAB_ICONS@@" in cpp
-assert 'Rectangle{anchors.fill:parent;color:"#0d0f14";radius:14' in replacement
+# The shell must not ship its own palette: it paints with the player's own
+# theme object, exactly like the stock Settings window, so it follows whatever
+# the emulator currently looks like instead of a colour frozen into the patch.
+assert "color:UiTheme.colors.primary80" in replacement
+assert "color:UiTheme.colors.primary10" in replacement
+assert "#0d0f14" not in replacement and 'color:"white"' not in replacement, \
+    "the rebuilt shell must not hard-code colours"
+assert 'color:"' not in replacement, "no literal colours may be baked into the shell"
 assert "Column{anchors.fill:parent" in replacement
 assert "MouseArea{anchors.fill:parent;onPressed:iSettingsWindow.startSystemMove()}" in replacement
 assert "anchors.centerIn:parent" in replacement
@@ -77,10 +84,14 @@ assert "ListView{id:v;" in replacement
 assert "orientation:ListView.Horizontal;model:pSettingsItems.pSettingElements;clip:true" in replacement
 # The strip spans the shell with a symmetric 16 px inset, and its slots divide
 # that width evenly, so the row is balanced without any label-length raggedness.
-assert "ListView{id:v;width:parent.width-32;height:48;x:16;" in replacement
+# A symmetric inset leaves the same gap at both ends of the strip, so the last
+# tab no longer sits against the window edge.
+assert "ListView{id:v;width:parent.width-64;height:48;x:32;" in replacement
 assert "property var h:iSettingsWindowShadowContainer.bHidden" in replacement
 assert "property var h:iSettingsWindowShadowContainer.bHidden" in replacement
-assert "((v.parent.width-32)/(v.count-h.length||1)|0)*(h.indexOf(k)<0);height:44" in replacement
+# Slots divide the strip's real width (no integer truncation, which left the
+# row short of the right inset and overlapped long neighbour labels).
+assert "width:v.width/(v.count-h.length||1)*(h.indexOf(k)<0);height:44" in replacement
 # Every category must stay reachable: the strip divides the shell width into
 # equal slots instead of letting the last tab be half-clipped at the edge.
 assert "item.anchors.fill=item.parent" in replacement
@@ -90,8 +101,8 @@ assert "StackLayout{id:iSelectedSettingControl;anchors.fill:parent;anchors.margi
 # growing it past that is a hard patch failure on 5.9/5.10 players.
 # v8, which fitted every shipped player, was 1821 bytes of QML.
 assert len(replacement.encode()) <= 1790, f"shell grew to {len(replacement.encode())} bytes"
-assert "Item{x:(parent.width-width)/2;width:Math.min(parent.width-32,568);" in replacement, "The page host must be horizontally centered in the shell"
-assert "width:Math.min(parent.width-32,568)" in replacement
+assert "Item{width:Math.min(parent.width-64,568);x:(parent.width-width)/2;" in replacement, "The page host must be horizontally centered in the shell"
+assert "width:Math.min(parent.width-64,568)" in replacement
 assert "delegate:Loader{width:iSelectedSettingControl.width;height:iSelectedSettingControl.height;" in replacement
 assert "pSettingBtnText:" in replacement and "pSelected:index==pCurrentTabIndex" in replacement and "pShowRedDot:modelData.pShowRedDot" in replacement
 assert "pSettingIdx:index" in replacement
