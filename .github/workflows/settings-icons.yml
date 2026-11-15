@@ -29,4 +29,4 @@ jobs:
           sudo apt-get install -y libgl1 libegl1 libxkbcommon0 libdbus-1-3
           python -m pip install PySide6==6.8.3
       - name: Load actual repair shell and verify icon readiness
-        run: python tests/settings_icons_repair_runtime_test.py
+        run: python tests/run_qt_runtime_test.py tests/settings_icons_repair_runtime_test.py

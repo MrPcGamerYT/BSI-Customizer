@@ -6,6 +6,7 @@ os.environ.setdefault('QSG_RHI_BACKEND','software')
 from PySide6.QtCore import QUrl, QMetaObject, Qt, QPoint
 from PySide6.QtGui import QGuiApplication
 from PySide6.QtQml import QQmlEngine, QQmlComponent
+from PySide6.QtQuick import QQuickWindow, QQuickItem
 from PySide6.QtTest import QTest
 
 app=QGuiApplication([])
