@@ -1,0 +1,25 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import vm from 'node:vm';
+const file = new URL('../assets/settings-shell-matched-icons/Icons.js', import.meta.url);
+const source = fs.readFileSync(file, 'utf8');
+const ctx = {}; vm.createContext(ctx); vm.runInContext(source.replace(/^\.pragma library\s*/, ''), ctx);
+const kinds = ['performance','display','graphics','gameSettings','controller','smartphone','palette','advanced','keyboard','info','headphones','harddrive','preferences','close','devices'];
+const outputs = kinds.map(kind => {
+    const value = decodeURIComponent(ctx.url(kind, '#f4f4f7').split(',')[1]);
+    assert.ok(value.includes('stroke="#f4f4f7"'));
+    assert.ok(value.includes('viewBox="0 0 24 24"'));
+    assert.ok(!/\b(?:script|animate|foreignObject|image)\b|onload=|href=|opacity=/.test(value));
+    return value;
+});
+assert.equal(new Set(outputs).size, kinds.length, 'every shell kind has its own distinct geometry');
+assert.equal(ctx.url('keyboard'), ctx.url('shortcuts'));
+assert.equal(ctx.url('controller'), ctx.url('gamepad'));
+assert.equal(ctx.url('gameSettings'), ctx.url('game-settings'));
+assert.equal(ctx.url('harddrive'), ctx.url('user-data'));
+assert.equal(ctx.url('info'), ctx.url('about'));
+assert.equal(ctx.url('unknown'), ctx.url('preferences'));
+assert.equal(ctx.url('constructor'), ctx.url('preferences'));
+assert.equal(ctx.url('display', '\"><script>alert(1)</script>'), ctx.url('display'));
+assert.ok(!source.includes('#FF2448') && !source.includes('#ed455d'));
+console.log('PASS: all 15 shell icon kinds are distinct monochrome SVGs; aliases, fallback and color escaping work; animation/opacity stay in the caller.');
