@@ -321,155 +321,74 @@ Window {
     check(len(buttons) == len(TABS), "expected %d tabs, drew %d" % (len(TABS), len(buttons)))
     check(bool(buttons), "the tab strip drew no buttons")
     if buttons:
-        widths = {round(b.width()) for b in buttons}
-        check(len(widths) == 1, "tab slots are not equal width: %s" % sorted(widths))
-        # No label may run into its neighbour: slots are laid out edge to edge
-        # and each label is clipped to its own slot by the native button.
+        # Placement first: everything below is measured left to right.
         slots = sorted(buttons, key=lambda b: b.mapToItem(content, QPointF(0, 0)).x())
+        widths = [round(b.width()) for b in slots]
         gaps = []
         for left, right in zip(slots, slots[1:]):
             lx = left.mapToItem(content, QPointF(left.width(), 0)).x()
             rx = right.mapToItem(content, QPointF(0, 0)).x()
             gaps.append(round(rx - lx))
-        check(abs(sum(gaps) / len(gaps)) < 2, "tab gaps are uneven: %s" % gaps)
-        check(all(abs(g) < 2 for g in gaps), "tabs overlap or float apart: %s" % gaps)
-        first = slots[0]
-        left_edge = first.mapToItem(content, QPointF(0, 0)).x()
-        check(left_edge >= 23, "the first tab is too close to the window edge (%.1f)" % left_edge)
 
-    # --- selected pill + accent underline ---------------------------------
+        # Sizing: a tab is as wide as its own label plus a fixed pad. Uniform
+        # slots are the bug the user reported - "Game settings" and "Devices"
+        # ran together while short labels floated in a wide empty box.
+        check(
+            len(set(widths)) > 1,
+            "tabs share one uniform width (%s); each must fit its own label" % sorted(set(widths)),
+        )
+        # Gaps: exactly equal between every pair, and actually visible.
+        check(len(set(gaps)) == 1, "tab gaps are uneven: %s" % gaps)
+        check(
+            gaps and 0 < gaps[0] <= 12,
+            "the gap between tabs must be visible but tight, got %s" % gaps,
+        )
+        # No collisions: no label can run into its neighbour.
+        for (left, w), nxt in zip(zip(slots, widths), gaps):
+            lx = left.mapToItem(content, QPointF(0, 0)).x()
+            check(
+                nxt > 0,
+                "the tab at x=%.1f (width %d) runs into the next one" % (lx, w),
+            )
+        # Every tab, including the last, must be fully inside the strip.
+        last = slots[-1]
+        right_edge = last.mapToItem(content, QPointF(last.width(), 0)).x()
+        check(
+            right_edge <= content.width() - 23,
+            "the last category is clipped at the shell edge (%.1f of %.1f)"
+            % (right_edge, content.width()),
+        )
+        check(
+            slots[0].mapToItem(content, QPointF(0, 0)).x() >= 23,
+            "the first tab is too close to the window edge",
+        )
+
+    # --- selected tab ------------------------------------------------------
+    # The selected tab is the native UiSettingsButton's own highlight; the shell
+    # paints no separate pill or underline (that redesign was rejected).
     selected = [b for b in buttons if prop(b, "pSelected") is True]
     check(len(selected) == 1, "exactly one tab must be selected, got %d" % len(selected))
-    def accent_rgb(i):
-        """Return the item's colour as an (r,g,b) 0-255 triple, or None."""
-        value = prop(i, "color")
-        if value is None or i.height() > 3:
-            return None
-        # Every tab owns an underline item; only the selected one is visible.
-        if prop(i, "visible", True) is False:
-            return None
-        # QColor is not marshalled to Python; it arrives as a repr carrying the
-        # float channels, so parse the three components out of it.
-        text = str(value)
-        m = re.search(r"fromRgbF\(([-\d.e]+),\s*([-\d.e]+),\s*([-\d.e]+)", text)
-        if m:
-            return tuple(round(float(g) * 255) for g in m.groups())
-        m = re.search(r"#([0-9a-fA-F]{6,8})", text)
-        if m:
-            digits = m.group(1)[-6:]
-            return tuple(int(digits[k:k + 2], 16) for k in (0, 2, 4))
-        return None
 
-    def is_accent(i):
-        self_accent = accent_rgb(i)
-        return self_accent is not None and all(
-            abs(a - b) <= 2 for a, b in zip(self_accent, ACCENT)
-        )
+    # --- page host: centred native column, no card -------------------------
+    # The shell keeps the stock fixed-width page column centred at its native
+    # width. There is deliberately no card, border or inset surface behind it.
+    # The card was a rounded rectangle inset 20 px on each side. Identify it by
+    # that geometry (`border` is a QQuickPen and is not marshalled to Python).
+    cards = [
+        i for i in tree
+        if abs(i.width() - (content.width() - 40)) < 3
+        and i.height() > content.height() - 130
+        and i is not content
+    ]
+    check(not cards, "the rejected page card came back (%d drawn)" % len(cards))
 
-    underline = find(is_accent)
-    if underline is None and os.environ.get("BSI_DEBUG_GUI"):
-        for i in tree:
-            c = prop(i, "color")
-            if c is not None and i.height() <= 3:
-                print("thin:", i.metaObject().className(), repr(str(c)), i.width(), i.height())
-    check(underline is not None, "the selected tab has no accent underline")
-    if underline:
-        u = underline.mapToItem(content, QPointF(0, 0))
-        u_rect = (u.x(), u.y(), underline.width(), underline.height())
-        # The underline must sit inside exactly one tab slot, span that slot, and
-        # hug its bottom edge. Locating the slot geometrically means this holds
-        # however the strip distributes its width.
-        host = next(
-            (
-                b for b in buttons
-                if b.mapToItem(content, QPointF(0, 0)).x() - 1 <= u_rect[0]
-                < b.mapToItem(content, QPointF(b.width(), 0)).x()
-            ),
-            None,
-        )
-        check(host is not None, "the underline is not inside any tab")
-        if host:
-            s_pt = host.mapToItem(content, QPointF(0, 0))
-            s_ = (s_pt.x(), s_pt.y(), host.width(), host.height())
-            check(
-                abs(u_rect[0] - s_[0]) < 2 and abs(u_rect[2] - host.width()) < 2,
-                "the underline does not span the selected tab "
-                "(underline x=%.1f w=%.1f, tab x=%.1f w=%.1f)"
-                % (u_rect[0], u_rect[2], s_[0], host.width()),
-            )
-            check(
-                s_[1] + host.height() - (u_rect[1] + u_rect[3]) <= 1,
-                "the underline is not at the bottom of the selected tab "
-                "(tab bottom=%.1f, underline bottom=%.1f)"
-                % (s_[1] + host.height(), u_rect[1] + u_rect[3]),
-            )
-            check(
-                str(prop(host, "pSettingBtnText")) == str(prop(selected[0], "pSettingBtnText")),
-                "the underline is under an unselected tab (%r vs %r)"
-                % (prop(host, "pSettingBtnText"), prop(selected[0], "pSettingBtnText")),
-            )
-
-    # --- custom icon ------------------------------------------------------
-    icons = [i for i in tree if source_of(i) == ICON]
-    check(bool(icons), "the custom tab icon is not painted anywhere")
-    if icons and buttons:
-        icon = icons[0]
-        host = next(
-            (b for b in buttons if b.mapToItem(content, QPointF(0, 0)).x()
-             <= icon.mapToItem(content, QPointF(0, 0)).x() < b.mapToItem(content, QPointF(b.width(), 0)).x()),
-            None,
-        )
-        if host:
-            mid = icon.mapToItem(content, QPointF(icon.width() / 2, 0)).x()
-            check(
-                abs(mid - host.mapToItem(content, QPointF(host.width() / 2, 0)).x()) < 2,
-                "the custom icon is not centred in its tab",
-            )
-        else:
-            failures.append("the custom icon is not inside any tab slot")
-
-    # --- page card --------------------------------------------------------
-    card = find(
-        lambda i: abs(i.width() - (content.width() - 40)) < 2
-        and abs(i.height() - (content.height() - 110)) < 2
-        and prop(i, "radius") is not None
-    )
-    check(card is not None, "the page card was not drawn at its inset size")
-    if card:
-        top = card.mapToItem(content, QPointF(0, 0))
-        check(abs(top.x() - 20) < 2, "the card is not inset 20 px from the left")
-        check(
-            abs(top.x() + card.width() - (content.width() - 20)) < 2,
-            "the card is not inset 20 px from the right",
-        )
-        check(prop(card, "radius") and prop(card, "radius") >= 8, "the card is not rounded")
-        # The border pen is not marshalled to Python, so verify it by the QML
-        # that produced it (the template assertion below covers the token); the
-        # drawn surface is checked by the render that accompanies this test.
-        if buttons:
-            strip_bottom = max(
-                b.mapToItem(content, QPointF(0, b.height())).y() for b in buttons
-            )
-            check(
-                top.y() + 1 >= strip_bottom,
-                "the card overlaps the tab strip (card top %.1f, strip bottom %.1f)"
-                % (top.y(), strip_bottom),
-            )
-
-    # --- the native page actually landed inside the card -------------------
     page = find(lambda i: i.objectName() == "runtimeSettingPage")
-    check(page is not None, "the native page was not loaded into the card")
-    if page and card:
+    check(page is not None, "the native page was not loaded into the shell")
+    if page:
         origin = page.mapToItem(content, QPointF(0, 0))
-        card_origin = card.mapToItem(content, QPointF(0, 0))
         check(
-            origin.x() >= card_origin.x() - 1
-            and origin.x() + page.width() <= card_origin.x() + card.width() + 1,
-            "the native page escaped the card horizontally",
-        )
-        check(
-            origin.y() >= card_origin.y() - 1,
-            "the native page starts above the card",
+            abs((origin.x() + page.width() / 2) - content.width() / 2) < 3,
+            "the native page column is not centred in the window",
         )
 
     # --- no hard-coded palette --------------------------------------------
@@ -488,9 +407,8 @@ Window {
         print("FAIL: the post-patch Settings GUI does not match the design")
         return 1
     print(
-        "PASS: the post-patch Settings GUI draws pill tabs with an accent "
-        "underline, an inset bordered page card, centred custom icons and no "
-        "colliding labels"
+        "PASS: the post-patch Settings GUI draws label-sized tabs with equal "
+        "gaps, no colliding labels and a centred native page column"
     )
     return 0
 

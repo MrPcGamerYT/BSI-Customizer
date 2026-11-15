@@ -65,7 +65,7 @@ match = re.search(
 )
 assert match, "Could not find the generated Settings-window QML template"
 replacement = match.group(1)
-assert "BSI Settings v12" in replacement
+assert "BSI Settings v13" in replacement
 assert "pSettingsItems.pSettingElements" in replacement
 assert "property var bHidden:" in replacement
 assert "property var bHidden:[]" in replacement
@@ -90,39 +90,49 @@ assert "color:UiTheme.colors.primary10" in replacement
 assert "#0d0f14" not in replacement and 'color:"white"' not in replacement, \
     "the rebuilt shell must not hard-code colours"
 assert 'color:"' not in replacement, "no literal colours may be baked into the shell"
-assert "MouseArea{width:parent.width;height:50;onPressed:iSettingsWindow.startSystemMove()}" in replacement, \
+assert "MouseArea{anchors.fill:parent;onPressed:iSettingsWindow.startSystemMove()}" in replacement, \
     "the whole header band must drag the window"
-assert "x:parent.width/2-width/2;y:14" in replacement, \
-    "the title must be centred in the header band, not behind the card"
+assert "anchors.centerIn:parent" in replacement, \
+    "the title must be centred in the header band"
 assert "ListView{id:v;" in replacement
 assert "orientation:ListView.Horizontal;model:pSettingsItems.pSettingElements" in replacement
-# The strip spans the shell with a symmetric 24 px inset, and its slots divide
-# that width evenly, so the row is balanced without any label-length raggedness
-# and the last tab never sits against the window edge.
-assert "ListView{id:v;width:parent.width-48;y:50;x:24;" in replacement
-assert "property var p:iSettingsWindowShadowContainer" in replacement
-# Slots divide the strip's real width (no integer truncation, which left the
-# row short of the right inset and overlapped long neighbour labels).
-assert "width:v.width/(v.count-p.bHidden.length||1)*(p.bHidden.indexOf(k)<0);height:40" in replacement
-# Even gaps: the strip is inset the same amount on both sides and the slots
-# divide exactly that width, so the first and last tabs sit equally far from
-# the window edge and every tab keeps the same gap.
+# The strip spans the shell with a symmetric 24 px inset so the first and last
+# tabs sit equally far from the window edge.
+assert "ListView{id:v;width:parent.width-48;height:44;x:24;" in replacement
+assert "property var w:iSettingsWindowShadowContainer" in replacement
+# A tab is as wide as its own label (measured with a hidden TextMetrics through
+# the same theme font) plus a fixed 22 px of padding. Equal-width slots are what
+# made "Game settings" and "Devices" collide, and they left short labels like
+# "About" floating in a wide empty box: the fix is to let the label size the tab.
+assert "width:t.implicitWidth+22;height:44" in replacement, \
+    "each tab must be sized by its own label, not by an equal share of the strip"
+assert 'Text{id:t;opacity:0;text:modelData.pButtonText;font:UiTheme.fonts.bodyMedium}' in replacement, \
+    "the tab must measure its label with the same font it draws it in"
+# Even gaps: the ListView sets one spacing value for every gap, so the space
+# between any two neighbouring tabs is identical no matter how long the labels
+# are. Doing this with padding inside an equal-width slot is what produced the
+# ragged row the user rejected.
+assert ";spacing:4" in replacement, \
+    "every gap between tabs must come from one spacing value"
 # A custom icon sits centred in the tab with the native label lifted to the top,
 # instead of being painted over the text.
-assert "anchors.bottomMargin:p.bIcons[k]?22:0" in replacement, "the label must move up when an icon is shown"
-assert "Image{source:p.bIcons[k];width:16;height:16;x:parent.width/2-8;y:20}" in replacement, \
+assert "anchors.bottomMargin:c?26:0" in replacement, "the label must move up when an icon is shown"
+assert "Image{source:c;width:18;height:18;x:parent.width/2-9;y:24}" in replacement, \
     "the icon must be centred in the tab"
 # Every category must stay reachable: the strip divides the shell width into
 # equal slots instead of letting the last tab be half-clipped at the edge.
 assert "item.anchors.fill=item.parent" in replacement
-# The page sits inside a rounded card inset from every window edge, so the
-# content surface is visibly separate from the shell background.
-assert "color:UiTheme.colors.primary70;radius:12;border.color:UiTheme.colors.primary60" in replacement, \
-    "the page must sit inside a rounded, bordered card"
-assert "height:parent.height-110" in replacement, \
-    "the card must stop short of the window bottom"
-assert "Rectangle{visible:s;y:38;width:parent.width;height:2;color:UiTheme.colors.accentNormal" in replacement, \
-    "the selected tab must carry an accent underline"
+# The page keeps the native, centred 568 px column it has always used. It is
+# NOT wrapped in a card and the shell paints no pill or underline behind the
+# selected tab: that redesign was rejected, the flat window is what ships.
+assert "width:Math.min(parent.width-48,568);x:(parent.width-width)/2" in replacement, \
+    "the page column must stay centred at its native width"
+assert "border.color" not in replacement and "radius:12" not in replacement, \
+    "the rejected card must not come back"
+assert "visible:s" not in replacement, \
+    "the rejected underline/pill must not come back"
+assert "Rectangle{anchors.fill:parent;color:UiTheme.colors.primary80;radius:14" in replacement, \
+    "the window itself stays a single flat rounded surface"
 assert "StackLayout{id:iSelectedSettingControl;anchors.fill:parent;currentIndex:pCurrentTabIndex" in replacement
 # The whole UiSettingsWindow.qml has to fit one resource slot in the player EXE,
 # and it can never be moved once the file is larger than the slot. A shipped
@@ -179,10 +189,8 @@ assert "bsiAboutDeveloperName" in about_doc and "bsiAboutDeveloperLink" in about
     "compacting the About page must keep its object names"
 assert "fCheckForUpdateCallback" in about_doc and "fUpdateShortDisplayName" in about_doc, \
     "the native About callbacks must survive compaction"
-assert "Rectangle{x:20;y:90;width:parent.width-40;height:parent.height-110;" in replacement, \
-    "the page card must be inset from both window edges"
-assert "delegate:Loader{width:parent.width;Component.onCompleted:setSource(modelData.pQmlSource" in replacement
-assert "pSettingBtnText:" in replacement and "pSelected:s" in replacement and "pShowRedDot:modelData.pShowRedDot" in replacement
+assert "delegate:Loader{anchors.fill:parent;Component.onCompleted:setSource(model.modelData.pQmlSource" in replacement
+assert "pSettingBtnText:" in replacement and "pSelected:index==pCurrentTabIndex" in replacement and "pShowRedDot:modelData.pShowRedDot" in replacement
 assert "pSettingIdx:index" in replacement
 assert "fChangeSelectedSetting(pSettingIdx)" in replacement
 
@@ -192,8 +200,13 @@ assert "fChangeSelectedSetting(pSettingIdx)" in replacement
 # rejected as "no longer loads" even though the document was fine.
 _patcher = pathlib.Path(__file__).resolve().parent.parent / "src" / "core" / "SettingsPanelPatcher.cpp"
 _patcher_src = _patcher.read_text()
-assert "setSource(modelData.pQmlSource" in replacement
-assert "modelData.pComponentObj=item" in replacement
+# This shell uses the stock `model.modelData` spelling...
+assert "setSource(model.modelData.pQmlSource" in replacement
+assert "model.modelData.pComponentObj=item" in replacement
+# ...but the validator must accept the shorthand too, because a shell whose
+# delegate sees the model data directly emits `modelData.pQmlSource`. Matching
+# only one spelling made re-applying over a patched player fail as "no longer
+# loads" even though the document was perfectly good.
 assert "setSource(modelData.pQmlSource" in _patcher_src, (
     "the validator must accept the rebuilt shell's setSource spelling"
 )
@@ -361,12 +374,12 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
         None,
     )
     # The page host is an id-carrying item, so it is reached through the QML
-    # child tree rather than objectName. It is inset the same 24 px on each side
-    # as the tab strip and capped at 568 px.
+    # child tree rather than objectName. It keeps the native 568 px column,
+    # centred, so the fixed-width stock pages are not stretched.
     page_frame = next(
         (candidate for candidate in visual_tree
-         if abs(candidate.width() - (obj.width() - 40)) < 2
-         and abs(candidate.height() - (obj.height() - 110)) < 2
+         if abs(candidate.width() - min(obj.width() - 48, 568)) < 2
+         and abs(candidate.height() - (obj.height() - 100)) < 2
          and candidate is not obj),
         None,
     )
@@ -421,26 +434,45 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
     assert abs(obj.x() - 190) < 2 and abs(obj.y() - 115) < 2, "The larger Settings window should remain centered"
     title_center = settings_title.mapToItem(obj, QPointF(settings_title.width() / 2, settings_title.height() / 2))
     assert abs(title_center.x() - obj.width() / 2) < 2, "The Settings title should be centered in the title bar"
-    assert tabs.property("spacing") == 0, "The horizontal tab strip should rely on each label-sized tab slot for spacing"
+    # Gaps: one spacing value for the whole strip, so the distance between any
+    # two neighbouring tabs is identical. The old uniform-slot layout put a
+    # different amount of air around short and long labels ("About" floated in a
+    # wide box) and let long neighbours such as "Game settings" and "Devices"
+    # run into each other.
+    assert tabs.property("spacing") == 4, "every gap between tabs must come from one spacing value"
     tab_slots = [item for item in visual_tree if item.property("pSettingBtnText") is not None]
     assert len(tab_slots) >= 2, "Visible native categories should each have a tab button"
-    # Every category must be reachable and fully drawn. The strip divides the
-    # available width into equal slots so the last tab is never half-clipped at
-    # the shell edge, which is what a label-length strip did on narrow windows.
-    assert len({round(item.width()) for item in tab_slots}) == 1, "Category slots should be uniform so no tab is clipped at the shell edge"
-    assert all(item.width() >= 40 for item in tab_slots), "Category slots must stay wide enough to read"
+    # Sizing: each tab is as wide as its own label plus a fixed pad, so a long
+    # label gets a long tab and a short one does not float in dead space.
+    widths = [round(item.width()) for item in tab_slots]
+    assert len(set(widths)) > 1, \
+        "tabs must size to their own labels, not share one uniform width"
+    assert all(w >= 40 for w in widths), "every tab must stay wide enough to read"
+    # Placement: laid out left to right with even spacing, each tab starting
+    # exactly where the previous one ended plus the gap.
+    order = sorted(tab_slots, key=lambda i: i.mapToItem(panel, QPointF(0, 0)).x())
+    lefts = [i.mapToItem(panel, QPointF(0, 0)).x() for i in order]
+    widths = [round(item.width()) for item in order]
+    gaps = [round(b - (a + w)) for a, b, w in zip(lefts, lefts[1:], widths)]
+    assert len(set(gaps)) == 1, f"gaps between tabs must all be equal, got {gaps}"
+    assert 0 < gaps[0] <= 12, f"the gap between tabs must be visible but tight, got {gaps[0]}"
+    # No collisions: no tab may overlap its neighbour, however long the labels.
+    for (a, wa), (b, _) in zip(zip(lefts, widths), zip(lefts[1:], widths[1:])):
+        assert b >= a + wa, f"tab at {a} (width {wa}) runs into the tab at {b}"
+    # Every tab, including the last, must be fully inside the strip.
+    assert lefts[-1] + widths[-1] <= panel.width() - 24 + 1, \
+        "the last category must not be clipped at the shell edge"
     assert abs(player.width - 1500) < 2 and abs(player.height - 900) < 2, "The shell should resize without changing the host player window"
     assert abs(panel.width() - obj.width()) < 2 and abs(panel.height() - obj.height()) < 2, "The PR #88 shell should fill its resized host"
     stack_center = stack.mapToItem(panel, QPointF(stack.width() / 2, stack.height() / 2))
     assert abs(stack_center.x() - panel.width() / 2) < 2, "The native page stack was not centered inside the shell"
-    # The stock pages are fixed-width surfaces, so the shell bounds the page
-    # region instead of stretching a page across the whole window.
-    assert page_frame is not None, "The shell did not create its centered page host card"
+    # The stock pages are fixed-width surfaces, so the shell keeps the native
+    # 568 px column centred instead of stretching a page across the window.
+    assert page_frame is not None, "the shell did not create its centred page host"
     frame_center = page_frame.mapToItem(panel, QPointF(page_frame.width() / 2, 0))
-    assert abs(frame_center.x() - panel.width() / 2) < 2, "The page host card should be centered in the shell"
-    assert abs(page_frame.width() - (panel.width() - 40)) < 2, "The page card must be inset 20 px on each side"
-    assert page_frame.width() < panel.width() - 30, "The page card must never touch the shell edges"
-    assert abs(stack.width() - page_frame.width()) < 2, "The native page stack should fill its centered page card"
+    assert abs(frame_center.x() - panel.width() / 2) < 2, "the page host should be centred in the shell"
+    assert abs(page_frame.width() - 568) < 2, "the page keeps its native 568 px width"
+    assert abs(stack.width() - page_frame.width()) < 2, "the native page stack should fill its centred host"
     loader_position = page_loader.mapToItem(panel, QPointF(0, 0))
     assert 0 < page_loader.width() <= page_frame.width(), "The native page Loader should stay inside the centered page card"
     assert loader_position.x() >= frame_center.x() - page_frame.width() / 2 - 8, "The native Loader drifted out of its page card"
