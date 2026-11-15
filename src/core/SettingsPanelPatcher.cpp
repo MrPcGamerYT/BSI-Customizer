@@ -860,6 +860,14 @@ function fUpdateShortDisplayName(n){pShortDisplayName=String(n||"")}
     return generated;
 }
 
+// The page as it is generated with no custom artwork, compressed. This is the
+// baseline the icon budget is measured against.
+int emptyPagePayload()
+{
+    return int(EmbeddedResources::payloadSizeFor(
+        buildAbout(QString(), QString(), {}, QString(), QStringList(), {}).toUtf8(), 1));
+}
+
 QVariantMap readRecovery(const QString &path, const QString &exePath)
 {
     QFile file(path);
@@ -1101,11 +1109,6 @@ QString minifySvg(const QString &source)
     return text;
 }
 
-// Defined below; readCustomAsset measures the generated page against the slot.
-QString buildAbout(const QString &developerName, const QString &tagline,
-                   const QVariantList &links, const QString &logoSource,
-                   const QStringList &hiddenTabs, const QVariantMap &tabIcons);
-
 // The About document is the only place a custom tab icon can live (it is the
 // page that publishes them to the shell), and its slot is small: one shipped
 // player reports 2337 bytes for the whole page, compressed. Every icon is
@@ -1140,19 +1143,15 @@ QByteArray rasterizeSvg(const QByteArray &svg, int box)
 }
 
 // How many bytes of tab artwork the About page can carry. The document is
-// compressed into a fixed slot, so this is measured, not guessed: build the page
-// with no artwork, see what it compresses to, and keep a reserve for the logo
-// and for the compressor's inability to pack incompressible data.
+// compressed into a fixed slot, so this is measured, not guessed: the compressed
+// size of the page with no artwork is compared against the slot floor, with a
+// reserve for the logo and for data the compressor cannot pack.
 constexpr int kAboutSlotFloor = 2337;
 constexpr int kArtworkReserve = 320;
 
-// `plainPage` is the generated About document built with no custom artwork. Its
-// compressed size is what competes for the slot, so measure exactly that.
-int artworkBudget(const QByteArray &plainPage)
+int artworkBudget(int plainPayload)
 {
-    if (plainPage.isEmpty()) return kAboutSlotFloor - kArtworkReserve - 1600;
-    const int used = int(EmbeddedResources::payloadSizeFor(plainPage, 1));
-    return qMax(0, kAboutSlotFloor - used - kArtworkReserve);
+    return qMax(0, kAboutSlotFloor - plainPayload - kArtworkReserve);
 }
 
 QVariantMap readCustomAsset(const QString &path, const QString &kind)
@@ -1188,8 +1187,7 @@ QVariantMap readCustomAsset(const QString &path, const QString &kind)
         // Still too big for the About page's slot? Draw it at the size the strip
         // uses and store that instead. Refusing the upload is worse: the user's
         // SVG is valid and only the container is small.
-        const int budget = artworkBudget(
-            buildAbout(QString(), QString(), {}, QString(), QStringList(), {}).toUtf8());
+        const int budget = artworkBudget(emptyPagePayload());
         if (budget > 0) {
             const int dataUriSize = int(stored.toBase64().size()) + 28;
             for (int box : {32, 24, 18}) {
