@@ -1,0 +1,55 @@
+name: Matched optimizer repair
+on:
+  workflow_dispatch:
+  push:
+    branches: [arena/cee7044d-bsi-customizer]
+    paths:
+      - 'assets/optimizer-repair/**'
+      - 'tools/optimizer-repair/**'
+      - 'tests/optimizer_repair*'
+      - '.github/workflows/optimizer-repair.yml'
+permissions:
+  contents: write
+concurrency:
+  group: optimizer-repair-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 12
+    env:
+      PYTHONUTF8: '1'
+    steps:
+      - run: git config --global core.autocrlf false
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install real Qt test runtime (not shipped)
+        run: python -m pip install PySide6==6.8.3
+      - name: Verify real QML request matrix without launching the helper
+        run: python tests/run_qt_runtime_test.py tests/optimizer_repair_runtime_test.py
+      - name: Build matched helper and run fake-platform transaction and UI tests
+        shell: pwsh
+        run: ./tools/optimizer-repair/build_windows.ps1
+      - uses: actions/upload-artifact@v4
+        with:
+          name: VOID-Optimizer-Repair-V3
+          path: |
+            deliverables/VOID-Optimizer-Repair-V3.zip
+            deliverables/VOID-Optimizer-Repair-V3.zip.sha256
+          if-no-files-found: error
+      - name: Save only the tested repair ZIP on this branch
+        if: github.ref == 'refs/heads/arena/cee7044d-bsi-customizer'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git add -- deliverables/VOID-Optimizer-Repair-V3.zip deliverables/VOID-Optimizer-Repair-V3.zip.sha256
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          git diff --cached --quiet
+          if ($LASTEXITCODE -eq 0) { exit 0 }
+          if ($LASTEXITCODE -ne 1) { exit $LASTEXITCODE }
+          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m 'Package tested matching optimizer v3 helper and page'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          git push origin arena/cee7044d-bsi-customizer
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
