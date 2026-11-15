@@ -5232,7 +5232,7 @@ Window {
                           // the 32 px inset is symmetric so the row keeps the same
                           // gap from the window edge on both sides.
                           && rebuiltWindow.contains(QStringLiteral("ListView{id:v;width:parent.width-64;height:48;x:32;"))
-                          && rebuiltWindow.contains(QStringLiteral("width:v.width/(v.count-h.length||1)")))
+                          && rebuiltWindow.contains(QStringLiteral("width:v.width/(v.count-h.length||1)"))
                           && rebuiltWindow.contains(QStringLiteral("MouseArea{anchors.fill:parent;onPressed:iSettingsWindow.startSystemMove()}"))
                           && rebuiltWindow.contains(QStringLiteral("pShowRedDot:modelData.pShowRedDot"))
                           && rebuiltWindow.contains(QStringLiteral("anchors.centerIn:parent"))
