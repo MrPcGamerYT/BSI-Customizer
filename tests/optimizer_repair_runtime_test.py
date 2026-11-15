@@ -10,14 +10,23 @@ os.environ.setdefault('QSG_RHI_BACKEND','software')
 # The OEM Qt 5 player uses customizable Controls; Qt 6 on Windows defaults to
 # a native style that deliberately rejects custom backgrounds/indicators.
 os.environ.setdefault('QT_QUICK_CONTROLS_STYLE','Basic')
+if os.name == 'nt':
+    os.environ.setdefault('QT_QPA_FONTDIR', str(Path(os.environ['WINDIR'])/'Fonts'))
 from PySide6.QtCore import QUrl, QMetaObject, QPointF, Qt
-from PySide6.QtGui import QGuiApplication, QColor
+from PySide6.QtGui import QGuiApplication, QColor, QFontDatabase, QFont, QRawFont
 from PySide6.QtQml import QQmlEngine, QQmlComponent
 from PySide6.QtQuick import QQuickWindow, QQuickItem
 from PySide6.QtTest import QTest
 
 root=Path(__file__).resolve().parents[1]
 app=QGuiApplication([])
+if os.name == 'nt':
+    fonts=Path(os.environ['WINDIR'])/'Fonts'
+    for name in ('segoeui.ttf','seguisb.ttf','segoeuib.ttf','seguisym.ttf','cambria.ttc'):
+        if (fonts/name).is_file():
+            assert QFontDatabase.addApplicationFont(str(fonts/name)) >= 0, name
+    assert QRawFont.fromFont(QFont('Segoe UI')).supportsCharacter(ord('A')), 'Headless renderer must have real Latin glyphs, not tofu'
+
 with tempfile.TemporaryDirectory() as directory:
     base=Path(directory)
     shutil.copyfile(root/'assets/optimizer-repair/Assets/OptimizerPage.qml',base/'OptimizerPage.qml')
