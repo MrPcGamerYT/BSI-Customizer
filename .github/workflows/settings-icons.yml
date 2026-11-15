@@ -1,0 +1,32 @@
+name: Isolated Settings icon repair
+on:
+  workflow_dispatch:
+  push:
+    branches: [arena/cee7044d-bsi-customizer]
+    paths:
+      - 'assets/settings-icons-repair/**'
+      - 'tests/settings_icons_repair*'
+      - '.github/workflows/settings-icons.yml'
+permissions:
+  contents: read
+jobs:
+  real-qt:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Validate preserved shared API and namespaced assets
+        run: node tests/settings_icons_repair_test.mjs
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install Qt and platform dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgl1 libegl1 libxkbcommon0 libdbus-1-3
+          python -m pip install PySide6==6.8.3
+      - name: Load actual repair shell and verify icon readiness
+        run: python tests/settings_icons_repair_runtime_test.py
