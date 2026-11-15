@@ -21,10 +21,22 @@ namespace VoidOptimizer {
     // Keep the viewport and thumb fully theme-owned; all content remains real controls.
     sealed class StudioScroll : Panel {
         Control body;
+        readonly HashSet<Control> watched=new HashSet<Control>();
         int offset,extent,dragStart,dragOffset;
         bool dragging,layingOut;
         public StudioScroll() { DoubleBuffered=true;BackColor=Skin.Background;TabStop=true;SetStyle(ControlStyles.ResizeRedraw,true); }
-        public void SetBody(Control value) { body=value;body.Dock=DockStyle.None;body.Anchor=AnchorStyles.Top|AnchorStyles.Left;body.AutoSize=false;Controls.Add(body);PerformLayout(); }
+        public void SetBody(Control value) { body=value;body.Dock=DockStyle.None;body.Anchor=AnchorStyles.Top|AnchorStyles.Left;body.AutoSize=false;Controls.Add(body);Watch(body);PerformLayout(); }
+        void Watch(Control control) {
+            if(!watched.Add(control))return;
+            control.ControlAdded+=delegate(object sender,ControlEventArgs e) { Watch(e.Control); };
+            control.Enter+=delegate {
+                if(control.Controls.Count!=0||control==body)return;
+                Point point=PointToClient(control.PointToScreen(Point.Empty));
+                if(point.Y<0)SetOffset(offset+point.Y);
+                else if(point.Y+control.Height>ClientSize.Height)SetOffset(offset+point.Y+control.Height-ClientSize.Height);
+            };
+            foreach(Control child in control.Controls)Watch(child);
+        }
         protected override void OnLayout(LayoutEventArgs e) {
             base.OnLayout(e);if(body==null||layingOut)return;layingOut=true;
             try {
