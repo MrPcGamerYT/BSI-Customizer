@@ -150,6 +150,33 @@ Window {
     QMetaObject.invokeMethod(window,"showLogin");QTest.qWait(50)
     assert named("nativeDiscordLogin") is not None
     assert not errors,errors
+    backend.setProperty("calls",[])
+    studioWindow=create('''import QtQuick
+import QtQuick.Window
+import QtQuick.Controls.Basic
+import BSICustomizer
+Window {
+ width: 1000; height: 920; visible: true
+ ScrollView { anchors.fill:parent; contentWidth:availableWidth
+  EmulatorUiStudio { id:studio; width:parent.width; objectName:"emulatorStudio" }
+ }
+ function stageStudio() { studio.stage(); }
+ function inspectStudio() { studio.inspectCoverage(); }
+ function invalidStudio() { studio.mappings="not json"; studio.stage(); }
+}''')
+    QTest.qWait(150)
+    assert calls()==[], "Emulator UI Studio must not inspect or scan on entry"
+    if screenshots: assert studioWindow.grabWindow().save(str(screenshots/"emulator-ui-studio.png"))
+    QMetaObject.invokeMethod(studioWindow,"inspectStudio")
+    assert calls()==["skin-plan"]
+    QMetaObject.invokeMethod(studioWindow,"stageStudio")
+    assert calls()==["skin-plan","queue-studio"]
+    QMetaObject.invokeMethod(studioWindow,"invalidStudio")
+    assert calls()==["skin-plan","queue-studio"], "malformed icon JSON must never queue"
+    for w,h in [(620,780),(1100,920)]:
+        studioWindow.resize(w,h);QTest.qWait(50)
+    assert not errors,errors
+    studioWindow.close()
     # Full production shell with mock services: no production auth bypass.
     # Only the fixture Auth QtObject changes. All real C++ engines are tested separately.
     updates=create('''import QtQuick

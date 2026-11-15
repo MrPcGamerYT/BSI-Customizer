@@ -8,7 +8,7 @@ var tools = [
     { title: "Performance & FPS", detail: "Inspect supported frame-rate patches before applying.", route: 3, terms: "fps frames limit performance" },
     { title: "Integrity & safety", detail: "Inspect integrity support and restore existing patches.", route: 4, terms: "integrity safety check" },
     { title: "Boot experience", detail: "Edit the existing boot-video workflow without changing it on entry.", route: 5, terms: "startup video mp4 splash loading" },
-    { title: "Player interface", detail: "Supported sidebar, layout, Settings and About editors.", route: 6, terms: "sidebar buttons order hide settings about layout typography font spacing icons titlebar" },
+    { title: "Player interface", detail: "Sidebar, layout, Settings, About and native Emulator UI Studio.", route: 6, terms: "sidebar buttons order hide settings about layout typography font spacing icons titlebar emulator studio assets animations qml" },
     { title: "Discord application ID", detail: "Inspect or patch the player's existing Discord ID.", route: 7, terms: "rpc presence discord app id names" },
     { title: "Animated presence & corners", detail: "Configure GIF RPC, activity images and emulator-window corners.", route: 8, terms: "gif rpc discord round rounded corners window images buttons" },
     { title: "Compatibility inspection", detail: "Open Workspace, then explicitly inspect the selected EXE.", route: 9, terms: "supported mapping report capacity compatibility" },

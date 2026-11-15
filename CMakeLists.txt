@@ -138,6 +138,8 @@ qt_add_executable(BSICustomizer
     src/core/SkinProfiles.h
     src/core/SkinProfiles.cpp
     src/core/PlayerSkinCompiler.h
+    src/core/EmulatorUiStudio.h
+    src/core/EmulatorUiStudio.cpp
     src/core/PlayerSkinCompiler.cpp
     src/core/Backend.h
     src/core/CrashDiagnostics.cpp src/core/CrashDiagnostics.h
@@ -318,6 +320,7 @@ qt_add_qml_module(BSICustomizer
         src/qml/UpdateBanner.qml
         src/qml/components/SidebarButton.qml
         src/qml/components/WinControls.qml
+        src/qml/components/EmulatorUiStudio.qml
         src/qml/components/SkinPreview.qml
         src/qml/components/MicroLabel.qml
         src/qml/components/CircleButton.qml

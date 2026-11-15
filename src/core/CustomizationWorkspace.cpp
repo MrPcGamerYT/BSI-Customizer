@@ -8,6 +8,7 @@
 #include "PlayerAppearancePatcher.h"
 #include "AddonPacks.h"
 #include "PlayerSkinCompiler.h"
+#include "EmulatorUiStudio.h"
 #include "PeUtils.h"
 #include "QtResources.h"
 #include "ThemeEngine.h"
@@ -319,6 +320,8 @@ QVariantMap simulate(const QString &path, const QVariantList &operations, const 
             next = preparedAppearance;
             msg = ok ? QStringLiteral("%1 appearance token(s) rewritten and read back in memory.").arg(op.value("edits").toMap().size()) : appearanceError;
         } else if (kind == QLatin1String("resource") || kind == QLatin1String("player-qml")) {
+            if(op.contains("studioDirectory") && !EmulatorUiStudio::verify(op.value("studioDirectory").toString(),op.value("studioHashes").toMap()))
+                return fail(QStringLiteral("Studio Assets changed or are missing. Regenerate and restage before Dry Run/Apply. No EXE was changed."));
             const QString encoded = op.value("data").toString();
             if (encoded.size() > (maxResource * 4 / 3 + 8)) return fail(QStringLiteral("Encoded replacement exceeds 32 MB."));
             const auto decoded = QByteArray::fromBase64Encoding(encoded.toLatin1(), QByteArray::AbortOnBase64DecodingErrors);

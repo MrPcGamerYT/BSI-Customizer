@@ -7,6 +7,7 @@
 #include "AddonPacks.h"
 #include "SkinProfiles.h"
 #include "PlayerSkinCompiler.h"
+#include "EmulatorUiStudio.h"
 #include <QCryptographicHash>
 #include "BootVideoPatcher.h"
 #include "PlayerCache.h"
@@ -2152,6 +2153,7 @@ QVariantMap Backend::workspace(const QString &action, const QVariantMap &options
     QVariantMap r;
     if (action == QLatin1String("inspect")) r = W::inspect(path, edits);
     else if (action == QLatin1String("skin-icon-load")) r = SkinProfiles::readIcon(options.value("file").toString());
+    else if (action == QLatin1String("studio-export")) r = EmulatorUiStudio::publish(options.value("folder").toString(), options.value("profile").toMap());
     else if (action == QLatin1String("skin-save")) r = SkinProfiles::save(options.value("file").toString(), options.value("profile").toMap());
     else if (action == QLatin1String("skin-load")) r = SkinProfiles::read(options.value("file").toString());
     else if (action == QLatin1String("skin-plan")) {
@@ -2162,10 +2164,12 @@ QVariantMap Backend::workspace(const QString &action, const QVariantMap &options
         r=PlayerSkinCompiler::plan(bytes,options.value("profile").toMap(),paths);
         r.remove("operations"); // inspection never queues or exports raw source
     }
-    else if (action == QLatin1String("queue-skin")) {
+    else if (action == QLatin1String("queue-skin") || action == QLatin1String("queue-studio")) {
+        const bool studio=action==QLatin1String("queue-studio");
         const auto profile = options.value("profile").toMap();
         r = SkinProfiles::validate(profile);
         if (!r.value("ok").toBool()) return r;
+        if (studio && !profile.value("playerUi").toBool()) return {{"ok",false},{"msg","Studio requires native player UI coverage."}};
         if (!m_workspaceOperations.isEmpty()) return {{"ok",false},{"msg","Review or clear your existing Workspace batch first. Nothing was discarded."}};
         const QByteArray bytes = readExe();
         const auto *base = AddonPacks::find(profile.value("base").toString());
@@ -2200,6 +2204,9 @@ QVariantMap Backend::workspace(const QString &action, const QVariantMap &options
             QStringList paths;for(const auto &v:m_resourceInfos)paths<<v.toMap().value("path").toString();
             const auto gui=PlayerSkinCompiler::plan(bytes,profile,paths);
             if(!gui.value("ok").toBool())return gui;
+            if(!studio)for(const auto &v:gui.value("operations").toList())
+                if(QByteArray::fromBase64(v.toMap().value("data").toString().toLatin1()).contains("BSI_STUDIO_HOOK_BEGIN"))
+                    return {{"ok",false},{"msg","This player uses an Assets Studio bundle. Reapply from Player Interface → Emulator UI studio, or restore its EXE snapshot first."}};
             pending.append(gui.value("operations").toList());coverage=gui.value("coverage").toList();
         }
         const auto icons=profile.value("icons").toList();
@@ -2215,10 +2222,32 @@ QVariantMap Backend::workspace(const QString &action, const QVariantMap &options
             pending << QVariantMap{{"kind","resource"},{"path",resource},{"data",QString::fromLatin1(svg.toBase64())},{"sha256",W::digest(svg)}};
         }
         if(pending.size()>128)return {{"ok",false},{"msg","Pack exceeds the 128-operation limit. No edits were queued."}};
+        QString studioDirectory;
+        if(studio) {
+            // Preflight every native hook before publishing any Assets files.
+            const QString root=QFileInfo(path).dir().filePath("Assets/BSIStudio");
+            for(const auto &v:pending) {
+                const auto op=v.toMap();if(op.value("kind").toString()!="player-qml")continue;
+                const auto result=EmulatorUiStudio::hook(QFileInfo(op.value("path").toString()).fileName(),QByteArray::fromBase64(op.value("data").toString().toLatin1()),QDir(root).filePath("preflight"));
+                if(!result.value("ok").toBool())return result;
+            }
+            const auto exported=EmulatorUiStudio::publish(root,profile);
+            if(!exported.value("ok").toBool())return exported;
+            studioDirectory=exported.value("directory").toString();
+            for(auto &v:pending) {
+                auto op=v.toMap();if(op.value("kind").toString()!="player-qml")continue;
+                const auto result=EmulatorUiStudio::hook(QFileInfo(op.value("path").toString()).fileName(),QByteArray::fromBase64(op.value("data").toString().toLatin1()),studioDirectory);
+                if(!result.value("ok").toBool())return result;
+                const auto data=result.value("source").toByteArray();
+                op["data"]=QString::fromLatin1(data.toBase64());op["sha256"]=W::digest(data);
+                op["studioDirectory"]=studioDirectory;op["studioHashes"]=exported.value("hashes");v=op;
+            }
+        }
         m_workspaceOperations=pending;m_workspaceHash=W::digest(bytes);
         r={{"ok",true},{"coverage",coverage},{"msg",profile.value("playerUi",false).toBool()
             ? "Player palette, geometry, rounded QML controls, interaction/popup animations and icon families staged together. Dry Run is required. Native/Android windows, raster art, external DLLs/RCCs and boot remain unchanged."
             : "Palette, numeric tokens and mapped icons staged. Player GUI deployment is off; motion is preview-only."}};
+        if(studio)r["msg"]="Assets generated at "+studioDirectory+". Native Settings, sidebar/topbar, shared controls and icons staged. Open Workspace → Dry Run → Apply. Keep this folder for recovery; boot is unchanged.";
     }
     else if (action == QLatin1String("queue-addon")) {
         // A pack is an isolated, fixed catalog operation. Never discard the user's batch.

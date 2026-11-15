@@ -88,10 +88,11 @@ jobs:
           sudo apt-get install -y qt6-base-dev pkg-config
           g++ -std=c++17 -O1 -ffunction-sections -fdata-sections -Wl,--gc-sections -Isrc \
             $(pkg-config --cflags Qt6Core) tests/player_skin_compile_test.cpp \
-            src/core/PlayerSkinCompiler.cpp src/core/SkinProfiles.cpp \
+            src/core/PlayerSkinCompiler.cpp src/core/SkinProfiles.cpp src/core/EmulatorUiStudio.cpp \
             $(pkg-config --libs Qt6Core) -o /tmp/player-skin-compile-test
           /tmp/player-skin-compile-test player-ui-source "${{ runner.temp }}/generated-player-skins"
           python tests/player_skin_syntax_test.py "${{ runner.temp }}/generated-player-skins"
+          python tests/emulator_ui_assets_test.py "${{ runner.temp }}/generated-player-skins-studio"
       - name: Type-check Workspace and Theme QML against real Qt metadata
         run: python tests/workspace_qml_lint_test.py
       - name: Exercise native Skin Studio and redesigned login

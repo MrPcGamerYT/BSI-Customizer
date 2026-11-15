@@ -349,6 +349,13 @@ Item {
                     StudioTabButton { text: qsTr("About preview & editor") }
                     StudioTabButton { text: qsTr("Remove items") }
                     StudioTabButton { text: qsTr("Appearance studio") }
+                    StudioTabButton { text: qsTr("Emulator UI studio") }
+                }
+
+                EmulatorUiStudio {
+                    visible: page.currentSection === 4
+                    Layout.fillWidth: true
+                    onNotify: message => page.notify(message)
                 }
 
                 // ---------------- one-click clean-up ----------------
