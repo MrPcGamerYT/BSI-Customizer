@@ -25,4 +25,3 @@ __pycache__/
 
 # Local Python tooling
 .venv/
-.harness/out/
