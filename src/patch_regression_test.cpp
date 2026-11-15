@@ -5179,6 +5179,35 @@ Window {
             check(safePanelSvg.value(QStringLiteral("ok")).toBool()
                       && safePanelLogo.value(QStringLiteral("ok")).toBool(),
                   QStringLiteral("the Settings rebuild accepts safe self-contained SVGs for icons and logos"));
+            // An editor-emitted icon is several times the size of its drawing.
+            // The About document it is embedded in has a small slot in the
+            // player EXE, so the stored form must be compacted - otherwise every
+            // icon upload fails with "needs N bytes but its slot only holds M".
+            const QString paddedPanelSvgPath = QDir(panelDir).filePath(QStringLiteral("padded-panel-icon.svg"));
+            const QByteArray paddedIcon = QByteArrayLiteral(
+                "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+                "<!-- Created with Inkscape -->\n"
+                "<svg\n   xmlns=\"http://www.w3.org/2000/svg\"\n   viewBox=\"0 0 24 24\">\n"
+                "  <metadata id=\"m\"><rdf:RDF/></metadata>\n"
+                "  <g\n     id=\"g1\">\n"
+                "    <circle cx=\"12\" cy=\"12\" r=\"9\" fill=\"#55aaff\" />\n"
+                "  </g>\n</svg>\n");
+            write(paddedPanelSvgPath, paddedIcon);
+            const QVariantMap paddedAsset = SettingsPanelPatcher::readCustomAsset(
+                paddedPanelSvgPath, QStringLiteral("tab-icon"));
+            const QByteArray storedIcon = QByteArray::fromBase64(
+                paddedAsset.value(QStringLiteral("asset")).toMap()
+                    .value(QStringLiteral("data")).toString().toLatin1());
+            check(paddedAsset.value(QStringLiteral("ok")).toBool()
+                      && !storedIcon.isEmpty() && storedIcon.size() < paddedIcon.size()
+                      && !storedIcon.contains("<!--") && !storedIcon.contains("<metadata")
+                      && !storedIcon.contains('\n')
+                      && storedIcon.contains("circle")
+                      && paddedAsset.value(QStringLiteral("msg")).toString()
+                             .contains(QStringLiteral("Minified")),
+                  QStringLiteral("a padded tab icon is stored compacted, with its drawing intact (%1 -> %2 bytes)")
+                      .arg(paddedIcon.size()).arg(storedIcon.size()));
+
             const QString unsafePanelSvgPath = QDir(panelDir).filePath(QStringLiteral("unsafe-panel-icon.svg"));
             write(unsafePanelSvgPath, QByteArrayLiteral("<svg xmlns=\"http://www.w3.org/2000/svg\"><script>alert(1)</script></svg>"));
             check(!SettingsPanelPatcher::readCustomAsset(unsafePanelSvgPath, QStringLiteral("tab-icon")).value(QStringLiteral("ok")).toBool(),

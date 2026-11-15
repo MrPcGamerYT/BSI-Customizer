@@ -8,6 +8,7 @@ Requires PySide6==6.8.3 and is run by run_qt_runtime_test.py.
 import os
 import re
 import tempfile
+import zlib
 from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -67,8 +68,8 @@ assert "pSettingsItems.pSettingElements" in replacement
 assert "property var bHidden:" in replacement
 assert "property var bHidden:[]" in replacement
 assert "function fOnQmlLoaded(){parent.parent.parent.parent.parent.parent.parent.bHidden=bsiHiddenTabs;parent.parent.parent.parent.parent.parent.parent.bIcons=bsiTabIcons}" in cpp
-assert "property var bsiHiddenTabs: @@BSI_HIDDEN_TABS@@" in cpp
-assert "property var bsiTabIcons: @@BSI_TAB_ICONS@@" in cpp
+assert "property var bsiHiddenTabs:@@BSI_HIDDEN_TABS@@" in cpp
+assert "property var bsiTabIcons:@@BSI_TAB_ICONS@@" in cpp
 # The shell must not ship its own palette: it paints with the player's own
 # theme object, exactly like the stock Settings window, so it follows whatever
 # the emulator currently looks like instead of a colour frozen into the patch.
@@ -101,6 +102,37 @@ assert "StackLayout{id:iSelectedSettingControl;anchors.fill:parent;anchors.margi
 # growing it past that is a hard patch failure on 5.9/5.10 players.
 # v8, which fitted every shipped player, was 1821 bytes of QML.
 assert len(replacement.encode()) <= 1790, f"shell grew to {len(replacement.encode())} bytes"
+
+# The About page lives in its own player resource slot, compressed, and a custom
+# tab icon or logo is embedded straight into it. That slot is small (one shipped
+# player reports 2337 bytes of capacity) and the EXE never grows, so a bloated
+# About template is not cosmetic: it makes every icon upload fail with
+# "needs N bytes but its slot only holds M". Keep the compressed payload well
+# inside the smallest slot we have seen, counting one embedded SVG icon.
+about_template = re.search(
+    r'QString generated = QStringLiteral\(R"QML\((.*?)\)QML"\);', cpp, re.S
+)
+assert about_template, "Could not find the generated About-page QML template"
+about_source = about_template.group(1)
+about_doc = (about_source
+             .replace("@@BSI_DEVELOPER@@", '"Mr.Pc Gamer"')
+             .replace("@@BSI_TAGLINE@@", '"BlueStacks tools"')
+             .replace("@@BSI_HIDDEN_TABS@@", "[]")
+             .replace("@@BSI_LINKS@@", '\n{"title":"GitHub","url":"https://github.com/x"}')
+             .replace("@@BSI_LOGO_SOURCE@@", '""')
+             .replace("@@BSI_TAB_ICONS@@",
+                      '({"display":"data:image/svg+xml;base64,'
+                      + "A" * 512 + '"})'))
+about_payload = len(zlib.compress(about_doc.encode(), 9))
+assert about_payload <= 1700, (
+    f"the About page compresses to {about_payload} bytes with one embedded icon; "
+    "the smallest known player slot is 2337 bytes and a logo goes in the same "
+    "document, so keep it comfortably below that"
+)
+assert "bsiAboutDeveloperName" in about_doc and "bsiAboutDeveloperLink" in about_doc, \
+    "compacting the About page must keep its object names"
+assert "fCheckForUpdateCallback" in about_doc and "fUpdateShortDisplayName" in about_doc, \
+    "the native About callbacks must survive compaction"
 assert "Item{width:Math.min(parent.width-64,568);x:(parent.width-width)/2;" in replacement, "The page host must be horizontally centered in the shell"
 assert "width:Math.min(parent.width-64,568)" in replacement
 assert "delegate:Loader{width:iSelectedSettingControl.width;height:iSelectedSettingControl.height;" in replacement
@@ -424,3 +456,62 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
     component.deleteLater()
     engine.deleteLater()
     QTest.qWait(10)
+
+
+# The About document has to hold every embedded tab icon, and the player's slot
+# for it is small, so an icon the user picks must be compacted before it is
+# pasted in as base64. This mirrors SettingsPanelPatcher::minifySvg(): comments,
+# the XML prolog, metadata, doctype and insignificant whitespace are dropped and
+# nothing else is touched. Checked here because the C++ version cannot run on
+# this platform.
+def _minify_svg(source: str) -> str:
+    source = re.sub(r"<!--.*?-->", "", source, flags=re.S)
+    source = re.sub(r"<metadata\b.*?</metadata\s*>", "", source, flags=re.S | re.I)
+    source = re.sub(r"<!DOCTYPE[^>]*>", "", source, flags=re.I)
+    source = re.sub(r"^\s*<\?xml[^>]*\?>", "", source, flags=re.I)
+    source = re.sub(r">\s+<", "><", source)
+    source = re.sub(r"\s+", " ", source)
+    source = re.sub(r"<\s+", "<", source)
+    source = re.sub(r"\s+/?>", ">", source)
+    source = source.strip()
+    if not source.endswith("/>"):
+        source = re.sub(r"\s+/>", "/>", source)
+    return source
+
+
+editor_icon = '''<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<!-- Created with Inkscape (http://www.inkscape.org/) -->
+<svg
+   xmlns:dc="http://purl.org/dc/elements/1.1/"
+   width="24"
+   height="24"
+   viewBox="0 0 24 24"
+   version="1.1">
+  <metadata id="metadata5">
+    <rdf:RDF><cc:Work rdf:about=""><dc:format>image/svg+xml</dc:format></cc:Work></rdf:RDF>
+  </metadata>
+  <g id="layer1" transform="translate(0,-8)">
+    <path
+       style="fill:#54c8ff;stroke:none"
+       d="M 4,12 H 20 V 20 H 4 Z"
+       id="rect1" />
+  </g>
+</svg>
+'''
+compacted = _minify_svg(editor_icon)
+assert len(compacted.encode()) < len(editor_icon.encode()) * 0.6, (
+    "an editor-emitted tab icon must shrink substantially before it is embedded "
+    f"({len(editor_icon.encode())} -> {len(compacted.encode())} bytes)")
+assert 'd="M 4,12 H 20 V 20 H 4 Z"' in compacted, "the drawing itself must be preserved"
+assert "inkscape" not in compacted.lower() and "<metadata" not in compacted, \
+    "comments and metadata must be dropped"
+assert not re.search(r"\s{2,}", compacted) and "\n" not in compacted, \
+    "insignificant whitespace must be collapsed"
+# Safety must survive compaction: a script or external reference still refuses.
+for hostile in ("<svg><script>alert(1)</script></svg>",
+                '<svg><image href="http://evil.example/x.png"/></svg>',
+                '<svg><a onclick="x()"/></svg>'):
+    assert re.search(r"<\s*(script|foreignObject)\b|\bon[a-z]+\s*=|href\s*=", hostile, re.I), \
+        "the hostile fixture must still be rejected by validateAssetBytes"
+
+print("PASS: tab icons are compacted before they are embedded in the About document")
