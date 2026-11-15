@@ -78,22 +78,50 @@ function url(name, color) {
     (recovery/'Icons.js').write_text(shared,encoding='utf-8')
     matched=ROOT / 'assets/settings-shell-matched-icons'
     library=(matched/'Icons.js').read_text()
-    mapping={k.replace('-',''):k for k in ['performance','display','graphics','game-settings','devices','gamepad','preferences','phone','shortcuts','user-data','advanced','about','close','palette','headphones']}
+    library+='\npaths.optimizer = '+json.dumps('<path d="m13.5 2-9 12h6l-1 8 10-13h-6l1-7Z"/>')+';\n'
+    library+='''
+// Resolve actual native page sources and opaque OEM IDs, never tab positions.
+function classifyTab(value) {
+    var key = String(value === undefined || value === null ? "" : value)
+        .replace(/^.*[\\\\/]/, "").toLowerCase().replace(/[^a-z0-9]/g, "");
+    if (/optimizer|optimiser|boost/.test(key)) return "optimizer";
+    if (/performance|engine|cpu|framerate/.test(key)) return "performance";
+    if (/display|resolution|dpi/.test(key)) return "display";
+    if (/graphic|renderer|gpu/.test(key)) return "graphics";
+    if (/gamepad|controller|joystick/.test(key)) return "controller";
+    if (/gamesetting|appsetting|gameconfig/.test(key)) return "gameSettings";
+    if (/phone|smartphone/.test(key)) return "smartphone";
+    if (/device|peripheral/.test(key)) return "devices";
+    if (/theme|palette|appearance/.test(key)) return "palette";
+    if (/advance/.test(key)) return "advanced";
+    if (/shortcut|keyboard|keymap/.test(key)) return "keyboard";
+    if (/about|info/.test(key)) return "info";
+    if (/audio|sound|headphone/.test(key)) return "headphones";
+    if (/storage|userdata|harddrive/.test(key)) return "harddrive";
+    if (/preference/.test(key)) return "preferences";
+    return "";
+}
+function kindForTab(id, pageSource, label) {
+    return classifyTab(pageSource) || classifyTab(id) || classifyTab(label) || "preferences";
+}
+'''
+    mapping={k.replace('-',''):k for k in ['performance','display','graphics','game-settings','devices','gamepad','preferences','phone','shortcuts','user-data','advanced','about','close','palette','headphones','optimizer']}
     library+='\n// Static transparent 48px fallback; all Settings assets are silver-white.\nvar pngFiles = '+json.dumps(mapping,indent=2)+''';
 function pngUrl(kind) {
     return Qt.resolvedUrl("BSISettingsIcons/png/" + pngFiles[normalizedKind(kind)] + ".png");
 }
 '''
-    (OUT/'BSISettingsIcons.js').write_text(library,encoding='utf-8')
+    (OUT/'BSISettingsIconsV3.js').write_text(library,encoding='utf-8')
     pngdir=OUT/'BSISettingsIcons/png';pngdir.mkdir(parents=True,exist_ok=True)
     for source in (matched/'png/48').glob('*.png'):shutil.copyfile(source,pngdir/source.name)
     print(f'Preserved {len(CHROME)} supplied primary shapes + {len(ALIASES)} aliases. Isolated Settings glyphs: {len(mapping)}.')
     # SettingsShell.qml and README are maintained alongside generated output.
-    archive=ROOT/'deliverables/VOID-Settings-Icons-Repair.zip'
+    archive=ROOT/'deliverables/VOID-Settings-Icons-V3.zip'
     archive.parent.mkdir(exist_ok=True)
     with zipfile.ZipFile(archive,'w',zipfile.ZIP_DEFLATED) as z:
         for path in sorted(OUT.rglob('*')):
-            if path.is_file():z.write(path,'VOID-Settings-Icons-Repair/'+path.relative_to(OUT).as_posix())
+            if path.is_file() and path.relative_to(OUT).as_posix() != 'BSISettingsIcons.js':
+                z.write(path,'VOID-Settings-Icons-V3/'+path.relative_to(OUT).as_posix())
     print(archive)
 
 if __name__=='__main__':main()

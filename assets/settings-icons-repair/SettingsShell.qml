@@ -3,7 +3,7 @@
 import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
-import "BSISettingsIcons.js" as Icons
+import "BSISettingsIconsV3.js" as Icons
 
 Item {
     id: shell
@@ -11,6 +11,9 @@ Item {
     property var bsiHost
     property var bsiTheme
     property bool bsiAnimations: true
+    readonly property string bsiIconPackVersion: "BSI icons v3"
+    // Temporary load confirmation; turn off after the v3 badge is visible.
+    property bool bsiIconDiagnostics: true
     // PNG first avoids depending on the player's Qt SVG image plugin.
     // Set false to use inline SVG with automatic PNG fallback.
     property bool bsiPreferPngIcons: true
@@ -20,22 +23,8 @@ Item {
     readonly property int selectedIndex: bsiHost ? bsiHost.pCurrentTabIndex : 0
     property alias pageContainer: bsiPageBody
 
-    function iconKind(id) {
-        var key = String(id || "").toLowerCase().replace(/[^a-z0-9]/g, "")
-        if (/performance|engine/.test(key)) return "performance"
-        if (/display|resolution/.test(key)) return "display"
-        if (/graphic/.test(key)) return "graphics"
-        if (/gamesetting/.test(key)) return "gameSettings"
-        if (/gamepad|controller/.test(key)) return "controller"
-        if (/phone/.test(key)) return "smartphone"
-        if (/device/.test(key)) return "devices"
-        if (/theme/.test(key)) return "palette"
-        if (/advance/.test(key)) return "advanced"
-        if (/shortcut|keyboard/.test(key)) return "keyboard"
-        if (/about|info/.test(key)) return "info"
-        if (/audio|sound/.test(key)) return "headphones"
-        if (/storage|userdata/.test(key)) return "harddrive"
-        return "preferences"
+    function iconKind(id, pageSource, label) {
+        return Icons.kindForTab(id, pageSource, label)
     }
     component BsiOutlineIcon: Item {
         id: icon
@@ -109,6 +98,13 @@ Item {
                 text: qsTranslate("QObject", "Settings")
                 color: "#f3f3f5"; font.pixelSize: 20; font.weight: Font.DemiBold
             }
+            Text {
+                objectName: "bsiSettingsIconVersion"
+                visible: shell.bsiIconDiagnostics
+                x: 16; y: 72
+                text: shell.bsiIconPackVersion + (shell.bsiPreferPngIcons ? " / PNG" : " / SVG")
+                color: "#777781"; font.pixelSize: 10
+            }
             ToolButton {
                 id: closeButton
                 objectName: "bsiSettingsClose"
@@ -166,7 +162,16 @@ Item {
                             anchors.leftMargin: shell.bsiCompact ? 20 : 17
                             anchors.verticalCenter: parent.verticalCenter
                             width: 18; height: 18
-                            kind: shell.iconKind(tab.nativeEntry.pButtonId)
+                            kind: shell.iconKind(tab.nativeEntry.pButtonId,
+                                                 tab.nativeEntry.pQmlSource,
+                                                 tab.nativeEntry.pButtonText)
+                            Component.onCompleted: {
+                                if (shell.bsiIconDiagnostics)
+                                    console.info(shell.bsiIconPackVersion + " tab: "
+                                        + String(tab.nativeEntry.pButtonId) + " | "
+                                        + String(tab.nativeEntry.pQmlSource || "") + " | "
+                                        + tab.nativeEntry.pButtonText + " -> " + kind)
+                            }
                             hot: tab.hovered; downState: tab.down; active: tab.selected
                             hoverTwist: kind === "advanced" ? 18 : kind === "palette" ? -10 : 0
                         }
