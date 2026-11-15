@@ -5297,13 +5297,21 @@ Window {
                         rebuiltAbout = EmbeddedResources::decodeText(
                             EmbeddedResources::readEntry(panelCopy, entry.entryOff, entry.flags, 8 * 1024 * 1024));
                 }
+                // The About document is emitted compactly (property:value, no
+                // space after the colon) so that it fits the player's small
+                // resource slot; match both spellings so this stays about the
+                // page structure rather than its whitespace.
                 const bool logoSourceVerified = expectedLogoSource.isEmpty()
-                    ? rebuiltAbout.contains(QStringLiteral("source: \"data:image/svg+xml;base64,"))
-                    : rebuiltAbout.contains(QStringLiteral("source: \"%1\"").arg(expectedLogoSource));
+                    ? rebuiltAbout.contains(QStringLiteral("source:\"data:image/svg+xml;base64,"))
+                    : (rebuiltAbout.contains(QStringLiteral("source: \"%1\"").arg(expectedLogoSource))
+                       || rebuiltAbout.contains(QStringLiteral("source:\"%1\"").arg(expectedLogoSource)));
                 check(logoSourceVerified
-                          && rebuiltAbout.contains(QStringLiteral("objectName: \"bsiAboutEmulatorLogo\""))
-                          && rebuiltAbout.contains(QStringLiteral("objectName: \"bsiAboutDeveloperName\""))
-                          && rebuiltAbout.contains(QStringLiteral("text: pDeveloperName"))
+                          && (rebuiltAbout.contains(QStringLiteral("objectName: \"bsiAboutEmulatorLogo\""))
+                              || rebuiltAbout.contains(QStringLiteral("objectName:\"bsiAboutEmulatorLogo\"")))
+                          && (rebuiltAbout.contains(QStringLiteral("objectName: \"bsiAboutDeveloperName\""))
+                              || rebuiltAbout.contains(QStringLiteral("objectName:\"bsiAboutDeveloperName\"")))
+                          && (rebuiltAbout.contains(QStringLiteral("text: pDeveloperName"))
+                              || rebuiltAbout.contains(QStringLiteral("text:pDeveloperName")))
                           && rebuiltAbout.contains(QStringLiteral("BSI Panel Regression"))
                           && rebuiltAbout.contains(QStringLiteral("Repeater"))
                           && rebuiltAbout.contains(QStringLiteral("Regression source"))
