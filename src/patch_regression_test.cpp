@@ -5258,12 +5258,17 @@ Window {
                           // The bounded, centered page region: the stock pages are
                           // fixed-width, so stretching one across the shell leaves
                           // its content hugging the left edge.
-                          && rebuiltWindow.contains(QStringLiteral("Item{width:Math.min(parent.width-64,568);x:(parent.width-width)/2;"))
+                          // The page host is inset the same 24 px as the strip and
+                          // sits below the header, not inside the 56 px title bar.
+                          && rebuiltWindow.contains(QStringLiteral("Item{width:Math.min(parent.width-48,568);x:(parent.width-width)/2;height:parent.height-112"))
                           // Tabs divide the strip into equal slots so the last
                           // category is never half-clipped at the shell edge, and
                           // the 32 px inset is symmetric so the row keeps the same
                           // gap from the window edge on both sides.
-                          && rebuiltWindow.contains(QStringLiteral("ListView{id:v;width:parent.width-64;height:48;x:32;"))
+                          // Slots divide the strip's exact width, so every tab keeps
+                          // the same gap instead of one wider closing gap.
+                          && rebuiltWindow.contains(QStringLiteral("ListView{id:v;width:parent.width-48;height:44;x:24;"))
+                          && rebuiltWindow.contains(QStringLiteral("width:v.width/(v.count-h.length||1)*(h.indexOf(k)<0);height:44"))
                           && rebuiltWindow.contains(QStringLiteral("width:v.width/(v.count-h.length||1)"))
                           && rebuiltWindow.contains(QStringLiteral("MouseArea{anchors.fill:parent;onPressed:iSettingsWindow.startSystemMove()}"))
                           && rebuiltWindow.contains(QStringLiteral("pShowRedDot:modelData.pShowRedDot"))
