@@ -130,8 +130,10 @@ assert "StackLayout{id:iSelectedSettingControl;anchors.fill:parent;currentIndex:
 # 2468"), which is the hard failure this test exists to prevent. Keep the
 # template far enough under that ceiling that the surrounding marker check, the
 # BOM handling and any future stock prefix still fit: 1900 leaves ~570 bytes of
-# headroom against the measured slot.
-assert len(replacement.encode()) <= 1900, (
+# headroom against the measured slot. The current shell is 1742 bytes, i.e.
+# 2468 in that slot - exactly the tightest player we have seen, so treat any
+# growth as a regression rather than headroom.
+assert len(replacement.encode()) <= 1742, (
     f"shell grew to {len(replacement.encode())} bytes; the tightest known "
     "UiSettingsWindow.qml slot is 2468 bytes"
 )
