@@ -11,7 +11,7 @@ os.environ.setdefault('QSG_RHI_BACKEND','software')
 # a native style that deliberately rejects custom backgrounds/indicators.
 os.environ.setdefault('QT_QUICK_CONTROLS_STYLE','Basic')
 from PySide6.QtCore import QUrl, QMetaObject, QPointF, Qt
-from PySide6.QtGui import QGuiApplication
+from PySide6.QtGui import QGuiApplication, QColor
 from PySide6.QtQml import QQmlEngine, QQmlComponent
 from PySide6.QtQuick import QQuickWindow, QQuickItem
 from PySide6.QtTest import QTest
@@ -27,7 +27,7 @@ with tempfile.TemporaryDirectory() as directory:
     component=QQmlComponent(engine,QUrl.fromLocalFile(str(base/'OptimizerPage.qml')))
     page=component.createWithInitialProperties({'previewOnly':True})
     assert page is not None,[e.toString() for e in component.errors()]
-    window=QQuickWindow();window.setGeometry(0,0,1000,760)
+    window=QQuickWindow();window.setColor(QColor("#080809"));window.setGeometry(0,0,1000,760)
     page.setParentItem(window.contentItem());page.setWidth(1000);page.setHeight(760)
     window.show();QTest.qWait(100)
     # Exercise actual delegate controls instead of only mutating page properties.
