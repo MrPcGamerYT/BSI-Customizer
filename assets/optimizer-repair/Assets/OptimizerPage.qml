@@ -113,7 +113,7 @@ Item {
             }
             ColumnLayout {
                 Layout.fillWidth: true; Layout.minimumWidth: 0; spacing: 3
-                Label { text: "VOID  /  SESSION CONTROL"; font.pixelSize: 10; font.letterSpacing: 1.8; color: "#9898a6" }
+                Label { text: "𝓥𝓞𝓘𝓓  /  SESSION CONTROL"; font.pixelSize: 10; font.letterSpacing: 1.8; color: "#9898a6" }
                 Label { text: "Optimizer"; font.pixelSize: 27; font.weight: Font.DemiBold }
             }
             ColumnLayout {

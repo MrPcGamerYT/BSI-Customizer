@@ -41,7 +41,7 @@ function Write-Atomic([string]$Path,[byte[]]$Bytes) {
     $temp=Join-Path $directory ([IO.Path]::GetRandomFileName())
     try {
         [IO.File]::WriteAllBytes($temp,$Bytes)
-        if (Test-Path -LiteralPath $Path) { [IO.File]::Replace($temp,$Path,$null) }
+        if (Test-Path -LiteralPath $Path) { [IO.File]::Replace($temp,$Path,[System.Management.Automation.Language.NullString]::Value) }
         else { [IO.File]::Move($temp,$Path) }
     } finally { if (Test-Path -LiteralPath $temp) { Remove-Item -LiteralPath $temp } }
 }
@@ -121,10 +121,12 @@ function Main {
         $key='HKCU:\Software\Classes\voidoptimizer-v3\shell\open\command'
         $actual=if (Test-Path $key) { (Get-Item $key).GetValue('') } else { '' }
         $expected='"'+(Join-Path $PSScriptRoot 'VOID-Optimizer.exe')+'" --request "%1"'
-        if ($actual -ceq $expected -and (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'VOID-Optimizer.exe'))) { Write-Host 'LINK OK: v3 points to this pack helper.' }
+        $report=$utf8.GetString((Read-Small (Join-Path $PSScriptRoot 'BUILD-REPORT.json'))) | ConvertFrom-Json
+        $helperOk=(Current (Join-Path $PSScriptRoot 'VOID-Optimizer.exe')) -eq $report.helperSha256
+        if ($actual -ceq $expected -and $helperOk) { Write-Host 'LINK OK: v3 points to this pack helper and its build-report hash matches.' }
         else { Write-Host 'LINK NOT VERIFIED: run SETUP-HELPER.cmd. A different owner must unregister itself; no registry override.' }
         Write-Host 'LIVE CHECK: restart Settings and look for STUDIO 04 / HELPER V3. If absent, stop and share the active loader; do not copy into other guessed folders.'
-        if (!$matches -or $actual -cne $expected) { throw 'Check incomplete. Read the PAGE and LINK results above.' }
+        if (!$matches -or !$helperOk -or $actual -cne $expected) { throw 'Check incomplete. Read the PAGE and LINK results above.' }
         return
     }
     Closed

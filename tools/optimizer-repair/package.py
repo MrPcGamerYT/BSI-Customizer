@@ -17,6 +17,8 @@ shutil.copytree(base,stage,dirs_exist_ok=True)
 shutil.copytree(ROOT/'tools/optimizer-repair/Source',stage/'Source',dirs_exist_ok=True)
 shutil.copyfile(exe,stage/'VOID-Optimizer.exe')
 shutil.copyfile(ROOT/'LICENSE',stage/'LICENSE')
+for size in ('1000x760','650x540','420x420'):
+    shutil.copyfile(ROOT/('.cache/optimizer-repair/studio04-'+size+'.png'),stage/('PREVIEW-'+size+'.png'))
 source=ROOT/'tools/optimizer-repair/Source/Optimizer.cs'
 report={'sourceCommit':subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip(),
         'sourceSha256':hashlib.sha256(source.read_bytes()).hexdigest(),
