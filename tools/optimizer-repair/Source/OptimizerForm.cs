@@ -66,6 +66,7 @@ namespace VoidOptimizer {
             Label limits=Words("Timer requests belong to this helper, not the player. Windows may scope or ignore them. No FPS guarantee, injection, services, RAM cleaning or boot edits.",8.5f,Skin.Muted);
             limits.Dock=DockStyle.Top;limits.MaximumSize=new Size(700,0);Add(content,limits);
             CardPanel footer=new CardPanel { Dock=DockStyle.Fill,AutoSize=false,Margin=new Padding(0,8,0,0),Padding=new Padding(12) };
+            frame.Controls.Add(footer,0,2);
             TableLayoutPanel footerBody=new TableLayoutPanel { Dock=DockStyle.Fill,ColumnCount=1,RowCount=2,Margin=new Padding(0),Padding=new Padding(0),BackColor=Color.Transparent };
             footerBody.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));
             footerBody.RowStyles.Add(new RowStyle(SizeType.Absolute,44));footerBody.RowStyles.Add(new RowStyle(SizeType.Percent,100));footer.Controls.Add(footerBody);
@@ -110,6 +111,8 @@ namespace VoidOptimizer {
             targets.Invalidate();UpdateState();
         }
         void InspectPid() {
+            if(session.Active)return;
+            targets.SelectedIndex=-1;
             int pid;
             if(!Int32.TryParse(pidInput.Text.Trim(),out pid)||pid<=0) { log.Text="Enter the PID from Task Manager > Details, not a filename. Nothing changed.";return; }
             try {
@@ -143,6 +146,7 @@ namespace VoidOptimizer {
         }
         bool Restore() { try { log.Text=session.Restore();monitoring=false;UpdateState();return true; } catch(Exception error) { log.Text="RESTORE FAILED: "+error.Message+" Recovery retained; retry Restore.";UpdateState();return false; } }
         public void SavePreview(string path) {
+            LayoutAssertions();
             targets.SelectedIndex=targets.Items.Count>0?0:-1;UpdateState();
             using(Bitmap image=new Bitmap(Width,Height)) { DrawToBitmap(image,new Rectangle(0,0,Width,Height));image.Save(path,System.Drawing.Imaging.ImageFormat.Png); }
         }
@@ -153,7 +157,11 @@ namespace VoidOptimizer {
             if(profile.SelectedIndex!=0||timerResolution.SelectedIndex!=0)throw new Exception("Default review values lost.");
             targets.SelectedIndex=-1;
             if(apply.Enabled)throw new Exception("Deselection must disable start.");
-            if(apply.Right>apply.Parent.ClientSize.Width||log.Width<100)throw new Exception("Footer layout clipped. Form="+ClientSize+" button="+apply.Bounds+" actions="+apply.Parent.ClientSize+" log="+log.Bounds+" body="+log.Parent.ClientSize);
+            LayoutAssertions();
+        }
+        void LayoutAssertions() {
+            Point location=PointToClient(apply.PointToScreen(Point.Empty));
+            if(apply.FindForm()!=this||!apply.Visible||location.Y<0||location.Y+apply.Height>ClientSize.Height||apply.Right>apply.Parent.ClientSize.Width||log.Width<100)throw new Exception("Footer layout clipped. Form="+ClientSize+" button="+apply.Bounds+" actions="+apply.Parent.ClientSize+" log="+log.Bounds+" body="+log.Parent.ClientSize);
         }
     }
 }
