@@ -5241,7 +5241,7 @@ Window {
                     if (file.name.compare(QLatin1String("UiSettingsWindow.qml"), Qt::CaseInsensitive) == 0)
                         rebuiltWindow = QString::fromUtf8(QtResources::readFile(panelImage, file));
                 }
-                check(rebuiltWindow.contains(QStringLiteral("BSI Settings v10"))
+                check(rebuiltWindow.contains(QStringLiteral("BSI Settings v12"))
                           && rebuiltWindow.contains(QStringLiteral("property var bHidden:"))
                           // The About page publishes the icon map into
                           // bIcons, so the shell has to declare it or that
@@ -5251,42 +5251,42 @@ Window {
                           // (the same UiTheme.colors the stock window uses) instead
                           // of a colour baked into the patch, so it keeps following
                           // whatever theme the emulator currently has.
-                          && rebuiltWindow.contains(QStringLiteral("Rectangle{anchors.fill:parent;color:UiTheme.colors.primary80;radius:14"))
+                          && rebuiltWindow.contains(QStringLiteral("Rectangle{anchors.fill:parent;color:UiTheme.colors.primary80"))
                           && rebuiltWindow.contains(QStringLiteral("color:UiTheme.colors.primary10"))
                           && !rebuiltWindow.contains(QStringLiteral("#0d0f14"))
-                          && rebuiltWindow.contains(QStringLiteral("Column{anchors.fill:parent"))
-                          // The bounded, centered page region: the stock pages are
-                          // fixed-width, so stretching one across the shell leaves
-                          // its content hugging the left edge.
-                          // The page host is inset the same 24 px as the strip and
-                          // sits below the header, not inside the 56 px title bar.
-                          && rebuiltWindow.contains(QStringLiteral("Item{width:Math.min(parent.width-48,568);x:(parent.width-width)/2;height:parent.height-112"))
+                          // The page lives in a rounded, bordered card inset from
+                          // every window edge, so the content surface reads as a
+                          // separate panel instead of a bare background.
+                          && rebuiltWindow.contains(QStringLiteral("Rectangle{x:20;y:90;width:parent.width-40;height:parent.height-110;"))
+                          && rebuiltWindow.contains(QStringLiteral("color:UiTheme.colors.primary70;radius:12;border.color:UiTheme.colors.primary60"))
+                          // The selected tab carries its own accent underline below
+                          // the pill the native button already paints.
+                          && rebuiltWindow.contains(QStringLiteral("Rectangle{visible:s;y:38;width:parent.width;height:2;color:UiTheme.colors.accentNormal"))
                           // Tabs divide the strip into equal slots so the last
                           // category is never half-clipped at the shell edge, and
                           // the 32 px inset is symmetric so the row keeps the same
                           // gap from the window edge on both sides.
                           // Slots divide the strip's exact width, so every tab keeps
                           // the same gap instead of one wider closing gap.
-                          && rebuiltWindow.contains(QStringLiteral("ListView{id:v;width:parent.width-48;height:44;x:24;"))
-                          && rebuiltWindow.contains(QStringLiteral("width:v.width/(v.count-h.length||1)*(h.indexOf(k)<0);height:44"))
-                          && rebuiltWindow.contains(QStringLiteral("width:v.width/(v.count-h.length||1)"))
-                          && rebuiltWindow.contains(QStringLiteral("MouseArea{anchors.fill:parent;onPressed:iSettingsWindow.startSystemMove()}"))
+
+                          && rebuiltWindow.contains(QStringLiteral("width:v.width/(v.count-p.bHidden.length||1)*(p.bHidden.indexOf(k)<0);height:40"))
+                          && rebuiltWindow.contains(QStringLiteral("MouseArea{width:parent.width;height:50;onPressed:iSettingsWindow.startSystemMove()}"))
                           && rebuiltWindow.contains(QStringLiteral("pShowRedDot:modelData.pShowRedDot"))
-                          && rebuiltWindow.contains(QStringLiteral("anchors.centerIn:parent"))
+                          && rebuiltWindow.contains(QStringLiteral("x:parent.width/2-width/2;y:14"))
                           && rebuiltWindow.contains(QStringLiteral("ListView{id:v;"))
-                          && rebuiltWindow.contains(QStringLiteral("orientation:ListView.Horizontal;model:pSettingsItems.pSettingElements;clip:true"))
+                          && rebuiltWindow.contains(QStringLiteral("orientation:ListView.Horizontal;model:pSettingsItems.pSettingElements"))
                           && rebuiltWindow.contains(QStringLiteral("item.anchors.fill=item.parent"))
                           // The strip is inset the same 24 px on both sides and its
                           // slots divide exactly that width, so every tab keeps the
                           // same gap and the last one never touches the edge.
-                          && rebuiltWindow.contains(QStringLiteral("ListView{id:v;width:parent.width-48;height:44;x:24;"))
+                          && rebuiltWindow.contains(QStringLiteral("ListView{id:v;width:parent.width-48;y:50;x:24;"))
                           // A custom icon sits centred in the tab, with the native
                           // label lifted to the top instead of being painted over.
-                          && rebuiltWindow.contains(QStringLiteral("anchors.bottomMargin:c?26:0"))
-                          && rebuiltWindow.contains(QStringLiteral("Image{source:c;width:18;height:18;x:parent.width/2-9;y:24}"))
+                          && rebuiltWindow.contains(QStringLiteral("anchors.bottomMargin:p.bIcons[k]?22:0"))
+                          && rebuiltWindow.contains(QStringLiteral("Image{source:p.bIcons[k];width:16;height:16;x:parent.width/2-8;y:20}"))
                           && rebuiltWindow.contains(QStringLiteral("StackLayout{id:iSelectedSettingControl;anchors.fill:parent;currentIndex:pCurrentTabIndex"))
-                          && rebuiltWindow.contains(QStringLiteral("delegate:Loader{width:iSelectedSettingControl.width;height:iSelectedSettingControl.height;"))
-                          && rebuiltWindow.contains(QStringLiteral("model.modelData.pComponentObj=item"))
+                          && rebuiltWindow.contains(QStringLiteral("delegate:Loader{width:parent.width;"))
+                          && rebuiltWindow.contains(QStringLiteral("modelData.pComponentObj=item"))
                           && rebuiltWindow.contains(QStringLiteral("fChangeSelectedSetting(pSettingIdx)"))
                           && rebuiltWindow.contains(QStringLiteral("onVisibleChanged:if(visible&&transientParent)"))
                           && rebuiltWindow.contains(QStringLiteral("var t=transientParent"))
@@ -5295,7 +5295,7 @@ Window {
                           && rebuiltWindow.contains(QStringLiteral("x=t.x+t.width/2-width/2"))
                           && rebuiltWindow.contains(QStringLiteral("y=t.y+t.height/2-height/2"))
                           && rebuiltWindow.contains(QStringLiteral("iSettingsWindow.startSystemMove()"))
-                          && rebuiltWindow.contains(QStringLiteral("asset:\"CloseIcon\"")),
+                          && rebuiltWindow.contains(QStringLiteral("asset:'CloseIcon'")),
                       QStringLiteral("the rebuilt %1 Settings panel restores the PR #88 shell and adds customizable tabs while preserving native pages, selection, dragging, and close behavior")
                           .arg(QFileInfo(input).fileName()));
                 QString expectedLogoSource;
