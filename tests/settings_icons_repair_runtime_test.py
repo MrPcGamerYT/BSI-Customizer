@@ -39,7 +39,7 @@ Window {
   if(mode===3) { var first=result[0];result[0]=result[1];result[1]=first; }
   return result;
  }
- function setMode(mode) { pSettingsItems={pSettingElements:makeEntries(mode)}; }
+ function setMode(mode: int) { pSettingsItems={pSettingElements:makeEntries(mode)}; }
  function fChangeSelectedSetting(index) { requested=index; }
  SettingsShell { id: panel; objectName:"repairShell"; anchors.fill:parent; bsiHost:host; bsiAnimations:false }
  Item { id: nativePage; objectName:"nativePageFixture"; width:20; height:20 }
@@ -102,7 +102,8 @@ assert window.property('pCurrentTabIndex')==0,'shell must not bypass the native 
 window.setProperty('pCurrentTabIndex',1)
 assert shell.property('selectedIndex')==1
 for mode in [1,2,3]:
-    QMetaObject.invokeMethod(window,'setMode',Q_ARG(int,mode));QTest.qWait(100)
+    assert QMetaObject.invokeMethod(window,'setMode',Q_ARG(int,mode))
+    QTest.qWait(100)
     assert_png_identity(mode)
 window.setWidth(640);QTest.qWait(100)
 assert shell.property('bsiCompact') is True
