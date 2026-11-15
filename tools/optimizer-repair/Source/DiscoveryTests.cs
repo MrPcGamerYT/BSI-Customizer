@@ -19,6 +19,9 @@ namespace VoidOptimizer {
             bool refused=false;
             try { PlayerAccess.Inspect(Process.GetCurrentProcess().Id); }catch(InvalidOperationException) { refused=true; }
             Need(refused,"manual PID cannot authorize an unrelated executable");
+            refused=false;
+            try { PlayerAccess.Priority(new Identity { Pid=Process.GetCurrentProcess().Id,Start=1,Image=@"C:\Old player\HD-Player.exe" }); }catch(TargetGone) { refused=true; }
+            Need(refused,"PID now belonging to a different executable counts as original target gone, not a monitor failure");
             List<Process> children=new List<Process>();
             try {
                 foreach(string bits in new string[]{"x86","x64"}) {

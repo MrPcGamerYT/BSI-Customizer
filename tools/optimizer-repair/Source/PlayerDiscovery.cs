@@ -21,23 +21,25 @@ namespace VoidOptimizer {
         [DllImport("kernel32.dll", SetLastError=true)] static extern bool SetPriorityClass(IntPtr handle, uint priority);
         [DllImport("advapi32.dll", SetLastError=true)] static extern bool OpenProcessToken(IntPtr handle, uint access, out IntPtr token);
         static Exception Error(string operation) { int code = Marshal.GetLastWin32Error(); return new Win32Exception(code, operation + " (Windows " + code + "): " + new Win32Exception(code).Message); }
-        static Identity Read(IntPtr handle, int pid) {
+        static Identity Read(IntPtr handle, int pid, Identity expected) {
             uint exitCode;
             if (!GetExitCodeProcess(handle, out exitCode)) throw Error("Read process state");
             if (exitCode != 259) throw new TargetGone();
             StringBuilder name = new StringBuilder(32768); int size = name.Capacity;
             if (!QueryFullProcessImageName(handle, 0, name, ref size)) throw Error("Read process image");
-            if (!String.Equals(Path.GetFileName(name.ToString()), "HD-Player.exe", StringComparison.OrdinalIgnoreCase))
-                throw new InvalidOperationException("Not HD-Player.exe. Renamed/unrelated executables are not authorized.");
             long created, exited, kernel, user;
             if (!GetProcessTimes(handle, out created, out exited, out kernel, out user)) throw Error("Read process creation time");
+            long start=DateTime.FromFileTimeUtc(created).Ticks;
+            if (expected != null && (start != expected.Start || !String.Equals(name.ToString(), expected.Image, StringComparison.OrdinalIgnoreCase))) throw new TargetGone();
+            if (!String.Equals(Path.GetFileName(name.ToString()), "HD-Player.exe", StringComparison.OrdinalIgnoreCase))
+                throw new InvalidOperationException("Not HD-Player.exe. Renamed/unrelated executables are not authorized.");
             IntPtr token;
             if (!OpenProcessToken(handle, 8, out token)) throw Error("Read process owner");
             try {
                 using (WindowsIdentity owner = new WindowsIdentity(token)) using (WindowsIdentity current = WindowsIdentity.GetCurrent())
                     if (owner.User == null || !owner.User.Equals(current.User)) throw new InvalidOperationException("Different Windows user. Only this user's emulator is allowed.");
             } finally { CloseHandle(token); }
-            return new Identity { Pid = pid, Image = name.ToString(), Start = DateTime.FromFileTimeUtc(created).Ticks };
+            return new Identity { Pid = pid, Image = name.ToString(), Start = start };
         }
         static IntPtr Open(int pid, bool write) {
             IntPtr handle = OpenProcess(QueryLimited | (write ? SetInformation : 0), false, pid);
@@ -51,13 +53,13 @@ namespace VoidOptimizer {
         public static Identity Inspect(int pid) {
             if (pid <= 0) throw new InvalidOperationException("Enter a positive PID from Task Manager > Details.");
             IntPtr handle = Open(pid, false);
-            try { return Read(handle, pid); } finally { CloseHandle(handle); }
+            try { return Read(handle, pid, null); } finally { CloseHandle(handle); }
         }
         static IntPtr Match(Identity target, bool write) {
             if (target == null || target.Pid <= 0 || target.Start <= 0 || String.IsNullOrEmpty(target.Image)) throw new InvalidOperationException("Select a verified player identity first.");
             IntPtr handle = Open(target.Pid, write);
             try {
-                Identity observed = Read(handle, target.Pid);
+                Identity observed = Read(handle, target.Pid, target);
                 if (observed.Start != target.Start || !String.Equals(observed.Image, target.Image, StringComparison.OrdinalIgnoreCase)) throw new TargetGone();
                 return handle;
             } catch { CloseHandle(handle); throw; }

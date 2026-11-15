@@ -66,13 +66,15 @@ namespace VoidOptimizer {
             Label limits=Words("Timer requests belong to this helper, not the player. Windows may scope or ignore them. No FPS guarantee, injection, services, RAM cleaning or boot edits.",8.5f,Skin.Muted);
             limits.Dock=DockStyle.Top;limits.MaximumSize=new Size(700,0);Add(content,limits);
             CardPanel footer=new CardPanel { Dock=DockStyle.Fill,AutoSize=false,Margin=new Padding(0,8,0,0),Padding=new Padding(12) };
-            TableLayoutPanel footerBody=Stack();footer.Controls.Add(footerBody);
+            TableLayoutPanel footerBody=new TableLayoutPanel { Dock=DockStyle.Fill,ColumnCount=1,RowCount=2,Margin=new Padding(0),Padding=new Padding(0),BackColor=Color.Transparent };
+            footerBody.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,100));
+            footerBody.RowStyles.Add(new RowStyle(SizeType.Absolute,44));footerBody.RowStyles.Add(new RowStyle(SizeType.Percent,100));footer.Controls.Add(footerBody);
             FlowLayoutPanel actions=new FlowLayoutPanel { Dock=DockStyle.Top,AutoSize=true,WrapContents=false,Margin=new Padding(0) };
             apply.Text="Review & start session";apply.Primary=true;apply.Width=184;apply.Click+=delegate { Apply(); };actions.Controls.Add(apply);
             restore.Text="Restore session";restore.Width=140;restore.Click+=delegate { Restore(); };actions.Controls.Add(restore);
             StudioButton diagnostics=new StudioButton { Text="Diagnostics",Width=120 };diagnostics.Click+=delegate { ShowDiagnostics(); };actions.Controls.Add(diagnostics);
-            Add(footerBody,actions);
-            log.Multiline=true;log.ReadOnly=true;log.Height=55;log.Dock=DockStyle.Top;log.BorderStyle=BorderStyle.None;log.BackColor=Skin.Surface;log.ForeColor=Skin.Muted;log.Font=new Font("Segoe UI",9);log.Margin=new Padding(0,8,0,0);log.AccessibleName="Session result and status";Add(footerBody,log);
+            actions.Dock=DockStyle.Fill;actions.AutoSize=false;footerBody.Controls.Add(actions,0,0);
+            log.Multiline=true;log.ReadOnly=true;log.Height=55;log.Dock=DockStyle.Top;log.BorderStyle=BorderStyle.None;log.BackColor=Skin.Surface;log.ForeColor=Skin.Muted;log.Font=new Font("Segoe UI",9);log.Margin=new Padding(0,8,0,0);log.AccessibleName="Session result and status";log.Dock=DockStyle.Fill;footerBody.Controls.Add(log,0,1);
             targets.SelectedIndexChanged+=delegate { UpdateState(); };
             RefreshTargets();UpdateState();
             log.Text=store.Exists?"RECOVERY PENDING. Restore the previous session before starting another. Nothing applied on startup.":"NOT APPLIED. Select a verified player, review your actions, then confirm the exact changes.";
@@ -151,7 +153,7 @@ namespace VoidOptimizer {
             if(profile.SelectedIndex!=0||timerResolution.SelectedIndex!=0)throw new Exception("Default review values lost.");
             targets.SelectedIndex=-1;
             if(apply.Enabled)throw new Exception("Deselection must disable start.");
-            if(apply.Right>apply.Parent.ClientSize.Width||log.Width<100)throw new Exception("Footer layout clipped.");
+            if(apply.Right>apply.Parent.ClientSize.Width||log.Width<100)throw new Exception("Footer layout clipped. Form="+ClientSize+" button="+apply.Bounds+" actions="+apply.Parent.ClientSize+" log="+log.Bounds+" body="+log.Parent.ClientSize);
         }
     }
 }
