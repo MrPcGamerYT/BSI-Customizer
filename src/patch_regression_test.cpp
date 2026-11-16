@@ -5264,7 +5264,7 @@ Window {
                         rebuiltWindow = QString::fromUtf8(QtResources::readFile(panelImage, file));
                 }
                 check(rebuiltWindow.contains(QStringLiteral("BSI v15"))
-                          && rebuiltWindow.contains(QStringLiteral("property var bHidden:"))
+                          && rebuiltWindow.contains(QStringLiteral("property var bHidden"))
                           // The About page publishes the icon map into
                           // bIcons, so the shell has to declare it or that
                           // assignment silently throws and no icon is drawn.
@@ -5284,12 +5284,12 @@ Window {
                           // A tab is measured with a hidden Text using the same
                           // theme font the button draws its label in, so the tab
                           // is exactly as wide as its own label plus the pad.
-                          && rebuiltWindow.contains(QStringLiteral("Text{id:t;opacity:0;text:modelData.pButtonText;font:UiTheme.fonts.bodyMedium}"))
+                          && rebuiltWindow.contains(QStringLiteral("FontMetrics{id:t;font:UiTheme.fonts.bodyMedium}"))
                           // Every tab is sized by its own label and the strip
                           // uses one spacing value, so all the gaps are equal.
                           // A tab the About page marks hidden (an empty icon
                           // value) collapses; an unknown tab keeps its width.
-                          && rebuiltWindow.contains(QStringLiteral("width:c===''?0:t.implicitWidth+22;height:44"))
+                          && rebuiltWindow.contains(QStringLiteral("width:c===''?0:t.advanceWidth(modelData.pButtonText)+22;height:44"))
                           && rebuiltWindow.contains(QStringLiteral("MouseArea{anchors.fill:parent;onPressed:iSettingsWindow.startSystemMove()}"))
                           && rebuiltWindow.contains(QStringLiteral("pShowRedDot:modelData.pShowRedDot"))
                           && rebuiltWindow.contains(QStringLiteral("anchors.centerIn:parent"))
@@ -5309,7 +5309,7 @@ Window {
                           // A custom icon sits centred in the tab, with the native
                           // label lifted to the top instead of being painted over.
                           && rebuiltWindow.contains(QStringLiteral("anchors.bottomMargin:c?26:0"))
-                          && rebuiltWindow.contains(QStringLiteral("Image{source:c;width:18;height:18;x:parent.width/2-9;y:24}"))
+                          && rebuiltWindow.contains(QStringLiteral("Image{source:c;visible:c;width:18;height:18;x:parent.width/2-9;y:24}"))
                           // Tabs are laid out label-sized with one spacing
                           // value for the whole strip: equal-width slots made
                           // long neighbours ("Game settings" / "Devices")
@@ -5320,7 +5320,7 @@ Window {
                           && !rebuiltWindow.contains(QStringLiteral("visible:s"))
                           && rebuiltWindow.contains(QStringLiteral("StackLayout{id:iSelectedSettingControl;anchors.fill:parent;currentIndex:pCurrentTabIndex"))
                           && rebuiltWindow.contains(QStringLiteral("delegate:Loader{anchors.fill:parent;"))
-                          && rebuiltWindow.contains(QStringLiteral("model.modelData.pComponentObj=item"))
+                          && rebuiltWindow.contains(QStringLiteral("modelData.pComponentObj=item"))
                           && rebuiltWindow.contains(QStringLiteral("fChangeSelectedSetting(pSettingIdx)"))
                           && rebuiltWindow.contains(QStringLiteral("onVisibleChanged:if(visible&&transientParent)"))
                           && rebuiltWindow.contains(QStringLiteral("var t=transientParent"))
