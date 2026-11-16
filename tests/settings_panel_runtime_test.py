@@ -65,7 +65,7 @@ match = re.search(
 )
 assert match, "Could not find the generated Settings-window QML template"
 replacement = match.group(1)
-assert "BSI Settings v14" in replacement
+assert "BSI v15" in replacement
 assert "pSettingsItems.pSettingElements" in replacement
 assert "property var bHidden:" in replacement
 assert "property var bHidden:[]" in replacement
@@ -104,12 +104,13 @@ assert "MouseArea{anchors.fill:parent;onPressed:iSettingsWindow.startSystemMove(
     "the whole header band must drag the window"
 assert "anchors.centerIn:parent" in replacement, \
     "the title must be centred in the header band"
-assert "ListView{id:v;" in replacement
+assert "ListView{width:Math.min(contentWidth,parent.width-48);height:44" in replacement
 assert "orientation:ListView.Horizontal;model:pSettingsItems.pSettingElements" in replacement
 # The strip spans the shell with a symmetric 24 px inset so the first and last
 # tabs sit equally far from the window edge.
-assert "ListView{id:v;width:parent.width-48;height:44;clip:true;x:24" in replacement
-assert "iSettingsWindowShadowContainer.bIcons[k]" in replacement
+assert "x:(parent.width-width)/2" in replacement, \
+    "the tab strip must be centred in the window"
+assert "iSettingsWindowShadowContainer.bIcons[" in replacement
 # A tab is as wide as its own label (measured with a hidden TextMetrics through
 # the same theme font) plus a fixed 22 px of padding. Equal-width slots are what
 # made "Game settings" and "Devices" collide, and they left short labels like
@@ -481,6 +482,15 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
     # Every tab, including the last, must be fully inside the strip.
     assert lefts[-1] + widths[-1] <= panel.width() - 24 + 1, \
         "the last category must not be clipped at the shell edge"
+    # The strip itself is centred: the whole run of tabs is one group in the
+    # middle of the title row, not a left-aligned list with dead space to the
+    # right. When the tabs are wider than the window the strip is clamped and
+    # scrolls instead, so the gutter is what is centred then.
+    strip_left = tabs.property("x")
+    strip_width = tabs.width()
+    assert abs((strip_left + strip_width / 2) - panel.width() / 2) < 2, \
+        f"the tab strip must be centred (x {strip_left}, width {strip_width} of {panel.width()})"
+    assert strip_left >= 23, f"the strip must keep its gutter from the window edge (x {strip_left})"
     assert abs(player.width - 1500) < 2 and abs(player.height - 900) < 2, "The shell should resize without changing the host player window"
     assert abs(panel.width() - obj.width()) < 2 and abs(panel.height() - obj.height()) < 2, "The PR #88 shell should fill its resized host"
     stack_center = stack.mapToItem(panel, QPointF(stack.width() / 2, stack.height() / 2))

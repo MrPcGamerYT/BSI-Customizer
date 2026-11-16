@@ -5263,7 +5263,7 @@ Window {
                     if (file.name.compare(QLatin1String("UiSettingsWindow.qml"), Qt::CaseInsensitive) == 0)
                         rebuiltWindow = QString::fromUtf8(QtResources::readFile(panelImage, file));
                 }
-                check(rebuiltWindow.contains(QStringLiteral("BSI Settings v14"))
+                check(rebuiltWindow.contains(QStringLiteral("BSI v15"))
                           && rebuiltWindow.contains(QStringLiteral("property var bHidden:"))
                           // The About page publishes the icon map into
                           // bIcons, so the shell has to declare it or that
@@ -5302,7 +5302,7 @@ Window {
                           // The strip is inset the same 24 px on both sides and its
                           // slots divide exactly that width, so every tab keeps the
                           // same gap and the last one never touches the edge.
-                          && rebuiltWindow.contains(QStringLiteral("ListView{id:v;width:parent.width-48;height:44;clip:true;x:24"))
+                          && rebuiltWindow.contains(QStringLiteral("ListView{width:Math.min(contentWidth,parent.width-48);height:44"))
                           // A custom icon sits centred in the tab, with the native
                           // label lifted to the top instead of being painted over.
                           && rebuiltWindow.contains(QStringLiteral("anchors.bottomMargin:c?26:0"))

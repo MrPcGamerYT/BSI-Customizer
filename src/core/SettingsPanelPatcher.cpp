@@ -45,7 +45,8 @@ const QString kWindowDesignMarkerV9 = QStringLiteral("BSI Settings v9");
 const QString kWindowDesignMarkerV10 = QStringLiteral("BSI Settings v10");
 const QString kWindowDesignMarkerV12 = QStringLiteral("BSI Settings v12");
 const QString kWindowDesignMarkerV13 = QStringLiteral("BSI Settings v13");
-const QString kWindowDesignMarker = QStringLiteral("BSI Settings v14");
+const QString kWindowDesignMarkerV14 = QStringLiteral("BSI Settings v14");
+const QString kWindowDesignMarker = QStringLiteral("BSI v15");
 const QString kAboutMarker = QStringLiteral("BSI CUSTOMIZER: redesigned About page v1");
 const QString kSchema = QStringLiteral("bsi.settings-panel.recovery");
 const QString kWindowLeaf = QStringLiteral("UiSettingsWindow.qml");
@@ -725,7 +726,7 @@ QString buildWindow(const QString &stock)
     // place, vertically centred: it used to be painted over the centred text
     // (unreadable) inside a bare Item, which is not a visual element, so it
     // could not be shown at all.
-    QString replacement = QStringLiteral(R"QML(UiShadowContainer{//BSI Settings v14
+    QString replacement = QStringLiteral(R"QML(UiShadowContainer{//BSI v15
 id:iSettingsWindowShadowContainer;anchors.fill:parent
 property var bHidden:[]
 property var bIcons:({})
@@ -735,8 +736,8 @@ Item{width:parent.width;height:56
 MouseArea{anchors.fill:parent;onPressed:iSettingsWindow.startSystemMove()}
 Text{text:qsTr('Settings');color:UiTheme.colors.primary10;font:UiTheme.fonts.bodyLarge;anchors.centerIn:parent}
 UiImageButton{asset:'CloseIcon';x:parent.width-32;y:12;onClicked:iSettingsWindow.close()}}
-ListView{id:v;width:parent.width-48;height:44;clip:true;x:24;orientation:ListView.Horizontal;model:pSettingsItems.pSettingElements;spacing:4
-delegate:Item{property var k:modelData.pQmlSource.toLowerCase().split('/').pop();property var c:iSettingsWindowShadowContainer.bIcons[k];width:t.implicitWidth+22;height:44
+ListView{width:Math.min(contentWidth,parent.width-48);height:44;x:(parent.width-width)/2;orientation:ListView.Horizontal;model:pSettingsItems.pSettingElements;spacing:4
+delegate:Item{property var c:iSettingsWindowShadowContainer.bIcons[modelData.pQmlSource.toLowerCase().split('/').pop()];width:t.implicitWidth+22;height:44
 UiSettingsButton{anchors.fill:parent;anchors.bottomMargin:c?26:0;pSettingIdx:index;pSettingBtnText:modelData.pButtonText;pSelected:index==pCurrentTabIndex;pShowRedDot:modelData.pShowRedDot;onSettingClicked:fChangeSelectedSetting(pSettingIdx)}
 Text{id:t;opacity:0;text:modelData.pButtonText;font:UiTheme.fonts.bodyMedium}
 Image{source:c;width:18;height:18;x:parent.width/2-9;y:24}}}
@@ -1078,7 +1079,8 @@ bool hasWindowMarker(const QString &text)
         || text.contains(kWindowDesignMarkerV3) || text.contains(kWindowDesignMarkerV4)
         || text.contains(kWindowDesignMarkerV5) || text.contains(kWindowDesignMarkerV6)
         || text.contains(kWindowDesignMarkerV8) || text.contains(kWindowDesignMarkerV9)
-        || text.contains(kWindowDesignMarkerV10) || text.contains(kWindowDesignMarkerV12) || text.contains(kWindowDesignMarkerV13)
+        || text.contains(kWindowDesignMarkerV10) || text.contains(kWindowDesignMarkerV12)
+        || text.contains(kWindowDesignMarkerV13) || text.contains(kWindowDesignMarkerV14)
         || text.contains(kWindowDesignMarker);
 }
 
