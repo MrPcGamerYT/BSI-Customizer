@@ -71,7 +71,7 @@ def fixture(root):
 TABS = ["Performance","Display","Graphics","Game settings","Devices","Gamepad",
         "Preferences","Phone","Shortcuts","User data","Advanced","About"]
 
-def build(root, w, h, tabs):
+def build(root, w, h, tabs, icons="({})"):
     rows = ",\n".join(f'{{ pButtonText: "{t}", pShowRedDot: false, pQmlSource: "Page.qml", '
                       f'pComponentArgs: null, pComponentObj: null }}' for t in tabs)
     host = root/"Host.qml"
@@ -82,7 +82,7 @@ def build(root, w, h, tabs):
         ' property var transientParent: iSettingsWindow\n property int pCurrentTabIndex: 0\n'
         ' property var pSettingsItems: ({ pSettingElements: [\n' + rows + '\n ] })\n'
         ' function fChangeSelectedSetting(index) { pCurrentTabIndex = index }\n'
-        + REPL.replace("@@BSI_HIDDEN_TABS@@","[]").replace("@@BSI_TAB_ICONS@@","({})")
+        + REPL.replace("@@BSI_HIDDEN_TABS@@","[]").replace("@@BSI_TAB_ICONS@@",icons)
         + "\n" + HELPER + "\n}\n", encoding="utf-8")
     return host
 
@@ -92,10 +92,10 @@ def walk(item):
         c = pend.pop(); out.append(c); pend.extend(c.childItems())
     return out
 
-def audit(app, w, h, tabs=TABS, label=""):
+def audit(app, w, h, tabs=TABS, label="", icons="({})"):
     temp = pathlib.Path(tempfile.mkdtemp(prefix="audit-"))
     fixture(temp)
-    host = build(temp, w, h, tabs)
+    host = build(temp, w, h, tabs, icons)
     eng = QQmlEngine(); eng.addImportPath(str(temp))
     p = P(); p.w, p.h = float(w), float(h)
     eng.rootContext().setContextProperty("iSettingsWindow", p)
@@ -149,6 +149,38 @@ def audit(app, w, h, tabs=TABS, label=""):
     # horizontal scrollbar only if truly needed
     errs.append(("tabs fully visible", f"{lst.property('contentWidth')} <= {lst.width():.1f}",
                  lst.property("contentWidth") <= lst.width()+1))
+    # --- the gap between two tabs must be the same everywhere. A hidden tab used
+    # to keep its ListView spacing, so the row showed 4/8/16 px holes; the
+    # delegates it builds are the only honest source for this.
+    content = lst.property("contentItem")
+    dels = []
+    if content is not None:
+        for d in walk(content):
+            ch = d.childItems()
+            if not ch:
+                continue
+            if d.height() in (44.0,) and ch[0].property("pSettingBtnText") is not None:
+                dels.append(d)
+    laid = sorted((d.mapToItem(obj, QPointF(0, 0)).x(), d.width()) for d in dels if d.width() > 0)
+    gaps = [round(laid[i + 1][0] - (laid[i][0] + laid[i][1])) for i in range(len(laid) - 1)]
+    errs.append(("tab gaps equal", f"{gaps}", len(set(gaps)) <= 1))
+    # Equal boxes are not enough: the eye reads the distance between the words.
+    # The pill must hug its label's ink, leaving the same padding on every tab,
+    # otherwise a label with wide side bearings looks crowded next to its
+    # neighbour. Measure the label itself by its drawn text width.
+    from PySide6.QtGui import QFont, QFontMetricsF
+    fm = QFontMetricsF(QFont(app.font()))
+    pads = []
+    for d in [x for x in dels if x.width() > 0]:
+        text = d.childItems()[0].property("pSettingBtnText") or ""
+        pads.append(round((d.width() - fm.boundingRect(text).width()) / 2, 1))
+    # The strip measures its labels with FontMetrics, so this also pins that it
+    # measures with the same font the delegate's label inherits: with a different
+    # font the pill would no longer hug the text and the paddings would differ.
+    errs.append(("equal label padding", f"{pads}",
+                 bool(pads) and max(pads) - min(pads) <= 2.0))
+    ghosts = [d for d in dels if d.width() <= 0 and d.property("visible")]
+    errs.append(("hidden tabs paint nothing", f"{len(ghosts)} ghost(s)", not ghosts))
     # --- page fit
     pw = page.width()
     errs.append(("page follows card", f"page={pw:.1f} card={card.width():.1f}", abs(pw - (card.width()-12)) <= 2))
@@ -194,5 +226,17 @@ print("\n== reference 1000x700")
 for k,v,ok in res:
     print(f"   [{'PASS' if ok else 'FAIL'}] {k}: {v}")
     if not ok: bad += 1
+# A hidden tab must not leave a hole behind it, and must not paint its label.
+# Everything here shares Page.qml, so key the sentinel on "page.qml".
+res = audit(app, 1213, 680, label="hidden",
+            icons='({"page.qml":""})')
+print("\n== hidden tabs 1213x680")
+# Only the strip is interesting here; the other rows repeat (and the tofu stand-in
+# font always trips the fit checks) so they would just be noise.
+res = [r for r in res if r[0].startswith(("tab", "hidden"))]
+for k, v, ok in res:
+    print(f"   [{'PASS' if ok else 'FAIL'}] {k}: {v}")
+    if not ok: bad += 1
+
 print("\nFAILURES:", bad)
 sys.exit(1 if bad else 0)

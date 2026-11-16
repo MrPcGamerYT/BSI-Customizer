@@ -5208,6 +5208,28 @@ Window {
                   QStringLiteral("a padded tab icon is stored compacted, with its drawing intact (%1 -> %2 bytes)")
                       .arg(paddedIcon.size()).arg(storedIcon.size()));
 
+            // A tab icon is only ever allowed to be an SVG. An icon too big for
+            // its budget used to be rasterised to PNG here, which the validator
+            // then rejected, so the icon silently vanished from the rebuilt page.
+            // Over budget or not, the stored icon must stay a usable SVG.
+            const QString bigPanelSvgPath = QDir(panelDir).filePath(QStringLiteral("big-panel-icon.svg"));
+            QByteArray bigIcon = QByteArrayLiteral("<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\">");
+            bigIcon += "<path d=\"M2 2h20v20H2z\" fill=\"#55aaff\"/>";
+            while (bigIcon.size() < 4000) bigIcon += "<!-- pad -->";
+            bigIcon += QByteArrayLiteral("</svg>");
+            write(bigPanelSvgPath, bigIcon);
+            const QVariantMap bigAsset = SettingsPanelPatcher::readCustomAsset(
+                bigPanelSvgPath, QStringLiteral("tab-icon"));
+            const QVariantMap bigStored = bigAsset.value(QStringLiteral("asset")).toMap();
+            const QByteArray bigStoredBytes = QByteArray::fromBase64(
+                bigStored.value(QStringLiteral("data")).toString().toLatin1());
+            check(bigAsset.value(QStringLiteral("ok")).toBool()
+                      && bigStored.value(QStringLiteral("mime")).toString()
+                             == QStringLiteral("image/svg+xml")
+                      && bigStoredBytes.contains("<svg")
+                      && !bigStoredBytes.startsWith("\x89PNG"),
+                  QStringLiteral("an oversized tab icon stays a valid SVG instead of becoming a rejected PNG"));
+
             const QString unsafePanelSvgPath = QDir(panelDir).filePath(QStringLiteral("unsafe-panel-icon.svg"));
             write(unsafePanelSvgPath, QByteArrayLiteral("<svg xmlns=\"http://www.w3.org/2000/svg\"><script>alert(1)</script></svg>"));
             check(!SettingsPanelPatcher::readCustomAsset(unsafePanelSvgPath, QStringLiteral("tab-icon")).value(QStringLiteral("ok")).toBool(),
@@ -5241,8 +5263,8 @@ Window {
                     if (file.name.compare(QLatin1String("UiSettingsWindow.qml"), Qt::CaseInsensitive) == 0)
                         rebuiltWindow = QString::fromUtf8(QtResources::readFile(panelImage, file));
                 }
-                check(rebuiltWindow.contains(QStringLiteral("BSI Settings v13"))
-                          && rebuiltWindow.contains(QStringLiteral("property var bHidden:"))
+                check(rebuiltWindow.contains(QStringLiteral("BSI v15"))
+                          && rebuiltWindow.contains(QStringLiteral("property var bHidden"))
                           // The About page publishes the icon map into
                           // bIcons, so the shell has to declare it or that
                           // assignment silently throws and no icon is drawn.
@@ -5254,36 +5276,48 @@ Window {
                           && rebuiltWindow.contains(QStringLiteral("Rectangle{anchors.fill:parent;color:UiTheme.colors.primary80;radius:14"))
                           && rebuiltWindow.contains(QStringLiteral("color:UiTheme.colors.primary10"))
                           && !rebuiltWindow.contains(QStringLiteral("#0d0f14"))
-                          // The page lives in a rounded, bordered card inset from
-                          // every window edge, so the content surface reads as a
-                          // separate panel instead of a bare background.
-                          && rebuiltWindow.contains(QStringLiteral("width:Math.min(parent.width-48,568);x:(parent.width-width)/2"))
-                          && rebuiltWindow.contains(QStringLiteral("property var bIcons:({})"))
-                          // The selected tab carries its own accent underline below
-                          // the pill the native button already paints.
-                          && rebuiltWindow.contains(QStringLiteral("Text{id:t;opacity:0;text:modelData.pButtonText;font:UiTheme.fonts.bodyMedium}"))
-                          // Tabs divide the strip into equal slots so the last
-                          // category is never half-clipped at the shell edge, and
-                          // the 32 px inset is symmetric so the row keeps the same
-                          // gap from the window edge on both sides.
-                          // Slots divide the strip's exact width, so every tab keeps
-                          // the same gap instead of one wider closing gap.
-
-                          && rebuiltWindow.contains(QStringLiteral("width:t.implicitWidth+22;height:44"))
+                          // The page host is inset from every window edge and
+                          // stops short of the bottom, so the native page and its
+                          // "Save changes" footer cannot run into the rounded
+                          // corner the way they did when the host filled the shell.
+                          && rebuiltWindow.contains(QStringLiteral("Item{width:Math.min(parent.width-48,568);x:(parent.width-width)/2;height:parent.height-118"))
+                          // A tab is measured with the same application font the
+                          // button draws its label in, so the tab is exactly as
+                          // wide as its own label plus the pad. Using the theme's
+                          // body font instead shrank wide tabs and ate their gap.
+                          && rebuiltWindow.contains(QStringLiteral("FontMetrics{id:t}"))
+                          // Every tab is sized by its own label and the strip
+                          // uses one spacing value, so all the gaps are equal.
+                          // A tab the About page marks hidden (an empty icon
+                          // value) takes a negative width so its own gap
+                          // collapses with it; an unknown tab keeps its width.
+                          && rebuiltWindow.contains(QStringLiteral("width:c===''?-4:t.boundingRect(modelData.pButtonText).width+22;height:44"))
                           && rebuiltWindow.contains(QStringLiteral("MouseArea{anchors.fill:parent;onPressed:iSettingsWindow.startSystemMove()}"))
                           && rebuiltWindow.contains(QStringLiteral("pShowRedDot:modelData.pShowRedDot"))
                           && rebuiltWindow.contains(QStringLiteral("anchors.centerIn:parent"))
-                          && rebuiltWindow.contains(QStringLiteral("ListView{id:v;"))
+                          // The strip is as wide as its own tabs, clamped to the
+                          // shell gutter, and centred under the title.
+                          && rebuiltWindow.contains(QStringLiteral("ListView{width:Math.min(contentWidth,parent.width-48)"))
                           && rebuiltWindow.contains(QStringLiteral("orientation:ListView.Horizontal;model:pSettingsItems.pSettingElements"))
                           && rebuiltWindow.contains(QStringLiteral("item.anchors.fill=item.parent"))
                           // The strip is inset the same 24 px on both sides and its
                           // slots divide exactly that width, so every tab keeps the
                           // same gap and the last one never touches the edge.
-                          && rebuiltWindow.contains(QStringLiteral("ListView{id:v;width:parent.width-48;height:44;x:24;"))
+                          && rebuiltWindow.contains(QStringLiteral("ListView{width:Math.min(contentWidth,parent.width-48);height:44"))
+                          // The width clamp bounds the strip, but at small window
+                          // sizes the tabs inside it still painted past the
+                          // rounded edge until the strip itself clipped.
+                          && rebuiltWindow.contains(QStringLiteral("clip:true;orientation:ListView.Horizontal"))
                           // A custom icon sits centred in the tab, with the native
                           // label lifted to the top instead of being painted over.
                           && rebuiltWindow.contains(QStringLiteral("anchors.bottomMargin:c?26:0"))
                           && rebuiltWindow.contains(QStringLiteral("Image{source:c;width:18;height:18;x:parent.width/2-9;y:24}"))
+                          // A hidden tab must not paint its label over the tabs
+                          // beside it: zeroing its width closed the slot but the
+                          // button inside kept drawing its text on top of the
+                          // neighbours, which is the smeared "Customise" and
+                          // "Advanced" seen in the window.
+                          && rebuiltWindow.contains(QStringLiteral("delegate:Item{visible:c!=='';property var c:"))
                           // Tabs are laid out label-sized with one spacing
                           // value for the whole strip: equal-width slots made
                           // long neighbours ("Game settings" / "Devices")
@@ -5294,7 +5328,7 @@ Window {
                           && !rebuiltWindow.contains(QStringLiteral("visible:s"))
                           && rebuiltWindow.contains(QStringLiteral("StackLayout{id:iSelectedSettingControl;anchors.fill:parent;currentIndex:pCurrentTabIndex"))
                           && rebuiltWindow.contains(QStringLiteral("delegate:Loader{anchors.fill:parent;"))
-                          && rebuiltWindow.contains(QStringLiteral("model.modelData.pComponentObj=item"))
+                          && rebuiltWindow.contains(QStringLiteral("modelData.pComponentObj=item"))
                           && rebuiltWindow.contains(QStringLiteral("fChangeSelectedSetting(pSettingIdx)"))
                           && rebuiltWindow.contains(QStringLiteral("onVisibleChanged:if(visible&&transientParent)"))
                           && rebuiltWindow.contains(QStringLiteral("var t=transientParent"))
@@ -5337,6 +5371,12 @@ Window {
                               || rebuiltAbout.contains(QStringLiteral("text:pDeveloperName")))
                           && rebuiltAbout.contains(QStringLiteral("BSI Panel Regression"))
                           && rebuiltAbout.contains(QStringLiteral("Repeater"))
+                          // The About content is one centred column; it used
+                          // to sit hard against the left of its viewport. The
+                          // ScrollView must span the page first, or the column
+                          // is only centred inside a narrower content box.
+                          && rebuiltAbout.contains(QStringLiteral("contentWidth:availableWidth"))
+                          && rebuiltAbout.contains(QStringLiteral("anchors.horizontalCenter:parent.horizontalCenter"))
                           && rebuiltAbout.contains(QStringLiteral("Regression source"))
                           && rebuiltAbout.contains(QStringLiteral("Regression community"))
                           && rebuiltAbout.contains(QStringLiteral("Regression video")),
@@ -5372,9 +5412,19 @@ Window {
                         if (entry.leaf.compare(QLatin1String("PlrAboutSetting.qml"), Qt::CaseInsensitive) == 0)
                             updatedAbout = EmbeddedResources::decodeText(EmbeddedResources::readEntry(panelCopy, entry.entryOff, entry.flags, 8 * 1024 * 1024));
                     }
-                    check(updatedWindow.contains(QStringLiteral("property var bHidden:[]"))
+                    check(updatedWindow.contains(QStringLiteral("property var bHidden"))
+                              && updatedWindow.contains(QStringLiteral("width:c===''?-4:"))
+                              && updatedWindow.contains(QStringLiteral("clip:true;orientation:ListView.Horizontal"))
                               && updatedAbout.contains(QStringLiteral("property var bsiHiddenTabs:"))
                               && (hiddenTabId.isEmpty() || updatedAbout.contains(hiddenTabId))
+                              // Unticking a tab used to change nothing after a
+                              // patch: the hidden list was published into bHidden
+                              // and no strip delegate ever read it. buildAbout now
+                              // also marks each hidden page in the icon map with
+                              // an empty value, which the strip does collapse.
+                              && (hiddenTabId.isEmpty()
+                                  || updatedAbout.contains(
+                                      QStringLiteral("\"%1\":\"\"").arg(hiddenTabId)))
                               && updatedAbout.contains(QStringLiteral("property var bsiTabIcons:"))
                               // The page must find the shell by walking up: counting parents reached
                               // the window and threw "Cannot assign to non-existent

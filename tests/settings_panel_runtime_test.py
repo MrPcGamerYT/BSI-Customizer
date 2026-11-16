@@ -65,10 +65,9 @@ match = re.search(
 )
 assert match, "Could not find the generated Settings-window QML template"
 replacement = match.group(1)
-assert "BSI Settings v13" in replacement
+assert "BSI v15" in replacement
 assert "pSettingsItems.pSettingElements" in replacement
-assert "property var bHidden:" in replacement
-assert "property var bHidden:[]" in replacement
+assert "property var bHidden" in replacement
 # The About page publishes the hidden-tab list and the icon map to the shell.
 # It must find that shell by walking up: counting parents landed on the window
 # instead of the UiShadowContainer, which threw
@@ -78,9 +77,19 @@ assert "function fOnQmlLoaded(){var p=parent;while(p&&p.bIcons===undefined)p=p.p
     "the About page must walk up to the shell, not count parents"
 # ...and the shell has to declare both of those properties, or the assignment
 # above has nowhere to land.
-assert "property var bHidden:[]" in replacement, "the shell must declare bHidden"
+assert "property var bHidden" in replacement, "the shell must declare bHidden"
 assert "property var bIcons:({})" in replacement, "the shell must declare bIcons"
 assert "property var bsiHiddenTabs:@@BSI_HIDDEN_TABS@@" in cpp
+# A tab icon may only be an SVG: validateAssetBytes() rejects any other MIME for
+# that kind. Rasterising an oversized icon therefore produced an asset that the
+# very next step refused, and the icon disappeared from the rebuilt page with no
+# message. The shrink path must leave tab icons as (minified) SVG.
+assert 'if (kind != QLatin1String("tab-icon") && budget > 0 && uriSize > budget)' in cpp, \
+    "shrinkAsset() must not rasterise a tab icon into a PNG the validator rejects"
+# And a fitting loop that gives up must still keep the artwork it managed to
+# build, instead of writing the page with every custom icon removed.
+assert "customTabIcons = bestIcons" in cpp, \
+    "the fit loop must keep its best attempt so custom icons are never silently dropped"
 assert "property var bsiTabIcons:@@BSI_TAB_ICONS@@" in cpp
 # The shell must not ship its own palette: it paints with the player's own
 # theme object, exactly like the stock Settings window, so it follows whatever
@@ -94,20 +103,36 @@ assert "MouseArea{anchors.fill:parent;onPressed:iSettingsWindow.startSystemMove(
     "the whole header band must drag the window"
 assert "anchors.centerIn:parent" in replacement, \
     "the title must be centred in the header band"
-assert "ListView{id:v;" in replacement
+assert "ListView{width:Math.min(contentWidth,parent.width-48);height:44" in replacement
 assert "orientation:ListView.Horizontal;model:pSettingsItems.pSettingElements" in replacement
 # The strip spans the shell with a symmetric 24 px inset so the first and last
 # tabs sit equally far from the window edge.
-assert "ListView{id:v;width:parent.width-48;height:44;x:24;" in replacement
-assert "property var w:iSettingsWindowShadowContainer" in replacement
-# A tab is as wide as its own label (measured with a hidden TextMetrics through
-# the same theme font) plus a fixed 22 px of padding. Equal-width slots are what
-# made "Game settings" and "Devices" collide, and they left short labels like
-# "About" floating in a wide empty box: the fix is to let the label size the tab.
-assert "width:t.implicitWidth+22;height:44" in replacement, \
+assert "x:(parent.width-width)/2" in replacement, \
+    "the tab strip must be centred in the window"
+assert "iSettingsWindowShadowContainer.bIcons[" in replacement
+# A tab is as wide as its own label plus a fixed 22 px of padding. Equal-width
+# slots are what made "Game settings" and "Devices" collide, and they left short
+# labels like "About" floating in a wide empty box: the fix is to let the label
+# size the tab.
+assert "width:c===''?-4:t.boundingRect(modelData.pButtonText).width+22;height:44" in replacement, \
     "each tab must be sized by its own label, not by an equal share of the strip"
-assert 'Text{id:t;opacity:0;text:modelData.pButtonText;font:UiTheme.fonts.bodyMedium}' in replacement, \
+# Measuring with the theme's body font was the other half of the ragged row:
+# that font is smaller than the one the native button draws its label in, so long
+# labels like "Game settings" overflowed their measured width and ate into the
+# spacing while short ones kept theirs. A bare FontMetrics inherits the same
+# application font the label inherits, which makes every gap identical.
+assert "FontMetrics{id:t}" in replacement, \
     "the tab must measure its label with the same font it draws it in"
+assert "font:UiTheme.fonts.bodyMedium}\n" not in replacement, \
+    "measuring with the theme body font shrank wide tabs and broke the even gaps"
+# The advance includes each glyph's side bearings, and they differ per label by
+# up to ~3 px, so sizing on the advance left different visible space beside each
+# word ("Game settings" nearly touched "Devices" while "Display" floated). Sizing
+# on the ink keeps the same padding beside every label.
+assert "t.boundingRect(modelData.pButtonText).width" in replacement, \
+    "the tab must be sized by the ink of its label, not its advance"
+assert "advanceWidth(" not in replacement, \
+    "advance includes side bearings, which makes the visible gaps uneven"
 # Even gaps: the ListView sets one spacing value for every gap, so the space
 # between any two neighbouring tabs is identical no matter how long the labels
 # are. Doing this with padding inside an equal-width slot is what produced the
@@ -119,14 +144,32 @@ assert ";spacing:4" in replacement, \
 assert "anchors.bottomMargin:c?26:0" in replacement, "the label must move up when an icon is shown"
 assert "Image{source:c;width:18;height:18;x:parent.width/2-9;y:24}" in replacement, \
     "the icon must be centred in the tab"
+# Collapsing the width hid the tab's box but not its label: the button inside the
+# delegate kept painting its text, so "Customise" and "Advanced" smeared over the
+# tabs beside them while their slot was already closed. The delegate has to be
+# invisible as well, not just zero sized.
+assert "delegate:Item{visible:c!=='';" in replacement, \
+    "a hidden tab must not paint its label over its neighbours"
+# A hidden tab has to leave the strip *without leaving a gap behind*. Publishing
+# bHidden into the shell did nothing at all, because no strip delegate ever read
+# it. Collapsing the tab to zero width was not enough either: a ListView puts its
+# spacing after every delegate, so each hidden tab left a 4 px hole and the row
+# ended up with 8 px and 16 px gaps between its neighbours (reported again after
+# the first attempt). A negative width cancels exactly one spacing, which is what
+# makes the gaps identical whether every tab is shown or only some are.
+assert "width:c===''?-4:" in replacement, \
+    "a hidden tab must cancel its own gap, not just its own width"
+assert "clip:true" in replacement, \
+    "the strip must clip so overflowing tabs cannot paint outside the window"
+
 # Every category must stay reachable: the strip divides the shell width into
 # equal slots instead of letting the last tab be half-clipped at the edge.
 assert "item.anchors.fill=item.parent" in replacement
 # The page keeps the native, centred 568 px column it has always used. It is
 # NOT wrapped in a card and the shell paints no pill or underline behind the
 # selected tab: that redesign was rejected, the flat window is what ships.
-assert "width:Math.min(parent.width-48,568);x:(parent.width-width)/2" in replacement, \
-    "the page column must stay centred at its native width"
+assert "Item{width:Math.min(parent.width-48,568);x:(parent.width-width)/2;height:parent.height-118" in replacement, \
+    "the page host must leave room for the footer inside the rounded window"
 assert "border.color" not in replacement and "radius:12" not in replacement, \
     "the rejected card must not come back"
 assert "visible:s" not in replacement, \
@@ -187,9 +230,24 @@ assert about_payload <= 1700, (
 )
 assert "bsiAboutDeveloperName" in about_doc and "bsiAboutDeveloperLink" in about_doc, \
     "compacting the About page must keep its object names"
+
+# A tab the user unticks must actually disappear from the strip. The About page
+# is the only thing that knows the hidden list, and the only channel it has into
+# the shell is the icon map (the strip's delegates read that map per tab), so a
+# hidden page has to appear there with an empty value. Publishing bHidden alone
+# changed nothing at all: no strip delegate ever read it, which is exactly the
+# "I unchecked tabs but they are still there after patching" report.
+# buildAbout() appends an empty value for every hidden page; the python-side
+# document cannot show that (the C++ does the appending), so assert the C++ does
+# it and that the pair of them agree on the key.
+assert 'iconLiteral += qmlString(page.toCaseFolded()) + QStringLiteral(":\\"\\"")' in cpp, \
+    "buildAbout must mark each hidden tab in the icon map with an empty value"
+# ...and the shell must collapse the tab on that marker rather than measure it.
+assert "width:c===''?-4:" in replacement, \
+    "the strip must collapse a tab the About page marks hidden"
 assert "fCheckForUpdateCallback" in about_doc and "fUpdateShortDisplayName" in about_doc, \
     "the native About callbacks must survive compaction"
-assert "delegate:Loader{anchors.fill:parent;Component.onCompleted:setSource(model.modelData.pQmlSource" in replacement
+assert "delegate:Loader{anchors.fill:parent;Component.onCompleted:setSource(modelData.pQmlSource" in replacement
 assert "pSettingBtnText:" in replacement and "pSelected:index==pCurrentTabIndex" in replacement and "pShowRedDot:modelData.pShowRedDot" in replacement
 assert "pSettingIdx:index" in replacement
 assert "fChangeSelectedSetting(pSettingIdx)" in replacement
@@ -200,13 +258,14 @@ assert "fChangeSelectedSetting(pSettingIdx)" in replacement
 # rejected as "no longer loads" even though the document was fine.
 _patcher = pathlib.Path(__file__).resolve().parent.parent / "src" / "core" / "SettingsPanelPatcher.cpp"
 _patcher_src = _patcher.read_text()
-# This shell uses the stock `model.modelData` spelling...
-assert "setSource(model.modelData.pQmlSource" in replacement
-assert "model.modelData.pComponentObj=item" in replacement
-# ...but the validator must accept the shorthand too, because a shell whose
-# delegate sees the model data directly emits `modelData.pQmlSource`. Matching
-# only one spelling made re-applying over a patched player fail as "no longer
-# loads" even though the document was perfectly good.
+# The page host's Repeater delegate has the model data directly in scope, so
+# this shell uses the `modelData` spelling (one of the two the validator accepts).
+assert "setSource(modelData.pQmlSource" in replacement
+assert "modelData.pComponentObj=item" in replacement
+# The validator must accept both spellings, because the stock document writes
+# `model.modelData` while this one sees the data directly. Matching only one made
+# re-applying over a patched player fail as "no longer loads" even though the
+# document was perfectly good.
 assert "setSource(modelData.pQmlSource" in _patcher_src, (
     "the validator must accept the rebuilt shell's setSource spelling"
 )
@@ -367,10 +426,13 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
         (item for item in visual_tree if item.metaObject().className().endswith("StackLayout")),
         None,
     )
+    # A StackLayout keeps one Loader per tab and only the current one has its
+    # item created, so pick the Loader that actually holds a page.
     page_loader = next(
         (item for item in visual_tree
          if item.metaObject().className().endswith("Loader")
-         and item.property("item") is not None),
+         and item.property("item") is not None
+         and item.width() > 100),
         None,
     )
     # The page host is an id-carrying item, so it is reached through the QML
@@ -379,7 +441,7 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
     page_frame = next(
         (candidate for candidate in visual_tree
          if abs(candidate.width() - min(obj.width() - 48, 568)) < 2
-         and abs(candidate.height() - (obj.height() - 100)) < 2
+         and abs(candidate.height() - (obj.height() - 118)) < 3
          and candidate is not obj),
         None,
     )
@@ -400,7 +462,13 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
         (item for item in visual_tree if str(item.property("text")) == "Settings"),
         None,
     )
-    loaded_page = visual_named("runtimeSettingPage")
+    # A StackLayout keeps a Loader per tab; the collapsed ones can leave a
+    # zero-sized page instance in the tree, so pick the one that is drawn.
+    loaded_page = next(
+        (item for item in visual_tree
+         if item.objectName() == "runtimeSettingPage" and item.width() > 100),
+        None,
+    )
     drag = next(
         (
             item for item in visual_tree
@@ -462,6 +530,15 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
     # Every tab, including the last, must be fully inside the strip.
     assert lefts[-1] + widths[-1] <= panel.width() - 24 + 1, \
         "the last category must not be clipped at the shell edge"
+    # The strip itself is centred: the whole run of tabs is one group in the
+    # middle of the title row, not a left-aligned list with dead space to the
+    # right. When the tabs are wider than the window the strip is clamped and
+    # scrolls instead, so the gutter is what is centred then.
+    strip_left = tabs.property("x")
+    strip_width = tabs.width()
+    assert abs((strip_left + strip_width / 2) - panel.width() / 2) < 2, \
+        f"the tab strip must be centred (x {strip_left}, width {strip_width} of {panel.width()})"
+    assert strip_left >= 23, f"the strip must keep its gutter from the window edge (x {strip_left})"
     assert abs(player.width - 1500) < 2 and abs(player.height - 900) < 2, "The shell should resize without changing the host player window"
     assert abs(panel.width() - obj.width()) < 2 and abs(panel.height() - obj.height()) < 2, "The PR #88 shell should fill its resized host"
     stack_center = stack.mapToItem(panel, QPointF(stack.width() / 2, stack.height() / 2))
@@ -471,7 +548,12 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
     assert page_frame is not None, "the shell did not create its centred page host"
     frame_center = page_frame.mapToItem(panel, QPointF(page_frame.width() / 2, 0))
     assert abs(frame_center.x() - panel.width() / 2) < 2, "the page host should be centred in the shell"
-    assert abs(page_frame.width() - 568) < 2, "the page keeps its native 568 px width"
+    # The host keeps the native 568 px column, and is short enough that the
+    # page's own footer cannot reach the rounded bottom edge of the shell.
+    assert abs(page_frame.width() - min(panel.width() - 48, 568)) < 2, \
+        "the page host must keep the native column width"
+    assert page_frame.height() <= panel.height() - 110, \
+        "the page host must clear the bottom edge"
     assert abs(stack.width() - page_frame.width()) < 2, "the native page stack should fill its centred host"
     loader_position = page_loader.mapToItem(panel, QPointF(0, 0))
     assert 0 < page_loader.width() <= page_frame.width(), "The native page Loader should stay inside the centered page card"
@@ -483,7 +565,10 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
     card_top = page_frame.mapToItem(panel, QPointF(0, 0)).y()
     assert tabs_bottom <= card_top + 1, "The category strip was overlapped by the page card"
     assert tabs.property("x") >= 0 and tabs.property("width") <= panel.width(), "The category strip overflowed the shell"
-    assert abs(loaded_page.width() - page_loader.width()) < 2, "The loaded native page did not follow its Loader width"
+    # The page fills its Loader through the shell's own onLoaded assignment, so
+    # both must report the same size (the page itself declares no width).
+    assert abs(loaded_page.width() - page_loader.width()) < 2, \
+        "the loaded native page did not follow its Loader width"
     assert loaded_page.objectName() == "runtimeSettingPage", "The native Settings page Loader did not load its page"
     # The rebuilt About page publishes its tab icons by walking up until it sees
     # `bIcons`, so what matters is that the shell is reachable at all - not that
@@ -548,6 +633,16 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
     assert any(item.objectName() == "bsiAboutDeveloperTagline" for item in about_tree), "About page did not create its subtitle element"
     assert len(about_links) == 2, "About page did not render the configured developer links"
     assert any(item.objectName() == "bsiAboutEmulatorLogo" for item in about_tree), "About page did not create its centered emulator logo"
+    # The About content is a single centred column: it used to be pinned to the
+    # left of its scroll area, so the logo, name and link rows all sat left of
+    # centre in a window that is otherwise centred. It is centred in its
+    # viewport, and no fixed contentWidth overrides that.
+    assert "ColumnLayout{id:iAboutD;width:Math.min(440,parent.width-24);anchors.horizontalCenter:parent.horizontalCenter" \
+        in about_source, "the About content column must be centred in its viewport"
+    assert "contentWidth:availableWidth" in about_source, \
+        "the About content must span the viewport so its column is centred in the page"
+    assert "contentWidth:iAboutD.width" not in about_source, \
+        "a fixed contentWidth would pin the About column to the left"
 
     print("PASS: generated Settings and About QML instantiate, retain native page behavior, show custom tabs, and render profile links")
     about_obj.deleteLater()
@@ -717,6 +812,6 @@ assert _page_payload(as_svg) > 2337, (
 assert "rasterizeSvg" in cpp and "artworkBudget" in cpp, \
     "a tab icon that cannot fit its slot must be drawn down, not refused"
 assert "image/png" in cpp, "the drawn-down icon is stored as PNG"
-assert "for (int box : {32, 24, 18})" in cpp, \
+assert "for (int box : {32, 28, 24, 20, 16, 12})" in cpp, \
     "the fallback should try progressively smaller squares until it fits"
 print("PASS: oversized tab icons are drawn down instead of failing the apply")

@@ -44,7 +44,9 @@ const QString kWindowDesignMarkerV8 = QStringLiteral("BSI Settings v8");
 const QString kWindowDesignMarkerV9 = QStringLiteral("BSI Settings v9");
 const QString kWindowDesignMarkerV10 = QStringLiteral("BSI Settings v10");
 const QString kWindowDesignMarkerV12 = QStringLiteral("BSI Settings v12");
-const QString kWindowDesignMarker = QStringLiteral("BSI Settings v13");
+const QString kWindowDesignMarkerV13 = QStringLiteral("BSI Settings v13");
+const QString kWindowDesignMarkerV14 = QStringLiteral("BSI Settings v14");
+const QString kWindowDesignMarker = QStringLiteral("BSI v15");
 const QString kAboutMarker = QStringLiteral("BSI CUSTOMIZER: redesigned About page v1");
 const QString kSchema = QStringLiteral("bsi.settings-panel.recovery");
 const QString kWindowLeaf = QStringLiteral("UiSettingsWindow.qml");
@@ -724,9 +726,9 @@ QString buildWindow(const QString &stock)
     // place, vertically centred: it used to be painted over the centred text
     // (unreadable) inside a bare Item, which is not a visual element, so it
     // could not be shown at all.
-    QString replacement = QStringLiteral(R"QML(UiShadowContainer{//BSI Settings v13
+    QString replacement = QStringLiteral(R"QML(UiShadowContainer{//BSI v15
 id:iSettingsWindowShadowContainer;anchors.fill:parent
-property var bHidden:[]
+property var bHidden
 property var bIcons:({})
 Rectangle{anchors.fill:parent;color:UiTheme.colors.primary80;radius:14
 Column{anchors.fill:parent
@@ -734,15 +736,16 @@ Item{width:parent.width;height:56
 MouseArea{anchors.fill:parent;onPressed:iSettingsWindow.startSystemMove()}
 Text{text:qsTr('Settings');color:UiTheme.colors.primary10;font:UiTheme.fonts.bodyLarge;anchors.centerIn:parent}
 UiImageButton{asset:'CloseIcon';x:parent.width-32;y:12;onClicked:iSettingsWindow.close()}}
-ListView{id:v;width:parent.width-48;height:44;x:24;orientation:ListView.Horizontal;model:pSettingsItems.pSettingElements;spacing:4
-delegate:Item{property var w:iSettingsWindowShadowContainer;property var k:modelData.pQmlSource.toLowerCase().split('/').pop();property var c:w.bIcons[k];width:t.implicitWidth+22;height:44
+ListView{width:Math.min(contentWidth,parent.width-48);height:44;x:(parent.width-width)/2;clip:true;orientation:ListView.Horizontal;model:pSettingsItems.pSettingElements;spacing:4
+delegate:Item{visible:c!=='';property var c:iSettingsWindowShadowContainer.bIcons[modelData.pQmlSource.toLowerCase().split('/').pop()];width:c===''?-4:t.boundingRect(modelData.pButtonText).width+22;height:44
 UiSettingsButton{anchors.fill:parent;anchors.bottomMargin:c?26:0;pSettingIdx:index;pSettingBtnText:modelData.pButtonText;pSelected:index==pCurrentTabIndex;pShowRedDot:modelData.pShowRedDot;onSettingClicked:fChangeSelectedSetting(pSettingIdx)}
-Text{id:t;opacity:0;text:modelData.pButtonText;font:UiTheme.fonts.bodyMedium}
+FontMetrics{id:t}
 Image{source:c;width:18;height:18;x:parent.width/2-9;y:24}}}
-Item{width:Math.min(parent.width-48,568);x:(parent.width-width)/2;height:parent.height-100
+Item{width:Math.min(parent.width-48,568);x:(parent.width-width)/2;height:parent.height-118
 StackLayout{id:iSelectedSettingControl;anchors.fill:parent;currentIndex:pCurrentTabIndex
-Repeater{model:pSettingsItems.pSettingElements;delegate:Loader{anchors.fill:parent;Component.onCompleted:setSource(model.modelData.pQmlSource,model.modelData.pComponentArgs||{});onLoaded:{item.anchors.fill=item.parent;model.modelData.pComponentObj=item;if(item.fOnQmlLoaded)item.fOnQmlLoaded()}}}}
-}}}}
+Repeater{model:pSettingsItems.pSettingElements;delegate:Loader{anchors.fill:parent;Component.onCompleted:setSource(modelData.pQmlSource,modelData.pComponentArgs||{});onLoaded:{item.anchors.fill=item.parent;modelData.pComponentObj=item;if(item.fOnQmlLoaded)item.fOnQmlLoaded()}}}}}
+}
+}}
 )QML");
     QString out = stock;
     out.replace(target.nameBegin, target.end - target.nameBegin, replacement);
@@ -780,6 +783,16 @@ QString buildAbout(const QString &developerName, const QString &tagline,
         if (iconLiteral.size() > 2) iconLiteral += QLatin1Char(',');
         iconLiteral += qmlString(it.key().toCaseFolded()) + QLatin1Char(':') + qmlString(it.value().toString());
     }
+    // A hidden tab must disappear from the strip, and the only channel the small
+    // About resource slot has for telling the shell that is the map the shell
+    // already reads per delegate. An empty value is the "hidden" sentinel: the
+    // delegate collapses to zero width and paints no icon. Declaring bHidden in
+    // the shell and publishing the list into it did nothing, because no strip
+    // delegate ever read it.
+    for (const QString &page : hiddenTabs) {
+        if (iconLiteral.size() > 2) iconLiteral += QLatin1Char(',');
+        iconLiteral += qmlString(page.toCaseFolded()) + QStringLiteral(":\"\"");
+    }
     iconLiteral += QStringLiteral("})");
     const QString qDeveloper = qmlString(developerName.trimmed());
     const QString qTagline = qmlString(tagline.trimmed());
@@ -810,8 +823,8 @@ property var pDeveloperLinks:[@@BSI_LINKS@@]
 ColumnLayout{anchors.fill:parent;spacing:0
 ScrollView{Layout.fillWidth:true;Layout.fillHeight:true;clip:true
 background:Rectangle{color:"transparent"}
-contentWidth:iAboutD.width;contentHeight:iAboutD.implicitHeight+48
-ColumnLayout{id:iAboutD;width:Math.min(440,parent.width-24)
+contentWidth:availableWidth;contentHeight:iAboutD.implicitHeight+48
+ColumnLayout{id:iAboutD;width:Math.min(440,parent.width-24);anchors.horizontalCenter:parent.horizontalCenter
 Layout.alignment:Qt.AlignHCenter|Qt.AlignTop;spacing:16
 Item{Layout.fillWidth:true;Layout.preferredHeight:28}
 Image{objectName:"bsiAboutEmulatorLogo";source:@@BSI_LOGO_SOURCE@@
@@ -1077,6 +1090,7 @@ bool hasWindowMarker(const QString &text)
         || text.contains(kWindowDesignMarkerV5) || text.contains(kWindowDesignMarkerV6)
         || text.contains(kWindowDesignMarkerV8) || text.contains(kWindowDesignMarkerV9)
         || text.contains(kWindowDesignMarkerV10) || text.contains(kWindowDesignMarkerV12)
+        || text.contains(kWindowDesignMarkerV13) || text.contains(kWindowDesignMarkerV14)
         || text.contains(kWindowDesignMarker);
 }
 
@@ -1155,14 +1169,41 @@ QByteArray rasterizeSvg(const QByteArray &svg, int box)
 
 // How many bytes of tab artwork the About page can carry. The document is
 // compressed into a fixed slot, so this is measured, not guessed: the compressed
-// size of the page with no artwork is compared against the slot floor, with a
-// reserve for the logo and for data the compressor cannot pack.
+// size of the page with no artwork is compared against that player's real slot,
+// with a reserve for the logo and for data the compressor cannot pack.
+//
+// kAboutSlotFloor is only the smallest slot any shipped build is known to have.
+// Using it as the budget for every player reserved 400+ bytes that do not exist
+// nowhere: a 2468-byte slot was budgeted as if it held 2337, so a single icon
+// was shrunk far harder than necessary and the page still failed the real
+// capacity check afterwards.
 constexpr int kAboutSlotFloor = 2337;
-constexpr int kArtworkReserve = 320;
+constexpr int kArtworkReserve = 160;
 
-int artworkBudget(int plainPayload)
+int artworkBudget(int plainPayload, int slotCapacity)
 {
-    return qMax(0, kAboutSlotFloor - plainPayload - kArtworkReserve);
+    const int slot = slotCapacity > 0 ? slotCapacity : kAboutSlotFloor;
+    return qMax(0, slot - plainPayload - kArtworkReserve);
+}
+
+// The real capacity of this player's About slot, or -1 when it cannot be
+// resolved (the caller then falls back to the known floor).
+int aboutSlotCapacity(const QByteArray &image, QString *error)
+{
+    QList<EmbeddedResources::Entry> matches;
+    for (const auto &entry : EmbeddedResources::list(image, true)) {
+        if (entry.format.compare(QLatin1String("qml"), Qt::CaseInsensitive) == 0
+            && entry.leaf.compare(kAboutLeaf, Qt::CaseInsensitive) == 0)
+            matches << entry;
+    }
+    if (matches.size() != 1 || matches.first().scanned) return -1;
+    const EmbeddedResources::Budget room =
+        EmbeddedResources::budget(image, matches.first().entryOff, kAboutLeaf);
+    if (!room.known) {
+        if (error) *error = room.detail;
+        return -1;
+    }
+    return int(room.capacity);
 }
 
 // Shrink one stored asset so the page can carry it. The About document is
@@ -1188,9 +1229,15 @@ QVariantMap shrinkAsset(QVariantMap asset, const QString &kind, int budget)
         stored = minified.toUtf8();
     // Still too big for the slot? Draw it down. Refusing is worse: the SVG is
     // valid, only the container is small.
+    //
+    // Only the logo may become a raster image. A tab icon is required to be an
+    // SVG (validateAssetBytes rejects "image/png" for that kind), so rasterising
+    // one here produced an asset that storedAssetSource() then refused, and the
+    // icon was dropped from the rebuilt page without any message. For icons the
+    // minified SVG is the smallest form we are allowed to embed.
     int uriSize = int(stored.toBase64().size()) + 28;
-    if (budget > 0 && uriSize > budget) {
-        for (int box : {32, 24, 18}) {
+    if (kind != QLatin1String("tab-icon") && budget > 0 && uriSize > budget) {
+        for (int box : {32, 28, 24, 20, 16, 12}) {
             if (uriSize <= budget) break;
             const QByteArray png = rasterizeSvg(stored, box);
             if (png.isEmpty()) break;
@@ -1227,7 +1274,7 @@ QVariantMap readCustomAsset(const QString &path, const QString &kind)
     const QVariantMap shrunk = shrinkAsset(
         {{QStringLiteral("mime"), mime},
          {QStringLiteral("data"), QString::fromLatin1(bytes.toBase64())}},
-        kind, artworkBudget(emptyPagePayload()));
+        kind, artworkBudget(emptyPagePayload(), 0));
     const QByteArray stored = QByteArray::fromBase64(
         shrunk.value(QStringLiteral("data")).toString().toLatin1());
     mime = shrunk.value(QStringLiteral("mime")).toString();
@@ -1442,29 +1489,78 @@ QVariantMap apply(const QString &exePath, const QString &developerName,
     const QVariantMap storedIcons = profile.value(QStringLiteral("tabIcons")).toMap();
     if (storedIcons.size() > 64)
         return fail(QStringLiteral("The Settings-panel profile contains too many custom tab icons."));
-    for (auto it = storedIcons.cbegin(); it != storedIcons.cend(); ++it) {
-        const QString id = it.key().toCaseFolded();
-        if (!availableTabs.contains(id)) continue; // stale option from another player version
+    const QVariantMap storedLogo = profile.value(QStringLiteral("logo")).toMap();
+    const bool hasCustomLogo = profile.contains(QStringLiteral("logo"));
+    // The slot this player actually has, not the smallest one any build is known
+    // to have. Everything below is sized against it.
+    const int slotCapacity = aboutSlotCapacity(image, nullptr);
+    const int plainPayload = emptyPagePayload();
+    // `logoSrc` is the resolved data URI for the About logo (not the stored
+    // asset), so the document can be rebuilt with it on every pass.
+    const auto buildAssets = [&](int budget, QVariantMap *icons, QString *logoSrc,
+                                 QString *error) -> bool {
+        icons->clear();
         QString source;
-        QString assetError;
-        // Artwork saved by an earlier build never went through shrinkAsset(), so
-        // shrink it again here: the budget is a property of this player's slot,
-        // not of when the icon was picked.
-        const QVariantMap shrunk = shrinkAsset(it.value().toMap(), QStringLiteral("tab-icon"),
-                                               artworkBudget(emptyPagePayload()));
-        if (!storedAssetSource(shrunk, QStringLiteral("tab-icon"), &source, &assetError))
-            return fail(assetError);
-        customTabIcons.insert(id, source);
-    }
+        for (auto it = storedIcons.cbegin(); it != storedIcons.cend(); ++it) {
+            const QString id = it.key().toCaseFolded();
+            if (!availableTabs.contains(id)) continue; // stale option from another player version
+            // Artwork saved by an earlier build never went through shrinkAsset(),
+            // so shrink it again here: the budget is a property of this player's
+            // slot, not of when the icon was picked.
+            const QVariantMap shrunk = shrinkAsset(it.value().toMap(),
+                                                   QStringLiteral("tab-icon"), budget);
+            if (!storedAssetSource(shrunk, QStringLiteral("tab-icon"), &source, error))
+                return false;
+            icons->insert(id, source);
+        }
+        if (hasCustomLogo) {
+            const QVariantMap shrunkLogo = shrinkAsset(storedLogo, QStringLiteral("logo"), budget);
+            if (!storedAssetSource(shrunkLogo, QStringLiteral("logo"), logoSrc, error))
+                return false;
+        }
+        return true;
+    };
+    // Fit the real document: draw the artwork down until the page it produces
+    // actually fits this player's slot. The previous code sized each asset
+    // against a fixed reservation and never checked the result, so a page that
+    // was 26 bytes over was reported as unfixable instead of being shrunk once
+    // more. Each pass halves the allowance, so this converges in a few tries.
+    //
+    // Every pass keeps the smallest document it has managed to build. Bailing
+    // out of this loop used to leave customTabIcons empty, which meant the page
+    // was written with no artwork at all: the user's icons silently vanished and
+    // no error explained it. A low-fidelity icon is always better than none.
+    int budget = artworkBudget(plainPayload, slotCapacity);
+    QVariantMap bestIcons;
     QString logoSource = current.aboutLogoSource;
-    if (profile.contains(QStringLiteral("logo"))) {
+    QString bestLogoSource = logoSource;
+    qint64 bestPayload = -1;
+    for (int pass = 0; pass < 8; ++pass) {
+        QVariantMap icons;
+        QString candidateLogo;
         QString assetError;
-        const QVariantMap shrunkLogo = shrinkAsset(profile.value(QStringLiteral("logo")).toMap(),
-                                                   QStringLiteral("logo"),
-                                                   artworkBudget(emptyPagePayload()));
-        if (!storedAssetSource(shrunkLogo, QStringLiteral("logo"), &logoSource, &assetError))
-            return fail(assetError);
+        if (!buildAssets(budget, &icons, &candidateLogo, &assetError)) {
+            if (pass == 0) return fail(assetError);
+            break;
+        }
+        const QString candidateLogoSource = hasCustomLogo ? candidateLogo : current.aboutLogoSource;
+        const QString doc = buildAbout(developerName, tagline, links, candidateLogoSource,
+                                       hiddenTabs, icons);
+        const qint64 payload = EmbeddedResources::payloadSizeFor(doc.toUtf8(), 1);
+        if (bestPayload < 0 || payload < bestPayload) {
+            bestPayload = payload;
+            bestIcons = icons;
+            bestLogoSource = candidateLogoSource;
+        }
+        if (slotCapacity <= 0 || payload <= slotCapacity) break;
+        if (budget <= 0) break;
+        budget = qMax(0, budget / 2);
     }
+    // Keep the best attempt either way: aboutCapacityProblem() below still fails
+    // the apply with an exact reason if even that does not fit, so nothing is
+    // ever written with a truncated page.
+    customTabIcons = bestIcons;
+    logoSource = bestLogoSource;
     const bool hasPatchMarker = hasWindowMarker(current.window.text)
         || current.about.text.contains(kAboutMarker);
     QMap<QString, QByteArray> originals;
