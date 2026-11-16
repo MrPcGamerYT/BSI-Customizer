@@ -174,7 +174,11 @@ def audit(app, w, h, tabs=TABS, label="", icons="({})"):
     for d in [x for x in dels if x.width() > 0]:
         text = d.childItems()[0].property("pSettingBtnText") or ""
         pads.append(round((d.width() - fm.boundingRect(text).width()) / 2, 1))
-    errs.append(("equal label padding", f"{pads}", len(set(pads)) <= 0.6))
+    # The strip measures its labels with FontMetrics, so this also pins that it
+    # measures with the same font the delegate's label inherits: with a different
+    # font the pill would no longer hug the text and the paddings would differ.
+    errs.append(("equal label padding", f"{pads}",
+                 bool(pads) and max(pads) - min(pads) <= 2.0))
     ghosts = [d for d in dels if d.width() <= 0 and d.property("visible")]
     errs.append(("hidden tabs paint nothing", f"{len(ghosts)} ghost(s)", not ghosts))
     # --- page fit
