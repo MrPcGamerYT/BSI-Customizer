@@ -114,7 +114,7 @@ assert "iSettingsWindowShadowContainer.bIcons[" in replacement
 # the same theme font) plus a fixed 22 px of padding. Equal-width slots are what
 # made "Game settings" and "Devices" collide, and they left short labels like
 # "About" floating in a wide empty box: the fix is to let the label size the tab.
-assert "width:c===''?0:t.advanceWidth(modelData.pButtonText)+22;height:44" in replacement, \
+assert "width:c===''?-4:t.advanceWidth(modelData.pButtonText)+22;height:44" in replacement, \
     "each tab must be sized by its own label, not by an equal share of the strip"
 assert "FontMetrics{id:t;font:UiTheme.fonts.bodyMedium}" in replacement, \
     "the tab must measure its label with the same font it draws it in"
@@ -131,20 +131,18 @@ assert ";spacing:4" in replacement, \
 assert "anchors.bottomMargin:c?26:0" in replacement, "the label must move up when an icon is shown"
 assert "Image{source:c;visible:c;width:18;height:18;x:parent.width/2-9;y:24}" in replacement, \
     "the icon must be centred in the tab"
-# A hidden tab has to leave the strip. Declaring bHidden in the shell and
-# publishing the list into it was not enough: no strip delegate ever read it, so
-# unticking a tab changed nothing after a patch. The About page now adds an
-# entry for each hidden page with an empty value, which is the only channel the
-# small About slot has, and the delegate collapses to zero width on it.
-assert "width:c===''?0:t.advanceWidth(modelData.pButtonText)+22" in replacement, \
-    "a tab the About page marks hidden must collapse instead of drawing"
-assert "visible:c;width:18" in replacement, \
-    "a hidden tab must not paint an icon either"
-# The strip is clipped: the width clamp keeps the strip inside the rounded
-# window, but at small player sizes the tabs inside it still painted past the
-# edge (the reported bug), which only clipping can stop.
-assert "clip:true;orientation:ListView.Horizontal" in replacement, \
-    "the tab strip must clip so overflowing tabs cannot paint outside the window"
+# A hidden tab has to leave the strip *without leaving a gap behind*. Publishing
+# bHidden into the shell did nothing at all, because no strip delegate ever read
+# it. Collapsing the tab to zero width was not enough either: a ListView puts its
+# spacing after every delegate, so each hidden tab left a 4 px hole and the row
+# ended up with 8 px and 16 px gaps between its neighbours (reported again after
+# the first attempt). A negative width cancels exactly one spacing, which is what
+# makes the gaps identical whether every tab is shown or only some are.
+assert "width:c===''?-4:" in replacement, \
+    "a hidden tab must cancel its own gap, not just its own width"
+assert "clip:true" in replacement, \
+    "the strip must clip so overflowing tabs cannot paint outside the window"
+
 # Every category must stay reachable: the strip divides the shell width into
 # equal slots instead of letting the last tab be half-clipped at the edge.
 assert "item.anchors.fill=item.parent" in replacement
@@ -226,7 +224,7 @@ assert "bsiAboutDeveloperName" in about_doc and "bsiAboutDeveloperLink" in about
 assert 'iconLiteral += qmlString(page.toCaseFolded()) + QStringLiteral(":\\"\\"")' in cpp, \
     "buildAbout must mark each hidden tab in the icon map with an empty value"
 # ...and the shell must collapse the tab on that marker rather than measure it.
-assert "width:c===''?0:" in replacement, \
+assert "width:c===''?-4:" in replacement, \
     "the strip must collapse a tab the About page marks hidden"
 assert "fCheckForUpdateCallback" in about_doc and "fUpdateShortDisplayName" in about_doc, \
     "the native About callbacks must survive compaction"

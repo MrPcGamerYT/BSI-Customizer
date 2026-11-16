@@ -5288,8 +5288,9 @@ Window {
                           // Every tab is sized by its own label and the strip
                           // uses one spacing value, so all the gaps are equal.
                           // A tab the About page marks hidden (an empty icon
-                          // value) collapses; an unknown tab keeps its width.
-                          && rebuiltWindow.contains(QStringLiteral("width:c===''?0:t.advanceWidth(modelData.pButtonText)+22;height:44"))
+                          // value) takes a negative width so its own gap
+                          // collapses with it; an unknown tab keeps its width.
+                          && rebuiltWindow.contains(QStringLiteral("width:c===''?-4:t.advanceWidth(modelData.pButtonText)+22;height:44"))
                           && rebuiltWindow.contains(QStringLiteral("MouseArea{anchors.fill:parent;onPressed:iSettingsWindow.startSystemMove()}"))
                           && rebuiltWindow.contains(QStringLiteral("pShowRedDot:modelData.pShowRedDot"))
                           && rebuiltWindow.contains(QStringLiteral("anchors.centerIn:parent"))
@@ -5405,7 +5406,7 @@ Window {
                             updatedAbout = EmbeddedResources::decodeText(EmbeddedResources::readEntry(panelCopy, entry.entryOff, entry.flags, 8 * 1024 * 1024));
                     }
                     check(updatedWindow.contains(QStringLiteral("property var bHidden"))
-                              && updatedWindow.contains(QStringLiteral("width:c===''?0:"))
+                              && updatedWindow.contains(QStringLiteral("width:c===''?-4:"))
                               && updatedWindow.contains(QStringLiteral("clip:true;orientation:ListView.Horizontal"))
                               && updatedAbout.contains(QStringLiteral("property var bsiHiddenTabs:"))
                               && (hiddenTabId.isEmpty() || updatedAbout.contains(hiddenTabId))
