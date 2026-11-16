@@ -5358,8 +5358,11 @@ Window {
                           && rebuiltAbout.contains(QStringLiteral("BSI Panel Regression"))
                           && rebuiltAbout.contains(QStringLiteral("Repeater"))
                           // The About content is one centred column; it used
-                          // to sit hard against the left of its viewport.
-                          && rebuiltAbout.contains(QStringLiteral("x:(parent.width-width)/2"))
+                          // to sit hard against the left of its viewport. The
+                          // ScrollView must span the page first, or the column
+                          // is only centred inside a narrower content box.
+                          && rebuiltAbout.contains(QStringLiteral("contentWidth:availableWidth"))
+                          && rebuiltAbout.contains(QStringLiteral("anchors.horizontalCenter:parent.horizontalCenter"))
                           && rebuiltAbout.contains(QStringLiteral("Regression source"))
                           && rebuiltAbout.contains(QStringLiteral("Regression community"))
                           && rebuiltAbout.contains(QStringLiteral("Regression video")),
