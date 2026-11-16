@@ -129,8 +129,14 @@ assert ";spacing:4" in replacement, \
 # A custom icon sits centred in the tab with the native label lifted to the top,
 # instead of being painted over the text.
 assert "anchors.bottomMargin:c?26:0" in replacement, "the label must move up when an icon is shown"
-assert "Image{source:c;visible:c;width:18;height:18;x:parent.width/2-9;y:24}" in replacement, \
+assert "Image{source:c;width:18;height:18;x:parent.width/2-9;y:24}" in replacement, \
     "the icon must be centred in the tab"
+# Collapsing the width hid the tab's box but not its label: the button inside the
+# delegate kept painting its text, so "Customise" and "Advanced" smeared over the
+# tabs beside them while their slot was already closed. The delegate has to be
+# invisible as well, not just zero sized.
+assert "delegate:Item{visible:c!=='';" in replacement, \
+    "a hidden tab must not paint its label over its neighbours"
 # A hidden tab has to leave the strip *without leaving a gap behind*. Publishing
 # bHidden into the shell did nothing at all, because no strip delegate ever read
 # it. Collapsing the tab to zero width was not enough either: a ListView puts its

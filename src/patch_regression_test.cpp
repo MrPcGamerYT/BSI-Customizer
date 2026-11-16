@@ -5310,7 +5310,13 @@ Window {
                           // A custom icon sits centred in the tab, with the native
                           // label lifted to the top instead of being painted over.
                           && rebuiltWindow.contains(QStringLiteral("anchors.bottomMargin:c?26:0"))
-                          && rebuiltWindow.contains(QStringLiteral("Image{source:c;visible:c;width:18;height:18;x:parent.width/2-9;y:24}"))
+                          && rebuiltWindow.contains(QStringLiteral("Image{source:c;width:18;height:18;x:parent.width/2-9;y:24}"))
+                          // A hidden tab must not paint its label over the tabs
+                          // beside it: zeroing its width closed the slot but the
+                          // button inside kept drawing its text on top of the
+                          // neighbours, which is the smeared "Customise" and
+                          // "Advanced" seen in the window.
+                          && rebuiltWindow.contains(QStringLiteral("delegate:Item{visible:c!=='';property var c:"))
                           // Tabs are laid out label-sized with one spacing
                           // value for the whole strip: equal-width slots made
                           // long neighbours ("Game settings" / "Devices")
