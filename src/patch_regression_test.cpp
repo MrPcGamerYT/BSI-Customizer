@@ -5285,18 +5285,15 @@ Window {
                           // theme font the button draws its label in, so the tab
                           // is exactly as wide as its own label plus the pad.
                           && rebuiltWindow.contains(QStringLiteral("Text{id:t;opacity:0;text:modelData.pButtonText;font:UiTheme.fonts.bodyMedium}"))
-                          // Tabs divide the strip into equal slots so the last
-                          // category is never half-clipped at the shell edge, and
-                          // the 32 px inset is symmetric so the row keeps the same
-                          // gap from the window edge on both sides.
-                          // Slots divide the strip's exact width, so every tab keeps
-                          // the same gap instead of one wider closing gap.
-
+                          // Every tab is sized by its own label and the strip
+                          // uses one spacing value, so all the gaps are equal.
                           && rebuiltWindow.contains(QStringLiteral("width:t.implicitWidth+22;height:44"))
                           && rebuiltWindow.contains(QStringLiteral("MouseArea{anchors.fill:parent;onPressed:iSettingsWindow.startSystemMove()}"))
                           && rebuiltWindow.contains(QStringLiteral("pShowRedDot:modelData.pShowRedDot"))
                           && rebuiltWindow.contains(QStringLiteral("anchors.centerIn:parent"))
-                          && rebuiltWindow.contains(QStringLiteral("ListView{id:v;"))
+                          // The strip is as wide as its own tabs, clamped to the
+                          // shell gutter, and centred under the title.
+                          && rebuiltWindow.contains(QStringLiteral("ListView{width:Math.min(contentWidth,parent.width-48)"))
                           && rebuiltWindow.contains(QStringLiteral("orientation:ListView.Horizontal;model:pSettingsItems.pSettingElements"))
                           && rebuiltWindow.contains(QStringLiteral("item.anchors.fill=item.parent"))
                           // The strip is inset the same 24 px on both sides and its
