@@ -1520,7 +1520,8 @@ QVariantMap apply(const QString &exePath, const QString &developerName,
     // no error explained it. A low-fidelity icon is always better than none.
     int budget = artworkBudget(plainPayload, slotCapacity);
     QVariantMap bestIcons;
-    QString bestLogoSource = current.aboutLogoSource;
+    QString logoSource = current.aboutLogoSource;
+    QString bestLogoSource = logoSource;
     qint64 bestPayload = -1;
     for (int pass = 0; pass < 8; ++pass) {
         QVariantMap icons;
