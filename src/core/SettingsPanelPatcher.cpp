@@ -737,7 +737,7 @@ MouseArea{anchors.fill:parent;onPressed:iSettingsWindow.startSystemMove()}
 Text{text:qsTr('Settings');color:UiTheme.colors.primary10;font:UiTheme.fonts.bodyLarge;anchors.centerIn:parent}
 UiImageButton{asset:'CloseIcon';x:parent.width-32;y:12;onClicked:iSettingsWindow.close()}}
 ListView{width:Math.min(contentWidth,parent.width-48);height:44;x:(parent.width-width)/2;clip:true;orientation:ListView.Horizontal;model:pSettingsItems.pSettingElements;spacing:4
-delegate:Item{visible:c!=='';property var c:iSettingsWindowShadowContainer.bIcons[modelData.pQmlSource.toLowerCase().split('/').pop()];width:c===''?-4:t.advanceWidth(modelData.pButtonText)+22;height:44
+delegate:Item{visible:c!=='';property var c:iSettingsWindowShadowContainer.bIcons[modelData.pQmlSource.toLowerCase().split('/').pop()];width:c===''?-4:t.boundingRect(modelData.pButtonText).width+22;height:44
 UiSettingsButton{anchors.fill:parent;anchors.bottomMargin:c?26:0;pSettingIdx:index;pSettingBtnText:modelData.pButtonText;pSelected:index==pCurrentTabIndex;pShowRedDot:modelData.pShowRedDot;onSettingClicked:fChangeSelectedSetting(pSettingIdx)}
 FontMetrics{id:t}
 Image{source:c;width:18;height:18;x:parent.width/2-9;y:24}}}

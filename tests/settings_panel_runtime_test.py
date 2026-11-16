@@ -114,7 +114,7 @@ assert "iSettingsWindowShadowContainer.bIcons[" in replacement
 # slots are what made "Game settings" and "Devices" collide, and they left short
 # labels like "About" floating in a wide empty box: the fix is to let the label
 # size the tab.
-assert "width:c===''?-4:t.advanceWidth(modelData.pButtonText)+22;height:44" in replacement, \
+assert "width:c===''?-4:t.boundingRect(modelData.pButtonText).width+22;height:44" in replacement, \
     "each tab must be sized by its own label, not by an equal share of the strip"
 # Measuring with the theme's body font was the other half of the ragged row:
 # that font is smaller than the one the native button draws its label in, so long
@@ -125,8 +125,14 @@ assert "FontMetrics{id:t}" in replacement, \
     "the tab must measure its label with the same font it draws it in"
 assert "font:UiTheme.fonts.bodyMedium}\n" not in replacement, \
     "measuring with the theme body font shrank wide tabs and broke the even gaps"
-assert "t.advanceWidth(modelData.pButtonText)" in replacement, \
-    "the tab's width must come from its own label"
+# The advance includes each glyph's side bearings, and they differ per label by
+# up to ~3 px, so sizing on the advance left different visible space beside each
+# word ("Game settings" nearly touched "Devices" while "Display" floated). Sizing
+# on the ink keeps the same padding beside every label.
+assert "t.boundingRect(modelData.pButtonText).width" in replacement, \
+    "the tab must be sized by the ink of its label, not its advance"
+assert "advanceWidth(" not in replacement, \
+    "advance includes side bearings, which makes the visible gaps uneven"
 # Even gaps: the ListView sets one spacing value for every gap, so the space
 # between any two neighbouring tabs is identical no matter how long the labels
 # are. Doing this with padding inside an equal-width slot is what produced the

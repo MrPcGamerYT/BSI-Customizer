@@ -164,6 +164,17 @@ def audit(app, w, h, tabs=TABS, label="", icons="({})"):
     laid = sorted((d.mapToItem(obj, QPointF(0, 0)).x(), d.width()) for d in dels if d.width() > 0)
     gaps = [round(laid[i + 1][0] - (laid[i][0] + laid[i][1])) for i in range(len(laid) - 1)]
     errs.append(("tab gaps equal", f"{gaps}", len(set(gaps)) <= 1))
+    # Equal boxes are not enough: the eye reads the distance between the words.
+    # The pill must hug its label's ink, leaving the same padding on every tab,
+    # otherwise a label with wide side bearings looks crowded next to its
+    # neighbour. Measure the label itself by its drawn text width.
+    from PySide6.QtGui import QFont, QFontMetricsF
+    fm = QFontMetricsF(QFont(app.font()))
+    pads = []
+    for d in [x for x in dels if x.width() > 0]:
+        text = d.childItems()[0].property("pSettingBtnText") or ""
+        pads.append(round((d.width() - fm.boundingRect(text).width()) / 2, 1))
+    errs.append(("equal label padding", f"{pads}", len(set(pads)) <= 0.6))
     ghosts = [d for d in dels if d.width() <= 0 and d.property("visible")]
     errs.append(("hidden tabs paint nothing", f"{len(ghosts)} ghost(s)", not ghosts))
     # --- page fit

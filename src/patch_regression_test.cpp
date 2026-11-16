@@ -5291,7 +5291,7 @@ Window {
                           // A tab the About page marks hidden (an empty icon
                           // value) takes a negative width so its own gap
                           // collapses with it; an unknown tab keeps its width.
-                          && rebuiltWindow.contains(QStringLiteral("width:c===''?-4:t.advanceWidth(modelData.pButtonText)+22;height:44"))
+                          && rebuiltWindow.contains(QStringLiteral("width:c===''?-4:t.boundingRect(modelData.pButtonText).width+22;height:44"))
                           && rebuiltWindow.contains(QStringLiteral("MouseArea{anchors.fill:parent;onPressed:iSettingsWindow.startSystemMove()}"))
                           && rebuiltWindow.contains(QStringLiteral("pShowRedDot:modelData.pShowRedDot"))
                           && rebuiltWindow.contains(QStringLiteral("anchors.centerIn:parent"))
