@@ -67,8 +67,7 @@ assert match, "Could not find the generated Settings-window QML template"
 replacement = match.group(1)
 assert "BSI v15" in replacement
 assert "pSettingsItems.pSettingElements" in replacement
-assert "property var bHidden:" in replacement
-assert "property var bHidden:[]" in replacement
+assert "property var bHidden" in replacement
 # The About page publishes the hidden-tab list and the icon map to the shell.
 # It must find that shell by walking up: counting parents landed on the window
 # instead of the UiShadowContainer, which threw
@@ -78,7 +77,7 @@ assert "function fOnQmlLoaded(){var p=parent;while(p&&p.bIcons===undefined)p=p.p
     "the About page must walk up to the shell, not count parents"
 # ...and the shell has to declare both of those properties, or the assignment
 # above has nowhere to land.
-assert "property var bHidden:[]" in replacement, "the shell must declare bHidden"
+assert "property var bHidden" in replacement, "the shell must declare bHidden"
 assert "property var bIcons:({})" in replacement, "the shell must declare bIcons"
 assert "property var bsiHiddenTabs:@@BSI_HIDDEN_TABS@@" in cpp
 # A tab icon may only be an SVG: validateAssetBytes() rejects any other MIME for
@@ -115,10 +114,12 @@ assert "iSettingsWindowShadowContainer.bIcons[" in replacement
 # the same theme font) plus a fixed 22 px of padding. Equal-width slots are what
 # made "Game settings" and "Devices" collide, and they left short labels like
 # "About" floating in a wide empty box: the fix is to let the label size the tab.
-assert "width:t.implicitWidth+22;height:44" in replacement, \
+assert "width:c===''?0:t.advanceWidth(modelData.pButtonText)+22;height:44" in replacement, \
     "each tab must be sized by its own label, not by an equal share of the strip"
-assert 'Text{id:t;opacity:0;text:modelData.pButtonText;font:UiTheme.fonts.bodyMedium}' in replacement, \
+assert "FontMetrics{id:t;font:UiTheme.fonts.bodyMedium}" in replacement, \
     "the tab must measure its label with the same font it draws it in"
+assert "t.advanceWidth(modelData.pButtonText)" in replacement, \
+    "the tab's width must come from its own label"
 # Even gaps: the ListView sets one spacing value for every gap, so the space
 # between any two neighbouring tabs is identical no matter how long the labels
 # are. Doing this with padding inside an equal-width slot is what produced the
@@ -128,8 +129,22 @@ assert ";spacing:4" in replacement, \
 # A custom icon sits centred in the tab with the native label lifted to the top,
 # instead of being painted over the text.
 assert "anchors.bottomMargin:c?26:0" in replacement, "the label must move up when an icon is shown"
-assert "Image{source:c;width:18;height:18;x:parent.width/2-9;y:24}" in replacement, \
+assert "Image{source:c;visible:c;width:18;height:18;x:parent.width/2-9;y:24}" in replacement, \
     "the icon must be centred in the tab"
+# A hidden tab has to leave the strip. Declaring bHidden in the shell and
+# publishing the list into it was not enough: no strip delegate ever read it, so
+# unticking a tab changed nothing after a patch. The About page now adds an
+# entry for each hidden page with an empty value, which is the only channel the
+# small About slot has, and the delegate collapses to zero width on it.
+assert "width:c===''?0:t.advanceWidth(modelData.pButtonText)+22" in replacement, \
+    "a tab the About page marks hidden must collapse instead of drawing"
+assert "visible:c;width:18" in replacement, \
+    "a hidden tab must not paint an icon either"
+# The strip is clipped: the width clamp keeps the strip inside the rounded
+# window, but at small player sizes the tabs inside it still painted past the
+# edge (the reported bug), which only clipping can stop.
+assert "clip:true;orientation:ListView.Horizontal" in replacement, \
+    "the tab strip must clip so overflowing tabs cannot paint outside the window"
 # Every category must stay reachable: the strip divides the shell width into
 # equal slots instead of letting the last tab be half-clipped at the edge.
 assert "item.anchors.fill=item.parent" in replacement
@@ -198,9 +213,24 @@ assert about_payload <= 1700, (
 )
 assert "bsiAboutDeveloperName" in about_doc and "bsiAboutDeveloperLink" in about_doc, \
     "compacting the About page must keep its object names"
+
+# A tab the user unticks must actually disappear from the strip. The About page
+# is the only thing that knows the hidden list, and the only channel it has into
+# the shell is the icon map (the strip's delegates read that map per tab), so a
+# hidden page has to appear there with an empty value. Publishing bHidden alone
+# changed nothing at all: no strip delegate ever read it, which is exactly the
+# "I unchecked tabs but they are still there after patching" report.
+# buildAbout() appends an empty value for every hidden page; the python-side
+# document cannot show that (the C++ does the appending), so assert the C++ does
+# it and that the pair of them agree on the key.
+assert 'iconLiteral += qmlString(page.toCaseFolded()) + QStringLiteral(":\\"\\"")' in cpp, \
+    "buildAbout must mark each hidden tab in the icon map with an empty value"
+# ...and the shell must collapse the tab on that marker rather than measure it.
+assert "width:c===''?0:" in replacement, \
+    "the strip must collapse a tab the About page marks hidden"
 assert "fCheckForUpdateCallback" in about_doc and "fUpdateShortDisplayName" in about_doc, \
     "the native About callbacks must survive compaction"
-assert "delegate:Loader{anchors.fill:parent;Component.onCompleted:setSource(model.modelData.pQmlSource" in replacement
+assert "delegate:Loader{anchors.fill:parent;Component.onCompleted:setSource(modelData.pQmlSource" in replacement
 assert "pSettingBtnText:" in replacement and "pSelected:index==pCurrentTabIndex" in replacement and "pShowRedDot:modelData.pShowRedDot" in replacement
 assert "pSettingIdx:index" in replacement
 assert "fChangeSelectedSetting(pSettingIdx)" in replacement
@@ -211,13 +241,14 @@ assert "fChangeSelectedSetting(pSettingIdx)" in replacement
 # rejected as "no longer loads" even though the document was fine.
 _patcher = pathlib.Path(__file__).resolve().parent.parent / "src" / "core" / "SettingsPanelPatcher.cpp"
 _patcher_src = _patcher.read_text()
-# This shell uses the stock `model.modelData` spelling...
-assert "setSource(model.modelData.pQmlSource" in replacement
-assert "model.modelData.pComponentObj=item" in replacement
-# ...but the validator must accept the shorthand too, because a shell whose
-# delegate sees the model data directly emits `modelData.pQmlSource`. Matching
-# only one spelling made re-applying over a patched player fail as "no longer
-# loads" even though the document was perfectly good.
+# The page host's Repeater delegate has the model data directly in scope, so
+# this shell uses the `modelData` spelling (one of the two the validator accepts).
+assert "setSource(modelData.pQmlSource" in replacement
+assert "modelData.pComponentObj=item" in replacement
+# The validator must accept both spellings, because the stock document writes
+# `model.modelData` while this one sees the data directly. Matching only one made
+# re-applying over a patched player fail as "no longer loads" even though the
+# document was perfectly good.
 assert "setSource(modelData.pQmlSource" in _patcher_src, (
     "the validator must accept the rebuilt shell's setSource spelling"
 )

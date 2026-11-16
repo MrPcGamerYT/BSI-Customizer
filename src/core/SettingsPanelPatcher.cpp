@@ -728,7 +728,7 @@ QString buildWindow(const QString &stock)
     // could not be shown at all.
     QString replacement = QStringLiteral(R"QML(UiShadowContainer{//BSI v15
 id:iSettingsWindowShadowContainer;anchors.fill:parent
-property var bHidden:[]
+property var bHidden
 property var bIcons:({})
 Rectangle{anchors.fill:parent;color:UiTheme.colors.primary80;radius:14
 Column{anchors.fill:parent
@@ -736,14 +736,14 @@ Item{width:parent.width;height:56
 MouseArea{anchors.fill:parent;onPressed:iSettingsWindow.startSystemMove()}
 Text{text:qsTr('Settings');color:UiTheme.colors.primary10;font:UiTheme.fonts.bodyLarge;anchors.centerIn:parent}
 UiImageButton{asset:'CloseIcon';x:parent.width-32;y:12;onClicked:iSettingsWindow.close()}}
-ListView{width:Math.min(contentWidth,parent.width-48);height:44;x:(parent.width-width)/2;orientation:ListView.Horizontal;model:pSettingsItems.pSettingElements;spacing:4
-delegate:Item{property var c:iSettingsWindowShadowContainer.bIcons[modelData.pQmlSource.toLowerCase().split('/').pop()];width:t.implicitWidth+22;height:44
+ListView{width:Math.min(contentWidth,parent.width-48);height:44;x:(parent.width-width)/2;clip:true;orientation:ListView.Horizontal;model:pSettingsItems.pSettingElements;spacing:4
+delegate:Item{property var c:iSettingsWindowShadowContainer.bIcons[modelData.pQmlSource.toLowerCase().split('/').pop()];width:c===''?0:t.advanceWidth(modelData.pButtonText)+22;height:44
 UiSettingsButton{anchors.fill:parent;anchors.bottomMargin:c?26:0;pSettingIdx:index;pSettingBtnText:modelData.pButtonText;pSelected:index==pCurrentTabIndex;pShowRedDot:modelData.pShowRedDot;onSettingClicked:fChangeSelectedSetting(pSettingIdx)}
-Text{id:t;opacity:0;text:modelData.pButtonText;font:UiTheme.fonts.bodyMedium}
-Image{source:c;width:18;height:18;x:parent.width/2-9;y:24}}}
+FontMetrics{id:t;font:UiTheme.fonts.bodyMedium}
+Image{source:c;visible:c;width:18;height:18;x:parent.width/2-9;y:24}}}
 Item{width:Math.min(parent.width-48,568);x:(parent.width-width)/2;height:parent.height-118
 StackLayout{id:iSelectedSettingControl;anchors.fill:parent;currentIndex:pCurrentTabIndex
-Repeater{model:pSettingsItems.pSettingElements;delegate:Loader{anchors.fill:parent;Component.onCompleted:setSource(model.modelData.pQmlSource,model.modelData.pComponentArgs||{});onLoaded:{item.anchors.fill=item.parent;model.modelData.pComponentObj=item;if(item.fOnQmlLoaded)item.fOnQmlLoaded()}}}}}
+Repeater{model:pSettingsItems.pSettingElements;delegate:Loader{anchors.fill:parent;Component.onCompleted:setSource(modelData.pQmlSource,modelData.pComponentArgs||{});onLoaded:{item.anchors.fill=item.parent;modelData.pComponentObj=item;if(item.fOnQmlLoaded)item.fOnQmlLoaded()}}}}}
 }
 }}
 )QML");
@@ -782,6 +782,16 @@ QString buildAbout(const QString &developerName, const QString &tagline,
     for (auto it = tabIcons.cbegin(); it != tabIcons.cend(); ++it) {
         if (iconLiteral.size() > 2) iconLiteral += QLatin1Char(',');
         iconLiteral += qmlString(it.key().toCaseFolded()) + QLatin1Char(':') + qmlString(it.value().toString());
+    }
+    // A hidden tab must disappear from the strip, and the only channel the small
+    // About resource slot has for telling the shell that is the map the shell
+    // already reads per delegate. An empty value is the "hidden" sentinel: the
+    // delegate collapses to zero width and paints no icon. Declaring bHidden in
+    // the shell and publishing the list into it did nothing, because no strip
+    // delegate ever read it.
+    for (const QString &page : hiddenTabs) {
+        if (iconLiteral.size() > 2) iconLiteral += QLatin1Char(',');
+        iconLiteral += qmlString(page.toCaseFolded()) + QStringLiteral(":\"\"");
     }
     iconLiteral += QStringLiteral("})");
     const QString qDeveloper = qmlString(developerName.trimmed());

@@ -5287,7 +5287,9 @@ Window {
                           && rebuiltWindow.contains(QStringLiteral("Text{id:t;opacity:0;text:modelData.pButtonText;font:UiTheme.fonts.bodyMedium}"))
                           // Every tab is sized by its own label and the strip
                           // uses one spacing value, so all the gaps are equal.
-                          && rebuiltWindow.contains(QStringLiteral("width:t.implicitWidth+22;height:44"))
+                          // A tab the About page marks hidden (an empty icon
+                          // value) collapses; an unknown tab keeps its width.
+                          && rebuiltWindow.contains(QStringLiteral("width:c===''?0:t.implicitWidth+22;height:44"))
                           && rebuiltWindow.contains(QStringLiteral("MouseArea{anchors.fill:parent;onPressed:iSettingsWindow.startSystemMove()}"))
                           && rebuiltWindow.contains(QStringLiteral("pShowRedDot:modelData.pShowRedDot"))
                           && rebuiltWindow.contains(QStringLiteral("anchors.centerIn:parent"))
@@ -5300,6 +5302,10 @@ Window {
                           // slots divide exactly that width, so every tab keeps the
                           // same gap and the last one never touches the edge.
                           && rebuiltWindow.contains(QStringLiteral("ListView{width:Math.min(contentWidth,parent.width-48);height:44"))
+                          // The width clamp bounds the strip, but at small window
+                          // sizes the tabs inside it still painted past the
+                          // rounded edge until the strip itself clipped.
+                          && rebuiltWindow.contains(QStringLiteral("clip:true;orientation:ListView.Horizontal"))
                           // A custom icon sits centred in the tab, with the native
                           // label lifted to the top instead of being painted over.
                           && rebuiltWindow.contains(QStringLiteral("anchors.bottomMargin:c?26:0"))
@@ -5398,9 +5404,19 @@ Window {
                         if (entry.leaf.compare(QLatin1String("PlrAboutSetting.qml"), Qt::CaseInsensitive) == 0)
                             updatedAbout = EmbeddedResources::decodeText(EmbeddedResources::readEntry(panelCopy, entry.entryOff, entry.flags, 8 * 1024 * 1024));
                     }
-                    check(updatedWindow.contains(QStringLiteral("property var bHidden:[]"))
+                    check(updatedWindow.contains(QStringLiteral("property var bHidden"))
+                              && updatedWindow.contains(QStringLiteral("width:c===''?0:"))
+                              && updatedWindow.contains(QStringLiteral("clip:true;orientation:ListView.Horizontal"))
                               && updatedAbout.contains(QStringLiteral("property var bsiHiddenTabs:"))
                               && (hiddenTabId.isEmpty() || updatedAbout.contains(hiddenTabId))
+                              // Unticking a tab used to change nothing after a
+                              // patch: the hidden list was published into bHidden
+                              // and no strip delegate ever read it. buildAbout now
+                              // also marks each hidden page in the icon map with
+                              // an empty value, which the strip does collapse.
+                              && (hiddenTabId.isEmpty()
+                                  || updatedAbout.contains(
+                                      QStringLiteral("\"%1\":\"\"").arg(hiddenTabId)))
                               && updatedAbout.contains(QStringLiteral("property var bsiTabIcons:"))
                               // The page must find the shell by walking up: counting parents reached
                               // the window and threw "Cannot assign to non-existent
