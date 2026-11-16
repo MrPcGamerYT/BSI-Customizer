@@ -585,6 +585,16 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
     assert any(item.objectName() == "bsiAboutDeveloperTagline" for item in about_tree), "About page did not create its subtitle element"
     assert len(about_links) == 2, "About page did not render the configured developer links"
     assert any(item.objectName() == "bsiAboutEmulatorLogo" for item in about_tree), "About page did not create its centered emulator logo"
+    # The About content is a single centred column: it used to be pinned to the
+    # left of its scroll area, so the logo, name and link rows all sat left of
+    # centre in a window that is otherwise centred. It is centred in its
+    # viewport, and no fixed contentWidth overrides that.
+    assert "ColumnLayout{id:iAboutD;width:Math.min(440,parent.width-24);anchors.horizontalCenter:parent.horizontalCenter" \
+        in about_source, "the About content column must be centred in its viewport"
+    assert "contentWidth:availableWidth" in about_source, \
+        "the About content must span the viewport so its column is centred in the page"
+    assert "contentWidth:iAboutD.width" not in about_source, \
+        "a fixed contentWidth would pin the About column to the left"
 
     print("PASS: generated Settings and About QML instantiate, retain native page behavior, show custom tabs, and render profile links")
     about_obj.deleteLater()

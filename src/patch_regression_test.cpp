@@ -5360,6 +5360,9 @@ Window {
                               || rebuiltAbout.contains(QStringLiteral("text:pDeveloperName")))
                           && rebuiltAbout.contains(QStringLiteral("BSI Panel Regression"))
                           && rebuiltAbout.contains(QStringLiteral("Repeater"))
+                          // The About content is one centred column; it used
+                          // to sit hard against the left of its viewport.
+                          && rebuiltAbout.contains(QStringLiteral("x:(parent.width-width)/2"))
                           && rebuiltAbout.contains(QStringLiteral("Regression source"))
                           && rebuiltAbout.contains(QStringLiteral("Regression community"))
                           && rebuiltAbout.contains(QStringLiteral("Regression video")),

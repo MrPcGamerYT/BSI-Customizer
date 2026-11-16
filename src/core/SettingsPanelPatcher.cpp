@@ -813,8 +813,8 @@ property var pDeveloperLinks:[@@BSI_LINKS@@]
 ColumnLayout{anchors.fill:parent;spacing:0
 ScrollView{Layout.fillWidth:true;Layout.fillHeight:true;clip:true
 background:Rectangle{color:"transparent"}
-contentWidth:iAboutD.width;contentHeight:iAboutD.implicitHeight+48
-ColumnLayout{id:iAboutD;width:Math.min(440,parent.width-24)
+contentWidth:availableWidth;contentHeight:iAboutD.implicitHeight+48
+ColumnLayout{id:iAboutD;width:Math.min(440,parent.width-24);anchors.horizontalCenter:parent.horizontalCenter
 Layout.alignment:Qt.AlignHCenter|Qt.AlignTop;spacing:16
 Item{Layout.fillWidth:true;Layout.preferredHeight:28}
 Image{objectName:"bsiAboutEmulatorLogo";source:@@BSI_LOGO_SOURCE@@
