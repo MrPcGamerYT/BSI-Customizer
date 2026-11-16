@@ -5241,7 +5241,7 @@ Window {
                     if (file.name.compare(QLatin1String("UiSettingsWindow.qml"), Qt::CaseInsensitive) == 0)
                         rebuiltWindow = QString::fromUtf8(QtResources::readFile(panelImage, file));
                 }
-                check(rebuiltWindow.contains(QStringLiteral("BSI Settings v13"))
+                check(rebuiltWindow.contains(QStringLiteral("BSI Settings v14"))
                           && rebuiltWindow.contains(QStringLiteral("property var bHidden:"))
                           // The About page publishes the icon map into
                           // bIcons, so the shell has to declare it or that
@@ -5254,13 +5254,14 @@ Window {
                           && rebuiltWindow.contains(QStringLiteral("Rectangle{anchors.fill:parent;color:UiTheme.colors.primary80;radius:14"))
                           && rebuiltWindow.contains(QStringLiteral("color:UiTheme.colors.primary10"))
                           && !rebuiltWindow.contains(QStringLiteral("#0d0f14"))
-                          // The page lives in a rounded, bordered card inset from
-                          // every window edge, so the content surface reads as a
-                          // separate panel instead of a bare background.
-                          && rebuiltWindow.contains(QStringLiteral("width:Math.min(parent.width-48,568);x:(parent.width-width)/2"))
-                          && rebuiltWindow.contains(QStringLiteral("property var bIcons:({})"))
-                          // The selected tab carries its own accent underline below
-                          // the pill the native button already paints.
+                          // The page host is inset from every window edge and
+                          // stops short of the bottom, so the native page and its
+                          // "Save changes" footer cannot run into the rounded
+                          // corner the way they did when the host filled the shell.
+                          && rebuiltWindow.contains(QStringLiteral("Item{width:parent.width;height:parent.height-100"))
+                          // A tab is measured with a hidden Text using the same
+                          // theme font the button draws its label in, so the tab
+                          // is exactly as wide as its own label plus the pad.
                           && rebuiltWindow.contains(QStringLiteral("Text{id:t;opacity:0;text:modelData.pButtonText;font:UiTheme.fonts.bodyMedium}"))
                           // Tabs divide the strip into equal slots so the last
                           // category is never half-clipped at the shell edge, and
@@ -5279,7 +5280,7 @@ Window {
                           // The strip is inset the same 24 px on both sides and its
                           // slots divide exactly that width, so every tab keeps the
                           // same gap and the last one never touches the edge.
-                          && rebuiltWindow.contains(QStringLiteral("ListView{id:v;width:parent.width-48;height:44;x:24;"))
+                          && rebuiltWindow.contains(QStringLiteral("ListView{id:v;width:parent.width;height:44;clip:true;"))
                           // A custom icon sits centred in the tab, with the native
                           // label lifted to the top instead of being painted over.
                           && rebuiltWindow.contains(QStringLiteral("anchors.bottomMargin:c?26:0"))
@@ -5293,7 +5294,7 @@ Window {
                           && !rebuiltWindow.contains(QStringLiteral("border.color"))
                           && !rebuiltWindow.contains(QStringLiteral("visible:s"))
                           && rebuiltWindow.contains(QStringLiteral("StackLayout{id:iSelectedSettingControl;anchors.fill:parent;currentIndex:pCurrentTabIndex"))
-                          && rebuiltWindow.contains(QStringLiteral("delegate:Loader{anchors.fill:parent;"))
+                          && rebuiltWindow.contains(QStringLiteral("delegate:Loader{Layout.fillWidth:true;Layout.fillHeight:true;"))
                           && rebuiltWindow.contains(QStringLiteral("model.modelData.pComponentObj=item"))
                           && rebuiltWindow.contains(QStringLiteral("fChangeSelectedSetting(pSettingIdx)"))
                           && rebuiltWindow.contains(QStringLiteral("onVisibleChanged:if(visible&&transientParent)"))

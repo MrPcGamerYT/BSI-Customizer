@@ -65,7 +65,7 @@ match = re.search(
 )
 assert match, "Could not find the generated Settings-window QML template"
 replacement = match.group(1)
-assert "BSI Settings v13" in replacement
+assert "BSI Settings v14" in replacement
 assert "pSettingsItems.pSettingElements" in replacement
 assert "property var bHidden:" in replacement
 assert "property var bHidden:[]" in replacement
@@ -98,7 +98,7 @@ assert "ListView{id:v;" in replacement
 assert "orientation:ListView.Horizontal;model:pSettingsItems.pSettingElements" in replacement
 # The strip spans the shell with a symmetric 24 px inset so the first and last
 # tabs sit equally far from the window edge.
-assert "ListView{id:v;width:parent.width-48;height:44;x:24;" in replacement
+assert "ListView{id:v;width:parent.width;height:44;clip:true;" in replacement
 assert "property var w:iSettingsWindowShadowContainer" in replacement
 # A tab is as wide as its own label (measured with a hidden TextMetrics through
 # the same theme font) plus a fixed 22 px of padding. Equal-width slots are what
@@ -125,8 +125,8 @@ assert "item.anchors.fill=item.parent" in replacement
 # The page keeps the native, centred 568 px column it has always used. It is
 # NOT wrapped in a card and the shell paints no pill or underline behind the
 # selected tab: that redesign was rejected, the flat window is what ships.
-assert "width:Math.min(parent.width-48,568);x:(parent.width-width)/2" in replacement, \
-    "the page column must stay centred at its native width"
+assert "Item{width:parent.width;height:parent.height-100" in replacement, \
+    "the page host must leave room for the footer inside the rounded window"
 assert "border.color" not in replacement and "radius:12" not in replacement, \
     "the rejected card must not come back"
 assert "visible:s" not in replacement, \
@@ -189,7 +189,7 @@ assert "bsiAboutDeveloperName" in about_doc and "bsiAboutDeveloperLink" in about
     "compacting the About page must keep its object names"
 assert "fCheckForUpdateCallback" in about_doc and "fUpdateShortDisplayName" in about_doc, \
     "the native About callbacks must survive compaction"
-assert "delegate:Loader{anchors.fill:parent;Component.onCompleted:setSource(model.modelData.pQmlSource" in replacement
+assert "delegate:Loader{Layout.fillWidth:true;Layout.fillHeight:true;Component.onCompleted:setSource(model.modelData.pQmlSource" in replacement
 assert "pSettingBtnText:" in replacement and "pSelected:index==pCurrentTabIndex" in replacement and "pShowRedDot:modelData.pShowRedDot" in replacement
 assert "pSettingIdx:index" in replacement
 assert "fChangeSelectedSetting(pSettingIdx)" in replacement
@@ -367,10 +367,13 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
         (item for item in visual_tree if item.metaObject().className().endswith("StackLayout")),
         None,
     )
+    # A StackLayout keeps one Loader per tab and only the current one has its
+    # item created, so pick the Loader that actually holds a page.
     page_loader = next(
         (item for item in visual_tree
          if item.metaObject().className().endswith("Loader")
-         and item.property("item") is not None),
+         and item.property("item") is not None
+         and item.width() > 100),
         None,
     )
     # The page host is an id-carrying item, so it is reached through the QML
@@ -378,8 +381,8 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
     # centred, so the fixed-width stock pages are not stretched.
     page_frame = next(
         (candidate for candidate in visual_tree
-         if abs(candidate.width() - min(obj.width() - 48, 568)) < 2
-         and abs(candidate.height() - (obj.height() - 100)) < 2
+         if abs(candidate.width() - (obj.width() - 36)) < 2
+         and abs(candidate.height() - (obj.height() - 136)) < 3
          and candidate is not obj),
         None,
     )
@@ -400,7 +403,13 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
         (item for item in visual_tree if str(item.property("text")) == "Settings"),
         None,
     )
-    loaded_page = visual_named("runtimeSettingPage")
+    # A StackLayout keeps a Loader per tab; the collapsed ones can leave a
+    # zero-sized page instance in the tree, so pick the one that is drawn.
+    loaded_page = next(
+        (item for item in visual_tree
+         if item.objectName() == "runtimeSettingPage" and item.width() > 100),
+        None,
+    )
     drag = next(
         (
             item for item in visual_tree
@@ -471,7 +480,10 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
     assert page_frame is not None, "the shell did not create its centred page host"
     frame_center = page_frame.mapToItem(panel, QPointF(page_frame.width() / 2, 0))
     assert abs(frame_center.x() - panel.width() / 2) < 2, "the page host should be centred in the shell"
-    assert abs(page_frame.width() - 568) < 2, "the page keeps its native 568 px width"
+    # The host now spans the shell minus its 18 px inset on each side, so the
+    # native page cannot paint over the rounded window edge or the footer.
+    assert abs(page_frame.width() - (panel.width() - 36)) < 2, \
+        "the page host must be inset from the window edges"
     assert abs(stack.width() - page_frame.width()) < 2, "the native page stack should fill its centred host"
     loader_position = page_loader.mapToItem(panel, QPointF(0, 0))
     assert 0 < page_loader.width() <= page_frame.width(), "The native page Loader should stay inside the centered page card"
@@ -483,7 +495,10 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
     card_top = page_frame.mapToItem(panel, QPointF(0, 0)).y()
     assert tabs_bottom <= card_top + 1, "The category strip was overlapped by the page card"
     assert tabs.property("x") >= 0 and tabs.property("width") <= panel.width(), "The category strip overflowed the shell"
-    assert abs(loaded_page.width() - page_loader.width()) < 2, "The loaded native page did not follow its Loader width"
+    # The page fills its Loader through the shell's own onLoaded assignment, so
+    # both must report the same size (the page itself declares no width).
+    assert abs(loaded_page.width() - page_loader.width()) < 2, \
+        "the loaded native page did not follow its Loader width"
     assert loaded_page.objectName() == "runtimeSettingPage", "The native Settings page Loader did not load its page"
     # The rebuilt About page publishes its tab icons by walking up until it sees
     # `bIcons`, so what matters is that the shell is reachable at all - not that
@@ -717,6 +732,6 @@ assert _page_payload(as_svg) > 2337, (
 assert "rasterizeSvg" in cpp and "artworkBudget" in cpp, \
     "a tab icon that cannot fit its slot must be drawn down, not refused"
 assert "image/png" in cpp, "the drawn-down icon is stored as PNG"
-assert "for (int box : {32, 24, 18})" in cpp, \
+assert "for (int box : {32, 28, 24, 20, 16, 12})" in cpp, \
     "the fallback should try progressively smaller squares until it fits"
 print("PASS: oversized tab icons are drawn down instead of failing the apply")

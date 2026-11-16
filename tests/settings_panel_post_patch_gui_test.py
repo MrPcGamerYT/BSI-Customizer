@@ -358,9 +358,12 @@ Window {
             "the last category is clipped at the shell edge (%.1f of %.1f)"
             % (right_edge, content.width()),
         )
+        # The strip starts at the same 18 px inset as everything else in the
+        # window, so the row and the page below it line up.
+        first_x = slots[0].mapToItem(content, QPointF(0, 0)).x()
         check(
-            slots[0].mapToItem(content, QPointF(0, 0)).x() >= 23,
-            "the first tab is too close to the window edge",
+            first_x >= 17,
+            "the first tab is too close to the window edge (%.1f)" % first_x,
         )
 
     # --- selected tab ------------------------------------------------------
@@ -382,13 +385,28 @@ Window {
     ]
     check(not cards, "the rejected page card came back (%d drawn)" % len(cards))
 
-    page = find(lambda i: i.objectName() == "runtimeSettingPage")
+    # One Loader per tab: the collapsed ones can leave a zero-sized page in the
+    # tree, so take the page that is actually drawn.
+    page = find(lambda i: i.objectName() == "runtimeSettingPage" and i.width() > 100)
     check(page is not None, "the native page was not loaded into the shell")
     if page:
         origin = page.mapToItem(content, QPointF(0, 0))
+        # The page fills the host, which is inset 18 px on both sides, so it
+        # must sit centred and clear of the rounded window edge.
         check(
             abs((origin.x() + page.width() / 2) - content.width() / 2) < 3,
             "the native page column is not centred in the window",
+        )
+        check(
+            origin.x() >= 15 and origin.x() + page.width() <= content.width() - 15,
+            "the native page runs into the window edge (x %.1f, w %.1f of %.1f)"
+            % (origin.x(), page.width(), content.width()),
+        )
+        bottom = origin.y() + page.height()
+        check(
+            bottom <= content.height() - 15,
+            "the page (and its footer) hits the bottom edge of the window "
+            "(bottom %.1f of %.1f)" % (bottom, content.height()),
         )
 
     # --- no hard-coded palette --------------------------------------------
