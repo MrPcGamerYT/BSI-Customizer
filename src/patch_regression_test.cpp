@@ -5281,10 +5281,11 @@ Window {
                           // "Save changes" footer cannot run into the rounded
                           // corner the way they did when the host filled the shell.
                           && rebuiltWindow.contains(QStringLiteral("Item{width:Math.min(parent.width-48,568);x:(parent.width-width)/2;height:parent.height-118"))
-                          // A tab is measured with a hidden Text using the same
-                          // theme font the button draws its label in, so the tab
-                          // is exactly as wide as its own label plus the pad.
-                          && rebuiltWindow.contains(QStringLiteral("FontMetrics{id:t;font:UiTheme.fonts.bodyMedium}"))
+                          // A tab is measured with the same application font the
+                          // button draws its label in, so the tab is exactly as
+                          // wide as its own label plus the pad. Using the theme's
+                          // body font instead shrank wide tabs and ate their gap.
+                          && rebuiltWindow.contains(QStringLiteral("FontMetrics{id:t}"))
                           // Every tab is sized by its own label and the strip
                           // uses one spacing value, so all the gaps are equal.
                           // A tab the About page marks hidden (an empty icon

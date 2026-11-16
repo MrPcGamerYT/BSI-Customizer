@@ -110,14 +110,21 @@ assert "orientation:ListView.Horizontal;model:pSettingsItems.pSettingElements" i
 assert "x:(parent.width-width)/2" in replacement, \
     "the tab strip must be centred in the window"
 assert "iSettingsWindowShadowContainer.bIcons[" in replacement
-# A tab is as wide as its own label (measured with a hidden TextMetrics through
-# the same theme font) plus a fixed 22 px of padding. Equal-width slots are what
-# made "Game settings" and "Devices" collide, and they left short labels like
-# "About" floating in a wide empty box: the fix is to let the label size the tab.
+# A tab is as wide as its own label plus a fixed 22 px of padding. Equal-width
+# slots are what made "Game settings" and "Devices" collide, and they left short
+# labels like "About" floating in a wide empty box: the fix is to let the label
+# size the tab.
 assert "width:c===''?-4:t.advanceWidth(modelData.pButtonText)+22;height:44" in replacement, \
     "each tab must be sized by its own label, not by an equal share of the strip"
-assert "FontMetrics{id:t;font:UiTheme.fonts.bodyMedium}" in replacement, \
+# Measuring with the theme's body font was the other half of the ragged row:
+# that font is smaller than the one the native button draws its label in, so long
+# labels like "Game settings" overflowed their measured width and ate into the
+# spacing while short ones kept theirs. A bare FontMetrics inherits the same
+# application font the label inherits, which makes every gap identical.
+assert "FontMetrics{id:t}" in replacement, \
     "the tab must measure its label with the same font it draws it in"
+assert "font:UiTheme.fonts.bodyMedium}\n" not in replacement, \
+    "measuring with the theme body font shrank wide tabs and broke the even gaps"
 assert "t.advanceWidth(modelData.pButtonText)" in replacement, \
     "the tab's width must come from its own label"
 # Even gaps: the ListView sets one spacing value for every gap, so the space
