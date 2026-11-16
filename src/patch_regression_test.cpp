@@ -5208,6 +5208,28 @@ Window {
                   QStringLiteral("a padded tab icon is stored compacted, with its drawing intact (%1 -> %2 bytes)")
                       .arg(paddedIcon.size()).arg(storedIcon.size()));
 
+            // A tab icon is only ever allowed to be an SVG. An icon too big for
+            // its budget used to be rasterised to PNG here, which the validator
+            // then rejected, so the icon silently vanished from the rebuilt page.
+            // Over budget or not, the stored icon must stay a usable SVG.
+            const QString bigPanelSvgPath = QDir(panelDir).filePath(QStringLiteral("big-panel-icon.svg"));
+            QByteArray bigIcon = QByteArrayLiteral("<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\">");
+            bigIcon += "<path d=\"M2 2h20v20H2z\" fill=\"#55aaff\"/>";
+            while (bigIcon.size() < 4000) bigIcon += "<!-- pad -->";
+            bigIcon += QByteArrayLiteral("</svg>");
+            write(bigPanelSvgPath, bigIcon);
+            const QVariantMap bigAsset = SettingsPanelPatcher::readCustomAsset(
+                bigPanelSvgPath, QStringLiteral("tab-icon"));
+            const QVariantMap bigStored = bigAsset.value(QStringLiteral("asset")).toMap();
+            const QByteArray bigStoredBytes = QByteArray::fromBase64(
+                bigStored.value(QStringLiteral("data")).toString().toLatin1());
+            check(bigAsset.value(QStringLiteral("ok")).toBool()
+                      && bigStored.value(QStringLiteral("mime")).toString()
+                             == QStringLiteral("image/svg+xml")
+                      && bigStoredBytes.contains("<svg")
+                      && !bigStoredBytes.startsWith("\x89PNG"),
+                  QStringLiteral("an oversized tab icon stays a valid SVG instead of becoming a rejected PNG"));
+
             const QString unsafePanelSvgPath = QDir(panelDir).filePath(QStringLiteral("unsafe-panel-icon.svg"));
             write(unsafePanelSvgPath, QByteArrayLiteral("<svg xmlns=\"http://www.w3.org/2000/svg\"><script>alert(1)</script></svg>"));
             check(!SettingsPanelPatcher::readCustomAsset(unsafePanelSvgPath, QStringLiteral("tab-icon")).value(QStringLiteral("ok")).toBool(),
@@ -5258,7 +5280,7 @@ Window {
                           // stops short of the bottom, so the native page and its
                           // "Save changes" footer cannot run into the rounded
                           // corner the way they did when the host filled the shell.
-                          && rebuiltWindow.contains(QStringLiteral("Item{width:parent.width;height:parent.height-100"))
+                          && rebuiltWindow.contains(QStringLiteral("Item{width:Math.min(parent.width-48,568);x:(parent.width-width)/2;height:parent.height-118"))
                           // A tab is measured with a hidden Text using the same
                           // theme font the button draws its label in, so the tab
                           // is exactly as wide as its own label plus the pad.
@@ -5280,7 +5302,7 @@ Window {
                           // The strip is inset the same 24 px on both sides and its
                           // slots divide exactly that width, so every tab keeps the
                           // same gap and the last one never touches the edge.
-                          && rebuiltWindow.contains(QStringLiteral("ListView{id:v;width:parent.width;height:44;clip:true;"))
+                          && rebuiltWindow.contains(QStringLiteral("ListView{id:v;width:parent.width-48;height:44;clip:true;x:24"))
                           // A custom icon sits centred in the tab, with the native
                           // label lifted to the top instead of being painted over.
                           && rebuiltWindow.contains(QStringLiteral("anchors.bottomMargin:c?26:0"))
@@ -5294,7 +5316,7 @@ Window {
                           && !rebuiltWindow.contains(QStringLiteral("border.color"))
                           && !rebuiltWindow.contains(QStringLiteral("visible:s"))
                           && rebuiltWindow.contains(QStringLiteral("StackLayout{id:iSelectedSettingControl;anchors.fill:parent;currentIndex:pCurrentTabIndex"))
-                          && rebuiltWindow.contains(QStringLiteral("delegate:Loader{Layout.fillWidth:true;Layout.fillHeight:true;"))
+                          && rebuiltWindow.contains(QStringLiteral("delegate:Loader{anchors.fill:parent;"))
                           && rebuiltWindow.contains(QStringLiteral("model.modelData.pComponentObj=item"))
                           && rebuiltWindow.contains(QStringLiteral("fChangeSelectedSetting(pSettingIdx)"))
                           && rebuiltWindow.contains(QStringLiteral("onVisibleChanged:if(visible&&transientParent)"))

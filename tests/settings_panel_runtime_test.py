@@ -81,6 +81,16 @@ assert "function fOnQmlLoaded(){var p=parent;while(p&&p.bIcons===undefined)p=p.p
 assert "property var bHidden:[]" in replacement, "the shell must declare bHidden"
 assert "property var bIcons:({})" in replacement, "the shell must declare bIcons"
 assert "property var bsiHiddenTabs:@@BSI_HIDDEN_TABS@@" in cpp
+# A tab icon may only be an SVG: validateAssetBytes() rejects any other MIME for
+# that kind. Rasterising an oversized icon therefore produced an asset that the
+# very next step refused, and the icon disappeared from the rebuilt page with no
+# message. The shrink path must leave tab icons as (minified) SVG.
+assert 'if (kind != QLatin1String("tab-icon") && budget > 0 && uriSize > budget)' in cpp, \
+    "shrinkAsset() must not rasterise a tab icon into a PNG the validator rejects"
+# And a fitting loop that gives up must still keep the artwork it managed to
+# build, instead of writing the page with every custom icon removed.
+assert "customTabIcons = bestIcons" in cpp, \
+    "the fit loop must keep its best attempt so custom icons are never silently dropped"
 assert "property var bsiTabIcons:@@BSI_TAB_ICONS@@" in cpp
 # The shell must not ship its own palette: it paints with the player's own
 # theme object, exactly like the stock Settings window, so it follows whatever
@@ -98,8 +108,8 @@ assert "ListView{id:v;" in replacement
 assert "orientation:ListView.Horizontal;model:pSettingsItems.pSettingElements" in replacement
 # The strip spans the shell with a symmetric 24 px inset so the first and last
 # tabs sit equally far from the window edge.
-assert "ListView{id:v;width:parent.width;height:44;clip:true;" in replacement
-assert "property var w:iSettingsWindowShadowContainer" in replacement
+assert "ListView{id:v;width:parent.width-48;height:44;clip:true;x:24" in replacement
+assert "iSettingsWindowShadowContainer.bIcons[k]" in replacement
 # A tab is as wide as its own label (measured with a hidden TextMetrics through
 # the same theme font) plus a fixed 22 px of padding. Equal-width slots are what
 # made "Game settings" and "Devices" collide, and they left short labels like
@@ -125,7 +135,7 @@ assert "item.anchors.fill=item.parent" in replacement
 # The page keeps the native, centred 568 px column it has always used. It is
 # NOT wrapped in a card and the shell paints no pill or underline behind the
 # selected tab: that redesign was rejected, the flat window is what ships.
-assert "Item{width:parent.width;height:parent.height-100" in replacement, \
+assert "Item{width:Math.min(parent.width-48,568);x:(parent.width-width)/2;height:parent.height-118" in replacement, \
     "the page host must leave room for the footer inside the rounded window"
 assert "border.color" not in replacement and "radius:12" not in replacement, \
     "the rejected card must not come back"
@@ -189,7 +199,7 @@ assert "bsiAboutDeveloperName" in about_doc and "bsiAboutDeveloperLink" in about
     "compacting the About page must keep its object names"
 assert "fCheckForUpdateCallback" in about_doc and "fUpdateShortDisplayName" in about_doc, \
     "the native About callbacks must survive compaction"
-assert "delegate:Loader{Layout.fillWidth:true;Layout.fillHeight:true;Component.onCompleted:setSource(model.modelData.pQmlSource" in replacement
+assert "delegate:Loader{anchors.fill:parent;Component.onCompleted:setSource(model.modelData.pQmlSource" in replacement
 assert "pSettingBtnText:" in replacement and "pSelected:index==pCurrentTabIndex" in replacement and "pShowRedDot:modelData.pShowRedDot" in replacement
 assert "pSettingIdx:index" in replacement
 assert "fChangeSelectedSetting(pSettingIdx)" in replacement
@@ -381,8 +391,8 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
     # centred, so the fixed-width stock pages are not stretched.
     page_frame = next(
         (candidate for candidate in visual_tree
-         if abs(candidate.width() - (obj.width() - 36)) < 2
-         and abs(candidate.height() - (obj.height() - 136)) < 3
+         if abs(candidate.width() - min(obj.width() - 48, 568)) < 2
+         and abs(candidate.height() - (obj.height() - 118)) < 3
          and candidate is not obj),
         None,
     )
@@ -480,10 +490,12 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
     assert page_frame is not None, "the shell did not create its centred page host"
     frame_center = page_frame.mapToItem(panel, QPointF(page_frame.width() / 2, 0))
     assert abs(frame_center.x() - panel.width() / 2) < 2, "the page host should be centred in the shell"
-    # The host now spans the shell minus its 18 px inset on each side, so the
-    # native page cannot paint over the rounded window edge or the footer.
-    assert abs(page_frame.width() - (panel.width() - 36)) < 2, \
-        "the page host must be inset from the window edges"
+    # The host keeps the native 568 px column, and is short enough that the
+    # page's own footer cannot reach the rounded bottom edge of the shell.
+    assert abs(page_frame.width() - min(panel.width() - 48, 568)) < 2, \
+        "the page host must keep the native column width"
+    assert page_frame.height() <= panel.height() - 110, \
+        "the page host must clear the bottom edge"
     assert abs(stack.width() - page_frame.width()) < 2, "the native page stack should fill its centred host"
     loader_position = page_loader.mapToItem(panel, QPointF(0, 0))
     assert 0 < page_loader.width() <= page_frame.width(), "The native page Loader should stay inside the centered page card"

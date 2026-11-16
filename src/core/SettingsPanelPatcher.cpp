@@ -730,19 +730,19 @@ id:iSettingsWindowShadowContainer;anchors.fill:parent
 property var bHidden:[]
 property var bIcons:({})
 Rectangle{anchors.fill:parent;color:UiTheme.colors.primary80;radius:14
-Column{anchors.fill:parent;anchors.margins:18
-Item{width:parent.width;height:32
+Column{anchors.fill:parent
+Item{width:parent.width;height:56
 MouseArea{anchors.fill:parent;onPressed:iSettingsWindow.startSystemMove()}
 Text{text:qsTr('Settings');color:UiTheme.colors.primary10;font:UiTheme.fonts.bodyLarge;anchors.centerIn:parent}
-UiImageButton{asset:'CloseIcon';x:parent.width-32;y:0;onClicked:iSettingsWindow.close()}}
-ListView{id:v;width:parent.width;height:44;clip:true;orientation:ListView.Horizontal;model:pSettingsItems.pSettingElements;spacing:4
-delegate:Item{property var w:iSettingsWindowShadowContainer;property var k:modelData.pQmlSource.toLowerCase().split('/').pop();property var c:w.bIcons[k];width:t.implicitWidth+22;height:44
+UiImageButton{asset:'CloseIcon';x:parent.width-32;y:12;onClicked:iSettingsWindow.close()}}
+ListView{id:v;width:parent.width-48;height:44;clip:true;x:24;orientation:ListView.Horizontal;model:pSettingsItems.pSettingElements;spacing:4
+delegate:Item{property var k:modelData.pQmlSource.toLowerCase().split('/').pop();property var c:iSettingsWindowShadowContainer.bIcons[k];width:t.implicitWidth+22;height:44
 UiSettingsButton{anchors.fill:parent;anchors.bottomMargin:c?26:0;pSettingIdx:index;pSettingBtnText:modelData.pButtonText;pSelected:index==pCurrentTabIndex;pShowRedDot:modelData.pShowRedDot;onSettingClicked:fChangeSelectedSetting(pSettingIdx)}
 Text{id:t;opacity:0;text:modelData.pButtonText;font:UiTheme.fonts.bodyMedium}
 Image{source:c;width:18;height:18;x:parent.width/2-9;y:24}}}
-Item{width:parent.width;height:parent.height-100
+Item{width:Math.min(parent.width-48,568);x:(parent.width-width)/2;height:parent.height-118
 StackLayout{id:iSelectedSettingControl;anchors.fill:parent;currentIndex:pCurrentTabIndex
-Repeater{model:pSettingsItems.pSettingElements;delegate:Loader{Layout.fillWidth:true;Layout.fillHeight:true;Component.onCompleted:setSource(model.modelData.pQmlSource,model.modelData.pComponentArgs||{});onLoaded:{item.anchors.fill=item.parent;model.modelData.pComponentObj=item;if(item.fOnQmlLoaded)item.fOnQmlLoaded()}}}}}
+Repeater{model:pSettingsItems.pSettingElements;delegate:Loader{anchors.fill:parent;Component.onCompleted:setSource(model.modelData.pQmlSource,model.modelData.pComponentArgs||{});onLoaded:{item.anchors.fill=item.parent;model.modelData.pComponentObj=item;if(item.fOnQmlLoaded)item.fOnQmlLoaded()}}}}}
 }
 }}
 )QML");
@@ -1217,8 +1217,14 @@ QVariantMap shrinkAsset(QVariantMap asset, const QString &kind, int budget)
         stored = minified.toUtf8();
     // Still too big for the slot? Draw it down. Refusing is worse: the SVG is
     // valid, only the container is small.
+    //
+    // Only the logo may become a raster image. A tab icon is required to be an
+    // SVG (validateAssetBytes rejects "image/png" for that kind), so rasterising
+    // one here produced an asset that storedAssetSource() then refused, and the
+    // icon was dropped from the rebuilt page without any message. For icons the
+    // minified SVG is the smallest form we are allowed to embed.
     int uriSize = int(stored.toBase64().size()) + 28;
-    if (budget > 0 && uriSize > budget) {
+    if (kind != QLatin1String("tab-icon") && budget > 0 && uriSize > budget) {
         for (int box : {32, 28, 24, 20, 16, 12}) {
             if (uriSize <= budget) break;
             const QByteArray png = rasterizeSvg(stored, box);
@@ -1507,9 +1513,16 @@ QVariantMap apply(const QString &exePath, const QString &developerName,
     // against a fixed reservation and never checked the result, so a page that
     // was 26 bytes over was reported as unfixable instead of being shrunk once
     // more. Each pass halves the allowance, so this converges in a few tries.
+    //
+    // Every pass keeps the smallest document it has managed to build. Bailing
+    // out of this loop used to leave customTabIcons empty, which meant the page
+    // was written with no artwork at all: the user's icons silently vanished and
+    // no error explained it. A low-fidelity icon is always better than none.
     int budget = artworkBudget(plainPayload, slotCapacity);
-    QString logoSource = current.aboutLogoSource;
-    for (int pass = 0; pass < 6; ++pass) {
+    QVariantMap bestIcons;
+    QString bestLogoSource = current.aboutLogoSource;
+    qint64 bestPayload = -1;
+    for (int pass = 0; pass < 8; ++pass) {
         QVariantMap icons;
         QString candidateLogo;
         QString assetError;
@@ -1517,22 +1530,24 @@ QVariantMap apply(const QString &exePath, const QString &developerName,
             if (pass == 0) return fail(assetError);
             break;
         }
-        if (hasCustomLogo) logoSource = candidateLogo;
-        const QString doc = buildAbout(developerName, tagline, links, logoSource,
+        const QString candidateLogoSource = hasCustomLogo ? candidateLogo : current.aboutLogoSource;
+        const QString doc = buildAbout(developerName, tagline, links, candidateLogoSource,
                                        hiddenTabs, icons);
         const qint64 payload = EmbeddedResources::payloadSizeFor(doc.toUtf8(), 1);
-        if (slotCapacity <= 0 || payload <= slotCapacity) {
-            customTabIcons = icons;
-            break;
+        if (bestPayload < 0 || payload < bestPayload) {
+            bestPayload = payload;
+            bestIcons = icons;
+            bestLogoSource = candidateLogoSource;
         }
-        if (budget <= 0) {
-            // Even the smallest rendering does not fit: keep the best attempt and
-            // let aboutCapacityProblem() explain precisely why.
-            customTabIcons = icons;
-            break;
-        }
+        if (slotCapacity <= 0 || payload <= slotCapacity) break;
+        if (budget <= 0) break;
         budget = qMax(0, budget / 2);
     }
+    // Keep the best attempt either way: aboutCapacityProblem() below still fails
+    // the apply with an exact reason if even that does not fit, so nothing is
+    // ever written with a truncated page.
+    customTabIcons = bestIcons;
+    logoSource = bestLogoSource;
     const bool hasPatchMarker = hasWindowMarker(current.window.text)
         || current.about.text.contains(kAboutMarker);
     QMap<QString, QByteArray> originals;
