@@ -1477,7 +1477,9 @@ QVariantMap apply(const QString &exePath, const QString &developerName,
     // to have. Everything below is sized against it.
     const int slotCapacity = aboutSlotCapacity(image, nullptr);
     const int plainPayload = emptyPagePayload();
-    const auto buildAssets = [&](int budget, QVariantMap *icons, QVariantMap *logo,
+    // `logoSrc` is the resolved data URI for the About logo (not the stored
+    // asset), so the document can be rebuilt with it on every pass.
+    const auto buildAssets = [&](int budget, QVariantMap *icons, QString *logoSrc,
                                  QString *error) -> bool {
         icons->clear();
         QString source;
@@ -1495,7 +1497,7 @@ QVariantMap apply(const QString &exePath, const QString &developerName,
         }
         if (hasCustomLogo) {
             const QVariantMap shrunkLogo = shrinkAsset(storedLogo, QStringLiteral("logo"), budget);
-            if (!storedAssetSource(shrunkLogo, QStringLiteral("logo"), logo, error))
+            if (!storedAssetSource(shrunkLogo, QStringLiteral("logo"), logoSrc, error))
                 return false;
         }
         return true;
