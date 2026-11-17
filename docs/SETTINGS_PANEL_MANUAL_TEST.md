@@ -34,12 +34,17 @@ The rebuilt shell (`BSI v15`) keeps the player's own tab model and pages in a fl
 In the patched window, check that:
 
 - the **Settings** title is centered in the title bar with the close (**X**) button at the top right;
-- the category tabs sit as a single centered, horizontally scrollable row under the title, with equal gaps between their labels and no overlap with the page;
+- the category tabs sit as a single centered, horizontally scrollable row under the title, without overlapping the page;
+- **every label is centered inside its own tab option**, including short labels such as About and long labels such as Game settings; the label and icon share one horizontal center;
+- every neighboring option has the same **4 px hit-target gap**, with **11 px of label padding on each side** (26 px between neighboring label bounds); notification dots stay in that padding instead of shifting labels;
+- hiding the first/last tab or several consecutive tabs leaves exactly the same gaps between the remaining tabs; replacing/defaulting icons and changing language must not shift labels off center;
 - each supplied pack icon appears beneath its tab label automatically, without uploading artwork first;
 - the native page has equal empty gutters on the left and right, and its controls and per-page footer (for example "Some changes will apply on next launch" with its save button) are fully visible;
 - clicking a category still switches the page, dragging the title bar still moves the window, and the close button still closes it.
 
-On a narrow player window the centered page column shrinks with the window (48 px total gutter); overflowing tabs remain reachable by scrolling.
+On a narrow player window the centered page column shrinks with the window (48 px total gutter); overflowing tabs remain reachable by scrolling. Labels use the player's themed font for both painting and measurement, including glyph side bearings, not an unrelated application font.
+
+The automated `settings_panel_post_patch_gui_test.py` measures the actual generated Text and hit-target geometry for all twelve tabs, with multiple fonts (including italic), translated labels, badges, default/custom/missing icons, consecutive hidden tabs and two viewport sizes. It also scrolls to and clicks the last tab. This is an offscreen Qt Quick test, not a substitute for the live-player check above.
 
 ## Default pack and custom-icon regression
 

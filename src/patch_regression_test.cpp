@@ -5532,54 +5532,50 @@ Window {
                           // (the same UiTheme.colors the stock window uses) instead
                           // of a colour baked into the patch, so it keeps following
                           // whatever theme the emulator currently has.
-                          && rebuiltWindow.contains(QStringLiteral("Rectangle{anchors.fill:parent;color:UiTheme.colors.primary80;radius:14"))
-                          && rebuiltWindow.contains(QStringLiteral("color:UiTheme.colors.primary10"))
+                          && rebuiltWindow.contains(QStringLiteral("Rectangle{id:r;property var q:UiTheme.colors;anchors.fill:parent;color:r.q.primary80;radius:14"))
+                          && rebuiltWindow.contains(QStringLiteral("color:r.q.primary10"))
                           && !rebuiltWindow.contains(QStringLiteral("#0d0f14"))
                           // The page host is inset from every window edge and
                           // stops short of the bottom, so the native page and its
                           // "Save changes" footer cannot run into the rounded
                           // corner the way they did when the host filled the shell.
-                          && rebuiltWindow.contains(QStringLiteral("Item{width:Math.min(parent.width-48,568);x:(parent.width-width)/2;height:parent.height-118"))
-                          // A tab is measured with the same application font the
-                          // button draws its label in, so the tab is exactly as
-                          // wide as its own label plus the pad. Using the theme's
-                          // body font instead shrank wide tabs and ate their gap.
-                          && rebuiltWindow.contains(QStringLiteral("FontMetrics{id:t}"))
-                          // Every tab is sized by its own label and the strip
-                          // uses one spacing value, so all the gaps are equal.
-                          // A tab the About page marks hidden (an empty icon
-                          // value) takes a negative width so its own gap
-                          // collapses with it; an unknown tab keeps its width.
-                          && rebuiltWindow.contains(QStringLiteral("width:c===''?-4:t.boundingRect(modelData.pButtonText).width+22;height:44"))
+                          && rebuiltWindow.contains(QStringLiteral("Item{width:Math.min(r.width-48,568);x:(r.width-width)/2;height:r.height-118"))
+                          // Own the real label and measure its actual themed
+                          // font. The stock button's private label is left-aligned;
+                          // app-font metrics did not match its themed font either.
+                          && !rebuiltWindow.contains(QStringLiteral("UiSettingsButton{"))
+                          && rebuiltWindow.contains(QStringLiteral("Text{id:t;text:modelData.pButtonText;font:h.font;"))
+                          && rebuiltWindow.contains(QStringLiteral("font:UiTheme.fonts.bodyLarge"))
+                          && rebuiltWindow.contains(QStringLiteral("TextMetrics{id:m;text:t.text;font:t.font}"))
+                          // Centre the ink, including non-zero glyph bearings,
+                          // with 11 px of padding per side and one 4 px gap.
+                          && rebuiltWindow.contains(QStringLiteral("x:11-m.boundingRect.x"))
+                          && rebuiltWindow.contains(QStringLiteral("width:c===''?-4:m.boundingRect.width+22;height:44"))
                           && rebuiltWindow.contains(QStringLiteral("MouseArea{anchors.fill:parent;onPressed:iSettingsWindow.startSystemMove()}"))
-                          && rebuiltWindow.contains(QStringLiteral("pShowRedDot:modelData.pShowRedDot"))
+                          && rebuiltWindow.contains(QStringLiteral("visible:modelData.pShowRedDot"))
                           && rebuiltWindow.contains(QStringLiteral("anchors.centerIn:parent"))
                           // The strip is as wide as its own tabs, clamped to the
                           // shell gutter, and centred under the title.
-                          && rebuiltWindow.contains(QStringLiteral("ListView{width:Math.min(contentWidth,parent.width-48)"))
+                          && rebuiltWindow.contains(QStringLiteral("ListView{width:Math.max(0,Math.min(contentWidth,r.width-48))"))
                           && rebuiltWindow.contains(QStringLiteral("orientation:ListView.Horizontal;model:pSettingsItems.pSettingElements"))
                           && rebuiltWindow.contains(QStringLiteral("item.anchors.fill=item.parent"))
-                          // The strip is inset the same 24 px on both sides and its
-                          // slots divide exactly that width, so every tab keeps the
-                          // same gap and the last one never touches the edge.
-                          && rebuiltWindow.contains(QStringLiteral("ListView{width:Math.min(contentWidth,parent.width-48);height:44"))
+                          // The content-sized row is centred with at least 24 px
+                          // gutters; long/translated rows scroll within that inset.
+                          && rebuiltWindow.contains(QStringLiteral("ListView{width:Math.max(0,Math.min(contentWidth,r.width-48));height:44"))
                           // The width clamp bounds the strip, but at small window
                           // sizes the tabs inside it still painted past the
                           // rounded edge until the strip itself clipped.
                           && rebuiltWindow.contains(QStringLiteral("clip:true;orientation:ListView.Horizontal"))
-                          // A custom icon sits centred in the tab, with the native
-                          // label lifted to the top instead of being painted over.
-                          && rebuiltWindow.contains(QStringLiteral("anchors.bottomMargin:c?26:0"))
-                          // The icon is drawn at 18x18 and so is decoded at 18x18:
-                          // without sourceSize a large SVG decodes at its natural
-                          // size and the strip scales it down at paint time.
-                          && rebuiltWindow.contains(QStringLiteral("Image{source:c||'';width:18;height:18;x:parent.width/2-9;y:24;sourceSize.width:18;sourceSize.height:18}"))
+                          // Labels sit above their icons; file-backed runtime
+                          // PNGs already have a bounded 54 px source resolution.
+                          && rebuiltWindow.contains(QStringLiteral("y:c?0:22-height/2"))
+                          && rebuiltWindow.contains(QStringLiteral("Image{source:c||'';width:18;height:18;x:parent.width/2-9;y:24}"))
                           // A hidden tab must not paint its label over the tabs
                           // beside it: zeroing its width closed the slot but the
                           // button inside kept drawing its text on top of the
                           // neighbours, which is the smeared "Customise" and
                           // "Advanced" seen in the window.
-                          && rebuiltWindow.contains(QStringLiteral("delegate:Item{visible:c!=='';property var c:"))
+                          && rebuiltWindow.contains(QStringLiteral("delegate:MouseArea{visible:c!=='';property var c:"))
                           // Tabs are laid out label-sized with one spacing
                           // value for the whole strip: equal-width slots made
                           // long neighbours ("Game settings" / "Devices")
@@ -5589,9 +5585,9 @@ Window {
                           && !rebuiltWindow.contains(QStringLiteral("border.color"))
                           && !rebuiltWindow.contains(QStringLiteral("visible:s"))
                           && rebuiltWindow.contains(QStringLiteral("StackLayout{id:iSelectedSettingControl;anchors.fill:parent;currentIndex:pCurrentTabIndex"))
-                          && rebuiltWindow.contains(QStringLiteral("delegate:Loader{anchors.fill:parent;"))
+                          && rebuiltWindow.contains(QStringLiteral("delegate:Loader{"))
                           && rebuiltWindow.contains(QStringLiteral("modelData.pComponentObj=item"))
-                          && rebuiltWindow.contains(QStringLiteral("fChangeSelectedSetting(pSettingIdx)"))
+                          && rebuiltWindow.contains(QStringLiteral("onClicked:{fChangeSelectedSetting(index);forceActiveFocus()}"))
                           && rebuiltWindow.contains(QStringLiteral("onVisibleChanged:if(visible&&transientParent)"))
                           && rebuiltWindow.contains(QStringLiteral("var t=transientParent"))
                           && rebuiltWindow.contains(QStringLiteral("width=Math.min(t.width*.96,1120)"))

@@ -767,51 +767,42 @@ QString buildWindow(const QString &stock)
     }
     if (!found) return {};
 
-    // Redesign the native shell while retaining the player's live tabs, pages,
-    // callbacks and controls. Keep the embedded QML compact for older resource slots.
+    // Retain the native model, page callbacks, selection/discard handling and
+    // theme, but own the tab labels: UiSettingsButton's private column is
+    // left-aligned and uses UiTheme.fonts.bodyLarge, not the application font.
+    // Moving/sizing that opaque button cannot reliably centre its text.
     //
-    // Shape (v9). The stock pages are fixed-size surfaces: a ~520 px content
-    // column pinned to the top-left and a footer anchored to the bottom edge.
-    // Stretching such a page across the whole shell is what left everything
-    // hugging the left edge, and the footer landed outside the visible area.
-    // The shell therefore never stretches a page: it centres one bounded host
-    // card under the tab strip and lets the page inside it fill that card, so
-    // the page supplies its own surface and keeps the layout it was authored
-    // with, inside a frame that is balanced. The card is the only thing that
-    // changes size, and it shrinks with the player window instead of pushing
-    // tabs or the footer out of view.
-    // Every member the player's own QML reaches for (the
-    // iSelectedSettingControl StackLayout, its Loader delegates, the
-    // fChangeSelectedSetting callback and the six-level `parent` hop used by
-    // the rebuilt About page) keeps exactly the same depth, so page QML that
-    // was already shipped keeps resolving its bindings.
+    // TextMetrics measures the *same* font/text as the actual Text. Give its
+    // ink bounds 11 px on either side and cancel the left glyph bearing, so
+    // both the hit targets (4 px) and visible labels (26 px) have uniform gaps.
+    // The red dot stays inside that padding; icons sit below the centred label.
+    // A hidden sentinel removes its hit target, label, icon and one spacing.
     //
-    // The tab strip is inset 24 px on both sides and the slots divide that width
-    // exactly, so every tab keeps the same gap and the first and last slots sit
-    // the same distance from the window edge. The Column is closed before the
-    // page host, so the host fills the area below the header instead of being
-    // laid out inside the 56 px bar. A custom icon now replaces the label's
-    // place, vertically centred: it used to be painted over the centred text
-    // (unreadable) inside a bare Item, which is not a visual element, so it
-    // could not be shown at all.
+    // Keep the native 568 px page column and footer clearance, all loader
+    // callbacks, and the flat shell without an extra page card or tab pill.
+    // StackLayout fills its Loader children by default; anchoring those children
+    // as well conflicts with its geometry and produces native Qt warnings.
+    // The tightest known Window slot leaves only 1741 UTF-8 template bytes;
+    // short local ids and compact object boundaries keep this within that cap.
     QString replacement = QStringLiteral(R"QML(UiShadowContainer{//BSI v15
 id:iSettingsWindowShadowContainer;anchors.fill:parent
 property var bHidden
 property var bIcons:({})
-Rectangle{anchors.fill:parent;color:UiTheme.colors.primary80;radius:14
+Rectangle{id:r;property var q:UiTheme.colors;anchors.fill:parent;color:r.q.primary80;radius:14
 Column{anchors.fill:parent
-Item{width:parent.width;height:56
+Item{width:r.width;height:56
 MouseArea{anchors.fill:parent;onPressed:iSettingsWindow.startSystemMove()}
-Text{text:qsTr('Settings');color:UiTheme.colors.primary10;font:UiTheme.fonts.bodyLarge;anchors.centerIn:parent}
-UiImageButton{asset:'CloseIcon';x:parent.width-32;y:12;onClicked:iSettingsWindow.close()}}
-ListView{width:Math.min(contentWidth,parent.width-48);height:44;x:(parent.width-width)/2;clip:true;orientation:ListView.Horizontal;model:pSettingsItems.pSettingElements;spacing:4
-delegate:Item{visible:c!=='';property var c:iSettingsWindowShadowContainer.bIcons[index];width:c===''?-4:t.boundingRect(modelData.pButtonText).width+22;height:44
-UiSettingsButton{anchors.fill:parent;anchors.bottomMargin:c?26:0;pSettingIdx:index;pSettingBtnText:modelData.pButtonText;pSelected:index==pCurrentTabIndex;pShowRedDot:modelData.pShowRedDot;onSettingClicked:fChangeSelectedSetting(pSettingIdx)}
-FontMetrics{id:t}
-Image{source:c||'';width:18;height:18;x:parent.width/2-9;y:24;sourceSize.width:18;sourceSize.height:18}}}
-Item{width:Math.min(parent.width-48,568);x:(parent.width-width)/2;height:parent.height-118
+Text{id:h;text:qsTr('Settings');color:r.q.primary10;font:UiTheme.fonts.bodyLarge;anchors.centerIn:parent}
+UiImageButton{asset:'CloseIcon';x:r.width-32;y:12;onClicked:iSettingsWindow.close()}}
+ListView{width:Math.max(0,Math.min(contentWidth,r.width-48));height:44;x:(r.width-width)/2;clip:true;orientation:ListView.Horizontal;model:pSettingsItems.pSettingElements;spacing:4
+delegate:MouseArea{visible:c!=='';property var c:r.parent.bIcons[index];width:c===''?-4:m.boundingRect.width+22;height:44;onClicked:{fChangeSelectedSetting(index);forceActiveFocus()}
+Text{id:t;text:modelData.pButtonText;font:h.font;x:11-m.boundingRect.x;y:c?0:22-height/2;color:r.q[index==pCurrentTabIndex?'subWindowHeaderClick':'primary20']}
+TextMetrics{id:m;text:t.text;font:t.font}
+Rectangle{visible:modelData.pShowRedDot;x:parent.width-8;y:t.y+6;width:6;height:6;radius:3;color:r.q.dangerNormal}
+Image{source:c||'';width:18;height:18;x:parent.width/2-9;y:24}}}
+Item{width:Math.min(r.width-48,568);x:(r.width-width)/2;height:r.height-118
 StackLayout{id:iSelectedSettingControl;anchors.fill:parent;currentIndex:pCurrentTabIndex
-Repeater{model:pSettingsItems.pSettingElements;delegate:Loader{anchors.fill:parent;Component.onCompleted:setSource(modelData.pQmlSource,modelData.pComponentArgs||{});onLoaded:{item.anchors.fill=item.parent;modelData.pComponentObj=item;if(item.fOnQmlLoaded)item.fOnQmlLoaded()}}}}}
+Repeater{model:pSettingsItems.pSettingElements;delegate:Loader{Component.onCompleted:setSource(modelData.pQmlSource,modelData.pComponentArgs||{});onLoaded:{item.anchors.fill=item.parent;modelData.pComponentObj=item;if(item.fOnQmlLoaded)item.fOnQmlLoaded()}}}}}
 }
 }}
 )QML");
