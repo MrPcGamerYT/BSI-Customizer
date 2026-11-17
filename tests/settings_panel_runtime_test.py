@@ -129,6 +129,18 @@ _hidden_sentinel = 'QStringLiteral(":\\"\\"")'
 assert _hidden_sentinel in cpp, (
     "a hidden tab must still publish the empty (collapsed, unpainted) sentinel"
 )
+# Artwork that cannot fit the slot is written beside the player and referenced,
+# instead of failing the whole apply with "needs N bytes but its slot only holds
+# M". Base64 defeats compression, so embedding capped custom artwork at roughly
+# 600 bytes per slot; a file reference costs the document a short path.
+assert "QString writeAssetFile(" in cpp and 'QStringLiteral("file:///")' in cpp, \
+    "oversized artwork must be written beside the player, not embedded"
+assert "aboutFitProblem(image," in cpp, \
+    "the apply must test the real document against the real slot before choosing"
+assert "writtenAssets" in cpp and "QFile::remove(QUrl(path).toLocalFile())" in cpp, \
+    "a refused apply must remove the icons it wrote for that attempt"
+assert 'settings-panel-assets' in cpp, \
+    "assets belong in the app's own data folder, never inside the player's"
 assert "customTabIcons = byTabIndex(customTabIcons);" in cpp, \
     "the icon map must be re-keyed by tab index before it is published"
 assert "hiddenTabs = keys.keys();" in cpp, \

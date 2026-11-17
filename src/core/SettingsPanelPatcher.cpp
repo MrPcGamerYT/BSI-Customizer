@@ -208,6 +208,52 @@ bool saveAtomic(const QString &path, const QByteArray &bytes)
         && file.commit();
 }
 
+// Where a tab icon lives when it does not fit inside the About document.
+//
+// The About page is written into a small, compressed resource slot that the EXE
+// must not outgrow, and custom artwork used to be base64'd straight into it. That
+// made the slot the hard limit on artwork: base64 defeats compression, so roughly
+// 600 bytes of icon was all a shipped player could ever take, and a second icon
+// failed the whole apply with "needs N bytes but its slot only holds M".
+//
+// The page therefore points at an absolute file:/// URL in this folder, which
+// costs the document only a short path: the artwork is then limited by what the
+// image loader can read, not by the slot. If a player cannot serve file:// URLs
+// at all, apply() falls back to the embedded form, so nothing is lost - see the
+// comment there.
+QString assetDirectory(const QString &exePath)
+{
+    const QString canonical = QFileInfo(exePath).canonicalFilePath();
+    if (canonical.isEmpty()) return {};
+    const QString root = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation)
+        + QStringLiteral("/settings-panel-assets");
+    return QDir(root).filePath(QString::fromLatin1(sha256(canonical.toUtf8())));
+}
+
+// Write one icon and return the relative path the About page should use. Kept
+// inside the asset folder, with a name derived from the tab, so a rebuild
+// overwrites the previous icon instead of accumulating them.
+QString writeAssetFile(const QString &exePath, const QString &name, const QByteArray &bytes,
+                       const QString &suffix, QString *error)
+{
+    const QString dir = assetDirectory(exePath);
+    if (dir.isEmpty()) {
+        *error = QStringLiteral("The selected executable has no resolvable path to store icons beside.");
+        return {};
+    }
+    if (!QDir().mkpath(dir)) {
+        *error = QStringLiteral("The Settings-panel icon folder could not be created.");
+        return {};
+    }
+    const QString file = QDir(dir).filePath(name + QLatin1Char('.') + suffix);
+    if (!saveAtomic(file, bytes)) {
+        *error = QStringLiteral("A custom tab icon could not be saved next to the player.");
+        return {};
+    }
+    return QStringLiteral("file:///") + QDir::fromNativeSeparators(dir) + QLatin1Char('/')
+        + name + QLatin1Char('.') + suffix;
+}
+
 QVariantMap fail(const QString &message)
 {
     return {{QStringLiteral("ok"), false}, {QStringLiteral("msg"), message}};
@@ -1374,8 +1420,36 @@ State analyze(const QString &exePath)
 // a custom tab icon or logo is base64-pasted into that same document. The writer
 // can only rewrite a record in place or move it into space that is already free
 // inside the file (the EXE never grows), so an oversized About page fails the
-// whole apply. Measure it first and name the culprits: "needs 2495 bytes but its
-// slot only holds 2337" leaves the user with no idea which icon caused it.
+// whole apply.
+//
+// Does this exact About document fit the player's own resource slot? Split out of
+// aboutCapacityProblem() because apply() needs the answer while it is still
+// choosing between embedding artwork and pointing at it, not only to complain
+// afterwards. Returns an empty string when it fits (or when the slot cannot be
+// measured, in which case the write is still verified afterwards).
+QString aboutFitProblem(const QByteArray &image, const QByteArray &aboutBytes)
+{
+    QList<EmbeddedResources::Entry> matches;
+    for (const auto &entry : EmbeddedResources::list(image, true)) {
+        if (entry.format.compare(QLatin1String("qml"), Qt::CaseInsensitive) == 0
+            && entry.leaf.compare(kAboutLeaf, Qt::CaseInsensitive) == 0)
+            matches << entry;
+    }
+    if (matches.size() != 1 || matches.first().scanned) return {};
+    const auto &entry = matches.first();
+    const auto link = QtResources::findLink(image, entry.entryOff, entry.leaf);
+    if (!link.found || link.ambiguous) return {};
+    const EmbeddedResources::Budget room = EmbeddedResources::budget(image, entry.entryOff, entry.leaf);
+    if (!room.known) return {};
+    const qint64 payload = EmbeddedResources::payloadSizeFor(aboutBytes, entry.flags);
+    if (payload <= room.capacity) return {};
+    QString error;
+    if (QtResources::findFreeSpace(image, link, payload, &error) >= 0) return {};
+    return QStringLiteral("over");
+}
+
+// Measure it first and name the culprits: "needs 2495 bytes but its slot only
+// holds 2337" leaves the user with no idea which icon caused it.
 QString aboutCapacityProblem(const QByteArray &image, const QByteArray &aboutBytes,
                              const QVariantMap &customTabIcons, bool customLogo)
 {
@@ -1497,9 +1571,11 @@ QVariantMap apply(const QString &exePath, const QString &developerName,
     const int plainPayload = emptyPagePayload();
     // `logoSrc` is the resolved data URI for the About logo (not the stored
     // asset), so the document can be rebuilt with it on every pass.
-    const auto buildAssets = [&](int budget, QVariantMap *icons, QString *logoSrc,
-                                 QString *error) -> bool {
+    const auto buildAssets = [&](int budget, QVariantMap *icons, QVariantMap *iconFiles,
+                                 QVariantMap *logoFiles, QString *logoSrc, QString *error) -> bool {
         icons->clear();
+        iconFiles->clear();
+        logoFiles->clear();
         QString source;
         for (auto it = storedIcons.cbegin(); it != storedIcons.cend(); ++it) {
             const QString id = it.key().toCaseFolded();
@@ -1512,11 +1588,15 @@ QVariantMap apply(const QString &exePath, const QString &developerName,
             if (!storedAssetSource(shrunk, QStringLiteral("tab-icon"), &source, error))
                 return false;
             icons->insert(id, source);
+            // Keep the saved bytes too: if this icon cannot fit the document the
+            // caller writes it beside the player instead and points at it.
+            iconFiles->insert(id, shrunk);
         }
         if (hasCustomLogo) {
             const QVariantMap shrunkLogo = shrinkAsset(storedLogo, QStringLiteral("logo"), budget);
             if (!storedAssetSource(shrunkLogo, QStringLiteral("logo"), logoSrc, error))
                 return false;
+            logoFiles->insert(QStringLiteral("logo"), shrunkLogo);
         }
         return true;
     };
@@ -1532,14 +1612,18 @@ QVariantMap apply(const QString &exePath, const QString &developerName,
     // no error explained it. A low-fidelity icon is always better than none.
     int budget = artworkBudget(plainPayload, slotCapacity);
     QVariantMap bestIcons;
+    QVariantMap bestIconFiles;
+    QVariantMap bestLogoFiles;
     QString logoSource = current.aboutLogoSource;
     QString bestLogoSource = logoSource;
     qint64 bestPayload = -1;
     for (int pass = 0; pass < 8; ++pass) {
         QVariantMap icons;
+        QVariantMap iconFiles;
+        QVariantMap logoFiles;
         QString candidateLogo;
         QString assetError;
-        if (!buildAssets(budget, &icons, &candidateLogo, &assetError)) {
+        if (!buildAssets(budget, &icons, &iconFiles, &logoFiles, &candidateLogo, &assetError)) {
             if (pass == 0) return fail(assetError);
             break;
         }
@@ -1550,6 +1634,8 @@ QVariantMap apply(const QString &exePath, const QString &developerName,
         if (bestPayload < 0 || payload < bestPayload) {
             bestPayload = payload;
             bestIcons = icons;
+            bestIconFiles = iconFiles;
+            bestLogoFiles = logoFiles;
             bestLogoSource = candidateLogoSource;
         }
         if (slotCapacity <= 0 || payload <= slotCapacity) break;
@@ -1660,9 +1746,70 @@ QVariantMap apply(const QString &exePath, const QString &developerName,
     const QString rebuiltWindow = buildWindow(originalWindowText);
     if (rebuiltWindow.isEmpty())
         return fail(QStringLiteral("This BlueStacks build's Settings-window structure is not recognized. No file was changed."));
-    const QString rebuiltAbout = buildAbout(developerName, tagline, links, logoSource, hiddenTabs, customTabIcons);
+    const QString rebuiltAbout = buildAbout(developerName, tagline, links, publishedLogoSource,
+                                            hiddenTabs, publishedIcons);
     if (rebuiltAbout.isEmpty())
         return fail(QStringLiteral("The About page could not be generated; no file was changed."));
+    // Artwork that does not fit the slot is written into the app's own asset
+    // folder and referenced by an absolute file:/// URL, so the document keeps only
+    // short paths. That removes the old "one small icon, and no more" ceiling.
+    //
+    // This is real iframe content, though: some players refuse file:// URLs
+    // outright. So the file form is adopted only when its document genuinely fits;
+    // otherwise nothing is written and the embedded form ships exactly as before,
+    // and the strip shows only the icons that fitted. Unverified behaviour is never
+    // allowed to be worse than what it replaced.
+    QVariantMap publishedIcons = customTabIcons;
+    QString publishedLogoSource = logoSource;
+    QStringList writtenAssets;
+    const auto fits = [&](const QVariantMap &icons, const QString &logoSrc) {
+        return aboutFitProblem(image, buildAbout(developerName, tagline, links, logoSrc,
+                                                 hiddenTabs, icons).toUtf8()).isEmpty();
+    };
+    if (!fits(publishedIcons, publishedLogoSource)
+        && (bestIconFiles.size() > 0 || profile.contains(QStringLiteral("logo")))) {
+        QVariantMap byFile = customTabIcons;
+        QString assetError;
+        bool stored = true;
+        for (auto it = bestIconFiles.cbegin(); it != bestIconFiles.cend(); ++it) {
+            const QVariantMap asset = it.value().toMap();
+            const QByteArray bytes = QByteArray::fromBase64(asset.value(QStringLiteral("data")).toString().toLatin1());
+            const QString mime = asset.value(QStringLiteral("mime")).toString();
+            const QString suffix = mime == QLatin1String("image/png") ? QStringLiteral("png")
+                                                                      : QStringLiteral("svg");
+            const QString path = writeAssetFile(exePath, it.key() + QStringLiteral("-tab-icon"),
+                                                bytes, suffix, &assetError);
+            if (path.isEmpty()) {
+                stored = false;
+                writtenAssets.clear();
+                break;
+            }
+            writtenAssets << path;
+            byFile.insert(it.key(), path);
+        }
+        QString logoByFile = publishedLogoSource;
+        if (stored && profile.contains(QStringLiteral("logo")) && !bestLogoFiles.isEmpty()) {
+            const QVariantMap asset = bestLogoFiles.toMap();
+            const QByteArray bytes = QByteArray::fromBase64(asset.value(QStringLiteral("data")).toString().toLatin1());
+            const QString mime = asset.value(QStringLiteral("mime")).toString();
+            const QString suffix = mime == QLatin1String("image/png") ? QStringLiteral("png")
+                                                                     : QStringLiteral("svg");
+            const QString path = writeAssetFile(exePath, QStringLiteral("about-logo"), bytes,
+                                                suffix, &assetError);
+            if (!path.isEmpty()) writtenAssets << path;
+            else stored = false;
+            if (stored) logoByFile = path;
+        }
+        // Only adopt the file form if it genuinely fits: a half-written set would
+        // leave some tabs pointing at files and others at nothing.
+        if (stored && fits(byFile, logoByFile)) {
+            publishedIcons = byFile;
+            publishedLogoSource = logoByFile;
+        } else {
+            for (const QString &path : writtenAssets) QFile::remove(QUrl(path).toLocalFile());
+            writtenAssets.clear();
+        }
+    }
     QMap<QString, QByteArray> replacements {
         {current.window.path, utf8PreservingBom(rebuiltWindow, originals.value(current.window.path))},
         {current.about.path, utf8PreservingBom(rebuiltAbout, originals.value(current.about.path))},
@@ -1700,10 +1847,11 @@ QVariantMap apply(const QString &exePath, const QString &developerName,
         return fail(QStringLiteral("Could not save the feature-specific recovery snapshot. No executable resources were changed."));
 
     const QString capacityProblem = aboutCapacityProblem(
-        image, replacements.value(current.about.path), customTabIcons,
+        image, replacements.value(current.about.path), publishedIcons,
         profile.contains(QStringLiteral("logo")));
     if (!capacityProblem.isEmpty()) {
         if (!hadRecovery) QFile::remove(backup);
+        for (const QString &path : writtenAssets) QFile::remove(QUrl(path).toLocalFile());
         return fail(capacityProblem);
     }
 
@@ -1711,11 +1859,24 @@ QVariantMap apply(const QString &exePath, const QString &developerName,
     if (!result.value(QStringLiteral("ok")).toBool()) {
         // Preserve an existing valid recovery file; remove only the one created
         // by this attempt, so a failed first apply cannot masquerade as active.
+        // Assets written for this attempt go too: the EXE still points at the
+        // previous page, so leaving new files beside the player is litter.
         if (!hadRecovery) QFile::remove(backup);
+        for (const QString &path : writtenAssets) QFile::remove(QUrl(path).toLocalFile());
         return result;
     }
+    // Say which form was used. If the icons had to move out of the page, the user
+    // should know before they look at the strip: a player that refuses file:// URLs
+    // would show no icons, and that would otherwise be silent.
+    const QString assetNote = writtenAssets.isEmpty()
+        ? QString()
+        : QStringLiteral(" The artwork was %1 icon(s) - too large for this player's About "
+                         "slot - stored in the app's own asset folder and referenced from the "
+                         "page. If the icons do not appear after restarting, this player does "
+                         "not load images that way; choose a smaller SVG and rebuild.")
+              .arg(QString::number(writtenAssets.size()));
     return {{QStringLiteral("ok"), true},
-            {QStringLiteral("msg"), QStringLiteral("The compact, draggable Settings window, icon tabs and customizable About page were applied. A selective recovery snapshot was saved; restart BlueStacks to see it.")},
+            {QStringLiteral("msg"), QStringLiteral("The compact, draggable Settings window, icon tabs and customizable About page were applied. A selective recovery snapshot was saved; restart BlueStacks to see it.") + assetNote},
             {QStringLiteral("recovery"), result.value(QStringLiteral("id"))}};
 }
 
