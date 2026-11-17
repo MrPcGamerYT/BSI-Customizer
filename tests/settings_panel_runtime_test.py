@@ -745,9 +745,20 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
     icon_items = [item for item in strip_items if source_of(item) == published_icon]
     assert icon_items, "The published icon is not painted by any tab"
     assert sum(1 for src in painted if src) >= 1, "No tab painted a custom icon"
-    icon_mid = icon_items[0].mapToItem(first_tab, QPointF(icon_items[0].width() / 2, 0)).x()
-    assert abs(icon_mid - first_tab.width() / 2) < 2, \
-        "A custom icon must be horizontally centred in its tab"
+    # The icon is 18x18 at x = parent.width/2 - 9, inside the delegate's own
+    # Item, so its centre is the delegate's centre. Measure both against the same
+    # item rather than across the button, which is inset and taller.
+    icon = icon_items[0]
+    icon_centre = icon.mapToItem(strip_items[0].parentItem(), QPointF(icon.width() / 2, 0)).x()
+    delegate = icon.parentItem()
+    delegate_centre = delegate.mapToItem(strip_items[0].parentItem(),
+                                         QPointF(delegate.width() / 2, 0)).x()
+    assert icon.width() == 18 and icon.height() == 18, \
+        f"a custom icon must be drawn at 18x18, got {icon.width()}x{icon.height()}"
+    assert abs(icon_centre - delegate_centre) < 2, (
+        f"a custom icon must be horizontally centred in its tab "
+        f"(icon centre {icon_centre}, tab centre {delegate_centre})"
+    )
 
     about_component.deleteLater()
     mounted_component.deleteLater()
