@@ -5391,6 +5391,17 @@ Window {
                 const QVariantList liveTabs = panelState.tabs;
                 const QString hiddenTabId = liveTabs.size() > 1
                     ? liveTabs.at(1).toMap().value(QStringLiteral("id")).toString() : QString();
+                // The strip delegate identifies a tab by its index, not by a name
+                // derived from pQmlSource: that value is a QML url, and a url has no
+                // toLowerCase() and stringifies percent-encoded, so a name key could
+                // never match. Everything published into the icon map - including the
+                // empty "hidden" sentinel - is therefore keyed by index.
+                const QString hiddenTabKey = liveTabs.size() > 1
+                    ? QString::number(liveTabs.at(1).toMap().value(QStringLiteral("index")).toInt())
+                    : QString();
+                const QString iconTabKey = liveTabs.isEmpty()
+                    ? QString()
+                    : QString::number(liveTabs.first().toMap().value(QStringLiteral("index")).toInt());
                 const QVariantMap panelOptions {
                     {QStringLiteral("tagline"), QStringLiteral("Regression subtitle")},
                     {QStringLiteral("hiddenTabs"), hiddenTabId.isEmpty() ? QVariantList{} : QVariantList{hiddenTabId}},
@@ -5416,7 +5427,7 @@ Window {
                               && updatedWindow.contains(QStringLiteral("width:c===''?-4:"))
                               && updatedWindow.contains(QStringLiteral("clip:true;orientation:ListView.Horizontal"))
                               && updatedAbout.contains(QStringLiteral("property var bsiHiddenTabs:"))
-                              && (hiddenTabId.isEmpty() || updatedAbout.contains(hiddenTabId))
+                              && (hiddenTabId.isEmpty() || updatedAbout.contains(hiddenTabKey))
                               // Unticking a tab used to change nothing after a
                               // patch: the hidden list was published into bHidden
                               // and no strip delegate ever read it. buildAbout now
@@ -5424,14 +5435,14 @@ Window {
                               // an empty value, which the strip does collapse.
                               && (hiddenTabId.isEmpty()
                                   || updatedAbout.contains(
-                                      QStringLiteral("\"%1\":\"\"").arg(hiddenTabId)))
+                                      QStringLiteral("\"%1\":\"\"").arg(hiddenTabKey)))
                               && updatedAbout.contains(QStringLiteral("property var bsiTabIcons:"))
                               // The page must find the shell by walking up: counting parents reached
                               // the window and threw "Cannot assign to non-existent
                               // property bHidden", which is exactly why a saved custom
                               // tab icon applied and then never appeared.
                               && updatedAbout.contains(QStringLiteral("function fOnQmlLoaded(){var p=parent;while(p&&p.bIcons===undefined)p=p.parent;if(p){p.bHidden=bsiHiddenTabs;p.bIcons=bsiTabIcons}}"))
-                              && updatedAbout.contains(QStringLiteral("data:image/svg+xml;base64,"))
+                              && updatedAbout.contains(QStringLiteral("\"%1\":\"data:image/").arg(iconTabKey))
                               && updatedAbout.contains(QStringLiteral("BSI Panel Regression Updated"))
                               && updatedAbout.contains(QStringLiteral("Regression subtitle")),
                           QStringLiteral("the real %1 Settings rebuild writes hidden tabs, custom SVG icons, and a custom About logo into regenerated QML")

@@ -110,20 +110,41 @@ assert "orientation:ListView.Horizontal;model:pSettingsItems.pSettingElements" i
 assert "x:(parent.width-width)/2" in replacement, \
     "the tab strip must be centred in the window"
 assert "iSettingsWindowShadowContainer.bIcons[" in replacement
-# The lookup used to split the tab's QML path on "/" only. The live model can
-# report a Windows-style "qrc:\Settings\DisplaySetting.qml", and then the basename
-# never came off: the key stayed "qrc:\settings\displaysetting.qml" while the About
-# page published "displaysetting.qml". Nothing threw, the lookup returned
-# undefined, and the tab showed no icon - the silent failure this pins.
-# The class is written with a doubled backslash: the template is a C++ raw
-# string, so the JS sees a single escaped backslash and the split works.
-_icon_split = re.search(
-    r"pQmlSource\.toLowerCase\(\)\.split\(/\[(.+?)/\]/\)\.pop\(\)", replacement
+# The icon map is keyed by the tab's own index, not by a name derived from its
+# page path. `pQmlSource` is a QML `url`, and a url stringifies percent-encoded
+# (qrc:%5CSettings%5CPerformanceSetting.qml): calling .toLowerCase() on the url
+# itself threw "Property 'toLowerCase' ... is not a function", so the binding
+# failed and *no* tab ever got an icon — and even stringified, splitting on a
+# path separator could never match, because the backslash arrives as %5C.
+# Keying by index removes the string surgery from the player entirely.
+assert "bIcons[index]" in replacement, (
+    "the strip delegate must look its icon up by tab index; deriving a key from "
+    "pQmlSource cannot work because the value is a percent-encoded url"
 )
-assert _icon_split, "the icon lookup must strip the path down to its leaf"
-assert _icon_split.group(1) == "\\\\", (
-    f"the icon separator class must also match a backslash, got {_icon_split.group(1)!r}"
+assert ".toLowerCase()" not in replacement.split("bIcons[")[1].split("]")[0], \
+    "no string method may be called on the url that indexes the icon map"
+# Hidden tabs share that map, with an empty value as the sentinel, so the
+# published keys must be tab indices on both paths.
+_hidden_sentinel = 'QStringLiteral(":\\"\\"")'
+assert _hidden_sentinel in cpp, (
+    "a hidden tab must still publish the empty (collapsed, unpainted) sentinel"
 )
+# Artwork that cannot fit the slot is written beside the player and referenced,
+# instead of failing the whole apply with "needs N bytes but its slot only holds
+# M". Base64 defeats compression, so embedding capped custom artwork at roughly
+# 600 bytes per slot; a file reference costs the document a short path.
+assert "QString writeAssetFile(" in cpp and 'QStringLiteral("file:///")' in cpp, \
+    "oversized artwork must be written beside the player, not embedded"
+assert "aboutFitProblem(image," in cpp, \
+    "the apply must test the real document against the real slot before choosing"
+assert "writtenAssets" in cpp and "QFile::remove(QUrl(path).toLocalFile())" in cpp, \
+    "a refused apply must remove the icons it wrote for that attempt"
+assert 'settings-panel-assets' in cpp, \
+    "assets belong in the app's own data folder, never inside the player's"
+assert "customTabIcons = byTabIndex(customTabIcons);" in cpp, \
+    "the icon map must be re-keyed by tab index before it is published"
+assert "hiddenTabs = keys.keys();" in cpp, \
+    "the hidden-tab list must be re-keyed by tab index too, or hidden tabs reappear"
 # A tab is as wide as its own label plus a fixed 22 px of padding. Equal-width
 # slots are what made "Game settings" and "Devices" collide, and they left short
 # labels like "About" floating in a wide empty box: the fix is to let the label
@@ -630,9 +651,14 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
     about_icon = ("data:image/svg+xml;base64," + __import__("base64").b64encode(
         b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">'
         b'<circle cx="12" cy="12" r="9" fill="#63e6be"/></svg>').decode())
+    # Publish the icon the way SettingsPanelPatcher::apply() now does: keyed by
+    # the tab's own index. A key derived from pQmlSource cannot work, because the
+    # value is a percent-encoded url. "SettingPage.qml" is the first tab here.
+    # The delegate indexes with its own `index`, so the fixture must publish
+    # under that same number rather than a page name.
     about_qml = about_qml.replace(
         "@@BSI_TAB_ICONS@@",
-        '({"settingpage.qml":"' + about_icon + '"})')
+        '({"0":"' + about_icon + '"})')
     about_qml = about_qml.replace("@@BSI_LOGO_SOURCE@@", '""')
     about_path = root / "AboutHost.qml"
     about_path.write_text(about_qml, encoding="utf-8")
@@ -692,13 +718,13 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
         "The shell must declare bIcons for the About page to publish into"
     if hasattr(published_icons, "toVariant"):
         published_icons = published_icons.toVariant()
-    assert isinstance(published_icons, dict) and published_icons.get("settingpage.qml"), \
+    assert isinstance(published_icons, dict) and published_icons.get("0"), \
         f"The About page did not publish its tab icons to the shell (got {published_icons!r})"
     published_hidden = shell_root.property("bHidden")
     if hasattr(published_hidden, "toVariant"):
         published_hidden = published_hidden.toVariant()
     assert published_hidden == [], "The About page did not publish its hidden-tab list"
-    published_icon = published_icons["settingpage.qml"]
+    published_icon = published_icons["0"]
     assert published_icon.startswith("data:image/svg+xml;base64,"), \
         "The published tab icon must be a self-contained SVG data URI"
     # And the strip must actually paint it, centred, with the label lifted clear.
@@ -719,9 +745,20 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
     icon_items = [item for item in strip_items if source_of(item) == published_icon]
     assert icon_items, "The published icon is not painted by any tab"
     assert sum(1 for src in painted if src) >= 1, "No tab painted a custom icon"
-    icon_mid = icon_items[0].mapToItem(first_tab, QPointF(icon_items[0].width() / 2, 0)).x()
-    assert abs(icon_mid - first_tab.width() / 2) < 2, \
-        "A custom icon must be horizontally centred in its tab"
+    # The icon is 18x18 at x = parent.width/2 - 9, inside the delegate's own
+    # Item, so its centre is the delegate's centre. Measure both against the same
+    # item rather than across the button, which is inset and taller.
+    icon = icon_items[0]
+    icon_centre = icon.mapToItem(strip_items[0].parentItem(), QPointF(icon.width() / 2, 0)).x()
+    delegate = icon.parentItem()
+    delegate_centre = delegate.mapToItem(strip_items[0].parentItem(),
+                                         QPointF(delegate.width() / 2, 0)).x()
+    assert icon.width() == 18 and icon.height() == 18, \
+        f"a custom icon must be drawn at 18x18, got {icon.width()}x{icon.height()}"
+    assert abs(icon_centre - delegate_centre) < 2, (
+        f"a custom icon must be horizontally centred in its tab "
+        f"(icon centre {icon_centre}, tab centre {delegate_centre})"
+    )
 
     about_component.deleteLater()
     mounted_component.deleteLater()
