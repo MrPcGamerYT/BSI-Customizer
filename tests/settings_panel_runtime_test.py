@@ -651,9 +651,14 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
     about_icon = ("data:image/svg+xml;base64," + __import__("base64").b64encode(
         b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">'
         b'<circle cx="12" cy="12" r="9" fill="#63e6be"/></svg>').decode())
+    # Publish the icon the way SettingsPanelPatcher::apply() now does: keyed by
+    # the tab's own index. A key derived from pQmlSource cannot work, because the
+    # value is a percent-encoded url. "SettingPage.qml" is the first tab here.
+    # The delegate indexes with its own `index`, so the fixture must publish
+    # under that same number rather than a page name.
     about_qml = about_qml.replace(
         "@@BSI_TAB_ICONS@@",
-        '({"settingpage.qml":"' + about_icon + '"})')
+        '({"0":"' + about_icon + '"})')
     about_qml = about_qml.replace("@@BSI_LOGO_SOURCE@@", '""')
     about_path = root / "AboutHost.qml"
     about_path.write_text(about_qml, encoding="utf-8")
@@ -719,7 +724,9 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
     if hasattr(published_hidden, "toVariant"):
         published_hidden = published_hidden.toVariant()
     assert published_hidden == [], "The About page did not publish its hidden-tab list"
-    published_icon = published_icons["settingpage.qml"]
+    assert published_icons.get("0"), \
+        f"the About page must publish the icon under the first tab's index (got {published_icons!r})"
+    published_icon = published_icons["0"]
     assert published_icon.startswith("data:image/svg+xml;base64,"), \
         "The published tab icon must be a self-contained SVG data URI"
     # And the strip must actually paint it, centred, with the label lifted clear.
