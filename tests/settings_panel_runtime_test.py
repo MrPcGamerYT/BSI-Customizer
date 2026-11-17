@@ -110,20 +110,29 @@ assert "orientation:ListView.Horizontal;model:pSettingsItems.pSettingElements" i
 assert "x:(parent.width-width)/2" in replacement, \
     "the tab strip must be centred in the window"
 assert "iSettingsWindowShadowContainer.bIcons[" in replacement
-# The lookup used to split the tab's QML path on "/" only. The live model can
-# report a Windows-style "qrc:\Settings\DisplaySetting.qml", and then the basename
-# never came off: the key stayed "qrc:\settings\displaysetting.qml" while the About
-# page published "displaysetting.qml". Nothing threw, the lookup returned
-# undefined, and the tab showed no icon - the silent failure this pins.
-# The class is written with a doubled backslash: the template is a C++ raw
-# string, so the JS sees a single escaped backslash and the split works.
-_icon_split = re.search(
-    r"pQmlSource\.toLowerCase\(\)\.split\(/\[(.+?)/\]/\)\.pop\(\)", replacement
+# The icon map is keyed by the tab's own index, not by a name derived from its
+# page path. `pQmlSource` is a QML `url`, and a url stringifies percent-encoded
+# (qrc:%5CSettings%5CPerformanceSetting.qml): calling .toLowerCase() on the url
+# itself threw "Property 'toLowerCase' ... is not a function", so the binding
+# failed and *no* tab ever got an icon — and even stringified, splitting on a
+# path separator could never match, because the backslash arrives as %5C.
+# Keying by index removes the string surgery from the player entirely.
+assert "bIcons[index]" in replacement, (
+    "the strip delegate must look its icon up by tab index; deriving a key from "
+    "pQmlSource cannot work because the value is a percent-encoded url"
 )
-assert _icon_split, "the icon lookup must strip the path down to its leaf"
-assert _icon_split.group(1) == "\\\\", (
-    f"the icon separator class must also match a backslash, got {_icon_split.group(1)!r}"
+assert ".toLowerCase()" not in replacement.split("bIcons[")[1].split("]")[0], \
+    "no string method may be called on the url that indexes the icon map"
+# Hidden tabs share that map, with an empty value as the sentinel, so the
+# published keys must be tab indices on both paths.
+_hidden_sentinel = 'QStringLiteral(":\\"\\"")'
+assert _hidden_sentinel in cpp, (
+    "a hidden tab must still publish the empty (collapsed, unpainted) sentinel"
 )
+assert "customTabIcons = byTabIndex(customTabIcons);" in cpp, \
+    "the icon map must be re-keyed by tab index before it is published"
+assert "hiddenTabs = keys.keys();" in cpp, \
+    "the hidden-tab list must be re-keyed by tab index too, or hidden tabs reappear"
 # A tab is as wide as its own label plus a fixed 22 px of padding. Equal-width
 # slots are what made "Game settings" and "Devices" collide, and they left short
 # labels like "About" floating in a wide empty box: the fix is to let the label

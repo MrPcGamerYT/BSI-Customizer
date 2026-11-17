@@ -737,7 +737,7 @@ MouseArea{anchors.fill:parent;onPressed:iSettingsWindow.startSystemMove()}
 Text{text:qsTr('Settings');color:UiTheme.colors.primary10;font:UiTheme.fonts.bodyLarge;anchors.centerIn:parent}
 UiImageButton{asset:'CloseIcon';x:parent.width-32;y:12;onClicked:iSettingsWindow.close()}}
 ListView{width:Math.min(contentWidth,parent.width-48);height:44;x:(parent.width-width)/2;clip:true;orientation:ListView.Horizontal;model:pSettingsItems.pSettingElements;spacing:4
-delegate:Item{visible:c!=='';property var c:iSettingsWindowShadowContainer.bIcons[modelData.pQmlSource.toLowerCase().split(/[\\/]/).pop()];width:c===''?-4:t.boundingRect(modelData.pButtonText).width+22;height:44
+delegate:Item{visible:c!=='';property var c:iSettingsWindowShadowContainer.bIcons[index];width:c===''?-4:t.boundingRect(modelData.pButtonText).width+22;height:44
 UiSettingsButton{anchors.fill:parent;anchors.bottomMargin:c?26:0;pSettingIdx:index;pSettingBtnText:modelData.pButtonText;pSelected:index==pCurrentTabIndex;pShowRedDot:modelData.pShowRedDot;onSettingClicked:fChangeSelectedSetting(pSettingIdx)}
 FontMetrics{id:t}
 Image{source:c;width:18;height:18;x:parent.width/2-9;y:24}}}
@@ -1561,6 +1561,38 @@ QVariantMap apply(const QString &exePath, const QString &developerName,
     // ever written with a truncated page.
     customTabIcons = bestIcons;
     logoSource = bestLogoSource;
+    // Identity for the strip delegate. `pQmlSource` is a QML url, and a url
+    // stringifies percent-encoded (qrc:%5CSettings%5CPerformanceSetting.qml), so
+    // splitting it on a path separator never yielded a leaf name: the lookup
+    // returned undefined for every tab and no custom icon was ever drawn. The
+    // delegate already knows its own `index`, so key the published map by that
+    // instead. No string surgery happens inside the player, and the keys are
+    // shorter than leaf names, which buys back bytes in the About slot too.
+    const auto byTabIndex = [&current](const QVariantMap &byId) {
+        QVariantMap out;
+        for (const QVariant &entry : current.tabs) {
+            const QVariantMap tab = entry.toMap();
+            const QString id = tab.value(QStringLiteral("id")).toString().toCaseFolded();
+            if (byId.contains(id))
+                out.insert(QString::number(tab.value(QStringLiteral("index")).toInt()),
+                           byId.value(id));
+        }
+        return out;
+    };
+    customTabIcons = byTabIndex(customTabIcons);
+    // Hidden tabs travel in the same map, with an empty value as the sentinel,
+    // so re-key them together: converting the icon map alone left an empty map
+    // whenever no icons were set, and every hidden tab reappeared.
+    if (!hiddenTabs.isEmpty()) {
+        QStringList hiddenById;
+        for (const QString &id : hiddenTabs) hiddenById << id;
+        const QVariantMap keys = byTabIndex([&hiddenById] {
+            QVariantMap map;
+            for (const QString &id : hiddenById) map.insert(id, QString());
+            return map;
+        }());
+        hiddenTabs = keys.keys();
+    }
     const bool hasPatchMarker = hasWindowMarker(current.window.text)
         || current.about.text.contains(kAboutMarker);
     QMap<QString, QByteArray> originals;
