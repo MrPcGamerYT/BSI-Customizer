@@ -41,10 +41,13 @@ QString mask(const QString &qml)
 
 QString compactIndentation(const QString &qml)
 {
-    // mask() deliberately does not parse JS template-literal interpolation.
-    // Refuse to compact those documents rather than change literal whitespace.
+    // mask() is not a full JS lexer: template interpolation and regex literals
+    // can contain quotes. Leave ambiguous fragments untouched rather than
+    // accidentally strip whitespace from a literal. This also conservatively
+    // skips fragments with division; native Settings prefixes do not need it.
     if (qml.contains(QLatin1Char('`'))) return qml;
     const QString masked = mask(qml);
+    if (masked.contains(QLatin1Char('/'))) return qml;
     QString out;
     out.reserve(qml.size());
     bool lineStart = true;

@@ -35,6 +35,8 @@ def compact_indentation(qml):
     if "`" in qml:
         return qml
     masked = mask(qml)
+    if "/" in masked:
+        return qml  # Regex/division ambiguity: the native prefix needs neither.
     result, line_start = [], True
     for char, marked in zip(qml, masked):
         if line_start and char in " \t" and marked == char:
@@ -60,9 +62,11 @@ rebuilt = stock[:start] + shell + stock[end:]
 close = rebuilt.rfind("\n}")
 assert close >= 0
 rebuilt = rebuilt[:close] + helper + rebuilt[close:]
-assert "return QmlText::compactIndentation(out);" in CPP, "the production builder must compact the full window, not just the shell"
-compact = compact_indentation(rebuilt)
-assert compact_indentation(compact) == compact
+assert "QString out = QmlText::compactIndentation(stock.left(target.nameBegin));" in CPP, "compact the native prefix as well as keeping the generated shell small"
+compact = compact_indentation(stock[:start]) + shell + stock[end:]
+compact_close = compact.rfind("\n}")
+compact = compact[:compact_close] + helper + compact[compact_close:]
+assert compact_indentation(compact_indentation(stock[:start])) == compact_indentation(stock[:start])
 # Every token, callback, string, notice and line ending remains; only leading
 # horizontal whitespace outside strings may disappear.
 assert re.sub(r"(?m)^[ \t]+", "", rebuilt) == re.sub(r"(?m)^[ \t]+", "", compact)
@@ -88,4 +92,7 @@ assert "'  preserve spaces'" in small
 assert small.endswith("}\r\n")
 template = "  QtObject { property string t: `first\n    ${1 + 2} second` }\n"
 assert compact_indentation(template) == template
+regex = "  QtObject { function f() { return /'/g; } property string t: 'first\\\n    second' }\n"
+assert compact_indentation(regex) == regex
+assert compact_indentation("  Item { width: 100 / 2 }\n") == "  Item { width: 100 / 2 }\n"
 print(f"PASS: complete legacy Settings window fits its real qCompress slot ({after}/2468 bytes, was {before}); native callbacks, notices and literal whitespace survive")

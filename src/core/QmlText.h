@@ -16,7 +16,8 @@ QString mask(const QString &qml);
 
 // Remove only leading spaces/tabs outside quoted literals. Keep line endings,
 // tokens and comments (including copyright notices); never join JS statements.
-// Template literals are conservatively left completely unchanged.
+// Fragments with template literals or unmasked slashes (regex/division) are
+// conservatively left completely unchanged.
 QString compactIndentation(const QString &qml);
 
 struct Object

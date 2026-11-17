@@ -807,8 +807,13 @@ Repeater{model:pSettingsItems.pSettingElements;delegate:Loader{Component.onCompl
 }
 }}
 )QML");
-    QString out = stock;
-    out.replace(target.nameBegin, target.end - target.nameBegin, replacement);
+    // Older MSI/BlueStacks sources have a 2468-byte compressed slot. Retaining
+    // the native callback prefix is essential, but its indentation is not.
+    // Compact only that prefix (the generated shell is already compact), keeping
+    // literals, copyright notices, line endings and JS statement breaks intact.
+    QString out = QmlText::compactIndentation(stock.left(target.nameBegin));
+    out += replacement;
+    out += stock.mid(target.end);
     // Make the redesigned Settings window use the available player viewport,
     // with a comfortable desktop cap and centered placement on smaller screens.
     const QString helper = QStringLiteral(R"QML(onVisibleChanged:if(visible&&transientParent){var t=transientParent;width=Math.min(t.width*.96,1120);height=Math.min(t.height*.94,670);x=t.x+t.width/2-width/2;y=t.y+t.height/2-height/2})QML");
@@ -816,11 +821,7 @@ Repeater{model:pSettingsItems.pSettingElements;delegate:Loader{Component.onCompl
     if (rootClose < 0) return {};
     out.insert(rootClose, helper);
     if (!out.contains(kWindowDesignMarker)) return {};
-    // Older MSI/BlueStacks sources have a 2468-byte compressed slot. Retaining
-    // their native callbacks is essential, but indentation is not: removing
-    // just leading whitespace gives the complete document compression headroom
-    // without touching literals, comments, line endings or JS statement breaks.
-    return QmlText::compactIndentation(out);
+    return out;
 }
 
 // The player delegate indexes this map with its native model index. Keep the

@@ -2356,6 +2356,11 @@ int runPatchRegressionTests()
         const QString templateLiteral = QStringLiteral("  QtObject { property string t: `first\n    ${1 + 2} second` }\n");
         check(QmlText::compactIndentation(templateLiteral) == templateLiteral,
               "QML indentation compaction conservatively leaves template literals untouched");
+        const QString regexLiteral = QStringLiteral("  QtObject { function f() { return /'/g; } property string t: 'first\\\n    second' }\n");
+        check(QmlText::compactIndentation(regexLiteral) == regexLiteral
+                  && QmlText::compactIndentation(QStringLiteral("  Item { width: 100 / 2 }\n"))
+                      == QLatin1String("  Item { width: 100 / 2 }\n"),
+              "QML prefix compaction preserves ambiguous regex quotes and slash expressions");
     }
 
 #if defined(Q_OS_WIN) && defined(Q_PROCESSOR_X86_64)
