@@ -110,6 +110,20 @@ assert "orientation:ListView.Horizontal;model:pSettingsItems.pSettingElements" i
 assert "x:(parent.width-width)/2" in replacement, \
     "the tab strip must be centred in the window"
 assert "iSettingsWindowShadowContainer.bIcons[" in replacement
+# The lookup used to split the tab's QML path on "/" only. The live model can
+# report a Windows-style "qrc:\Settings\DisplaySetting.qml", and then the basename
+# never came off: the key stayed "qrc:\settings\displaysetting.qml" while the About
+# page published "displaysetting.qml". Nothing threw, the lookup returned
+# undefined, and the tab showed no icon - the silent failure this pins.
+# The class is written with a doubled backslash: the template is a C++ raw
+# string, so the JS sees a single escaped backslash and the split works.
+_icon_split = re.search(
+    r"pQmlSource\.toLowerCase\(\)\.split\(/\[(.+?)/\]/\)\.pop\(\)", replacement
+)
+assert _icon_split, "the icon lookup must strip the path down to its leaf"
+assert _icon_split.group(1) == "\\\\", (
+    f"the icon separator class must also match a backslash, got {_icon_split.group(1)!r}"
+)
 # A tab is as wide as its own label plus a fixed 22 px of padding. Equal-width
 # slots are what made "Game settings" and "Devices" collide, and they left short
 # labels like "About" floating in a wide empty box: the fix is to let the label
