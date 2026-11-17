@@ -39,6 +39,29 @@ QString mask(const QString &qml)
     return out;
 }
 
+QString compactIndentation(const QString &qml)
+{
+    // mask() is not a full JS lexer: template interpolation and regex literals
+    // can contain quotes. Leave ambiguous fragments untouched rather than
+    // accidentally strip whitespace from a literal. This also conservatively
+    // skips fragments with division; native Settings prefixes do not need it.
+    if (qml.contains(QLatin1Char('`'))) return qml;
+    const QString masked = mask(qml);
+    if (masked.contains(QLatin1Char('/'))) return qml;
+    QString out;
+    out.reserve(qml.size());
+    bool lineStart = true;
+    for (qsizetype i = 0; i < qml.size(); ++i) {
+        const QChar c = qml.at(i);
+        if (lineStart && (c == QLatin1Char(' ') || c == QLatin1Char('\t'))
+            && masked.at(i) == c)
+            continue;
+        out += c;
+        lineStart = c == QLatin1Char('\n') || c == QLatin1Char('\r');
+    }
+    return out;
+}
+
 static int closeBrace(const QString &m, int open)
 {
     int depth = 0;

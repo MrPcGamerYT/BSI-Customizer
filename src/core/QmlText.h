@@ -14,6 +14,12 @@ namespace QmlText {
 // the exact length of the input, so offsets map back onto the source text.
 QString mask(const QString &qml);
 
+// Remove only leading spaces/tabs outside quoted literals. Keep line endings,
+// tokens and comments (including copyright notices); never join JS statements.
+// Fragments with template literals or unmasked slashes (regex/division) are
+// conservatively left completely unchanged.
+QString compactIndentation(const QString &qml);
+
 struct Object
 {
     int nameBegin = -1; // first character of the type name (may be qualified)

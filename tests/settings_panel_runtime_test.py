@@ -11,15 +11,16 @@ import re
 import tempfile
 import urllib.parse
 import zlib
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("QSG_RHI_BACKEND", "software")
 
 from PySide6.QtCore import QObject, QPointF, Property, Qt, Slot, QUrl
-from PySide6.QtGui import QGuiApplication
+from PySide6.QtGui import QColor, QGuiApplication, QImage
 from PySide6.QtQuick import QQuickItem, QQuickWindow
-from PySide6.QtQml import QQmlComponent, QQmlEngine
+from PySide6.QtQml import QQmlComponent, QQmlEngine, QQmlExpression
 from PySide6.QtTest import QTest
 
 
@@ -94,8 +95,9 @@ assert "property var bsiTabIcons:@@BSI_TAB_ICONS@@" in cpp
 # The shell must not ship its own palette: it paints with the player's own
 # theme object, exactly like the stock Settings window, so it follows whatever
 # the emulator currently looks like instead of a colour frozen into the patch.
-assert "color:UiTheme.colors.primary80" in replacement
-assert "color:UiTheme.colors.primary10" in replacement
+assert "property var q:UiTheme.colors" in replacement
+assert "color:r.q.primary80" in replacement
+assert "color:r.q.primary10" in replacement
 assert "#0d0f14" not in replacement and 'color:"white"' not in replacement, \
     "the rebuilt shell must not hard-code colours"
 assert 'color:"' not in replacement, "no literal colours may be baked into the shell"
@@ -103,13 +105,14 @@ assert "MouseArea{anchors.fill:parent;onPressed:iSettingsWindow.startSystemMove(
     "the whole header band must drag the window"
 assert "anchors.centerIn:parent" in replacement, \
     "the title must be centred in the header band"
-assert "ListView{width:Math.min(contentWidth,parent.width-48);height:44" in replacement
+assert "ListView{width:Math.max(0,Math.min(contentWidth,r.width-48));height:44" in replacement
 assert "orientation:ListView.Horizontal;model:pSettingsItems.pSettingElements" in replacement
 # The strip spans the shell with a symmetric 24 px inset so the first and last
 # tabs sit equally far from the window edge.
-assert "x:(parent.width-width)/2" in replacement, \
+assert "x:(r.width-width)/2" in replacement, \
     "the tab strip must be centred in the window"
 assert "iSettingsWindowShadowContainer.bIcons[" in replacement
+assert "r.parent.bIcons" not in replacement, "native shadow containers reparent their default children"
 # The icon map is keyed by the tab's own index, not by a name derived from its
 # page path. `pQmlSource` is a QML `url`, and a url stringifies percent-encoded
 # (qrc:%5CSettings%5CPerformanceSetting.qml): calling .toLowerCase() on the url
@@ -133,58 +136,52 @@ assert _hidden_sentinel in cpp, (
 # instead of failing the whole apply with "needs N bytes but its slot only holds
 # M". Base64 defeats compression, so embedding capped custom artwork at roughly
 # 600 bytes per slot; a file reference costs the document a short path.
-assert "QString writeAssetFile(" in cpp and 'QStringLiteral("file:///")' in cpp, \
-    "oversized artwork must be written beside the player, not embedded"
+assert "QString writeAssetFile(" in cpp and "QUrl::fromLocalFile(file).toString(QUrl::FullyEncoded)" in cpp, \
+    "referenced artwork must use correctly encoded absolute file URLs"
 assert "aboutFitProblem(image," in cpp, \
     "the apply must test the real document against the real slot before choosing"
-assert "writtenAssets" in cpp and "QFile::remove(QUrl(path).toLocalFile())" in cpp, \
-    "a refused apply must remove the icons it wrote for that attempt"
+assert "StagedAssetFiles stagedAssets" in cpp and "if (!committed)" in cpp, \
+    "a refused apply must remove only files newly created for that attempt"
+assert "sha256(bytes).left(24)" in cpp and "existing != bytes" in cpp, \
+    "replacement images need immutable URLs so failed applies cannot overwrite live artwork"
 assert 'settings-panel-assets' in cpp, \
     "assets belong in the app's own data folder, never inside the player's"
-assert "customTabIcons = byTabIndex(customTabIcons);" in cpp, \
-    "the icon map must be re-keyed by tab index before it is published"
+assert "customTabIcons = byTabIndex(customTabIcons, current.tabs);" in cpp, \
+    "the embedded icon map must be re-keyed by tab index before it is published"
+assert "byFile = byTabIndex(byFile, current.tabs);" in cpp, \
+    "file references must use numeric keys too, not leave an unloadable data URI in the numeric slot"
+assert 'bestLogoFiles.value(QStringLiteral("logo")).toMap()' in cpp, \
+    "the logo asset must be unpacked before its bytes are written"
+assert "runtimeAssetPng(it.value().toMap(), true)" in cpp, \
+    "runtime icons must not depend on the player's optional SVG decoder"
+assert "QXmlStreamReader xml(bytes)" in cpp and "!QSvgRenderer(bytes).isValid()" in cpp, \
+    "malformed SVGs must fail when selected rather than apply as blank icons"
 assert "hiddenTabs = keys.keys();" in cpp, \
     "the hidden-tab list must be re-keyed by tab index too, or hidden tabs reappear"
-# A tab is as wide as its own label plus a fixed 22 px of padding. Equal-width
-# slots are what made "Game settings" and "Devices" collide, and they left short
-# labels like "About" floating in a wide empty box: the fix is to let the label
-# size the tab.
-assert "width:c===''?-4:t.boundingRect(modelData.pButtonText).width+22;height:44" in replacement, \
-    "each tab must be sized by its own label, not by an equal share of the strip"
-# Measuring with the theme's body font was the other half of the ragged row:
-# that font is smaller than the one the native button draws its label in, so long
-# labels like "Game settings" overflowed their measured width and ate into the
-# spacing while short ones kept theirs. A bare FontMetrics inherits the same
-# application font the label inherits, which makes every gap identical.
-assert "FontMetrics{id:t}" in replacement, \
-    "the tab must measure its label with the same font it draws it in"
-assert "font:UiTheme.fonts.bodyMedium}\n" not in replacement, \
-    "measuring with the theme body font shrank wide tabs and broke the even gaps"
-# The advance includes each glyph's side bearings, and they differ per label by
-# up to ~3 px, so sizing on the advance left different visible space beside each
-# word ("Game settings" nearly touched "Devices" while "Display" floated). Sizing
-# on the ink keeps the same padding beside every label.
-assert "t.boundingRect(modelData.pButtonText).width" in replacement, \
-    "the tab must be sized by the ink of its label, not its advance"
-assert "advanceWidth(" not in replacement, \
-    "advance includes side bearings, which makes the visible gaps uneven"
-# Even gaps: the ListView sets one spacing value for every gap, so the space
-# between any two neighbouring tabs is identical no matter how long the labels
-# are. Doing this with padding inside an equal-width slot is what produced the
-# ragged row the user rejected.
+# Own the actual label instead of relying on UiSettingsButton's private,
+# left-aligned column. Measure the exact same themed font that Text draws.
+assert "UiSettingsButton{" not in replacement, \
+    "the stock tab button's private label is left aligned"
+assert "Text{id:t;text:modelData.pButtonText;font:h.font;" in replacement
+assert "font:UiTheme.fonts.bodyLarge;anchors.centerIn:parent" in replacement
+assert "TextMetrics{id:m;text:t.text;font:t.font}" in replacement, \
+    "width and bearing must use the actual label's font and text"
+assert "width:c===''?-4:m.boundingRect.width+22;height:44" in replacement, \
+    "each hit target must fit its own label plus 11 px on each side"
+assert "x:11-m.boundingRect.x" in replacement, \
+    "cancel glyph bearings so the label's ink, not just its Text box, is centred"
+assert "advanceWidth(" not in replacement
 assert ";spacing:4" in replacement, \
-    "every gap between tabs must come from one spacing value"
-# A custom icon sits centred in the tab with the native label lifted to the top,
-# instead of being painted over the text.
-assert "anchors.bottomMargin:c?26:0" in replacement, "the label must move up when an icon is shown"
-assert "Image{source:c;width:18;height:18;x:parent.width/2-9;y:24;sourceSize.width:18;sourceSize.height:18}" \
-    in replacement, "the icon must be centred in the tab at exactly 18x18"
-# Collapsing the width hid the tab's box but not its label: the button inside the
-# delegate kept painting its text, so "Customise" and "Advanced" smeared over the
-# tabs beside them while their slot was already closed. The delegate has to be
-# invisible as well, not just zero sized.
-assert "delegate:Item{visible:c!=='';" in replacement, \
-    "a hidden tab must not paint its label over its neighbours"
+    "all hit-target gaps must be exactly 4 px (all label gaps exactly 26 px)"
+assert "y:c?0:22-height/2" in replacement, \
+    "labels must be centred vertically or lifted above their icon"
+assert "Image{source:c||'';width:18;height:18;x:parent.width/2-9;y:24}" in replacement
+# The badge must not shift the label, and the full padded tab remains clickable.
+assert "x:parent.width-8;y:t.y+6;width:6;height:6" in replacement
+assert "visible:modelData.pShowRedDot" in replacement
+assert "onClicked:{fChangeSelectedSetting(index);forceActiveFocus()}" in replacement
+assert "delegate:MouseArea{visible:c!=='';" in replacement, \
+    "a hidden tab must neither paint nor intercept clicks"
 # A hidden tab has to leave the strip *without leaving a gap behind*. Publishing
 # bHidden into the shell did nothing at all, because no strip delegate ever read
 # it. Collapsing the tab to zero width was not enough either: a ListView puts its
@@ -197,31 +194,24 @@ assert "width:c===''?-4:" in replacement, \
 assert "clip:true" in replacement, \
     "the strip must clip so overflowing tabs cannot paint outside the window"
 
-# Every category must stay reachable: the strip divides the shell width into
-# equal slots instead of letting the last tab be half-clipped at the edge.
+# Every category must stay reachable by scrolling when the strip overflows.
 assert "item.anchors.fill=item.parent" in replacement
 # The page keeps the native, centred 568 px column it has always used. It is
 # NOT wrapped in a card and the shell paints no pill or underline behind the
 # selected tab: that redesign was rejected, the flat window is what ships.
-assert "Item{width:Math.min(parent.width-48,568);x:(parent.width-width)/2;height:parent.height-118" in replacement, \
+assert "Item{width:Math.min(r.width-48,568);x:(r.width-width)/2;height:r.height-118" in replacement, \
     "the page host must leave room for the footer inside the rounded window"
 assert "border.color" not in replacement and "radius:12" not in replacement, \
     "the rejected card must not come back"
 assert "visible:s" not in replacement, \
     "the rejected underline/pill must not come back"
-assert "Rectangle{anchors.fill:parent;color:UiTheme.colors.primary80;radius:14" in replacement, \
+assert "Rectangle{id:r;property var q:UiTheme.colors;anchors.fill:parent;color:r.q.primary80;radius:14" in replacement, \
     "the window itself stays a single flat rounded surface"
 assert "StackLayout{id:iSelectedSettingControl;anchors.fill:parent;currentIndex:pCurrentTabIndex" in replacement
-# The whole UiSettingsWindow.qml has to fit one resource slot in the player EXE,
-# and it can never be moved once the file is larger than the slot. A shipped
-# BlueStacks 5.10 build reports 2468 bytes there and a real apply of an earlier
-# draft of this shell needed 2479 ("needs 2479 bytes but its slot only holds
-# 2468"), which is the hard failure this test exists to prevent. Keep the
-# template far enough under that ceiling that the surrounding marker check, the
-# BOM handling and any future stock prefix still fit: 1900 leaves ~570 bytes of
-# headroom against the measured slot. The measured surrounding overhead is 727
-# bytes, so 2468 - 727 = 1741 is the hard limit for this template; it currently
-# sits at 1732 (2459 in the slot), which is the whole margin there is.
+# Keep a coarse template-bloat guard, but this is not proof that the compressed
+# whole window fits: native callbacks/prefix and compression entropy matter too.
+# settings_panel_window_budget_test reconstructs the complete 2468-byte legacy
+# resource, including the original native prefix and the geometry helper.
 assert len(replacement.encode()) <= 1741, (
     f"shell grew to {len(replacement.encode())} bytes; the tightest known "
     "UiSettingsWindow.qml slot is 2468 bytes"
@@ -282,10 +272,11 @@ assert "width:c===''?-4:" in replacement, \
     "the strip must collapse a tab the About page marks hidden"
 assert "fCheckForUpdateCallback" in about_doc and "fUpdateShortDisplayName" in about_doc, \
     "the native About callbacks must survive compaction"
-assert "delegate:Loader{anchors.fill:parent;Component.onCompleted:setSource(modelData.pQmlSource" in replacement
-assert "pSettingBtnText:" in replacement and "pSelected:index==pCurrentTabIndex" in replacement and "pShowRedDot:modelData.pShowRedDot" in replacement
-assert "pSettingIdx:index" in replacement
-assert "fChangeSelectedSetting(pSettingIdx)" in replacement
+assert "delegate:Loader{Component.onCompleted:setSource(modelData.pQmlSource" in replacement
+assert "text:modelData.pButtonText" in replacement
+assert "color:r.q[index==pCurrentTabIndex?'subWindowHeaderClick':'primary20']" in replacement
+assert "visible:modelData.pShowRedDot" in replacement
+assert "fChangeSelectedSetting(index)" in replacement
 
 # The runtime validator that decides whether a player may be rebuilt must accept
 # the rebuilt shell's own spelling. It used to look only for the stock
@@ -332,12 +323,14 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
         "module BsiSettingsFixture\n"
         "UiShadowContainer 1.0 UiShadowContainer.qml\n"
         "UiImageButton 1.0 UiImageButton.qml\n"
-        "UiSettingsButton 1.0 UiSettingsButton.qml\n"
         "singleton UiTheme 1.0 UiTheme.qml\n",
         encoding="utf-8",
     )
     (module / "UiShadowContainer.qml").write_text(
-        "import QtQuick 2.15\nItem { }\n", encoding="utf-8"
+        "import QtQuick 2.15\n"
+        "Item { default property alias children: content.data\n"
+        "    Item { id: content; anchors.fill: parent }\n"
+        "}\n", encoding="utf-8"
     )
     (module / "UiImageButton.qml").write_text(
         "import QtQuick 2.15\n"
@@ -348,21 +341,6 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
         "    property int pImageHeight: 16\n"
         "    signal clicked()\n"
         "    MouseArea { anchors.fill: parent; onClicked: parent.clicked() }\n"
-        "}\n",
-        encoding="utf-8",
-    )
-    (module / "UiSettingsButton.qml").write_text(
-        "import QtQuick 2.15\n"
-        "Rectangle {\n"
-        "    property int pSettingIdx: 0\n"
-        "    property string pSettingBtnText: \"\"\n"
-        "    property bool pSelected: false\n"
-        "    property bool pShowRedDot: false\n"
-        "    signal settingClicked(int index)\n"
-        "    radius: 8\n"
-        "    color: pSelected ? \"#203c55\" : \"#182635\"\n"
-        "    Text { anchors.fill: parent; text: pSettingBtnText; color: \"white\"; horizontalAlignment: Text.AlignHCenter; verticalAlignment: Text.AlignVCenter }\n"
-        "    MouseArea { anchors.fill: parent; onClicked: parent.settingClicked(parent.pSettingIdx) }\n"
         "}\n",
         encoding="utf-8",
     )
@@ -378,6 +356,8 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
         "        property color primary70: \"#1b2838\"\n"
         "        property color primary80: \"#101a27\"\n"
         "        property color accentNormal: \"#54c8ff\"\n"
+        "        property color subWindowHeaderClick: \"#54c8ff\"\n"
+        "        property color dangerNormal: \"#ee3344\"\n"
         "    }\n"
         "    property QtObject fonts: QtObject {\n"
         "        property font bodySmall: Qt.font({pixelSize: 11})\n"
@@ -486,13 +466,14 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
          and abs(item.height() - obj.height()) < 2),
         None,
     )
-    first_tab = next(
+    first_label = next(
         (
             item for item in visual_tree
-            if str(item.property("pSettingBtnText")).endswith("Graphics")
+            if str(item.property("text")) == "Graphics"
         ),
         None,
     )
+    first_tab = first_label.parentItem() if first_label is not None else None
     settings_title = next(
         (item for item in visual_tree if str(item.property("text")) == "Settings"),
         None,
@@ -543,7 +524,8 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
     # wide box) and let long neighbours such as "Game settings" and "Devices"
     # run into each other.
     assert tabs.property("spacing") == 4, "every gap between tabs must come from one spacing value"
-    tab_slots = [item for item in visual_tree if item.property("pSettingBtnText") is not None]
+    tab_labels = [item for item in visual_tree if item.property("text") in ("Display", "Graphics")]
+    tab_slots = [item.parentItem() for item in tab_labels]
     assert len(tab_slots) >= 2, "Visible native categories should each have a tab button"
     # Sizing: each tab is as wide as its own label plus a fixed pad, so a long
     # label gets a long tab and a short one does not float in dead space.
@@ -616,13 +598,15 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
     ):
         node = node.parentItem()
     assert node is not None, "a native page cannot reach the shell by walking up"
-    assert str(first_tab.property("pSettingBtnText")).splitlines()[0], "Category tabs should show their own icon glyphs"
+    assert first_label.property("text") == "Graphics", "Category tabs must retain their native labels"
 
     tab_point = first_tab.mapToScene(QPointF(first_tab.width() / 2, first_tab.height() / 2)).toPoint()
     QTest.mouseClick(window, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, tab_point)
     QTest.qWait(60)
     assert obj.property("pCurrentTabIndex") == 1, "Clicking a category did not call the native selection callback"
-    assert stack.property("currentIndex") == 1 and first_tab.property("pSelected"), "Category selection did not update the selected tab and page stack"
+    assert stack.property("currentIndex") == 1, "Category selection did not update the native page stack"
+    assert first_label.property("color") == QColor("#54c8ff"), "Selection must use the player's selected-tab text colour"
+    assert first_tab.hasActiveFocus(), "Clicking a category must retain native focus behaviour"
 
     drag_point = drag.mapToScene(QPointF(8, 8)).toPoint()
     QTest.mousePress(window, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, drag_point)
@@ -733,10 +717,10 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
     # check below is that the code knows to differ, not that this case differs.
     assert "int playerQtMajor(const QByteArray &image)" in cpp, \
         "the apply must read the player's own Qt version from its import table"
-    assert "mustReference = qtMajor == 5" in cpp, \
-        "a Qt 5 player must always get referenced icons, never embedded data: URIs"
-    assert "QStringLiteral(\"file:///\")" in cpp, \
-        "referenced icons must be absolute file:/// URLs the player can open"
+    assert "mustReference = qtMajor != 6" in cpp, \
+        "Qt 5 and unidentified players must get referenced icons and logos, never data URIs"
+    assert "QUrl::fromLocalFile(file).toString(QUrl::FullyEncoded)" in cpp, \
+        "referenced icons must be encoded absolute file URLs the player can open"
     # And the strip must actually paint it, centred, with the label lifted clear.
     strip_items = visual_items(tabs)
 
@@ -770,6 +754,31 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
         f"(icon centre {icon_centre}, tab centre {delegate_centre})"
     )
 
+    # Exercise the referenced runtime form as well, using a path that cannot be
+    # made into a URL by concatenating "file:///". The PNG must actually decode,
+    # not merely appear in Image.source (which also happens for broken images).
+    runtime_dir = root / "icons # space % café"
+    runtime_dir.mkdir()
+    runtime_path = runtime_dir / "replacement icon.png"
+    runtime_image = QImage(54, 54, QImage.Format.Format_ARGB32)
+    runtime_image.fill(QColor("#33dd77"))
+    assert runtime_image.save(str(runtime_path))
+    runtime_url = QUrl.fromLocalFile(str(runtime_path)).toString(QUrl.ComponentFormattingOption.FullyEncoded)
+    assert about_child.setProperty("bsiTabIcons", {"0": runtime_url, "1": ""})
+    assert QMetaObject.invokeMethod(about_child, "fOnQmlLoaded")
+    QTest.qWait(60)
+    runtime_icons = [item for item in visual_items(tabs)
+                     if source_of(item) and QUrl(source_of(item)).toLocalFile() == str(runtime_path)]
+    assert runtime_icons, "the referenced PNG did not reach the numeric tab slot"
+    decoded = QQmlExpression(engine.rootContext(), runtime_icons[0], "status === 1")  # Image.Ready
+    result = decoded.evaluate()
+    assert not decoded.hasError() and (result[0] if isinstance(result, tuple) else result), \
+        "the referenced PNG must decode as Image.Ready, including spaces, #, % and Unicode in its URL"
+    hidden_label = next(item for item in visual_items(tabs) if item.property("text") == "Graphics")
+    hidden_tab = hidden_label.parentItem()
+    assert not hidden_tab.isVisible(), "hidden sentinels must still work beside file-backed icons"
+    print("PASS: referenced PNG icons decode from encoded local URLs and keep hidden-tab sentinels")
+
     about_component.deleteLater()
     mounted_component.deleteLater()
     window.close()
@@ -793,11 +802,8 @@ def _minify_svg(source: str) -> str:
     source = re.sub(r">\s+<", "><", source)
     source = re.sub(r"\s+", " ", source)
     source = re.sub(r"<\s+", "<", source)
-    source = re.sub(r"\s+/?>", ">", source)
-    source = source.strip()
-    if not source.endswith("/>"):
-        source = re.sub(r"\s+/>", "/>", source)
-    return source
+    source = re.sub(r"\s+(/?>)", r"\1", source)
+    return source.strip()
 
 
 editor_icon = '''<?xml version="1.0" encoding="UTF-8" standalone="no"?>
@@ -823,6 +829,8 @@ compacted = _minify_svg(editor_icon)
 assert len(compacted.encode()) < len(editor_icon.encode()) * 0.6, (
     "an editor-emitted tab icon must shrink substantially before it is embedded "
     f"({len(editor_icon.encode())} -> {len(compacted.encode())} bytes)")
+ET.fromstring(compacted)  # A `<path ... />` must not turn into an unclosed `<path>`.
+assert '<path' in compacted and '/>' in compacted, "self-closing drawing elements must survive cleanup"
 assert 'd="M 4,12 H 20 V 20 H 4 Z"' in compacted, "the drawing itself must be preserved"
 assert "inkscape" not in compacted.lower() and "<metadata" not in compacted, \
     "comments and metadata must be dropped"
@@ -838,11 +846,9 @@ for hostile in ("<svg><script>alert(1)</script></svg>",
 print("PASS: tab icons are compacted before they are embedded in the About document")
 
 
-# A tab icon the user picks is often far bigger than the slot the About page
-# lives in (a 150-path icon is ~8.7 KB of markup against a 2337-byte slot), and
-# refusing the upload is not an answer: the SVG is valid and only the container
-# is small. Such an icon is drawn once at the size the strip uses and stored as a
-# PNG instead, which is what makes "set 2+ custom icons" apply at all.
+# A large SVG stays editable in the profile. Referenced PNG copies keep the
+# About document bounded even with several icons, without relying on the
+# player's SVG decoder. Check both the over-budget input and the short-URL form.
 def _page_payload(icons_literal):
     doc = about_source
     for token, value in (
@@ -869,10 +875,14 @@ as_svg = "({" + ",".join(
     f'"{i}":"data:image/svg+xml,{big_icon}"' for i in range(4)) + "})"
 assert _page_payload(as_svg) > 2337, (
     "the fixture must reproduce the over-slot case, otherwise this test proves nothing")
-# After the raster fallback the same four icons are a few hundred bytes each.
-assert "rasterizeSvg" in cpp and "artworkBudget" in cpp, \
-    "a tab icon that cannot fit its slot must be drawn down, not refused"
-assert "image/png" in cpp, "the drawn-down icon is stored as PNG"
-assert "for (int box : {32, 28, 24, 20, 16, 12})" in cpp, \
-    "the fallback should try progressively smaller squares until it fits"
-print("PASS: oversized tab icons are drawn down instead of failing the apply")
+# Runtime files replace the entire numeric map, rather than adding filename
+# keys beside data URIs that the delegate would continue reading.
+assert "runtimeAssetPng" in cpp and "byFile = byTabIndex(byFile, current.tabs)" in cpp
+assert "return rasterizeSvg(bytes, icon ? 54 : 320, icon);" in cpp, \
+    "runtime copies must render icons at sufficient resolution while preserving the saved SVG"
+file_form = "({" + ",".join(
+    f'"{i}":"file:///C:/Users/Test/AppData/Local/BSI/settings-panel-assets/'
+    + "a" * 64 + "/" + __import__("hashlib").sha256(str(i).encode()).hexdigest()[:24]
+    + '.png"' for i in range(4)) + "})"
+assert _page_payload(file_form) < 2337, "file references must leave the About page inside the known slot"
+print("PASS: oversized icon artwork can use compact numeric file references without altering the SVG profile")

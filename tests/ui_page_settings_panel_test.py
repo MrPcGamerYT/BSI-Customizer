@@ -8,6 +8,7 @@ Requires PySide6==6.8.3. No player executable is touched.
 QT_QPA_PLATFORM=offscreen python3 tests/ui_page_settings_panel_test.py
 """
 import os
+import base64
 import shutil
 import tempfile
 import sys
@@ -32,6 +33,13 @@ if os.environ.get("GITHUB_ACTIONS"):
 
 app = QGuiApplication([])
 source = Path(__file__).resolve().parents[1] / "src/qml"
+pack = source.parent / "assets/settings-panel-icons"
+def svg_asset(name):
+    svg = (pack / (name + ".svg")).read_text().replace('<svg ', '<svg color="#e7e9f2" ', 1)
+    return {"mime": "image/svg+xml", "data": base64.b64encode(svg.encode()).decode()}
+DEFAULT_ICONS = {"graphics": svg_asset("graphics"), "display": svg_asset("display")}
+CUSTOM_ICON = {"mime": "image/svg+xml", "data": base64.b64encode(
+    b'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="#55aaff"/></svg>').decode()}
 
 PANEL_STATE = {
     "supported": True,
@@ -91,6 +99,8 @@ QtObject {
     property var customizationProfile: ({})
     property var calls: []
     property var hidden: []
+    property var packIcons: ({})
+    property var selectedAsset: ({})
     signal log(string message, string color)
     function settingsPanelRebuildState() {
         calls = calls.concat(["settingsPanelRebuildState"]);
@@ -104,6 +114,7 @@ QtObject {
                 {id: "graphics", page: "SettingsGraphics.qml", label: "Graphics", index: 0},
                 {id: "display", page: "SettingsDisplay.qml", label: "Display", index: 1}
             ],
+            defaultTabIcons: packIcons,
             logoFallback: true, logoStatus: "", detail: "Editable player QML sources found."
         };
     }
@@ -115,10 +126,18 @@ QtObject {
     }
     function setSettingsPanelAsset(kind, id, path) {
         calls = calls.concat(["setSettingsPanelAsset:" + kind + ":" + id + ":" + path]);
+        const profile = settings.settingsPanelProfile || {};
+        const icons = Object.assign({}, profile.tabIcons || {});
+        icons[id] = selectedAsset;
+        settings.settingsPanelProfile = {hiddenTabs: profile.hiddenTabs || [], tabIcons: icons};
         return {ok: true, msg: "Asset saved."};
     }
     function clearSettingsPanelAsset(kind, id) {
         calls = calls.concat(["clearSettingsPanelAsset:" + kind + ":" + id]);
+        const profile = settings.settingsPanelProfile || {};
+        const icons = Object.assign({}, profile.tabIcons || {});
+        delete icons[id];
+        settings.settingsPanelProfile = {hiddenTabs: profile.hiddenTabs || [], tabIcons: icons};
         return {ok: true, msg: "Asset cleared."};
     }
     // Mirrors the real patcher's answers: normally ok, but a player patched by
@@ -156,6 +175,8 @@ QtObject {
     engine.rootContext().setContextProperty("backend", backend)
     engine.rootContext().setContextProperty("themes", themes)
     engine.rootContext().setContextProperty("settings", settings)
+    backend.setProperty("packIcons", DEFAULT_ICONS)
+    backend.setProperty("selectedAsset", CUSTOM_ICON)
 
     window = create('''import QtQuick
 import QtQuick.Window
@@ -237,6 +258,39 @@ Window {
     panel = page.property("panel").toVariant()
     assert panel["supported"] and panel["settingsPageCount"] == 7
     assert [t["id"] for t in panel["tabs"]] == ["graphics", "display"]
+
+    # An empty profile previews the real supplied pack. Selecting a custom SVG
+    # changes that tab only; Use default removes the override instead of making
+    # the tab iconless or writing the defaults into QSettings.
+    def icon_source(tab_id):
+        # refreshPanel replaces the Repeater model, so reacquire its delegate.
+        return items(window.contentItem(), "settingsPanelTabIcon-" + tab_id)[0].property("source").toString()
+
+    assert DEFAULT_ICONS["graphics"]["data"] in icon_source("graphics")
+    assert not settings.property("settingsPanelProfile").toVariant().get("tabIcons")
+    from PySide6.QtCore import Q_ARG
+    QMetaObject.invokeMethod(page, "setPanelAsset", Q_ARG("QVariant", "tab-icon"),
+                             Q_ARG("QVariant", "graphics"), Q_ARG("QVariant", "/chosen/custom.svg"))
+    QTest.qWait(50)
+    assert CUSTOM_ICON["data"] in icon_source("graphics")
+    assert DEFAULT_ICONS["display"]["data"] in icon_source("display")
+    QMetaObject.invokeMethod(page, "clearPanelAsset", Q_ARG("QVariant", "tab-icon"),
+                             Q_ARG("QVariant", "graphics"))
+    QTest.qWait(50)
+    assert DEFAULT_ICONS["graphics"]["data"] in icon_source("graphics")
+    assert settings.property("settingsPanelProfile").toVariant()["tabIcons"] == {}
+    for tab_id in DEFAULT_ICONS:
+        QMetaObject.invokeMethod(page, "setPanelAsset", Q_ARG("QVariant", "tab-icon"),
+                                 Q_ARG("QVariant", tab_id), Q_ARG("QVariant", "/chosen/custom.svg"))
+    QMetaObject.invokeMethod(page, "resetPanelOptions")
+    QTest.qWait(50)
+    assert settings.property("settingsPanelProfile").toVariant()["tabIcons"] == {}
+    for tab_id, asset in DEFAULT_ICONS.items():
+        assert asset["data"] in icon_source(tab_id), "reset must restore every pack preview"
+    calls = backend.property("calls").toVariant()
+    assert "setSettingsPanelAsset:tab-icon:graphics:/chosen/custom.svg" in calls
+    assert "clearSettingsPanelAsset:tab-icon:graphics" in calls
+    assert not any(call.startswith("applySettingsPanelRebuild:") for call in calls)
 
     # Hidden-tab selection goes through the saved profile and refuses to hide
     # every native tab.
@@ -346,4 +400,4 @@ Window {
     QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
     QTest.qWait(1)
     print("PASS: real native Player-interface page; Settings-panel rebuild tab renders player "
-          "state and drives profile save, apply and restore")
+          "state, previews pack/default overrides and drives profile save, apply and restore")

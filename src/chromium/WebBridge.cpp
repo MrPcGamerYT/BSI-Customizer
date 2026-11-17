@@ -324,7 +324,9 @@ QVariantMap WebBridge::invoke(const QString &method, const QVariantMap &args)
         } else if (kind == QLatin1String("logo")) panelProfile.remove(QStringLiteral("logo"));
         else return failure(QStringLiteral("Choose a tab icon or logo to clear."));
         m_settings.setSettingsPanelProfile(panelProfile);
-        value = QStringLiteral("Custom asset cleared. Apply the rebuild to update the selected player.");
+        value = kind == QLatin1String("tab-icon")
+            ? QStringLiteral("Custom icon cleared. The bundled pack icon will be used where available. Apply the rebuild to update the selected player.")
+            : QStringLiteral("Custom logo cleared. Apply the rebuild to use the player/fallback logo.");
     } else if (method == QLatin1String("readInterface")) {
         value = QVariantMap{{"removals", m_backend.removalNames()}, {"layout", m_backend.layoutTweaks()},
                             {"about", m_backend.aboutPageState()},

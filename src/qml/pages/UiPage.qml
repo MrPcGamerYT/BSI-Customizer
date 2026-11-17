@@ -50,7 +50,8 @@ Item {
                            embeddedQmlResourceCount: 0, qmlResourceSamples: [],
                            logoStatus: "", logoFallback: false,
                            detail: qsTr("Load the player UI to inspect its Settings window.") })
-    // hiddenTabs/tabIcons come from the saved profile, not from the player.
+    // Only overrides live in the saved profile. The inspected state's
+    // defaultTabIcons supplies the bundled pack without seeding QSettings.
     property var panelProfile: ({ hiddenTabs: [], tabIcons: {}, logo: null })
     property string panelMsg: ""
     // True when the player carries a patch whose recovery snapshot is unusable,
@@ -275,6 +276,17 @@ Item {
         page.panelReady = true;
     }
 
+    function panelTabAsset(id) {
+        return (page.panelProfile.tabIcons || {})[id]
+                || (page.panel.defaultTabIcons || {})[id] || null;
+    }
+
+    function panelTabIconSource(id) {
+        const asset = page.panelTabAsset(id);
+        return asset && asset.mime && asset.data
+                ? "data:" + asset.mime + ";base64," + asset.data : "";
+    }
+
     function panelTabVisible(id) {
         const hidden = page.panelProfile.hiddenTabs || [];
         return hidden.indexOf(id) < 0;
@@ -351,7 +363,7 @@ Item {
             backend.clearSettingsPanelAsset("logo", "");
         page.savePanelOptions([]);
         page.refreshPanel();
-        page.panelMsg = qsTr("Tab visibility and custom artwork are back to the player defaults.");
+        page.panelMsg = qsTr("Tab visibility is reset and bundled pack icons are selected. Apply the rebuild to update the player.");
     }
 
     // Apply / Restore run the real patcher: it verifies every embedded QML
@@ -1845,9 +1857,11 @@ Item {
                             Layout.fillWidth: true
                             wrapMode: Text.Wrap
                             visible: page.panelReady
-                            text: qsTr("Untick a tab to hide it — at least one native tab always stays "
-                                       + "visible. Custom SVGs are embedded into the rebuilt window; "
-                                       + "only self-contained SVG files are accepted.")
+                            text: qsTr("The bundled icon pack is selected by default. Replace any SVG, "
+                                       + "or choose Use default to undo a custom icon, then Apply. "
+                                       + "Untick a tab to hide it — at least one must stay visible. "
+                                       + "Runtime PNG copies are kept in the Customizer’s data folder; "
+                                       + "your saved SVGs stay editable.")
                             color: Theme.textDim
                             font.pixelSize: 10
                             font.italic: true
@@ -1858,6 +1872,15 @@ Item {
                             visible: page.panelReady && (page.panel.tabs || []).length === 0
                             text: qsTr("Inspect a supported player to list its live tabs.")
                             color: Theme.textDim
+                            font.pixelSize: 11
+                        }
+
+                        Text {
+                            Layout.fillWidth: true
+                            visible: !!page.panel.defaultIconError
+                            text: page.panel.defaultIconError || ""
+                            color: Theme.warn
+                            wrapMode: Text.Wrap
                             font.pixelSize: 11
                         }
 
@@ -1915,15 +1938,27 @@ Item {
                                     }
                                 }
 
+                                Image {
+                                    objectName: "settingsPanelTabIcon-" + modelData.id
+                                    Layout.preferredWidth: 22
+                                    Layout.preferredHeight: 22
+                                    Layout.alignment: Qt.AlignVCenter
+                                    visible: !!page.panelTabAsset(modelData.id)
+                                    source: page.panelTabIconSource(modelData.id)
+                                    sourceSize.width: 22
+                                    sourceSize.height: 22
+                                    fillMode: Image.PreserveAspectFit
+                                }
                                 MicroLabel {
                                     Layout.alignment: Qt.AlignVCenter
-                                    visible: !!(page.panelProfile.tabIcons || {})[modelData.id]
-                                    text: qsTr("custom SVG")
+                                    visible: !!page.panelTabAsset(modelData.id)
+                                    text: (page.panelProfile.tabIcons || {})[modelData.id]
+                                          ? qsTr("custom SVG") : qsTr("pack default")
                                     color: Theme.accentText
                                 }
                                 ActionButton {
                                     implicitHeight: 26
-                                    text: (page.panelProfile.tabIcons || {})[modelData.id]
+                                    text: page.panelTabAsset(modelData.id)
                                           ? qsTr("Replace SVG") : qsTr("Choose SVG")
                                     onClicked: {
                                         panelAssetDialog.targetKind = "tab-icon";
@@ -1935,7 +1970,8 @@ Item {
                                 ActionButton {
                                     implicitHeight: 26
                                     visible: !!(page.panelProfile.tabIcons || {})[modelData.id]
-                                    text: qsTr("Clear")
+                                    text: (page.panel.defaultTabIcons || {})[modelData.id]
+                                          ? qsTr("Use default") : qsTr("Clear")
                                     onClicked: page.clearPanelAsset("tab-icon", modelData.id)
                                 }
                             }

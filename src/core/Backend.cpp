@@ -2000,6 +2000,8 @@ QString Backend::aboutPageReport()
 QVariantMap Backend::settingsPanelRebuildState()
 {
     const auto state = SettingsPanelPatcher::analyze(m_settings->exePath());
+    QString iconError;
+    const auto defaultIcons = SettingsPanelPatcher::defaultTabIcons(state.tabs, &iconError);
     return {{QStringLiteral("supported"), state.supported},
             {QStringLiteral("applied"), state.applied},
             {QStringLiteral("restorable"), state.restorable},
@@ -2010,6 +2012,8 @@ QVariantMap Backend::settingsPanelRebuildState()
             {QStringLiteral("embeddedQmlResourceCount"), state.embeddedQmlResourceCount},
             {QStringLiteral("qmlResourceSamples"), state.qmlResourceSamples},
             {QStringLiteral("tabs"), state.tabs},
+            {QStringLiteral("defaultTabIcons"), defaultIcons},
+            {QStringLiteral("defaultIconError"), iconError},
             {QStringLiteral("logoFallback"), state.logoFallback},
             {QStringLiteral("logoStatus"), state.logoStatus},
             {QStringLiteral("detail"), state.detail}};
@@ -2127,8 +2131,10 @@ QVariantMap Backend::clearSettingsPanelAsset(const QString &kind, const QString 
                       QStringLiteral("red"));
     }
     m_settings->setSettingsPanelProfile(panelProfile);
-    return result(true, QStringLiteral("Custom artwork cleared. Apply the rebuild to update the "
-                                       "selected player."), QStringLiteral("green"));
+    return result(true, kind == QLatin1String("tab-icon")
+        ? QStringLiteral("Custom icon cleared. The bundled pack icon will be used where available. Apply the rebuild to update the selected player.")
+        : QStringLiteral("Custom logo cleared. Apply the rebuild to use the player/fallback logo."),
+        QStringLiteral("green"));
 }
 
 QVariantMap Backend::restoreBackup(const QString &path)
