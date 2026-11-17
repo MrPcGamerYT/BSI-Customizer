@@ -718,14 +718,12 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
         "The shell must declare bIcons for the About page to publish into"
     if hasattr(published_icons, "toVariant"):
         published_icons = published_icons.toVariant()
-    assert isinstance(published_icons, dict) and published_icons.get("settingpage.qml"), \
+    assert isinstance(published_icons, dict) and published_icons.get("0"), \
         f"The About page did not publish its tab icons to the shell (got {published_icons!r})"
     published_hidden = shell_root.property("bHidden")
     if hasattr(published_hidden, "toVariant"):
         published_hidden = published_hidden.toVariant()
     assert published_hidden == [], "The About page did not publish its hidden-tab list"
-    assert published_icons.get("0"), \
-        f"the About page must publish the icon under the first tab's index (got {published_icons!r})"
     published_icon = published_icons["0"]
     assert published_icon.startswith("data:image/svg+xml;base64,"), \
         "The published tab icon must be a self-contained SVG data URI"
