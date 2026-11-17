@@ -3179,7 +3179,7 @@ int runPatchRegressionTests()
         putLe32(qt5Player, 0x98 + 108, 16);
         putLe32(qt5Player, 0x98 + 60, 0x1000);
         const auto imports = PeUtils::importedModules(qt5Player);
-        check(imports.ok && imports.modules.contains(QStringLiteral("Qt5Core.dll")),
+        check(imports.ok && imports.modules.contains(QStringLiteral("Qt5Core.dll"), Qt::CaseInsensitive),
               "the icon regression fixture really identifies as a Qt 5 player");
         const QString qt5Path = temp.filePath(QStringLiteral("settings-icons-qt5.exe"));
         write(qt5Path, qt5Player);
@@ -3188,7 +3188,7 @@ int runPatchRegressionTests()
         putLe32(qt6Player, 0x98 + 108, 16);
         putLe32(qt6Player, 0x98 + 60, 0x1000);
         const auto qt6Imports = PeUtils::importedModules(qt6Player);
-        check(qt6Imports.ok && qt6Imports.modules.contains(QStringLiteral("Qt6Core.dll")),
+        check(qt6Imports.ok && qt6Imports.modules.contains(QStringLiteral("Qt6Core.dll"), Qt::CaseInsensitive),
               "the default-pack regression fixture really identifies as a Qt 6 player");
         write(qt6DefaultPath, qt6Player);
         const QVariantMap noOverrides;
