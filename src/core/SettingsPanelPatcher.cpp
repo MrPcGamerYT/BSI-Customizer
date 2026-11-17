@@ -777,6 +777,8 @@ QString buildWindow(const QString &stock)
     // both the hit targets (4 px) and visible labels (26 px) have uniform gaps.
     // The red dot stays inside that padding; icons sit below the centred label.
     // A hidden sentinel removes its hit target, label, icon and one spacing.
+    // UiShadowContainer redirects its default children into a private item;
+    // address bIcons by the public shell id, never by r.parent.
     //
     // Keep the native 568 px page column and footer clearance, all loader
     // callbacks, and the flat shell without an extra page card or tab pill.
@@ -792,14 +794,10 @@ property var bIcons:({})
 Rectangle{id:r;property var q:UiTheme.colors;anchors.fill:parent;color:r.q.primary80;radius:14
 Column{anchors.fill:parent
 Item{width:r.width;height:56
-MouseArea{anchors.fill:parent;onPressed:iSettingsWindow.startSystemMove()}
-Text{id:h;text:qsTr('Settings');color:r.q.primary10;font:UiTheme.fonts.bodyLarge;anchors.centerIn:parent}
-UiImageButton{asset:'CloseIcon';x:r.width-32;y:12;onClicked:iSettingsWindow.close()}}
+MouseArea{anchors.fill:parent;onPressed:iSettingsWindow.startSystemMove()}Text{id:h;text:qsTr('Settings');color:r.q.primary10;font:UiTheme.fonts.bodyLarge;anchors.centerIn:parent}UiImageButton{asset:'CloseIcon';x:r.width-32;y:12;onClicked:iSettingsWindow.close()}}
 ListView{width:Math.max(0,Math.min(contentWidth,r.width-48));height:44;x:(r.width-width)/2;clip:true;orientation:ListView.Horizontal;model:pSettingsItems.pSettingElements;spacing:4
-delegate:MouseArea{visible:c!=='';property var c:r.parent.bIcons[index];width:c===''?-4:m.boundingRect.width+22;height:44;onClicked:{fChangeSelectedSetting(index);forceActiveFocus()}
-Text{id:t;text:modelData.pButtonText;font:h.font;x:11-m.boundingRect.x;y:c?0:22-height/2;color:r.q[index==pCurrentTabIndex?'subWindowHeaderClick':'primary20']}
-TextMetrics{id:m;text:t.text;font:t.font}
-Rectangle{visible:modelData.pShowRedDot;x:parent.width-8;y:t.y+6;width:6;height:6;radius:3;color:r.q.dangerNormal}
+delegate:MouseArea{visible:c!=='';property var c:iSettingsWindowShadowContainer.bIcons[index];width:c===''?-4:m.boundingRect.width+22;height:44;onClicked:{fChangeSelectedSetting(index);forceActiveFocus()}
+Text{id:t;text:modelData.pButtonText;font:h.font;x:11-m.boundingRect.x;y:c?0:22-height/2;color:r.q[index==pCurrentTabIndex?'subWindowHeaderClick':'primary20']}TextMetrics{id:m;text:t.text;font:t.font}Rectangle{visible:modelData.pShowRedDot;x:parent.width-8;y:t.y+6;width:6;height:6;radius:3;color:r.q.dangerNormal}
 Image{source:c||'';width:18;height:18;x:parent.width/2-9;y:24}}}
 Item{width:Math.min(r.width-48,568);x:(r.width-width)/2;height:r.height-118
 StackLayout{id:iSelectedSettingControl;anchors.fill:parent;currentIndex:pCurrentTabIndex

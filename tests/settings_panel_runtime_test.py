@@ -111,7 +111,8 @@ assert "orientation:ListView.Horizontal;model:pSettingsItems.pSettingElements" i
 # tabs sit equally far from the window edge.
 assert "x:(r.width-width)/2" in replacement, \
     "the tab strip must be centred in the window"
-assert "r.parent.bIcons[" in replacement
+assert "iSettingsWindowShadowContainer.bIcons[" in replacement
+assert "r.parent.bIcons" not in replacement, "native shadow containers reparent their default children"
 # The icon map is keyed by the tab's own index, not by a name derived from its
 # page path. `pQmlSource` is a QML `url`, and a url stringifies percent-encoded
 # (qrc:%5CSettings%5CPerformanceSetting.qml): calling .toLowerCase() on the url
@@ -326,7 +327,10 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
         encoding="utf-8",
     )
     (module / "UiShadowContainer.qml").write_text(
-        "import QtQuick 2.15\nItem { }\n", encoding="utf-8"
+        "import QtQuick 2.15\n"
+        "Item { default property alias children: content.data\n"
+        "    Item { id: content; anchors.fill: parent }\n"
+        "}\n", encoding="utf-8"
     )
     (module / "UiImageButton.qml").write_text(
         "import QtQuick 2.15\n"

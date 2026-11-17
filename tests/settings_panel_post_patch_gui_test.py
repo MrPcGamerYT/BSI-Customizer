@@ -20,7 +20,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("QT_QUICK_BACKEND", "software")
 os.environ.setdefault("QSG_RHI_BACKEND", "software")
 
-from PySide6.QtCore import QPointF, Qt
+from PySide6.QtCore import QMetaObject, QPointF, Qt
 from PySide6.QtGui import QColor, QFont, QFontMetricsF, QGuiApplication, QImage
 from PySide6.QtQml import QQmlComponent, QQmlEngine, QQmlExpression
 from PySide6.QtQuick import QQuickItem
@@ -59,7 +59,16 @@ def write_module(root):
         "UiShadowContainer 1.0 UiShadowContainer.qml\n"
         "UiImageButton 1.0 UiImageButton.qml\n"
         "singleton UiTheme 1.0 UiTheme.qml\n", encoding="utf-8")
-    (module / "UiShadowContainer.qml").write_text("import QtQuick 2.15\nItem {}\n", encoding="utf-8")
+    # The real player redirects default children into an inner shadow frame.
+    # A plain Item double hid r.parent.bIcons bugs. Keep that parenting contract
+    # and exercise both zero and the native 15 px shadow inset below.
+    (module / "UiShadowContainer.qml").write_text("""import QtQuick 2.15
+Item {
+    default property alias children: content.data
+    property real shadowThickness: 0
+    Item { id: content; anchors.fill: parent; anchors.margins: shadowThickness }
+}
+""", encoding="utf-8")
     (module / "UiImageButton.qml").write_text("""import QtQuick 2.15
 Item {
     width: 32; height: 32
@@ -154,14 +163,21 @@ Window {
         # Inspect even off-viewport delegates; clipping/reachability are checked
         # separately. The production view may virtualise those delegates.
         strip.setProperty("cacheBuffer", 10000)
+        shell_root = next(i for i in visual_items(content) if i.metaObject().indexOfProperty("bIcons") >= 0)
+        surface = next(i for i in visual_items(content) if prop(i, "radius") == 14)
         QTest.qWait(100)
 
         def check_layout(labels, icons):
-            QTest.qWait(40)
+            # Width/model/inset changes are polished asynchronously. Flush the
+            # view's documented deferred-layout queue before measuring a steady
+            # frame, rather than sampling a partially virtualised transition.
+            QTest.qWait(60)
+            QMetaObject.invokeMethod(strip, "forceLayout")
+            QTest.qWait(20)
             tree = visual_items(content)
             text_items = {prop(i, "text"): i for i in tree if prop(i, "text") in labels}
             assert len(text_items) == len(labels), "not all twelve real tab labels were instantiated"
-            assert 0 <= strip.width() <= window.width() - 48 + EPSILON
+            assert 0 <= strip.width() <= surface.width() - 48 + EPSILON
             strip_mid = strip.mapToItem(content, QPointF(strip.width() / 2, 0)).x()
             assert abs(strip_mid - window.width() / 2) < EPSILON, "the tab viewport is not centred"
             assert strip.property("spacing") == 4
@@ -205,18 +221,19 @@ Window {
                 expected = "#54c8ff" if index == window.property("pCurrentTabIndex") else "#d2dae4"
                 assert label.property("color") == QColor(expected), "native selected-tab colours were lost"
             for (x, width, _), (next_x, _, _) in zip(visible, visible[1:]):
-                assert abs(next_x - x - width - 4) < EPSILON, f"uneven hit-target gap: {next_x - x - width}"
+                assert abs(next_x - x - width - 4) < EPSILON, f"uneven hit-target gap: {next_x - x - width} (x={x}, width={width}, next={next_x})"
             for (_, right), (next_left, _) in zip(inks, inks[1:]):
                 assert abs(next_left - right - 26) < EPSILON, f"uneven visible label gap: {next_left - right}"
             if visible:
                 assert len({round(width, 2) for _, width, _ in visible}) > 1 or len(visible) == 1
             page = next(i for i in tree if i.objectName() == "runtimeSettingPage" and i.isVisible())
-            assert abs(page.width() - min(window.width() - 48, 568)) < EPSILON
+            assert abs(page.width() - min(surface.width() - 48, 568)) < EPSILON
             page_origin = page.mapToItem(content, QPointF(0, 0))
             assert abs(page_origin.x() + page.width() / 2 - window.width() / 2) < EPSILON
-            expected_top = 100 if visible else 56  # Column omits a completely empty strip.
+            surface_origin = surface.mapToItem(content, QPointF(0, 0))
+            expected_top = surface_origin.y() + (100 if visible else 56)
             assert abs(page_origin.y() - expected_top) < EPSILON, f"wrong page position: {page_origin.y()}"
-            assert page_origin.y() + page.height() <= window.height() - 18 + EPSILON, "native footer escaped the shell"
+            assert page_origin.y() + page.height() <= surface_origin.y() + surface.height() - 18 + EPSILON, "native footer escaped the shell"
             return text_items
 
         defaults = {str(i): icon_url for i in range(12)}
@@ -226,12 +243,17 @@ Window {
                      (mixed, (0, 1)), (mixed, (10, 11)),
                      (defaults, (0, 3, 4, 11)), (defaults, tuple(range(11))),
                      (defaults, tuple(range(12)))]
-        for width, height in [(1120, 670), (720, 480)]:
+        for width, height, inset in [(1120, 670, 0), (720, 480, 0), (1120, 670, 15), (720, 480, 15)]:
+            shell_root.setProperty("shadowThickness", inset)
             window.resize(width, height)
             for base, hidden in scenarios:
                 icons = dict(base, **{str(i): "" for i in hidden})
                 assert window.setProperty("testIcons", icons)
-                check_layout(LABELS, icons)
+                try:
+                    check_layout(LABELS, icons)
+                except AssertionError:
+                    print("FAILED CASE:", width, height, "shadow inset", inset, "hidden", hidden)
+                    raise
 
         # Live theme changes exercise positive/negative glyph bearings rather
         # than merely trusting the label's layout rectangle to be centred.
@@ -271,7 +293,7 @@ Window {
         window.deleteLater()
         QTest.qWait(10)
         engine.deleteLater()
-    print("PASS: all twelve real labels are centred; hit-target gaps are 4 px and ink gaps 26 px across icons, fonts, translations, hidden tabs and viewports")
+    print("PASS: all twelve real labels are centred; hit-target gaps are 4 px and ink gaps 26 px across native shadow parenting/insets, icons, fonts, translations, hidden tabs and viewports")
     return 0
 
 
