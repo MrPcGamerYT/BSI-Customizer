@@ -5311,7 +5311,10 @@ Window {
                           // A custom icon sits centred in the tab, with the native
                           // label lifted to the top instead of being painted over.
                           && rebuiltWindow.contains(QStringLiteral("anchors.bottomMargin:c?26:0"))
-                          && rebuiltWindow.contains(QStringLiteral("Image{source:c;width:18;height:18;x:parent.width/2-9;y:24}"))
+                          // The icon is drawn at 18x18 and so is decoded at 18x18:
+                          // without sourceSize a large SVG decodes at its natural
+                          // size and the strip scales it down at paint time.
+                          && rebuiltWindow.contains(QStringLiteral("Image{source:c;width:18;height:18;x:parent.width/2-9;y:24;sourceSize.width:18;sourceSize.height:18}"))
                           // A hidden tab must not paint its label over the tabs
                           // beside it: zeroing its width closed the slot but the
                           // button inside kept drawing its text on top of the
