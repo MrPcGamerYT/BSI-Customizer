@@ -59,7 +59,9 @@ cpp = (repo / "src/core/SettingsPanelPatcher.cpp").read_text()
 window = re.search(r'(?:const )?QString replacement = QStringLiteral\(R"QML\((.*?)\)QML"\);', cpp, re.S)
 about = re.search(r'QString generated = QStringLiteral\(R"QML\((.*?)\)QML"\);', cpp, re.S)
 assert window and about
-assert len(window.group(1).encode()) <= 1741, "the shell must fit its known 2468-byte slot including the stock prefix"
+# A coarse template-bloat guard only. The full compressed native prefix,
+# callbacks and geometry helper are measured in settings_panel_window_budget_test.
+assert len(window.group(1).encode()) <= 1741, "keep the shell compact; also run the complete-window compression budget test"
 assert "QVariantMap storedIcons = packIcons;" in cpp
 assert "storedIcons.insert(it.key().toCaseFolded(), it.value());" in cpp
 assert "const bool mustReference = qtMajor != 6 || !packIcons.isEmpty();" in cpp

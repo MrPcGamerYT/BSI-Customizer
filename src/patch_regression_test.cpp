@@ -2323,6 +2323,39 @@ int runPatchRegressionTests()
         ThemeEngine::buildQml(qml, entries, { { QStringLiteral("missingColor"), QStringLiteral("#abcdef") } },
                               true, &skipped);
         check(!skipped.isEmpty(), "missing staged properties are reported, not silently discarded");
+
+        const QString indented = QStringLiteral(
+            "  import QtQml 2.15\r\n"
+            "  QtObject {\r\n"
+            "    // Copyright Example; keep this notice and all callbacks.\r\n"
+            "    property string literal: \"  { // not a comment\"\r\n"
+            "    property string continued: \"first\\\r\n"
+            "      second\"\r\n"
+            "\tproperty string single: '  preserve spaces'\r\n"
+            "  }\r\n");
+        const QString compact = QmlText::compactIndentation(indented);
+        const QString expected = QStringLiteral(
+            "import QtQml 2.15\r\n"
+            "QtObject {\r\n"
+            "// Copyright Example; keep this notice and all callbacks.\r\n"
+            "property string literal: \"  { // not a comment\"\r\n"
+            "property string continued: \"first\\\r\n"
+            "      second\"\r\n"
+            "property string single: '  preserve spaces'\r\n"
+            "}\r\n");
+        check(compact == expected && QmlText::compactIndentation(compact) == compact,
+              "QML indentation compaction preserves literals, notices, CRLF and statement boundaries");
+        QQmlComponent compactComponent(&engine);
+        compactComponent.setData(compact.toUtf8(), QUrl());
+        std::unique_ptr<QObject> compactObject(compactComponent.create());
+        check(compactObject
+                  && compactObject->property("literal").toString() == QLatin1String("  { // not a comment")
+                  && compactObject->property("continued").toString() == QLatin1String("first      second")
+                  && compactObject->property("single").toString() == QLatin1String("  preserve spaces"),
+              "indentation-compacted QML compiles with unchanged multiline and quoted text");
+        const QString templateLiteral = QStringLiteral("  QtObject { property string t: `first\n    ${1 + 2} second` }\n");
+        check(QmlText::compactIndentation(templateLiteral) == templateLiteral,
+              "QML indentation compaction conservatively leaves template literals untouched");
     }
 
 #if defined(Q_OS_WIN) && defined(Q_PROCESSOR_X86_64)

@@ -39,6 +39,26 @@ QString mask(const QString &qml)
     return out;
 }
 
+QString compactIndentation(const QString &qml)
+{
+    // mask() deliberately does not parse JS template-literal interpolation.
+    // Refuse to compact those documents rather than change literal whitespace.
+    if (qml.contains(QLatin1Char('`'))) return qml;
+    const QString masked = mask(qml);
+    QString out;
+    out.reserve(qml.size());
+    bool lineStart = true;
+    for (qsizetype i = 0; i < qml.size(); ++i) {
+        const QChar c = qml.at(i);
+        if (lineStart && (c == QLatin1Char(' ') || c == QLatin1Char('\t'))
+            && masked.at(i) == c)
+            continue;
+        out += c;
+        lineStart = c == QLatin1Char('\n') || c == QLatin1Char('\r');
+    }
+    return out;
+}
+
 static int closeBrace(const QString &m, int open)
 {
     int depth = 0;

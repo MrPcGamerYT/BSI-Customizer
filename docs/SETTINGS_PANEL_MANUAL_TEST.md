@@ -46,6 +46,8 @@ On a narrow player window the centered page column shrinks with the window (48 p
 
 The automated `settings_panel_post_patch_gui_test.py` measures the actual generated Text and hit-target geometry for all twelve tabs, with multiple fonts (including italic), translated labels, badges, default/custom/missing icons, consecutive hidden tabs and two viewport sizes. It also scrolls to and clicks the last tab. This is an offscreen Qt Quick test, not a substitute for the live-player check above.
 
+`settings_panel_window_budget_test.py` rebuilds the **entire** legacy Settings window against its exact read-only compressed resource fixture, including the native callback prefix and geometry helper. Counting template bytes alone is not a reliable compression budget. Apply removes only insignificant leading indentation, retaining quoted literal whitespace, line endings, native logic and copyright notices; the complete fixture uses 2396 of its 2468-byte slot. The Windows engine suite additionally patches disposable copies of the real player references.
+
 ## Default pack and custom-icon regression
 
 Use a disposable player copy and an empty Settings-panel profile for the first check:

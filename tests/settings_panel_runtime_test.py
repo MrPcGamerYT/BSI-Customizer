@@ -207,13 +207,10 @@ assert "visible:s" not in replacement, \
 assert "Rectangle{id:r;property var q:UiTheme.colors;anchors.fill:parent;color:r.q.primary80;radius:14" in replacement, \
     "the window itself stays a single flat rounded surface"
 assert "StackLayout{id:iSelectedSettingControl;anchors.fill:parent;currentIndex:pCurrentTabIndex" in replacement
-# The whole UiSettingsWindow.qml has to fit one resource slot in the player EXE,
-# and it can never be moved once the file is larger than the slot. A shipped
-# BlueStacks 5.10 build reports 2468 bytes there and a real apply of an earlier
-# draft of this shell needed 2479 ("needs 2479 bytes but its slot only holds
-# 2468"), which is the hard failure this test exists to prevent. Keep the
-# template under the measured limit: the surrounding native document costs
-# 727 bytes, so 2468 - 727 = 1741 is the maximum template size.
+# Keep a coarse template-bloat guard, but this is not proof that the compressed
+# whole window fits: native callbacks/prefix and compression entropy matter too.
+# settings_panel_window_budget_test reconstructs the complete 2468-byte legacy
+# resource, including the original native prefix and the geometry helper.
 assert len(replacement.encode()) <= 1741, (
     f"shell grew to {len(replacement.encode())} bytes; the tightest known "
     "UiSettingsWindow.qml slot is 2468 bytes"

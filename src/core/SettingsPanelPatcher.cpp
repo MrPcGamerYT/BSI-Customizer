@@ -782,8 +782,9 @@ QString buildWindow(const QString &stock)
     // callbacks, and the flat shell without an extra page card or tab pill.
     // StackLayout fills its Loader children by default; anchoring those children
     // as well conflicts with its geometry and produces native Qt warnings.
-    // The tightest known Window slot leaves only 1741 UTF-8 template bytes;
-    // short local ids and compact object boundaries keep this within that cap.
+    // Keep the template small, but the *whole* compressed Window (including
+    // native callbacks, copyright header and geometry helper) must fit the slot.
+    // Template length alone cannot predict that compression budget.
     QString replacement = QStringLiteral(R"QML(UiShadowContainer{//BSI v15
 id:iSettingsWindowShadowContainer;anchors.fill:parent
 property var bHidden
@@ -815,7 +816,11 @@ Repeater{model:pSettingsItems.pSettingElements;delegate:Loader{Component.onCompl
     if (rootClose < 0) return {};
     out.insert(rootClose, helper);
     if (!out.contains(kWindowDesignMarker)) return {};
-    return out;
+    // Older MSI/BlueStacks sources have a 2468-byte compressed slot. Retaining
+    // their native callbacks is essential, but indentation is not: removing
+    // just leading whitespace gives the complete document compression headroom
+    // without touching literals, comments, line endings or JS statement breaks.
+    return QmlText::compactIndentation(out);
 }
 
 // The player delegate indexes this map with its native model index. Keep the
