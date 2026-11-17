@@ -1746,10 +1746,6 @@ QVariantMap apply(const QString &exePath, const QString &developerName,
     const QString rebuiltWindow = buildWindow(originalWindowText);
     if (rebuiltWindow.isEmpty())
         return fail(QStringLiteral("This BlueStacks build's Settings-window structure is not recognized. No file was changed."));
-    const QString rebuiltAbout = buildAbout(developerName, tagline, links, publishedLogoSource,
-                                            hiddenTabs, publishedIcons);
-    if (rebuiltAbout.isEmpty())
-        return fail(QStringLiteral("The About page could not be generated; no file was changed."));
     // Artwork that does not fit the slot is written into the app's own asset
     // folder and referenced by an absolute file:/// URL, so the document keeps only
     // short paths. That removes the old "one small icon, and no more" ceiling.
@@ -1789,7 +1785,7 @@ QVariantMap apply(const QString &exePath, const QString &developerName,
         }
         QString logoByFile = publishedLogoSource;
         if (stored && profile.contains(QStringLiteral("logo")) && !bestLogoFiles.isEmpty()) {
-            const QVariantMap asset = bestLogoFiles.toMap();
+            const QVariantMap asset = bestLogoFiles;
             const QByteArray bytes = QByteArray::fromBase64(asset.value(QStringLiteral("data")).toString().toLatin1());
             const QString mime = asset.value(QStringLiteral("mime")).toString();
             const QString suffix = mime == QLatin1String("image/png") ? QStringLiteral("png")
@@ -1810,6 +1806,10 @@ QVariantMap apply(const QString &exePath, const QString &developerName,
             writtenAssets.clear();
         }
     }
+    const QString rebuiltAbout = buildAbout(developerName, tagline, links, publishedLogoSource,
+                                            hiddenTabs, publishedIcons);
+    if (rebuiltAbout.isEmpty())
+        return fail(QStringLiteral("The About page could not be generated; no file was changed."));
     QMap<QString, QByteArray> replacements {
         {current.window.path, utf8PreservingBom(rebuiltWindow, originals.value(current.window.path))},
         {current.about.path, utf8PreservingBom(rebuiltAbout, originals.value(current.about.path))},
