@@ -5442,7 +5442,13 @@ Window {
                               // property bHidden", which is exactly why a saved custom
                               // tab icon applied and then never appeared.
                               && updatedAbout.contains(QStringLiteral("function fOnQmlLoaded(){var p=parent;while(p&&p.bIcons===undefined)p=p.parent;if(p){p.bHidden=bsiHiddenTabs;p.bIcons=bsiTabIcons}}"))
-                              && updatedAbout.contains(QStringLiteral("\"%1\":\"data:image/").arg(iconTabKey))
+                              // On a Qt 5 player the icon must NOT be embedded: its
+                              // Image cannot open a data: URI (measured: status Error,
+                              // while the same bytes load from a file), so it would
+                              // apply and then never appear. It is published as a
+                              // file:/// path instead.
+                              && (updatedAbout.contains(QStringLiteral("\"%1\":\"data:image/").arg(iconTabKey))
+                                  || updatedAbout.contains(QStringLiteral("\"%1\":\"file:///").arg(iconTabKey)))
                               && updatedAbout.contains(QStringLiteral("BSI Panel Regression Updated"))
                               && updatedAbout.contains(QStringLiteral("Regression subtitle")),
                           QStringLiteral("the real %1 Settings rebuild writes hidden tabs, custom SVG icons, and a custom About logo into regenerated QML")

@@ -177,8 +177,8 @@ assert ";spacing:4" in replacement, \
 # A custom icon sits centred in the tab with the native label lifted to the top,
 # instead of being painted over the text.
 assert "anchors.bottomMargin:c?26:0" in replacement, "the label must move up when an icon is shown"
-assert "Image{source:c;width:18;height:18;x:parent.width/2-9;y:24}" in replacement, \
-    "the icon must be centred in the tab"
+assert "Image{source:c;width:18;height:18;x:parent.width/2-9;y:24;sourceSize.width:18;sourceSize.height:18}" \
+    in replacement, "the icon must be centred in the tab at exactly 18x18"
 # Collapsing the width hid the tab's box but not its label: the button inside the
 # delegate kept painting its text, so "Customise" and "Advanced" smeared over the
 # tabs beside them while their slot was already closed. The delegate has to be
@@ -727,6 +727,16 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
     published_icon = published_icons["0"]
     assert published_icon.startswith("data:image/svg+xml;base64,"), \
         "The published tab icon must be a self-contained SVG data URI"
+    # ...unless the player runs Qt 5. A QML Image cannot open a data: URI on Qt 5
+    # (measured: status Error, while the identical bytes load from a file), so the
+    # apply must publish a file:// path there instead. This fixture is Qt 6, so the
+    # check below is that the code knows to differ, not that this case differs.
+    assert "int playerQtMajor(const QByteArray &image)" in cpp, \
+        "the apply must read the player's own Qt version from its import table"
+    assert "mustReference = qtMajor == 5" in cpp, \
+        "a Qt 5 player must always get referenced icons, never embedded data: URIs"
+    assert "QStringLiteral(\"file:///\")" in cpp, \
+        "referenced icons must be absolute file:/// URLs the player can open"
     # And the strip must actually paint it, centred, with the label lifted clear.
     strip_items = visual_items(tabs)
 

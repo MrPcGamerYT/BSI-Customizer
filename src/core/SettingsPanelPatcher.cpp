@@ -4,6 +4,7 @@
 #include "CustomizationWorkspace.h"
 #include "EmbeddedResources.h"
 #include "PatchFile.h"
+#include "PeUtils.h"
 #include "QmlText.h"
 #include "QtResources.h"
 #include "ThemeEngine.h"
@@ -786,7 +787,7 @@ ListView{width:Math.min(contentWidth,parent.width-48);height:44;x:(parent.width-
 delegate:Item{visible:c!=='';property var c:iSettingsWindowShadowContainer.bIcons[index];width:c===''?-4:t.boundingRect(modelData.pButtonText).width+22;height:44
 UiSettingsButton{anchors.fill:parent;anchors.bottomMargin:c?26:0;pSettingIdx:index;pSettingBtnText:modelData.pButtonText;pSelected:index==pCurrentTabIndex;pShowRedDot:modelData.pShowRedDot;onSettingClicked:fChangeSelectedSetting(pSettingIdx)}
 FontMetrics{id:t}
-Image{source:c;width:18;height:18;x:parent.width/2-9;y:24}}}
+Image{source:c;width:18;height:18;x:parent.width/2-9;y:24;sourceSize.width:18;sourceSize.height:18}}}
 Item{width:Math.min(parent.width-48,568);x:(parent.width-width)/2;height:parent.height-118
 StackLayout{id:iSelectedSettingControl;anchors.fill:parent;currentIndex:pCurrentTabIndex
 Repeater{model:pSettingsItems.pSettingElements;delegate:Loader{anchors.fill:parent;Component.onCompleted:setSource(modelData.pQmlSource,modelData.pComponentArgs||{});onLoaded:{item.anchors.fill=item.parent;modelData.pComponentObj=item;if(item.fOnQmlLoaded)item.fOnQmlLoaded()}}}}}
@@ -1422,6 +1423,39 @@ State analyze(const QString &exePath)
 // inside the file (the EXE never grows), so an oversized About page fails the
 // whole apply.
 //
+// Which Qt the *player* runs on, from HD-Player.exe's own import table.
+//
+// This decides more than it looks like it does. A QML Image cannot load a
+// data: URI on Qt 5 - measured, not assumed: with Qt 5.15 every data: URI gets
+// status Error while the identical bytes load fine from a file - and a Qt 5
+// player also needs the imageformats plugins to have an SVG decoder at all.
+// Both only fail at paint time, silently, which is exactly the "saved fine, then
+// never appeared" report. Qt 6 loads data: URIs, so the same document works there.
+//
+// Returns 5, 6, or 0 when the table cannot be read (then the caller reasons about
+// both generations rather than assuming one).
+int playerQtMajor(const QByteArray &image)
+{
+    const auto imports = PeUtils::importedModules(image);
+    if (!imports.ok) return 0;
+    QSet<int> versions;
+    const auto add = [&versions](const QStringList &modules, const QString &suffix) {
+        for (const auto &module : modules) {
+            for (int major : { 5, 6 }) {
+                const auto prefix = QStringLiteral("qt%1").arg(major);
+                if ((!suffix.isEmpty() && module.compare(prefix + suffix, Qt::CaseInsensitive) == 0)
+                    || (suffix.isEmpty() && module.startsWith(prefix, Qt::CaseInsensitive)
+                        && module.endsWith(QLatin1String(".dll"), Qt::CaseInsensitive)))
+                    versions.insert(major);
+            }
+        }
+    };
+    add(imports.modules, QStringLiteral("quicktemplates2.dll"));
+    if (versions.isEmpty()) add(imports.modules, QStringLiteral("core.dll"));
+    if (versions.isEmpty()) add(imports.modules, QString());
+    return versions.size() == 1 ? *versions.cbegin() : 0;
+}
+
 // Does this exact About document fit the player's own resource slot? Split out of
 // aboutCapacityProblem() because apply() needs the answer while it is still
 // choosing between embedding artwork and pointing at it, not only to complain
@@ -1762,7 +1796,14 @@ QVariantMap apply(const QString &exePath, const QString &developerName,
         return aboutFitProblem(image, buildAbout(developerName, tagline, links, logoSrc,
                                                  hiddenTabs, icons).toUtf8()).isEmpty();
     };
-    if (!fits(publishedIcons, publishedLogoSource)
+    // On a Qt 5 player the embedded form is not merely too big, it is unloadable:
+    // a QML Image cannot open a data: URI there (measured: status Error, while the
+    // same bytes load from a file), so the icon would save, apply, and never
+    // appear. Always use the file form in that case, and do not let the size check
+    // put the unloadable form back.
+    const int qtMajor = playerQtMajor(image);
+    const bool mustReference = qtMajor == 5 && bestIconFiles.size() > 0;
+    if ((mustReference || !fits(publishedIcons, publishedLogoSource))
         && (bestIconFiles.size() > 0 || profile.contains(QStringLiteral("logo")))) {
         QVariantMap byFile = customTabIcons;
         QString assetError;
@@ -1798,7 +1839,7 @@ QVariantMap apply(const QString &exePath, const QString &developerName,
         }
         // Only adopt the file form if it genuinely fits: a half-written set would
         // leave some tabs pointing at files and others at nothing.
-        if (stored && fits(byFile, logoByFile)) {
+        if (stored && (mustReference || fits(byFile, logoByFile))) {
             publishedIcons = byFile;
             publishedLogoSource = logoByFile;
         } else {
@@ -1868,13 +1909,19 @@ QVariantMap apply(const QString &exePath, const QString &developerName,
     // Say which form was used. If the icons had to move out of the page, the user
     // should know before they look at the strip: a player that refuses file:// URLs
     // would show no icons, and that would otherwise be silent.
-    const QString assetNote = writtenAssets.isEmpty()
-        ? QString()
-        : QStringLiteral(" The artwork was %1 icon(s) - too large for this player's About "
-                         "slot - stored in the app's own asset folder and referenced from the "
-                         "page. If the icons do not appear after restarting, this player does "
-                         "not load images that way; choose a smaller SVG and rebuild.")
-              .arg(QString::number(writtenAssets.size()));
+    QString assetNote;
+    if (!writtenAssets.isEmpty()) {
+        assetNote = QStringLiteral(" %1 icon(s) were stored in the app's own asset folder and "
+                                   "referenced from the page").arg(QString::number(writtenAssets.size()));
+        if (qtMajor == 5)
+            assetNote += QStringLiteral(", because this player runs Qt 5, whose Image cannot load "
+                                        "an embedded data: URI - the icon would otherwise apply and "
+                                        "then never appear");
+        else
+            assetNote += QStringLiteral(", because they were too large for this player's About slot");
+        assetNote += QStringLiteral(". If the icons still do not appear after restarting, the player "
+                                    "refuses images from outside its own resources; tell the developer.");
+    }
     return {{QStringLiteral("ok"), true},
             {QStringLiteral("msg"), QStringLiteral("The compact, draggable Settings window, icon tabs and customizable About page were applied. A selective recovery snapshot was saved; restart BlueStacks to see it.") + assetNote},
             {QStringLiteral("recovery"), result.value(QStringLiteral("id"))}};
