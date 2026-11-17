@@ -115,12 +115,13 @@ assert "iSettingsWindowShadowContainer.bIcons[" in replacement
 # never came off: the key stayed "qrc:\settings\displaysetting.qml" while the About
 # page published "displaysetting.qml". Nothing threw, the lookup returned
 # undefined, and the tab showed no icon - the silent failure this pins.
-# The class is written \x5c so the raw string needs no doubled backslash.
+# The class is written with a doubled backslash: the template is a C++ raw
+# string, so the JS sees a single escaped backslash and the split works.
 _icon_split = re.search(
     r"pQmlSource\.toLowerCase\(\)\.split\(/\[(.+?)/\]/\)\.pop\(\)", replacement
 )
 assert _icon_split, "the icon lookup must strip the path down to its leaf"
-assert _icon_split.group(1) == "\\x5c", (
+assert _icon_split.group(1) == "\\\\", (
     f"the icon separator class must also match a backslash, got {_icon_split.group(1)!r}"
 )
 # A tab is as wide as its own label plus a fixed 22 px of padding. Equal-width
