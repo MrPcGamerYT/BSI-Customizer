@@ -5311,7 +5311,10 @@ Window {
                           // A custom icon sits centred in the tab, with the native
                           // label lifted to the top instead of being painted over.
                           && rebuiltWindow.contains(QStringLiteral("anchors.bottomMargin:c?26:0"))
-                          && rebuiltWindow.contains(QStringLiteral("Image{source:c;width:18;height:18;x:parent.width/2-9;y:24}"))
+                          // The icon is drawn at 18x18 and so is decoded at 18x18:
+                          // without sourceSize a large SVG decodes at its natural
+                          // size and the strip scales it down at paint time.
+                          && rebuiltWindow.contains(QStringLiteral("Image{source:c;width:18;height:18;x:parent.width/2-9;y:24;sourceSize.width:18;sourceSize.height:18}"))
                           // A hidden tab must not paint its label over the tabs
                           // beside it: zeroing its width closed the slot but the
                           // button inside kept drawing its text on top of the
@@ -5442,7 +5445,13 @@ Window {
                               // property bHidden", which is exactly why a saved custom
                               // tab icon applied and then never appeared.
                               && updatedAbout.contains(QStringLiteral("function fOnQmlLoaded(){var p=parent;while(p&&p.bIcons===undefined)p=p.parent;if(p){p.bHidden=bsiHiddenTabs;p.bIcons=bsiTabIcons}}"))
-                              && updatedAbout.contains(QStringLiteral("\"%1\":\"data:image/").arg(iconTabKey))
+                              // On a Qt 5 player the icon must NOT be embedded: its
+                              // Image cannot open a data: URI (measured: status Error,
+                              // while the same bytes load from a file), so it would
+                              // apply and then never appear. It is published as a
+                              // file:/// path instead.
+                              && (updatedAbout.contains(QStringLiteral("\"%1\":\"data:image/").arg(iconTabKey))
+                                  || updatedAbout.contains(QStringLiteral("\"%1\":\"file:///").arg(iconTabKey)))
                               && updatedAbout.contains(QStringLiteral("BSI Panel Regression Updated"))
                               && updatedAbout.contains(QStringLiteral("Regression subtitle")),
                           QStringLiteral("the real %1 Settings rebuild writes hidden tabs, custom SVG icons, and a custom About logo into regenerated QML")
