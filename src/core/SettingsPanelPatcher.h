@@ -34,6 +34,10 @@ struct State
 // stale state at the exact path the patcher reads.
 QString recoveryPathFor(const QString &exePath);
 State analyze(const QString &exePath);
+// Built-in assets keyed by the inspected pages' stable ids, in the same
+// MIME/base64 format as custom uploads. These are not saved as user overrides;
+// clearing an override therefore restores the pack on the next Apply.
+QVariantMap defaultTabIcons(const QVariantList &tabs, QString *error = nullptr);
 QVariantMap readCustomAsset(const QString &path, const QString &kind);
 QVariantMap apply(const QString &exePath, const QString &developerName,
                   const QVariantList &links, const QVariantMap &profile, bool enabled);

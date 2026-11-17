@@ -11,15 +11,16 @@ import re
 import tempfile
 import urllib.parse
 import zlib
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("QSG_RHI_BACKEND", "software")
 
 from PySide6.QtCore import QObject, QPointF, Property, Qt, Slot, QUrl
-from PySide6.QtGui import QGuiApplication
+from PySide6.QtGui import QColor, QGuiApplication, QImage
 from PySide6.QtQuick import QQuickItem, QQuickWindow
-from PySide6.QtQml import QQmlComponent, QQmlEngine
+from PySide6.QtQml import QQmlComponent, QQmlEngine, QQmlExpression
 from PySide6.QtTest import QTest
 
 
@@ -133,16 +134,26 @@ assert _hidden_sentinel in cpp, (
 # instead of failing the whole apply with "needs N bytes but its slot only holds
 # M". Base64 defeats compression, so embedding capped custom artwork at roughly
 # 600 bytes per slot; a file reference costs the document a short path.
-assert "QString writeAssetFile(" in cpp and 'QStringLiteral("file:///")' in cpp, \
-    "oversized artwork must be written beside the player, not embedded"
+assert "QString writeAssetFile(" in cpp and "QUrl::fromLocalFile(file).toString(QUrl::FullyEncoded)" in cpp, \
+    "referenced artwork must use correctly encoded absolute file URLs"
 assert "aboutFitProblem(image," in cpp, \
     "the apply must test the real document against the real slot before choosing"
-assert "writtenAssets" in cpp and "QFile::remove(QUrl(path).toLocalFile())" in cpp, \
-    "a refused apply must remove the icons it wrote for that attempt"
+assert "StagedAssetFiles stagedAssets" in cpp and "if (!committed)" in cpp, \
+    "a refused apply must remove only files newly created for that attempt"
+assert "sha256(bytes).left(24)" in cpp and "existing != bytes" in cpp, \
+    "replacement images need immutable URLs so failed applies cannot overwrite live artwork"
 assert 'settings-panel-assets' in cpp, \
     "assets belong in the app's own data folder, never inside the player's"
-assert "customTabIcons = byTabIndex(customTabIcons);" in cpp, \
-    "the icon map must be re-keyed by tab index before it is published"
+assert "customTabIcons = byTabIndex(customTabIcons, current.tabs);" in cpp, \
+    "the embedded icon map must be re-keyed by tab index before it is published"
+assert "byFile = byTabIndex(byFile, current.tabs);" in cpp, \
+    "file references must use numeric keys too, not leave an unloadable data URI in the numeric slot"
+assert 'bestLogoFiles.value(QStringLiteral("logo")).toMap()' in cpp, \
+    "the logo asset must be unpacked before its bytes are written"
+assert "runtimeAssetPng(it.value().toMap(), true)" in cpp, \
+    "runtime icons must not depend on the player's optional SVG decoder"
+assert "QXmlStreamReader xml(bytes)" in cpp and "!QSvgRenderer(bytes).isValid()" in cpp, \
+    "malformed SVGs must fail when selected rather than apply as blank icons"
 assert "hiddenTabs = keys.keys();" in cpp, \
     "the hidden-tab list must be re-keyed by tab index too, or hidden tabs reappear"
 # A tab is as wide as its own label plus a fixed 22 px of padding. Equal-width
@@ -177,7 +188,7 @@ assert ";spacing:4" in replacement, \
 # A custom icon sits centred in the tab with the native label lifted to the top,
 # instead of being painted over the text.
 assert "anchors.bottomMargin:c?26:0" in replacement, "the label must move up when an icon is shown"
-assert "Image{source:c;width:18;height:18;x:parent.width/2-9;y:24;sourceSize.width:18;sourceSize.height:18}" \
+assert "Image{source:c||'';width:18;height:18;x:parent.width/2-9;y:24;sourceSize.width:18;sourceSize.height:18}" \
     in replacement, "the icon must be centred in the tab at exactly 18x18"
 # Collapsing the width hid the tab's box but not its label: the button inside the
 # delegate kept painting its text, so "Customise" and "Advanced" smeared over the
@@ -733,10 +744,10 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
     # check below is that the code knows to differ, not that this case differs.
     assert "int playerQtMajor(const QByteArray &image)" in cpp, \
         "the apply must read the player's own Qt version from its import table"
-    assert "mustReference = qtMajor == 5" in cpp, \
-        "a Qt 5 player must always get referenced icons, never embedded data: URIs"
-    assert "QStringLiteral(\"file:///\")" in cpp, \
-        "referenced icons must be absolute file:/// URLs the player can open"
+    assert "mustReference = qtMajor != 6" in cpp, \
+        "Qt 5 and unidentified players must get referenced icons and logos, never data URIs"
+    assert "QUrl::fromLocalFile(file).toString(QUrl::FullyEncoded)" in cpp, \
+        "referenced icons must be encoded absolute file URLs the player can open"
     # And the strip must actually paint it, centred, with the label lifted clear.
     strip_items = visual_items(tabs)
 
@@ -770,6 +781,32 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
         f"(icon centre {icon_centre}, tab centre {delegate_centre})"
     )
 
+    # Exercise the referenced runtime form as well, using a path that cannot be
+    # made into a URL by concatenating "file:///". The PNG must actually decode,
+    # not merely appear in Image.source (which also happens for broken images).
+    runtime_dir = root / "icons # space % café"
+    runtime_dir.mkdir()
+    runtime_path = runtime_dir / "replacement icon.png"
+    runtime_image = QImage(54, 54, QImage.Format.Format_ARGB32)
+    runtime_image.fill(QColor("#33dd77"))
+    assert runtime_image.save(str(runtime_path))
+    runtime_url = QUrl.fromLocalFile(str(runtime_path)).toString(QUrl.ComponentFormattingOption.FullyEncoded)
+    assert about_child.setProperty("bsiTabIcons", {"0": runtime_url, "1": ""})
+    assert QMetaObject.invokeMethod(about_child, "fOnQmlLoaded")
+    QTest.qWait(60)
+    runtime_icons = [item for item in visual_items(tabs)
+                     if source_of(item) and QUrl(source_of(item)).toLocalFile() == str(runtime_path)]
+    assert runtime_icons, "the referenced PNG did not reach the numeric tab slot"
+    decoded = QQmlExpression(engine.rootContext(), runtime_icons[0], "status === 1")  # Image.Ready
+    result = decoded.evaluate()
+    assert not decoded.hasError() and (result[0] if isinstance(result, tuple) else result), \
+        "the referenced PNG must decode as Image.Ready, including spaces, #, % and Unicode in its URL"
+    hidden_tab = next(item for item in visual_items(tabs)
+                      if item.metaObject().indexOfProperty("pSettingIdx") > 0
+                      and item.property("pSettingIdx") == 1)
+    assert not hidden_tab.isVisible(), "hidden sentinels must still work beside file-backed icons"
+    print("PASS: referenced PNG icons decode from encoded local URLs and keep hidden-tab sentinels")
+
     about_component.deleteLater()
     mounted_component.deleteLater()
     window.close()
@@ -793,11 +830,8 @@ def _minify_svg(source: str) -> str:
     source = re.sub(r">\s+<", "><", source)
     source = re.sub(r"\s+", " ", source)
     source = re.sub(r"<\s+", "<", source)
-    source = re.sub(r"\s+/?>", ">", source)
-    source = source.strip()
-    if not source.endswith("/>"):
-        source = re.sub(r"\s+/>", "/>", source)
-    return source
+    source = re.sub(r"\s+(/?>)", r"\1", source)
+    return source.strip()
 
 
 editor_icon = '''<?xml version="1.0" encoding="UTF-8" standalone="no"?>
@@ -823,6 +857,8 @@ compacted = _minify_svg(editor_icon)
 assert len(compacted.encode()) < len(editor_icon.encode()) * 0.6, (
     "an editor-emitted tab icon must shrink substantially before it is embedded "
     f"({len(editor_icon.encode())} -> {len(compacted.encode())} bytes)")
+ET.fromstring(compacted)  # A `<path ... />` must not turn into an unclosed `<path>`.
+assert '<path' in compacted and '/>' in compacted, "self-closing drawing elements must survive cleanup"
 assert 'd="M 4,12 H 20 V 20 H 4 Z"' in compacted, "the drawing itself must be preserved"
 assert "inkscape" not in compacted.lower() and "<metadata" not in compacted, \
     "comments and metadata must be dropped"
@@ -838,11 +874,9 @@ for hostile in ("<svg><script>alert(1)</script></svg>",
 print("PASS: tab icons are compacted before they are embedded in the About document")
 
 
-# A tab icon the user picks is often far bigger than the slot the About page
-# lives in (a 150-path icon is ~8.7 KB of markup against a 2337-byte slot), and
-# refusing the upload is not an answer: the SVG is valid and only the container
-# is small. Such an icon is drawn once at the size the strip uses and stored as a
-# PNG instead, which is what makes "set 2+ custom icons" apply at all.
+# A large SVG stays editable in the profile. Referenced PNG copies keep the
+# About document bounded even with several icons, without relying on the
+# player's SVG decoder. Check both the over-budget input and the short-URL form.
 def _page_payload(icons_literal):
     doc = about_source
     for token, value in (
@@ -869,10 +903,14 @@ as_svg = "({" + ",".join(
     f'"{i}":"data:image/svg+xml,{big_icon}"' for i in range(4)) + "})"
 assert _page_payload(as_svg) > 2337, (
     "the fixture must reproduce the over-slot case, otherwise this test proves nothing")
-# After the raster fallback the same four icons are a few hundred bytes each.
-assert "rasterizeSvg" in cpp and "artworkBudget" in cpp, \
-    "a tab icon that cannot fit its slot must be drawn down, not refused"
-assert "image/png" in cpp, "the drawn-down icon is stored as PNG"
-assert "for (int box : {32, 28, 24, 20, 16, 12})" in cpp, \
-    "the fallback should try progressively smaller squares until it fits"
-print("PASS: oversized tab icons are drawn down instead of failing the apply")
+# Runtime files replace the entire numeric map, rather than adding filename
+# keys beside data URIs that the delegate would continue reading.
+assert "runtimeAssetPng" in cpp and "byFile = byTabIndex(byFile, current.tabs)" in cpp
+assert "return rasterizeSvg(bytes, icon ? 54 : 320, icon);" in cpp, \
+    "runtime copies must render icons at sufficient resolution while preserving the saved SVG"
+file_form = "({" + ",".join(
+    f'"{i}":"file:///C:/Users/Test/AppData/Local/BSI/settings-panel-assets/'
+    + "a" * 64 + "/" + __import__("hashlib").sha256(str(i).encode()).hexdigest()[:24]
+    + '.png"' for i in range(4)) + "})"
+assert _page_payload(file_form) < 2337, "file references must leave the About page inside the known slot"
+print("PASS: oversized icon artwork can use compact numeric file references without altering the SVG profile")

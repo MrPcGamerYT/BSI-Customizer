@@ -29,17 +29,32 @@ To run only the safe-copy backend check and skip opening the GUI, add `-NoLaunch
 
 ## What the rebuilt window should look like
 
-The rebuilt shell (`BSI Settings v9`) keeps the player's own tab model and pages but never stretches a page. The stock Settings pages are fixed-size surfaces — a ~520 px content column pinned to the top-left plus a footer anchored to the bottom edge — so a full-bleed shell is what made a correctly built panel look left-aligned and cramped.
+The rebuilt shell (`BSI v15`) keeps the player's own tab model and pages in a flat, rounded window. Native pages use a centered column up to 568 px wide, with a footer anchored to the bottom edge. There is no extra content card or selected-tab pill.
 
 In the patched window, check that:
 
 - the **Settings** title is centered in the title bar with the close (**X**) button at the top right;
-- the category tabs sit as a single row, centered, on their own row under the title — no tab is half-clipped at the window edge, and the row does not overlap the content card;
-- the page sits in one centered card about 570 px wide, with equal empty gutters on the left and right;
-- each page's own rows, presets, sliders and toggles are aligned inside that card, and any per-page footer (for example "Some changes will apply on next launch" with its save button) is fully visible at the bottom of the card, not cut off;
+- the category tabs sit as a single centered, horizontally scrollable row under the title, with equal gaps between their labels and no overlap with the page;
+- each supplied pack icon appears beneath its tab label automatically, without uploading artwork first;
+- the native page has equal empty gutters on the left and right, and its controls and per-page footer (for example "Some changes will apply on next launch" with its save button) are fully visible;
 - clicking a category still switches the page, dragging the title bar still moves the window, and the close button still closes it.
 
-On a narrow player window the card shrinks with the window (down to 32 px total gutter) instead of dropping the tabs or hiding the footer.
+On a narrow player window the centered page column shrinks with the window (48 px total gutter); overflowing tabs remain reachable by scrolling.
+
+## Default pack and custom-icon regression
+
+Use a disposable player copy and an empty Settings-panel profile for the first check:
+
+1. Inspect the player. Each known native tab should preview a **Pack default** icon. Inspection alone must not modify the player or save these defaults as custom overrides.
+2. Apply without uploading any icons, then restart the disposable player. Verify all visible tabs have the supplied artwork. A twelve-tab player uses eleven distinct SVGs: Game settings and Gamepad share the controller. Devices uses the monitor/phone drawing; Phone uses the standalone phone drawing. Unknown future tabs are not assigned a guessed icon.
+3. Replace one tab with a valid SVG (also try an editor-exported `<path ... />` SVG). The preview should update immediately, other pack icons should remain, and the player should change only after **Apply** and restart. Malformed SVGs should be rejected when selected.
+4. Replace the same tab again with a visibly different drawing/color. Apply and restart; the new icon must appear rather than a cached older image.
+5. Set a second custom tab icon. Choose **Use default** on the first one and Apply. Only the first should return to pack artwork; the second should remain customized.
+6. Hide a tab, Apply and restart. Its label, icon and gap should disappear together; the remaining pack/custom icons must stay on their correct pages.
+7. Use **Reset tab visibility & artwork**, then Apply. All tabs should be visible with pack icons again, the custom About logo should be cleared, and the About name/links should remain.
+8. Restore the original Settings panel. Confirm only the Settings-window/About sources are restored and unrelated customizations remain.
+
+Repeat with both Qt 5 and Qt 6 players when available. The patcher writes immutable PNG runtime copies under the Customizer's local application-data `settings-panel-assets` directory. Keep that directory while the patch is in use; the original SVGs and custom SVG overrides remain editable. Explicit SVG colors must remain unchanged; uncolored `currentColor` artwork should be readable light gray, not black or blank.
 
 Keep the Customizer open while inspecting the GUI. Closing it ends the manual session and removes the disposable GUI copy and temporary settings. A GUI Apply/Restore operates only on that copy.
 

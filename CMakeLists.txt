@@ -303,6 +303,26 @@ if(BSI_EXE_TEST_FILE)
     target_compile_definitions(BSICustomizer PRIVATE BSI_EXE_TEST_FILE="${_bsi_exe_reference}")
 endif()
 
+# The supplied Settings-tab pack is embedded in both UI builds. No download or
+# user profile seeding is needed: an empty profile automatically uses this pack.
+qt_add_resources(BSICustomizer "settings_panel_icons"
+    PREFIX "/settings-panel-icons"
+    BASE "${CMAKE_CURRENT_SOURCE_DIR}/src/assets/settings-panel-icons"
+    FILES
+        src/assets/settings-panel-icons/default-icons.json
+        src/assets/settings-panel-icons/performance.svg
+        src/assets/settings-panel-icons/display.svg
+        src/assets/settings-panel-icons/graphics.svg
+        src/assets/settings-panel-icons/game-settings.svg
+        src/assets/settings-panel-icons/devices.svg
+        src/assets/settings-panel-icons/preferences.svg
+        src/assets/settings-panel-icons/phone.svg
+        src/assets/settings-panel-icons/shortcuts.svg
+        src/assets/settings-panel-icons/user-data.svg
+        src/assets/settings-panel-icons/advanced.svg
+        src/assets/settings-panel-icons/about.svg
+)
+
 qt_add_qml_module(BSICustomizer
     URI BSICustomizer
     VERSION 1.0
