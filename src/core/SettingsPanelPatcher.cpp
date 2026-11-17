@@ -862,7 +862,7 @@ Item{Layout.fillWidth:true;Layout.preferredHeight:28}}}}
 
 // Publish the hidden tabs and icons to the shell. Walk up instead of counting
 // parents: one hop too many lands on the window and the assignment throws.
-function fOnQmlLoaded(){var p=parent;while(p&&p.bIcons===undefined)p=p.parent;if(p){p.bHidden=bsiHiddenTabs;p.bIcons=bsiTabIcons}}}
+function fOnQmlLoaded(){var p=parent;while(p&&p.bIcons===undefined)p=p.parent;if(p){p.bHidden=bsiHiddenTabs;p.bIcons=bsiTabIcons}}
 function fCheckForUpdateCallback(apiCallStatus,jsonData){
 if(apiCallStatus===0){var j=JSON.parse(jsonData)
 pUpdateAvailable=String(j.update_available).toLowerCase()==="true"
