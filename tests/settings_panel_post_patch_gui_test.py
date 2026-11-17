@@ -236,12 +236,14 @@ def main():
     player = Player()
     settings = SettingsObject(len(TABS))
 
-    # The shell as it lands in the player: the template with the tab model the
-    # About page publishes (lower-cased page file names -> icon data URIs),
-    # exactly the shape `buildWindow()`/`buildAbout()` produce after a patch.
+    # The shell as it lands in the player: the template with the map the About
+    # page publishes. That map is keyed by the tab's own index, because
+    # pQmlSource is a QML url: it has no toLowerCase() and stringifies
+    # percent-encoded, so a name derived from it can never match and the strip
+    # silently drew nothing.
     bound = SHELL.replace(
         "property var bIcons:({})",
-        "property var bIcons:({'settingpage.qml':'%s'})" % ICON,
+        "property var bIcons:({'0':'%s'})" % ICON,
     )
     tabs_js = "[" + ",".join(
         "{pQmlSource:'%s',pButtonText:'%s',pShowRedDot:false}" % (src.capitalize(), label)
@@ -364,6 +366,35 @@ Window {
         check(
             first_x >= 17,
             "the first tab is too close to the window edge (%.1f)" % first_x,
+        )
+
+    # --- the custom icon is actually drawn ---------------------------------
+    # This is the reported failure: the icon saved fine, the apply succeeded and
+    # the tab still showed nothing. Keying the map by index is what makes the
+    # delegate resolve it, so assert the artwork really is painted: 18x18 and
+    # centred in its own tab.
+    painted = [i for i in tree if source_of(i) == ICON]
+    check(bool(painted), "the custom tab icon is not painted by any tab")
+    if painted and buttons:
+        icon = painted[0]
+        delegate = icon.parentItem()
+        strip = delegate.parentItem()
+        icon_mid = icon.mapToItem(strip, QPointF(icon.width() / 2, 0)).x()
+        tab_mid = delegate.mapToItem(strip, QPointF(delegate.width() / 2, 0)).x()
+        check(
+            round(icon.width()) == 18 and round(icon.height()) == 18,
+            "the custom icon must be drawn at 18x18, got %dx%d"
+            % (icon.width(), icon.height()),
+        )
+        check(
+            abs(icon_mid - tab_mid) < 2,
+            "the custom icon is not centred in its tab (%.1f vs %.1f)"
+            % (icon_mid, tab_mid),
+        )
+        # With an icon the label moves up to make room; the icon sits beneath it.
+        check(
+            icon.mapToItem(strip, QPointF(0, 0)).y() > 20,
+            "the custom icon must sit below the label, not over it",
         )
 
     # --- selected tab ------------------------------------------------------
