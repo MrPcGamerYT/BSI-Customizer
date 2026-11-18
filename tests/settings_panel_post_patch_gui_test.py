@@ -168,7 +168,7 @@ import QtQuick.Layouts 1.15
 import BsiGuiFixture 1.0
 Window {
     id: iSettingsWindow
-    width: 800; height: 460; visible: false; color: "transparent"
+    width: 650; height: 460; visible: false; color: "transparent"
     transientParent: fixturePlayer
     property int pCurrentTabIndex: 0
     property var testIcons: ({})
@@ -268,6 +268,18 @@ Window {
             page_origin = page.mapToItem(content, QPointF(0, 0))
             assert abs(page_origin.x() + page.width() / 2 - window.width() / 2) < EPSILON
             surface_origin = surface.mapToItem(content, QPointF(0, 0))
+            # Preserve the native page width instead of stretching its controls
+            # into the unused sides. The narrower shell leaves 26 px per side
+            # with the real 15 px shadow, not the old 101 px gutters. With no
+            # shadow the gutter is at most 41 px; narrow players retain 24 px.
+            left_gutter = page_origin.x() - surface_origin.x()
+            right_gutter = surface_origin.x() + surface.width() - page_origin.x() - page.width()
+            assert abs(left_gutter - right_gutter) < EPSILON, "page gutters must be symmetric"
+            assert 24 - EPSILON <= left_gutter <= 41 + EPSILON, (
+                f"excess Settings side space returned: {left_gutter} px per side")
+            if window.width() == 650 and shell_root.property("shadowThickness") == 15:
+                assert abs(page.width() - 568) < EPSILON, "tightening the shell must not shrink desktop page controls"
+                assert abs(left_gutter - 26) < EPSILON
             expected_top = surface_origin.y() + (112 if visible else 68)
             assert abs(page_origin.y() - expected_top) < EPSILON, f"wrong page position: {page_origin.y()}"
             assert abs(page.height() - (surface.height() - 130)) < EPSILON, "top padding changed the footer clearance"
@@ -293,9 +305,9 @@ Window {
             shell_root.setProperty("shadowThickness", inset)
             window.show()
             QTest.qWait(80)
-            assert abs(window.width() - min(width * .96, 800)) <= 1
+            assert abs(window.width() - min(width * .96, 650)) <= 1
             assert abs(window.height() - min(height * .94, 460)) <= 1
-            assert window.width() <= 800 and window.height() <= 460, "the old oversized Settings footprint returned"
+            assert window.width() <= 650 and window.height() <= 460, "the broad Settings side gutters returned"
             assert abs(window.x() + window.width() / 2 - (player.x() + width / 2)) <= 1
             assert abs(window.y() + window.height() / 2 - (player.y() + height / 2)) <= 1
             assert window.x() >= player.x() and window.y() >= player.y()
@@ -310,7 +322,11 @@ Window {
                      (mixed, (0, 1)), (mixed, (10, 11)),
                      (defaults, (0, 3, 4, 11)), (defaults, tuple(range(11))),
                      (defaults, tuple(range(12)))]
-        for width, height, inset in [(1440, 900, 0), (1149, 659, 0), (1440, 900, 15), (1149, 659, 15), (720, 480, 15), (640, 400, 15)]:
+        viewports = [(1440, 900, 0), (1149, 659, 0),
+                     (1440, 900, 15), (1149, 659, 15), (720, 480, 15),
+                     (680, 480, 15), (676, 480, 15),  # both sides of the width-cap breakpoint
+                     (640, 400, 15), (560, 400, 15)]
+        for width, height, inset in viewports:
             fit_player(width, height, inset, x=80, y=50)
             for base, hidden in scenarios:
                 icons = dict(base, **{str(i): "" for i in hidden})
@@ -345,21 +361,28 @@ Window {
         assert window.setProperty("tabData", model(translated))
         check_layout(translated, mixed)
 
-        # Scroll to the final option at a narrow size, click its full hit target,
-        # and require the native selection/page callback and focus to survive.
+        # The tighter desktop row deliberately scrolls instead of shrinking
+        # labels/icons or changing their approved gaps. Reach and click EVERY
+        # category at desktop and narrow sizes, then return to the first one.
         assert window.setProperty("tabData", model(LABELS))
         assert window.setProperty("testIcons", defaults)
-        strip.setProperty("contentX", 0)
-        labels = check_layout(LABELS, defaults)
-        strip.setProperty("contentX", max(0, strip.property("contentWidth") - strip.width()))
-        QTest.qWait(50)
-        last = labels["About"].parentItem()
-        point = last.mapToScene(QPointF(last.width() / 2, last.height() / 2)).toPoint()
-        assert 24 <= point.x() <= window.width() - 24, "the last option cannot be reached by scrolling"
-        QTest.mouseClick(window, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, point)
-        QTest.qWait(40)
-        assert window.property("pCurrentTabIndex") == 11 and last.hasActiveFocus(), "tab click did not retain native selection and focus"
-        check_layout(LABELS, defaults)
+        for width, height in [(1440, 900), (560, 400)]:
+            fit_player(width, height, 15)
+            strip.setProperty("contentX", 0)
+            labels = check_layout(LABELS, defaults)
+            assert strip.property("contentWidth") > strip.width(), "the fixture must exercise a scrolling tab row"
+            for index in list(range(len(LABELS))) + [0]:
+                tab = labels[LABELS[index]].parentItem()
+                target = tab.x() + tab.width() / 2 - strip.width() / 2
+                strip.setProperty("contentX", max(0, min(target, strip.property("contentWidth") - strip.width())))
+                QTest.qWait(30)
+                point = tab.mapToScene(QPointF(tab.width() / 2, tab.height() / 2)).toPoint()
+                assert 24 <= point.x() <= window.width() - 24, f"{LABELS[index]} cannot be reached by scrolling"
+                QTest.mouseClick(window, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, point)
+                QTest.qWait(20)
+                assert window.property("pCurrentTabIndex") == index and tab.hasActiveFocus(), \
+                    f"{LABELS[index]} lost native selection/focus after the window was tightened"
+            check_layout(LABELS, defaults)
         assert not re.search(r"color:\s*[\"']#", SHELL), "the shell must use the player's native palette"
         assert not warnings, "QML runtime warnings:\n" + "\n".join(warnings)
         if len(sys.argv) > 1:
@@ -372,7 +395,7 @@ Window {
         player.deleteLater()
         QTest.qWait(10)
         engine.deleteLater()
-    print("PASS: compact 800x460 Settings stays centred and viewport-safe; pages clear the tab strip by 12 px; all twelve labels/icons keep their gaps, Save changes stays visible, and long pages remain scrollable")
+    print("PASS: compact 650x460 Settings removes the broad side gutters and stays centred and viewport-safe; pages clear the tab strip by 12 px; all twelve labels/icons keep their gaps, Save changes stays visible, and long pages remain scrollable")
     return 0
 
 

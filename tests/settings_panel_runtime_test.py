@@ -308,7 +308,7 @@ assert helper_match, "Could not find the compact Settings-window geometry helper
 helper = helper_match.group(1)
 assert "onVisibleChanged:if(visible&&transientParent)" in helper
 assert "var t=transientParent" in helper
-assert "width=Math.min(t.width*.96,800)" in helper
+assert "width=Math.min(t.width*.96,650)" in helper
 assert "height=Math.min(t.height*.94,460)" in helper
 assert "x=t.x+t.width/2-width/2" in helper
 assert "y=t.y+t.height/2-height/2" in helper
@@ -514,8 +514,8 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
     assert not missing, f"Missing controls: {missing}; found object names: {found_names}"
     panel_center = panel.mapToItem(window.contentItem(), QPointF(panel.width() / 2, panel.height() / 2))
     assert abs(panel_center.x() - window.width() / 2) < 2 and abs(panel_center.y() - window.height() / 2) < 2, "The compact Settings shell should stay centered in the player window"
-    assert abs(obj.width() - 800) < 2 and abs(obj.height() - 460) < 2, "Settings must use the compact desktop footprint, not fill most of the player"
-    assert abs(obj.x() - 350) < 2 and abs(obj.y() - 220) < 2, "The compact Settings window should remain centered"
+    assert abs(obj.width() - 650) < 2 and abs(obj.height() - 460) < 2, "Settings must remove the broad side gutters without reducing its height"
+    assert abs(obj.x() - 425) < 2 and abs(obj.y() - 220) < 2, "The compact Settings window should remain centered"
     title_center = settings_title.mapToItem(obj, QPointF(settings_title.width() / 2, settings_title.height() / 2))
     assert abs(title_center.x() - obj.width() / 2) < 2, "The Settings title should be centered in the title bar"
     # Gaps: one spacing value for the whole strip, so the distance between any
