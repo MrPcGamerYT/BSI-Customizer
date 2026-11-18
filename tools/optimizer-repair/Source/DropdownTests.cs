@@ -31,13 +31,13 @@ namespace VoidOptimizer {
                         try {
                             for(int pass=0;pass<12;pass++)foreach(StudioChoice choice in choices) {
                                 ContextMenuStrip menu=Open(choice);
-                                ToolStripItem selected=menu.Items[2];selected.PerformClick();
+                                bool itemDisposed=false;ToolStripItem selected=menu.Items[2];selected.Disposed+=delegate { itemDisposed=true; };selected.PerformClick();
                                 if(menu.Visible)menu.Close(ToolStripDropDownCloseReason.ItemClicked);
                                 Pump();Need(choice.SelectedIndex==2,"item click must select exactly the requested item");
                                 Need(!menu.IsDisposed,"selection must leave reusable menu alive");
                                 foreach(ToolStripDropDownCloseReason reason in new ToolStripDropDownCloseReason[]{ToolStripDropDownCloseReason.Keyboard,ToolStripDropDownCloseReason.AppClicked,ToolStripDropDownCloseReason.CloseCalled}) {
                                     Need(Object.ReferenceEquals(menu,Open(choice)),"reopen must reuse the control-owned menu");
-                                    Need(selected.IsDisposed,"old menu items must be disposed on the next open");
+                                    Need(itemDisposed,"old item disposal event missing; sameItem="+Object.ReferenceEquals(menu.Items[2],selected)+", IsDisposed="+selected.IsDisposed+", reason="+reason);
                                     Close(menu,reason);Need(choice.SelectedIndex==2,"dismissal must not change selection");
                                 }
                                 Open(choice);choice.PerformClick();Pump();

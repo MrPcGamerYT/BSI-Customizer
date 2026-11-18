@@ -14,9 +14,8 @@ UPGRADE YOUR EXISTING REGISTERED FOLDER; DO NOT REGISTER ANOTHER COPY
 2. Extract this ZIP. Back up the existing VOID-Optimizer.exe and
    BUILD-REPORT.json, then replace those TWO files in the folder whose path
    your registered URL command shows. Keep that path and filename unchanged.
-   For the path you reported, the folder is:
-   C:\Users\NOVA\Documents\customizer\VOID-Optimizer-Studio04\VOID-Optimizer-Helper05
-   The folder may retain its old name; the new window header says HELPER 06.
+   The existing folder may still be named VOID-Optimizer-Helper05; leave that
+   name unchanged. The new window header, not its folder name, says HELPER 06.
 3. Run CHECK-INSTALL.cmd there, then open VOID-Optimizer.exe. No setup/link
    registration or emulator QML replacement is required for this helper-only
    upgrade. The protocol and existing recovery format remain v3/compatible.
