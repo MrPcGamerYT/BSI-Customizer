@@ -812,9 +812,10 @@ Repeater{model:pSettingsItems.pSettingElements;delegate:Loader{Component.onCompl
     QString out = QmlText::compactIndentation(stock.left(target.nameBegin));
     out += replacement;
     out += stock.mid(target.end);
-    // Make the redesigned Settings window use the available player viewport,
-    // with a comfortable desktop cap and centered placement on smaller screens.
-    const QString helper = QStringLiteral(R"QML(onVisibleChanged:if(visible&&transientParent){var t=transientParent;width=Math.min(t.width*.96,1120);height=Math.min(t.height*.94,670);x=t.x+t.width/2-width/2;y=t.y+t.height/2-height/2})QML");
+    // Keep Settings a compact 800x460 desktop dialog (~770x430 inside the
+    // native shadow), rather than filling the player with unused space. Retain
+    // the existing small-viewport guards, centering, theme and native pages.
+    const QString helper = QStringLiteral(R"QML(onVisibleChanged:if(visible&&transientParent){var t=transientParent;width=Math.min(t.width*.96,800);height=Math.min(t.height*.94,460);x=t.x+t.width/2-width/2;y=t.y+t.height/2-height/2})QML");
     const int rootClose = out.lastIndexOf(QLatin1String("\n}"));
     if (rootClose < 0) return {};
     out.insert(rootClose, helper);

@@ -304,12 +304,12 @@ helper_match = re.search(
     cpp,
     re.S,
 )
-assert helper_match, "Could not find the PR #88 Settings-window geometry helper"
+assert helper_match, "Could not find the compact Settings-window geometry helper"
 helper = helper_match.group(1)
 assert "onVisibleChanged:if(visible&&transientParent)" in helper
 assert "var t=transientParent" in helper
-assert "width=Math.min(t.width*.96,1120)" in helper
-assert "height=Math.min(t.height*.94,670)" in helper
+assert "width=Math.min(t.width*.96,800)" in helper
+assert "height=Math.min(t.height*.94,460)" in helper
 assert "x=t.x+t.width/2-width/2" in helper
 assert "y=t.y+t.height/2-height/2" in helper
 replacement = replacement.replace("@@BSI_HIDDEN_TABS@@", "[]")
@@ -489,8 +489,8 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
         (
             item for item in visual_tree
             if item.metaObject().className().endswith("MouseArea")
-            and item.width() > window.width() * 0.5
-            and item.height() < 70
+            and abs(item.width() - obj.width()) < 2
+            and abs(item.height() - 56) < 2
         ),
         None,
     )
@@ -513,9 +513,9 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
     found_names = sorted(item.objectName() for item in visual_tree if item.objectName())
     assert not missing, f"Missing controls: {missing}; found object names: {found_names}"
     panel_center = panel.mapToItem(window.contentItem(), QPointF(panel.width() / 2, panel.height() / 2))
-    assert abs(panel_center.x() - window.width() / 2) < 2 and abs(panel_center.y() - window.height() / 2) < 2, "The PR #88 Settings shell should stay centered in the player window"
-    assert abs(obj.width() - 1120) < 2 and abs(obj.height() - 670) < 2, "The redesigned Settings window should use the viewport-sized footprint, capped for desktop readability"
-    assert abs(obj.x() - 190) < 2 and abs(obj.y() - 115) < 2, "The larger Settings window should remain centered"
+    assert abs(panel_center.x() - window.width() / 2) < 2 and abs(panel_center.y() - window.height() / 2) < 2, "The compact Settings shell should stay centered in the player window"
+    assert abs(obj.width() - 800) < 2 and abs(obj.height() - 460) < 2, "Settings must use the compact desktop footprint, not fill most of the player"
+    assert abs(obj.x() - 350) < 2 and abs(obj.y() - 220) < 2, "The compact Settings window should remain centered"
     title_center = settings_title.mapToItem(obj, QPointF(settings_title.width() / 2, settings_title.height() / 2))
     assert abs(title_center.x() - obj.width() / 2) < 2, "The Settings title should be centered in the title bar"
     # Gaps: one spacing value for the whole strip, so the distance between any
