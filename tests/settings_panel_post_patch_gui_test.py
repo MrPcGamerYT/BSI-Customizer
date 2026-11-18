@@ -168,7 +168,7 @@ import QtQuick.Layouts 1.15
 import BsiGuiFixture 1.0
 Window {
     id: iSettingsWindow
-    width: 650; height: 460; visible: false; color: "transparent"
+    width: 806; height: 464; visible: false; color: "transparent"
     transientParent: fixturePlayer
     property int pCurrentTabIndex: 0
     property var testIcons: ({})
@@ -268,18 +268,17 @@ Window {
             page_origin = page.mapToItem(content, QPointF(0, 0))
             assert abs(page_origin.x() + page.width() / 2 - window.width() / 2) < EPSILON
             surface_origin = surface.mapToItem(content, QPointF(0, 0))
-            # Preserve the native page width instead of stretching its controls
-            # into the unused sides. The narrower shell leaves 26 px per side
-            # with the real 15 px shadow, not the old 101 px gutters. With no
-            # shadow the gutter is at most 41 px; narrow players retain 24 px.
+            # Resize only the window. The approved 568 px native page and its
+            # controls stay unchanged; the latest screenshot sets the frame size.
             left_gutter = page_origin.x() - surface_origin.x()
             right_gutter = surface_origin.x() + surface.width() - page_origin.x() - page.width()
             assert abs(left_gutter - right_gutter) < EPSILON, "page gutters must be symmetric"
-            assert 24 - EPSILON <= left_gutter <= 41 + EPSILON, (
-                f"excess Settings side space returned: {left_gutter} px per side")
-            if window.width() == 650 and shell_root.property("shadowThickness") == 15:
-                assert abs(page.width() - 568) < EPSILON, "tightening the shell must not shrink desktop page controls"
-                assert abs(left_gutter - 26) < EPSILON
+            assert abs(left_gutter - (surface.width() - page.width()) / 2) < EPSILON
+            if window.width() == 806 and window.height() == 464 and shell_root.property("shadowThickness") == 15:
+                assert abs(surface.width() - 776) < EPSILON, "visible width must match the screenshot border"
+                assert abs(surface.height() - 434) < EPSILON, "visible height must match the screenshot border"
+                assert abs(page.width() - 568) < EPSILON, "resizing the window must not stretch native controls"
+                assert abs(left_gutter - 104) < EPSILON
             expected_top = surface_origin.y() + (112 if visible else 68)
             assert abs(page_origin.y() - expected_top) < EPSILON, f"wrong page position: {page_origin.y()}"
             assert abs(page.height() - (surface.height() - 130)) < EPSILON, "top padding changed the footer clearance"
@@ -305,9 +304,9 @@ Window {
             shell_root.setProperty("shadowThickness", inset)
             window.show()
             QTest.qWait(80)
-            assert abs(window.width() - min(width * .96, 650)) <= 1
-            assert abs(window.height() - min(height * .94, 460)) <= 1
-            assert window.width() <= 650 and window.height() <= 460, "the broad Settings side gutters returned"
+            assert abs(window.width() - min(width * .96, 806)) <= 1
+            assert abs(window.height() - min(height * .94, 464)) <= 1
+            assert window.width() <= 806 and window.height() <= 464, "Settings exceeded the screenshot dimensions"
             assert abs(window.x() + window.width() / 2 - (player.x() + width / 2)) <= 1
             assert abs(window.y() + window.height() / 2 - (player.y() + height / 2)) <= 1
             assert window.x() >= player.x() and window.y() >= player.y()
@@ -324,7 +323,7 @@ Window {
                      (defaults, tuple(range(12)))]
         viewports = [(1440, 900, 0), (1149, 659, 0),
                      (1440, 900, 15), (1149, 659, 15), (720, 480, 15),
-                     (680, 480, 15), (676, 480, 15),  # both sides of the width-cap breakpoint
+                     (840, 480, 15), (838, 480, 15),  # both sides of the width-cap breakpoint
                      (640, 400, 15), (560, 400, 15)]
         for width, height, inset in viewports:
             fit_player(width, height, inset, x=80, y=50)
@@ -395,7 +394,7 @@ Window {
         player.deleteLater()
         QTest.qWait(10)
         engine.deleteLater()
-    print("PASS: compact 650x460 Settings removes the broad side gutters and stays centred and viewport-safe; pages clear the tab strip by 12 px; all twelve labels/icons keep their gaps, Save changes stays visible, and long pages remain scrollable")
+    print("PASS: screenshot-matched 776x434 visible Settings frame (806x464 with native shadow); centred and viewport-safe; unchanged native controls, theme, twelve tab labels/icons, 12 px page gap, Save changes and scrolling")
     return 0
 
 

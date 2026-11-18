@@ -814,10 +814,10 @@ Repeater{model:pSettingsItems.pSettingElements;delegate:Loader{Component.onCompl
     QString out = QmlText::compactIndentation(stock.left(target.nameBegin));
     out += replacement;
     out += stock.mid(target.end);
-    // Tighten only the width: 650x460 leaves the native 568 px page intact,
-    // with 26 px gutters inside the 15 px shadow instead of 101 px per side.
-    // Retain the height, viewport guards, centering, theme and native pages.
-    const QString helper = QStringLiteral(R"QML(onVisibleChanged:if(visible&&transientParent){var t=transientParent;width=Math.min(t.width*.96,650);height=Math.min(t.height*.94,460);x=t.x+t.width/2-width/2;y=t.y+t.height/2-height/2})QML");
+    // Match only the supplied screenshot's 776x434 visible Settings frame.
+    // Include the unchanged native 15 px shadow on each side: 806x464 overall.
+    // Retain viewport guards, centering, theme, controls and native page sizes.
+    const QString helper = QStringLiteral(R"QML(onVisibleChanged:if(visible&&transientParent){var t=transientParent;width=Math.min(t.width*.96,806);height=Math.min(t.height*.94,464);x=t.x+t.width/2-width/2;y=t.y+t.height/2-height/2})QML");
     const int rootClose = out.lastIndexOf(QLatin1String("\n}"));
     if (rootClose < 0) return {};
     out.insert(rootClose, helper);
