@@ -2,10 +2,13 @@
 
 ## What this feature does
 
-**Add-ons → Native tool / Normal startup DLL** adds one explicitly chosen,
-ordinary **AMD64 DLL** as a required PE dependency of the selected AMD64
-`HD-Player.exe`. The optional Chromium collection opens the **same native panel**.
-No automatic file inspection, patching or DLL execution occurs on page entry.
+**PATCHER → DLL patcher** adds one explicitly chosen, ordinary **AMD64 DLL**
+as a required PE dependency of the selected AMD64 `HD-Player.exe`. Expand the
+**PATCHER** sidebar category and click **DLL patcher**. Alternatively, use
+**Open DLL patcher** at the top of **COLLECTION**, above the skin packs. Both
+links open one dedicated editor; the form is no longer buried below the packs.
+The optional Chromium collection opens the **same native page**. No automatic
+file inspection, patching or DLL execution occurs on page entry.
 
 The new implementation is original C++ code, compiled into BSI. It does **not**
 embed or run the uploaded Python/JavaScript/PowerShell patchers, impersonate a
@@ -31,6 +34,34 @@ A DLL that requires an explicit `zlag_init()` or another exported initializer
 will need its own supported initialization design; this tool does not invoke
 that function. DLL initialization runs under loader-lock constraints. A generic
 loader cannot certify that arbitrary DLL initialization is safe.
+
+## Supplied ZLag plugin source: what to enter
+
+The supplied `test_host.cpp` looks for **`zlag_plugin.dll`** and the exact API name
+**`ZLag_GetApiVersion`**. For a trusted AMD64 build of that plugin, enter those as
+**DLL filename** and **Existing native function export** respectively. If the
+built file has a different filename, enter its actual basename instead. Inspect
+must confirm that the selected function really exists in that DLL; source
+function definitions alone do not prove a compiled export table. Do not enter
+`.cpp` or `.h` files into the DLL field: they must first be built into a DLL.
+The generic `zlag.dll` / `zlag_init` defaults do **not** describe this plugin API.
+
+The attached `zlag_plugin.cpp` intentionally has no auto-start code. Its
+`DllMain` only disables thread notifications. Merely loading it (or importing
+`ZLag_GetApiVersion`) **does not** call `ZLag_VerifyFirebaseHwid(1)` or
+`ZLag_SetPerformanceMode(1)`. The supplied API requires a separate explicit,
+consenting caller for the Firebase check, and successful authorization before
+enabling performance mode; that mode changes only the current process's Windows
+priority class. This patcher neither invokes those APIs nor bypasses licensing.
+No hardware-profile GUID was sent to Firebase during this source review.
+
+The four source attachments omit `zlag_plugin.h`, `firebase_config.h` and the
+compiled DLL/build configuration. The intended API can be reviewed, but exact
+binary exports/dependencies and a reproducible build remain unverified. A
+redacted configuration template is sufficient for further offline source review;
+do not send service credentials. The interactive `test_host.cpp` explicitly
+loads and calls the API in its **own** process; it is not proof that HD-Player
+calls those functions on ordinary startup.
 
 ## Use and distribution
 
@@ -135,10 +166,12 @@ structural tests alone are insufficient.
 
 Check the **Regular DLL normal startup (Windows x64, no proxy/runtime)** job and
 all other checks for the exact PR head. The existence of these tests is not a
-claim that a pending run passed. The real supplied `zlag.dll`/source ZIP was not
-available for review; its dependencies, initialization contract, licensing and
-behavior in HD-Player remain **unverified**. No arbitrary export-calling promise
-or all-clear for that payload follows from a harmless loader test.
+claim that a pending run passed. Four supplied ZLag plugin source files have now
+been reviewed (see the API notes above), but the compiled DLL and its required
+headers/build configuration were not supplied. Binary exports/dependencies,
+license-service behavior and functionality in HD-Player remain **unverified**.
+No arbitrary export-calling promise or payload all-clear follows from a harmless
+loader test or an offline source review.
 
 ### Reproduce
 
@@ -165,4 +198,9 @@ The Python decoder, CMake, compiler, Qt SDK and the two native test adapters are
 **development/test tools**, not recipient prerequisites. `BSI-Customizer
 --selftest` also runs the production file-transaction checks without injection,
 including its optional read-only player reference. Actual UI creation/interaction
-is covered separately by `tests/dll_startup_ui_test.py` with explicit mock services.
+is covered separately by `tests/dll_startup_ui_test.py` and
+`tests/dll_startup_shell_test.py` with explicit mock services. The latter opens
+the full production `Main.qml`, physically clicks **PATCHER → DLL patcher** and
+the Collection shortcut, checks there is only one editor, and exercises scrolling,
+inspection, cancellation/confirmation, busy and sign-out gates at 1440×930,
+980×640 and 691×475. These UI fixtures never access an EXE/DLL or contact Firebase.

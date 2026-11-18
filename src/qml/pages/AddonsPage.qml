@@ -99,6 +99,27 @@ Item {
                 }
                 Label { text: qsTr("Make it yours."); color: Theme.text; font.family: Theme.headingFont; font.pixelSize: 40; font.weight: Font.DemiBold; font.letterSpacing: -1.8 }
             }
+            Card {
+                Layout.fillWidth: true
+                RowLayout {
+                    width: parent.width
+                    spacing: 16
+                    ColumnLayout {
+                        Layout.fillWidth: true
+                        Label { text: qsTr("DLL patcher"); color: Theme.text; font.pixelSize: 16; font.bold: true }
+                        Label {
+                            Layout.fillWidth: true; wrapMode: Text.Wrap; color: Theme.textDim
+                            text: qsTr("Normal startup DLL loading, without a proxy. Also available under PATCHER → DLL patcher.")
+                        }
+                    }
+                    ActionButton {
+                        objectName: "openStartupDllPatcher"
+                        text: qsTr("Open DLL patcher")
+                        enabled: !backend.busy
+                        onClicked: page.navigate(13)
+                    }
+                }
+            }
             GridLayout {
                 Layout.fillWidth: true; columns: page.wide ? 2 : 1; columnSpacing: 28; rowSpacing: 26
                 ColumnLayout {
@@ -207,7 +228,6 @@ Item {
                     }
                 }
             }
-            DllStartupPanel { Layout.fillWidth: true; onNotify: message => page.notify(message) }
         }
     }
     Drawer {

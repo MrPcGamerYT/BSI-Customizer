@@ -108,6 +108,10 @@ jobs:
         run: python tests/workspace_qml_lint_test.py
       - name: Exercise opt-in native startup-DLL review and recovery controls
         run: python tests/run_qt_runtime_test.py tests/dll_startup_ui_test.py
+      - name: Click DLL patcher in the full app sidebar and Collection (mock services)
+        env:
+          BSI_UI_SCREENSHOT_DIR: ${{ runner.temp }}/control-center-ui
+        run: python tests/run_qt_runtime_test.py tests/dll_startup_shell_test.py
       - name: Exercise native Skin Studio and redesigned login
         env:
           BSI_UI_SCREENSHOT_DIR: ${{ runner.temp }}/control-center-ui

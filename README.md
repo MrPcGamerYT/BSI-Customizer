@@ -97,8 +97,9 @@ See [Add-ons scope and safety](docs/FORGE-ADDONS.md),
 
 ### Regular startup DLL (no proxy or recurring launcher)
 
-**Add-ons → Normal startup DLL** uses a native C++ writer to add an ordinary
-AMD64 DLL as a required dependency of the selected HD-Player.exe. Copy your
+**PATCHER → DLL patcher** uses a native C++ writer to add an ordinary
+AMD64 DLL as a required dependency of the selected HD-Player.exe. The **Collection**
+page also has an **Open DLL patcher** shortcut above the skin packs. Copy your
 trusted DLL beside the EXE, enter its filename (default `zlag.dll`) and an exact
 existing native function export (default `zlag_init`), inspect the hash-bound
 plan, then explicitly review/confirm. Protected unique backups and
