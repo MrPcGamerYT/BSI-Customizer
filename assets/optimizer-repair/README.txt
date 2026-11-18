@@ -1,3 +1,40 @@
+VOID OPTIMIZER / HELPER 06 DROPDOWN HOTFIX
+
+Fixes: "Cannot access a disposed object. Object name: ContextMenuStrip".
+Helper05 incorrectly disposed each menu INSIDE its Closed callback, while
+WinForms was still processing that close. Helper06 retains one menu per choice
+control, rebuilds/disposes old items only before a later open, and disposes the
+menu with its owning control. No exception suppression or tuning-guard changes.
+
+UPGRADE YOUR EXISTING REGISTERED FOLDER; DO NOT REGISTER ANOTHER COPY
+1. If the helper is still running, dismiss the error, Restore any active
+   session if possible, then close normally. Do not force-kill an active
+   session or delete its recovery record. If it already exited, retain the
+   recovery record and use Restore after opening this repaired version.
+2. Extract this ZIP. Back up the existing VOID-Optimizer.exe and
+   BUILD-REPORT.json, then replace those TWO files in the folder whose path
+   your registered URL command shows. Keep that path and filename unchanged.
+   For the path you reported, the folder is:
+   C:\Users\NOVA\Documents\customizer\VOID-Optimizer-Studio04\VOID-Optimizer-Helper05
+   The folder may retain its old name; the new window header says HELPER 06.
+3. Run CHECK-INSTALL.cmd there, then open VOID-Optimizer.exe. No setup/link
+   registration or emulator QML replacement is required for this helper-only
+   upgrade. The protocol and existing recovery format remain v3/compatible.
+4. Open/select/dismiss the player, profile and timer menus. If player detection
+   still fails, use Diagnostics and share its text rather than guessing paths.
+
+The Windows build now runs actual popup/message-loop lifecycle regression tests:
+repeated selection, keyboard/outside/programmatic dismissal close paths,
+reopening all three selectors, stale/empty data, item cleanup, owner disposal
+with a menu visible, and window close. Earlier screenshot-only UI checks did
+not exercise dropdown closing; this adds the missing interaction coverage.
+Tests create no helper session and apply no tuning or protocol registration.
+Actual rendered previews: helper06-preview.png and helper06-compact.png.
+
+Retained Helper05 feature/first-install reference follows; HELPER 06 supersedes
+its version labels and preview filenames. The visible Studio04 QML is unchanged.
+---------------------------------------------------------------------------
+
 VOID OPTIMIZER / HELPER 05 UPDATE
 Developed By NOVA XIS
 

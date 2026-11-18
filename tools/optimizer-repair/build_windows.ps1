@@ -15,7 +15,7 @@ foreach ($bits in @('x86','x64')) {
     & $csc /nologo /target:exe "/platform:$bits" "/out:$fixture" (Join-Path $PSScriptRoot 'TestFixtures/ProbeChild.cs')
     if ($LASTEXITCODE -ne 0) { throw 'Discovery fixture compile failed.' }
 }
-foreach ($mode in @('--self-test', '--discovery-self-test', '--ui-smoke-test')) {
+foreach ($mode in @('--self-test', '--dropdown-self-test', '--discovery-self-test', '--ui-smoke-test')) {
     $stdout = Join-Path $out ($mode.TrimStart('-') + '.stdout.txt')
     $stderr = Join-Path $out ($mode.TrimStart('-') + '.stderr.txt')
     $test = Start-Process -FilePath $exe -ArgumentList $mode -Wait -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr

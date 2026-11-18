@@ -372,9 +372,11 @@ namespace VoidOptimizer {
         [DllImport("user32.dll")] static extern bool PostMessage(IntPtr window, int message, IntPtr a, IntPtr b);
         [STAThread] static int Main(string[] args) {
             try {
+                if(args.Length==1&&args[0]=="--dropdown-self-test")Application.SetUnhandledExceptionMode(UnhandledExceptionMode.ThrowException);
                 Application.EnableVisualStyles(); Application.SetCompatibleTextRenderingDefault(false);
                 if (args.Length == 1 && args[0] == "--self-test") { Tests.Run(); return 0; }
                 if (args.Length == 1 && args[0] == "--discovery-self-test") { DiscoveryTests.Run(); return 0; }
+                if (args.Length == 1 && args[0] == "--dropdown-self-test") { DropdownTests.Run(); return 0; }
                 bool smoke = args.Length == 1 && args[0] == "--ui-smoke-test";
                 Options options = new Options();
                 if (args.Length == 2 && args[0] == "--request") options = Options.Parse(args[1]);
@@ -401,9 +403,9 @@ namespace VoidOptimizer {
                                 timer.Stop();
                                 try {
                                     form.UiAssertions();
-                                    form.SavePreview(Path.Combine(Path.GetDirectoryName(Application.ExecutablePath), "helper05-preview.png"));
+                                    form.SavePreview(Path.Combine(Path.GetDirectoryName(Application.ExecutablePath), "helper06-preview.png"));
                                     form.Size = new Size(680,560); form.PerformLayout(); Application.DoEvents();
-                                    form.SavePreview(Path.Combine(Path.GetDirectoryName(Application.ExecutablePath), "helper05-compact.png"));
+                                    form.SavePreview(Path.Combine(Path.GetDirectoryName(Application.ExecutablePath), "helper06-compact.png"));
                                 } catch (Exception error) { File.WriteAllText(Path.Combine(Path.GetDirectoryName(Application.ExecutablePath), "self-test-error.txt"), error.ToString()); Environment.ExitCode=1; }
                                 form.Close(); timer.Dispose();
                             }; timer.Start();
@@ -414,7 +416,7 @@ namespace VoidOptimizer {
                 return Environment.ExitCode;
             } catch (Exception error) {
                 Console.Error.WriteLine(error);
-                bool automated = args.Length == 1 && (args[0] == "--self-test" || args[0] == "--discovery-self-test" || args[0] == "--ui-smoke-test");
+                bool automated = args.Length == 1 && (args[0] == "--self-test" || args[0] == "--discovery-self-test" || args[0] == "--dropdown-self-test" || args[0] == "--ui-smoke-test");
                 if (automated) File.WriteAllText(Path.Combine(Path.GetDirectoryName(Application.ExecutablePath), "self-test-error.txt"), error.ToString());
                 if (!automated) MessageBox.Show("STOPPED: " + error.Message, "VOID Optimizer", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 return 1;

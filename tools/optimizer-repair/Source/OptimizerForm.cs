@@ -33,7 +33,7 @@ namespace VoidOptimizer {
             frame.RowStyles.Add(new RowStyle(SizeType.Absolute,85)); frame.RowStyles.Add(new RowStyle(SizeType.Percent,100)); frame.RowStyles.Add(new RowStyle(SizeType.Absolute,148));
             Controls.Add(frame);
             TableLayoutPanel header=Stack();
-            Add(header,Words("𝓥𝓞𝓘𝓓   /   LOCAL SESSION CONTROL                                       HELPER 05",8.5f,Skin.Muted));
+            Add(header,Words("𝓥𝓞𝓘𝓓   /   LOCAL SESSION CONTROL                                       HELPER 06",8.5f,Skin.Muted));
             Add(header,Words("Session helper",23,Skin.Text));
             Add(header,Words("Developed By NOVA XIS  ·  Review first. Keep open during play; close restores.",9,Skin.Muted));
             frame.Controls.Add(header,0,0);

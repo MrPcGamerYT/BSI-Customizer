@@ -89,6 +89,18 @@ namespace VoidOptimizer {
     }
     sealed class StudioChoice : StudioButton {
         public readonly List<object> Items=new List<object>();
+        // Own one menu for the control lifetime. ToolStrip continues using the menu
+        // after raising Closed; disposing it from that event is a use-after-dispose.
+        readonly ContextMenuStrip dropDown=new ContextMenuStrip();
+        internal ContextMenuStrip DropDownForTests { get { return dropDown; } }
+        public StudioChoice() {
+            dropDown.BackColor=Skin.Surface;dropDown.ForeColor=Skin.Text;
+            dropDown.Renderer=new ToolStripProfessionalRenderer(new DarkMenuColors());dropDown.ShowImageMargin=false;
+        }
+        protected override void Dispose(bool disposing) {
+            if(disposing)dropDown.Dispose();
+            base.Dispose(disposing);
+        }
         int index=-1;
         public event EventHandler SelectedIndexChanged;
         public int SelectedIndex { get { return index; } set { index=value>=0&&value<Items.Count?value:-1; Invalidate(); if(SelectedIndexChanged!=null)SelectedIndexChanged(this,EventArgs.Empty); } }
@@ -100,11 +112,24 @@ namespace VoidOptimizer {
             using(Pen pen=new Pen(text,1.4f))g.DrawLines(pen,new Point[]{new Point(Width-25,Height/2-2),new Point(Width-20,Height/2+3),new Point(Width-15,Height/2-2)});
         }
         protected override void OnClick(EventArgs e) {
-            base.OnClick(e); if(Items.Count==0)return;
-            ContextMenuStrip menu=new ContextMenuStrip(); menu.BackColor=Skin.Surface; menu.ForeColor=Skin.Text;menu.Font=Font;
-            menu.Renderer=new ToolStripProfessionalRenderer(new DarkMenuColors()); menu.ShowImageMargin=false;
-            for(int i=0;i<Items.Count;i++) { int choice=i; ToolStripMenuItem item=new ToolStripMenuItem(Items[i].ToString()); item.Checked=i==index; item.Click+=delegate { SelectedIndex=choice; }; menu.Items.Add(item); }
-            menu.Closed+=delegate { menu.Dispose(); }; menu.Show(this,new Point(0,Height));
+            base.OnClick(e);
+            if(IsDisposed||Disposing||!Enabled)return;
+            if(dropDown.Visible) { dropDown.Close();return; }
+            // Previous close processing has returned before these items are rebuilt.
+            while(dropDown.Items.Count>0) {
+                ToolStripItem old=dropDown.Items[0];dropDown.Items.RemoveAt(0);old.Dispose();
+            }
+            if(Items.Count==0)return;
+            dropDown.Font=Font;
+            for(int i=0;i<Items.Count;i++) {
+                int choice=i;object value=Items[i];
+                ToolStripMenuItem item=new ToolStripMenuItem(value.ToString());item.Checked=i==index;
+                item.Click+=delegate {
+                    if(!IsDisposed&&!Disposing&&Enabled&&choice<Items.Count&&Object.ReferenceEquals(Items[choice],value))SelectedIndex=choice;
+                };
+                dropDown.Items.Add(item);
+            }
+            dropDown.Show(this,new Point(0,Height));
         }
     }
     sealed class DarkMenuColors : ProfessionalColorTable {
