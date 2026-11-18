@@ -86,6 +86,8 @@ Do not auto-apply a “best FPS” profile: more CPU/RAM can worsen host content
 
 BSI already contains Qt resource readers, PE utilities and an instruction decoder. Reuse them before adding a general-purpose decompiler dependency.
 
+For the separately supplied startup-import scripts, see the [direct-DLL review](DLL-STARTUP-REVIEW.md): their no-proxy loading mechanism was confirmed structurally on disposable copies, but reproduced safety failures prevent embedding those scripts. BSI now has a separate original [native startup-DLL writer](DLL-STARTUP.md), with protected apply/restore and a harmless Windows host/DLL test. The supplied payload and actual emulator startup with it remain unverified. Loading a DLL does not automatically call its exported initializer.
+
 ## D. Files worth supplying next
 
 The linked player EXEs are already available; sending identical copies again is unnecessary. For a target not represented above, supply a small, version-matched bundle:

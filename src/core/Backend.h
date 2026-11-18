@@ -194,6 +194,12 @@ public:
     Q_INVOKABLE QVariantMap gifRpcApply(const QString &path, const QVariantMap &settings, bool replaceExisting = false);
     Q_INVOKABLE QVariantMap gifRpcRestore(const QString &path);
 
+    // ---- regular startup DLL (not the separate GIF-RPC proxy) ----
+    Q_INVOKABLE QVariantMap dllStartupInspect(const QString &dllName);
+    Q_INVOKABLE QVariantMap dllStartupApply(const QString &dllName, const QString &exeSha256,
+                                            const QString &dllSha256, bool riskAcknowledged = false);
+    Q_INVOKABLE QVariantMap dllStartupRestore();
+
     // ---- extras ----
     Q_INVOKABLE QVariantMap applyRemovals(const QStringList &names);
     Q_INVOKABLE QVariantList layoutTweaks();

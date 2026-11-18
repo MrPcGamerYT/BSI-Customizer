@@ -207,6 +207,7 @@ Item {
                     }
                 }
             }
+            DllStartupPanel { Layout.fillWidth: true; onNotify: message => page.notify(message) }
         }
     }
     Drawer {

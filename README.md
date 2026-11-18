@@ -95,6 +95,23 @@ See [Add-ons scope and safety](docs/FORGE-ADDONS.md),
 [the UI/engine verification map](docs/UNIFIED-UI.md) and
 [the performance review](docs/PERFORMANCE.md).
 
+### Regular startup DLL (no proxy or recurring launcher)
+
+**Add-ons → Normal startup DLL** uses a native C++ writer to add an ordinary
+AMD64 DLL as a required dependency of the selected HD-Player.exe. Copy your
+trusted DLL beside the EXE, enter its filename (default `zlag.dll`), inspect the
+hash-bound plan, then explicitly review/confirm. Protected unique backups and
+verified restore are separate from GIF RPC; the uploaded scripts are not run or
+bundled. The optional Chromium collection opens the same native controls.
+
+After patching, recipients need the **EXE with that DLL and its dependencies** in
+a compatible emulator installation, **not Python, Node, scripts or BSI running**.
+Windows performs normal DLL initialization; **no exported initializer such as
+`zlag_init` is called**. A missing or incompatible DLL can stop startup and
+patching invalidates the EXE signature. No payload DLL is included or certified.
+See [the feature, recovery and verification guide](docs/DLL-STARTUP.md) and
+[the supplied-script safety review](docs/DLL-STARTUP-REVIEW.md).
+
 ## Sign-in gate (Discord only)
 
 This is a private dev tool: the app opens on the Premium-Optimizer-style
@@ -1013,6 +1030,8 @@ scripts/Run-SettingsPanel-Manual.cmd
 ```
 
 It reports the Customizer backend's real detection analysis and QML resource inventory, exercises apply on a temporary copy, and confirms the selected HD-Player.exe hash is unchanged. It then opens the GUI directly to **Interface → Settings panel rebuild** against a second disposable copy; the Apply button stays available so native diagnostics are visible instead of hidden by a UI support gate. The same page lets you center the native content, choose visible tabs, upload safe SVG tab icons, and customize the in-player About logo, name, and links. Uploaded artwork is stored only in the app profile and written to the disposable/selected player only on Apply. In manual mode, profile edits and apply/restore are restricted to temporary app settings and that copy. The CLI diagnostic is also available directly with `BSI-Customizer.exe --settings-panel-test <HD-Player.exe>`; see [the manual tester guide](docs/SETTINGS_PANEL_MANUAL_TEST.md).
+
+The separately supplied **Pay Load Patcher** was reviewed for proxy-free DLL startup; it is **not enabled or bundled** as an installer. Python/JavaScript structural checks on four disposable player references passed, but safety failures and the distinction between loading a DLL and calling its initializer remain integration blockers. See the [direct-DLL review and pinned-source audit](docs/DLL-STARTUP-REVIEW.md); no actual payload DLL or live player was executed.
 
 For an unsupported real EXE, collect a read-only diagnostic report:
 

@@ -69,7 +69,7 @@ ApplicationWindow {
     property string browserFailure: ""
     readonly property var nativeSources: ["DashboardPage.qml", "ThemePage.qml", "ResourcesPage.qml",
         "FpsPage.qml", "IntegrityPage.qml", "BootVideoPage.qml", "UiPage.qml", "RpcidPage.qml",
-        "AppearancePage.qml", "AboutPage.qml", "GifRpcPage.qml", "WorkspacePage.qml", "DebloatPage.qml"]
+        "AppearancePage.qml", "AboutPage.qml", "GifRpcPage.qml", "WorkspacePage.qml", "DebloatPage.qml", "DllStartupPage.qml"]
     onClosing: (close) => { if (backend.busy) close.accepted = false; }
     onVisibilityChanged: rpc.windowModeChanged(visibility === Window.Maximized)
 

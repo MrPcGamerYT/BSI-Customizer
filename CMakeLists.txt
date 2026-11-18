@@ -95,6 +95,11 @@ qt_add_executable(BSICustomizer
     src/core/VersionResource.cpp
     src/core/GifRpc.h
     src/core/GifRpc.cpp
+    src/core/DllStartupImport.h
+    src/core/DllStartupImport.cpp
+    src/core/DllStartup.h
+    src/core/DllStartup.cpp
+    tests/dll-startup/file_test.cpp
     src/core/PlayerCache.h
     src/core/PlayerCache.cpp
     src/core/BootVideoPatcher.h
@@ -204,6 +209,7 @@ target_compile_definitions(BSICustomizer PRIVATE
     BSI_VERSION="${PROJECT_VERSION}"
 )
 target_link_libraries(BSICustomizer PRIVATE bsi_7z)
+target_include_directories(BSICustomizer PRIVATE src)
 
 # ---------------------------------------------------------------------------
 # Optional build-time auth embed ("zip auth json"): the whole auth.json blob
@@ -346,6 +352,7 @@ qt_add_qml_module(BSICustomizer
         src/qml/components/ControlCenterBackdrop.qml
         src/qml/components/LoadingStrip.qml
         src/qml/components/LazyFeature.qml
+        src/qml/components/DllStartupPanel.qml
         src/qml/components/Card.qml
         src/qml/components/ActionButton.qml
         src/qml/components/StudioTextField.qml
@@ -376,6 +383,7 @@ qt_add_qml_module(BSICustomizer
         src/qml/pages/BootVideoPage.qml
         src/qml/pages/UiPage.qml
         src/qml/pages/GifRpcPage.qml
+        src/qml/pages/DllStartupPage.qml
         src/qml/pages/WorkspacePage.qml
         src/qml/pages/DebloatPage.qml
         src/qml/pages/RpcidPage.qml

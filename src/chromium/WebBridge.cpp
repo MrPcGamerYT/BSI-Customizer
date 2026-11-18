@@ -472,7 +472,7 @@ QVariantMap WebBridge::invoke(const QString &method, const QVariantMap &args)
         else return failure(QStringLiteral("Unknown maintenance action."));
     } else if (method == QLatin1String("openNativeTool")) {
         bool valid = false; const int page = args.value("page").toInt(&valid);
-        if (!valid || page < 0 || page > 12) return failure(QStringLiteral("Invalid native tool page."));
+        if (!valid || page < 0 || page > 13) return failure(QStringLiteral("Invalid native tool page."));
         emit nativeToolRequested(page);
     } else if (method == QLatin1String("signOut")) m_auth.signOut();
     else return failure(QStringLiteral("Unknown bridge command: %1").arg(method));
