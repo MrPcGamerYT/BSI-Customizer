@@ -19,7 +19,7 @@ namespace
 {
 constexpr qint64 fileLimit = 128LL * 1024 * 1024;
 const QString journalSuffix = QStringLiteral(".bsi-startup-dll.json");
-const QString schema = QStringLiteral("bsi.dll-startup.v1");
+const QString schema = QStringLiteral("bsi.dll-startup.v2");
 #ifdef BSI_DLLSTARTUP_TESTING
 Fault testFault = Fault::None;
 #endif
@@ -87,9 +87,11 @@ bool inputs(const QString &exe, const QString &name, QByteArray &target, QByteAr
     }
     return readFile(exe, target, error) && readFile(QFileInfo(exe).dir().filePath(name), dll, error);
 }
-DllStartupImport::Plan prepare(const QByteArray &target, const QByteArray &dll, const QString &name)
+DllStartupImport::Plan prepare(const QByteArray &target, const QByteArray &dll, const QString &name,
+                               const QString &exportName)
 {
-    return DllStartupImport::prepare(bytes(target), bytes(dll), name.toUtf8().toStdString());
+    return DllStartupImport::prepare(bytes(target), bytes(dll), name.toUtf8().toStdString(),
+                                     exportName.toUtf8().toStdString());
 }
 
 // NewOnly is essential: neither a user backup nor an interrupted transaction
@@ -117,7 +119,7 @@ bool exclusiveFile(const QString &p, const QByteArray &data, QString &error)
 }
 
 struct Record {
-    QString backup, originalSha, patchedSha, dllSha, dllName;
+    QString backup, originalSha, patchedSha, dllSha, dllName, exportName;
     QByteArray original;
 };
 bool loadRecord(const QString &exe, Record &r, QString &error)
@@ -136,12 +138,14 @@ bool loadRecord(const QString &exe, Record &r, QString &error)
     r.patchedSha = o.value("patchedSha256").toString();
     r.dllSha = o.value("dllSha256").toString();
     r.dllName = o.value("dllName").toString();
+    r.exportName = o.value("requiredExport").toString();
     if (parseError.error != QJsonParseError::NoError || !doc.isObject() ||
         o.value("schema").toString() != schema ||
         o.value("exeFile").toString() != QFileInfo(exe).fileName() || uuid.isNull() ||
         id != uuid.toString(QUuid::WithoutBraces) || backup != prefix + id + QStringLiteral(".backup") ||
         !hashValid(r.originalSha) || !hashValid(r.patchedSha) || r.originalSha == r.patchedSha ||
-        !hashValid(r.dllSha) || !validName(r.dllName)) {
+        !hashValid(r.dllSha) || !validName(r.dllName) ||
+        !DllStartupImport::validExportName(r.exportName.toUtf8().toStdString())) {
         error = QStringLiteral("Invalid startup-DLL recovery journal. No file was changed; preserve it and "
                                "the original backup for manual recovery.");
         return false;
@@ -240,12 +244,13 @@ QString warning()
 }
 } // namespace
 
-QVariantMap inspect(const QString &exePath, const QString &dllName)
+QVariantMap inspect(const QString &exePath, const QString &dllName, const QString &requiredExport)
 {
     const QString exe = absolute(exePath);
     auto result = fail(QString());
     result.insert("warning", warning());
     result.insert("dllName", dllName);
+    result.insert("requiredExport", requiredExport);
     result.insert("canApply", false);
     result.insert("canRestore", false);
     result.insert("hasJournal", exists(exe + journalSuffix));
@@ -270,7 +275,7 @@ QVariantMap inspect(const QString &exePath, const QString &dllName)
         result.insert("msg", error);
         return result;
     }
-    const auto plan = prepare(target, dll, dllName);
+    const auto plan = prepare(target, dll, dllName, requiredExport);
     if (!plan.ok) {
         result.insert("msg", QString::fromStdString(plan.error));
         return result;
@@ -303,7 +308,7 @@ QVariantMap inspect(const QString &exePath, const QString &dllName)
 }
 
 QVariantMap apply(const QString &exePath, const QString &dllName, const QString &expectedExeSha256,
-                  const QString &expectedDllSha256, bool riskAcknowledged)
+                  const QString &expectedDllSha256, bool riskAcknowledged, const QString &requiredExport)
 {
     if (!riskAcknowledged)
         return fail(QStringLiteral("Review and acknowledge the startup-DLL/signature warnings first."));
@@ -322,7 +327,7 @@ QVariantMap apply(const QString &exePath, const QString &dllName, const QString 
     if (sha(target) != expectedExeSha256 || sha(dll) != expectedDllSha256)
         return fail(
             QStringLiteral("The EXE or DLL changed since inspection. Inspect again; nothing was written."));
-    const auto plan = prepare(target, dll, dllName);
+    const auto plan = prepare(target, dll, dllName, requiredExport);
     if (!plan.ok)
         return fail(QString::fromStdString(plan.error));
     if (plan.alreadyApplied) {
@@ -330,7 +335,8 @@ QVariantMap apply(const QString &exePath, const QString &dllName, const QString 
             Record record;
             if (!loadRecord(exe, record, error))
                 return fail(error);
-            if (record.patchedSha != sha(target) || record.dllSha != sha(dll) || record.dllName != dllName)
+            if (record.patchedSha != sha(target) || record.dllSha != sha(dll) || record.dllName != dllName ||
+                record.exportName != requiredExport)
                 return fail(QStringLiteral("The recorded EXE/DLL no longer matches. Nothing was changed; "
                                            "review recovery before continuing."));
         }
@@ -352,6 +358,7 @@ QVariantMap apply(const QString &exePath, const QString &dllName, const QString 
                              {"exeFile", QFileInfo(exe).fileName()},
                              {"backupFile", QFileInfo(backup).fileName()},
                              {"dllName", dllName},
+                             {"requiredExport", requiredExport},
                              {"originalSha256", sha(target)},
                              {"patchedSha256", sha(output)},
                              {"dllSha256", sha(dll)},

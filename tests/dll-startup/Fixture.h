@@ -63,6 +63,26 @@ inline Bytes image(bool dll = false)
         const std::string module = "KERNEL32.dll", function = "ExitProcess";
         std::copy(module.begin(), module.end(), b.begin() + 0x6c0);
         std::copy(function.begin(), function.end(), b.begin() + 0x6e2);
+    } else {
+        // Two real, sorted named function exports for data-only PE tests.
+        put(b, o + 112, 0x2000);
+        put(b, o + 116, 0xc0);
+        put(b, 0x600 + 16, 1);
+        put(b, 0x600 + 20, 2);
+        put(b, 0x600 + 24, 2);
+        put(b, 0x600 + 28, 0x2040);
+        put(b, 0x600 + 32, 0x2050);
+        put(b, 0x600 + 36, 0x2060);
+        put(b, 0x640, 0x1000);
+        put(b, 0x644, 0x1001);
+        b[0x401] = 0xc3;
+        put(b, 0x650, 0x2080);
+        put(b, 0x654, 0x2090);
+        put(b, 0x660, 1, 2);
+        put(b, 0x662, 0, 2);
+        const std::string other = "other_init", init = "zlag_init";
+        std::copy(other.begin(), other.end(), b.begin() + 0x680);
+        std::copy(init.begin(), init.end(), b.begin() + 0x690);
     }
     return b;
 }

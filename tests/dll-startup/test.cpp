@@ -85,7 +85,7 @@ int main(int argc, char **argv)
     const auto exe = DllStartupFixture::image(), dll = DllStartupFixture::image(true);
     auto p = prepare(exe, dll, "bsi-startup-probe.dll");
     check(p.ok && !p.alreadyApplied && p.importsBefore == 1 && p.importsAfter == 2,
-          "append a direct startup dependency with NO export requirement");
+          "append a normal startup dependency with an exact validated export, without calling it");
     if (!p.ok) {
         std::cerr << p.error << '\n';
         return 1;
@@ -99,7 +99,29 @@ int main(int argc, char **argv)
     for (const auto &name : {"../bad.dll", "bad\\file.dll", "C:bad.dll", "bad name.dll", "bad.exe", "CON.dll",
                              "nul.x.dll", "com1.dll", ".dll", "bad\xC3\xA9.dll"})
         check(!prepare(exe, dll, name).ok, "unsafe/non-ASCII/reserved DLL name refused before any file I/O");
+    check(!prepare(p.output, dll, "bsi-startup-probe.dll", "other_init").ok,
+          "different requested export never falsely succeeds on an already imported DLL");
+    check(!prepare(exe, dll, "a.dll", "ZLAG_INIT").ok && !prepare(exe, dll, "a.dll", "absent").ok,
+          "DLL export lookup is exact and case-sensitive");
+    check(!prepare(exe, dll, "a.dll", "").ok && !prepare(exe, dll, "a.dll", "bad\xC3\xA9").ok,
+          "empty/non-ASCII export names fail closed");
     auto bad = dll;
+    DllStartupFixture::put(bad, 0x640, 0);
+    check(!prepare(exe, bad, "a.dll").ok, "named export with a null function RVA is refused");
+    bad = dll;
+    DllStartupFixture::put(bad, 0x98 + 112, 0);
+    DllStartupFixture::put(bad, 0x98 + 116, 0);
+    check(!prepare(exe, bad, "a.dll").ok, "DLL without exports cannot create a skipped empty import");
+    bad = dll;
+    DllStartupFixture::put(bad, 0x662, 2, 2);
+    check(!prepare(exe, bad, "a.dll").ok, "out-of-bounds named-export ordinal is refused");
+    bad = dll;
+    DllStartupFixture::put(bad, 0x640, 0x20b0);
+    check(!prepare(exe, bad, "a.dll").ok, "forwarded selected export is refused rather than guessed");
+    bad = dll;
+    DllStartupFixture::put(bad, 0x600 + 24, 0xffffffff);
+    check(!prepare(exe, bad, "a.dll").ok, "unbounded malformed export table is refused");
+    bad = dll;
     DllStartupFixture::put(bad, 0x96, 0x22, 2);
     check(!prepare(exe, bad, "a.dll").ok, "renamed EXE is not accepted as a DLL");
     bad = dll;
@@ -149,7 +171,8 @@ int main(int argc, char **argv)
     std::uint32_t random = 0x8e9100ad;
     bool fuzzOk = true;
     for (int iteration = 0; iteration < 2000; ++iteration) {
-        auto mutant = exe;
+        const bool mutateDll = (iteration & 1) != 0;
+        auto mutant = mutateDll ? dll : exe;
         for (int j = 0; j < 4; ++j) {
             random ^= random << 13;
             random ^= random >> 17;
@@ -158,16 +181,16 @@ int main(int argc, char **argv)
             mutant[at] ^= std::uint8_t(random >> 24);
         }
         const auto saved = mutant;
-        const auto candidate = prepare(mutant, dll, "a.dll");
+        const auto candidate = mutateDll ? prepare(exe, mutant, "a.dll") : prepare(mutant, dll, "a.dll");
         if (mutant != saved)
             fuzzOk = false;
         if (candidate.ok) {
-            const auto again = prepare(candidate.output, dll, "a.dll");
+            const auto again = prepare(candidate.output, mutateDll ? mutant : dll, "a.dll");
             if (!again.ok || !again.alreadyApplied || again.output != candidate.output)
                 fuzzOk = false;
         }
     }
-    check(fuzzOk, "2000 deterministic malformed-header/import mutations are bounded, input-immutable and "
+    check(fuzzOk, "2000 deterministic EXE/DLL header/import/export mutations are bounded, input-immutable and "
                   "idempotent on acceptance");
 #ifdef _WIN32
     SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX);
@@ -182,9 +205,11 @@ int main(int argc, char **argv)
     const auto host = readFile(fs::u8path(argv[1]));
     writeFile(target, host);
     check(launch(target) == 7, "unpatched host has no hidden DLL dependency");
-    for (int kind = 2; kind <= 3; ++kind) {
+    check(!prepare(host, readFile(fs::u8path(argv[2])), "bsi-startup-probe.dll", "BsiProbeInitialize").ok,
+          "real no-export DLL is rejected before EXE modification");
+    for (int kind = 3; kind <= 3; ++kind) {
         const auto input = readFile(fs::u8path(argv[kind]));
-        const auto plan = prepare(host, input, "bsi-startup-probe.dll");
+        const auto plan = prepare(host, input, "bsi-startup-probe.dll", "BsiProbeInitialize");
         if (!plan.ok)
             std::cerr << plan.error << '\n';
         check(plan.ok, "prepare real MSVC host and regular DLL");
@@ -199,7 +224,7 @@ int main(int argc, char **argv)
         check(launch(target) != 0, "missing required DLL fails startup (documented dependency)");
     }
     const auto declined = readFile(fs::u8path(argv[4]));
-    const auto declinedPlan = prepare(host, declined, "bsi-startup-probe.dll");
+    const auto declinedPlan = prepare(host, declined, "bsi-startup-probe.dll", "BsiProbeInitialize");
     check(declinedPlan.ok, "prepare harmless DLL whose initialization declines");
     if (declinedPlan.ok) {
         writeFile(target, declinedPlan.output);

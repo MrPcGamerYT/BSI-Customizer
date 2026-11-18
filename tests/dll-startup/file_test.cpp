@@ -100,6 +100,11 @@ void basicTests()
     check(again.value("ok").toBool() && !again.value("changed").toBool() && read(f.exe) == patched &&
               read(backup) == f.original,
           "repeat apply never repatches or clobbers a backup");
+    const auto different =
+        DllStartup::apply(f.exe, name, hash(patched), hash(f.payload), true, QStringLiteral("other_init"));
+    check(
+        !different.value("ok").toBool() && read(f.exe) == patched && read(backup) == f.original,
+        "another valid requested export on the same installed DLL is refused without changing target/backup");
     check(QFile::remove(f.dll), "remove required DLL in disposable fixture");
     check(f.inspect().value("canRestore").toBool(), "missing DLL does not block recovery inspection");
     r = DllStartup::restore(f.exe);
@@ -115,6 +120,21 @@ void basicTests()
 }
 void refusalTests()
 {
+    {
+        Fixture f;
+        auto malformed = DllStartupFixture::image(true);
+        DllStartupFixture::put(malformed, 0x640, 0);
+        write(f.dll, array(malformed));
+        const auto r = DllStartup::apply(f.exe, name, hash(f.original), hash(read(f.dll)), true);
+        check(!r.value("ok").toBool() && read(f.exe) == f.original && !QFileInfo::exists(f.exe + suffix),
+              "null named export is refused before backup/journal/EXE writes");
+        write(f.dll, f.payload);
+        const auto wrongCase = DllStartup::apply(f.exe, name, hash(f.original), hash(f.payload), true,
+                                                 QStringLiteral("ZLAG_INIT"));
+        check(!wrongCase.value("ok").toBool() && read(f.exe) == f.original &&
+                  !QFileInfo::exists(f.exe + suffix),
+              "wrong export case cannot create a startup dependency that Windows cannot resolve");
+    }
     {
         Fixture f;
         const auto review = f.inspect();
@@ -294,9 +314,10 @@ int main(int argc, char **argv)
         const auto dllName = QStringLiteral("bsi-startup-probe.dll");
         if (!QFile::copy(args.at(2), exe) || !QFile::copy(args.at(3), folder.filePath(dllName)))
             return 2;
-        const auto review = DllStartup::inspect(exe, dllName);
+        const auto symbol = QStringLiteral("BsiProbeInitialize");
+        const auto review = DllStartup::inspect(exe, dllName, symbol);
         const auto r = DllStartup::apply(exe, dllName, review.value("exeSha256").toString(),
-                                         review.value("dllSha256").toString(), true);
+                                         review.value("dllSha256").toString(), true, symbol);
         if (!r.value("ok").toBool())
             std::fprintf(stderr, "%s\n", qPrintable(r.value("msg").toString()));
         return r.value("ok").toBool() ? 0 : 1;

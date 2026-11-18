@@ -99,8 +99,9 @@ See [Add-ons scope and safety](docs/FORGE-ADDONS.md),
 
 **Add-ons → Normal startup DLL** uses a native C++ writer to add an ordinary
 AMD64 DLL as a required dependency of the selected HD-Player.exe. Copy your
-trusted DLL beside the EXE, enter its filename (default `zlag.dll`), inspect the
-hash-bound plan, then explicitly review/confirm. Protected unique backups and
+trusted DLL beside the EXE, enter its filename (default `zlag.dll`) and an exact
+existing native function export (default `zlag_init`), inspect the hash-bound
+plan, then explicitly review/confirm. Protected unique backups and
 verified restore are separate from GIF RPC; the uploaded scripts are not run or
 bundled. The optional Chromium collection opens the same native controls.
 

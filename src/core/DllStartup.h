@@ -7,9 +7,11 @@
 // AMD64 DLL must already be beside it and must stay there for normal launches.
 namespace DllStartup
 {
-QVariantMap inspect(const QString &exePath, const QString &dllName);
+QVariantMap inspect(const QString &exePath, const QString &dllName,
+                    const QString &requiredExport = QStringLiteral("zlag_init"));
 QVariantMap apply(const QString &exePath, const QString &dllName, const QString &expectedExeSha256,
-                  const QString &expectedDllSha256, bool riskAcknowledged);
+                  const QString &expectedDllSha256, bool riskAcknowledged,
+                  const QString &requiredExport = QStringLiteral("zlag_init"));
 QVariantMap restore(const QString &exePath);
 
 #ifdef BSI_DLLSTARTUP_TESTING

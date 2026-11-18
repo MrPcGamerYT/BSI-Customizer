@@ -96,14 +96,16 @@ def verify(original, patched):
             added.Name.rstrip(b"\0") == b".bsidll" and added.Characteristics == 0xC0000040,
             "Unexpected added section",
         )
-        # Do not rely on pefile's high-level list: it omits descriptors with no
-        # symbols. Independently read both terminated, empty thunk lists.
+        # Independently verify both real, terminated import-by-name thunk lists.
+        # Empty lists passed structural parsing but were skipped on Windows.
         ilt, timestamp, chain, name, iat = struct.unpack("<5I", new[-1][0])
         require(ilt != iat and timestamp == chain == 0, "Unexpected new import descriptor")
-        require(
-            after.get_data(ilt, 8) == after.get_data(iat, 8) == bytes(8),
-            "New DLL must not import/call an export",
-        )
+        thunk_data = after.get_data(ilt, 16)
+        require(len(thunk_data) == 16 and thunk_data == after.get_data(iat, 16), "ILT/IAT mismatch")
+        symbol, end = struct.unpack("<2Q", thunk_data)
+        require(symbol and not symbol & (1 << 63) and end == 0, "Missing real terminated import-by-name")
+        require(after.get_data(symbol, 2) == bytes(2), "Unexpected symbol hint")
+        require(after.get_string_at_rva(symbol + 2) == b"zlag_init", "Wrong resolved export")
         require(after.get_string_at_rva(name) == b"zlag.dll", "Wrong startup DLL name")
         return {
             "importsBefore": len(old),

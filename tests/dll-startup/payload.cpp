@@ -1,7 +1,7 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 // Harmless startup-only fixture. No networking, hooks, threads or file writes.
-// One build deliberately exports NOTHING: a regular DLL needs no proxy API.
+// The no-export build must be rejected, not produce an empty import Windows skips.
 #ifdef BSI_PROBE_EXPORT
 extern "C" __declspec(dllexport) void BsiProbeInitialize()
 {

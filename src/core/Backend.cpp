@@ -1504,25 +1504,25 @@ QVariantMap Backend::gifRpcRestore(const QString &path)
 
 // -------------------------------------------------------- regular startup DLL
 
-QVariantMap Backend::dllStartupInspect(const QString &dllName)
+QVariantMap Backend::dllStartupInspect(const QString &dllName, const QString &requiredExport)
 {
     if (actionsLocked()) return lockedMap();
     if (!m_backgroundWorker)
-        return runBackground([=](Backend &worker) { return worker.dllStartupInspect(dllName); });
-    const auto r = DllStartup::inspect(m_settings->exePath(), dllName);
+        return runBackground([=](Backend &worker) { return worker.dllStartupInspect(dllName, requiredExport); });
+    const auto r = DllStartup::inspect(m_settings->exePath(), dllName, requiredExport);
     doLog(r.value("msg").toString(), r.value("ok").toBool() ? QStringLiteral("blue") : QStringLiteral("red"));
     return r;
 }
 
 QVariantMap Backend::dllStartupApply(const QString &dllName, const QString &exeSha256,
-                                    const QString &dllSha256, bool riskAcknowledged)
+                                    const QString &dllSha256, bool riskAcknowledged, const QString &requiredExport)
 {
     if (actionsLocked()) return lockedMap();
     if (!m_backgroundWorker)
-        return runBackground([=](Backend &worker) { return worker.dllStartupApply(dllName, exeSha256, dllSha256, riskAcknowledged); });
+        return runBackground([=](Backend &worker) { return worker.dllStartupApply(dllName, exeSha256, dllSha256, riskAcknowledged, requiredExport); });
     if (BsDetector::isProcessRunning(QStringLiteral("HD-Player.exe")))
         return result(false, QStringLiteral("Close every HD-Player instance before changing its startup dependencies."), QStringLiteral("red"));
-    const auto r = DllStartup::apply(m_settings->exePath(), dllName, exeSha256, dllSha256, riskAcknowledged);
+    const auto r = DllStartup::apply(m_settings->exePath(), dllName, exeSha256, dllSha256, riskAcknowledged, requiredExport);
     if (r.value("changed").toBool()) invalidatePlayerAnalysis();
     doLog(r.value("msg").toString(), r.value("ok").toBool() ? QStringLiteral("green") : QStringLiteral("red"));
     return r;

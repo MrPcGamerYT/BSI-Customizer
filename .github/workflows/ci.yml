@@ -168,7 +168,7 @@ jobs:
         run: python tests/dll_startup_native_test.py --engine build-dll-startup/Release/dll-startup-test.exe --file-test build-dll-startup/Release/dll-startup-file-test.exe --reference-dir hd-player-reference
       - name: Prepare through production native transaction; exit patcher
         run: |
-          & build-dll-startup/Release/dll-startup-file-test.exe --prepare-deployment build-dll-startup/Release/startup-host.exe build-dll-startup/Release/startup-no-exports.dll "$env:RUNNER_TEMP/prepared-startup"
+          & build-dll-startup/Release/dll-startup-file-test.exe --prepare-deployment build-dll-startup/Release/startup-host.exe build-dll-startup/Release/startup-with-export.dll "$env:RUNNER_TEMP/prepared-startup"
           if ($LASTEXITCODE -ne 0) { throw 'Native deployment preparation failed' }
       - name: Recipient needs only patched EXE plus regular DLL, not patcher/interpreters
         shell: pwsh
@@ -189,7 +189,7 @@ jobs:
             if (-not $p.WaitForExit(10000)) { $p.Kill(); throw 'Harmless recipient startup timed out' }
             if ($p.ExitCode -ne 0) { throw "Harmless DLL was not initialized on normal launch $launch (exit $($p.ExitCode))" }
           }
-          'PASS: three ordinary launches; only EXE + no-export DLL; patcher already exited; no interpreter/Qt/SDK on PATH.' | Out-File $env:GITHUB_STEP_SUMMARY -Append
+          'PASS: three ordinary launches; only EXE + regular DLL; export resolved but not called; patcher already exited; no interpreter/Qt/SDK on PATH.' | Out-File $env:GITHUB_STEP_SUMMARY -Append
 
   build-windows:
     name: Build & self-test (Windows x64 · ${{ matrix.label }})

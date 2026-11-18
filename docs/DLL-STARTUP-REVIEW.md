@@ -87,7 +87,7 @@ Repeat `--reference` for multiple files. The audit snapshots the source bytes af
 
 ## Before supporting/bundling the supplied staff payload
 
-The original native writer is separate from these scripts and deliberately does not require/call an export. Its bounded parsing, native transactions and harmless runtime test are described in [the feature guide](DLL-STARTUP.md). These remaining gates apply to claiming that the **specific staff DLL/tool** works, or bundling that third-party payload:
+The original native writer is separate from these scripts and requires an exact validated native function export but does not call it. Its bounded parsing, native transactions and harmless runtime test are described in [the feature guide](DLL-STARTUP.md). These remaining gates apply to claiming that the **specific staff DLL/tool** works, or bundling that third-party payload:
 
 1. Obtain the actual `zlag.dll` source (preferably the source ZIP uploaded directly), its exported initializer, dependencies and intended initialization contract. The patcher attachments are **not** the DLL source.
 2. Resolve the reproduced failures above, add bounded PE parsing, safe filename/export validation, exact module/export verification and non-clobbering recovery. Do not replace the existing RPC proxy as an incidental side effect.

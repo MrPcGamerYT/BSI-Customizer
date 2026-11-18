@@ -13,7 +13,7 @@ using U = std::uint64_t;
 constexpr U fileLimit = 128ULL * 1024 * 1024;
 constexpr U stringBudget = 8 * 1024 * 1024;
 constexpr U thunkBudget = 131072;
-constexpr char marker[] = "BSIDLLSTARTUPv1";
+constexpr char marker[] = "BSIDLLSTARTUPv2";
 constexpr U prefix = sizeof(marker);
 static_assert(prefix == 16, "marker format");
 
@@ -202,6 +202,49 @@ struct Image {
     }
 };
 
+// Validate exactly what Windows will resolve. No export is ever invoked here.
+// Reject forwarders/data exports rather than guessing at a DLL's dependency
+// contract. Name tables must be sorted as required for import-by-name lookup.
+void requireExport(const Image &dll, const std::string &requested)
+{
+    const U rva = read(dll.b, dll.opt + 112, 4), size = read(dll.b, dll.opt + 116, 4);
+    need(rva && size >= 40 && size <= fileLimit,
+         "The DLL needs the selected named function export; it has no valid export directory.");
+    const U dir = dll.raw(rva, 40);
+    dll.raw(rva, size);
+    const U functions = read(dll.b, dir + 20, 4), names = read(dll.b, dir + 24, 4);
+    need(functions && functions <= 1000000 && names && names <= 1000000,
+         "Invalid or empty DLL export tables.");
+    const U ft = dll.raw(read(dll.b, dir + 28, 4), functions * 4);
+    const U nt = dll.raw(read(dll.b, dir + 32, 4), names * 4);
+    const U ot = dll.raw(read(dll.b, dir + 36, 4), names * 2);
+    U address = 0;
+    bool found = false;
+    std::string previous;
+    for (U i = 0; i < names; ++i) {
+        const auto name = dll.string(read(dll.b, nt + i * 4, 4), 4096);
+        need(i == 0 || previous < name, "Unsorted or duplicate DLL export names.");
+        previous = name;
+        const U ordinal = read(dll.b, ot + i * 2, 2);
+        need(ordinal < functions, "DLL export ordinal is outside the function table.");
+        if (name == requested) {
+            found = true;
+            address = read(dll.b, ft + ordinal * 4, 4);
+        }
+    }
+    need(found, "Selected export is absent from the DLL (names are case-sensitive).");
+    need(address != 0, "Selected DLL export has a null function address.");
+    need(address < rva || address >= rva + size,
+         "Selected export is a forwarder; choose a real native function export.");
+    dll.raw(address, 1);
+    need(std::any_of(dll.sections.begin(), dll.sections.end(),
+                     [&](const Section &s) {
+                         return address >= s.va && address - s.va < std::max(s.vs, s.size) &&
+                                (s.flags & 0x20000000);
+                     }),
+         "Selected DLL export does not point to executable, file-backed native code.");
+}
+
 std::uint32_t checksum(const Bytes &b, U at)
 {
     U sum = 0;
@@ -242,13 +285,22 @@ bool validName(const std::string &s)
     return true;
 }
 
-Plan prepare(const Bytes &exe, const Bytes &dll, const std::string &name)
+bool validExportName(const std::string &name)
+{
+    return !name.empty() && name.size() <= 255 &&
+           std::all_of(name.begin(), name.end(), [](char c) { return c >= 33 && c <= 126; });
+}
+
+Plan prepare(const Bytes &exe, const Bytes &dll, const std::string &name, const std::string &exportName)
 {
     Plan p;
     try {
         need(validName(name), "Use an ASCII DLL filename (letters, digits, dot, dash or underscore; no "
                               "paths, spaces or reserved device names).");
+        need(validExportName(exportName),
+             "Enter an exact ASCII function export name (1-255 non-space characters).");
         const Image target(exe, false), payload(dll, true);
+        requireExport(payload, exportName);
         p.dependencies = payload.modules;
         p.importsBefore = target.modules.size();
         const auto own = std::find_if(target.sections.begin(), target.sections.end(),
@@ -264,13 +316,18 @@ Plan prepare(const Bytes &exe, const Bytes &dll, const std::string &name)
             need(lower(target.modules.back()) == lower(name),
                  "A different startup DLL is already installed. Restore it before choosing another.");
             const U ds = (target.modules.size() + 1) * 20;
-            const U ilt = align(prefix + ds, 8), iat = ilt + 8, filename = iat + 8;
-            const U vs = filename + target.modules.back().size() + 1;
+            const U ilt = align(prefix + ds, 8), iat = ilt + 16, filename = iat + 16;
+            const U hint = align(filename + target.modules.back().size() + 1, 2);
+            const U vs = hint + 2 + exportName.size() + 1;
             need(own->vs == vs && own->size == align(vs, target.fa) && own->flags == 0xc0000040 &&
                      read(exe, target.opt + 124, 4) == ds &&
                      target.descriptors.back() == descriptor(own->va, ilt, filename, iat) &&
                      target.string(own->va + filename, 121) == target.modules.back() &&
-                     read(exe, own->raw + ilt, 8) == 0 && read(exe, own->raw + iat, 8) == 0,
+                     read(exe, own->raw + ilt, 8) == own->va + hint &&
+                     read(exe, own->raw + iat, 8) == own->va + hint &&
+                     read(exe, own->raw + ilt + 8, 8) == 0 && read(exe, own->raw + iat + 8, 8) == 0 &&
+                     read(exe, own->raw + hint, 2) == 0 &&
+                     target.string(own->va + hint + 2, 256) == exportName,
                  "The startup import no longer matches this patcher's format; nothing was changed.");
             p.ok = p.alreadyApplied = true;
             p.output = exe;
@@ -290,8 +347,9 @@ Plan prepare(const Bytes &exe, const Bytes &dll, const std::string &name)
                  "The new section-header slot contains data; refusing to overwrite it.");
         const U ds = (target.descriptors.size() + 2) * 20;
         need(ds <= 2048 * 20, "No room within the import-descriptor safety limit.");
-        const U ilt = align(prefix + ds, 8), iat = ilt + 8, filename = iat + 8;
-        const U size = filename + name.size() + 1, rawSize = align(size, target.fa);
+        const U ilt = align(prefix + ds, 8), iat = ilt + 16, filename = iat + 16;
+        const U hint = align(filename + name.size() + 1, 2);
+        const U size = hint + 2 + exportName.size() + 1, rawSize = align(size, target.fa);
         const U va = align(target.imageSize, target.sa), offset = align(exe.size(), target.fa);
         need(offset + rawSize <= fileLimit, "Patched EXE would exceed 128 MiB.");
         p.output = exe;
@@ -304,9 +362,12 @@ Plan prepare(const Bytes &exe, const Bytes &dll, const std::string &name)
         }
         const auto added = descriptor(va, ilt, filename, iat);
         std::copy(added.begin(), added.end(), p.output.begin() + std::ptrdiff_t(cursor));
-        // Two separate, null-terminated empty thunk lists. Windows loads and
-        // attaches the module; there is no symbol to resolve or call.
+        // A real symbol is essential: Windows skipped DLLs with empty thunk
+        // lists in the actual startup test. Resolving this symbol never calls it.
+        put(p.output, offset + ilt, va + hint, 8);
+        put(p.output, offset + iat, va + hint, 8);
         std::copy(name.begin(), name.end(), p.output.begin() + std::ptrdiff_t(offset + filename));
+        std::copy(exportName.begin(), exportName.end(), p.output.begin() + std::ptrdiff_t(offset + hint + 2));
         const char section[] = ".bsidll";
         std::copy(section, section + sizeof(section), p.output.begin() + std::ptrdiff_t(target.end));
         put(p.output, target.end + 8, size);

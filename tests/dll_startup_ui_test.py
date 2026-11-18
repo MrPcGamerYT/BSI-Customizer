@@ -44,20 +44,20 @@ with tempfile.TemporaryDirectory() as directory:
         """import QtQuick
 QtObject {
  property bool busy: false
- property string exePath: "fixture/HD-Player.exe"
+ property string exePath: ""
  property var calls: []
  property bool installed: false
  property bool missingDll: false
  signal workspaceChanged()
- function dllStartupInspect(name) {
+ function dllStartupInspect(name,exportName) {
   calls = calls.concat(["inspect:" + name]); workspaceChanged();
   if (missingDll) return {ok:false,canRestore:installed,msg:"DLL missing; restore is available"};
   return {ok:true,canApply:!installed,alreadyApplied:installed,canRestore:installed,
           exeSha256:"reviewed-exe",dllSha256:"reviewed-dll",warning:"Explicit fixture risks",
           dllDirectImports:["KERNEL32.dll"],msg:"Fixture inspection"};
  }
- function dllStartupApply(name,exe,dll,ack) {
-  if (exe!=="reviewed-exe" || dll!=="reviewed-dll" || ack!==true) throw Error("Unreviewed apply");
+ function dllStartupApply(name,exe,dll,ack,exportName) {
+  if (exe!=="reviewed-exe" || dll!=="reviewed-dll" || ack!==true || exportName!=="zlag_init") throw Error("Unreviewed apply");
   calls = calls.concat(["apply:" + name]); installed=true; workspaceChanged();
   return {ok:true,changed:true,msg:"Fixture applied"};
  }
@@ -107,7 +107,13 @@ ApplicationWindow {
     ]
     assert calls() == [], "no file reads, writes or DLL execution on entry"
     assert named("startupDllName").property("text") == "zlag.dll"
-    assert not apply.property("enabled") and not restore.property("enabled")
+    assert named("startupDllExport").property("text") == "zlag_init"
+    assert (
+        not inspect.property("enabled") and not apply.property("enabled") and not restore.property("enabled")
+    )
+    backend.setProperty("exePath", "fixture/HD-Player.exe")
+    QTest.qWait(30)
+    assert inspect.property("enabled") and calls() == []
     invoke(window, "attemptApply")
     assert calls() == [], "controller must refuse an unreviewed apply too"
     invoke(inspect, "clicked")
@@ -139,6 +145,10 @@ ApplicationWindow {
     assert not apply.property("enabled"), "filename changes invalidate a review"
     invoke(inspect, "clicked")
     assert apply.property("enabled")
+    named("startupDllExport").setProperty("text", "AnotherExport")
+    QTest.qWait(30)
+    assert not apply.property("enabled"), "export name changes invalidate a review"
+    invoke(inspect, "clicked")
     backend.setProperty("exePath", "another/HD-Player.exe")
     QTest.qWait(30)
     assert not apply.property("enabled"), "EXE selection changes invalidate a review"

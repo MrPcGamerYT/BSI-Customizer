@@ -1895,8 +1895,8 @@ int runSelfTest()
                              .toString()
                              .contains(QStringLiteral("Sign in with Discord")),
                   "Backend refuses patching while the Discord gate is closed");
-            for (const auto &startupResult : {gated.dllStartupInspect(QStringLiteral("zlag.dll")),
-                      gated.dllStartupApply(QStringLiteral("zlag.dll"), {}, {}, true), gated.dllStartupRestore()}) {
+            for (const auto &startupResult : {gated.dllStartupInspect(QStringLiteral("zlag.dll"), QStringLiteral("zlag_init")),
+                      gated.dllStartupApply(QStringLiteral("zlag.dll"), {}, {}, true, QStringLiteral("zlag_init")), gated.dllStartupRestore()}) {
                 check(!startupResult.value("ok").toBool()
                           && startupResult.value("error").toString().contains(QStringLiteral("Sign in with Discord")),
                       "regular-DLL inspect/apply/restore respect the native Discord gate before file access");

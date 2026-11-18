@@ -20,9 +20,13 @@ They do need the **patched EXE plus the named DLL and all that DLL's compatible
 dependencies**, alongside the rest of a compatible emulator installation. A
 standalone copy of HD-Player.exe is not a complete emulator distribution.
 
-**Loading is not the same as calling an exported function.** This writer uses
-an empty, terminated import thunk list: no export is required or called. Windows
-performs normal DLL initialization (`DLL_PROCESS_ATTACH`/the DLL entry point).
+**Loading is not the same as calling an exported function.** This writer imports
+one exact, case-sensitive existing native function export (default `zlag_init`).
+Windows resolves its address but **does not call it**; normal DLL initialization
+(`DLL_PROCESS_ATTACH`/the DLL entry point) runs instead. DLLs with no exports,
+null/out-of-bounds function addresses, data-only selected exports and selected
+forwarders are refused before apply. This is a deliberate supported-layout
+constraint, not a proxy requirement.
 A DLL that requires an explicit `zlag_init()` or another exported initializer
 will need its own supported initialization design; this tool does not invoke
 that function. DLL initialization runs under loader-lock constraints. A generic
@@ -37,7 +41,8 @@ loader cannot certify that arbitrary DLL initialization is safe.
    on Home/Settings, not another installation's EXE.
 3. Put your **trusted AMD64 DLL beside that EXE**. BSI deliberately does not
    download, load, copy, rename, modify or remove payload DLLs. Enter just its
-   ASCII filename (default `zlag.dll`), not a path. Filename changes remain
+   ASCII filename (default `zlag.dll`), not a path, and an exact existing native
+   function export (default `zlag_init`). Filename/export changes remain
    available; restoring the old import is required before choosing another DLL.
 4. Click **Inspect EXE + DLL**. Review the EXE/DLL SHA-256 values, dependency
    information and risks. The dependency list is normal, direct imports only,
@@ -59,7 +64,8 @@ replace the modified EXE. Do not run an untrusted DLL to test this feature.
 
 - The planner only parses data, with bounded headers/RVAs/sections/import
   descriptors/thunks/strings. It rejects wrong architecture, EXE-as-DLL,
-  overlapping/truncated sections, unsupported bound imports and occupied new
+  malformed/null/wrong-case exports, overlapping/truncated sections, unsupported
+  bound imports and occupied new
   section-header slots. Files are limited to 128 MiB. Unsupported layouts fail
   closed; arbitrary PE32/ARM64/system EXEs are not a supported target promise.
 - New import descriptors live in a writable, non-executable `.bsidll` section.
@@ -112,13 +118,20 @@ replace the modified EXE. Do not run an untrusted DLL to test this feature.
    The originals and original archives must retain their hashes. They are never
    launched by these tests.
 3. **Actual Windows loader:** CI compiles an original harmless host and regular
-   DLLs with static CRTs. A DLL with **no exports**, one with an initializer
-   export that must **not** be called, missing-DLL startup and a DLL that declines
-   initialization are tested in fresh processes. A separate recipient test
-   copies only the patched EXE and no-export DLL, **exits the patcher**, removes
+   DLLs with static CRTs. A DLL with **no exports must be refused**; a regular DLL
+   with an initializer export must attach while that export is **not** called.
+   Missing-DLL startup and a DLL that declines initialization are also tested in
+   fresh processes. A separate recipient test copies only the patched EXE and
+   regular DLL, **exits the patcher**, removes
    Qt/SDK/interpreter locations from PATH, then launches the EXE normally three
    times. This proves the no-proxy/no-recurring-runtime mechanism, not the user's
    unavailable payload or a complete emulator installation.
+
+An earlier empty-thunk prototype passed structural checks but **failed** the
+actual Windows startup test. That approach was rejected, not merged. The current
+format requires a real validated function import and has regression guards for
+missing/null/wrong-case exports and changed-export repeat requests. This is why
+structural tests alone are insufficient.
 
 Check the **Regular DLL normal startup (Windows x64, no proxy/runtime)** job and
 all other checks for the exact PR head. The existence of these tests is not a

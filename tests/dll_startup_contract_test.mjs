@@ -30,7 +30,7 @@ assert.ok(!cmake.includes('PRIVATE BSI_DLLSTARTUP_TESTING'), 'No fault injection
 assert.ok(read('src/qml/pages/AddonsPage.qml').includes('DllStartupPanel {'));
 const panel = read('src/qml/components/DllStartupPanel.qml');
 assert.ok(!panel.includes('Component.onCompleted:'), 'No auto-inspection/apply on page entry');
-assert.ok(panel.includes('text: "zlag.dll"') && panel.includes('onTextChanged: panel.invalidate()'));
+assert.ok(panel.includes('text: "zlag.dll"') && panel.includes('text: "zlag_init"') && panel.includes('onTextChanged: panel.invalidate()'));
 assert.ok(panel.includes('acknowledge.checked && panel.ready'));
 assert.ok(panel.includes('onWorkspaceChanged() { panel.invalidate(); }'));
 assert.ok(panel.includes('onExePathChanged() { panel.invalidate(); }'));

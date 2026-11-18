@@ -10,20 +10,22 @@ Card {
     property var review: ({})
     property string reviewPath: ""
     property string reviewName: ""
-    property string report: qsTr("Copy your trusted AMD64 DLL beside the selected HD-Player.exe, enter its filename, then inspect. Nothing runs or changes on page entry.")
-    readonly property bool currentReview: reviewPath === backend.exePath && reviewName === dllName.text && !!review.exeSha256
+    property string reviewExport: ""
+    property string report: qsTr("Copy your trusted AMD64 DLL beside the selected HD-Player.exe, enter its filename and an exact existing function export, then inspect. Nothing runs or changes on page entry.")
+    readonly property bool currentReview: reviewPath === backend.exePath && reviewName === dllName.text && reviewExport === exportName.text && !!review.exeSha256
     readonly property bool ready: currentReview && !!review.canApply && !backend.busy
     function invalidate() {
-        review = {}; reviewPath = ""; reviewName = "";
+        review = {}; reviewPath = ""; reviewName = ""; reviewExport = "";
         if (confirmApply) confirmApply.close();
         if (confirmRestore) confirmRestore.close();
     }
     function inspectFiles(announce) {
         const path = backend.exePath;
         const name = dllName.text;
-        const result = backend.dllStartupInspect(name);
-        if (path !== backend.exePath || name !== dllName.text) return;
-        review = result; reviewPath = path; reviewName = name;
+        const symbol = exportName.text;
+        const result = backend.dllStartupInspect(name, symbol);
+        if (path !== backend.exePath || name !== dllName.text || symbol !== exportName.text) return;
+        review = result; reviewPath = path; reviewName = name; reviewExport = symbol;
         report = result.msg || "";
         if (announce) panel.notify(report);
     }
@@ -31,7 +33,7 @@ Card {
         if (!ready || !acknowledge.checked) return;
         const token = review;
         review = {};
-        const result = backend.dllStartupApply(dllName.text, token.exeSha256, token.dllSha256, true);
+        const result = backend.dllStartupApply(dllName.text, token.exeSha256, token.dllSha256, true, exportName.text);
         inspectFiles(false); report = result.msg || ""; panel.notify(report);
     }
     function restoreReviewed() {
@@ -62,9 +64,16 @@ Card {
             Accessible.name: qsTr("Startup DLL filename")
             onTextChanged: panel.invalidate()
         }
+        Label { text: qsTr("Existing native function export (resolved, NEVER called)"); color: Theme.text }
+        StudioTextField {
+            id: exportName; objectName: "startupDllExport"
+            Layout.fillWidth: true; text: "zlag_init"; maximumLength: 255; selectByMouse: true
+            Accessible.name: qsTr("Exact startup DLL export name")
+            onTextChanged: panel.invalidate()
+        }
         Label {
             Layout.fillWidth: true; wrapMode: Text.Wrap; color: Theme.warn
-            text: qsTr("Close the emulator first. Patching invalidates the EXE signature. A missing, incompatible or failing DLL can stop Windows from launching it. Normal DLL initialization runs; NO exported function (including zlag_init) is called. Use only a trusted DLL designed for startup initialization.")
+            text: qsTr("Close the emulator first. Patching invalidates the EXE signature. A missing, incompatible or failing DLL can stop Windows from launching it. The exact, case-sensitive export must exist or inspection is refused. Normal DLL initialization runs; NO exported function (including zlag_init) is called. Use only a trusted DLL designed for startup initialization.")
         }
         Flow {
             Layout.fillWidth: true; Layout.preferredHeight: childrenRect.height; spacing: 8
@@ -97,7 +106,7 @@ Card {
             ColumnLayout {
                 width: parent.width; spacing: 12
                 Label { Layout.fillWidth: true; wrapMode: Text.Wrap; textFormat: Text.PlainText; color: Theme.text; text: panel.review.warning || "" }
-                Label { Layout.fillWidth: true; wrapMode: Text.WrapAnywhere; textFormat: Text.PlainText; color: Theme.textDim; text: panel.reviewPath + "\n" + panel.reviewName }
+                Label { Layout.fillWidth: true; wrapMode: Text.WrapAnywhere; textFormat: Text.PlainText; color: Theme.textDim; text: panel.reviewPath + "\n" + panel.reviewName + "!" + panel.reviewExport }
                 StudioCheckBox { id: acknowledge; objectName: "startupDllAcknowledge"; Layout.fillWidth: true; text: qsTr("I am authorized, trust this DLL and accept these risks.") }
             }
         }
