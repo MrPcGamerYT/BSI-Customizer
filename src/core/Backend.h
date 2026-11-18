@@ -311,6 +311,7 @@ signals:
     void log(const QString &message, const QString &color);
 
 private:
+    void invalidatePlayerAnalysis();
     QVariantMap runBackground(const std::function<QVariantMap(Backend &)> &operation);
     void copyPatchState(const Backend &source);
     bool m_busy = false;

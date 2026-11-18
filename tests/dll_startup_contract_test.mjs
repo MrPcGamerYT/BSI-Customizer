@@ -8,6 +8,8 @@ for (const file of ['src/core/DllStartup.cpp', 'src/core/DllStartupImport.cpp',
   assert.ok(cmake.includes(file), 'Shipping build must include ' + file);
 }
 const backend = read('src/core/Backend.cpp');
+assert.match(read('src/core/Backend.h'), /\bvoid\s+invalidatePlayerAnalysis\(\)\s*;/,
+  'Shared cache invalidation must be declared as a Backend member as well as defined');
 for (const method of ['dllStartupInspect', 'dllStartupApply', 'dllStartupRestore']) {
   const at = backend.indexOf('QVariantMap Backend::' + method + '(');
   assert.ok(at >= 0, method);
