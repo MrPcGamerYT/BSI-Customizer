@@ -9,6 +9,12 @@ on:
     branches: [main, arena/3f309c3c-bsi-customizer, arena/c19d0730-bsi-customizer, arena/038fda0d-bsi-customizer]
   pull_request:
   workflow_dispatch:
+    inputs:
+      test_supplied_dll:
+        description: 'Opt in: test the pinned supplied DLL in an offline disposable Windows probe (not the emulator)'
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
@@ -24,7 +30,13 @@ env:
   BSI_SKIN_REFERENCE_DIR: ${{ github.workspace }}/player-ui-source
 
 jobs:
+  supplied-dll-validation:
+    name: Opt-in supplied DLL test
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.test_supplied_dll }}
+    uses: ./.github/workflows/dll-payload-test.yml
+
   rpc-scan-regression:
+    if: ${{ github.event_name != 'workflow_dispatch' || !inputs.test_supplied_dll }}
     name: RPC scan equivalence (Linux, Qt-free)
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -49,6 +61,7 @@ jobs:
           /tmp/dll-startup-test
 
   resources-ui-regression:
+    if: ${{ github.event_name != 'workflow_dispatch' || !inputs.test_supplied_dll }}
     name: Resources manual scan and search (Qt 6.8)
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -63,7 +76,9 @@ jobs:
       - name: Test Add-ons catalog and guarded review flow
         run: node tests/addons_test.mjs
       - name: Check native startup-DLL wiring and opt-in safety contracts
-        run: node tests/dll_startup_contract_test.mjs
+        run: |
+          node tests/dll_startup_contract_test.mjs
+          node tests/dll_startup_payload_contract_test.mjs
       - name: Test resource search matching and large lists
         run: node tests/resource_search_test.mjs
       - name: Test Chromium Settings-panel rebuild controls and profile flow
@@ -138,6 +153,7 @@ jobs:
         run: python tests/run_qt_runtime_test.py tests/ui_page_settings_panel_test.py
 
   dll-startup-windows:
+    if: ${{ github.event_name != 'workflow_dispatch' || !inputs.test_supplied_dll }}
     name: Regular DLL normal startup (Windows x64, no proxy/runtime)
     runs-on: windows-latest
     timeout-minutes: 20
@@ -196,6 +212,7 @@ jobs:
           'PASS: three ordinary launches; only EXE + regular DLL; export resolved but not called; patcher already exited; no interpreter/Qt/SDK on PATH.' | Out-File $env:GITHUB_STEP_SUMMARY -Append
 
   build-windows:
+    if: ${{ github.event_name != 'workflow_dispatch' || !inputs.test_supplied_dll }}
     name: Build & self-test (Windows x64 · ${{ matrix.label }})
     runs-on: windows-latest
     # The two "latest package" jobs legitimately run ~58 minutes (build + the

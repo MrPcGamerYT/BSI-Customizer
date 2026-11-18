@@ -304,17 +304,25 @@ int main(int argc, char **argv)
 {
     QCoreApplication app(argc, argv);
     const auto args = app.arguments();
-    if (args.size() == 5 && args.at(1) == QLatin1String("--prepare-deployment")) {
+    if (args.size() == 3 && args.at(1) == QLatin1String("--restore-deployment")) {
+        const auto r = DllStartup::restore(args.at(2));
+        if (!r.value("ok").toBool())
+            std::fprintf(stderr, "%s\n", qPrintable(r.value("msg").toString()));
+        return r.value("ok").toBool() ? 0 : 1;
+    }
+    if ((args.size() == 5 || args.size() == 7) && args.at(1) == QLatin1String("--prepare-deployment")) {
         // CI later copies ONLY these two files into a different directory and
-        // launches the host AFTER this patcher process has exited.
-        if (!QDir().mkdir(args.at(4)))
+        // launches the host AFTER this patcher process has exited. Optional
+        // name/export arguments also permit data-only tests of a supplied DLL.
+        const auto dllName = args.size() == 7 ? args.at(5) : QStringLiteral("bsi-startup-probe.dll");
+        const auto symbol = args.size() == 7 ? args.at(6) : QStringLiteral("BsiProbeInitialize");
+        if (!DllStartupImport::validName(dllName.toUtf8().toStdString()) ||
+            !DllStartupImport::validExportName(symbol.toUtf8().toStdString()) || !QDir().mkdir(args.at(4)))
             return 2;
         const QDir folder(args.at(4));
         const auto exe = folder.filePath(QStringLiteral("HD-Player.exe"));
-        const auto dllName = QStringLiteral("bsi-startup-probe.dll");
         if (!QFile::copy(args.at(2), exe) || !QFile::copy(args.at(3), folder.filePath(dllName)))
             return 2;
-        const auto symbol = QStringLiteral("BsiProbeInitialize");
         const auto review = DllStartup::inspect(exe, dllName, symbol);
         const auto r = DllStartup::apply(exe, dllName, review.value("exeSha256").toString(),
                                          review.value("dllSha256").toString(), true, symbol);

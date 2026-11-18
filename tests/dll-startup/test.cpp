@@ -66,8 +66,9 @@ DWORD launch(const fs::path &file)
 int main(int argc, char **argv)
 {
     // Test-only data adapter for independent PE parsing of disposable copies.
-    if (argc == 6 && std::string(argv[1]) == "--prepare") {
-        const auto p = prepare(readFile(fs::u8path(argv[2])), readFile(fs::u8path(argv[3])), argv[4]);
+    if ((argc == 6 || argc == 7) && std::string(argv[1]) == "--prepare") {
+        const auto p = prepare(readFile(fs::u8path(argv[2])), readFile(fs::u8path(argv[3])), argv[4],
+                               argc == 7 ? argv[6] : "zlag_init");
         if (!p.ok) {
             std::cerr << p.error << '\n';
             return 1;

@@ -30,6 +30,12 @@ if(BSI_DLLSTARTUP_FILE_TESTS)
 endif()
 if(WIN32)
     add_executable(startup-host host.cpp)
+    # Never run the supplied DLL in ordinary CI/CTest. Only the separately
+    # opted-in, network-blocked Windows job builds/launches this original host.
+    add_executable(supplied-payload-host EXCLUDE_FROM_ALL supplied_payload_host.cpp)
+    if(MSVC)
+        target_compile_options(supplied-payload-host PRIVATE /W4 /WX /utf-8)
+    endif()
     add_library(startup-no-exports SHARED payload.cpp)
     add_library(startup-with-export SHARED payload.cpp)
     target_compile_definitions(startup-with-export PRIVATE BSI_PROBE_EXPORT)

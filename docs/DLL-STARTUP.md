@@ -127,8 +127,8 @@ replace the modified EXE. Do not run an untrusted DLL to test this feature.
    fresh processes. A separate recipient test copies only the patched EXE and
    regular DLL, **exits the patcher**, removes
    Qt/SDK/interpreter locations from PATH, then launches the EXE normally three
-   times. This proves the no-proxy/no-recurring-runtime mechanism, not the user's
-   unavailable payload or a complete emulator installation.
+   times. This proves the no-proxy/no-recurring-runtime mechanism, not a
+   particular supplied payload or a complete emulator installation.
 
 An earlier empty-thunk prototype passed structural checks but **failed** the
 actual Windows startup test. That approach was rejected, not merged. The current
@@ -141,11 +141,15 @@ all other checks for the exact PR head. The existence of these tests is not a
 claim that a pending run passed. The user identified the four previously attached
 ZLag plugin source files as the **wrong DLL sources**; they are not evidence
 about the intended payload, and the filename/export advice derived from them
-has been withdrawn. The correct compiled DLL/matching source is still needed.
-Its actual exports, dependencies, initialization contract, licensing and behavior
-in HD-Player remain **unverified**. The generic filename/export defaults are not
-certification of a particular payload. No arbitrary export-calling promise or
-payload all-clear follows from a harmless loader test.
+has been withdrawn. A **separate compiled payload ZIP** was subsequently supplied:
+its x64 `Z-Lag.dll` exports the native `ZLagImportAnchor` function. See the
+[hash-pinned payload review and opt-in offline test](DLL-STARTUP-PAYLOAD-REVIEW.md)
+for the exact inputs, automatic HWID-to-Firestore behavior, test design and
+remaining verification boundary. Check actual job results before claiming the
+supplied DLL was runtime-tested. Its legitimate authorization, visual effects
+and behavior in a complete HD-Player installation remain **unverified** by the
+offline probe. Generic defaults are not certification of a payload; no arbitrary
+export-calling promise or payload all-clear follows from a loader test.
 
 ### Reproduce
 

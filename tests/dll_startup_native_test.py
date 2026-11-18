@@ -68,11 +68,11 @@ def descriptors(pe):
     raise RuntimeError("Unterminated import descriptors")
 
 
-def verify(original, patched):
+def verify(original, patched, dll_name=b"zlag.dll", required_export=b"zlag_init"):
     before, after = [pefile.PE(data=data, fast_load=True) for data in (original, patched)]
     try:
         old, new = descriptors(before), descriptors(after)
-        require(new[:-1] == old and new[-1][1] == b"zlag.dll", "Original descriptors/names changed")
+        require(new[:-1] == old and new[-1][1] == dll_name, "Original descriptors/names changed")
         require(
             after.FILE_HEADER.NumberOfSections == before.FILE_HEADER.NumberOfSections + 1,
             "Not one new section",
@@ -105,8 +105,8 @@ def verify(original, patched):
         symbol, end = struct.unpack("<2Q", thunk_data)
         require(symbol and not symbol & (1 << 63) and end == 0, "Missing real terminated import-by-name")
         require(after.get_data(symbol, 2) == bytes(2), "Unexpected symbol hint")
-        require(after.get_string_at_rva(symbol + 2) == b"zlag_init", "Wrong resolved export")
-        require(after.get_string_at_rva(name) == b"zlag.dll", "Wrong startup DLL name")
+        require(after.get_string_at_rva(symbol + 2) == required_export, "Wrong resolved export")
+        require(after.get_string_at_rva(name) == dll_name, "Wrong startup DLL name")
         return {
             "importsBefore": len(old),
             "importsAfter": len(new),
