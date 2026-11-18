@@ -782,6 +782,8 @@ QString buildWindow(const QString &stock)
     //
     // Keep the native 568 px page column and footer clearance, all loader
     // callbacks, and the flat shell without an extra page card or tab pill.
+    // Inset the page stack 12 px below the tab strip without moving the footer
+    // or adding space between the title and tabs.
     // StackLayout fills its Loader children by default; anchoring those children
     // as well conflicts with its geometry and produces native Qt warnings.
     // Keep the template small, but the *whole* compressed Window (including
@@ -800,7 +802,7 @@ delegate:MouseArea{visible:c!=='';property var c:iSettingsWindowShadowContainer.
 Text{id:t;text:modelData.pButtonText;font:h.font;x:11-m.boundingRect.x;y:c?0:22-height/2;color:r.q[index==pCurrentTabIndex?'subWindowHeaderClick':'primary20']}TextMetrics{id:m;text:t.text;font:t.font}Rectangle{visible:modelData.pShowRedDot;x:parent.width-8;y:t.y+6;width:6;height:6;radius:3;color:r.q.dangerNormal}
 Image{source:c||'';width:18;height:18;x:parent.width/2-9;y:24}}}
 Item{width:Math.min(r.width-48,568);x:(r.width-width)/2;height:r.height-118
-StackLayout{id:iSelectedSettingControl;anchors.fill:parent;currentIndex:pCurrentTabIndex
+StackLayout{id:iSelectedSettingControl;anchors.fill:parent;currentIndex:pCurrentTabIndex;anchors.topMargin:12
 Repeater{model:pSettingsItems.pSettingElements;delegate:Loader{Component.onCompleted:setSource(modelData.pQmlSource,modelData.pComponentArgs||{});onLoaded:{item.anchors.fill=item.parent;modelData.pComponentObj=item;if(item.fOnQmlLoaded)item.fOnQmlLoaded()}}}}}
 }
 }}
@@ -812,9 +814,10 @@ Repeater{model:pSettingsItems.pSettingElements;delegate:Loader{Component.onCompl
     QString out = QmlText::compactIndentation(stock.left(target.nameBegin));
     out += replacement;
     out += stock.mid(target.end);
-    // Make the redesigned Settings window use the available player viewport,
-    // with a comfortable desktop cap and centered placement on smaller screens.
-    const QString helper = QStringLiteral(R"QML(onVisibleChanged:if(visible&&transientParent){var t=transientParent;width=Math.min(t.width*.96,1120);height=Math.min(t.height*.94,670);x=t.x+t.width/2-width/2;y=t.y+t.height/2-height/2})QML");
+    // Keep Settings a compact 800x460 desktop dialog (~770x430 inside the
+    // native shadow), rather than filling the player with unused space. Retain
+    // the existing small-viewport guards, centering, theme and native pages.
+    const QString helper = QStringLiteral(R"QML(onVisibleChanged:if(visible&&transientParent){var t=transientParent;width=Math.min(t.width*.96,800);height=Math.min(t.height*.94,460);x=t.x+t.width/2-width/2;y=t.y+t.height/2-height/2})QML");
     const int rootClose = out.lastIndexOf(QLatin1String("\n}"));
     if (rootClose < 0) return {};
     out.insert(rootClose, helper);
@@ -880,6 +883,9 @@ QString buildAbout(const QString &developerName, const QString &tagline,
     // compact - whitespace and repeated token spellings are the difference
     // between "the icon applies" and "needs 2495 bytes but its slot only holds
     // 2337".
+    // The logo is a ColumnLayout child: plain width/height lose to a decoded
+    // image's implicit size. Use preferred AND maximum layout hints so large
+    // native/custom artwork stays small without stretching its aspect ratio.
     QString generated = QStringLiteral(R"QML(import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
@@ -905,7 +911,8 @@ ColumnLayout{id:iAboutD;width:Math.min(440,parent.width-24);anchors.horizontalCe
 Layout.alignment:Qt.AlignHCenter|Qt.AlignTop;spacing:16
 Item{Layout.fillWidth:true;Layout.preferredHeight:28}
 Image{objectName:"bsiAboutEmulatorLogo";source:@@BSI_LOGO_SOURCE@@
-width:160;height:60;fillMode:Image.PreserveAspectFit;Layout.alignment:Qt.AlignHCenter}
+Layout.preferredWidth:160;Layout.preferredHeight:60;Layout.maximumWidth:160;Layout.maximumHeight:60
+fillMode:Image.PreserveAspectFit;Layout.alignment:Qt.AlignHCenter}
 Text{objectName:"bsiAboutDeveloperName";text:pDeveloperName;font:UiTheme.fonts.bodyLarge
 color:UiTheme.colors.primary10;horizontalAlignment:Text.AlignHCenter
 wrapMode:Text.Wrap;Layout.fillWidth:true}

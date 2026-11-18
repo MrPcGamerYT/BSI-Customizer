@@ -23,12 +23,13 @@ os.environ.setdefault("QSG_RHI_BACKEND", "software")
 from PySide6.QtCore import QMetaObject, QPointF, Qt
 from PySide6.QtGui import QColor, QFont, QFontMetricsF, QGuiApplication, QImage
 from PySide6.QtQml import QQmlComponent, QQmlEngine, QQmlExpression
-from PySide6.QtQuick import QQuickItem
+from PySide6.QtQuick import QQuickItem, QQuickWindow
 from PySide6.QtTest import QTest
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
 CPP = (REPO / "src/core/SettingsPanelPatcher.cpp").read_text(encoding="utf-8")
 SHELL = re.search(r'QString replacement = QStringLiteral\(R"QML\((.*?)\)QML"\);', CPP, re.S).group(1)
+HELPER = re.search(r'const QString helper = QStringLiteral\(R"QML\((.*?)\)QML"\);', CPP, re.S).group(1)
 LABELS = [
     "Performance", "Display", "Graphics", "Game settings", "Devices", "Gamepad",
     "Preferences", "Phone", "Shortcuts", "User data", "Advanced", "About",
@@ -93,14 +94,44 @@ QtObject {
     }
 }
 """, encoding="utf-8")
+    # Match native pages' scrollable form + fixed footer contract. A short
+    # one-line body would not catch compact windows cutting off Save changes.
     (root / "SettingPage.qml").write_text("""import QtQuick 2.15
 Item {
     objectName: "runtimeSettingPage"
-    Text { x: 24; y: 16; text: "CPU allocation"; color: "#e8edf5" }
+    Flickable {
+        objectName: "runtimeSettingScroll"
+        x: 24; y: 16; width: parent.width - 48
+        height: Math.max(0, parent.height - 72); clip: true
+        contentWidth: width; contentHeight: form.height
+        Column {
+            id: form; width: parent.width; spacing: 14
+            Repeater {
+                model: ["CPU allocation", "Memory allocation", "Performance mode", "Graphics renderer", "Other setting"]
+                Column {
+                    width: parent.width; spacing: 6
+                    Text { text: modelData; color: "#e8edf5" }
+                    Rectangle {
+                        objectName: index === 4 ? "runtimeLastControl" : ""
+                        width: Math.min(200, parent.width); height: 34
+                        color: "#1b2838"
+                    }
+                }
+            }
+        }
+    }
     Item {
         anchors.left: parent.left; anchors.right: parent.right
         anchors.bottom: parent.bottom; height: 46
-        Text { x: 24; text: "Some changes will apply on next launch"; color: "#8b93a3" }
+        Text { x: 24; anchors.verticalCenter: parent.verticalCenter
+            width: parent.width - 168; elide: Text.ElideRight
+            text: "Some changes will apply on next launch"; color: "#8b93a3" }
+        Rectangle {
+            objectName: "runtimeSaveChanges"
+            anchors.right: parent.right; anchors.verticalCenter: parent.verticalCenter
+            width: 120; height: 32; color: "#35465a"
+            Text { anchors.centerIn: parent; text: "Save changes"; color: "#e8edf5" }
+        }
     }
     function fOnQmlLoaded() {}
 }
@@ -137,7 +168,8 @@ import QtQuick.Layouts 1.15
 import BsiGuiFixture 1.0
 Window {
     id: iSettingsWindow
-    width: 1120; height: 670; visible: true; color: "transparent"
+    width: 800; height: 460; visible: false; color: "transparent"
+    transientParent: fixturePlayer
     property int pCurrentTabIndex: 0
     property var testIcons: ({})
     property var tabData: %s
@@ -149,10 +181,14 @@ Window {
     onTestItalicChanged: updateFont()
     function fChangeSelectedSetting(i) { pCurrentTabIndex = i }
     %s
+    %s
 }
-""" % (json.dumps(model(LABELS)), bound), encoding="utf-8")
+""" % (json.dumps(model(LABELS)), bound, HELPER), encoding="utf-8")
         engine = QQmlEngine()
         engine.addImportPath(str(root))
+        player = QQuickWindow()
+        player.setGeometry(0, 0, 1440, 900)
+        engine.rootContext().setContextProperty("fixturePlayer", player)
         warnings = []
         engine.warnings.connect(lambda errors: warnings.extend(e.toString() for e in errors))
         component = QQmlComponent(engine, str(host))
@@ -165,6 +201,7 @@ Window {
         strip.setProperty("cacheBuffer", 10000)
         shell_root = next(i for i in visual_items(content) if i.metaObject().indexOfProperty("bIcons") >= 0)
         surface = next(i for i in visual_items(content) if prop(i, "radius") == 14)
+        window.show()
         QTest.qWait(100)
 
         def check_layout(labels, icons):
@@ -231,10 +268,40 @@ Window {
             page_origin = page.mapToItem(content, QPointF(0, 0))
             assert abs(page_origin.x() + page.width() / 2 - window.width() / 2) < EPSILON
             surface_origin = surface.mapToItem(content, QPointF(0, 0))
-            expected_top = surface_origin.y() + (100 if visible else 56)
+            expected_top = surface_origin.y() + (112 if visible else 68)
             assert abs(page_origin.y() - expected_top) < EPSILON, f"wrong page position: {page_origin.y()}"
+            assert abs(page.height() - (surface.height() - 130)) < EPSILON, "top padding changed the footer clearance"
+            if visible:
+                strip_bottom = strip.mapToItem(content, QPointF(0, strip.height())).y()
+                assert abs(page_origin.y() - strip_bottom - 12) < EPSILON, "page content must leave exactly 12 px below the tab strip"
             assert page_origin.y() + page.height() <= surface_origin.y() + surface.height() - 18 + EPSILON, "native footer escaped the shell"
+            page_items = visual_items(page)
+            scroll = next(i for i in page_items if i.objectName() == "runtimeSettingScroll")
+            save = next(i for i in page_items if i.objectName() == "runtimeSaveChanges")
+            assert scroll.height() > 0 and scroll.property("contentHeight") > scroll.height(), "long native forms must remain scrollable"
+            save_origin = save.mapToItem(page, QPointF(0, 0))
+            assert save_origin.x() >= 0 and save_origin.x() + save.width() <= page.width()
+            assert save_origin.y() >= scroll.y() + scroll.height(), "Save changes overlaps the scrollable form"
+            assert save_origin.y() + save.height() <= page.height(), "Save changes was clipped by the compact window"
             return text_items
+
+        def fit_player(width, height, inset, x=0, y=0):
+            # Execute the real production helper on an actual transient window,
+            # not a manually resized scene that could hide a broken size cap.
+            window.hide()
+            player.setGeometry(x, y, width, height)
+            shell_root.setProperty("shadowThickness", inset)
+            window.show()
+            QTest.qWait(80)
+            assert abs(window.width() - min(width * .96, 800)) <= 1
+            assert abs(window.height() - min(height * .94, 460)) <= 1
+            assert window.width() <= 800 and window.height() <= 460, "the old oversized Settings footprint returned"
+            assert abs(window.x() + window.width() / 2 - (player.x() + width / 2)) <= 1
+            assert abs(window.y() + window.height() / 2 - (player.y() + height / 2)) <= 1
+            assert window.x() >= player.x() and window.y() >= player.y()
+            assert window.x() + window.width() <= player.x() + width
+            assert window.y() + window.height() <= player.y() + height
+            assert player.width() == width and player.height() == height, "sizing Settings must not resize the player"
 
         defaults = {str(i): icon_url for i in range(12)}
         mixed = {str(i): (custom_url if i == 4 else icon_url) for i in range(0, 12, 2)}
@@ -243,9 +310,8 @@ Window {
                      (mixed, (0, 1)), (mixed, (10, 11)),
                      (defaults, (0, 3, 4, 11)), (defaults, tuple(range(11))),
                      (defaults, tuple(range(12)))]
-        for width, height, inset in [(1120, 670, 0), (720, 480, 0), (1120, 670, 15), (720, 480, 15)]:
-            shell_root.setProperty("shadowThickness", inset)
-            window.resize(width, height)
+        for width, height, inset in [(1440, 900, 0), (1149, 659, 0), (1440, 900, 15), (1149, 659, 15), (720, 480, 15), (640, 400, 15)]:
+            fit_player(width, height, inset, x=80, y=50)
             for base, hidden in scenarios:
                 icons = dict(base, **{str(i): "" for i in hidden})
                 assert window.setProperty("testIcons", icons)
@@ -254,6 +320,18 @@ Window {
                 except AssertionError:
                     print("FAILED CASE:", width, height, "shadow inset", inset, "hidden", hidden)
                     raise
+
+        # A long page must still reach its final setting without moving the
+        # footer out of view at the smallest viewport, with all tabs visible.
+        assert window.setProperty("testIcons", defaults)
+        check_layout(LABELS, defaults)
+        page = next(i for i in visual_items(content) if i.objectName() == "runtimeSettingPage" and i.isVisible())
+        scroll = next(i for i in visual_items(page) if i.objectName() == "runtimeSettingScroll")
+        last_control = next(i for i in visual_items(scroll) if i.objectName() == "runtimeLastControl")
+        scroll.setProperty("contentY", scroll.property("contentHeight") - scroll.height())
+        QTest.qWait(30)
+        last_bottom = last_control.mapToItem(scroll, QPointF(0, last_control.height())).y()
+        assert 0 < last_bottom <= scroll.height() + EPSILON, "the compact window made lower native form controls unreachable"
 
         # Live theme changes exercise positive/negative glyph bearings rather
         # than merely trusting the label's layout rectangle to be centred.
@@ -285,15 +363,16 @@ Window {
         assert not re.search(r"color:\s*[\"']#", SHELL), "the shell must use the player's native palette"
         assert not warnings, "QML runtime warnings:\n" + "\n".join(warnings)
         if len(sys.argv) > 1:
-            window.resize(1120, 670)
+            fit_player(1440, 900, 15)
             strip.setProperty("contentX", 0)
             QTest.qWait(80)
             assert window.grabWindow().save(sys.argv[1]), "could not save the actual Qt scene"
         window.setVisible(False)
         window.deleteLater()
+        player.deleteLater()
         QTest.qWait(10)
         engine.deleteLater()
-    print("PASS: all twelve real labels are centred; hit-target gaps are 4 px and ink gaps 26 px across native shadow parenting/insets, icons, fonts, translations, hidden tabs and viewports")
+    print("PASS: compact 800x460 Settings stays centred and viewport-safe; pages clear the tab strip by 12 px; all twelve labels/icons keep their gaps, Save changes stays visible, and long pages remain scrollable")
     return 0
 
 

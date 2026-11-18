@@ -212,7 +212,7 @@ assert "StackLayout{id:iSelectedSettingControl;anchors.fill:parent;currentIndex:
 # whole window fits: native callbacks/prefix and compression entropy matter too.
 # settings_panel_window_budget_test reconstructs the complete 2468-byte legacy
 # resource, including the original native prefix and the geometry helper.
-assert len(replacement.encode()) <= 1741, (
+assert len(replacement.encode()) <= 1762, (
     f"shell grew to {len(replacement.encode())} bytes; the tightest known "
     "UiSettingsWindow.qml slot is 2468 bytes"
 )
@@ -304,12 +304,12 @@ helper_match = re.search(
     cpp,
     re.S,
 )
-assert helper_match, "Could not find the PR #88 Settings-window geometry helper"
+assert helper_match, "Could not find the compact Settings-window geometry helper"
 helper = helper_match.group(1)
 assert "onVisibleChanged:if(visible&&transientParent)" in helper
 assert "var t=transientParent" in helper
-assert "width=Math.min(t.width*.96,1120)" in helper
-assert "height=Math.min(t.height*.94,670)" in helper
+assert "width=Math.min(t.width*.96,800)" in helper
+assert "height=Math.min(t.height*.94,460)" in helper
 assert "x=t.x+t.width/2-width/2" in helper
 assert "y=t.y+t.height/2-height/2" in helper
 replacement = replacement.replace("@@BSI_HIDDEN_TABS@@", "[]")
@@ -489,8 +489,8 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
         (
             item for item in visual_tree
             if item.metaObject().className().endswith("MouseArea")
-            and item.width() > window.width() * 0.5
-            and item.height() < 70
+            and abs(item.width() - obj.width()) < 2
+            and abs(item.height() - 56) < 2
         ),
         None,
     )
@@ -513,9 +513,9 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
     found_names = sorted(item.objectName() for item in visual_tree if item.objectName())
     assert not missing, f"Missing controls: {missing}; found object names: {found_names}"
     panel_center = panel.mapToItem(window.contentItem(), QPointF(panel.width() / 2, panel.height() / 2))
-    assert abs(panel_center.x() - window.width() / 2) < 2 and abs(panel_center.y() - window.height() / 2) < 2, "The PR #88 Settings shell should stay centered in the player window"
-    assert abs(obj.width() - 1120) < 2 and abs(obj.height() - 670) < 2, "The redesigned Settings window should use the viewport-sized footprint, capped for desktop readability"
-    assert abs(obj.x() - 190) < 2 and abs(obj.y() - 115) < 2, "The larger Settings window should remain centered"
+    assert abs(panel_center.x() - window.width() / 2) < 2 and abs(panel_center.y() - window.height() / 2) < 2, "The compact Settings shell should stay centered in the player window"
+    assert abs(obj.width() - 800) < 2 and abs(obj.height() - 460) < 2, "Settings must use the compact desktop footprint, not fill most of the player"
+    assert abs(obj.x() - 350) < 2 and abs(obj.y() - 220) < 2, "The compact Settings window should remain centered"
     title_center = settings_title.mapToItem(obj, QPointF(settings_title.width() / 2, settings_title.height() / 2))
     assert abs(title_center.x() - obj.width() / 2) < 2, "The Settings title should be centered in the title bar"
     # Gaps: one spacing value for the whole strip, so the distance between any
@@ -581,6 +581,9 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
     tabs_bottom = tabs.mapToItem(panel, QPointF(0, tabs.height())).y()
     card_top = page_frame.mapToItem(panel, QPointF(0, 0)).y()
     assert tabs_bottom <= card_top + 1, "The category strip was overlapped by the page card"
+    page_top = loaded_page.mapToItem(panel, QPointF(0, 0)).y()
+    assert abs(page_top - tabs_bottom - 12) < 2, "The native page must start 12 px below the tab strip"
+    assert abs(stack.height() - (page_frame.height() - 12)) < 2, "The new top gap must not push the native footer down"
     assert tabs.property("x") >= 0 and tabs.property("width") <= panel.width(), "The category strip overflowed the shell"
     # The page fills its Loader through the shell's own onLoaded assignment, so
     # both must report the same size (the page itself declares no width).
@@ -667,6 +670,44 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
         "the About content must span the viewport so its column is centred in the page"
     assert "contentWidth:iAboutD.width" not in about_source, \
         "a fixed contentWidth would pin the About column to the left"
+
+    # A real decoded image has implicit dimensions: an empty source cannot
+    # reproduce the oversized About artwork reported in a compact window.
+    # Mount the actual generated About page in the currently visible Loader,
+    # just as the player does, and exercise square/wide/tall high-res artwork.
+    active_loader = next(item for item in visual_items(obj)
+                         if item.metaObject().className().endswith("Loader")
+                         and item.isVisible() and item.width() > 100)
+    about_obj.setParentItem(active_loader)
+    about_obj.setWidth(active_loader.width())
+    about_obj.setHeight(active_loader.height())
+    logo = next(item for item in about_tree if item.objectName() == "bsiAboutEmulatorLogo")
+    name = next(item for item in about_tree if item.objectName() == "bsiAboutDeveloperName")
+    for label, width, height in [("square", 320, 320), ("wide", 1280, 320),
+                                 ("tall", 320, 1280), ("large", 2048, 2048)]:
+        image_path = root / ("about logo " + label + ".png")
+        image = QImage(width, height, QImage.Format.Format_ARGB32)
+        image.fill(QColor("#e7e9f2"))
+        assert image.save(str(image_path))
+        logo.setProperty("source", QUrl.fromLocalFile(str(image_path)))
+        QTest.qWait(80)
+        ready = QQmlExpression(engine.rootContext(), logo, "status === 1")
+        result = ready.evaluate()
+        assert not ready.hasError() and (result[0] if isinstance(result, tuple) else result), \
+            "the About logo fixture did not decode"
+        assert 0 < logo.width() <= 160.1 and 0 < logo.height() <= 60.1, \
+            f"{label} About artwork escaped its compact layout bounds: {logo.width()}x{logo.height()}"
+        painted_width, painted_height = logo.property("paintedWidth"), logo.property("paintedHeight")
+        assert 0 < painted_width <= 160.1 and 0 < painted_height <= 60.1
+        assert abs(painted_width / painted_height - width / height) < .01, \
+            "the About logo must retain the supplied artwork's aspect ratio"
+        center = logo.mapToItem(about_obj, QPointF(logo.width() / 2, 0)).x()
+        assert abs(center - about_obj.width() / 2) < 2, "the smaller About logo must stay centered"
+        logo_bottom = logo.mapToItem(about_obj, QPointF(0, logo.height())).y()
+        name_top = name.mapToItem(about_obj, QPointF(0, 0)).y()
+        assert logo_bottom <= name_top and name_top < about_obj.height(), \
+            "the About logo must not cover or push the developer name out of the compact page"
+    print("PASS: real square, wide, tall and oversized About logos stay centered within 160x60 without stretching")
 
     print("PASS: generated Settings and About QML instantiate, retain native page behavior, show custom tabs, and render profile links")
     about_obj.deleteLater()

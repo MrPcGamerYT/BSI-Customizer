@@ -5622,14 +5622,14 @@ Window {
                           // The rejected card/pill/underline must not return.
                           && !rebuiltWindow.contains(QStringLiteral("border.color"))
                           && !rebuiltWindow.contains(QStringLiteral("visible:s"))
-                          && rebuiltWindow.contains(QStringLiteral("StackLayout{id:iSelectedSettingControl;anchors.fill:parent;currentIndex:pCurrentTabIndex"))
+                          && rebuiltWindow.contains(QStringLiteral("StackLayout{id:iSelectedSettingControl;anchors.fill:parent;currentIndex:pCurrentTabIndex;anchors.topMargin:12"))
                           && rebuiltWindow.contains(QStringLiteral("delegate:Loader{"))
                           && rebuiltWindow.contains(QStringLiteral("modelData.pComponentObj=item"))
                           && rebuiltWindow.contains(QStringLiteral("onClicked:{fChangeSelectedSetting(index);forceActiveFocus()}"))
                           && rebuiltWindow.contains(QStringLiteral("onVisibleChanged:if(visible&&transientParent)"))
                           && rebuiltWindow.contains(QStringLiteral("var t=transientParent"))
-                          && rebuiltWindow.contains(QStringLiteral("width=Math.min(t.width*.96,1120)"))
-                          && rebuiltWindow.contains(QStringLiteral("height=Math.min(t.height*.94,670)"))
+                          && rebuiltWindow.contains(QStringLiteral("width=Math.min(t.width*.96,800)"))
+                          && rebuiltWindow.contains(QStringLiteral("height=Math.min(t.height*.94,460)"))
                           && rebuiltWindow.contains(QStringLiteral("x=t.x+t.width/2-width/2"))
                           && rebuiltWindow.contains(QStringLiteral("y=t.y+t.height/2-height/2"))
                           && rebuiltWindow.contains(QStringLiteral("iSettingsWindow.startSystemMove()"))
@@ -5666,6 +5666,12 @@ Window {
                 check(logoSourceVerified
                           && (rebuiltAbout.contains(QStringLiteral("objectName: \"bsiAboutEmulatorLogo\""))
                               || rebuiltAbout.contains(QStringLiteral("objectName:\"bsiAboutEmulatorLogo\"")))
+                          // Layout children prefer an image's decoded implicit
+                          // size over bare width/height. Bound the logo even
+                          // when a custom/runtime PNG is hundreds of pixels tall.
+                          && rebuiltAbout.contains(QStringLiteral("Layout.preferredWidth:160;Layout.preferredHeight:60"))
+                          && rebuiltAbout.contains(QStringLiteral("Layout.maximumWidth:160;Layout.maximumHeight:60"))
+                          && rebuiltAbout.contains(QStringLiteral("fillMode:Image.PreserveAspectFit"))
                           && (rebuiltAbout.contains(QStringLiteral("objectName: \"bsiAboutDeveloperName\""))
                               || rebuiltAbout.contains(QStringLiteral("objectName:\"bsiAboutDeveloperName\"")))
                           && (rebuiltAbout.contains(QStringLiteral("text: pDeveloperName"))
