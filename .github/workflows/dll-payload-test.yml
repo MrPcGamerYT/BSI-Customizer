@@ -49,6 +49,9 @@ jobs:
           target: desktop
           arch: win64_msvc2022_64
           cache: true
+          # Reuse the Python 3.11 above where pefile is installed. The action
+          # otherwise selects another interpreter and hides those dependencies.
+          setup-python: 'false'
       - name: Build original probe and production transaction adapter only
         shell: pwsh
         run: |

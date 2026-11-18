@@ -15,6 +15,8 @@ assert.match(workflow, /on:\s*\n  workflow_call:/);
 assert.doesNotMatch(workflow, /^\s*(pull_request|pull_request_target|push|schedule):/m);
 assert.match(workflow, /permissions:\s*\n  contents: read/);
 assert.match(workflow, /persist-credentials: false/);
+assert.match(workflow, /uses: jurplel\/install-qt-action@v4\.3\.1[\s\S]*?setup-python: 'false'/,
+  'Qt setup must not switch away from the Python where pefile was installed');
 assert.doesNotMatch(workflow, /secrets: inherit/);
 assert.match(workflow, /980007812e078635ddc2569caf4d885459ecb104/);
 assert.match(validator, /48289b241b789c4cdc0e553e84d0af4eb1cb3afa73b657698256ea5fdb4687c3/);
