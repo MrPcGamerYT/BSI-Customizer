@@ -8,6 +8,7 @@ original probe host only AFTER installing its outbound firewall block.
 import argparse
 import hashlib
 import json
+import os
 from pathlib import Path, PurePosixPath
 import stat
 import struct
@@ -322,4 +323,14 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as error:
+        # Hosted log downloads are not always reachable from the review
+        # sandbox. Surface data-only failures through GitHub's annotations too;
+        # this stage never executes the DLL or obtains a hardware identifier.
+        if os.environ.get("GITHUB_ACTIONS"):
+            for line in str(error).splitlines()[-30:]:
+                escaped = line.replace("%", "%25").replace("\r", "%0D")
+                print("::error::Supplied-DLL data check: " + escaped, flush=True)
+        raise
