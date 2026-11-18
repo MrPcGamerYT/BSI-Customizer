@@ -35,34 +35,6 @@ will need its own supported initialization design; this tool does not invoke
 that function. DLL initialization runs under loader-lock constraints. A generic
 loader cannot certify that arbitrary DLL initialization is safe.
 
-## Supplied ZLag plugin source: what to enter
-
-The supplied `test_host.cpp` looks for **`zlag_plugin.dll`** and the exact API name
-**`ZLag_GetApiVersion`**. For a trusted AMD64 build of that plugin, enter those as
-**DLL filename** and **Existing native function export** respectively. If the
-built file has a different filename, enter its actual basename instead. Inspect
-must confirm that the selected function really exists in that DLL; source
-function definitions alone do not prove a compiled export table. Do not enter
-`.cpp` or `.h` files into the DLL field: they must first be built into a DLL.
-The generic `zlag.dll` / `zlag_init` defaults do **not** describe this plugin API.
-
-The attached `zlag_plugin.cpp` intentionally has no auto-start code. Its
-`DllMain` only disables thread notifications. Merely loading it (or importing
-`ZLag_GetApiVersion`) **does not** call `ZLag_VerifyFirebaseHwid(1)` or
-`ZLag_SetPerformanceMode(1)`. The supplied API requires a separate explicit,
-consenting caller for the Firebase check, and successful authorization before
-enabling performance mode; that mode changes only the current process's Windows
-priority class. This patcher neither invokes those APIs nor bypasses licensing.
-No hardware-profile GUID was sent to Firebase during this source review.
-
-The four source attachments omit `zlag_plugin.h`, `firebase_config.h` and the
-compiled DLL/build configuration. The intended API can be reviewed, but exact
-binary exports/dependencies and a reproducible build remain unverified. A
-redacted configuration template is sufficient for further offline source review;
-do not send service credentials. The interactive `test_host.cpp` explicitly
-loads and calls the API in its **own** process; it is not proof that HD-Player
-calls those functions on ordinary startup.
-
 ## Use and distribution
 
 1. Work on an authorized disposable installation first. Keep an independent
@@ -166,12 +138,14 @@ structural tests alone are insufficient.
 
 Check the **Regular DLL normal startup (Windows x64, no proxy/runtime)** job and
 all other checks for the exact PR head. The existence of these tests is not a
-claim that a pending run passed. Four supplied ZLag plugin source files have now
-been reviewed (see the API notes above), but the compiled DLL and its required
-headers/build configuration were not supplied. Binary exports/dependencies,
-license-service behavior and functionality in HD-Player remain **unverified**.
-No arbitrary export-calling promise or payload all-clear follows from a harmless
-loader test or an offline source review.
+claim that a pending run passed. The user identified the four previously attached
+ZLag plugin source files as the **wrong DLL sources**; they are not evidence
+about the intended payload, and the filename/export advice derived from them
+has been withdrawn. The correct compiled DLL/matching source is still needed.
+Its actual exports, dependencies, initialization contract, licensing and behavior
+in HD-Player remain **unverified**. The generic filename/export defaults are not
+certification of a particular payload. No arbitrary export-calling promise or
+payload all-clear follows from a harmless loader test.
 
 ### Reproduce
 
