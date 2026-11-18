@@ -668,6 +668,44 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
     assert "contentWidth:iAboutD.width" not in about_source, \
         "a fixed contentWidth would pin the About column to the left"
 
+    # A real decoded image has implicit dimensions: an empty source cannot
+    # reproduce the oversized About artwork reported in a compact window.
+    # Mount the actual generated About page in the currently visible Loader,
+    # just as the player does, and exercise square/wide/tall high-res artwork.
+    active_loader = next(item for item in visual_items(obj)
+                         if item.metaObject().className().endswith("Loader")
+                         and item.isVisible() and item.width() > 100)
+    about_obj.setParentItem(active_loader)
+    about_obj.setWidth(active_loader.width())
+    about_obj.setHeight(active_loader.height())
+    logo = next(item for item in about_tree if item.objectName() == "bsiAboutEmulatorLogo")
+    name = next(item for item in about_tree if item.objectName() == "bsiAboutDeveloperName")
+    for label, width, height in [("square", 320, 320), ("wide", 1280, 320),
+                                 ("tall", 320, 1280), ("large", 2048, 2048)]:
+        image_path = root / ("about logo " + label + ".png")
+        image = QImage(width, height, QImage.Format.Format_ARGB32)
+        image.fill(QColor("#e7e9f2"))
+        assert image.save(str(image_path))
+        logo.setProperty("source", QUrl.fromLocalFile(str(image_path)))
+        QTest.qWait(80)
+        ready = QQmlExpression(engine.rootContext(), logo, "status === 1")
+        result = ready.evaluate()
+        assert not ready.hasError() and (result[0] if isinstance(result, tuple) else result), \
+            "the About logo fixture did not decode"
+        assert 0 < logo.width() <= 160.1 and 0 < logo.height() <= 60.1, \
+            f"{label} About artwork escaped its compact layout bounds: {logo.width()}x{logo.height()}"
+        painted_width, painted_height = logo.property("paintedWidth"), logo.property("paintedHeight")
+        assert 0 < painted_width <= 160.1 and 0 < painted_height <= 60.1
+        assert abs(painted_width / painted_height - width / height) < .01, \
+            "the About logo must retain the supplied artwork's aspect ratio"
+        center = logo.mapToItem(about_obj, QPointF(logo.width() / 2, 0)).x()
+        assert abs(center - about_obj.width() / 2) < 2, "the smaller About logo must stay centered"
+        logo_bottom = logo.mapToItem(about_obj, QPointF(0, logo.height())).y()
+        name_top = name.mapToItem(about_obj, QPointF(0, 0)).y()
+        assert logo_bottom <= name_top and name_top < about_obj.height(), \
+            "the About logo must not cover or push the developer name out of the compact page"
+    print("PASS: real square, wide, tall and oversized About logos stay centered within 160x60 without stretching")
+
     print("PASS: generated Settings and About QML instantiate, retain native page behavior, show custom tabs, and render profile links")
     about_obj.deleteLater()
     # Now the part that was broken in the field: a custom tab icon must reach

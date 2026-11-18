@@ -881,6 +881,9 @@ QString buildAbout(const QString &developerName, const QString &tagline,
     // compact - whitespace and repeated token spellings are the difference
     // between "the icon applies" and "needs 2495 bytes but its slot only holds
     // 2337".
+    // The logo is a ColumnLayout child: plain width/height lose to a decoded
+    // image's implicit size. Use preferred AND maximum layout hints so large
+    // native/custom artwork stays small without stretching its aspect ratio.
     QString generated = QStringLiteral(R"QML(import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
@@ -906,7 +909,8 @@ ColumnLayout{id:iAboutD;width:Math.min(440,parent.width-24);anchors.horizontalCe
 Layout.alignment:Qt.AlignHCenter|Qt.AlignTop;spacing:16
 Item{Layout.fillWidth:true;Layout.preferredHeight:28}
 Image{objectName:"bsiAboutEmulatorLogo";source:@@BSI_LOGO_SOURCE@@
-width:160;height:60;fillMode:Image.PreserveAspectFit;Layout.alignment:Qt.AlignHCenter}
+Layout.preferredWidth:160;Layout.preferredHeight:60;Layout.maximumWidth:160;Layout.maximumHeight:60
+fillMode:Image.PreserveAspectFit;Layout.alignment:Qt.AlignHCenter}
 Text{objectName:"bsiAboutDeveloperName";text:pDeveloperName;font:UiTheme.fonts.bodyLarge
 color:UiTheme.colors.primary10;horizontalAlignment:Text.AlignHCenter
 wrapMode:Text.Wrap;Layout.fillWidth:true}

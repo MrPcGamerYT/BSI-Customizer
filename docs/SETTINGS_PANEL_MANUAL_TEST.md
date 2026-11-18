@@ -40,6 +40,7 @@ In the patched window, check that:
 - every neighboring option has the same **4 px hit-target gap**, with **11 px of label padding on each side** (26 px between neighboring label bounds); notification dots stay in that padding instead of shifting labels;
 - hiding the first/last tab or several consecutive tabs leaves exactly the same gaps between the remaining tabs; replacing/defaulting icons and changing language must not shift labels off center;
 - each supplied pack icon appears beneath its tab label automatically, without uploading artwork first;
+- the **About** page logo stays centered in a **160 × 60 px maximum area**, preserving its aspect ratio (a square icon paints at 60 × 60), rather than expanding to its source resolution; test square, wide and tall custom artwork and verify the developer name remains visible;
 - the native page has equal empty gutters on the left and right, and its controls and per-page footer (for example "Some changes will apply on next launch" with its save button) are fully visible;
 - clicking a category still switches the page, dragging the title bar still moves the window, and the close button still closes it.
 

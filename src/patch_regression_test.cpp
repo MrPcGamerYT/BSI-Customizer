@@ -5666,6 +5666,12 @@ Window {
                 check(logoSourceVerified
                           && (rebuiltAbout.contains(QStringLiteral("objectName: \"bsiAboutEmulatorLogo\""))
                               || rebuiltAbout.contains(QStringLiteral("objectName:\"bsiAboutEmulatorLogo\"")))
+                          // Layout children prefer an image's decoded implicit
+                          // size over bare width/height. Bound the logo even
+                          // when a custom/runtime PNG is hundreds of pixels tall.
+                          && rebuiltAbout.contains(QStringLiteral("Layout.preferredWidth:160;Layout.preferredHeight:60"))
+                          && rebuiltAbout.contains(QStringLiteral("Layout.maximumWidth:160;Layout.maximumHeight:60"))
+                          && rebuiltAbout.contains(QStringLiteral("fillMode:Image.PreserveAspectFit"))
                           && (rebuiltAbout.contains(QStringLiteral("objectName: \"bsiAboutDeveloperName\""))
                               || rebuiltAbout.contains(QStringLiteral("objectName:\"bsiAboutDeveloperName\"")))
                           && (rebuiltAbout.contains(QStringLiteral("text: pDeveloperName"))
