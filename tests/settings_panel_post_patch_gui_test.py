@@ -268,8 +268,12 @@ Window {
             page_origin = page.mapToItem(content, QPointF(0, 0))
             assert abs(page_origin.x() + page.width() / 2 - window.width() / 2) < EPSILON
             surface_origin = surface.mapToItem(content, QPointF(0, 0))
-            expected_top = surface_origin.y() + (100 if visible else 56)
+            expected_top = surface_origin.y() + (112 if visible else 68)
             assert abs(page_origin.y() - expected_top) < EPSILON, f"wrong page position: {page_origin.y()}"
+            assert abs(page.height() - (surface.height() - 130)) < EPSILON, "top padding changed the footer clearance"
+            if visible:
+                strip_bottom = strip.mapToItem(content, QPointF(0, strip.height())).y()
+                assert abs(page_origin.y() - strip_bottom - 12) < EPSILON, "page content must leave exactly 12 px below the tab strip"
             assert page_origin.y() + page.height() <= surface_origin.y() + surface.height() - 18 + EPSILON, "native footer escaped the shell"
             page_items = visual_items(page)
             scroll = next(i for i in page_items if i.objectName() == "runtimeSettingScroll")
@@ -368,7 +372,7 @@ Window {
         player.deleteLater()
         QTest.qWait(10)
         engine.deleteLater()
-    print("PASS: compact 800x460 Settings stays centred and viewport-safe; all twelve labels/icons keep their gaps, Save changes stays visible, and long pages remain scrollable")
+    print("PASS: compact 800x460 Settings stays centred and viewport-safe; pages clear the tab strip by 12 px; all twelve labels/icons keep their gaps, Save changes stays visible, and long pages remain scrollable")
     return 0
 
 

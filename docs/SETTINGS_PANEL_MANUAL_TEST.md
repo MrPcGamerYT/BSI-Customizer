@@ -35,7 +35,7 @@ In the patched window, check that:
 
 - the window is compact and centered at both screenshot-sized player viewports (1440 × 900 and 1149 × 659), without the old broad empty margins;
 - the **Settings** title is centered in the title bar with the close (**X**) button at the top right;
-- the category tabs sit as a single centered, horizontally scrollable row under the title, without overlapping the page;
+- the category tabs sit as a single centered, horizontally scrollable row under the title, with **12 px of clear space below the strip before the page begins**; the title-to-tab spacing and native footer position are unchanged;
 - **every label is centered inside its own tab option**, including short labels such as About and long labels such as Game settings; the label and icon share one horizontal center;
 - every neighboring option has the same **4 px hit-target gap**, with **11 px of label padding on each side** (26 px between neighboring label bounds); notification dots stay in that padding instead of shifting labels;
 - hiding the first/last tab or several consecutive tabs leaves exactly the same gaps between the remaining tabs; replacing/defaulting icons and changing language must not shift labels off center;
@@ -48,7 +48,7 @@ On a narrow player window the centered page column shrinks with the window (48 p
 
 The automated `settings_panel_post_patch_gui_test.py` measures the actual generated Text and hit-target geometry for all twelve tabs, with multiple fonts (including italic), translated labels, badges, default/custom/missing icons, consecutive hidden tabs, both screenshot viewport sizes plus narrow players, and the player's redirected shadow-container children/insets. It executes the production sizing helper on a real transient window, checks footer visibility and scroll reachability, and scrolls to and clicks the last tab. This is an offscreen Qt Quick test, not a substitute for the live-player check above.
 
-`settings_panel_window_budget_test.py` rebuilds the **entire** legacy Settings window against its exact read-only compressed resource fixture, including the native callback prefix and geometry helper. Counting template bytes alone is not a reliable compression budget. Apply removes only insignificant leading indentation, retaining quoted literal whitespace, line endings, native logic and copyright notices; the complete fixture uses 2396 of its 2468-byte slot. The Windows engine suite additionally patches disposable copies of the real player references.
+`settings_panel_window_budget_test.py` rebuilds the **entire** legacy Settings window against its exact read-only compressed resource fixture, including the native callback prefix and geometry helper. Counting template bytes alone is not a reliable compression budget. Apply removes only insignificant leading indentation, retaining quoted literal whitespace, line endings, native logic and copyright notices; the complete fixture uses 2408 of its 2468-byte slot. The Windows engine suite additionally patches disposable copies of the real player references.
 
 ## Default pack and custom-icon regression
 

@@ -212,7 +212,7 @@ assert "StackLayout{id:iSelectedSettingControl;anchors.fill:parent;currentIndex:
 # whole window fits: native callbacks/prefix and compression entropy matter too.
 # settings_panel_window_budget_test reconstructs the complete 2468-byte legacy
 # resource, including the original native prefix and the geometry helper.
-assert len(replacement.encode()) <= 1741, (
+assert len(replacement.encode()) <= 1762, (
     f"shell grew to {len(replacement.encode())} bytes; the tightest known "
     "UiSettingsWindow.qml slot is 2468 bytes"
 )
@@ -581,6 +581,9 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
     tabs_bottom = tabs.mapToItem(panel, QPointF(0, tabs.height())).y()
     card_top = page_frame.mapToItem(panel, QPointF(0, 0)).y()
     assert tabs_bottom <= card_top + 1, "The category strip was overlapped by the page card"
+    page_top = loaded_page.mapToItem(panel, QPointF(0, 0)).y()
+    assert abs(page_top - tabs_bottom - 12) < 2, "The native page must start 12 px below the tab strip"
+    assert abs(stack.height() - (page_frame.height() - 12)) < 2, "The new top gap must not push the native footer down"
     assert tabs.property("x") >= 0 and tabs.property("width") <= panel.width(), "The category strip overflowed the shell"
     # The page fills its Loader through the shell's own onLoaded assignment, so
     # both must report the same size (the page itself declares no width).
