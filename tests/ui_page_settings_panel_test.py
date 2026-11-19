@@ -1,8 +1,9 @@
 """Load the real native Player-interface page in Qt 6.8 with a mock backend.
 
 Checks that the Settings-panel rebuild section exists as a fifth tab next to
-its siblings, renders the inspected player state, and drives the real
-invokables (profile save, apply, restore) with the native tab list.
+its siblings, renders the inspected player state, and drives profile save,
+apply and restore with the native tab list. Physical full-Main.qml navigation
+also exercises cleanup migration and the one combined title-details choice.
 
 Requires PySide6==6.8.3. No player executable is touched.
 QT_QPA_PLATFORM=offscreen python3 tests/ui_page_settings_panel_test.py
@@ -17,7 +18,7 @@ from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("QSG_RHI_BACKEND", "software")
-from PySide6.QtCore import QObject, QUrl, QCoreApplication, QEvent, QMetaObject, QPoint, QPointF, Qt
+from PySide6.QtCore import QObject, QUrl, QCoreApplication, QEvent, QMetaObject, QPoint, QPointF, QRectF, Qt
 from PySide6.QtGui import QGuiApplication, QWindow
 from PySide6.QtQml import QQmlComponent, QQmlEngine
 from PySide6.QtQuick import QQuickItem
@@ -93,6 +94,8 @@ with tempfile.TemporaryDirectory() as directory:
 QtObject {
     property string exePath: "player.exe"
     property bool busy: false
+    property var installs: []
+    signal workspaceChanged()
     property var resourceInfos: []
     property var themeEntries: []
     property var workspaceOperations: []
@@ -385,9 +388,27 @@ Window {
     # Drive the actual native cleanup migration and the one combined removal
     # with physical clicks, not a source-only contract or an invoked handler.
     def click_item(item):
-        assert item.isVisible() and item.width() > 0 and item.height() > 0
+        assert item.isVisible() and item.isEnabled() and item.width() > 0 and item.height() > 0
+        ancestors = []
+        parent = item.parentItem()
+        while parent:
+            ancestors.append(parent)
+            parent = parent.parentItem()
+        for parent in reversed(ancestors):
+            if parent.metaObject().indexOfProperty("contentY") < 0:
+                continue
+            top = item.mapToItem(parent, QPointF(0, 0)).y()
+            delta = top - 8 if top < 8 else max(0, top + item.height() - parent.height() + 8)
+            maximum = max(0, parent.property("contentHeight") - parent.height())
+            parent.setProperty("contentY", max(0, min(maximum, parent.property("contentY") + delta)))
+            QTest.qWait(30)
         point = item.mapToScene(QPointF(item.width() / 2, item.height() / 2))
-        assert 0 <= point.x() < window.width() and 0 <= point.y() < window.height(), (item, point)
+        visible = QRectF(0, 0, window.width(), window.height())
+        for parent in ancestors:
+            assert parent.isVisible() and parent.opacity() > 0
+            if parent.clip():
+                visible = visible.intersected(parent.mapRectToScene(parent.boundingRect()))
+        assert visible.contains(point), (item, point, visible)
         QTest.mouseClick(window, Qt.LeftButton, Qt.NoModifier, point.toPoint())
         QTest.qWait(80)
 
@@ -423,6 +444,88 @@ Window {
     assert page.property("checkedCount") == 1
     click_item(page.findChild(QObject, "applyPlayerUiRemovals"))
     assert "applyRemovals:Remove title details" in backend.property("calls").toVariant()
+
+    # Follow the actual default application's sidebar too. This catches a
+    # perfectly working standalone page that is missing/unreachable in Main.
+    window.close()
+    auth = create('''import QtQuick
+QtObject {
+    property bool authorized: false
+    property bool busy: false
+    property bool hasSavedSession: false
+    property var savedUser: ({})
+    property string savedMeta: ""
+    property real progress: 0
+    property bool progressIndeterminate: false
+    property string note: ""
+    property string noteKind: ""
+    property string inviteUrl: ""
+    property string setupHint: ""
+    function signOut() { authorized = false; }
+    function startDiscord() { return {Manual: true}; }
+    function continueSaved() {}
+    function completeManual(value) {}
+    function forgetSaved() {}
+}''')
+    updates = create('''import QtQuick
+QtObject {
+    property bool available: false
+    property bool skipped: false
+    property string state: "idle"
+    property string noteKind: ""
+    property string latestVersion: ""
+    property string downloadHost: ""
+    property string downloadSize: ""
+    property string releaseNotes: ""
+    property real progress: 0
+    property bool readyToInstall: false
+}''')
+    engine.rootContext().setContextProperty("auth", auth)
+    engine.rootContext().setContextProperty("updates", updates)
+    themes.setProperty("reduceMotion", True)
+    window = create("import BSICustomizer\nMain {}")
+    window.resize(1440, 930)
+    loader = window.findChild(QObject, "featureInterface")
+    assert loader is not None and loader.property("item") is None
+    auth.setProperty("authorized", True)  # Only the mock, never production sign-in.
+    QTest.qWait(150)
+    click_item(items(window.contentItem(), "navGroup1")[0])
+    click_item(items(window.contentItem(), "featureNav6")[0])
+    for _ in range(150):
+        if loader.property("item") is not None:
+            break
+        QTest.qWait(20)
+    page = loader.property("item")
+    assert page is not None and window.property("currentPage") == 6
+    for width, height in ((1440, 930), (980, 640)):
+        window.resize(width, height)
+        QTest.qWait(80)
+        click_text("Layout & clean-up")
+        backend.setProperty("cleanupApplied", True)
+        backend.setProperty("cleanupNeedsUpdate", True)
+        click_text("Load player UI" if page.property("inspectionStale") else "Refresh UI")
+        clean_action = page.findChild(QObject, "cleanPlayerUiAction")
+        assert clean_action.property("text") == "Update clean-up"
+        click_item(clean_action)
+        assert backend.property("cleanupApplied") and not backend.property("cleanupNeedsUpdate")
+        assert clean_action.property("text") == "Restore stock UI"
+        click_item(clean_action)
+        assert not backend.property("cleanupApplied")
+        click_text("Remove items")
+        assert page.findChild(QObject, "playerUiRemovalList").property("count") == 2
+        if page.property("checkedCount"):
+            click_text("Remove title details")
+        click_text("Remove title details")
+        assert page.property("checkedCount") == 1
+        before_removals = backend.property("calls").toVariant().count("applyRemovals:Remove title details")
+        click_item(page.findChild(QObject, "applyPlayerUiRemovals"))
+        assert backend.property("calls").toVariant().count("applyRemovals:Remove title details") == before_removals + 1
+        click_item(page.findChild(QObject, "settingsPanelRebuildTab"))
+        assert page.property("currentSection") == 4 and page.property("panelReady")
+        print(f"PASS: full Main.qml PATCHER > Player interface physical navigation, cleanup Update/Restore, combined removal and Settings tab at {width}x{height}")
+    auth.setProperty("authorized", False)
+    QTest.qWait(80)
+    assert loader.property("item") is None, "sign-out must unload the feature page"
 
     # Known mock-only messages come from the missing About "source" text and
     # a Controls Dialog wrapped in a plain Window. The removalNames list and

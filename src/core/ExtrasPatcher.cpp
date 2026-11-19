@@ -371,7 +371,8 @@ Result applyRemovals(const QString &exePath, const QStringList &enabledNames)
     else if (titleDetailsWanted)
         msg += QStringLiteral(" Both title-bar details were already hidden; Settings text was left untouched.");
     if (titleDetailsWanted) {
-        QtResources::clearPlayerQmlCache(exePath);
+        QtResources::clearSourceQmlCache(exePath, { QStringLiteral("PlrTopbar.qml") },
+            { QStringLiteral("iVersionTxt"), QStringLiteral("iImageTxt") });
         msg += QStringLiteral(" Restart BlueStacks. Use Restore EXE backup to undo this removal.");
     }
     return { true, msg };

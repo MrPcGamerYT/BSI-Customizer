@@ -180,7 +180,9 @@ const server = http.createServer((req, res) => {
     await page.locator('[data-about-field="tagline"]').fill('A customized About panel');
     await page.locator('[data-about-link="0"] [data-about-field="title"]').fill('My project');
     await page.locator('[data-about-link="0"] [data-about-field="url"]').fill('https://example.test/my-project');
-    await page.locator('[data-action="settings-about-save"]').evaluate(el => el.click());
+    // A programmatic click on a briefly disabled button is discarded. Wait
+    // for the real control to accept input rather than racing bridge updates.
+    await page.locator('[data-action="settings-about-save"]').click();
     await page.waitForFunction(() => __calls.some(c => c.method === 'setAboutProfile'));
     const profileCall = await page.evaluate(() => __calls.findLast(c => c.method === 'setAboutProfile'));
     assert.equal(profileCall.args.developerName, 'Updated Fixture Developer');
@@ -259,7 +261,10 @@ const server = http.createServer((req, res) => {
     await page.getByRole('button', { name: 'Update this tweak', exact: true }).click();
     await page.waitForFunction(() => !document.body.dataset.confirming && !document.body.classList.contains('busy'));
     assert.deepEqual((await last('applyLayoutTweak')).args, { id: 'clean-player-ui', enabled: true }, 'migration must repair Settings without restoring all extras');
-    await page.getByRole('button', { name: 'Restore this tweak', exact: true }).waitFor();
+    await page.getByRole('button', { name: 'Restore this tweak', exact: true }).click();
+    await page.waitForFunction(() => !document.body.dataset.confirming && !document.body.classList.contains('busy'));
+    assert.deepEqual((await last('applyLayoutTweak')).args, { id: 'clean-player-ui', enabled: false }, 'Restore remains reachable after a successful migration');
+    await page.getByRole('button', { name: 'Apply this tweak', exact: true }).waitFor();
     await page.locator('[data-interface-tab="remove"]').evaluate(el => el.click());
     assert.equal(await page.locator('label').filter({ hasText: /^Remove title details$/ }).count(), 1, 'one combined title-details choice');
     assert.equal(await page.getByText('Titlebar Version', { exact: true }).count(), 0);
@@ -491,4 +496,14 @@ const server = http.createServer((req, res) => {
     assert.deepEqual(errors, []);
     console.log('PASS: 15 routes including six Add-ons previews and stage/dry-run/apply/recovery; picker commit/cancel, styled cancellation and reduced-motion window effects; sidebar/debloat/ADB/disk requests; Qt preview controls; offline native actions disabled; manual scans; pagination/search; safe text rendering; real request arguments; failed-engine errors; integrated About/removal/RPC/GIF/boot/gradient/workspace/updater contracts; sign-out lock. UI test transport only.');
   } finally { await browser.close(); }
-})().then(() => server.close()).catch(error => { console.error(error); server.close(); process.exitCode = 1; });
+})().then(() => server.close()).catch(error => {
+  console.error(error);
+  if (process.env.GITHUB_ACTIONS) {
+    // Preserve the real assertion/locator error in check annotations too:
+    // failed-job log downloads can be unavailable to repository API clients.
+    const message = String(error.stack || error).replaceAll('%', '%25').replaceAll('\r', '%0D').replaceAll('\n', '%0A');
+    console.error(`::error file=tests/chromium_ui_test.cjs::${message}`);
+  }
+  server.close();
+  process.exitCode = 1;
+});

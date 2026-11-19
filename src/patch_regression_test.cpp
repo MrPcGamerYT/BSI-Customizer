@@ -3638,8 +3638,36 @@ int runPatchRegressionTests()
         r.f.bytes.replace(0xb000, settingsUnit.size(), settingsUnit);
         r.f.bytes.replace(0xb800, importOnlyUnit.size(), importOnlyUnit);
         const QByteArray original = r.f.bytes;
-        const QString path = temp.filePath(QStringLiteral("titlebar-removals.exe"));
+        const QString playerDir = temp.filePath(QStringLiteral("titlebar-removal-player"));
+        const QString cacheDir = QDir(playerDir).filePath(QStringLiteral("cache/qmlcache"));
+        QDir().mkpath(QDir(cacheDir).filePath(QStringLiteral("nested")));
+        const QString path = QDir(playerDir).filePath(QStringLiteral("HD-Player.exe"));
         write(path, original);
+        // Hashed on-disk caches need the same exact ownership rule as the
+        // embedded units. Never delete an entire qmlcache to refresh one bar.
+        const QString topCache = QDir(cacheDir).filePath(QStringLiteral("e9d22f3.qmlc"));
+        const QString unnamedCache = QDir(cacheDir).filePath(QStringLiteral("nested/4dc43f.qmlc"));
+        const QString settingsCache = QDir(cacheDir).filePath(QStringLiteral("settings.qmlc"));
+        const QString importCache = QDir(cacheDir).filePath(QStringLiteral("import-only.jsc"));
+        const QString unknownCache = QDir(cacheDir).filePath(QStringLiteral("unknown.qmlc"));
+        const QString note = QDir(cacheDir).filePath(QStringLiteral("keep.txt"));
+        const QByteArray unknown("qv4cdata, not a valid compiled unit: PlrTopbar.qml iVersionTxt iImageTxt");
+        write(topCache, topUnit); write(unnamedCache, sourceLessTop);
+        write(settingsCache, settingsUnit); write(importCache, importOnlyUnit);
+        write(unknownCache, unknown); write(note, QByteArray("keep unrelated cache contents"));
+        const QString outsideDir = temp.filePath(QStringLiteral("unrelated-qml-cache"));
+        QDir().mkpath(outsideDir);
+        const QString outsideUnit = QDir(outsideDir).filePath(QStringLiteral("title.qmlc"));
+        write(outsideUnit, topUnit);
+        const QString cacheLink = QDir(cacheDir).filePath(QStringLiteral("linked"));
+#ifdef Q_OS_WIN
+        const bool linked = QProcess::execute(QStringLiteral("cmd.exe"),
+            { QStringLiteral("/c"), QStringLiteral("mklink"), QStringLiteral("/J"),
+              QDir::toNativeSeparators(cacheLink), QDir::toNativeSeparators(outsideDir) }) == 0;
+#else
+        const bool linked = QFile::link(outsideDir, cacheLink);
+#endif
+        check(linked, "the titlebar cache-isolation fixture creates a directory link/junction");
         const auto names = ExtrasPatcher::removalNames();
         check(names.count(QStringLiteral("Remove title details")) == 1
                   && !names.contains(QStringLiteral("Titlebar Version"))
@@ -3670,6 +3698,16 @@ int runPatchRegressionTests()
               "Settings source and both named/source-less import-only Settings bytecode remain byte-for-byte intact");
         check(le32(after, 0xa000 + 8) == 0 && le32(after, 0xa800 + 8) == 0,
               "only the owning named and source-less titlebar compiled units are disabled");
+        check(!QFileInfo::exists(topCache) && !QFileInfo::exists(unnamedCache)
+                  && read(settingsCache) == settingsUnit && read(importCache) == importOnlyUnit
+                  && read(unknownCache) == unknown && read(note) == QByteArray("keep unrelated cache contents")
+                  && read(outsideUnit) == topUnit && QDir(cacheDir).exists(),
+              "only proven titlebar disk caches are removed; Settings, imports, unknown data, notes and linked folders stay intact");
+#ifdef Q_OS_WIN
+        if (linked) QDir().rmdir(cacheLink);
+#else
+        if (linked) QFile::remove(cacheLink);
+#endif
         check(read(path + QStringLiteral(".bak")) == original,
               "the verified original backup makes the combined removal reversible");
         const auto repeat = ExtrasPatcher::applyRemovals(path, { QStringLiteral("Remove title details") });
