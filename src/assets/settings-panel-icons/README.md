@@ -24,3 +24,9 @@ preserving explicitly chosen root colors/styles. Source files in this folder
 are never rewritten. Editable profile assets remain SVG; the player receives
 local PNG runtime copies to avoid optional SVG-plugin/data-URI incompatibilities
 and to keep all twelve tabs within the fixed About resource slot.
+
+The selected tab tints the runtime icon silhouette with the player's own
+selected-tab color, matching its label and soft background. Unselected icons
+retain their supplied/custom colors; selection never rewrites the source SVG
+or its immutable PNG copy. The public Qt Quick Controls `ToolButton.icon`
+renderer supports this in both Qt 5 and Qt 6 without an extra effects import.

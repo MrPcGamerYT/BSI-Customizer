@@ -2353,11 +2353,52 @@ int runPatchRegressionTests()
                   && compactObject->property("continued").toString() == QLatin1String("first      second")
                   && compactObject->property("single").toString() == QLatin1String("  preserve spaces"),
               "indentation-compacted QML compiles with unchanged multiline and quoted text");
+        const QString dense = QmlText::compactWhitespace(indented);
+        check(dense.contains(QStringLiteral("literal:\"  { // not a comment\""))
+                  && dense.contains(QStringLiteral("// Copyright Example; keep this notice and all callbacks.\r\n"))
+                  && dense.contains(QStringLiteral("\"first\\\r\n      second\""))
+                  && dense.count(QLatin1Char('\n')) == indented.count(QLatin1Char('\n'))
+                  && dense.count(QLatin1Char('\r')) == indented.count(QLatin1Char('\r'))
+                  && QmlText::compactWhitespace(dense) == dense,
+              "QML separator compaction preserves literal whitespace, notices, CRLF and is idempotent");
+        QQmlComponent denseComponent(&engine);
+        denseComponent.setData(dense.toUtf8(), QUrl());
+        std::unique_ptr<QObject> denseObject(denseComponent.create());
+        check(denseObject && compactObject
+                  && denseObject->property("literal") == compactObject->property("literal")
+                  && denseObject->property("continued") == compactObject->property("continued")
+                  && denseObject->property("single") == compactObject->property("single"),
+              "separator-compacted QML compiles with identical quoted values");
+        const QString operators = QStringLiteral(
+            "  import QtQml 2.15\r\n"
+            "  QtObject {\r\n"
+            "    property int result: 0\r\n"
+            "    property bool compare: 1 <= 2 && 2 !== 3\r\n"
+            "    function calculate(a, b) { return a + +b - -b }\r\n"
+            "    function increment() { result = calculate(6, 2) }\r\n"
+            "    function newlineReturn() { return\r\n  42 }\r\n"
+            "  }\r\n");
+        const QString smallOperators = QmlText::compactWhitespace(operators);
+        QQmlComponent operatorsComponent(&engine);
+        operatorsComponent.setData(smallOperators.toUtf8(), QUrl());
+        std::unique_ptr<QObject> operatorsObject(operatorsComponent.create());
+        check(operatorsObject && operatorsObject->property("compare").toBool()
+                  && QMetaObject::invokeMethod(operatorsObject.get(), "increment")
+                  && operatorsObject->property("result").toInt() == 10
+                  && smallOperators.contains(QStringLiteral("a + +b - -b"))
+                  && smallOperators.contains(QStringLiteral("return\r\n42"))
+                  && QmlText::compactWhitespace(QStringLiteral("x < < y; x = = y"))
+                      == QLatin1String("x< <y;x= =y"),
+              "QML compaction preserves operator token boundaries, callbacks and JS automatic semicolon insertion");
         const QString templateLiteral = QStringLiteral("  QtObject { property string t: `first\n    ${1 + 2} second` }\n");
-        check(QmlText::compactIndentation(templateLiteral) == templateLiteral,
-              "QML indentation compaction conservatively leaves template literals untouched");
+        check(QmlText::compactIndentation(templateLiteral) == templateLiteral
+                  && QmlText::compactWhitespace(templateLiteral) == templateLiteral,
+              "QML compaction conservatively leaves template literals untouched");
         const QString regexLiteral = QStringLiteral("  QtObject { function f() { return /'/g; } property string t: 'first\\\n    second' }\n");
         check(QmlText::compactIndentation(regexLiteral) == regexLiteral
+                  && QmlText::compactWhitespace(regexLiteral) == regexLiteral
+                  && QmlText::compactWhitespace(QStringLiteral("  Item { width: 100 / 2 }\n"))
+                      == QLatin1String("  Item { width: 100 / 2 }\n")
                   && QmlText::compactIndentation(QStringLiteral("  Item { width: 100 / 2 }\n"))
                       == QLatin1String("  Item { width: 100 / 2 }\n"),
               "QML prefix compaction preserves ambiguous regex quotes and slash expressions");
@@ -5560,8 +5601,8 @@ Window {
                     if (file.name.compare(QLatin1String("UiSettingsWindow.qml"), Qt::CaseInsensitive) == 0)
                         rebuiltWindow = QString::fromUtf8(QtResources::readFile(panelImage, file));
                 }
-                check(rebuiltWindow.contains(QStringLiteral("BSI v15"))
-                          && rebuiltWindow.contains(QStringLiteral("property var bHidden"))
+                check(rebuiltWindow.contains(QStringLiteral("BSI v16"))
+                          && !rebuiltWindow.contains(QStringLiteral("property var bHidden"))
                           // The About page publishes the icon map into
                           // bIcons, so the shell has to declare it or that
                           // assignment silently throws and no icon is drawn.
@@ -5570,7 +5611,7 @@ Window {
                           // (the same UiTheme.colors the stock window uses) instead
                           // of a colour baked into the patch, so it keeps following
                           // whatever theme the emulator currently has.
-                          && rebuiltWindow.contains(QStringLiteral("Rectangle{id:r;property var q:UiTheme.colors;anchors.fill:parent;color:r.q.primary80;radius:14"))
+                          && rebuiltWindow.contains(QStringLiteral("Rectangle{id:r;property var q:UiTheme.colors;anchors.fill:parent;radius:14;color:r.q.primary80"))
                           && rebuiltWindow.contains(QStringLiteral("color:r.q.primary10"))
                           && !rebuiltWindow.contains(QStringLiteral("#0d0f14"))
                           // The page host is inset from every window edge and
@@ -5595,7 +5636,7 @@ Window {
                           // The strip is as wide as its own tabs, clamped to the
                           // shell gutter, and centred under the title.
                           && rebuiltWindow.contains(QStringLiteral("ListView{width:Math.max(0,Math.min(contentWidth,r.width-48))"))
-                          && rebuiltWindow.contains(QStringLiteral("orientation:ListView.Horizontal;model:pSettingsItems.pSettingElements"))
+                          && rebuiltWindow.contains(QStringLiteral("orientation:Qt.Horizontal;model:pSettingsItems.pSettingElements"))
                           && rebuiltWindow.contains(QStringLiteral("item.anchors.fill=item.parent"))
                           // The content-sized row is centred with at least 24 px
                           // gutters; long/translated rows scroll within that inset.
@@ -5603,23 +5644,25 @@ Window {
                           // The width clamp bounds the strip, but at small window
                           // sizes the tabs inside it still painted past the
                           // rounded edge until the strip itself clipped.
-                          && rebuiltWindow.contains(QStringLiteral("clip:true;orientation:ListView.Horizontal"))
+                          && rebuiltWindow.contains(QStringLiteral("clip:true;orientation:Qt.Horizontal"))
                           // Labels sit above their icons; file-backed runtime
                           // PNGs already have a bounded 54 px source resolution.
                           && rebuiltWindow.contains(QStringLiteral("y:c?0:22-height/2"))
-                          && rebuiltWindow.contains(QStringLiteral("Image{source:c||'';width:18;height:18;x:parent.width/2-9;y:24}"))
+                          && rebuiltWindow.contains(QStringLiteral("ToolButton{width:18;height:18;x:parent.width/2-9;y:24;enabled:false;padding:0;background:null;icon.source:c||'';icon.color:index==pCurrentTabIndex?t.color:'transparent';icon.width:18;icon.height:18}"))
                           // A hidden tab must not paint its label over the tabs
                           // beside it: zeroing its width closed the slot but the
                           // button inside kept drawing its text on top of the
                           // neighbours, which is the smeared "Customise" and
                           // "Advanced" seen in the window.
-                          && rebuiltWindow.contains(QStringLiteral("delegate:MouseArea{visible:c!=='';property var c:"))
+                          && rebuiltWindow.contains(QStringLiteral("delegate:MouseArea{hoverEnabled:true;visible:c!=='';property var c:"))
                           // Tabs are laid out label-sized with one spacing
                           // value for the whole strip: equal-width slots made
                           // long neighbours ("Game settings" / "Devices")
                           // collide while short labels floated in dead space.
                           && rebuiltWindow.contains(QStringLiteral(";spacing:4"))
-                          // The rejected card/pill/underline must not return.
+                          // The native page stays flat; only tabs get the requested
+                          // soft selected/hover surface and actual icon tint.
+                          && rebuiltWindow.contains(QStringLiteral("radius:6;color:t.color;opacity:index==pCurrentTabIndex?.2:parent.containsMouse?.1:0"))
                           && !rebuiltWindow.contains(QStringLiteral("border.color"))
                           && !rebuiltWindow.contains(QStringLiteral("visible:s"))
                           && rebuiltWindow.contains(QStringLiteral("StackLayout{id:iSelectedSettingControl;anchors.fill:parent;currentIndex:pCurrentTabIndex;anchors.topMargin:12"))
@@ -5628,13 +5671,13 @@ Window {
                           && rebuiltWindow.contains(QStringLiteral("onClicked:{fChangeSelectedSetting(index);forceActiveFocus()}"))
                           && rebuiltWindow.contains(QStringLiteral("onVisibleChanged:if(visible&&transientParent)"))
                           && rebuiltWindow.contains(QStringLiteral("var t=transientParent"))
-                          && rebuiltWindow.contains(QStringLiteral("width=Math.min(t.width*.96,806)"))
-                          && rebuiltWindow.contains(QStringLiteral("height=Math.min(t.height*.94,464)"))
+                          && rebuiltWindow.contains(QStringLiteral("width=Math.min(t.width*.96,1068)"))
+                          && rebuiltWindow.contains(QStringLiteral("height=Math.min(t.height*.94,611)"))
                           && rebuiltWindow.contains(QStringLiteral("x=t.x+t.width/2-width/2"))
                           && rebuiltWindow.contains(QStringLiteral("y=t.y+t.height/2-height/2"))
                           && rebuiltWindow.contains(QStringLiteral("iSettingsWindow.startSystemMove()"))
                           && rebuiltWindow.contains(QStringLiteral("asset:'CloseIcon'")),
-                      QStringLiteral("the rebuilt %1 Settings panel restores the PR #88 shell and adds customizable tabs while preserving native pages, selection, dragging, and close behavior")
+                      QStringLiteral("the rebuilt %1 Settings panel matches the latest screenshot size and tints selected tabs/icons while preserving native pages, selection, dragging, and close behavior")
                           .arg(QFileInfo(input).fileName()));
                 QString expectedLogoSource;
                 for (const auto &entry : EmbeddedResources::list(original, true)) {
@@ -5730,9 +5773,9 @@ Window {
                         if (entry.leaf.compare(QLatin1String("PlrAboutSetting.qml"), Qt::CaseInsensitive) == 0)
                             updatedAbout = EmbeddedResources::decodeText(EmbeddedResources::readEntry(panelCopy, entry.entryOff, entry.flags, 8 * 1024 * 1024));
                     }
-                    check(updatedWindow.contains(QStringLiteral("property var bHidden"))
+                    check(updatedWindow.contains(QStringLiteral("property var bIcons:({})"))
                               && updatedWindow.contains(QStringLiteral("width:c===''?-4:"))
-                              && updatedWindow.contains(QStringLiteral("clip:true;orientation:ListView.Horizontal"))
+                              && updatedWindow.contains(QStringLiteral("clip:true;orientation:Qt.Horizontal"))
                               && updatedAbout.contains(QStringLiteral("property var bsiHiddenTabs:"))
                               && (hiddenTabId.isEmpty() || updatedAbout.contains(hiddenTabKey))
                               // Unticking a tab used to change nothing after a
@@ -5748,7 +5791,7 @@ Window {
                               // the window and threw "Cannot assign to non-existent
                               // property bHidden", which is exactly why a saved custom
                               // tab icon applied and then never appeared.
-                              && updatedAbout.contains(QStringLiteral("function fOnQmlLoaded(){var p=parent;while(p&&p.bIcons===undefined)p=p.parent;if(p){p.bHidden=bsiHiddenTabs;p.bIcons=bsiTabIcons}}"))
+                              && updatedAbout.contains(QStringLiteral("function fOnQmlLoaded(){var p=parent;while(p&&p.bIcons===undefined)p=p.parent;if(p)p.bIcons=bsiTabIcons}"))
                               // On a Qt 5 player the icon must NOT be embedded: its
                               // Image cannot open a data: URI (measured: status Error,
                               // while the same bytes load from a file), so it would

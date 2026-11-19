@@ -48,7 +48,8 @@ const QString kWindowDesignMarkerV10 = QStringLiteral("BSI Settings v10");
 const QString kWindowDesignMarkerV12 = QStringLiteral("BSI Settings v12");
 const QString kWindowDesignMarkerV13 = QStringLiteral("BSI Settings v13");
 const QString kWindowDesignMarkerV14 = QStringLiteral("BSI Settings v14");
-const QString kWindowDesignMarker = QStringLiteral("BSI v15");
+const QString kWindowDesignMarkerV15 = QStringLiteral("BSI v15");
+const QString kWindowDesignMarker = QStringLiteral("BSI v16");
 const QString kAboutMarker = QStringLiteral("BSI CUSTOMIZER: redesigned About page v1");
 const QString kSchema = QStringLiteral("bsi.settings-panel.recovery");
 const QString kWindowLeaf = QStringLiteral("UiSettingsWindow.qml");
@@ -780,8 +781,14 @@ QString buildWindow(const QString &stock)
     // UiShadowContainer redirects its default children into a private item;
     // address bIcons by the public shell id, never by r.parent.
     //
-    // Keep the native 568 px page column and footer clearance, all loader
-    // callbacks, and the flat shell without an extra page card or tab pill.
+    // Keep the native 568 px page column, footer clearance and loader callbacks.
+    // Only the selected tab gains a soft themed highlight; hover is quieter.
+    // A public Controls ToolButton paints/tints each PNG icon, with no optional
+    // SVG decoder, GraphicalEffects or private Controls.impl import. Its disabled,
+    // background-free surface leaves all input to the enclosing tab MouseArea.
+    // Transparent icon.color preserves custom artwork when it is not selected.
+    // The unused bHidden channel is gone: hidden tabs still use bIcons' empty
+    // sentinel, published by About before the user can interact with the strip.
     // Inset the page stack 12 px below the tab strip without moving the footer
     // or adding space between the title and tabs.
     // StackLayout fills its Loader children by default; anchoring those children
@@ -789,35 +796,28 @@ QString buildWindow(const QString &stock)
     // Keep the template small, but the *whole* compressed Window (including
     // native callbacks, copyright header and geometry helper) must fit the slot.
     // Template length alone cannot predict that compression budget.
-    QString replacement = QStringLiteral(R"QML(UiShadowContainer{//BSI v15
+    QString replacement = QStringLiteral(R"QML(UiShadowContainer{//BSI v16
 id:iSettingsWindowShadowContainer;anchors.fill:parent
-property var bHidden
 property var bIcons:({})
-Rectangle{id:r;property var q:UiTheme.colors;anchors.fill:parent;color:r.q.primary80;radius:14
-Column{anchors.fill:parent
-Item{width:r.width;height:56
-MouseArea{anchors.fill:parent;onPressed:iSettingsWindow.startSystemMove()}Text{id:h;text:qsTr('Settings');color:r.q.primary10;font:UiTheme.fonts.bodyLarge;anchors.centerIn:parent}UiImageButton{asset:'CloseIcon';x:r.width-32;y:12;onClicked:iSettingsWindow.close()}}
-ListView{width:Math.max(0,Math.min(contentWidth,r.width-48));height:44;x:(r.width-width)/2;clip:true;orientation:ListView.Horizontal;model:pSettingsItems.pSettingElements;spacing:4
-delegate:MouseArea{visible:c!=='';property var c:iSettingsWindowShadowContainer.bIcons[index];width:c===''?-4:m.boundingRect.width+22;height:44;onClicked:{fChangeSelectedSetting(index);forceActiveFocus()}
-Text{id:t;text:modelData.pButtonText;font:h.font;x:11-m.boundingRect.x;y:c?0:22-height/2;color:r.q[index==pCurrentTabIndex?'subWindowHeaderClick':'primary20']}TextMetrics{id:m;text:t.text;font:t.font}Rectangle{visible:modelData.pShowRedDot;x:parent.width-8;y:t.y+6;width:6;height:6;radius:3;color:r.q.dangerNormal}
-Image{source:c||'';width:18;height:18;x:parent.width/2-9;y:24}}}
-Item{width:Math.min(r.width-48,568);x:(r.width-width)/2;height:r.height-118
+Rectangle{id:r;property var q:UiTheme.colors;anchors.fill:parent;radius:14;color:r.q.primary80
+Column{Item{width:r.width;height:56
+MouseArea{anchors.fill:parent;onPressed:iSettingsWindow.startSystemMove()}Text{id:h;text:qsTr('Settings');color:r.q.primary10;font:UiTheme.fonts.bodyLarge;anchors.centerIn:parent}UiImageButton{asset:'CloseIcon';x:r.width-32;y:12;onClicked:iSettingsWindow.close()}}ListView{width:Math.max(0,Math.min(contentWidth,r.width-48));height:44;x:(r.width-width)/2;clip:true;orientation:Qt.Horizontal;model:pSettingsItems.pSettingElements;spacing:4
+delegate:MouseArea{hoverEnabled:true;visible:c!=='';property var c:iSettingsWindowShadowContainer.bIcons[index];width:c===''?-4:m.boundingRect.width+22;height:44;onClicked:{fChangeSelectedSetting(index);forceActiveFocus()}
+Rectangle{anchors.fill:parent;radius:6;color:t.color;opacity:index==pCurrentTabIndex?.2:parent.containsMouse?.1:0}Text{id:t;text:modelData.pButtonText;font:h.font;x:11-m.boundingRect.x;y:c?0:22-height/2;color:r.q[index==pCurrentTabIndex?'subWindowHeaderClick':'primary20']}TextMetrics{id:m;text:t.text;font:t.font}Rectangle{visible:modelData.pShowRedDot;x:parent.width-8;y:t.y+6;width:6;height:6;radius:3;color:r.q.dangerNormal}ToolButton{width:18;height:18;x:parent.width/2-9;y:24;enabled:false;padding:0;background:null;icon.source:c||'';icon.color:index==pCurrentTabIndex?t.color:'transparent';icon.width:18;icon.height:18}}}Item{width:Math.min(r.width-48,568);x:(r.width-width)/2;height:r.height-118
 StackLayout{id:iSelectedSettingControl;anchors.fill:parent;currentIndex:pCurrentTabIndex;anchors.topMargin:12
-Repeater{model:pSettingsItems.pSettingElements;delegate:Loader{Component.onCompleted:setSource(modelData.pQmlSource,modelData.pComponentArgs||{});onLoaded:{item.anchors.fill=item.parent;modelData.pComponentObj=item;if(item.fOnQmlLoaded)item.fOnQmlLoaded()}}}}}
-}
-}}
+Repeater{model:pSettingsItems.pSettingElements;delegate:Loader{Component.onCompleted:setSource(modelData.pQmlSource,modelData.pComponentArgs||{});onLoaded:{item.anchors.fill=item.parent;modelData.pComponentObj=item;item.fOnQmlLoaded&&item.fOnQmlLoaded()}}}}}}}}
 )QML");
     // Older MSI/BlueStacks sources have a 2468-byte compressed slot. Retaining
     // the native callback prefix is essential, but its indentation is not.
     // Compact only that prefix (the generated shell is already compact), keeping
     // literals, copyright notices, line endings and JS statement breaks intact.
-    QString out = QmlText::compactIndentation(stock.left(target.nameBegin));
+    QString out = QmlText::compactWhitespace(stock.left(target.nameBegin));
     out += replacement;
     out += stock.mid(target.end);
-    // Match only the supplied screenshot's 776x434 visible Settings frame.
-    // Include the unchanged native 15 px shadow on each side: 806x464 overall.
+    // Latest 1301x665 reference: visible border x=140..1177, y=49..629.
+    // Match its 1038x581 frame plus the unchanged 15 px shadow: 1068x611.
     // Retain viewport guards, centering, theme, controls and native page sizes.
-    const QString helper = QStringLiteral(R"QML(onVisibleChanged:if(visible&&transientParent){var t=transientParent;width=Math.min(t.width*.96,806);height=Math.min(t.height*.94,464);x=t.x+t.width/2-width/2;y=t.y+t.height/2-height/2})QML");
+    const QString helper = QStringLiteral(R"QML(onVisibleChanged:if(visible&&transientParent){var t=transientParent;width=Math.min(t.width*.96,1068);height=Math.min(t.height*.94,611);x=t.x+t.width/2-width/2;y=t.y+t.height/2-height/2})QML");
     const int rootClose = out.lastIndexOf(QLatin1String("\n}"));
     if (rootClose < 0) return {};
     out.insert(rootClose, helper);
@@ -944,9 +944,8 @@ color:UiTheme.colors.primary30;font:UiTheme.fonts.bodySmall
 horizontalAlignment:Text.AlignHCenter;wrapMode:Text.Wrap;Layout.fillWidth:true}
 Item{Layout.fillWidth:true;Layout.preferredHeight:28}}}}
 
-// Publish the hidden tabs and icons to the shell. Walk up instead of counting
-// parents: one hop too many lands on the window and the assignment throws.
-function fOnQmlLoaded(){var p=parent;while(p&&p.bIcons===undefined)p=p.parent;if(p){p.bHidden=bsiHiddenTabs;p.bIcons=bsiTabIcons}}
+// Publish icons and hidden sentinels by walking up to the owning shell.
+function fOnQmlLoaded(){var p=parent;while(p&&p.bIcons===undefined)p=p.parent;if(p)p.bIcons=bsiTabIcons}
 function fCheckForUpdateCallback(apiCallStatus,jsonData){
 if(apiCallStatus===0){var j=JSON.parse(jsonData)
 pUpdateAvailable=String(j.update_available).toLowerCase()==="true"
@@ -1175,7 +1174,7 @@ bool hasWindowMarker(const QString &text)
         || text.contains(kWindowDesignMarkerV8) || text.contains(kWindowDesignMarkerV9)
         || text.contains(kWindowDesignMarkerV10) || text.contains(kWindowDesignMarkerV12)
         || text.contains(kWindowDesignMarkerV13) || text.contains(kWindowDesignMarkerV14)
-        || text.contains(kWindowDesignMarker);
+        || text.contains(kWindowDesignMarkerV15) || text.contains(kWindowDesignMarker);
 }
 
 // Standalone Image sources do not inherit the QML/HTML text's currentColor.
@@ -2033,7 +2032,7 @@ QVariantMap apply(const QString &exePath, const QString &developerName,
                         .arg(referencedAssets);
     }
     return {{QStringLiteral("ok"), true},
-            {QStringLiteral("msg"), QStringLiteral("The compact, draggable Settings window, icon tabs and customizable About page were applied. A selective recovery snapshot was saved; restart BlueStacks to see it.") + assetNote},
+            {QStringLiteral("msg"), QStringLiteral("The screenshot-sized Settings window, themed selected tabs/icons and customizable About page were applied. A selective recovery snapshot was saved; restart BlueStacks to see it.") + assetNote},
             {QStringLiteral("recovery"), result.value(QStringLiteral("id"))}};
 }
 
