@@ -66,19 +66,35 @@ or `vulkan-1.dll`. The existing arbitrary startup-DLL feature remains separate.
 - Standalone experimental Qt plugin, native C++ settings bridge, bounded shader
   values, atomic per-instance persistence, and a shader-only QML page with
   presets, individual/all reset, Save/Discard and renderer diagnostics.
-- Independent OpenGL/GLES processing pipeline: saturation, contrast, warmth,
-  shadow lift, tonal pop, ambient light, sharpening, spatial edge smoothing,
-  bloom and vignette. Tonal pop is not HDR display output; edge smoothing is
-  not advertised as an exact implementation of the upload's FXAA algorithm.
-- Preliminary Windows WGL/EGL presentation hooks, restricted to identified game
-  child surfaces rather than the Qt Settings frame. **Not certified in a running
-  player or on physical GPU hardware.**
+- Independent OpenGL/GLES, DirectX 11, DirectX 12 (Microsoft D3D11On12 on the
+  actual captured D3D12 queue), and native Vulkan processing pipelines, sharing
+  original effect math: saturation, contrast, warmth, shadow lift, tonal pop,
+  ambient light, sharpening, spatial edge smoothing, bloom and vignette.
+  Tonal pop is not HDR display output; edge smoothing is not advertised as an
+  exact implementation of the upload's FXAA algorithm.
+- Experimental WGL/EGL, DXGI factory/Present/Present1/resize/release/color-space,
+  and Vulkan loader/getProc/device/surface/swapchain/acquire/present hooks.
+  Surface/window ownership, native setting and capability checks gate effects.
+  **Not certified in a running player or on physical GPU hardware.** A DLL
+  hooking some graphics entry points alone is not proof of game integration.
 - Vendor-neutral renderer-family routing. The player setting (`gl`, `dx`,
   `vlcn`) gates the observed API; a loaded OpenGL library cannot substitute for
   DirectX/Vulkan. An automatic route binds to one observed game-API family so
   an ANGLE translation layer cannot grade the same image again.
-- Explicit capability gates: DirectX 11/12 and Vulkan adapters are currently
-  **not implemented** and cannot report active processing or processed frames.
+- Explicit per-device success gates: an implemented adapter is not enough to
+  report active processing. The actual pipeline must confirm device/image
+  requirements and successful submission before any processed-frame counter
+  increments. Unidentified, unsupported/protected and unsafe presentation
+  combinations remain untouched with a diagnostic.
+- Vulkan uses its own commands, descriptors, copies, image barriers, render pass
+  and SPIR-V generated from the shared original source. Original binary waits
+  are consumed once, with per-acquired-image completion semaphores. Unobserved
+  acquisitions, non-graphics/protected presentation queues, ambiguous exclusive
+  queue-family ownership and unhandled presentation extensions are bypassed.
+- DirectX isolates/restores the native immediate-context state; DirectX 12
+  wraps/releases backbuffers on its captured queue and restores PRESENT. It
+  never guesses a queue from a different device or uses the Settings renderer.
+  Compiler/On12 DLL lifetimes include all objects with DLL-owned COM vtables.
 
 There is no production installer, no root/tab-model resource patch yet, and no
 completed native Shaders category to navigate to in a patched player. Existing
@@ -92,27 +108,42 @@ The prototype is not linked into the main Customizer build or release payload.
   neutral/disabled frames are byte-identical, color grading matches reference
   math, alpha survives, host GL state is restored, pre-existing GL errors are
   not consumed, and invalid values/sizes are refused.
-- **The EGL test's software driver itself uses Vulkan. This does not validate a
-  native Vulkan game adapter.** It also does not certify Intel/AMD/NVIDIA GPUs.
+- **The EGL test's software driver itself uses Vulkan. That test does not
+  validate the native Vulkan adapter.** A separate actual native Vulkan test
+  now executes `VulkanPipeline` on SwiftShader without EGL/GL, including all
+  ten pixel effects, neutral byte identity, reference math, alpha, semaphore
+  handoff/reuse, invalid-image/value rejection and resource recreation. It
+  also passes ASan/UBSan locally. This still is not a Win32 WSI or hardware test.
 - Actual Qt 6 C++ plugin/component build with warnings treated as errors, and
   actual plugin import in a Qt fixture window: real pointer Enable/slider/Save/
   Discard input, preset/reset semantics, bounded native values and atomic
   test-mode persistence. The fixture is not HD-Player category navigation.
-- Sanitized C++ capability/routing tests, including missing-adapter rejection,
+- Sanitized C++ capability/routing tests, including unvalidated-device rejection,
   native-setting isolation, no ANGLE double-processing and honest counters.
+- All Windows pipeline/hook sources and WARP/presentation fixtures cross-compile
+  against real Windows headers. Initial Windows Qt 5/6 plugin builds succeeded,
+  but execution tests found real compiler/lifetime issues; those must pass the
+  current CI rerun, not be excused by successful compilation.
+- Current shader CI separately requires native D3D11 and D3D12 WARP pixels, a
+  real Win32 DXGI presentation/resize fixture, Qt 5/6 plugin-control input,
+  Mesa Vulkan with mandatory Khronos validation, native SwiftShader Vulkan
+  under ASan/UBSan, and both desktop GL core and GLES real framebuffer tests.
+  Tests fail, rather than skip-pass, when their required APIs are unavailable.
 - Existing icon/style and complete Settings/About resource budgets still pass.
 
-The regular Windows plugin, Qt 5 build, WGL presentation hooks, native installer
-and real player have not yet passed their required checks. Historical regular-
-DLL loading results and earlier PR CI runs do not certify this implementation.
+Windows execution/presentation checks are still being debugged. WGL/EGL and
+Win32 Vulkan presentation, the native installer and a real player have not yet
+passed their required checks. Historical regular-DLL loading results, earlier
+PR CI runs and a software backend's success do not certify this implementation.
 
 ## Mandatory backend and hardware matrix
 
 | Native game API | Current adapter | Intel | AMD | NVIDIA |
 | --- | --- | --- | --- | --- |
 | OpenGL / GLES | Pipeline prototype; Windows integration unverified | Pending | Pending | Pending |
-| DirectX (record actual D3D version/feature level) | Not implemented | Pending | Pending | Pending |
-| Vulkan | Not implemented | Pending | Pending | Pending |
+| DirectX 11 | Native pipeline + DXGI hooks; Windows execution checks in progress | Pending | Pending | Pending |
+| DirectX 12 | Actual-queue On12 pipeline + DXGI hooks; Windows checks in progress | Pending | Pending | Pending |
+| Vulkan | Native pipeline pixel tests pass locally; Win32 WSI unverified | Pending | Pending | Pending |
 
 For DirectX, identify the API actually used by each supported player build;
 D3D11 is not evidence of D3D12 or vice versa. Do not silently label an unknown
@@ -124,9 +155,13 @@ must verify the GPU actually rendering the game, not merely the display GPU.
 
 ## Required before merge
 
-1. Finish and test the DirectX and Vulkan game-presentation adapters, with
-   correct shader formats, state/layout preservation, synchronization, resource
-   lifetimes and device-loss recovery. Retain the vendor-neutral routing gates.
+1. Complete the current DirectX, Vulkan and GL game-presentation validation,
+   with correct shader formats, state/layout preservation, synchronization,
+   resource lifetimes and device-loss recovery. The presence of these source
+   files or three renderer names is not completion. Retain vendor-neutral gates
+   and document the explicit unhandled modes (including legacy D3D9/10, HDR,
+   protected content, Vulkan extended presents/cross-family ownership and late
+   unobserved surfaces/queues) instead of silently processing them incorrectly.
 2. Finish native Settings model/boot integration and a recoverable installer for
    regular matching-Qt DLLs. Validate dependencies/architecture before changing
    the player; preserve fixed resource slots, atomic writes, rollback, prior

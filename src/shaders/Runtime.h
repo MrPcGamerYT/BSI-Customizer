@@ -7,7 +7,7 @@
 
 namespace BsiShaders {
 struct Metrics {
-    bool hooks=false, observed=false, active=false;
+    bool hooks=false, observed=false, active=false, deviceReady=false;
     Renderer renderer=Renderer::Unknown;
     RendererFamily requested=RendererFamily::Automatic;
     std::uint64_t processed=0;
@@ -26,7 +26,7 @@ public:
     Parameters settings();
     Metrics metrics();
     void report(bool hooks,bool observed,bool active,const std::string &status,bool processed=false,
-                Renderer renderer=Renderer::Unknown);
+                Renderer renderer=Renderer::Unknown,bool deviceRequirementsMet=false);
     bool eligible(std::uintptr_t surface);
 private:
     std::mutex mutex;

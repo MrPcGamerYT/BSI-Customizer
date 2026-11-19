@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.21)
 if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
-    project(BSIShaderPipelineTests LANGUAGES CXX)
+    project(BSIShaderPipelineTests LANGUAGES C CXX)
     enable_testing()
 endif()
 set(CMAKE_CXX_STANDARD 17)
@@ -28,4 +28,14 @@ if(WIN32)
     target_link_libraries(shader-d3d-pixels-test PRIVATE d3d11 d3d12 dxgi)
     add_test(NAME shader-d3d11-warp-pixels COMMAND shader-d3d-pixels-test d3d11)
     add_test(NAME shader-d3d12-warp-pixels COMMAND shader-d3d-pixels-test d3d12)
+    set(minhook_dir "${shader_dir}/../third_party/minhook")
+    add_executable(shader-dxgi-hooks-test dxgi_hooks_test.cpp
+        "${shader_dir}/Runtime.cpp" "${shader_dir}/PresentationHooks.cpp" "${shader_dir}/DxgiHooks.cpp"
+        "${shader_dir}/VulkanHooks.cpp" "${shader_dir}/GlPipeline.cpp" "${shader_dir}/VulkanPipeline.cpp"
+        "${shader_dir}/D3d11Pipeline.cpp" "${shader_dir}/D3d12Pipeline.cpp"
+        "${minhook_dir}/src/buffer.c" "${minhook_dir}/src/hook.c" "${minhook_dir}/src/trampoline.c" "${minhook_dir}/src/hde/hde64.c")
+    target_include_directories(shader-dxgi-hooks-test PRIVATE "${shader_dir}" "${minhook_dir}/include" "${shader_dir}/../third_party/vulkan/include")
+    target_compile_definitions(shader-dxgi-hooks-test PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
+    target_link_libraries(shader-dxgi-hooks-test PRIVATE user32 gdi32 psapi d3d11 dxgi)
+    add_test(NAME shader-dxgi-presentation-hooks COMMAND shader-dxgi-hooks-test)
 endif()

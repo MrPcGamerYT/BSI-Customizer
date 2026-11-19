@@ -32,18 +32,36 @@ jobs:
         with:
           node-version: '22'
       - name: Install real software graphics APIs
-        run: sudo apt-get update && sudo apt-get install -y mesa-vulkan-drivers libvulkan1 libegl1 libegl-mesa0 libgles2
+        run: sudo apt-get update && sudo apt-get install -y mesa-vulkan-drivers vulkan-validationlayers libvulkan1 libegl1 libegl-mesa0 libgles2
       - name: Check committed SPIR-V matches the shared original source
         run: |
           npm install --prefix "$RUNNER_TEMP/spirv-tools" --no-fund --no-audit --save-exact @webgpu/glslang@0.0.15
           BSI_CHECK_GENERATED=1 node tests/shaders/compile_spirv.cjs "$RUNNER_TEMP/spirv-tools/node_modules/@webgpu/glslang"
-      - name: Sanitized routing and native Vulkan pixel tests
+      - name: Native Mesa Vulkan pixels with mandatory Khronos lifetime/API validation
+        env:
+          BSI_SHADERS_VULKAN_VALIDATION: '1'
         run: |
-          cmake -S tests/shaders -B build-shader-tests -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_FLAGS='-Wall -Wextra -Werror -pedantic -fsanitize=address,undefined -fno-omit-frame-pointer'
+          cmake -S tests/shaders -B build-shader-tests -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_FLAGS='-Wall -Wextra -Werror -pedantic'
           python3 tests/shaders/run_ci_tests.py --command cmake --build build-shader-tests --parallel 2
           python3 tests/shaders/run_ci_tests.py --test-dir build-shader-tests --output-on-failure --timeout 60
-      - name: Production GLES pipeline pixels and state restoration
-        run: python3 tests/shaders_gpu_test.py
+      - name: ASan/UBSan routing and native Vulkan on a second software ICD
+        # Mesa/LLVM leaves process-global JIT allocations reported by LSan.
+        # Do not blanket-disable leak detection to hide them: run Mesa above
+        # with Vulkan object/lifetime validation and run this sanitizer build
+        # against pinned SwiftShader instead. No test assertion is skipped.
+        run: |
+          npm install --prefix "$RUNNER_TEMP/spirv-tools" --no-fund --no-audit --save-exact @sparticuz/chromium@133.0.0
+          mkdir -p "$RUNNER_TEMP/shader-icd"
+          node -e "const fs=require('node:fs'),z=require('node:zlib');fs.writeFileSync(process.env.RUNNER_TEMP+'/shader-icd/swiftshader.tar',z.brotliDecompressSync(fs.readFileSync(process.env.RUNNER_TEMP+'/spirv-tools/node_modules/@sparticuz/chromium/bin/swiftshader.tar.br')));"
+          tar -xf "$RUNNER_TEMP/shader-icd/swiftshader.tar" -C "$RUNNER_TEMP/shader-icd"
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined -fno-omit-frame-pointer -pthread -Isrc/shaders tests/shaders/renderer_capabilities_test.cpp src/shaders/Runtime.cpp -o "$RUNNER_TEMP/routing-asan"
+          python3 tests/shaders/run_ci_tests.py --command "$RUNNER_TEMP/routing-asan"
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined -fno-omit-frame-pointer -Isrc/shaders -Isrc/third_party/vulkan/include tests/shaders/vulkan_pixels_test.cpp src/shaders/VulkanPipeline.cpp -ldl -o "$RUNNER_TEMP/vulkan-asan"
+          BSI_SHADERS_VULKAN_LIBRARY="$RUNNER_TEMP/shader-icd/libvk_swiftshader.so" python3 tests/shaders/run_ci_tests.py --command "$RUNNER_TEMP/vulkan-asan"
+      - name: Production GLES and desktop OpenGL core pixels/state restoration
+        run: |
+          python3 tests/shaders/run_ci_tests.py --command python3 tests/shaders_gpu_test.py
+          BSI_SHADERS_EGL_API=opengl python3 tests/shaders/run_ci_tests.py --command python3 tests/shaders_gpu_test.py
       - name: Record scope of results
         run: echo 'Software/API tests only. No HD-Player installation, Win32 presentation hook or Intel/AMD/NVIDIA hardware certification is implied.' >> "$GITHUB_STEP_SUMMARY"
 
@@ -79,9 +97,9 @@ jobs:
         run: python -m pip install '${{ matrix.python-package }}'
       - name: Build regular plugin, MinHook and native DirectX tests (no system proxy)
         run: |
-          cmake -S src/shaders -B build-shaders -A x64 -DBSI_SHADERS_BUILD_TESTS=ON -DBSI_TEST_VULKAN=OFF
+          python tests/shaders/run_ci_tests.py --command cmake -S src/shaders -B build-shaders -A x64 -DBSI_SHADERS_BUILD_TESTS=ON -DBSI_TEST_VULKAN=OFF
           if ($LASTEXITCODE -ne 0) { throw 'Shader configuration failed' }
-          cmake --build build-shaders --config Release --parallel 2
+          python tests/shaders/run_ci_tests.py --command cmake --build build-shaders --config Release --parallel 2
           if ($LASTEXITCODE -ne 0) { throw 'Shader build failed' }
       - name: Native DirectX 11 and 12 WARP frame pixels
         run: python tests/shaders/run_ci_tests.py --test-dir build-shaders -C Release --output-on-failure --timeout 60
@@ -89,7 +107,7 @@ jobs:
         env:
           BSI_TEST_QT_API: ${{ matrix.python-api }}
           BSI_SHADERS_MODULE_ROOT: ${{ github.workspace }}/build-shaders/module
-        run: python tests/run_qt_runtime_test.py tests/shaders_plugin_ui_test.py
+        run: python tests/shaders/run_ci_tests.py --command python tests/run_qt_runtime_test.py tests/shaders_plugin_ui_test.py
       - name: Record limits rather than claim universal support
         shell: pwsh
         run: "'Windows Qt fixture + WARP API tests only. Not HD-Player category navigation, game presentation hooks or physical Intel/AMD/NVIDIA certification. No merge authorized by these tests alone.' | Out-File $env:GITHUB_STEP_SUMMARY -Append"

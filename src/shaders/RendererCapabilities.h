@@ -27,9 +27,9 @@ struct RendererCapability {
 inline constexpr std::array<RendererCapability, 5> rendererCapabilities {{
     {Renderer::OpenGL, "opengl", "OpenGL", true},
     {Renderer::OpenGLES, "opengles", "OpenGL ES / EGL", true},
-    {Renderer::Direct3D11, "d3d11", "DirectX 11", false},
-    {Renderer::Direct3D12, "d3d12", "DirectX 12", false},
-    {Renderer::Vulkan, "vulkan", "Vulkan", false}
+    {Renderer::Direct3D11, "d3d11", "DirectX 11", true},
+    {Renderer::Direct3D12, "d3d12", "DirectX 12", true},
+    {Renderer::Vulkan, "vulkan", "Vulkan", true}
 }};
 inline constexpr RendererCapability capability(Renderer renderer) {
     for (const auto &entry : rendererCapabilities)

@@ -92,7 +92,7 @@ Item {
                 }
                 Label {
                     Layout.fillWidth: true; wrapMode: Text.Wrap
-                    text: qsTr("OpenGL game surfaces only. DirectX, Vulkan and unidentified surfaces are safely bypassed. No FPS, optimizer or system tweaks.")
+                    text: qsTr("Uses the game's OpenGL, DirectX 11/12 or Vulkan presentation API, according to its renderer setting. Unsupported/protected surfaces are left untouched. Experimental; GPU/driver validation is incomplete. No FPS or system tweaks.")
                     color: page.mutedColor; font.pixelSize: 12
                 }
                 CheckBox {

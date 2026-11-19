@@ -18,6 +18,7 @@ target_include_directories(BSIShaders PRIVATE ../third_party/vulkan/include)
 target_link_libraries(BSIShaders PRIVATE Qt${QT_VERSION_MAJOR}::Core Qt${QT_VERSION_MAJOR}::Gui Qt${QT_VERSION_MAJOR}::Qml)
 if(WIN32)
     target_sources(BSIShaders PRIVATE D3d11Pipeline.cpp D3d11Pipeline.h D3d12Pipeline.cpp D3d12Pipeline.h HlslSources.h
+        DxgiHooks.cpp VulkanHooks.cpp PresentationHooks.h
         ../third_party/minhook/src/buffer.c ../third_party/minhook/src/hook.c
         ../third_party/minhook/src/trampoline.c ../third_party/minhook/src/hde/hde64.c)
     target_include_directories(BSIShaders PRIVATE ../third_party/minhook/include)

@@ -78,7 +78,7 @@ QVariantMap ShaderBridge::metrics()const{
     const auto m=Runtime::instance().metrics();
     return {{"hooksAttached",m.hooks},{"gameSurfaceObserved",m.observed},{"active",m.active},
             {"renderer",QString::fromLatin1(capability(m.renderer).label)},
-            {"backendImplemented",capability(m.renderer).pipelineImplemented},
+            {"backendImplemented",capability(m.renderer).pipelineImplemented},{"deviceRequirementsMet",m.deviceReady},
             {"processedFrames",QVariant::fromValue<qulonglong>(m.processed)},{"status",QString::fromStdString(m.status)}};
 }
 void ShaderBridge::attach(QObject *object,const QString &instance,const QString &graphicsRenderer){
@@ -126,7 +126,7 @@ QVariantMap ShaderBridge::apply(const QVariantMap &values){
             {QStringLiteral("values"),QJsonObject::fromVariantMap(variant(p))}}).toJson(QJsonDocument::Compact);
         QSaveFile file(s.file);file.setDirectWriteFallback(false);
         if(!file.open(QIODevice::WriteOnly)||file.write(bytes)!=bytes.size()||!file.commit())error=QStringLiteral("Could not atomically save shader settings; the running effects were not changed.");
-        else {s.saved=p;s.error.clear();Runtime::instance().set(p);notify();return {{"ok",true},{"msg",QStringLiteral("Shader settings saved. Neutral settings bypass processing; other settings apply to supported OpenGL game frames.")}};}
+        else {s.saved=p;s.error.clear();Runtime::instance().set(p);notify();return {{"ok",true},{"msg",QStringLiteral("Shader settings saved. Neutral settings bypass processing; other settings apply only after the actual game surface, renderer and device requirements are verified.")}};}
     }
     s.error=error;notify();return {{"ok",false},{"msg",error}};
 }

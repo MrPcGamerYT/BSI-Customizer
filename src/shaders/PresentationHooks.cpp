@@ -1,8 +1,13 @@
 #include "Runtime.h"
 #ifdef _WIN32
 #include "GlPipeline.h"
+#include "PresentationHooks.h"
+#ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
 #define NOMINMAX
+#endif
 #include <windows.h>
 #include <psapi.h>
 #include "MinHook.h"
@@ -28,7 +33,7 @@ using EglCurrent=void*(WINAPI*)();
 using EglQuery=unsigned(WINAPI*)(void*,void*,int,int*);
 using EglProc=void*(WINAPI*)(const char*);
 struct Hooks {
-    std::mutex mutex,renderMutex,surfaceMutex;
+    std::mutex mutex,renderMutex,surfaceMutex,hookMutex;
     std::atomic<bool> stopping{false};
     std::thread worker;
     bool started=false;
@@ -40,7 +45,8 @@ struct Hooks {
     EglCurrent currentEgl=nullptr;EglQuery queryEgl=nullptr;EglProc eglProc=nullptr;
     std::map<void*,HWND> surfaces;
     std::map<std::pair<bool,std::uintptr_t>,std::unique_ptr<GlPipeline>> pipelines;
-    std::vector<void*> targets;
+    struct Detour {void *replacement;void *original;};
+    std::map<void*,Detour> targets;
 };
 Hooks &hooks(){static auto *state=new Hooks;return *state;}
 thread_local bool presenting=false;
@@ -74,7 +80,7 @@ void process(bool egl,std::uintptr_t context,int width,int height){
         std::string error;
         const bool ready=it->second->initialize(resolve,egl?reinterpret_cast<void*>(1):nullptr,&error);
         const bool rendered=ready&&it->second->render(width,height,p,&error);
-        Runtime::instance().report(true,true,rendered,rendered?"Shaders active on the native OpenGL game surface.":error,rendered,renderer);
+        Runtime::instance().report(true,true,rendered,rendered?"Shaders active on the native OpenGL game surface.":error,rendered,renderer,rendered);
     } catch(...) {Runtime::instance().report(true,true,false,"Shader processing failed; original presentation continues.",false,renderer);}
 }
 void processWgl(HDC dc){
@@ -124,11 +130,26 @@ unsigned WINAPI swapEgl(void *display,void *surface){
 }
 bool install(void *target,void *replacement,void **original){
     if(!target||!replacement)return false;
-    auto &h=hooks();
-    for(void *existing:h.targets)if(existing==target)return false;
-    if(MH_CreateHook(target,replacement,original)!=MH_OK)return false;
-    if(MH_EnableHook(target)!=MH_OK){MH_RemoveHook(target);return false;}
-    h.targets.push_back(target);return true;
+    auto &h=hooks();std::lock_guard<std::mutex> lock(h.hookMutex);
+    if(h.stopping.load())return false;
+    const auto found=h.targets.find(target);
+    if(found!=h.targets.end()){
+        if(found->second.replacement!=replacement)return false;
+        if(original)*original=found->second.original;
+        return true;
+    }
+    // A host may unload/reload its renderer. Keep an installed detour's code
+    // module alive rather than leaving a trampoline into an unmapped DLL.
+    HMODULE owner=nullptr;
+    if(!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS|GET_MODULE_HANDLE_EX_FLAG_PIN,
+                          reinterpret_cast<LPCWSTR>(target),&owner))return false;
+    void *trampoline=nullptr;
+    if(MH_CreateHook(target,replacement,&trampoline)!=MH_OK)return false;
+    if(original)*original=trampoline;
+    // Publish the trampoline before enabling the callback on a host thread.
+    h.targets.emplace(target,Hooks::Detour{replacement,trampoline});
+    if(MH_EnableHook(target)!=MH_OK){h.targets.erase(target);MH_RemoveHook(target);return false;}
+    return true;
 }
 void scan(){
     auto &h=hooks();
@@ -163,9 +184,14 @@ void scan(){
             }
         }
     }
-    const bool attached=h.swaps[0]||h.swaps[1]||h.swapEgl;
-    if(!Runtime::instance().metrics().observed)Runtime::instance().report(attached,false,false,attached?"Waiting for an eligible OpenGL game surface; DirectX/Vulkan and unidentified surfaces are bypassed.":"No supported OpenGL presentation API loaded; DirectX/Vulkan are not supported.");
+    const bool dxgi=scanDxgiHooks(install),vulkan=scanVulkanHooks(install);
+    const bool attached=h.swaps[0]||h.swaps[1]||h.swapEgl||dxgi||vulkan;
+    if(!Runtime::instance().metrics().observed)Runtime::instance().report(attached,false,false,attached?"Waiting for an identified game surface matching the player's OpenGL, DirectX or Vulkan setting.":"Waiting for the game's presentation API; no eligible backend has been observed.");
 }
+}
+void *originalPresentationFunction(void *target){
+    auto &h=hooks();std::lock_guard<std::mutex> lock(h.hookMutex);
+    const auto it=h.targets.find(target);return it==h.targets.end()?nullptr:it->second.original;
 }
 void startPresentationHooks(){
     auto &h=hooks();std::lock_guard<std::mutex> lock(h.mutex);if(h.started)return;
@@ -178,19 +204,34 @@ void startPresentationHooks(){
     }
     const auto status=MH_Initialize();
     if(status!=MH_OK){Runtime::instance().report(false,false,false,"Could not initialize presentation hooks.");return;}
-    h.worker=std::thread([]{
-        while(!hooks().stopping.load()){
-            scan();
-            for(int i=0;i<15&&!hooks().stopping.load();++i)std::this_thread::sleep_for(std::chrono::milliseconds(100));
-        }
-    });
+    // Prime ONLY the OS API selected in the player's settings, synchronously
+    // before returning from the root bootstrap. Polling alone can miss device /
+    // swapchain creation between LoadLibrary and the next scan. No system DLL
+    // is replaced and no other renderer is selected as a fallback.
+    const auto requested=Runtime::instance().metrics().requested;
+    if(requested==RendererFamily::Vulkan)LoadLibraryExW(L"vulkan-1.dll",nullptr,LOAD_LIBRARY_SEARCH_SYSTEM32);
+    else if(requested==RendererFamily::DirectX){
+        LoadLibraryExW(L"dxgi.dll",nullptr,LOAD_LIBRARY_SEARCH_SYSTEM32);
+        LoadLibraryExW(L"d3d11.dll",nullptr,LOAD_LIBRARY_SEARCH_SYSTEM32);
+    }else if(requested==RendererFamily::OpenGL)LoadLibraryExW(L"opengl32.dll",nullptr,LOAD_LIBRARY_SEARCH_SYSTEM32);
+    try {
+        scan();
+        h.worker=std::thread([]{
+            while(!hooks().stopping.load()){
+                try {scan();}catch(...){}
+                for(int i=0;i<15&&!hooks().stopping.load();++i)std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            }
+        });
+    }catch(...){Runtime::instance().report(false,false,false,"Presentation-hook initialization was incomplete; unsupported/unidentified surfaces remain untouched.");}
 }
 void stopPresentationHooks(){
     auto &h=hooks();std::lock_guard<std::mutex> lock(h.mutex);
     h.stopping.store(true);if(h.worker.joinable())h.worker.join();
     // Do not free trampolines while a host thread could still be returning
     // through one. The pinned module/driver reclaim them at process exit.
-    for(void *target:h.targets)MH_DisableHook(target);
+    stopDxgiHooks();stopVulkanHooks();
+    std::lock_guard<std::mutex> hooksLock(h.hookMutex);
+    for(const auto &entry:h.targets)MH_DisableHook(entry.first);
 }
 } // namespace BsiShaders
 #endif

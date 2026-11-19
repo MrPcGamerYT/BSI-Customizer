@@ -1,7 +1,11 @@
 #include "Runtime.h"
 #ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
 #define NOMINMAX
+#endif
 #include <windows.h>
 #endif
 namespace BsiShaders {
@@ -16,15 +20,13 @@ void Runtime::set(const Parameters &settings){
     std::lock_guard<std::mutex> lock(mutex);current=settings;
     if(settings.neutral()){
         state.active=false;
-        if(canRoute(state.renderer,state.observed,true,state.requested))state.status="Neutral bypass — game pixels are untouched.";
+        if(canRoute(state.renderer,state.observed,state.deviceReady,state.requested))state.status="Neutral bypass — game pixels are untouched.";
     }
 }
 void Runtime::selectRenderer(RendererFamily requested){
     std::lock_guard<std::mutex> lock(mutex);
-    state.requested=requested;state.renderer=Renderer::Unknown;state.observed=false;state.active=false;
-    state.status=(requested==RendererFamily::DirectX||requested==RendererFamily::Vulkan)
-        ?"The selected renderer's shader backend is not implemented yet; game frames are untouched."
-        :"Waiting for the selected game's presentation API.";
+    state.requested=requested;state.renderer=Renderer::Unknown;state.observed=false;state.active=false;state.deviceReady=false;
+    state.status="Waiting for an identified game surface matching the player's renderer setting. No effects have been confirmed.";
 }
 bool Runtime::accepts(Renderer observed){
     std::lock_guard<std::mutex> lock(mutex);
@@ -37,19 +39,19 @@ bool Runtime::accepts(Renderer observed){
 }
 Parameters Runtime::settings(){std::lock_guard<std::mutex> lock(mutex);return current;}
 Metrics Runtime::metrics(){std::lock_guard<std::mutex> lock(mutex);return state;}
-void Runtime::report(bool hooks,bool observed,bool active,const std::string &status,bool processed,Renderer renderer){
+void Runtime::report(bool hooks,bool observed,bool active,const std::string &status,bool processed,Renderer renderer,bool deviceRequirementsMet){
     std::lock_guard<std::mutex> lock(mutex);
     state.hooks=state.hooks||hooks;
     const auto selected=(state.requested==RendererFamily::Automatic&&state.observed)
         ?family(state.renderer):state.requested;
     if(observed && renderer!=Renderer::Unknown){
         if(!matches(selected,renderer))return;
-        state.observed=true;state.renderer=renderer;
+        state.observed=true;state.renderer=renderer;state.deviceReady=deviceRequirementsMet;
     }
-    const bool routed=canRoute(state.renderer,state.observed,true,selected);
+    const bool routed=canRoute(state.renderer,state.observed,state.deviceReady,selected);
     state.active=active&&routed&&!current.neutral();
     state.status=(current.neutral()&&routed)?"Neutral bypass — game pixels are untouched.":status;
-    if(active&&!routed)state.status="The observed game renderer has no implemented shader backend; no effects were applied.";
+    if(active&&!routed)state.status="The observed game renderer's backend/device requirements are not validated; no effects were confirmed.";
     if(processed&&state.active)++state.processed;
 }
 bool Runtime::eligible(std::uintptr_t surface){

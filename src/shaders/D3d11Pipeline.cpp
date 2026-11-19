@@ -88,10 +88,13 @@ bool D3d11Pipeline::initialize(ID3D11Device *device,std::string *error){
        ||!result(device->CreatePixelShader(fragment->GetBufferPointer(),fragment->GetBufferSize(),nullptr,&p.fragment),"CreatePixelShader",error))return false;
     D3D11_SAMPLER_DESC sampling{};sampling.Filter=D3D11_FILTER_MIN_MAG_LINEAR_MIP_POINT;
     sampling.AddressU=sampling.AddressV=sampling.AddressW=D3D11_TEXTURE_ADDRESS_CLAMP;sampling.MaxLOD=D3D11_FLOAT32_MAX;
+    sampling.MaxAnisotropy=1;sampling.ComparisonFunc=D3D11_COMPARISON_NEVER;
     if(!result(device->CreateSamplerState(&sampling,&p.sampler),"CreateSamplerState",error))return false;
     D3D11_RASTERIZER_DESC raster{};raster.FillMode=D3D11_FILL_SOLID;raster.CullMode=D3D11_CULL_NONE;raster.DepthClipEnable=TRUE;
     if(!result(device->CreateRasterizerState(&raster,&p.raster),"CreateRasterizerState",error))return false;
     D3D11_DEPTH_STENCIL_DESC depth{};depth.DepthFunc=D3D11_COMPARISON_ALWAYS;
+    depth.FrontFace.StencilFailOp=depth.FrontFace.StencilDepthFailOp=depth.FrontFace.StencilPassOp=D3D11_STENCIL_OP_KEEP;
+    depth.FrontFace.StencilFunc=D3D11_COMPARISON_ALWAYS;depth.BackFace=depth.FrontFace;
     if(!result(device->CreateDepthStencilState(&depth,&p.depth),"CreateDepthStencilState",error))return false;
     D3D11_BUFFER_DESC constants{};constants.ByteWidth=48;constants.Usage=D3D11_USAGE_DEFAULT;constants.BindFlags=D3D11_BIND_CONSTANT_BUFFER;
     if(!result(device->CreateBuffer(&constants,nullptr,&p.constants),"CreateBuffer(constants)",error))return false;

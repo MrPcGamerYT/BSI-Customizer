@@ -2,6 +2,7 @@
 // mock, and NOT a physical-GPU or emulator/WSI presentation certification.
 #include "VulkanPipeline.h"
 #include <array>
+#include <atomic>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -16,6 +17,12 @@
 #endif
 using namespace BsiShaders;
 namespace {
+std::atomic<unsigned> validationErrors{0};
+VKAPI_ATTR VkBool32 VKAPI_CALL validation(VkDebugUtilsMessageSeverityFlagBitsEXT severity,VkDebugUtilsMessageTypeFlagsEXT,
+                                         const VkDebugUtilsMessengerCallbackDataEXT *data,void*){
+    if(severity&VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT){++validationErrors;std::cerr<<"VULKAN VALIDATION ERROR: "<<(data&&data->pMessage?data->pMessage:"unknown")<<'\n';}
+    return VK_FALSE;
+}
 void require(bool condition,const std::string &what){if(!condition){std::cerr<<"FAIL: "<<what<<'\n';std::exit(1);}}
 void okay(VkResult value,const char *what){if(value!=VK_SUCCESS){std::cerr<<"FAIL: "<<what<<" VkResult="<<value<<'\n';std::exit(1);}}
 template<typename T>T info(VkStructureType type){T v{};v.sType=type;return v;}
@@ -39,7 +46,14 @@ int main(){
     auto create=instanceProc<PFN_vkCreateInstance>(get,VK_NULL_HANDLE,"vkCreateInstance");
     auto app=info<VkApplicationInfo>(VK_STRUCTURE_TYPE_APPLICATION_INFO);app.pApplicationName="BSI shader pixel test";app.apiVersion=VK_API_VERSION_1_0;
     auto instanceInfo=info<VkInstanceCreateInfo>(VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO);instanceInfo.pApplicationInfo=&app;
-    VkInstance instance=VK_NULL_HANDLE;okay(create(&instanceInfo,nullptr,&instance),"create instance");
+    const bool validate=std::getenv("BSI_SHADERS_VULKAN_VALIDATION")!=nullptr;
+    const char *layer="VK_LAYER_KHRONOS_validation",*extension=VK_EXT_DEBUG_UTILS_EXTENSION_NAME;
+    auto debug=info<VkDebugUtilsMessengerCreateInfoEXT>(VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT);
+    debug.messageSeverity=VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;debug.messageType=VK_DEBUG_UTILS_MESSAGE_TYPE_GENERAL_BIT_EXT|VK_DEBUG_UTILS_MESSAGE_TYPE_VALIDATION_BIT_EXT|VK_DEBUG_UTILS_MESSAGE_TYPE_PERFORMANCE_BIT_EXT;debug.pfnUserCallback=validation;
+    if(validate){instanceInfo.enabledLayerCount=1;instanceInfo.ppEnabledLayerNames=&layer;instanceInfo.enabledExtensionCount=1;instanceInfo.ppEnabledExtensionNames=&extension;instanceInfo.pNext=&debug;}
+    VkInstance instance=VK_NULL_HANDLE;okay(create(&instanceInfo,nullptr,&instance),"create instance (required validation layer missing is a failure)");
+    VkDebugUtilsMessengerEXT messenger=VK_NULL_HANDLE;
+    if(validate)okay(instanceProc<PFN_vkCreateDebugUtilsMessengerEXT>(get,instance,"vkCreateDebugUtilsMessengerEXT")(instance,&debug,nullptr,&messenger),"create mandatory validation messenger");
     const auto destroyInstance=instanceProc<PFN_vkDestroyInstance>(get,instance,"vkDestroyInstance");
     const auto enumerate=instanceProc<PFN_vkEnumeratePhysicalDevices>(get,instance,"vkEnumeratePhysicalDevices");
     const auto properties=instanceProc<PFN_vkGetPhysicalDeviceProperties>(get,instance,"vkGetPhysicalDeviceProperties");
@@ -125,7 +139,10 @@ int main(){
     p.values[0]=20;require(!pipeline.process(queue,5,{},p,&done,&error)&&!done,"unknown image index cannot submit");
     pipeline.release();require(pipeline.initialize(target,&error),error);p=Parameters{};p.enabled=true;p.values[2]=40;require(run(flat,p)!=flat,"resource recreation must still change pixels");pipeline.release();
     g.DestroyCommandPool(device,pool,nullptr);g.DestroyImage(device,image,nullptr);g.FreeMemory(device,imageMemory,nullptr);UnmapMemory(device,stagingMemory);DestroyBuffer(device,staging,nullptr);g.FreeMemory(device,stagingMemory,nullptr);
-    DestroyDevice(device,nullptr);destroyInstance(instance,nullptr);
+    DestroyDevice(device,nullptr);
+    if(messenger)instanceProc<PFN_vkDestroyDebugUtilsMessengerEXT>(get,instance,"vkDestroyDebugUtilsMessengerEXT")(instance,messenger,nullptr);
+    destroyInstance(instance,nullptr);require(validationErrors.load()==0,"Khronos validation reported API/synchronization/resource-lifetime errors");
+    if(validate)std::cout<<"PASS: required Khronos validation layer reports zero Vulkan errors, including device resource destruction\n";
     std::cout<<"PASS: native Vulkan production pipeline renders all 10 effects to real image pixels; neutral byte identity, reference math, alpha, semaphore handoff/reuse, parameter bounds, invalid image rejection and resource recreation\n";
     std::cout<<"LIMIT: offscreen API test only; Win32 surface/presentation hooks, native player integration and physical Intel/AMD/NVIDIA validation remain separate requirements\n";
 }

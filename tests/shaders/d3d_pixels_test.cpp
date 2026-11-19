@@ -65,7 +65,7 @@ void d3d12(){
     HANDLE event=CreateEventW(nullptr,FALSE,FALSE,nullptr);require(event!=nullptr,"create test fence event");
     const auto idle=[&]{okay(queue->Signal(fence.Get(),++serial),"signal D3D12 fence");okay(fence->SetEventOnCompletion(serial,event),"arm D3D12 fence");require(WaitForSingleObject(event,10000)==WAIT_OBJECT_0,"D3D12 GPU test timed out");};
     D3D12_RESOURCE_DESC imageDesc{};imageDesc.Dimension=D3D12_RESOURCE_DIMENSION_TEXTURE2D;imageDesc.Width=width;imageDesc.Height=height;imageDesc.DepthOrArraySize=imageDesc.MipLevels=1;imageDesc.Format=DXGI_FORMAT_R8G8B8A8_UNORM;imageDesc.SampleDesc.Count=1;imageDesc.Flags=D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;
-    D3D12_HEAP_PROPERTIES heap{};heap.Type=D3D12_HEAP_TYPE_DEFAULT;ComPtr<ID3D12Resource> image;
+    D3D12_HEAP_PROPERTIES heap{};heap.Type=D3D12_HEAP_TYPE_DEFAULT;heap.CreationNodeMask=heap.VisibleNodeMask=1;ComPtr<ID3D12Resource> image;
     okay(device->CreateCommittedResource(&heap,D3D12_HEAP_FLAG_NONE,&imageDesc,D3D12_RESOURCE_STATE_COMMON,nullptr,IID_PPV_ARGS(&image)),"create native D3D12 image");
     D3D12_PLACED_SUBRESOURCE_FOOTPRINT footprint{};UINT64 total=0;device->GetCopyableFootprints(&imageDesc,0,1,0,&footprint,nullptr,nullptr,&total);
     D3D12_RESOURCE_DESC buffer{};buffer.Dimension=D3D12_RESOURCE_DIMENSION_BUFFER;buffer.Width=total;buffer.Height=buffer.DepthOrArraySize=buffer.MipLevels=1;buffer.SampleDesc.Count=1;buffer.Layout=D3D12_TEXTURE_LAYOUT_ROW_MAJOR;

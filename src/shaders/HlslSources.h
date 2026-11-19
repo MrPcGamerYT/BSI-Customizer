@@ -17,6 +17,7 @@ inline std::string hlslFragmentSource(){
     for(std::size_t i=0;i<controls.size();++i)replace("weights["+std::to_string(i)+"]","packed["+std::to_string(i/4)+"]["+std::to_string(i%4)+"]");
     replace("void main()","float4 main(float4 position:SV_Position):SV_Target");
     replace("OUTPUT=","return ");
+    replace("vec3(luminance(c))","float3(luminance(c),luminance(c),luminance(c))");
     for(const std::string scalar:{"0.","1.","2.",".65"}){
         replace("vec3("+scalar+")","float3("+scalar+","+scalar+","+scalar+")");
         replace("vec2("+scalar+")","float2("+scalar+","+scalar+")");

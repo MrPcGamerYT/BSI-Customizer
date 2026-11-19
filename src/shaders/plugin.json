@@ -4,7 +4,7 @@
   "proxy": false,
   "status": "experimental; not installed by the Customizer",
   "targetRenderers": ["OpenGL", "DirectX 11", "DirectX 12", "Vulkan"],
-  "renderers": ["OpenGL", "OpenGL ES via EGL"],
-  "unsupported": ["DirectX", "Vulkan"],
+  "renderers": ["OpenGL", "OpenGL ES via EGL", "DirectX 11", "DirectX 12 via D3D11On12", "Vulkan"],
+  "unsupported": ["DirectX 9/10", "HDR output", "protected images", "unidentified game surfaces"],
   "hardwareValidation": "pending; no Intel, AMD or NVIDIA compatibility certification"
 }

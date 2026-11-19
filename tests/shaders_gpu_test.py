@@ -40,11 +40,13 @@ def main():
         display = platform(0x31DD, None, (I * 1)(EGL_NONE))
     major, minor = I(), I()
     assert native("eglInitialize", U, P, C.POINTER(I), C.POINTER(I))(display, C.byref(major), C.byref(minor)), "Cannot initialize a real EGL display"
-    assert native("eglBindAPI", U, U)(0x30A0)
-    attrs = (I * 17)(0x3033, 1, 0x3040, 4, 0x3024, 8, 0x3023, 8, 0x3022, 8, 0x3021, 8, 0x3031, 0, 0x3032, 0, EGL_NONE)
+    desktop = os.environ.get("BSI_SHADERS_EGL_API") == "opengl"
+    assert native("eglBindAPI", U, U)(0x30A2 if desktop else 0x30A0)
+    attrs = (I * 17)(0x3033, 1, 0x3040, 8 if desktop else 4, 0x3024, 8, 0x3023, 8, 0x3022, 8, 0x3021, 8, 0x3031, 0, 0x3032, 0, EGL_NONE)
     config, count = P(), I()
     assert native("eglChooseConfig", U, P, C.POINTER(I), C.POINTER(P), I, C.POINTER(I))(display, attrs, C.byref(config), 1, C.byref(count)) and count.value
-    context = native("eglCreateContext", P, P, P, P, C.POINTER(I))(display, config, None, (I * 3)(0x3098, 2, EGL_NONE))
+    context_attrs = (I * 7)(0x3098, 3, 0x30FB, 3, 0x30FD, 1, EGL_NONE) if desktop else (I * 3)(0x3098, 2, EGL_NONE)
+    context = native("eglCreateContext", P, P, P, P, C.POINTER(I))(display, config, None, context_attrs)
     surface = native("eglCreatePbufferSurface", P, P, P, C.POINTER(I))(display, config, (I * 5)(0x3057, SIZE, 0x3056, SIZE, EGL_NONE))
     assert context and surface
     make_current = native("eglMakeCurrent", U, P, P, P, P)
@@ -174,7 +176,7 @@ def main():
     native("eglDestroySurface", U, P, P)(display, surface)
     native("eglDestroyContext", U, P, P)(display, context)
     native("eglTerminate", U, P)(display)
-    print("PASS: production C++ GLES pipeline changes real pixels for all 10 effects; neutral byte identity, reference color math, source alpha, host-state restoration, pending error preservation and invalid input guards")
+    print("PASS: production C++ " + ("desktop OpenGL core" if desktop else "GLES") + " pipeline changes real pixels for all 10 effects; neutral byte identity, reference color math, source alpha, host-state restoration, pending error preservation and invalid input guards")
     print("LIMIT: software/API test only; Windows hooks, native Settings integration, DirectX/Vulkan and physical GPU-vendor coverage remain unverified")
 
 
