@@ -24,6 +24,13 @@ if(WIN32)
     target_include_directories(BSIShaders PRIVATE ../third_party/minhook/include)
     target_link_libraries(BSIShaders PRIVATE user32 gdi32 psapi)
     target_compile_definitions(BSIShaders PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
+    if(MSVC)
+        # VS 2022's newer constexpr std::mutex initialization crashes inside
+        # the older MSVCP140.dll bundled with Qt 5/player installations. Use
+        # MSVC's supported legacy initialization path; never overwrite the
+        # player's CRT DLLs or require a global runtime upgrade just for this.
+        target_compile_definitions(BSIShaders PRIVATE _DISABLE_CONSTEXPR_MUTEX_CONSTRUCTOR)
+    endif()
 endif()
 set(module_dir "${CMAKE_CURRENT_BINARY_DIR}/module/BSIShaders")
 set_target_properties(BSIShaders PROPERTIES OUTPUT_NAME BSIShaders
