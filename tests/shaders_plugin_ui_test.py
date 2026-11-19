@@ -16,15 +16,17 @@ import uuid
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("QT_QUICK_BACKEND", "software")
-os.environ.setdefault("QT_QUICK_CONTROLS_STYLE", "Basic")
+# Basic was introduced in Qt 6; Qt 5 calls its base style Default. Keep the
+# host's SDK/QML paths separate from the Python runtime's own QML plugins below.
+os.environ.setdefault("QT_QUICK_CONTROLS_STYLE", "Default" if os.environ.get("BSI_TEST_QT_API") == "PyQt5" else "Basic")
 if os.environ.get("BSI_TEST_QT_API") == "PyQt5":
-    from PyQt5.QtCore import QCoreApplication, QFileInfo, QObject, QPointF, QStandardPaths, Qt, QUrl
+    from PyQt5.QtCore import QCoreApplication, QFileInfo, QLibraryInfo, QObject, QPointF, QStandardPaths, Qt, QUrl, qVersion
     from PyQt5.QtGui import QGuiApplication
     from PyQt5.QtQml import QQmlComponent, QQmlEngine, QQmlExpression
     from PyQt5.QtQuick import QQuickItem
     from PyQt5.QtTest import QTest
 else:
-    from PySide6.QtCore import QCoreApplication, QFileInfo, QObject, QPointF, QStandardPaths, Qt, QUrl
+    from PySide6.QtCore import QCoreApplication, QFileInfo, QLibraryInfo, QObject, QPointF, QStandardPaths, Qt, QUrl, qVersion
     from PySide6.QtGui import QGuiApplication
     from PySide6.QtQml import QQmlComponent, QQmlEngine, QQmlExpression
     from PySide6.QtQuick import QQuickItem
@@ -52,9 +54,31 @@ def main():
         assert not profile.exists() and not profile.is_symlink(), "test refuses to overwrite any existing profile"
         cleanup.callback(lambda: profile.unlink(missing_ok=True))
         engine = QQmlEngine()
-        engine.addImportPath(str(module_root))
+        # install-qt-action supplies QML2_IMPORT_PATH for the C++ build SDK. The
+        # Python host is a separate, ABI-compatible Qt distribution (not always
+        # the identical patch release). Letting both register Controls loads the
+        # plugin twice under different paths and Qt 5 rejects the second as a
+        # protected module. Never mix their private QML plugins. This changes
+        # only the fixture's search path, not the plugin or a player's engine.
+        if os.environ.get("BSI_TEST_QT_API") == "PyQt5":
+            runtime_qml = QLibraryInfo.location(QLibraryInfo.Qml2ImportsPath)
+        else:
+            runtime_qml = QLibraryInfo.path(QLibraryInfo.LibraryPath.QmlImportsPath)
+        assert Path(runtime_qml).is_dir(), runtime_qml
+        engine.setImportPathList([str(module_root), runtime_qml, "qrc:/qt-project.org/imports", "qrc:/qt/qml"])
+        print("Fixture Qt runtime:", qVersion(), "QML paths:", engine.importPathList(), flush=True)
         warnings = []
         engine.warnings.connect(lambda errors: warnings.extend(error.toString() for error in errors))
+        # Check the host's real Controls installation independently, before
+        # importing BSIShaders, so host packaging errors cannot look like a
+        # shader success/failure. No controls or native types are mocked.
+        controls = QQmlComponent(engine)
+        controls.setData(b'import QtQuick 2.15; import QtQuick.Controls 2.15; Button { text: "Controls preflight" }', QUrl("file:///ControlsPreflight.qml"))
+        assert controls.status() == QQmlComponent.Status.Ready, [e.toString() for e in controls.errors()]
+        control = controls.create()
+        assert control, [e.toString() for e in controls.errors()]
+        control.deleteLater()
+        app.processEvents()
         qml = b'''import QtQuick 2.15
 import QtQuick.Window 2.15
 import BSIShaders 1.0

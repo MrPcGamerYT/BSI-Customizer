@@ -32,6 +32,7 @@ using EglDestroy=unsigned(WINAPI*)(void*,void*);
 using EglCurrent=void*(WINAPI*)();
 using EglQuery=unsigned(WINAPI*)(void*,void*,int,int*);
 using EglProc=void*(WINAPI*)(const char*);
+using EglQueryApi=unsigned(WINAPI*)();
 struct Hooks {
     std::mutex mutex,renderMutex,surfaceMutex,hookMutex;
     std::atomic<bool> stopping{false};
@@ -42,13 +43,16 @@ struct Hooks {
     WglCurrent currentWgl=nullptr;WglProc wglProc=nullptr;WglDelete deleteWgl=nullptr;
     EglSwap swapEgl=nullptr;EglCreate createEgl=nullptr;
     EglDestroy destroySurface=nullptr,destroyContext=nullptr;
-    EglCurrent currentEgl=nullptr;EglQuery queryEgl=nullptr;EglProc eglProc=nullptr;
+    EglCurrent currentEgl=nullptr;EglQuery queryEgl=nullptr;EglProc eglProc=nullptr;EglQueryApi eglApi=nullptr;
     std::map<void*,HWND> surfaces;
     std::map<std::pair<bool,std::uintptr_t>,std::unique_ptr<GlPipeline>> pipelines;
     struct Detour {void *replacement;void *original;};
     std::map<void*,Detour> targets;
 };
 Hooks &hooks(){static auto *state=new Hooks;return *state;}
+template<class T> T exportFunction(HMODULE module,const char *name){
+    return reinterpret_cast<T>(reinterpret_cast<void*>(GetProcAddress(module,name)));
+}
 thread_local bool presenting=false;
 struct Recursion { bool previous;Recursion():previous(presenting){presenting=true;}~Recursion(){presenting=previous;} };
 void *resolve(const char *name,void *user){
@@ -64,7 +68,9 @@ void *resolve(const char *name,void *user){
 }
 void process(bool egl,std::uintptr_t context,int width,int height){
     auto &h=hooks();if(!context||presenting||h.stopping.load())return;
-    const auto renderer=egl?Renderer::OpenGLES:Renderer::OpenGL;
+    const auto api=egl&&h.eglApi?h.eglApi():0x30a2u;
+    if(egl&&api!=0x30a0u&&api!=0x30a2u)return;
+    const auto renderer=api==0x30a0u?Renderer::OpenGLES:Renderer::OpenGL;
     if(!Runtime::instance().accepts(renderer))return;
     const auto p=Runtime::instance().settings();
     if(p.neutral()){Runtime::instance().report(true,true,false,"Neutral bypass",false,renderer);return;}
@@ -148,22 +154,24 @@ bool install(void *target,void *replacement,void **original){
     if(original)*original=trampoline;
     // Publish the trampoline before enabling the callback on a host thread.
     h.targets.emplace(target,Hooks::Detour{replacement,trampoline});
-    if(MH_EnableHook(target)!=MH_OK){h.targets.erase(target);MH_RemoveHook(target);return false;}
+    if(MH_EnableHook(target)!=MH_OK){h.targets.erase(target);MH_RemoveHook(target);if(original)*original=nullptr;return false;}
     return true;
 }
 void scan(){
     auto &h=hooks();
     if(!h.gl){
         h.gl=GetModuleHandleW(L"opengl32.dll");
-        if(h.gl){h.currentWgl=reinterpret_cast<WglCurrent>(GetProcAddress(h.gl,"wglGetCurrentContext"));h.wglProc=reinterpret_cast<WglProc>(GetProcAddress(h.gl,"wglGetProcAddress"));}
+        if(h.gl){h.currentWgl=exportFunction<WglCurrent>(h.gl,"wglGetCurrentContext");h.wglProc=exportFunction<WglProc>(h.gl,"wglGetProcAddress");}
     }
     if(h.gl&&h.currentWgl&&h.wglProc){
+        // Context identity is reusable after destruction. Do not cache driver
+        // object names at all unless their destruction can be observed.
+        if(!h.deleteWgl)install(reinterpret_cast<void*>(GetProcAddress(h.gl,"wglDeleteContext")),reinterpret_cast<void*>(&removeWgl),reinterpret_cast<void**>(&h.deleteWgl));
         void *candidates[]{reinterpret_cast<void*>(GetProcAddress(GetModuleHandleW(L"gdi32.dll"),"SwapBuffers")),reinterpret_cast<void*>(GetProcAddress(h.gl,"wglSwapBuffers"))};
         void *callbacks[]{reinterpret_cast<void*>(&swapWgl<0>),reinterpret_cast<void*>(&swapWgl<1>)};
-        for(int i=0;i<2;++i)if(!h.swaps[i]){
+        if(h.deleteWgl)for(int i=0;i<2;++i)if(!h.swaps[i]){
             if(install(candidates[i],callbacks[i],reinterpret_cast<void**>(&h.swaps[i])))h.swapTargets[i]=candidates[i];
         }
-        if(!h.deleteWgl)install(reinterpret_cast<void*>(GetProcAddress(h.gl,"wglDeleteContext")),reinterpret_cast<void*>(&removeWgl),reinterpret_cast<void**>(&h.deleteWgl));
     }
     if(!h.egl){
         HMODULE modules[512]{};DWORD required=0;
@@ -171,15 +179,19 @@ void scan(){
             const unsigned count=std::min<unsigned>(required/sizeof(HMODULE),512);
             for(unsigned i=0;i<count;++i){
                 auto module=modules[i];
-                if(!GetProcAddress(module,"eglSwapBuffers")||!GetProcAddress(module,"eglCreateWindowSurface")||!GetProcAddress(module,"eglGetCurrentContext")||!GetProcAddress(module,"eglQuerySurface")||!GetProcAddress(module,"eglGetProcAddress")||!GetProcAddress(module,"eglDestroySurface")||!GetProcAddress(module,"eglDestroyContext"))continue;
-                h.egl=module;h.currentEgl=reinterpret_cast<EglCurrent>(GetProcAddress(module,"eglGetCurrentContext"));
-                h.queryEgl=reinterpret_cast<EglQuery>(GetProcAddress(module,"eglQuerySurface"));h.eglProc=reinterpret_cast<EglProc>(GetProcAddress(module,"eglGetProcAddress"));
+                if(!GetProcAddress(module,"eglSwapBuffers")||!GetProcAddress(module,"eglCreateWindowSurface")||!GetProcAddress(module,"eglGetCurrentContext")||!GetProcAddress(module,"eglQuerySurface")||!GetProcAddress(module,"eglGetProcAddress")||!GetProcAddress(module,"eglDestroySurface")||!GetProcAddress(module,"eglDestroyContext")||!GetProcAddress(module,"eglQueryAPI"))continue;
+                h.egl=module;h.currentEgl=exportFunction<EglCurrent>(module,"eglGetCurrentContext");
+                h.queryEgl=exportFunction<EglQuery>(module,"eglQuerySurface");h.eglProc=exportFunction<EglProc>(module,"eglGetProcAddress");
+                h.eglApi=exportFunction<EglQueryApi>(module,"eglQueryAPI");
                 // Surface ownership tracking is mandatory. If it cannot be
                 // installed, do not process an unidentified Qt/UI framebuffer.
                 if(!install(reinterpret_cast<void*>(GetProcAddress(module,"eglCreateWindowSurface")),reinterpret_cast<void*>(&createSurface),reinterpret_cast<void**>(&h.createEgl))){h.egl=nullptr;continue;}
-                install(reinterpret_cast<void*>(GetProcAddress(module,"eglDestroySurface")),reinterpret_cast<void*>(&removeSurface),reinterpret_cast<void**>(&h.destroySurface));
-                install(reinterpret_cast<void*>(GetProcAddress(module,"eglDestroyContext")),reinterpret_cast<void*>(&removeContext),reinterpret_cast<void**>(&h.destroyContext));
-                if(!install(reinterpret_cast<void*>(GetProcAddress(module,"eglSwapBuffers")),reinterpret_cast<void*>(&swapEgl),reinterpret_cast<void**>(&h.swapEgl))){h.egl=nullptr;}
+                const bool surfaces=install(reinterpret_cast<void*>(GetProcAddress(module,"eglDestroySurface")),reinterpret_cast<void*>(&removeSurface),reinterpret_cast<void**>(&h.destroySurface));
+                const bool contexts=install(reinterpret_cast<void*>(GetProcAddress(module,"eglDestroyContext")),reinterpret_cast<void*>(&removeContext),reinterpret_cast<void**>(&h.destroyContext));
+                if(surfaces&&contexts)install(reinterpret_cast<void*>(GetProcAddress(module,"eglSwapBuffers")),reinterpret_cast<void*>(&swapEgl),reinterpret_cast<void**>(&h.swapEgl));
+                // Never retarget already-live callbacks to another EGL DLL's
+                // entry points after a partial failure. Keep the pinned
+                // provider stable and safely bypass incomplete lifecycle hooks.
                 break;
             }
         }
