@@ -19,6 +19,7 @@ class Runtime {
 public:
     static Runtime &instance();
     void start(std::uintptr_t playerWindow);
+    void setWindow(std::uintptr_t playerWindow);
     void stop();
     void set(const Parameters &settings);
     void selectRenderer(RendererFamily requested);

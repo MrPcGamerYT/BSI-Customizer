@@ -11,8 +11,14 @@
 namespace BsiShaders {
 Runtime &Runtime::instance(){static auto *runtime=new Runtime;return *runtime;}
 void Runtime::start(std::uintptr_t window){
-    {std::lock_guard<std::mutex> lock(mutex);host=window;}
+    setWindow(window);
     startPresentationHooks();
+}
+void Runtime::setWindow(std::uintptr_t window){
+    std::lock_guard<std::mutex> lock(mutex);
+    if(host==window)return;
+    host=window;state.observed=false;state.active=false;state.deviceReady=false;state.renderer=Renderer::Unknown;
+    state.status=window?"Waiting for the identified player's game presentation surface.":"The native player surface is not available; no effects are active.";
 }
 void Runtime::stop(){stopPresentationHooks();}
 void Runtime::set(const Parameters &settings){

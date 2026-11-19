@@ -9,6 +9,8 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QMetaType>
+#include <QPlatformSurfaceEvent>
+#include <QPointer>
 #include <QSaveFile>
 #include <QSet>
 #include <QStandardPaths>
@@ -19,10 +21,29 @@
 
 namespace BsiShaders {
 namespace {
+// A child Bootstrap completes before its QML Window necessarily does. Do not
+// force QWindow::create()/winId() in that partially constructed Quick window
+// (notably Qt 5). Install API hooks early, and attach HWND ownership when Qt
+// has actually created its platform surface. Also revoke it on recreation.
+class SurfaceObserver final : public QObject {
+public:
+    explicit SurfaceObserver(QWindow *window):QObject(window),window(window){window->installEventFilter(this);}
+    bool eventFilter(QObject *object,QEvent *event) override {
+        if(object==window&&event->type()==QEvent::PlatformSurface){
+            const auto *surface=static_cast<QPlatformSurfaceEvent*>(event);
+            if(surface->surfaceEventType()==QPlatformSurfaceEvent::SurfaceAboutToBeDestroyed)Runtime::instance().setWindow(0);
+            else if(window&&window->handle())Runtime::instance().setWindow(std::uintptr_t(window->winId()));
+        }
+        return false;
+    }
+private:
+    QPointer<QWindow> window;
+};
 struct State {
     Parameters saved;
     QString instance,file,error;
     QSet<ShaderBridge*> bridges;
+    QPointer<SurfaceObserver> surfaceObserver;
     bool attached=false,connected=false;
 };
 State &state(){static auto *s=new State;return *s;}
@@ -112,7 +133,9 @@ void ShaderBridge::attach(QObject *object,const QString &instance,const QString 
         s.attached=false;Runtime::instance().set(Parameters{});notify();return;
     }
     s.attached=true;Runtime::instance().selectRenderer(requested);Runtime::instance().set(s.saved);
-    Runtime::instance().start(std::uintptr_t(window->winId()));
+    if(s.surfaceObserver)delete s.surfaceObserver;
+    s.surfaceObserver=new SurfaceObserver(window);
+    Runtime::instance().start(window->handle()?std::uintptr_t(window->winId()):0);
     if(!s.connected){s.connected=true;QObject::connect(QCoreApplication::instance(),&QCoreApplication::aboutToQuit,[] {Runtime::instance().stop();});}
     notify();
 }

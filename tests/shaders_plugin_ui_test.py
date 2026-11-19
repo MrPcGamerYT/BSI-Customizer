@@ -10,6 +10,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import sys
 import tempfile
 import uuid
 
@@ -31,6 +32,10 @@ else:
 
 
 def main():
+    native_diagnostics = None
+    if sys.platform == "win32" and os.environ.get("BSI_SHADERS_DIAGNOSTICS"):
+        from shaders.windows_diagnostics import install
+        native_diagnostics = install()
     module_root = Path(os.environ["BSI_SHADERS_MODULE_ROOT"]).resolve()
     assert (module_root / "BSIShaders/qmldir").is_file()
     with tempfile.TemporaryDirectory(prefix="bsi-shader-settings-") as temp, ExitStack() as cleanup:

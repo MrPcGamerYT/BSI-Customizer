@@ -107,6 +107,7 @@ jobs:
         env:
           BSI_TEST_QT_API: ${{ matrix.python-api }}
           BSI_SHADERS_MODULE_ROOT: ${{ github.workspace }}/build-shaders/module
+          BSI_SHADERS_DIAGNOSTICS: '1'
         run: python tests/shaders/run_ci_tests.py --command python tests/run_qt_runtime_test.py tests/shaders_plugin_ui_test.py
       - name: Record limits rather than claim universal support
         shell: pwsh
