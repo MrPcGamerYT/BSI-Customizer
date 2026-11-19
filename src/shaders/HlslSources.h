@@ -17,7 +17,10 @@ inline std::string hlslFragmentSource(){
     for(std::size_t i=0;i<controls.size();++i)replace("weights["+std::to_string(i)+"]","packed["+std::to_string(i/4)+"]["+std::to_string(i%4)+"]");
     replace("void main()","float4 main(float4 position:SV_Position):SV_Target");
     replace("OUTPUT=","return ");
-    for(const std::string scalar:{"0.","1.","2.",".65"})replace("vec3("+scalar+")","float3("+scalar+","+scalar+","+scalar+")");
+    for(const std::string scalar:{"0.","1.","2.",".65"}){
+        replace("vec3("+scalar+")","float3("+scalar+","+scalar+","+scalar+")");
+        replace("vec2("+scalar+")","float2("+scalar+","+scalar+")");
+    }
     return std::string("Texture2D frame:register(t0);SamplerState sourceSampler:register(s0);\n"
         "cbuffer Parameters:register(b0){float4 packed[3];};\n"
         "#define texel packed[2].zw\n#define uv (position.xy*texel)\n"

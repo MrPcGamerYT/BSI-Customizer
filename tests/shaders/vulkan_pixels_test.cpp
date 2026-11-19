@@ -16,7 +16,7 @@
 #endif
 using namespace BsiShaders;
 namespace {
-void require(bool condition,const char *what){if(!condition){std::cerr<<"FAIL: "<<what<<'\n';std::exit(1);}}
+void require(bool condition,const std::string &what){if(!condition){std::cerr<<"FAIL: "<<what<<'\n';std::exit(1);}}
 void okay(VkResult value,const char *what){if(value!=VK_SUCCESS){std::cerr<<"FAIL: "<<what<<" VkResult="<<value<<'\n';std::exit(1);}}
 template<typename T>T info(VkStructureType type){T v{};v.sType=type;return v;}
 template<typename T>T instanceProc(PFN_vkGetInstanceProcAddr resolver,VkInstance instance,const char *name){
@@ -62,7 +62,7 @@ int main(){
     EXTRA(DestroyDevice);EXTRA(GetDeviceQueue);EXTRA(CreateBuffer);EXTRA(DestroyBuffer);EXTRA(GetBufferMemoryRequirements);EXTRA(BindBufferMemory);EXTRA(MapMemory);EXTRA(UnmapMemory);EXTRA(CmdCopyBufferToImage);EXTRA(CmdCopyImageToBuffer);
 #undef EXTRA
     VkQueue queue=VK_NULL_HANDLE;GetDeviceQueue(device,family,0,&queue);
-    VulkanApi g;std::string error;require(g.load(device,resolve,&error),error.c_str());
+    VulkanApi g;std::string error;require(g.load(device,resolve,&error),error);
     auto memoryType=[&](std::uint32_t bits,VkMemoryPropertyFlags flags){
         for(std::uint32_t i=0;i<memory.memoryTypeCount;++i)if((bits&(1u<<i))&&(memory.memoryTypes[i].propertyFlags&flags)==flags)return i;
         require(false,"required memory type unavailable");return 0u;
@@ -99,11 +99,11 @@ int main(){
         okay(g.QueueSubmit(queue,1,&submit,VK_NULL_HANDLE),"submit transfer");okay(g.QueueWaitIdle(queue),"complete transfer");
     };
     VulkanTarget target;target.api=g;target.memory=memory;target.format=imageInfo.format;target.extent={width,height};target.queueFamily=family;target.images={image};target.restingLayout=VK_IMAGE_LAYOUT_GENERAL;
-    VulkanPipeline pipeline;require(pipeline.initialize(target,&error),error.c_str());
+    VulkanPipeline pipeline;require(pipeline.initialize(target,&error),error);
     std::vector<unsigned char> flat(size);for(std::uint32_t i=0;i<size;i+=4){flat[i]=204;flat[i+1]=102;flat[i+2]=51;flat[i+3]=173;}
     auto run=[&](const std::vector<unsigned char> &input,const Parameters &settings){
         std::memcpy(mapped,input.data(),size);transfer(true,VK_NULL_HANDLE);VkSemaphore done=VK_NULL_HANDLE;
-        require(pipeline.process(queue,0,{},settings,&done,&error),error.c_str());
+        require(pipeline.process(queue,0,{},settings,&done,&error),error);
         require((done==VK_NULL_HANDLE)==settings.neutral(),"neutral bypass submits no GPU pass/semaphore");
         transfer(false,done);return std::vector<unsigned char>(static_cast<unsigned char*>(mapped),static_cast<unsigned char*>(mapped)+size);
     };
@@ -123,7 +123,7 @@ int main(){
     for(std::size_t control=6;control<10;++control){p=Parameters{};p.enabled=true;p.values[control]=85;require(run(pattern,p)!=pattern,"every spatial Vulkan effect must change actual image pixels");}
     VkSemaphore done=VK_NULL_HANDLE;p.values[0]=101;require(!pipeline.process(queue,0,{},p,&done,&error)&&!done,"out-of-range values cannot submit");
     p.values[0]=20;require(!pipeline.process(queue,5,{},p,&done,&error)&&!done,"unknown image index cannot submit");
-    pipeline.release();require(pipeline.initialize(target,&error),error.c_str());p=Parameters{};p.enabled=true;p.values[2]=40;require(run(flat,p)!=flat,"resource recreation must still change pixels");pipeline.release();
+    pipeline.release();require(pipeline.initialize(target,&error),error);p=Parameters{};p.enabled=true;p.values[2]=40;require(run(flat,p)!=flat,"resource recreation must still change pixels");pipeline.release();
     g.DestroyCommandPool(device,pool,nullptr);g.DestroyImage(device,image,nullptr);g.FreeMemory(device,imageMemory,nullptr);UnmapMemory(device,stagingMemory);DestroyBuffer(device,staging,nullptr);g.FreeMemory(device,stagingMemory,nullptr);
     DestroyDevice(device,nullptr);destroyInstance(instance,nullptr);
     std::cout<<"PASS: native Vulkan production pipeline renders all 10 effects to real image pixels; neutral byte identity, reference math, alpha, semaphore handoff/reuse, parameter bounds, invalid image rejection and resource recreation\n";

@@ -4,6 +4,7 @@
 #define VK_NO_PROTOTYPES
 #endif
 #include <vulkan/vulkan_core.h>
+#include <cstdint>
 #include <memory>
 #include <string>
 #include <vector>

@@ -15,7 +15,7 @@
 using namespace BsiShaders;
 using Microsoft::WRL::ComPtr;
 namespace {
-void require(bool c,const char *text){if(!c){std::cerr<<"FAIL: "<<text<<'\n';std::exit(1);}}
+void require(bool c,const std::string &text){if(!c){std::cerr<<"FAIL: "<<text<<'\n';std::exit(1);}}
 void okay(HRESULT hr,const char *text){if(FAILED(hr)){std::cerr<<"FAIL: "<<text<<" HRESULT="<<std::hex<<hr<<'\n';std::exit(1);}}
 constexpr UINT width=64,height=64,bytes=width*height*4;
 using Pixels=std::vector<unsigned char>;
@@ -44,9 +44,9 @@ void d3d11(){
     D3D11_RASTERIZER_DESC raster{};raster.FillMode=D3D11_FILL_WIREFRAME;raster.CullMode=D3D11_CULL_FRONT;raster.ScissorEnable=TRUE;
     ComPtr<ID3D11RasterizerState> nativeRaster;okay(device->CreateRasterizerState(&raster,&nativeRaster),"create host raster state");context->RSSetState(nativeRaster.Get());
     const D3D11_VIEWPORT nativeViewport{2,3,17,19,.2f,.8f};context->RSSetViewports(1,&nativeViewport);context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_POINTLIST);
-    D3d11Pipeline pipeline;std::string error;require(pipeline.initialize(device.Get(),&error),error.c_str());
+    D3d11Pipeline pipeline;std::string error;require(pipeline.initialize(device.Get(),&error),error);
     const Run run=[&](const Pixels &input,const Parameters &p){
-        context->UpdateSubresource(image.Get(),0,nullptr,input.data(),width*4,0);require(pipeline.render(image.Get(),p,&error),error.c_str());
+        context->UpdateSubresource(image.Get(),0,nullptr,input.data(),width*4,0);require(pipeline.render(image.Get(),p,&error),error);
         ComPtr<ID3D11RasterizerState> restored;context->RSGetState(&restored);require(restored.Get()==nativeRaster.Get(),"the player's rasterizer state was not restored");
         D3D11_PRIMITIVE_TOPOLOGY topology{};context->IAGetPrimitiveTopology(&topology);require(topology==D3D11_PRIMITIVE_TOPOLOGY_POINTLIST,"native topology changed");
         UINT count=1;D3D11_VIEWPORT viewport{};context->RSGetViewports(&count,&viewport);require(count==1&&std::memcmp(&viewport,&nativeViewport,sizeof(viewport))==0,"native viewport changed");
@@ -54,7 +54,7 @@ void d3d11(){
         Pixels pixels(bytes);for(UINT row=0;row<height;++row)std::memcpy(pixels.data()+row*width*4,static_cast<unsigned char*>(mapped.pData)+row*mapped.RowPitch,width*4);context->Unmap(readback.Get(),0);return pixels;
     };
     exercise(run);Parameters p;p.enabled=true;p.values[0]=101;require(!pipeline.render(image.Get(),p,&error),"out-of-range controls must not render");
-    pipeline.release();require(pipeline.initialize(device.Get(),&error),error.c_str());p.values[0]=30;require(run(Pixels(bytes,127),p).size()==bytes,"DirectX resource recreation failed");
+    pipeline.release();require(pipeline.initialize(device.Get(),&error),error);p.values[0]=30;require(run(Pixels(bytes,127),p).size()==bytes,"DirectX resource recreation failed");
     std::cout<<"PASS: native D3D11 WARP production shaders, all 10 pixel effects, exact neutral, alpha, reference math, full context isolation checks, bounds and recreation\n";
 }
 void d3d12(){
@@ -80,10 +80,10 @@ void d3d12(){
         if(toImage)commands->CopyTextureRegion(&imageLocation,0,0,0,&bufferLocation,nullptr);else commands->CopyTextureRegion(&bufferLocation,0,0,0,&imageLocation,nullptr);
         std::swap(b.Transition.StateBefore,b.Transition.StateAfter);commands->ResourceBarrier(1,&b);okay(commands->Close(),"close transfer");ID3D12CommandList *list[]{commands.Get()};queue->ExecuteCommandLists(1,list);idle();
     };
-    D3d12Pipeline pipeline;std::string error;require(pipeline.initialize(device.Get(),queue.Get(),&error),error.c_str());
+    D3d12Pipeline pipeline;std::string error;require(pipeline.initialize(device.Get(),queue.Get(),&error),error);
     const Run run=[&](const Pixels &input,const Parameters &p){
         void *data=nullptr;okay(upload->Map(0,nullptr,&data),"map D3D12 upload");for(UINT row=0;row<height;++row)std::memcpy(static_cast<unsigned char*>(data)+footprint.Offset+row*footprint.Footprint.RowPitch,input.data()+row*width*4,width*4);upload->Unmap(0,nullptr);transfer(true);
-        require(pipeline.render(image.Get(),p,&error),error.c_str());idle();transfer(false);okay(readback->Map(0,nullptr,&data),"map actual D3D12 result");Pixels result(bytes);for(UINT row=0;row<height;++row)std::memcpy(result.data()+row*width*4,static_cast<unsigned char*>(data)+footprint.Offset+row*footprint.Footprint.RowPitch,width*4);readback->Unmap(0,nullptr);return result;
+        require(pipeline.render(image.Get(),p,&error),error);idle();transfer(false);okay(readback->Map(0,nullptr,&data),"map actual D3D12 result");Pixels result(bytes);for(UINT row=0;row<height;++row)std::memcpy(result.data()+row*width*4,static_cast<unsigned char*>(data)+footprint.Offset+row*footprint.Footprint.RowPitch,width*4);readback->Unmap(0,nullptr);return result;
     };
     exercise(run);idle();pipeline.release();CloseHandle(event);
     std::cout<<"PASS: actual D3D12 WARP resources/queue with production On12 shader backend, all 10 effects, neutral byte identity, reference math, alpha and copy/presentation-state round trips\n";
