@@ -1,0 +1,122 @@
+name: Supplied DLL offline startup
+
+# Called only by an explicitly opted-in workflow_dispatch of CI. Never execute
+# supplied code on pull_request/push. Pin BOTH archive and DLL hashes in the
+# Python validator; no arbitrary URL input, source build or license bypass.
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+jobs:
+  offline-startup:
+    name: Supplied Z-Lag DLL (Windows x64, outbound blocked, probe only)
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: Checkout pinned player references (data only; never launched)
+        uses: actions/checkout@v5
+        with:
+          repository: MrPcGamerYT/HD-Player
+          ref: 6e4dc894eb1b6956060b3f76d13fc438e5178d03
+          path: hd-player-reference
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install pefile==2024.8.26
+      - name: Download exact reviewed Git blob as data
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: python
+        run: |
+          import base64, json, os, pathlib, subprocess
+          blob = '980007812e078635ddc2569caf4d885459ecb104'
+          obj = json.loads(subprocess.check_output([
+              'gh', 'api', 'repos/dsajgddghdsaakovvgheww/BSI-Customizer/git/blobs/' + blob
+          ], timeout=45))
+          assert obj['encoding'] == 'base64' and obj['size'] == 1457358
+          path = pathlib.Path(os.environ['RUNNER_TEMP']) / 'reviewed-dll.zip'
+          path.write_bytes(base64.b64decode(obj['content']))
+      - uses: jurplel/install-qt-action@v4.3.1
+        with:
+          version: '6.8.3'
+          host: windows
+          target: desktop
+          arch: win64_msvc2022_64
+          cache: true
+          # Reuse the Python 3.11 above where pefile is installed. The action
+          # otherwise selects another interpreter and hides those dependencies.
+          setup-python: 'false'
+      - name: Build original probe and production transaction adapter only
+        shell: pwsh
+        run: |
+          cmake -S tests/dll-startup -B build-payload-test -A x64 -DBSI_DLLSTARTUP_FILE_TESTS=ON
+          if ($LASTEXITCODE -ne 0) { throw 'Test configuration failed' }
+          cmake --build build-payload-test --config Release --target dll-startup-file-test supplied-payload-host --parallel
+          if ($LASTEXITCODE -ne 0) { throw 'Test adapter build failed' }
+      - name: Verify pinned payload and prepare through production transaction (no execution)
+        shell: pwsh
+        run: |
+          python tests/dll_startup_payload_test.py --archive "$env:RUNNER_TEMP/reviewed-dll.zip" --file-test build-payload-test/Release/dll-startup-file-test.exe --reference "hd-player-reference/HD-Player MSI v5.9.exe" --reference "hd-player-reference/HD-Player v.5.10 bluestacks.exe" --reference "hd-player-reference/HD-Player MSI Latest version.zip" --reference "hd-player-reference/HD-Player latest version Bluestacks 5.zip" --probe-host build-payload-test/Release/supplied-payload-host.exe --prepare-dir "$env:RUNNER_TEMP/prepared-payload" --report "$env:RUNNER_TEMP/payload-results/native-data.json"
+          if ($LASTEXITCODE -ne 0) { throw 'Pinned payload/data checks failed' }
+      - name: Three normal launches with outbound access blocked before any supplied code runs
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $recipient = Join-Path $env:RUNNER_TEMP 'supplied DLL recipient'
+          New-Item -ItemType Directory $recipient | Out-Null
+          Copy-Item "$env:RUNNER_TEMP/prepared-payload/HD-Player.exe" $recipient
+          Copy-Item "$env:RUNNER_TEMP/prepared-payload/Z-Lag.dll" $recipient
+          if ((Get-ChildItem $recipient -File).Count -ne 2) { throw 'Recipient must initially contain EXE + DLL only' }
+          $exe = Join-Path $recipient 'HD-Player.exe'
+          $dll = Join-Path $recipient 'Z-Lag.dll'
+          $exeHash = (Get-FileHash $exe -Algorithm SHA256).Hash
+          $dllHash = (Get-FileHash $dll -Algorithm SHA256).Hash
+          if ($dllHash.ToLowerInvariant() -ne '80fa1503e6071777ff3ba9daabfe27918bbcad94fb1b4726ca88dbdb533be296') { throw 'Wrong runtime DLL' }
+          $ruleName = 'BSI-Supplied-DLL-Offline-' + [guid]::NewGuid().ToString('N')
+          $profiles = @(Get-NetFirewallProfile | Select-Object Name, Enabled)
+          $results = @()
+          try {
+            # Fail closed if the firewall cannot be enabled/verified. Never
+            # bypass/replace the DLL's license check or send its HWID to Firestore.
+            Set-NetFirewallProfile -Profile Domain,Private,Public -Enabled True
+            New-NetFirewallRule -Name $ruleName -DisplayName $ruleName -Direction Outbound -Program $exe -Action Block -Profile Any -Enabled True | Out-Null
+            $rule = Get-NetFirewallRule -Name $ruleName
+            $filter = $rule | Get-NetFirewallApplicationFilter
+            if ($rule.Enabled -ne 'True' -or $rule.Action -ne 'Block' -or $rule.Direction -ne 'Outbound' -or $filter.Program -ne $exe) { throw 'Outbound block verification failed; supplied DLL not run' }
+            if (@(Get-NetFirewallProfile | Where-Object { $_.Enabled -ne 'True' }).Count -ne 0) { throw 'Firewall profile disabled; supplied DLL not run' }
+            $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
+            $env:QT_PLUGIN_PATH = ''
+            $env:QML_IMPORT_PATH = ''
+            $env:QML2_IMPORT_PATH = ''
+            Remove-Item Env:GH_TOKEN -ErrorAction SilentlyContinue
+            Remove-Item Env:GITHUB_TOKEN -ErrorAction SilentlyContinue
+            for ($launch = 1; $launch -le 3; $launch++) {
+              $log = Join-Path $recipient 'zlag.log'
+              Remove-Item $log -ErrorAction SilentlyContinue
+              $p = Start-Process -FilePath $exe -WorkingDirectory $recipient -PassThru -RedirectStandardOutput "$env:RUNNER_TEMP/probe-$launch.stdout" -RedirectStandardError "$env:RUNNER_TEMP/probe-$launch.stderr"
+              if (-not $p.WaitForExit(15000)) { $p.Kill(); throw 'Supplied-DLL probe timed out' }
+              if ($p.ExitCode -ne 0) { throw "Supplied-DLL probe failed (exit $($p.ExitCode)); effects were not tested" }
+              if (-not (Test-Path $log) -or -not (Select-String -LiteralPath $log -SimpleMatch "loaded by the host's normal import table" -Quiet)) { throw 'Startup worker marker missing' }
+              if (Select-String -LiteralPath $log -SimpleMatch 'HWID authorization accepted' -Quiet) { throw 'Unexpected authorization in an offline test' }
+              if ((Get-FileHash $exe -Algorithm SHA256).Hash -ne $exeHash -or (Get-FileHash $dll -Algorithm SHA256).Hash -ne $dllHash) { throw 'Runtime changed EXE/DLL bytes' }
+              $results += @{ launch = $launch; exitCode = $p.ExitCode; exactDllLoaded = $true; startupWorkerObserved = $true; outboundBlocked = $true; anchorCalled = $false }
+            }
+            @{ test = 'Original probe host, NOT HD-Player'; launches = $results; licenseVerified = $false; visualEffectsVerified = $false; optimizerActionsRun = $false } | ConvertTo-Json -Depth 8 | Out-File "$env:RUNNER_TEMP/payload-results/offline-startup.json" -Encoding utf8
+            'PASS: exact supplied x64 DLL loaded and startup worker observed on three normal launches, after patcher exit, without interpreter/Qt/SDK on PATH. Outbound blocked; no initializer/anchor call, license bypass, emulator, optimizer action or visual-effects claim.' | Out-File $env:GITHUB_STEP_SUMMARY -Append
+          } finally {
+            Get-NetFirewallRule -Name $ruleName -ErrorAction SilentlyContinue | Remove-NetFirewallRule
+            foreach ($profile in $profiles) { Set-NetFirewallProfile -Profile $profile.Name -Enabled $profile.Enabled }
+          }
+      - name: Upload sanitized test evidence only (no binaries, HWIDs or DLL logs)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: supplied-dll-evidence-${{ github.run_id }}
+          path: ${{ runner.temp }}/payload-results/*.json
+          if-no-files-found: ignore

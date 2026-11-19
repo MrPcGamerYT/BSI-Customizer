@@ -1,0 +1,45 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+
+const read = path => fs.readFileSync(new URL(`../${path}`, import.meta.url), 'utf8');
+const ci = read('.github/workflows/ci.yml');
+const workflow = read('.github/workflows/dll-payload-test.yml');
+const validator = read('tests/dll_startup_payload_test.py');
+const host = read('tests/dll-startup/supplied_payload_host.cpp');
+const cmake = read('tests/dll-startup/CMakeLists.txt');
+
+assert.match(ci, /test_supplied_dll:[\s\S]*?type: boolean[\s\S]*?default: false/);
+assert.match(ci, /if: \$\{\{ github\.event_name == 'workflow_dispatch' && inputs\.test_supplied_dll \}\}[\s\S]*?uses: \.\/\.github\/workflows\/dll-payload-test\.yml/);
+assert.match(ci, /node tests\/dll_startup_payload_contract_test\.mjs/);
+assert.match(workflow, /on:\s*\n  workflow_call:/);
+assert.doesNotMatch(workflow, /^\s*(pull_request|pull_request_target|push|schedule):/m);
+assert.match(workflow, /permissions:\s*\n  contents: read/);
+assert.match(workflow, /persist-credentials: false/);
+assert.match(workflow, /uses: jurplel\/install-qt-action@v4\.3\.1[\s\S]*?setup-python: 'false'/,
+  'Qt setup must not switch away from the Python where pefile was installed');
+assert.doesNotMatch(workflow, /secrets: inherit/);
+assert.match(workflow, /980007812e078635ddc2569caf4d885459ecb104/);
+assert.match(validator, /48289b241b789c4cdc0e553e84d0af4eb1cb3afa73b657698256ea5fdb4687c3/);
+assert.match(validator, /80fa1503e6071777ff3ba9daabfe27918bbcad94fb1b4726ca88dbdb533be296/);
+assert.match(validator, /sha\(data\) == ARCHIVE_SHA256/);
+assert.match(validator, /sha\(dll\) == DLL_SHA256/);
+assert.doesNotMatch(validator, /\b(ctypes|WinDLL|CDLL|extractall)\b/);
+assert.match(validator, /--restore-deployment/);
+assert.match(validator, /"runtimeVisualEffectsVerified": False/);
+assert.match(workflow, /-Direction Outbound -Program \$exe -Action Block -Profile Any -Enabled True/);
+assert.ok(workflow.indexOf('Get-NetFirewallRule -Name $ruleName') < workflow.indexOf('Start-Process -FilePath $exe'));
+assert.match(workflow, /Firewall profile disabled; supplied DLL not run/);
+assert.match(workflow, /Unexpected authorization in an offline test/);
+assert.match(workflow, /licenseVerified = \$false; visualEffectsVerified = \$false; optimizerActionsRun = \$false/);
+assert.match(workflow, /\$env:PATH = "\$env:SystemRoot\\System32;\$env:SystemRoot"/);
+assert.match(workflow, /Remove-Item Env:GH_TOKEN/);
+assert.match(workflow, /Remove-Item Env:GITHUB_TOKEN/);
+assert.match(workflow, /payload-results\/\*\.json/);
+assert.doesNotMatch(workflow, /path:.*\.(dll|exe|zip|log)/i);
+assert.match(host, /GetModuleHandleW\(L"Z-Lag\.dll"\)/);
+assert.match(host, /_wcsicmp\(expected, dllPath\)/);
+assert.match(host, /loaded by the host's normal import table/);
+assert.doesNotMatch(host, /\b(?:LoadLibrary[AW]?|ZLagImportAnchor)\s*\(/);
+assert.match(cmake, /add_executable\(supplied-payload-host EXCLUDE_FROM_ALL supplied_payload_host\.cpp\)/);
+assert.doesNotMatch(cmake, /add_test\([^\n]*supplied-payload-host/);
+console.log('PASS: supplied DLL execution is hash-pinned, manual-only, outbound-blocked and confined to an original probe; evidence excludes license/rendering claims and private logs.');

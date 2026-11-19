@@ -91,7 +91,8 @@ ApplicationWindow {
         { label: qsTr("Patch workspace"), section: qsTr("PATCHER"), icon: Icons.extras },
         { label: qsTr("Debloat & disk manager"), section: qsTr("PATCHER"), icon: Icons.debloat },
         { label: qsTr("Backups"), section: qsTr("RECOVERY"), icon: Icons.integrity },
-        { label: qsTr("Add-ons"), section: qsTr("COLLECTION"), icon: Icons.theme }
+        { label: qsTr("Add-ons"), section: qsTr("COLLECTION"), icon: Icons.theme },
+        { label: qsTr("DLL patcher"), section: qsTr("PATCHER"), icon: Icons.extras }
     ]
     readonly property var pageNames: featurePages.map(p => p.label)
     property alias currentPage: pages.currentIndex
@@ -121,7 +122,7 @@ ApplicationWindow {
                 Repeater {
                     model: [
                         {label:"HOME",icon:Icons.dashboard,route:0,children:[]},
-                        {label:"PATCHER",icon:Icons.theme,route:1,children:[1,2,3,4,5,6]},
+                        {label:"PATCHER",icon:Icons.theme,route:1,children:[1,2,3,4,5,6,13]},
                         {label:"PRESENCE",icon:Icons.discord,route:7,children:[7,8]},
                         {label:"APP",icon:Icons.settings,route:-1,children:[]},
                         {label:"TOOLS",icon:Icons.debloat,route:9,children:[9,10]},
@@ -134,6 +135,7 @@ ApplicationWindow {
                         required property int index
                         property bool expanded: false
                         readonly property bool selected: pages.currentIndex === modelData.route || modelData.children.indexOf(pages.currentIndex)>=0
+                        onSelectedChanged: if (selected && modelData.children.length > 0) expanded = true
                         width: parent.width; spacing: 3
                         AbstractButton {
                             id: navButton; objectName: "navGroup" + navGroup.index
@@ -168,6 +170,7 @@ ApplicationWindow {
                                 AbstractButton {
                                     id: subButton; required property int modelData
                                     objectName: "featureNav" + modelData
+                                    Accessible.name: window.featurePages[subButton.modelData].label
                                     width: parent.width; height: 33
                                     background: Rectangle {
                                         radius: 8; color: subButton.hovered ? Theme.hoverFill : "transparent"
@@ -293,6 +296,7 @@ ApplicationWindow {
             LazyFeature { objectName: "featureDebloat"; pageIndex: 10; currentPage: pages.currentIndex; authorized: auth.authorized; pageSource: Qt.resolvedUrl("pages/DebloatPage.qml"); onNotify: (msg) => toast.show(msg); onNavigate: (index) => window.navigatePage(index) }
             LazyFeature { objectName: "featureBackups"; pageIndex: 11; currentPage: pages.currentIndex; authorized: auth.authorized; pageSource: Qt.resolvedUrl("pages/BackupsPage.qml"); onNotify: (msg) => toast.show(msg); onNavigate: (index) => window.navigatePage(index) }
             LazyFeature { id: collectionPage; objectName: "featureAddons"; pageIndex: 12; currentPage: pages.currentIndex; authorized: auth.authorized; pageSource: Qt.resolvedUrl("pages/AddonsPage.qml"); onNotify: (msg) => toast.show(msg); onNavigate: (index) => window.navigatePage(index) }
+            LazyFeature { objectName: "featureDllStartup"; pageIndex: 13; currentPage: pages.currentIndex; authorized: auth.authorized; pageSource: Qt.resolvedUrl("pages/DllStartupPage.qml"); onNotify: (msg) => toast.show(msg) }
         }
         LogPanel {
             id: logPanel

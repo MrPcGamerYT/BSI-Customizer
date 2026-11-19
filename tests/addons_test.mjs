@@ -93,12 +93,12 @@ console.log(
 
 // Native deployment smoke tests must evolve with the actual shell routes too.
 const nativeSelftest = read("src/selftest.cpp");
-assert.ok(nativeSelftest.includes('stack->property("count").toInt() == 13'));
-for (const name of ["featureBackups", "featureAddons"]) {
+assert.ok(nativeSelftest.includes('stack->property("count").toInt() == 14'));
+for (const name of ["featureBackups", "featureAddons", "featureDllStartup"]) {
   assert.ok(main.includes('objectName: "' + name + '"'));
   assert.ok(nativeSelftest.includes('"' + name + '"'));
 }
 const deployed = read("src/chromium/ChromiumTests.cpp");
 assert.ok(deployed.includes("document.querySelectorAll('#spine [data-page]').length === 15"));
 assert.ok(deployed.includes("BsiAddons.packs.length === 6"));
-console.log("PASS: native selftest covers thirteen shell pages; deployed Chromium smoke test expects fifteen routes and the six-pack catalog.");
+console.log("PASS: native selftest covers fourteen shell pages including DLL patcher; deployed Chromium smoke test expects fifteen routes and the six-pack catalog.");

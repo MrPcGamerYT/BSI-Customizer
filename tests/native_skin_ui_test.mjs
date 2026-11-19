@@ -33,7 +33,7 @@ assert.ok(!login.includes('authorized = true'));assert.ok(read('src/qml/Theme.qm
 console.log('PASS: native 4.0.1 defaults, six independent editable drafts, icon variants, authorization/manual callback retention, explicit mapping guard and stale-plan invalidation.');
 
 const shell=read('src/qml/Main.qml'),lazy=read('src/qml/components/LazyFeature.qml');
-assert.equal((shell.match(/LazyFeature \{/g)||[]).length,13,'all tools keep a lazy route');
+assert.equal((shell.match(/LazyFeature \{/g)||[]).length,14,'all tools, including the named DLL patcher, keep a lazy route');
 assert.ok(lazy.includes('active: authorized && (currentPage === pageIndex || visited)'));
 assert.ok(lazy.includes('asynchronous: true'));
 assert.ok(!shell.includes('backend.detectInstalls()'),'installation detection must be explicit on Home');

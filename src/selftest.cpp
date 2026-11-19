@@ -47,6 +47,7 @@
 using namespace ByteUtils;
 
 int runPatchRegressionTests();
+int runDllStartupFileTests(const QString &reference);
 
 namespace {
 
@@ -371,8 +372,8 @@ int runSelfTest()
                 dashboardLoader->setProperty("currentPage", 0);
             }
             QObject *dashboard = dashboardLoader ? dashboardLoader->property("item").value<QObject *>() : nullptr;
-            check(stack && stack->property("count").toInt() == 13,
-                  "studio shell retains eleven original editors plus Backups and Add-ons; app settings remain in the modal panel");
+            check(stack && stack->property("count").toInt() == 14,
+                  "studio shell retains the original editors, Backups, Add-ons and a dedicated DLL patcher; app settings remain in the modal panel");
             check(root->findChild<QObject *>(QStringLiteral("studioSidebar")) != nullptr,
                   "studio navigation sidebar is present");
             QObject *instanceFlow = root->findChild<QObject *>(QStringLiteral("studioInstanceFlow"));
@@ -404,7 +405,7 @@ int runSelfTest()
             const char *featureObjects[] = {
                 "studioDashboardLoader", "featureTheme", "featureResources", "featureFps",
                 "featureIntegrity", "featureBoot", "featureInterface", "featureRpc",
-                "featureGif", "featureWorkspace", "featureDebloat", "featureBackups", "featureAddons"
+                "featureGif", "featureWorkspace", "featureDebloat", "featureBackups", "featureAddons", "featureDllStartup"
             };
             for (int index = 0; index < int(sizeof(featureObjects) / sizeof(featureObjects[0])); ++index) {
                 const bool exists = root->findChild<QObject *>(QString::fromLatin1(featureObjects[index])) != nullptr;
@@ -413,8 +414,20 @@ int runSelfTest()
                       qPrintable(QStringLiteral("unified shell opens original feature page %1: %2")
                           .arg(index).arg(QString::fromLatin1(featureObjects[index]))));
             }
+            QObject *startupLoader = root->findChild<QObject *>(QStringLiteral("featureDllStartup"));
+            if (startupLoader) {
+                startupLoader->setProperty("asynchronous", false);
+                startupLoader->setProperty("authorized", true);
+                startupLoader->setProperty("currentPage", 13);
+            }
+            QCoreApplication::processEvents();
+            QObject *startupPage = startupLoader ? startupLoader->property("item").value<QObject *>() : nullptr;
+            QObject *startupTitle = startupPage ? startupPage->findChild<QObject *>(QStringLiteral("dllStartupPageTitle")) : nullptr;
+            check(startupTitle && startupTitle->property("text").toString() == QStringLiteral("DLL patcher")
+                      && startupPage->findChild<QObject *>(QStringLiteral("inspectStartupDll")) != nullptr,
+                  "the packaged DLL patcher route creates its real titled page and inspection controls");
             check(backend.resourceInfos().size() == resourceCount,
-                  "visiting all thirteen shell pages does not auto-scan Resources");
+                  "visiting all fourteen shell pages does not auto-scan Resources");
             if (stack) stack->setProperty("currentIndex", 2);
             QMetaObject::invokeMethod(root, "navigatePage", Q_ARG(QVariant, QVariant(99)));
             check(stack && stack->property("currentIndex").toInt() == 2,
@@ -1894,6 +1907,12 @@ int runSelfTest()
                              .toString()
                              .contains(QStringLiteral("Sign in with Discord")),
                   "Backend refuses patching while the Discord gate is closed");
+            for (const auto &startupResult : {gated.dllStartupInspect(QStringLiteral("zlag.dll"), QStringLiteral("zlag_init")),
+                      gated.dllStartupApply(QStringLiteral("zlag.dll"), {}, {}, true, QStringLiteral("zlag_init")), gated.dllStartupRestore()}) {
+                check(!startupResult.value("ok").toBool()
+                          && startupResult.value("error").toString().contains(QStringLiteral("Sign in with Discord")),
+                      "regular-DLL inspect/apply/restore respect the native Discord gate before file access");
+            }
             Backend ungated(&gateSettings);
             check(ungated.patchThemeQml().value(QStringLiteral("error")).toString()
                       != QStringLiteral("Sign in with Discord to unlock BSI Customizer."),
@@ -1939,6 +1958,11 @@ int runSelfTest()
 #endif // BSI_ENFORCE_EMBEDDED_AUTH
     }
 
+#ifdef BSI_EXE_TEST_FILE
+    g_failures += runDllStartupFileTests(QString::fromUtf8(BSI_EXE_TEST_FILE));
+#else
+    g_failures += runDllStartupFileTests({});
+#endif
     g_failures += runPatchRegressionTests();
 
     std::printf("========================\n");

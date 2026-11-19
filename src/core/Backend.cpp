@@ -12,6 +12,7 @@
 #include "PlayerCache.h"
 #include "PlayerAppearancePatcher.h"
 #include "GifRpc.h"
+#include "DllStartup.h"
 #include "BsDetector.h"
 #include "ExtrasPatcher.h"
 #include "IntegrityPatcher.h"
@@ -48,33 +49,36 @@ Backend::Backend(SettingsManager *settings, QObject *parent)
     connect(settings, &SettingsManager::dllPathChanged, this, &Backend::dllPathChanged);
     connect(settings, &SettingsManager::confPathChanged, this, &Backend::confPathChanged);
     connect(settings, &SettingsManager::exePathChanged, this, [this] {
-        m_workspaceOperations.clear(); m_workspaceHash.clear(); m_themeFileHash.clear(); m_resourceFileHash.clear();
-        emit workspaceChanged();
-        m_themeInfo = {};
-        m_themeEntries.clear();
-        m_gradientTargets.clear();
-        emit gradientTargetsChanged();
-        m_hexQmlColors.clear();
-        m_edits.clear();
-        m_themeFilePath.clear();
-        m_themeStatus.clear();
-        m_themeDetection.clear();
-        m_detectedQtMajor = 0;
-        m_qmlThemeAvailable = false;
-        m_svgs.clear();
-        m_resources.clear();
-        m_resourceInfos.clear();
-        ++m_resourceRevision;
-        m_resourcesIncludeBinary = true;
+        invalidatePlayerAnalysis();
         emit exePathChanged();
-        emit themeChanged();
-        emit svgsChanged();
-        // The Resources tab reads entry offsets out of this list: keeping it on
-        // screen after the target changed made every preview read the new file
-        // at the old file's offsets, which looks like "the pictures do not
-        // show" on whichever build was selected second.
-        emit resourcesChanged();
     });
+}
+
+void Backend::invalidatePlayerAnalysis()
+{
+    m_workspaceOperations.clear(); m_workspaceHash.clear(); m_themeFileHash.clear(); m_resourceFileHash.clear();
+    m_themeInfo = {};
+    m_themeEntries.clear();
+    m_gradientTargets.clear();
+    m_hexQmlColors.clear();
+    m_edits.clear();
+    m_themeFilePath.clear();
+    m_themeStatus.clear();
+    m_themeDetection.clear();
+    m_detectedQtMajor = 0;
+    m_qmlThemeAvailable = false;
+    m_svgs.clear();
+    m_resources.clear();
+    m_resourceInfos.clear();
+    ++m_resourceRevision;
+    m_resourcesIncludeBinary = true;
+    emit workspaceChanged();
+    emit gradientTargetsChanged();
+    emit themeChanged();
+    emit svgsChanged();
+    // Never leave a reviewed workspace, theme or resource offset cache valid
+    // after changing targets OR applying/restoring a startup import.
+    emit resourcesChanged();
 }
 
 // An isolated facade/settings snapshot keeps all engine state thread-local.
@@ -1495,6 +1499,45 @@ QVariantMap Backend::gifRpcRestore(const QString &path)
         return runBackground([=](Backend &worker) { return worker.gifRpcRestore(path); });
     const auto r = GifRpc::restore(path);
     doLog(r.value(QStringLiteral("msg")).toString(), r.value(QStringLiteral("ok")).toBool() ? QStringLiteral("green") : QStringLiteral("red"));
+    return r;
+}
+
+// -------------------------------------------------------- regular startup DLL
+
+QVariantMap Backend::dllStartupInspect(const QString &dllName, const QString &requiredExport)
+{
+    if (actionsLocked()) return lockedMap();
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) { return worker.dllStartupInspect(dllName, requiredExport); });
+    const auto r = DllStartup::inspect(m_settings->exePath(), dllName, requiredExport);
+    doLog(r.value("msg").toString(), r.value("ok").toBool() ? QStringLiteral("blue") : QStringLiteral("red"));
+    return r;
+}
+
+QVariantMap Backend::dllStartupApply(const QString &dllName, const QString &exeSha256,
+                                    const QString &dllSha256, bool riskAcknowledged, const QString &requiredExport)
+{
+    if (actionsLocked()) return lockedMap();
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) { return worker.dllStartupApply(dllName, exeSha256, dllSha256, riskAcknowledged, requiredExport); });
+    if (BsDetector::isProcessRunning(QStringLiteral("HD-Player.exe")))
+        return result(false, QStringLiteral("Close every HD-Player instance before changing its startup dependencies."), QStringLiteral("red"));
+    const auto r = DllStartup::apply(m_settings->exePath(), dllName, exeSha256, dllSha256, riskAcknowledged, requiredExport);
+    if (r.value("changed").toBool()) invalidatePlayerAnalysis();
+    doLog(r.value("msg").toString(), r.value("ok").toBool() ? QStringLiteral("green") : QStringLiteral("red"));
+    return r;
+}
+
+QVariantMap Backend::dllStartupRestore()
+{
+    if (actionsLocked()) return lockedMap();
+    if (!m_backgroundWorker)
+        return runBackground([](Backend &worker) { return worker.dllStartupRestore(); });
+    if (BsDetector::isProcessRunning(QStringLiteral("HD-Player.exe")))
+        return result(false, QStringLiteral("Close every HD-Player instance before restoring its EXE."), QStringLiteral("red"));
+    const auto r = DllStartup::restore(m_settings->exePath());
+    if (r.value("changed").toBool()) invalidatePlayerAnalysis();
+    doLog(r.value("msg").toString(), r.value("ok").toBool() ? QStringLiteral("green") : QStringLiteral("red"));
     return r;
 }
 
