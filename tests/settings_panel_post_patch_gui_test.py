@@ -179,7 +179,7 @@ import QtQuick.Layouts 1.15
 import BsiGuiFixture 1.0
 Window {
     id: iSettingsWindow
-    width: 1068; height: 611; visible: false; color: "transparent"
+    width: 780; height: 500; visible: false; color: "transparent"
     transientParent: fixturePlayer
     property int pCurrentTabIndex: 0
     property var testIcons: ({})
@@ -302,16 +302,18 @@ Window {
             assert abs(page_origin.x() + page.width() / 2 - window.width() / 2) < EPSILON
             surface_origin = surface.mapToItem(content, QPointF(0, 0))
             # Resize only the window. The approved 568 px native page and its
-            # controls stay unchanged; retain the previously approved frame size.
+            # controls stay unchanged; trim only the excess outer side space.
             left_gutter = page_origin.x() - surface_origin.x()
             right_gutter = surface_origin.x() + surface.width() - page_origin.x() - page.width()
             assert abs(left_gutter - right_gutter) < EPSILON, "page gutters must be symmetric"
             assert abs(left_gutter - (surface.width() - page.width()) / 2) < EPSILON
-            if window.width() == 1068 and window.height() == 611 and shell_root.property("shadowThickness") == 15:
-                assert abs(surface.width() - 1038) < EPSILON, "visible width must match the screenshot border"
-                assert abs(surface.height() - 581) < EPSILON, "visible height must match the screenshot border"
+            if window.width() == 780 and window.height() == 500 and shell_root.property("shadowThickness") == 15:
+                assert abs(surface.width() - 750) < EPSILON, "visible width must match the screenshot border"
+                assert abs(surface.height() - 470) < EPSILON, "visible height must match the screenshot border"
                 assert abs(page.width() - 568) < EPSILON, "resizing the window must not stretch native controls"
-                assert abs(left_gutter - 235) < EPSILON
+                assert abs(left_gutter - 91) < EPSILON
+                assert left_gutter < 100, "the marked empty side bands returned"
+                assert surface.width() / surface.height() >= 1.5, "trimming the sides must not make Settings square"
             expected_top = surface_origin.y() + (112 if visible else 68)
             assert abs(page_origin.y() - expected_top) < EPSILON, f"wrong page position: {page_origin.y()}"
             assert abs(page.height() - (surface.height() - 130)) < EPSILON, "top padding changed the footer clearance"
@@ -395,9 +397,9 @@ Window {
             shell_root.setProperty("shadowThickness", inset)
             window.show()
             QTest.qWait(80)
-            assert abs(window.width() - min(width * .96, 1068)) <= 1
-            assert abs(window.height() - min(height * .94, 611)) <= 1
-            assert window.width() <= 1068 and window.height() <= 611, "Settings exceeded the previously approved dimensions"
+            assert abs(window.width() - min(width * .96, 780)) <= 1
+            assert abs(window.height() - min(height * .94, 500)) <= 1
+            assert window.width() <= 780 and window.height() <= 500, "Settings restored the unwanted side bands"
             assert abs(window.x() + window.width() / 2 - (player.x() + width / 2)) <= 1
             assert abs(window.y() + window.height() / 2 - (player.y() + height / 2)) <= 1
             assert window.x() >= player.x() and window.y() >= player.y()
@@ -414,7 +416,7 @@ Window {
                      (defaults, tuple(range(12)))]
         viewports = [(1440, 900, 0), (1301, 665, 0),
                      (1440, 900, 15), (1301, 665, 15), (1011, 584, 15), (720, 480, 15),
-                     (1114, 652, 15), (1111, 649, 15),  # both sides of the size-cap breakpoints
+                     (814, 534, 15), (811, 530, 15),  # both sides of the size-cap breakpoints
                      (640, 400, 15), (560, 400, 15)]
         for width, height, inset in viewports:
             fit_player(width, height, inset, x=80, y=50)
@@ -519,7 +521,7 @@ Window {
         player.deleteLater()
         QTest.qWait(10)
         engine.deleteLater()
-    print("PASS: restored 1038x581 visible Settings frame (1068x611 with native shadow); themed selected-tab full-opacity border/background/label/icon, quieter hover, custom colours restored, twelve centred tabs, uniform gaps, native page/footer and scrolling")
+    print("PASS: wide 750x470 visible Settings frame (780x500 with native shadow), reduced side gutters; themed selected-tab full-opacity border/background/label/icon, quieter hover, custom colours restored, twelve centred tabs, uniform gaps, native page/footer and scrolling")
     return 0
 
 

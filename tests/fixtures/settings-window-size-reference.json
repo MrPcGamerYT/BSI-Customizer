@@ -1,9 +1,12 @@
 {
-  "referenceCommit": "b196d0a73aae6487deb120bafc3900c4654dd630",
-  "reference": "Previously approved Settings window size, restored at the user's request instead of the latest resize.",
-  "image": { "width": 1301, "height": 665 },
-  "opaquePanel": { "x": 140, "y": 49, "width": 1038, "height": 581 },
+  "attachment": "Capture_LI.jpg",
+  "sha256": "d61fb079a6f9316d879c782eef3761f16bc49198a5f23693b1d28b00851456f0",
+  "image": { "width": 1440, "height": 900 },
+  "opaquePanel": { "width": 750, "height": 470 },
   "nativeShadowInset": 15,
-  "outerWindow": { "width": 1068, "height": 611 },
-  "measurement": "Keep the pre-resize visible frame and native shadow. Only smaller player viewports may clamp the window; tab styling and native page sizes remain unchanged."
+  "outerWindow": { "width": 780, "height": 500 },
+  "nativePageWidth": 568,
+  "horizontalPageGutter": 91,
+  "minimumWideAspectRatio": 1.5,
+  "measurement": "Layout target for removing the cyan-marked side bands in the existing-window screenshot, not a pixel measurement of that screenshot. Keep the native form size; reduce equal outer gutters from 235 to 91 px and retain a clearly wide rectangular frame. Smaller viewports may clamp it."
 }

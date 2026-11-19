@@ -5885,13 +5885,13 @@ Window {
                           && rebuiltWindow.contains(QStringLiteral("onClicked:{fChangeSelectedSetting(index);forceActiveFocus()}"))
                           && rebuiltWindow.contains(QStringLiteral("onVisibleChanged:if(visible&&transientParent)"))
                           && rebuiltWindow.contains(QStringLiteral("var t=transientParent"))
-                          && rebuiltWindow.contains(QStringLiteral("width=Math.min(t.width*.96,1068)"))
-                          && rebuiltWindow.contains(QStringLiteral("height=Math.min(t.height*.94,611)"))
+                          && rebuiltWindow.contains(QStringLiteral("width=Math.min(t.width*.96,780)"))
+                          && rebuiltWindow.contains(QStringLiteral("height=Math.min(t.height*.94,500)"))
                           && rebuiltWindow.contains(QStringLiteral("x=(t.width-width)/2+t.x"))
                           && rebuiltWindow.contains(QStringLiteral("y=(t.height-height)/2+t.y"))
                           && rebuiltWindow.contains(QStringLiteral("iSettingsWindow.startSystemMove()"))
                           && rebuiltWindow.contains(QStringLiteral("asset:'CloseIcon'")),
-                      QStringLiteral("the rebuilt %1 Settings panel keeps the previously approved size and tints selected tabs/icons while preserving native pages, selection, dragging, and close behavior")
+                      QStringLiteral("the rebuilt %1 Settings panel trims the marked side space, stays wide and tints selected tabs/icons while preserving native pages, selection, dragging, and close behavior")
                           .arg(QFileInfo(input).fileName()));
                 QString expectedLogoSource;
                 for (const auto &entry : EmbeddedResources::list(original, true)) {

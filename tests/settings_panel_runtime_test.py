@@ -311,8 +311,8 @@ assert helper_match, "Could not find the compact Settings-window geometry helper
 helper = helper_match.group(1)
 assert "onVisibleChanged:if(visible&&transientParent)" in helper
 assert "var t=transientParent" in helper
-assert "width=Math.min(t.width*.96,1068)" in helper
-assert "height=Math.min(t.height*.94,611)" in helper
+assert "width=Math.min(t.width*.96,780)" in helper
+assert "height=Math.min(t.height*.94,500)" in helper
 assert "x=(t.width-width)/2+t.x" in helper
 assert "y=(t.height-height)/2+t.y" in helper
 replacement = replacement.replace("@@BSI_HIDDEN_TABS@@", "[]")
@@ -517,8 +517,8 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
     assert not missing, f"Missing controls: {missing}; found object names: {found_names}"
     panel_center = panel.mapToItem(window.contentItem(), QPointF(panel.width() / 2, panel.height() / 2))
     assert abs(panel_center.x() - window.width() / 2) < 2 and abs(panel_center.y() - window.height() / 2) < 2, "The compact Settings shell should stay centered in the player window"
-    assert abs(obj.width() - 1068) < 2 and abs(obj.height() - 611) < 2, "Settings must retain the previously approved size, including the native shadow allowance"
-    assert abs(obj.x() - 216) < 2 and abs(obj.y() - 144.5) < 2, "The screenshot-sized Settings window should remain centered"
+    assert abs(obj.width() - 780) < 2 and abs(obj.height() - 500) < 2, "Settings must trim the marked side space while retaining the native shadow allowance"
+    assert abs(obj.x() - 360) < 2 and abs(obj.y() - 200) < 2, "The screenshot-sized Settings window should remain centered"
     title_center = settings_title.mapToItem(obj, QPointF(settings_title.width() / 2, settings_title.height() / 2))
     assert abs(title_center.x() - obj.width() / 2) < 2, "The Settings title should be centered in the title bar"
     # Gaps: one spacing value for the whole strip, so the distance between any

@@ -100,13 +100,15 @@ while depth:
 assert "id: iSettingsWindowShadowContainer" in masked[start:end]
 shell = re.search(r'QString replacement = QStringLiteral\(R"QML\((.*?)\)QML"\);', CPP, re.S)[1]
 helper = re.search(r'const QString helper = QStringLiteral\(R"QML\((.*?)\)QML"\);', CPP, re.S)[1]
-# Pin the previously approved size independently of the generated shell.
-# The user undid the latest resize without reverting the tab styling.
+# Pin the annotated side-gutter request independently of the generated shell.
+# Tightening the frame must not stretch the native form or make it square.
 size_reference = json.loads((REPO / "tests/fixtures/settings-window-size-reference.json").read_text())
 panel, outer = size_reference["opaquePanel"], size_reference["outerWindow"]
 for dimension in ("width", "height"):
     assert panel[dimension] + 2 * size_reference["nativeShadowInset"] == outer[dimension]
-assert (panel["width"], panel["height"]) == (1038, 581)
+assert (panel["width"], panel["height"]) == (750, 470)
+assert panel["width"] == size_reference["nativePageWidth"] + 2 * size_reference["horizontalPageGutter"]
+assert panel["width"] / panel["height"] >= size_reference["minimumWideAspectRatio"]
 assert f"width=Math.min(t.width*.96,{outer['width']})" in helper
 assert f"height=Math.min(t.height*.94,{outer['height']})" in helper
 rebuilt = stock[:start] + shell + stock[end:]
