@@ -7,7 +7,8 @@ so restricted API clients needn't download an external log-storage URL.
 import subprocess
 import sys
 
-result = subprocess.run(["ctest", *sys.argv[1:]], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+command = sys.argv[2:] if sys.argv[1:2] == ["--command"] else ["ctest", *sys.argv[1:]]
+result = subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
 print(result.stdout, end="", flush=True)
 if result.returncode:
     message = result.stdout[-24000:].replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")

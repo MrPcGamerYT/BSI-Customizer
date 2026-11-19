@@ -40,7 +40,7 @@ jobs:
       - name: Sanitized routing and native Vulkan pixel tests
         run: |
           cmake -S tests/shaders -B build-shader-tests -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_FLAGS='-Wall -Wextra -Werror -pedantic -fsanitize=address,undefined -fno-omit-frame-pointer'
-          cmake --build build-shader-tests --parallel 2
+          python3 tests/shaders/run_ci_tests.py --command cmake --build build-shader-tests --parallel 2
           python3 tests/shaders/run_ci_tests.py --test-dir build-shader-tests --output-on-failure --timeout 60
       - name: Production GLES pipeline pixels and state restoration
         run: python3 tests/shaders_gpu_test.py

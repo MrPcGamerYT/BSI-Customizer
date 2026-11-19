@@ -7,6 +7,8 @@
 namespace BsiShaders {
 using Microsoft::WRL::ComPtr;
 struct D3d12Pipeline::Impl {
+    // First member is destroyed last, after the DLL's COM objects.
+    struct Library {HMODULE handle=nullptr;~Library(){if(handle)FreeLibrary(handle);}} library;
     ComPtr<ID3D12Device> native;
     ComPtr<ID3D12CommandQueue> queue;
     ComPtr<ID3D11Device> device;
@@ -27,13 +29,12 @@ bool D3d12Pipeline::initialize(ID3D12Device *device,ID3D12CommandQueue *queue,st
     if(desc.Type!=D3D12_COMMAND_LIST_TYPE_DIRECT||desc.NodeMask>1||FAILED(queue->GetDevice(IID_PPV_ARGS(&owner)))||owner.Get()!=device){
         *error="The captured DirectX 12 queue is not the game's compatible direct queue; shaders bypassed.";return false;
     }
-    HMODULE module=LoadLibraryExW(L"d3d11.dll",nullptr,LOAD_LIBRARY_SEARCH_SYSTEM32);
-    if(!module){*error="Windows D3D11On12 is unavailable; the DirectX 12 frame was not changed.";return false;}
-    const auto create=reinterpret_cast<PFN_D3D11ON12_CREATE_DEVICE>(reinterpret_cast<void*>(GetProcAddress(module,"D3D11On12CreateDevice")));
-    if(!create){FreeLibrary(module);*error="Windows D3D11On12 entry point is unavailable.";return false;}
+    p.library.handle=LoadLibraryExW(L"d3d11.dll",nullptr,LOAD_LIBRARY_SEARCH_SYSTEM32);
+    if(!p.library.handle){*error="Windows D3D11On12 is unavailable; the DirectX 12 frame was not changed.";return false;}
+    const auto create=reinterpret_cast<PFN_D3D11ON12_CREATE_DEVICE>(reinterpret_cast<void*>(GetProcAddress(p.library.handle,"D3D11On12CreateDevice")));
+    if(!create){*error="Windows D3D11On12 entry point is unavailable.";return false;}
     IUnknown *queues[]{queue};
     const auto hr=create(device,D3D11_CREATE_DEVICE_BGRA_SUPPORT,nullptr,0,queues,1,0,&p.device,&p.context,nullptr);
-    FreeLibrary(module);
     if(FAILED(hr)||FAILED(p.device.As(&p.on12))){*error="Could not create an isolated shader device on the game's DirectX 12 queue.";return false;}
     p.native=device;p.queue=queue;
     p.ready=p.shaders.initialize(p.device.Get(),error);return p.ready;

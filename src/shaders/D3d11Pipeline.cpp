@@ -69,10 +69,13 @@ bool D3d11Pipeline::initialize(ID3D11Device *device,std::string *error){
     if(!result(p.device->CreateDeviceContextState(0,&level,1,D3D11_SDK_VERSION,__uuidof(ID3D11Device),&chosen,&p.state),"CreateDeviceContextState",error))return false;
     // Load the OS compiler only when DirectX is actually used. An OpenGL or
     // Vulkan player does not acquire an unnecessary d3dcompiler dependency.
-    HMODULE compiler=LoadLibraryExW(L"d3dcompiler_47.dll",nullptr,LOAD_LIBRARY_SEARCH_SYSTEM32);
-    if(!compiler){*error="Windows shader compiler d3dcompiler_47.dll is unavailable; DirectX effects bypassed.";return false;}
-    const auto compile=reinterpret_cast<pD3DCompile>(reinterpret_cast<void*>(GetProcAddress(compiler,"D3DCompile")));
-    if(!compile){FreeLibrary(compiler);*error="Windows shader compiler entry point is unavailable.";return false;}
+    // Compiler blobs have DLL-owned COM vtables. Keep the library loaded until
+    // AFTER every blob is released, not just until D3DCompile returns.
+    struct Library {HMODULE handle;~Library(){if(handle)FreeLibrary(handle);}};
+    Library compiler{LoadLibraryExW(L"d3dcompiler_47.dll",nullptr,LOAD_LIBRARY_SEARCH_SYSTEM32)};
+    if(!compiler.handle){*error="Windows shader compiler d3dcompiler_47.dll is unavailable; DirectX effects bypassed.";return false;}
+    const auto compile=reinterpret_cast<pD3DCompile>(reinterpret_cast<void*>(GetProcAddress(compiler.handle,"D3DCompile")));
+    if(!compile){*error="Windows shader compiler entry point is unavailable.";return false;}
     const auto build=[&](const std::string &text,const char *profile,ComPtr<ID3DBlob> *code){
         ComPtr<ID3DBlob> log;
         const auto hr=compile(text.data(),text.size(),"BSI original shared effect",nullptr,nullptr,"main",profile,D3DCOMPILE_ENABLE_STRICTNESS|D3DCOMPILE_OPTIMIZATION_LEVEL3,0,code->GetAddressOf(),&log);
@@ -80,7 +83,7 @@ bool D3d11Pipeline::initialize(ID3D11Device *device,std::string *error){
     };
     ComPtr<ID3DBlob> vertex,fragment;
     const bool compiled=build(hlslVertexSource(),"vs_4_0",&vertex)&&build(hlslFragmentSource(),"ps_4_0",&fragment);
-    FreeLibrary(compiler);if(!compiled)return false;
+    if(!compiled)return false;
     if(!result(device->CreateVertexShader(vertex->GetBufferPointer(),vertex->GetBufferSize(),nullptr,&p.vertex),"CreateVertexShader",error)
        ||!result(device->CreatePixelShader(fragment->GetBufferPointer(),fragment->GetBufferSize(),nullptr,&p.fragment),"CreatePixelShader",error))return false;
     D3D11_SAMPLER_DESC sampling{};sampling.Filter=D3D11_FILTER_MIN_MAG_LINEAR_MIP_POINT;
