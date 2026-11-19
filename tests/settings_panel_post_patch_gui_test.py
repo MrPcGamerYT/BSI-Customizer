@@ -18,13 +18,23 @@ import tempfile
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("QT_QUICK_BACKEND", "software")
-os.environ.setdefault("QSG_RHI_BACKEND", "software")
+if os.environ.get("BSI_TEST_QT_API") != "PyQt5":
+    os.environ.setdefault("QSG_RHI_BACKEND", "software")
 
-from PySide6.QtCore import QMetaObject, QPointF, Qt
-from PySide6.QtGui import QColor, QFont, QFontMetricsF, QGuiApplication, QImage
-from PySide6.QtQml import QQmlComponent, QQmlEngine, QQmlExpression
-from PySide6.QtQuick import QQuickItem, QQuickWindow
-from PySide6.QtTest import QTest
+# Use a separate interpreter process for each Qt generation; never load both
+# bindings in one process. CI exercises the exact same assertions with each.
+if os.environ.get("BSI_TEST_QT_API") == "PyQt5":
+    from PyQt5.QtCore import QMetaObject, QPointF, Qt
+    from PyQt5.QtGui import QColor, QFont, QFontMetricsF, QGuiApplication, QImage
+    from PyQt5.QtQml import QQmlComponent, QQmlEngine, QQmlExpression
+    from PyQt5.QtQuick import QQuickItem, QQuickWindow
+    from PyQt5.QtTest import QSignalSpy, QTest
+else:
+    from PySide6.QtCore import QMetaObject, QPointF, Qt
+    from PySide6.QtGui import QColor, QFont, QFontMetricsF, QGuiApplication, QImage
+    from PySide6.QtQml import QQmlComponent, QQmlEngine, QQmlExpression
+    from PySide6.QtQuick import QQuickItem, QQuickWindow
+    from PySide6.QtTest import QSignalSpy, QTest
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
 CPP = (REPO / "src/core/SettingsPanelPatcher.cpp").read_text(encoding="utf-8")
@@ -107,12 +117,12 @@ Item {
         Column {
             id: form; width: parent.width; spacing: 14
             Repeater {
-                model: ["CPU allocation", "Memory allocation", "Performance mode", "Graphics renderer", "Other setting"]
+                model: ["CPU allocation", "Memory allocation", "Performance mode", "Graphics renderer", "Frame rate", "High frame rate", "VSync", "Texture quality", "Other setting"]
                 Column {
                     width: parent.width; spacing: 6
                     Text { text: modelData; color: "#e8edf5" }
                     Rectangle {
-                        objectName: index === 4 ? "runtimeLastControl" : ""
+                        objectName: index === 8 ? "runtimeLastControl" : ""
                         width: Math.min(200, parent.width); height: 34
                         color: "#1b2838"
                     }
@@ -164,17 +174,20 @@ def main():
         host = root / "SettingsHost.qml"
         host.write_text("""import QtQuick 2.15
 import QtQuick.Window 2.15
+import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
 import BsiGuiFixture 1.0
 Window {
     id: iSettingsWindow
-    width: 806; height: 464; visible: false; color: "transparent"
+    width: 1068; height: 611; visible: false; color: "transparent"
     transientParent: fixturePlayer
     property int pCurrentTabIndex: 0
     property var testIcons: ({})
     property var tabData: %s
     property QtObject pSettingsItems: QtObject { property var pSettingElements: iSettingsWindow.tabData }
     property int testFontSize: 17
+    property color testAccent: "#54c8ff"
+    onTestAccentChanged: UiTheme.colors.subWindowHeaderClick = testAccent
     property bool testItalic: false
     function updateFont() { UiTheme.fonts.bodyLarge = Qt.font({pixelSize:testFontSize,italic:testItalic}) }
     onTestFontSizeChanged: updateFont()
@@ -239,13 +252,16 @@ Window {
                 visible.append((origin, slot.width(), slot))
                 inks.append((origin + left, origin + right))
                 has_icon = bool(icons.get(str(index)))
-                images = [i for i in slot.childItems() if prop(i, "source") is not None]
-                assert len(images) == 1
-                image = images[0]
+                images = [i for i in visual_items(slot) if prop(i, "source") is not None]
+                # Controls creates its internal IconImage lazily, only when a
+                # source exists. Inspect that painted image, not the Button API.
                 if has_icon:
-                    assert image.width() == image.height() == 18
-                    assert abs(image.x() + 9 - slot.width() / 2) < EPSILON
-                    assert label.y() == 0 and label.height() <= image.y() + EPSILON, f"{text}: label overlaps its icon"
+                    assert len(images) == 1
+                    image = images[0]
+                    assert image.width() == image.height() == 18, \
+                        f"{text}: actual icon is {image.width()}x{image.height()}, not 18x18"
+                    assert abs(image.mapToItem(slot, QPointF(9, 0)).x() - slot.width() / 2) < EPSILON
+                    assert label.y() == 0 and label.height() <= image.mapToItem(slot, QPointF(0, 0)).y() + EPSILON, f"{text}: label overlaps its icon"
                     decoded = QQmlExpression(engine.rootContext(), image, "status === 1")
                     result = decoded.evaluate()
                     assert not decoded.hasError() and (result[0] if isinstance(result, tuple) else result), "tab icon did not decode"
@@ -255,8 +271,16 @@ Window {
                 assert len(badges) == 1 and badges[0].isVisible() == (index % 4 == 2)
                 if badges[0].isVisible():
                     assert right < badges[0].x() and badges[0].x() + 6 <= slot.width(), "badge shifted or covered the label"
-                expected = "#54c8ff" if index == window.property("pCurrentTabIndex") else "#d2dae4"
+                selected = index == window.property("pCurrentTabIndex")
+                expected = window.property("testAccent") if selected else QColor("#d2dae4")
                 assert label.property("color") == QColor(expected), "native selected-tab colours were lost"
+                highlights = [i for i in slot.childItems() if prop(i, "radius") == 6]
+                assert len(highlights) == 1, "each tab needs exactly one soft selection surface"
+                highlight = highlights[0]
+                expected_opacity = .2 if selected else .1 if slot.property("containsMouse") else 0
+                assert abs(highlight.opacity() - expected_opacity) < EPSILON
+                assert highlight.property("color") == label.property("color")
+                assert highlight.size() == slot.size(), "selection must not alter tab bounds or neighbouring gaps"
             for (x, width, _), (next_x, _, _) in zip(visible, visible[1:]):
                 assert abs(next_x - x - width - 4) < EPSILON, f"uneven hit-target gap: {next_x - x - width} (x={x}, width={width}, next={next_x})"
             for (_, right), (next_left, _) in zip(inks, inks[1:]):
@@ -274,11 +298,11 @@ Window {
             right_gutter = surface_origin.x() + surface.width() - page_origin.x() - page.width()
             assert abs(left_gutter - right_gutter) < EPSILON, "page gutters must be symmetric"
             assert abs(left_gutter - (surface.width() - page.width()) / 2) < EPSILON
-            if window.width() == 806 and window.height() == 464 and shell_root.property("shadowThickness") == 15:
-                assert abs(surface.width() - 776) < EPSILON, "visible width must match the screenshot border"
-                assert abs(surface.height() - 434) < EPSILON, "visible height must match the screenshot border"
+            if window.width() == 1068 and window.height() == 611 and shell_root.property("shadowThickness") == 15:
+                assert abs(surface.width() - 1038) < EPSILON, "visible width must match the screenshot border"
+                assert abs(surface.height() - 581) < EPSILON, "visible height must match the screenshot border"
                 assert abs(page.width() - 568) < EPSILON, "resizing the window must not stretch native controls"
-                assert abs(left_gutter - 104) < EPSILON
+                assert abs(left_gutter - 235) < EPSILON
             expected_top = surface_origin.y() + (112 if visible else 68)
             assert abs(page_origin.y() - expected_top) < EPSILON, f"wrong page position: {page_origin.y()}"
             assert abs(page.height() - (surface.height() - 130)) < EPSILON, "top padding changed the footer clearance"
@@ -296,6 +320,54 @@ Window {
             assert save_origin.y() + save.height() <= page.height(), "Save changes was clipped by the compact window"
             return text_items
 
+        def rendered_frame():
+            # Qt 5's software backend cannot grabWindow(), but its documented
+            # asynchronous item capture renders the exact same scene to a PNG.
+            capture = content.grabToImage()
+            assert capture is not None
+            ready = QSignalSpy(capture.ready)
+            if capture.image().isNull():
+                assert ready.wait(2000), "the real Qt scene did not finish rendering"
+            frame = capture.image()
+            assert not frame.isNull(), "the real Qt scene did not render"
+            return frame
+
+        def check_selection_paint(labels, icons):
+            # Assert the pixels of the ACTUAL Controls icon image, not merely an
+            # icon.color binding or a coloured rectangle behind an unchanged PNG.
+            frame = rendered_frame()
+            checked = 0
+            for index, text in enumerate(LABELS):
+                slot = labels[text].parentItem()
+                source = icons.get(str(index))
+                if not slot.isVisible() or not source:
+                    continue
+                image = next(i for i in visual_items(slot) if prop(i, "source") is not None)
+                point = image.mapToScene(QPointF(9, 9))
+                strip_point = image.mapToItem(strip, QPointF(9, 9))
+                if not 0 <= strip_point.x() < strip.width():
+                    continue
+                selected = index == window.property("pCurrentTabIndex")
+                expected = (QColor(window.property("testAccent")) if selected
+                            else QColor("#cc77ff" if source == custom_url else "#33dd77"))
+                painted = frame.pixelColor(round(point.x()), round(point.y()))
+                assert painted == expected, f"{text}: selected/custom icon pixels are {painted.name()}, expected {expected.name()}"
+                checked += 1
+                # Sample the pill in the label's left padding, clear of glyphs,
+                # the centered icon, notification dot and rounded corners.
+                point = slot.mapToScene(QPointF(5, 22))
+                if 0 <= slot.mapToItem(strip, QPointF(5, 22)).x() < strip.width():
+                    opacity = .2 if selected else .1 if slot.property("containsMouse") else 0
+                    foreground = labels[text].property("color")
+                    background = QColor("#101a27")
+                    actual = frame.pixelColor(round(point.x()), round(point.y()))
+                    for channel in ("red", "green", "blue"):
+                        expected_channel = round(getattr(foreground, channel)() * opacity
+                                                 + getattr(background, channel)() * (1 - opacity))
+                        assert abs(getattr(actual, channel)() - expected_channel) <= 2, \
+                            f"{text}: the selected/hover background was not actually painted"
+            assert checked, "no visible icon pixels were checked"
+
         def fit_player(width, height, inset, x=0, y=0):
             # Execute the real production helper on an actual transient window,
             # not a manually resized scene that could hide a broken size cap.
@@ -304,9 +376,9 @@ Window {
             shell_root.setProperty("shadowThickness", inset)
             window.show()
             QTest.qWait(80)
-            assert abs(window.width() - min(width * .96, 806)) <= 1
-            assert abs(window.height() - min(height * .94, 464)) <= 1
-            assert window.width() <= 806 and window.height() <= 464, "Settings exceeded the screenshot dimensions"
+            assert abs(window.width() - min(width * .96, 1068)) <= 1
+            assert abs(window.height() - min(height * .94, 611)) <= 1
+            assert window.width() <= 1068 and window.height() <= 611, "Settings exceeded the screenshot dimensions"
             assert abs(window.x() + window.width() / 2 - (player.x() + width / 2)) <= 1
             assert abs(window.y() + window.height() / 2 - (player.y() + height / 2)) <= 1
             assert window.x() >= player.x() and window.y() >= player.y()
@@ -321,9 +393,9 @@ Window {
                      (mixed, (0, 1)), (mixed, (10, 11)),
                      (defaults, (0, 3, 4, 11)), (defaults, tuple(range(11))),
                      (defaults, tuple(range(12)))]
-        viewports = [(1440, 900, 0), (1149, 659, 0),
-                     (1440, 900, 15), (1149, 659, 15), (720, 480, 15),
-                     (840, 480, 15), (838, 480, 15),  # both sides of the width-cap breakpoint
+        viewports = [(1440, 900, 0), (1301, 665, 0),
+                     (1440, 900, 15), (1301, 665, 15), (720, 480, 15),
+                     (1114, 652, 15), (1111, 649, 15),  # both sides of the size-cap breakpoints
                      (640, 400, 15), (560, 400, 15)]
         for width, height, inset in viewports:
             fit_player(width, height, inset, x=80, y=50)
@@ -375,26 +447,60 @@ Window {
                 target = tab.x() + tab.width() / 2 - strip.width() / 2
                 strip.setProperty("contentX", max(0, min(target, strip.property("contentWidth") - strip.width())))
                 QTest.qWait(30)
-                point = tab.mapToScene(QPointF(tab.width() / 2, tab.height() / 2)).toPoint()
+                # Alternate full-tab and actual icon-area clicks: the icon's
+                # disabled background-free Button must never swallow selection.
+                point = tab.mapToScene(QPointF(tab.width() / 2, 33 if index % 2 else 12)).toPoint()
                 assert 24 <= point.x() <= window.width() - 24, f"{LABELS[index]} cannot be reached by scrolling"
                 QTest.mouseClick(window, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, point)
                 QTest.qWait(20)
                 assert window.property("pCurrentTabIndex") == index and tab.hasActiveFocus(), \
                     f"{LABELS[index]} lost native selection/focus after the window was tightened"
+                check_selection_paint(labels, defaults)
             check_layout(LABELS, defaults)
+
+        # Hover is weaker than selection, never changes the selected page, and
+        # disappears on exit. Theme updates must reach the label, pill AND icon.
+        fit_player(1301, 665, 15)
+        assert window.setProperty("testIcons", dict(defaults, **{"4": custom_url}))
+        actual_icons = dict(defaults, **{"4": custom_url})
+        strip.setProperty("contentX", 0)
+        labels = check_layout(LABELS, actual_icons)
+        hover_tab = labels["Display"].parentItem()
+        QTest.mouseMove(window, hover_tab.mapToScene(QPointF(hover_tab.width() / 2, 33)).toPoint())
+        QTest.qWait(30)
+        assert hover_tab.property("containsMouse"), "tab hover was not delivered to the real scene"
+        assert window.property("pCurrentTabIndex") == 0, "hover must not change the native selected page"
+        check_layout(LABELS, actual_icons)
+        check_selection_paint(labels, actual_icons)
+        QTest.mouseMove(window, surface.mapToScene(QPointF(12, 12)).toPoint())
+        QTest.qWait(30)
+        assert not hover_tab.property("containsMouse"), "hover highlight stuck after pointer exit"
+        check_selection_paint(labels, actual_icons)
+        for index in (4, 0):
+            tab = labels[LABELS[index]].parentItem()
+            QTest.mouseClick(window, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier,
+                             tab.mapToScene(QPointF(tab.width() / 2, 33)).toPoint())
+            QTest.qWait(30)
+            assert window.property("pCurrentTabIndex") == index
+            check_selection_paint(labels, actual_icons)
+        assert window.setProperty("testAccent", QColor("#f59e0b"))
+        QTest.qWait(30)
+        check_layout(LABELS, actual_icons)
+        check_selection_paint(labels, actual_icons)
+        assert window.setProperty("testAccent", QColor("#54c8ff"))
         assert not re.search(r"color:\s*[\"']#", SHELL), "the shell must use the player's native palette"
         assert not warnings, "QML runtime warnings:\n" + "\n".join(warnings)
         if len(sys.argv) > 1:
             fit_player(1440, 900, 15)
             strip.setProperty("contentX", 0)
             QTest.qWait(80)
-            assert window.grabWindow().save(sys.argv[1]), "could not save the actual Qt scene"
+            assert rendered_frame().save(sys.argv[1]), "could not save the actual Qt scene"
         window.setVisible(False)
         window.deleteLater()
         player.deleteLater()
         QTest.qWait(10)
         engine.deleteLater()
-    print("PASS: screenshot-matched 776x434 visible Settings frame (806x464 with native shadow); centred and viewport-safe; unchanged native controls, theme, twelve tab labels/icons, 12 px page gap, Save changes and scrolling")
+    print("PASS: screenshot-matched 1038x581 visible Settings frame (1068x611 with native shadow); themed selected-tab background/label/icon, quieter hover, custom colours restored, twelve centred tabs, uniform gaps, native page/footer and scrolling")
     return 0
 
 

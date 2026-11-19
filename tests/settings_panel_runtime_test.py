@@ -66,19 +66,18 @@ match = re.search(
 )
 assert match, "Could not find the generated Settings-window QML template"
 replacement = match.group(1)
-assert "BSI v15" in replacement
+assert "BSI v16" in replacement
 assert "pSettingsItems.pSettingElements" in replacement
-assert "property var bHidden" in replacement
 # The About page publishes the hidden-tab list and the icon map to the shell.
 # It must find that shell by walking up: counting parents landed on the window
 # instead of the UiShadowContainer, which threw
 # "Cannot assign to non-existent property bHidden" and silently dropped every
 # custom tab icon (the file applied, nothing ever showed).
-assert "function fOnQmlLoaded(){var p=parent;while(p&&p.bIcons===undefined)p=p.parent;if(p){p.bHidden=bsiHiddenTabs;p.bIcons=bsiTabIcons}}" in cpp, \
+assert "function fOnQmlLoaded(){var p=parent;while(p&&p.bIcons===undefined)p=p.parent;if(p)p.bIcons=bsiTabIcons}" in cpp, \
     "the About page must walk up to the shell, not count parents"
-# ...and the shell has to declare both of those properties, or the assignment
-# above has nowhere to land.
-assert "property var bHidden" in replacement, "the shell must declare bHidden"
+# One map now carries both icons and hidden sentinels. Retiring the unused
+# bHidden channel buys room for the selection effect in legacy resource slots.
+assert "property var bHidden" not in replacement, "hidden sentinels use the single icon-map channel"
 assert "property var bIcons:({})" in replacement, "the shell must declare bIcons"
 assert "property var bsiHiddenTabs:@@BSI_HIDDEN_TABS@@" in cpp
 # A tab icon may only be an SVG: validateAssetBytes() rejects any other MIME for
@@ -106,7 +105,7 @@ assert "MouseArea{anchors.fill:parent;onPressed:iSettingsWindow.startSystemMove(
 assert "anchors.centerIn:parent" in replacement, \
     "the title must be centred in the header band"
 assert "ListView{width:Math.max(0,Math.min(contentWidth,r.width-48));height:44" in replacement
-assert "orientation:ListView.Horizontal;model:pSettingsItems.pSettingElements" in replacement
+assert "orientation:Qt.Horizontal;model:pSettingsItems.pSettingElements" in replacement
 # The strip spans the shell with a symmetric 24 px inset so the first and last
 # tabs sit equally far from the window edge.
 assert "x:(r.width-width)/2" in replacement, \
@@ -175,12 +174,12 @@ assert ";spacing:4" in replacement, \
     "all hit-target gaps must be exactly 4 px (all label gaps exactly 26 px)"
 assert "y:c?0:22-height/2" in replacement, \
     "labels must be centred vertically or lifted above their icon"
-assert "Image{source:c||'';width:18;height:18;x:parent.width/2-9;y:24}" in replacement
+assert "ToolButton{width:18;height:18;x:parent.width/2-9;y:24;enabled:false;padding:0;background:null;icon.source:c||'';icon.color:index==pCurrentTabIndex?t.color:'transparent';icon.width:18;icon.height:18}" in replacement
 # The badge must not shift the label, and the full padded tab remains clickable.
 assert "x:parent.width-8;y:t.y+6;width:6;height:6" in replacement
 assert "visible:modelData.pShowRedDot" in replacement
 assert "onClicked:{fChangeSelectedSetting(index);forceActiveFocus()}" in replacement
-assert "delegate:MouseArea{visible:c!=='';" in replacement, \
+assert "delegate:MouseArea{hoverEnabled:true;visible:c!=='';" in replacement, \
     "a hidden tab must neither paint nor intercept clicks"
 # A hidden tab has to leave the strip *without leaving a gap behind*. Publishing
 # bHidden into the shell did nothing at all, because no strip delegate ever read
@@ -196,23 +195,25 @@ assert "clip:true" in replacement, \
 
 # Every category must stay reachable by scrolling when the strip overflows.
 assert "item.anchors.fill=item.parent" in replacement
-# The page keeps the native, centred 568 px column it has always used. It is
-# NOT wrapped in a card and the shell paints no pill or underline behind the
-# selected tab: that redesign was rejected, the flat window is what ships.
+# The native page is still a flat centred column, not an extra content card.
+# The latest request explicitly adds a selected-tab effect, including its icon.
 assert "Item{width:Math.min(r.width-48,568);x:(r.width-width)/2;height:r.height-118" in replacement, \
     "the page host must leave room for the footer inside the rounded window"
-assert "border.color" not in replacement and "radius:12" not in replacement, \
-    "the rejected card must not come back"
-assert "visible:s" not in replacement, \
-    "the rejected underline/pill must not come back"
-assert "Rectangle{id:r;property var q:UiTheme.colors;anchors.fill:parent;color:r.q.primary80;radius:14" in replacement, \
+assert "radius:12" not in replacement, "do not wrap the native page in a new card"
+assert "Rectangle{anchors.fill:parent;radius:6;color:t.color;opacity:index==pCurrentTabIndex?.2:parent.containsMouse?.1:0}" in replacement, \
+    "selection and quieter hover must use the label's native theme colour"
+assert "icon.color:index==pCurrentTabIndex?t.color:'transparent'" in replacement, \
+    "tint the actual selected icon and preserve custom colours when deselected"
+assert "GraphicalEffects" not in replacement and "ShaderEffect" not in replacement, \
+    "selection must work on both player Qt generations without optional effects"
+assert "Rectangle{id:r;property var q:UiTheme.colors;anchors.fill:parent;radius:14;color:r.q.primary80" in replacement, \
     "the window itself stays a single flat rounded surface"
 assert "StackLayout{id:iSelectedSettingControl;anchors.fill:parent;currentIndex:pCurrentTabIndex" in replacement
 # Keep a coarse template-bloat guard, but this is not proof that the compressed
 # whole window fits: native callbacks/prefix and compression entropy matter too.
 # settings_panel_window_budget_test reconstructs the complete 2468-byte legacy
 # resource, including the original native prefix and the geometry helper.
-assert len(replacement.encode()) <= 1762, (
+assert len(replacement.encode()) <= 1976, (
     f"shell grew to {len(replacement.encode())} bytes; the tightest known "
     "UiSettingsWindow.qml slot is 2468 bytes"
 )
@@ -308,8 +309,8 @@ assert helper_match, "Could not find the compact Settings-window geometry helper
 helper = helper_match.group(1)
 assert "onVisibleChanged:if(visible&&transientParent)" in helper
 assert "var t=transientParent" in helper
-assert "width=Math.min(t.width*.96,806)" in helper
-assert "height=Math.min(t.height*.94,464)" in helper
+assert "width=Math.min(t.width*.96,1068)" in helper
+assert "height=Math.min(t.height*.94,611)" in helper
 assert "x=t.x+t.width/2-width/2" in helper
 assert "y=t.y+t.height/2-height/2" in helper
 replacement = replacement.replace("@@BSI_HIDDEN_TABS@@", "[]")
@@ -514,8 +515,8 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
     assert not missing, f"Missing controls: {missing}; found object names: {found_names}"
     panel_center = panel.mapToItem(window.contentItem(), QPointF(panel.width() / 2, panel.height() / 2))
     assert abs(panel_center.x() - window.width() / 2) < 2 and abs(panel_center.y() - window.height() / 2) < 2, "The compact Settings shell should stay centered in the player window"
-    assert abs(obj.width() - 806) < 2 and abs(obj.height() - 464) < 2, "Settings must match the screenshot frame, including the native shadow allowance"
-    assert abs(obj.x() - 347) < 2 and abs(obj.y() - 218) < 2, "The screenshot-sized Settings window should remain centered"
+    assert abs(obj.width() - 1068) < 2 and abs(obj.height() - 611) < 2, "Settings must match the screenshot frame, including the native shadow allowance"
+    assert abs(obj.x() - 216) < 2 and abs(obj.y() - 144.5) < 2, "The screenshot-sized Settings window should remain centered"
     title_center = settings_title.mapToItem(obj, QPointF(settings_title.width() / 2, settings_title.height() / 2))
     assert abs(title_center.x() - obj.width() / 2) < 2, "The Settings title should be centered in the title bar"
     # Gaps: one spacing value for the whole strip, so the distance between any
@@ -745,10 +746,8 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
         published_icons = published_icons.toVariant()
     assert isinstance(published_icons, dict) and published_icons.get("0"), \
         f"The About page did not publish its tab icons to the shell (got {published_icons!r})"
-    published_hidden = shell_root.property("bHidden")
-    if hasattr(published_hidden, "toVariant"):
-        published_hidden = published_hidden.toVariant()
-    assert published_hidden == [], "The About page did not publish its hidden-tab list"
+    assert shell_root.metaObject().indexOfProperty("bHidden") < 0, \
+        "the unused hidden-list channel must not return; hidden sentinels are tested below"
     published_icon = published_icons["0"]
     assert published_icon.startswith("data:image/svg+xml;base64,"), \
         "The published tab icon must be a self-contained SVG data URI"

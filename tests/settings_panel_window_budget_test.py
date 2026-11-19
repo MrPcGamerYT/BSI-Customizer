@@ -46,6 +46,48 @@ def compact_indentation(qml):
     return "".join(result)
 
 
+def compact_whitespace(qml):
+    # Mirror QmlText::compactWhitespace, including its conservative bailouts.
+    if "`" in qml:
+        return qml
+    masked = mask(qml)
+    if "/" in masked:
+        return qml
+    separators, operators, operator_chars = "(){}[]:;,", "=!<>&|", "=!<>+-*/%&|^~?."
+    result, line_start, i = [], True, 0
+    while i < len(qml):
+        char = qml[i]
+        if char in " \t" and masked[i] == char:
+            end = i + 1
+            while end < len(qml) and qml[end] in " \t" and masked[end] == qml[end]:
+                end += 1
+            left = masked[i - 1] if i else "\0"
+            right = masked[end] if end < len(qml) else "\0"
+            beside_separator = left in separators or right in separators
+            beside_operator = ((left in operators or right in operators)
+                               and not (left in operator_chars and right in operator_chars))
+            if not (line_start or beside_separator or beside_operator):
+                result.append(qml[i:end])
+                line_start = False
+            i = end
+            continue
+        result.append(char)
+        line_start = char in "\r\n"
+        i += 1
+    return "".join(result)
+
+
+def lexical_tokens(qml):
+    # Comments/literals are indivisible. Maximal operators catch accidental
+    # token joins (+ + -> ++, = = -> ==), not just equal non-whitespace bytes.
+    tokens = re.compile(r'//[^\n]*|/\*.*?\*/|"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\''
+                        r'|[A-Za-z_$][\w$]*|\d+(?:\.\d+)?'
+                        r'|===|!==|==|!=|<=|>=|&&|\|\||\+\+|--|\+=|-=|=>|<<|>>|\?\.'
+                        r'|[^\s]', re.S)
+    return [re.sub(r"(?m)^[ \t]+", "", t[0]) if t[0].startswith("/") else t[0]
+            for t in tokens.finditer(qml)]
+
+
 stock = RAW.decode("utf-8")  # Do not normalise the fixture's original CRLF.
 masked = mask(stock)
 objects = list(re.finditer(r"\bUiShadowContainer\s*\{", masked))
@@ -62,14 +104,14 @@ rebuilt = stock[:start] + shell + stock[end:]
 close = rebuilt.rfind("\n}")
 assert close >= 0
 rebuilt = rebuilt[:close] + helper + rebuilt[close:]
-assert "QString out = QmlText::compactIndentation(stock.left(target.nameBegin));" in CPP, "compact the native prefix as well as keeping the generated shell small"
-compact = compact_indentation(stock[:start]) + shell + stock[end:]
+assert "QString out = QmlText::compactWhitespace(stock.left(target.nameBegin));" in CPP, "compact the native prefix as well as keeping the generated shell small"
+compact = compact_whitespace(stock[:start]) + shell + stock[end:]
 compact_close = compact.rfind("\n}")
 compact = compact[:compact_close] + helper + compact[compact_close:]
-assert compact_indentation(compact_indentation(stock[:start])) == compact_indentation(stock[:start])
-# Every token, callback, string, notice and line ending remains; only leading
-# horizontal whitespace outside strings may disappear.
-assert re.sub(r"(?m)^[ \t]+", "", rebuilt) == re.sub(r"(?m)^[ \t]+", "", compact)
+assert compact_whitespace(compact_whitespace(stock[:start])) == compact_whitespace(stock[:start])
+# Every token, callback, string, notice and line ending remains; only redundant
+# horizontal whitespace outside strings/comments may disappear.
+assert lexical_tokens(rebuilt) == lexical_tokens(compact)
 assert compact.count("\n") == rebuilt.count("\n")
 assert compact.count("\r") == rebuilt.count("\r")
 for token in ("Copyright (C)", "All Rights Reserved", "fChangeSelectedSetting", "fSwitchSettingPanel",
@@ -95,4 +137,13 @@ assert compact_indentation(template) == template
 regex = "  QtObject { function f() { return /'/g; } property string t: 'first\\\n    second' }\n"
 assert compact_indentation(regex) == regex
 assert compact_indentation("  Item { width: 100 / 2 }\n") == "  Item { width: 100 / 2 }\n"
-print(f"PASS: complete legacy Settings window fits its real qCompress slot ({after}/2468 bytes, was {before}); native callbacks, notices and literal whitespace survive")
+for original in (quoted, template, regex, "  Item { width: 100 / 2 }\n",
+                 "  QtObject { function f(a, b) { return a + +b - -b } }\r\n",
+                 "  Item { property bool x: 1 < < 2; property bool y: 1 = = 2 }\n",
+                 "  Item { /* : , =  keep notice  */ property string t: ' = { x } ' }\n"):
+    result = compact_whitespace(original)
+    assert lexical_tokens(result) == lexical_tokens(original)
+    assert result.count("\n") == original.count("\n")
+    assert result.count("\r") == original.count("\r")
+    assert compact_whitespace(result) == result
+print(f"PASS: complete legacy Settings window fits its real qCompress slot ({after}/2468 bytes, was {before}); native callbacks, notices, operator tokens and literal whitespace survive")

@@ -29,11 +29,15 @@ To run only the safe-copy backend check and skip opening the GUI, add `-NoLaunch
 
 ## What the rebuilt window should look like
 
-The rebuilt shell (`BSI v15`) keeps the player's own tab model and pages in a flat, rounded window. Only the window dimensions match the latest supplied 1149 × 659 screenshot: its blue frame spans x=187…962 and y=110…543, or **776 × 434 pixels**. Allowing for the unchanged native 15 px transparent shadow on each side gives a cap of **806 × 464 logical pixels** for the Qt window (a 776 × 434 visible frame at 1× scale), centered on the player. Smaller viewports retain the existing 96% width / 94% height clamps. Native pages keep their centered column up to 568 px wide, scrolling and fixed footer. Theme, colors, fonts, icons and tab spacing are unchanged; there is no extra content card or selected-tab pill.
+The rebuilt shell (`BSI v16`) keeps the player's own tab model and pages in a flat, rounded window. The latest supplied **1301 × 665** screenshot has a visible dialog border at approximately x=140…1177 and y=49…629: **1038 × 581 pixels**. Allowing for the unchanged native 15 px transparent shadow on each side gives a cap of **1068 × 611 logical pixels**, centered on the player. This supersedes the previous 776 × 434 reference. Smaller viewports retain the existing 96% width / 94% height clamps; physical pixels scale with the player's DPI.
+
+The user explicitly chose **horizontal top tabs**, not the reference's sidebar. The selected tab now has a soft rounded background, with its label **and actual icon** following the player's selected-tab color (`subWindowHeaderClick`). Hover uses a quieter background without changing selection. Unselected custom icons retain their original colors; selection tints their alpha silhouette without modifying the stored SVG/PNG. The rest of the native palette, fonts, controls and page column (up to 568 px), scrolling, footer and callbacks are retained. There is no additional page-content card. Existing v15 rebuilds remain recognizable for update/restore.
 
 In the patched window, check that:
 
-- the visible frame is 776 × 434 at 1× scale and remains centered at both screenshot-sized player viewports (1440 × 900 and 1149 × 659); only the window size has changed;
+- the visible frame is **1038 × 581** at 1× scale and remains centered at both desktop/reference player viewports (1440 × 900 and 1301 × 665), with the original viewport clamps at smaller sizes;
+- clicking a tab, including directly on its icon, changes the native selection and lights up its background, centered label and actual icon together; hover is weaker, never switches pages, and clears on exit;
+- switching away from a custom-colored icon restores its unselected artwork; changing the player theme also changes the selected tab/label/icon without replacing the window palette;
 - the **Settings** title is centered in the title bar with the close (**X**) button at the top right;
 - the category tabs sit as a single centered, horizontally scrollable row under the title, with **12 px of clear space below the strip before the page begins**; the title-to-tab spacing and native footer position are unchanged;
 - **every label is centered inside its own tab option**, including short labels such as About and long labels such as Game settings; the label and icon share one horizontal center;
@@ -46,9 +50,34 @@ In the patched window, check that:
 
 On a narrow player window the centered page column shrinks with the window (48 px total gutter inside the shadow frame); overflowing tabs remain reachable by scrolling. Long native forms scroll independently while **Save changes** stays visible in the footer. Labels use the player's themed font for both painting and measurement, including glyph side bearings, not an unrelated application font.
 
-The automated `settings_panel_post_patch_gui_test.py` measures the actual generated Text and hit-target geometry for all twelve tabs, with multiple fonts (including italic), translated labels, badges, default/custom/missing icons, consecutive hidden tabs, both screenshot viewport sizes plus narrow players and the width-cap breakpoint, and the player's redirected shadow-container children/insets. It executes the production sizing helper on a real transient window, asserts the screenshot's exact 776 × 434 visible frame inside the native 15 px shadow without stretching the 568 px page, checks symmetric gutters, footer visibility and scroll reachability, and scrolls to and clicks every tab at both desktop and narrow sizes before returning to the first. This is an offscreen Qt Quick test, not a substitute for the live-player check above.
+The automated `settings_panel_post_patch_gui_test.py` runs the **same assertions in Qt 6 and Qt 5**, measuring the actual generated Text and hit targets for all twelve tabs: multiple fonts (including italic), translations, badges, default/custom/missing icons, consecutive hidden tabs, reference/desktop/narrow players and both sides of the size-cap breakpoints. It executes the production sizing helper on a real transient window and checks the exact 1038 × 581 visible frame, native 15 px inset, unchanged 568 px page, symmetric gutters, 12 px page gap, footer and scrolling. It scrolls to and physically clicks every tab (alternating label/icon-area clicks), then tests hover, live theme changes and the **painted icon/background pixels**. Assertions check that the selected PNG is truly recolored and its original custom colors return when deselected. This is an offscreen Qt Quick test, not an HD-Player/VM session.
 
-`settings_panel_window_budget_test.py` rebuilds the **entire** legacy Settings window against its exact read-only compressed resource fixture, including the native callback prefix and geometry helper. Counting template bytes alone is not a reliable compression budget. Apply removes only insignificant leading indentation, retaining quoted literal whitespace, line endings, native logic and copyright notices; the complete fixture uses 2408 of its 2468-byte slot. The Windows engine suite additionally patches disposable copies of the real player references.
+`settings_panel_window_budget_test.py` reconstructs the **entire** legacy Settings resource, including its original callback prefix and the sizing helper. Counting shell-template bytes is not a reliable compression budget. Apply removes redundant horizontal whitespace beside safe punctuation/operators as well as leading indentation, retaining literals, notices, every line ending and JS statement boundary; ambiguous regex/template fragments are left unchanged. Token/Qt regressions protect operator separation, callbacks and quoted line continuations. The complete fixture uses **2435 / 2468 bytes**, retaining 33 bytes of headroom (the test requires at least 32). Hidden tabs still use the numeric icon-map empty sentinel; the unused separate `bHidden` channel was retired to make room for the new styling. The Windows engine suite additionally patches disposable copies of the real player references.
+
+## Interactive Settings-window preview
+
+This is the generated **in-player Settings shell**, not the Customizer's Settings-panel editor:
+
+```sh
+python -m pip install PySide6==6.8.3
+python .harness/settings_window_preview.py --port 8080
+```
+
+Open the server's port in your browser. It binds to `0.0.0.0` and uses relative browser URLs, so proxied previews work. Linux also needs the usual Qt libraries (`libgl1`, `libegl1`, `libxkbcommon0`, `libdbus-1-3`).
+
+- The window template, viewport-sizing helper, selected styling and About page are extracted directly from `SettingsPanelPatcher.cpp`; there is no separate HTML imitation of the Settings UI.
+- The supplied pack is converted to actual PNGs. Browser pointer, wheel and key events reach real Qt controls; frames are rendered by Qt on its GUI thread.
+- Click/hover the top tabs, scroll over the strip to reach the last tabs, edit the sample form and try Save changes. The category picker also scrolls to a category and clicks its actual icon area. The toolbar can simulate a smaller player or a different selected-tab accent, and reopen the window after closing it.
+- **Page values, save handling, the theme service and shadow/close helpers are explicit fixtures.** No emulator, executable, license service or system setting is accessed. This previews the shell design; it does not certify a complete emulator installation.
+- `tests/settings_window_preview_test.py` renders all twelve pages and exercises real tab/icon, slider, Save and Close input, reopen, resize and theme changes, with no shell runtime warnings.
+
+For the optional second-runtime regression, install `PyQt5==5.15.11` and run:
+
+```sh
+BSI_TEST_QT_API=PyQt5 python tests/settings_panel_post_patch_gui_test.py
+```
+
+Use separate Python processes for Qt 5 and Qt 6.
 
 ## Default pack and custom-icon regression
 
@@ -63,7 +92,7 @@ Use a disposable player copy and an empty Settings-panel profile for the first c
 7. Use **Reset tab visibility & artwork**, then Apply. All tabs should be visible with pack icons again, the custom About logo should be cleared, and the About name/links should remain.
 8. Restore the original Settings panel. Confirm only the Settings-window/About sources are restored and unrelated customizations remain.
 
-Repeat with both Qt 5 and Qt 6 players when available. The patcher writes immutable PNG runtime copies under the Customizer's local application-data `settings-panel-assets` directory. Keep that directory while the patch is in use; the original SVGs and custom SVG overrides remain editable. Explicit SVG colors must remain unchanged; uncolored `currentColor` artwork should be readable light gray, not black or blank.
+Repeat with both Qt 5 and Qt 6 players when available. The patcher writes immutable PNG runtime copies under the Customizer's local application-data `settings-panel-assets` directory. Keep that directory while the patch is in use; the original SVGs and custom SVG overrides remain editable. Explicit SVG colors must remain unchanged in stored artwork and on unselected tabs; the selected icon intentionally follows the player's selected-tab color. Uncolored `currentColor` artwork should be readable light gray, not black or blank.
 
 Keep the Customizer open while inspecting the GUI. Closing it ends the manual session and removes the disposable GUI copy and temporary settings. A GUI Apply/Restore operates only on that copy.
 

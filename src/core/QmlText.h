@@ -20,6 +20,11 @@ QString mask(const QString &qml);
 // conservatively left completely unchanged.
 QString compactIndentation(const QString &qml);
 
+// Also remove horizontal whitespace beside unambiguous punctuation/operators.
+// Quoted text, comments and every line ending survive; operator pairs stay
+// separated (e.g. `+ +` must not become `++`). Same regex/template bailouts.
+QString compactWhitespace(const QString &qml);
+
 struct Object
 {
     int nameBegin = -1; // first character of the type name (may be qualified)
