@@ -819,12 +819,10 @@ Repeater{model:pSettingsItems.pSettingElements;delegate:Loader{Component.onCompl
     QString out = QmlText::compactWhitespace(stock.left(target.nameBegin));
     out += replacement;
     out += stock.mid(target.end);
-    // Latest user reference (imagSDAADASSDASDASDASDAe.png, 1011x584):
-    // opaque panel x=120..889, y=78..507 => exactly 770x430 visible pixels.
-    // The native UiShadowContainer insets 15 px, so the Window is 800x460.
-    // Do not scale back to the superseded 1038x581 frame on larger players.
+    // The user reverted the latest resize: keep the previously approved
+    // 1038x581 visible frame plus the unchanged 15 px shadow: 1068x611.
     // Retain viewport guards, centering, theme, controls and native page sizes.
-    const QString helper = QStringLiteral(R"QML(onVisibleChanged:if(visible&&transientParent){var t=transientParent;width=Math.min(t.width*.96,800);height=Math.min(t.height*.94,460);x=(t.width-width)/2+t.x;y=(t.height-height)/2+t.y})QML");
+    const QString helper = QStringLiteral(R"QML(onVisibleChanged:if(visible&&transientParent){var t=transientParent;width=Math.min(t.width*.96,1068);height=Math.min(t.height*.94,611);x=(t.width-width)/2+t.x;y=(t.height-height)/2+t.y})QML");
     const int rootClose = out.lastIndexOf(QLatin1String("\n}"));
     if (rootClose < 0) return {};
     out.insert(rootClose, helper);

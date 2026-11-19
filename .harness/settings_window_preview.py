@@ -168,7 +168,7 @@ Window {
         self.engine.addImportPath(str(root))
         self.bridge = SampleBridge()
         self.player = QQuickWindow()
-        self.player.setGeometry(0, 0, 1011, 584)
+        self.player.setGeometry(0, 0, 1301, 665)
         self.engine.rootContext().setContextProperty("fixturePlayer", self.player)
         self.engine.rootContext().setContextProperty("previewBridge", self.bridge)
         self.warnings = []
@@ -250,7 +250,7 @@ Window {
             point = tab.mapToScene(QPointF(tab.width() / 2, 33)).toPoint()
             QTest.mouseClick(self.window, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, point)
         elif kind == "resize":
-            width, height = (760, 480) if event.get("small") else (1011, 584)
+            width, height = (760, 480) if event.get("small") else (1301, 665)
             self.window.hide()
             self.player.setGeometry(0, 0, width, height)
             self.window.show()  # Executes the production transient-window helper.
