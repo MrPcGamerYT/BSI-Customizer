@@ -1,0 +1,10 @@
+{
+  "api": 1,
+  "scope": "shader-only",
+  "proxy": false,
+  "status": "experimental; not installed by the Customizer",
+  "targetRenderers": ["OpenGL", "DirectX 11", "DirectX 12", "Vulkan"],
+  "renderers": ["OpenGL", "OpenGL ES via EGL"],
+  "unsupported": ["DirectX", "Vulkan"],
+  "hardwareValidation": "pending; no Intel, AMD or NVIDIA compatibility certification"
+}

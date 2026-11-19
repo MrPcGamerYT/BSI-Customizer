@@ -1,0 +1,196 @@
+#include "Runtime.h"
+#ifdef _WIN32
+#include "GlPipeline.h"
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+#include <psapi.h>
+#include "MinHook.h"
+#include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <map>
+#include <memory>
+#include <mutex>
+#include <thread>
+#include <vector>
+
+namespace BsiShaders {
+namespace {
+using WglSwap=BOOL(WINAPI*)(HDC);
+using WglCurrent=HGLRC(WINAPI*)();
+using WglProc=PROC(WINAPI*)(LPCSTR);
+using WglDelete=BOOL(WINAPI*)(HGLRC);
+using EglSwap=unsigned(WINAPI*)(void*,void*);
+using EglCreate=void*(WINAPI*)(void*,void*,void*,const int*);
+using EglDestroy=unsigned(WINAPI*)(void*,void*);
+using EglCurrent=void*(WINAPI*)();
+using EglQuery=unsigned(WINAPI*)(void*,void*,int,int*);
+using EglProc=void*(WINAPI*)(const char*);
+struct Hooks {
+    std::mutex mutex,renderMutex,surfaceMutex;
+    std::atomic<bool> stopping{false};
+    std::thread worker;
+    bool started=false;
+    HMODULE gl=nullptr,egl=nullptr;
+    WglSwap swaps[2]{};void *swapTargets[2]{};
+    WglCurrent currentWgl=nullptr;WglProc wglProc=nullptr;WglDelete deleteWgl=nullptr;
+    EglSwap swapEgl=nullptr;EglCreate createEgl=nullptr;
+    EglDestroy destroySurface=nullptr,destroyContext=nullptr;
+    EglCurrent currentEgl=nullptr;EglQuery queryEgl=nullptr;EglProc eglProc=nullptr;
+    std::map<void*,HWND> surfaces;
+    std::map<std::pair<bool,std::uintptr_t>,std::unique_ptr<GlPipeline>> pipelines;
+    std::vector<void*> targets;
+};
+Hooks &hooks(){static auto *state=new Hooks;return *state;}
+thread_local bool presenting=false;
+struct Recursion { bool previous;Recursion():previous(presenting){presenting=true;}~Recursion(){presenting=previous;} };
+void *resolve(const char *name,void *user){
+    auto &h=hooks();const bool egl=user!=nullptr;
+    void *address=nullptr;
+    if(egl){if(h.eglProc)address=h.eglProc(name);if(!address&&h.egl)address=reinterpret_cast<void*>(GetProcAddress(h.egl,name));}
+    else {
+        if(h.wglProc)address=reinterpret_cast<void*>(h.wglProc(name));
+        const auto value=reinterpret_cast<std::intptr_t>(address);
+        if(!address||value==1||value==2||value==3||value==-1)address=h.gl?reinterpret_cast<void*>(GetProcAddress(h.gl,name)):nullptr;
+    }
+    return address;
+}
+void process(bool egl,std::uintptr_t context,int width,int height){
+    auto &h=hooks();if(!context||presenting||h.stopping.load())return;
+    const auto renderer=egl?Renderer::OpenGLES:Renderer::OpenGL;
+    if(!Runtime::instance().accepts(renderer))return;
+    const auto p=Runtime::instance().settings();
+    if(p.neutral()){Runtime::instance().report(true,true,false,"Neutral bypass",false,renderer);return;}
+    std::unique_lock<std::mutex> lock(h.renderMutex,std::try_to_lock);if(!lock.owns_lock())return;
+    Recursion guard;
+    try {
+        const auto key=std::make_pair(egl,context);
+        auto it=h.pipelines.find(key);
+        if(it==h.pipelines.end()){
+            if(h.pipelines.size()>=16){Runtime::instance().report(true,true,false,"Too many game contexts; shaders safely bypassed.",false,renderer);return;}
+            it=h.pipelines.emplace(key,std::make_unique<GlPipeline>()).first;
+        }
+        std::string error;
+        const bool ready=it->second->initialize(resolve,egl?reinterpret_cast<void*>(1):nullptr,&error);
+        const bool rendered=ready&&it->second->render(width,height,p,&error);
+        Runtime::instance().report(true,true,rendered,rendered?"Shaders active on the native OpenGL game surface.":error,rendered,renderer);
+    } catch(...) {Runtime::instance().report(true,true,false,"Shader processing failed; original presentation continues.",false,renderer);}
+}
+void processWgl(HDC dc){
+    auto &h=hooks();if(presenting||h.stopping.load()||!h.currentWgl)return;
+    HWND window=WindowFromDC(dc);
+    if(!Runtime::instance().eligible(reinterpret_cast<std::uintptr_t>(window)))return;
+    RECT rect{};if(!GetClientRect(window,&rect))return;
+    process(false,reinterpret_cast<std::uintptr_t>(h.currentWgl()),rect.right,rect.bottom);
+}
+template<int Index> BOOL WINAPI swapWgl(HDC dc){
+    processWgl(dc);Recursion guard;return hooks().swaps[Index](dc);
+}
+BOOL WINAPI removeWgl(HGLRC context){
+    auto &h=hooks();const BOOL okay=h.deleteWgl(context);
+    if(okay){std::lock_guard<std::mutex> lock(h.renderMutex);h.pipelines.erase({false,reinterpret_cast<std::uintptr_t>(context)});}
+    return okay;
+}
+void *WINAPI createSurface(void *display,void *config,void *window,const int *attrs){
+    auto &h=hooks();void *surface=h.createEgl(display,config,window,attrs);
+    if(surface&&window&&IsWindow(reinterpret_cast<HWND>(window))){
+        std::lock_guard<std::mutex> lock(h.surfaceMutex);
+        if(h.surfaces.size()<128)h.surfaces[surface]=reinterpret_cast<HWND>(window);
+    }
+    return surface;
+}
+unsigned WINAPI removeSurface(void *display,void *surface){
+    auto &h=hooks();const auto okay=h.destroySurface(display,surface);
+    if(okay){std::lock_guard<std::mutex> lock(h.surfaceMutex);h.surfaces.erase(surface);}
+    return okay;
+}
+unsigned WINAPI removeContext(void *display,void *context){
+    auto &h=hooks();const auto okay=h.destroyContext(display,context);
+    if(okay){std::lock_guard<std::mutex> lock(h.renderMutex);h.pipelines.erase({true,reinterpret_cast<std::uintptr_t>(context)});}
+    return okay;
+}
+unsigned WINAPI swapEgl(void *display,void *surface){
+    auto &h=hooks();HWND window=nullptr;
+    if(!presenting&&!h.stopping.load()){
+        {std::lock_guard<std::mutex> lock(h.surfaceMutex);const auto it=h.surfaces.find(surface);if(it!=h.surfaces.end())window=it->second;}
+        if(Runtime::instance().eligible(reinterpret_cast<std::uintptr_t>(window))){
+            int width=0,height=0;
+            if(h.queryEgl(display,surface,0x3057,&width)&&h.queryEgl(display,surface,0x3056,&height))
+                process(true,reinterpret_cast<std::uintptr_t>(h.currentEgl()),width,height);
+        }
+    }
+    Recursion guard;return h.swapEgl(display,surface);
+}
+bool install(void *target,void *replacement,void **original){
+    if(!target||!replacement)return false;
+    auto &h=hooks();
+    for(void *existing:h.targets)if(existing==target)return false;
+    if(MH_CreateHook(target,replacement,original)!=MH_OK)return false;
+    if(MH_EnableHook(target)!=MH_OK){MH_RemoveHook(target);return false;}
+    h.targets.push_back(target);return true;
+}
+void scan(){
+    auto &h=hooks();
+    if(!h.gl){
+        h.gl=GetModuleHandleW(L"opengl32.dll");
+        if(h.gl){h.currentWgl=reinterpret_cast<WglCurrent>(GetProcAddress(h.gl,"wglGetCurrentContext"));h.wglProc=reinterpret_cast<WglProc>(GetProcAddress(h.gl,"wglGetProcAddress"));}
+    }
+    if(h.gl&&h.currentWgl&&h.wglProc){
+        void *candidates[]{reinterpret_cast<void*>(GetProcAddress(GetModuleHandleW(L"gdi32.dll"),"SwapBuffers")),reinterpret_cast<void*>(GetProcAddress(h.gl,"wglSwapBuffers"))};
+        void *callbacks[]{reinterpret_cast<void*>(&swapWgl<0>),reinterpret_cast<void*>(&swapWgl<1>)};
+        for(int i=0;i<2;++i)if(!h.swaps[i]){
+            if(install(candidates[i],callbacks[i],reinterpret_cast<void**>(&h.swaps[i])))h.swapTargets[i]=candidates[i];
+        }
+        if(!h.deleteWgl)install(reinterpret_cast<void*>(GetProcAddress(h.gl,"wglDeleteContext")),reinterpret_cast<void*>(&removeWgl),reinterpret_cast<void**>(&h.deleteWgl));
+    }
+    if(!h.egl){
+        HMODULE modules[512]{};DWORD required=0;
+        if(EnumProcessModules(GetCurrentProcess(),modules,sizeof(modules),&required)){
+            const unsigned count=std::min<unsigned>(required/sizeof(HMODULE),512);
+            for(unsigned i=0;i<count;++i){
+                auto module=modules[i];
+                if(!GetProcAddress(module,"eglSwapBuffers")||!GetProcAddress(module,"eglCreateWindowSurface")||!GetProcAddress(module,"eglGetCurrentContext")||!GetProcAddress(module,"eglQuerySurface")||!GetProcAddress(module,"eglGetProcAddress")||!GetProcAddress(module,"eglDestroySurface")||!GetProcAddress(module,"eglDestroyContext"))continue;
+                h.egl=module;h.currentEgl=reinterpret_cast<EglCurrent>(GetProcAddress(module,"eglGetCurrentContext"));
+                h.queryEgl=reinterpret_cast<EglQuery>(GetProcAddress(module,"eglQuerySurface"));h.eglProc=reinterpret_cast<EglProc>(GetProcAddress(module,"eglGetProcAddress"));
+                // Surface ownership tracking is mandatory. If it cannot be
+                // installed, do not process an unidentified Qt/UI framebuffer.
+                if(!install(reinterpret_cast<void*>(GetProcAddress(module,"eglCreateWindowSurface")),reinterpret_cast<void*>(&createSurface),reinterpret_cast<void**>(&h.createEgl))){h.egl=nullptr;continue;}
+                install(reinterpret_cast<void*>(GetProcAddress(module,"eglDestroySurface")),reinterpret_cast<void*>(&removeSurface),reinterpret_cast<void**>(&h.destroySurface));
+                install(reinterpret_cast<void*>(GetProcAddress(module,"eglDestroyContext")),reinterpret_cast<void*>(&removeContext),reinterpret_cast<void**>(&h.destroyContext));
+                if(!install(reinterpret_cast<void*>(GetProcAddress(module,"eglSwapBuffers")),reinterpret_cast<void*>(&swapEgl),reinterpret_cast<void**>(&h.swapEgl))){h.egl=nullptr;}
+                break;
+            }
+        }
+    }
+    const bool attached=h.swaps[0]||h.swaps[1]||h.swapEgl;
+    if(!Runtime::instance().metrics().observed)Runtime::instance().report(attached,false,false,attached?"Waiting for an eligible OpenGL game surface; DirectX/Vulkan and unidentified surfaces are bypassed.":"No supported OpenGL presentation API loaded; DirectX/Vulkan are not supported.");
+}
+}
+void startPresentationHooks(){
+    auto &h=hooks();std::lock_guard<std::mutex> lock(h.mutex);if(h.started)return;
+    h.started=true;
+    // Qt calls this after loading/registering the normal QML plugin, outside
+    // DllMain/loader lock. Pin callback code for the process lifetime.
+    HMODULE self=nullptr;
+    if(!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS|GET_MODULE_HANDLE_EX_FLAG_PIN,reinterpret_cast<LPCWSTR>(&startPresentationHooks),&self)){
+        Runtime::instance().report(false,false,false,"Could not pin shader callback code; hooks not installed.");return;
+    }
+    const auto status=MH_Initialize();
+    if(status!=MH_OK){Runtime::instance().report(false,false,false,"Could not initialize presentation hooks.");return;}
+    h.worker=std::thread([]{
+        while(!hooks().stopping.load()){
+            scan();
+            for(int i=0;i<15&&!hooks().stopping.load();++i)std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+    });
+}
+void stopPresentationHooks(){
+    auto &h=hooks();std::lock_guard<std::mutex> lock(h.mutex);
+    h.stopping.store(true);if(h.worker.joinable())h.worker.join();
+    // Do not free trampolines while a host thread could still be returning
+    // through one. The pinned module/driver reclaim them at process exit.
+    for(void *target:h.targets)MH_DisableHook(target);
+}
+} // namespace BsiShaders
+#endif

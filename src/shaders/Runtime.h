@@ -1,0 +1,39 @@
+#pragma once
+#include "Parameters.h"
+#include "RendererCapabilities.h"
+#include <cstdint>
+#include <mutex>
+#include <string>
+
+namespace BsiShaders {
+struct Metrics {
+    bool hooks=false, observed=false, active=false;
+    Renderer renderer=Renderer::Unknown;
+    RendererFamily requested=RendererFamily::Automatic;
+    std::uint64_t processed=0;
+    std::string status="Waiting for the game's presentation API. Multi-renderer support is not complete.";
+};
+// One state per HD-Player process; Qt objects never cross the render-thread
+// boundary. The settings bridge copies bounded values through this mutex.
+class Runtime {
+public:
+    static Runtime &instance();
+    void start(std::uintptr_t playerWindow);
+    void stop();
+    void set(const Parameters &settings);
+    void selectRenderer(RendererFamily requested);
+    bool accepts(Renderer observed);
+    Parameters settings();
+    Metrics metrics();
+    void report(bool hooks,bool observed,bool active,const std::string &status,bool processed=false,
+                Renderer renderer=Renderer::Unknown);
+    bool eligible(std::uintptr_t surface);
+private:
+    std::mutex mutex;
+    Parameters current;
+    Metrics state;
+    std::uintptr_t host=0;
+};
+void startPresentationHooks();
+void stopPresentationHooks();
+} // namespace BsiShaders

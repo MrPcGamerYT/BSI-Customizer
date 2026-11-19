@@ -1,0 +1,7 @@
+<RCC>
+  <qresource prefix="/bsi-shaders">
+    <file alias="BsiShadersSetting.qml">BsiShadersSetting.qml</file>
+    <file alias="shaders.svg">../assets/settings-panel-icons/shaders.svg</file>
+    <file alias="shaders.png">../assets/settings-panel-icons/shaders.png</file>
+  </qresource>
+</RCC>

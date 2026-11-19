@@ -1,0 +1,105 @@
+name: Experimental shader backends (not player certification)
+
+on:
+  push:
+    branches: ['arena/**']
+    paths:
+      - 'src/shaders/**'
+      - 'src/third_party/minhook/**'
+      - 'src/third_party/vulkan/**'
+      - 'src/assets/settings-panel-icons/shaders.*'
+      - 'tests/shaders/**'
+      - 'tests/shaders_*'
+      - '.github/workflows/shaders.yml'
+  pull_request:
+    paths:
+      - 'src/shaders/**'
+      - 'src/third_party/minhook/**'
+      - 'src/third_party/vulkan/**'
+      - 'src/assets/settings-panel-icons/shaders.*'
+      - 'tests/shaders/**'
+      - 'tests/shaders_*'
+      - '.github/workflows/shaders.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: shader-api-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native-vulkan-gl:
+    name: Native Vulkan and GLES pixels (Mesa software; not hardware)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      LIBGL_ALWAYS_SOFTWARE: '1'
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install real software graphics APIs
+        run: sudo apt-get update && sudo apt-get install -y mesa-vulkan-drivers libegl1 libgles2
+      - name: Check committed SPIR-V matches the shared original source
+        run: |
+          npm install --prefix "$RUNNER_TEMP/spirv-tools" --no-fund --no-audit --save-exact @webgpu/glslang@0.0.15
+          BSI_CHECK_GENERATED=1 node tests/shaders/compile_spirv.cjs "$RUNNER_TEMP/spirv-tools/node_modules/@webgpu/glslang"
+      - name: Sanitized routing and native Vulkan pixel tests
+        run: |
+          cmake -S tests/shaders -B build-shader-tests -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_FLAGS='-Wall -Wextra -Werror -pedantic -fsanitize=address,undefined -fno-omit-frame-pointer'
+          cmake --build build-shader-tests --parallel 2
+          ctest --test-dir build-shader-tests --output-on-failure
+      - name: Production GLES pipeline pixels and state restoration
+        run: python3 tests/shaders_gpu_test.py
+      - name: Record scope of results
+        run: echo 'Software/API tests only. No HD-Player installation, Win32 presentation hook or Intel/AMD/NVIDIA hardware certification is implied.' >> "$GITHUB_STEP_SUMMARY"
+
+  windows-plugin:
+    name: Windows x64 Qt ${{ matrix.qt }} plugin and DirectX WARP
+    runs-on: windows-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - qt: '6.8.3'
+            arch: win64_msvc2022_64
+            python-api: PySide6
+            python-package: PySide6==6.8.3
+          - qt: '5.15.2'
+            arch: win64_msvc2019_64
+            python-api: PyQt5
+            python-package: PyQt5==5.15.11
+    steps:
+      - uses: actions/checkout@v5
+      - uses: jurplel/install-qt-action@v4.3.1
+        with:
+          version: ${{ matrix.qt }}
+          host: windows
+          target: desktop
+          arch: ${{ matrix.arch }}
+          cache: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install matching Qt Python host for real plugin component tests
+        run: python -m pip install '${{ matrix.python-package }}'
+      - name: Build regular plugin, MinHook and native DirectX tests (no system proxy)
+        run: |
+          cmake -S src/shaders -B build-shaders -A x64 -DBSI_SHADERS_BUILD_TESTS=ON -DBSI_TEST_VULKAN=OFF
+          if ($LASTEXITCODE -ne 0) { throw 'Shader configuration failed' }
+          cmake --build build-shaders --config Release --parallel 2
+          if ($LASTEXITCODE -ne 0) { throw 'Shader build failed' }
+      - name: Native DirectX 11 and 12 WARP frame pixels
+        run: ctest --test-dir build-shaders -C Release --output-on-failure
+      - name: Actual C++ plugin import and physical shader-page controls (Qt fixture only)
+        env:
+          BSI_TEST_QT_API: ${{ matrix.python-api }}
+          BSI_SHADERS_MODULE_ROOT: ${{ github.workspace }}/build-shaders/module
+        run: python tests/run_qt_runtime_test.py tests/shaders_plugin_ui_test.py
+      - name: Record limits rather than claim universal support
+        shell: pwsh
+        run: "'Windows Qt fixture + WARP API tests only. Not HD-Player category navigation, game presentation hooks or physical Intel/AMD/NVIDIA certification. No merge authorized by these tests alone.' | Out-File $env:GITHUB_STEP_SUMMARY -Append"
