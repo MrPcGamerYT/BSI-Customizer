@@ -61,7 +61,7 @@ about = re.search(r'QString generated = QStringLiteral\(R"QML\((.*?)\)QML"\);', 
 assert window and about
 # A coarse template-bloat guard only. The full compressed native prefix,
 # callbacks and geometry helper are measured in settings_panel_window_budget_test.
-assert len(window.group(1).encode()) <= 1976, "keep the shell compact; also run the complete-window compression budget test"
+assert len(window.group(1).encode()) <= 2080, "keep the shell compact; also run the complete-window compression budget test"
 assert "QVariantMap storedIcons = packIcons;" in cpp
 assert "storedIcons.insert(it.key().toCaseFolded(), it.value());" in cpp
 assert "const bool mustReference = qtMajor != 6 || !packIcons.isEmpty();" in cpp

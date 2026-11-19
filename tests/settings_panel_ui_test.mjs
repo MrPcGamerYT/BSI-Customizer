@@ -13,6 +13,7 @@ const defaults = { [graphicsId]: svgAsset('graphics'), [devicesId]: svgAsset('de
 const custom = { mime: 'image/svg+xml', data: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="9" fill="#55aaff"/></svg>').toString('base64') };
 const requests = [];
 let profile = { hiddenTabs: [], tabIcons: {} };
+let cleanup = { id: 'clean-player-ui', label: 'Clean player UI', supported: true, applied: true, needsUpdate: true };
 let panelState = {
   supported: true, applied: false, restorable: false, detail: 'Editable player QML sources found.',
   defaultTabIcons: defaults,
@@ -44,8 +45,9 @@ const ctx = {
   request: async (method, args = {}) => {
     requests.push({ method, args });
     if (method === 'readInterface') return {
-      layout: [], removals: [], about: {}, settingsPanel: panelState
+      layout: [{ ...cleanup }], removals: ['Remove title details', 'Sidebar Rotate'], about: {}, settingsPanel: panelState
     };
+    if (method === 'applyLayoutTweak') cleanup = { ...cleanup, applied: args.enabled, needsUpdate: false };
     if (method === 'setSettingsPanelAsset') profile.tabIcons[args.id] = custom;
     if (method === 'clearSettingsPanelAsset') delete profile.tabIcons[args.id];
     if (method === 'saveSettingsPanelProfile') profile.hiddenTabs = args.hiddenTabs;
@@ -75,6 +77,24 @@ const editors = fakeWindow.BsiEditors.create(ctx);
 await editors.action('interface-load', null, 6);
 let view = editors.render(6);
 assert.match(view, /Settings panel rebuild/);
+assert.match(view, /Update this tweak/);
+assert.doesNotMatch(view, /Restore this tweak/);
+await editors.action('layout', { dataset: { index: '0' } }, 6);
+assert.equal(JSON.stringify(requests.filter(x => x.method === 'applyLayoutTweak').at(-1).args),
+  '{"id":"clean-player-ui","enabled":true}', 'Update must keep cleanup enabled, not restore all buttons');
+assert.equal(cleanup.applied, true);
+assert.match(editors.render(6), /Restore this tweak/);
+await editors.action('layout', { dataset: { index: '0' } }, 6);
+assert.equal(JSON.stringify(requests.filter(x => x.method === 'applyLayoutTweak').at(-1).args),
+  '{"id":"clean-player-ui","enabled":false}', 'Restore is still available after successful migration');
+editors.selectInterfaceTab('remove');
+const removalView = editors.render(6);
+assert.equal((removalView.match(/>Remove title details<\/label>/g) || []).length, 1);
+assert.doesNotMatch(removalView, /Titlebar Version|Titlebar Instance Label/);
+editors.input({ dataset: { editorField: 'remove:0' }, type: 'checkbox', checked: true });
+await editors.action('removals', null, 6);
+assert.equal(JSON.stringify(requests.filter(x => x.method === 'applyRemovals').at(-1).args),
+  '{"names":["Remove title details"]}', 'one combined control dispatches one combined removal');
 editors.selectInterfaceTab('settings-panel');
 view = editors.render(6);
 assert.match(view, /Rebuild the BlueStacks Settings panel/);
@@ -139,4 +159,4 @@ assert.equal(JSON.stringify(requests.filter(x => x.method === 'applySettingsPane
 assert.equal(panelState.applied, true);
 await editors.action('settings-panel-restore', null, 6);
 assert.equal(JSON.stringify(requests.filter(x => x.method === 'applySettingsPanelRebuild').at(-1)?.args), '{"enabled":false}');
-console.log('PASS: Chromium default pack previews, per-tab SVG overrides, Use default, reset and explicit Settings-panel apply/restore');
+console.log('PASS: Chromium cleanup Update/Restore migration, one combined title-details control, default pack previews, per-tab SVG overrides, Use default, reset and explicit Settings-panel apply/restore');

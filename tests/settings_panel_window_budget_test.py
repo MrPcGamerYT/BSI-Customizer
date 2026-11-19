@@ -100,6 +100,15 @@ while depth:
 assert "id: iSettingsWindowShadowContainer" in masked[start:end]
 shell = re.search(r'QString replacement = QStringLiteral\(R"QML\((.*?)\)QML"\);', CPP, re.S)[1]
 helper = re.search(r'const QString helper = QStringLiteral\(R"QML\((.*?)\)QML"\);', CPP, re.S)[1]
+# Pin the newest user attachment independently of the generated shell, so a
+# future resize cannot silently revive the superseded larger window.
+size_reference = json.loads((REPO / "tests/fixtures/settings-window-size-reference.json").read_text())
+panel, outer = size_reference["opaquePanel"], size_reference["outerWindow"]
+for dimension in ("width", "height"):
+    assert panel[dimension] + 2 * size_reference["nativeShadowInset"] == outer[dimension]
+assert (panel["width"], panel["height"]) == (770, 430)
+assert f"width=Math.min(t.width*.96,{outer['width']})" in helper
+assert f"height=Math.min(t.height*.94,{outer['height']})" in helper
 rebuilt = stock[:start] + shell + stock[end:]
 close = rebuilt.rfind("\n}")
 assert close >= 0

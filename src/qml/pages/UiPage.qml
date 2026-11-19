@@ -561,17 +561,17 @@ Item {
                                 Text {
                                     Layout.fillWidth: true
                                     wrapMode: Text.Wrap
-                                    text: qsTr("One apply hides every extra button. Title bar: help, "
-                                               + "menu/settings, quests, rewards, account, nowbuX, "
+                                    text: qsTr("One apply hides extra buttons while keeping Settings accessible. Title bar: help, "
+                                               + "quests, rewards, account, nowbuX, "
                                                + "pin-to-top, top-bar icons, macro, sync and screen "
                                                + "recording. Sidebar: screenshot, screen record, media "
                                                + "folder, rotate, location, shake, lock cursor, macro, "
                                                + "sync, eco mode, instance manager, side panel, live "
-                                               + "stream, chat, settings and its own Back / Home / "
+                                               + "stream, chat and its own Back / Home / "
                                                + "Recent. Back, Home, Recent, the BlueStacks logo, the "
                                                + "title/version and the window controls stay, and the "
                                                + "sidebar keeps fullscreen, volume, game controls, "
-                                               + "install APK and trim memory — it is not removed. To "
+                                               + "install APK, trim memory and Settings. The title-bar Settings/menu stays too. To "
                                                + "remove the sidebar itself, turn on “Sidebar buttons "
                                                + "to the top bar” below.")
                                     color: Theme.textDim
@@ -584,6 +584,7 @@ Item {
                                 accent: !page.cleanTweak.applied || !!page.cleanTweak.needsUpdate
                                 implicitHeight: 30
                                 enabled: !!page.cleanTweak.supported
+                                objectName: "cleanPlayerUiAction"
                                 text: !page.cleanTweak.supported
                                       ? qsTr("Unavailable")
                                       : (page.cleanTweak.applied
@@ -591,7 +592,7 @@ Item {
                                                                         : qsTr("Restore stock UI"))
                                          : qsTr("Clean in one click"))
                                 onClicked: {
-                                    // Update keeps the clean-up on and writes the missing half.
+                                    // Update repairs Settings access without restoring the unwanted buttons.
                                     const target = !(page.cleanTweak.applied
                                                      && !page.cleanTweak.needsUpdate);
                                     const result = backend.applyLayoutTweak("clean-player-ui", target);
@@ -614,12 +615,12 @@ Item {
                             font.pixelSize: 11
                             font.weight: Font.DemiBold
                             text: page.cleanTweak.needsUpdate
-                                  ? qsTr("An older clean-up is applied — press “Update clean-up” to hide "
-                                         + "the extra sidebar buttons too.")
+                                  ? qsTr("An older clean-up is applied — press “Update clean-up” to restore Settings access "
+                                         + "while keeping the unwanted buttons hidden.")
                                   : (page.cleanTweak.applied
                                      ? qsTr("Applied — the extra buttons are hidden and the sidebar keeps "
-                                            + "fullscreen, volume, game controls, install APK and trim "
-                                            + "memory. Press “Restore stock UI” to bring everything back.")
+                                            + "fullscreen, volume, game controls, install APK, trim "
+                                            + "memory and Settings. The title-bar menu also stays. Press “Restore stock UI” to bring everything back.")
                                      : (page.cleanTweak.supported
                                         ? qsTr("Ready — one click hides every button listed above.")
                                         : (page.cleanTweak.state || page.cleanTweak.detail)))
@@ -926,8 +927,9 @@ Item {
                                 Text {
                                     Layout.fillWidth: true
                                     wrapMode: Text.Wrap
-                                    text: qsTr("Nulls out the selected ad/UI strings in the binary so "
-                                               + "those elements never render.")
+                                    text: qsTr("Hide selected controls. Remove title details hides the version and instance label together, "
+                                               + "collapses their row and vertically centres the player name. Settings text and shared strings stay intact. "
+                                               + "Use Restore Backup to undo removals.")
                                     color: Theme.textDim
                                     font.pixelSize: 11
                                 }
@@ -951,6 +953,7 @@ Item {
                                 accent: true
                                 enabled: page.checkedCount > 0
                                 implicitHeight: 28
+                                objectName: "applyPlayerUiRemovals"
                                 text: page.checkedCount > 0
                                       ? qsTr("Apply Removals (%1)").arg(page.checkedCount)
                                       : qsTr("Apply Removals")
@@ -968,6 +971,7 @@ Item {
 
                         ListView {
                             id: removalList
+                            objectName: "playerUiRemovalList"
                             Layout.fillWidth: true
                             Layout.fillHeight: true
                             clip: true

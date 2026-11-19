@@ -17,6 +17,7 @@ import queue
 import re
 import tempfile
 import threading
+import time
 import urllib.parse
 from pathlib import Path
 
@@ -167,7 +168,7 @@ Window {
         self.engine.addImportPath(str(root))
         self.bridge = SampleBridge()
         self.player = QQuickWindow()
-        self.player.setGeometry(0, 0, 1301, 665)
+        self.player.setGeometry(0, 0, 1011, 584)
         self.engine.rootContext().setContextProperty("fixturePlayer", self.player)
         self.engine.rootContext().setContextProperty("previewBridge", self.bridge)
         self.warnings = []
@@ -226,6 +227,10 @@ Window {
                 dx, dy = dy, 0
             wheel = QWheelEvent(QPointF(point), QPointF(point), QPoint(), QPoint(round(-dx), round(-dy)),
                 Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier, Qt.ScrollPhase.NoScrollPhase, False)
+            # QQuickFlickable integrates wheel gestures by timestamp. Zero is
+            # not a fresh event: repeated browser scrolls would stall after the
+            # first 72 px, making lower native controls look unreachable.
+            wheel.setTimestamp(round(time.monotonic() * 1000))
             QGuiApplication.sendEvent(self.window, wheel)
         elif kind == "key":
             key = {"Escape": Qt.Key.Key_Escape, "Tab": Qt.Key.Key_Tab,
@@ -245,7 +250,7 @@ Window {
             point = tab.mapToScene(QPointF(tab.width() / 2, 33)).toPoint()
             QTest.mouseClick(self.window, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, point)
         elif kind == "resize":
-            width, height = (760, 480) if event.get("small") else (1301, 665)
+            width, height = (760, 480) if event.get("small") else (1011, 584)
             self.window.hide()
             self.player.setGeometry(0, 0, width, height)
             self.window.show()  # Executes the production transient-window helper.

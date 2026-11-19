@@ -89,7 +89,7 @@ const server = http.createServer((req, res) => {
       new MutationObserver(() => { if(window.__autoConfirm) document.querySelector('#confirm-dialog[open] button[value="yes"]')?.click(); }).observe(document, {subtree:true,childList:true,attributes:true,attributeFilter:['open']});
       const signal = () => ({ handlers: [], connect(fn) { this.handlers.push(fn); }, emit(...args) { this.handlers.forEach(fn => fn(...args)); } });
       window.__calls = [];
-      let profile = {}, operations = [];
+      let profile = {}, operations = [], cleanupNeedsUpdate = true, cleanupApplied = true;
       const state = { protocol: 1, authorized: true, busy: false, exeFound: true, exePath: 'C:\\fixture\\HD-Player.exe', version: 'test-only', resourceRevision: 0, workspaceRevision: 0, updates: { configured: true, state: 'idle' }, aboutProfile: { developerName: 'Fixture developer', tagline: 'Fixture tagline', links: [{kind:'github',title:'Source',url:'https://example.test/source'},{kind:'discord',title:'Community',url:'https://example.test/chat'},{kind:'youtube',title:'Video',url:'https://example.test/video'},{kind:'youtube',title:'More videos',url:'https://example.test/more'}] }, themeStatus: 'Fixture palette', themeMethod: 'qml' };
       const colors = [{ name: 'testAccent', value: '#123456', edit: '', purpose: 'Test fixture only' }];
       const svgPreview = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI+PGNpcmNsZSBjeD0iMTIiIGN5PSIxMiIgcj0iOCIvPjwvc3ZnPg==';
@@ -116,8 +116,9 @@ const server = http.createServer((req, res) => {
           if (method === 'fpsPatch') value = { ok: false, msg: 'Fixture: target is unsupported; no write' };
           if (method === 'bootLogoPreview') value = { available: true, logo: svgPreview };
           if (method === 'bootPatch') value = { ok: true, msg: 'Built-in Aurora HTML boot animation installed; no supported completion gate was found; requested 4567 ms hold was not applied.' };
+          if (method === 'applyLayoutTweak') { cleanupNeedsUpdate = false; cleanupApplied = args.enabled; value = { ok: true, msg: 'Fixture cleanup updated.' }; }
           if (method === 'readInterface') value = {
-            removals: ['Fixture sidebar', 'Fixture banner'], layout: [{ id: 'test-layout', label: 'Fixture layout', supported: true, applied: false }],
+            removals: ['Remove title details', 'Fixture sidebar'], layout: [{ id: 'clean-player-ui', label: 'Clean player UI', supported: true, applied: cleanupApplied, needsUpdate: cleanupNeedsUpdate }],
             about: { supported: true, text: 'Original fixture About', showSections: true, links: [{ id: 'website', name: 'Website', label: 'Original label', url: 'https://example.test', hidden: false }] }
           };
           if (method === 'rpcidNames') value = { ok: true, entries: [{ key: 'ProductName', value: 'Fixture', max: 40 }] };
@@ -255,10 +256,17 @@ const server = http.createServer((req, res) => {
     const last = method => page.evaluate(name => __calls.filter(c => c.method === name).at(-1), method);
     await nav(6);
     await click('interface-load');
+    await page.getByRole('button', { name: 'Update this tweak', exact: true }).click();
+    await page.waitForFunction(() => !document.body.dataset.confirming && !document.body.classList.contains('busy'));
+    assert.deepEqual((await last('applyLayoutTweak')).args, { id: 'clean-player-ui', enabled: true }, 'migration must repair Settings without restoring all extras');
+    await page.getByRole('button', { name: 'Restore this tweak', exact: true }).waitFor();
     await page.locator('[data-interface-tab="remove"]').evaluate(el => el.click());
+    assert.equal(await page.locator('label').filter({ hasText: /^Remove title details$/ }).count(), 1, 'one combined title-details choice');
+    assert.equal(await page.getByText('Titlebar Version', { exact: true }).count(), 0);
+    assert.equal(await page.getByText('Titlebar Instance Label', { exact: true }).count(), 0);
     await edit('remove:0').check();
     await click('removals');
-    assert.deepEqual((await last('applyRemovals')).args.names, ['Fixture sidebar']);
+    assert.deepEqual((await last('applyRemovals')).args.names, ['Remove title details']);
     await page.locator('[data-interface-tab="about"]').evaluate(el => el.click());
     await edit('about:text').fill('Edited About fixture');
     await page.waitForFunction(() => document.querySelector('#interface-about-preview')?.innerText.includes('Edited About fixture'));

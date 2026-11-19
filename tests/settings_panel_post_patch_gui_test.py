@@ -179,7 +179,7 @@ import QtQuick.Layouts 1.15
 import BsiGuiFixture 1.0
 Window {
     id: iSettingsWindow
-    width: 1068; height: 611; visible: false; color: "transparent"
+    width: 800; height: 460; visible: false; color: "transparent"
     transientParent: fixturePlayer
     property int pCurrentTabIndex: 0
     property var testIcons: ({})
@@ -275,8 +275,17 @@ Window {
                 expected = window.property("testAccent") if selected else QColor("#d2dae4")
                 assert label.property("color") == QColor(expected), "native selected-tab colours were lost"
                 highlights = [i for i in slot.childItems() if prop(i, "radius") == 6]
-                assert len(highlights) == 1, "each tab needs exactly one soft selection surface"
-                highlight = highlights[0]
+                assert len(highlights) == 2, "each tab needs a soft surface plus an independent opaque outline"
+                highlight = next(i for i in highlights if prop(i, "color") == label.property("color"))
+                outline = next(i for i in highlights if i != highlight)
+                stroke = QQmlExpression(engine.rootContext(), outline, "border.color")
+                result = stroke.evaluate()
+                assert not stroke.hasError()
+                stroke_color = result[0] if isinstance(result, tuple) else result
+                assert stroke_color == (label.property("color") if selected else QColor("transparent")), \
+                    "only selection, never hover, gets the native accent outline"
+                assert outline.opacity() == 1 and outline.size() == slot.size(), \
+                    "the selected border must be fully opaque without changing geometry"
                 expected_opacity = .2 if selected else .1 if slot.property("containsMouse") else 0
                 assert abs(highlight.opacity() - expected_opacity) < EPSILON
                 assert highlight.property("color") == label.property("color")
@@ -298,11 +307,11 @@ Window {
             right_gutter = surface_origin.x() + surface.width() - page_origin.x() - page.width()
             assert abs(left_gutter - right_gutter) < EPSILON, "page gutters must be symmetric"
             assert abs(left_gutter - (surface.width() - page.width()) / 2) < EPSILON
-            if window.width() == 1068 and window.height() == 611 and shell_root.property("shadowThickness") == 15:
-                assert abs(surface.width() - 1038) < EPSILON, "visible width must match the screenshot border"
-                assert abs(surface.height() - 581) < EPSILON, "visible height must match the screenshot border"
+            if window.width() == 800 and window.height() == 460 and shell_root.property("shadowThickness") == 15:
+                assert abs(surface.width() - 770) < EPSILON, "visible width must match the screenshot border"
+                assert abs(surface.height() - 430) < EPSILON, "visible height must match the screenshot border"
                 assert abs(page.width() - 568) < EPSILON, "resizing the window must not stretch native controls"
-                assert abs(left_gutter - 235) < EPSILON
+                assert abs(left_gutter - 101) < EPSILON
             expected_top = surface_origin.y() + (112 if visible else 68)
             assert abs(page_origin.y() - expected_top) < EPSILON, f"wrong page position: {page_origin.y()}"
             assert abs(page.height() - (surface.height() - 130)) < EPSILON, "top padding changed the footer clearance"
@@ -353,6 +362,16 @@ Window {
                 painted = frame.pixelColor(round(point.x()), round(point.y()))
                 assert painted == expected, f"{text}: selected/custom icon pixels are {painted.name()}, expected {expected.name()}"
                 checked += 1
+                if selected:
+                    # A full-colour 1 px bottom edge is clear of text, icons,
+                    # badges and rounded corners. Merely setting border.color
+                    # on the .2-opacity background would fail this pixel check.
+                    edge = slot.mapToScene(QPointF(slot.width() / 2, slot.height() - 1))
+                    painted_edge = frame.pixelColor(round(edge.x()), round(edge.y()))
+                    accent = QColor(window.property("testAccent"))
+                    assert all(abs(getattr(painted_edge, c)() - getattr(accent, c)()) <= 2
+                               for c in ("red", "green", "blue")), \
+                        f"{text}: selected outline was not painted at full opacity ({painted_edge.name()})"
                 # Sample the pill in the label's left padding, clear of glyphs,
                 # the centered icon, notification dot and rounded corners.
                 point = slot.mapToScene(QPointF(5, 22))
@@ -376,9 +395,9 @@ Window {
             shell_root.setProperty("shadowThickness", inset)
             window.show()
             QTest.qWait(80)
-            assert abs(window.width() - min(width * .96, 1068)) <= 1
-            assert abs(window.height() - min(height * .94, 611)) <= 1
-            assert window.width() <= 1068 and window.height() <= 611, "Settings exceeded the screenshot dimensions"
+            assert abs(window.width() - min(width * .96, 800)) <= 1
+            assert abs(window.height() - min(height * .94, 460)) <= 1
+            assert window.width() <= 800 and window.height() <= 460, "Settings exceeded the screenshot dimensions"
             assert abs(window.x() + window.width() / 2 - (player.x() + width / 2)) <= 1
             assert abs(window.y() + window.height() / 2 - (player.y() + height / 2)) <= 1
             assert window.x() >= player.x() and window.y() >= player.y()
@@ -394,7 +413,7 @@ Window {
                      (defaults, (0, 3, 4, 11)), (defaults, tuple(range(11))),
                      (defaults, tuple(range(12)))]
         viewports = [(1440, 900, 0), (1301, 665, 0),
-                     (1440, 900, 15), (1301, 665, 15), (720, 480, 15),
+                     (1440, 900, 15), (1301, 665, 15), (1011, 584, 15), (720, 480, 15),
                      (1114, 652, 15), (1111, 649, 15),  # both sides of the size-cap breakpoints
                      (640, 400, 15), (560, 400, 15)]
         for width, height, inset in viewports:
@@ -500,7 +519,7 @@ Window {
         player.deleteLater()
         QTest.qWait(10)
         engine.deleteLater()
-    print("PASS: screenshot-matched 1038x581 visible Settings frame (1068x611 with native shadow); themed selected-tab background/label/icon, quieter hover, custom colours restored, twelve centred tabs, uniform gaps, native page/footer and scrolling")
+    print("PASS: screenshot-matched 770x430 visible Settings frame (800x460 with native shadow); themed selected-tab full-opacity border/background/label/icon, quieter hover, custom colours restored, twelve centred tabs, uniform gaps, native page/footer and scrolling")
     return 0
 
 

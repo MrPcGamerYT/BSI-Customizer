@@ -7,7 +7,8 @@
 #include <QVariantList>
 #include <QVariantMap>
 
-// Ad/UI string removal and instance detection.
+// Ad/UI removals and instance detection. Title details are a scoped QML edit,
+// never a global string deletion. Removals use the verified EXE backup for undo.
 namespace ExtrasPatcher {
 
 struct Result { bool ok = false; QString msg; };

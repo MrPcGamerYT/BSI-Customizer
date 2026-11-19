@@ -7,6 +7,7 @@
 #include "core/EmbeddedImages.h"
 #include "core/EmbeddedResources.h"
 #include "core/ExtrasPatcher.h"
+#include "core/TitlebarDetails.h"
 #include "core/AboutPatcher.h"
 #include "core/SettingsPanelPatcher.h"
 #include "core/AndroidCleanup.h"
@@ -3560,96 +3561,140 @@ int runPatchRegressionTests()
               "a repeated removal does not stack further edits");
     }
 
-    std::printf("[extras-titlebar] the version and engine labels are hidden, never deleted\n");
+    std::printf("[extras-titlebar] one combined removal, collapsed row, centred title and intact Settings text\n");
     {
-        // "Titlebar Version" used to null every UTF-16 "version" in the file.
-        // That also hit the compiled QML caches and the translator tables, and
-        // the latest player then refused to start (0x…05). The label is hidden
-        // in PlrTopbar.qml instead: the same two Text elements exist in 5.9,
-        // 5.10 and the current build.
         const QString topbar = QStringLiteral(
-            "import QtQuick 2.15\r\n"
-            "UiRowLayout {\r\n"
-            "    UiRowLayout{\r\n"
+            "import QtQuick 2.15\r\nimport QtQuick.Layouts 1.15\r\n"
+            "RowLayout {\r\n"
+            "    ColumnLayout {\r\n"
+            "        id: iTitleLayout\r\n"
+            "        Layout.leftMargin: 12\r\n"
             "        Text {\r\n"
-            "            id: iVersionTxt\r\n"
-            "            text: plrBackend.version\r\n"
-            "            opacity: 0.7\r\n"
+            "            id: iBstTxt\r\n"
+            "            text: plrBackend.title\r\n"
+            "            horizontalAlignment: Text.AlignLeft\r\n"
+            "            Layout.preferredWidth: pPreferredWidth + 12\r\n"
             "        }\r\n"
-            "        Text {\r\n"
-            "            id: iImageTxt\r\n"
-            "            visible: uiBackend.oem === \"msi5\"\r\n"
-            "            text: \"N32\"\r\n"
-            "            opacity: 0.7\r\n"
+            "        RowLayout {\r\n"
+            "            id: iVersionImgLayout\r\n"
+            "            Text {\r\n"
+            "                id: iVersionTxt\r\n"
+            "                text: plrBackend.version\r\n"
+            "                opacity: 0.7\r\n"
+            "            }\r\n"
+            "            Text {\r\n"
+            "                id: iImageTxt\r\n"
+            "                text: \"N32\"\r\n"
+            "                opacity: 0.7\r\n"
+            "                Layout.leftMargin: 4\r\n"
+            "            }\r\n"
             "        }\r\n"
             "    }\r\n"
+            "    Button { id: iCfgBtn; text: qsTr(\"Settings\"); onClicked: fOpenHamburgerPopup() }\r\n"
+            "    function reload() { iVersionImgLayout.visible = true; iBstTxt.pPreferredWidth = width - 100 }\r\n"
             "}\r\n");
-        // A translator table: the same word, UTF-16LE, exactly what the old
-        // removal silently zeroed.
-        const QByteArray german = QByteArray("v\0e\0r\0s\0i\0o\0n\0", 14);
-        // Stored raw, not zlib'd: the point of the test is that those bytes come
-        // out of the patch byte-for-byte, which a compressed record would hide.
-        QSet<QString> raw;
-        raw.insert(QStringLiteral("i18n.de-DE.qm"));
-        // The QML comes first and the table is packed straight behind it, so the
-        // record has no slack - on a real player every slot is exactly full too,
-        // and that is why a growing edit used to end in "needs more bytes".
-        auto r = resourcesBytes({ qMakePair(QStringLiteral("PlrTopbar.qml"), topbar.toUtf8()),
-                                  qMakePair(QStringLiteral("i18n.de-DE.qm"), german) },
-                                false, raw);
+        // Protect both the editable Settings page and its compiled QML. Merely
+        // mentioning/importing PlrTopbar must not make a Settings unit an owner.
+        const QString settings = QStringLiteral(
+            "import QtQuick 2.15\r\nColumn {\r\n"
+            " Text { text: qsTr(\"Version\") }\r\n"
+            " Text { text: qsTr(\"Instance name\") }\r\n"
+            " Text { text: qsTr(\"CPU allocation\") }\r\n"
+            " property string componentName: \"PlrTopbar.qml\"\r\n}\r\n");
+        const QByteArray german("v\0e\0r\0s\0i\0o\0n\0", 14);
+        QSet<QString> raw { QStringLiteral("i18n.de-DE.qm") };
+        auto r = resourcesBytes({ { QStringLiteral("PlrTopbar.qml"), topbar.toUtf8() },
+                                  { QStringLiteral("i18n.de-DE.qm"), german },
+                                  { QStringLiteral("UiSettingsWindow.qml"), settings.toUtf8() } }, false, raw);
         addRegistration(r, false);
+        const auto unit = [](const QString &source, const QStringList &extra, int major) {
+            const QStringList words = QStringList { source } + extra;
+            QByteArray bytes(2048, '\0');
+            bytes.replace(0, 8, QByteArray("qv4cdata", 8));
+            putLe32(bytes, 8, 41); putLe32(bytes, 12, major == 5 ? 0x50f04 : 0x60803);
+            putLe32(bytes, 24, bytes.size()); putLe32(bytes, 112, words.size());
+            putLe32(bytes, 116, 248); putLe32(bytes, 236, 0);
+            int at = 248 + words.size() * 4;
+            for (int i = 0; i < words.size(); ++i) {
+                putLe32(bytes, 248 + i * 4, at);
+                if (major == 5) {
+                    putLe32(bytes, at, 0xffffffff); putLe32(bytes, at + 4, words[i].size());
+                    at += 24;
+                } else { putLe32(bytes, at, words[i].size()); at += 4; }
+                for (QChar c : words[i]) { putLe16(bytes, at, c.unicode()); at += 2; }
+                at = (at + 3) & ~3;
+            }
+            return bytes;
+        };
+        const QStringList details { QStringLiteral("iVersionTxt"), QStringLiteral("iImageTxt") };
+        const auto topUnit = unit(QStringLiteral("qrc:/PlrTopbar.qml"), details, 6);
+        const auto sourceLessTop = unit(QString(), details, 5);
+        const auto settingsUnit = unit(QStringLiteral("qrc:/UiSettingsWindow.qml"),
+            details + QStringList { QStringLiteral("PlrTopbar.qml"), QStringLiteral("Version") }, 6);
+        const auto importOnlyUnit = unit(QString(),
+            { QStringLiteral("PlrTopbar.qml"), QStringLiteral("iVersionTxt"), QStringLiteral("CPU allocation") }, 5);
+        r.f.bytes.replace(0xa000, topUnit.size(), topUnit);
+        r.f.bytes.replace(0xa800, sourceLessTop.size(), sourceLessTop);
+        r.f.bytes.replace(0xb000, settingsUnit.size(), settingsUnit);
+        r.f.bytes.replace(0xb800, importOnlyUnit.size(), importOnlyUnit);
+        const QByteArray original = r.f.bytes;
         const QString path = temp.filePath(QStringLiteral("titlebar-removals.exe"));
-        write(path, r.f.bytes);
-
-        check(ExtrasPatcher::removalNames().contains(QStringLiteral("Titlebar Version"))
-                  && ExtrasPatcher::removalNames().contains(QStringLiteral("Titlebar Instance Label")),
-              "the title bar offers both the version and the engine label as removals");
-
-        const auto applied = ExtrasPatcher::applyRemovals(
-            path, { QStringLiteral("Titlebar Version") });
-        check(applied.ok && applied.msg.contains(QLatin1String("Hid 1 title-bar label")),
-              QStringLiteral("the version label is hidden in the QML (%1)").arg(applied.msg));
+        write(path, original);
+        const auto names = ExtrasPatcher::removalNames();
+        check(names.count(QStringLiteral("Remove title details")) == 1
+                  && !names.contains(QStringLiteral("Titlebar Version"))
+                  && !names.contains(QStringLiteral("Titlebar Instance Label")),
+              "both UIs receive exactly one combined title-details option, not separate switches");
+        const auto applied = ExtrasPatcher::applyRemovals(path, { QStringLiteral("Remove title details") });
+        check(applied.ok && applied.msg.contains(QLatin1String("Hid both title-bar details")),
+              QStringLiteral("the combined title-details removal applies (%1)").arg(applied.msg));
         const QByteArray after = read(path);
-        check(after.contains(german),
-              "the UTF-16 string 'version' in the translator table is untouched");
-        const QByteArray qmlAfter = resourceText(after, r, QStringLiteral("PlrTopbar.qml")).toUtf8();
-        // The record is exactly full, like every slot in a real player, and the
-        // hide still has to work: the edit empties the text binding instead of
-        // adding a member, so nothing grows and no free space is needed. This is
-        // the fix for "it says it wants more bytes to hide".
-        check(be32(after, r.nodes.value(QStringLiteral("PlrTopbar.qml")) + 10)
-                  == quint32(r.entries.value(QStringLiteral("PlrTopbar.qml")) - r.f.payloads),
-              "hiding a label keeps its record where it was - no growth, no relocation");
-        check(qmlAfter.size() <= topbar.toUtf8().size(),
-              "and the document is not one byte larger than the stock one");
-        const QString text = QString::fromUtf8(qmlAfter);
-        check(text.contains(QStringLiteral("text: \"\""))
-                  && !text.contains(QStringLiteral("text: plrBackend.version")),
-              "the version Text prints nothing; the binding, not the element, was emptied");
-        check(text.contains(QStringLiteral("text: \"N32\"")),
-              "the engine label is a separate removal and is still there");
-
-        const auto engine = ExtrasPatcher::applyRemovals(
-            path, { QStringLiteral("Titlebar Instance Label") });
-        check(engine.ok && engine.msg.contains(QLatin1String("Hid 1 title-bar label")),
-              QStringLiteral("the engine label is hidden by its own row (%1)").arg(engine.msg));
-        const QString both = resourceText(read(path), r, QStringLiteral("PlrTopbar.qml"));
-        check(both.contains(QStringLiteral("visible: false")),
-              "an existing visible: expression is switched off in place");
-        check(!both.contains(QLatin1String("titlebar hide")),
-              "no marker comment is added: a comment would be bytes the record does not have");
-        check(both.size() <= topbar.size(),
-              "and the whole document still did not grow");
-        check(read(path).contains(german),
-              "and the string table is still intact after both removals");
-
-        const auto repeat = ExtrasPatcher::applyRemovals(
-            path, { QStringLiteral("Titlebar Version") });
-        check(repeat.ok && repeat.msg.contains(QLatin1String("already hidden")),
-              QStringLiteral("a repeated removal reports the label as already hidden (%1)").arg(repeat.msg));
-        check(resourceText(read(path), r, QStringLiteral("PlrTopbar.qml"))
-                      .count(QStringLiteral("text: \"\"")) == 1,
-              "a repeated removal does not edit the label a second time");
+        const QString text = resourceText(after, r, QStringLiteral("PlrTopbar.qml"));
+        check(after.size() == original.size() && after.contains(german),
+              "the packed titlebar removal never grows the EXE or deletes the shared UTF-16 version string");
+        check(text == TitlebarDetails::hide(topbar)
+                  && text.contains(QLatin1String("visible:false"))
+                  && text.contains(QLatin1String("onVisibleChanged:if(visible)visible=false"))
+                  && text.contains(QLatin1String("Layout.alignment:Qt.AlignVCenter")),
+              "the entire details row collapses and a native reload cannot re-show it; the name is vertically centred");
+        check(text.contains(QLatin1String("text:plrBackend.title"))
+                  && text.contains(QLatin1String("text:plrBackend.version"))
+                  && text.contains(QLatin1String("text:\"N32\""))
+                  && text.contains(QLatin1String("horizontalAlignment:Text.AlignLeft"))
+                  && text.contains(QLatin1String("pPreferredWidth + 12"))
+                  && QmlText::compactWhitespace(text).contains(QLatin1String("iBstTxt.pPreferredWidth=width - 100")),
+              "text bindings, left alignment, responsive title sizing and Settings/menu callbacks survive");
+        check(resourceText(after, r, QStringLiteral("UiSettingsWindow.qml")) == settings
+                  && after.mid(0xb000, settingsUnit.size()) == settingsUnit
+                  && after.mid(0xb800, importOnlyUnit.size()) == importOnlyUnit,
+              "Settings source and both named/source-less import-only Settings bytecode remain byte-for-byte intact");
+        check(le32(after, 0xa000 + 8) == 0 && le32(after, 0xa800 + 8) == 0,
+              "only the owning named and source-less titlebar compiled units are disabled");
+        check(read(path + QStringLiteral(".bak")) == original,
+              "the verified original backup makes the combined removal reversible");
+        const auto repeat = ExtrasPatcher::applyRemovals(path, { QStringLiteral("Remove title details") });
+        check(repeat.ok && repeat.msg.contains(QLatin1String("already hidden")) && read(path) == after,
+              "reapplying is byte-idempotent and reports both details already hidden");
+        // Old saved profiles remain usable, but each legacy name now maps to
+        // the one combined action; neither is a separate public checkbox.
+        for (const QString &oldName : { QStringLiteral("Titlebar Version"), QStringLiteral("Titlebar Instance Label") }) {
+            const QString alias = temp.filePath(oldName + QStringLiteral(".exe"));
+            write(alias, original);
+            check(ExtrasPatcher::applyRemovals(alias, { oldName }).ok
+                      && resourceText(read(alias), r, QStringLiteral("PlrTopbar.qml")) == text,
+                  QStringLiteral("legacy removal profile '%1' migrates to the combined action").arg(oldName));
+        }
+        // A fully packed file with no relocation cave must fail atomically,
+        // rather than blanking shared strings or growing the executable.
+        const QString tiny = QStringLiteral("import QtQuick\nItem{Text{id:iBstTxt;text:'Player'}Text{id:iVersionTxt;text:'6.0'}Text{id:iImageTxt;text:'P64'}}");
+        auto packed = resourcesBytes({ { QStringLiteral("PlrTopbar.qml"), tiny.toUtf8() },
+                                      { QStringLiteral("i18n.de-DE.qm"), german } }, true, raw);
+        addRegistration(packed, false);
+        const QString packedPath = temp.filePath(QStringLiteral("no-titlebar-room.exe"));
+        write(packedPath, packed.f.bytes);
+        const auto refused = ExtrasPatcher::applyRemovals(packedPath, { QStringLiteral("Remove title details") });
+        check(!refused.ok && read(packedPath) == packed.f.bytes && !QFileInfo::exists(packedPath + QStringLiteral(".bak")),
+              "insufficient fixed-slot/free-space capacity refuses the entire title-details edit without modifying any bytes");
     }
 
     std::printf("[layout] sidebar-to-titlebar layout tweak by QML\n");
@@ -5388,6 +5433,99 @@ Window {
         ciNotice(QStringLiteral("reference EXE %1 (%2 bytes) - solid, gradient, Resources, and boot paths run against it")
                      .arg(QFileInfo(input).fileName()).arg(original.size()));
 
+        // Exercise combined title-details removal on a disposable copy of
+        // every pinned Qt 5/6 player. No executable/QML from these references
+        // is launched. Protect every native Settings-page source, not only a
+        // synthetic text label or the outer window shell.
+        {
+            const QString titleCopy = temp.filePath(QStringLiteral("real-title-details.exe"));
+            check(write(titleCopy, original), "the real title-details test creates a disposable EXE copy");
+            const auto sourceFiles = QtResources::registeredFiles(original);
+            QMap<QString, QByteArray> protectedSettings;
+            for (const auto &file : sourceFiles) {
+                if (!file.name.endsWith(QLatin1String(".qml"), Qt::CaseInsensitive)
+                    || !file.name.contains(QLatin1String("Setting"), Qt::CaseInsensitive)) continue;
+                const QString key = file.path.isEmpty() ? file.name : file.path;
+                protectedSettings.insert(key, QtResources::readFile(original, file));
+            }
+            const QString titleBefore = linkedResourceText(original, QStringLiteral("PlrTopbar.qml"));
+            const auto removed = ExtrasPatcher::applyRemovals(titleCopy, { QStringLiteral("Remove title details") });
+            check(removed.ok,
+                  QStringLiteral("real %1 combined title-details removal applies without growing the EXE (%2)")
+                      .arg(QFileInfo(input).fileName(), removed.msg));
+            if (removed.ok) {
+                const auto changed = read(titleCopy);
+                const QString titleAfter = linkedResourceText(changed, QStringLiteral("PlrTopbar.qml"));
+                QString error;
+                check(changed.size() == original.size() && titleAfter == TitlebarDetails::hide(titleBefore, &error),
+                      QStringLiteral("real %1 writes only the collapsed, vertically centred titlebar rewrite (%2)")
+                          .arg(QFileInfo(input).fileName(), error));
+                const auto stillProtected = [&](const QByteArray &image) {
+                    QMap<QString, QByteArray> settings;
+                    for (const auto &file : QtResources::registeredFiles(image)) {
+                        if (!file.name.endsWith(QLatin1String(".qml"), Qt::CaseInsensitive)
+                            || !file.name.contains(QLatin1String("Setting"), Qt::CaseInsensitive)) continue;
+                        const QString key = file.path.isEmpty() ? file.name : file.path;
+                        settings.insert(key, QtResources::readFile(image, file));
+                    }
+                    return !protectedSettings.isEmpty() && settings == protectedSettings;
+                };
+                check(stillProtected(changed),
+                      QStringLiteral("real %1 keeps all %2 native Settings sources byte-for-byte intact after hiding title details")
+                          .arg(QFileInfo(input).fileName()).arg(protectedSettings.size()));
+                auto compiled = changed;
+                check(QtResources::sourceUnits(compiled, { QStringLiteral("PlrTopbar.qml") },
+                          { QStringLiteral("iVersionTxt"), QStringLiteral("iImageTxt") }, false, true) == 0,
+                      "the real titlebar's identifiable compiled units are disabled, not unrelated Settings imports");
+                const auto repeated = ExtrasPatcher::applyRemovals(titleCopy, { QStringLiteral("Remove title details") });
+                check(repeated.ok && read(titleCopy) == changed,
+                      "the real combined title-details removal is byte-idempotent");
+                const QString cleanId = QStringLiteral("clean-player-ui");
+                const auto cleanBefore = LayoutPatcher::analyze(changed, cleanId);
+                const auto clean = LayoutPatcher::apply(titleCopy, cleanId, true);
+                check(clean.ok && !LayoutPatcher::analyze(read(titleCopy), cleanId).needsUpdate,
+                      QStringLiteral("real %1 clean-up preserves/repairs Settings access (%2)")
+                          .arg(QFileInfo(input).fileName(), clean.msg));
+                check(stillProtected(read(titleCopy)),
+                      "the real clean-up does not alter any native Settings page text either");
+                if (clean.ok && !cleanBefore.applied) {
+                    const auto restored = LayoutPatcher::apply(titleCopy, cleanId, false);
+                    check(restored.ok && linkedResourceText(read(titleCopy), QStringLiteral("PlrTopbar.qml")) == titleAfter,
+                          "restoring the real clean-up does not re-show title details or change the centred player name");
+                    // Also cover the opposite order on the fully packed real
+                    // records: capacity compaction must not rewrite the exact
+                    // cleanup-owned spellings that Restore uses for recovery.
+                    const QString reverseCopy = temp.filePath(QStringLiteral("real-title-details-after-clean.exe"));
+                    check(write(reverseCopy, original), "the reverse-order regression uses another disposable copy");
+                    const auto cleanFirst = LayoutPatcher::apply(reverseCopy, cleanId, true);
+                    const auto beforeHide = read(reverseCopy);
+                    const auto hideSecond = cleanFirst.ok
+                        ? ExtrasPatcher::applyRemovals(reverseCopy, { QStringLiteral("Remove title details") })
+                        : ExtrasPatcher::Result { false, cleanFirst.msg };
+                    check(hideSecond.ok && read(reverseCopy).size() == beforeHide.size(),
+                          QStringLiteral("real %1 title-details removal never grows an already-cleaned EXE (%2)")
+                              .arg(QFileInfo(input).fileName(), hideSecond.msg));
+                    const auto restoredLast = hideSecond.ok
+                        ? LayoutPatcher::apply(reverseCopy, cleanId, false)
+                        : LayoutPatcher::Result { false, hideSecond.msg };
+                    const auto reverseBytes = read(reverseCopy);
+                    const QString reverseTitle = linkedResourceText(reverseBytes, QStringLiteral("PlrTopbar.qml"));
+                    check(restoredLast.ok && !LayoutPatcher::analyze(reverseBytes, cleanId).applied
+                              && stillProtected(reverseBytes)
+                              && read(reverseCopy + QStringLiteral(".bak")) == original,
+                          QStringLiteral("real %1 cleanup-first/title-details-second keeps Settings intact and cleanup fully restorable (%2)")
+                              .arg(QFileInfo(input).fileName(), restoredLast.msg));
+                    check(TitlebarDetails::hide(reverseTitle) == reverseTitle,
+                          QStringLiteral("real %1 title-details removal stays byte-idempotent after cleanup Restore too")
+                              .arg(QFileInfo(input).fileName()));
+                    QFile::remove(reverseCopy); QFile::remove(reverseCopy + QStringLiteral(".bak"));
+                }
+                check(read(titleCopy + QStringLiteral(".bak")) == original,
+                      "all real copy repatches preserve the first verified backup for full undo");
+            }
+            QFile::remove(titleCopy); QFile::remove(titleCopy + QStringLiteral(".bak"));
+        }
+
         // Exercise the exact All files snapshot used by the Resources tab on
         // each uploaded HD-Player reference, without writing to that reference.
         SettingsManager resourceSettings(nullptr, false);
@@ -5601,7 +5739,7 @@ Window {
                     if (file.name.compare(QLatin1String("UiSettingsWindow.qml"), Qt::CaseInsensitive) == 0)
                         rebuiltWindow = QString::fromUtf8(QtResources::readFile(panelImage, file));
                 }
-                check(rebuiltWindow.contains(QStringLiteral("BSI v16"))
+                check(rebuiltWindow.contains(QStringLiteral("BSI v17"))
                           && !rebuiltWindow.contains(QStringLiteral("property var bHidden"))
                           // The About page publishes the icon map into
                           // bIcons, so the shell has to declare it or that
@@ -5611,8 +5749,8 @@ Window {
                           // (the same UiTheme.colors the stock window uses) instead
                           // of a colour baked into the patch, so it keeps following
                           // whatever theme the emulator currently has.
-                          && rebuiltWindow.contains(QStringLiteral("Rectangle{id:r;property var q:UiTheme.colors;anchors.fill:parent;radius:14;color:r.q.primary80"))
-                          && rebuiltWindow.contains(QStringLiteral("color:r.q.primary10"))
+                          && rebuiltWindow.contains(QStringLiteral("Rectangle{id:r;property var c:UiTheme.colors;anchors.fill:parent;radius:14;color:r.c.primary80"))
+                          && rebuiltWindow.contains(QStringLiteral("color:r.c.primary10"))
                           && !rebuiltWindow.contains(QStringLiteral("#0d0f14"))
                           // The page host is inset from every window edge and
                           // stops short of the bottom, so the native page and its
@@ -5625,7 +5763,7 @@ Window {
                           && !rebuiltWindow.contains(QStringLiteral("UiSettingsButton{"))
                           && rebuiltWindow.contains(QStringLiteral("Text{id:t;text:modelData.pButtonText;font:h.font;"))
                           && rebuiltWindow.contains(QStringLiteral("font:UiTheme.fonts.bodyLarge"))
-                          && rebuiltWindow.contains(QStringLiteral("TextMetrics{id:m;text:t.text;font:t.font}"))
+                          && rebuiltWindow.contains(QStringLiteral("TextMetrics{id:m;text:t.text;font:h.font}"))
                           // Centre the ink, including non-zero glyph bearings,
                           // with 11 px of padding per side and one 4 px gap.
                           && rebuiltWindow.contains(QStringLiteral("x:11-m.boundingRect.x"))
@@ -5648,7 +5786,7 @@ Window {
                           // Labels sit above their icons; file-backed runtime
                           // PNGs already have a bounded 54 px source resolution.
                           && rebuiltWindow.contains(QStringLiteral("y:c?0:22-height/2"))
-                          && rebuiltWindow.contains(QStringLiteral("ToolButton{width:18;height:18;x:parent.width/2-9;y:24;enabled:false;padding:0;background:null;icon.source:c||'';icon.color:index==pCurrentTabIndex?t.color:'transparent';icon.width:18;icon.height:18}"))
+                          && rebuiltWindow.contains(QStringLiteral("ToolButton{width:18;height:18;x:parent.width/2-9;y:24;enabled:false;padding:0;background:null;icon{width:18;height:18;color:index==pCurrentTabIndex?t.color:'transparent';source:c||''}}"))
                           // A hidden tab must not paint its label over the tabs
                           // beside it: zeroing its width closed the slot but the
                           // button inside kept drawing its text on top of the
@@ -5663,7 +5801,7 @@ Window {
                           // The native page stays flat; only tabs get the requested
                           // soft selected/hover surface and actual icon tint.
                           && rebuiltWindow.contains(QStringLiteral("radius:6;color:t.color;opacity:index==pCurrentTabIndex?.2:parent.containsMouse?.1:0"))
-                          && !rebuiltWindow.contains(QStringLiteral("border.color"))
+                          && rebuiltWindow.contains(QStringLiteral("border.color:index==pCurrentTabIndex?t.color:'transparent';color:'transparent'"))
                           && !rebuiltWindow.contains(QStringLiteral("visible:s"))
                           && rebuiltWindow.contains(QStringLiteral("StackLayout{id:iSelectedSettingControl;anchors.fill:parent;currentIndex:pCurrentTabIndex;anchors.topMargin:12"))
                           && rebuiltWindow.contains(QStringLiteral("delegate:Loader{"))
@@ -5671,10 +5809,10 @@ Window {
                           && rebuiltWindow.contains(QStringLiteral("onClicked:{fChangeSelectedSetting(index);forceActiveFocus()}"))
                           && rebuiltWindow.contains(QStringLiteral("onVisibleChanged:if(visible&&transientParent)"))
                           && rebuiltWindow.contains(QStringLiteral("var t=transientParent"))
-                          && rebuiltWindow.contains(QStringLiteral("width=Math.min(t.width*.96,1068)"))
-                          && rebuiltWindow.contains(QStringLiteral("height=Math.min(t.height*.94,611)"))
-                          && rebuiltWindow.contains(QStringLiteral("x=t.x+t.width/2-width/2"))
-                          && rebuiltWindow.contains(QStringLiteral("y=t.y+t.height/2-height/2"))
+                          && rebuiltWindow.contains(QStringLiteral("width=Math.min(t.width*.96,800)"))
+                          && rebuiltWindow.contains(QStringLiteral("height=Math.min(t.height*.94,460)"))
+                          && rebuiltWindow.contains(QStringLiteral("x=(t.width-width)/2+t.x"))
+                          && rebuiltWindow.contains(QStringLiteral("y=(t.height-height)/2+t.y"))
                           && rebuiltWindow.contains(QStringLiteral("iSettingsWindow.startSystemMove()"))
                           && rebuiltWindow.contains(QStringLiteral("asset:'CloseIcon'")),
                       QStringLiteral("the rebuilt %1 Settings panel matches the latest screenshot size and tints selected tabs/icons while preserving native pages, selection, dragging, and close behavior")
@@ -6968,6 +7106,12 @@ Window {
             "        PlrSidebarElement {\r\n"
             "            pElementId: pRotate\r\n"
             "            pAsset: \"SidebarRotate\"\r\n"
+            "        },\r\n"
+            "        PlrSidebarElement {\r\n"
+            "            pElementId: pSettings\r\n"
+            "            pAsset: \"SidebarSettings\"\r\n"
+            "            pShowViaRepaterOnly: false\r\n"
+            "            pIsFeatureEnable: iSidebarProperties.pIsSettingsEnabled\r\n"
             "        }\r\n"
             "    ]\r\n"
             "}\r\n");
@@ -6999,6 +7143,13 @@ Window {
             "        }\r\n"
             "    ]\r\n"
             "    Row {\r\n"
+            "        ColumnLayout { id: iTitleLayout\r\n"
+            "            Text { id: iBstTxt; text: plrBackend.title }\r\n"
+            "            RowLayout { id: iVersionImgLayout\r\n"
+            "                Text { id: iVersionTxt; text: plrBackend.version }\r\n"
+            "                Text { id: iImageTxt; text: \"N32\" }\r\n"
+            "            }\r\n"
+            "        }\r\n"
             "        UiImageButton {\r\n"
             "            id: iSidebarShowBtn\r\n"
             "        }\r\n"
@@ -7034,10 +7185,17 @@ Window {
                   && cleanSidebarText.contains(QLatin1String("pIsFeatureEnable: iSidebarProperties.pIsVolumeEnabled"))
                   && !cleanSidebarText.contains(QLatin1String("pIsScreenshotEnabled")),
               "the sidebar keeps fullscreen and volume and switches screenshot and rotate off");
-        check(cleanTopbarText.count(QLatin1String("pVisible: false /* BSI CUSTOMIZER: clean player UI visible:")) == 2
+        check(cleanSidebarText.contains(QLatin1String("pIsFeatureEnable: iSidebarProperties.pIsSettingsEnabled"))
+                  && cleanSidebarText.contains(QLatin1String("pShowViaRepaterOnly: false"))
+                  && cleanTopbarText.contains(QLatin1String("text: plrBackend.version"))
+                  && cleanTopbarText.contains(QLatin1String("text: \"N32\"")),
+              "clean-up preserves sidebar Settings conditions and leaves title/details to the separate combined removal");
+        check(cleanTopbarText.count(QLatin1String("pVisible: false /* BSI CUSTOMIZER: clean player UI visible:")) == 1
+                  && cleanTopbarText.contains(QLatin1String("pVisible: pIsNowbuxEnabled\r\n            pWidth: iCfgBtn.width"))
+                  && cleanTopbarText.contains(QLatin1String("UiImageButton { id: iCfgBtn }"))
                   && cleanTopbarText.contains(QLatin1String("pVisible: true\r\n            pWidth: iBackBtn.width"))
                   && cleanTopbarText.contains(QLatin1String("visible: false // BSI CUSTOMIZER: clean player UI")),
-              "the help/menu elements stop being shown by fReloadTopbarElements while Back stays, and the sidebar toggle is hidden");
+              "help stops being shown by fReloadTopbarElements while Settings/menu and Back stay; the sidebar toggle is hidden");
         check(cleanTopbarText.contains(QLatin1String("UiImageButton { visible: false /* BSI CUSTOMIZER: clean player UI */; id: iHelpBtn }"))
                   && cleanTopbarText.contains(QLatin1String("UiImageButton { id: iBackBtn }")),
               "an object written on a single line is hidden inline instead of being split across lines");
@@ -7145,17 +7303,139 @@ Window {
                                   .arg(oldApplied.msg));
         const auto oldTopbarText = resourceText(read(oldPath), old, QStringLiteral("PlrTopbar.qml"));
         const auto oldPlrText = resourceText(read(oldPath), old, QStringLiteral("plr.qml"));
-        check(oldTopbarText.count(QLatin1String("\"visible\" : false /* BSI CUSTOMIZER: clean player UI visible:")) == 4
+        check(oldTopbarText.count(QLatin1String("\"visible\" : false /* BSI CUSTOMIZER: clean player UI visible:")) == 3
+                  && oldTopbarText.contains(QLatin1String("\"id\" : iCfgBtn,            \"visible\" : true"))
                   && oldTopbarText.contains(QLatin1String("\"id\" : iTitleLayout,       \"visible\" : true"))
                   && oldTopbarText.contains(QLatin1String("\"id\" : iBackBtn,           \"visible\" : true"))
                   && oldTopbarText.contains(QLatin1String("id: iQuestbtn; visible: false /* BSI CUSTOMIZER")),
-              "the ListModel entries for the menu/help buttons are switched off while the title and Back stay");
+              "the ListModel entries for extra/help buttons are switched off while Settings/menu, the title and Back stay");
         check(oldPlrText == oldPlr,
               "the layout-child sidebar keeps its stock Layout.preferredWidth");
         check(LayoutPatcher::apply(oldPath, cleanId, false).ok
                   && resourceText(read(oldPath), old, QStringLiteral("PlrTopbar.qml")) == oldTopbar
                   && resourceText(read(oldPath), old, QStringLiteral("plr.qml")) == oldPlr,
               "the MSI 5.9 style clean-up also restores byte-for-byte");
+
+        const auto oldHide = [](const QString &value, const QString &kind) {
+            return QStringLiteral("false /* BSI CUSTOMIZER: ") + kind + QLatin1Char(':')
+                + QString::fromLatin1(value.toUtf8().toBase64()) + QStringLiteral(" */");
+        };
+        const auto migration = [&](const QString &caseName, const QString &beforeTop,
+                                   const QString &beforeSide, const QString &wantedTop,
+                                   const QString &wantedSide, const QString &stockTop,
+                                   const QString &stockSide) {
+            auto prior = resources({ { QStringLiteral("plr.qml"), cleanPlr },
+                                     { QStringLiteral("PlrTopbar.qml"), beforeTop },
+                                     { QStringLiteral("PlrSidebar.qml"), beforeSide } });
+            addRegistration(prior, false);
+            const QString path = temp.filePath(caseName + QStringLiteral(".exe"));
+            write(path, prior.f.bytes);
+            const auto state = LayoutPatcher::analyze(read(path), cleanId);
+            check(state.supported && state.applied && state.needsUpdate,
+                  caseName + QStringLiteral(": an otherwise-complete old clean-up offers Update to repair Settings"));
+            const auto result = LayoutPatcher::apply(path, cleanId, true);
+            const auto repaired = read(path);
+            check(result.ok, caseName + QStringLiteral(": Update succeeds: ") + result.msg);
+            check(resourceText(repaired, prior, QStringLiteral("PlrTopbar.qml")) == wantedTop
+                      && resourceText(repaired, prior, QStringLiteral("PlrSidebar.qml")) == wantedSide,
+                  caseName + QStringLiteral(": only cleanup-owned Settings hides are removed; all other extra buttons stay hidden"));
+            check(!LayoutPatcher::analyze(repaired, cleanId).needsUpdate,
+                  caseName + QStringLiteral(": read-back no longer requests an update"));
+            check(LayoutPatcher::apply(path, cleanId, true).ok && read(path) == repaired,
+                  caseName + QStringLiteral(": the repair is byte-idempotent"));
+            check(LayoutPatcher::apply(path, cleanId, false).ok
+                      && resourceText(read(path), prior, QStringLiteral("PlrTopbar.qml")) == stockTop
+                      && resourceText(read(path), prior, QStringLiteral("PlrSidebar.qml")) == stockSide,
+                  caseName + QStringLiteral(": Restore still restores exact native/independent conditions"));
+        };
+        QString oldCompleteTop = cleanTopbarText;
+        oldCompleteTop.replace(QStringLiteral("pVisible: pIsNowbuxEnabled\r\n            pWidth: iCfgBtn.width"),
+            QStringLiteral("pVisible: ") + oldHide(QStringLiteral("pIsNowbuxEnabled"), QStringLiteral("clean player UI visible"))
+            + QStringLiteral("\r\n            pWidth: iCfgBtn.width"));
+        oldCompleteTop.replace(QStringLiteral("UiImageButton { id: iCfgBtn }"),
+            QStringLiteral("UiImageButton { visible: false /* BSI CUSTOMIZER: clean player UI */; id: iCfgBtn }"));
+        QString oldCompleteSide = cleanSidebarText;
+        oldCompleteSide.replace(QStringLiteral("pIsFeatureEnable: iSidebarProperties.pIsSettingsEnabled"),
+            QStringLiteral("pIsFeatureEnable: ") + oldHide(QStringLiteral("iSidebarProperties.pIsSettingsEnabled"), QStringLiteral("sidebar clean")));
+        migration(QStringLiteral("complete-element-clean"), oldCompleteTop, oldCompleteSide,
+                  cleanTopbarText, cleanSidebarText, cleanTopbar, cleanSidebar);
+
+        // Settings had no feature/visibility binding: remove exactly the lines
+        // our old clean-up inserted, not the feature's native overflow policy.
+        QString sideNoBinding = cleanSidebar;
+        sideNoBinding.remove(QStringLiteral("            pIsFeatureEnable: iSidebarProperties.pIsSettingsEnabled\r\n"));
+        QString cleanNoBinding = cleanSidebarText;
+        cleanNoBinding.remove(QStringLiteral("            pIsFeatureEnable: iSidebarProperties.pIsSettingsEnabled\r\n"));
+        QString oldInserted = cleanNoBinding;
+        oldInserted.replace(QStringLiteral("        PlrSidebarElement {\r\n            pElementId: pSettings"),
+            QStringLiteral("        PlrSidebarElement {\r\n            pIsFeatureEnable: false // BSI CUSTOMIZER: sidebar clean\r\n            pElementId: pSettings"));
+        QString conditionalStock = cleanTopbar;
+        conditionalStock.replace(QStringLiteral("UiImageButton { id: iCfgBtn }"),
+                                 QStringLiteral("UiImageButton { id: iCfgBtn; visible: !pFullscreen }") );
+        QString conditionalClean = cleanTopbarText;
+        conditionalClean.replace(QStringLiteral("UiImageButton { id: iCfgBtn }"),
+                                 QStringLiteral("UiImageButton { id: iCfgBtn; visible: !pFullscreen }") );
+        QString conditionalOld = conditionalClean;
+        conditionalOld.replace(QStringLiteral("visible: !pFullscreen"),
+            QStringLiteral("visible: false /* BSI CUSTOMIZER: clean player UI */ && (!pFullscreen)"));
+        migration(QStringLiteral("inserted-sidebar-and-conditional-direct-settings"), conditionalOld, oldInserted,
+                  conditionalClean, cleanNoBinding, conditionalStock, sideNoBinding);
+
+        QString oldModel = oldTopbarText;
+        oldModel.replace(QStringLiteral("\"id\" : iCfgBtn,            \"visible\" : true"),
+            QStringLiteral("\"id\" : iCfgBtn,            \"visible\" : ")
+                + oldHide(QStringLiteral("true"), QStringLiteral("clean player UI visible")));
+        migration(QStringLiteral("complete-listmodel-clean"), oldModel, oldCompleteSide,
+                  oldTopbarText, cleanSidebarText, oldTopbar, cleanSidebar);
+
+        // An intentional user removal/stock false is NOT cleanup-owned, even
+        // while the other controls carry cleanup markers. Never re-enable it.
+        QString independentTop = cleanTopbar;
+        independentTop.replace(QStringLiteral("pVisible: pIsNowbuxEnabled"), QStringLiteral("pVisible: false"));
+        independentTop.replace(QStringLiteral("UiImageButton { id: iCfgBtn }"),
+                               QStringLiteral("UiImageButton { id: iCfgBtn; visible: false }"));
+        QString independentSide = cleanSidebar;
+        independentSide.replace(QStringLiteral("pIsFeatureEnable: iSidebarProperties.pIsSettingsEnabled"),
+                                QStringLiteral("pIsFeatureEnable: false"));
+        auto independent = resources({ { QStringLiteral("PlrTopbar.qml"), independentTop },
+                                       { QStringLiteral("PlrSidebar.qml"), independentSide },
+                                       { QStringLiteral("plr.qml"), cleanPlr } });
+        addRegistration(independent, false);
+        const QString independentPath = temp.filePath(QStringLiteral("independently-hidden-settings.exe"));
+        write(independentPath, independent.f.bytes);
+        check(LayoutPatcher::apply(independentPath, cleanId, true).ok,
+              "clean-up still applies when Settings is independently disabled");
+        const auto independentBytes = read(independentPath);
+        check(!LayoutPatcher::analyze(independentBytes, cleanId).needsUpdate
+                  && resourceText(independentBytes, independent, QStringLiteral("PlrTopbar.qml"))
+                      .contains(QLatin1String("UiImageButton { id: iCfgBtn; visible: false }"))
+                  && resourceText(independentBytes, independent, QStringLiteral("PlrSidebar.qml"))
+                      .contains(QLatin1String("pIsFeatureEnable: false\r\n        }")),
+              "independent Settings false conditions survive and do not produce an endless Update prompt");
+        check(LayoutPatcher::apply(independentPath, cleanId, false).ok
+                  && resourceText(read(independentPath), independent, QStringLiteral("PlrTopbar.qml")) == independentTop
+                  && resourceText(read(independentPath), independent, QStringLiteral("PlrSidebar.qml")) == independentSide,
+              "Restore preserves every independently disabled Settings condition exactly");
+
+        auto detailsFixture = resources({ { QStringLiteral("plr.qml"), cleanPlr },
+                                           { QStringLiteral("PlrSidebar.qml"), cleanSidebar },
+                                           { QStringLiteral("PlrTopbar.qml"), cleanTopbar } });
+        addRegistration(detailsFixture, false);
+        const QString detailsPath = temp.filePath(QStringLiteral("clean-after-combined-details.exe"));
+        write(detailsPath, detailsFixture.f.bytes);
+        const auto detailsRemoved = ExtrasPatcher::applyRemovals(detailsPath, { QStringLiteral("Remove title details") });
+        const auto hiddenTitle = resourceText(read(detailsPath), detailsFixture, QStringLiteral("PlrTopbar.qml"));
+        check(detailsRemoved.ok && LayoutPatcher::apply(detailsPath, cleanId, true).ok
+                  && LayoutPatcher::apply(detailsPath, cleanId, false).ok
+                  && resourceText(read(detailsPath), detailsFixture, QStringLiteral("PlrTopbar.qml")) == hiddenTitle,
+              "clean-up apply/restore never undoes the separate combined title-details removal or alters its name centering");
+        const QString reversePath = temp.filePath(QStringLiteral("combined-details-after-clean.exe"));
+        write(reversePath, detailsFixture.f.bytes);
+        check(LayoutPatcher::apply(reversePath, cleanId, true).ok
+                  && ExtrasPatcher::applyRemovals(reversePath, { QStringLiteral("Remove title details") }).ok
+                  && LayoutPatcher::apply(reversePath, cleanId, false).ok
+                  && !LayoutPatcher::analyze(read(reversePath), cleanId).applied,
+              "title-details capacity compaction preserves every cleanup-owned field so Restore works in the opposite apply order too");
     }
 
     std::printf("[about] Settings About page offers every stock link and the About text\n");

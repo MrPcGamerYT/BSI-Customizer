@@ -66,7 +66,7 @@ match = re.search(
 )
 assert match, "Could not find the generated Settings-window QML template"
 replacement = match.group(1)
-assert "BSI v16" in replacement
+assert "BSI v17" in replacement
 assert "pSettingsItems.pSettingElements" in replacement
 # The About page publishes the hidden-tab list and the icon map to the shell.
 # It must find that shell by walking up: counting parents landed on the window
@@ -94,9 +94,9 @@ assert "property var bsiTabIcons:@@BSI_TAB_ICONS@@" in cpp
 # The shell must not ship its own palette: it paints with the player's own
 # theme object, exactly like the stock Settings window, so it follows whatever
 # the emulator currently looks like instead of a colour frozen into the patch.
-assert "property var q:UiTheme.colors" in replacement
-assert "color:r.q.primary80" in replacement
-assert "color:r.q.primary10" in replacement
+assert "property var c:UiTheme.colors" in replacement
+assert "color:r.c.primary80" in replacement
+assert "color:r.c.primary10" in replacement
 assert "#0d0f14" not in replacement and 'color:"white"' not in replacement, \
     "the rebuilt shell must not hard-code colours"
 assert 'color:"' not in replacement, "no literal colours may be baked into the shell"
@@ -163,7 +163,7 @@ assert "UiSettingsButton{" not in replacement, \
     "the stock tab button's private label is left aligned"
 assert "Text{id:t;text:modelData.pButtonText;font:h.font;" in replacement
 assert "font:UiTheme.fonts.bodyLarge;anchors.centerIn:parent" in replacement
-assert "TextMetrics{id:m;text:t.text;font:t.font}" in replacement, \
+assert "TextMetrics{id:m;text:t.text;font:h.font}" in replacement, \
     "width and bearing must use the actual label's font and text"
 assert "width:c===''?-4:m.boundingRect.width+22;height:44" in replacement, \
     "each hit target must fit its own label plus 11 px on each side"
@@ -174,7 +174,7 @@ assert ";spacing:4" in replacement, \
     "all hit-target gaps must be exactly 4 px (all label gaps exactly 26 px)"
 assert "y:c?0:22-height/2" in replacement, \
     "labels must be centred vertically or lifted above their icon"
-assert "ToolButton{width:18;height:18;x:parent.width/2-9;y:24;enabled:false;padding:0;background:null;icon.source:c||'';icon.color:index==pCurrentTabIndex?t.color:'transparent';icon.width:18;icon.height:18}" in replacement
+assert "ToolButton{width:18;height:18;x:parent.width/2-9;y:24;enabled:false;padding:0;background:null;icon{width:18;height:18;color:index==pCurrentTabIndex?t.color:'transparent';source:c||''}}" in replacement
 # The badge must not shift the label, and the full padded tab remains clickable.
 assert "x:parent.width-8;y:t.y+6;width:6;height:6" in replacement
 assert "visible:modelData.pShowRedDot" in replacement
@@ -202,18 +202,20 @@ assert "Item{width:Math.min(r.width-48,568);x:(r.width-width)/2;height:r.height-
 assert "radius:12" not in replacement, "do not wrap the native page in a new card"
 assert "Rectangle{anchors.fill:parent;radius:6;color:t.color;opacity:index==pCurrentTabIndex?.2:parent.containsMouse?.1:0}" in replacement, \
     "selection and quieter hover must use the label's native theme colour"
-assert "icon.color:index==pCurrentTabIndex?t.color:'transparent'" in replacement, \
+assert "icon{width:18;height:18;color:index==pCurrentTabIndex?t.color:'transparent'" in replacement, \
     "tint the actual selected icon and preserve custom colours when deselected"
+assert "Rectangle{anchors.fill:parent;radius:6;border.color:index==pCurrentTabIndex?t.color:'transparent';color:'transparent'}" in replacement, \
+    "the selected tab needs a separate full-opacity themed outline; hover must not acquire one"
 assert "GraphicalEffects" not in replacement and "ShaderEffect" not in replacement, \
     "selection must work on both player Qt generations without optional effects"
-assert "Rectangle{id:r;property var q:UiTheme.colors;anchors.fill:parent;radius:14;color:r.q.primary80" in replacement, \
+assert "Rectangle{id:r;property var c:UiTheme.colors;anchors.fill:parent;radius:14;color:r.c.primary80" in replacement, \
     "the window itself stays a single flat rounded surface"
 assert "StackLayout{id:iSelectedSettingControl;anchors.fill:parent;currentIndex:pCurrentTabIndex" in replacement
 # Keep a coarse template-bloat guard, but this is not proof that the compressed
 # whole window fits: native callbacks/prefix and compression entropy matter too.
 # settings_panel_window_budget_test reconstructs the complete 2468-byte legacy
 # resource, including the original native prefix and the geometry helper.
-assert len(replacement.encode()) <= 1976, (
+assert len(replacement.encode()) <= 2080, (
     f"shell grew to {len(replacement.encode())} bytes; the tightest known "
     "UiSettingsWindow.qml slot is 2468 bytes"
 )
@@ -275,7 +277,7 @@ assert "fCheckForUpdateCallback" in about_doc and "fUpdateShortDisplayName" in a
     "the native About callbacks must survive compaction"
 assert "delegate:Loader{Component.onCompleted:setSource(modelData.pQmlSource" in replacement
 assert "text:modelData.pButtonText" in replacement
-assert "color:r.q[index==pCurrentTabIndex?'subWindowHeaderClick':'primary20']" in replacement
+assert "color:r.c[index==pCurrentTabIndex?'subWindowHeaderClick':'primary20']" in replacement
 assert "visible:modelData.pShowRedDot" in replacement
 assert "fChangeSelectedSetting(index)" in replacement
 
@@ -309,10 +311,10 @@ assert helper_match, "Could not find the compact Settings-window geometry helper
 helper = helper_match.group(1)
 assert "onVisibleChanged:if(visible&&transientParent)" in helper
 assert "var t=transientParent" in helper
-assert "width=Math.min(t.width*.96,1068)" in helper
-assert "height=Math.min(t.height*.94,611)" in helper
-assert "x=t.x+t.width/2-width/2" in helper
-assert "y=t.y+t.height/2-height/2" in helper
+assert "width=Math.min(t.width*.96,800)" in helper
+assert "height=Math.min(t.height*.94,460)" in helper
+assert "x=(t.width-width)/2+t.x" in helper
+assert "y=(t.height-height)/2+t.y" in helper
 replacement = replacement.replace("@@BSI_HIDDEN_TABS@@", "[]")
 replacement = replacement.replace("@@BSI_TAB_ICONS@@", "({})")
 
@@ -515,8 +517,8 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
     assert not missing, f"Missing controls: {missing}; found object names: {found_names}"
     panel_center = panel.mapToItem(window.contentItem(), QPointF(panel.width() / 2, panel.height() / 2))
     assert abs(panel_center.x() - window.width() / 2) < 2 and abs(panel_center.y() - window.height() / 2) < 2, "The compact Settings shell should stay centered in the player window"
-    assert abs(obj.width() - 1068) < 2 and abs(obj.height() - 611) < 2, "Settings must match the screenshot frame, including the native shadow allowance"
-    assert abs(obj.x() - 216) < 2 and abs(obj.y() - 144.5) < 2, "The screenshot-sized Settings window should remain centered"
+    assert abs(obj.width() - 800) < 2 and abs(obj.height() - 460) < 2, "Settings must match the screenshot frame, including the native shadow allowance"
+    assert abs(obj.x() - 350) < 2 and abs(obj.y() - 220) < 2, "The screenshot-sized Settings window should remain centered"
     title_center = settings_title.mapToItem(obj, QPointF(settings_title.width() / 2, settings_title.height() / 2))
     assert abs(title_center.x() - obj.width() / 2) < 2, "The Settings title should be centered in the title bar"
     # Gaps: one spacing value for the whole strip, so the distance between any

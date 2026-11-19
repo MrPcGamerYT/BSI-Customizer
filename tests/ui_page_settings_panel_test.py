@@ -98,6 +98,9 @@ QtObject {
     property var workspaceOperations: []
     property var customizationProfile: ({})
     property var calls: []
+    property var removalNames: ["Remove title details", "Sidebar Rotate"]
+    property bool cleanupNeedsUpdate: true
+    property bool cleanupApplied: true
     property var hidden: []
     property var packIcons: ({})
     property var selectedAsset: ({})
@@ -156,7 +159,17 @@ QtObject {
         recoveryBlocked = false;
         return {ok: true, msg: "Restored from backup."};
     }
-    function layoutTweaks() { return []; }
+    function layoutTweaks() { return [{id: "clean-player-ui", supported: true,
+        applied: cleanupApplied, needsUpdate: cleanupNeedsUpdate, label: "Clean player UI", detail: ""}]; }
+    function applyLayoutTweak(id, enabled) {
+        calls = calls.concat(["applyLayoutTweak:" + id + ":" + enabled]);
+        cleanupApplied = enabled; cleanupNeedsUpdate = false;
+        return {ok: true, msg: "Clean UI updated."};
+    }
+    function applyRemovals(names) {
+        calls = calls.concat(["applyRemovals:" + names.join(",")]);
+        return {ok: true, msg: "Removed title details only."};
+    }
     function sidebarButtonRows() { return {supported: false, applied: false, buttons: [], detail: ""}; }
     function aboutPageState() { return {supported: false, applied: false, detail: "", text: "", links: []}; }
     function localFilePath(url) { return String(url); }
@@ -369,12 +382,52 @@ Window {
                      "Name under logo", "Subtitle"]:
         assert expected in joined, expected
 
-    # Three messages come from the mock doubles, not from the page: the fixture
-    # has no removalNames list, no about "source" text and a Controls Dialog
-    # wrapped in a plain Window. They appear identically on the unmodified page;
-    # anything else - and anything from the rebuild section - is a failure.
-    fixture_noise = ("removalNames", "page.about.source",
-                     'Binding loop detected for property "implicitHeight"')
+    # Drive the actual native cleanup migration and the one combined removal
+    # with physical clicks, not a source-only contract or an invoked handler.
+    def click_item(item):
+        assert item.isVisible() and item.width() > 0 and item.height() > 0
+        point = item.mapToScene(QPointF(item.width() / 2, item.height() / 2))
+        assert 0 <= point.x() < window.width() and 0 <= point.y() < window.height(), (item, point)
+        QTest.mouseClick(window, Qt.LeftButton, Qt.NoModifier, point.toPoint())
+        QTest.qWait(80)
+
+    def click_text(value):
+        pending = [window.contentItem()]
+        while pending:
+            item = pending.pop()
+            if item.isVisible() and item.property("text") == value:
+                click_item(item)
+                return
+            pending.extend(item.childItems())
+        raise AssertionError("Native UI text not reachable: " + value)
+
+    click_text("Layout & clean-up")
+    assert page.property("currentSection") == 0
+    click_text("Refresh UI" if not page.property("inspectionStale") else "Load player UI")
+    clean_action = page.findChild(QObject, "cleanPlayerUiAction")
+    assert clean_action.property("text") == "Update clean-up"
+    click_item(clean_action)
+    assert backend.property("cleanupApplied") and not backend.property("cleanupNeedsUpdate")
+    assert "applyLayoutTweak:clean-player-ui:true" in backend.property("calls").toVariant()
+    assert clean_action.property("text") == "Restore stock UI"
+    click_item(clean_action)
+    assert not backend.property("cleanupApplied")
+    assert "applyLayoutTweak:clean-player-ui:false" in backend.property("calls").toVariant()
+    click_text("Remove items")
+    assert page.property("currentSection") == 2
+    removal = page.findChild(QObject, "playerUiRemovalList")
+    assert removal.property("count") == 2
+    assert "Titlebar Version" not in texts(window.contentItem())
+    assert "Titlebar Instance Label" not in texts(window.contentItem())
+    click_text("Remove title details")
+    assert page.property("checkedCount") == 1
+    click_item(page.findChild(QObject, "applyPlayerUiRemovals"))
+    assert "applyRemovals:Remove title details" in backend.property("calls").toVariant()
+
+    # Known mock-only messages come from the missing About "source" text and
+    # a Controls Dialog wrapped in a plain Window. The removalNames list and
+    # cleanup state are real fixture contracts now, not tolerated warnings.
+    fixture_noise = ("page.about.source", 'Binding loop detected for property "implicitHeight"')
     unexpected = [w for w in errors
                   if not any(token in w for token in fixture_noise + ("TypeError: Type error",
                                                                      "Unable to assign [undefined]"))]
@@ -400,4 +453,4 @@ Window {
     QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
     QTest.qWait(1)
     print("PASS: real native Player-interface page; Settings-panel rebuild tab renders player "
-          "state, previews pack/default overrides and drives profile save, apply and restore")
+          "state, previews pack/default overrides and drives profile save/apply/restore, cleanup Settings-access migration and one combined title-details removal")

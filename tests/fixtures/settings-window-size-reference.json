@@ -1,0 +1,9 @@
+{
+  "attachment": "imagSDAADASSDASDASDASDAe.png",
+  "sha256": "b37ecdb3b7542667c3c7aa4147c4ff6441e262f3e55704f43cbecda1a82eac8a",
+  "image": { "width": 1011, "height": 584 },
+  "opaquePanel": { "x": 120, "y": 78, "width": 770, "height": 430 },
+  "nativeShadowInset": 15,
+  "outerWindow": { "width": 800, "height": 460 },
+  "measurement": "Opaque panel pixels, excluding the surrounding native glow. The same fixed maximum applies on larger players; only smaller viewports may clamp it."
+}

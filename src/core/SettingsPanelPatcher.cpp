@@ -49,7 +49,8 @@ const QString kWindowDesignMarkerV12 = QStringLiteral("BSI Settings v12");
 const QString kWindowDesignMarkerV13 = QStringLiteral("BSI Settings v13");
 const QString kWindowDesignMarkerV14 = QStringLiteral("BSI Settings v14");
 const QString kWindowDesignMarkerV15 = QStringLiteral("BSI v15");
-const QString kWindowDesignMarker = QStringLiteral("BSI v16");
+const QString kWindowDesignMarkerV16 = QStringLiteral("BSI v16");
+const QString kWindowDesignMarker = QStringLiteral("BSI v17");
 const QString kAboutMarker = QStringLiteral("BSI CUSTOMIZER: redesigned About page v1");
 const QString kSchema = QStringLiteral("bsi.settings-panel.recovery");
 const QString kWindowLeaf = QStringLiteral("UiSettingsWindow.qml");
@@ -782,7 +783,11 @@ QString buildWindow(const QString &stock)
     // address bIcons by the public shell id, never by r.parent.
     //
     // Keep the native 568 px page column, footer clearance and loader callbacks.
-    // Only the selected tab gains a soft themed highlight; hover is quieter.
+    // Only the selected tab gains a soft themed highlight and a full-colour 1 px
+    // outline; hover is quieter. A separate transparent rectangle keeps the
+    // outline opaque instead of fading it with the .2-opacity background.
+    // Grouped icon properties and shared title-font metrics retain the complete
+    // legacy 2468-byte slot budget, including its required 32-byte headroom.
     // A public Controls ToolButton paints/tints each PNG icon, with no optional
     // SVG decoder, GraphicalEffects or private Controls.impl import. Its disabled,
     // background-free surface leaves all input to the enclosing tab MouseArea.
@@ -796,14 +801,14 @@ QString buildWindow(const QString &stock)
     // Keep the template small, but the *whole* compressed Window (including
     // native callbacks, copyright header and geometry helper) must fit the slot.
     // Template length alone cannot predict that compression budget.
-    QString replacement = QStringLiteral(R"QML(UiShadowContainer{//BSI v16
+    QString replacement = QStringLiteral(R"QML(UiShadowContainer{//BSI v17
 id:iSettingsWindowShadowContainer;anchors.fill:parent
 property var bIcons:({})
-Rectangle{id:r;property var q:UiTheme.colors;anchors.fill:parent;radius:14;color:r.q.primary80
+Rectangle{id:r;property var c:UiTheme.colors;anchors.fill:parent;radius:14;color:r.c.primary80
 Column{Item{width:r.width;height:56
-MouseArea{anchors.fill:parent;onPressed:iSettingsWindow.startSystemMove()}Text{id:h;text:qsTr('Settings');color:r.q.primary10;font:UiTheme.fonts.bodyLarge;anchors.centerIn:parent}UiImageButton{asset:'CloseIcon';x:r.width-32;y:12;onClicked:iSettingsWindow.close()}}ListView{width:Math.max(0,Math.min(contentWidth,r.width-48));height:44;x:(r.width-width)/2;clip:true;orientation:Qt.Horizontal;model:pSettingsItems.pSettingElements;spacing:4
+MouseArea{anchors.fill:parent;onPressed:iSettingsWindow.startSystemMove()}Text{id:h;text:qsTr('Settings');color:r.c.primary10;font:UiTheme.fonts.bodyLarge;anchors.centerIn:parent}UiImageButton{asset:'CloseIcon';x:r.width-32;y:12;onClicked:iSettingsWindow.close()}}ListView{width:Math.max(0,Math.min(contentWidth,r.width-48));height:44;x:(r.width-width)/2;clip:true;orientation:Qt.Horizontal;model:pSettingsItems.pSettingElements;spacing:4
 delegate:MouseArea{hoverEnabled:true;visible:c!=='';property var c:iSettingsWindowShadowContainer.bIcons[index];width:c===''?-4:m.boundingRect.width+22;height:44;onClicked:{fChangeSelectedSetting(index);forceActiveFocus()}
-Rectangle{anchors.fill:parent;radius:6;color:t.color;opacity:index==pCurrentTabIndex?.2:parent.containsMouse?.1:0}Text{id:t;text:modelData.pButtonText;font:h.font;x:11-m.boundingRect.x;y:c?0:22-height/2;color:r.q[index==pCurrentTabIndex?'subWindowHeaderClick':'primary20']}TextMetrics{id:m;text:t.text;font:t.font}Rectangle{visible:modelData.pShowRedDot;x:parent.width-8;y:t.y+6;width:6;height:6;radius:3;color:r.q.dangerNormal}ToolButton{width:18;height:18;x:parent.width/2-9;y:24;enabled:false;padding:0;background:null;icon.source:c||'';icon.color:index==pCurrentTabIndex?t.color:'transparent';icon.width:18;icon.height:18}}}Item{width:Math.min(r.width-48,568);x:(r.width-width)/2;height:r.height-118
+Rectangle{anchors.fill:parent;radius:6;color:t.color;opacity:index==pCurrentTabIndex?.2:parent.containsMouse?.1:0}Rectangle{anchors.fill:parent;radius:6;border.color:index==pCurrentTabIndex?t.color:'transparent';color:'transparent'}Text{id:t;text:modelData.pButtonText;font:h.font;x:11-m.boundingRect.x;y:c?0:22-height/2;color:r.c[index==pCurrentTabIndex?'subWindowHeaderClick':'primary20']}TextMetrics{id:m;text:t.text;font:h.font}Rectangle{visible:modelData.pShowRedDot;x:parent.width-8;y:t.y+6;width:6;height:6;radius:3;color:r.c.dangerNormal}ToolButton{width:18;height:18;x:parent.width/2-9;y:24;enabled:false;padding:0;background:null;icon{width:18;height:18;color:index==pCurrentTabIndex?t.color:'transparent';source:c||''}}}}Item{width:Math.min(r.width-48,568);x:(r.width-width)/2;height:r.height-118
 StackLayout{id:iSelectedSettingControl;anchors.fill:parent;currentIndex:pCurrentTabIndex;anchors.topMargin:12
 Repeater{model:pSettingsItems.pSettingElements;delegate:Loader{Component.onCompleted:setSource(modelData.pQmlSource,modelData.pComponentArgs||{});onLoaded:{item.anchors.fill=item.parent;modelData.pComponentObj=item;item.fOnQmlLoaded&&item.fOnQmlLoaded()}}}}}}}}
 )QML");
@@ -814,10 +819,12 @@ Repeater{model:pSettingsItems.pSettingElements;delegate:Loader{Component.onCompl
     QString out = QmlText::compactWhitespace(stock.left(target.nameBegin));
     out += replacement;
     out += stock.mid(target.end);
-    // Latest 1301x665 reference: visible border x=140..1177, y=49..629.
-    // Match its 1038x581 frame plus the unchanged 15 px shadow: 1068x611.
+    // Latest user reference (imagSDAADASSDASDASDASDAe.png, 1011x584):
+    // opaque panel x=120..889, y=78..507 => exactly 770x430 visible pixels.
+    // The native UiShadowContainer insets 15 px, so the Window is 800x460.
+    // Do not scale back to the superseded 1038x581 frame on larger players.
     // Retain viewport guards, centering, theme, controls and native page sizes.
-    const QString helper = QStringLiteral(R"QML(onVisibleChanged:if(visible&&transientParent){var t=transientParent;width=Math.min(t.width*.96,1068);height=Math.min(t.height*.94,611);x=t.x+t.width/2-width/2;y=t.y+t.height/2-height/2})QML");
+    const QString helper = QStringLiteral(R"QML(onVisibleChanged:if(visible&&transientParent){var t=transientParent;width=Math.min(t.width*.96,800);height=Math.min(t.height*.94,460);x=(t.width-width)/2+t.x;y=(t.height-height)/2+t.y})QML");
     const int rootClose = out.lastIndexOf(QLatin1String("\n}"));
     if (rootClose < 0) return {};
     out.insert(rootClose, helper);
@@ -1174,7 +1181,8 @@ bool hasWindowMarker(const QString &text)
         || text.contains(kWindowDesignMarkerV8) || text.contains(kWindowDesignMarkerV9)
         || text.contains(kWindowDesignMarkerV10) || text.contains(kWindowDesignMarkerV12)
         || text.contains(kWindowDesignMarkerV13) || text.contains(kWindowDesignMarkerV14)
-        || text.contains(kWindowDesignMarkerV15) || text.contains(kWindowDesignMarker);
+        || text.contains(kWindowDesignMarkerV15) || text.contains(kWindowDesignMarkerV16)
+        || text.contains(kWindowDesignMarker);
 }
 
 // Standalone Image sources do not inherit the QML/HTML text's currentColor.

@@ -109,6 +109,8 @@ qt_add_executable(BSICustomizer
     src/core/EmbeddedResources.cpp
     src/core/ExtrasPatcher.h
     src/core/ExtrasPatcher.cpp
+    src/core/TitlebarDetails.h
+    src/core/TitlebarDetails.cpp
     src/core/QmlText.h
     src/core/QmlText.cpp
     src/core/PlayerAppearanceScan.h

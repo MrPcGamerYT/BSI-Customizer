@@ -147,6 +147,22 @@ jobs:
             $(pkg-config --libs Qt6Core) -o /tmp/player-skin-compile-test
           /tmp/player-skin-compile-test player-ui-source "${{ runner.temp }}/generated-player-skins"
           python tests/player_skin_syntax_test.py "${{ runner.temp }}/generated-player-skins"
+      - name: Generate titlebar details fixtures through the production C++ rewrite
+        run: |
+          g++ -std=c++17 -O1 -Wall -Wextra -Werror -fPIC -Isrc \
+            $(pkg-config --cflags Qt6Core) tests/titlebar_details_test.cpp \
+            src/core/TitlebarDetails.cpp src/core/QmlText.cpp \
+            $(pkg-config --libs Qt6Core) -o /tmp/titlebar-details-test
+          /tmp/titlebar-details-test "${{ runner.temp }}/titlebar-details" player-ui-source/PlrTopbar.qml
+      - name: Render combined title-details removal and intact Settings text in Qt 6
+        env:
+          BSI_TITLE_DETAILS_FIXTURES: ${{ runner.temp }}/titlebar-details
+        run: python tests/run_qt_runtime_test.py tests/titlebar_details_gui_test.py
+      - name: Render the same title-details and Settings-text regression in Qt 5
+        env:
+          BSI_TITLE_DETAILS_FIXTURES: ${{ runner.temp }}/titlebar-details
+          BSI_TEST_QT_API: PyQt5
+        run: python tests/run_qt_runtime_test.py tests/titlebar_details_gui_test.py
       - name: Type-check Workspace and Theme QML against real Qt metadata
         run: python tests/workspace_qml_lint_test.py
       - name: Exercise opt-in native startup-DLL review and recovery controls
