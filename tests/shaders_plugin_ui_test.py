@@ -86,6 +86,7 @@ Window {
     id: host
     width: 750; height: 470; visible: true
     property alias shaderPage: shaderLoader.item
+    property bool bsiShaderDirty: false
     Bootstrap { hostWindow: host; instanceName: "Fixture-Nougat64"; graphicsRenderer: "gl" }
     Item {
         anchors.fill: parent
@@ -141,10 +142,10 @@ Window {
 
         initial = settings()
         assert initial["enabled"] is False and len(initial) == 11
-        assert not page.property("pEnableSave"), "a new neutral profile must not start dirty"
+        assert not page.property("pEnableSave") and not window.property("bsiShaderDirty"), "a new neutral profile must not start dirty"
         assert item("shaderRendererStatus").property("text")
         click(item("shaderEnabled"))
-        assert page.property("pEnableSave")
+        assert page.property("pEnableSave") and window.property("bsiShaderDirty"), "unsaved drafts must participate in native tab/close prompts"
         assert settings() == initial, "unsaved native UI edits must not affect the live parameters"
         slider = item("shaderValue-saturation")
         assert slider.property("enabled")
@@ -156,7 +157,7 @@ Window {
         click(item("shaderSave"))
         changed = settings()
         assert changed["enabled"] and changed["saturation"] > 0
-        assert not page.property("pEnableSave")
+        assert not page.property("pEnableSave") and not window.property("bsiShaderDirty")
         assert profile.is_file(), "the actual native bridge did not persist the expected test-mode profile"
         evaluate("setValue('contrast', 31)")
         assert page.property("pEnableSave") and settings() == changed

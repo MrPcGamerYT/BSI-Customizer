@@ -124,7 +124,7 @@ Imports importedModules(const QByteArray &data)
     const quint16 magic = quint16(le16(data, opt));
     const bool plus = magic == 0x20b;
     const int directories = plus ? 112 : 96;
-    if ((magic != 0x10b && !plus) || optionalHeaderSize(data) < directories) {
+    if ((magic != 0x10b && !plus) || optionalHeaderSize(data) < quint32(directories)) {
         result.error = QStringLiteral("Unsupported PE optional header"); return result;
     }
     const auto secs = sections(data);
@@ -164,7 +164,7 @@ Imports importedModules(const QByteArray &data)
     };
     for (int index : { 1, 13 }) {
         if (number <= quint32(index)) continue;
-        if (optionalHeaderSize(data) < directories + (index + 1) * 8) {
+        if (optionalHeaderSize(data) < quint32(directories + (index + 1) * 8)) {
             result.error = QStringLiteral("Truncated data directories"); return result;
         }
         const quint32 rva = le32(data, opt + directories + index * 8);

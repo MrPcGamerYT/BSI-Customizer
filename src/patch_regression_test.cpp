@@ -10,6 +10,9 @@
 #include "core/TitlebarDetails.h"
 #include "core/AboutPatcher.h"
 #include "core/SettingsPanelPatcher.h"
+#include "core/ShaderSettingsImage.h"
+#include "core/ShaderSettingsSource.h"
+#include "../tests/shaders/settings_fixture.h"
 #include "core/AndroidCleanup.h"
 #include "core/rootdisk/RootDisk.h"
 #include "core/AdbClient.h"
@@ -3477,6 +3480,75 @@ int runPatchRegressionTests()
 
     }
 
+    std::printf("[shader-settings] experimental native source/image planning, design Update and exact selective Restore (synthetic only)\n");
+    {
+        const QString nativeWindow = QStringLiteral(
+            "import QtQuick 2.15\nimport QtQuick.Window 2.15\nWindow{\n"
+            "id:iSettingsWindow\n"
+            "function fChangeSelectedSetting(index){if(uiBackend.confIsModified())prompt()}\n"
+            "function fSwitchSettingPanel(){}\n"
+            "function discardClose(){uiBackend.confDiscard()}\n"
+            "onClosing:{if(uiBackend.confIsModified())prompt()}\n"
+            "UiShadowContainer{ id: iSettingsWindowShadowContainer\n"
+            "property var nativeModel:pSettingsItems.pSettingElements\n"
+            "function retain(){setSource(modelData.pQmlSource);modelData.pComponentObj=item}\n"
+            "}\n}\n");
+        QList<QPair<QString, QString>> shaderFiles{
+            {QStringLiteral("plr.qml"), ShaderSettingsFixture::player()},
+            {QStringLiteral("UiSettingsWindow.qml"), nativeWindow}
+        };
+        for (const auto &page : ShaderSettingsFixture::pages)
+            shaderFiles << qMakePair(page, page == QLatin1String("PlrAboutSetting.qml")
+                ? aboutPageFixture() : QStringLiteral("import QtQuick 2.15\nItem{}\n"));
+        auto fixture = resources(shaderFiles);
+        addRegistration(fixture, false);
+        putLe32(fixture.f.bytes, 0x98 + 108, 16);
+        const QString path = temp.filePath(QStringLiteral("shader-settings-interop.exe"));
+        write(path, fixture.f.bytes);
+        const auto design = SettingsPanelPatcher::apply(path, QStringLiteral("Native shader fixture"), {}, {}, true);
+        const auto base = read(path);
+        const auto shader = ShaderSettingsImage::prepare(base, true);
+        check(design.value(QStringLiteral("ok")).toBool() && shader.ok && shader.output.size() == base.size(),
+              QStringLiteral("shader integration is prepared only on the real rebuilt design, in a roomy synthetic PE (%1; %2)")
+                  .arg(design.value(QStringLiteral("msg")).toString(), shader.error));
+        if (shader.ok) {
+            QString error;
+            check(PatchFile::writeVerified(path, base, shader.output, &error),
+                  QStringLiteral("the synthetic shader image is committed/read back atomically (%1)").arg(error));
+            const auto active = SettingsPanelPatcher::analyze(path);
+            check(active.supported && active.applied && !active.restorable && active.tabs.size() == 13
+                      && active.tabs.last().toMap().value(QStringLiteral("id")).toString() == QLatin1String("bsishaderssetting.qml")
+                      && active.tabs.last().toMap().value(QStringLiteral("label")).toString() == QLatin1String("Shaders"),
+                  QStringLiteral("only an intact owned shader integration extends native Settings discovery to 13 categories (%1)").arg(active.detail));
+            const auto beforeRestore = read(path);
+            const auto blocked = SettingsPanelPatcher::apply(path, QString(), {}, {}, false);
+            check(!blocked.value(QStringLiteral("ok")).toBool() && read(path) == beforeRestore
+                      && blocked.value(QStringLiteral("msg")).toString().contains(QStringLiteral("Remove the native Shaders")),
+                  "design Restore cannot strand a dependent shader integration or destroy its recovery snapshot");
+            const QVariantMap options{{QStringLiteral("hiddenTabs"), QStringList{QStringLiteral("bsishaderssetting.qml")}}};
+            const auto update = SettingsPanelPatcher::apply(path, QStringLiteral("Updated shader fixture"), {}, options, true);
+            const auto updated = read(path);
+            check(update.value(QStringLiteral("ok")).toBool()
+                      && ShaderSettingsSource::hasWindow(linkedResourceText(updated, QStringLiteral("UiSettingsWindow.qml")))
+                      && SettingsPanelPatcher::analyze(path).tabs.size() == 13,
+                  QStringLiteral("Settings Update preserves the independently owned shader navigation/dirty overlay and accepts its hidden/customizable icon id (%1)")
+                      .arg(update.value(QStringLiteral("msg")).toString()));
+            const auto repeat = SettingsPanelPatcher::apply(path, QStringLiteral("Updated shader fixture"), {}, options, true);
+            check(repeat.value(QStringLiteral("ok")).toBool() && read(path) == updated,
+                  "an identical Settings Update with shaders remains byte-idempotent");
+            const auto remove = ShaderSettingsImage::prepare(read(path), false);
+            check(remove.ok && PatchFile::writeVerified(path, read(path), remove.output, &error),
+                  QStringLiteral("shader source removal preserves the later Settings design update (%1)").arg(remove.error));
+            const auto restored = SettingsPanelPatcher::apply(path, QString(), {}, {}, false);
+            check(restored.value(QStringLiteral("ok")).toBool()
+                      && linkedResourceText(read(path), QStringLiteral("plr.qml")) == ShaderSettingsFixture::player()
+                      && linkedResourceText(read(path), QStringLiteral("UiSettingsWindow.qml")) == nativeWindow
+                      && linkedResourceText(read(path), QStringLiteral("PlrAboutSetting.qml")) == aboutPageFixture(),
+                  QStringLiteral("removing shaders then restoring Settings recovers every exact original source without overwriting unrelated resources (%1)")
+                      .arg(restored.value(QStringLiteral("msg")).toString()));
+        }
+    }
+
     std::printf("[settings-gradient] settings panel surface in both gradient editors\n");
     {
         // The settings window paints its whole panel with one full-window
@@ -5911,6 +5983,27 @@ Window {
                           && rebuiltWindow.contains(QStringLiteral("asset:'CloseIcon'")),
                       QStringLiteral("the rebuilt %1 Settings panel trims the marked side space, stays wide and tints selected tabs/icons while preserving native pages, selection, dragging, and close behavior")
                           .arg(QFileInfo(input).fileName()));
+                // This is an in-memory native-source plan, not DLL deployment
+                // or emulator execution. Known player slots currently refuse
+                // the addon; refusal must be explicit and leave the file alone.
+                const auto shaderPlan = ShaderSettingsImage::prepare(panelImage, true);
+                bool shaderBounded = false;
+                if (shaderPlan.ok) {
+                    const auto again = ShaderSettingsImage::prepare(shaderPlan.output, true);
+                    const auto undone = ShaderSettingsImage::prepare(shaderPlan.output, false);
+                    shaderBounded = shaderPlan.output.size() == panelImage.size()
+                        && again.ok && !again.changed && undone.ok && undone.sources.size() == shaderPlan.sources.size();
+                    for (int source = 0; shaderBounded && source < undone.sources.size(); ++source)
+                        shaderBounded = undone.sources.at(source).after == shaderPlan.sources.at(source).before;
+                } else {
+                    shaderBounded = shaderPlan.output.isEmpty()
+                        && shaderPlan.error.contains(QStringLiteral("Growing the EXE is forbidden"));
+                }
+                check(shaderBounded && read(panelCopy) == panelImage,
+                      QStringLiteral("the real %1 shader plan either fits/restores exactly or explicitly refuses capacity without changing/growing the EXE (%2)")
+                          .arg(QFileInfo(input).fileName(), shaderPlan.error));
+                ciNotice(QStringLiteral("Shader native-image preparation only, not installed/player-certified: %1: %2")
+                             .arg(QFileInfo(input).fileName(), shaderPlan.ok ? QStringLiteral("bounded plan prepared") : shaderPlan.error));
                 QString expectedLogoSource;
                 for (const auto &entry : EmbeddedResources::list(original, true)) {
                     if (entry.path.compare(QLatin1String("qrcAssets/BlueStacks5Beta.svg"), Qt::CaseInsensitive) == 0)

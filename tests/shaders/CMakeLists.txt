@@ -6,6 +6,27 @@ endif()
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(shader_dir "${CMAKE_CURRENT_LIST_DIR}/../../src/shaders")
+option(BSI_TEST_NATIVE_SETTINGS "Require the Qt Core native Settings source/image tests" OFF)
+if(BSI_TEST_NATIVE_SETTINGS AND NOT TARGET Qt${QT_VERSION_MAJOR}::Core)
+    find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Core)
+    find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Core)
+endif()
+if(TARGET Qt${QT_VERSION_MAJOR}::Core)
+    set(core_dir "${shader_dir}/../core")
+    add_executable(shader-settings-source-test settings_source_test.cpp
+        "${core_dir}/ShaderSettingsSource.cpp" "${core_dir}/NativeSettingsModel.cpp" "${core_dir}/QmlText.cpp")
+    target_include_directories(shader-settings-source-test PRIVATE "${core_dir}")
+    target_link_libraries(shader-settings-source-test PRIVATE Qt${QT_VERSION_MAJOR}::Core)
+    add_test(NAME shader-native-settings-source COMMAND shader-settings-source-test)
+    add_executable(shader-settings-image-test settings_image_test.cpp
+        "${core_dir}/ShaderSettingsImage.cpp" "${core_dir}/ShaderSettingsSource.cpp"
+        "${core_dir}/NativeSettingsModel.cpp" "${core_dir}/QmlText.cpp"
+        "${core_dir}/QtResources.cpp" "${core_dir}/QtResourcePatching.cpp"
+        "${core_dir}/QtResourceRegistration.cpp" "${core_dir}/PeUtils.cpp" "${core_dir}/ZlibUtils.cpp")
+    target_include_directories(shader-settings-image-test PRIVATE "${core_dir}")
+    target_link_libraries(shader-settings-image-test PRIVATE Qt${QT_VERSION_MAJOR}::Core)
+    add_test(NAME shader-native-settings-image COMMAND shader-settings-image-test)
+endif()
 add_executable(shader-renderer-routing-test renderer_capabilities_test.cpp runtime_hooks_stub.cpp "${shader_dir}/Runtime.cpp")
 target_include_directories(shader-renderer-routing-test PRIVATE "${shader_dir}")
 if(WIN32)

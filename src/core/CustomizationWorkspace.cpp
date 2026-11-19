@@ -24,7 +24,9 @@
 #include <QJsonObject>
 #include <QLockFile>
 #include <QJsonParseError>
+#ifdef Q_OS_WIN
 #include <QLocalSocket>
+#endif
 #include <QRegularExpression>
 #include <QSaveFile>
 #include <QSet>

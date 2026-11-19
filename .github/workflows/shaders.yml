@@ -4,6 +4,15 @@ on:
   pull_request:
     paths:
       - 'src/shaders/**'
+      - 'src/core/NativeSettingsModel.*'
+      - 'src/core/ShaderSettings*'
+      - 'src/core/SettingsPanelPatcher.*'
+      - 'src/core/QmlText.*'
+      - 'src/core/QtResource*'
+      - 'src/core/PeUtils.*'
+      - 'src/core/ZlibUtils.*'
+      - 'tests/settings_panel_window_budget_test.py'
+      - 'tests/fixtures/settings-window-*'
       - 'src/third_party/minhook/**'
       - 'src/third_party/vulkan/**'
       - 'src/assets/settings-panel-icons/shaders.*'
@@ -32,7 +41,7 @@ jobs:
         with:
           node-version: '22'
       - name: Install real software graphics APIs
-        run: sudo apt-get update && sudo apt-get install -y mesa-vulkan-drivers vulkan-validationlayers libvulkan1 libegl1 libegl-mesa0 libgles2
+        run: sudo apt-get update && sudo apt-get install -y mesa-vulkan-drivers vulkan-validationlayers libvulkan1 libegl1 libegl-mesa0 libgles2 qt6-base-dev
       - name: Check committed SPIR-V matches the shared original source
         run: |
           npm install --prefix "$RUNNER_TEMP/spirv-tools" --no-fund --no-audit --save-exact @webgpu/glslang@0.0.15
@@ -41,7 +50,7 @@ jobs:
         env:
           BSI_SHADERS_VULKAN_VALIDATION: '1'
         run: |
-          cmake -S tests/shaders -B build-shader-tests -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_FLAGS='-Wall -Wextra -Werror -pedantic'
+          cmake -S tests/shaders -B build-shader-tests -DCMAKE_BUILD_TYPE=Debug -DBSI_TEST_NATIVE_SETTINGS=ON -DCMAKE_CXX_FLAGS='-Wall -Wextra -Werror -pedantic'
           python3 tests/shaders/run_ci_tests.py --command cmake --build build-shader-tests --parallel 2
           python3 tests/shaders/run_ci_tests.py --test-dir build-shader-tests --output-on-failure --timeout 60
       - name: ASan/UBSan routing and native Vulkan on a second software ICD
@@ -97,7 +106,7 @@ jobs:
         run: python -m pip install '${{ matrix.python-package }}'
       - name: Build regular plugin, MinHook and native DirectX tests (no system proxy)
         run: |
-          python tests/shaders/run_ci_tests.py --command cmake -S src/shaders -B build-shaders -A x64 -DBSI_SHADERS_BUILD_TESTS=ON -DBSI_TEST_VULKAN=OFF
+          python tests/shaders/run_ci_tests.py --command cmake -S src/shaders -B build-shaders -A x64 -DBSI_SHADERS_BUILD_TESTS=ON -DBSI_TEST_NATIVE_SETTINGS=ON -DBSI_TEST_VULKAN=OFF
           if ($LASTEXITCODE -ne 0) { throw 'Shader configuration failed' }
           python tests/shaders/run_ci_tests.py --command cmake --build build-shaders --config Release --parallel 2
           if ($LASTEXITCODE -ne 0) { throw 'Shader build failed' }
@@ -109,6 +118,17 @@ jobs:
           BSI_SHADERS_MODULE_ROOT: ${{ github.workspace }}/build-shaders/module
           BSI_SHADERS_DIAGNOSTICS: '1'
         run: python tests/shaders/run_ci_tests.py --command python -X faulthandler -u tests/shaders_plugin_ui_test.py
+      - name: Physical native Settings navigation, prompts and missing-module fallback (contract fixture)
+        env:
+          BSI_TEST_QT_API: ${{ matrix.python-api }}
+          BSI_SHADERS_MODULE_ROOT: ${{ github.workspace }}/build-shaders/module
+          BSI_SHADERS_SOURCE_TEST: ${{ github.workspace }}/build-shaders/tests/Release/shader-settings-source-test.exe
+          BSI_SHADERS_DIAGNOSTICS: '1'
+        run: |
+          python tests/shaders/run_ci_tests.py --command python -X faulthandler -u tests/shaders_native_settings_test.py
+          if ($LASTEXITCODE -ne 0) { throw 'Native Settings contract fixture failed' }
+          python tests/shaders/run_ci_tests.py --command python -X faulthandler -u tests/shaders_native_settings_test.py --missing-module
+          if ($LASTEXITCODE -ne 0) { throw 'Missing shader module fallback failed' }
       - name: Record limits rather than claim universal support
         shell: pwsh
         run: "'Windows Qt fixture + WARP API tests only. Not HD-Player category navigation, game presentation hooks or physical Intel/AMD/NVIDIA certification. No merge authorized by these tests alone.' | Out-File $env:GITHUB_STEP_SUMMARY -Append"

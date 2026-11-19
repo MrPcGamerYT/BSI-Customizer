@@ -56,11 +56,21 @@ The automated `settings_panel_post_patch_gui_test.py` runs the **same assertions
 
 ## Shaders request: not yet available
 
-The matching original Shaders SVG is embedded with a reserved default mapping,
-but no Shaders category or game-frame processing has been implemented. Existing
-players still have their native twelve-tab model. Do not count icon raster tests,
-this shell preview, or the separate DLL-startup tests as shader validation. See
-[the renderer integration blocker and merge gates](SHADERS-INTEGRATION.md).
+The matching original Shaders SVG is embedded with a reserved default mapping.
+A regular-DLL shader prototype and reversible native source/image planners now
+exist, including a physically navigated **13-tab Qt contract fixture** with
+native tab/close No/Discard prompts, actual plugin controls and missing-module
+fallback. That fixture is not a running emulator or a deployment test.
+
+**The Customizer still does not install Shaders.** The current addition exceeds
+the fixed root-resource capacity on all four read-only player references and is
+safely refused without growing/writing those EXEs. Plugin ownership/ABI checks,
+recoverable EXE+module deployment, actual game-frame effects in a running player
+and the Intel/AMD/NVIDIA renderer matrix are still outstanding. Existing player
+installations therefore retain their native twelve-tab model. Do not count this
+shell preview, successful software shader pixels, or separate DLL-startup tests
+as end-to-end shader validation. See the detailed
+[capacity blocker, achieved tests and merge gates](SHADERS-INTEGRATION.md).
 
 ## Interactive Settings-window preview
 

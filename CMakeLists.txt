@@ -113,6 +113,12 @@ qt_add_executable(BSICustomizer
     src/core/TitlebarDetails.cpp
     src/core/QmlText.h
     src/core/QmlText.cpp
+    src/core/NativeSettingsModel.h
+    src/core/NativeSettingsModel.cpp
+    src/core/ShaderSettingsSource.h
+    src/core/ShaderSettingsSource.cpp
+    src/core/ShaderSettingsImage.h
+    src/core/ShaderSettingsImage.cpp
     src/core/PlayerAppearanceScan.h
     src/core/PlayerAppearanceScan.cpp
     src/core/PlayerAppearancePatcher.h

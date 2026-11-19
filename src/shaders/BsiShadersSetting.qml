@@ -14,6 +14,17 @@ Item {
     property bool pCompLoaded: false
     property var draft: ({})
     property bool pEnableSave: differs()
+    // Shader drafts are separate from uiBackend's configuration transaction.
+    // Participate in the native shell's existing tab/close discard prompts.
+    function publishDirty() {
+        var window = page.Window.window
+        if (window && window.bsiShaderDirty !== undefined) window.bsiShaderDirty = pEnableSave
+    }
+    onPEnableSaveChanged: publishDirty()
+    Component.onDestruction: {
+        var window = page.Window.window
+        if (window && window.bsiShaderDirty !== undefined) window.bsiShaderDirty = false
+    }
     function differs() {
         if (!!draft.enabled !== !!Engine.saved.enabled) return true
         for (var i = 0; i < Engine.controls.length; ++i) {
@@ -28,7 +39,7 @@ Item {
     readonly property color accent: bsiPalette ? bsiPalette.subWindowHeaderClick : "#55b8ff"
     function fInitUi() { draft = JSON.parse(JSON.stringify(Engine.saved)); feedback = "" }
     function fOnQmlLoaded() {
-        fInitUi(); pCompLoaded = true
+        fInitUi(); pCompLoaded = true; publishDirty()
         // Appending after the native tabs preserves their existing icon indexes.
         // Use the original default only when no custom/hidden override exists.
         var host = parent
@@ -40,11 +51,7 @@ Item {
         }
     }
     function fSetPreviousState() { fInitUi() }
-    function fDiscardChanges() {
-        fInitUi()
-        var window = page.Window.window
-        if (window && window.fSwitchSettingPanel) window.fSwitchSettingPanel()
-    }
+    function fDiscardChanges() { fInitUi() }
     function fHandleConfChange() { return save() }
     function setValue(key, value) {
         var next = Object.assign({}, draft); next[key] = value; draft = next

@@ -368,7 +368,7 @@ bool replaceResource(QByteArray &data, qint64 entry, const Link &snapshot,
     const auto verified = findLink(changed, destination, link.sourceName);
     if (!verified.found || verified.ambiguous || verified.nodes != link.nodes
         || verified.compression != link.compression
-        || readFile(changed, { link.sourceName, destination, link.compression }, 50000000) != source)
+        || readFile(changed, { link.sourceName, destination, link.compression, QString() }, 50000000) != source)
         return refuse(QStringLiteral("Rewritten resource did not pass verification; no file was written."));
     data = changed;
     if (newEntry) *newEntry = destination;

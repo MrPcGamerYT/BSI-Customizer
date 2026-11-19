@@ -6,6 +6,8 @@
 #include "PatchFile.h"
 #include "PeUtils.h"
 #include "QmlText.h"
+#include "NativeSettingsModel.h"
+#include "ShaderSettingsSource.h"
 #include "QtResources.h"
 #include "ThemeEngine.h"
 
@@ -321,211 +323,15 @@ bool sourceFor(const QByteArray &image, const QString &exePath, const QString &l
     return true;
 }
 
-bool literalQmlString(const QString &source, int begin, int end, QString *value)
-{
-    while (begin < end && source.at(begin).isSpace()) ++begin;
-    if (begin >= end || (source.at(begin) != QLatin1Char('\"')
-                         && source.at(begin) != QLatin1Char('\'')))
-        return false;
-    const QChar quote = source.at(begin++);
-    QString decoded;
-    bool closed = false;
-    while (begin < end) {
-        const QChar ch = source.at(begin++);
-        if (ch == quote) { closed = true; break; }
-        if (ch == QLatin1Char('\\')) {
-            if (begin >= end) return false;
-            const QChar escaped = source.at(begin++);
-            if (escaped == QLatin1Char('\\') || escaped == quote || escaped == QLatin1Char('/'))
-                decoded += escaped;
-            else if (escaped == QLatin1Char('n')) decoded += QLatin1Char('\n');
-            else if (escaped == QLatin1Char('r')) decoded += QLatin1Char('\r');
-            else if (escaped == QLatin1Char('t')) decoded += QLatin1Char('\t');
-            else return false;
-        } else {
-            if (ch == QLatin1Char('\n') || ch == QLatin1Char('\r')) return false;
-            decoded += ch;
-        }
-    }
-    if (!closed || !decoded.endsWith(QLatin1String(".qml"), Qt::CaseInsensitive)) return false;
-    *value = decoded;
-    return true;
-}
-
 bool readSettingsModelPages(const QString &playerText, const QHash<QString, QList<QtResources::File>> &qmlByLeaf,
                             QSet<QString> *pageNames, QVariantList *tabs, QString *error)
 {
+    QHash<QString, int> pageCounts;
+    for (auto it = qmlByLeaf.cbegin(); it != qmlByLeaf.cend(); ++it)
+        pageCounts.insert(it.key(), it.value().size());
+    const auto model = NativeSettingsModel::locate(playerText, pageCounts, error);
+    if (model.nameBegin < 0) return false;
     const QString masked = QmlText::mask(playerText);
-    const QRegularExpression inlineModelDeclaration(
-        QStringLiteral("\\bproperty\\s+(?:[A-Za-z_][A-Za-z0-9_]*\\s+)*SettingElementModelList\\s+pSettingsItems\\b"));
-    const bool inlineSettingsModel = inlineModelDeclaration.match(masked).hasMatch();
-    const QRegularExpression componentSettingsBindingPattern(
-        QStringLiteral("\\bpSettingsWindow\\s*(?:=|:)\\s*[A-Za-z_][A-Za-z0-9_]*\\.createObject\\s*\\([^;]*(?:[\\\"']pSettingsItems[\\\"']|\\bpSettingsItems\\b)\\s*:\\s*([A-Za-z_][A-Za-z0-9_]*)"));
-    QRegularExpressionMatch componentSettingsBinding = componentSettingsBindingPattern.match(playerText);
-    if (!componentSettingsBinding.hasMatch()) {
-        // Some MSI builds create UiSettingsWindow first and assign its model
-        // immediately afterward instead of passing it in createObject's map.
-        const QRegularExpression separateSettingsModelBinding(
-            QStringLiteral("\\bpSettingsWindow\\s*(?:\\.\\s*pSettingsItems|\\[\\s*[\\\"']pSettingsItems[\\\"']\\s*\\])\\s*=\\s*([A-Za-z_][A-Za-z0-9_]*)"));
-        componentSettingsBinding = separateSettingsModelBinding.match(playerText);
-    }
-    const bool liveComponentBinding = componentSettingsBinding.hasMatch();
-    const QString settingsComponentId = liveComponentBinding
-        ? componentSettingsBinding.captured(1) : QString();
-
-    QList<QmlText::Object> settingsComponents;
-    if (liveComponentBinding) {
-        const QRegularExpression settingsId(
-            QStringLiteral("\\bid\\s*:\\s*%1\\b").arg(QRegularExpression::escape(settingsComponentId)));
-        for (const auto &component : QmlText::objects(masked, QStringLiteral("Component"))) {
-            const QString body = masked.mid(component.open, component.end - component.open);
-            if (settingsId.match(body).hasMatch()) settingsComponents << component;
-        }
-    }
-
-    const auto allModels = QmlText::objects(masked, QStringLiteral("SettingElementModelList"));
-    QList<QmlText::Object> models;
-    QList<QmlText::Object> inlineSettingsModels;
-    for (const auto &model : allModels) {
-        bool inlineOwner = false;
-        if (inlineSettingsModel) {
-            QRegularExpressionMatch nearestDeclaration;
-            auto declarations = inlineModelDeclaration.globalMatch(masked.left(model.nameBegin));
-            while (declarations.hasNext()) nearestDeclaration = declarations.next();
-            if (nearestDeclaration.hasMatch()) {
-                const QString between = masked.mid(nearestDeclaration.capturedEnd(),
-                                                   model.nameBegin - nearestDeclaration.capturedEnd());
-                inlineOwner = QRegularExpression(QStringLiteral("^\\s*:\\s*$"))
-                                  .match(between).hasMatch();
-            }
-        }
-        bool componentOwner = false;
-        for (const auto &component : settingsComponents) {
-            if (model.nameBegin > component.open && model.end <= component.end) {
-                componentOwner = true;
-                break;
-            }
-        }
-        if (inlineOwner) inlineSettingsModels << model;
-        if (inlineOwner || componentOwner) models << model;
-    }
-    // Some older Player QML packages declare the native model in plr.qml but
-    // inherit/compose its element list without a local pSettingElements
-    // binding. If there is exactly one model and a real Settings-window
-    // connection, it is still unambiguous; scope discovery to that model body.
-    if (models.isEmpty() && allModels.size() == 1
-        && (inlineSettingsModel || (liveComponentBinding && settingsComponents.size() == 1)))
-        models << allModels.first();
-    // Older MSI player QML can declare several model objects, but the one
-    // directly initialized by the property named pSettingsItems is the model
-    // consumed by UiSettingsWindow. If no unique matching Component exists,
-    // prefer that unique inline owner rather than rejecting it alongside nested
-    // models for subpages.
-    if (models.size() > 1 && settingsComponents.size() != 1 && inlineSettingsModels.size() == 1)
-        models = inlineSettingsModels;
-
-    // When plr.qml constructs the window with
-    // `pSettingsItems: someSettingsItems.createObject(...)`, that Component is
-    // the object actually passed to UiSettingsWindow. Prefer its root model
-    // (especially an explicitly named pSettingsItems model) over stale inline
-    // declarations and nested page-local models elsewhere in plr.qml.
-    if (models.size() > 1 && liveComponentBinding) {
-        QList<QmlText::Object> namedSettingsModels;
-        QList<QmlText::Object> componentRootModels;
-        for (const auto &model : models) {
-            for (const auto &component : settingsComponents) {
-                if (model.nameBegin <= component.open || model.end > component.end) continue;
-                int depth = 0;
-                for (int i = component.open + 1; i < model.nameBegin; ++i) {
-                    if (masked.at(i) == QLatin1Char('{')) ++depth;
-                    else if (masked.at(i) == QLatin1Char('}')) --depth;
-                }
-                if (depth != 0) continue;
-                componentRootModels << model;
-                QmlText::Binding idBinding;
-                if (QmlText::binding(masked, model.open, model.end - 1,
-                                     QStringLiteral("id"), &idBinding)
-                    && masked.mid(idBinding.valueBegin,
-                                  idBinding.valueEnd - idBinding.valueBegin).trimmed()
-                        == QLatin1String("pSettingsItems"))
-                    namedSettingsModels << model;
-            }
-        }
-        if (namedSettingsModels.size() == 1) models = namedSettingsModels;
-        else if (componentRootModels.size() == 1) models = componentRootModels;
-    }
-    if (models.size() > 1) {
-        QList<QmlText::Object> explicitlyNamed;
-        for (const auto &candidate : models) {
-            QmlText::Binding idBinding;
-            if (QmlText::binding(masked, candidate.open, candidate.end - 1,
-                                 QStringLiteral("id"), &idBinding)
-                && masked.mid(idBinding.valueBegin,
-                              idBinding.valueEnd - idBinding.valueBegin).trimmed()
-                    == QLatin1String("pSettingsItems"))
-                explicitlyNamed << candidate;
-        }
-        if (explicitlyNamed.size() == 1) models = explicitlyNamed;
-    }
-    // A live Component can contain several nested SettingElementModelList
-    // objects (for page subviews as well as the tab strip). Prefer the unique
-    // model whose page list resolves to the About page and the full native tab
-    // set; unrelated page-local models must not make the actual Settings panel
-    // look unsupported.
-    if (models.size() > 1) {
-        QList<QmlText::Object> completeModels;
-        const QRegularExpression pageSource(QStringLiteral("\\bpQmlSource\\s*:"));
-        for (const auto &candidate : models) {
-            int begin = candidate.open;
-            int end = candidate.end - 1;
-            QmlText::Binding list;
-            if (QmlText::binding(masked, candidate.open, candidate.end - 1,
-                                 QStringLiteral("pSettingElements"), &list)) {
-                begin = list.valueBegin;
-                end = list.valueEnd;
-            }
-            int resolved = 0;
-            bool hasAbout = false;
-            auto sources = pageSource.globalMatch(masked.mid(begin, end - begin));
-            while (sources.hasNext()) {
-                const auto source = sources.next();
-                const int valueBegin = begin + source.capturedEnd();
-                QString path;
-                if (!literalQmlString(playerText, valueBegin, end, &path)) continue;
-                const QString leaf = QFileInfo(path).fileName();
-                const auto found = qmlByLeaf.constFind(leaf.toCaseFolded());
-                if (found == qmlByLeaf.cend() || found.value().size() != 1) continue;
-                ++resolved;
-                if (leaf.compare(kAboutLeaf, Qt::CaseInsensitive) == 0) hasAbout = true;
-            }
-            if (hasAbout && resolved >= 8) completeModels << candidate;
-        }
-        if (completeModels.size() == 1) models = completeModels;
-    }
-    if (playerText.isEmpty() || models.size() != 1) {
-        if (models.isEmpty()) {
-            *error = QStringLiteral("The registered plr.qml does not expose a live native Settings tab model; this player layout is unsupported.");
-        } else {
-            QStringList candidateIds;
-            for (const auto &candidate : models) {
-                QmlText::Binding idBinding;
-                QString id = QStringLiteral("<anonymous>");
-                if (QmlText::binding(masked, candidate.open, candidate.end - 1,
-                                     QStringLiteral("id"), &idBinding))
-                    id = masked.mid(idBinding.valueBegin,
-                                    idBinding.valueEnd - idBinding.valueBegin).trimmed();
-                candidateIds << id;
-            }
-            const QString binding = liveComponentBinding
-                ? QStringLiteral("the pSettingsItems binding resolves to object id %1").arg(settingsComponentId)
-                : QStringLiteral("no pSettingsItems Component binding was resolved from pSettingsWindow");
-            *error = QStringLiteral("The registered plr.qml exposes multiple possible live Settings tab models (%1); refusing to guess. %2.")
-                         .arg(candidateIds.join(QStringLiteral(", ")), binding);
-        }
-        return false;
-    }
-
-    const auto &model = models.first();
     int sourceBegin = model.open;
     int sourceEnd = model.end - 1;
     QmlText::Binding elements;
@@ -542,7 +348,7 @@ bool readSettingsModelPages(const QString &playerText, const QHash<QString, QLis
         const int valueBegin = colon + 1;
         if (valueBegin >= sourceEnd) break;
         QString page;
-        if (!literalQmlString(playerText, valueBegin, sourceEnd, &page)) {
+        if (!NativeSettingsModel::literalQmlString(playerText, valueBegin, sourceEnd, &page)) {
             *error = QStringLiteral("A page in the live Settings tab model has a dynamic or malformed pQmlSource; it cannot be resolved safely.");
             return false;
         }
@@ -553,7 +359,13 @@ bool readSettingsModelPages(const QString &playerText, const QHash<QString, QLis
             return false;
         }
         const auto found = qmlByLeaf.constFind(leaf.toCaseFolded());
-        if (found == qmlByLeaf.cend() || found.value().size() != 1) {
+        const bool shaderModulePage = page == ShaderSettingsSource::pageUrl()
+            && ShaderSettingsSource::hasPlayer(playerText);
+        // The only external page admitted here is our intact, independently
+        // validated native shader integration. A similarly named missing page
+        // or an arbitrary file URL must never weaken native graph validation.
+        if (shaderModulePage ? found != qmlByLeaf.cend()
+                             : (found == qmlByLeaf.cend() || found.value().size() != 1)) {
             *error = QStringLiteral("The Settings tab QML page %1 is missing or ambiguous in the registered player resources.").arg(leaf);
             return false;
         }
@@ -626,6 +438,16 @@ TargetSources readSources(const QString &exePath, const QByteArray &image)
     QSet<QString> pageNames;
     if (!readSettingsModelPages(playerText, qmlByLeaf, &pageNames, &out.tabs, &out.error))
         return out;
+    if (ShaderSettingsSource::hasPlayer(playerText) || ShaderSettingsSource::hasWindow(out.window.text)) {
+        QHash<QString, int> pageCounts;
+        for (auto it = qmlByLeaf.cbegin(); it != qmlByLeaf.cend(); ++it)
+            pageCounts.insert(it.key(), it.value().size());
+        const auto shaderPlan = ShaderSettingsSource::prepare(playerText, out.window.text, pageCounts);
+        if (!shaderPlan.ok) {
+            out.error = shaderPlan.error;
+            return out;
+        }
+    }
     bool hasAboutPage = false;
     for (const QString &path : pageNames)
         if (QFileInfo(path).fileName().compare(kAboutLeaf, Qt::CaseInsensitive) == 0)
@@ -996,6 +818,16 @@ QVariantMap readRecovery(const QString &path, const QString &exePath)
     return map;
 }
 
+bool withoutShaderWindow(const QByteArray &bytes, QByteArray *base)
+{
+    const QString text = EmbeddedResources::decodeText(bytes);
+    if (!ShaderSettingsSource::hasWindow(text)) return false;
+    QString stripped, error;
+    if (!ShaderSettingsSource::removeWindow(text, &stripped, &error)) return false;
+    *base = utf8PreservingBom(stripped, bytes);
+    return true;
+}
+
 QVariantList sourceRecords(const TargetSources &sources, const QMap<QString, QByteArray> &originals,
                            const QMap<QString, QByteArray> &patched = {})
 {
@@ -1008,6 +840,16 @@ QVariantList sourceRecords(const TargetSources &sources, const QMap<QString, QBy
         const QString replacementHash = QString::fromLatin1(sha256(replacement));
         acceptedHashes << currentHash;
         if (replacementHash != currentHash) acceptedHashes << replacementHash;
+        // The independently owned shader overlay may be installed/removed
+        // between design updates. Accept only an exact reversible overlay of
+        // one of our hashed base sources, never arbitrary later window edits.
+        for (const auto &bytes : {source->bytes, replacement}) {
+            QByteArray base;
+            if (withoutShaderWindow(bytes, &base)) {
+                const QString hash = QString::fromLatin1(sha256(base));
+                if (!acceptedHashes.contains(hash)) acceptedHashes << hash;
+            }
+        }
         records << QVariantMap {
             {QStringLiteral("path"), source->path},
             {QStringLiteral("original"), QString::fromLatin1(original.toBase64())},
@@ -1055,15 +897,17 @@ QMap<QString, QByteArray> originalsFromRecovery(const QVariantMap &recovery,
 
 bool recoveryAcceptsCurrent(const QVariantMap &record, const QByteArray &current)
 {
-    const QString digest = QString::fromLatin1(sha256(current));
+    QStringList digests{QString::fromLatin1(sha256(current))};
+    QByteArray base;
+    if (withoutShaderWindow(current, &base)) digests << QString::fromLatin1(sha256(base));
     const QVariantList accepted = record.value(QStringLiteral("acceptedSha256")).toList();
     if (!accepted.isEmpty()) {
         for (const QVariant &hash : accepted)
-            if (hash.toString() == digest) return true;
+            if (digests.contains(hash.toString())) return true;
         return false;
     }
     // Read the first, not-yet-deployed schema during an in-place upgrade.
-    return record.value(QStringLiteral("patchedSha256")).toString() == digest;
+    return digests.contains(record.value(QStringLiteral("patchedSha256")).toString());
 }
 
 QVariantList operationsFor(const QMap<QString, QByteArray> &replacement)
@@ -1548,6 +1392,10 @@ State analyze(const QString &exePath)
         state.detail = QStringLiteral("The Settings window has %1 native page roots and a verified %2-resource QML dependency closure. Source files are ready; no emulator UI change is claimed yet.")
             .arg(state.settingsPageCount).arg(state.settingsQmlResourceCount);
     }
+    if (ShaderSettingsSource::hasWindow(sources.window.text)) {
+        state.restorable = false;
+        state.detail += QStringLiteral(" Remove the dependent native Shaders integration before restoring the underlying Settings design.");
+    }
     if (!state.logoStatus.isEmpty()) state.detail += QLatin1Char(' ') + state.logoStatus;
     return state;
 }
@@ -1683,6 +1531,8 @@ QVariantMap apply(const QString &exePath, const QString &developerName,
     const bool hadRecovery = !recovery.isEmpty();
 
     if (!enabled) {
+        if (ShaderSettingsSource::hasWindow(current.window.text))
+            return fail(QStringLiteral("Remove the native Shaders integration before restoring the underlying Settings-panel design. No source or recovery snapshot was changed."));
         if (recovery.isEmpty()) return fail(QStringLiteral("No verified Settings-panel recovery snapshot was found; nothing was changed."));
         RecoveryProblem restoreProblem = RecoveryProblem::None;
         const QMap<QString, QByteArray> originals = originalsFromRecovery(recovery, &restoreProblem);
@@ -1913,9 +1763,14 @@ QVariantMap apply(const QString &exePath, const QString &developerName,
     const QString originalAboutText = EmbeddedResources::decodeText(originals.value(current.about.path));
     if (originalWindowText.isEmpty() || originalAboutText.isEmpty())
         return fail(QStringLiteral("A saved original QML source could not be decoded; the executable was not changed."));
-    const QString rebuiltWindow = buildWindow(originalWindowText);
+    QString rebuiltWindow = buildWindow(originalWindowText);
     if (rebuiltWindow.isEmpty())
         return fail(QStringLiteral("This BlueStacks build's Settings-window structure is not recognized. No file was changed."));
+    if (ShaderSettingsSource::hasWindow(current.window.text)) {
+        QString integrated, error;
+        if (!ShaderSettingsSource::addWindow(rebuiltWindow, &integrated, &error)) return fail(error);
+        rebuiltWindow = integrated;
+    }
     // The About page carries URLs, while the saved profile retains the
     // editable SVGs. Qt 5 (and unidentified players) get local PNG copies even
     // when data URIs would fit: the URI scheme and the SVG decoder are separate

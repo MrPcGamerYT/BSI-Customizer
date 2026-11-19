@@ -96,10 +96,45 @@ or `vulkan-1.dll`. The existing arbitrary startup-DLL feature remains separate.
   never guesses a queue from a different device or uses the Settings renderer.
   Compiler/On12 DLL lifetimes include all objects with DLL-owned COM vtables.
 
-There is no production installer, no root/tab-model resource patch yet, and no
-completed native Shaders category to navigate to in a patched player. Existing
-twelve-tab players and their original eleven default drawings remain unchanged.
-The prototype is not linked into the main Customizer build or release payload.
+- Read-only native source/image planners now discover the model actually passed
+  to Settings, append a thirteenth native row without repurposing Graphics/About,
+  and prepare an optional, caught regular-plugin bootstrap in `iAppwin`'s startup
+  handler. Missing modules leave native startup running and the shader row/page
+  inactive. There is no mandatory `import BSIShaders` in the player root.
+- Shader drafts now participate in the native navigation/close No/Discard
+  prompts. The source overlay can be removed exactly, including original LF or
+  CRLF bytes. Ambiguous roots, nested decoys, unknown fragments, dynamic rows,
+  edited owned fragments and unsupported handler shapes are refused.
+- Settings design Update preserves a validated shader overlay and its stable
+  default/custom/hidden icon identity. Design Restore is blocked until that
+  dependent overlay is removed. A synthetic registered-PE regression exercises
+  Update, idempotence, shader removal and exact original Settings-source Restore.
+
+**There is still no production shader-package installer or working installation
+in a player.** These planners are compiled into the Customizer for tests, but
+are not exposed as an install action or bundled with a plugin release payload.
+Existing twelve-tab player installations remain unchanged.
+
+### Fixed-resource capacity blocker (read-only player references)
+
+The production Settings builder and shader planner were run on copies **in
+memory** from all four pinned reference EXEs. No reference was launched or
+written. Source/model planning recognizes each build, but the current root
+addition does not fit its existing compressed `plr.qml` slot, and no verified
+mapped gap large enough to relocate it was found:
+
+| Reference | Integrated root payload | Available root slot | Result |
+| --- | ---: | ---: | --- |
+| MSI latest package | 21,061 B | 20,619 B | Refused; no write/growth |
+| MSI v5.9 | 6,536 B | 6,219 B | Refused; no write/growth |
+| BlueStacks latest package | 26,172 B | 25,720 B | Refused; no write/growth |
+| BlueStacks v5.10 | 9,457 B | 9,159 B | Refused; no write/growth |
+
+These are the actual writer's encoded payload sizes, preserving the root's BOM,
+not just the shorter BOM-stripped source estimates. Window additions need their
+own capacity check too. A roomy synthetic PE passing is **not** a capacity pass
+for these players. The refusal must not be weakened into appending a section,
+overwriting another resource, or reporting a successful shader install.
 
 ## Validation achieved so far
 
@@ -120,10 +155,26 @@ The prototype is not linked into the main Customizer build or release payload.
   test-mode persistence. The fixture is not HD-Player category navigation.
 - Sanitized C++ capability/routing tests, including unvalidated-device rejection,
   native-setting isolation, no ANGLE double-processing and honest counters.
-- All Windows pipeline/hook sources and WARP/presentation fixtures cross-compile
-  against real Windows headers. Initial Windows Qt 5/6 plugin builds succeeded,
-  but execution tests found real compiler/lifetime issues; those must pass the
-  current CI rerun, not be excused by successful compilation.
+- Shader CI [44635010359](https://github.com/dsajgddghdsaakovvgheww/BSI-Customizer/actions/runs/44635010359)
+  passed Windows Qt 5 and Qt 6 plugin controls, D3D11/D3D12 WARP pixels and the
+  Win32 DXGI presentation fixture, plus Linux Vulkan/GL checks at `5632f79`.
+  Earlier Qt 5 runtime/Controls failures were fixed rather than skipped. This
+  run predates the new native source/image/navigation tests; current-head CI is
+  still required. Cross-compilation alone is not counted as execution.
+- New source/image tests pass locally with all their dependencies rebuilt and
+  `-Wall -Wextra -Werror`: real registered PE resources/imports/call-site data,
+  bounded relocation, unchanged EXE size/import modules/unrelated resources,
+  exact decoded resource restoration, BOM, idempotence, unsupported Qt/x86,
+  missing resources, orphan/partial integration and dense no-space refusal.
+  This is byte planning, **not** an EXE+DLL package transaction or exact binary
+  layout/timestamp restoration.
+- A Qt 6.8.3 native-contract fixture physically opens the complete generated
+  780×500 native shell, navigates to the appended Shaders row, loads the actual
+  plugin page, exercises native No/Discard on tab changes and close, and checks
+  Save/reopen/reset/persistence. A separate fresh process tests missing-module
+  startup, inactive row/page, native callback loops and Settings close. Native
+  proprietary models/backend/dialog controls are fixtures, not an installed
+  player. Windows Qt 5/6 CI now explicitly includes these tests.
 - Current shader CI separately requires native D3D11 and D3D12 WARP pixels, a
   real Win32 DXGI presentation/resize fixture, Qt 5/6 plugin-control input,
   Mesa Vulkan with mandatory Khronos validation, native SwiftShader Vulkan
@@ -131,18 +182,20 @@ The prototype is not linked into the main Customizer build or release payload.
   Tests fail, rather than skip-pass, when their required APIs are unavailable.
 - Existing icon/style and complete Settings/About resource budgets still pass.
 
-Windows execution/presentation checks are still being debugged. WGL/EGL and
-Win32 Vulkan presentation, the native installer and a real player have not yet
-passed their required checks. Historical regular-DLL loading results, earlier
-PR CI runs and a software backend's success do not certify this implementation.
+WGL/EGL and Win32 Vulkan presentation, package ABI/dependency ownership checks,
+recoverable EXE+module deployment, real-player navigation/game frames and the
+physical GPU matrix have not passed their required checks. The real-reference
+capacity failure above also remains unresolved. Historical regular-DLL loading,
+Qt fixture navigation, prior PR CI and software pixels do not certify a working
+installation of this feature.
 
 ## Mandatory backend and hardware matrix
 
 | Native game API | Current adapter | Intel | AMD | NVIDIA |
 | --- | --- | --- | --- | --- |
 | OpenGL / GLES | Pipeline prototype; Windows integration unverified | Pending | Pending | Pending |
-| DirectX 11 | Native pipeline + DXGI hooks; Windows execution checks in progress | Pending | Pending | Pending |
-| DirectX 12 | Actual-queue On12 pipeline + DXGI hooks; Windows checks in progress | Pending | Pending | Pending |
+| DirectX 11 | WARP pixels + DXGI fixture pass; game presentation unverified | Pending | Pending | Pending |
+| DirectX 12 | Actual-queue On12 WARP pixels pass; game presentation unverified | Pending | Pending | Pending |
 | Vulkan | Native pipeline pixel tests pass locally; Win32 WSI unverified | Pending | Pending | Pending |
 
 For DirectX, identify the API actually used by each supported player build;
@@ -162,11 +215,13 @@ must verify the GPU actually rendering the game, not merely the display GPU.
    and document the explicit unhandled modes (including legacy D3D9/10, HDR,
    protected content, Vulkan extended presents/cross-family ownership and late
    unobserved surfaces/queues) instead of silently processing them incorrectly.
-2. Finish native Settings model/boot integration and a recoverable installer for
-   regular matching-Qt DLLs. Validate dependencies/architecture before changing
-   the player; preserve fixed resource slots, atomic writes, rollback, prior
-   title/menu/gutter fixes and unrelated pages. Do not break player startup if
-   a shader package is missing or incompatible.
+2. Resolve the real-player fixed-resource capacity blocker without EXE growth,
+   complete package ownership/ABI/dependency validation and a recoverable
+   installer for regular matching-Qt DLLs. The existing in-memory plans are not
+   a two-part EXE+module transaction. Preserve fixed slots, verified rollback,
+   prior title/menu/gutter fixes, exact original sources and unrelated pages.
+   Verify update/removal recovery and missing/incompatible-package fallback in
+   an actual player; the missing-module fixture alone is not sufficient.
 3. Physically navigate to Shaders in a running supported Windows emulator.
    Verify **game-image pixels** on all three renderer families, not just Qt UI
    bindings. Verify default/custom/hidden icon behavior, reset, Save/Discard,
