@@ -107,15 +107,26 @@ jobs:
           # not just exit 100; never continue with missing Qt dependencies.
           report_failure() {
             status=$?
+            message=""
             while IFS= read -r line; do
               line="${line//'%'/'%25'}"
               line="${line//$'\r'/'%0D'}"
-              printf '::error::%s\n' "$line"
+              message+="$line%0A"
             done < <(tail -n 60 "$log")
+            # One multiline annotation avoids the per-step annotation limit
+            # hiding the final apt diagnostic behind its retry progress lines.
+            printf '::error::%s\n' "$message"
             exit "$status"
           }
           trap report_failure ERR
-          sudo apt-get -o Acquire::Retries=3 update 2>&1 | tee "$log"
+          # Fetch official Ubuntu indexes over HTTPS, avoiding stale cleartext
+          # mirror/proxy cache entries. Keep normal signed-index verification.
+          for sources in /etc/apt/sources.list /etc/apt/sources.list.d/ubuntu.sources; do
+            if [ -f "$sources" ]; then
+              sudo sed -i -E 's#http://((security|archive|azure\.archive)\.ubuntu\.com/ubuntu)#https://\1#g' "$sources"
+            fi
+          done
+          sudo apt-get -o Acquire::Retries=3 -o Acquire::https::No-Cache=true update 2>&1 | tee "$log"
           sudo apt-get -o Acquire::Retries=3 install -y libgl1 libegl1 libxkbcommon0 libdbus-1-3 2>&1 | tee -a "$log"
           python -m pip install PySide6==6.8.3 PyQt5==5.15.11 2>&1 | tee -a "$log"
       - name: Checkout pinned player UI contracts for source compilation
