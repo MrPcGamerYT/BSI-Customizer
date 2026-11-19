@@ -1,16 +1,6 @@
 name: Experimental shader backends (not player certification)
 
 on:
-  push:
-    branches: ['arena/**']
-    paths:
-      - 'src/shaders/**'
-      - 'src/third_party/minhook/**'
-      - 'src/third_party/vulkan/**'
-      - 'src/assets/settings-panel-icons/shaders.*'
-      - 'tests/shaders/**'
-      - 'tests/shaders_*'
-      - '.github/workflows/shaders.yml'
   pull_request:
     paths:
       - 'src/shaders/**'
@@ -42,7 +32,7 @@ jobs:
         with:
           node-version: '22'
       - name: Install real software graphics APIs
-        run: sudo apt-get update && sudo apt-get install -y mesa-vulkan-drivers libegl1 libgles2
+        run: sudo apt-get update && sudo apt-get install -y mesa-vulkan-drivers libvulkan1 libegl1 libegl-mesa0 libgles2
       - name: Check committed SPIR-V matches the shared original source
         run: |
           npm install --prefix "$RUNNER_TEMP/spirv-tools" --no-fund --no-audit --save-exact @webgpu/glslang@0.0.15
@@ -51,7 +41,7 @@ jobs:
         run: |
           cmake -S tests/shaders -B build-shader-tests -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_FLAGS='-Wall -Wextra -Werror -pedantic -fsanitize=address,undefined -fno-omit-frame-pointer'
           cmake --build build-shader-tests --parallel 2
-          ctest --test-dir build-shader-tests --output-on-failure
+          python3 tests/shaders/run_ci_tests.py --test-dir build-shader-tests --output-on-failure --timeout 60
       - name: Production GLES pipeline pixels and state restoration
         run: python3 tests/shaders_gpu_test.py
       - name: Record scope of results
@@ -94,7 +84,7 @@ jobs:
           cmake --build build-shaders --config Release --parallel 2
           if ($LASTEXITCODE -ne 0) { throw 'Shader build failed' }
       - name: Native DirectX 11 and 12 WARP frame pixels
-        run: ctest --test-dir build-shaders -C Release --output-on-failure
+        run: python tests/shaders/run_ci_tests.py --test-dir build-shaders -C Release --output-on-failure --timeout 60
       - name: Actual C++ plugin import and physical shader-page controls (Qt fixture only)
         env:
           BSI_TEST_QT_API: ${{ matrix.python-api }}
