@@ -174,6 +174,11 @@ const server = http.createServer((req, res) => {
     assert.equal(await maxButton.getAttribute('aria-label'), 'Maximize', 'Restored window returns to the maximize affordance');
     await page.locator('[data-window="min"]').evaluate(el => el.click());
     await page.waitForFunction(() => __windowActions?.includes('min'));
+    // The mock records minimize without hiding/restoring a native window. Wait
+    // for the real presentation recovery instead of racing its pointer guard
+    // and letting scroll-into-view run against a scaled, noninteractive app.
+    await page.waitForFunction(() => !document.body.classList.contains('minimizing')
+      && getComputedStyle(document.querySelector('.app')).pointerEvents !== 'none', null, { timeout: 5000 });
     // Busy-state snapshots may briefly disable navigation; use real input so
     // the Settings-open click is not silently dropped on a disabled button.
     await page.locator('#spine [data-page="8"]').click();

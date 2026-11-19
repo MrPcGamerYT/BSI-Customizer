@@ -3230,6 +3230,24 @@ int runPatchRegressionTests()
         check(SettingsPanelPatcher::defaultTabIcons(reordered) == fullPack,
               "reordering or translating the Settings model cannot change its default icon mapping");
 
+        // Reserve the original drawing, without inserting a fake shader page
+        // or treating ordinary native Graphics controls as a renderer bridge.
+        const QString reservedShaderId = QStringLiteral("bsishaderssetting.qml");
+        const QVariantList reservedArtworkTabs {
+            QVariantMap{{QStringLiteral("id"), reservedShaderId}},
+            QVariantMap{{QStringLiteral("id"), QStringLiteral("unknown-setting.qml")}}
+        };
+        const auto reservedIcons = SettingsPanelPatcher::defaultTabIcons(reservedArtworkTabs, &packError);
+        const auto shaderAsset = reservedIcons.value(reservedShaderId).toMap();
+        const QByteArray shaderSvg = QByteArray::fromBase64(shaderAsset.value(QStringLiteral("data")).toByteArray());
+        check(packError.isEmpty() && reservedIcons.size() == 1
+                  && shaderAsset.value(QStringLiteral("mime")) == QStringLiteral("image/svg+xml")
+                  && QSvgRenderer(shaderSvg).isValid()
+                  && shaderAsset != fullPack.value(QStringLiteral("uigraphicssetting.qml")).toMap(),
+              "the original Shaders SVG has a valid reserved default mapping, without guessing unknown page icons");
+        check(fullPack.size() == 12 && !fullPack.contains(reservedShaderId),
+              "reserving shader artwork does not insert a Settings tab or replace any native page");
+
         // These regressions do not require a user-supplied HD-Player. Exercise
         // the same upload -> profile -> apply -> file -> published map path on
         // a registered synthetic Qt 5 player, not just an injected QML map.

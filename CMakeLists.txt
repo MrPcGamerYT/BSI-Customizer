@@ -311,8 +311,10 @@ if(BSI_EXE_TEST_FILE)
     target_compile_definitions(BSICustomizer PRIVATE BSI_EXE_TEST_FILE="${_bsi_exe_reference}")
 endif()
 
-# The supplied Settings-tab pack is embedded in both UI builds. No download or
-# user profile seeding is needed: an empty profile automatically uses this pack.
+# The supplied Settings-tab pack and original reserved Shaders icon are embedded
+# in both UI builds. The catalog only maps discovered page ids; reserving artwork
+# does not create a Settings page or claim a native shader renderer exists.
+# No download or profile seeding is needed for the existing native page defaults.
 qt_add_resources(BSICustomizer "settings_panel_icons"
     PREFIX "/settings-panel-icons"
     BASE "${CMAKE_CURRENT_SOURCE_DIR}/src/assets/settings-panel-icons"
@@ -321,6 +323,7 @@ qt_add_resources(BSICustomizer "settings_panel_icons"
         src/assets/settings-panel-icons/performance.svg
         src/assets/settings-panel-icons/display.svg
         src/assets/settings-panel-icons/graphics.svg
+        src/assets/settings-panel-icons/shaders.svg
         src/assets/settings-panel-icons/game-settings.svg
         src/assets/settings-panel-icons/devices.svg
         src/assets/settings-panel-icons/preferences.svg

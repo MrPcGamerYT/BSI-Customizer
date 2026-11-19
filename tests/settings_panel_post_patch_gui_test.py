@@ -25,15 +25,17 @@ if os.environ.get("BSI_TEST_QT_API") != "PyQt5":
 # bindings in one process. CI exercises the exact same assertions with each.
 if os.environ.get("BSI_TEST_QT_API") == "PyQt5":
     from PyQt5.QtCore import QMetaObject, QPointF, Qt
-    from PyQt5.QtGui import QColor, QFont, QFontMetricsF, QGuiApplication, QImage
+    from PyQt5.QtGui import QColor, QFont, QFontMetricsF, QGuiApplication, QImage, QPainter
     from PyQt5.QtQml import QQmlComponent, QQmlEngine, QQmlExpression
     from PyQt5.QtQuick import QQuickItem, QQuickWindow
+    from PyQt5.QtSvg import QSvgRenderer
     from PyQt5.QtTest import QSignalSpy, QTest
 else:
     from PySide6.QtCore import QMetaObject, QPointF, Qt
-    from PySide6.QtGui import QColor, QFont, QFontMetricsF, QGuiApplication, QImage
+    from PySide6.QtGui import QColor, QFont, QFontMetricsF, QGuiApplication, QImage, QPainter
     from PySide6.QtQml import QQmlComponent, QQmlEngine, QQmlExpression
     from PySide6.QtQuick import QQuickItem, QQuickWindow
+    from PySide6.QtSvg import QSvgRenderer
     from PySide6.QtTest import QSignalSpy, QTest
 
 REPO = pathlib.Path(__file__).resolve().parents[1]
@@ -154,8 +156,33 @@ def model(labels):
             for i, label in enumerate(labels)]
 
 
+def check_reserved_shader_artwork():
+    # Artwork-only coverage: no mock shader controls or fabricated game frame.
+    source = (REPO / "src/assets/settings-panel-icons/shaders.svg").read_bytes()
+    for size in (24, 48):
+        for accent in ("#54c8ff", "#f59e0b"):
+            renderer = QSvgRenderer(source.replace(b"<svg ", f'<svg color="{accent}" '.encode(), 1))
+            assert renderer.isValid(), "the original reserved Shaders SVG must parse in Qt 5 and Qt 6"
+            image = QImage(size, size, QImage.Format.Format_ARGB32_Premultiplied)
+            image.fill(QColor("transparent"))
+            painter = QPainter(image)
+            renderer.render(painter)
+            painter.end()
+            pixels = [(x, y, image.pixelColor(x, y)) for y in range(size) for x in range(size)
+                      if image.pixelColor(x, y).alpha() > 0]
+            assert size * size * .1 < len(pixels) < size * size * .7, "icon must paint a visible outline, not a blank or solid tile"
+            assert all(0 < x < size - 1 and 0 < y < size - 1 for x, y, _ in pixels), "SVG strokes must not clip at the icon edges"
+            ink = [color for _, _, color in pixels if color.alpha() >= 128]
+            expected = QColor(accent)
+            assert ink and all(abs(color.red() - expected.red()) <= 2
+                               and abs(color.green() - expected.green()) <= 2
+                               and abs(color.blue() - expected.blue()) <= 2 for color in ink), "the reserved artwork must inherit the selected-tab accent"
+    print("PASS: original reserved Shaders SVG paints unclipped at 1x/2x with two theme accents; artwork only, not shader-effect validation")
+
+
 def main():
     app = QGuiApplication.instance() or QGuiApplication([])
+    check_reserved_shader_artwork()
     # Deliberately different from the native themed font, reproducing the old
     # app-font FontMetrics / bodyLarge label mismatch.
     app.setFont(QFont("Sans Serif", 9))

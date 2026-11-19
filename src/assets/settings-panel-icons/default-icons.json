@@ -2,6 +2,9 @@
   "version": 1,
   "source": "User-supplied tab-icons.zip",
   "sourceSha256": "e2dba9b369d058200b7f73c877bfd5c62e4eaf61def34899c35f8760474cf4c7",
+  "additionalArtwork": {
+    "shaders.svg": "Original BSI Customizer artwork; reserved for a renderer-backed Shaders tab, not part of the uploaded pack."
+  },
   "pages": {
     "uiperformancesetting.qml": "performance.svg",
     "performancesetting.qml": "performance.svg",
@@ -10,6 +13,7 @@
     "displaysetting.qml": "display.svg",
     "uigraphicssetting.qml": "graphics.svg",
     "graphicssetting.qml": "graphics.svg",
+    "bsishaderssetting.qml": "shaders.svg",
     "plrgamesetting.qml": "game-settings.svg",
     "gamesetting.qml": "game-settings.svg",
     "plrgamepadsetting.qml": "game-settings.svg",

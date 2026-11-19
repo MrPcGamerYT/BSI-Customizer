@@ -3,6 +3,8 @@
 The C++ self-test exercises the actual catalog loader, Apply, SVG rasterization,
 custom overrides and restore. This small test additionally checks packaging and
 all twelve native page identities without needing a player or Qt installation.
+The additional original Shaders artwork is reserved, not a thirteenth native
+page or evidence of a working shader integration.
 """
 import hashlib
 import json
@@ -33,10 +35,22 @@ expected = {
 pages = manifest["pages"]
 assert all(pages[page] == icon for page, icon in expected.items())
 assert len(set(expected.values())) == 11
+assert pages["bsishaderssetting.qml"] == "shaders.svg"
+assert set(manifest["additionalArtwork"]) == {"shaders.svg"}
+assert "Original BSI Customizer artwork" in manifest["additionalArtwork"]["shaders.svg"]
+assert "bsishaderssetting.qml" not in expected, "reserved artwork must not invent a native Settings page"
 assert all(page == page.casefold() and "/" not in page for page in pages)
 assert all(Path(icon).name == icon and icon.endswith(".svg") for icon in pages.values())
 files = set(pages.values())
+assert len(files) == 12, "eleven supplied drawings plus one original reserved Shaders drawing"
 assert files == {path.name for path in pack.glob("*.svg")}
+shader_svg = ET.fromstring((pack / "shaders.svg").read_bytes())
+for attribute, value in {
+    "width": "24", "height": "24", "fill": "none", "stroke": "currentColor",
+    "stroke-width": "1.7", "stroke-linecap": "round", "stroke-linejoin": "round",
+}.items():
+    assert shader_svg.attrib[attribute] == value, "the new icon must match the supplied outline style"
+assert all("fill" not in child.attrib and "stroke" not in child.attrib for child in shader_svg)
 for name in files:
     svg = (pack / name).read_bytes()
     root = ET.fromstring(svg)
@@ -53,7 +67,7 @@ assert 'PREFIX "/settings-panel-icons"' in resources.group(1)
 for name in files | {"default-icons.json"}:
     assert f"src/assets/settings-panel-icons/{name}" in resources.group(1)
 assert "if(BSI_CHROMIUM_UI)" not in resources.group(0)
-print("PASS: supplied pack embeds eleven self-contained SVGs and maps all twelve native Settings tabs")
+print("PASS: all twelve native Settings tabs keep their eleven supplied icons; original matching Shaders artwork is embedded with a reserved default mapping only")
 
 cpp = (repo / "src/core/SettingsPanelPatcher.cpp").read_text()
 window = re.search(r'(?:const )?QString replacement = QStringLiteral\(R"QML\((.*?)\)QML"\);', cpp, re.S)
