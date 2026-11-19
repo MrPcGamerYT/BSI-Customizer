@@ -427,6 +427,8 @@ Window {
     click_text("Refresh UI" if not page.property("inspectionStale") else "Load player UI")
     clean_action = page.findChild(QObject, "cleanPlayerUiAction")
     assert clean_action.property("text") == "Update clean-up"
+    assert any("Title bar: three-line menu, help" in text for text in texts(window.contentItem()))
+    assert not any("Settings/menu stays" in text for text in texts(window.contentItem()))
     click_item(clean_action)
     assert backend.property("cleanupApplied") and not backend.property("cleanupNeedsUpdate")
     assert "applyLayoutTweak:clean-player-ui:true" in backend.property("calls").toVariant()
@@ -506,6 +508,7 @@ QtObject {
         click_text("Load player UI" if page.property("inspectionStale") else "Refresh UI")
         clean_action = page.findChild(QObject, "cleanPlayerUiAction")
         assert clean_action.property("text") == "Update clean-up"
+        assert any("Title bar: three-line menu, help" in text for text in texts(window.contentItem()))
         click_item(clean_action)
         assert backend.property("cleanupApplied") and not backend.property("cleanupNeedsUpdate")
         assert clean_action.property("text") == "Restore stock UI"

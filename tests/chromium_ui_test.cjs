@@ -118,7 +118,7 @@ const server = http.createServer((req, res) => {
           if (method === 'bootPatch') value = { ok: true, msg: 'Built-in Aurora HTML boot animation installed; no supported completion gate was found; requested 4567 ms hold was not applied.' };
           if (method === 'applyLayoutTweak') { cleanupNeedsUpdate = false; cleanupApplied = args.enabled; value = { ok: true, msg: 'Fixture cleanup updated.' }; }
           if (method === 'readInterface') value = {
-            removals: ['Remove title details', 'Fixture sidebar'], layout: [{ id: 'clean-player-ui', label: 'Clean player UI', supported: true, applied: cleanupApplied, needsUpdate: cleanupNeedsUpdate }],
+            removals: ['Remove title details', 'Fixture sidebar'], layout: [{ id: 'clean-player-ui', label: 'Clean player UI', supported: true, applied: cleanupApplied, needsUpdate: cleanupNeedsUpdate, detail: 'Hide the three-line title-bar menu while keeping sidebar Settings accessible.' }],
             about: { supported: true, text: 'Original fixture About', showSections: true, links: [{ id: 'website', name: 'Website', label: 'Original label', url: 'https://example.test', hidden: false }] }
           };
           if (method === 'rpcidNames') value = { ok: true, entries: [{ key: 'ProductName', value: 'Fixture', max: 40 }] };
@@ -174,7 +174,10 @@ const server = http.createServer((req, res) => {
     assert.equal(await maxButton.getAttribute('aria-label'), 'Maximize', 'Restored window returns to the maximize affordance');
     await page.locator('[data-window="min"]').evaluate(el => el.click());
     await page.waitForFunction(() => __windowActions?.includes('min'));
-    await page.locator('#spine [data-page="8"]').evaluate(el => el.click());
+    // Busy-state snapshots may briefly disable navigation; use real input so
+    // the Settings-open click is not silently dropped on a disabled button.
+    await page.locator('#spine [data-page="8"]').click();
+    await page.waitForFunction(() => document.querySelector('#settings-dialog').open);
     await page.locator('[data-settings-tab="about"]').click();
     await page.locator('[data-about-field="developerName"]').fill('Updated Fixture Developer');
     await page.locator('[data-about-field="tagline"]').fill('A customized About panel');
@@ -258,6 +261,7 @@ const server = http.createServer((req, res) => {
     const last = method => page.evaluate(name => __calls.filter(c => c.method === name).at(-1), method);
     await nav(6);
     await click('interface-load');
+    assert.match(await page.locator('#main').innerText(), /three-line title-bar menu while keeping sidebar Settings accessible/);
     await page.getByRole('button', { name: 'Update this tweak', exact: true }).click();
     await page.waitForFunction(() => !document.body.dataset.confirming && !document.body.classList.contains('busy'));
     assert.deepEqual((await last('applyLayoutTweak')).args, { id: 'clean-player-ui', enabled: true }, 'migration must repair Settings without restoring all extras');

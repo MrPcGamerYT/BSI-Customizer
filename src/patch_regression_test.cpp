@@ -670,6 +670,40 @@ QString linkedResourceText(const QByteArray &image, const QString &leaf)
     return result;
 }
 
+// Independently inspect the owning object's first-frame binding, rather than
+// accepting a false visibility somewhere else in the same titlebar source.
+bool qmlObjectStartsHidden(const QString &qml, const QString &id)
+{
+    const QString masked = QmlText::mask(qml);
+    QmlText::Binding declaration;
+    int next = 0;
+    while (QmlText::binding(masked, next, int(masked.size()), QStringLiteral("id"), &declaration)) {
+        next = declaration.valueEnd;
+        if (qml.mid(declaration.valueBegin, declaration.valueEnd - declaration.valueBegin) != id) continue;
+        int open = declaration.nameBegin - 1;
+        int depth = 0;
+        for (; open >= 0; --open) {
+            if (masked.at(open) == QLatin1Char('}')) ++depth;
+            else if (masked.at(open) == QLatin1Char('{')) {
+                if (depth == 0) break;
+                --depth;
+            }
+        }
+        if (open < 0) return false;
+        int close = open;
+        depth = 0;
+        for (; close < masked.size(); ++close) {
+            if (masked.at(close) == QLatin1Char('{')) ++depth;
+            else if (masked.at(close) == QLatin1Char('}') && --depth == 0) break;
+        }
+        QmlText::Binding visible;
+        if (!QmlText::binding(masked, open + 1, close, QStringLiteral("visible"), &visible)) return false;
+        const QString value = masked.mid(visible.valueBegin, visible.valueEnd - visible.valueBegin).simplified();
+        return value == QLatin1String("false") || value.startsWith(QLatin1String("false &&"));
+    }
+    return false;
+}
+
 bool registeredQmlContains(const QByteArray &image, const QString &marker)
 {
     for (const auto &file : QtResources::registeredFiles(image)) {
@@ -5524,6 +5558,10 @@ Window {
                 check(clean.ok && !LayoutPatcher::analyze(read(titleCopy), cleanId).needsUpdate,
                       QStringLiteral("real %1 clean-up preserves/repairs Settings access (%2)")
                           .arg(QFileInfo(input).fileName(), clean.msg));
+                check(qmlObjectStartsHidden(linkedResourceText(read(titleCopy), QStringLiteral("PlrTopbar.qml")),
+                                            QStringLiteral("iCfgBtn")),
+                      QStringLiteral("real %1 clean-up hides the owning three-line menu button, not just another top-bar control")
+                          .arg(QFileInfo(input).fileName()));
                 check(stillProtected(read(titleCopy)),
                       "the real clean-up does not alter any native Settings page text either");
                 if (clean.ok && !cleanBefore.applied) {
@@ -7228,17 +7266,19 @@ Window {
                   && cleanTopbarText.contains(QLatin1String("text: plrBackend.version"))
                   && cleanTopbarText.contains(QLatin1String("text: \"N32\"")),
               "clean-up preserves sidebar Settings conditions and leaves title/details to the separate combined removal");
-        check(cleanTopbarText.count(QLatin1String("pVisible: false /* BSI CUSTOMIZER: clean player UI visible:")) == 1
-                  && cleanTopbarText.contains(QLatin1String("pVisible: pIsNowbuxEnabled\r\n            pWidth: iCfgBtn.width"))
-                  && cleanTopbarText.contains(QLatin1String("UiImageButton { id: iCfgBtn }"))
+        check(cleanTopbarText.count(QLatin1String("pVisible: false /* BSI CUSTOMIZER: clean player UI visible:")) == 2
+                  && cleanTopbarText.contains(QLatin1String("UiImageButton { visible: false /* BSI CUSTOMIZER: clean player UI */; id: iCfgBtn }"))
                   && cleanTopbarText.contains(QLatin1String("pVisible: true\r\n            pWidth: iBackBtn.width"))
                   && cleanTopbarText.contains(QLatin1String("visible: false // BSI CUSTOMIZER: clean player UI")),
-              "help stops being shown by fReloadTopbarElements while Settings/menu and Back stay; the sidebar toggle is hidden");
+              "the three-line menu and help stay hidden across native reloads; Back stays and the sidebar toggle is hidden");
         check(cleanTopbarText.contains(QLatin1String("UiImageButton { visible: false /* BSI CUSTOMIZER: clean player UI */; id: iHelpBtn }"))
                   && cleanTopbarText.contains(QLatin1String("UiImageButton { id: iBackBtn }")),
               "an object written on a single line is hidden inline instead of being split across lines");
-        check(LayoutPatcher::analyze(cleanBytes, cleanId).applied,
-              "the written clean UI is detected on read-back");
+        check(LayoutPatcher::analyze(cleanBytes, cleanId).applied
+                  && !LayoutPatcher::analyze(cleanBytes, cleanId).needsUpdate,
+              "the hidden three-line menu is current, not mistaken for a Settings-access regression");
+        check(LayoutPatcher::apply(cleanPath, cleanId, true).ok && read(cleanPath) == cleanBytes,
+              "reapplying the current clean-up is byte-idempotent, including its menu hide");
         // The clean-up writes nothing into plr.qml, so it never blocks the
         // title-bar move (which is the only option that removes the sidebar).
         check(!cleanPlrText.contains(QLatin1String("BSI CUSTOMIZER")),
@@ -7341,12 +7381,13 @@ Window {
                                   .arg(oldApplied.msg));
         const auto oldTopbarText = resourceText(read(oldPath), old, QStringLiteral("PlrTopbar.qml"));
         const auto oldPlrText = resourceText(read(oldPath), old, QStringLiteral("plr.qml"));
-        check(oldTopbarText.count(QLatin1String("\"visible\" : false /* BSI CUSTOMIZER: clean player UI visible:")) == 3
-                  && oldTopbarText.contains(QLatin1String("\"id\" : iCfgBtn,            \"visible\" : true"))
+        check(oldTopbarText.count(QLatin1String("\"visible\" : false /* BSI CUSTOMIZER: clean player UI visible:")) == 4
+                  && oldTopbarText.contains(QLatin1String("\"id\" : iCfgBtn,            \"visible\" : false /* BSI CUSTOMIZER: clean player UI visible:"))
+                  && oldTopbarText.contains(QLatin1String("UiImageButton { visible: false /* BSI CUSTOMIZER: clean player UI */; id: iCfgBtn }"))
                   && oldTopbarText.contains(QLatin1String("\"id\" : iTitleLayout,       \"visible\" : true"))
                   && oldTopbarText.contains(QLatin1String("\"id\" : iBackBtn,           \"visible\" : true"))
                   && oldTopbarText.contains(QLatin1String("id: iQuestbtn; visible: false /* BSI CUSTOMIZER")),
-              "the ListModel entries for extra/help buttons are switched off while Settings/menu, the title and Back stay");
+              "the legacy ListModel also hides the three-line menu and other extras while the title and Back stay");
         check(oldPlrText == oldPlr,
               "the layout-child sidebar keeps its stock Layout.preferredWidth");
         check(LayoutPatcher::apply(oldPath, cleanId, false).ok
@@ -7370,13 +7411,13 @@ Window {
             write(path, prior.f.bytes);
             const auto state = LayoutPatcher::analyze(read(path), cleanId);
             check(state.supported && state.applied && state.needsUpdate,
-                  caseName + QStringLiteral(": an otherwise-complete old clean-up offers Update to repair Settings"));
+                  caseName + QStringLiteral(": an otherwise-complete old clean-up offers Update for the menu/sidebar Settings rules"));
             const auto result = LayoutPatcher::apply(path, cleanId, true);
             const auto repaired = read(path);
             check(result.ok, caseName + QStringLiteral(": Update succeeds: ") + result.msg);
             check(resourceText(repaired, prior, QStringLiteral("PlrTopbar.qml")) == wantedTop
                       && resourceText(repaired, prior, QStringLiteral("PlrSidebar.qml")) == wantedSide,
-                  caseName + QStringLiteral(": only cleanup-owned Settings hides are removed; all other extra buttons stay hidden"));
+                  caseName + QStringLiteral(": the menu stays hidden, sidebar Settings stays accessible, and other extras stay hidden"));
             check(!LayoutPatcher::analyze(repaired, cleanId).needsUpdate,
                   caseName + QStringLiteral(": read-back no longer requests an update"));
             check(LayoutPatcher::apply(path, cleanId, true).ok && read(path) == repaired,
@@ -7386,12 +7427,44 @@ Window {
                       && resourceText(read(path), prior, QStringLiteral("PlrSidebar.qml")) == stockSide,
                   caseName + QStringLiteral(": Restore still restores exact native/independent conditions"));
         };
-        QString oldCompleteTop = cleanTopbarText;
-        oldCompleteTop.replace(QStringLiteral("pVisible: pIsNowbuxEnabled\r\n            pWidth: iCfgBtn.width"),
-            QStringLiteral("pVisible: ") + oldHide(QStringLiteral("pIsNowbuxEnabled"), QStringLiteral("clean player UI visible"))
-            + QStringLiteral("\r\n            pWidth: iCfgBtn.width"));
-        oldCompleteTop.replace(QStringLiteral("UiImageButton { id: iCfgBtn }"),
-            QStringLiteral("UiImageButton { visible: false /* BSI CUSTOMIZER: clean player UI */; id: iCfgBtn }"));
+        // The immediately previous clean-up kept the hamburger visible.
+        // Upgrade it without restoring the other extras or hiding Settings.
+        const QString hiddenMenu = QStringLiteral("UiImageButton { visible: false /* BSI CUSTOMIZER: clean player UI */; id: iCfgBtn }");
+        const QString stockMenu = QStringLiteral("UiImageButton { id: iCfgBtn }");
+        const QString hiddenMenuModel = QStringLiteral("pVisible: ")
+            + oldHide(QStringLiteral("pIsNowbuxEnabled"), QStringLiteral("clean player UI visible"))
+            + QStringLiteral("\r\n            pWidth: iCfgBtn.width");
+        const QString stockMenuModel = QStringLiteral("pVisible: pIsNowbuxEnabled\r\n            pWidth: iCfgBtn.width");
+        QString visibleElementMenu = cleanTopbarText;
+        visibleElementMenu.replace(hiddenMenuModel, stockMenuModel);
+        visibleElementMenu.replace(hiddenMenu, stockMenu);
+        check(visibleElementMenu.contains(stockMenuModel) && visibleElementMenu.contains(stockMenu),
+              "the previous-version fixture genuinely leaves both the menu model and first-frame button visible");
+        migration(QStringLiteral("menu-visible-element-clean"), visibleElementMenu, cleanSidebarText,
+                  cleanTopbarText, cleanSidebarText, cleanTopbar, cleanSidebar);
+        QString visibleMenuModelOnly = cleanTopbarText;
+        visibleMenuModelOnly.replace(hiddenMenuModel, stockMenuModel);
+        migration(QStringLiteral("menu-reload-model-update"), visibleMenuModelOnly, cleanSidebarText,
+                  cleanTopbarText, cleanSidebarText, cleanTopbar, cleanSidebar);
+        QString visibleMenuButtonOnly = cleanTopbarText;
+        visibleMenuButtonOnly.replace(hiddenMenu, stockMenu);
+        migration(QStringLiteral("menu-first-frame-update"), visibleMenuButtonOnly, cleanSidebarText,
+                  cleanTopbarText, cleanSidebarText, cleanTopbar, cleanSidebar);
+
+        QString visibleListMenu = oldTopbarText;
+        visibleListMenu.replace(QStringLiteral("\"id\" : iCfgBtn,            \"visible\" : ")
+                + oldHide(QStringLiteral("true"), QStringLiteral("clean player UI visible")),
+            QStringLiteral("\"id\" : iCfgBtn,            \"visible\" : true"));
+        visibleListMenu.replace(hiddenMenu, stockMenu);
+        check(visibleListMenu.contains(QStringLiteral("\"id\" : iCfgBtn,            \"visible\" : true"))
+                  && visibleListMenu.contains(stockMenu),
+              "the previous ListModel fixture also genuinely leaves its menu visible");
+        migration(QStringLiteral("menu-visible-listmodel-clean"), visibleListMenu, cleanSidebarText,
+                  oldTopbarText, cleanSidebarText, oldTopbar, cleanSidebar);
+
+        // Older patches already hid the menu, but also hid sidebar Settings.
+        // Repair only sidebar access; never re-show the menu during that repair.
+        const QString oldCompleteTop = cleanTopbarText;
         QString oldCompleteSide = cleanSidebarText;
         oldCompleteSide.replace(QStringLiteral("pIsFeatureEnable: iSidebarProperties.pIsSettingsEnabled"),
             QStringLiteral("pIsFeatureEnable: ") + oldHide(QStringLiteral("iSidebarProperties.pIsSettingsEnabled"), QStringLiteral("sidebar clean")));
@@ -7411,18 +7484,18 @@ Window {
         conditionalStock.replace(QStringLiteral("UiImageButton { id: iCfgBtn }"),
                                  QStringLiteral("UiImageButton { id: iCfgBtn; visible: !pFullscreen }") );
         QString conditionalClean = cleanTopbarText;
-        conditionalClean.replace(QStringLiteral("UiImageButton { id: iCfgBtn }"),
-                                 QStringLiteral("UiImageButton { id: iCfgBtn; visible: !pFullscreen }") );
-        QString conditionalOld = conditionalClean;
-        conditionalOld.replace(QStringLiteral("visible: !pFullscreen"),
-            QStringLiteral("visible: false /* BSI CUSTOMIZER: clean player UI */ && (!pFullscreen)"));
+        conditionalClean.replace(hiddenMenu,
+            QStringLiteral("UiImageButton { id: iCfgBtn; visible: false /* BSI CUSTOMIZER: clean player UI */ && (!pFullscreen) }"));
+        const QString conditionalOld = conditionalClean;
         migration(QStringLiteral("inserted-sidebar-and-conditional-direct-settings"), conditionalOld, oldInserted,
                   conditionalClean, cleanNoBinding, conditionalStock, sideNoBinding);
 
-        QString oldModel = oldTopbarText;
-        oldModel.replace(QStringLiteral("\"id\" : iCfgBtn,            \"visible\" : true"),
-            QStringLiteral("\"id\" : iCfgBtn,            \"visible\" : ")
-                + oldHide(QStringLiteral("true"), QStringLiteral("clean player UI visible")));
+        QString conditionalVisible = visibleElementMenu;
+        conditionalVisible.replace(stockMenu, QStringLiteral("UiImageButton { id: iCfgBtn; visible: !pFullscreen }"));
+        migration(QStringLiteral("menu-conditional-visible-update"), conditionalVisible, cleanNoBinding,
+                  conditionalClean, cleanNoBinding, conditionalStock, sideNoBinding);
+
+        const QString oldModel = oldTopbarText;
         migration(QStringLiteral("complete-listmodel-clean"), oldModel, oldCompleteSide,
                   oldTopbarText, cleanSidebarText, oldTopbar, cleanSidebar);
 

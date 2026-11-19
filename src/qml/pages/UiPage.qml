@@ -561,7 +561,7 @@ Item {
                                 Text {
                                     Layout.fillWidth: true
                                     wrapMode: Text.Wrap
-                                    text: qsTr("One apply hides extra buttons while keeping Settings accessible. Title bar: help, "
+                                    text: qsTr("One apply hides extra buttons while keeping sidebar Settings accessible. Title bar: three-line menu, help, "
                                                + "quests, rewards, account, nowbuX, "
                                                + "pin-to-top, top-bar icons, macro, sync and screen "
                                                + "recording. Sidebar: screenshot, screen record, media "
@@ -571,7 +571,7 @@ Item {
                                                + "Recent. Back, Home, Recent, the BlueStacks logo, the "
                                                + "title/version and the window controls stay, and the "
                                                + "sidebar keeps fullscreen, volume, game controls, "
-                                               + "install APK, trim memory and Settings. The title-bar Settings/menu stays too. To "
+                                               + "install APK, trim memory and Settings. To "
                                                + "remove the sidebar itself, turn on “Sidebar buttons "
                                                + "to the top bar” below.")
                                     color: Theme.textDim
@@ -592,7 +592,7 @@ Item {
                                                                         : qsTr("Restore stock UI"))
                                          : qsTr("Clean in one click"))
                                 onClicked: {
-                                    // Update repairs Settings access without restoring the unwanted buttons.
+                                    // Update hides the title-bar menu and keeps sidebar Settings without restoring other extras.
                                     const target = !(page.cleanTweak.applied
                                                      && !page.cleanTweak.needsUpdate);
                                     const result = backend.applyLayoutTweak("clean-player-ui", target);
@@ -615,12 +615,12 @@ Item {
                             font.pixelSize: 11
                             font.weight: Font.DemiBold
                             text: page.cleanTweak.needsUpdate
-                                  ? qsTr("An older clean-up is applied — press “Update clean-up” to restore Settings access "
-                                         + "while keeping the unwanted buttons hidden.")
+                                  ? qsTr("An older clean-up is applied — press “Update clean-up” to hide the three-line menu "
+                                         + "while keeping sidebar Settings accessible.")
                                   : (page.cleanTweak.applied
-                                     ? qsTr("Applied — the extra buttons are hidden and the sidebar keeps "
+                                     ? qsTr("Applied — the three-line menu and extra buttons are hidden; the sidebar keeps "
                                             + "fullscreen, volume, game controls, install APK, trim "
-                                            + "memory and Settings. The title-bar menu also stays. Press “Restore stock UI” to bring everything back.")
+                                            + "memory and Settings. Press “Restore stock UI” to bring everything back.")
                                      : (page.cleanTweak.supported
                                         ? qsTr("Ready — one click hides every button listed above.")
                                         : (page.cleanTweak.state || page.cleanTweak.detail)))

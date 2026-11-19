@@ -13,7 +13,8 @@ const defaults = { [graphicsId]: svgAsset('graphics'), [devicesId]: svgAsset('de
 const custom = { mime: 'image/svg+xml', data: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="9" fill="#55aaff"/></svg>').toString('base64') };
 const requests = [];
 let profile = { hiddenTabs: [], tabIcons: {} };
-let cleanup = { id: 'clean-player-ui', label: 'Clean player UI', supported: true, applied: true, needsUpdate: true };
+let cleanup = { id: 'clean-player-ui', label: 'Clean player UI', supported: true, applied: true, needsUpdate: true,
+  detail: 'Hide the three-line title-bar menu while keeping sidebar Settings accessible.' };
 let panelState = {
   supported: true, applied: false, restorable: false, detail: 'Editable player QML sources found.',
   defaultTabIcons: defaults,
@@ -78,6 +79,8 @@ await editors.action('interface-load', null, 6);
 let view = editors.render(6);
 assert.match(view, /Settings panel rebuild/);
 assert.match(view, /Update this tweak/);
+assert.match(view, /three-line title-bar menu/);
+assert.match(view, /sidebar Settings accessible/);
 assert.doesNotMatch(view, /Restore this tweak/);
 await editors.action('layout', { dataset: { index: '0' } }, 6);
 assert.equal(JSON.stringify(requests.filter(x => x.method === 'applyLayoutTweak').at(-1).args),

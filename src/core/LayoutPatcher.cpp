@@ -91,11 +91,11 @@ const QString kSettingsFlipTag = QStringLiteral(" /* BSI CUSTOMIZER: settings in
 const QString kNoSmartMarker = QStringLiteral(" // BSI CUSTOMIZER: stock overflow only");
 
 // ---------------------------------------------------------- clean player UI
-// One option that hides every extra top-bar button in one apply. Back/Home/
-// Recent, Settings/menu access, the product logo, the window title/version and the minimize/
-// maximize/close controls stay. The sidebar is deliberately left alone: it is
-// only removed by moving it into the title bar ("Sidebar buttons to the top
-// bar"). The stock top bar re-asserts `visible` from fReloadTopbarElements(),
+// One option that hides every extra top-bar button, including the three-line
+// menu, in one apply. Back/Home/Recent, the product logo, the window title/
+// version and minimize/maximize/close stay. Settings remains in the sidebar;
+// the strip itself is only removed by moving it into the title bar ("Sidebar
+// buttons to the top bar"). The stock top bar re-asserts `visible` from fReloadTopbarElements(),
 // so the option switches the owning PlrTopbarElement's `pVisible` off as well;
 // a plain `visible: false` binding would be overwritten the next time the
 // window is resized.
@@ -2613,7 +2613,6 @@ const QStringList &cleanKeepIds()
     static const QStringList ids {
         QStringLiteral("iProductLogo"), QStringLiteral("iBstTxt"),
         QStringLiteral("iVersionImgLayout"), QStringLiteral("iTitleLayout"),
-        QStringLiteral("iCfgBtn"),
         QStringLiteral("iBackBtn"), QStringLiteral("iHomeBtn"), QStringLiteral("iRecentBtn"),
         QStringLiteral("iMinmizeBtn"), QStringLiteral("iMinimizeBtn"),
         QStringLiteral("iMaximizeBtn"), QStringLiteral("iFixedResizeBtn"),
@@ -2627,7 +2626,7 @@ const QStringList &cleanKeepIds()
 const QStringList &cleanHideIds()
 {
     static const QStringList ids {
-        QStringLiteral("iSidebarShowBtn"), QStringLiteral("iHelpBtn"),
+        QStringLiteral("iSidebarShowBtn"), QStringLiteral("iCfgBtn"), QStringLiteral("iHelpBtn"),
         // MSI 5.9 spells the quest button `iQuestbtn`.
         QStringLiteral("iQuestBtn"), QStringLiteral("iQuestbtn"),
         QStringLiteral("iRewardsCenterBtn"), QStringLiteral("iRawModeWarningBtn"),
@@ -2711,7 +2710,8 @@ bool cleanHideObject(const QString &qml, const QmlText::Object &object, QList<Ed
     QmlText::Binding visible;
     if (directBinding(masked, object.open, object.end, QStringLiteral("visible"), &visible)) {
         const QString value = qml.mid(visible.valueBegin, visible.valueEnd - visible.valueBegin);
-        if (value.startsWith(kCleanHidePrefix)) return false; // already hidden by us
+        // A native/user false is already hidden; do not take ownership of it.
+        if (value == QLatin1String("false") || value.startsWith(kCleanHidePrefix)) return false;
         addEdit(edits, visible.valueBegin, visible.valueEnd - visible.valueBegin,
                 kCleanHidePrefix + value + QStringLiteral(")"));
     } else {
@@ -3019,10 +3019,8 @@ bool cleanTopbarEdits(QString &qml, bool enabled, QList<Edit> &edits)
         }
     }
 
-    QStringList buttonIds = cleanHideIds();
-    buttonIds << QStringLiteral("iCfgBtn"); // repair Settings hidden by older clean-ups
-    for (const auto &id : buttonIds) {
-        const bool hide = enabled && id != QLatin1String("iCfgBtn");
+    for (const auto &id : cleanHideIds()) {
+        const bool hide = enabled;
         int valueBegin = 0;
         int valueEnd = 0;
         if (modelEntryVisible(qml, id, &valueBegin, &valueEnd)) {
@@ -3056,33 +3054,6 @@ bool cleanTopbarEdits(QString &qml, bool enabled, QList<Edit> &edits)
     return changed > 0;
 }
 
-// Old clean-ups disabled Settings in both native top-bar models and the
-// sidebar feature list. Recognize only our tagged edits, so Update repairs
-// access without re-enabling a user-hidden/stock-disabled feature.
-bool cleanHidesSettings(const QString &topbar, const QString &sidebar)
-{
-    const QString masked = QmlText::mask(topbar);
-    QmlText::Object button;
-    if (findObjectById(topbar, masked, QStringLiteral("iCfgBtn"), &button)) {
-        QList<Edit> restore;
-        if (cleanShowObject(topbar, button, restore)) return true;
-    }
-    for (const auto &element : QmlText::objects(masked, QStringLiteral("PlrTopbarElement"))) {
-        const QString body = topbar.mid(element.open, element.end - element.open);
-        if (body.contains(QLatin1String("iCfgBtn")) && body.contains(kCleanVisibleTag)) return true;
-    }
-    int begin = 0, end = 0, tagEnd = 0;
-    QString original;
-    if (modelEntryVisible(topbar, QStringLiteral("iCfgBtn"), &begin, &end)
-        && taggedAfter(topbar, begin, kCleanVisibleTag, &original, &tagEnd)) return true;
-    for (const auto &element : QmlText::objects(QmlText::mask(sidebar), QStringLiteral("PlrSidebarElement"))) {
-        if (sidebarElementId(sidebar, element) != QLatin1String("pSettings")) continue;
-        const QString body = sidebar.mid(element.open, element.end - element.open);
-        if (body.contains(kSidebarCleanTag) || body.contains(kSidebarCleanLine)) return true;
-    }
-    return false;
-}
-
 State analyzeCleanUi(const QByteArray &image)
 {
     State state;
@@ -3108,11 +3079,6 @@ State analyzeCleanUi(const QByteArray &image)
     const bool sidebarClean = sidebarButtonsCleaned(sidebar.qml);
     const bool legacy = plr.qml.contains(kCleanMarker) || sidebar.qml.contains(kCleanMarker);
     state.applied = topbarClean || sidebarClean || legacy;
-    // A clean-up written by an older version only hid the title-bar buttons (and
-    // sometimes the whole strip). It is reported as an update so the missing
-    // half can be written without restoring first.
-    state.needsUpdate = state.applied
-        && (!(topbarClean && sidebarClean) || cleanHidesSettings(topbar.qml, sidebar.qml));
     QString p = plr.qml;
     QString s = sidebar.qml;
     QString t = topbar.qml;
@@ -3133,6 +3099,16 @@ State analyzeCleanUi(const QByteArray &image)
                              "nothing would be written.");
         return state;
     }
+    if (state.applied) {
+        // Reuse the actual enabling rules: older clean-ups may leave the menu
+        // visible or hide sidebar Settings. Only a real pending edit requests
+        // Update, so an intentionally hidden menu never causes an update loop.
+        QList<Edit> topbarUpdate;
+        QList<Edit> sidebarUpdate;
+        cleanTopbarEdits(t, true, topbarUpdate);
+        cleanSidebarEdits(s, true, sidebarUpdate);
+        state.needsUpdate = !plrPlan.isEmpty() || !topbarUpdate.isEmpty() || !sidebarUpdate.isEmpty();
+    }
     // Prove every edit set applies without overlap before offering the option.
     if (!applyEdits(p, plrPlan) || !applyEdits(s, sidebarPlan) || !applyEdits(t, topbarPlan)) {
         state.detail = QStringLiteral("The clean-UI edits overlap in this player; nothing would be written.");
@@ -3140,14 +3116,14 @@ State analyzeCleanUi(const QByteArray &image)
     }
     state.supported = true;
     state.detail = state.needsUpdate
-        ? QStringLiteral("An older clean-up is applied. Press Update to keep Settings accessible "
-                         "and refresh the hidden extra buttons.")
+        ? QStringLiteral("An older clean-up is applied. Press Update to hide the three-line title-bar "
+                         "menu while keeping sidebar Settings accessible.")
         : state.applied
-          ? QStringLiteral("Applied: the extra title-bar buttons are hidden and the sidebar keeps "
+          ? QStringLiteral("Applied: the three-line title-bar menu and extra buttons are hidden; the sidebar keeps "
                            "fullscreen, volume, game controls, install APK, trim memory and Settings.")
-          : QStringLiteral("Ready: one apply hides every extra top-bar button and every sidebar "
-                           "button except fullscreen, volume, game controls, install APK, trim "
-                           "memory and Settings. The title-bar menu stays accessible too.");
+          : QStringLiteral("Ready: one apply hides the three-line title-bar menu, other extra top-bar "
+                           "buttons, and every sidebar button except fullscreen, volume, game controls, install APK, trim "
+                           "memory and Settings.");
     return state;
 }
 
@@ -3215,9 +3191,9 @@ Result applyCleanUi(const QString &exePath, bool enabled)
     if (!PatchFile::writeVerified(exePath, original, changed, &error)) return refuse(error);
     const int caches = QtResources::clearPlayerQmlCache(exePath);
     QString msg = enabled
-        ? QStringLiteral("Clean UI applied: the extra title-bar buttons are gone and the sidebar "
+        ? QStringLiteral("Clean UI applied: the three-line title-bar menu and extra buttons are hidden; the sidebar "
                          "keeps fullscreen, volume, game controls, install APK, trim memory and "
-                         "Settings. The title-bar Settings/menu, Back, Home, Recent, the logo, the title/version and the window "
+                         "Settings. Back, Home, Recent, the logo, the title/version and the window "
                          "controls stay. Restart BlueStacks.")
         : QStringLiteral("Stock title-bar and sidebar buttons restored (including any sidebar "
                          "hidden by the old clean-up). Restart BlueStacks.");
@@ -3549,14 +3525,14 @@ QList<Tweak> tweaks()
                          "this off and apply to restore the stock sidebar.") },
         { kCleanUi,
           QStringLiteral("Clean player UI (one click)"),
-          QStringLiteral("Hides extra buttons in one apply while keeping Settings accessible. Title bar: help, "
+          QStringLiteral("Hides extra buttons in one apply while keeping sidebar Settings accessible. Title bar: three-line menu, help, "
                          "quests, rewards, account, nowbuX, pin-to-top, top-bar icons, macro, "
                          "sync and screen recording. Sidebar: screenshot, screen record, media "
                          "folder, rotate, location, shake, lock cursor, macro, sync, eco mode, "
                          "instance manager, side panel and its own back/home/recent. "
                          "Back, Home, Recent, the BlueStacks logo, the title/version and the "
                          "window controls stay, and the sidebar keeps fullscreen, volume, game "
-                         "controls, install APK, trim memory and Settings. The title-bar menu stays too. Untick and apply to restore.") },
+                         "controls, install APK, trim memory and Settings. Untick and apply to restore.") },
         // kResponsiveSidebar is kept internally for byte-for-byte restore of
         // any player that had the old standalone option applied, and for the
         // regression tests. It is NOT surfaced in the UI: the helper is
