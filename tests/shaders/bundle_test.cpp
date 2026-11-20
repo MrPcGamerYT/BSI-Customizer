@@ -119,6 +119,9 @@ int main(int argc, char **argv)
     }
     require(ShaderPackage::licenseNotices().contains("MinHook") && ShaderPackage::licenseNotices().contains("Apache License"),
             QStringLiteral("Binary redistribution notices accompany owned installations"));
+    require(ShaderPackage::licenseNotices().size() == 17709 && ShaderPackage::sha256(ShaderPackage::licenseNotices())
+                == QLatin1String("fd42573ba8962381dbf5f27419147cc33f454bc1b97e4134113ef9102554fd9c"),
+            QStringLiteral("Compiled notices preserve ALL bytes across MSVC-safe literal splitting; old owned installations stay valid"));
     std::printf("PASS: %d embedded bundle/hash/identity/bounds/descriptor assertions (no DLL execution)\n", assertions);
     return 0;
 }

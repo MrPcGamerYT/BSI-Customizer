@@ -150,7 +150,7 @@ for future or arbitrarily modified OEM builds.
 
 - Local strict native suite: **11/11 passed**; the ASan/UBSan build also passed
   **11/11**, with leak detection and halt-on-undefined-behavior enabled. This
-  includes **130** package/ABI, **31** bundle and **2185** disposable-file/recovery
+  includes **130** package/ABI and **2185** disposable-file/recovery
   assertions, 26 interruption cycles, and synthetic 5.15.4/5.15.19/6.7/6.8
   scenarios. These are not actual Windows DLL/player tests.
 - Rebuilt real local Qt 6.8.3 bridge: plugin controls, physical native-tab
@@ -171,6 +171,14 @@ for future or arbitrarily modified OEM builds.
   release jobs pin `windows-2022` and explicitly select VS 2022/v143, where
   those SDK headers remain supported. No Qt headers or version strings were
   patched to hide the toolchain mismatch. See [local build requirements](PORTABLE.md).
+- The pinned-toolchain attempt (`cfc0c0e`) compiled the real Qt 5/6.2 bridge DLLs,
+  then caught an independent MSVC raw-string limit in the installer/test license
+  asset. The fix splits only the C++ representation into ≤4 KiB raw tokens.
+  All **17,709 installed notice bytes** remain identical (SHA-256
+  `fd42573ba8962381dbf5f27419147cc33f454bc1b97e4134113ef9102554fd9c`),
+  with both a source check and compiled C++ bundle assertion. No upstream notice
+  was shortened and existing owned installations keep the same notice bytes.
+  This failed attempt is not counted as a runtime/ABI pass either.
 - New CI targets actual Windows **6.2.4-built plugin → 6.7.3 and 6.8.3 hosts**,
   a Windows 5.15.2/PyQt5 host, and a Linux distro-built Qt 5 plugin on an
   independent newer PyQt5 Qt 5 runtime. These are **pending until the exact-head
