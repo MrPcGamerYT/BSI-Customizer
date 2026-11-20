@@ -8,6 +8,7 @@ Run Qt 5 and Qt 6 in separate processes with BSI_TEST_QT_API=PyQt5/PySide6.
 from contextlib import ExitStack
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import sys
@@ -266,6 +267,12 @@ Window {
         for width in (750, 420, 750):
             window.setWidth(width)
             QTest.qWait(30)
+            form = item("shaderForm")
+            viewport = item("shaderViewport")
+            extent = math.ceil(form.property("implicitHeight")) + 20
+            assert viewport.property("contentHeight") == extent, "scroll extent must follow the settled form layout"
+            QTest.qWait(50)
+            assert viewport.property("contentHeight") == extent, "idle form sizing did not settle"
             for key in keys:
                 reset_button = item("shaderControlReset-" + key)
                 value_label = item("shaderValueLabel-" + key)

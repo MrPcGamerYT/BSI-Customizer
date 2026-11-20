@@ -415,6 +415,8 @@ def main():
             evaluate(about, "UiTheme.colors.accentNormal = '#ab5544'")
             assert evaluate(combo, "String(shaderStyle.accent)") == "#ab5544"
             evaluate(about, "UiTheme.colors.accentNormal = '#54c8ff'")
+            QTest.qWait(50)
+            assert evaluate(page, "viewport.contentHeight === Math.ceil(form.implicitHeight) + 20"), "native themed scroll extent did not settle"
             assert not window.property("bsiShaderDirty2")
             initial = evaluate(page, "JSON.stringify(Engine.saved)")
             click(window, named(page, "shaderEnabled"))

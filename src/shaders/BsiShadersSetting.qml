@@ -178,21 +178,29 @@ Item {
             objectName: "shadersScroll"
             Layout.fillWidth: true; Layout.fillHeight: true
             // The layout sizes the viewport, not the entire scrollable form.
-            // Qt 5's implicit Flickable otherwise feeds its contentHeight back
-            // through ScrollView during wrapping/native theme changes.
             implicitWidth: 0; implicitHeight: 0
             clip: true
             ScrollBar.vertical: ShaderScrollBar { shaderStyle: look }
             ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
             contentItem: Flickable {
                 id: viewport
+                objectName: "shaderViewport"
                 clip: true
                 contentWidth: width
-                contentHeight: form.implicitHeight + 20
+                contentHeight: 0
                 boundsBehavior: Flickable.StopAtBounds
                 flickableDirection: Flickable.VerticalFlick
+                // Qt 5 can re-enter a ColumnLayout's implicit measurement when
+                // contentHeight changes during wrapping or native theme setup.
+                // Commit the extent once that layout pass has finished instead
+                // of feeding its implicitHeight synchronously back into it.
+                function updateExtent() { contentHeight = Math.ceil(form.implicitHeight) + 20 }
+                Component.onCompleted: Qt.callLater(updateExtent)
+                onVisibleChanged: if (visible) Qt.callLater(updateExtent)
                 ColumnLayout {
                     id: form
+                    objectName: "shaderForm"
+                    onImplicitHeightChanged: Qt.callLater(viewport.updateExtent)
                     width: Math.min(520, Math.max(0, viewport.width - 24))
                     spacing: 16
                     Text { text: qsTr("Visual effects"); color: look.text; font: look.bodyFont }
