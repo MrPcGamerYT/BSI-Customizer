@@ -54,9 +54,12 @@ def configure_host_qt():
         qml = QLibraryInfo.path(QLibraryInfo.LibraryPath.QmlImportsPath)
         binaries = QLibraryInfo.path(QLibraryInfo.LibraryPath.BinariesPath)
     if sys.platform == "win32":
-        assert Path(binaries).is_dir(), binaries
+        from shaders.qt_host_paths import windows_host_binaries
+        binding_root = Path(sys.modules[QCoreApplication.__module__].__file__).resolve().parent
+        binaries = str(windows_host_binaries(binding_root, binaries, int(qVersion().split(".")[0])))
         os.environ["PATH"] = binaries + os.pathsep + os.environ.get("PATH", "")
         _host_dll_directories.append(os.add_dll_directory(binaries))
+        print("Independent host DLL directory:", binaries, flush=True)
     assert Path(plugins).is_dir() and Path(qml).is_dir(), (plugins, qml)
     # install-qt-action exports paths for BUILDING. QPA is private/version-bound
     # and must come from the Python HOST, before constructing QGuiApplication.

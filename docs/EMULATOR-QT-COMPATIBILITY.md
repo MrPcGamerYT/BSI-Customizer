@@ -187,8 +187,13 @@ for future or arbitrarily modified OEM builds.
   and verifies `QT_VERSION` at compile time. Both UI fixtures also isolate the
   host's own **native QPA/private plugins before creating the application**, in
   addition to their existing QML isolation. A platform plugin is not the small
-  public BSI bridge and must not be borrowed from the older build SDK. The
-  corrected Windows jobs must still finish; neither failure is called a pass.
+  public BSI bridge and must not be borrowed from the older build SDK. A follow-up
+  caught PySide6's flattened Windows wheel layout: its Qt DLLs are beside the
+  binding, not in QLibraryInfo's reported (nonexistent) `bin`. Host setup now
+  requires the matching Core DLL inside that Python binding; five filesystem
+  tests cover flat/nested layouts, missing/wrong-major DLLs and rejecting an
+  external SDK. These test files are never loaded as DLLs. Corrected Windows
+  jobs must still finish; none of these failed attempts is called a pass.
 - New CI targets actual Windows **6.2.4-built plugin → 6.7.3 and 6.8.3 hosts**,
   a Windows 5.15.2/PyQt5 host, and a Linux distro-built Qt 5 plugin on an
   independent newer PyQt5 Qt 5 runtime. These are **pending until the exact-head
