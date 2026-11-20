@@ -111,6 +111,10 @@ import QtQuick.Window 2.15
 import QtQuick.Controls 2.15
 Window {
  id:dialog;objectName:"nativeDiscardPrompt";width:390;height:190
+ // Match the native dialog's modal/transient and JS-owned close lifecycle.
+ flags:Qt.Dialog|Qt.FramelessWindowHint
+ modality:Qt.ApplicationModal
+ onVisibleChanged:if(!visible)dialog.destroy()
  property int pDialogType:0
  property string pDescription:""
  property var pButtonsList:null
@@ -130,6 +134,7 @@ Item {
         "UiImageButton": '''import QtQuick 2.15
 Item {
  property string asset:""
+ objectName:asset
  signal clicked()
  width:24;height:24
  MouseArea{anchors.fill:parent;onClicked:parent.clicked()}
@@ -277,12 +282,28 @@ def main():
             label = next(i for i in tree(window.contentItem()) if i.metaObject().indexOfProperty("text") >= 0 and i.property("text") == text)
             click(window, label.parentItem())
 
+        def visible_prompts():
+            return [w for w in QGuiApplication.topLevelWindows() if w.objectName() == "nativeDiscardPrompt" and w.isVisible()]
+
         def prompt_button(text):
-            prompts = [w for w in QGuiApplication.topLevelWindows() if w.objectName() == "nativeDiscardPrompt" and w.isVisible()]
-            assert len(prompts) == 1, "native dirty-state prompt not shown exactly once"
+            # The Windows Qt 5 platform can queue modal/transient changes. Wait
+            # for the actual window, never invoke a mocked handler or turn a
+            # missing prompt into a pass. Keep diagnostics useful on CI.
+            for _ in range(50):
+                if visible_prompts():
+                    break
+                QTest.qWait(20)
+            prompts = visible_prompts()
+            assert len(prompts) == 1, (
+                "native dirty-state prompt not shown exactly once: "
+                + repr([(w.objectName(), w.isVisible(), w.property("bsiShaderDirty"))
+                        for w in QGuiApplication.topLevelWindows()])
+                + f"; QML warnings: {warnings}"
+            )
             prompt = prompts[0]
             button = next(i for i in tree(prompt.contentItem()) if i.objectName().startswith("nativePromptButton") and i.property("text") == text)
             click(prompt, button)
+            assert not visible_prompts(), "native prompt remained visible after its physical button click"
 
         window = open_settings()
         if missing:
@@ -322,12 +343,13 @@ def main():
             assert json.loads(saved)["enabled"] and profile.is_file()
             assert not window.property("bsiShaderDirty")
             click(window, named(page, "shaderEnabled"))
-            window.close()
-            QTest.qWait(30)
+            assert page.property("pEnableSave") and window.property("bsiShaderDirty"), "physical post-Save edit did not publish native dirty state"
+            # Use the actual native header close action, not a Python wrapper
+            # call, and require both No and Discard to traverse onClosing.
+            click(window, named(window.contentItem(), "CloseIcon"))
             prompt_button("No")
             assert window.isVisible() and window.property("bsiShaderDirty")
-            window.close()
-            QTest.qWait(30)
+            click(window, named(window.contentItem(), "CloseIcon"))
             prompt_button("Discard Changes")
             QTest.qWait(60)
             assert player.property("pSettingsWindow") is None, "native close/discard recursed or left a dirty window alive"
