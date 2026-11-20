@@ -3,6 +3,8 @@
 #include "BsDetector.h"
 #include "PatchFile.h"
 #include "PeUtils.h"
+#include "PhoneProfiles.h"
+#include "PhoneProfilesInstall.h"
 #include "QmlText.h"
 #include "QtResources.h"
 #include "ThemeEngine.h"
@@ -21,6 +23,7 @@ namespace LayoutPatcher {
 namespace {
 
 const QString kSidebarToTitlebar = QStringLiteral("sidebar-to-titlebar");
+const QString kPhoneProfiles = QStringLiteral("phone-profile-presets");
 const QString kResponsiveSidebar = QStringLiteral("responsive-sidebar");
 // The responsive fix can be selected for the stock sidebar on its own. When
 // moving the controls into the title bar, it is installed automatically; that
@@ -3564,6 +3567,17 @@ Result applyOrder(const QString &exePath, const QStringList &order, const QStrin
 QList<Tweak> tweaks()
 {
     return {
+        { kPhoneProfiles,
+          QStringLiteral("Extra phones in the stock Phone dropdown"),
+          QStringLiteral("Adds ROG Phone 9/8, REDMAGIC 10/9 Pro, OnePlus 13/12 and Galaxy S25/S24 Ultra "
+                         "at the top of Settings > Phone's existing dropdown. Stock styling and native "
+                         "Save/Discard stay. A local preset uses the native custom-device API, not an invented "
+                         "cloud code. A recognized identity may expose a game's high-FPS options; 90/120/144 FPS "
+                         "availability depends on the game/version and emulator. Apply only adds choices; "
+                         "it does not select a phone, change FPS/root settings or clear Android data. "
+                         "Keep the local phone-profiles helper/recovery folder in Customizer app data; "
+                         "undo before moving the patched player or changing Windows users. Saving a different "
+                         "identity in the player retains the native Android-framework-data warning.") },
         { kSidebarToTitlebar,
           QStringLiteral("Sidebar buttons to the top bar"),
           QStringLiteral("Moves the original sidebar buttons into a row centred in the title "
@@ -3597,6 +3611,13 @@ QList<Tweak> tweaks()
 State analyze(const QByteArray &image, const QString &id)
 {
     State state;
+    if (id == kPhoneProfiles) {
+        const auto phone = PhoneProfiles::inspect(image);
+        state.supported = phone.supported;
+        state.applied = phone.applied;
+        state.detail = phone.detail;
+        return state;
+    }
     if (id != kSidebarToTitlebar && id != kResponsiveSidebar && id != kCleanUi) {
         state.detail = QStringLiteral("Unknown layout tweak.");
         return state;
@@ -3669,6 +3690,10 @@ State analyze(const QByteArray &image, const QString &id)
 Result apply(const QString &exePath, const QString &id, bool enabled)
 {
     const auto refuse = [&](const QString &message) { return Result { false, message }; };
+    if (id == kPhoneProfiles) {
+        const auto result = PhoneProfilesInstall::apply(exePath, enabled);
+        return {result.ok, result.msg};
+    }
     if (id != kSidebarToTitlebar && id != kResponsiveSidebar && id != kCleanUi)
         return refuse(QStringLiteral("Unknown layout tweak."));
     if (id == kCleanUi) return applyCleanUi(exePath, enabled);

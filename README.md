@@ -270,6 +270,16 @@ option refuses to write while BlueStacks is running, keeps the original
 `.bak`, verifies the rewritten QML by reading it back, and clears the player's
 QML disk cache so the change is picked up on the next start.
 
+**Extra phones in the stock Phone dropdown.** Adds ASUS ROG Phone 9/8,
+REDMAGIC 10/9 Pro, OnePlus 13/12 and Galaxy S25/S24 Ultra **first in the existing
+Settings → Phone dropdown**, keeping its stock appearance and existing choices.
+Choose a phone and use native Save changes/Discard; Apply alone does not select
+an identity or change FPS/root settings. Keep the feature's **local helper and
+recovery folder** in Customizer app data—the patched EXE is not self-contained.
+Saving a different identity retains the player's Android-framework-data warning.
+Game-specific high-FPS options are **not guaranteed**. See [profiles, recovery,
+tests and limitations](docs/PHONE-PROFILES.md).
+
 **Clean player UI (one click).** One apply hides every extra button.
 
 * **Title bar:** help, menu/settings, quests, rewards, raw-mode warning,

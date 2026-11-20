@@ -136,6 +136,10 @@ qt_add_executable(BSICustomizer
     src/core/PlayerAppearancePatcher.cpp
     src/core/LayoutPatcher.h
     src/core/LayoutPatcher.cpp
+    src/core/PhoneProfiles.h
+    src/core/PhoneProfiles.cpp
+    src/core/PhoneProfilesInstall.h
+    src/core/PhoneProfilesInstall.cpp
     src/core/AboutPatcher.h
     src/core/AboutPatcher.cpp
     src/core/SettingsPanelPatcher.h

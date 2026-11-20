@@ -5,6 +5,11 @@ on:
     paths:
       - 'src/shaders/**'
       - 'src/core/NativeSettingsModel.*'
+      - 'src/core/PhoneProfiles*'
+      - 'src/core/LayoutPatcher.*'
+      - 'src/core/PatchFile.*'
+      - 'tests/phone_profiles*'
+      - 'docs/PHONE-PROFILES.md'
       - 'src/core/ShaderSettings*'
       - 'src/core/ShaderPackage.*'
       - 'src/core/ShaderInstall.*'
@@ -52,9 +57,9 @@ concurrency:
 
 jobs:
   qt-evidence:
-    name: Read-only Qt inventory of four pinned player samples
+    name: Qt inventory and Phone-source recovery on four pinned player samples
     runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v5
@@ -71,6 +76,18 @@ jobs:
         env:
           BSI_QT_REFERENCE_DIR: ${{ github.workspace }}/player-references
         run: python tests/shaders/run_ci_tests.py --command python tests/emulator_qt_report_test.py -v
+      - name: Build the production Phone source and disk installer (Qt Core only)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qt6-base-dev
+          cmake -S tests/shaders -B build-phone-profiles -DCMAKE_BUILD_TYPE=Debug -DBSI_TEST_NATIVE_SETTINGS=ON -DBSI_TEST_VULKAN=OFF -DCMAKE_CXX_FLAGS='-Wall -Wextra -Werror -pedantic'
+          python tests/shaders/run_ci_tests.py --command cmake --build build-phone-profiles --target phone-profiles-test --parallel 2
+      - name: Realistic helper URLs, no-growth planning and disk recovery on disposable pinned-player copies
+        env:
+          BSI_PHONE_PROFILES_TEST: ${{ github.workspace }}/build-phone-profiles/phone-profiles-test
+          BSI_PHONE_REFERENCE_DIR: ${{ github.workspace }}/player-references
+          BSI_TEST_COMMAND_TIMEOUT: '600'
+        run: python tests/shaders/run_ci_tests.py --command python tests/phone_profiles_references_test.py
       - name: Source-only public Qt bridge boundary guard
         run: python tests/shaders/public_qt_api_contract_test.py
       - name: Failure and timeout diagnostics never turn a failed test into a pass
@@ -101,6 +118,11 @@ jobs:
         run: |
           cmake -S src/shaders -B build-qt5-bridge -DCMAKE_BUILD_TYPE=Release -DBSI_SHADERS_QT_MAJOR=5 -DBSI_SHADERS_BUILD_TESTS=ON -DBSI_TEST_NATIVE_SETTINGS=ON -DBSI_TEST_VULKAN=OFF
           python tests/shaders/run_ci_tests.py --command cmake --build build-qt5-bridge --parallel 2
+      - name: Stock Phone dropdown, native Save/Discard contract and qrc-to-local helper on Qt 5
+        env:
+          BSI_PHONE_PROFILES_TEST: ${{ github.workspace }}/build-qt5-bridge/tests/phone-profiles-test
+          BSI_PHONE_RCC: /usr/lib/qt5/bin/rcc
+        run: python tests/run_qt_runtime_test.py tests/phone_profiles_gui_test.py
       - name: Physical controls, persistence, navigation and missing-module fallback on the independent host
         run: |
           python tests/run_qt_runtime_test.py tests/shaders_plugin_ui_test.py
@@ -247,6 +269,11 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Native Settings contract fixture failed' }
           python tests/shaders/run_ci_tests.py --command python -X faulthandler -u tests/shaders_native_settings_test.py --missing-module
           if ($LASTEXITCODE -ne 0) { throw 'Missing shader module fallback failed' }
+      - name: Stock Phone dropdown, native Save/Discard contract and qrc-to-local helper on Windows
+        env:
+          BSI_TEST_QT_API: ${{ matrix.python-api }}
+          BSI_PHONE_PROFILES_TEST: ${{ github.workspace }}/build-shaders/tests/Release/phone-profiles-test.exe
+        run: python tests/run_qt_runtime_test.py tests/phone_profiles_gui_test.py
       - name: Actual generated glass Settings materials and native input on the independent Windows Qt host
         env:
           BSI_TEST_QT_API: ${{ matrix.python-api }}

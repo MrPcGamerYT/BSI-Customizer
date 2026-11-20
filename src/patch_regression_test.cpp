@@ -21,6 +21,8 @@
 #include "core/DebloatPatcher.h"
 #include "core/IntegrityPatcher.h"
 #include "core/LayoutPatcher.h"
+#include "core/PhoneProfiles.h"
+#include "../tests/phone_profiles_fixture.h"
 #include "core/QmlText.h"
 #include "core/ByteUtils.h"
 #include "core/FpsPatcher.h"
@@ -3860,9 +3862,50 @@ int runPatchRegressionTests()
               "insufficient fixed-slot/free-space capacity refuses the entire title-details edit without modifying any bytes");
     }
 
+    std::printf("[phone-profiles] actual layout dispatcher and independent Phone-source recovery\n");
+    {
+        // Qt test mode + a unique application identity isolate the persistent
+        // helper/snapshot from the user's Customizer data, including Windows.
+        const auto previousName = QCoreApplication::applicationName();
+        const bool previousTestMode = QStandardPaths::isTestModeEnabled();
+        QStandardPaths::setTestModeEnabled(true);
+        QCoreApplication::setApplicationName(QStringLiteral("BSI-Phone-dispatch-") + QFileInfo(temp.path()).fileName());
+        const QString ownedData = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
+        const bool fresh = !QFileInfo::exists(ownedData);
+        check(fresh, "Phone dispatcher test owns a fresh isolated application-data path");
+        if (fresh) {
+            const QString id = QStringLiteral("phone-profile-presets");
+            const QString native = PhoneProfilesFixture::source();
+            auto r = resources({{PhoneProfiles::resourceName(), native},
+                                {QStringLiteral("Unrelated.qml"), QStringLiteral("import QtQuick 2.15\nItem{property string untouched:'keep'}\n")}});
+            addRegistration(r, false);
+            const QString path = temp.filePath(QStringLiteral("phone-presets.exe"));
+            check(write(path, r.f.bytes), "write only a disposable Phone dispatcher image");
+            const auto stock = LayoutPatcher::analyze(r.f.bytes, id);
+            check(stock.supported && !stock.applied, "stock Phone resource is offered through the existing layout backend");
+            const auto added = LayoutPatcher::apply(path, id, true);
+            check(added.ok, QStringLiteral("Phone install uses the production dispatcher: ") + added.msg);
+            const auto patched = read(path);
+            check(patched.size() == r.f.bytes.size() && LayoutPatcher::analyze(patched, id).applied,
+                  "dispatcher install is recognized without growing the EXE");
+            const auto repeat = LayoutPatcher::apply(path, id, true);
+            check(repeat.ok && read(path) == patched, "dispatcher install is idempotent");
+            const auto removed = LayoutPatcher::apply(path, id, false);
+            const auto restored = read(path);
+            check(removed.ok && !LayoutPatcher::analyze(restored, id).applied
+                      && resourceText(restored, r, PhoneProfiles::resourceName()) == native
+                      && resourceText(restored, r, QStringLiteral("Unrelated.qml"))
+                         == resourceText(r.f.bytes, r, QStringLiteral("Unrelated.qml")),
+                  QStringLiteral("Phone removal restores exact native source and preserves unrelated resources: ") + removed.msg);
+            check(QDir(ownedData).removeRecursively(), "clean only the Phone dispatcher's unique test application data");
+        }
+        QCoreApplication::setApplicationName(previousName);
+        QStandardPaths::setTestModeEnabled(previousTestMode);
+    }
+
     std::printf("[layout] sidebar-to-titlebar layout tweak by QML\n");
     {
-        // The layout family's first tweak: the side strip is gone and every
+        // The layout family's sidebar move: the side strip is gone and every
         // sidebar button becomes one centered row inside the title bar. Two
         // real player generations are covered here:
         //   * the current player anchors PlrSidebar to the right-hand strip and
@@ -4092,11 +4135,12 @@ int runPatchRegressionTests()
 
         const QString id = QStringLiteral("sidebar-to-titlebar");
         const QString smartId = QStringLiteral("responsive-sidebar");
-        check(LayoutPatcher::tweaks().size() == 3
-                  && LayoutPatcher::tweaks().front().id == id
-                  && LayoutPatcher::tweaks().at(1).id == QStringLiteral("clean-player-ui")
+        check(LayoutPatcher::tweaks().size() == 4
+                  && LayoutPatcher::tweaks().front().id == QStringLiteral("phone-profile-presets")
+                  && LayoutPatcher::tweaks().at(1).id == id
+                  && LayoutPatcher::tweaks().at(2).id == QStringLiteral("clean-player-ui")
                   && LayoutPatcher::tweaks().last().id == smartId,
-              "the layout family offers the clean player UI plus responsive overflow for the stock sidebar and title bar");
+              "the layout family adds stock Phone choices without losing the existing sidebar/title-bar options");
 
         auto r = resources({ { QStringLiteral("plr.qml"), anchoredPlr },
                              { QStringLiteral("PlrSidebar.qml"), sidebar },

@@ -30,6 +30,14 @@ if(TARGET Qt${QT_VERSION_MAJOR}::Core)
     target_include_directories(shader-settings-image-test PRIVATE "${core_dir}")
     target_link_libraries(shader-settings-image-test PRIVATE Qt${QT_VERSION_MAJOR}::Core bsi_zopfli)
     add_test(NAME shader-native-settings-image COMMAND shader-settings-image-test)
+    add_executable(phone-profiles-test ../phone_profiles_test.cpp
+        "${core_dir}/PhoneProfiles.cpp" "${core_dir}/PhoneProfilesInstall.cpp"
+        "${core_dir}/PatchFile.cpp" "${core_dir}/QmlText.cpp"
+        "${core_dir}/QtResources.cpp" "${core_dir}/QtResourcePatching.cpp"
+        "${core_dir}/QtResourceRegistration.cpp" "${core_dir}/PeUtils.cpp" "${core_dir}/ZlibUtils.cpp")
+    target_include_directories(phone-profiles-test PRIVATE "${core_dir}" "${CMAKE_CURRENT_LIST_DIR}/..")
+    target_link_libraries(phone-profiles-test PRIVATE Qt${QT_VERSION_MAJOR}::Core bsi_zopfli)
+    add_test(NAME phone-profiles-native-contract COMMAND phone-profiles-test)
     add_executable(shader-resource-compression-test resource_compression_test.cpp "${core_dir}/ZlibUtils.cpp")
     target_include_directories(shader-resource-compression-test PRIVATE "${core_dir}")
     target_link_libraries(shader-resource-compression-test PRIVATE Qt${QT_VERSION_MAJOR}::Core bsi_zopfli)
