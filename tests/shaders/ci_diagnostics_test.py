@@ -31,6 +31,20 @@ class DiagnosticsTests(unittest.TestCase):
         self.assertIn("native 100% failure", result.stdout)
         self.assertIn("::error title=Native shader test failure::native 100%25 failure%0A", result.stdout)
 
+    def test_long_log_keeps_actual_failure_in_the_api_annotation(self):
+        result = run('import sys;print("x" * 12000);print("FINAL FAILURE");sys.exit(9)')
+        self.assertEqual(result.returncode, 9, result.stdout)
+        annotation = result.stdout[result.stdout.index("::error"):]
+        self.assertIn("FINAL FAILURE", annotation)
+        self.assertLess(len(annotation.encode("utf-8")), 4096)
+
+    def test_exited_parent_is_not_kept_alive_by_inherited_stdout(self):
+        # The finite child models an inherited error-reporting handle, not a
+        # running player. Waiting for pipe EOF would falsely time out its parent.
+        result = run('import subprocess,sys;subprocess.Popen([sys.executable,"-c","import time;time.sleep(2)"]);print("PARENT EXITED")', "1")
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertIn("PARENT EXITED", result.stdout)
+
     def test_timeout_is_failure_with_partial_output(self):
         result = run('import time;print("before blocking", flush=True);time.sleep(5)', "1")
         self.assertEqual(result.returncode, 124, result.stdout)
