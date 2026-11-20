@@ -16,7 +16,7 @@ inventory = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(inventory)
 
 
-def fixture(*, dll=False, major=5, release="5.15.4.0", tag=None, cache=None):
+def fixture(*, dll=False, major=5, release="5.15.4.0", tag=None, cache=None, qt_names=None):
     """Synthetic, never executable PE with independent fixed-version resources."""
     data = bytearray(0xA000)
     def put(offset, value, width=4):
@@ -42,7 +42,7 @@ def fixture(*, dll=False, major=5, release="5.15.4.0", tag=None, cache=None):
             at = pool; raw(at, value + b"\0"); pool += len(value) + 1
             return at
         for i, part in enumerate(("Core", "Gui", "Qml", "Quick")):
-            name = append(f"Qt{major}{part}.dll".encode())
+            name = append((qt_names or {}).get(part, f"Qt{major}{part}.dll").encode())
             pool = (pool + 7) & ~7
             symbols = [b"?fixture@@YAXXZ"] + ([f"qt_version_tag_{tag.replace('.', '_')}".encode()] if tag and i == 0 else [])
             table = pool; iat = table + (len(symbols) + 1) * 8; pool = iat + (len(symbols) + 1) * 8
@@ -112,6 +112,16 @@ class InventoryTests(unittest.TestCase):
         self.assertIsNone(report["runtimeQtVersion"])
         self.runtimes(6, "6.7.3.0")
         self.assertEqual(inventory.inspect(self.exe)["runtimeQtVersion"], "6.7.3")
+
+    def test_mixed_debug_and_suffixed_import_families_refuse(self):
+        self.runtimes()
+        for name in ("Qt6Gui.dll", "Qt5Guid.dll", "Qt5Gui_custom.dll"):
+            with self.subTest(name=name):
+                self.exe.write_bytes(fixture(qt_names={"Gui": name}))
+                report = inventory.inspect(self.exe)
+                self.assertIsNone(report["runtimeQtVersion"])
+                self.assertFalse(report["runtimeInventoryComplete"])
+                self.assertTrue(any("import family" in text for text in report["issues"]))
 
     def test_mixed_runtime_versions_refuse_complete_result(self):
         self.runtimes()

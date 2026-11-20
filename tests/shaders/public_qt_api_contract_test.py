@@ -19,8 +19,10 @@ PUBLIC = {
 for path in sorted((*SHADERS.glob("*.cpp"), *SHADERS.glob("*.h"))):
     source = path.read_text()
     includes = set(re.findall(r'^\s*#\s*include\s*[<"]([^>"\n]+)[>"]', source, re.M))
-    qt_headers = {name for name in includes if re.match(r"(?:Q[A-Z]|Qt[A-Z])", name)}
+    qt_headers = {name for name in includes if re.match(r"(?:Q[A-Z]|Qt[A-Z]|q[a-z0-9_]+\.h$)", name)}
     assert qt_headers == PUBLIC.get(path.name, set()), (path.name, qt_headers, PUBLIC.get(path.name, set()))
+    if path.name not in PUBLIC:
+        assert not any("ShaderBridge" in name or "ShaderPlugin" in name for name in includes), path
     assert not any("/private/" in name or name.endswith("_p.h") for name in includes), path
     assert not re.search(r"\b(?:QObjectPrivate|QWindowPrivate|QQuickWindowPrivate|QQmlEnginePrivate|qt_qmlDebugEnableDebugging)\b", source), path
 cmake = (SHADERS / "CMakeLists.txt").read_text()

@@ -172,7 +172,8 @@ def inspect(path):
               "qmlCacheCompilerHeaders": compiler_headers, "runtimeDlls": {}, "runtimeQtVersion": None,
               "runtimeInventoryComplete": False, "playerExecuted": False, "targetModified": False,
               "shaderSupport": "not-certified-by-this-inventory", "issues": []}
-    if len(families) != 1 or any(not re.fullmatch(rf"qt{families[0]}[a-z0-9]+\.dll", name) for name in qt_imports):
+    if len(families) != 1 or any(not re.fullmatch(rf"qt{families[0]}[a-z0-9]+\.dll", name)
+                                 or name.endswith("d.dll") for name in qt_imports):
         report["issues"].append("Missing, mixed, debug/suffixed or unknown Qt import family; no runtime version guessed.")
         return report
     if player["machine"] != "0x8664":

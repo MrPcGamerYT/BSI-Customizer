@@ -125,7 +125,15 @@ cmake -S . -B build -A x64 -DBSI_BUILD_PORTABLE=ON -DBSI_CHROMIUM_UI=OFF `
 cmake --build build --config Release --parallel
 ```
 
-Use a new/empty output directory. Ordinary developer/CI builds can omit this
+Use a new/empty output directory. The shader script defaults to **Visual Studio
+2022 / v143** explicitly: Qt 6.2.4 headers use `stdext` iterators removed in the
+VS 2026 STL. The release/bridge jobs use `windows-2022`, not the moving latest
+image. Do not patch SDK headers or relabel a newer Qt DLL to conceal this build
+incompatibility. A self-hosted builder needs this toolchain installed; optional
+`-Generator` / `-Toolset` parameters are for explicitly provisioned compatible
+builders, not a runtime compatibility override.
+
+Ordinary developer/CI builds can omit this
 optional bundle: safe removal/recovery remains available, but install is disabled
 with an explicit report. No Qt 5 library is linked into the Qt 6 Customizer. The
 player receives only the matching regular module, qmldir, ownership record and

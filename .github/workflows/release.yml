@@ -18,9 +18,9 @@ on:
         description: 'Windows runner (self-hosted requires your registered Windows x64 PC)'
         type: choice
         options:
-          - windows-latest
+          - windows-2022
           - self-hosted
-        default: windows-latest
+        default: windows-2022
       version:
         # Type the version here when running manually: the whole run (built
         # EXE name, BSI_VERSION inside the binary, tag and release) follows it,
@@ -60,7 +60,9 @@ jobs:
     name: Build & self-test (Windows x64)
     # Only an explicit manual run can select a self-hosted PC. PR code always
     # uses an isolated hosted runner, never a contributor-controlled local job.
-    runs-on: ${{ inputs.runner == 'self-hosted' && fromJSON('["self-hosted", "Windows", "X64"]') || 'windows-latest' }}
+    # Pin VS 2022: the genuine Qt 6.2.4 shader headers use stdext array
+    # iterators that were removed in the VS 2026 STL on windows-latest.
+    runs-on: ${{ inputs.runner == 'self-hosted' && fromJSON('["self-hosted", "Windows", "X64"]') || 'windows-2022' }}
     timeout-minutes: 60
     permissions:
       contents: write

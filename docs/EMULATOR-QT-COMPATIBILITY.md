@@ -157,12 +157,20 @@ for future or arbitrarily modified OEM builds.
   navigation, Save/Discard/persistence, and a separate missing-module process
   passed. Full Customizer Main.qml mock-service flows also passed at 1440×930
   and 980×640; no installed emulator or hardware GPU was exercised.
-- Read-only inventory: **10 tests pass**, including all four hash-pinned
+- Read-only inventory: **11 tests pass**, including all four hash-pinned
   references, compiler-vs-runtime separation, wrong/debug/mixed providers,
-  archive no-extraction behavior, links and input preservation.
+  debug/suffixed/mixed import-family refusal, archive no-extraction behavior,
+  links and input preservation.
 - The source-boundary guard passes. It detects private Qt headers creeping into
   the bridge and any Qt headers creeping into the renderer. It is **not** an
   independent ABI proof.
+- The first Windows 6.2.4 build attempt (`487353c`) failed **before runtime
+  testing**: the moving `windows-latest` image selected VS 2026, whose STL has
+  removed the `stdext` array iterators referenced by the genuine Qt 6.2.4
+  headers. This is not a passing baseline test. The corrected shader and
+  release jobs pin `windows-2022` and explicitly select VS 2022/v143, where
+  those SDK headers remain supported. No Qt headers or version strings were
+  patched to hide the toolchain mismatch. See [local build requirements](PORTABLE.md).
 - New CI targets actual Windows **6.2.4-built plugin → 6.7.3 and 6.8.3 hosts**,
   a Windows 5.15.2/PyQt5 host, and a Linux distro-built Qt 5 plugin on an
   independent newer PyQt5 Qt 5 runtime. These are **pending until the exact-head

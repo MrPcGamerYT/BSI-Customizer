@@ -3,7 +3,9 @@ param(
     [Parameter(Mandatory)][string]$Qt5Prefix,
     [Parameter(Mandatory)][string]$Qt6Prefix,
     [Parameter(Mandatory)][string]$BuildRoot,
-    [Parameter(Mandatory)][string]$OutputDirectory
+    [Parameter(Mandatory)][string]$OutputDirectory,
+    [string]$Generator = 'Visual Studio 17 2022',
+    [string]$Toolset = 'v143'
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -29,7 +31,9 @@ try {
             throw "Release coverage requires the actual Qt $($entry.Baseline) build baseline, not $version. Never relabel a DLL or replace a player's runtime."
         }
         $build = Join-Path $BuildRoot "qt-$version"
-        cmake -S (Join-Path $repo 'src/shaders') -B $build -A x64 `
+        # Do not inherit a moving VS 2026 generator: its STL removed stdext
+        # iterators used by the genuine older Qt SDK headers. No SDK edits.
+        cmake -S (Join-Path $repo 'src/shaders') -B $build -G $Generator -A x64 -T $Toolset `
             "-DBSI_SHADERS_QT_MAJOR=$($entry.Major)" "-DQt$($entry.Major)_DIR=$prefix/lib/cmake/Qt$($entry.Major)" `
             '-DBSI_SHADERS_BUILD_TESTS=ON' '-DBSI_TEST_NATIVE_SETTINGS=ON' '-DBSI_TEST_VULKAN=OFF'
         if ($LASTEXITCODE -ne 0) { throw "Cannot configure Qt $version shader module" }
