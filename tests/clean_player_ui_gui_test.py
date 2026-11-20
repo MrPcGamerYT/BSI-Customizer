@@ -132,13 +132,19 @@ def main():
         # The matching source checks above are not enough: Settings text must
         # actually paint, and the hidden menu's subtree must paint nothing.
         def rendered():
+            # Request a scene-update boundary after property changes before
+            # scheduling the asynchronous item grab, and keep independent
+            # pixel snapshots. This is capture synchronization hardening, not
+            # a diagnosed fix for the Windows Qt 5 missing-paint failure.
+            window.requestUpdate()
+            QTest.qWait(40)
             capture = window.contentItem().grabToImage()
             spy = QSignalSpy(capture.ready)
             if capture.image().isNull():
                 assert spy.wait(2000), filename
             result = capture.image()
             assert not result.isNull(), filename
-            return result
+            return result.copy()
 
         image = rendered()
         label = items["settingsHeading"]
@@ -164,6 +170,15 @@ def main():
                 if (painted.red() + painted.green() + painted.blue()
                         > blank.red() + blank.green() + blank.blue() + 96):
                     ink += 1
+        if ink < 5:
+            # Preserve the actual pair for a failed platform; do not suppress or
+            # weaken the pixel assertion when a Windows font/render path fails.
+            api = "qt5" if QT5 else "qt6"
+            assert image.save(str(root / (filename + "-painted-" + api + ".png")))
+            assert control.save(str(root / (filename + "-control-" + api + ".png")))
+            print("Settings paint failure:", filename, "Qt", qVersion(), "font", label.property("font").toString(),
+                  "bounds", origin.x(), origin.y(), label.width(), label.height(),
+                  "capture", image.width(), image.height(), "pixel delta", ink, flush=True)
         assert ink >= 5, (filename, "Settings label did not paint", ink, sx, sy)
         if filename == "element-clean-details.qml":
             assert image.save(str(root / ("clean-topbar-qt5.png" if QT5 else "clean-topbar-qt6.png")))

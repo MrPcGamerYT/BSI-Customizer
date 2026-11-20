@@ -515,6 +515,14 @@ jobs:
           $manualTester = Join-Path $env:GITHUB_WORKSPACE 'scripts/Test-SettingsPanel-Manual.ps1'
           & $manualTester -CustomizerPath $env:exe -PlayerPath $target -NoLaunch
 
+      - name: Upload actual topbar paint/control regression pixels
+        if: always() && matrix.label == 'MSI latest package'
+        uses: actions/upload-artifact@v4
+        with:
+          name: topbar-qt-pixels-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/topbar-ui/*.png
+          if-no-files-found: ignore
+
       # A failing job's log cannot be read back through the API on this account,
       # and the annotations only carry the lines that mention failure. The whole
       # log is published as an artifact so the run can be read afterwards.
