@@ -30,6 +30,10 @@
 // that makes arbitrary Qt plugins portable. Renderer code has no Qt objects or
 // private headers. Keep the actual compile version; never relabel a binary.
 static_assert(sizeof(qreal) == 8, "The public Qt bridge requires default double qreal");
+#ifdef BSI_SHADERS_EXPECT_QT_VERSION
+static_assert(QT_VERSION == BSI_SHADERS_EXPECT_QT_VERSION,
+              "The linked/header Qt SDK is not the requested genuine shader baseline; isolate CMake SDK paths");
+#endif
 extern "C" Q_DECL_EXPORT const char BSIShadersDescriptor[] =
     "BSI_SHADERS_V3;QT=" QT_VERSION_STR ";ARCH=" BSI_SHADER_ARCH
     ";ABI=" BSI_SHADER_ABI ";BUILD=" BSI_SHADER_BUILD ";NS=" BSI_SHADER_NAMESPACE ";API=public-v1;END;";

@@ -131,7 +131,11 @@ VS 2026 STL. The release/bridge jobs use `windows-2022`, not the moving latest
 image. Do not patch SDK headers or relabel a newer Qt DLL to conceal this build
 incompatibility. A self-hosted builder needs this toolchain installed; optional
 `-Generator` / `-Toolset` parameters are for explicitly provisioned compatible
-builders, not a runtime compatibility override.
+builders, not a runtime compatibility override. The script also pins each
+iteration's CMake prefix and Qt 6 host/CoreTools paths: setting `Qt6_DIR` alone
+allowed the application's 6.8.3 tools into a 6.2.4 configure. A packed
+`BSI_SHADERS_EXPECT_QT_VERSION` compile-time assertion independently refuses
+wrong-version headers instead of trusting only the selected qmake.
 
 Ordinary developer/CI builds can omit this
 optional bundle: safe removal/recovery remains available, but install is disabled

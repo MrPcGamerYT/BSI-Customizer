@@ -21,6 +21,7 @@ import uuid
 from shaders_plugin_ui_test import (
     QCoreApplication, QFileInfo, QGuiApplication, QLibraryInfo, QObject, QPointF,
     QQmlComponent, QQmlEngine, QQmlExpression, QStandardPaths, Qt, QTest, QUrl,
+    configure_host_qt,
 )
 if os.environ.get("BSI_TEST_QT_API") == "PyQt5":
     from PyQt5.QtCore import pyqtProperty as Property, pyqtSlot as Slot
@@ -203,6 +204,7 @@ def main():
     planner = Path(os.environ["BSI_SHADERS_SOURCE_TEST"]).resolve()
     module_root = Path(os.environ["BSI_SHADERS_MODULE_ROOT"]).resolve()
     assert planner.is_file()
+    runtime_qml = configure_host_qt()
     QStandardPaths.setTestModeEnabled(True)
     app = QGuiApplication.instance() or QGuiApplication([])
     with tempfile.TemporaryDirectory(prefix="bsi-native-shaders-") as temp, ExitStack() as cleanup:
@@ -217,10 +219,6 @@ def main():
         source_path.write_text(stock)
         subprocess.run([str(planner), "--emit", str(directory), str(source_path)], check=True)
         engine = QQmlEngine()
-        if os.environ.get("BSI_TEST_QT_API") == "PyQt5":
-            runtime_qml = QLibraryInfo.location(QLibraryInfo.Qml2ImportsPath)
-        else:
-            runtime_qml = QLibraryInfo.path(QLibraryInfo.LibraryPath.QmlImportsPath)
         engine.setImportPathList(([str(module_root)] if not missing else []) + [str(directory), runtime_qml, "qrc:/qt-project.org/imports", "qrc:/qt/qml"])
         warnings = []
         engine.warnings.connect(lambda errors: warnings.extend(e.toString() for e in errors))

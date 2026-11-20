@@ -40,6 +40,36 @@ else:
     from PySide6.QtTest import QTest
 
 
+_host_dll_directories = []
+
+
+def configure_host_qt():
+    """Keep SDK QPA/private plugins out of the independent public-bridge host."""
+    if os.environ.get("BSI_TEST_QT_API") == "PyQt5":
+        plugins = QLibraryInfo.location(QLibraryInfo.PluginsPath)
+        qml = QLibraryInfo.location(QLibraryInfo.Qml2ImportsPath)
+        binaries = QLibraryInfo.location(QLibraryInfo.BinariesPath)
+    else:
+        plugins = QLibraryInfo.path(QLibraryInfo.LibraryPath.PluginsPath)
+        qml = QLibraryInfo.path(QLibraryInfo.LibraryPath.QmlImportsPath)
+        binaries = QLibraryInfo.path(QLibraryInfo.LibraryPath.BinariesPath)
+    if sys.platform == "win32":
+        assert Path(binaries).is_dir(), binaries
+        os.environ["PATH"] = binaries + os.pathsep + os.environ.get("PATH", "")
+        _host_dll_directories.append(os.add_dll_directory(binaries))
+    assert Path(plugins).is_dir() and Path(qml).is_dir(), (plugins, qml)
+    # install-qt-action exports paths for BUILDING. QPA is private/version-bound
+    # and must come from the Python HOST, before constructing QGuiApplication.
+    # The BSI bridge itself remains the genuinely older compiled public plugin.
+    os.environ["QT_PLUGIN_PATH"] = plugins
+    os.environ["QT_QPA_PLATFORM_PLUGIN_PATH"] = str(Path(plugins) / "platforms")
+    os.environ.pop("QML2_IMPORT_PATH", None)
+    os.environ.pop("QML_IMPORT_PATH", None)
+    QCoreApplication.setLibraryPaths([plugins])
+    print("Independent host Qt:", qVersion(), "native plugins:", plugins, flush=True)
+    return qml
+
+
 def main():
     native_diagnostics = None
     if sys.platform == "win32" and os.environ.get("BSI_SHADERS_DIAGNOSTICS"):
@@ -47,6 +77,7 @@ def main():
         native_diagnostics = install()
     module_root = Path(os.environ["BSI_SHADERS_MODULE_ROOT"]).resolve()
     assert (module_root / "BSIShaders/qmldir").is_file()
+    runtime_qml = configure_host_qt()
     with tempfile.TemporaryDirectory(prefix="bsi-shader-settings-") as temp, ExitStack() as cleanup:
         os.environ["XDG_CONFIG_HOME"] = temp
         # Do not assume Windows Known Folder APIs honor APPDATA env overrides.
@@ -67,10 +98,6 @@ def main():
         # plugin twice under different paths and Qt 5 rejects the second as a
         # protected module. Never mix their private QML plugins. This changes
         # only the fixture's search path, not the plugin or a player's engine.
-        if os.environ.get("BSI_TEST_QT_API") == "PyQt5":
-            runtime_qml = QLibraryInfo.location(QLibraryInfo.Qml2ImportsPath)
-        else:
-            runtime_qml = QLibraryInfo.path(QLibraryInfo.LibraryPath.QmlImportsPath)
         assert Path(runtime_qml).is_dir(), runtime_qml
         engine.setImportPathList([str(module_root), runtime_qml, "qrc:/qt-project.org/imports", "qrc:/qt/qml"])
         print("Fixture Qt runtime:", qVersion(), "QML paths:", engine.importPathList(), flush=True)

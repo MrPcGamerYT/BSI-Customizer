@@ -30,6 +30,13 @@ add_library(BSIShaders MODULE ShaderPlugin.cpp ShaderBridge.cpp ShaderBridge.h R
     VulkanPipeline.cpp VulkanPipeline.h VulkanSpirv.h PresentationHooks.cpp shaders.qrc)
 target_include_directories(BSIShaders PRIVATE ../third_party/vulkan/include)
 target_link_libraries(BSIShaders PRIVATE Qt${QT_VERSION_MAJOR}::Core Qt${QT_VERSION_MAJOR}::Gui Qt${QT_VERSION_MAJOR}::Qml)
+set(BSI_SHADERS_EXPECT_QT_VERSION "" CACHE STRING "Optional packed QT_VERSION required by the payload builder; never a descriptor override")
+if(NOT BSI_SHADERS_EXPECT_QT_VERSION STREQUAL "")
+    if(NOT BSI_SHADERS_EXPECT_QT_VERSION MATCHES "^[0-9]+$")
+        message(FATAL_ERROR "BSI_SHADERS_EXPECT_QT_VERSION must be a packed QT_VERSION integer")
+    endif()
+    target_compile_definitions(BSIShaders PRIVATE BSI_SHADERS_EXPECT_QT_VERSION=${BSI_SHADERS_EXPECT_QT_VERSION})
+endif()
 if(WIN32)
     target_sources(BSIShaders PRIVATE D3d11Pipeline.cpp D3d11Pipeline.h D3d12Pipeline.cpp D3d12Pipeline.h HlslSources.h
         DxgiHooks.cpp VulkanHooks.cpp PresentationHooks.h

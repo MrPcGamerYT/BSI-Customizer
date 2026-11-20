@@ -31,9 +31,19 @@ try {
             throw "Release coverage requires the actual Qt $($entry.Baseline) build baseline, not $version. Never relabel a DLL or replace a player's runtime."
         }
         $build = Join-Path $BuildRoot "qt-$version"
+        $sdkVersion = [Version]$version
+        $packedVersion = ($sdkVersion.Major -shl 16) -bor ($sdkVersion.Minor -shl 8) -bor $sdkVersion.Build
+        # The app's SDK is also installed. Isolate BOTH target components and
+        # host moc/rcc tools: Qt6_DIR alone still allowed 6.8 CoreTools into 6.2.
+        $env:PATH = (Join-Path $prefix 'bin') + ';' + $oldPath
+        $sdkArguments = @("-DCMAKE_PREFIX_PATH=$prefix", "-DBSI_SHADERS_EXPECT_QT_VERSION=$packedVersion")
+        if ($entry.Major -eq 6) {
+            $sdkArguments += "-DQT_HOST_PATH=$prefix"
+            $sdkArguments += "-DQt6CoreTools_DIR=$prefix/lib/cmake/Qt6CoreTools"
+        }
         # Do not inherit a moving VS 2026 generator: its STL removed stdext
         # iterators used by the genuine older Qt SDK headers. No SDK edits.
-        cmake -S (Join-Path $repo 'src/shaders') -B $build -G $Generator -A x64 -T $Toolset `
+        cmake -S (Join-Path $repo 'src/shaders') -B $build -G $Generator -A x64 -T $Toolset @sdkArguments `
             "-DBSI_SHADERS_QT_MAJOR=$($entry.Major)" "-DQt$($entry.Major)_DIR=$prefix/lib/cmake/Qt$($entry.Major)" `
             '-DBSI_SHADERS_BUILD_TESTS=ON' '-DBSI_TEST_NATIVE_SETTINGS=ON' '-DBSI_TEST_VULKAN=OFF'
         if ($LASTEXITCODE -ne 0) { throw "Cannot configure Qt $version shader module" }

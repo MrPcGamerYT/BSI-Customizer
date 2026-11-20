@@ -179,6 +179,16 @@ for future or arbitrarily modified OEM builds.
   with both a source check and compiled C++ bundle assertion. No upstream notice
   was shortened and existing owned installations keep the same notice bytes.
   This failed attempt is not counted as a runtime/ABI pass either.
+- Further Windows fixtures passed on Qt 5 and on the **6.2.4 → 6.8.3**
+  public bridge, but two separate environment failures remained: the bundled
+  builder resolved **6.8.3 CoreTools inside a 6.2.4 CMake configure**, and the
+  6.7.3 Python host raised `0xc0000139` creating `QGuiApplication` **before
+  importing BSIShaders**. The builder now isolates target/host/CoreTools prefixes
+  and verifies `QT_VERSION` at compile time. Both UI fixtures also isolate the
+  host's own **native QPA/private plugins before creating the application**, in
+  addition to their existing QML isolation. A platform plugin is not the small
+  public BSI bridge and must not be borrowed from the older build SDK. The
+  corrected Windows jobs must still finish; neither failure is called a pass.
 - New CI targets actual Windows **6.2.4-built plugin → 6.7.3 and 6.8.3 hosts**,
   a Windows 5.15.2/PyQt5 host, and a Linux distro-built Qt 5 plugin on an
   independent newer PyQt5 Qt 5 runtime. These are **pending until the exact-head
