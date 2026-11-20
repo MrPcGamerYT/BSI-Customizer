@@ -12,11 +12,14 @@ class HostBinaryPathTests(unittest.TestCase):
         self.addCleanup(self.temp.cleanup)
         self.root = Path(self.temp.name) / "binding"
         self.root.mkdir()
+        # Windows TEMP may use RUNNER~1; production deliberately returns the
+        # canonical long path. Compare identities in that same representation.
+        self.root = self.root.resolve()
 
     def dll(self, directory, major=6):
         directory.mkdir(parents=True, exist_ok=True)
         (directory / f"Qt{major}Core.dll").write_bytes(b"fixture only; never loaded")
-        return directory
+        return directory.resolve()
 
     def test_flat_pyside_wheel_with_nonexistent_reported_bin(self):
         self.dll(self.root)
@@ -37,6 +40,12 @@ class HostBinaryPathTests(unittest.TestCase):
             windows_host_binaries(self.root, sdk, 6)
         self.dll(self.root)
         self.assertEqual(windows_host_binaries(self.root, sdk, 6), self.root)
+
+    def test_parent_segments_return_canonical_host_identity(self):
+        self.dll(self.root)
+        (self.root / "nested").mkdir()
+        alias = self.root / "nested" / ".."
+        self.assertEqual(windows_host_binaries(alias, alias / "bin", 6), self.root)
 
     def test_wrong_major_or_missing_core_fails_closed(self):
         self.dll(self.root, 5)

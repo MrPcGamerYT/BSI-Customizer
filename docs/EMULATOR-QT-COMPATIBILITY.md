@@ -190,9 +190,11 @@ for future or arbitrarily modified OEM builds.
   public BSI bridge and must not be borrowed from the older build SDK. A follow-up
   caught PySide6's flattened Windows wheel layout: its Qt DLLs are beside the
   binding, not in QLibraryInfo's reported (nonexistent) `bin`. Host setup now
-  requires the matching Core DLL inside that Python binding; five filesystem
-  tests cover flat/nested layouts, missing/wrong-major DLLs and rejecting an
-  external SDK. These test files are never loaded as DLLs. Corrected Windows
+  requires the matching Core DLL inside that Python binding; six filesystem
+  tests cover flat/nested layouts, canonical host identity, missing/wrong-major
+  DLLs and rejecting an external SDK. Test expectations also canonicalize Windows
+  short TEMP names (`RUNNER~1`); they do not require the same path spelling.
+  These test files are never loaded as DLLs. Corrected Windows
   jobs must still finish; none of these failed attempts is called a pass.
 - New CI targets actual Windows **6.2.4-built plugin → 6.7.3 and 6.8.3 hosts**,
   a Windows 5.15.2/PyQt5 host, and a Linux distro-built Qt 5 plugin on an
