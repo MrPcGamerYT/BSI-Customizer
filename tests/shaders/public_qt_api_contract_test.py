@@ -1,0 +1,34 @@
+"""Guard the V3 bridge's audited public-API source boundary, not ABI certification.
+
+Real compiler/plugin/UI/import tests are also mandatory. This rejects accidentally
+introducing private Qt headers into a version-adaptive bridge, or Qt objects into
+the rendering engine. An arbitrary external DLL cannot opt in through this test.
+"""
+from pathlib import Path
+import re
+
+ROOT = Path(__file__).resolve().parents[2]
+SHADERS = ROOT / "src/shaders"
+PUBLIC = {
+    "ShaderPlugin.cpp": {"QQmlEngine", "QQmlExtensionPlugin", "QtQml/qqml.h"},
+    "ShaderBridge.h": {"QObject", "QVariantMap", "QVariantList", "QQmlParserStatus"},
+    "ShaderBridge.cpp": {"QCoreApplication", "QCryptographicHash", "QDir", "QFile", "QFileInfo", "QJsonDocument",
+                         "QJsonObject", "QMetaType", "QPlatformSurfaceEvent", "QPointer", "QSaveFile", "QSet",
+                         "QStandardPaths", "QThread", "QTimer", "QWindow"},
+}
+for path in sorted((*SHADERS.glob("*.cpp"), *SHADERS.glob("*.h"))):
+    source = path.read_text()
+    includes = set(re.findall(r'^\s*#\s*include\s*[<"]([^>"\n]+)[>"]', source, re.M))
+    qt_headers = {name for name in includes if re.match(r"(?:Q[A-Z]|Qt[A-Z])", name)}
+    assert qt_headers == PUBLIC.get(path.name, set()), (path.name, qt_headers, PUBLIC.get(path.name, set()))
+    assert not any("/private/" in name or name.endswith("_p.h") for name in includes), path
+    assert not re.search(r"\b(?:QObjectPrivate|QWindowPrivate|QQuickWindowPrivate|QQmlEnginePrivate|qt_qmlDebugEnableDebugging)\b", source), path
+cmake = (SHADERS / "CMakeLists.txt").read_text()
+assert not re.search(r"::(?:Core|Gui|Qml|Quick)Private\b", cmake)
+plugin = (SHADERS / "ShaderPlugin.cpp").read_text()
+assert '"BSI_SHADERS_V3;QT=" QT_VERSION_STR' in plugin
+assert "API=public-v1;END;" in plugin
+assert "sizeof(qreal) == 8" in plugin
+assert "new BsiShaders::ShaderBridge(engine)" in plugin
+assert "set(bsi_qt_minimum 5.15.2)" in cmake and "set(bsi_qt_minimum 6.2.4)" in cmake
+print("PASS: source-only V3 public Qt bridge boundary; renderer has no Qt headers, no private bridge headers, honest compiled version. Not runtime/game certification.")

@@ -20,8 +20,8 @@ void rejected(const QByteArray &player, const ShaderPackage::Payload &p, const Q
               const char *message)
 {
     const auto result = ShaderPackage::validate(player, p, r);
-    require(!result.ok && result.qtVersion.isEmpty() && result.packageSha256.isEmpty()
-                && result.runtimeSha256.isEmpty() && !result.error.isEmpty(), QString::fromLatin1(message));
+    require(!result.ok && result.qtVersion.isEmpty() && result.moduleQtVersion.isEmpty() && !result.publicQtApi
+                && result.packageSha256.isEmpty() && result.runtimeSha256.isEmpty() && !result.error.isEmpty(), QString::fromLatin1(message));
 }
 QByteArray read(const QString &path)
 {
@@ -64,10 +64,16 @@ void actual(const QString &moduleDir, const QString &runtimeDir)
         if (providers.contains(name)) continue;
         for (const auto &dir : {bin, system}) if (QFileInfo::exists(dir.filePath(name))) { providers.insert(name, read(dir.filePath(name))); break; }
     }
-    const int major = QString::fromLatin1(qVersion()).left(1).toInt();
+    const auto description = ShaderPackage::describe(p);
+    require(description.ok, QStringLiteral("Actual module descriptor: ") + description.error);
+    const int major = description.moduleQtVersion.left(1).toInt();
+    const auto fixed = ShaderPackage::runtimeVersion(providers.value(QStringLiteral("qt%1core.dll").arg(major)));
+    require(fixed.ok, QStringLiteral("Actual host fixed version: ") + fixed.error);
     const auto result = ShaderPackage::validate(image(false, qtImports(major)), p, providers);
-    require(result.ok && result.qtVersion == QString::fromLatin1(qVersion()), QStringLiteral("Actual compiled Windows module/runtime package check: ") + result.error);
-    std::printf("PASS: actual release Qt %s MSVC regular plugin, read-only descriptor/entry points/imports/fixed-version/dependency closure; not an installed-player test\n", qVersion());
+    require(result.ok && result.qtVersion == fixed.qtVersion && result.moduleQtVersion == description.moduleQtVersion,
+            QStringLiteral("Actual compiled Windows module/runtime package check: ") + result.error);
+    std::printf("PASS: actual module built with Qt %s -> runtime Qt %s, MSVC regular plugin, read-only descriptor/entry points/imports/fixed-version/dependency closure; not an installed-player test\n",
+                qPrintable(result.moduleQtVersion), qPrintable(result.qtVersion));
 }
 }
 int main(int argc, char **argv)
@@ -125,6 +131,52 @@ int main(int argc, char **argv)
         auto uppercase = r; uppercase.insert(QStringLiteral("Qt%1Core.dll").arg(major), r.first());
         rejected(host, p, uppercase, "Case-ambiguous dependency keys are refused");
     }
+    // This is a new opt-in source contract, not a blanket relaxation of V2.
+    for (const auto &baseline : {QStringLiteral("5.15.2"), QStringLiteral("6.2.4")}) {
+        const int major = baseline.left(1).toInt();
+        const auto portable = payload(baseline, {}, true);
+        const auto description = ShaderPackage::describe(portable);
+        require(description.ok && description.publicQtApi && description.moduleQtVersion == baseline,
+                QStringLiteral("Only the explicit audited V3 descriptor opts in"));
+        const auto host = image(false, qtImports(major));
+        const QStringList supported = major == 5 ? QStringList{baseline, QStringLiteral("5.15.4"), QStringLiteral("5.15.19")}
+            : QStringList{baseline, QStringLiteral("6.5.3"), QStringLiteral("6.7.0"), QStringLiteral("6.7.3"), QStringLiteral("6.8.3"), QStringLiteral("6.10.0")};
+        for (const auto &target : supported) {
+            const auto result = ShaderPackage::validate(host, portable, runtime(target));
+            require(ShaderPackage::canTarget(description, target) && result.ok && result.qtVersion == target
+                        && result.moduleQtVersion == baseline && result.publicQtApi && result.runtimeSha256.size() == 3,
+                    QStringLiteral("Public API forward preflight preserves actual host and compile versions: ") + target + result.error);
+            if (target != baseline) rejected(host, payload(baseline), runtime(target), "Legacy V2 NEVER gains wider version eligibility");
+            auto broken = runtime(target);
+            broken[QStringLiteral("qt%1qml.dll").arg(major)] = image(true, {}, {{QByteArray("missing"), {}}}, target);
+            rejected(host, portable, broken, "A public-API contract never bypasses missing imported symbols");
+        }
+        const QString older = major == 5 ? QStringLiteral("5.15.1") : QStringLiteral("6.2.3");
+        rejected(host, portable, runtime(older), "A newer bridge never runs backwards against an older runtime");
+        require(!ShaderPackage::canTarget(description, older), QStringLiteral("Candidate selection also refuses older runtimes"));
+        for (const auto &invalid : {QStringLiteral("4.8.7"), QStringLiteral("7.0.0"), QStringLiteral("5.015.4"), QStringLiteral("6.999.0"), QStringLiteral("6.7.3-extra"), QString()})
+            require(!ShaderPackage::canTarget(description, invalid), QStringLiteral("Version eligibility has no unknown/string/prefix fallback"));
+        const QString otherMajor = major == 5 ? QStringLiteral("6.8.3") : QStringLiteral("5.15.4");
+        require(!ShaderPackage::canTarget(description, otherMajor), QStringLiteral("Qt 5 and 6 NEVER share one ABI"));
+        rejected(image(false, qtImports(major == 5 ? 6 : 5)), portable, runtime(otherMajor), "Cross-major public bridge is refused");
+        auto mixed = runtime(baseline);
+        mixed[QStringLiteral("qt%1gui.dll").arg(major)] = runtime(supported.last()).value(QStringLiteral("qt%1gui.dll").arg(major));
+        rejected(host, portable, mixed, "All host Qt providers must STILL have identical exact fixed versions");
+        auto bad = portable;
+        bad.dll.replace("qt_plugin_query_metadata", "qt_plugin_query_metadatb");
+        rejected(host, bad, runtime(baseline), "The real Qt 5 / early Qt 6 metadata entry is still mandatory");
+        bad = portable; bad.dll.replace("API=public-v1", "API=custom-v1");
+        rejected(host, bad, runtime(baseline), "Unknown/private ABI policies cannot request forward compatibility");
+        bad = portable; bad.dll.replace("ABI=msvc", "ABI=ming");
+        rejected(host, bad, runtime(baseline), "Public-API policy does not bridge a compiler ABI mismatch");
+        bad = portable; putLe32(bad.dll, 0x1b0 + 36, 0xc0000040);
+        rejected(host, bad, runtime(baseline), "V3 descriptor must still be read-only non-executable data");
+        auto debug = runtime(baseline); putLe32(debug[QStringLiteral("qt%1core.dll").arg(major)], 0x8144, 1);
+        rejected(host, portable, debug, "V3 still rejects debug runtime builds");
+    }
+    require(!ShaderPackage::describe(payload(QStringLiteral("5.12.0"), {}, true)).ok
+                && !ShaderPackage::describe(payload(QStringLiteral("6.0.0"), {}, true)).ok,
+            QStringLiteral("A descriptor cannot claim an unaudited API floor"));
     const auto host = image(false, qtImports(6));
     auto p = payload(QStringLiteral("6.8.3"), {{QByteArray("vendor.dll"), {QByteArray("work")}, true}});
     auto r = runtime();

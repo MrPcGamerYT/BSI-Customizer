@@ -97,14 +97,16 @@ inline QList<Import> qtImports(int major)
         out << Import{QByteArray("Qt") + QByteArray::number(major) + name + ".dll", {QByteArray("?bsi_fixture@@YAXXZ")}, false};
     return out;
 }
-inline ShaderPackage::Payload payload(const QString &version = QStringLiteral("6.8.3"), const QList<Import> &extra = {})
+inline ShaderPackage::Payload payload(const QString &version = QStringLiteral("6.8.3"), const QList<Import> &extra = {},
+                                      bool publicQtApi = false)
 {
     const int major = version.left(1).toInt();
-    const auto descriptor = QByteArray("data:BSI_SHADERS_V2;QT=") + version.toLatin1()
-        + ";ARCH=x64;ABI=msvc;BUILD=release;NS=default;END;";
+    const auto descriptor = QByteArray(publicQtApi ? "data:BSI_SHADERS_V3;QT=" : "data:BSI_SHADERS_V2;QT=") + version.toLatin1()
+        + ";ARCH=x64;ABI=msvc;BUILD=release;NS=default;" + (publicQtApi ? "API=public-v1;" : "") + "END;";
     const QMap<QByteArray, QByteArray> exports{{QByteArray("BSIShadersDescriptor"), descriptor},
         {QByteArray("qt_plugin_instance"), {}},
-        {major == 6 ? QByteArray("qt_plugin_query_metadata_v2") : QByteArray("qt_plugin_query_metadata"), {}}};
+        {major == 6 && version.section(QLatin1Char('.'), 1, 1).toInt() >= 3
+            ? QByteArray("qt_plugin_query_metadata_v2") : QByteArray("qt_plugin_query_metadata"), {}}};
     return {image(true, qtImports(major) + extra, exports), ShaderPackage::moduleDefinition()};
 }
 inline QMap<QString, QByteArray> runtime(const QString &version = QStringLiteral("6.8.3"))

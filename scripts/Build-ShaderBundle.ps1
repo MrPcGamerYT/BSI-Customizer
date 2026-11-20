@@ -16,12 +16,17 @@ if ((Test-Path -LiteralPath $OutputDirectory) -and @(Get-ChildItem -LiteralPath 
 New-Item -ItemType Directory -Force -Path $BuildRoot, $OutputDirectory | Out-Null
 $oldPath = $env:PATH
 try {
-    foreach ($entry in @(@{Major = 5; Prefix = $Qt5Prefix}, @{Major = 6; Prefix = $Qt6Prefix})) {
+    # These are BUILD baselines, not an exhaustive list of player runtimes.
+    # Newer same-major players still undergo full imported-symbol/provider checks.
+    foreach ($entry in @(@{Major = 5; Prefix = $Qt5Prefix; Baseline = '5.15.2'}, @{Major = 6; Prefix = $Qt6Prefix; Baseline = '6.2.4'})) {
         $prefix = (Resolve-Path -LiteralPath $entry.Prefix).Path
         $qmake = Join-Path $prefix 'bin/qmake.exe'
         $version = (& $qmake -query QT_VERSION).Trim()
         if ($LASTEXITCODE -ne 0 -or $version -notmatch "^$($entry.Major)\.\d{1,3}\.\d{1,3}$") {
             throw "Invalid Qt $($entry.Major) SDK: $prefix"
+        }
+        if ($version -ne $entry.Baseline) {
+            throw "Release coverage requires the actual Qt $($entry.Baseline) build baseline, not $version. Never relabel a DLL or replace a player's runtime."
         }
         $build = Join-Path $BuildRoot "qt-$version"
         cmake -S (Join-Path $repo 'src/shaders') -B $build -A x64 `
@@ -40,6 +45,6 @@ try {
         foreach ($name in @('BSIShaders.dll', 'qmldir')) {
             Copy-Item -LiteralPath (Join-Path $build "module/BSIShaders/$name") -Destination (Join-Path $out $name)
         }
-        Write-Host "Verified regular shader payload: Qt $version / x64 / release / MSVC"
+        Write-Host "Verified regular shader payload: Qt $version build baseline / public-v1 / x64 / release / MSVC"
     }
 } finally { $env:PATH = $oldPath }

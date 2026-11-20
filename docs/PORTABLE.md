@@ -104,18 +104,21 @@ cmake --build build --config Release --parallel
 
 ### Experimental native shader payloads
 
-The Single EXE test workflow now builds/tests separate **Qt 5.15.2 and Qt 6.8.3**
-regular x64 release MSVC shader modules, embeds them inside the inner application
+The revised Single EXE test workflow builds/tests separate **Qt 5.15.2 and Qt 6.2.4**
+public-API build baselines for regular x64 release MSVC shader modules, and embeds them inside the inner application
 and requires clean-PATH bundle checks in the packed/extracted EXEs. They are
 **not installed into a player automatically**. See the
 [native Shaders user verification guide](SHADERS-USER-TEST.md); real game/GPU
-validation is still pending, and an unmatched player Qt version safely refuses.
+validation is still pending. New V3 modules can qualify on equal/newer same-major
+runtimes only after full provider/symbol checks; old V2 remains exact-version only.
+See [Qt evidence and limits](EMULATOR-QT-COMPATIBILITY.md). Incompatible/unknown
+installations refuse without replacing runtimes.
 
 To include the same experimental payloads in a local native build:
 
 ```powershell
 ./scripts/Build-ShaderBundle.ps1 -Qt5Prefix "C:/Qt/5.15.2/msvc2019_64" `
-  -Qt6Prefix "C:/Qt/6.8.3/msvc2022_64" -BuildRoot build-shader-payloads `
+  -Qt6Prefix "C:/Qt/6.2.4/msvc2019_64" -BuildRoot build-shader-payloads `
   -OutputDirectory build-shader-bundle
 cmake -S . -B build -A x64 -DBSI_BUILD_PORTABLE=ON -DBSI_CHROMIUM_UI=OFF `
   -DBSI_REQUIRE_SHADER_BUNDLE=ON -DBSI_SHADER_BUNDLE_DIR="$PWD/build-shader-bundle"

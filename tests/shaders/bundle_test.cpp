@@ -98,6 +98,25 @@ int main(int argc, char **argv)
     auto mislabeled = rows[0].toObject(); mislabeled[QStringLiteral("qtVersion")] = QStringLiteral("6.8.3"); mislabeled[QStringLiteral("id")] = QStringLiteral("qt-6.8.3");
     rejected(index(QJsonArray{mislabeled}), [&](const QString &name) { return files.value(QStringLiteral("qt-5.15.2/") + QFileInfo(name).fileName()); },
              QStringLiteral("Pinned bytes still need their actual matching read-only descriptor and Qt entry points"));
+    {
+        QMap<QString, QByteArray> publicFiles;
+        QJsonArray publicRows;
+        for (const auto &baseline : {QStringLiteral("5.15.2"), QStringLiteral("6.2.4")}) {
+            const auto p = ShaderPackageFixture::payload(baseline, {}, true);
+            publicRows << row(baseline, p);
+            publicFiles.insert(QStringLiteral("qt-") + baseline + QStringLiteral("/BSIShaders.dll"), p.dll);
+            publicFiles.insert(QStringLiteral("qt-") + baseline + QStringLiteral("/qmldir"), p.qmldir);
+        }
+        const auto decoded = ShaderBundle::decode(index(publicRows), [&](const QString &name) { return publicFiles.value(name); });
+        require(decoded.ok && decoded.entries.size() == 2, QStringLiteral("V3 baselines use the SAME pinned bounded bundle format: ") + decoded.error);
+        for (const auto &entry : decoded.entries) {
+            const auto description = ShaderPackage::describe(entry.payload);
+            const auto target = entry.qtVersion.startsWith(QLatin1Char('5')) ? QStringLiteral("5.15.4") : QStringLiteral("6.7.3");
+            require(description.ok && description.publicQtApi && description.moduleQtVersion == entry.qtVersion
+                        && ShaderPackage::canTarget(description, target),
+                    QStringLiteral("The index retains the real build baseline; eligibility never relabels a DLL"));
+        }
+    }
     require(ShaderPackage::licenseNotices().contains("MinHook") && ShaderPackage::licenseNotices().contains("Apache License"),
             QStringLiteral("Binary redistribution notices accompany owned installations"));
     std::printf("PASS: %d embedded bundle/hash/identity/bounds/descriptor assertions (no DLL execution)\n", assertions);

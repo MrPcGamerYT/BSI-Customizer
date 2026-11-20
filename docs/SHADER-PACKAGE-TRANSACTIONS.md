@@ -3,7 +3,10 @@
 **Experimental test implementation, not a certified shader release.** The native
 Customizer exposes reviewed installation/update/removal/recovery under
 **PATCHER → Player interface → Shaders**. The Single EXE test build embeds the
-regular Qt 5.15.2 and Qt 6.8.3 Windows x64 release modules. Nothing here certifies
+regular Windows x64 release modules. The new V3 packaging uses genuine Qt
+5.15.2 / 6.2.4 public-API build baselines; older V2 builds used exact-version
+5.15.2 / 6.8.3 modules. See [Qt research and proof boundaries](EMULATOR-QT-COMPATIBILITY.md).
+Nothing here certifies
 a running player, real game effects or a physical GPU. The user will verify those
 with the [test guide](SHADERS-USER-TEST.md); do not merge on fixtures alone.
 
@@ -15,13 +18,20 @@ DllMain or an exported function to inspect a candidate DLL.
 - Native AMD64 PE32+ EXE/DLL types, section bounds/non-overlap/alignment and
   file-backed directories are required. An EXE renamed `.dll` is refused.
 - The actual **named data export** `BSIShadersDescriptor` must be read-only,
-  non-executable, non-forwarded and contain the complete bounded v2 contract:
-  `BSI_SHADERS_V2;QT=x.y.z;ARCH=x64;ABI=msvc;BUILD=release;NS=default;END;`.
+  non-executable, non-forwarded and contain a complete bounded known contract:
+  `BSI_SHADERS_V2;QT=x.y.z;ARCH=x64;ABI=msvc;BUILD=release;NS=default;END;`
+  is **still exact-version only**. New source-audited
+  `BSI_SHADERS_V3;QT=x.y.z;ARCH=x64;ABI=msvc;BUILD=release;NS=default;API=public-v1;END;`
+  opts into equal/newer **same-major** public Qt ABI eligibility, never an older
+  runtime or Qt 5/6 interchange. The compiled baseline is not relabeled.
   Finding a string anywhere in the file is not sufficient. Qt's matching native
-  `qt_plugin_instance` and metadata-query function exports must also exist.
+  `qt_plugin_instance` and metadata-query function exports must also exist:
+  Qt 5 and Qt 6.2 use the original query name; Qt 6.3+ uses `_v2`.
 - Player and plugin must import the same Qt Core/Gui/Qml family through actual
   descriptors. Qt providers must have **exact matching release file AND product
-  VS_FIXEDFILEINFO versions** in every version-resource language. Editable
+  VS_FIXEDFILEINFO versions WITH EACH OTHER**, in every version-resource language.
+  That actual player release must satisfy the selected module's V2/V3 contract.
+  Editable
   `FileVersion` display strings, a matching major alone and loaded-module names
   are not used as compatibility proof. Debug/private/mixed versions and custom
   namespaces are not supported by this conservative contract.
@@ -73,7 +83,8 @@ engine's application-directory QML import path. It contains exactly:
 - `BSIShaders.dll`
 - `qmldir`
 - `bsi-shaders-owner.json` (canonical `bsi.shader-module.v2`, target EXE basename,
-  package hash and compiled Qt version)
+  package hash and actual player Qt version; the DLL descriptor separately
+  retains its compiled baseline)
 - `THIRD-PARTY-NOTICES.txt` (complete MinHook/HDE and Vulkan MIT/Apache notices,
   exact and bounded; accompanies binary redistribution)
 
@@ -168,9 +179,11 @@ synthetic native PE packages, never executing them:
   encoding, not a stubbed success.
 
 Windows CI additionally requires read-only validation of the **actual compiled
-Qt 5.15.2 and 6.8.3 release modules against their actual SDK/VC dependencies**,
-then the existing plugin/native-Settings physical-input fixtures. These checks
-must pass at the new head; adding a test is not a passing result.
+Qt 5.15.2 and 6.2.4 V3 release baselines against their actual SDK/VC dependencies**,
+then independent host-provider checks and plugin/native-Settings physical-input
+fixtures, including Qt 6.7.3 and 6.8.3 hosts. These checks must pass at the new
+head; adding a test is not a passing result. Older historical runs with V2
+6.8.3 modules do not validate this new baseline/contract.
 
 Additional tests cover read-only inspection, whole-set review invalidation,
 changed-but-ABI-compatible runtime bytes, exact bundle selection, safe removal

@@ -152,6 +152,17 @@ jobs:
       - name: Remember the Qt 5 SDK without linking it into the Customizer
         run: '"BSI_SHADER_QT5_PREFIX=$env:QT_ROOT_DIR" >> $env:GITHUB_ENV'
 
+      - name: Install the older public-API Qt 6 shader bridge SDK
+        uses: jurplel/install-qt-action@v4.3.1
+        with:
+          version: '6.2.4'
+          host: windows
+          target: desktop
+          arch: win64_msvc2019_64
+          cache: true
+      - name: Remember the Qt 6 shader SDK separately from the Customizer SDK
+        run: '"BSI_SHADER_QT6_PREFIX=$env:QT_ROOT_DIR" >> $env:GITHUB_ENV'
+
       - name: Install Qt 6 build tools
         uses: jurplel/install-qt-action@v4.3.1
         with:
@@ -162,9 +173,9 @@ jobs:
           modules: qtmultimedia
           cache: true
 
-      - name: Build and verify the exact-version regular shader payloads
+      - name: Build and verify the public-API regular shader payload baselines
         run: |
-          ./scripts/Build-ShaderBundle.ps1 -Qt5Prefix $env:BSI_SHADER_QT5_PREFIX -Qt6Prefix $env:QT_ROOT_DIR `
+          ./scripts/Build-ShaderBundle.ps1 -Qt5Prefix $env:BSI_SHADER_QT5_PREFIX -Qt6Prefix $env:BSI_SHADER_QT6_PREFIX `
             -BuildRoot build-shader-payloads -OutputDirectory "$env:RUNNER_TEMP/bsi-shader-payloads"
 
       - name: Configure application and one-file package

@@ -553,6 +553,8 @@ Inspection inspect(const QString &exePath, const ShaderPackage::Payload *payload
             const auto runtime = runtimeFor(exe, *payload);
             const auto valid = ShaderPackage::validate(image, *payload, runtime.bytes); need(valid.ok, valid.error);
             result.qtVersion = valid.qtVersion;
+            result.moduleQtVersion = valid.moduleQtVersion;
+            result.publicQtApi = valid.publicQtApi;
             result.runtimeSha256 = valid.runtimeSha256;
             result.applyReviewSha256 = applyHash(image, tree, *payload, valid.runtimeSha256);
             result.updateAvailable = result.installed && result.packageSha256 != result.installedPackageSha256;

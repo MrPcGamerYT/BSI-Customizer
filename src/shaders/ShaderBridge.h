@@ -11,6 +11,7 @@ class ShaderBridge final : public QObject {
     Q_PROPERTY(QVariantList controls READ controlList CONSTANT)
     Q_PROPERTY(QVariantMap metrics READ metrics NOTIFY metricsChanged)
     Q_PROPERTY(QString error READ error NOTIFY settingsChanged)
+    Q_PROPERTY(QVariantMap bridgeInfo READ bridgeInfo CONSTANT)
 public:
     explicit ShaderBridge(QObject *parent=nullptr);
     ~ShaderBridge() override;
@@ -18,6 +19,7 @@ public:
     QVariantList controlList() const;
     QVariantMap metrics() const;
     QString error() const;
+    QVariantMap bridgeInfo() const;
     Q_INVOKABLE QVariantMap apply(const QVariantMap &values);
     static void attach(QObject *window,const QString &instance,const QString &graphicsRenderer);
 signals:

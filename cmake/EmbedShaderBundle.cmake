@@ -2,7 +2,7 @@
 # download. The resulting data-only qrc travels INSIDE the application/portable
 # EXE. No Qt 5 library is linked into the Qt 6 Customizer.
 function(bsi_embed_shader_bundle target)
-    set(BSI_SHADER_BUNDLE_DIR "" CACHE PATH "Prebuilt exact-version regular shader modules (qt-x.y.z/BSIShaders.dll + qmldir)")
+    set(BSI_SHADER_BUNDLE_DIR "" CACHE PATH "Prebuilt regular shader modules keyed by their true compiled Qt baseline (qt-x.y.z/BSIShaders.dll + qmldir)")
     option(BSI_REQUIRE_SHADER_BUNDLE "Refuse an application build without embedded shader modules" OFF)
     if(BSI_SHADER_BUNDLE_DIR STREQUAL "")
         if(BSI_REQUIRE_SHADER_BUNDLE)

@@ -3,7 +3,10 @@
 **Status: experimental test implementation, not installed-player or universal
 GPU/renderer certification. Do not merge on automated fixtures alone.** The
 Customizer now exposes the reviewed install/update/remove/recover flow and the
-Single EXE test workflow embeds exact-version regular modules. The user will
+Single EXE test workflow embeds regular modules with explicit compatibility contracts.
+The new [V3 public-API baseline policy and Qt evidence](EMULATOR-QT-COMPATIBILITY.md)
+supersede the earlier V2-only exact-patch selection described in historical test
+entries below; V2 itself remains exact-version only. The user will
 verify the actual player. Start with the [user test guide](SHADERS-USER-TEST.md).
 
 ## Current user requirements
@@ -122,10 +125,11 @@ implementation now includes:
   reapply, shader-only removal and reviewed interrupted-transaction recovery.
   No entry/navigation action installs or inspects automatically. Target,
   resource/workspace changes invalidate the review and its open confirmation.
-- A data-only compiled resource bundle, initially **Qt 5.15.2 and Qt 6.8.3 Windows
-  x64 release MSVC** builds. Only the exact compatible pinned entry is selectable;
-  arbitrary user DLLs/downloads and runtime replacement are not exposed. Other
-  player Qt versions safely refuse and need a separately built/tested module.
+- A data-only compiled resource bundle of pinned Windows x64 release MSVC builds.
+  New V3 source uses **Qt 5.15.2 / 6.2.4 public-API baselines** and verifies newer
+  same-major target runtimes through full provider/symbol checks. Earlier V2
+  5.15.2 / 6.8.3 modules remain exact-version only. Arbitrary user DLLs/downloads,
+  compatibility overrides and player runtime replacement are not exposed.
 - EXE/module/runtime review fingerprints, including invalidation after DLL-only
   updates, so unchanged EXE bytes cannot reuse a stale install/remove review.
   Removal remains available with an absent/mismatched application payload when

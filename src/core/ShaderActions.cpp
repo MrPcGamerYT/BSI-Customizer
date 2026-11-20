@@ -1,6 +1,7 @@
 #include "ShaderActions.h"
 #include "ShaderInstall.h"
 #include <QRegularExpression>
+#include <QVersionNumber>
 
 namespace ShaderActions {
 namespace {
@@ -26,8 +27,11 @@ QVariantMap bundleInfo()
 {
     const auto bundle = ShaderBundle::load();
     QVariantList entries;
-    for (const auto &entry : bundle.entries) entries << QVariantMap{{"id", entry.id}, {"qtVersion", entry.qtVersion},
-        {"packageSha256", entry.packageSha256}, {"dllSha256", ShaderPackage::sha256(entry.payload.dll)}};
+    for (const auto &entry : bundle.entries) {
+        const auto description = ShaderPackage::describe(entry.payload);
+        entries << QVariantMap{{"id", entry.id}, {"qtVersion", entry.qtVersion}, {"publicQtApi", description.publicQtApi},
+            {"packageSha256", entry.packageSha256}, {"dllSha256", ShaderPackage::sha256(entry.payload.dll)}};
+    }
     return {{"ok", bundle.ok}, {"msg", bundle.error}, {"entries", entries}};
 }
 QVariantMap inspect(const QString &exePath, const ShaderBundle::Catalog &bundle)
@@ -35,20 +39,22 @@ QVariantMap inspect(const QString &exePath, const ShaderBundle::Catalog &bundle)
     auto r = ShaderInstall::inspect(exePath);
     QString id, bundleError = bundle.error;
     QStringList versions;
-    if (bundle.ok) for (const auto &entry : bundle.entries) {
-        versions << entry.qtVersion;
-        if (r.ok && !r.qtVersion.isEmpty() && entry.qtVersion == r.qtVersion) {
-            id = entry.id;
-            r = ShaderInstall::inspect(exePath, &entry.payload);
-            break;
-        }
+    const ShaderBundle::Entry *selected = nullptr;
+    if (bundle.ok && r.ok && !r.qtVersion.isEmpty()) for (const auto &entry : bundle.entries) {
+        const auto description = ShaderPackage::describe(entry.payload);
+        if (ShaderPackage::canTarget(description, r.qtVersion)
+            && (!selected || QVersionNumber::compare(QVersionNumber::fromString(entry.qtVersion),
+                                                     QVersionNumber::fromString(selected->qtVersion)) > 0)) selected = &entry;
     }
-    // List the whole bundle, even when the first compatible row was selected.
+    // Deterministic newest eligible baseline, then FULL byte/dependency checks.
+    // Do not silently try another candidate to hide a corrupt/missing provider.
+    if (selected) { id = selected->id; r = ShaderInstall::inspect(exePath, &selected->payload); }
+    // List the whole bundle, even when a compatible baseline was selected.
     versions.clear(); for (const auto &entry : bundle.entries) versions << entry.qtVersion;
     if (!r.recoveryRequired && id.isEmpty() && r.applyError.isEmpty()) {
         if (!bundle.ok) r.applyError = bundleError;
         else if (!r.runtimeError.isEmpty()) r.applyError = r.runtimeError;
-        else r.applyError = QStringLiteral("No bundled module matches this player's exact release Qt version (%1). Bundled: %2. The player runtime is never replaced or downgraded.")
+        else r.applyError = QStringLiteral("No bundled module matches this player's Qt compatibility contract (%1). Module build baselines: %2. Legacy modules remain exact-version only; newer public-API modules still require the same Qt major and full dependency checks. The player runtime is never replaced or downgraded.")
                                 .arg(r.qtVersion.isEmpty() ? QStringLiteral("unknown") : r.qtVersion, versions.join(QStringLiteral(", ")));
     }
     QStringList report;
@@ -60,7 +66,9 @@ QVariantMap inspect(const QString &exePath, const ShaderBundle::Catalog &bundle)
                               : r.sourcePresent ? QStringLiteral("Native sources are present but the module is missing. Remove this inactive integration before reinstalling.")
                               : r.modulePresent ? QStringLiteral("An owned shader module exists without its matching native source integration; automatic overwrite/removal is refused.")
                                                 : QStringLiteral("Shaders are not installed in this player."));
-        if (!r.qtVersion.isEmpty()) report << QStringLiteral("Player release Qt: %1 (x64). Bundled: %2.").arg(r.qtVersion, versions.join(QStringLiteral(", ")));
+        if (!r.qtVersion.isEmpty()) report << QStringLiteral("Player release Qt: %1 (x64). Module build baselines: %2.").arg(r.qtVersion, versions.join(QStringLiteral(", ")));
+        if (!r.moduleQtVersion.isEmpty()) report << QStringLiteral("Selected module built with Qt %1; contract: %2. This preflight is not installed-player or GPU certification.")
+            .arg(r.moduleQtVersion, r.publicQtApi ? QStringLiteral("audited public API, same major, newer/equal runtime") : QStringLiteral("legacy exact version"));
         if (r.canApply) report << (r.updateAvailable ? QStringLiteral("A different bundled module is ready to install as an update.")
                                                    : r.installed ? QStringLiteral("This bundled package is already installed; reapply is idempotent.")
                                                                  : QStringLiteral("Native source capacity and the matching module/dependency contract passed preflight."));
@@ -73,7 +81,8 @@ QVariantMap inspect(const QString &exePath, const ShaderBundle::Catalog &bundle)
             {"sourcePresent", r.sourcePresent}, {"modulePresent", r.modulePresent}, {"playerClosed", r.playerClosed},
             {"canApply", r.canApply}, {"canRemove", r.canRemove}, {"canRecover", r.canRecover},
             {"updateAvailable", r.updateAvailable}, {"recoveryRequired", r.recoveryRequired},
-            {"qtMajor", r.qtMajor}, {"qtVersion", r.qtVersion}, {"exeSha256", r.exeSha256},
+            {"qtMajor", r.qtMajor}, {"qtVersion", r.qtVersion}, {"moduleQtVersion", r.moduleQtVersion},
+            {"publicQtApi", r.publicQtApi}, {"exeSha256", r.exeSha256},
             {"packageSha256", r.packageSha256}, {"installedPackageSha256", r.installedPackageSha256},
             {"stateSha256", r.stateSha256}, {"applyReviewSha256", r.applyReviewSha256}, {"journalSha256", r.journalSha256},
             {"recoveryDirectory", r.recoveryDirectory}, {"bundleId", id}, {"bundledQtVersions", versions},

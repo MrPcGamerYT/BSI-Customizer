@@ -140,6 +140,15 @@ Window {
             QTest.mouseClick(window, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, point)
             QTest.qWait(25)
 
+        info = json.loads(evaluate("JSON.stringify(Engine.bridgeInfo)", window))
+        assert info["runtimeQtVersion"] == qVersion() and info["publicQtApi"] is True, info
+        built = tuple(map(int, info["moduleQtVersion"].split(".")))
+        runtime = tuple(map(int, info["runtimeQtVersion"].split(".")))
+        assert built[0] == runtime[0] and runtime >= built, info
+        expected = os.environ.get("BSI_SHADERS_EXPECT_BUILD_QT")
+        if expected:
+            assert info["moduleQtVersion"] == expected, info
+        print("ACTUAL loaded public Qt bridge:", json.dumps(info, sort_keys=True), flush=True)
         initial = settings()
         assert initial["enabled"] is False and len(initial) == 11
         assert not page.property("pEnableSave") and not window.property("bsiShaderDirty"), "a new neutral profile must not start dirty"

@@ -26,9 +26,13 @@
 #else
 #define BSI_SHADER_NAMESPACE "default"
 #endif
+// V3 is an explicit contract for this audited public-API bridge, not a switch
+// that makes arbitrary Qt plugins portable. Renderer code has no Qt objects or
+// private headers. Keep the actual compile version; never relabel a binary.
+static_assert(sizeof(qreal) == 8, "The public Qt bridge requires default double qreal");
 extern "C" Q_DECL_EXPORT const char BSIShadersDescriptor[] =
-    "BSI_SHADERS_V2;QT=" QT_VERSION_STR ";ARCH=" BSI_SHADER_ARCH
-    ";ABI=" BSI_SHADER_ABI ";BUILD=" BSI_SHADER_BUILD ";NS=" BSI_SHADER_NAMESPACE ";END;";
+    "BSI_SHADERS_V3;QT=" QT_VERSION_STR ";ARCH=" BSI_SHADER_ARCH
+    ";ABI=" BSI_SHADER_ABI ";BUILD=" BSI_SHADER_BUILD ";NS=" BSI_SHADER_NAMESPACE ";API=public-v1;END;";
 class BSIShadersPlugin final : public QQmlExtensionPlugin {
     Q_OBJECT
     Q_PLUGIN_METADATA(IID QQmlExtensionInterface_iid FILE "plugin.json")

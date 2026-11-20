@@ -272,7 +272,7 @@ int main(int argc, char *argv[])
     }
     // Read-only shader diagnostics never load a player/plugin DLL or bypass
     // authorization for writes. The packaged EXE uses this to verify that its
-    // exact-version shader payloads survived single-file bundling.
+    // version-contract shader payloads survived single-file bundling.
     if (args.contains(QStringLiteral("--shader-bundle-check"))) {
         ensureConsoleOutput();
         const auto report = ShaderActions::bundleInfo();

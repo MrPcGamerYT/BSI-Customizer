@@ -90,6 +90,10 @@ ShaderBridge::ShaderBridge(QObject *parent):QObject(parent){
 ShaderBridge::~ShaderBridge(){state().bridges.remove(this);}
 QVariantMap ShaderBridge::saved()const{return variant(state().saved);}
 QString ShaderBridge::error()const{return state().error;}
+QVariantMap ShaderBridge::bridgeInfo()const{
+    return {{"moduleQtVersion",QString::fromLatin1(QT_VERSION_STR)},
+            {"runtimeQtVersion",QString::fromLatin1(qVersion())},{"publicQtApi",true}};
+}
 QVariantList ShaderBridge::controlList()const{
     QVariantList out;
     for(const auto &c:controls)out<<QVariantMap{{"key",QString::fromLatin1(c.key)},{"label",QString::fromLatin1(c.label)},{"minimum",c.minimum},{"maximum",c.maximum}};

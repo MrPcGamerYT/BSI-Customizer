@@ -71,14 +71,20 @@ struct Fixture {
     QString exe, module, journal;
     QByteArray original;
     ShaderPackage::Payload first, second;
-    Fixture()
+    Fixture(const QString &runtimeVersion = QStringLiteral("6.8.3"), const QString &baseline = {}, bool publicQtApi = false)
     {
         require(dir.isValid(), QStringLiteral("Disposable transaction directory"));
         exe = dir.filePath(QStringLiteral("HD-Player.exe")); module = dir.filePath(QStringLiteral("BSIShaders"));
         journal = exe + QStringLiteral(".bsi-shaders-transaction.json");
-        original = player(); write(exe, original);
-        first = ShaderPackageFixture::payload(); second = first; second.dll[0x1001] = char(0x90);
-        const auto r = ShaderPackageFixture::runtime();
+        original = player();
+        if (runtimeVersion.startsWith(QLatin1Char('5'))) {
+            for (const auto &name : {QByteArray("Core"), QByteArray("Gui"), QByteArray("Qml")})
+                original.replace(QByteArray("Qt6") + name + ".dll", QByteArray("Qt5") + name + ".dll");
+        }
+        write(exe, original);
+        first = ShaderPackageFixture::payload(baseline.isEmpty() ? runtimeVersion : baseline, {}, publicQtApi);
+        second = first; second.dll[0x1001] = char(0x90);
+        const auto r = ShaderPackageFixture::runtime(runtimeVersion);
         for (auto i = r.cbegin(); i != r.cend(); ++i) write(dir.filePath(i.key()), i.value());
         ShaderInstall::setTestFault(Checkpoint::None);
     }
@@ -190,6 +196,54 @@ int main(int argc, char **argv)
         require(removeReview.canRemove && ShaderActions::remove(f.exe, removeReview.exeSha256, removeReview.stateSha256, true).value("ok").toBool(),
                 QStringLiteral("Reviewed shader-only removal works independently of the app's bundled payload"));
         require(resources(read(f.exe)) == resources(f.original), QStringLiteral("Reviewed remove restores original decoded native resources"));
+    }
+    for (const auto &target : {QStringLiteral("5.15.4"), QStringLiteral("5.15.19"), QStringLiteral("6.7.0"), QStringLiteral("6.8.3")}) {
+        const QString baseline = target.startsWith(QLatin1Char('5')) ? QStringLiteral("5.15.2") : QStringLiteral("6.2.4");
+        Fixture f(target, baseline, true);
+        const auto before = snapshot(f.dir.path());
+        const auto review = ShaderInstall::inspect(f.exe, &f.first);
+        require(review.ok && review.canApply && review.qtVersion == target && review.moduleQtVersion == baseline
+                    && review.publicQtApi && snapshot(f.dir.path()) == before,
+                QStringLiteral("Read-only public bridge preflight keeps the actual player Qt version: ") + target + review.applyError);
+        ShaderBundle::Catalog catalog; catalog.ok = true;
+        catalog.entries << ShaderBundle::Entry{QStringLiteral("qt-") + baseline, baseline, ShaderPackage::payloadHash(f.first), f.first};
+        const auto facade = ShaderActions::inspect(f.exe, catalog);
+        require(facade.value("canApply").toBool() && facade.value("qtVersion").toString() == target
+                    && facade.value("moduleQtVersion").toString() == baseline && facade.value("publicQtApi").toBool()
+                    && facade.value("bundleId").toString() == QStringLiteral("qt-") + baseline,
+                QStringLiteral("Facade selects the audited same-major baseline, NOT an exact-version spoof: ") + target + facade.value("msg").toString());
+        const auto legacy = ShaderPackageFixture::payload(baseline);
+        catalog.entries[0].payload = legacy; catalog.entries[0].packageSha256 = ShaderPackage::payloadHash(legacy);
+        require(!ShaderActions::inspect(f.exe, catalog).value("canApply").toBool() && snapshot(f.dir.path()) == before,
+                QStringLiteral("An older V2 bundle is NOT given the audited V3 compatibility contract"));
+        f.install();
+        const auto installed = snapshot(f.dir.path());
+        require(!f.apply(f.first).changed && snapshot(f.dir.path()) == installed, QStringLiteral("Public ABI installation remains byte-idempotent"));
+        require(ShaderInstall::remove(f.exe, ShaderPackage::sha256(read(f.exe)), true).ok
+                    && resources(read(f.exe)) == resources(f.original), QStringLiteral("Public ABI installation has exact source-only removal"));
+        // A different version contract must retain the SAME recovery discipline.
+        const auto restored = snapshot(f.dir.path());
+        ShaderInstall::setTestFault(Checkpoint::Exe, true);
+        require(f.apply(f.first).recoveryRequired, QStringLiteral("Stage public-ABI interrupted apply"));
+        ShaderInstall::setTestFault(Checkpoint::None);
+        require(recoverReviewed(f.exe).ok && snapshot(f.dir.path()) == restored, QStringLiteral("Public ABI interruption restores the exact previous file set"));
+    }
+    {
+        Fixture f(QStringLiteral("6.7.3"), QStringLiteral("6.2.4"), true);
+        ShaderBundle::Catalog catalog; catalog.ok = true;
+        const auto newer = ShaderPackageFixture::payload(QStringLiteral("6.5.3"), {}, true);
+        catalog.entries << ShaderBundle::Entry{QStringLiteral("qt-6.5.3"), QStringLiteral("6.5.3"), ShaderPackage::payloadHash(newer), newer};
+        catalog.entries << ShaderBundle::Entry{QStringLiteral("qt-6.2.4"), QStringLiteral("6.2.4"), ShaderPackage::payloadHash(f.first), f.first};
+        const auto before = snapshot(f.dir.path());
+        auto facade = ShaderActions::inspect(f.exe, catalog);
+        require(facade.value("canApply").toBool() && facade.value("bundleId").toString() == QLatin1String("qt-6.5.3")
+                    && snapshot(f.dir.path()) == before, QStringLiteral("Newest eligible audited baseline is deterministic, not list-order dependent"));
+        const auto missing = ShaderPackageFixture::payload(QStringLiteral("6.5.3"), {{QByteArray("vendor.dll"), {QByteArray("work")}, false}}, true);
+        catalog.entries[0].payload = missing; catalog.entries[0].packageSha256 = ShaderPackage::payloadHash(missing);
+        facade = ShaderActions::inspect(f.exe, catalog);
+        require(!facade.value("canApply").toBool() && facade.value("bundleId").toString() == QLatin1String("qt-6.5.3")
+                    && !facade.value("applyError").toString().isEmpty() && snapshot(f.dir.path()) == before,
+                QStringLiteral("A missing provider is not hidden by silently falling back to another candidate"));
     }
     {
         Fixture f;

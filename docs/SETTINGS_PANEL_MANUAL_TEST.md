@@ -54,13 +54,16 @@ The automated `settings_panel_post_patch_gui_test.py` runs the **same assertions
 
 `settings_panel_window_budget_test.py` reconstructs the **entire** legacy Settings resource, including its original callback prefix and the sizing helper. Counting shell-template bytes is not a reliable compression budget. Apply removes redundant horizontal whitespace beside safe punctuation/operators as well as leading indentation, retaining literals, notices, every line ending and JS statement boundary; ambiguous regex/template fragments are left unchanged. Token/Qt regressions protect operator separation, callbacks and quoted line continuations. The complete fixture uses **2436 / 2468 bytes**, retaining 32 bytes of headroom (the test requires at least 32). Hidden tabs still use the numeric icon-map empty sentinel; the unused separate `bHidden` channel was retired to make room for the new styling. The Windows engine suite additionally patches disposable copies of the real player references.
 
-## Experimental native Shaders — ready for user verification, not certified
+## Experimental native Shaders — test workflow, not certified
 
 The native Customizer now has **PATCHER → Player interface → Shaders** with
 read-only compatibility/hash inspection and explicit install/update/reapply,
 shader-only removal and recovery dialogs. The Single EXE test workflow embeds
-regular x64 release MSVC modules for **Qt 5.15.2 and 6.8.3**; another exact player
-Qt version safely refuses. Apply the native Settings top-tabs redesign first,
+regular x64 release MSVC modules. New V3 builds use genuine **Qt 5.15.2 / 6.2.4
+public-API baselines**, with newer/equal same-major runtimes eligible only after
+full provider/symbol checks; older V2 downloads remain exact-version only.
+See [Qt research, current test status and coverage limits](EMULATOR-QT-COMPATIBILITY.md).
+Apply the native Settings top-tabs redesign first,
 then follow the [real-player test and recovery guide](SHADERS-USER-TEST.md).
 Nothing installs on entry, and a regular Qt module is not a `version.dll` proxy.
 

@@ -132,7 +132,7 @@ Card {
         }
         Label {
             Layout.fillWidth: true; wrapMode: Text.Wrap; color: Theme.tertiary; font.pixelSize: 11
-            text: qsTr("Installation refuses a mismatched Qt version, unknown/edited native sources or unowned files. No runtime DLL is replaced. Removal deactivates the native shader source first and keeps the Settings redesign, unrelated edits and saved preferences. Interrupted transactions retain verified snapshots; never delete their journal/recovery folder or launch the player until recovery succeeds. Two filesystem objects are recoverable, not simultaneously atomic or power-loss certified.")
+            text: qsTr("Installation refuses an incompatible Qt ABI/version or dependency set, unknown/edited native sources or unowned files. No runtime DLL is replaced. Removal deactivates the native shader source first and keeps the Settings redesign, unrelated edits and saved preferences. Interrupted transactions retain verified snapshots; never delete their journal/recovery folder or launch the player until recovery succeeds. Two filesystem objects are recoverable, not simultaneously atomic or power-loss certified.")
         }
     }
     Dialog {

@@ -19,11 +19,17 @@ do not establish that your player's game presentation works on your GPU/driver.
   any existing shader directory). Patching invalidates the EXE's signature.
 - Close **every** player instance before inspecting for installation, applying,
   removing or recovering. Keep them closed until the operation finishes.
-- The initial bundle contains **Windows x64 release MSVC Qt 5.15.2 and 6.8.3**
-  modules. Inspection checks the player's actual Qt Core/Gui/Qml fixed versions,
-  imported symbols and dependency closure. **Another Qt version is refused**;
-  do not rename a module, replace Qt/VC/system DLLs or force a mismatched install.
-  Send the inspection report if your version is different.
+- The new **V3 public-API** build uses genuine **Qt 5.15.2 and 6.2.4 build
+  baselines**, not an exhaustive list of player releases. A newer/equal runtime
+  in the **same Qt major** can qualify only after full fixed-version,
+  architecture, import/export and dependency checks. All of the player's Qt
+  providers must still match each other exactly. Old **V2** downloads/installations
+  remain exact-version only; they do not gain this support automatically.
+  Do not rename a DLL, replace Qt/VC/system files or force an incompatible install.
+  Read the actual player Qt, module baseline and contract in the report. See the
+  [evidence, compatibility conditions and unverified versions](EMULATOR-QT-COMPATIBILITY.md).
+  A source/CI change is not a new validated download; use only the identified,
+  tested artifact for the exact build being evaluated.
 
 ## Install — where the controls actually are
 

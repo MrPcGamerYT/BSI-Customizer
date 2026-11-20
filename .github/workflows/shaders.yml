@@ -16,6 +16,10 @@ on:
       - 'src/assets/shader-notices.inc'
       - 'cmake/EmbedShaderBundle.cmake'
       - 'scripts/Build-ShaderBundle.ps1'
+      - 'scripts/Inspect-EmulatorQt.py'
+      - 'tests/emulator_qt_report_test.py'
+      - 'tests/fixtures/emulator-qt-evidence.json'
+      - 'docs/EMULATOR-QT-COMPATIBILITY.md'
       - 'tests/ui_page_settings_panel_test.py'
       - 'src/core/SettingsPanelPatcher.*'
       - 'src/core/QmlText.*'
@@ -45,10 +49,64 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  qt-evidence:
+    name: Read-only Qt inventory of four pinned player samples
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install pefile==2024.8.26
+      - uses: actions/checkout@v5
+        with:
+          repository: MrPcGamerYT/HD-Player
+          ref: 6e4dc894eb1b6956060b3f76d13fc438e5178d03
+          path: player-references
+          persist-credentials: false
+      - name: Verify fixed-version, import-tag and compiler-header evidence without executing players
+        env:
+          BSI_QT_REFERENCE_DIR: ${{ github.workspace }}/player-references
+        run: python tests/shaders/run_ci_tests.py --command python tests/emulator_qt_report_test.py -v
+      - name: Source-only public Qt bridge boundary guard
+        run: python tests/shaders/public_qt_api_contract_test.py
+
+  linux-public-qt5:
+    name: Actual Qt 5 public bridge on a newer independent Qt 5 runtime (Linux fixture)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      BSI_TEST_QT_API: PyQt5
+      BSI_SHADERS_MODULE_ROOT: ${{ github.workspace }}/build-qt5-bridge/module
+      BSI_SHADERS_SOURCE_TEST: ${{ github.workspace }}/build-qt5-bridge/tests/shader-settings-source-test
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install distro Qt 5 build SDK and a separate Python Qt 5 runtime
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qtbase5-dev qtdeclarative5-dev libgl1 libegl1 libxkbcommon0 libdbus-1-3
+          python -m pip install PyQt5==5.15.11
+          echo "BSI_SHADERS_EXPECT_BUILD_QT=$(qmake -query QT_VERSION)" >> "$GITHUB_ENV"
+      - name: Build the actual Qt 5 plugin, not a mocked bridge
+        run: |
+          cmake -S src/shaders -B build-qt5-bridge -DCMAKE_BUILD_TYPE=Release -DBSI_SHADERS_QT_MAJOR=5 -DBSI_SHADERS_BUILD_TESTS=ON -DBSI_TEST_NATIVE_SETTINGS=ON -DBSI_TEST_VULKAN=OFF
+          python tests/shaders/run_ci_tests.py --command cmake --build build-qt5-bridge --parallel 2
+      - name: Physical controls, persistence, navigation and missing-module fallback on the independent host
+        run: |
+          python tests/run_qt_runtime_test.py tests/shaders_plugin_ui_test.py
+          python tests/run_qt_runtime_test.py tests/shaders_native_settings_test.py
+          python tests/run_qt_runtime_test.py tests/shaders_native_settings_test.py --missing-module
+      - name: Record scope
+        run: echo 'Actual Linux Qt bridge cross-patch fixture, not Windows Qt 5.15.4 or installed-player/game/GPU certification.' >> "$GITHUB_STEP_SUMMARY"
+
   native-vulkan-gl:
     name: Native Vulkan and GLES pixels (Mesa software; not hardware)
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 25
     env:
       LIBGL_ALWAYS_SOFTWARE: '1'
       ASAN_OPTIONS: 'detect_leaks=1'
@@ -62,6 +120,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y mesa-vulkan-drivers vulkan-validationlayers libvulkan1 libegl1 libegl-mesa0 libgles2 qt6-base-dev
       - name: Check committed SPIR-V matches the shared original source
         run: |
+          python3 tests/shaders/run_ci_tests.py --command python3 tests/shaders/public_qt_api_contract_test.py
           python3 tests/shaders/run_ci_tests.py --command python3 tests/shaders/zopfli_provenance_test.py
           python3 tests/shaders/run_ci_tests.py --command python3 tests/shaders/bundle_notices_test.py
           npm install --prefix "$RUNNER_TEMP/spirv-tools" --no-fund --no-audit --save-exact @webgpu/glslang@0.0.15
@@ -100,18 +159,25 @@ jobs:
         run: echo 'Software/API tests only. No HD-Player installation, Win32 presentation hook or Intel/AMD/NVIDIA hardware certification is implied.' >> "$GITHUB_STEP_SUMMARY"
 
   windows-plugin:
-    name: Windows x64 Qt ${{ matrix.qt }} plugin and DirectX WARP
+    name: Windows x64 bridge ${{ matrix.qt }} -> host ${{ matrix.host-qt }} and WARP
     runs-on: windows-latest
     timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
         include:
-          - qt: '6.8.3'
-            arch: win64_msvc2022_64
+          - qt: '6.2.4'
+            host-qt: '6.7.3'
+            arch: win64_msvc2019_64
+            python-api: PySide6
+            python-package: PySide6==6.7.3
+          - qt: '6.2.4'
+            host-qt: '6.8.3'
+            arch: win64_msvc2019_64
             python-api: PySide6
             python-package: PySide6==6.8.3
           - qt: '5.15.2'
+            host-qt: 'PyQt5-bundled-5.15'
             arch: win64_msvc2019_64
             python-api: PyQt5
             python-package: PyQt5==5.15.11
@@ -127,10 +193,12 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Install matching Qt Python host for real plugin component tests
+      - name: Install an independent Qt Python host for actual cross-version plugin tests
         run: python -m pip install '${{ matrix.python-package }}'
       - name: Build regular plugin, MinHook and native DirectX tests (no system proxy)
         run: |
+          python tests/shaders/run_ci_tests.py --command python tests/shaders/public_qt_api_contract_test.py
+          if ($LASTEXITCODE -ne 0) { throw 'Public Qt bridge source boundary failed' }
           python tests/shaders/run_ci_tests.py --command python tests/shaders/zopfli_provenance_test.py
           if ($LASTEXITCODE -ne 0) { throw 'Pinned compression provenance check failed' }
           python tests/shaders/run_ci_tests.py --command python tests/shaders/bundle_notices_test.py
@@ -141,11 +209,18 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Shader build failed' }
       - name: Native DirectX 11 and 12 WARP frame pixels
         run: python tests/shaders/run_ci_tests.py --test-dir build-shaders -C Release --output-on-failure --timeout 60
+      - name: Read-only actual module/provider contract against the independent host runtime
+        run: |
+          $hostBin = (& python -c "import ${{ matrix.python-api }};from pathlib import Path;p=Path(${{ matrix.python-api }}.__file__).parent;print(p/'Qt5'/'bin' if '${{ matrix.python-api }}' == 'PyQt5' else p)").Trim()
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot locate the explicit Python Qt host runtime' }
+          python tests/shaders/run_ci_tests.py --command build-shaders/tests/Release/shader-package-test.exe build-shaders/module/BSIShaders "$hostBin"
+          if ($LASTEXITCODE -ne 0) { throw 'Actual cross-version module/provider preflight failed' }
       - name: Actual C++ plugin import and physical shader-page controls (Qt fixture only)
         env:
           BSI_TEST_QT_API: ${{ matrix.python-api }}
           BSI_SHADERS_MODULE_ROOT: ${{ github.workspace }}/build-shaders/module
           BSI_SHADERS_DIAGNOSTICS: '1'
+          BSI_SHADERS_EXPECT_BUILD_QT: ${{ matrix.qt }}
         run: python tests/shaders/run_ci_tests.py --command python -X faulthandler -u tests/shaders_plugin_ui_test.py
       - name: Physical native Settings navigation, prompts and missing-module fallback (contract fixture)
         env:
@@ -153,6 +228,7 @@ jobs:
           BSI_SHADERS_MODULE_ROOT: ${{ github.workspace }}/build-shaders/module
           BSI_SHADERS_SOURCE_TEST: ${{ github.workspace }}/build-shaders/tests/Release/shader-settings-source-test.exe
           BSI_SHADERS_DIAGNOSTICS: '1'
+          BSI_SHADERS_EXPECT_BUILD_QT: ${{ matrix.qt }}
         run: |
           python tests/shaders/run_ci_tests.py --command python -X faulthandler -u tests/shaders_native_settings_test.py
           if ($LASTEXITCODE -ne 0) { throw 'Native Settings contract fixture failed' }

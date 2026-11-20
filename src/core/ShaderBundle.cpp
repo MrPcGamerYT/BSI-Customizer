@@ -34,7 +34,7 @@ Catalog decode(const QByteArray &index, const std::function<QByteArray(const QSt
         need(root.size() == 2 && root.value(QStringLiteral("schema")).toString() == QLatin1String("bsi.shader-bundle.v1")
              && root.value(QStringLiteral("entries")).isArray(), "Unknown embedded shader bundle schema.");
         const auto rows = root.value(QStringLiteral("entries")).toArray();
-        need(!rows.isEmpty() && rows.size() <= 4, "The embedded shader bundle must contain one to four exact-version modules.");
+        need(!rows.isEmpty() && rows.size() <= 4, "The embedded shader bundle must contain one to four version-contract modules.");
         QSet<QString> versions;
         qint64 total = 0;
         static const QRegularExpression version(QStringLiteral("^[56]\\.[0-9]{1,3}\\.[0-9]{1,3}$"));

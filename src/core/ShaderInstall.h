@@ -28,7 +28,9 @@ struct Inspection {
     bool recoveryRequired = false;
     bool updateAvailable = false;
     int qtMajor = 0;
-    QString qtVersion;
+    QString qtVersion; // actual player Core/Gui/Qml release
+    QString moduleQtVersion; // real compiled baseline, never relabeled
+    bool publicQtApi = false;
     QString exeSha256;
     QString packageSha256;
     QString installedPackageSha256;

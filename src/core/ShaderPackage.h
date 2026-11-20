@@ -16,7 +16,12 @@ struct Payload {
 struct Result {
     bool ok = false;
     QString error;
+    // describe(): compiled baseline. validate(): actual player runtime.
     QString qtVersion;
+    QString moduleQtVersion;
+    // Only the new, source-audited V3 descriptor opts into Qt's backwards
+    // public-API ABI contract. Existing V2 modules remain exact-version only.
+    bool publicQtApi = false;
     QString packageSha256;
     QMap<QString, QString> runtimeSha256;
 };
@@ -42,10 +47,15 @@ QByteArray licenseNotices();
 Result describe(const Payload &payload);
 // Read the fixed release version of a Qt runtime DLL, not editable strings.
 Result runtimeVersion(const QByteArray &dll);
+// Version eligibility only, for choosing a compiled-in candidate. This is NOT
+// a substitute for validate(): all actual imports/providers must still pass.
+// V2 stays exact; audited V3 permits a newer/equal runtime of the SAME major.
+bool canTarget(const Result &description, const QString &runtimeQtVersion);
 // Runtime keys must be unique lowercase basenames. All non-system dependency
-// providers (and forwarders) must be present. Qt Core/Gui/Qml must have the same
-// exact release VS_FIXEDFILEINFO version as the compiled module, with all used
-// imported symbols resolvable. Unknown/debug/mixed-Qt/other-ABI packages refuse.
+// providers (and forwarders) must be present. Every Qt provider must have the
+// SAME exact release VS_FIXEDFILEINFO version as the player's Core. Its version
+// must satisfy the module's versioned contract, and every used imported symbol
+// must resolve. Unknown/debug/mixed-Qt/other-ABI packages still refuse.
 Result validate(const QByteArray &player, const Payload &payload,
                 const QMap<QString, QByteArray> &runtime);
 } // namespace ShaderPackage

@@ -4,6 +4,7 @@
 #include <QCryptographicHash>
 #include <QRegularExpression>
 #include <QSet>
+#include <QVersionNumber>
 #include <algorithm>
 #include <memory>
 #include <stdexcept>
@@ -279,7 +280,22 @@ public:
     }
 };
 
-QString describePlugin(Image &plugin, const Payload &payload)
+struct Contract { QString version; bool publicApi = false; };
+QVersionNumber qtVersion(const QString &text)
+{
+    static const QRegularExpression format(QStringLiteral("^[56]\\.(?:0|[1-9][0-9]{0,2})\\.(?:0|[1-9][0-9]{0,2})$"));
+    if (!format.match(text).hasMatch()) return {};
+    const auto version = QVersionNumber::fromString(text);
+    if (version.minorVersion() > 255 || version.microVersion() > 255) return {};
+    return version;
+}
+bool targets(const Contract &contract, const QString &runtime)
+{
+    const auto built = qtVersion(contract.version), host = qtVersion(runtime);
+    if (built.isNull() || host.isNull() || built.majorVersion() != host.majorVersion()) return false;
+    return contract.publicApi ? QVersionNumber::compare(host, built) >= 0 : host == built;
+}
+Contract describePlugin(Image &plugin, const Payload &payload)
 {
     need(payload.qmldir.size() <= 1024 && QByteArray(payload.qmldir).replace("\r\n", "\n") == moduleDefinition(),
          "The shader qmldir is not the exact owned regular-plugin definition.");
@@ -287,13 +303,26 @@ QString describePlugin(Image &plugin, const Payload &payload)
     const auto descriptor = plugin.nativeExport(QByteArray("BSIShadersDescriptor"), false);
     const QString contract = QString::fromLatin1(plugin.string(descriptor.rva, 192));
     plugin.raw(descriptor.rva, U(contract.size()) + 1);
-    static const QRegularExpression format(QStringLiteral("^BSI_SHADERS_V2;QT=([56]\\.[0-9]{1,3}\\.[0-9]{1,3});ARCH=x64;ABI=msvc;BUILD=release;NS=default;END;$"));
-    const auto matched = format.match(contract);
-    need(matched.hasMatch(), "Unknown shader descriptor, Qt ABI, architecture, debug build or namespace.");
-    const QString version = matched.captured(1);
+    static const QRegularExpression exact(QStringLiteral("^BSI_SHADERS_V2;QT=([56]\\.[0-9]{1,3}\\.[0-9]{1,3});ARCH=x64;ABI=msvc;BUILD=release;NS=default;END;$"));
+    static const QRegularExpression publicApi(QStringLiteral("^BSI_SHADERS_V3;QT=([56]\\.[0-9]{1,3}\\.[0-9]{1,3});ARCH=x64;ABI=msvc;BUILD=release;NS=default;API=public-v1;END;$"));
+    auto matched = exact.match(contract);
+    Contract result;
+    if (!matched.hasMatch()) { matched = publicApi.match(contract); result.publicApi = matched.hasMatch(); }
+    need(matched.hasMatch(), "Unknown shader descriptor, Qt API policy, ABI, architecture, debug build or namespace.");
+    result.version = matched.captured(1);
+    const auto built = qtVersion(result.version);
+    need(!built.isNull(), "Invalid compiled Qt baseline.");
+    if (result.publicApi) {
+        const QVersionNumber minimum = built.majorVersion() == 5 ? QVersionNumber(5, 15, 2) : QVersionNumber(6, 2, 4);
+        need(QVersionNumber::compare(built, minimum) >= 0, "The public Qt bridge baseline predates its audited API floor.");
+    }
     plugin.nativeExport(QByteArray("qt_plugin_instance"), true);
-    plugin.nativeExport(version.startsWith(QLatin1Char('6')) ? QByteArray("qt_plugin_query_metadata_v2") : QByteArray("qt_plugin_query_metadata"), true);
-    return version;
+    // Qt 6.0-6.2 used the original query export too; moc switched to the
+    // v2 metadata entry in Qt 6.3. Requiring only _v2 would reject a real 6.2
+    // baseline even though newer Qt loaders explicitly support that format.
+    const bool metadataV2 = built.majorVersion() == 6 && built.minorVersion() >= 3;
+    plugin.nativeExport(metadataV2 ? QByteArray("qt_plugin_query_metadata_v2") : QByteArray("qt_plugin_query_metadata"), true);
+    return result;
 }
 
 bool qtName(const QString &name, int *major = nullptr)
@@ -382,7 +411,9 @@ Result describe(const Payload &payload)
     Result result;
     try {
         Image plugin(payload.dll, true);
-        result.qtVersion = describePlugin(plugin, payload);
+        const auto contract = describePlugin(plugin, payload);
+        result.qtVersion = result.moduleQtVersion = contract.version;
+        result.publicQtApi = contract.publicApi;
         result.packageSha256 = payloadHash(payload);
         result.ok = true;
     } catch (const std::exception &e) { result.error = QString::fromUtf8(e.what()); }
@@ -397,6 +428,11 @@ Result runtimeVersion(const QByteArray &dll)
         result.ok = true;
     } catch (const std::exception &e) { result.error = QString::fromUtf8(e.what()); }
     return result;
+}
+
+bool canTarget(const Result &description, const QString &runtimeQtVersion)
+{
+    return description.ok && targets({description.moduleQtVersion, description.publicQtApi}, runtimeQtVersion);
 }
 
 Result validate(const QByteArray &player, const Payload &payload, const QMap<QString, QByteArray> &runtime)
@@ -414,7 +450,8 @@ Result validate(const QByteArray &player, const Payload &payload, const QMap<QSt
         }
         need(total <= totalLimit, "Shader validation input exceeds 512 MiB.");
         Image host(player, false), plugin(payload.dll, true);
-        const QString version = describePlugin(plugin, payload);
+        const auto contract = describePlugin(plugin, payload);
+        const QString version = contract.version;
         const int major = version.left(1).toInt();
         const QString core = QStringLiteral("qt%1core.dll").arg(major);
         const QString gui = QStringLiteral("qt%1gui.dll").arg(major);
@@ -431,6 +468,13 @@ Result validate(const QByteArray &player, const Payload &payload, const QMap<QSt
             }
         };
         checkQt(host.modules); checkQt(plugin.modules);
+        need(runtime.contains(core), QStringLiteral("Missing verified player runtime: %1.").arg(core));
+        const auto coreVersion = runtimeVersion(runtime.value(core));
+        need(coreVersion.ok, coreVersion.error);
+        const QString runtimeQtVersion = coreVersion.qtVersion;
+        need(targets(contract, runtimeQtVersion), contract.publicApi
+            ? QStringLiteral("The public Qt bridge built with %1 requires that version or newer in the SAME Qt major; player: %2.").arg(version, runtimeQtVersion)
+            : QStringLiteral("This legacy exact-version module needs Qt %1; player: %2. No compatibility override was applied.").arg(version, runtimeQtVersion));
         QMap<QString, std::shared_ptr<Image>> providers;
         QSet<QString> visiting, checked;
         auto provider = [&](const QString &module) -> std::shared_ptr<Image> {
@@ -444,7 +488,8 @@ Result validate(const QByteArray &player, const Payload &payload, const QMap<QSt
             p->readExports(); checkQt(p->modules);
             int m = 0;
             if (qtName(module, &m)) {
-                need(m == major && p->version() == version, QStringLiteral("Exact release Qt version mismatch: %1 needs %2.").arg(module, version));
+                need(m == major && p->version() == runtimeQtVersion,
+                     QStringLiteral("Mixed player Qt release versions: %1 must match Core %2 exactly.").arg(module, runtimeQtVersion));
             }
             result.runtimeSha256.insert(module, sha256(runtime[module]));
             providers.insert(module, p); return p;
@@ -495,7 +540,8 @@ Result validate(const QByteArray &player, const Payload &payload, const QMap<QSt
             for (const auto &s : plugin.imports) if (s.module == module && s.name.startsWith('?')) mangled = true;
             need(mangled, "The plugin does not establish the required MSVC Qt import contract.");
         }
-        result.ok = true; result.qtVersion = version; result.packageSha256 = payloadHash(payload);
+        result.ok = true; result.qtVersion = runtimeQtVersion; result.moduleQtVersion = version;
+        result.publicQtApi = contract.publicApi; result.packageSha256 = payloadHash(payload);
     } catch (const std::exception &e) {
         result.error = QString::fromUtf8(e.what()); result.runtimeSha256.clear();
     }

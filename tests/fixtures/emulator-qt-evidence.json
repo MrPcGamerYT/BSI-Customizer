@@ -1,0 +1,44 @@
+{
+  "schema": "bsi.emulator-qt-evidence.v1",
+  "scope": "Four pinned EXE-only samples, not an exhaustive release/runtime database",
+  "repository": "https://github.com/MrPcGamerYT/HD-Player",
+  "commit": "6e4dc894eb1b6956060b3f76d13fc438e5178d03",
+  "samples": [
+    {
+      "input": "HD-Player MSI v5.9.exe",
+      "playerFileVersion": "5.9.300.6315",
+      "playerSha256": "1f473ca2ec1e684cf85dbf1cacd47ed0cb33c27c6fe298ada1775f2a3414f2ed",
+      "qtMajor": 5,
+      "compiledMinorTags": [],
+      "qmlCacheCompilerHeaders": {"5.15.4": 99},
+      "runtimeQtVersion": null
+    },
+    {
+      "input": "HD-Player v.5.10 bluestacks.exe",
+      "playerFileVersion": "5.10.150.1016",
+      "playerSha256": "bcec63030f032fef60850559b5a5c40fdcce44f3b129aa5ccee05e990957467b",
+      "qtMajor": 5,
+      "compiledMinorTags": [],
+      "qmlCacheCompilerHeaders": {"5.15.4": 105},
+      "runtimeQtVersion": null
+    },
+    {
+      "input": "HD-Player MSI Latest version.zip",
+      "playerFileVersion": "5.22.75.6322",
+      "playerSha256": "b373ad8ce5dbc6b1e605b3c153d20b69bf5769b7ff82f896291e4844ab418efd",
+      "qtMajor": 6,
+      "compiledMinorTags": ["6.7"],
+      "qmlCacheCompilerHeaders": {},
+      "runtimeQtVersion": null
+    },
+    {
+      "input": "HD-Player latest version Bluestacks 5.zip",
+      "playerFileVersion": "5.22.285.1013",
+      "playerSha256": "d2f8509d025f90bd23604aa1c8f6981c456468bceab4db4a30bb380806826f39",
+      "qtMajor": 6,
+      "compiledMinorTags": ["6.7"],
+      "qmlCacheCompilerHeaders": {},
+      "runtimeQtVersion": null
+    }
+  ]
+}
