@@ -69,11 +69,16 @@ Each payload stays in its original mapped slot; reference disk hashes, EXE size
 and unrelated resources remain unchanged. Some legacy slots have only 8 bytes
 left, so other/edited builds must still fail safely if they do not fit.
 
-Plugin ownership/ABI checks, recoverable EXE+module deployment, actual game-frame
-effects in a running player and the Intel/AMD/NVIDIA renderer matrix remain
-outstanding. Existing installations are unchanged (eleven or twelve native pages
-in the inspected builds). Do not count the shell preview, byte-capacity plans,
-software shader pixels or separate DLL-startup tests as end-to-end validation.
+An experimental strict package validator and recoverable EXE+module backend now
+pass disposable-file install/update/removal and interruption/rollback tests. They
+are **not connected to an install action or bundled release DLL**. Actual-player
+Qt/VC compatibility, import-path/deployment recovery, game-frame effects and the
+Intel/AMD/NVIDIA renderer matrix remain outstanding. Existing installations are
+unchanged (eleven or twelve native pages in the inspected builds). Do not count
+shell/Qt fixtures, byte-capacity or file-transaction plans, software shader pixels
+or separate DLL-startup tests as end-to-end validation. The encoder now contains
+allocation/exit failures in C and uses a hash-verified defined-load build fix;
+these safety improvements do not prove shader rendering.
 See the detailed [capacity results, achieved tests and merge gates](SHADERS-INTEGRATION.md).
 
 ## Interactive Settings-window preview

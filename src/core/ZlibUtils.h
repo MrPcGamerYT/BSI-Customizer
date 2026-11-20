@@ -20,6 +20,8 @@ QByteArray compress(const QByteArray &data);
 // Qt-resource payload ([BE32 decoded size][zlib stream]). Keep ordinary Qt
 // level 9 when it fits, or when capacity is unknown/negative. Only an oversized
 // payload of at most 256 KiB gets a fixed-15-iteration lossless Zopfli attempt.
+// Its C guard contains allocation/exit failures, cleans up, and caps live encoder
+// allocations at 64 MiB; failure retains the ordinary bytes, not a false fit.
 // Return the smaller verified encoding; the caller MUST still enforce capacity
 // and storage ownership. This never makes space, changes source bytes or writes.
 QByteArray compressForCapacity(const QByteArray &data, qint64 capacity);

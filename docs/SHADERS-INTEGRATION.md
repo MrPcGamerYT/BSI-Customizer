@@ -110,10 +110,13 @@ or `vulkan-1.dll`. The existing arbitrary startup-DLL feature remains separate.
   dependent overlay is removed. A synthetic registered-PE regression exercises
   Update, idempotence, shader removal and exact original Settings-source Restore.
 
-**There is still no production shader-package installer or working installation
-in a player.** These planners are compiled into the Customizer for tests, but
-are not exposed as an install action or bundled with a plugin release payload.
-Existing twelve-tab player installations remain unchanged.
+**There is still no exposed production shader installer or working installation
+in a player.** There is now an experimental read-only package validator and
+recoverable install/update/removal backend, covered by disposable-file tests;
+it is not wired to a Customizer action or bundled with a plugin release payload.
+The native source planner requires the recognized redesigned top-tab shell.
+Existing player installations remain unchanged. See
+[package/transaction safety and limits](SHADER-PACKAGE-TRANSACTIONS.md).
 
 ### Fixed-resource capacity now passes read-only planning on four references
 
@@ -132,6 +135,12 @@ ordinary Qt level-9 zlib exceeds a slot, only up to **256 KiB input**, with
 bytes**, including BOM/CRLF. The ordinary fitting fast path is byte-unchanged;
 no extra DLL, interpreter or recipient setup is introduced. Source provenance,
 unmodified-file hashes and mandatory binary/portable license notices are tested.
+All encoder allocations/exit paths now run through a C-only, thread-isolated
+64 MiB guard: failure cleans up and retains ordinary compression, after which a
+nonfitting plan is refused. No longjmp crosses C++/Qt frames. Two upstream
+unaligned/aliasing loads exposed by strict UBSan are fixed in a separately
+input/output-hash-verified generated source copy using `memcpy`; the 23 original
+upstream hashes remain intact, and sanitizer alignment checks are not disabled.
 
 The actual production builder/planner/writer now passes add, byte-idempotent
 repeat and exact decoded-resource removal **in memory** on all four pinned EXEs:
@@ -184,10 +193,32 @@ was executed or written. Current-head Windows/full-app checks remain required.
   never retry toggles or bypass assertions. Regular CI, portable and Chromium
   checks also pass at that head. **These runs predate compact v2/tighter packing**;
   current-head checks are still required. Cross-compilation is not execution.
-- Compact v2 currently passes all five local CTests in strict C++ builds and
-  ASan/UBSan (including the vendored C encoder), actual Qt 6 plugin/native shell
-  and missing-module tests, exact prior-v1 removal, the production Settings
-  Update/Restore lifecycle and all four real-reference source-capacity cycles.
+- Compact v2 plus the package/recovery/guard tests pass all nine local strict
+  CTests and all nine ASan/UBSan tests with leak detection and halt-on-error. The actual Qt 6 plugin/native shell and separate missing-module process,
+  exact prior-v1 removal, production Settings Update/Restore lifecycle and all
+  four real-reference source-capacity cycles pass again with the guarded encoder.
+  A final strict ASan/UBSan rerun after the code fixes is 9/9. Older exit-zero
+  runs with recoverable UBSan diagnostics are not clean evidence; the new job enables `UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1`, keeps leak
+  detection and instruments the C encoder/guard as well as C++.
+- Strict read-only Qt 5/6 package fixtures check the actual data export, exact
+  release fixed-file/product versions, native Qt entry points and normal/delay/
+  transitive/forwarded dependency symbols. The descriptor is a contract, not a
+  digital signature or proof of compatibility with every custom Qt build.
+- Disposable registered-PE file tests pass complete installation, byte-idempotent
+  repeat, module update with no EXE churn and source removal preserving later
+  unrelated customizations. They cover 26 ordinary-failure/interruption cycles,
+  plus interrupted recovery, rollback failure, locks, symlinks, unowned/extra
+  files and changed target/snapshot/journal refusal. No real player was installed.
+- Every one of 4,288 allocation points in a small encoder fixture is faulted,
+  plus fatal-exit and input/output/memory-limit failures, zero outstanding
+  allocations, subsequent success and concurrent calls. The production C++
+  call site's fallback is tested with a separate failure-only linker stub.
+- At `7b56821`, shader workflow
+  [44667528162](https://github.com/dsajgddghdsaakovvgheww/BSI-Customizer/actions/runs/44667528162)
+  passes both Windows Qt versions and Linux graphics, and Single EXE packaging
+  passes. These predate the package/recovery/guard code; current-head CI must
+  separately pass actual compiled Windows module/runtime validation and all
+  full-app/reference/portable/Chromium checks.
 - New source/image tests pass locally with all their dependencies rebuilt and
   `-Wall -Wextra -Werror`: real registered PE resources/imports/call-site data,
   bounded relocation, unchanged EXE size/import modules/unrelated resources,
@@ -209,10 +240,10 @@ was executed or written. Current-head Windows/full-app checks remain required.
   Tests fail, rather than skip-pass, when their required APIs are unavailable.
 - Existing icon/style and complete Settings/About resource budgets still pass.
 
-WGL/EGL and Win32 Vulkan presentation, package ABI/dependency ownership checks,
-recoverable EXE+module deployment, real-player navigation/game frames and the
-physical GPU matrix have not passed their required checks. Source-capacity
-success above does not resolve those gates. Historical regular-DLL loading,
+WGL/EGL and Win32 Vulkan presentation, actual-player Qt package compatibility
+and deployment recovery, real-player navigation/game frames and the physical
+GPU matrix have not passed their required checks. Package/recovery fixtures
+and source-capacity success above do not resolve those installed-player gates. Historical regular-DLL loading,
 Qt fixture navigation, prior PR CI and software pixels do not certify a working
 installation of this feature.
 
@@ -242,13 +273,14 @@ must verify the GPU actually rendering the game, not merely the display GPU.
    and document the explicit unhandled modes (including legacy D3D9/10, HDR,
    protected content, Vulkan extended presents/cross-family ownership and late
    unobserved surfaces/queues) instead of silently processing them incorrectly.
-2. Preserve the now-passing fixed-resource capacity cycles and complete package
-   ownership/ABI/dependency validation and a recoverable installer for regular
-   matching-Qt DLLs. The existing in-memory plans are not
-   a two-part EXE+module transaction. Preserve fixed slots, verified rollback,
-   prior title/menu/gutter fixes, exact original sources and unrelated pages.
-   Verify update/removal recovery and missing/incompatible-package fallback in
-   an actual player; the missing-module fixture alone is not sufficient.
+2. Preserve the fixed-resource capacity cycles and validate the experimental
+   package/transaction backend against actual Windows player Qt/VC dependencies.
+   Complete trusted matching-Qt payload selection/distribution and safe Customizer
+   preflight/install/update/removal/recovery UX; the backend is not an exposed
+   production installer. Preserve fixed slots, verified rollback, prior
+   title/menu/gutter fixes, exact original sources and unrelated pages. Verify
+   update/removal recovery, the actual QML import path and missing/incompatible
+   package fallback in a player; disposable/Qt fixtures alone are not sufficient.
 3. Physically navigate to Shaders in a running supported Windows emulator.
    Verify **game-image pixels** on all three renderer families, not just Qt UI
    bindings. Verify default/custom/hidden icon behavior, reset, Save/Discard,

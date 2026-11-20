@@ -2,10 +2,16 @@
 #include "ByteUtils.h"
 #include "settings_fixture.h"
 #include <QCoreApplication>
+#include <QThread>
 #include <cstdio>
 #include <cstdlib>
 
 namespace {
+class Worker final : public QThread {
+public:
+    QByteArray input, output;
+    void run() override { output = ZlibUtils::compressForCapacity(input, 0); }
+};
 void require(bool ok, const char *message)
 {
     if (!ok) { std::fprintf(stderr, "FAIL: %s\n", message); std::exit(1); }
@@ -34,6 +40,12 @@ int main(int argc, char **argv)
             "the 256 KiB fallback input limit must be enforced");
     require(ZlibUtils::compressForCapacity({}, 0) == qCompress(QByteArray{}, 9),
             "empty input keeps the ordinary Qt behavior");
+    Worker workers[4];
+    for (auto &worker : workers) { worker.input = binary; worker.start(); }
+    for (auto &worker : workers) {
+        require(worker.wait(30000) && worker.output == ZlibUtils::compressForCapacity(binary, 0),
+                "concurrent encoder calls must retain independent TLS allocation/cleanup contexts");
+    }
     std::puts("PASS: bounded lossless Qt-resource compression, unchanged normal fast path, exact BOM/binary source bytes, deterministic output and fixed input cap");
     return 0;
 }

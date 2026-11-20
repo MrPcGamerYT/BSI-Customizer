@@ -17,3 +17,24 @@ extra runtime DLL, script, setup or system-DLL proxy is introduced.
 
 The encoder does not affect shader math or GPU vendor/backend routing. Its
 license must accompany Customizer binary/portable distributions.
+
+## BSI build adapters and correction
+
+The original files/hashes above are still byte-exact. BSI compiles a generated
+copy of `lz77.c` with **two unaligned/aliasing typed match loads replaced by
+`memcpy` loads of the same words**. `src/core/ZopfliMatch.cmake` applies this
+small build-only correction only to the pinned original hash, and requires the
+exact corrected SHA-256:
+`557de25382d40718ef590ed8d71056d247f9b2843081d3f37845c64a6291fa95`.
+No compression option or output semantics are changed; sanitizer checks are not
+suppressed. This notice identifies the modified compiled file as required by
+Apache-2.0. No original upstream source/license hash was relaxed or replaced.
+
+Only upstream C translation units have malloc/realloc/free/exit calls remapped
+to `src/core/BoundedZopfli.c` through `ZopfliAllocator.h`. The guard itself uses
+the real CRT, a per-thread allocation list, a **64 MiB live-allocation cap** and
+C-only setjmp recovery. Any allocation/budget/encoder-exit failure releases every
+tracked block and returns failure without changing caller output. No jump crosses
+a C++/Qt frame; the caller retains ordinary compression and must refuse a slot
+that still does not fit. There is no subprocess/helper runtime. Isolated tests
+inject every allocation-failure point and fatal exit, and test concurrent calls.

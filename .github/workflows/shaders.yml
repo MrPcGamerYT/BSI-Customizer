@@ -6,11 +6,16 @@ on:
       - 'src/shaders/**'
       - 'src/core/NativeSettingsModel.*'
       - 'src/core/ShaderSettings*'
+      - 'src/core/ShaderPackage.*'
+      - 'src/core/ShaderInstall.*'
       - 'src/core/SettingsPanelPatcher.*'
       - 'src/core/QmlText.*'
       - 'src/core/QtResource*'
       - 'src/core/PeUtils.*'
       - 'src/core/ZlibUtils.*'
+      - 'src/core/BoundedZopfli.*'
+      - 'src/core/ZopfliAllocator.h'
+      - 'src/core/ZopfliMatch.cmake'
       - 'tests/settings_panel_window_budget_test.py'
       - 'tests/fixtures/settings-window-*'
       - 'src/third_party/minhook/**'
@@ -34,9 +39,11 @@ jobs:
   native-vulkan-gl:
     name: Native Vulkan and GLES pixels (Mesa software; not hardware)
     runs-on: ubuntu-24.04
-    timeout-minutes: 10
+    timeout-minutes: 15
     env:
       LIBGL_ALWAYS_SOFTWARE: '1'
+      ASAN_OPTIONS: 'detect_leaks=1'
+      UBSAN_OPTIONS: 'halt_on_error=1:print_stacktrace=1'
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v4
@@ -70,6 +77,11 @@ jobs:
           python3 tests/shaders/run_ci_tests.py --command "$RUNNER_TEMP/routing-asan"
           g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined -fno-omit-frame-pointer -Isrc/shaders -Isrc/third_party/vulkan/include tests/shaders/vulkan_pixels_test.cpp src/shaders/VulkanPipeline.cpp -ldl -o "$RUNNER_TEMP/vulkan-asan"
           BSI_SHADERS_VULKAN_LIBRARY="$RUNNER_TEMP/shader-icd/libvk_swiftshader.so" python3 tests/shaders/run_ci_tests.py --command "$RUNNER_TEMP/vulkan-asan"
+      - name: ASan/UBSan native source, package, file recovery and every encoder allocation failure
+        run: |
+          cmake -S tests/shaders -B build-shader-core-asan -DCMAKE_BUILD_TYPE=Debug -DBSI_TEST_NATIVE_SETTINGS=ON -DBSI_TEST_VULKAN=OFF -DCMAKE_C_FLAGS='-O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer' -DCMAKE_CXX_FLAGS='-O1 -g -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined -fno-omit-frame-pointer' -DCMAKE_EXE_LINKER_FLAGS='-fsanitize=address,undefined'
+          python3 tests/shaders/run_ci_tests.py --command cmake --build build-shader-core-asan --parallel 2
+          python3 tests/shaders/run_ci_tests.py --test-dir build-shader-core-asan --output-on-failure --timeout 180
       - name: Production GLES and desktop OpenGL core pixels/state restoration
         run: |
           python3 tests/shaders/run_ci_tests.py --command python3 tests/shaders_gpu_test.py

@@ -122,6 +122,10 @@ qt_add_executable(BSICustomizer
     src/core/ShaderSettingsSource.cpp
     src/core/ShaderSettingsImage.h
     src/core/ShaderSettingsImage.cpp
+    src/core/ShaderPackage.h
+    src/core/ShaderPackage.cpp
+    src/core/ShaderInstall.h
+    src/core/ShaderInstall.cpp
     src/core/PlayerAppearanceScan.h
     src/core/PlayerAppearanceScan.cpp
     src/core/PlayerAppearancePatcher.h
