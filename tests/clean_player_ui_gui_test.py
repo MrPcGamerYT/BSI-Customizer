@@ -12,14 +12,14 @@ QT5 = os.environ.get("BSI_TEST_QT_API") == "PyQt5"
 os.environ.setdefault("QT_QUICK_CONTROLS_STYLE", "Default" if QT5 else "Basic")
 if QT5:
     from PyQt5.QtCore import QCoreApplication, QLibraryInfo, QMetaObject, QPointF, Qt, qVersion
-    from PyQt5.QtGui import QGuiApplication
+    from PyQt5.QtGui import QFontDatabase, QFontInfo, QGuiApplication
     from PyQt5.QtQml import QQmlComponent, QQmlEngine
     from PyQt5.QtQuick import QQuickItem, QQuickWindow
     from PyQt5.QtTest import QSignalSpy, QTest
 else:
     os.environ.setdefault("QSG_RHI_BACKEND", "software")
     from PySide6.QtCore import QCoreApplication, QLibraryInfo, QMetaObject, QPointF, Qt, qVersion
-    from PySide6.QtGui import QGuiApplication
+    from PySide6.QtGui import QFontDatabase, QFontInfo, QGuiApplication
     from PySide6.QtQml import QQmlComponent, QQmlEngine
     from PySide6.QtQuick import QQuickItem, QQuickWindow
     from PySide6.QtTest import QSignalSpy, QTest
@@ -69,11 +69,30 @@ def main():
     os.environ.pop("QML_IMPORT_PATH", None)
     QCoreApplication.setLibraryPaths([plugins])
     app = QGuiApplication.instance() or QGuiApplication([])
+    # Qt 5's Windows offscreen QPA uses QFreeTypeFontDatabase, not Windows'
+    # installed-font discovery. Without an explicitly deployed font it uses
+    # the box engine: "Settings" measures 144x18 but paints zero glyph pixels.
+    # Make this independent authored host self-contained, like the other Qt
+    # fixtures. Do not change any production-written QML or paint threshold.
+    previous_family = QFontInfo(app.font()).family()
+    font_path = Path(__file__).resolve().parents[1] / "src/qml/fonts/Inter.ttf"
+    font_id = QFontDatabase.addApplicationFont(str(font_path))
+    assert font_id >= 0, ("Could not load the bundled offscreen test font", str(font_path))
+    families = QFontDatabase.applicationFontFamilies(font_id)
+    assert families, ("The bundled offscreen test font has no family", str(font_path))
+    font = app.font()
+    font.setFamily(families[0])
+    app.setFont(font)
+    resolved_family = QFontInfo(app.font()).family()
+    assert resolved_family in families, ("Offscreen host did not resolve its deployed font", families, resolved_family)
+    print("Topbar fixture font:", str(font_path), "family:", resolved_family,
+          "previous default:", repr(previous_family), flush=True)
     engine = QQmlEngine()
     engine.setImportPathList([qml, "qrc:/qt-project.org/imports", "qrc:/qt/qml"])
     print("Topbar fixture host Qt:", qVersion(), "QML paths:", engine.importPathList(), flush=True)
     warnings = []
     engine.warnings.connect(lambda errors: warnings.extend(e.toString() for e in errors))
+    painted_counts = []
     for filename in expected:
         phase = next(p for p in ("clean-details", "details-clean", "restored", "stock", "clean")
                      if filename.endswith("-" + p + ".qml"))
@@ -149,9 +168,8 @@ def main():
         image = rendered()
         label = items["settingsHeading"]
         origin = label.mapToScene(QPointF(0, 0))
-        # The exact foreground-RGB assertion failed on Windows Qt 5.15.2.
-        # Distinguish missing paint from antialiasing/DPI differences rather
-        # than assuming which caused it. Map logical bounds to capture pixels.
+        # A resolved font/property is not proof that the label paints. Map
+        # logical bounds to capture pixels and keep the differential check.
         # Prove this very Text paints: render it at zero opacity with unchanged
         # Column geometry, then demand foreground contrast against that control
         # image. A hidden/blank/nonpainting label still fails, not a relaxed
@@ -180,12 +198,14 @@ def main():
                   "bounds", origin.x(), origin.y(), label.width(), label.height(),
                   "capture", image.width(), image.height(), "pixel delta", ink, flush=True)
         assert ink >= 5, (filename, "Settings label did not paint", ink, sx, sy)
+        painted_counts.append(ink)
         if filename == "element-clean-details.qml":
             assert image.save(str(root / ("clean-topbar-qt5.png" if QT5 else "clean-topbar-qt6.png")))
         window.hide()
         window.deleteLater()
         QTest.qWait(10)
     assert not warnings, "\n".join(warnings)
+    print("Settings label differential pixels: minimum", min(painted_counts), "across", len(painted_counts), "scenes", flush=True)
     print("PASS: 20 production-written topbar scenes, both native models/owning-item shapes and callbacks; menu stays hidden after reload/imperative show/resize/window restore; physical Settings input and painted text survive; one combined removal collapses details and gives equal top/bottom name spacing in Qt " + ("5" if QT5 else "6"))
     print("LIMIT: authored native-contract scenes, not an installed player's native window or physical GPU verification")
     return 0

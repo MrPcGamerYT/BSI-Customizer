@@ -152,12 +152,26 @@ These are two separate controls in **PATCHER → Player interface**:
 The application self-test includes both orders on synthetic resources and the
 selected untouched player reference. For physical Qt contract-scene checks,
 set `BSI_TOPBAR_TEST_FIXTURES` to an empty directory when running `--selftest`,
-then run `tests/clean_player_ui_gui_test.py` with the same variable. Repeat in a
-separate process with `BSI_TEST_QT_API=PyQt5`. The 20 production-written scenes
-cover both native visibility models, owning-item shapes, callbacks, imperative
-re-show attempts, resize/window restore, physical Settings clicks, painted text,
-and equal top/bottom name spacing. These authored scenes do not certify a real
-installed player; carry out the manual checks above too.
+then run `python tests/run_qt_runtime_test.py tests/clean_player_ui_capture_test.py`
+with the same variable. Repeat in a separate process with
+`BSI_TEST_QT_API=PyQt5`. The 20 production-written scenes cover both native
+visibility models, owning-item shapes, callbacks, imperative re-show attempts,
+resize/window restore, physical Settings clicks, painted text, and equal
+top/bottom name spacing.
+
+The independent host explicitly loads the repository's OFL-licensed Inter
+font before creating QML. Qt 5's Windows offscreen backend uses a FreeType font
+database rather than ordinary Windows installed-font discovery; without a
+supplied font, its box engine can measure a heading while painting no glyphs.
+The capture runner repeats all 20 unchanged scenes with host/default and
+isolated font search paths. A separately staged transparent-heading negative
+must fail the original rendered-text assertion (at least 5 brighter pixels,
+each with RGB-sum contrast greater than 96). It cannot pass on an arbitrary
+exception. Original exported QML stays byte-identical; case logs and failure
+paint/control PNGs are retained under `capture-validation/`. This fixes the
+authored test host, not production player fonts, and does not weaken the paint
+check. These scenes do not certify a real installed player; carry out the
+manual checks above too.
 
 ## Default pack and custom-icon regression
 
