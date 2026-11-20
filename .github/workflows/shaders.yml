@@ -30,6 +30,8 @@ on:
       - 'src/core/ZopfliAllocator.h'
       - 'src/core/ZopfliMatch.cmake'
       - 'tests/settings_panel_window_budget_test.py'
+      - 'tests/settings_panel_glass_test.py'
+      - '.harness/settings_window_preview.py'
       - 'tests/fixtures/settings-window-*'
       - 'src/third_party/minhook/**'
       - 'src/third_party/vulkan/**'
@@ -244,6 +246,10 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Native Settings contract fixture failed' }
           python tests/shaders/run_ci_tests.py --command python -X faulthandler -u tests/shaders_native_settings_test.py --missing-module
           if ($LASTEXITCODE -ne 0) { throw 'Missing shader module fallback failed' }
+      - name: Actual generated glass Settings materials and native input on the independent Windows Qt host
+        env:
+          BSI_TEST_QT_API: ${{ matrix.python-api }}
+        run: python tests/run_qt_runtime_test.py tests/settings_panel_glass_test.py
       - name: Record limits rather than claim universal support
         shell: pwsh
         run: "'Windows Qt fixture + WARP API tests only. Not HD-Player category navigation, game presentation hooks or physical Intel/AMD/NVIDIA certification. No merge authorized by these tests alone.' | Out-File $env:GITHUB_STEP_SUMMARY -Append"

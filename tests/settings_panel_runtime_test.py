@@ -66,7 +66,7 @@ match = re.search(
 )
 assert match, "Could not find the generated Settings-window QML template"
 replacement = match.group(1)
-assert "BSI v17" in replacement
+assert "BSI v18" in replacement
 assert "pSettingsItems.pSettingElements" in replacement
 # The About page publishes the hidden-tab list and the icon map to the shell.
 # It must find that shell by walking up: counting parents landed on the window
@@ -79,7 +79,7 @@ assert "function fOnQmlLoaded(){var p=parent;while(p&&p.bIcons===undefined)p=p.p
 # bHidden channel buys room for the selection effect in legacy resource slots.
 assert "property var bHidden" not in replacement, "hidden sentinels use the single icon-map channel"
 assert "property var bIcons:({})" in replacement, "the shell must declare bIcons"
-assert "property var bsiHiddenTabs:@@BSI_HIDDEN_TABS@@" in cpp
+assert "property var bsiHiddenTabs:" not in cpp, "the unused hidden list must not duplicate numeric icon-map sentinels"
 # A tab icon may only be an SVG: validateAssetBytes() rejects any other MIME for
 # that kind. Rasterising an oversized icon therefore produced an asset that the
 # very next step refused, and the icon disappeared from the rebuilt page with no
@@ -209,7 +209,7 @@ assert "Rectangle{anchors.fill:parent;radius:6;border.color:index==pCurrentTabIn
 assert "GraphicalEffects" not in replacement and "ShaderEffect" not in replacement, \
     "selection must work on both player Qt generations without optional effects"
 assert "Rectangle{id:r;property var c:UiTheme.colors;anchors.fill:parent;radius:14;color:r.c.primary80" in replacement, \
-    "the window itself stays a single flat rounded surface"
+    "the window keeps its native base colour; the About-hosted material decorates that surface"
 assert "StackLayout{id:iSelectedSettingControl;anchors.fill:parent;currentIndex:pCurrentTabIndex" in replacement
 # Keep a coarse template-bloat guard, but this is not proof that the compressed
 # whole window fits: native callbacks/prefix and compression entropy matter too.
@@ -251,10 +251,10 @@ assert about_marker.group(1) in about_doc, (
     "the rebuild refuses to write a page that fails this check")
 
 about_payload = len(zlib.compress(about_doc.encode(), 9))
-assert about_payload <= 1700, (
+assert about_payload <= 1950, (
     f"the About page compresses to {about_payload} bytes with one embedded icon; "
     "the smallest known player slot is 2337 bytes and a logo goes in the same "
-    "document, so keep it comfortably below that"
+    "document; the complete 12/13-icon cases are separately pinned below 2337"
 )
 assert "bsiAboutDeveloperName" in about_doc and "bsiAboutDeveloperLink" in about_doc, \
     "compacting the About page must keep its object names"
@@ -419,6 +419,7 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
     obj.setWidth(player.width)
     obj.setHeight(player.height)
     obj.setParentItem(window.contentItem())
+    obj.setParent(window)
     window.show()
     obj.setVisible(True)
     QTest.qWait(120)
@@ -627,8 +628,8 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
     assert about_match, "Could not find the generated About-page QML template"
     about_qml = about_match.group(1)
     about_qml = about_qml.replace(
-        "import QtQuick.Layouts 1.15",
-        "import QtQuick.Layouts 1.15\nimport BsiSettingsFixture 1.0",
+        "import QtQuick.Controls 2.15",
+        "import QtQuick.Controls 2.15\nimport BsiSettingsFixture 1.0",
     )
     about_qml = about_qml.replace("@@BSI_DEVELOPER@@", '"Runtime Developer"')
     about_qml = about_qml.replace("@@BSI_TAGLINE@@", '"Runtime subtitle"')
@@ -658,8 +659,8 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
         raise AssertionError("About QML failed to create: " + "\n".join(e.toString() for e in about_component.errors()))
     about_tree = visual_items(about_obj)
     about_links = [item for item in about_tree if item.objectName() == "bsiAboutDeveloperLink"]
-    assert about_obj.property("pDeveloperName") == "Runtime Developer", "About page did not retain the customizable developer name"
-    assert about_obj.property("pDeveloperTagline") == "Runtime subtitle", "About page did not render the customizable subtitle"
+    assert next(i for i in about_tree if i.objectName() == "bsiAboutDeveloperName").property("text") == "Runtime Developer", "About page did not retain the customizable developer name"
+    assert next(i for i in about_tree if i.objectName() == "bsiAboutDeveloperTagline").property("text") == "Runtime subtitle", "About page did not render the customizable subtitle"
     assert any(item.objectName() == "bsiAboutDeveloperTagline" for item in about_tree), "About page did not create its subtitle element"
     assert len(about_links) == 2, "About page did not render the configured developer links"
     assert any(item.objectName() == "bsiAboutEmulatorLogo" for item in about_tree), "About page did not create its centered emulator logo"
@@ -667,7 +668,7 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
     # left of its scroll area, so the logo, name and link rows all sat left of
     # centre in a window that is otherwise centred. It is centred in its
     # viewport, and no fixed contentWidth overrides that.
-    assert "ColumnLayout{id:iAboutD;width:Math.min(440,parent.width-24);anchors.horizontalCenter:parent.horizontalCenter" \
+    assert "Column{id:d;width:Math.min(440,parent.width-24);anchors.horizontalCenter:parent.horizontalCenter" \
         in about_source, "the About content column must be centred in its viewport"
     assert "contentWidth:availableWidth" in about_source, \
         "the About content must span the viewport so its column is centred in the page"
@@ -682,6 +683,7 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
                          if item.metaObject().className().endswith("Loader")
                          and item.isVisible() and item.width() > 100)
     about_obj.setParentItem(active_loader)
+    about_obj.setParent(active_loader)
     about_obj.setWidth(active_loader.width())
     about_obj.setHeight(active_loader.height())
     logo = next(item for item in about_tree if item.objectName() == "bsiAboutEmulatorLogo")
@@ -724,6 +726,7 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
     about_child = mounted_component.create()
     assert about_child is not None, "The generated About page did not load inside the shell"
     about_child.setParentItem(page_loader)
+    about_child.setParent(page_loader)
     QTest.qWait(30)
     # The player's Loader calls this after loading; do the same.
     from PySide6.QtCore import QMetaObject
@@ -824,8 +827,12 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
     about_component.deleteLater()
     mounted_component.deleteLater()
     window.close()
-    obj.deleteLater()
+    window.deleteLater()
     component.deleteLater()
+    # Destroy mounted objects before their engine-owned theme singleton.
+    from PySide6.QtCore import QCoreApplication, QEvent
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    QTest.qWait(10)
     engine.deleteLater()
     QTest.qWait(10)
 

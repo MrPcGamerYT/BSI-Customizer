@@ -131,21 +131,40 @@ def main():
         assert window.property("settingsClicks") == before + 1, (filename, "sidebar Settings no longer accepts physical clicks")
         # The matching source checks above are not enough: Settings text must
         # actually paint, and the hidden menu's subtree must paint nothing.
-        capture = window.contentItem().grabToImage()
-        spy = QSignalSpy(capture.ready)
-        if capture.image().isNull():
-            assert spy.wait(2000), filename
-        image = capture.image()
-        assert not image.isNull(), filename
+        def rendered():
+            capture = window.contentItem().grabToImage()
+            spy = QSignalSpy(capture.ready)
+            if capture.image().isNull():
+                assert spy.wait(2000), filename
+            result = capture.image()
+            assert not result.isNull(), filename
+            return result
+
+        image = rendered()
         label = items["settingsHeading"]
         origin = label.mapToScene(QPointF(0, 0))
+        # The exact foreground-RGB assertion failed on Windows Qt 5.15.2.
+        # Distinguish missing paint from antialiasing/DPI differences rather
+        # than assuming which caused it. Map logical bounds to capture pixels.
+        # Prove this very Text paints: render it at zero opacity with unchanged
+        # Column geometry, then demand foreground contrast against that control
+        # image. A hidden/blank/nonpainting label still fails, not a relaxed
+        # source-only or 'some bright pixel anywhere' assertion.
+        opacity = label.property("opacity")
+        assert opacity > 0
+        label.setProperty("opacity", 0)
+        control = rendered()
+        label.setProperty("opacity", opacity)
+        assert (image.width(), image.height()) == (control.width(), control.height())
+        sx, sy = image.width() / window.width(), image.height() / window.height()
         ink = 0
-        for y in range(round(origin.y()), min(image.height(), round(origin.y() + label.height()))):
-            for x in range(round(origin.x()), min(image.width(), round(origin.x() + label.width()))):
-                c = image.pixelColor(x, y)
-                if abs(c.red() - 231) <= 2 and abs(c.green() - 237) <= 2 and abs(c.blue() - 245) <= 2:
+        for y in range(round(origin.y() * sy), min(image.height(), round((origin.y() + label.height()) * sy))):
+            for x in range(round(origin.x() * sx), min(image.width(), round((origin.x() + label.width()) * sx))):
+                painted, blank = image.pixelColor(x, y), control.pixelColor(x, y)
+                if (painted.red() + painted.green() + painted.blue()
+                        > blank.red() + blank.green() + blank.blue() + 96):
                     ink += 1
-        assert ink >= 5, (filename, "Settings label did not paint")
+        assert ink >= 5, (filename, "Settings label did not paint", ink, sx, sy)
         if filename == "element-clean-details.qml":
             assert image.save(str(root / ("clean-topbar-qt5.png" if QT5 else "clean-topbar-qt6.png")))
         window.hide()

@@ -107,10 +107,17 @@ values = {
     "LINKS": links,
     "LOGO_SOURCE": json.dumps(root + hashlib.sha256(b"logo").hexdigest()[:24] + ".png"),
 }
-doc = about.group(1)
-for token, value in values.items():
-    doc = doc.replace("@@BSI_" + token + "@@", value)
-assert "@@BSI_" not in doc
-payload = 4 + len(zlib.compress(doc.encode(), 9))
-assert payload <= 2337, f"all twelve default icons, logo and links must fit the known About slot: {payload} > 2337"
-print(f"PASS: complete 12-tab referenced-artwork payload fits the fixed About slot ({payload}/2337 bytes)")
+for count in (12, 13):
+    # The glass helper shares this slot. Include the real installed-Shaders
+    # case, not just the original twelve tabs or one highly compressible icon.
+    current_icons = {str(i): root + hashlib.sha256(str(i).encode()).hexdigest()[:24] + ".png"
+                     for i in range(count)}
+    current = dict(values, TAB_ICONS="(" + json.dumps(current_icons, separators=(",", ":")) + ")")
+    doc = about.group(1)
+    for token, value in current.items():
+        doc = doc.replace("@@BSI_" + token + "@@", value)
+    assert "@@BSI_" not in doc
+    assert "function fGlassAll()" in doc and "c.a*.88" in doc
+    payload = 4 + len(zlib.compress(doc.encode(), 9))
+    assert payload <= 2337, f"complete glass + {count} independent icons, logo and four links exceed About: {payload} > 2337"
+    print(f"PASS: complete glass + {count}-tab referenced-artwork payload fits the fixed About slot ({payload}/2337 bytes)")

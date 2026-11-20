@@ -1716,8 +1716,9 @@ Item {
                                     text: qsTr("Customize the in-player Settings window: centre the "
                                                + "native page content, choose which native tabs stay "
                                                + "visible, give each tab its own SVG icon and edit the "
-                                               + "About logo, name and links. These choices are saved "
-                                               + "on this PC; the selected HD-Player.exe changes only "
+                                               + "About logo, name and links. Glass surfaces, selected "
+                                               + "tabs and native controls follow the player theme. "
+                                               + "These choices are saved on this PC; the selected HD-Player.exe changes only "
                                                + "when you apply.")
                                     color: Theme.textDim
                                     font.pixelSize: 11

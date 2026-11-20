@@ -74,6 +74,23 @@ int main(int argc, char **argv)
         }
     }
     {
+        // v18 changes the material, not the native icon/Loader/dirty-state
+        // anchors. Retain v17 compatibility and exact removal on both designs.
+        QString glass = baseWindow;
+        glass.replace(QStringLiteral("//BSI v17"), QStringLiteral("//BSI v18"));
+        const auto plan = ShaderSettingsSource::prepare(player(), glass, counts);
+        require(plan.ok && plan.tabIndex == 12, QStringLiteral("glass Settings shader integration: ") + plan.error);
+        QString restored, error;
+        require(ShaderSettingsSource::removeWindow(plan.window, &restored, &error) && restored == glass,
+                QStringLiteral("exact v18 glass window removal: ") + error);
+        const auto repeat = ShaderSettingsSource::prepare(plan.player, plan.window, counts);
+        require(repeat.ok && repeat.alreadyApplied && repeat.window == plan.window,
+                QStringLiteral("v18 glass shader idempotence: ") + repeat.error);
+        glass.replace(QStringLiteral("//BSI v18"), QStringLiteral("//BSI v19"));
+        require(!ShaderSettingsSource::prepare(player(), glass, counts).ok,
+                QStringLiteral("unknown future Settings designs must not be guessed"));
+    }
+    {
         QString restored, error;
         require(ShaderSettingsSource::hasPlayer(ShaderSettingsLegacyFixture::player)
                     && ShaderSettingsSource::hasWindow(ShaderSettingsLegacyFixture::window),

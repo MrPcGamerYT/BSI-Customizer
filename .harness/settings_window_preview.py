@@ -24,12 +24,22 @@ from pathlib import Path
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("QT_QUICK_BACKEND", "software")
 
-from PySide6.QtCore import QBuffer, QEvent, QIODevice, QObject, QPoint, QPointF, QTimer, QUrl, Qt, Slot
-from PySide6.QtGui import QColor, QFont, QFontDatabase, QGuiApplication, QImage, QMouseEvent, QPainter, QWheelEvent
-from PySide6.QtQml import QQmlComponent, QQmlEngine
-from PySide6.QtQuick import QQuickWindow
-from PySide6.QtSvg import QSvgRenderer
-from PySide6.QtTest import QTest
+QT5 = os.environ.get("BSI_TEST_QT_API") == "PyQt5"
+os.environ.setdefault("QT_QUICK_CONTROLS_STYLE", "Default" if QT5 else "Basic")
+if QT5:
+    from PyQt5.QtCore import QBuffer, QCoreApplication, QEvent, QIODevice, QLibraryInfo, QObject, QPoint, QPointF, QTimer, QUrl, Qt, pyqtSlot as Slot
+    from PyQt5.QtGui import QColor, QFont, QFontDatabase, QGuiApplication, QImage, QMouseEvent, QPainter, QWheelEvent
+    from PyQt5.QtQml import QQmlComponent, QQmlEngine
+    from PyQt5.QtQuick import QQuickWindow
+    from PyQt5.QtSvg import QSvgRenderer
+    from PyQt5.QtTest import QSignalSpy, QTest
+else:
+    from PySide6.QtCore import QBuffer, QCoreApplication, QEvent, QIODevice, QLibraryInfo, QObject, QPoint, QPointF, QTimer, QUrl, Qt, Slot
+    from PySide6.QtGui import QColor, QFont, QFontDatabase, QGuiApplication, QImage, QMouseEvent, QPainter, QWheelEvent
+    from PySide6.QtQml import QQmlComponent, QQmlEngine
+    from PySide6.QtQuick import QQuickWindow
+    from PySide6.QtSvg import QSvgRenderer
+    from PySide6.QtTest import QSignalSpy, QTest
 
 REPO = Path(__file__).resolve().parents[1]
 LABELS = ["Performance", "Display", "Graphics", "Game settings", "Devices", "Gamepad",
@@ -83,7 +93,20 @@ class SampleBridge(QObject):
 
 
 class SettingsPreview:
-    def __init__(self):
+    def __init__(self, page_source=None, about_links=()):
+        # The independent host must not import a different build SDK's QML/QPA
+        # plugins (particularly Qt 6's qmldir files in a Qt 5 test process).
+        if QT5:
+            plugins = QLibraryInfo.location(QLibraryInfo.PluginsPath)
+            qml = QLibraryInfo.location(QLibraryInfo.Qml2ImportsPath)
+        else:
+            plugins = QLibraryInfo.path(QLibraryInfo.LibraryPath.PluginsPath)
+            qml = QLibraryInfo.path(QLibraryInfo.LibraryPath.QmlImportsPath)
+        os.environ["QT_PLUGIN_PATH"] = plugins
+        os.environ["QT_QPA_PLATFORM_PLUGIN_PATH"] = str(Path(plugins) / "platforms")
+        os.environ.pop("QML2_IMPORT_PATH", None)
+        os.environ.pop("QML_IMPORT_PATH", None)
+        QCoreApplication.setLibraryPaths([plugins])
         self.app = QGuiApplication.instance() or QGuiApplication([])
         self.app.setQuitOnLastWindowClosed(False)
         QFontDatabase.addApplicationFont(str(REPO / "src/qml/fonts/Inter.ttf"))
@@ -134,12 +157,12 @@ Item {
         about = re.search(r'QString generated = QStringLiteral\(R"QML\((.*?)\)QML"\);', cpp, re.S)[1]
         values = {"DEVELOPER": json.dumps("BSI Customizer"), "TAGLINE": json.dumps("Settings window · live shell preview"),
                   "LOGO_SOURCE": json.dumps(icons["11"]), "TAB_ICONS": "(" + json.dumps(icons) + ")",
-                  "HIDDEN_TABS": "[]", "LINKS": ""}
+                  "HIDDEN_TABS": "[]", "LINKS": ",".join(json.dumps(link) for link in about_links)}
         for key, value in values.items():
             about = about.replace("@@BSI_" + key + "@@", value)
-        about = about.replace("import QtQuick.Layouts 1.15", "import QtQuick.Layouts 1.15\nimport BsiGuiFixture 1.0")
+        about = about.replace("import QtQuick.Controls 2.15", "import QtQuick.Controls 2.15\nimport BsiGuiFixture 1.0")
         (root / "About.qml").write_text(about)
-        (root / "DemoPage.qml").write_text((REPO / ".harness/settings_preview_page.qml").read_text())
+        (root / "DemoPage.qml").write_text(page_source or (REPO / ".harness/settings_preview_page.qml").read_text())
         model = [{"pButtonText": label, "pShowRedDot": False,
                   "pQmlSource": "About.qml" if i == 11 else "DemoPage.qml",
                   "pComponentArgs": {} if i == 11 else {"pageIndex": i, "pageTitle": label},
@@ -165,7 +188,7 @@ Window {
         path = root / "SettingsHost.qml"
         path.write_text(host)
         self.engine = QQmlEngine()
-        self.engine.addImportPath(str(root))
+        self.engine.setImportPathList([str(root), qml, "qrc:/qt-project.org/imports", "qrc:/qt/qml"])
         self.bridge = SampleBridge()
         self.player = QQuickWindow()
         self.player.setGeometry(0, 0, 1440, 900)
@@ -187,7 +210,14 @@ Window {
 
     def frame(self):
         if self.window.isVisible():
-            image = self.window.grabWindow()
+            # Qt 5's software renderer needs the public asynchronous item
+            # capture API rather than QQuickWindow::grabWindow().
+            capture = self.window.contentItem().grabToImage()
+            assert capture is not None
+            ready = QSignalSpy(capture.ready)
+            if capture.image().isNull():
+                assert ready.wait(2000), "Qt did not finish the Settings frame"
+            image = capture.image()
             assert not image.isNull(), "Qt did not render the Settings window"
             buffer = QBuffer()
             buffer.open(QIODevice.OpenModeFlag.WriteOnly)

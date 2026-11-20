@@ -5906,7 +5906,7 @@ Window {
                     if (file.name.compare(QLatin1String("UiSettingsWindow.qml"), Qt::CaseInsensitive) == 0)
                         rebuiltWindow = QString::fromUtf8(QtResources::readFile(panelImage, file));
                 }
-                check(rebuiltWindow.contains(QStringLiteral("BSI v17"))
+                check(rebuiltWindow.contains(QStringLiteral("BSI v18"))
                           && !rebuiltWindow.contains(QStringLiteral("property var bHidden"))
                           // The About page publishes the icon map into
                           // bIcons, so the shell has to declare it or that
@@ -6040,16 +6040,16 @@ Window {
                 check(logoSourceVerified
                           && (rebuiltAbout.contains(QStringLiteral("objectName: \"bsiAboutEmulatorLogo\""))
                               || rebuiltAbout.contains(QStringLiteral("objectName:\"bsiAboutEmulatorLogo\"")))
-                          // Layout children prefer an image's decoded implicit
-                          // size over bare width/height. Bound the logo even
-                          // when a custom/runtime PNG is hundreds of pixels tall.
-                          && rebuiltAbout.contains(QStringLiteral("Layout.preferredWidth:160;Layout.preferredHeight:60"))
-                          && rebuiltAbout.contains(QStringLiteral("Layout.maximumWidth:160;Layout.maximumHeight:60"))
+                          // The compact About now uses a Column (not a Layout),
+                          // so explicit bounds take precedence over decoded size.
+                          && rebuiltAbout.contains(QStringLiteral("width:160;height:60"))
+                          && rebuiltAbout.contains(QStringLiteral("Column{id:d;"))
                           && rebuiltAbout.contains(QStringLiteral("fillMode:Image.PreserveAspectFit"))
                           && (rebuiltAbout.contains(QStringLiteral("objectName: \"bsiAboutDeveloperName\""))
                               || rebuiltAbout.contains(QStringLiteral("objectName:\"bsiAboutDeveloperName\"")))
-                          && (rebuiltAbout.contains(QStringLiteral("text: pDeveloperName"))
-                              || rebuiltAbout.contains(QStringLiteral("text:pDeveloperName")))
+                          && rebuiltAbout.contains(QStringLiteral("text:\"BSI Panel Regression\""))
+                          && rebuiltAbout.contains(QStringLiteral("//BSI glass"))
+                          && rebuiltAbout.contains(QStringLiteral("function fGlassAll()"))
                           && rebuiltAbout.contains(QStringLiteral("BSI Panel Regression"))
                           && rebuiltAbout.contains(QStringLiteral("Repeater"))
                           // The About content is one centred column; it used
@@ -6107,7 +6107,7 @@ Window {
                     check(updatedWindow.contains(QStringLiteral("property var bIcons:({})"))
                               && updatedWindow.contains(QStringLiteral("width:c===''?-4:"))
                               && updatedWindow.contains(QStringLiteral("clip:true;orientation:Qt.Horizontal"))
-                              && updatedAbout.contains(QStringLiteral("property var bsiHiddenTabs:"))
+                              && !updatedAbout.contains(QStringLiteral("property var bsiHiddenTabs:"))
                               && (hiddenTabId.isEmpty() || updatedAbout.contains(hiddenTabKey))
                               // Unticking a tab used to change nothing after a
                               // patch: the hidden list was published into bHidden

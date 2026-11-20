@@ -52,7 +52,8 @@ const QString kWindowDesignMarkerV13 = QStringLiteral("BSI Settings v13");
 const QString kWindowDesignMarkerV14 = QStringLiteral("BSI Settings v14");
 const QString kWindowDesignMarkerV15 = QStringLiteral("BSI v15");
 const QString kWindowDesignMarkerV16 = QStringLiteral("BSI v16");
-const QString kWindowDesignMarker = QStringLiteral("BSI v17");
+const QString kWindowDesignMarkerV17 = QStringLiteral("BSI v17");
+const QString kWindowDesignMarker = QStringLiteral("BSI v18");
 const QString kAboutMarker = QStringLiteral("BSI CUSTOMIZER: redesigned About page v1");
 const QString kSchema = QStringLiteral("bsi.settings-panel.recovery");
 const QString kWindowLeaf = QStringLiteral("UiSettingsWindow.qml");
@@ -623,7 +624,7 @@ QString buildWindow(const QString &stock)
     // Keep the template small, but the *whole* compressed Window (including
     // native callbacks, copyright header and geometry helper) must fit the slot.
     // Template length alone cannot predict that compression budget.
-    QString replacement = QStringLiteral(R"QML(UiShadowContainer{//BSI v17
+    QString replacement = QStringLiteral(R"QML(UiShadowContainer{//BSI v18
 id:iSettingsWindowShadowContainer;anchors.fill:parent
 property var bIcons:({})
 Rectangle{id:r;property var c:UiTheme.colors;anchors.fill:parent;radius:14;color:r.c.primary80
@@ -680,12 +681,6 @@ QString buildAbout(const QString &developerName, const QString &tagline,
         rows += QStringLiteral("\n        { title: %1, url: %2 },")
             .arg(qmlString(label), qmlString(url));
     }
-    QString hiddenLiteral = QStringLiteral("[");
-    for (const QString &page : hiddenTabs) {
-        if (hiddenLiteral.size() > 1) hiddenLiteral += QLatin1Char(',');
-        hiddenLiteral += qmlString(page.toCaseFolded());
-    }
-    hiddenLiteral += QLatin1Char(']');
     QString iconLiteral = QStringLiteral("({");
     for (auto it = tabIcons.cbegin(); it != tabIcons.cend(); ++it) {
         if (iconLiteral.size() > 2) iconLiteral += QLatin1Char(',');
@@ -711,13 +706,32 @@ QString buildAbout(const QString &developerName, const QString &tagline,
     // compact - whitespace and repeated token spellings are the difference
     // between "the icon applies" and "needs 2495 bytes but its slot only holds
     // 2337".
-    // The logo is a ColumnLayout child: plain width/height lose to a decoded
-    // image's implicit size. Use preferred AND maximum layout hints so large
-    // native/custom artwork stays small without stretching its aspect ratio.
+    // A plain Column, explicit 160x60 image bounds and the public ItemDelegate
+    // replace the heavier nested Layouts/handmade link buttons. Identity strings
+    // bind directly to Text; the unused hidden-list property is retired (empty
+    // numeric icon-map entries still hide tabs). This funds the *entire* glass
+    // material inside the two existing resource slots, even with thirteen PNG
+    // URLs and four links. No companion QML/script/DLL or new resource is needed.
+    //
+    // About is eagerly loaded by the native Repeater even when its tab is hidden.
+    // Its bounded, visible-window-only pass decorates only the owning shell and
+    // that shell's public Control.popup content/background, never the global
+    // Overlay, shared UiTheme or other player windows. Existing gradients and
+    // native color/validation/focus/opacity bindings survive; only empty gradient
+    // slots gain theme-bound reflective/translucent stops. Qt 5/6 represent an
+    // unset Rectangle.gradient as either null OR undefined: use == null, guarded
+    // by the Rectangle border API, not === null (which silently left Qt 6 flat).
+    // Loader swaps and lazy popup/page layout are picked up without replacing
+    // native controls, indicators, signals, input, models or save/discard logic.
+    // Asset-based check/radio/toggle indicators get one purely visual glint child;
+    // it accepts no input and retains the original glyph, dimensions and state.
+    // Tiny badges/separators remain unchanged. Bound both visited nodes and the
+    // queue to 4096; pause the Timer when the Settings window is hidden. Public
+    // QtQuick 2.15 only: no optional blur/effects/private implementation imports.
     QString generated = QStringLiteral(R"QML(import QtQuick 2.15
 import QtQuick.Controls 2.15
-import QtQuick.Layouts 1.15
-Item{objectName:"aboutSettings"
+import QtQuick.Window 2.15
+Item{id:a;objectName:"aboutSettings"
 property bool pUpdateAvailable:false
 property string pUpdateVersion:""
 property string pMoreInfoURL:""
@@ -725,69 +739,35 @@ property string pDownloadURL:""
 property bool pIsInCompatibleUpdateVersion:false
 property string pParentWindow:""
 property string pShortDisplayName:""
-property string pDeveloperName:@@BSI_DEVELOPER@@
-property string pDeveloperTagline:@@BSI_TAGLINE@@
-property var bsiHiddenTabs:@@BSI_HIDDEN_TABS@@
 property var bsiTabIcons:@@BSI_TAB_ICONS@@
 property var pDeveloperLinks:[@@BSI_LINKS@@]
+property var c:UiTheme.colors
+property color edge:Qt.rgba(c.primary10.r,c.primary10.g,c.primary10.b,.16)
 // BSI CUSTOMIZER: redesigned About page v1
-ColumnLayout{anchors.fill:parent;spacing:0
-ScrollView{Layout.fillWidth:true;Layout.fillHeight:true;clip:true
-background:Rectangle{color:"transparent"}
-contentWidth:availableWidth;contentHeight:iAboutD.implicitHeight+48
-ColumnLayout{id:iAboutD;width:Math.min(440,parent.width-24);anchors.horizontalCenter:parent.horizontalCenter
-Layout.alignment:Qt.AlignHCenter|Qt.AlignTop;spacing:16
-Item{Layout.fillWidth:true;Layout.preferredHeight:28}
-Image{objectName:"bsiAboutEmulatorLogo";source:@@BSI_LOGO_SOURCE@@
-Layout.preferredWidth:160;Layout.preferredHeight:60;Layout.maximumWidth:160;Layout.maximumHeight:60
-fillMode:Image.PreserveAspectFit;Layout.alignment:Qt.AlignHCenter}
-Text{objectName:"bsiAboutDeveloperName";text:pDeveloperName;font:UiTheme.fonts.bodyLarge
-color:UiTheme.colors.primary10;horizontalAlignment:Text.AlignHCenter
-wrapMode:Text.Wrap;Layout.fillWidth:true}
-Text{objectName:"bsiAboutDeveloperTagline";visible:pDeveloperTagline.length>0
-text:pDeveloperTagline;font:UiTheme.fonts.bodySmall;color:UiTheme.colors.primary30
-horizontalAlignment:Text.AlignHCenter;wrapMode:Text.Wrap;Layout.fillWidth:true}
-Rectangle{Layout.fillWidth:true;Layout.preferredHeight:1;color:UiTheme.colors.primary60}
+ScrollView{anchors.fill:parent;clip:true;contentWidth:availableWidth;contentHeight:d.height+24;background:null
+Column{id:d;width:Math.min(440,parent.width-24);anchors.horizontalCenter:parent.horizontalCenter;spacing:16;topPadding:28;bottomPadding:28
+Image{objectName:"bsiAboutEmulatorLogo";source:@@BSI_LOGO_SOURCE@@;width:160;height:60;fillMode:Image.PreserveAspectFit;anchors.horizontalCenter:parent.horizontalCenter}
+Text{objectName:"bsiAboutDeveloperName";text:@@BSI_DEVELOPER@@;font:UiTheme.fonts.bodyLarge;color:a.c.primary10;horizontalAlignment:Text.AlignHCenter;wrapMode:Text.Wrap;width:parent.width}
+Text{objectName:"bsiAboutDeveloperTagline";visible:text.length>0;text:@@BSI_TAGLINE@@;font:UiTheme.fonts.bodySmall;color:a.c.primary30;horizontalAlignment:Text.AlignHCenter;wrapMode:Text.Wrap;width:parent.width}
+Rectangle{width:parent.width;height:1;color:a.c.primary60}
 Repeater{model:pDeveloperLinks
-delegate:Rectangle{objectName:"bsiAboutDeveloperLink"
-Layout.fillWidth:true;Layout.preferredHeight:42
-property bool hovered:false
-radius:10;border.width:1
-color:hovered?Qt.rgba(UiTheme.colors.accentNormal.r,UiTheme.colors.accentNormal.g,UiTheme.colors.accentNormal.b,.16)
-:Qt.rgba(UiTheme.colors.primary60.r,UiTheme.colors.primary60.g,UiTheme.colors.primary60.b,.42)
-border.color:hovered?UiTheme.colors.accentNormal:UiTheme.colors.primary60
-Text{anchors.left:parent.left;anchors.right:parent.right;anchors.leftMargin:14
-anchors.rightMargin:38;anchors.verticalCenter:parent.verticalCenter
-text:modelData.title;font:UiTheme.fonts.bodyMedium;elide:Text.ElideRight
-color:parent.hovered?UiTheme.colors.accentNormal:UiTheme.colors.primary10}
-Text{anchors.right:parent.right;anchors.rightMargin:14
-anchors.verticalCenter:parent.verticalCenter;text:"\u2197"
-color:UiTheme.colors.accentNormal;font.pixelSize:16}
-MouseArea{anchors.fill:parent;hoverEnabled:true;cursorShape:Qt.PointingHandCursor
-onEntered:parent.hovered=true;onExited:parent.hovered=false
-onClicked:{var t=String(modelData.url||"");if(/^https?:\/\//i.test(t))Qt.openUrlExternally(t)}}}}
-Text{visible:pDeveloperLinks.length===0
-text:qsTranslate("QObject","Add up to four developer links in BSI Customizer.")
-color:UiTheme.colors.primary30;font:UiTheme.fonts.bodySmall
-horizontalAlignment:Text.AlignHCenter;wrapMode:Text.Wrap;Layout.fillWidth:true}
-Item{Layout.fillWidth:true;Layout.preferredHeight:28}}}}
-
-// Publish icons and hidden sentinels by walking up to the owning shell.
+delegate:ItemDelegate{objectName:"bsiAboutDeveloperLink";width:d.width;height:42;hoverEnabled:true;leftPadding:14;rightPadding:38;text:modelData.title;font:UiTheme.fonts.bodyMedium;palette.text:hovered?a.c.accentNormal:a.c.primary10
+background:Rectangle{radius:10;color:parent.hovered?Qt.rgba(a.c.accentNormal.r,a.c.accentNormal.g,a.c.accentNormal.b,.16):Qt.rgba(a.c.primary60.r,a.c.primary60.g,a.c.primary60.b,.42);border.color:parent.hovered?a.c.accentNormal:a.c.primary60}
+Text{anchors{right:parent.right;rightMargin:14;verticalCenter:parent.verticalCenter}text:"\u2197";color:a.c.accentNormal;font.pixelSize:16}
+onClicked:if(/^https?:\/\//i.test(modelData.url))Qt.openUrlExternally(modelData.url)}}
+}}
 function fOnQmlLoaded(){var p=parent;while(p&&p.bIcons===undefined)p=p.parent;if(p)p.bIcons=bsiTabIcons}
-function fCheckForUpdateCallback(apiCallStatus,jsonData){
-if(apiCallStatus===0){var j=JSON.parse(jsonData)
-pUpdateAvailable=String(j.update_available).toLowerCase()==="true"
-pIsInCompatibleUpdateVersion=pUpdateAvailable&&String(j.update_details.is_build_compatible).toLowerCase()!=="true"
-if(pUpdateAvailable){pUpdateVersion=j.update_details.client_version
-pMoreInfoURL=j.update_details.detailed_changelogs_url
-pDownloadURL=j.update_details.download_url}}
-else{pUpdateAvailable=false;pIsInCompatibleUpdateVersion=false}}
+function fCheckForUpdateCallback(s,d){if(s===0){var j=JSON.parse(d);pUpdateAvailable=String(j.update_available).toLowerCase()==="true";pIsInCompatibleUpdateVersion=pUpdateAvailable&&String(j.update_details.is_build_compatible).toLowerCase()!=="true";if(pUpdateAvailable){pUpdateVersion=j.update_details.client_version;pMoreInfoURL=j.update_details.detailed_changelogs_url;pDownloadURL=j.update_details.download_url}}else{pUpdateAvailable=false;pIsInCompatibleUpdateVersion=false}}
 function fUpdateShortDisplayName(n){pShortDisplayName=String(n||"")}
+//BSI glass
+Component{id:g;Gradient{property var s;property color c:s.color;GradientStop{color:Qt.lighter(c,1.7)}GradientStop{position:1;color:Qt.rgba(c.r,c.g,c.b,c.a*.88)}}}
+Component{id:shine;Rectangle{objectName:"bsiGlass";anchors.fill:parent;z:1;property var o;radius:o.autoExclusive||width>height*1.3?height/2:3;color:a.edge}}
+function fGlassAll(){var r=parent;while(r&&r.bIcons===undefined)r=r.parent;if(!r)return;var q=[r],n=0;while(q.length&&n++<4096){var o=q.pop();if(!o)continue;if(o.border&&o.gradient==null&&o.height>3&&o.width>7){o.gradient=g.createObject(o,{s:o});if(!o.radius)o.radius=6;if(o.c===a.c)o.border.color=Qt.binding(()=>a.edge)}if(o.indicator&&o.indicator.asset!==undefined){var c=o.indicator.children,j=0;while(j<c.length&&c[j].objectName!=='bsiGlass')j++;if(j===c.length)shine.createObject(o.indicator,{o:o})}if(o.popup&&q.length<4095)q.push(o.popup.background,o.popup.contentItem);var c=o.children||[];for(var i=0;i<c.length&&q.length<4096;i++)q.push(c[i])}}
+Timer{interval:160;running:a.Window.window&&a.Window.window.visible;repeat:true;triggeredOnStart:true;onTriggered:fGlassAll()}
 }
 )QML");
     generated.replace(QStringLiteral("@@BSI_DEVELOPER@@"), qDeveloper);
     generated.replace(QStringLiteral("@@BSI_TAGLINE@@"), qTagline);
-    generated.replace(QStringLiteral("@@BSI_HIDDEN_TABS@@"), hiddenLiteral);
     generated.replace(QStringLiteral("@@BSI_TAB_ICONS@@"), iconLiteral);
     generated.replace(QStringLiteral("@@BSI_LINKS@@"), rows);
     generated.replace(QStringLiteral("@@BSI_LOGO_SOURCE@@"), qmlString(logoSource));
@@ -1025,7 +1005,7 @@ bool hasWindowMarker(const QString &text)
         || text.contains(kWindowDesignMarkerV10) || text.contains(kWindowDesignMarkerV12)
         || text.contains(kWindowDesignMarkerV13) || text.contains(kWindowDesignMarkerV14)
         || text.contains(kWindowDesignMarkerV15) || text.contains(kWindowDesignMarkerV16)
-        || text.contains(kWindowDesignMarker);
+        || text.contains(kWindowDesignMarkerV17) || text.contains(kWindowDesignMarker);
 }
 
 // Standalone Image sources do not inherit the QML/HTML text's currentColor.
@@ -1392,6 +1372,8 @@ State analyze(const QString &exePath)
         state.detail = QStringLiteral("The Settings window has %1 native page roots and a verified %2-resource QML dependency closure. Source files are ready; no emulator UI change is claimed yet.")
             .arg(state.settingsPageCount).arg(state.settingsQmlResourceCount);
     }
+    if (state.applied && !sources.window.text.contains(kWindowDesignMarker))
+        state.detail += QStringLiteral(" An older Settings design is installed; choose Update rebuilt Settings panel to apply the glass materials.");
     if (ShaderSettingsSource::hasWindow(sources.window.text)) {
         state.restorable = false;
         state.detail += QStringLiteral(" Remove the dependent native Shaders integration before restoring the underlying Settings design.");
@@ -1894,7 +1876,7 @@ QVariantMap apply(const QString &exePath, const QString &developerName,
                         .arg(referencedAssets);
     }
     return {{QStringLiteral("ok"), true},
-            {QStringLiteral("msg"), QStringLiteral("The screenshot-sized Settings window, themed selected tabs/icons and customizable About page were applied. A selective recovery snapshot was saved; restart BlueStacks to see it.") + assetNote},
+            {QStringLiteral("msg"), QStringLiteral("The glass Settings window, themed selected/hover tabs, native-control materials and customizable About page were applied. A selective recovery snapshot was saved; restart BlueStacks to see it.") + assetNote},
             {QStringLiteral("recovery"), result.value(QStringLiteral("id"))}};
 }
 
