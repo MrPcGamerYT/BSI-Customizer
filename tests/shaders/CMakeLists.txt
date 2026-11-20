@@ -36,6 +36,8 @@ if(TARGET Qt${QT_VERSION_MAJOR}::Core)
     add_test(NAME shader-resource-compression COMMAND shader-resource-compression-test)
     if(BSI_ZOPFLI_TESTING)
         add_executable(shader-bounded-compression-test bounded_zopfli_test.c)
+        set_target_properties(shader-bounded-compression-test PROPERTIES
+            C_STANDARD 99 C_STANDARD_REQUIRED ON AUTOMOC OFF AUTOUIC OFF AUTORCC OFF)
         target_include_directories(shader-bounded-compression-test PRIVATE "${core_dir}")
         target_compile_definitions(shader-bounded-compression-test PRIVATE BSI_ZOPFLI_TESTING)
         target_link_libraries(shader-bounded-compression-test PRIVATE bsi_zopfli)

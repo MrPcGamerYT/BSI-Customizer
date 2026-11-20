@@ -28,4 +28,11 @@ string(SHA256 corrected "${source}")
 if(NOT corrected STREQUAL "557de25382d40718ef590ed8d71056d247f9b2843081d3f37845c64a6291fa95")
     message(FATAL_ERROR "Unexpected corrected lz77.c bytes; refusing to compile")
 endif()
-file(WRITE "${BSI_ZOPFLI_MATCH_OUTPUT}" "${source}")
+# file(WRITE) can translate LF to native CRLF on Windows. configure_file's
+# explicit newline mode produces the exact pinned bytes on every platform.
+file(WRITE "${BSI_ZOPFLI_MATCH_OUTPUT}.in" "${source}")
+configure_file("${BSI_ZOPFLI_MATCH_OUTPUT}.in" "${BSI_ZOPFLI_MATCH_OUTPUT}" @ONLY NEWLINE_STYLE UNIX)
+file(SHA256 "${BSI_ZOPFLI_MATCH_OUTPUT}" written)
+if(NOT written STREQUAL corrected)
+    message(FATAL_ERROR "Generated match-source file hash differs from the verified bytes")
+endif()
