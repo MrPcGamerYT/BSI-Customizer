@@ -93,6 +93,14 @@ QByteArray read(const QString &path)
     require(file.open(QIODevice::ReadOnly) && file.size() < 256 * 1024 * 1024, QStringLiteral("read reference %1").arg(path));
     return file.readAll();
 }
+bool sameImports(const QByteArray &a, const QByteArray &b)
+{
+    const auto first = PeUtils::importedModules(a), second = PeUtils::importedModules(b);
+    // Compare every module in order, including size and parse success. Qt
+    // 5.15.2's QList::operator== needs stdext helpers removed by modern MSVC.
+    return first.ok && second.ok && first.modules.size() == second.modules.size()
+        && std::equal(first.modules.cbegin(), first.modules.cend(), second.modules.cbegin());
+}
 void cycle(const QByteArray &base)
 {
     const auto before = sources(base);
@@ -103,7 +111,7 @@ void cycle(const QByteArray &base)
     const auto restored = ShaderSettingsImage::prepare(installed.output, false);
     require(restored.ok && restored.changed && !restored.installed && restored.output.size() == base.size(), QStringLiteral("bounded image removal: ") + restored.error);
     require(sources(restored.output) == before, QStringLiteral("every original source/resource byte survives the add/remove cycle"));
-    require(PeUtils::importedModules(installed.output).modules == PeUtils::importedModules(base).modules, QStringLiteral("no startup/system-proxy DLL import may be added"));
+    require(sameImports(installed.output, base), QStringLiteral("no startup/system-proxy DLL import may be added"));
     const auto after = sources(installed.output);
     for (auto it = before.cbegin(); it != before.cend(); ++it)
         if (!it.key().endsWith(QLatin1String("plr.qml"), Qt::CaseInsensitive) && !it.key().endsWith(QLatin1String("UiSettingsWindow.qml"), Qt::CaseInsensitive))
@@ -122,7 +130,9 @@ int main(int argc, char **argv)
     cycle(base);
     const auto dense = fixture(true);
     const auto refused = ShaderSettingsImage::prepare(dense, true);
-    require(!refused.ok && refused.output.isEmpty() && refused.error.contains(QStringLiteral("Growing the EXE is forbidden")), QStringLiteral("no-slot/no-cave image must fail without growing: ") + refused.error);
+    require(!refused.ok && !refused.changed && !refused.installed && refused.output.isEmpty()
+                && refused.error.contains(QStringLiteral("Growing the EXE is forbidden")),
+            QStringLiteral("no-slot/no-cave image must fail without growth or a false installed status: ") + refused.error);
     auto x86 = base; putLe16(x86, 0x84, 0x14c); putLe16(x86, 0x98, 0x10b);
     require(!ShaderSettingsImage::prepare(x86, true).ok, QStringLiteral("unsupported x86 cannot receive an x64 plugin plan"));
     auto unknown = base; unknown.replace(0x1200, 11, "NotQt00.dll");
@@ -145,7 +155,7 @@ int main(int argc, char **argv)
     auto qt5 = base;
     qt5.replace(0x1200, 11, QByteArray("Qt5Core.dll"));
     const auto qt5Plan = ShaderSettingsImage::prepare(qt5, true);
-    require(qt5Plan.ok && qt5Plan.qtMajor == 5 && PeUtils::importedModules(qt5Plan.output).modules == PeUtils::importedModules(qt5).modules,
+    require(qt5Plan.ok && qt5Plan.qtMajor == 5 && sameImports(qt5Plan.output, qt5),
             QStringLiteral("the actual Qt5 import selects only a Qt5 package plan, without changing imports: ") + qt5Plan.error);
     auto bom = base;
     const auto prefix = QByteArray::fromHex("efbbbf");

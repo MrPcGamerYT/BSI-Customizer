@@ -141,7 +141,6 @@ Plan prepare(const QByteArray &image, bool enabled)
         newPlayer = sourcePlan.player;
         newWindow = sourcePlan.window;
         plan.tabIndex = sourcePlan.tabIndex;
-        plan.installed = true;
     } else if (hasPlayer || hasWindow) {
         if (!hasPlayer || !hasWindow || !ShaderSettingsSource::removePlayer(player, &newPlayer, &plan.error)
             || !ShaderSettingsSource::removeWindow(window, &newWindow, &plan.error)) {
@@ -156,6 +155,7 @@ Plan prepare(const QByteArray &image, bool enabled)
         if (!replaceSource(working, source.leaf, source.after, &plan.error)) return plan;
     plan.output = working;
     plan.changed = working != image;
+    plan.installed = enabled;
     plan.ok = true;
     return plan;
 }

@@ -366,7 +366,12 @@ bool replaceResource(QByteArray &data, qint64 entry, const Link &snapshot,
         return refuse(QStringLiteral("The resource source was prepared, but %1 matching compiled QML unit(s) remain active; the player may ignore this edit. Nothing was written. Retry on a supported player build or restore its backup.")
                           .arg(compiledStillActive));
     const auto verified = findLink(changed, destination, link.sourceName);
-    if (!verified.found || verified.ambiguous || verified.nodes != link.nodes
+    // Qt 5.15.2's QList equality instantiates MSVC stdext array iterators that
+    // newer toolsets have removed. Public const iterators preserve the exact
+    // size/order comparison without depending on those obsolete SDK helpers.
+    const bool sameNodes = verified.nodes.size() == link.nodes.size()
+        && std::equal(verified.nodes.cbegin(), verified.nodes.cend(), link.nodes.cbegin());
+    if (!verified.found || verified.ambiguous || !sameNodes
         || verified.compression != link.compression
         || readFile(changed, { link.sourceName, destination, link.compression, QString() }, 50000000) != source)
         return refuse(QStringLiteral("Rewritten resource did not pass verification; no file was written."));
