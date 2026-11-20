@@ -177,132 +177,142 @@ Item {
             id: scroll
             objectName: "shadersScroll"
             Layout.fillWidth: true; Layout.fillHeight: true
+            // The layout sizes the viewport, not the entire scrollable form.
+            // Qt 5's implicit Flickable otherwise feeds its contentHeight back
+            // through ScrollView during wrapping/native theme changes.
+            implicitWidth: 0; implicitHeight: 0
             clip: true
-            contentWidth: form.width
-            contentHeight: form.implicitHeight + 20
             ScrollBar.vertical: ShaderScrollBar { shaderStyle: look }
             ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
-            ColumnLayout {
-                id: form
-                width: Math.min(520, Math.max(0, scroll.availableWidth - 24))
-                spacing: 16
-                Text { text: qsTr("Visual effects"); color: look.text; font: look.bodyFont }
-                Text {
-                    objectName: "shaderFeedback"
-                    visible: !!page.feedback
-                    Layout.fillWidth: true; wrapMode: Text.Wrap
-                    text: page.feedback; color: page.saveFailed ? look.danger : look.secondary; font: look.smallFont
-                }
-                RowLayout {
-                    Layout.fillWidth: true; spacing: 16
-                    ShaderCheckBox {
-                        objectName: "shaderEnabled"
-                        shaderStyle: look
-                        Layout.fillWidth: true
-                        text: qsTr("Enable visual effects")
-                        checked: !!page.draft.enabled
-                        onToggled: page.setValue("enabled", checked)
+            contentItem: Flickable {
+                id: viewport
+                clip: true
+                contentWidth: width
+                contentHeight: form.implicitHeight + 20
+                boundsBehavior: Flickable.StopAtBounds
+                flickableDirection: Flickable.VerticalFlick
+                ColumnLayout {
+                    id: form
+                    width: Math.min(520, Math.max(0, viewport.width - 24))
+                    spacing: 16
+                    Text { text: qsTr("Visual effects"); color: look.text; font: look.bodyFont }
+                    Text {
+                        objectName: "shaderFeedback"
+                        visible: !!page.feedback
+                        Layout.fillWidth: true; wrapMode: Text.Wrap
+                        text: page.feedback; color: page.saveFailed ? look.danger : look.secondary; font: look.smallFont
                     }
-                    ShaderButton {
-                        objectName: "shaderEnhance"
-                        shaderStyle: look
-                        primary: page.presetIndex === 4
-                        text: qsTr("Enhance")
-                        Accessible.description: qsTr("Select balanced color, tonal contrast and detail enhancement. Save changes to apply. This is not ray tracing.")
-                        onClicked: page.preset(4)
-                    }
-                }
-                Text { text: qsTr("Preset"); color: look.text; font: look.bodyFont }
-                RowLayout {
-                    Layout.fillWidth: true; spacing: 12
-                    ShaderComboBox {
-                        objectName: "shaderPresets"
-                        shaderStyle: look
-                        Layout.preferredWidth: 200
-                        model: [qsTr("Neutral"), qsTr("Clear"), qsTr("Vivid"), qsTr("Warm cinema"), qsTr("Enhanced"), qsTr("Custom")]
-                        currentIndex: page.presetIndex
-                        onActivated: page.preset(currentIndex)
-                    }
-                    ShaderButton {
-                        objectName: "shaderReset"
-                        shaderStyle: look
-                        text: qsTr("Reset all"); onClicked: page.reset()
-                    }
-                    Item { Layout.fillWidth: true }
-                }
-                Text {
-                    visible: !!page.draft.enabled && page.presetIndex === 0
-                    Layout.fillWidth: true; wrapMode: Text.Wrap
-                    text: qsTr("Neutral bypass: choose Enhance or a preset to change the image.")
-                    color: look.muted; font: look.smallFont
-                }
-                Rectangle { Layout.fillWidth: true; height: 1; color: look.separator }
-                Repeater {
-                    model: Engine.controls
-                    delegate: ColumnLayout {
-                        id: group
-                        property var controlData: modelData
-                        Layout.fillWidth: true; spacing: 4
-                        RowLayout {
-                            Layout.fillWidth: true; spacing: 12
-                            Text {
-                                Layout.fillWidth: true; elide: Text.ElideRight
-                                text: group.controlData.label; color: look.text; font: look.bodyFont
-                            }
-                            Text {
-                                objectName: "shaderValueLabel-" + group.controlData.key
-                                Layout.minimumWidth: 32
-                                horizontalAlignment: Text.AlignRight
-                                text: Math.round(valueSlider.value).toString(); color: look.secondary; font: look.smallFont
-                            }
-                            ShaderButton {
-                                objectName: "shaderControlReset-" + group.controlData.key
-                                shaderStyle: look; quiet: true
-                                Layout.alignment: Qt.AlignRight | Qt.AlignVCenter
-                                text: qsTr("Reset")
-                                enabled: Number(page.draft[group.controlData.key] || 0) !== 0
-                                Accessible.name: qsTr("Reset ") + group.controlData.label
-                                onClicked: page.setValue(group.controlData.key, 0)
-                            }
-                        }
-                        ShaderSlider {
-                            id: valueSlider
+                    RowLayout {
+                        Layout.fillWidth: true; spacing: 16
+                        ShaderCheckBox {
+                            objectName: "shaderEnabled"
                             shaderStyle: look
-                            objectName: "shaderValue-" + group.controlData.key
                             Layout.fillWidth: true
-                            from: group.controlData.minimum; to: group.controlData.maximum; stepSize: 1
-                            value: page.draft[group.controlData.key] || 0
-                            enabled: !!page.draft.enabled
-                            onMoved: page.setValue(group.controlData.key, Math.round(value))
+                            text: qsTr("Enable visual effects")
+                            checked: !!page.draft.enabled
+                            onToggled: page.setValue("enabled", checked)
+                        }
+                        ShaderButton {
+                            objectName: "shaderEnhance"
+                            shaderStyle: look
+                            primary: page.presetIndex === 4
+                            text: qsTr("Enhance")
+                            Accessible.description: qsTr("Select balanced color, tonal contrast and detail enhancement. Save changes to apply. This is not ray tracing.")
+                            onClicked: page.preset(4)
                         }
                     }
-                }
-                Rectangle { Layout.fillWidth: true; height: 1; color: look.separator }
-                Text { text: qsTr("Rendering status"); color: look.text; font: look.bodyFont }
-                Text {
-                    objectName: "shaderRendererStatus"
-                    Layout.fillWidth: true; wrapMode: Text.Wrap
-                    text: qsTr("Observed game API: ") + Engine.metrics.renderer + "\n" + Engine.metrics.status
-                    color: Engine.metrics.active ? look.accent : look.muted; font: look.smallFont
-                }
-                Text {
-                    objectName: "shaderFrameCounter"
-                    Layout.fillWidth: true; wrapMode: Text.Wrap
-                    text: qsTr("Processed game frames: ") + Engine.metrics.processedFrames
-                        + qsTr(" · Game surface observed: ") + (Engine.metrics.gameSurfaceObserved ? qsTr("yes") : qsTr("no"))
-                        + qsTr(" · Processing active: ") + (Engine.metrics.active ? qsTr("yes") : qsTr("no"))
-                    color: look.muted; font: look.smallFont
-                }
-                Text {
-                    Layout.fillWidth: true; wrapMode: Text.Wrap
-                    text: qsTr("Enhance is a balanced color and detail preset, not ray tracing. Tonal pop is not HDR display output. Unsupported or protected surfaces are left untouched. Experimental; actual GPU/driver validation is incomplete. No FPS or system tweaks.")
-                    color: look.muted; font: look.smallFont
-                }
-                Text {
-                    objectName: "shaderError"
-                    visible: !!Engine.error
-                    Layout.fillWidth: true; wrapMode: Text.Wrap
-                    text: Engine.error; color: look.danger; font: look.smallFont
+                    Text { text: qsTr("Preset"); color: look.text; font: look.bodyFont }
+                    RowLayout {
+                        Layout.fillWidth: true; spacing: 12
+                        ShaderComboBox {
+                            objectName: "shaderPresets"
+                            shaderStyle: look
+                            Layout.preferredWidth: 200
+                            model: [qsTr("Neutral"), qsTr("Clear"), qsTr("Vivid"), qsTr("Warm cinema"), qsTr("Enhanced"), qsTr("Custom")]
+                            currentIndex: page.presetIndex
+                            onActivated: page.preset(currentIndex)
+                        }
+                        ShaderButton {
+                            objectName: "shaderReset"
+                            shaderStyle: look
+                            text: qsTr("Reset all"); onClicked: page.reset()
+                        }
+                        Item { Layout.fillWidth: true }
+                    }
+                    Text {
+                        visible: !!page.draft.enabled && page.presetIndex === 0
+                        Layout.fillWidth: true; wrapMode: Text.Wrap
+                        text: qsTr("Neutral bypass: choose Enhance or a preset to change the image.")
+                        color: look.muted; font: look.smallFont
+                    }
+                    Rectangle { Layout.fillWidth: true; height: 1; color: look.separator }
+                    Repeater {
+                        model: Engine.controls
+                        delegate: ColumnLayout {
+                            id: group
+                            property var controlData: modelData
+                            Layout.fillWidth: true; spacing: 4
+                            RowLayout {
+                                Layout.fillWidth: true; spacing: 12
+                                Text {
+                                    Layout.fillWidth: true; elide: Text.ElideRight
+                                    text: group.controlData.label; color: look.text; font: look.bodyFont
+                                }
+                                Text {
+                                    objectName: "shaderValueLabel-" + group.controlData.key
+                                    Layout.minimumWidth: 32
+                                    horizontalAlignment: Text.AlignRight
+                                    text: Math.round(valueSlider.value).toString(); color: look.secondary; font: look.smallFont
+                                }
+                                ShaderButton {
+                                    objectName: "shaderControlReset-" + group.controlData.key
+                                    shaderStyle: look; quiet: true
+                                    Layout.alignment: Qt.AlignRight | Qt.AlignVCenter
+                                    text: qsTr("Reset")
+                                    enabled: Number(page.draft[group.controlData.key] || 0) !== 0
+                                    Accessible.name: qsTr("Reset ") + group.controlData.label
+                                    onClicked: page.setValue(group.controlData.key, 0)
+                                }
+                            }
+                            ShaderSlider {
+                                id: valueSlider
+                                shaderStyle: look
+                                objectName: "shaderValue-" + group.controlData.key
+                                Layout.fillWidth: true
+                                from: group.controlData.minimum; to: group.controlData.maximum; stepSize: 1
+                                value: page.draft[group.controlData.key] || 0
+                                enabled: !!page.draft.enabled
+                                onMoved: page.setValue(group.controlData.key, Math.round(value))
+                            }
+                        }
+                    }
+                    Rectangle { Layout.fillWidth: true; height: 1; color: look.separator }
+                    Text { text: qsTr("Rendering status"); color: look.text; font: look.bodyFont }
+                    Text {
+                        objectName: "shaderRendererStatus"
+                        Layout.fillWidth: true; wrapMode: Text.Wrap
+                        text: qsTr("Observed game API: ") + Engine.metrics.renderer + "\n" + Engine.metrics.status
+                        color: Engine.metrics.active ? look.accent : look.muted; font: look.smallFont
+                    }
+                    Text {
+                        objectName: "shaderFrameCounter"
+                        Layout.fillWidth: true; wrapMode: Text.Wrap
+                        text: qsTr("Processed game frames: ") + Engine.metrics.processedFrames
+                            + qsTr(" · Game surface observed: ") + (Engine.metrics.gameSurfaceObserved ? qsTr("yes") : qsTr("no"))
+                            + qsTr(" · Processing active: ") + (Engine.metrics.active ? qsTr("yes") : qsTr("no"))
+                        color: look.muted; font: look.smallFont
+                    }
+                    Text {
+                        Layout.fillWidth: true; wrapMode: Text.Wrap
+                        text: qsTr("Enhance is a balanced color and detail preset, not ray tracing. Tonal pop is not HDR display output. Unsupported or protected surfaces are left untouched. Experimental; actual GPU/driver validation is incomplete. No FPS or system tweaks.")
+                        color: look.muted; font: look.smallFont
+                    }
+                    Text {
+                        objectName: "shaderError"
+                        visible: !!Engine.error
+                        Layout.fillWidth: true; wrapMode: Text.Wrap
+                        text: Engine.error; color: look.danger; font: look.smallFont
+                    }
                 }
             }
         }

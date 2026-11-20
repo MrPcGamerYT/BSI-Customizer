@@ -258,8 +258,15 @@ const server = http.createServer((req, res) => {
     // New HTML editors must dispatch the original backend contracts rather
     // than opening a native-editor placeholder.
     const nav = async index => {
+      // Observing an RPC call is not its completion: the native snapshot and
+      // renderer can still be busy. Navigation intentionally refuses that
+      // state, so wait before dispatch, then require the requested destination.
+      await page.waitForFunction(() => !document.body.dataset.confirming && !document.body.classList.contains('busy'));
       await page.locator(`#spine [data-page="${index}"]`).evaluate(el => el.click());
-      await page.waitForFunction(() => !document.body.classList.contains('busy'));
+      await page.waitForFunction(destination =>
+        !document.body.classList.contains('busy') &&
+        (destination === 8 ? document.querySelector('#settings-dialog').open
+          : document.querySelector(`#spine [data-page="${destination}"]`)?.getAttribute('aria-current') === 'page'), index);
     };
     const edit = key => page.locator(`[data-editor-field="${key}"]`);
     const click = async name => { await page.locator(`[data-action="editor:${name}"]`).evaluate(el => el.click()); await page.waitForFunction(() => !document.body.dataset.confirming && !document.body.classList.contains('busy')); };
