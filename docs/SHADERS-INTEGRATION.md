@@ -115,26 +115,46 @@ in a player.** These planners are compiled into the Customizer for tests, but
 are not exposed as an install action or bundled with a plugin release payload.
 Existing twelve-tab player installations remain unchanged.
 
-### Fixed-resource capacity blocker (read-only player references)
+### Fixed-resource capacity now passes read-only planning on four references
 
-The production Settings builder and shader planner were run on copies **in
-memory** from all four pinned reference EXEs. No reference was launched or
-written. Source/model planning recognizes each build, but the current root
-addition does not fit its existing compressed `plr.qml` slot, and no verified
-mapped gap large enough to relocate it was found:
+The earlier v1 addition correctly refused all four roots rather than growing
+the EXE. Compact v2 retains the native row, optional startup, dirty/close and
+missing-module behavior while removing a redundant bootstrap reference/function
+and repeated per-expression comments. The window's reserved, versioned
+`bsiShaderDirty2` property identifies its format; removal still requires every
+exact owned fragment/count. Edited/duplicated fragments and unknown identifiers
+are refused. The prior v1 planning format remains exactly removable; it is not
+silently migrated or treated as a deployed installation.
 
-| Reference | Integrated root payload | Available root slot | Result |
-| --- | ---: | ---: | --- |
-| MSI latest package | 21,061 B | 20,619 B | Refused; no write/growth |
-| MSI v5.9 | 6,536 B | 6,219 B | Refused; no write/growth |
-| BlueStacks latest package | 26,172 B | 25,720 B | Refused; no write/growth |
-| BlueStacks v5.10 | 9,457 B | 9,159 B | Refused; no write/growth |
+An in-process, pinned Apache-2.0 **Zopfli 1.0.3** encoder is now used only when
+ordinary Qt level-9 zlib exceeds a slot, only up to **256 KiB input**, with
+**15 fixed iterations**. The result must inflate through Qt to the **exact source
+bytes**, including BOM/CRLF. The ordinary fitting fast path is byte-unchanged;
+no extra DLL, interpreter or recipient setup is introduced. Source provenance,
+unmodified-file hashes and mandatory binary/portable license notices are tested.
 
-These are the actual writer's encoded payload sizes, preserving the root's BOM,
-not just the shorter BOM-stripped source estimates. Window additions need their
-own capacity check too. A roomy synthetic PE passing is **not** a capacity pass
-for these players. The refusal must not be weakened into appending a section,
-overwriting another resource, or reporting a successful shader install.
+The actual production builder/planner/writer now passes add, byte-idempotent
+repeat and exact decoded-resource removal **in memory** on all four pinned EXEs:
+
+| Reference | Packed root / slot | Packed window / slot | Native categories with Shaders |
+| --- | ---: | ---: | ---: |
+| MSI latest package | 20,045 / 20,619 B | 2,675 / 2,701 B | 13 |
+| MSI v5.9 | 6,205 / 6,219 B | 2,460 / 2,468 B | 12 |
+| BlueStacks latest package | 24,928 / 25,720 B | 2,675 / 2,701 B | 13 |
+| BlueStacks v5.10 | 8,982 / 9,159 B | 2,460 / 2,468 B | 12 |
+
+Every rewritten source stayed in its **original mapped record**, with no EXE
+size change, new section, relocated record, overwritten neighboring resource or
+cache storage reclaimed as a cave. All original registered resource bytes match
+after removal, and disk hashes of all four reference EXEs remain unchanged.
+Roots retain their original BOM; these window resources have none. Legacy builds
+have eleven original native pages, not the twelve in the newer/contract fixture.
+
+This resolves the measured **source-capacity blocker**, not installation or game
+rendering. Margins are small (8 B in the legacy window); an edited/other build
+that does not fit must still be refused atomically. Dense no-space fixtures
+continue to fail without output, writes or a false installed status. No reference
+was executed or written. Current-head Windows/full-app checks remain required.
 
 ## Validation achieved so far
 
@@ -155,12 +175,19 @@ overwriting another resource, or reporting a successful shader install.
   test-mode persistence. The fixture is not HD-Player category navigation.
 - Sanitized C++ capability/routing tests, including unvalidated-device rejection,
   native-setting isolation, no ANGLE double-processing and honest counters.
-- Shader CI [44635010359](https://github.com/dsajgddghdsaakovvgheww/BSI-Customizer/actions/runs/44635010359)
-  passed Windows Qt 5 and Qt 6 plugin controls, D3D11/D3D12 WARP pixels and the
-  Win32 DXGI presentation fixture, plus Linux Vulkan/GL checks at `5632f79`.
-  Earlier Qt 5 runtime/Controls failures were fixed rather than skipped. This
-  run predates the new native source/image/navigation tests; current-head CI is
-  still required. Cross-compilation alone is not counted as execution.
+- Shader CI [44644329744](https://github.com/dsajgddghdsaakovvgheww/BSI-Customizer/actions/runs/44644329744)
+  passes Windows Qt 5 and Qt 6 plugin controls, D3D11/D3D12 WARP pixels, the
+  Win32 DXGI fixture and native Settings navigation/No/Discard/close/missing-DLL
+  contracts, plus Linux Vulkan/GL checks, at `bb8e363`. Qt 5's actual physical
+  test failure was a target clipped by the focused ScrollView: tests now reveal
+  it through the real Flickable, check clip bounds and make one pointer click,
+  never retry toggles or bypass assertions. Regular CI, portable and Chromium
+  checks also pass at that head. **These runs predate compact v2/tighter packing**;
+  current-head checks are still required. Cross-compilation is not execution.
+- Compact v2 currently passes all five local CTests in strict C++ builds and
+  ASan/UBSan (including the vendored C encoder), actual Qt 6 plugin/native shell
+  and missing-module tests, exact prior-v1 removal, the production Settings
+  Update/Restore lifecycle and all four real-reference source-capacity cycles.
 - New source/image tests pass locally with all their dependencies rebuilt and
   `-Wall -Wextra -Werror`: real registered PE resources/imports/call-site data,
   bounded relocation, unchanged EXE size/import modules/unrelated resources,
@@ -184,8 +211,8 @@ overwriting another resource, or reporting a successful shader install.
 
 WGL/EGL and Win32 Vulkan presentation, package ABI/dependency ownership checks,
 recoverable EXE+module deployment, real-player navigation/game frames and the
-physical GPU matrix have not passed their required checks. The real-reference
-capacity failure above also remains unresolved. Historical regular-DLL loading,
+physical GPU matrix have not passed their required checks. Source-capacity
+success above does not resolve those gates. Historical regular-DLL loading,
 Qt fixture navigation, prior PR CI and software pixels do not certify a working
 installation of this feature.
 
@@ -215,9 +242,9 @@ must verify the GPU actually rendering the game, not merely the display GPU.
    and document the explicit unhandled modes (including legacy D3D9/10, HDR,
    protected content, Vulkan extended presents/cross-family ownership and late
    unobserved surfaces/queues) instead of silently processing them incorrectly.
-2. Resolve the real-player fixed-resource capacity blocker without EXE growth,
-   complete package ownership/ABI/dependency validation and a recoverable
-   installer for regular matching-Qt DLLs. The existing in-memory plans are not
+2. Preserve the now-passing fixed-resource capacity cycles and complete package
+   ownership/ABI/dependency validation and a recoverable installer for regular
+   matching-Qt DLLs. The existing in-memory plans are not
    a two-part EXE+module transaction. Preserve fixed slots, verified rollback,
    prior title/menu/gutter fixes, exact original sources and unrelated pages.
    Verify update/removal recovery and missing/incompatible-package fallback in

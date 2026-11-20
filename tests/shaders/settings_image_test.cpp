@@ -3,6 +3,7 @@
 #include "QtResources.h"
 #include "PeUtils.h"
 #include "ByteUtils.h"
+#include "ZlibUtils.h"
 #include "settings_fixture.h"
 #include <QCoreApplication>
 #include <QFile>
@@ -129,6 +130,25 @@ int main(int argc, char **argv)
             QStringLiteral("removing absent shaders is a pure no-op, not a native source/cache rewrite: ") + absent.error);
     cycle(base);
     const auto dense = fixture(true);
+    {
+        QtResources::File root;
+        for (const auto &file : QtResources::registeredFiles(dense)) if (file.name == QLatin1String("plr.qml")) root = file;
+        QString error;
+        const auto budget = QtResources::inPlaceCapacity(dense, root.entryOff, root.name, &error);
+        const auto replacement = ShaderSettingsFixture::player().toUtf8() + QByteArray("\n//A\n");
+        require(root.entryOff >= 0 && qCompress(replacement, 9).size() > budget
+                    && ZlibUtils::compressForCapacity(replacement, budget).size() <= budget,
+                QStringLiteral("fixture must genuinely need tighter lossless encoding in its fixed slot"));
+        auto rewritten = dense;
+        require(ShaderSettingsImage::replaceSource(rewritten, root.name, replacement, &error)
+                    && rewritten.size() == dense.size(), QStringLiteral("no-cave fixed-slot fallback must write/read back without growth: ") + error);
+        const auto link = QtResources::findLink(rewritten, root.entryOff, root.name);
+        require(link.found && !link.ambiguous && QtResources::readFile(rewritten, root) == replacement,
+                QStringLiteral("tighter payload must stay in the original mapped record"));
+        auto wanted = sources(dense);
+        wanted[root.path.isEmpty() ? root.name : root.path] = replacement;
+        require(sources(rewritten) == wanted, QStringLiteral("tighter encoding cannot change any unrelated registered resource"));
+    }
     const auto refused = ShaderSettingsImage::prepare(dense, true);
     require(!refused.ok && !refused.changed && !refused.installed && refused.output.isEmpty()
                 && refused.error.contains(QStringLiteral("Growing the EXE is forbidden")),

@@ -5983,9 +5983,11 @@ Window {
                           && rebuiltWindow.contains(QStringLiteral("asset:'CloseIcon'")),
                       QStringLiteral("the rebuilt %1 Settings panel trims the marked side space, stays wide and tints selected tabs/icons while preserving native pages, selection, dragging, and close behavior")
                           .arg(QFileInfo(input).fileName()));
-                // This is an in-memory native-source plan, not DLL deployment
-                // or emulator execution. Known player slots currently refuse
-                // the addon; refusal must be explicit and leave the file alone.
+                // Still only an in-memory plan, not deployment/player proof.
+                // Bounded lossless packing now fits the four pinned references:
+                // these tests must require a fit, not accept a safe refusal as
+                // successful installation. Dense/unsupported refusal fixtures
+                // remain separate tests with no weakened storage ownership.
                 const auto shaderPlan = ShaderSettingsImage::prepare(panelImage, true);
                 bool shaderBounded = false;
                 if (shaderPlan.ok) {
@@ -5995,12 +5997,15 @@ Window {
                         && again.ok && !again.changed && undone.ok && undone.sources.size() == shaderPlan.sources.size();
                     for (int source = 0; shaderBounded && source < undone.sources.size(); ++source)
                         shaderBounded = undone.sources.at(source).after == shaderPlan.sources.at(source).before;
-                } else {
-                    shaderBounded = shaderPlan.output.isEmpty()
-                        && shaderPlan.error.contains(QStringLiteral("Growing the EXE is forbidden"));
+                    QMap<QString, QByteArray> beforeResources, afterResources;
+                    for (const auto &entry : QtResources::registeredFiles(panelImage))
+                        beforeResources.insert(entry.path, QtResources::readFile(panelImage, entry));
+                    for (const auto &entry : QtResources::registeredFiles(undone.output))
+                        afterResources.insert(entry.path, QtResources::readFile(undone.output, entry));
+                    shaderBounded = shaderBounded && beforeResources == afterResources;
                 }
                 check(shaderBounded && read(panelCopy) == panelImage,
-                      QStringLiteral("the real %1 shader plan either fits/restores exactly or explicitly refuses capacity without changing/growing the EXE (%2)")
+                      QStringLiteral("the real %1 shader source plan fits, repeats byte-idempotently and restores every registered resource without changing/growing the EXE (%2)")
                           .arg(QFileInfo(input).fileName(), shaderPlan.error));
                 ciNotice(QStringLiteral("Shader native-image preparation only, not installed/player-certified: %1: %2")
                              .arg(QFileInfo(input).fileName(), shaderPlan.ok ? QStringLiteral("bounded plan prepared") : shaderPlan.error));

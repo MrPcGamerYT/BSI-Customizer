@@ -2,6 +2,7 @@
 #include "ShaderSettingsSource.h"
 #include "PeUtils.h"
 #include "QtResources.h"
+#include "ZlibUtils.h"
 #include <QFileInfo>
 #include <QHash>
 #include <QSet>
@@ -72,9 +73,9 @@ bool replaceSource(QByteArray &image, const QString &leaf, const QByteArray &sou
         return refuse(error, QStringLiteral("The native source %1 has no unique registered resource mapping.").arg(leaf));
     if (QtResources::readFile(image, file, maxSource) == source
         && QtResources::sourceUnits(image, {leaf}, ids(leaf), false, true) == 0) return true;
-    const QByteArray payload = file.flags == 1 ? qCompress(source, 9) : source;
     const auto capacity = QtResources::inPlaceCapacity(image, file.entryOff, file.name, error);
     if (capacity < 0) return false;
+    const QByteArray payload = file.flags == 1 ? ZlibUtils::compressForCapacity(source, capacity) : source;
     qint64 destination = -1;
     if (payload.size() > capacity) {
         destination = QtResources::findFreeSpace(image, link, payload.size() + 4, error);

@@ -62,15 +62,19 @@ exist, including a physically navigated **13-tab Qt contract fixture** with
 native tab/close No/Discard prompts, actual plugin controls and missing-module
 fallback. That fixture is not a running emulator or a deployment test.
 
-**The Customizer still does not install Shaders.** The current addition exceeds
-the fixed root-resource capacity on all four read-only player references and is
-safely refused without growing/writing those EXEs. Plugin ownership/ABI checks,
-recoverable EXE+module deployment, actual game-frame effects in a running player
-and the Intel/AMD/NVIDIA renderer matrix are still outstanding. Existing player
-installations therefore retain their native twelve-tab model. Do not count this
-shell preview, successful software shader pixels, or separate DLL-startup tests
-as end-to-end shader validation. See the detailed
-[capacity blocker, achieved tests and merge gates](SHADERS-INTEGRATION.md).
+**The Customizer still does not install Shaders.** Compact v2 and bounded,
+verified lossless compression now pass **read-only, in-memory** root/window
+capacity, repeat and exact source/resource removal on all four player references.
+Each payload stays in its original mapped slot; reference disk hashes, EXE size
+and unrelated resources remain unchanged. Some legacy slots have only 8 bytes
+left, so other/edited builds must still fail safely if they do not fit.
+
+Plugin ownership/ABI checks, recoverable EXE+module deployment, actual game-frame
+effects in a running player and the Intel/AMD/NVIDIA renderer matrix remain
+outstanding. Existing installations are unchanged (eleven or twelve native pages
+in the inspected builds). Do not count the shell preview, byte-capacity plans,
+software shader pixels or separate DLL-startup tests as end-to-end validation.
+See the detailed [capacity results, achieved tests and merge gates](SHADERS-INTEGRATION.md).
 
 ## Interactive Settings-window preview
 

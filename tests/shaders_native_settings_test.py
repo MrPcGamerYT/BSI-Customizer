@@ -317,7 +317,7 @@ def main():
             prompts = visible_prompts()
             assert len(prompts) == 1, (
                 "native dirty-state prompt not shown exactly once: "
-                + repr([(w.objectName(), w.isVisible(), w.property("bsiShaderDirty"))
+                + repr([(w.objectName(), w.isVisible(), w.property("bsiShaderDirty2"))
                         for w in QGuiApplication.topLevelWindows()])
                 + f"; QML warnings: {warnings}"
             )
@@ -333,7 +333,7 @@ def main():
             for callback in ("fRefreshAudioSettingModels(false)", "fPreferenceSettingChangedClbk(false)", "fAdvanceSettingChangedClbk(false)", "fReloadSettingComboboxes()"):
                 evaluate(window, callback)
             assert not evaluate(window, "pSettingsItems.pSettingElements[12].pIsVisible")
-            assert not window.property("bsiShaderDirty")
+            assert not window.property("bsiShaderDirty2")
             assert not any(i.objectName() == "shaderEnabled" for i in tree(window.contentItem()))
             window.close()
             QTest.qWait(60)
@@ -344,17 +344,17 @@ def main():
             assert window.property("pCurrentTabIndex") == 12
             page = evaluate(window, "pSettingsItems.pSettingElements[12].pComponentObj")
             assert page and evaluate(page, "Engine.controls.length") == 10
-            assert not window.property("bsiShaderDirty")
+            assert not window.property("bsiShaderDirty2")
             initial = evaluate(page, "JSON.stringify(Engine.saved)")
             click(window, named(page, "shaderEnabled"))
-            assert window.property("bsiShaderDirty")
+            assert window.property("bsiShaderDirty2")
             tab(window, 0)
             assert window.property("pCurrentTabIndex") == 12, "native navigation silently lost unsaved shader edits"
             prompt_button("No")
             assert window.property("pCurrentTabIndex") == 12 and page.property("pEnableSave")
             tab(window, 0)
             prompt_button("Discard Changes")
-            assert window.property("pCurrentTabIndex") == 0 and not window.property("bsiShaderDirty")
+            assert window.property("pCurrentTabIndex") == 0 and not window.property("bsiShaderDirty2")
             assert evaluate(page, "JSON.stringify(Engine.saved)") == initial
             tab(window, 12)
             click(window, named(page, "shaderEnabled"))
@@ -362,22 +362,22 @@ def main():
             click(window, named(page, "shaderSave"))
             saved = evaluate(page, "JSON.stringify(Engine.saved)")
             assert json.loads(saved)["enabled"] and profile.is_file()
-            assert not window.property("bsiShaderDirty")
+            assert not window.property("bsiShaderDirty2")
             click(window, named(page, "shaderEnabled"))
-            assert page.property("pEnableSave") and window.property("bsiShaderDirty"), (
+            assert page.property("pEnableSave") and window.property("bsiShaderDirty2"), (
                 "physical post-Save edit did not publish native dirty state: "
                 + repr({"checked": named(page, "shaderEnabled").property("checked"),
                         "controlEnabled": named(page, "shaderEnabled").property("enabled"),
                         "draft": evaluate(page, "JSON.stringify(draft)"),
                         "saved": evaluate(page, "JSON.stringify(Engine.saved)"),
                         "pageDirty": page.property("pEnableSave"),
-                        "nativeDirty": window.property("bsiShaderDirty"), "warnings": warnings})
+                        "nativeDirty": window.property("bsiShaderDirty2"), "warnings": warnings})
             )
             # Use the actual native header close action, not a Python wrapper
             # call, and require both No and Discard to traverse onClosing.
             click(window, named(window.contentItem(), "CloseIcon"))
             prompt_button("No")
-            assert window.isVisible() and window.property("bsiShaderDirty")
+            assert window.isVisible() and window.property("bsiShaderDirty2")
             click(window, named(window.contentItem(), "CloseIcon"))
             prompt_button("Discard Changes")
             QTest.qWait(60)
@@ -387,7 +387,7 @@ def main():
             tab(window, 12)
             page = evaluate(window, "pSettingsItems.pSettingElements[12].pComponentObj")
             assert evaluate(page, "JSON.stringify(Engine.saved)") == saved
-            assert not page.property("pEnableSave") and not window.property("bsiShaderDirty")
+            assert not page.property("pEnableSave") and not window.property("bsiShaderDirty2")
             evaluate(page, "reset()")
             click(window, named(page, "shaderSave"))
             assert evaluate(page, "JSON.stringify(Engine.saved)") == initial

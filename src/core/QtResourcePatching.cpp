@@ -2,6 +2,7 @@
 #include "ByteUtils.h"
 #include "PeUtils.h"
 #include "QtResourceRegistration.h"
+#include "ZlibUtils.h"
 #include <algorithm>
 #include <limits>
 
@@ -302,7 +303,10 @@ bool replaceResource(QByteArray &data, qint64 entry, const Link &snapshot,
     const auto oldPayload = data.mid(entry + 4, stored);
     if (link.compression != 0 && link.compression != 1) return refuse(QStringLiteral("Unsupported resource compression."));
     const auto oldSource = link.compression == 1 ? qUncompress(oldPayload) : oldPayload;
-    const QByteArray payload = oldSource == source ? oldPayload : (link.compression == 1 ? qCompress(source, 9) : source);
+    const qint64 end = entrySpaceEnd(data, link, entry, error);
+    if (end < 0) return false;
+    const QByteArray payload = oldSource == source ? oldPayload
+        : (link.compression == 1 ? ZlibUtils::compressForCapacity(source, end - entry - 4) : source);
     if ((link.compression == 1 && payload.size() < 6)
         || (link.compression == 1 ? qUncompress(payload) : payload) != source)
         return refuse(QStringLiteral("Resource compression did not verify."));
@@ -311,8 +315,6 @@ bool replaceResource(QByteArray &data, qint64 entry, const Link &snapshot,
     QByteArray changed = data;
     if (!PeUtils::sectionForRaw(PeUtils::sections(changed), entry))
         return refuse(QStringLiteral("Resource is not mapped by a PE section."));
-    const qint64 end = entrySpaceEnd(changed, link, entry, error);
-    if (end < 0) return false;
     qint64 destination = entry;
     if (record.size() > end - entry) {
         if (forcedDestination >= 0) {

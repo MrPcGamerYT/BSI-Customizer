@@ -11,6 +11,8 @@ namespace ShaderSettingsSource {
 namespace {
 const QString rowStart = QStringLiteral("/*BSI-SHADERS-ROW:1*/");
 const QString rowEnd = QStringLiteral("/*BSI-SHADERS-ROW-END*/");
+// Retain exact removal of the earlier, never-deployed planning format.
+namespace legacy {
 const QString bootStart = QStringLiteral("/*BSI-SHADERS-BOOT:1*/");
 const QString windowStart = QStringLiteral("/*BSI-SHADERS-WINDOW:1*/");
 const QString startCall = QStringLiteral("/*BSI-SHADERS-START:1*/fBsiStartShaders();/*BSI-SHADERS-START-END*/");
@@ -19,10 +21,6 @@ const QString visibilityGate = QStringLiteral("/*BSI-SHADERS-VISIBLE:1*/modelDat
 const QString pageGate = QStringLiteral("/*BSI-SHADERS-PAGE:1*/active:modelData.pIsVisible!==false;/*BSI-SHADERS-PAGE-END*/");
 const QString closeReset = QStringLiteral("/*BSI-SHADERS-CLOSE:1*/;bsiShaderDirty=false;/*BSI-SHADERS-CLOSE-END*/");
 const QString windowProperty = QStringLiteral("/*BSI-SHADERS-WINDOW:1*/\nproperty bool bsiShaderDirty:false\n/*BSI-SHADERS-WINDOW-END*/\n");
-// No mandatory import is added to plr.qml: an absent/ABI-incompatible plugin is
-// caught here, leaves native startup intact, and hides only the shader row.
-// QQmlEngine includes the executable directory in its default module paths;
-// BSIShaders/qmldir and the regular plugin are installed there as one package.
 const QString boot = QStringLiteral(R"QML(/*BSI-SHADERS-BOOT:1*/
 property bool bsiShaderReady:false
 property var bsiShaderBootstrap:null
@@ -34,6 +32,23 @@ bsiShaderReady=bsiShaderBootstrap!==null
 }
 /*BSI-SHADERS-BOOT-END*/
 )QML");
+} // namespace legacy
+const QString bootStart = QStringLiteral("/*BSI-SHADERS-BOOT:2*/");
+// The versioned property is the v2 window marker. Exact fragment/count checks
+// below still protect every owned edit. Per-expression comments are redundant
+// and consumed scarce fixed slots; no original native token/comment is removed.
+const QString windowStart = QStringLiteral("property bool bsiShaderDirty2:false");
+const QString windowProperty = windowStart + QLatin1Char('\n');
+const QString dirtySuffix = QStringLiteral("||bsiShaderDirty2");
+const QString visibilityGate = QStringLiteral("modelData.pIsVisible===false?'':");
+const QString pageGate = QStringLiteral("active:modelData.pIsVisible!==false;");
+const QString closeReset = QStringLiteral(";bsiShaderDirty2=false;");
+const QString boot = bootStart + QStringLiteral("\nproperty bool bsiShaderReady:false\n/*BSI-SHADERS-BOOT-END*/\n");
+// Keep this an optional caught import, outside DllMain. Parent ownership keeps
+// Bootstrap alive; a duplicate JS reference/function is unnecessary. Missing
+// modules leave startup running and the shader row/page inactive. The complete
+// original startup block is restored by removing this exact owned insertion.
+const QString startCall = QStringLiteral(R"QML(/*BSI-SHADERS-START:2*/try{bsiShaderReady=!!Qt.createQmlObject('import BSIShaders 1.0;Bootstrap{hostWindow:iAppwin;instanceName:plrBackend.getVmName();graphicsRenderer:uiBackend.confGetInstanceString("graphics_renderer")}',iAppwin)}catch(e){console.warn(e)}/*BSI-SHADERS-START-END*/)QML");
 QString row(int index, bool list)
 {
     return rowStart + (list ? QStringLiteral(",\n") : QStringLiteral("\n"))
@@ -132,8 +147,8 @@ bool literal(const QString &text, const QmlText::Binding &binding, QString *url)
 }
 }
 QString pageUrl() { return QStringLiteral("qrc:/bsi-shaders/BsiShadersSetting.qml"); }
-bool hasPlayer(const QString &text) { return text.contains(bootStart); }
-bool hasWindow(const QString &text) { return text.contains(windowStart); }
+bool hasPlayer(const QString &text) { return text.contains(bootStart) || text.contains(legacy::bootStart); }
+bool hasWindow(const QString &text) { return text.contains(windowStart) || text.contains(legacy::windowStart); }
 bool hasFragments(const QString &text) { return reserved(text); }
 
 bool removePlayer(const QString &text, QString *base, QString *error)
@@ -150,7 +165,9 @@ bool removePlayer(const QString &text, QString *base, QString *error)
                               && fragment != row(index.captured(1).toInt(), true)))
         return refuse(error, QStringLiteral("The native shader Settings row was edited; automatic removal is blocked."));
     output.remove(begin, end - begin);
-    if (!exactRemove(&output, boot, 1, error) || !exactRemove(&output, startCall, 1, error)) return false;
+    const bool old = text.contains(legacy::bootStart);
+    if (!exactRemove(&output, old ? legacy::boot : boot, 1, error)
+        || !exactRemove(&output, old ? legacy::startCall : startCall, 1, error)) return false;
     if (reserved(output)) return refuse(error, QStringLiteral("Unexpected shader identifiers remain in the player root; no source was changed."));
     *base = output;
     return true;
@@ -159,9 +176,12 @@ bool removePlayer(const QString &text, QString *base, QString *error)
 bool removeWindow(const QString &text, QString *base, QString *error)
 {
     QString output = text;
-    if (!exactRemove(&output, windowProperty, 1, error) || !exactRemove(&output, dirtySuffix, 2, error)
-        || !exactRemove(&output, visibilityGate, 1, error) || !exactRemove(&output, pageGate, 1, error)
-        || !exactRemove(&output, closeReset, 1, error)) return false;
+    const bool old = text.contains(legacy::windowStart);
+    if (!exactRemove(&output, old ? legacy::windowProperty : windowProperty, 1, error)
+        || !exactRemove(&output, old ? legacy::dirtySuffix : dirtySuffix, 2, error)
+        || !exactRemove(&output, old ? legacy::visibilityGate : visibilityGate, 1, error)
+        || !exactRemove(&output, old ? legacy::pageGate : pageGate, 1, error)
+        || !exactRemove(&output, old ? legacy::closeReset : closeReset, 1, error)) return false;
     if (reserved(output)) return refuse(error, QStringLiteral("Unexpected shader identifiers remain in the Settings window; no source was changed."));
     *base = output;
     return true;

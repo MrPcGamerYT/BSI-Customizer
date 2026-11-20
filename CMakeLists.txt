@@ -34,6 +34,9 @@ add_library(bsi_7z STATIC
 target_include_directories(bsi_7z PUBLIC src/third_party/7zip/C)
 target_compile_definitions(bsi_7z PRIVATE Z7_EXTRACT_ONLY Z7_PPMD_SUPPORT)
 
+# Lossless, bounded fallback for fixed Qt-resource slots. No runtime dependency.
+add_subdirectory(src/third_party/zopfli)
+
 find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Network Qml Quick QuickControls2 Svg Multimedia)
 
 qt_standard_project_setup(REQUIRES 6.5)
@@ -216,7 +219,7 @@ set_target_properties(BSICustomizer PROPERTIES
 target_compile_definitions(BSICustomizer PRIVATE
     BSI_VERSION="${PROJECT_VERSION}"
 )
-target_link_libraries(BSICustomizer PRIVATE bsi_7z)
+target_link_libraries(BSICustomizer PRIVATE bsi_7z bsi_zopfli)
 target_include_directories(BSICustomizer PRIVATE src)
 
 # ---------------------------------------------------------------------------
@@ -497,6 +500,15 @@ add_custom_command(TARGET BSICustomizer POST_BUILD
         "$<TARGET_FILE_DIR:BSICustomizer>/THIRD-PARTY-NOTICES.txt"
 )
 install(FILES src/third_party/hde64/LICENSE.txt DESTINATION bin RENAME THIRD-PARTY-NOTICES.txt)
+add_custom_command(TARGET BSICustomizer POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:BSICustomizer>/licenses/zopfli"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/third_party/zopfli/LICENSE"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/third_party/zopfli/README.bsi.md"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/third_party/zopfli/UPSTREAM.json"
+        "$<TARGET_FILE_DIR:BSICustomizer>/licenses/zopfli")
+install(FILES src/third_party/zopfli/LICENSE src/third_party/zopfli/README.bsi.md
+    src/third_party/zopfli/UPSTREAM.json DESTINATION bin/licenses/zopfli)
 
 # Packaging belongs to the build graph as well as the release workflow. This
 # allows the existing Windows CI build to validate the one-file artifact.

@@ -1,6 +1,7 @@
 #include "ShaderSettingsSource.h"
 #include "NativeSettingsModel.h"
 #include "settings_fixture.h"
+#include "legacy_source_fixture.h"
 #include <QCoreApplication>
 #include <QDir>
 #include <QFile>
@@ -60,7 +61,29 @@ int main(int argc, char **argv)
             require(!ShaderSettingsSource::removePlayer(damaged, &base, &error), QStringLiteral("manual integration edits block removal"));
             require(!ShaderSettingsSource::prepare(plan.player, baseWindow, counts).ok, QStringLiteral("partial installation is not an idempotent success"));
             require(!ShaderSettingsSource::removeWindow(plan.window + QStringLiteral("\nproperty bool bsiShaderUnknown:true"), &base, &error), QStringLiteral("unknown owned identifiers block removal"));
+            for (const auto &fragment : {QStringLiteral("property bool bsiShaderDirty2:false"), QStringLiteral("||bsiShaderDirty2"),
+                                        QStringLiteral("active:modelData.pIsVisible!==false;"), QStringLiteral("modelData.pIsVisible===false?'':"),
+                                        QStringLiteral(";bsiShaderDirty2=false;")}) {
+                damaged = plan.window;
+                const int at = damaged.indexOf(fragment);
+                require(at >= 0, QStringLiteral("compact owned-fragment fixture must exist: ") + fragment);
+                damaged.replace(at, fragment.size(), fragment.left(fragment.size() - 1));
+                require(!ShaderSettingsSource::removeWindow(damaged, &base, &error), QStringLiteral("an edited compact owned fragment cannot be removed: ") + fragment);
+                require(!ShaderSettingsSource::removeWindow(plan.window + fragment, &base, &error), QStringLiteral("duplicate compact owned fragments cannot be removed: ") + fragment);
+            }
         }
+    }
+    {
+        QString restored, error;
+        require(ShaderSettingsSource::hasPlayer(ShaderSettingsLegacyFixture::player)
+                    && ShaderSettingsSource::hasWindow(ShaderSettingsLegacyFixture::window),
+                QStringLiteral("the prior planning format remains detectable"));
+        require(ShaderSettingsSource::removePlayer(ShaderSettingsLegacyFixture::player, &restored, &error) && restored == player(),
+                QStringLiteral("exact prior-format root removal: ") + error);
+        require(ShaderSettingsSource::removeWindow(ShaderSettingsLegacyFixture::window, &restored, &error) && restored == baseWindow,
+                QStringLiteral("exact prior-format window removal: ") + error);
+        require(!ShaderSettingsSource::prepare(ShaderSettingsLegacyFixture::player, ShaderSettingsLegacyFixture::window, counts).ok,
+                QStringLiteral("prior planning versions must be removed explicitly before a v2 install, not silently migrated"));
     }
     auto missing = counts;
     missing.remove(QStringLiteral("uigraphicssetting.qml"));

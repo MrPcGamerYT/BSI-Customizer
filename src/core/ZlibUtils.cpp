@@ -1,5 +1,8 @@
 #include "ZlibUtils.h"
 #include "ByteUtils.h"
+#include "../third_party/zopfli/zlib_container.h"
+#include <cstdlib>
+#include <memory>
 
 namespace ZlibUtils {
 
@@ -34,6 +37,29 @@ QByteArray compress(const QByteArray &data)
     if (withHeader.size() <= 4)
         return {};
     return withHeader.mid(4); // strip qCompress' 4-byte BE size header
+}
+
+QByteArray compressForCapacity(const QByteArray &data, qint64 capacity)
+{
+    const QByteArray ordinary = qCompress(data, 9);
+    constexpr qsizetype maxTightInput = 256 * 1024;
+    if (capacity < 0 || ordinary.size() <= capacity || data.isEmpty() || data.size() > maxTightInput)
+        return ordinary;
+    ZopfliOptions options;
+    ZopfliInitOptions(&options);
+    options.numiterations = 15;
+    unsigned char *output = nullptr;
+    std::size_t size = 0;
+    ZopfliZlibCompress(&options, reinterpret_cast<const unsigned char *>(data.constData()),
+                       std::size_t(data.size()), &output, &size);
+    const std::unique_ptr<unsigned char, decltype(&std::free)> allocated(output, &std::free);
+    if (!output || size < 6 || ordinary.size() <= 4 || size >= std::size_t(ordinary.size() - 4)) return ordinary;
+    QByteArray tight(4, '\0');
+    ByteUtils::putBe32(tight, 0, quint32(data.size()));
+    tight.append(reinterpret_cast<const char *>(output), int(size));
+    // Same decoder as the player. Keep all source bytes, including BOM/CRLF,
+    // and never trust an encoder result merely because it is shorter.
+    return qUncompress(tight) == data ? tight : ordinary;
 }
 
 QByteArray inflateLoose(const QByteArray &rawStream, qint64 sizeHint)

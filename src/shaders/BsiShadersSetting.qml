@@ -18,12 +18,14 @@ Item {
     // Participate in the native shell's existing tab/close discard prompts.
     function publishDirty() {
         var window = page.Window.window
-        if (window && window.bsiShaderDirty !== undefined) window.bsiShaderDirty = pEnableSave
+        if (window && window.bsiShaderDirty2 !== undefined) window.bsiShaderDirty2 = pEnableSave
+        else if (window && window.bsiShaderDirty !== undefined) window.bsiShaderDirty = pEnableSave
     }
     onPEnableSaveChanged: publishDirty()
     Component.onDestruction: {
         var window = page.Window.window
-        if (window && window.bsiShaderDirty !== undefined) window.bsiShaderDirty = false
+        if (window && window.bsiShaderDirty2 !== undefined) window.bsiShaderDirty2 = false
+        else if (window && window.bsiShaderDirty !== undefined) window.bsiShaderDirty = false
     }
     function differs() {
         if (!!draft.enabled !== !!Engine.saved.enabled) return true
