@@ -427,6 +427,9 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
           __COMPAT_LAYER: RUNASINVOKER
+          # Export authored scenes through the actual resource patchers, not
+          # QML read from the reference player. Physical checks run below.
+          BSI_TOPBAR_TEST_FIXTURES: ${{ runner.temp }}/topbar-ui
         run: |
           $log = Join-Path $env:RUNNER_TEMP 'selftest.log'
           $err = Join-Path $env:RUNNER_TEMP 'selftest.err'
@@ -472,6 +475,26 @@ jobs:
             }
             throw "self-test failed (exit code $($p.ExitCode))"
           }
+
+      - name: Install Qt 5 and Qt 6 hosts for physical topbar regression scenes
+        if: matrix.label == 'MSI latest package'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Prepare isolated Qt contract-scene runtimes
+        if: matrix.label == 'MSI latest package'
+        run: python -m pip install PySide6==6.8.3 PyQt5==5.15.11
+      - name: Physically test cleaned menu, combined title removal and Settings in Qt 6
+        if: matrix.label == 'MSI latest package'
+        env:
+          BSI_TOPBAR_TEST_FIXTURES: ${{ runner.temp }}/topbar-ui
+        run: python tests/run_qt_runtime_test.py tests/clean_player_ui_gui_test.py
+      - name: Test the same production-written topbar scenes in Qt 5
+        if: matrix.label == 'MSI latest package'
+        env:
+          BSI_TOPBAR_TEST_FIXTURES: ${{ runner.temp }}/topbar-ui
+          BSI_TEST_QT_API: PyQt5
+        run: python tests/run_qt_runtime_test.py tests/clean_player_ui_gui_test.py
 
       - name: Manual Settings-panel tester (safe-copy apply)
         if: matrix.label == 'MSI latest package'

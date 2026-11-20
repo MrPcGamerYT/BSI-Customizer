@@ -107,6 +107,11 @@ const QString kCleanHiddenLine = QStringLiteral(
     "visible: false // BSI CUSTOMIZER: clean player UI");
 const QString kCleanVisibleTag = QStringLiteral(
     " /* BSI CUSTOMIZER: clean player UI visible:");
+// Model flags cover native reloads, but pin/mini-mode/backend callbacks can
+// also assign iCfgBtn.visible directly. A separate owned signal connection
+// guards the actual owning item without replacing any native signal handler.
+const QString kCleanMenuGuard = QStringLiteral(
+    "/* BSI CUSTOMIZER: clean player UI menu guard */");
 // The player assigns iSidebar.visible imperatively when fullscreen is left
 // (restoring the pre-fullscreen value), which would destroy the false binding
 // above and paint the empty strip again. Collapsing the instance width to zero
@@ -2646,6 +2651,7 @@ bool findObjectById(const QString &qml, const QString &masked, const QString &id
     const QRegularExpression rx(QStringLiteral("\\bid\\s*:\\s*")
                                 + QRegularExpression::escape(id) + QStringLiteral("\\b"));
     auto iter = rx.globalMatch(masked);
+    bool found = false;
     while (iter.hasNext()) {
         const auto match = iter.next();
         QmlText::Object object;
@@ -2654,7 +2660,47 @@ bool findObjectById(const QString &qml, const QString &masked, const QString &id
         if (!directBinding(masked, object.open, object.end, QStringLiteral("id"), &binding))
             continue;
         if (qml.mid(binding.valueBegin, binding.valueEnd - binding.valueBegin) != id) continue;
+        if (found) return false;
         *out = object;
+        found = true;
+    }
+    return found;
+}
+
+QString cleanMenuGuardText(const QString &qml)
+{
+    const QString nl = lineEnding(qml);
+    return nl + kCleanMenuGuard + nl
+        + QStringLiteral("Connections{target:iCfgBtn;function onVisibleChanged(){if(iCfgBtn.visible)iCfgBtn.visible=false}}")
+        + nl;
+}
+
+bool cleanMenuGuardValid(const QString &qml)
+{
+    const QString masked = QmlText::mask(qml);
+    QmlText::Object menu;
+    const bool found = findObjectById(qml, masked, QStringLiteral("iCfgBtn"), &menu);
+    const bool declared = QRegularExpression(QStringLiteral("\\bid\\s*:\\s*iCfgBtn\\b")).match(masked).hasMatch();
+    if (declared && !found) return false;
+    if (!qml.contains(kCleanMenuGuard)) return true;
+    const QString text = cleanMenuGuardText(qml);
+    return found && qml.count(kCleanMenuGuard) == 1 && menu.end - 1 - text.size() > menu.open
+        && qml.mid(menu.end - 1 - text.size(), text.size()) == text;
+}
+
+bool cleanMenuGuardEdits(const QString &qml, bool enabled, QList<Edit> &edits)
+{
+    QmlText::Object menu;
+    if (!findObjectById(qml, QmlText::mask(qml), QStringLiteral("iCfgBtn"), &menu)) return false;
+    const QString text = cleanMenuGuardText(qml);
+    const int at = menu.end - 1 - text.size();
+    const bool owned = at > menu.open && qml.mid(at, text.size()) == text;
+    if (enabled && !owned) {
+        addEdit(edits, menu.end - 1, 0, text);
+        return true;
+    }
+    if (!enabled && owned) {
+        addEdit(edits, at, text.size(), QString());
         return true;
     }
     return false;
@@ -2988,7 +3034,7 @@ bool modelEntryVisible(const QString &qml, const QString &id, int *valueBegin, i
 bool cleanTopbarEdits(QString &qml, bool enabled, QList<Edit> &edits)
 {
     const QString masked = QmlText::mask(qml);
-    int changed = 0;
+    int changed = cleanMenuGuardEdits(qml, enabled, edits) ? 1 : 0;
     for (const auto &element : QmlText::objects(masked, QStringLiteral("PlrTopbarElement"))) {
         const QString body = qml.mid(element.open, element.end - element.open);
         bool keep = false;
@@ -3073,6 +3119,11 @@ State analyzeCleanUi(const QByteArray &image)
     }
     findDoc(image, QStringLiteral("plr.qml"), &plr, &error);
     findDoc(image, QStringLiteral("PlrSidebar.qml"), &sidebar, &error);
+    if (!cleanMenuGuardValid(topbar.qml)) {
+        state.detail = QStringLiteral("The title-bar menu is ambiguous or its owned clean-up guard was edited; "
+                                      "no file would be written. Restore the verified backup before retrying.");
+        return state;
+    }
     // The sidebar may already live in the title bar: this option only edits the
     // buttons themselves, so both layouts are fine.
     const bool topbarClean = topbar.qml.contains(kCleanMarker);

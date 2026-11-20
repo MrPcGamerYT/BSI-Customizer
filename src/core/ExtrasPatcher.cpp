@@ -7,6 +7,7 @@
 #include "QtResources.h"
 #include "ThemeEngine.h"
 #include "TitlebarDetails.h"
+#include "ZlibUtils.h"
 
 #include <QFile>
 #include <QFileInfo>
@@ -221,9 +222,15 @@ bool hideTitlebarLabels(QByteArray &data, int *hidden, QString *error)
         const auto link = QtResources::findLink(data, file.entryOff, file.name);
         if (!link.found || link.ambiguous)
             return refuse(QStringLiteral("The title bar QML resource mapping is ambiguous; no file was written."));
-        const qint64 payload = file.flags == 1 ? qCompress(source, 9).size() : source.size();
-        qint64 destination = -1;
         const qint64 capacity = QtResources::inPlaceCapacity(data, file.entryOff, file.name);
+        // Use the writer's actual bounded lossless encoding, not an ordinary
+        // qCompress estimate. Clean UI can already occupy a full/tightly
+        // encoded record: the old preflight refused before replaceResource()
+        // could try the exact same safe encoding that made the clean-up fit.
+        // This changes neither source bytes nor the no-growth/ownership rule.
+        const qint64 payload = file.flags == 1
+            ? ZlibUtils::compressForCapacity(source, capacity).size() : source.size();
+        qint64 destination = -1;
         if (capacity >= 0 && payload > capacity) {
             destination = QtResources::findFreeSpace(data, link, 4 + payload, error);
             if (destination < 0)

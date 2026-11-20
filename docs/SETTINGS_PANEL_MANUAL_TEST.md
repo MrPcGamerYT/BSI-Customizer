@@ -109,6 +109,41 @@ BSI_TEST_QT_API=PyQt5 python tests/settings_panel_post_patch_gui_test.py
 
 Use separate Python processes for Qt 5 and Qt 6.
 
+## Clean title bar and combined title-details removal
+
+These are two separate controls in **PATCHER → Player interface**:
+
+1. Close every player instance. Apply **Clean player UI**, or **Update clean-up**
+   if an older cleanup is already applied. The three-line title-bar menu must
+   disappear, including its actual clickable item, not only its SVG. The
+   sidebar **Settings** button must remain accessible. Resize, maximize/restore,
+   leave fullscreen and exercise any existing pin/mini-mode exit; the menu
+   must not reappear. Native navigation/window controls must continue working.
+2. In **Ads / UI Removal**, select the single **Remove title details** choice
+   and apply it. This one action removes both the version and instance/engine
+   label, collapses their row, and vertically centers the remaining player name
+   with equal space above and below. It does **not** horizontally center the
+   name. Resize/restart and confirm the details do not reappear.
+3. Open Settings: its headings, version/instance text, pages, buttons and native
+   callbacks must still work. Repeat the two actions in the opposite order on
+   another disposable copy. Full compressed records must use bounded lossless
+   encoding or safely refuse—never grow the EXE for title-details removal.
+4. **Restore stock UI** restores only the clean-up's exact owned fields and
+   runtime menu guard; it must not undo the separate title-details removal.
+   **Restore EXE backup** is the full undo for removals. Preserve that first
+   verified backup. Edited/duplicated owned guards or ambiguous menu owners
+   must refuse without writing rather than guessing.
+
+The application self-test includes both orders on synthetic resources and the
+selected untouched player reference. For physical Qt contract-scene checks,
+set `BSI_TOPBAR_TEST_FIXTURES` to an empty directory when running `--selftest`,
+then run `tests/clean_player_ui_gui_test.py` with the same variable. Repeat in a
+separate process with `BSI_TEST_QT_API=PyQt5`. The 20 production-written scenes
+cover both native visibility models, owning-item shapes, callbacks, imperative
+re-show attempts, resize/window restore, physical Settings clicks, painted text,
+and equal top/bottom name spacing. These authored scenes do not certify a real
+installed player; carry out the manual checks above too.
+
 ## Default pack and custom-icon regression
 
 Use a disposable player copy and an empty Settings-panel profile for the first check:

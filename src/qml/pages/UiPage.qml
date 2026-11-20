@@ -936,7 +936,7 @@ Item {
                                     Layout.fillWidth: true
                                     wrapMode: Text.Wrap
                                     text: qsTr("Hide selected controls. Remove title details hides the version and instance label together, "
-                                               + "collapses their row and vertically centres the player name. Settings text and shared strings stay intact. "
+                                               + "collapses their row and vertically centres the player name with equal space above and below. Settings text and shared strings stay intact. "
                                                + "Use Restore Backup to undo removals.")
                                     color: Theme.textDim
                                     font.pixelSize: 11
