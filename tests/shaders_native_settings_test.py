@@ -257,8 +257,29 @@ def main():
             return next(item for item in tree(root) if item.objectName() == name)
 
         def click(window, control):
+            # A Quick item stays isVisible() even when a focused ScrollView has
+            # scrolled it behind a clipped header/footer (notably Qt 5 Windows).
+            # Reveal it using the real Flickable, then reject any clipped hit.
+            ancestor = control.parentItem()
+            while ancestor:
+                if ancestor.metaObject().indexOfProperty("contentY") >= 0:
+                    center = control.mapToItem(ancestor, QPointF(control.width() / 2, control.height() / 2))
+                    margin = min(control.height() / 2 + 2, ancestor.height() / 2)
+                    offset = min(center.y() - margin, 0) + max(center.y() - ancestor.height() + margin, 0)
+                    maximum = max(0, ancestor.property("contentHeight") - ancestor.height())
+                    ancestor.setProperty("contentY", max(0, min(maximum, ancestor.property("contentY") + offset)))
+                    QTest.qWait(20)
+                ancestor = ancestor.parentItem()
+            ancestor = control.parentItem()
+            while ancestor:
+                if ancestor.clip():
+                    center = control.mapToItem(ancestor, QPointF(control.width() / 2, control.height() / 2))
+                    assert 0 <= center.x() < ancestor.width() and 0 <= center.y() < ancestor.height(), f"physical target {name_of(control)} is clipped by {name_of(ancestor)}"
+                ancestor = ancestor.parentItem()
             point = control.mapToScene(QPointF(control.width() / 2, control.height() / 2)).toPoint()
             assert control.isVisible() and 0 <= point.x() < window.width() and 0 <= point.y() < window.height(), name_of(control)
+            QTest.mouseMove(window, point)
+            QTest.qWait(20)
             QTest.mouseClick(window, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, point)
             QTest.qWait(40)
 
@@ -343,7 +364,15 @@ def main():
             assert json.loads(saved)["enabled"] and profile.is_file()
             assert not window.property("bsiShaderDirty")
             click(window, named(page, "shaderEnabled"))
-            assert page.property("pEnableSave") and window.property("bsiShaderDirty"), "physical post-Save edit did not publish native dirty state"
+            assert page.property("pEnableSave") and window.property("bsiShaderDirty"), (
+                "physical post-Save edit did not publish native dirty state: "
+                + repr({"checked": named(page, "shaderEnabled").property("checked"),
+                        "controlEnabled": named(page, "shaderEnabled").property("enabled"),
+                        "draft": evaluate(page, "JSON.stringify(draft)"),
+                        "saved": evaluate(page, "JSON.stringify(Engine.saved)"),
+                        "pageDirty": page.property("pEnableSave"),
+                        "nativeDirty": window.property("bsiShaderDirty"), "warnings": warnings})
+            )
             # Use the actual native header close action, not a Python wrapper
             # call, and require both No and Discard to traverse onClosing.
             click(window, named(window.contentItem(), "CloseIcon"))
