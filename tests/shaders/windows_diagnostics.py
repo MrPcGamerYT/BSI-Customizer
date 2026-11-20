@@ -11,6 +11,15 @@ import sys
 
 def install():
     kernel = C.WinDLL("kernel32", use_last_error=True)
+    # An unattended test must fail, not wait forever behind a Windows error
+    # dialog. This is process-local test setup, never a player/runtime change.
+    get_mode = kernel.GetErrorMode
+    get_mode.argtypes = []
+    get_mode.restype = W.DWORD
+    set_mode = kernel.SetErrorMode
+    set_mode.argtypes = [W.DWORD]
+    set_mode.restype = W.DWORD
+    set_mode(get_mode() | 0x1 | 0x2 | 0x8000)
     get_module = kernel.GetModuleHandleExW
     get_module.argtypes = [W.DWORD, C.c_void_p, C.POINTER(C.c_void_p)]
     get_module.restype = W.BOOL

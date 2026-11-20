@@ -71,6 +71,8 @@ jobs:
         run: python tests/shaders/run_ci_tests.py --command python tests/emulator_qt_report_test.py -v
       - name: Source-only public Qt bridge boundary guard
         run: python tests/shaders/public_qt_api_contract_test.py
+      - name: Failure and timeout diagnostics never turn a failed test into a pass
+        run: python tests/shaders/ci_diagnostics_test.py -v
 
   linux-public-qt5:
     name: Actual Qt 5 public bridge on a newer independent Qt 5 runtime (Linux fixture)
@@ -219,6 +221,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Actual cross-version module/provider preflight failed' }
       - name: Actual C++ plugin import and physical shader-page controls (Qt fixture only)
         env:
+          BSI_TEST_COMMAND_TIMEOUT: '180'
           BSI_TEST_QT_API: ${{ matrix.python-api }}
           BSI_SHADERS_MODULE_ROOT: ${{ github.workspace }}/build-shaders/module
           BSI_SHADERS_DIAGNOSTICS: '1'
@@ -226,6 +229,7 @@ jobs:
         run: python tests/shaders/run_ci_tests.py --command python -X faulthandler -u tests/shaders_plugin_ui_test.py
       - name: Physical native Settings navigation, prompts and missing-module fallback (contract fixture)
         env:
+          BSI_TEST_COMMAND_TIMEOUT: '180'
           BSI_TEST_QT_API: ${{ matrix.python-api }}
           BSI_SHADERS_MODULE_ROOT: ${{ github.workspace }}/build-shaders/module
           BSI_SHADERS_SOURCE_TEST: ${{ github.workspace }}/build-shaders/tests/Release/shader-settings-source-test.exe

@@ -177,7 +177,7 @@ jobs:
 
       - name: Build and verify the public-API regular shader payload baselines
         run: |
-          ./scripts/Build-ShaderBundle.ps1 -Qt5Prefix $env:BSI_SHADER_QT5_PREFIX -Qt6Prefix $env:BSI_SHADER_QT6_PREFIX `
+          python tests/shaders/run_ci_tests.py --command pwsh -NoProfile -File ./scripts/Build-ShaderBundle.ps1 -Qt5Prefix $env:BSI_SHADER_QT5_PREFIX -Qt6Prefix $env:BSI_SHADER_QT6_PREFIX `
             -BuildRoot build-shader-payloads -OutputDirectory "$env:RUNNER_TEMP/bsi-shader-payloads"
 
       - name: Configure application and one-file package

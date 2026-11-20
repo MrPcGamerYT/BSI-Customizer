@@ -14,6 +14,13 @@ import sys
 import tempfile
 import uuid
 
+if os.environ.get("BSI_SHADERS_DIAGNOSTICS"):
+    import faulthandler
+    faulthandler.enable()
+    # Preserve where a native Qt host stalls, including imports/shutdown. CI
+    # bounds the command separately and still counts a hang as a failure.
+    faulthandler.dump_traceback_later(60, repeat=True)
+
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("QT_QUICK_BACKEND", "software")
 # Basic was introduced in Qt 6; Qt 5 calls its base style Default. Keep the
