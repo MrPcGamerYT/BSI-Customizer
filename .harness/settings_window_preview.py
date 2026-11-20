@@ -292,6 +292,13 @@ Window {
             profile = Path(QStandardPaths.writableLocation(QStandardPaths.StandardLocation.GenericConfigLocation)) / "BSICustomizer/Shaders" / (key + ".json")
             assert not profile.exists() and not profile.is_symlink()
             self.profile = profile
+        # Realize the independent offscreen host while hidden, before the
+        # production onVisibleChanged sizing callback. Qt 5's offscreen QPA can
+        # otherwise report its first cached geometry as native pixels and divide
+        # our logical 780x500 by the monitor DPR on first show. Do not compensate
+        # by changing the generated QML, page geometry or capture dimensions.
+        self.window.create()
+        self.app.processEvents()
         self.window.show()
         QTest.qWait(150)
         self.frame()

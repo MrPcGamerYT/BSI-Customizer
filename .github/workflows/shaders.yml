@@ -36,6 +36,7 @@ on:
       - 'src/core/ZopfliMatch.cmake'
       - 'tests/settings_panel_window_budget_test.py'
       - 'tests/settings_panel_glass_test.py'
+      - 'tests/settings_panel_glass_capture_test.py'
       - '.harness/settings_window_preview.py'
       - 'tests/fixtures/settings-window-*'
       - 'src/third_party/minhook/**'
@@ -128,6 +129,17 @@ jobs:
           python tests/run_qt_runtime_test.py tests/shaders_plugin_ui_test.py
           python tests/run_qt_runtime_test.py tests/shaders_native_settings_test.py
           python tests/run_qt_runtime_test.py tests/shaders_native_settings_test.py --missing-module
+      - name: Production glass at host, 100/125/150/200 percent DPI and strict flat-image negative controls
+        env:
+          BSI_GLASS_ARTIFACTS: ${{ runner.temp }}/settings-glass-captures
+        run: python tests/run_qt_runtime_test.py tests/settings_panel_glass_capture_test.py
+      - name: Retain glass capture diagnostics and negative controls
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: glass-captures-linux-qt5
+          path: ${{ runner.temp }}/settings-glass-captures
+          if-no-files-found: ignore
       - name: Record scope
         run: echo 'Actual Linux Qt bridge cross-patch fixture, not Windows Qt 5.15.4 or installed-player/game/GPU certification.' >> "$GITHUB_STEP_SUMMARY"
 
@@ -274,10 +286,18 @@ jobs:
           BSI_TEST_QT_API: ${{ matrix.python-api }}
           BSI_PHONE_PROFILES_TEST: ${{ github.workspace }}/build-shaders/tests/Release/phone-profiles-test.exe
         run: python tests/run_qt_runtime_test.py tests/phone_profiles_gui_test.py
-      - name: Actual generated glass Settings materials and native input on the independent Windows Qt host
+      - name: Actual generated glass pixels/input at host, 100/125/150/200 percent DPI and strict flat-image negative controls
         env:
           BSI_TEST_QT_API: ${{ matrix.python-api }}
-        run: python tests/run_qt_runtime_test.py tests/settings_panel_glass_test.py
+          BSI_GLASS_ARTIFACTS: ${{ runner.temp }}/settings-glass-captures
+        run: python tests/run_qt_runtime_test.py tests/settings_panel_glass_capture_test.py
+      - name: Retain glass capture diagnostics and negative controls
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: glass-captures-windows-${{ matrix.qt }}-${{ matrix.host-qt }}
+          path: ${{ runner.temp }}/settings-glass-captures
+          if-no-files-found: ignore
       - name: Record limits rather than claim universal support
         shell: pwsh
         run: "'Windows Qt fixture + WARP API tests only. Not HD-Player category navigation, game presentation hooks or physical Intel/AMD/NVIDIA certification. No merge authorized by these tests alone.' | Out-File $env:GITHUB_STEP_SUMMARY -Append"

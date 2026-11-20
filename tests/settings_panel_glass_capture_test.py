@@ -1,0 +1,45 @@
+"""Real glass pixels/input at native, fractional and integral high DPI.
+
+Every positive run uses unmodified production QML. Flat-gradient negative
+controls must fail the same strict rendered-reflection assertion, not merely a
+property check. Never hide a renderer failure with a retry or a relaxed limit.
+"""
+import os
+from pathlib import Path
+import subprocess
+import sys
+
+
+def main():
+    test = Path(__file__).with_name("settings_panel_glass_test.py")
+    artifacts = os.environ.get("BSI_GLASS_ARTIFACTS")
+    for negative in (False, True):
+        for scale in (("1", "2") if negative else (None, "1", "1.25", "1.5", "2")):
+            name = ("flat-negative-" if negative else "production-") + (scale or "host-default")
+            env = dict(os.environ)
+            env.pop("BSI_GLASS_NEGATIVE_FLAT", None)
+            if scale is not None:
+                env["QT_SCALE_FACTOR"] = scale
+            if negative:
+                env["BSI_GLASS_NEGATIVE_FLAT"] = "1"
+            if artifacts:
+                env["BSI_GLASS_ARTIFACTS"] = str(Path(artifacts) / name)
+            result = subprocess.run([sys.executable, "-X", "faulthandler", "-u", str(test)],
+                                    env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                                    timeout=90)
+            if negative:
+                valid = result.returncode == 1 and "AssertionError: ('the window reflection is not present in the rendered pixels'" in result.stdout
+            else:
+                valid = result.returncode == 0 and "PASS Qt " in result.stdout
+            if not valid:
+                print(result.stdout, end="", flush=True)
+                raise AssertionError(f"{name}: unexpected glass-test result {result.returncode}")
+            if negative:
+                print(f"PASS: {name} rejected by unchanged rendered-pixel reflection assertion", flush=True)
+            else:
+                print(f"PASS: {name}\n{result.stdout}", end="", flush=True)
+    print("PASS: five production DPI runs plus two strict flat-gradient negative controls; no production material, contrast threshold or native input assertion changed")
+
+
+if __name__ == "__main__":
+    main()

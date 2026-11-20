@@ -6,8 +6,11 @@ slider track/fill/handle, text validation and an Overlay-reparented combo popup.
 No OEM source/artwork, player process, game renderer or optional effects plugin.
 """
 import importlib.util
+import json
 import os
 from pathlib import Path
+
+_preview = None
 
 REPO = Path(__file__).resolve().parents[1]
 spec = importlib.util.spec_from_file_location("glass_preview", REPO / ".harness/settings_window_preview.py")
@@ -168,7 +171,8 @@ def evaluate(item, text):
 
 
 def main():
-    preview = m.SettingsPreview(page_source=PAGE, about_links=[{"title": "Project", "url": "https://example.com"}])
+    global _preview
+    preview = _preview = m.SettingsPreview(page_source=PAGE, about_links=[{"title": "Project", "url": "https://example.com"}])
     window = preview.window
     m.QTest.qWait(240)
     content = window.contentItem()
@@ -188,19 +192,46 @@ def main():
             preview.event({"type": kind, "x": point.x(), "y": point.y()})
         m.QTest.qWait(30)
 
+    first_frame = True
+
     def frame():
+        nonlocal first_frame
         image = m.QImage.fromData(preview.frame())
         assert not image.isNull()
+        if first_frame:
+            # grabToImage's PNG dimensions can be physical pixels; PNG decoding
+            # need not preserve its DPR metadata. Report actual bounds, not an
+            # assumption about a particular OS/Qt host's monitor scaling.
+            print("Glass capture:", json.dumps({"qt": qVersion(),
+                "window": [window.width(), window.height()],
+                "image": [image.width(), image.height()],
+                "windowDpr": window.devicePixelRatio(), "imageDpr": image.devicePixelRatio()}), flush=True)
+            first_frame = False
         return image
 
+    def scene_pixel(point):
+        image = frame()
+        # QQuickItem.mapToScene returns logical window coordinates. Sampling
+        # that directly in a high-DPI QImage tests a DIFFERENT item (or the
+        # transparent shadow), not the intended material. Keep every existing
+        # color/contrast assertion, scaling by this capture's actual extent.
+        x = int(point.x() * image.width() / window.width())
+        y = int(point.y() * image.height() / window.height())
+        assert 0 <= x < image.width() and 0 <= y < image.height(), (point, x, y, image.size())
+        return image.pixelColor(x, y)
+
     def pixel(item, x, y):
-        point = item.mapToScene(m.QPointF(x, y))
-        return frame().pixelColor(round(point.x()), round(point.y()))
+        return scene_pixel(item.mapToScene(m.QPointF(x, y)))
 
     about = named("aboutSettings", visible=False)
     surface = next(i for i in tree() if m.prop(i, "radius") == 14)
     assert gradient(surface), "the actual window stayed flat: Qt's unset gradient can be undefined, not only null"
     assert evaluate(surface, "gradient.stops[1].color.a") == 1, "do not reveal an uninitialized game frame through Settings"
+    if os.environ.get("BSI_GLASS_NEGATIVE_FLAT") == "1":
+        # Intentional negative control: keep the real Gradient installed but
+        # remove its reflection. A property-only or misaddressed-pixel test
+        # must never accept this as a pass, at any monitor scale.
+        evaluate(surface, "gradient.stops[0].color = gradient.stops[1].color")
     # Sample before reading the top stop's color: that getter can force Qt 5
     # bindings and mask a gradient installed too early in a Loader's onLoaded.
     top = pixel(surface, 12, 30)
@@ -317,8 +348,11 @@ def main():
     assert hover.property("containsMouse") and window.property("pCurrentTabIndex") == 0
     fill = next(i for i in hover.childItems() if m.prop(i, "radius") == 6 and m.prop(i, "opacity") == .1)
     assert gradient(fill), "hover must use the same glass material, at lower opacity"
-    edge = selected.mapToScene(m.QPointF(selected.width() / 2, selected.height() - 1))
-    assert frame().pixelColor(round(edge.x()), round(edge.y())) == m.QColor("#54c8ff"), "the glass faded the selected outline"
+    # Sample the centre of the one-logical-pixel stroke, not its inner
+    # antialiased boundary at fractional DPI. Still require the exact opaque
+    # accent color; do not loosen it to a property-only/approximate assertion.
+    edge = selected.mapToScene(m.QPointF(selected.width() / 2, selected.height() - .5))
+    assert scene_pixel(edge) == m.QColor("#54c8ff"), "the glass faded the selected outline"
     preview.event({"type": "accent", "warm": True})
     assert labels["Performance"].property("color") == m.QColor("#f59e0b")
     click(field)
@@ -371,4 +405,19 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except BaseException:
+        # Failure diagnostics only: no retries, property fallback or relaxed
+        # threshold. Preserve the last rendered frame before atexit teardown.
+        output = os.environ.get("BSI_GLASS_ARTIFACTS")
+        if output and _preview is not None:
+            directory = Path(output)
+            directory.mkdir(parents=True, exist_ok=True)
+            (directory / "glass-failure.png").write_bytes(_preview.last_frame)
+            (directory / "glass-state.json").write_text(json.dumps({
+                "qt": qVersion(), "state": _preview.state(),
+                "windowDpr": _preview.window.devicePixelRatio(),
+                "scaleFactor": os.environ.get("QT_SCALE_FACTOR"),
+                "warnings": _preview.warnings}, indent=2))
+        raise
