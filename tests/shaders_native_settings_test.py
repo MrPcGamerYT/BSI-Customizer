@@ -296,6 +296,19 @@ def main():
 
         def tab(window, index, pointer_scroll=False):
             strip = next(i for i in tree(window.contentItem()) if i.metaObject().className().endswith("ListView"))
+
+            def settled():
+                # A ListView may already report atXEnd while its overshoot or
+                # kinetic animation is still running (Qt 6 Windows). A real
+                # click during that motion only stops the flick and must not
+                # be mistaken for a category activation. Wait for ordinary
+                # pointer-driven scrolling to finish; never cancel/position it.
+                for _ in range(150):
+                    if not any(strip.property(p) for p in ("moving", "flicking", "dragging")):
+                        return
+                    QTest.qWait(20)
+                assert False, "native top-strip scrolling did not settle after a real pointer drag"
+
             if pointer_scroll:
                 # Prove the appended category is reachable with an ordinary
                 # mouse, not only positionViewAtIndex/contentX assignment. Drag
@@ -311,15 +324,25 @@ def main():
                         point = start + (end - start) * (step / 12)
                         QTest.mouseMove(window, point, 15)
                     QTest.mouseRelease(window, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, end)
-                    QTest.qWait(200)
+                    QTest.qWait(20)
+                    settled()
                 assert strip.property("atXEnd"), "the native top strip cannot be scrolled to Shaders with a real mouse drag"
             else:
                 strip.setProperty("cacheBuffer", 10000)
                 evaluate(strip, f"positionViewAtIndex({index}, ListView.Contain)")
             QTest.qWait(80)
+            settled()
             text = evaluate(window, f"pSettingsItems.pSettingElements[{index}].pButtonText")
             label = next(i for i in tree(window.contentItem()) if i.metaObject().indexOfProperty("text") >= 0 and i.property("text") == text)
             click(window, label.parentItem())
+            return {"requested": index, "selected": window.property("pCurrentTabIndex"),
+                    "contentX": strip.property("contentX"), "contentWidth": strip.property("contentWidth"),
+                    "atXEnd": strip.property("atXEnd"), "moving": strip.property("moving"),
+                    "flicking": strip.property("flicking"), "dragging": strip.property("dragging"),
+                    "rowVisible": evaluate(window, f"pSettingsItems.pSettingElements[{index}].pIsVisible"),
+                    "hit": (label.mapToScene(QPointF(label.width() / 2, label.height() / 2)).x(),
+                            label.mapToScene(QPointF(label.width() / 2, label.height() / 2)).y()),
+                    "warnings": warnings}
 
         def visible_prompts():
             return [w for w in QGuiApplication.topLevelWindows() if w.objectName() == "nativeDiscardPrompt" and w.isVisible()]
@@ -358,8 +381,8 @@ def main():
             assert player.property("pSettingsWindow") is None
             assert not profile.exists()
         else:
-            tab(window, 12, pointer_scroll=True)
-            assert window.property("pCurrentTabIndex") == 12
+            navigation = tab(window, 12, pointer_scroll=True)
+            assert window.property("pCurrentTabIndex") == 12, f"physical Shaders activation failed after pointer scrolling: {navigation}"
             page = evaluate(window, "pSettingsItems.pSettingElements[12].pComponentObj")
             assert page and evaluate(page, "Engine.controls.length") == 10
             assert not window.property("bsiShaderDirty2")
