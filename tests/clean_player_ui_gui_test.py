@@ -8,17 +8,17 @@ from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("QT_QUICK_BACKEND", "software")
-os.environ.setdefault("QT_QUICK_CONTROLS_STYLE", "Basic")
 QT5 = os.environ.get("BSI_TEST_QT_API") == "PyQt5"
+os.environ.setdefault("QT_QUICK_CONTROLS_STYLE", "Default" if QT5 else "Basic")
 if QT5:
-    from PyQt5.QtCore import QMetaObject, QPointF, Qt
+    from PyQt5.QtCore import QCoreApplication, QLibraryInfo, QMetaObject, QPointF, Qt, qVersion
     from PyQt5.QtGui import QGuiApplication
     from PyQt5.QtQml import QQmlComponent, QQmlEngine
     from PyQt5.QtQuick import QQuickItem, QQuickWindow
     from PyQt5.QtTest import QSignalSpy, QTest
 else:
     os.environ.setdefault("QSG_RHI_BACKEND", "software")
-    from PySide6.QtCore import QMetaObject, QPointF, Qt
+    from PySide6.QtCore import QCoreApplication, QLibraryInfo, QMetaObject, QPointF, Qt, qVersion
     from PySide6.QtGui import QGuiApplication
     from PySide6.QtQml import QQmlComponent, QQmlEngine
     from PySide6.QtQuick import QQuickItem, QQuickWindow
@@ -52,8 +52,26 @@ def main():
                 for callback in ("", "-callback")
                 for phase in ("stock", "clean", "clean-details", "details-clean", "restored")]
     assert all((root / name).is_file() for name in expected), "Run the production --selftest fixture exporter first"
+    # install-qt-action leaves the C++ build SDK's QML imports in the environment.
+    # In Windows CI that made this Qt 5 host parse Qt 6's qmldir ("version auto"),
+    # before any authored scene could load. Native/QML plugins must be the
+    # independent Python host's own; no source/assertion or player Qt is changed.
+    if QT5:
+        plugins = QLibraryInfo.location(QLibraryInfo.PluginsPath)
+        qml = QLibraryInfo.location(QLibraryInfo.Qml2ImportsPath)
+    else:
+        plugins = QLibraryInfo.path(QLibraryInfo.LibraryPath.PluginsPath)
+        qml = QLibraryInfo.path(QLibraryInfo.LibraryPath.QmlImportsPath)
+    assert Path(plugins).is_dir() and Path(qml).is_dir(), (plugins, qml)
+    os.environ["QT_PLUGIN_PATH"] = plugins
+    os.environ["QT_QPA_PLATFORM_PLUGIN_PATH"] = str(Path(plugins) / "platforms")
+    os.environ.pop("QML2_IMPORT_PATH", None)
+    os.environ.pop("QML_IMPORT_PATH", None)
+    QCoreApplication.setLibraryPaths([plugins])
     app = QGuiApplication.instance() or QGuiApplication([])
     engine = QQmlEngine()
+    engine.setImportPathList([qml, "qrc:/qt-project.org/imports", "qrc:/qt/qml"])
+    print("Topbar fixture host Qt:", qVersion(), "QML paths:", engine.importPathList(), flush=True)
     warnings = []
     engine.warnings.connect(lambda errors: warnings.extend(e.toString() for e in errors))
     for filename in expected:

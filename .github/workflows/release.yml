@@ -66,6 +66,8 @@ jobs:
     timeout-minutes: 60
     permissions:
       contents: write
+      # Read back the published test ZIPs, not just the pre-upload local EXEs.
+      actions: read
       # The build step republishes a failure as a PR comment: the job log of a
       # failed run is not readable from this account's API.
       pull-requests: write
@@ -82,6 +84,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+
+      - name: Test archive integrity verifier offline (no EXEs executed)
+        run: python tests/artifact_download_test.py -v
 
       - name: Resolve and validate release version
         id: meta
@@ -391,24 +396,74 @@ jobs:
       # Test builds need a downloadable EXE too, without creating a tag or
       # publishing a release. Keep retention short to limit storage usage.
       - name: Upload tested portable EXE
+        id: portable_upload
         if: ${{ !startsWith(github.ref, 'refs/tags/') && !inputs.publish_release }}
         uses: actions/upload-artifact@v4
         with:
-          name: BSI-Customizer-${{ steps.meta.outputs.version }}-win64-${{ github.run_id }}
+          name: BSI-Customizer-${{ steps.meta.outputs.version }}-win64-${{ github.run_id }}-r${{ github.run_attempt }}
           path: build/artifacts/${{ steps.meta.outputs.exe_name }}
           if-no-files-found: error
           retention-days: 3
-          compression-level: 0
+          compression-level: 6
 
       - name: Upload tested installer
+        id: setup_upload
         if: ${{ !startsWith(github.ref, 'refs/tags/') && !inputs.publish_release }}
         uses: actions/upload-artifact@v4
         with:
-          name: BSI-Customizer-${{ steps.meta.outputs.version }}-setup-${{ github.run_id }}
+          name: BSI-Customizer-${{ steps.meta.outputs.version }}-setup-${{ github.run_id }}-r${{ github.run_attempt }}
           path: build/artifacts/${{ steps.meta.outputs.setup_name }}
           if-no-files-found: error
           retention-days: 3
-          compression-level: 0
+          compression-level: 6
+
+      # Local smoke tests cannot certify the actual ZIP the user downloads.
+      # Read BOTH uploaded artifacts back from GitHub, verify ZIP/CRC + outer
+      # digest + exact inner EXE, then extract with Windows' own ZIP reader.
+      - name: Download both published ZIPs and verify CRC, hashes and Windows extraction
+        if: ${{ !startsWith(github.ref, 'refs/tags/') && !inputs.publish_release }}
+        timeout-minutes: 5
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PORTABLE_ID: ${{ steps.portable_upload.outputs.artifact-id }}
+          PORTABLE_ZIP_SHA: ${{ steps.portable_upload.outputs.artifact-digest }}
+          PORTABLE_URL: ${{ steps.portable_upload.outputs.artifact-url }}
+          PORTABLE_NAME: ${{ steps.meta.outputs.exe_name }}
+          PORTABLE_SHA: ${{ steps.artifact.outputs.sha256 }}
+          SETUP_ID: ${{ steps.setup_upload.outputs.artifact-id }}
+          SETUP_ZIP_SHA: ${{ steps.setup_upload.outputs.artifact-digest }}
+          SETUP_URL: ${{ steps.setup_upload.outputs.artifact-url }}
+          SETUP_NAME: ${{ steps.meta.outputs.setup_name }}
+          SETUP_SHA: ${{ steps.installer.outputs.sha256 }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = Join-Path $env:RUNNER_TEMP "bsi-verified-downloads-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          if (Test-Path -LiteralPath $root) { throw 'Download verification requires a new directory' }
+          New-Item -ItemType Directory -Path $root | Out-Null
+          $cases = @(
+            @{Kind='portable'; Id=$env:PORTABLE_ID; ZipSha=$env:PORTABLE_ZIP_SHA; Name=$env:PORTABLE_NAME; Sha=$env:PORTABLE_SHA; Url=$env:PORTABLE_URL},
+            @{Kind='setup'; Id=$env:SETUP_ID; ZipSha=$env:SETUP_ZIP_SHA; Name=$env:SETUP_NAME; Sha=$env:SETUP_SHA; Url=$env:SETUP_URL}
+          )
+          foreach ($case in $cases) {
+            $zip = Join-Path $root "$($case.Kind).zip"
+            $report = Join-Path $root "$($case.Kind).json"
+            $source = Join-Path 'build/artifacts' $case.Name
+            python scripts/Verify-ArtifactDownload.py --artifact-id $case.Id --repository $env:GITHUB_REPOSITORY `
+              --archive $zip --archive-sha256 $case.ZipSha --source $source --source-sha256 $case.Sha --report $report
+            if ($LASTEXITCODE -ne 0) { throw "Published $($case.Kind) ZIP failed download/CRC/hash verification" }
+            $unpacked = Join-Path $root $case.Kind
+            Expand-Archive -LiteralPath $zip -DestinationPath $unpacked
+            $files = @(Get-ChildItem -LiteralPath $unpacked -Recurse -File)
+            if ($files.Count -ne 1 -or $files[0].Name -cne $case.Name) { throw 'Windows ZIP extraction produced unexpected files' }
+            $sha = (Get-FileHash -LiteralPath $files[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($sha -ne $case.Sha) { throw 'Windows-extracted EXE differs from the tested build' }
+            $checked = Get-Content -LiteralPath $report -Raw | ConvertFrom-Json
+            Write-Host "::notice title=Windows ZIP extraction verified::$($case.Name) | EXE SHA256=$sha"
+            "### Verified $($case.Kind) download" >> $env:GITHUB_STEP_SUMMARY
+            "[$($case.Name)]($($case.Url)) — ZIP CRC and Windows extraction passed." >> $env:GITHUB_STEP_SUMMARY
+            "ZIP bytes: $($checked.archiveBytes); ZIP SHA-256: ``$($checked.archiveSha256)``" >> $env:GITHUB_STEP_SUMMARY
+            "EXE SHA-256: ``$sha``" >> $env:GITHUB_STEP_SUMMARY
+          }
 
       # Publish directly from the same Windows job that built and tested the
       # executable. A cross-job upload/download through Actions artifacts can

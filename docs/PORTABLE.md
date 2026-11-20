@@ -78,7 +78,24 @@ After a successful build:
 - Test builds also upload a separate **setup** artifact containing the tested
   `BSI-Customizer-<version>-setup.exe` installer (three-day retention). Choose
   this artifact when testing installation, shortcuts or installed-app updates.
+- Both test ZIPs use standard Deflate compression and names containing the run
+  ID **and attempt**, so a rebuild does not reuse a previous download. Before
+  the job can pass, it **downloads both published ZIPs back from GitHub**, checks
+  the ZIP structure/CRC and uploaded archive SHA-256, requires exactly the tested
+  EXE with its recorded size/SHA-256, then extracts again with Windows
+  `Expand-Archive` and compares the extracted EXE hash. This tests the delivered
+  archives, not just the pre-upload build. ZIP and inner-EXE hashes/sizes are
+  recorded separately in the run summary and check annotations. No extra files
+  or nested ZIPs are added to either artifact.
 - A published GitHub Release exposes the **`.exe` directly** as its download.
+
+The download verifier is a CI/developer tool, not a recipient dependency. Its
+19 offline tests cover truncation, CRC/SHA mismatch, HTML/error-page downloads,
+wrong/extra/linked members, unsupported ZIP encodings, size limits and transport
+credential separation. It never executes a member. A GitHub token is sent only
+to the GitHub API, never to the signed storage download URL. A locally downloaded
+file that is only a small HTML/JSON error page is not the advertised ZIP; check
+repository access/sign-in and compare its size/hash rather than running it.
 
 Set the `project(... VERSION ...)` value in `CMakeLists.txt` before pushing a
 matching tag, e.g. `v2.0.1` for project version `2.0.1`. Mismatched versions are
