@@ -1913,6 +1913,13 @@ int runSelfTest()
                           && startupResult.value("error").toString().contains(QStringLiteral("Sign in with Discord")),
                       "regular-DLL inspect/apply/restore respect the native Discord gate before file access");
             }
+            for (const auto &shaderResult : {gated.shadersInspect(),
+                      gated.shadersApply(QStringLiteral("qt-5.15.2"), {}, {}, {}, true),
+                      gated.shadersRemove({}, {}, true), gated.shadersRecover({}, true)}) {
+                check(!shaderResult.value("ok").toBool()
+                          && shaderResult.value("error").toString().contains(QStringLiteral("Sign in with Discord")),
+                      "native shader inspect/install/remove/recover respect authorization before file access");
+            }
             Backend ungated(&gateSettings);
             check(ungated.patchThemeQml().value(QStringLiteral("error")).toString()
                       != QStringLiteral("Sign in with Discord to unlock BSI Customizer."),

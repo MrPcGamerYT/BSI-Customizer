@@ -1,0 +1,45 @@
+[CmdletBinding()]
+param(
+    [Parameter(Mandatory)][string]$Qt5Prefix,
+    [Parameter(Mandatory)][string]$Qt6Prefix,
+    [Parameter(Mandatory)][string]$BuildRoot,
+    [Parameter(Mandatory)][string]$OutputDirectory
+)
+$ErrorActionPreference = 'Stop'
+Set-StrictMode -Version Latest
+$repo = Split-Path $PSScriptRoot -Parent
+$BuildRoot = [IO.Path]::GetFullPath($BuildRoot)
+$OutputDirectory = [IO.Path]::GetFullPath($OutputDirectory)
+if ((Test-Path -LiteralPath $OutputDirectory) -and @(Get-ChildItem -LiteralPath $OutputDirectory -Force).Count) {
+    throw 'Use a new/empty shader bundle output directory; existing files are never deleted.'
+}
+New-Item -ItemType Directory -Force -Path $BuildRoot, $OutputDirectory | Out-Null
+$oldPath = $env:PATH
+try {
+    foreach ($entry in @(@{Major = 5; Prefix = $Qt5Prefix}, @{Major = 6; Prefix = $Qt6Prefix})) {
+        $prefix = (Resolve-Path -LiteralPath $entry.Prefix).Path
+        $qmake = Join-Path $prefix 'bin/qmake.exe'
+        $version = (& $qmake -query QT_VERSION).Trim()
+        if ($LASTEXITCODE -ne 0 -or $version -notmatch "^$($entry.Major)\.\d{1,3}\.\d{1,3}$") {
+            throw "Invalid Qt $($entry.Major) SDK: $prefix"
+        }
+        $build = Join-Path $BuildRoot "qt-$version"
+        cmake -S (Join-Path $repo 'src/shaders') -B $build -A x64 `
+            "-DBSI_SHADERS_QT_MAJOR=$($entry.Major)" "-DQt$($entry.Major)_DIR=$prefix/lib/cmake/Qt$($entry.Major)" `
+            '-DBSI_SHADERS_BUILD_TESTS=ON' '-DBSI_TEST_NATIVE_SETTINGS=ON' '-DBSI_TEST_VULKAN=OFF'
+        if ($LASTEXITCODE -ne 0) { throw "Cannot configure Qt $version shader module" }
+        cmake --build $build --config Release --parallel 2
+        if ($LASTEXITCODE -ne 0) { throw "Cannot build Qt $version shader module" }
+        # Only this SDK is first on PATH, not another Qt major. Package checking
+        # reads actual imports/exports/fixed versions; no arbitrary DLL is loaded.
+        $env:PATH = (Join-Path $prefix 'bin') + ';' + $oldPath
+        ctest --test-dir $build -C Release --output-on-failure --timeout 60
+        if ($LASTEXITCODE -ne 0) { throw "Qt $version shader/package/recovery/DirectX tests failed" }
+        $out = Join-Path $OutputDirectory "qt-$version"
+        New-Item -ItemType Directory -Path $out | Out-Null
+        foreach ($name in @('BSIShaders.dll', 'qmldir')) {
+            Copy-Item -LiteralPath (Join-Path $build "module/BSIShaders/$name") -Destination (Join-Path $out $name)
+        }
+        Write-Host "Verified regular shader payload: Qt $version / x64 / release / MSVC"
+    }
+} finally { $env:PATH = $oldPath }

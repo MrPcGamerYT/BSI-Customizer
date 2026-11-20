@@ -1,9 +1,11 @@
 # Experimental shader package validation and recovery
 
-**Backend preparation, not an enabled/released feature.** `ShaderInstall` is not
-connected to a Customizer button/CLI action and no shader payload is bundled.
-Nothing here certifies a running player, real game effects or a physical GPU.
-Do not merge the feature on these tests alone.
+**Experimental test implementation, not a certified shader release.** The native
+Customizer exposes reviewed installation/update/removal/recovery under
+**PATCHER → Player interface → Shaders**. The Single EXE test build embeds the
+regular Qt 5.15.2 and Qt 6.8.3 Windows x64 release modules. Nothing here certifies
+a running player, real game effects or a physical GPU. The user will verify those
+with the [test guide](SHADERS-USER-TEST.md); do not merge on fixtures alone.
 
 ## Package/ABI boundary
 
@@ -43,9 +45,24 @@ player Qt version.
 
 ## Filesystem backend
 
-`ShaderInstall::apply` requires an acknowledged operation, an exact current EXE
-SHA-256 and the exact reviewed package SHA-256. `remove` also requires the current
-EXE hash. Runtime dependency bytes are read only from the player's directory;
+`ShaderInstall::inspect` is read-only: no lock/staging/backup files, DLL loads or
+player execution. It separately reports install/removal/recovery readiness and
+exact fixed release Qt versions. The Customizer's authorized facade always
+requires fresh acknowledgment and the complete review token, not just a green
+compatibility message. Apply binds the EXE, current owned module (including
+absence), selected embedded package and verified runtime bytes. Removal binds
+the EXE/module pair; a DLL-only update invalidates both old review types. Recovery
+requires the exact reviewed journal SHA-256 and acknowledgment. Low-level optional
+apply/remove fingerprints remain for internal transaction fixtures, but are not
+optional in the exposed service/UI.
+
+The bundle is compiled into the app, with strict bounded IDs, exact files,
+per-file/package SHA-256 pins and actual descriptor/entry-point checks. No DLL is
+picked from a download/CWD/PATH or arbitrary file picker. A hash is a build-input
+pin, not a publisher signature. Corrupt/missing/mismatched bundles disable
+installation, not safe removal/recovery of an already owned integration.
+
+Runtime dependency bytes are read only from the player's directory;
 only known VC-runtime names may fall back to Windows' GetSystemDirectory path.
 No dependency is searched through PATH/cwd or copied, updated or overwritten.
 An adjacent system-library override is refused instead of endorsing a proxy.
@@ -55,8 +72,10 @@ engine's application-directory QML import path. It contains exactly:
 
 - `BSIShaders.dll`
 - `qmldir`
-- `bsi-shaders-owner.json` (canonical schema, target EXE basename, package hash,
-  compiled Qt version)
+- `bsi-shaders-owner.json` (canonical `bsi.shader-module.v2`, target EXE basename,
+  package hash and compiled Qt version)
+- `THIRD-PARTY-NOTICES.txt` (complete MinHook/HDE and Vulkan MIT/Apache notices,
+  exact and bounded; accompanies binary redistribution)
 
 An existing directory without this complete exact owned set, extra files,
 changed hashes or a mismatched target is never adopted/overwritten/deleted.
@@ -153,9 +172,19 @@ Qt 5.15.2 and 6.8.3 release modules against their actual SDK/VC dependencies**,
 then the existing plugin/native-Settings physical-input fixtures. These checks
 must pass at the new head; adding a test is not a passing result.
 
-Still required: release payload selection/distribution, safe Customizer UI and
-preflight/recovery UX, the player's real QML import-path behavior, actual
-installed-player navigation/missing-incompatible-package behavior, Windows
-presentation validation and game-frame evidence, and the physical
-Intel/AMD/NVIDIA + configured/observed renderer matrix. No merge is authorized
-by preparation/backend/software results alone.
+Additional tests cover read-only inspection, whole-set review invalidation,
+changed-but-ABI-compatible runtime bytes, exact bundle selection, safe removal
+without a compatible application payload, acknowledged journal recovery, bounded
+bundle corruption/identity/schema checks and the real CMake manifest/hash
+producer. The full production Main.qml is physically navigated through Shaders,
+inspect/cancel/acknowledge/install/remove/recover and stale/busy/target guards
+with explicit mock services; no player file is accessed by that UI fixture.
+The portable test verifies actual embedded payload bytes in both the launcher
+and extracted app, not just the presence of a source file.
+
+Current-head Windows checks must pass for every bundle/UI change. Beyond those
+builds, still required: the player's real QML import-path behavior, actual installed-player navigation/
+missing-incompatible-package behavior, Windows presentation validation and visible
+game-frame evidence, and the physical Intel/AMD/NVIDIA + configured/observed
+renderer matrix. No merge is authorized by backend/UI-fixture/software results
+alone.

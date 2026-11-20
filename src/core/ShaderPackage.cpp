@@ -279,6 +279,23 @@ public:
     }
 };
 
+QString describePlugin(Image &plugin, const Payload &payload)
+{
+    need(payload.qmldir.size() <= 1024 && QByteArray(payload.qmldir).replace("\r\n", "\n") == moduleDefinition(),
+         "The shader qmldir is not the exact owned regular-plugin definition.");
+    plugin.readExports();
+    const auto descriptor = plugin.nativeExport(QByteArray("BSIShadersDescriptor"), false);
+    const QString contract = QString::fromLatin1(plugin.string(descriptor.rva, 192));
+    plugin.raw(descriptor.rva, U(contract.size()) + 1);
+    static const QRegularExpression format(QStringLiteral("^BSI_SHADERS_V2;QT=([56]\\.[0-9]{1,3}\\.[0-9]{1,3});ARCH=x64;ABI=msvc;BUILD=release;NS=default;END;$"));
+    const auto matched = format.match(contract);
+    need(matched.hasMatch(), "Unknown shader descriptor, Qt ABI, architecture, debug build or namespace.");
+    const QString version = matched.captured(1);
+    plugin.nativeExport(QByteArray("qt_plugin_instance"), true);
+    plugin.nativeExport(version.startsWith(QLatin1Char('6')) ? QByteArray("qt_plugin_query_metadata_v2") : QByteArray("qt_plugin_query_metadata"), true);
+    return version;
+}
+
 bool qtName(const QString &name, int *major = nullptr)
 {
     static const QRegularExpression rx(QStringLiteral("^qt([56])[a-z0-9]+\\.dll$"));
@@ -296,6 +313,12 @@ QString sha256(const QByteArray &bytes)
 QByteArray moduleDefinition()
 {
     return QByteArray("module BSIShaders\nplugin BSIShaders\nclassname BSIShadersPlugin\n");
+}
+QByteArray licenseNotices()
+{
+    return QByteArray(
+#include "../assets/shader-notices.inc"
+    );
 }
 QString payloadHash(const Payload &payload)
 {
@@ -354,6 +377,28 @@ Dependencies dependencies(const QByteArray &image, bool dll)
     return result;
 }
 
+Result describe(const Payload &payload)
+{
+    Result result;
+    try {
+        Image plugin(payload.dll, true);
+        result.qtVersion = describePlugin(plugin, payload);
+        result.packageSha256 = payloadHash(payload);
+        result.ok = true;
+    } catch (const std::exception &e) { result.error = QString::fromUtf8(e.what()); }
+    return result;
+}
+Result runtimeVersion(const QByteArray &dll)
+{
+    Result result;
+    try {
+        Image runtime(dll, true);
+        result.qtVersion = runtime.version();
+        result.ok = true;
+    } catch (const std::exception &e) { result.error = QString::fromUtf8(e.what()); }
+    return result;
+}
+
 Result validate(const QByteArray &player, const Payload &payload, const QMap<QString, QByteArray> &runtime)
 {
     Result result;
@@ -369,17 +414,8 @@ Result validate(const QByteArray &player, const Payload &payload, const QMap<QSt
         }
         need(total <= totalLimit, "Shader validation input exceeds 512 MiB.");
         Image host(player, false), plugin(payload.dll, true);
-        plugin.readExports();
-        const auto descriptor = plugin.nativeExport(QByteArray("BSIShadersDescriptor"), false);
-        const QString contract = QString::fromLatin1(plugin.string(descriptor.rva, 192));
-        plugin.raw(descriptor.rva, U(contract.size()) + 1);
-        static const QRegularExpression format(QStringLiteral("^BSI_SHADERS_V2;QT=([56]\\.[0-9]{1,3}\\.[0-9]{1,3});ARCH=x64;ABI=msvc;BUILD=release;NS=default;END;$"));
-        const auto matched = format.match(contract);
-        need(matched.hasMatch(), "Unknown shader descriptor, Qt ABI, architecture, debug build or namespace.");
-        const QString version = matched.captured(1);
+        const QString version = describePlugin(plugin, payload);
         const int major = version.left(1).toInt();
-        plugin.nativeExport(QByteArray("qt_plugin_instance"), true);
-        plugin.nativeExport(major == 6 ? QByteArray("qt_plugin_query_metadata_v2") : QByteArray("qt_plugin_query_metadata"), true);
         const QString core = QStringLiteral("qt%1core.dll").arg(major);
         const QString gui = QStringLiteral("qt%1gui.dll").arg(major);
         const QString qml = QStringLiteral("qt%1qml.dll").arg(major);

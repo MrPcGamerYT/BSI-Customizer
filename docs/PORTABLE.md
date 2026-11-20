@@ -71,7 +71,7 @@ After a successful build:
 - The Actions artifact download is wrapped in a ZIP by GitHub's artifact service;
   it contains **one EXE**, not a folder of dependencies. Find it under
   **Artifacts** at the bottom of the run's summary. Test artifacts expire after
-  **one day**; download promptly. Artifact uploads still depend on the account's
+  **three days**; download promptly. Artifact uploads still depend on the account's
   Actions storage allowance, including when using a self-hosted runner. If an
   upload fails on your self-hosted PC, the EXE remains under `build/artifacts/`
   inside that runner's checkout.
@@ -101,6 +101,34 @@ set `BSI_CHROMIUM_UI=OFF`.
 cmake -S . -B build -A x64 -DCMAKE_BUILD_TYPE=Release -DBSI_BUILD_PORTABLE=ON -DBSI_CHROMIUM_UI=ON
 cmake --build build --config Release --parallel
 ```
+
+### Experimental native shader payloads
+
+The Single EXE test workflow now builds/tests separate **Qt 5.15.2 and Qt 6.8.3**
+regular x64 release MSVC shader modules, embeds them inside the inner application
+and requires clean-PATH bundle checks in the packed/extracted EXEs. They are
+**not installed into a player automatically**. See the
+[native Shaders user verification guide](SHADERS-USER-TEST.md); real game/GPU
+validation is still pending, and an unmatched player Qt version safely refuses.
+
+To include the same experimental payloads in a local native build:
+
+```powershell
+./scripts/Build-ShaderBundle.ps1 -Qt5Prefix "C:/Qt/5.15.2/msvc2019_64" `
+  -Qt6Prefix "C:/Qt/6.8.3/msvc2022_64" -BuildRoot build-shader-payloads `
+  -OutputDirectory build-shader-bundle
+cmake -S . -B build -A x64 -DBSI_BUILD_PORTABLE=ON -DBSI_CHROMIUM_UI=OFF `
+  -DBSI_REQUIRE_SHADER_BUNDLE=ON -DBSI_SHADER_BUNDLE_DIR="$PWD/build-shader-bundle"
+cmake --build build --config Release --parallel
+```
+
+Use a new/empty output directory. Ordinary developer/CI builds can omit this
+optional bundle: safe removal/recovery remains available, but install is disabled
+with an explicit report. No Qt 5 library is linked into the Qt 6 Customizer. The
+player receives only the matching regular module, qmldir, ownership record and
+complete third-party notices, never the app's Qt/VC runtime. Build tools/SDKs are
+not recipient dependencies. The official experimental test workflow requires a
+valid bundle instead of silently producing an installer that cannot install it.
 
 The `BSI-Portable` target:
 

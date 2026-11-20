@@ -35,6 +35,13 @@ bool systemModule(const QString &name);
 QString sha256(const QByteArray &bytes);
 QString payloadHash(const Payload &payload);
 QByteArray moduleDefinition();
+// Accompanies the installed module, including binary redistribution notices.
+QByteArray licenseNotices();
+// Bounded descriptor/entry-point inspection, without loading the module. This
+// is compatibility metadata, not a signature or permission to execute a DLL.
+Result describe(const Payload &payload);
+// Read the fixed release version of a Qt runtime DLL, not editable strings.
+Result runtimeVersion(const QByteArray &dll);
 // Runtime keys must be unique lowercase basenames. All non-system dependency
 // providers (and forwarders) must be present. Qt Core/Gui/Qml must have the same
 // exact release VS_FIXEDFILEINFO version as the compiled module, with all used

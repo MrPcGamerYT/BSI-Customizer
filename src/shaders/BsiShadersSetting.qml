@@ -100,6 +100,14 @@ Item {
                     color: Engine.metrics.active ? page.accent : page.mutedColor
                 }
                 Label {
+                    objectName: "shaderFrameCounter"
+                    Layout.fillWidth: true; wrapMode: Text.Wrap
+                    text: qsTr("Processed game frames: ") + Engine.metrics.processedFrames
+                        + qsTr(" · Game surface observed: ") + (Engine.metrics.gameSurfaceObserved ? qsTr("yes") : qsTr("no"))
+                        + qsTr(" · Processing active: ") + (Engine.metrics.active ? qsTr("yes") : qsTr("no"))
+                    color: page.mutedColor; font.pixelSize: 12
+                }
+                Label {
                     Layout.fillWidth: true; wrapMode: Text.Wrap
                     text: qsTr("Uses the game's OpenGL, DirectX 11/12 or Vulkan presentation API, according to its renderer setting. Unsupported/protected surfaces are left untouched. Experimental; GPU/driver validation is incomplete. No FPS or system tweaks.")
                     color: page.mutedColor; font.pixelSize: 12

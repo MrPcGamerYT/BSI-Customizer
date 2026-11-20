@@ -3,7 +3,7 @@ import os
 import subprocess
 import sys
 
-result = subprocess.run([sys.executable, "-X", "faulthandler", "-u", sys.argv[1]],
+result = subprocess.run([sys.executable, "-X", "faulthandler", "-u", *sys.argv[1:]],
                         stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
 print(result.stdout, end="", flush=True)
 if result.returncode and os.environ.get("GITHUB_ACTIONS"):

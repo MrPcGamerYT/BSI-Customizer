@@ -96,6 +96,7 @@ jobs:
         run: |
           python tests/settings_panel_icon_pack_test.py
           python tests/settings_panel_window_budget_test.py
+          python tests/shaders/bundle_notices_test.py
       - name: Check DLL-startup audit input guards (no patcher or payload execution)
         run: python tests/dll_startup_audit_test.py
       - name: Install Qt runtime test dependencies

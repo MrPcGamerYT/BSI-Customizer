@@ -126,6 +126,10 @@ qt_add_executable(BSICustomizer
     src/core/ShaderPackage.cpp
     src/core/ShaderInstall.h
     src/core/ShaderInstall.cpp
+    src/core/ShaderBundle.h
+    src/core/ShaderBundle.cpp
+    src/core/ShaderActions.h
+    src/core/ShaderActions.cpp
     src/core/PlayerAppearanceScan.h
     src/core/PlayerAppearanceScan.cpp
     src/core/PlayerAppearancePatcher.h
@@ -371,6 +375,7 @@ qt_add_qml_module(BSICustomizer
         src/qml/components/LoadingStrip.qml
         src/qml/components/LazyFeature.qml
         src/qml/components/DllStartupPanel.qml
+        src/qml/components/ShaderInstallPanel.qml
         src/qml/components/Card.qml
         src/qml/components/ActionButton.qml
         src/qml/components/StudioTextField.qml
@@ -492,6 +497,24 @@ if(BSI_CHROMIUM_UI)
             src/web/fonts/manrope-LICENSE.txt src/web/fonts/plus-jakarta-sans-LICENSE.txt)
 endif()
 
+include(cmake/EmbedShaderBundle.cmake)
+bsi_embed_shader_bundle(BSICustomizer)
+# Mandatory notices for the regular shader module embedded in test/release
+# builds. Keep them in ordinary deployments as well as the one-file payload.
+add_custom_command(TARGET BSICustomizer POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:BSICustomizer>/licenses/shaders/vulkan"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/third_party/minhook/LICENSE.txt"
+        "$<TARGET_FILE_DIR:BSICustomizer>/licenses/shaders/MinHook.txt"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/third_party/vulkan/LICENSE.md"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/third_party/vulkan/LICENSES/Apache-2.0.txt"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/third_party/vulkan/LICENSES/MIT.txt"
+        "$<TARGET_FILE_DIR:BSICustomizer>/licenses/shaders/vulkan")
+install(FILES src/third_party/minhook/LICENSE.txt DESTINATION bin/licenses/shaders RENAME MinHook.txt)
+install(FILES src/third_party/vulkan/LICENSE.md src/third_party/vulkan/LICENSES/Apache-2.0.txt
+    src/third_party/vulkan/LICENSES/MIT.txt DESTINATION bin/licenses/shaders/vulkan)
+
 install(TARGETS BSICustomizer RUNTIME DESTINATION bin)
 # Discord Rich Presence discovery/patching is compiled into the application,
 # UI and command line alike (BSI-Customizer.exe --rpcid ...). The build and
@@ -528,13 +551,17 @@ if(BSI_BUILD_PORTABLE)
     find_program(BSI_PWSH pwsh REQUIRED)
     get_filename_component(_bsi_qt_prefix "${Qt6_DIR}/../../.." ABSOLUTE)
     set(BSI_PORTABLE_EXE "${CMAKE_CURRENT_BINARY_DIR}/artifacts/BSI-Customizer-${PROJECT_VERSION}-win64.exe")
+    set(_bsi_shader_package_test)
+    if(BSI_REQUIRE_SHADER_BUNDLE)
+        list(APPEND _bsi_shader_package_test -RequireShaderBundle)
+    endif()
     add_custom_target(BSI-Portable ALL
         COMMAND "${BSI_PWSH}" -NoProfile -File "${CMAKE_CURRENT_SOURCE_DIR}/scripts/Build-SingleExe.ps1"
             -AppExecutable "$<TARGET_FILE:BSICustomizer>" -QtPrefix "${_bsi_qt_prefix}"
             -Version "${PROJECT_VERSION}" -BuildRoot "${CMAKE_CURRENT_BINARY_DIR}/portable"
             -OutputDirectory "${CMAKE_CURRENT_BINARY_DIR}/artifacts"
         COMMAND "${BSI_PWSH}" -NoProfile -File "${CMAKE_CURRENT_SOURCE_DIR}/scripts/Test-SingleExe.ps1"
-            -ExecutablePath "${BSI_PORTABLE_EXE}"
+            -ExecutablePath "${BSI_PORTABLE_EXE}" ${_bsi_shader_package_test}
         DEPENDS BSICustomizer
         BYPRODUCTS "${BSI_PORTABLE_EXE}"
         USES_TERMINAL VERBATIM

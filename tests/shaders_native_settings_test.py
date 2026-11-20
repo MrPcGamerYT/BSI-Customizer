@@ -294,10 +294,28 @@ def main():
             assert evaluate(window, "pSettingsItems.pSettingElements.length") == 13
             return window
 
-        def tab(window, index):
+        def tab(window, index, pointer_scroll=False):
             strip = next(i for i in tree(window.contentItem()) if i.metaObject().className().endswith("ListView"))
-            strip.setProperty("cacheBuffer", 10000)
-            evaluate(strip, f"positionViewAtIndex({index}, ListView.Contain)")
+            if pointer_scroll:
+                # Prove the appended category is reachable with an ordinary
+                # mouse, not only positionViewAtIndex/contentX assignment. Drag
+                # the native horizontal ListView left to expose its right end.
+                for _ in range(8):
+                    if strip.property("atXEnd"):
+                        break
+                    start = strip.mapToScene(QPointF(strip.width() * .85, strip.height() / 2)).toPoint()
+                    end = strip.mapToScene(QPointF(strip.width() * .15, strip.height() / 2)).toPoint()
+                    QTest.mouseMove(window, start)
+                    QTest.mousePress(window, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, start)
+                    for step in range(1, 13):
+                        point = start + (end - start) * (step / 12)
+                        QTest.mouseMove(window, point, 15)
+                    QTest.mouseRelease(window, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, end)
+                    QTest.qWait(200)
+                assert strip.property("atXEnd"), "the native top strip cannot be scrolled to Shaders with a real mouse drag"
+            else:
+                strip.setProperty("cacheBuffer", 10000)
+                evaluate(strip, f"positionViewAtIndex({index}, ListView.Contain)")
             QTest.qWait(80)
             text = evaluate(window, f"pSettingsItems.pSettingElements[{index}].pButtonText")
             label = next(i for i in tree(window.contentItem()) if i.metaObject().indexOfProperty("text") >= 0 and i.property("text") == text)
@@ -340,7 +358,7 @@ def main():
             assert player.property("pSettingsWindow") is None
             assert not profile.exists()
         else:
-            tab(window, 12)
+            tab(window, 12, pointer_scroll=True)
             assert window.property("pCurrentTabIndex") == 12
             page = evaluate(window, "pSettingsItems.pSettingElements[12].pComponentObj")
             assert page and evaluate(page, "Engine.controls.length") == 10
@@ -399,7 +417,7 @@ def main():
         QTest.qWait(30)
         engine.deleteLater()
         app.processEvents()
-    print("PASS: " + ("missing regular DLL does not block native startup; shader row/page are inactive, all native callback loops and Settings close remain intact" if missing else "production optional bootstrap imports the real plugin; physically navigate the 13-tab native-shell fixture, native No/Discard on tab and close, Save, persistence/reopen, reset and intact 750x470 layout"))
+    print("PASS: " + ("missing regular DLL does not block native startup; shader row/page are inactive, all native callback loops and Settings close remain intact" if missing else "production optional bootstrap imports the real plugin; mouse-drag the native top strip to Shaders and physically navigate the 13-tab native-shell fixture, native No/Discard on tab and close, Save, persistence/reopen, reset and intact 750x470 layout"))
     print("LIMIT: Qt/native-contract fixture only; no installed emulator, real game frames, deployment recovery or physical Intel/AMD/NVIDIA coverage is implied")
 
 

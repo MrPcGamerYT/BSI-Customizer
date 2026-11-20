@@ -1,7 +1,10 @@
 # Native Settings Shaders: regular-DLL, multi-renderer work in progress
 
-**Status: experimental and incomplete. Do not merge or advertise universal
-GPU/renderer support. The Customizer does not yet install this feature.**
+**Status: experimental test implementation, not installed-player or universal
+GPU/renderer certification. Do not merge on automated fixtures alone.** The
+Customizer now exposes the reviewed install/update/remove/recover flow and the
+Single EXE test workflow embeds exact-version regular modules. The user will
+verify the actual player. Start with the [user test guide](SHADERS-USER-TEST.md).
 
 ## Current user requirements
 
@@ -58,7 +61,7 @@ Qt 5/6 builds matching the player's Qt ABI. Qt invokes its registration outside
 `DllMain`; it does not replace/forward `version.dll`, `dxgi.dll`, `opengl32.dll`
 or `vulkan-1.dll`. The existing arbitrary startup-DLL feature remains separate.
 
-## Implemented preparation, not a completed feature
+## Implemented experimental path, not player certification
 
 - Original 24 px `currentColor`, no-fill, 1.7 px rounded-outline Shaders SVG,
   embedded in the Customizer's default/custom-icon catalog. A derived PNG is
@@ -110,13 +113,37 @@ or `vulkan-1.dll`. The existing arbitrary startup-DLL feature remains separate.
   dependent overlay is removed. A synthetic registered-PE regression exercises
   Update, idempotence, shader removal and exact original Settings-source Restore.
 
-**There is still no exposed production shader installer or working installation
-in a player.** There is now an experimental read-only package validator and
-recoverable install/update/removal backend, covered by disposable-file tests;
-it is not wired to a Customizer action or bundled with a plugin release payload.
-The native source planner requires the recognized redesigned top-tab shell.
-Existing player installations remain unchanged. See
-[package/transaction safety and limits](SHADER-PACKAGE-TRANSACTIONS.md).
+**There is still no verified working installation in a real player.** The test
+implementation now includes:
+
+- **PATCHER → Player interface → Shaders** in the native Customizer, with explicit
+  read-only inspection, closed-player/capacity/dependency checks, displayed
+  SHA-256 identities, fresh risk acknowledgment, install/update/idempotent
+  reapply, shader-only removal and reviewed interrupted-transaction recovery.
+  No entry/navigation action installs or inspects automatically. Target,
+  resource/workspace changes invalidate the review and its open confirmation.
+- A data-only compiled resource bundle, initially **Qt 5.15.2 and Qt 6.8.3 Windows
+  x64 release MSVC** builds. Only the exact compatible pinned entry is selectable;
+  arbitrary user DLLs/downloads and runtime replacement are not exposed. Other
+  player Qt versions safely refuse and need a separately built/tested module.
+- EXE/module/runtime review fingerprints, including invalidation after DLL-only
+  updates, so unchanged EXE bytes cannot reuse a stale install/remove review.
+  Removal remains available with an absent/mismatched application payload when
+  the current owned native fragments can safely be removed.
+- The Single EXE workflow independently builds/tests both regular modules before
+  embedding them, and requires the packed/extracted app to decode and verify the
+  embedded descriptors/hashes on a clean PATH. It includes the native installer
+  component and mandatory third-party notices. A delivered app needs no build
+  tool/interpreter or recurring launcher for the player.
+- A processed-frame/game-surface/active status readout in the native shader page
+  for user verification. A counter is a successful-submission diagnostic, not
+  proof that the expected game image visibly changed.
+
+The recognized redesigned top-tab native shell is a prerequisite; the installer
+links to its separate Settings-panel preparation UI rather than guessing an
+unknown player's shell. Existing player installations change only after the
+explicit authorized operation. See [package/transaction safety and limits](SHADER-PACKAGE-TRANSACTIONS.md)
+and the [real-player verification checklist](SHADERS-USER-TEST.md).
 
 ### Fixed-resource capacity now passes read-only planning on four references
 
@@ -193,13 +220,27 @@ was executed or written. Current-head Windows/full-app checks remain required.
   never retry toggles or bypass assertions. Regular CI, portable and Chromium
   checks also pass at that head. **These runs predate compact v2/tighter packing**;
   current-head checks are still required. Cross-compilation is not execution.
-- Compact v2 plus the package/recovery/guard tests pass all nine local strict
-  CTests and all nine ASan/UBSan tests with leak detection and halt-on-error. The actual Qt 6 plugin/native shell and separate missing-module process,
+- At `55571af`, compact v2 plus the package/recovery/guard suite passed all nine
+  local CTests and all nine ASan/UBSan tests with leak detection and halt-on-error
+  (211.65 seconds in the final local strict run). The bundle extension adds two
+  further CTests; every changed-head suite must be rerun. The actual Qt 6 plugin/native shell and separate missing-module process,
   exact prior-v1 removal, production Settings Update/Restore lifecycle and all
   four real-reference source-capacity cycles pass again with the guarded encoder.
-  A final strict ASan/UBSan rerun after the code fixes is 9/9. Older exit-zero
+  That final strict ASan/UBSan rerun was 9/9. Older exit-zero
   runs with recoverable UBSan diagnostics are not clean evidence; the new job enables `UBSAN_OPTIONS=halt_on_error=1:print_stacktrace=1`, keeps leak
   detection and instruments the C encoder/guard as well as C++.
+- The bundled-installer extension passes **11/11 local CTests (31.82 s)** and
+  **11/11 ASan/UBSan CTests (244.39 s)** with leak detection and halt-on-error.
+  The sanitizer run uses the explicit native SwiftShader loader; an earlier
+  invocation without that mandatory loader failed and is not counted as a pass.
+  The complete Customizer `Main.qml` is physically exercised at 1440×930 and
+  980×640 for inspection, cancel/fresh acknowledgment, installation, removal,
+  recovery, version refusal, busy/stale guards and the preparation link, using
+  mock services without player files. Native navigation now starts by dragging
+  the actual top strip to Shaders, not programmatically selecting its position.
+  Separate Qt 5 and Qt 6 missing-module processes pass. These are local fixture
+  results; changed-head Windows compilation/embedding/portable checks and real
+  player/GPU verification are separate gates, not implied successes.
 - Strict read-only Qt 5/6 package fixtures check the actual data export, exact
   release fixed-file/product versions, native Qt entry points and normal/delay/
   transitive/forwarded dependency symbols. The descriptor is a contract, not a
@@ -275,9 +316,9 @@ must verify the GPU actually rendering the game, not merely the display GPU.
    unobserved surfaces/queues) instead of silently processing them incorrectly.
 2. Preserve the fixed-resource capacity cycles and validate the experimental
    package/transaction backend against actual Windows player Qt/VC dependencies.
-   Complete trusted matching-Qt payload selection/distribution and safe Customizer
-   preflight/install/update/removal/recovery UX; the backend is not an exposed
-   production installer. Preserve fixed slots, verified rollback, prior
+   Verify the new matching-Qt payload bundle and Customizer preflight/install/
+   update/removal/recovery UI in the delivered Windows build and actual player;
+   the experimental UI is not production certification. Preserve fixed slots, verified rollback, prior
    title/menu/gutter fixes, exact original sources and unrelated pages. Verify
    update/removal recovery, the actual QML import path and missing/incompatible
    package fallback in a player; disposable/Qt fixtures alone are not sufficient.

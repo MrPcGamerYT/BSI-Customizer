@@ -54,31 +54,34 @@ The automated `settings_panel_post_patch_gui_test.py` runs the **same assertions
 
 `settings_panel_window_budget_test.py` reconstructs the **entire** legacy Settings resource, including its original callback prefix and the sizing helper. Counting shell-template bytes is not a reliable compression budget. Apply removes redundant horizontal whitespace beside safe punctuation/operators as well as leading indentation, retaining literals, notices, every line ending and JS statement boundary; ambiguous regex/template fragments are left unchanged. Token/Qt regressions protect operator separation, callbacks and quoted line continuations. The complete fixture uses **2436 / 2468 bytes**, retaining 32 bytes of headroom (the test requires at least 32). Hidden tabs still use the numeric icon-map empty sentinel; the unused separate `bHidden` channel was retired to make room for the new styling. The Windows engine suite additionally patches disposable copies of the real player references.
 
-## Shaders request: not yet available
+## Experimental native Shaders — ready for user verification, not certified
 
-The matching original Shaders SVG is embedded with a reserved default mapping.
-A regular-DLL shader prototype and reversible native source/image planners now
-exist, including a physically navigated **13-tab Qt contract fixture** with
-native tab/close No/Discard prompts, actual plugin controls and missing-module
-fallback. That fixture is not a running emulator or a deployment test.
+The native Customizer now has **PATCHER → Player interface → Shaders** with
+read-only compatibility/hash inspection and explicit install/update/reapply,
+shader-only removal and recovery dialogs. The Single EXE test workflow embeds
+regular x64 release MSVC modules for **Qt 5.15.2 and 6.8.3**; another exact player
+Qt version safely refuses. Apply the native Settings top-tabs redesign first,
+then follow the [real-player test and recovery guide](SHADERS-USER-TEST.md).
+Nothing installs on entry, and a regular Qt module is not a `version.dll` proxy.
 
-**The Customizer still does not install Shaders.** Compact v2 and bounded,
-verified lossless compression now pass **read-only, in-memory** root/window
-capacity, repeat and exact source/resource removal on all four player references.
-Each payload stays in its original mapped slot; reference disk hashes, EXE size
-and unrelated resources remain unchanged. Some legacy slots have only 8 bytes
-left, so other/edited builds must still fail safely if they do not fit.
+The matching original SVG is a customizable default. The **13-tab Qt contract
+fixture** loads the actual plugin, mouse-drags the horizontal native strip to
+Shaders, tests native tab/close No/Discard prompts, controls, persistence and
+missing-module fallback. The full Customizer Main.qml also has physical-pointer
+installer tests with explicit mock services. Neither is a running emulator.
 
-An experimental strict package validator and recoverable EXE+module backend now
-pass disposable-file install/update/removal and interruption/rollback tests. They
-are **not connected to an install action or bundled release DLL**. Actual-player
-Qt/VC compatibility, import-path/deployment recovery, game-frame effects and the
-Intel/AMD/NVIDIA renderer matrix remain outstanding. Existing installations are
-unchanged (eleven or twelve native pages in the inspected builds). Do not count
-shell/Qt fixtures, byte-capacity or file-transaction plans, software shader pixels
-or separate DLL-startup tests as end-to-end validation. The encoder now contains
-allocation/exit failures in C and uses a hash-verified defined-load build fix;
-these safety improvements do not prove shader rendering.
+Compact v2 and bounded verified lossless compression retain the read-only,
+in-memory root/window capacity, repeat and exact decoded-resource removal cycles
+on four untouched player references. Some legacy slots have only 8 bytes left;
+other/edited builds still safely refuse when they do not fit. The strict package
+validator and recoverable EXE+four-file module use complete dependency/ownership
+checks and reviewed EXE/module/runtime fingerprints. Source/transaction tests
+preserve unrelated resources and never replace Qt/VC/system DLLs.
+
+Actual-player Qt/import-path/deployment behavior, visible game-frame effects,
+Windows presentation safety and the physical Intel/AMD/NVIDIA renderer matrix
+remain unverified. Do not count fixtures, resource capacity, recovery tests or
+software shader pixels as end-to-end validation. **No merge yet.**
 See the detailed [capacity results, achieved tests and merge gates](SHADERS-INTEGRATION.md).
 
 ## Interactive Settings-window preview

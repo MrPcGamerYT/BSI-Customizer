@@ -55,7 +55,15 @@ if(TARGET Qt${QT_VERSION_MAJOR}::Core)
         add_test(NAME shader-actual-windows-package COMMAND shader-package-test
             "${module_dir}" "$<TARGET_FILE_DIR:Qt${QT_VERSION_MAJOR}::Core>")
     endif()
+    add_executable(shader-bundle-test bundle_test.cpp "${core_dir}/ShaderBundle.cpp" "${core_dir}/ShaderPackage.cpp")
+    target_include_directories(shader-bundle-test PRIVATE "${core_dir}")
+    target_link_libraries(shader-bundle-test PRIVATE Qt${QT_VERSION_MAJOR}::Core)
+    add_test(NAME shader-bundle-validation COMMAND shader-bundle-test)
+    add_test(NAME shader-bundle-cmake COMMAND ${CMAKE_COMMAND}
+        "-DTEST_EXE=$<TARGET_FILE:shader-bundle-test>" "-DSOURCE_ROOT=${shader_dir}/../.."
+        "-DWORK=${CMAKE_CURRENT_BINARY_DIR}/bundle-cmake-fixtures" -P "${CMAKE_CURRENT_LIST_DIR}/bundle_cmake_test.cmake")
     add_executable(shader-install-test install_test.cpp "${core_dir}/ShaderInstall.cpp"
+        "${core_dir}/ShaderActions.cpp" "${core_dir}/ShaderBundle.cpp"
         "${core_dir}/ShaderPackage.cpp" "${core_dir}/ShaderSettingsImage.cpp"
         "${core_dir}/ShaderSettingsSource.cpp" "${core_dir}/NativeSettingsModel.cpp" "${core_dir}/QmlText.cpp"
         "${core_dir}/QtResources.cpp" "${core_dir}/QtResourcePatching.cpp"

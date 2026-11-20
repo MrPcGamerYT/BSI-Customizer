@@ -13,6 +13,7 @@
 #include "PlayerAppearancePatcher.h"
 #include "GifRpc.h"
 #include "DllStartup.h"
+#include "ShaderActions.h"
 #include "BsDetector.h"
 #include "ExtrasPatcher.h"
 #include "IntegrityPatcher.h"
@@ -1541,7 +1542,48 @@ QVariantMap Backend::dllStartupRestore()
     return r;
 }
 
-// ------------------------------------------------------------------ extras
+// --------------------------------------------------------- native game shaders
+QVariantMap Backend::shadersInspect()
+{
+    if (actionsLocked()) return lockedMap();
+    if (!m_backgroundWorker)
+        return runBackground([](Backend &worker) { return worker.shadersInspect(); });
+    const auto r = ShaderActions::inspect(m_settings->exePath());
+    doLog(r.value("msg").toString(), r.value("ok").toBool() ? QStringLiteral("blue") : QStringLiteral("orange"));
+    return r;
+}
+QVariantMap Backend::shadersApply(const QString &bundleId, const QString &exeSha256,
+                                 const QString &packageSha256, const QString &reviewSha256,
+                                 bool riskAcknowledged)
+{
+    if (actionsLocked()) return lockedMap();
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) { return worker.shadersApply(bundleId, exeSha256, packageSha256, reviewSha256, riskAcknowledged); });
+    const auto r = ShaderActions::apply(m_settings->exePath(), bundleId, exeSha256, packageSha256, reviewSha256, riskAcknowledged);
+    if (r.value("changed").toBool()) invalidatePlayerAnalysis();
+    doLog(r.value("msg").toString(), r.value("ok").toBool() ? QStringLiteral("green") : QStringLiteral("red"));
+    return r;
+}
+QVariantMap Backend::shadersRemove(const QString &exeSha256, const QString &stateSha256, bool riskAcknowledged)
+{
+    if (actionsLocked()) return lockedMap();
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) { return worker.shadersRemove(exeSha256, stateSha256, riskAcknowledged); });
+    const auto r = ShaderActions::remove(m_settings->exePath(), exeSha256, stateSha256, riskAcknowledged);
+    if (r.value("changed").toBool()) invalidatePlayerAnalysis();
+    doLog(r.value("msg").toString(), r.value("ok").toBool() ? QStringLiteral("green") : QStringLiteral("red"));
+    return r;
+}
+QVariantMap Backend::shadersRecover(const QString &journalSha256, bool riskAcknowledged)
+{
+    if (actionsLocked()) return lockedMap();
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) { return worker.shadersRecover(journalSha256, riskAcknowledged); });
+    const auto r = ShaderActions::recover(m_settings->exePath(), journalSha256, riskAcknowledged);
+    if (r.value("changed").toBool()) invalidatePlayerAnalysis();
+    doLog(r.value("msg").toString(), r.value("ok").toBool() ? QStringLiteral("green") : QStringLiteral("red"));
+    return r;
+}
 
 // ---------------------------------------------------------------------------
 // BlueStacks Debloat

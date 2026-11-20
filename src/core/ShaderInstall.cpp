@@ -25,6 +25,7 @@ namespace {
 using Tree = QMap<QString, QByteArray>;
 const QString moduleName = QStringLiteral("BSIShaders");
 const QString ownerName = QStringLiteral("bsi-shaders-owner.json");
+const QString noticesName = QStringLiteral("THIRD-PARTY-NOTICES.txt");
 const QString journalSuffix = QStringLiteral(".bsi-shaders-transaction.json");
 constexpr qint64 fileLimit = 128LL * 1024 * 1024;
 #ifdef BSI_SHADER_INSTALL_TESTING
@@ -148,14 +149,15 @@ Tree readTree(const QString &path, const QString &exeName)
     need(QFileInfo(path).isDir(), QStringLiteral("Not an owned shader module directory: %1").arg(path));
     const QDir dir(path);
     const auto names = entries(path, 4);
-    QStringList expected{QStringLiteral("BSIShaders.dll"), QStringLiteral("qmldir"), ownerName}; expected.sort();
+    QStringList expected{QStringLiteral("BSIShaders.dll"), QStringLiteral("qmldir"), ownerName, noticesName}; expected.sort();
     need(names.size() == expected.size() && std::equal(names.cbegin(), names.cend(), expected.cbegin()), QStringLiteral("Unowned/extra/missing module files; nothing will be overwritten: %1").arg(path));
     Tree tree;
-    for (const auto &name : expected) tree.insert(name, read(dir.filePath(name), name.endsWith(QLatin1String(".dll")) ? fileLimit : 4096));
+    for (const auto &name : expected) tree.insert(name, read(dir.filePath(name), name.endsWith(QLatin1String(".dll")) ? fileLimit : name == noticesName ? 32768 : 4096));
+    need(tree.value(noticesName) == ShaderPackage::licenseNotices(), "Owned shader license notices were changed; no files will be overwritten.");
     need(QByteArray(tree.value(QStringLiteral("qmldir"))).replace("\r\n", "\n") == ShaderPackage::moduleDefinition(), "Owned qmldir was changed.");
     const auto owner = object(tree.value(ownerName));
     const ShaderPackage::Payload p{tree.value(QStringLiteral("BSIShaders.dll")), tree.value(QStringLiteral("qmldir"))};
-    need(owner.size() == 4 && owner.value(QStringLiteral("schema")).toString() == QLatin1String("bsi.shader-module.v1")
+    need(owner.size() == 4 && owner.value(QStringLiteral("schema")).toString() == QLatin1String("bsi.shader-module.v2")
              && owner.value(QStringLiteral("exeFile")).toString() == exeName
              && owner.value(QStringLiteral("packageSha256")).toString() == ShaderPackage::payloadHash(p)
              && QRegularExpression(QStringLiteral("^[56]\\.[0-9]{1,3}\\.[0-9]{1,3}$")).match(owner.value(QStringLiteral("qtVersion")).toString()).hasMatch(),
@@ -165,7 +167,8 @@ Tree readTree(const QString &path, const QString &exeName)
 Tree owned(const ShaderPackage::Payload &p, const QString &exeName, const QString &version)
 {
     return {{QStringLiteral("BSIShaders.dll"), p.dll}, {QStringLiteral("qmldir"), p.qmldir},
-        {ownerName, json({{QStringLiteral("schema"), QStringLiteral("bsi.shader-module.v1")}, {QStringLiteral("exeFile"), exeName},
+        {noticesName, ShaderPackage::licenseNotices()},
+        {ownerName, json({{QStringLiteral("schema"), QStringLiteral("bsi.shader-module.v2")}, {QStringLiteral("exeFile"), exeName},
             {QStringLiteral("packageSha256"), ShaderPackage::payloadHash(p)}, {QStringLiteral("qtVersion"), version}})}};
 }
 void writeTree(const QString &path, const Tree &tree)
@@ -184,7 +187,7 @@ void rename(const QString &from, const QString &to)
     need(!exists(to) && QDir().rename(from, to), QStringLiteral("Cannot safely rename shader module (close the player): %1 -> %2").arg(from, to));
 }
 // Never recurse through a user directory or use removeRecursively(). Deletion
-// only handles a fully verified, exactly three-file owned module tree.
+// only handles a fully verified, exactly four-file owned module tree.
 void eraseTree(const QString &path, const Tree &wanted, const QString &exeName)
 {
     if (!exists(path)) return;
@@ -238,6 +241,44 @@ void unchangedRuntime(const Runtime &runtime)
 {
     for (auto i = runtime.paths.cbegin(); i != runtime.paths.cend(); ++i)
         need(read(i.value()) == runtime.bytes.value(i.key()), QStringLiteral("Player runtime changed after validation: %1").arg(i.key()));
+}
+QString stateHash(const QByteArray &exe, const Tree &tree)
+{
+    return ShaderPackage::sha256(QByteArray("bsi.shader-state.v1\nexe:") + ShaderPackage::sha256(exe).toLatin1()
+        + "\nmodule:" + treeHash(tree).toLatin1() + '\n');
+}
+QString applyHash(const QByteArray &exe, const Tree &tree, const ShaderPackage::Payload &payload,
+                  const QMap<QString, QString> &runtimeHashes)
+{
+    QByteArray record = QByteArray("bsi.shader-review.v1\nstate:") + stateHash(exe, tree).toLatin1()
+        + "\npackage:" + ShaderPackage::payloadHash(payload).toLatin1() + '\n';
+    for (auto i = runtimeHashes.cbegin(); i != runtimeHashes.cend(); ++i)
+        record += i.key().toLatin1() + ':' + i.value().toLatin1() + '\n';
+    return ShaderPackage::sha256(record);
+}
+QString hostVersion(const QString &exe, const QByteArray &image, int *major)
+{
+    const auto deps = ShaderPackage::dependencies(image, false); need(deps.ok, deps.error);
+    QList<int> families;
+    for (int m : {5, 6}) if (deps.modules.contains(QStringLiteral("qt%1core.dll").arg(m))) families << m;
+    need(families.size() == 1, "Cannot identify a unique Qt release runtime imported by this player.");
+    *major = families.first();
+    const QDir dir = QFileInfo(exe).dir(); const auto names = entries(dir.absolutePath(), 4096);
+    QString version;
+    for (const auto &part : {QStringLiteral("core"), QStringLiteral("gui"), QStringLiteral("qml")}) {
+        const QString name = QStringLiteral("qt%1%2.dll").arg(*major).arg(part);
+        need(deps.modules.contains(name), "The player must import a complete Qt Core/Gui/Qml family.");
+        QString path;
+        for (const auto &entry : names) if (entry.compare(name, Qt::CaseInsensitive) == 0) {
+            need(path.isEmpty(), "Case-ambiguous adjacent Qt runtime DLLs."); path = dir.filePath(entry);
+        }
+        need(!path.isEmpty(), QStringLiteral("Required adjacent player runtime is missing: %1. Nothing is installed to supply it.").arg(name));
+        const auto found = ShaderPackage::runtimeVersion(read(path)); need(found.ok, name + QLatin1String(": ") + found.error);
+        need(found.qtVersion.startsWith(QString::number(*major) + QLatin1Char('.'))
+             && (version.isEmpty() || version == found.qtVersion), "Player Qt Core/Gui/Qml release versions do not agree.");
+        version = found.qtVersion;
+    }
+    return version;
 }
 struct Record {
     QString exe, recovery, state;
@@ -368,7 +409,7 @@ Result reconcile(Record r)
     return result;
 }
 Result operate(const QString &exe, const ShaderPackage::Payload *payload, const QString &expectedExe,
-               const QString &expectedPackage, bool acknowledged)
+               const QString &expectedPackage, bool acknowledged, const QString &expectedReview)
 {
     Result result; Record r; r.exe = exe;
     bool journalReady = false;
@@ -386,12 +427,17 @@ Result operate(const QString &exe, const ShaderPackage::Payload *payload, const 
             need(hashValid(expectedPackage) && ShaderPackage::payloadHash(*payload) == expectedPackage, "Package changed since its trusted SHA-256 was reviewed.");
             runtime = runtimeFor(exe, *payload);
             const auto valid = ShaderPackage::validate(r.before, *payload, runtime.bytes); need(valid.ok, valid.error);
+            need(expectedReview.isEmpty() || (hashValid(expectedReview)
+                && expectedReview == applyHash(r.before, r.oldModule, *payload, valid.runtimeSha256)),
+                "The reviewed EXE/module/runtime set changed. Inspect again; nothing was installed.");
             r.newModule = owned(*payload, exeName, valid.qtVersion);
             // Existing owned source and module must form a complete pair. Never
             // claim/overwrite an adjacent user's directory to repair an orphan.
             const auto absent = ShaderSettingsImage::prepare(r.before, false); need(absent.ok, absent.error);
             need(absent.changed == !r.oldModule.isEmpty(), "Orphan shader source/module; reconcile it before installing or updating.");
         } else {
+            need(expectedReview.isEmpty() || (hashValid(expectedReview) && expectedReview == stateHash(r.before, r.oldModule)),
+                 "The reviewed EXE/module set changed. Inspect again; nothing was removed.");
             need(image.changed || r.oldModule.isEmpty(), "Owned module exists without its native source overlay; removal is refused.");
         }
         if (r.before == r.after && r.oldModule == r.newModule) { result.ok = true; return result; }
@@ -454,22 +500,87 @@ template<class Operation> Result locked(const QString &exePath, Operation operat
     } catch (const std::exception &e) { Result r; r.error = QString::fromUtf8(e.what()); return r; }
 }
 } // namespace
+Inspection inspect(const QString &exePath, const ShaderPackage::Payload *payload)
+{
+    Inspection result;
+    try {
+        need(!exePath.trimmed().isEmpty(), "Select HD-Player.exe first.");
+        const QString exe = absolute(exePath); safePath(exe);
+        const auto image = read(exe); result.exeSha256 = ShaderPackage::sha256(image);
+        QString processError;
+        try { closedPlayer(exe); result.playerClosed = true; }
+        catch (const std::exception &e) { processError = QString::fromUtf8(e.what()); }
+        if (exists(exe + journalSuffix)) {
+            result.recoveryRequired = true;
+            try {
+                const auto r = load(exe); currentKnown(r);
+                if (r.state == QLatin1String("committed"))
+                    need(image == r.after && readTree(modulePath(exe), QFileInfo(exe).fileName()) == r.newModule,
+                         "Committed shader files changed; recovery will not overwrite them.");
+                result.journalSha256 = ShaderPackage::sha256(r.journal);
+                result.recoveryDirectory = r.recovery;
+                result.canRecover = result.playerClosed;
+                result.recoveryError = processError;
+            } catch (const std::exception &e) { result.recoveryError = QString::fromUtf8(e.what()); }
+            result.error = QStringLiteral("An interrupted shader transaction needs recovery before installation, removal or player launch.");
+            return result;
+        }
+        const auto tree = readTree(modulePath(exe), QFileInfo(exe).fileName());
+        result.modulePresent = !tree.isEmpty();
+        result.stateSha256 = stateHash(image, tree);
+        if (!tree.isEmpty()) result.installedPackageSha256 = ShaderPackage::payloadHash(
+            {tree.value(QStringLiteral("BSIShaders.dll")), tree.value(QStringLiteral("qmldir"))});
+        const auto removal = ShaderSettingsImage::prepare(image, false); need(removal.ok, removal.error);
+        result.qtMajor = removal.qtMajor;
+        result.sourcePresent = removal.changed;
+        result.installed = result.sourcePresent && result.modulePresent;
+        result.ok = true;
+        if (result.modulePresent && !result.sourcePresent) {
+            result.applyError = result.removeError = QStringLiteral("Owned module exists without its native source overlay. Automatic overwrite/removal is refused; restore a matching saved pair first.");
+            return result;
+        }
+        result.canRemove = result.sourcePresent && result.playerClosed;
+        if (!processError.isEmpty()) result.removeError = processError;
+        else if (!result.sourcePresent) result.removeError = QStringLiteral("No native shader integration is installed.");
+        try { result.qtVersion = hostVersion(exe, image, &result.qtMajor); }
+        catch (const std::exception &e) { result.runtimeError = QString::fromUtf8(e.what()); }
+        if (!payload) return result;
+        result.packageSha256 = ShaderPackage::payloadHash(*payload);
+        try {
+            need(result.sourcePresent == result.modulePresent,
+                 "Native shader sources exist without their owned module. Remove that inactive integration before reinstalling.");
+            const auto addition = ShaderSettingsImage::prepare(image, true); need(addition.ok, addition.error);
+            const auto runtime = runtimeFor(exe, *payload);
+            const auto valid = ShaderPackage::validate(image, *payload, runtime.bytes); need(valid.ok, valid.error);
+            result.qtVersion = valid.qtVersion;
+            result.runtimeSha256 = valid.runtimeSha256;
+            result.applyReviewSha256 = applyHash(image, tree, *payload, valid.runtimeSha256);
+            result.updateAvailable = result.installed && result.packageSha256 != result.installedPackageSha256;
+            result.canApply = result.playerClosed;
+            result.applyError = processError;
+        } catch (const std::exception &e) { result.applyError = QString::fromUtf8(e.what()); }
+    } catch (const std::exception &e) { result.error = QString::fromUtf8(e.what()); }
+    return result;
+}
 Result apply(const QString &exe, const ShaderPackage::Payload &payload, const QString &expectedExe,
-             const QString &expectedPackage, bool acknowledged)
+             const QString &expectedPackage, bool acknowledged, const QString &expectedReview)
 {
-    return locked(exe, [&](const QString &path) { return operate(path, &payload, expectedExe, expectedPackage, acknowledged); });
+    return locked(exe, [&](const QString &path) { return operate(path, &payload, expectedExe, expectedPackage, acknowledged, expectedReview); });
 }
-Result remove(const QString &exe, const QString &expectedExe, bool acknowledged)
+Result remove(const QString &exe, const QString &expectedExe, bool acknowledged, const QString &expectedState)
 {
-    return locked(exe, [&](const QString &path) { return operate(path, nullptr, expectedExe, {}, acknowledged); });
+    return locked(exe, [&](const QString &path) { return operate(path, nullptr, expectedExe, {}, acknowledged, expectedState); });
 }
-Result recover(const QString &exePath)
+Result recover(const QString &exePath, const QString &expectedJournal, bool acknowledged)
 {
     return locked(exePath, [&](const QString &exe) {
         Result result;
         try {
             if (!exists(exe + journalSuffix)) { result.ok = true; return result; }
+            need(acknowledged && hashValid(expectedJournal), "Inspect and acknowledge this shader recovery first.");
             const auto record = load(exe); result.recoveryDirectory = record.recovery;
+            need(ShaderPackage::sha256(record.journal) == expectedJournal,
+                 "The recovery journal changed since inspection. Nothing was recovered; inspect again.");
             return reconcile(record);
         } catch (const std::exception &e) { result.error = QString::fromUtf8(e.what()); result.recoveryRequired = true; return result; }
     });

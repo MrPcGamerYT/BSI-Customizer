@@ -96,6 +96,7 @@ QtObject {
     property bool busy: false
     property var installs: []
     signal workspaceChanged()
+    signal resourcesChanged()
     property var resourceInfos: []
     property var themeEntries: []
     property var workspaceOperations: []
@@ -175,6 +176,35 @@ QtObject {
     }
     function sidebarButtonRows() { return {supported: false, applied: false, buttons: [], detail: ""}; }
     function aboutPageState() { return {supported: false, applied: false, detail: "", text: "", links: []}; }
+    property bool shadersInstalled: false
+    property bool shadersPending: false
+    property bool shadersIncompatible: false
+    function shadersInspect() {
+        calls = calls.concat(["shadersInspect"]);
+        return {ok: !shadersPending, installed: shadersInstalled, sourcePresent: shadersInstalled,
+                canApply: !shadersPending && !shadersIncompatible, canRemove: shadersInstalled && !shadersPending,
+                canRecover: shadersPending, recoveryRequired: shadersPending, bundleId: "qt-5.15.2",
+                exeSha256: "reviewed-shader-exe", packageSha256: "reviewed-shader-package",
+                stateSha256: "reviewed-shader-state", applyReviewSha256: "reviewed-shader-runtime",
+                journalSha256: shadersPending ? "reviewed-shader-journal" : "",
+                msg: shadersPending ? "Pending shader transaction" : shadersIncompatible ? "Exact Qt mismatch" : "Shader fixture inspection"};
+    }
+    function shadersApply(id, exe, packageHash, review, ack) {
+        if (id !== "qt-5.15.2" || exe !== "reviewed-shader-exe" || packageHash !== "reviewed-shader-package"
+            || review !== "reviewed-shader-runtime" || ack !== true) throw Error("Unreviewed shader apply");
+        calls = calls.concat(["shadersApply"]); shadersInstalled = true; workspaceChanged();
+        return {ok: true, changed: true, msg: "Shader fixture installed; no files accessed"};
+    }
+    function shadersRemove(exe, state, ack) {
+        if (exe !== "reviewed-shader-exe" || state !== "reviewed-shader-state" || ack !== true) throw Error("Unreviewed shader removal");
+        calls = calls.concat(["shadersRemove"]); shadersInstalled = false; resourcesChanged();
+        return {ok: true, changed: true, msg: "Shader fixture removed; no files accessed"};
+    }
+    function shadersRecover(journal, ack) {
+        if (journal !== "reviewed-shader-journal" || ack !== true) throw Error("Unreviewed shader recovery");
+        calls = calls.concat(["shadersRecover"]); shadersPending = false; workspaceChanged();
+        return {ok: true, changed: true, msg: "Shader fixture recovered; no files accessed"};
+    }
     function localFilePath(url) { return String(url); }
 }''')
     themes = create('''import QtQuick
@@ -221,7 +251,7 @@ Window {
     tab = window.findChild(QObject, "settingsPanelRebuildTab")
     assert tab is not None, "the Settings-panel rebuild tab must exist"
     strip = window.findChild(QObject, "playerUiSections")
-    assert strip is not None and strip.property("count") == 5, strip.property("count")
+    assert strip is not None and strip.property("count") == 6, strip.property("count")
     labels = []
     pending = [strip]
     while pending:
@@ -234,7 +264,7 @@ Window {
     # the walk is depth-first from the last child: de-duplicate, then reverse.
     labels = list(dict.fromkeys(labels))[::-1]
     assert labels == ["Layout & clean-up", "About preview & editor", "Remove items",
-                      "Appearance studio", "Settings panel"], labels
+                      "Appearance studio", "Settings panel", "Shaders"], labels
 
     # Opening the tab is the only thing that inspects the player.
     assert "settingsPanelRebuildState" not in backend.property("calls").toVariant()
@@ -526,6 +556,71 @@ QtObject {
         click_item(page.findChild(QObject, "settingsPanelRebuildTab"))
         assert page.property("currentSection") == 4 and page.property("panelReady")
         print(f"PASS: full Main.qml PATCHER > Player interface physical navigation, cleanup Update/Restore, combined removal and Settings tab at {width}x{height}")
+
+        def shader_named(name):
+            matches = items(window.contentItem(), name)
+            obj = matches[0] if matches else window.findChild(QObject, name)
+            if obj is None:
+                obj = page.findChild(QObject, name)
+            assert obj is not None, name
+            return obj
+
+        before_shader = backend.property("calls").toVariant()
+        click_item(shader_named("nativeShadersTab"))
+        assert page.property("currentSection") == 5
+        assert backend.property("calls").toVariant() == before_shader, "opening Shaders never inspects or installs automatically"
+        assert not shader_named("installShaders").isEnabled() and not shader_named("removeShaders").isEnabled()
+        click_item(shader_named("inspectShaders"))
+        assert shader_named("installShaders").isEnabled()
+        click_item(shader_named("installShaders"))
+        assert shader_named("shaderInstallConfirm").property("opened")
+        assert not shader_named("confirmShaderOperation").isEnabled(), "acknowledgment defaults OFF"
+        QMetaObject.invokeMethod(shader_named("shaderInstallPanel"), "runReviewed")
+        assert backend.property("calls").toVariant().count("shadersApply") == before_shader.count("shadersApply")
+        QTest.keyClick(window, Qt.Key_Escape)
+        QTest.qWait(80)
+        assert not shader_named("shaderInstallConfirm").property("opened"), "cancel must close without a write"
+        click_item(shader_named("installShaders"))
+        click_item(shader_named("shaderInstallAcknowledge"))
+        assert shader_named("confirmShaderOperation").isEnabled()
+        click_item(shader_named("confirmShaderOperation"))
+        assert backend.property("shadersInstalled") and shader_named("removeShaders").isEnabled()
+        assert "Shader fixture installed" in shader_named("shaderInstallReport").property("text")
+        click_item(shader_named("removeShaders"))
+        assert not shader_named("confirmShaderOperation").isEnabled(), "each operation needs a fresh acknowledgment"
+        click_item(shader_named("shaderInstallAcknowledge"))
+        click_item(shader_named("confirmShaderOperation"))
+        assert not backend.property("shadersInstalled") and not shader_named("removeShaders").isEnabled()
+        backend.setProperty("shadersPending", True)
+        click_item(shader_named("inspectShaders"))
+        assert shader_named("recoverShaders").isEnabled() and not shader_named("installShaders").isEnabled()
+        click_item(shader_named("recoverShaders"))
+        assert not shader_named("confirmShaderOperation").isEnabled()
+        click_item(shader_named("shaderInstallAcknowledge"))
+        click_item(shader_named("confirmShaderOperation"))
+        assert not backend.property("shadersPending") and "shadersRecover" in backend.property("calls").toVariant()
+        backend.setProperty("shadersIncompatible", True)
+        click_item(shader_named("inspectShaders"))
+        assert not shader_named("installShaders").isEnabled()
+        assert "Exact Qt mismatch" in shader_named("shaderInstallReport").property("text")
+        backend.setProperty("shadersIncompatible", False)
+        click_item(shader_named("inspectShaders"))
+        backend.setProperty("busy", True)
+        QTest.qWait(30)
+        assert not shader_named("inspectShaders").isEnabled() and not shader_named("installShaders").isEnabled()
+        backend.setProperty("busy", False)
+        click_item(shader_named("installShaders"))
+        QMetaObject.invokeMethod(backend, "resourcesChanged")
+        QTest.qWait(50)
+        assert not shader_named("installShaders").isEnabled() and not shader_named("shaderInstallConfirm").property("opened"), "another patch invalidates the review and open confirmation"
+        click_item(shader_named("inspectShaders"))
+        backend.setProperty("exePath", "other-player.exe")
+        QTest.qWait(30)
+        assert not shader_named("installShaders").isEnabled(), "target changes invalidate shader reviews"
+        backend.setProperty("exePath", "player.exe")
+        click_item(shader_named("shaderPreparePanel"))
+        assert page.property("currentSection") == 4, "the prerequisite link reaches the actual native panel-preparation section"
+        print(f"PASS: full Main.qml native Shaders installer physical tab/inspect/cancel/ack/install/remove/recovery, exact-version refusal and stale/busy guards at {width}x{height} (mock services, no player files)")
     auth.setProperty("authorized", False)
     QTest.qWait(80)
     assert loader.property("item") is None, "sign-out must unload the feature page"

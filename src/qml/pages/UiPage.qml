@@ -533,6 +533,14 @@ Item {
                     StudioTabButton { text: qsTr("Remove items") }
                     StudioTabButton { text: qsTr("Appearance studio") }
                     StudioTabButton { objectName: "settingsPanelRebuildTab"; text: qsTr("Settings panel") }
+                    StudioTabButton { objectName: "nativeShadersTab"; text: qsTr("Shaders") }
+                }
+
+                ShaderInstallPanel {
+                    visible: page.currentSection === 5
+                    Layout.fillWidth: true
+                    onNotify: (message) => page.notify(message)
+                    onPrepareSettingsPanel: page.currentSection = 4
                 }
 
                 // ---------------- one-click clean-up ----------------
