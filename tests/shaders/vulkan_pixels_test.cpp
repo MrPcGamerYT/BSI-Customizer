@@ -1,6 +1,7 @@
 // Actual native Vulkan commands on an offscreen image. Not ANGLE/GLES, not a
 // mock, and NOT a physical-GPU or emulator/WSI presentation certification.
 #include "VulkanPipeline.h"
+#include "VulkanTextureQuality.h"
 #include <array>
 #include <atomic>
 #include <cmath>
@@ -77,6 +78,22 @@ int main(){
 #undef EXTRA
     VkQueue queue=VK_NULL_HANDLE;GetDeviceQueue(device,family,0,&queue);
     VulkanApi g;std::string error;require(g.load(device,resolve,&error),error);
+    // Descriptor/API creation proof only. These explicit test-fixture premises
+    // are not evidence that a real game's resources/profile are qualified.
+    TextureQualityProof quality;quality.renderer=Renderer::Vulkan;quality.requested=RendererFamily::Vulkan;
+    quality.use=TextureUse::SampledColor;quality.visibleMipLevels=7;
+    quality.gameSurfaceIdentified=quality.resourceOwnershipProven=quality.privateReplacementSupported=quality.externalOverridesReviewed=true;
+    auto nativeSampler=info<VkSamplerCreateInfo>(VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO);
+    nativeSampler.minFilter=nativeSampler.magFilter=VK_FILTER_LINEAR;nativeSampler.mipmapMode=VK_SAMPLER_MIPMAP_MODE_LINEAR;
+    nativeSampler.addressModeU=nativeSampler.addressModeV=nativeSampler.addressModeW=VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+    nativeSampler.maxLod=6;
+    for(auto mode:{TextureQuality::Native,TextureQuality::Light,TextureQuality::Strong}){
+        const auto planned=planVulkanTextureQuality(mode,quality,nativeSampler);
+        require(planned.descriptor.minLod==(mode==TextureQuality::Native?0.f:mode==TextureQuality::Light?1.5f:3.f),"bounded Vulkan quality sampler description");
+        VkSampler sampler=VK_NULL_HANDLE;okay(g.CreateSampler(device,&planned.descriptor,nullptr,&sampler),"create private experimental minimum-LOD sampler");
+        g.DestroySampler(device,sampler,nullptr);require(nativeSampler.minLod==0&&nativeSampler.mipLodBias==0,"original Vulkan sampler descriptor remains untouched");
+    }
+    std::cout<<"PASS: experimental Vulkan minimum-LOD descriptor creates/destroys actual samplers; not a quality pixel or game-binding test\n";
     auto memoryType=[&](std::uint32_t bits,VkMemoryPropertyFlags flags){
         for(std::uint32_t i=0;i<memory.memoryTypeCount;++i)if((bits&(1u<<i))&&(memory.memoryTypes[i].propertyFlags&flags)==flags)return i;
         require(false,"required memory type unavailable");return 0u;

@@ -160,7 +160,8 @@ jobs:
       - name: Production GLES and desktop OpenGL core pixels/state restoration
         run: |
           python3 tests/shaders/run_ci_tests.py --command python3 tests/shaders_gpu_test.py
-          BSI_SHADERS_EGL_API=opengl python3 tests/shaders/run_ci_tests.py --command python3 tests/shaders_gpu_test.py
+          BSI_TEST_TEXTURE_QUALITY=1 BSI_SHADERS_EGL_CLIENT_VERSION=3 python3 tests/shaders/run_ci_tests.py --command python3 tests/shaders_gpu_test.py
+          BSI_TEST_TEXTURE_QUALITY=1 BSI_SHADERS_EGL_API=opengl python3 tests/shaders/run_ci_tests.py --command python3 tests/shaders_gpu_test.py
       - name: Record scope of results
         run: echo 'Software/API tests only. No HD-Player installation, Win32 presentation hook or Intel/AMD/NVIDIA hardware certification is implied.' >> "$GITHUB_STEP_SUMMARY"
 

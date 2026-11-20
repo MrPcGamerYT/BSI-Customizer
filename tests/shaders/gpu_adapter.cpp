@@ -1,4 +1,5 @@
 #include "GlPipeline.h"
+#include "GlTextureQuality.h"
 #include <cstring>
 #include <memory>
 
@@ -21,6 +22,17 @@ void bsi_test_reference(const float *input,const int *values,float *output){
     for(std::size_t i=0;i<p.values.size();++i)p.values[i]=values[i];
     const auto result=BsiShaders::grade({input[0],input[1],input[2]},p);
     for(int i=0;i<3;++i)output[i]=result[i];
+}
+// Test-owned mip resources supply explicit qualification. This bridge is not
+// linked into the plugin and cannot assert ownership/profile safety in a game.
+int bsi_test_quality_minimum(int mode,int es,int supported,unsigned mips,float minimum,float maximum,float bias,int reviewed,float *out){
+    using namespace BsiShaders;
+    TextureQualityProof proof;proof.renderer=es?Renderer::OpenGLES:Renderer::OpenGL;proof.requested=RendererFamily::OpenGL;
+    proof.use=TextureUse::SampledColor;proof.gameSurfaceIdentified=proof.resourceOwnershipProven=true;
+    proof.privateReplacementSupported=supported!=0;proof.externalOverridesReviewed=reviewed!=0;proof.visibleMipLevels=mips;
+    GlQualitySampler source;source.minimumFilter=0x2703;source.minimumLod=minimum;source.maximumLod=maximum;source.lodBias=bias;
+    const auto plan=planGlTextureQuality(static_cast<TextureQuality>(mode),proof,source);
+    *out=plan.descriptor.minimumLod;return plan.changed();
 }
 void bsi_test_release(){if(pipeline)pipeline->release();pipeline.reset();}
 }

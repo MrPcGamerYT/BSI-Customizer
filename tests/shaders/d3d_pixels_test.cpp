@@ -2,6 +2,7 @@
 // look-alike CPU function, but do not certify hardware, DXGI hooks or HD-Player.
 #include "D3d11Pipeline.h"
 #include "D3d12Pipeline.h"
+#include "D3dTextureQuality.h"
 #include <dxgi1_4.h>
 #include <wrl/client.h>
 #include <array>
@@ -17,6 +18,11 @@ using Microsoft::WRL::ComPtr;
 namespace {
 void require(bool c,const std::string &text){if(!c){std::cerr<<"FAIL: "<<text<<'\n';std::exit(1);}}
 void okay(HRESULT hr,const char *text){if(FAILED(hr)){std::cerr<<"FAIL: "<<text<<" HRESULT="<<std::hex<<hr<<'\n';std::exit(1);}}
+TextureQualityProof qualityProof(Renderer api){
+    // Explicit test-owned descriptor premises, never inferred game ownership.
+    TextureQualityProof p;p.renderer=api;p.requested=RendererFamily::DirectX;p.use=TextureUse::SampledColor;p.visibleMipLevels=7;
+    p.gameSurfaceIdentified=p.resourceOwnershipProven=p.privateReplacementSupported=p.externalOverridesReviewed=true;return p;
+}
 constexpr UINT width=64,height=64,bytes=width*height*4;
 using Pixels=std::vector<unsigned char>;
 using Run=std::function<Pixels(const Pixels&,const Parameters&)>;
@@ -38,6 +44,17 @@ void exercise(const Run &run){
 void d3d11(){
     ComPtr<ID3D11Device> device;ComPtr<ID3D11DeviceContext> context;
     okay(D3D11CreateDevice(nullptr,D3D_DRIVER_TYPE_WARP,nullptr,D3D11_CREATE_DEVICE_BGRA_SUPPORT,nullptr,0,D3D11_SDK_VERSION,&device,nullptr,&context),"create real D3D11 WARP device");
+    D3D11_SAMPLER_DESC nativeSampling{};nativeSampling.Filter=D3D11_FILTER_MIN_MAG_MIP_LINEAR;
+    nativeSampling.AddressU=nativeSampling.AddressV=nativeSampling.AddressW=D3D11_TEXTURE_ADDRESS_CLAMP;
+    nativeSampling.ComparisonFunc=D3D11_COMPARISON_ALWAYS;nativeSampling.MaxAnisotropy=1;nativeSampling.MaxLOD=6;
+    ComPtr<ID3D11SamplerState> nativeSampler;okay(device->CreateSamplerState(&nativeSampling,&nativeSampler),"create original D3D11 test sampler");
+    for(auto mode:{TextureQuality::Light,TextureQuality::Strong}){
+        const auto planned=planD3dTextureQuality(mode,qualityProof(Renderer::Direct3D11),nativeSampling);require(planned.changed(),"qualified D3D11 quality descriptor");
+        ComPtr<ID3D11SamplerState> replacement;okay(device->CreateSamplerState(&planned.descriptor,&replacement),"create private D3D11 quality sampler");
+        D3D11_SAMPLER_DESC original{},actual{};nativeSampler->GetDesc(&original);replacement->GetDesc(&actual);
+        require(original.MinLOD==0&&actual.MinLOD==(mode==TextureQuality::Light?1.5f:3.f),"real D3D11 sampler round-trip preserves original and accepts bounded mip floor");
+    }
+    std::cout<<"PASS: experimental D3D11 minimum-LOD sampler creation/GetDesc round-trip; not a quality pixel or game-binding test\n";
     D3D11_TEXTURE2D_DESC desc{};desc.Width=width;desc.Height=height;desc.MipLevels=desc.ArraySize=1;desc.Format=DXGI_FORMAT_R8G8B8A8_UNORM;desc.SampleDesc.Count=1;desc.BindFlags=D3D11_BIND_RENDER_TARGET;
     ComPtr<ID3D11Texture2D> image,readback;okay(device->CreateTexture2D(&desc,nullptr,&image),"create D3D11 render image");
     desc.BindFlags=0;desc.Usage=D3D11_USAGE_STAGING;desc.CPUAccessFlags=D3D11_CPU_ACCESS_READ;okay(device->CreateTexture2D(&desc,nullptr,&readback),"create D3D11 readback");
@@ -60,6 +77,25 @@ void d3d11(){
 void d3d12(){
     ComPtr<IDXGIFactory4> factory;okay(CreateDXGIFactory1(IID_PPV_ARGS(&factory)),"create DXGI factory");ComPtr<IDXGIAdapter> warp;okay(factory->EnumWarpAdapter(IID_PPV_ARGS(&warp)),"get WARP adapter");
     ComPtr<ID3D12Device> device;okay(D3D12CreateDevice(warp.Get(),D3D_FEATURE_LEVEL_11_0,IID_PPV_ARGS(&device)),"create actual D3D12 WARP device");
+    D3D12_SAMPLER_DESC nativeSampling{};nativeSampling.Filter=D3D12_FILTER_MIN_MAG_MIP_LINEAR;
+    nativeSampling.AddressU=nativeSampling.AddressV=nativeSampling.AddressW=D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+    nativeSampling.ComparisonFunc=D3D12_COMPARISON_FUNC_ALWAYS;nativeSampling.MaxAnisotropy=1;nativeSampling.MaxLOD=6;
+    const auto quality=qualityProof(Renderer::Direct3D12);
+    const auto planned=planD3dTextureQuality(TextureQuality::Strong,quality,nativeSampling);require(planned.changed(),"qualified D3D12 sampler descriptor");
+    D3D12_DESCRIPTOR_HEAP_DESC samplerHeapInfo{};samplerHeapInfo.Type=D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER;samplerHeapInfo.NumDescriptors=2;
+    ComPtr<ID3D12DescriptorHeap> samplerHeap;okay(device->CreateDescriptorHeap(&samplerHeapInfo,IID_PPV_ARGS(&samplerHeap)),"create private D3D12 sampler heap");
+    auto handle=samplerHeap->GetCPUDescriptorHandleForHeapStart();device->CreateSampler(&nativeSampling,handle);
+    handle.ptr+=device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_SAMPLER);device->CreateSampler(&planned.descriptor,handle);
+    D3D12_STATIC_SAMPLER_DESC staticSource{};staticSource.Filter=D3D12_FILTER_MIN_MAG_MIP_LINEAR;
+    staticSource.AddressU=staticSource.AddressV=staticSource.AddressW=D3D12_TEXTURE_ADDRESS_MODE_CLAMP;
+    staticSource.ComparisonFunc=D3D12_COMPARISON_FUNC_ALWAYS;staticSource.MaxLOD=6;staticSource.MaxAnisotropy=1;
+    staticSource.ShaderVisibility=D3D12_SHADER_VISIBILITY_PIXEL;
+    const auto stat=planD3dTextureQuality(TextureQuality::Strong,quality,staticSource);require(stat.changed(),"qualified D3D12 static sampler descriptor");
+    D3D12_ROOT_SIGNATURE_DESC root{};root.NumStaticSamplers=1;root.pStaticSamplers=&stat.descriptor;
+    ComPtr<ID3DBlob> rootBytes,rootError;okay(D3D12SerializeRootSignature(&root,D3D_ROOT_SIGNATURE_VERSION_1,&rootBytes,&rootError),"serialize private D3D12 static sampler");
+    ComPtr<ID3D12RootSignature> rootSignature;okay(device->CreateRootSignature(0,rootBytes->GetBufferPointer(),rootBytes->GetBufferSize(),IID_PPV_ARGS(&rootSignature)),"create private D3D12 root signature");
+    require(nativeSampling.MinLOD==0&&staticSource.MinLOD==0,"original DirectX 12 descriptors untouched");
+    std::cout<<"PASS: experimental D3D12 dynamic sampler heap and serialized static-sampler root signature; not a quality pixel or game-binding test\n";
     D3D12_COMMAND_QUEUE_DESC q{};q.Type=D3D12_COMMAND_LIST_TYPE_DIRECT;ComPtr<ID3D12CommandQueue> queue;okay(device->CreateCommandQueue(&q,IID_PPV_ARGS(&queue)),"create D3D12 queue");
     ComPtr<ID3D12Fence> fence;okay(device->CreateFence(0,D3D12_FENCE_FLAG_NONE,IID_PPV_ARGS(&fence)),"create D3D12 test fence");UINT64 serial=0;
     HANDLE event=CreateEventW(nullptr,FALSE,FALSE,nullptr);require(event!=nullptr,"create test fence event");

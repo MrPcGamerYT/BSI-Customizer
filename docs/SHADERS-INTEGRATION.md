@@ -36,6 +36,19 @@ Compatibility claims require recorded tests, not just a three-option menu.
 
 ## Supplied archive and licensing boundary
 
+The separately supplied **Free Fire Potato DLL** archive has now been downloaded
+and statically inspected. See [the Potato DLL review](POTATO-DLL-REVIEW.md) for
+verified identities, the observed 1.5/3.0 OpenGL texture-LOD behavior, compatibility
+risks and Visual Studio build instructions for the existing regular module.
+It contains no source/license and has not been executed or incorporated. No
+Potato mode or NVIDIA Profile Inspector startup-conflict fix is implemented;
+that report distinguishes observed binary behavior from the still-unreproduced
+failure and the prerequisites for a separate source implementation. The
+independent [texture-quality portability experiment](TEXTURE-QUALITY-PORTABILITY.md)
+now provides a guarded shared sampler policy, typed API descriptor adapters and
+owned-resource tests. It is **not wired to game resources or enabled as a preset**;
+that document separates API evidence from missing player/performance qualification.
+
 Reference upload: [`zlag-dll-source.zip`](https://github.com/dsajgddghdsaakovvgheww/BSI-Customizer/blob/main/zlag-dll-source.zip).
 Inspected Git blob: `7d5f717ba1f76d2c41bc9244a24cd83636064f16`
 (935,703 bytes, 89 archive entries). Selected text was inspected only; no archive
