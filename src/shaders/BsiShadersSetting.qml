@@ -2,20 +2,92 @@ import QtQuick 2.15
 import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
 import QtQuick.Window 2.15
+import QtQml.Models 2.15
 import BSIShaders 1.0
 
 Item {
     id: page
     property string pParentWindow: "plr"
     property string pVmName: ""
+    // This is the NATIVE model index, never its sorted visual position.
     property int bsiTabIndex: -1
     property var bsiPalette: null
-    property font bsiFont: Qt.font({pixelSize: 14})
+    property font bsiFont: Qt.font({family: "Segoe UI", pixelSize: 14})
+    property var bsiTheme: null
     property bool pCompLoaded: false
     property var draft: ({})
     property bool pEnableSave: differs()
-    // Shader drafts are separate from uiBackend's configuration transaction.
-    // Participate in the native shell's existing tab/close discard prompts.
+    property string feedback: ""
+    property bool saveFailed: false
+    readonly property color textColor: look.text
+    readonly property color mutedColor: look.muted
+    readonly property color accent: look.accent
+    readonly property int presetIndex: selectedPreset()
+
+    ShaderStyle {
+        id: look
+        nativeTheme: page.bsiTheme
+        fallbackPalette: page.bsiPalette
+        fallbackFont: page.bsiFont
+    }
+    // DelegateModel reorders DISPLAY groups without mutating the native list or
+    // its `index` role. About/custom/hidden icon indexes and native callbacks
+    // therefore stay valid across install, update, reopen and exact removal.
+    DelegateModel { id: orderedTabs }
+    property bool tabsArranged: false
+    function settingsHost() {
+        var host = parent
+        while (host && host.bIcons === undefined) host = host.parent
+        return host
+    }
+    function resolveStyle() {
+        var window = page.Window.window
+        var rows = window && window.pSettingsItems ? window.pSettingsItems.pSettingElements : []
+        for (var i = 0; i < rows.length; ++i) {
+            var about = rows[i].pComponentObj
+            if (about && about.objectName === "aboutSettings" && about.bsiTheme) {
+                // Do not round-trip a QObject palette through an OEM C++
+                // pComponentArgs map: some hosts serialize it to an empty map.
+                page.bsiTheme = Qt.binding(function() { return about.bsiTheme })
+                return
+            }
+        }
+        // Older shells still expose the palette on their own surface. Invalid
+        // or missing individual roles use readable defaults, never black text.
+        var host = settingsHost(), queue = host ? [host] : [], count = 0
+        while (queue.length && count++ < 2048) {
+            var item = queue.pop()
+            if (item.c && item.c.primary10 !== undefined && item.c.primary80 !== undefined) {
+                page.bsiPalette = Qt.binding(function() { return item.c })
+                return
+            }
+            var children = item.children || []
+            for (var j = 0; j < children.length && queue.length < 2048; ++j) queue.push(children[j])
+        }
+    }
+    function arrangeTabs() {
+        if (tabsArranged || bsiTabIndex < 0) return
+        var window = page.Window.window
+        if (!window || !window.pSettingsItems) return
+        var rows = window.pSettingsItems.pSettingElements, aboutIndex = -1
+        for (var i = 0; i < rows.length; ++i)
+            if (/\/?PlrAboutSetting\.qml$/i.test(String(rows[i].pQmlSource))) aboutIndex = i
+        if (aboutIndex < 0 || aboutIndex === bsiTabIndex) return
+        var host = settingsHost(), queue = host ? [host] : [], count = 0
+        while (queue.length && count++ < 2048) {
+            var item = queue.pop()
+            if (item.orientation === Qt.Horizontal && item.positionViewAtIndex !== undefined && item.delegate) {
+                orderedTabs.model = rows
+                orderedTabs.delegate = item.delegate
+                item.model = orderedTabs
+                orderedTabs.items.move(bsiTabIndex, aboutIndex > bsiTabIndex ? aboutIndex - 1 : aboutIndex)
+                tabsArranged = true
+                return
+            }
+            var children = item.children || []
+            for (var j = 0; j < children.length && queue.length < 2048; ++j) queue.push(children[j])
+        }
+    }
     function publishDirty() {
         var window = page.Window.window
         if (window && window.bsiShaderDirty2 !== undefined) window.bsiShaderDirty2 = pEnableSave
@@ -35,22 +107,18 @@ Item {
         }
         return false
     }
-    property string feedback: ""
-    readonly property color textColor: bsiPalette ? bsiPalette.primary10 : "#e7e9f2"
-    readonly property color mutedColor: bsiPalette ? bsiPalette.primary20 : "#a9adba"
-    readonly property color accent: bsiPalette ? bsiPalette.subWindowHeaderClick : "#55b8ff"
-    function fInitUi() { draft = JSON.parse(JSON.stringify(Engine.saved)); feedback = "" }
+    function fInitUi() {
+        draft = JSON.parse(JSON.stringify(Engine.saved)); feedback = ""; saveFailed = false
+    }
     function fOnQmlLoaded() {
-        fInitUi(); pCompLoaded = true; publishDirty()
-        // Appending after the native tabs preserves their existing icon indexes.
-        // Use the original default only when no custom/hidden override exists.
-        var host = parent
-        while (host && host.bIcons === undefined) host = host.parent
+        resolveStyle(); fInitUi(); pCompLoaded = true; publishDirty()
+        var host = settingsHost()
         if (host && bsiTabIndex >= 0 && host.bIcons[bsiTabIndex] === undefined) {
             var icons = Object.assign({}, host.bIcons)
             icons[bsiTabIndex] = "qrc:/bsi-shaders/shaders.png"
             host.bIcons = icons
         }
+        arrangeTabs()
     }
     function fSetPreviousState() { fInitUi() }
     function fDiscardChanges() { fInitUi() }
@@ -58,132 +126,203 @@ Item {
     function setValue(key, value) {
         var next = Object.assign({}, draft); next[key] = value; draft = next
     }
-    function reset() {
-        var next = {enabled: false}
+    function presetValues(index) {
+        var next = {enabled: index > 0}
         for (var i = 0; i < Engine.controls.length; ++i) next[Engine.controls[i].key] = 0
-        draft = next
-    }
-    function preset(index) {
-        reset()
         if (index === 1) {
-            setValue("enabled", true); setValue("sharpen", 30); setValue("fxaa", 30)
+            next.sharpen = 30; next.fxaa = 30
         } else if (index === 2) {
-            setValue("enabled", true); setValue("saturation", 22); setValue("contrast", 12); setValue("hdr", 18)
+            next.saturation = 22; next.contrast = 12; next.hdr = 18
         } else if (index === 3) {
-            setValue("enabled", true); setValue("warmth", 25); setValue("contrast", 8); setValue("bloom", 20); setValue("vignette", 25)
+            next.warmth = 25; next.contrast = 8; next.bloom = 20; next.vignette = 25
+        } else if (index === 4) {
+            // Real, vendor-neutral color/detail processing, not an RTX claim.
+            next.saturation = 16; next.contrast = 10; next.hdr = 12
+            next.sharpen = 24; next.fxaa = 20; next.bloom = 6
         }
+        return next
     }
+    function selectedPreset() {
+        for (var index = 0; index <= 4; ++index) {
+            var values = presetValues(index), same = index === 0 || !!draft.enabled
+            for (var i = 0; same && i < Engine.controls.length; ++i) {
+                var key = Engine.controls[i].key
+                same = Number(draft[key] || 0) === values[key]
+            }
+            if (same) return index
+        }
+        return 5
+    }
+    function reset() { draft = presetValues(0) }
+    function preset(index) { if (index >= 0 && index <= 4) draft = presetValues(index) }
     function save() {
         var response = Engine.apply(draft)
-        feedback = response.msg
-        if (response.ok) draft = JSON.parse(JSON.stringify(Engine.saved))
+        saveFailed = !response.ok
+        feedback = response.ok ? qsTr("Changes saved") : response.msg
+        if (response.ok) {
+            draft = JSON.parse(JSON.stringify(Engine.saved))
+            var window = page.Window.window
+            if (window && typeof window.fShowToast === "function") {
+                window.fShowToast(qsTr("Changes saved"))
+                feedback = ""
+            }
+        }
         return response.ok
     }
+
     ColumnLayout {
         anchors.fill: parent
-        spacing: 10
+        spacing: 24
         ScrollView {
             id: scroll
             objectName: "shadersScroll"
-            Layout.fillWidth: true
-            Layout.fillHeight: true
+            Layout.fillWidth: true; Layout.fillHeight: true
             clip: true
-            contentWidth: availableWidth
+            contentWidth: form.width
+            contentHeight: form.implicitHeight + 20
+            ScrollBar.vertical: ShaderScrollBar { shaderStyle: look }
+            ScrollBar.horizontal.policy: ScrollBar.AlwaysOff
             ColumnLayout {
-                width: scroll.availableWidth
-                spacing: 12
-                Label { text: qsTr("Game shaders"); color: page.textColor; font: page.bsiFont }
-                Label {
+                id: form
+                width: Math.min(520, Math.max(0, scroll.availableWidth - 24))
+                spacing: 16
+                Text { text: qsTr("Visual effects"); color: look.text; font: look.bodyFont }
+                Text {
+                    objectName: "shaderFeedback"
+                    visible: !!page.feedback
+                    Layout.fillWidth: true; wrapMode: Text.Wrap
+                    text: page.feedback; color: page.saveFailed ? look.danger : look.secondary; font: look.smallFont
+                }
+                RowLayout {
+                    Layout.fillWidth: true; spacing: 16
+                    ShaderCheckBox {
+                        objectName: "shaderEnabled"
+                        shaderStyle: look
+                        Layout.fillWidth: true
+                        text: qsTr("Enable visual effects")
+                        checked: !!page.draft.enabled
+                        onToggled: page.setValue("enabled", checked)
+                    }
+                    ShaderButton {
+                        objectName: "shaderEnhance"
+                        shaderStyle: look
+                        primary: page.presetIndex === 4
+                        text: qsTr("Enhance")
+                        Accessible.description: qsTr("Select balanced color, tonal contrast and detail enhancement. Save changes to apply. This is not ray tracing.")
+                        onClicked: page.preset(4)
+                    }
+                }
+                Text { text: qsTr("Preset"); color: look.text; font: look.bodyFont }
+                RowLayout {
+                    Layout.fillWidth: true; spacing: 12
+                    ShaderComboBox {
+                        objectName: "shaderPresets"
+                        shaderStyle: look
+                        Layout.preferredWidth: 200
+                        model: [qsTr("Neutral"), qsTr("Clear"), qsTr("Vivid"), qsTr("Warm cinema"), qsTr("Enhanced"), qsTr("Custom")]
+                        currentIndex: page.presetIndex
+                        onActivated: page.preset(currentIndex)
+                    }
+                    ShaderButton {
+                        objectName: "shaderReset"
+                        shaderStyle: look
+                        text: qsTr("Reset all"); onClicked: page.reset()
+                    }
+                    Item { Layout.fillWidth: true }
+                }
+                Text {
+                    visible: !!page.draft.enabled && page.presetIndex === 0
+                    Layout.fillWidth: true; wrapMode: Text.Wrap
+                    text: qsTr("Neutral bypass: choose Enhance or a preset to change the image.")
+                    color: look.muted; font: look.smallFont
+                }
+                Rectangle { Layout.fillWidth: true; height: 1; color: look.separator }
+                Repeater {
+                    model: Engine.controls
+                    delegate: ColumnLayout {
+                        id: group
+                        property var controlData: modelData
+                        Layout.fillWidth: true; spacing: 4
+                        RowLayout {
+                            Layout.fillWidth: true; spacing: 12
+                            Text {
+                                Layout.fillWidth: true; elide: Text.ElideRight
+                                text: group.controlData.label; color: look.text; font: look.bodyFont
+                            }
+                            Text {
+                                objectName: "shaderValueLabel-" + group.controlData.key
+                                Layout.minimumWidth: 32
+                                horizontalAlignment: Text.AlignRight
+                                text: Math.round(valueSlider.value).toString(); color: look.secondary; font: look.smallFont
+                            }
+                            ShaderButton {
+                                objectName: "shaderControlReset-" + group.controlData.key
+                                shaderStyle: look; quiet: true
+                                Layout.alignment: Qt.AlignRight | Qt.AlignVCenter
+                                text: qsTr("Reset")
+                                enabled: Number(page.draft[group.controlData.key] || 0) !== 0
+                                Accessible.name: qsTr("Reset ") + group.controlData.label
+                                onClicked: page.setValue(group.controlData.key, 0)
+                            }
+                        }
+                        ShaderSlider {
+                            id: valueSlider
+                            shaderStyle: look
+                            objectName: "shaderValue-" + group.controlData.key
+                            Layout.fillWidth: true
+                            from: group.controlData.minimum; to: group.controlData.maximum; stepSize: 1
+                            value: page.draft[group.controlData.key] || 0
+                            enabled: !!page.draft.enabled
+                            onMoved: page.setValue(group.controlData.key, Math.round(value))
+                        }
+                    }
+                }
+                Rectangle { Layout.fillWidth: true; height: 1; color: look.separator }
+                Text { text: qsTr("Rendering status"); color: look.text; font: look.bodyFont }
+                Text {
                     objectName: "shaderRendererStatus"
                     Layout.fillWidth: true; wrapMode: Text.Wrap
                     text: qsTr("Observed game API: ") + Engine.metrics.renderer + "\n" + Engine.metrics.status
-                    color: Engine.metrics.active ? page.accent : page.mutedColor
+                    color: Engine.metrics.active ? look.accent : look.muted; font: look.smallFont
                 }
-                Label {
+                Text {
                     objectName: "shaderFrameCounter"
                     Layout.fillWidth: true; wrapMode: Text.Wrap
                     text: qsTr("Processed game frames: ") + Engine.metrics.processedFrames
                         + qsTr(" · Game surface observed: ") + (Engine.metrics.gameSurfaceObserved ? qsTr("yes") : qsTr("no"))
                         + qsTr(" · Processing active: ") + (Engine.metrics.active ? qsTr("yes") : qsTr("no"))
-                    color: page.mutedColor; font.pixelSize: 12
+                    color: look.muted; font: look.smallFont
                 }
-                Label {
+                Text {
                     Layout.fillWidth: true; wrapMode: Text.Wrap
-                    text: qsTr("Uses the game's OpenGL, DirectX 11/12 or Vulkan presentation API, according to its renderer setting. Unsupported/protected surfaces are left untouched. Experimental; GPU/driver validation is incomplete. No FPS or system tweaks.")
-                    color: page.mutedColor; font.pixelSize: 12
+                    text: qsTr("Enhance is a balanced color and detail preset, not ray tracing. Tonal pop is not HDR display output. Unsupported or protected surfaces are left untouched. Experimental; actual GPU/driver validation is incomplete. No FPS or system tweaks.")
+                    color: look.muted; font: look.smallFont
                 }
-                CheckBox {
-                    objectName: "shaderEnabled"
-                    text: qsTr("Enable visual effects")
-                    checked: !!page.draft.enabled
-                    palette.windowText: page.textColor; palette.highlight: page.accent
-                    onToggled: page.setValue("enabled", checked)
-                }
-                RowLayout {
-                    Layout.fillWidth: true
-                    Label { text: qsTr("Preset"); color: page.textColor }
-                    ComboBox {
-                        objectName: "shaderPresets"
-                        Layout.fillWidth: true
-                        model: [qsTr("Neutral"), qsTr("Clear"), qsTr("Vivid"), qsTr("Warm cinema")]
-                        onActivated: page.preset(currentIndex)
-                    }
-                    Button { objectName: "shaderReset"; text: qsTr("Reset all"); onClicked: page.reset() }
-                }
-                Repeater {
-                    model: Engine.controls
-                    delegate: ColumnLayout {
-                        Layout.fillWidth: true; spacing: 0
-                        RowLayout {
-                            Layout.fillWidth: true
-                            Label { Layout.fillWidth: true; text: modelData.label; color: page.textColor }
-                            Label { text: Math.round(valueSlider.value).toString(); color: page.mutedColor }
-                            ToolButton { text: qsTr("Reset"); onClicked: page.setValue(modelData.key, 0) }
-                        }
-                        Slider {
-                            id: valueSlider
-                            objectName: "shaderValue-" + modelData.key
-                            Layout.fillWidth: true
-                            from: modelData.minimum; to: modelData.maximum; stepSize: 1
-                            value: page.draft[modelData.key] || 0
-                            enabled: !!page.draft.enabled
-                            palette.highlight: page.accent
-                            onMoved: page.setValue(modelData.key, Math.round(value))
-                        }
-                    }
-                }
-                Label {
-                    Layout.fillWidth: true; wrapMode: Text.Wrap
-                    text: qsTr("Tonal pop is a contrast effect, not HDR display output. Edge smoothing is spatial antialiasing. All zero values or disabling effects completely bypasses processing.")
-                    color: page.mutedColor; font.pixelSize: 12
-                }
-                Label {
+                Text {
                     objectName: "shaderError"
                     visible: !!Engine.error
                     Layout.fillWidth: true; wrapMode: Text.Wrap
-                    text: Engine.error; color: page.mutedColor
+                    text: Engine.error; color: look.danger; font: look.smallFont
                 }
             }
         }
-        Label {
-            objectName: "shaderFeedback"
-            visible: !!page.feedback
-            Layout.fillWidth: true; wrapMode: Text.Wrap
-            text: page.feedback; color: page.mutedColor; font.pixelSize: 12
-        }
+        // Match native Settings: one stationary, right-aligned Save button.
+        // It remains visible at 40% opacity when clean. Discard belongs to the
+        // existing native tab/close prompt, not a second permanent footer action.
         RowLayout {
+            objectName: "shaderFooter"
             Layout.fillWidth: true
-            Label {
-                Layout.fillWidth: true; wrapMode: Text.Wrap
-                text: qsTr("Save applies to supported game frames immediately. Unsaved edits do not change the image.")
-                color: page.mutedColor; font.pixelSize: 12
+            Layout.minimumHeight: 36; Layout.preferredHeight: 36; Layout.maximumHeight: 36
+            spacing: 4
+            Text {
+                Layout.fillWidth: true; elide: Text.ElideRight
+                text: qsTr("Changes apply after saving")
+                color: look.secondary; font: look.smallFont
             }
-            Button { objectName: "shaderDiscard"; text: qsTr("Discard"); enabled: page.pEnableSave; onClicked: page.fInitUi() }
-            Button {
-                objectName: "shaderSave"
-                text: qsTr("Save changes"); enabled: page.pEnableSave
-                palette.button: page.accent
-                onClicked: page.save()
+            ShaderButton {
+                objectName: "shaderSave"; shaderStyle: look; primary: true
+                Layout.alignment: Qt.AlignRight | Qt.AlignVCenter
+                text: qsTr("Save changes"); enabled: page.pEnableSave; onClicked: page.save()
             }
         }
     }

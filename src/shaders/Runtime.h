@@ -28,6 +28,9 @@ public:
     Metrics metrics();
     void report(bool hooks,bool observed,bool active,const std::string &status,bool processed=false,
                 Renderer renderer=Renderer::Unknown,bool deviceRequirementsMet=false);
+    // Identity without a size gate: a game child may still be 1x1 while its
+    // renderer creates a full-size swapchain, before Qt finishes layout.
+    bool ownsGameWindow(std::uintptr_t surface);
     bool eligible(std::uintptr_t surface);
 private:
     std::mutex mutex;

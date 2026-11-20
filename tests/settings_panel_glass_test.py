@@ -120,6 +120,22 @@ Item {
             Rectangle { anchors.centerIn: parent; width: 12; height: 12; radius: 6; visible: radio.checked; color: UiTheme.colors.subWindowHeaderClick }
         }
     }
+    Button {
+        objectName: "nativeLayeredButton"; x: 370; y: 115; width: 150; height: 30
+        background: Rectangle {
+            objectName: "nativeLayeredBackground"
+            color: "#123456"; radius: 0; layer.enabled: true
+            Rectangle { objectName: "nativeLayeredInner"; anchors.fill: parent; anchors.margins: 1; color: "#234567" }
+        }
+    }
+    Rectangle { objectName: "nativeLayoutRectangle"; x: 370; y: 160; width: 150; height: 24; color: "#234567"; radius: 0 }
+    ScrollBar {
+        id: bar; objectName: "nativeScrollBar"; x: 548; y: 12; width: 6; height: 220
+        orientation: Qt.Vertical; policy: ScrollBar.AlwaysOn; size: .3; position: .2
+        property color nativeThumbColor: "#717585"
+        contentItem: Rectangle { objectName: "nativeScrollThumb"; implicitWidth: 6; implicitHeight: 6; color: bar.nativeThumbColor; radius: 0 }
+        background: Rectangle { objectName: "nativeScrollBackground"; color: "transparent" }
+    }
     Slider {
         id: slider; objectName: "glassSlider"; x: 24; y: 200; width: 480; height: 32
         from: 1; to: 240; value: 60
@@ -184,12 +200,15 @@ def main():
     about = named("aboutSettings", visible=False)
     surface = next(i for i in tree() if m.prop(i, "radius") == 14)
     assert gradient(surface), "the actual window stayed flat: Qt's unset gradient can be undefined, not only null"
-    assert evaluate(surface, "gradient.stops[1].color.a") < .9, "the window must actually paint translucent glass"
+    assert evaluate(surface, "gradient.stops[1].color.a") == 1, "do not reveal an uninitialized game frame through Settings"
+    # Sample before reading the top stop's color: that getter can force Qt 5
+    # bindings and mask a gradient installed too early in a Loader's onLoaded.
     top = pixel(surface, 12, 30)
     bottom = pixel(surface, 12, surface.height() - 30)
-    assert top.lightness() > bottom.lightness() + 6, "the window reflection is not present in the rendered pixels"
-    # Software item captures are RGB32, so prove transparency by compositing
-    # over a real contrasting sibling, not by asserting a fictitious PNG alpha.
+    assert top.lightness() > bottom.lightness() + 6, ("the window reflection is not present in the rendered pixels", top.name(), bottom.name(), top.lightness(), bottom.lightness())
+    # The shell has a reflective glass feel, but its opaque foundation must not
+    # flash a different color when a game beneath it repaints on a tab change.
+    # This compositing test also works with software captures in RGB32.
     backdrop_component = m.QQmlComponent(preview.engine)
     backdrop_component.setData(b'import QtQuick 2.15; Rectangle { width:780; height:500; z:-1; color:"white" }', m.QUrl("Backdrop.qml"))
     backdrop = backdrop_component.create()
@@ -199,8 +218,8 @@ def main():
     m.QTest.qWait(20)
     glass_bottom = pixel(surface, 12, surface.height() - 30)
     glass_top = pixel(surface, 12, 30)
-    assert glass_bottom.red() > bottom.red() + 15, "the glass did not actually reveal the contrasting surface below it"
-    assert glass_top.red() - top.red() < glass_bottom.red() - bottom.red(), "the lower glass must be more translucent than its reflection"
+    assert glass_bottom == bottom and glass_top == top, "the Settings foundation leaked the unrelated/game surface below it"
+    assert evaluate(named("glassButtonBackground"), "gradient.stops[1].color.a") < .9, "control reflections should retain their translucent lower stop"
     assert evaluate(backdrop, "gradient == null"), "Settings styling escaped into an unrelated sibling"
     backdrop.setProperty("visible", False)
     assert 0 < evaluate(surface, "border.color.a") < .3, "the outer glass rim must stay quiet"
@@ -239,10 +258,9 @@ def main():
         control = named(name)
         assert evaluate(control, "indicator.children.length") >= 2
         overlays = [i for i in m.items(control) if i.objectName() == "bsiGlass"]
-        assert len(overlays) == 1, "each asset-based native indicator needs exactly one non-intercepting glass surface"
-        assert gradient(overlays[0])
-        assert abs(overlays[0].width() - evaluate(control, "indicator.width")) < .1
-        assert overlays[0].property("radius") == (12 if name != "glassCheck" else 3)
+        assert not overlays, "do not overlay native asset-based indicators or alter their paint/state"
+        assert not evaluate(control, "indicator.children[0].gradient != null"), "indicator geometry/material must remain native"
+        assert evaluate(control, "indicator.children[0].radius") == (12 if name != "glassCheck" else 3)
         assert not control.property("checked")
         click(control, .2)
         assert control.property("checked"), name + " stopped toggling"
@@ -256,7 +274,24 @@ def main():
     assert gradient(named("glassReplacementBackground"))
     for _ in range(10):
         assert QMetaObject.invokeMethod(about, "fGlassAll") is not False
-    assert len([i for i in m.items(named("glassToggle")) if i.objectName() == "bsiGlass"]) == 1, "rescanning duplicated overlays"
+    assert not [i for i in m.items(named("glassToggle")) if i.objectName() == "bsiGlass"], "rescanning inserted a native-indicator overlay"
+    assert named("glassReplacementBackground").property("radius") == 4
+    for name in ("nativeLayeredBackground", "nativeLayeredInner", "nativeLayoutRectangle", "nativeScrollThumb", "nativeScrollBackground"):
+        item = named(name)
+        assert not evaluate(item, "gradient != null"), name + " was incorrectly decorated"
+        assert item.property("radius") == 0, name + " geometry was changed"
+    thumb = named("nativeScrollThumb")
+    bar = named("nativeScrollBar")
+    assert pixel(thumb, thumb.width() / 2, thumb.height() / 2) == m.QColor("#717585"), "the native thumb became transparent"
+    bar.setProperty("nativeThumbColor", m.QColor("#aabbcc"))
+    m.QTest.qWait(180)
+    assert pixel(thumb, thumb.width() / 2, thumb.height() / 2) == m.QColor("#aabbcc"), "native scrollbar color binding was lost"
+    # First visits and the deferred rescan must not replace a flat/black frame.
+    for index in (4, 2, 7, 11, 0):
+        preview.event({"type": "navigate", "index": index})
+        first = pixel(surface, 12, surface.height() - 30)
+        m.QTest.qWait(180)
+        assert pixel(surface, 12, surface.height() - 30) == first, "first-tab paint changed after the material timer"
 
     # Popups leave the shell's visual tree and live in the window Overlay.
     combo = named("glassCombo")

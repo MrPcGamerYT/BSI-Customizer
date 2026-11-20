@@ -60,7 +60,7 @@ void Runtime::report(bool hooks,bool observed,bool active,const std::string &sta
     if(active&&!routed)state.status="The observed game renderer's backend/device requirements are not validated; no effects were confirmed.";
     if(processed&&state.active)++state.processed;
 }
-bool Runtime::eligible(std::uintptr_t surface){
+bool Runtime::ownsGameWindow(std::uintptr_t surface){
 #ifdef _WIN32
     std::uintptr_t root;
     {std::lock_guard<std::mutex> lock(mutex);root=host;}
@@ -70,7 +70,15 @@ bool Runtime::eligible(std::uintptr_t surface){
     if(owner!=GetCurrentProcessId())return false;
     wchar_t type[160]{};
     if(!GetClassNameW(window,type,160)||wcsncmp(type,L"Qt",2)==0||wcsncmp(type,L"Chrome",6)==0)return false;
-    RECT rect{};return GetClientRect(window,&rect)&&rect.right>=320&&rect.bottom>=200;
+    return true;
+#else
+    (void)surface;return false;
+#endif
+}
+bool Runtime::eligible(std::uintptr_t surface){
+#ifdef _WIN32
+    if(!ownsGameWindow(surface))return false;
+    RECT rect{};return GetClientRect(reinterpret_cast<HWND>(surface),&rect)&&rect.right>=320&&rect.bottom>=200;
 #else
     (void)surface;return false;
 #endif

@@ -66,14 +66,14 @@ match = re.search(
 )
 assert match, "Could not find the generated Settings-window QML template"
 replacement = match.group(1)
-assert "BSI v18" in replacement
+assert "BSI v19" in replacement
 assert "pSettingsItems.pSettingElements" in replacement
 # The About page publishes the hidden-tab list and the icon map to the shell.
 # It must find that shell by walking up: counting parents landed on the window
 # instead of the UiShadowContainer, which threw
 # "Cannot assign to non-existent property bHidden" and silently dropped every
 # custom tab icon (the file applied, nothing ever showed).
-assert "function fOnQmlLoaded(){var p=parent;while(p&&p.bIcons===undefined)p=p.parent;if(p)p.bIcons=bsiTabIcons}" in cpp, \
+assert "function fOnQmlLoaded(){var p=parent;while(p&&p.bIcons===undefined)p=p.parent;if(p)p.bIcons=bsiTabIcons;Qt.callLater(fGlassAll)}" in cpp, \
     "the About page must walk up to the shell, not count parents"
 # One map now carries both icons and hidden sentinels. Retiring the unused
 # bHidden channel buys room for the selection effect in legacy resource slots.
@@ -414,7 +414,12 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
     if obj is None:
         raise AssertionError("Settings QML failed to create: " + "\n".join(e.toString() for e in component.errors()))
 
-    window = QQuickWindow()
+    # The shipping About material listens to this native Window property. A
+    # bare C++ QQuickWindow has no matching signal, unlike the player's root.
+    window_component = QQmlComponent(engine)
+    window_component.setData(b'import QtQuick.Window 2.15; Window { property int pCurrentTabIndex: 0 }', QUrl("SettingsWindowContract.qml"))
+    window = window_component.create()
+    assert window is not None, [e.toString() for e in window_component.errors()]
     window.resize(int(player.width), int(player.height))
     obj.setWidth(player.width)
     obj.setHeight(player.height)

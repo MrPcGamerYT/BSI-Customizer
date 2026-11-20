@@ -53,7 +53,8 @@ const QString kWindowDesignMarkerV14 = QStringLiteral("BSI Settings v14");
 const QString kWindowDesignMarkerV15 = QStringLiteral("BSI v15");
 const QString kWindowDesignMarkerV16 = QStringLiteral("BSI v16");
 const QString kWindowDesignMarkerV17 = QStringLiteral("BSI v17");
-const QString kWindowDesignMarker = QStringLiteral("BSI v18");
+const QString kWindowDesignMarkerV18 = QStringLiteral("BSI v18");
+const QString kWindowDesignMarker = QStringLiteral("BSI v19");
 const QString kAboutMarker = QStringLiteral("BSI CUSTOMIZER: redesigned About page v1");
 const QString kSchema = QStringLiteral("bsi.settings-panel.recovery");
 const QString kWindowLeaf = QStringLiteral("UiSettingsWindow.qml");
@@ -609,6 +610,7 @@ QString buildWindow(const QString &stock)
     // Only the selected tab gains a soft themed highlight and a full-colour 1 px
     // outline; hover is quieter. A separate transparent rectangle keeps the
     // outline opaque instead of fading it with the .2-opacity background.
+    // Retain the approved 6 px tab corners; glass must not turn them into pills.
     // Grouped icon properties and shared title-font metrics retain the complete
     // legacy 2468-byte slot budget, including its required 32-byte headroom.
     // A public Controls ToolButton paints/tints each PNG icon, with no optional
@@ -624,7 +626,7 @@ QString buildWindow(const QString &stock)
     // Keep the template small, but the *whole* compressed Window (including
     // native callbacks, copyright header and geometry helper) must fit the slot.
     // Template length alone cannot predict that compression budget.
-    QString replacement = QStringLiteral(R"QML(UiShadowContainer{//BSI v18
+    QString replacement = QStringLiteral(R"QML(UiShadowContainer{//BSI v19
 id:iSettingsWindowShadowContainer;anchors.fill:parent
 property var bIcons:({})
 Rectangle{id:r;property var c:UiTheme.colors;anchors.fill:parent;radius:14;color:r.c.primary80
@@ -723,8 +725,16 @@ QString buildAbout(const QString &developerName, const QString &tagline,
     // by the Rectangle border API, not === null (which silently left Qt 6 flat).
     // Loader swaps and lazy popup/page layout are picked up without replacing
     // native controls, indicators, signals, input, models or save/discard logic.
-    // Asset-based check/radio/toggle indicators get one purely visual glint child;
-    // it accepts no input and retains the original glyph, dimensions and state.
+    // v19 limits decoration to public control backgrounds/slider parts and our
+    // own shell/tab surfaces. Never alter radii, native image indicators, scroll
+    // thumbs, arbitrary layout rectangles or layer/FBO-backed gradient borders:
+    // the old blanket rewrite could invalidate their native scene-graph paint.
+    // The outer surface stays opaque while reflecting the current theme; do not
+    // expose an uninitialized/black game surface during a first tab transition.
+    // Queue the initial pass until the Loader tree finishes its bindings: on
+    // Qt 5, gradients created in onLoaded can otherwise stay visually flat.
+    // Later tab changes are synchronous; the bounded Timer catches subsequent
+    // Loader/background replacements, without touching unrelated windows.
     // Tiny badges/separators remain unchanged. Bound both visited nodes and the
     // queue to 4096; pause the Timer when the Settings window is hidden. Public
     // QtQuick 2.15 only: no optional blur/effects/private implementation imports.
@@ -740,30 +750,29 @@ property bool pIsInCompatibleUpdateVersion:false
 property string pParentWindow:""
 property string pShortDisplayName:""
 property var bsiTabIcons:@@BSI_TAB_ICONS@@
-property var pDeveloperLinks:[@@BSI_LINKS@@]
+property var bsiTheme:UiTheme
 property var c:UiTheme.colors
-property color edge:Qt.rgba(c.primary10.r,c.primary10.g,c.primary10.b,.16)
+property color edge:Qt.rgba(c.primary10.r,c.primary10.g,c.primary10.b,.2)
 // BSI CUSTOMIZER: redesigned About page v1
 ScrollView{anchors.fill:parent;clip:true;contentWidth:availableWidth;contentHeight:d.height+24;background:null
-Column{id:d;width:Math.min(440,parent.width-24);anchors.horizontalCenter:parent.horizontalCenter;spacing:16;topPadding:28;bottomPadding:28
+Column{id:d;width:Math.min(440,parent.width-24);anchors.horizontalCenter:parent.horizontalCenter;spacing:16;topPadding:16;bottomPadding:16
 Image{objectName:"bsiAboutEmulatorLogo";source:@@BSI_LOGO_SOURCE@@;width:160;height:60;fillMode:Image.PreserveAspectFit;anchors.horizontalCenter:parent.horizontalCenter}
 Text{objectName:"bsiAboutDeveloperName";text:@@BSI_DEVELOPER@@;font:UiTheme.fonts.bodyLarge;color:a.c.primary10;horizontalAlignment:Text.AlignHCenter;wrapMode:Text.Wrap;width:parent.width}
 Text{objectName:"bsiAboutDeveloperTagline";visible:text.length>0;text:@@BSI_TAGLINE@@;font:UiTheme.fonts.bodySmall;color:a.c.primary30;horizontalAlignment:Text.AlignHCenter;wrapMode:Text.Wrap;width:parent.width}
 Rectangle{width:parent.width;height:1;color:a.c.primary60}
-Repeater{model:pDeveloperLinks
+Repeater{model:[@@BSI_LINKS@@]
 delegate:ItemDelegate{objectName:"bsiAboutDeveloperLink";width:d.width;height:42;hoverEnabled:true;leftPadding:14;rightPadding:38;text:modelData.title;font:UiTheme.fonts.bodyMedium;palette.text:hovered?a.c.accentNormal:a.c.primary10
 background:Rectangle{radius:10;color:parent.hovered?Qt.rgba(a.c.accentNormal.r,a.c.accentNormal.g,a.c.accentNormal.b,.16):Qt.rgba(a.c.primary60.r,a.c.primary60.g,a.c.primary60.b,.42);border.color:parent.hovered?a.c.accentNormal:a.c.primary60}
 Text{anchors{right:parent.right;rightMargin:14;verticalCenter:parent.verticalCenter}text:"\u2197";color:a.c.accentNormal;font.pixelSize:16}
 onClicked:if(/^https?:\/\//i.test(modelData.url))Qt.openUrlExternally(modelData.url)}}
 }}
-function fOnQmlLoaded(){var p=parent;while(p&&p.bIcons===undefined)p=p.parent;if(p)p.bIcons=bsiTabIcons}
-function fCheckForUpdateCallback(s,d){if(s===0){var j=JSON.parse(d);pUpdateAvailable=String(j.update_available).toLowerCase()==="true";pIsInCompatibleUpdateVersion=pUpdateAvailable&&String(j.update_details.is_build_compatible).toLowerCase()!=="true";if(pUpdateAvailable){pUpdateVersion=j.update_details.client_version;pMoreInfoURL=j.update_details.detailed_changelogs_url;pDownloadURL=j.update_details.download_url}}else{pUpdateAvailable=false;pIsInCompatibleUpdateVersion=false}}
+function fOnQmlLoaded(){var p=parent;while(p&&p.bIcons===undefined)p=p.parent;if(p)p.bIcons=bsiTabIcons;Qt.callLater(fGlassAll)}
+function fCheckForUpdateCallback(s,d){if(s===0){var j=JSON.parse(d);pUpdateAvailable=/^true$/i.test(j.update_available);pIsInCompatibleUpdateVersion=pUpdateAvailable&&!/^true$/i.test(j.update_details.is_build_compatible);if(pUpdateAvailable){pUpdateVersion=j.update_details.client_version;pMoreInfoURL=j.update_details.detailed_changelogs_url;pDownloadURL=j.update_details.download_url}}else{pUpdateAvailable=false;pIsInCompatibleUpdateVersion=false}}
 function fUpdateShortDisplayName(n){pShortDisplayName=String(n||"")}
-//BSI glass
-Component{id:g;Gradient{property var s;property color c:s.color;GradientStop{color:Qt.lighter(c,1.7)}GradientStop{position:1;color:Qt.rgba(c.r,c.g,c.b,c.a*.88)}}}
-Component{id:shine;Rectangle{objectName:"bsiGlass";anchors.fill:parent;z:1;property var o;radius:o.autoExclusive||width>height*1.3?height/2:3;color:a.edge}}
-function fGlassAll(){var r=parent;while(r&&r.bIcons===undefined)r=r.parent;if(!r)return;var q=[r],n=0;while(q.length&&n++<4096){var o=q.pop();if(!o)continue;if(o.border&&o.gradient==null&&o.height>3&&o.width>7){o.gradient=g.createObject(o,{s:o});if(!o.radius)o.radius=6;if(o.c===a.c)o.border.color=Qt.binding(()=>a.edge)}if(o.indicator&&o.indicator.asset!==undefined){var c=o.indicator.children,j=0;while(j<c.length&&c[j].objectName!=='bsiGlass')j++;if(j===c.length)shine.createObject(o.indicator,{o:o})}if(o.popup&&q.length<4095)q.push(o.popup.background,o.popup.contentItem);var c=o.children||[];for(var i=0;i<c.length&&q.length<4096;i++)q.push(c[i])}}
-Timer{interval:160;running:a.Window.window&&a.Window.window.visible;repeat:true;triggeredOnStart:true;onTriggered:fGlassAll()}
+Component{id:g;Gradient{property var s;property color c:s.color;GradientStop{color:!c.a&&s.border.color.a&&s.parent.containsMouse!==undefined?a.edge:Qt.lighter(c,1.7)}GradientStop{position:1;color:s.c===a.c?c:Qt.rgba(c.r,c.g,c.b,c.a*.88)}}}
+function fGlassAll(){var r=parent;while(r&&r.bIcons===undefined)r=r.parent;if(!r)return;var q=[[r,0]],n=0;while(q.length&&n++<4096){var e=q.pop(),o=e[0],s=e[1];if(!o||o.minimumSize!==undefined||o.layer&&o.layer.enabled)continue;if(o.border&&o.gradient==null&&(s||o.c===a.c||o.parent&&o.parent.containsMouse!==undefined)){o.gradient=g.createObject(o,{s:o});if(o.c===a.c)o.border.color=Qt.binding(()=>a.edge)}if(o.background&&q.length<4096)q.push([o.background,1]);if(o.handle&&q.length<4094)q.push([o.handle,1],[o.contentItem,1]);if(o.popup&&q.length<4094)q.push([o.popup.background,1],[o.popup.contentItem,0]);var c=o.children||[];for(var i=0;i<c.length&&q.length<4096;i++)q.push([c[i],s])}}
+Connections{target:a.Window.window;function onPCurrentTabIndexChanged(){fGlassAll()}}
+Timer{interval:160;running:a.Window.window&&a.Window.window.visible;repeat:true;onTriggered:fGlassAll()}
 }
 )QML");
     generated.replace(QStringLiteral("@@BSI_DEVELOPER@@"), qDeveloper);
@@ -1005,7 +1014,8 @@ bool hasWindowMarker(const QString &text)
         || text.contains(kWindowDesignMarkerV10) || text.contains(kWindowDesignMarkerV12)
         || text.contains(kWindowDesignMarkerV13) || text.contains(kWindowDesignMarkerV14)
         || text.contains(kWindowDesignMarkerV15) || text.contains(kWindowDesignMarkerV16)
-        || text.contains(kWindowDesignMarkerV17) || text.contains(kWindowDesignMarker);
+        || text.contains(kWindowDesignMarkerV17) || text.contains(kWindowDesignMarkerV18)
+        || text.contains(kWindowDesignMarker);
 }
 
 // Standalone Image sources do not inherit the QML/HTML text's currentColor.

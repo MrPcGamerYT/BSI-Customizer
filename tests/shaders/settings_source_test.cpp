@@ -87,6 +87,14 @@ int main(int argc, char **argv)
         require(repeat.ok && repeat.alreadyApplied && repeat.window == plan.window,
                 QStringLiteral("v18 glass shader idempotence: ") + repeat.error);
         glass.replace(QStringLiteral("//BSI v18"), QStringLiteral("//BSI v19"));
+        const auto current = ShaderSettingsSource::prepare(player(), glass, counts);
+        require(current.ok && current.tabIndex == 12, QStringLiteral("safe-material v19 shader integration: ") + current.error);
+        require(ShaderSettingsSource::removeWindow(current.window, &restored, &error) && restored == glass,
+                QStringLiteral("exact v19 shader removal: ") + error);
+        const auto currentRepeat = ShaderSettingsSource::prepare(current.player, current.window, counts);
+        require(currentRepeat.ok && currentRepeat.alreadyApplied && currentRepeat.window == current.window,
+                QStringLiteral("v19 shader idempotence: ") + currentRepeat.error);
+        glass.replace(QStringLiteral("//BSI v19"), QStringLiteral("//BSI v20"));
         require(!ShaderSettingsSource::prepare(player(), glass, counts).ok,
                 QStringLiteral("unknown future Settings designs must not be guessed"));
     }

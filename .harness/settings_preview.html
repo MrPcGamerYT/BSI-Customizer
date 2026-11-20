@@ -66,7 +66,7 @@ kbd{font:10px system-ui;border:1px solid #34445a;border-radius:3px;padding:0 4px
 <span class="tip">Hover or click tabs · Scroll to explore</span>
 </div>
 <div class="notes">
-<p><strong>Actual generated shell, explicit sample pages.</strong> The glass window, controls, selected/hover surfaces, spacing and icon tint come directly from the patcher’s QML. These are translucent gradients and reflections, not desktop blur. Page values and Save changes are demonstrations, not a connected emulator. Scroll over the tabs to move sideways; scroll over the form to move down. <kbd>Esc</kbd> closes a menu.</p>
+<p><strong>Actual generated shell and Shaders controls.</strong> Rounded frosted highlights and reflections use the existing theme—not a purple recolor or desktop blur. When enabled, Shaders loads the real C++ bridge: Enhance and sliders stay as drafts until Save; Discard appears only when leaving unsaved changes. Its saved profile is isolated to this preview. Other pages use sample controls. This is not a connected emulator or a GPU compatibility test. Scroll the tabs sideways or the form vertically; <kbd>Esc</kbd> closes a menu.</p>
 <span id="feedback">No emulator files touched</span>
 </div>
 </main>
@@ -82,7 +82,7 @@ function update(state){
   document.getElementById('outer').textContent=`${state.width} × ${state.height} including shadow`;
   document.getElementById('selection').textContent=state.label+' selected';
   document.getElementById('closed').hidden=state.open;
-  document.getElementById('feedback').textContent=state.saves?`Demo saved ${state.saves} time${state.saves===1?'':'s'} · no files changed`:'No emulator files touched';
+  document.getElementById('feedback').textContent=state.shaders?(state.shaderDirty?'Unsaved shader edits · emulator untouched':'Isolated Shaders preview · emulator untouched'):(state.saves?`Demo saved ${state.saves} time${state.saves===1?'':'s'}`:'No emulator files touched');
   document.getElementById('connection').textContent=state.warnings.length?'Preview warning':'Live · Qt 6';
 }
 async function paint(){

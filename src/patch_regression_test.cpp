@@ -5906,7 +5906,7 @@ Window {
                     if (file.name.compare(QLatin1String("UiSettingsWindow.qml"), Qt::CaseInsensitive) == 0)
                         rebuiltWindow = QString::fromUtf8(QtResources::readFile(panelImage, file));
                 }
-                check(rebuiltWindow.contains(QStringLiteral("BSI v18"))
+                check(rebuiltWindow.contains(QStringLiteral("BSI v19"))
                           && !rebuiltWindow.contains(QStringLiteral("property var bHidden"))
                           // The About page publishes the icon map into
                           // bIcons, so the shell has to declare it or that
@@ -6048,7 +6048,10 @@ Window {
                           && (rebuiltAbout.contains(QStringLiteral("objectName: \"bsiAboutDeveloperName\""))
                               || rebuiltAbout.contains(QStringLiteral("objectName:\"bsiAboutDeveloperName\"")))
                           && rebuiltAbout.contains(QStringLiteral("text:\"BSI Panel Regression\""))
-                          && rebuiltAbout.contains(QStringLiteral("//BSI glass"))
+                          && rebuiltAbout.contains(QStringLiteral("o.minimumSize!==undefined"))
+                          && rebuiltAbout.contains(QStringLiteral("o.layer&&o.layer.enabled"))
+                          && rebuiltAbout.contains(QStringLiteral("onPCurrentTabIndexChanged"))
+                          && !rebuiltAbout.contains(QStringLiteral("if(!o.radius)o.radius=6"))
                           && rebuiltAbout.contains(QStringLiteral("function fGlassAll()"))
                           && rebuiltAbout.contains(QStringLiteral("BSI Panel Regression"))
                           && rebuiltAbout.contains(QStringLiteral("Repeater"))
@@ -6122,7 +6125,7 @@ Window {
                               // the window and threw "Cannot assign to non-existent
                               // property bHidden", which is exactly why a saved custom
                               // tab icon applied and then never appeared.
-                              && updatedAbout.contains(QStringLiteral("function fOnQmlLoaded(){var p=parent;while(p&&p.bIcons===undefined)p=p.parent;if(p)p.bIcons=bsiTabIcons}"))
+                              && updatedAbout.contains(QStringLiteral("function fOnQmlLoaded(){var p=parent;while(p&&p.bIcons===undefined)p=p.parent;if(p)p.bIcons=bsiTabIcons;Qt.callLater(fGlassAll)}"))
                               // On a Qt 5 player the icon must NOT be embedded: its
                               // Image cannot open a data: URI (measured: status Error,
                               // while the same bytes load from a file), so it would

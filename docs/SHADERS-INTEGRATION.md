@@ -210,9 +210,13 @@ was executed or written. Current-head Windows/full-app checks remain required.
   handoff/reuse, invalid-image/value rejection and resource recreation. It
   also passes ASan/UBSan locally. This still is not a Win32 WSI or hardware test.
 - Actual Qt 6 C++ plugin/component build with warnings treated as errors, and
-  actual plugin import in a Qt fixture window: real pointer Enable/slider/Save/
-  Discard input, preset/reset semantics, bounded native values and atomic
-  test-mode persistence. The fixture is not HD-Player category navigation.
+  actual plugin import in a Qt fixture window: real pointer Enable/slider/
+  Enhance/Save and all ten full-caption Reset actions at 750/420 px, clean Save
+  opacity, stationary footer, preset/reset semantics, bounded native values
+  and atomic test-mode persistence. The separate native-shell contract test
+  physically exercises No/Discard on tab changes and close with the generated
+  About material, preserved native indexes and Shaders visually before About.
+  Neither fixture is an installed HD-Player or a physical GPU test.
 - Sanitized C++ capability/routing tests, including unvalidated-device rejection,
   native-setting isolation, no ANGLE double-processing and honest counters.
 - Shader CI [44644329744](https://github.com/dsajgddghdsaakovvgheww/BSI-Customizer/actions/runs/44644329744)

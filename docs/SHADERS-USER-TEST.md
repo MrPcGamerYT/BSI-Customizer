@@ -69,6 +69,16 @@ runtime replacement is installed. The optional import is caught: if the module
 is missing or fails to load, native startup should continue with the shader row
 inactive. This fallback still requires testing in the real player.
 
+## Native Settings actions
+
+- **Save changes** stays at the bottom right, visible but dimmed/disabled when
+  the draft matches the saved profile. Edits enable it; saving disables it again.
+- There is no permanent Discard button. Leave the tab or close Settings with
+  unsaved edits to use the player's existing **No / Discard Changes** prompt.
+  No must keep the draft; Discard must restore the saved values.
+- Each slider has a fully labelled, right-aligned **Reset** action. It is disabled
+  at zero, changes only the draft, and must remain reachable on the last row.
+
 ## Verify effects, not just saved sliders
 
 1. Run a game and choose a still/repeatable scene. Record the player version,

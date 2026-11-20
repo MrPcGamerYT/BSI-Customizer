@@ -193,6 +193,18 @@ Item {
  Text {text:"Untouched native-page fixture"}
 }
 ''')
+    # Use the complete generated About/material alongside the actual native
+    # shell and public plugin. Standalone shader controls cannot catch styling
+    # that accidentally rewrites a native indicator/background or model index.
+    cpp = (REPO / "src/core/SettingsPanelPatcher.cpp").read_text()
+    about = re.search(r'QString generated = QStringLiteral\(R"QML\((.*?)\)QML"\);', cpp, re.S)[1]
+    for key, value in {"DEVELOPER": json.dumps("Native Settings contract"),
+                       "TAGLINE": json.dumps("Not an installed emulator"),
+                       "TAB_ICONS": "({})", "LINKS": "", "LOGO_SOURCE": json.dumps("")}.items():
+        about = about.replace("@@BSI_" + key + "@@", value)
+    assert "@@BSI_" not in about
+    about = about.replace("import QtQuick.Controls 2.15", "import QtQuick.Controls 2.15\nimport BsiNativeFixture 1.0")
+    (directory / "PlrAboutSetting.qml").write_text(about)
 
 
 def main():
@@ -383,6 +395,26 @@ def main():
             assert window.property("pCurrentTabIndex") == 12, f"physical Shaders activation failed after pointer scrolling: {navigation}"
             page = evaluate(window, "pSettingsItems.pSettingElements[12].pComponentObj")
             assert page and evaluate(page, "Engine.controls.length") == 10
+            assert page.property("tabsArranged"), "Shaders must sort visually before About"
+            assert page.property("bsiTabIndex") == 12, "visual sorting changed the native callback index"
+            assert evaluate(window, "String(pSettingsItems.pSettingElements[11].pQmlSource).endsWith('PlrAboutSetting.qml')")
+            strip = next(i for i in tree(window.contentItem()) if i.metaObject().className().endswith("ListView"))
+            shader_label = next(i for i in tree(strip) if i.metaObject().indexOfProperty("text") >= 0 and i.property("text") == "Shaders")
+            about_label = next(i for i in tree(strip) if i.metaObject().indexOfProperty("text") >= 0 and i.property("text") == "About")
+            assert shader_label.mapToItem(strip, QPointF(0, 0)).x() < about_label.mapToItem(strip, QPointF(0, 0)).x(), "Shaders is not visually before About"
+            about = evaluate(window, "pSettingsItems.pSettingElements[11].pComponentObj")
+            assert about.objectName() == "aboutSettings" and evaluate(page, "bsiTheme !== null")
+            # The generated material must preserve the shader controls' own
+            # surfaces and live native palette, not substitute a fixed theme.
+            combo = named(page, "shaderPresets")
+            slider = named(page, "shaderValue-saturation")
+            check = named(page, "shaderEnabled")
+            assert evaluate(combo, "background.gradient.stops.length") == 2
+            assert evaluate(slider, "handle.gradient.stops.length") == 2
+            assert evaluate(check, "indicator.radius") == 2
+            evaluate(about, "UiTheme.colors.accentNormal = '#ab5544'")
+            assert evaluate(combo, "String(shaderStyle.accent)") == "#ab5544"
+            evaluate(about, "UiTheme.colors.accentNormal = '#54c8ff'")
             assert not window.property("bsiShaderDirty2")
             initial = evaluate(page, "JSON.stringify(Engine.saved)")
             click(window, named(page, "shaderEnabled"))
@@ -438,7 +470,7 @@ def main():
         QTest.qWait(30)
         engine.deleteLater()
         app.processEvents()
-    print("PASS: " + ("missing regular DLL does not block native startup; shader row/page are inactive, all native callback loops and Settings close remain intact" if missing else "production optional bootstrap imports the real plugin; mouse-drag the native top strip to Shaders and physically navigate the 13-tab native-shell fixture, native No/Discard on tab and close, Save, persistence/reopen, reset and intact 750x470 layout"))
+    print("PASS: " + ("missing regular DLL does not block native startup; shader row/page are inactive, all native callback loops and Settings close remain intact" if missing else "production optional bootstrap imports the real plugin with complete generated About glass; Shaders sorts before About without changing native indexes, retains themed controls, mouse-drag navigation across 13 tabs, native No/Discard on tab and close, Save, persistence/reopen, reset and intact 750x470 layout"))
     print("LIMIT: Qt/native-contract fixture only; no installed emulator, real game frames, deployment recovery or physical Intel/AMD/NVIDIA coverage is implied")
 
 

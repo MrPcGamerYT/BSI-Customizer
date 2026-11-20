@@ -10,6 +10,9 @@ HTTP requests enqueue work for Qt's GUI thread; the browser forwards actual
 pointer/wheel/key input and receives rendered Qt frames (not an HTML remake).
 """
 import argparse
+import atexit
+import hashlib
+import uuid
 import http.server
 import json
 import os
@@ -27,16 +30,16 @@ os.environ.setdefault("QT_QUICK_BACKEND", "software")
 QT5 = os.environ.get("BSI_TEST_QT_API") == "PyQt5"
 os.environ.setdefault("QT_QUICK_CONTROLS_STYLE", "Default" if QT5 else "Basic")
 if QT5:
-    from PyQt5.QtCore import QBuffer, QCoreApplication, QEvent, QIODevice, QLibraryInfo, QObject, QPoint, QPointF, QTimer, QUrl, Qt, pyqtSlot as Slot
+    from PyQt5.QtCore import QBuffer, QCoreApplication, QEvent, QIODevice, QLibraryInfo, QObject, QPoint, QPointF, QStandardPaths, QTimer, QUrl, Qt, pyqtSlot as Slot
     from PyQt5.QtGui import QColor, QFont, QFontDatabase, QGuiApplication, QImage, QMouseEvent, QPainter, QWheelEvent
-    from PyQt5.QtQml import QQmlComponent, QQmlEngine
+    from PyQt5.QtQml import QQmlComponent, QQmlEngine, QQmlExpression
     from PyQt5.QtQuick import QQuickWindow
     from PyQt5.QtSvg import QSvgRenderer
     from PyQt5.QtTest import QSignalSpy, QTest
 else:
-    from PySide6.QtCore import QBuffer, QCoreApplication, QEvent, QIODevice, QLibraryInfo, QObject, QPoint, QPointF, QTimer, QUrl, Qt, Slot
+    from PySide6.QtCore import QBuffer, QCoreApplication, QEvent, QIODevice, QLibraryInfo, QObject, QPoint, QPointF, QStandardPaths, QTimer, QUrl, Qt, Slot
     from PySide6.QtGui import QColor, QFont, QFontDatabase, QGuiApplication, QImage, QMouseEvent, QPainter, QWheelEvent
-    from PySide6.QtQml import QQmlComponent, QQmlEngine
+    from PySide6.QtQml import QQmlComponent, QQmlEngine, QQmlExpression
     from PySide6.QtQuick import QQuickWindow
     from PySide6.QtSvg import QSvgRenderer
     from PySide6.QtTest import QSignalSpy, QTest
@@ -81,6 +84,16 @@ def prop(item, name):
     return item.property(name) if item.metaObject().indexOfProperty(name) >= 0 else None
 
 
+def evaluate(item, text):
+    expression = QQmlExpression(QQmlEngine.contextForObject(item), item, text)
+    result = expression.evaluate()
+    assert not expression.hasError(), expression.error().toString()
+    if isinstance(result, tuple):
+        value, undefined = result
+        return None if undefined else value
+    return result
+
+
 class SampleBridge(QObject):
     """No persistent writes: Save changes only counts a demonstration click."""
     def __init__(self):
@@ -93,7 +106,14 @@ class SampleBridge(QObject):
 
 
 class SettingsPreview:
-    def __init__(self, page_source=None, about_links=()):
+    def __init__(self, page_source=None, about_links=(), shader_module=None):
+        self._closed = False
+        self.profile = None
+        self.shader_module = Path(shader_module).resolve() if shader_module else None
+        self.labels = LABELS + (["Shaders"] if self.shader_module else [])
+        if self.shader_module:
+            assert (self.shader_module / "BSIShaders/qmldir").is_file(), "Build the real shader module before enabling its preview"
+            QStandardPaths.setTestModeEnabled(True)
         # The independent host must not import a different build SDK's QML/QPA
         # plugins (particularly Qt 6's qmldir files in a Qt 5 test process).
         if QT5:
@@ -138,7 +158,7 @@ Item {
 }
 """)
         icons = {}
-        for index, name in enumerate(ICON_FILES):
+        for index, name in enumerate(ICON_FILES + (["shaders"] if self.shader_module else [])):
             target = root / (name + ".png")
             if not target.exists():
                 svg = (REPO / "src/assets/settings-panel-icons" / (name + ".svg")).read_text()
@@ -161,12 +181,25 @@ Item {
         for key, value in values.items():
             about = about.replace("@@BSI_" + key + "@@", value)
         about = about.replace("import QtQuick.Controls 2.15", "import QtQuick.Controls 2.15\nimport BsiGuiFixture 1.0")
-        (root / "About.qml").write_text(about)
+        (root / "PlrAboutSetting.qml").write_text(about)
         (root / "DemoPage.qml").write_text(page_source or (REPO / ".harness/settings_preview_page.qml").read_text())
         model = [{"pButtonText": label, "pShowRedDot": False,
-                  "pQmlSource": "About.qml" if i == 11 else "DemoPage.qml",
+                  "pQmlSource": "PlrAboutSetting.qml" if i == 11 else "DemoPage.qml",
                   "pComponentArgs": {} if i == 11 else {"pageIndex": i, "pageTitle": label},
-                  "pComponentObj": None} for i, label in enumerate(LABELS)]
+                  "pComponentObj": None} for i, label in enumerate(self.labels)]
+        if self.shader_module:
+            model[-1].update(pQmlSource="qrc:/bsi-shaders/BsiShadersSetting.qml",
+                             pComponentArgs={"bsiTabIndex": 12, "bsiPalette": {}})
+        self.instance_name = "SettingsPreview-" + uuid.uuid4().hex
+        # Real native rows are QObjects, not QVariantMap/JS-copy snapshots.
+        # Loader assignments to pComponentObj must remain shared so native
+        # discard callbacks, theme discovery and visual sorting see each page.
+        model_qml = ",".join(
+            "QtObject{property string pButtonText:" + json.dumps(row["pButtonText"])
+            + ";property url pQmlSource:" + json.dumps(row["pQmlSource"])
+            + ";property var pComponentArgs:(" + json.dumps(row["pComponentArgs"]) + ")"
+            + ";property QtObject pComponentObj:null;property bool pIsVisible:true;property bool pShowRedDot:false}"
+            for row in model)
         host = """import QtQuick 2.15
 import QtQuick.Window 2.15
 import QtQuick.Controls 2.15
@@ -178,17 +211,67 @@ Window {
     transientParent: fixturePlayer
     property int pCurrentTabIndex: 0
     property color previewAccent: "#54c8ff"
-    onPreviewAccentChanged: UiTheme.colors.subWindowHeaderClick = previewAccent
-    property QtObject pSettingsItems: QtObject { property var pSettingElements: %s }
+    onPreviewAccentChanged: { UiTheme.colors.subWindowHeaderClick = previewAccent; UiTheme.colors.accentNormal = previewAccent }
+    property bool bsiShaderDirty2: false
+    function fPreviewPalette(msi) {
+        var c = UiTheme.colors
+        c.primary80 = msi ? "#21242c" : "#101a27"
+        c.primary70 = msi ? "#17181c" : "#192637"
+        c.primary60 = msi ? "#454954" : "#2d3a4d"
+        c.primary30 = msi ? "#abafba" : "#8c9aaf"
+        c.primary20 = msi ? "#c7c9d1" : "#d2dae4"
+        previewAccent = msi ? "#eb2c43" : "#54c8ff"
+    }
+    property QtObject pSettingsItems: QtObject { property list<QtObject> pSettingElements: [%s] }
     function fChangeSelectedSetting(index) { pCurrentTabIndex = index }
     %s
     %s
 }
-""" % (json.dumps(model), shell, helper)
+""" % (model_qml, shell, helper)
         path = root / "SettingsHost.qml"
+        if self.shader_module:
+            (root / "ShaderDiscardPrompt.qml").write_text((REPO / ".harness/settings_preview_shader_prompt.qml").read_text())
+            host = host.replace("import BsiGuiFixture 1.0", "import BsiGuiFixture 1.0\nimport BSIShaders 1.0", 1)
+            host = host.replace("property int pCurrentTabIndex: 0", "property int pCurrentTabIndex: 0\n    Bootstrap { hostWindow: fixturePlayer; instanceName: " + json.dumps(self.instance_name) + "; graphicsRenderer: \"gl\" }")
+            host = host.replace("function fChangeSelectedSetting(index) { pCurrentTabIndex = index }", '''property alias previewDiscardOpen: shaderPrompt.visible
+    function fChangeSelectedSetting(index) {
+        if (index === pCurrentTabIndex) return
+        if (bsiShaderDirty2) shaderPrompt.request(index, false)
+        else pCurrentTabIndex = index
+    }
+    onClosing: function(event) {
+        if (bsiShaderDirty2) { event.accepted = false; shaderPrompt.request(-1, true) }
+    }
+    ShaderDiscardPrompt {
+        id: shaderPrompt
+        parent: Overlay.overlay
+        onDiscardRequested: function(index, closing) {
+            var page = pSettingsItems.pSettingElements[12].pComponentObj
+            if (page) page.fDiscardChanges()
+            if (closing) iSettingsWindow.close()
+            else iSettingsWindow.pCurrentTabIndex = index
+        }
+    }
+    function fShowToast(message) {
+        previewToast.message = message
+        previewToast.open()
+        toastTimer.restart()
+    }
+    Popup {
+        id: previewToast
+        objectName: "previewSavedToast"
+        property string message: ""
+        parent: Overlay.overlay
+        x: (parent.width - width) / 2; y: parent.height - height - 76
+        padding: 12; closePolicy: Popup.NoAutoClose
+        contentItem: Text { text: previewToast.message; font: UiTheme.fonts.bodySmall; color: UiTheme.colors.primary10 }
+        background: Rectangle { radius: 6; color: UiTheme.colors.primary70; border.color: UiTheme.colors.primary60 }
+    }
+    Timer { id: toastTimer; interval: 1400; onTriggered: previewToast.close() }
+''')
         path.write_text(host)
         self.engine = QQmlEngine()
-        self.engine.setImportPathList([str(root), qml, "qrc:/qt-project.org/imports", "qrc:/qt/qml"])
+        self.engine.setImportPathList(([str(self.shader_module)] if self.shader_module else []) + [str(root), qml, "qrc:/qt-project.org/imports", "qrc:/qt/qml"])
         self.bridge = SampleBridge()
         self.player = QQuickWindow()
         self.player.setGeometry(0, 0, 1440, 900)
@@ -199,14 +282,43 @@ Window {
         self.component = QQmlComponent(self.engine, QUrl.fromLocalFile(str(path)))
         self.window = self.component.create()
         assert self.window is not None, [e.toString() for e in self.component.errors()]
-        self.strip = next(i for i in items(self.window.contentItem()) if i.metaObject().className().endswith("ListView"))
+        atexit.register(self.close)
+        self.strip = next(i for i in items(self.window.contentItem()) if i.metaObject().className().endswith("ListView") and evaluate(i, "orientation === Qt.Horizontal"))
         self.strip.setProperty("cacheBuffer", 10000)
         self.pressed = False
         self.last_frame = b""
+        if self.shader_module:
+            key = hashlib.sha256((str(Path(QCoreApplication.applicationFilePath()).resolve()) + "\n" + self.instance_name).encode()).hexdigest()
+            profile = Path(QStandardPaths.writableLocation(QStandardPaths.StandardLocation.GenericConfigLocation)) / "BSICustomizer/Shaders" / (key + ".json")
+            assert not profile.exists() and not profile.is_symlink()
+            self.profile = profile
         self.window.show()
         QTest.qWait(150)
         self.frame()
         assert not self.warnings, self.warnings
+
+    def close(self):
+        if self._closed:
+            return
+        self._closed = True
+        # Dispose Quick objects before their engine/singleton theme. This also
+        # keeps failed assertions from producing misleading teardown crashes.
+        for item in (self.window, self.player):
+            try:
+                item.hide()
+                item.deleteLater()
+            except RuntimeError:
+                pass  # A test may already have disposed its fixture window.
+        QTest.qWait(20)
+        self.component = None
+        try:
+            self.engine.deleteLater()
+        except RuntimeError:
+            pass
+        QTest.qWait(20)
+        if self.profile is not None:
+            self.profile.unlink(missing_ok=True)
+        self.directory.cleanup()
 
     def frame(self):
         if self.window.isVisible():
@@ -227,10 +339,13 @@ Window {
 
     def state(self):
         index = self.window.property("pCurrentTabIndex")
-        return {"selected": index, "label": LABELS[index], "width": self.window.width(),
+        return {"selected": index, "label": self.labels[index], "width": self.window.width(),
                 "height": self.window.height(), "visibleWidth": self.window.width() - 30,
                 "visibleHeight": self.window.height() - 30, "open": self.window.isVisible(),
-                "saves": self.bridge.saves, "warnings": list(self.warnings)}
+                "saves": self.bridge.saves, "shaders": bool(self.shader_module),
+                "shaderDirty": bool(self.window.property("bsiShaderDirty2")),
+                "discardPrompt": bool(self.window.property("previewDiscardOpen")),
+                "warnings": list(self.warnings)}
 
     def event(self, event):
         kind = event.get("type")
@@ -270,9 +385,9 @@ Window {
                 QTest.keyClick(self.window, key)
         elif kind == "navigate":
             index = int(event["index"])
-            if not 0 <= index < len(LABELS):
+            if not 0 <= index < len(self.labels):
                 raise ValueError("unknown category")
-            label = next(i for i in items(self.strip) if prop(i, "text") == LABELS[index])
+            label = next(i for i in items(self.strip) if prop(i, "text") == self.labels[index])
             tab = label.parentItem()
             target = tab.x() + tab.width() / 2 - self.strip.width() / 2
             self.strip.setProperty("contentX", max(0, min(target, self.strip.property("contentWidth") - self.strip.width())))
@@ -286,6 +401,10 @@ Window {
             self.window.show()  # Executes the production transient-window helper.
         elif kind == "accent":
             self.window.setProperty("previewAccent", QColor("#f59e0b" if event.get("warm") else "#54c8ff"))
+        elif kind == "palette":
+            expression = QQmlExpression(self.engine.rootContext(), self.window, "fPreviewPalette(" + ("true" if event.get("msi") else "false") + ")")
+            expression.evaluate()
+            assert not expression.hasError(), expression.error().toString()
         elif kind == "reopen":
             self.window.show()
         else:
@@ -297,10 +416,17 @@ Window {
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--port", type=int, default=8080)
+    parser.add_argument("--shader-module", help="Parent of the compiled BSIShaders module; loads its real C++ bridge and shipped page")
+    parser.add_argument("--start-shaders", action="store_true", help="Open on the actual Shaders page (requires --shader-module)")
+    parser.add_argument("--theme", choices=("blue", "msi"), default="msi")
     args = parser.parse_args()
-    preview = SettingsPreview()
+    assert not args.start_shaders or args.shader_module, "--start-shaders requires a real compiled module"
+    preview = SettingsPreview(shader_module=args.shader_module)
+    preview.event({"type": "palette", "msi": args.theme == "msi"})
+    if args.start_shaders:
+        preview.event({"type": "navigate", "index": 12})
     jobs = queue.Queue(maxsize=32)
-    html = (REPO / ".harness/settings_preview.html").read_text().replace("__LABELS__", json.dumps(LABELS)).encode()
+    html = (REPO / ".harness/settings_preview.html").read_text().replace("__LABELS__", json.dumps(preview.labels)).encode()
 
     class Handler(http.server.BaseHTTPRequestHandler):
         def on_qt(self, callback):
@@ -382,7 +508,10 @@ def main():
     server = http.server.ThreadingHTTPServer(("0.0.0.0", args.port), Handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     print(f"Settings window live on 0.0.0.0:{args.port} — actual generated Qt shell; sample services only", flush=True)
-    preview.app.exec()
+    try:
+        preview.app.exec()
+    finally:
+        preview.close()
 
 
 if __name__ == "__main__":
