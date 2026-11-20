@@ -9,6 +9,7 @@ record = json.loads((directory / "UPSTREAM.json").read_text())
 assert record["repository"] == "https://github.com/google/zopfli"
 assert record["commit"] == "bd64b2f0553d4f1ef4e6627647c5d9fc8c71ffc0"
 assert record["tag"] == "zopfli-1.0.3"
+assert "src/third_party/zopfli/* -text" in (root / ".gitattributes").read_text(), "Windows checkouts must preserve upstream source/license bytes"
 assert len(record["files"]) == 23
 for name, digest in record["files"].items():
     assert Path(name).name == name
