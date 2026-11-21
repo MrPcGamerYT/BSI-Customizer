@@ -17,7 +17,11 @@ struct Metrics {
     std::uint64_t processed=0;
     VulkanCapture vulkan;
     bool textureSupported=false;
-    std::uint64_t textureDraws=0,textureBindings=0;
+    // Since the latest texture setting/presentation-source change, not lifetime
+    // success carried over from a different game context or an earlier toggle.
+    std::uint64_t textureDraws=0,textureBindings=0,textureInspected=0,textureSceneDraws=0;
+    std::uint64_t textureDepthBypasses=0,textureBlendBypasses=0,textureSamplerBypasses=0,textureOtherBypasses=0;
+    std::string textureLastBypass;
     std::string textureStatus="Potato graphic is off; native texture sampling retained.";
     std::string status="Waiting for the game's presentation API. Multi-renderer support is not complete.";
 };
@@ -40,11 +44,15 @@ public:
     // touching pixels. Atomic arbitration prevents concurrent/nested providers
     // (including translation layers in the same API family) grading twice.
     bool claimPresentation(Renderer renderer,std::uintptr_t object,std::uintptr_t window);
+    // A draw hook may use an already selected source, NEVER claim a route from
+    // a draw/context alone. Also authorizes a scene context on its exact drawable.
+    bool isPresentation(Renderer renderer,std::uintptr_t object,std::uintptr_t window);
     void releasePresentation(Renderer renderer,std::uintptr_t object);
     Parameters settings();
     void setTexture(const TextureConfiguration &settings);
     TextureConfiguration texture();
-    void textureReport(unsigned bindings,const std::string &detail,bool supported);
+    void textureReport(unsigned bindings,const std::string &detail,bool supported,
+                       TextureDrawReason reason=TextureDrawReason::NotInspected);
     Metrics metrics();
     void waiting(bool hooks,const std::string &status);
     void vulkanEvent(VulkanEvent event,const std::string &detail={});
@@ -56,6 +64,7 @@ public:
     bool ownsGameWindow(std::uintptr_t surface);
     bool eligible(std::uintptr_t surface);
 private:
+    void resetTextureEvidence(); // caller holds mutex
     std::mutex mutex;
     Parameters current;
     TextureConfiguration currentTexture;

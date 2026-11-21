@@ -52,8 +52,8 @@ ratios that do not fit are also unavailable, with the reason shown beside the
 selector. The actual configured dimensions and proposed target are displayed.
 
 When the proposed target **exactly matches the currently configured Display**,
-the choice is marked **(current)** and Save succeeds as an explicitly reported
-**no-op**: no Display write, native commit or additional restart, and no claim
+the choice is marked **(current; no resize)** and Save succeeds as an explicitly
+reported **no-op**: no Display write, native commit or additional restart, and no claim
 of fewer pixels or better performance. Both original dimensions (even an
 existing odd dimension) and the custom/predefined flag remain exact. Independent
 visual/texture edits can Save at the same time. Switching from Strong back to a
@@ -62,6 +62,13 @@ explicitly restores that original with Save/restart, never beyond the original.
 If a draft becomes ineligible after an external edit, **Keep saved resolution**
 drops only that unsaved selection, preserving the other shader drafts. This is
 different from the existing **Keep current display** recovery action.
+
+In the user's 960×540 screenshot, 540 already equals both current and captured
+original. No further reduction is supported and 720 would upscale it; this is
+not evidence that a native write/restart failed. The page now repeats that
+minimum-size limitation beside the selector. C++ preview/status dimensions and
+arrows use explicit Unicode escapes so Windows compiler code pages cannot turn
+the multiplication sign into mojibake. Native size/restart behavior is unchanged.
 
 The exact original is captured once when enabling a reduction. Strength changes
 always plan from that original, not from an already reduced target. Restoration

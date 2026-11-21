@@ -26,11 +26,25 @@ textures, create mipmaps, remove geometry, change the game's draw distance,
 change DPI/FPS caps or guarantee any FPS improvement. `texelFetch` and other
 samplerless accesses may ignore this policy.
 
-The regular `BSIShaders` module observes selected public draw entry points
-(arrays/elements, range and instanced variants). It does not cover every
-multi-draw/indirect/extension entry point. A context is armed only after a
-qualified presentation; earlier draws remain native. Off and unsupported paths
-retain the original calls, and the original draw/present executes once.
+The regular `BSIShaders` module observes **20 draw signatures / 46 core and
+extension names**: arrays/elements, range, instancing, base vertex/base instance,
+multi-draw and indirect/count variants. The earlier five-entry-point set could
+see only a compositor's plain `DrawArrays` while missing a translator's scene
+geometry. Signatures and ABI-compatible aliases share one bounded inventory;
+arguments, pointer arrays, signed base vertices and 64-bit count-buffer offsets
+are forwarded unchanged. CPU/GPU indirect/index buffers are never inspected.
+This still is not coverage of every vendor command or another process's guest
+renderer. Original calls execute once on both supported and bypass paths.
+
+A qualified **presentation must happen first**. A second current scene context
+can then be armed on that **exact same provider/display/drawable/game HWND**,
+without having to swap itself or stealing the presentation claim. The previous
+same-context-only gate missed this arrangement. A draw cannot claim a source.
+Unknown, offscreen, pbuffer, share-group-only and other-window/drawable contexts
+remain native: a presented compositor image does not prove ownership of its
+producer's scene resources. These are repaired interception gaps, **not proof
+that either was the cause in the user's game**; installed-player evidence is
+still required.
 
 ### State and resource checks
 
@@ -39,7 +53,9 @@ retain the original calls, and the original draw/present executes once.
 - A tracked current context and the **exact current drawable**, on an eligible
   non-Qt/non-Chrome child HWND owned by the attached player. The setting or a
   loaded graphics DLL is not proof. EGL identities include provider, display and
-  surface; one UI provider does not monopolize a later game's provider.
+  surface; context identities also include the provider/display. One UI provider
+  does not monopolize a later game's provider. Alternate scene contexts repeat
+  the same legal EGL protection checks before any GL initialization/inspection.
 - An opaque triangle draw, depth testing and depth writes enabled, a real depth
   attachment of at least 16 bits, and a depth function other than NEVER/ALWAYS.
   Merely enabling the depth-test bit on a UI/no-depth target is insufficient.
@@ -109,9 +125,19 @@ not certify those lifetimes.
   require a restart for arming subsequent eligible draws, but hooks must have
   captured a qualified game presentation. This is not evidence of changed game
   pixels or a hot native-framebuffer resize.
-- Prepared sampler draw/binding counters are separate from processed
-  presentation-shader frames. Neither counter measures texture appearance,
-  FPS, successful guest rendering or driver-profile compatibility.
+- A saved-On/zero-prepared report explicitly says **no texture override is
+  confirmed**; it must not be diagnosed as an unsaved/off draft. The footer
+  repeats this instead of implying that saving again will make it active.
+- Inspected calls, eligible scene calls, depth/UI, blended, no-qualified-sampler
+  and other bypasses are separate from prepared sampler draw/binding counts.
+  They reset on texture-setting or presentation-source changes; old lifetime
+  success cannot masquerade as activity after a new toggle/context. A later HUD
+  bypass cannot erase earlier preparation evidence; its latest reason is kept
+  separately in **Copy rendering status**. Arming hooks is not a prepared draw.
+- Texture counters are separate from processed presentation-shader frames.
+  Neither measures texture appearance, FPS, successful guest rendering or
+  driver-profile compatibility. A scene in an unowned/offscreen producer is
+  not modified just to make these counters increment.
 - On an observed DirectX/Vulkan texture path, status explicitly says texture
   interception is unimplemented. It never substitutes resolution or relabels a
   GL/UI surface as Vulkan success.
@@ -129,9 +155,14 @@ Current local source checks (CI must run against the pushed review head):
 | Windows x64 cross-compile/link | Complete EGL/DXGI/Vulkan hook test executables; compilation/linking is **not execution** |
 | Actual Qt 6 plugin and editors | Texture review/toggle/Save/Discard/preset independence, truthful no-game diagnostics and independent native-resolution/restart controls |
 
-Windows CI additionally builds/runs real MinHook detours with authored EGL/Vulkan
-lifecycle DLL doubles, native HWND ownership and DirectX WARP. Those tests do
-not execute an EGL game driver, protected GPU memory or an emulator. Software
+Windows CI additionally builds/runs real MinHook detours with authored EGL/GL
+state and Vulkan lifecycle DLL doubles, native HWND ownership and DirectX WARP.
+The EGL regression requires private minimum-LOD samplers **inside** each of the
+46 original draw entry points, exact argument forwarding/once-only calls,
+compositor-only zero-prepared behavior, another scene context on the exact
+selected drawable, UI/protected/pbuffer/other-drawable refusal, off/on evidence
+reset, source teardown and a late independent provider. Those tests do not
+execute an EGL game driver, protected GPU memory or an emulator. Software
 CI also requires GLES and desktop-core pixels and sanitizer tests; a pending or
 failed check is not a pass. The D3D/Vulkan descriptor tests and their existing
 ten-effect pixels remain distinct from missing Potato game-binding tests.

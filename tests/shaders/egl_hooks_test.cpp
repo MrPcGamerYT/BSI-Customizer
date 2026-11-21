@@ -2,6 +2,8 @@
 // No GL pixels, protected GPU memory, emulator or physical driver executes.
 #include "Runtime.h"
 #include "PresentationHooks.h"
+#include "GlDrawCalls.h"
+#undef BSI_GL_DRAW_CALLS
 #include <windows.h>
 #include <chrono>
 #include <cstdint>
@@ -43,6 +45,16 @@ struct Fixture {
     void swap(void *surface){
         const auto before=count();require(function<unsigned(WINAPI*)(void*,void*)>("eglSwapBuffers")(display,surface)!=0,"original EGL presentation succeeds");
         require(count()==before+1,"every original EGL swap executes exactly once, including every safety bypass");
+    }
+    void scene(unsigned flags){function<void(*)(unsigned)>("bsiFixtureSceneState")(flags);}
+    void draw(GlDrawKind kind=GlDrawKind::ElementsBaseVertex,unsigned alias=0,LONG bindings=2,unsigned mode=4){
+        const auto before=count("bsiFixtureDrawCalls"),privateBefore=count("bsiFixturePrivateDraws");
+        function<void(*)(unsigned,unsigned,unsigned)>("bsiFixtureDraw")(static_cast<unsigned>(kind),alias,mode);
+        require(count("bsiFixtureDrawCalls")==before+1,"each real detour invokes its original exactly once, including bypasses/multi/indirect calls");
+        require(count("bsiFixtureArgumentsIntact")&&count("bsiFixtureBindingsRestored")&&!count("bsiFixtureInvalidGl"),
+                "all counts, offsets, pointer arrays, signed base vertices and 64-bit count-buffer offsets forward intact; restore exact native samplers/active unit");
+        require(count("bsiFixtureLastPrivateBindings")==bindings&&count("bsiFixturePrivateDraws")==privateBefore+(bindings?1:0),
+                "private coarser-LOD samplers are visible INSIDE the original draw, never merely counted afterward");
     }
     void removeSurface(void *value){require(function<unsigned(WINAPI*)(void*,void*)>("eglDestroySurface")(display,value)!=0,"native surface teardown");}
     void removeContext(void *value){require(function<unsigned(WINAPI*)(void*,void*)>("eglDestroyContext")(display,value)!=0,"native context teardown");}
@@ -92,7 +104,77 @@ int main(int argc,char **argv){
     b.removeContext(cb);b.removeSurface(gameB);
     require(!runtime.metrics().observed&&a.count("bsiFixtureGlQueries")==0&&b.count("bsiFixtureGlQueries")==0,
             "neutral/lifecycle tests execute no GL inspection or effect passes and leave no routing claim");
-    runtime.stop();DestroyWindow(ui);DestroyWindow(game);DestroyWindow(root);UnregisterClassW(cls.lpszClassName,cls.hInstance);
-    std::puts("PASS: production EGL detours, UI-first/late independent providers, core/EXT platform-window creation, exact current drawable, protection gates, config-independent actual GLES and surface/context teardown re-detection; exactly-once native swaps");
-    std::puts("LIMIT: authored EGL lifecycle doubles only, no GL driver/game pixels, protected GPU memory or physical GPU/player certification");
+    // Reproduce the missed-scene pattern: plain DrawArrays is only the final
+    // depth-disabled compositor; geometry uses base-vertex/multi/indirect APIs
+    // and a second context which NEVER swaps on its own.
+    runtime.configureRenderer(RendererFamily::Vulkan);runtime.setTexture({true,true});
+    const auto presenter=a.context(),scene=a.context(),protectedScene=a.context(true);
+    const auto target=a.surface(game),sameWindowOtherDrawable=a.surface(game),uiTarget=a.surface(ui),secret=a.surface(game,0,true);
+    require(presenter&&scene&&protectedScene&&target&&sameWindowOtherDrawable&&uiTarget&&secret,"texture dispatch fixtures");
+    a.current(target,scene);a.draw(GlDrawKind::ElementsBaseVertex,0,0);
+    require(!runtime.metrics().observed&&!runtime.metrics().textureInspected,"a draw alone must not claim presentation or invent game evidence");
+    a.current(target,presenter);a.swap(target);
+    require(runtime.metrics().observed&&runtime.metrics().textureSupported&&!runtime.metrics().textureDraws,"only the owned swap arms inspection, not successful texture draws");
+    a.scene(1);a.draw(GlDrawKind::Arrays,0,0);
+    m=runtime.metrics();require(m.textureInspected==1&&m.textureDepthBypasses==1&&!m.textureSceneDraws&&!m.textureDraws,
+            "compositor-only draw is inspected but never relabeled as a successful scene preparation");
+    a.scene(0);unsigned variants=0;
+    for(unsigned kind=0;kind<glDrawKinds;++kind)for(unsigned alias=0;alias<glDrawAliases;++alias)if(glDrawNames[kind][alias]){
+        a.draw(static_cast<GlDrawKind>(kind),alias);++variants;
+    }
+    m=runtime.metrics();require(m.textureDraws==variants&&m.textureBindings==variants*2&&m.textureSceneDraws==variants&&m.textureInspected==variants+1,
+            "all scene draw signatures/core/extension aliases, not only the five compositor-era hooks, prepare and count real temporary bindings");
+    const auto preparedStatus=m.textureStatus;
+    a.scene(1);a.draw(GlDrawKind::Arrays,0,0);
+    require(runtime.metrics().textureStatus==preparedStatus&&!runtime.metrics().textureLastBypass.empty(),"last HUD bypass cannot overwrite earlier scene preparation evidence");
+    a.scene(0);a.current(target,scene);a.draw();
+    require(runtime.metrics().textureDraws==variants+1&&runtime.metrics().renderer==Renderer::OpenGLES&&runtime.metrics().processed==0,
+            "a second scene context on the EXACT selected drawable qualifies without stealing presentation or counting visual-effect frames");
+
+    auto inspected=runtime.metrics().textureInspected;
+    a.current(target,protectedScene);const auto glBefore=a.count("bsiFixtureGlQueries");a.draw(GlDrawKind::ElementsBaseVertex,0,0);
+    require(a.count("bsiFixtureGlQueries")==glBefore&&runtime.metrics().textureInspected==inspected,"protected alternate context is rejected before ANY GL initialization");
+    a.current(sameWindowOtherDrawable,scene);a.draw(GlDrawKind::ElementsBaseVertex,0,0);
+    a.current(uiTarget,scene);a.draw(GlDrawKind::ElementsBaseVertex,0,0);
+    a.current(secret,scene);a.draw(GlDrawKind::ElementsBaseVertex,0,0);
+    a.current(nullptr,scene);a.draw(GlDrawKind::ElementsBaseVertex,0,0);
+    require(runtime.metrics().textureInspected==inspected,"same HWND is insufficient for another drawable; UI, protected and pbuffer/unmapped drawables stay native even with a known scene context");
+    const auto otherGame=CreateWindowExW(0,L"STATIC",L"other owned child",WS_CHILD,0,0,640,360,root,nullptr,GetModuleHandleW(nullptr),nullptr);
+    require(otherGame!=nullptr,"separate owned child fixture");
+    const auto otherTarget=a.surface(otherGame);a.current(otherTarget,scene);a.draw(GlDrawKind::ElementsBaseVertex,0,0);
+    require(runtime.metrics().textureInspected==inspected,"another eligible owned child is NOT the selected game drawable");
+    a.removeSurface(otherTarget);DestroyWindow(otherGame);
+
+    a.current(target,scene);
+    for(unsigned flags:{1u,2u,4u,8u,16u,32u,64u}){a.scene(flags);a.draw(GlDrawKind::ElementsBaseVertex,0,0);}
+    a.scene(0);a.draw(GlDrawKind::ElementsBaseVertex,0,0,1); // lines, not scene triangles
+    m=runtime.metrics();require(m.textureInspected==inspected+8&&m.textureDepthBypasses==6&&m.textureBlendBypasses==1
+            &&m.textureSamplerBypasses==2&&m.textureOtherBypasses==1,"depth/write/always-pass/no-depth, blended, missing/protected mips and primitive bypasses remain distinct and never prepared");
+    runtime.setTexture({false,true});a.draw(GlDrawKind::ElementsBaseVertex,0,0);
+    require(!runtime.metrics().textureDraws&&!runtime.metrics().textureBindings&&!runtime.metrics().textureInspected,"off clears prior texture evidence and cannot reuse lifetime success as current activity");
+    runtime.setTexture({true,true});a.draw();require(runtime.metrics().textureDraws==1,"on can arm an already tracked scene without a restart");
+    a.current(sameWindowOtherDrawable,presenter);a.swap(sameWindowOtherDrawable);
+    require(runtime.metrics().observed&&!runtime.metrics().textureDraws&&!runtime.metrics().textureInspected,
+            "even the SAME presenter context/HWND must reset evidence when its actually presented drawable changes");
+    a.current(target,scene);a.draw(GlDrawKind::ElementsBaseVertex,0,0);
+    require(!runtime.metrics().textureInspected,"the former drawable loses alternate scene authorization after a new drawable is presented");
+    a.current(target,presenter);a.swap(target);a.current(target,scene);a.draw();
+    require(runtime.metrics().textureDraws==1,"an exact original drawable can be re-adopted only by a fresh owned swap");
+    a.removeContext(presenter);a.draw(GlDrawKind::ElementsBaseVertex,0,0);
+    require(!runtime.metrics().observed&&!runtime.metrics().textureDraws&&!runtime.metrics().textureInspected,"destroying the presenter revokes alternate scene authorization and its evidence");
+    a.swap(target);a.draw();require(runtime.metrics().observed&&runtime.metrics().textureDraws==1,"the former scene can be adopted ONLY after its own qualified swap");
+    a.removeSurface(target);a.draw(GlDrawKind::ElementsBaseVertex,0,0);
+    require(!runtime.metrics().observed&&!runtime.metrics().textureDraws,"surface destruction revokes all associated scene contexts");
+    a.removeContext(scene);a.removeContext(protectedScene);a.removeSurface(sameWindowOtherDrawable);a.removeSurface(secret);
+
+    // Leave provider A current on excluded UI while provider B draws the game.
+    const auto uiContext=a.context();a.current(uiTarget,uiContext);
+    const auto second=b.context(),secondTarget=b.surface(game,2);b.current(secondTarget,second);b.swap(secondTarget);b.draw();
+    require(runtime.metrics().observed&&runtime.metrics().textureDraws==1&&runtime.metrics().textureInspected==1,
+            "independent late EGL provider draws are not stolen by an earlier UI provider or old game-source counters");
+    b.removeContext(second);b.removeSurface(secondTarget);a.removeContext(uiContext);a.removeSurface(uiTarget);
+    require(!runtime.metrics().observed&&!runtime.metrics().textureDraws&&!a.count("bsiFixtureInvalidGl")&&!b.count("bsiFixtureInvalidGl"),"teardown and dispatch fixtures leave no stale presentation/texture success or invalid GL state");
+    runtime.setTexture({});runtime.stop();DestroyWindow(ui);DestroyWindow(game);DestroyWindow(root);UnregisterClassW(cls.lpszClassName,cls.hInstance);
+    std::printf("PASS: production EGL/MinHook lifecycle plus %u draw signature/alias detours; exact arguments/once-only native draws, private samplers DURING base-vertex/multi/indirect/instanced draws, alternate context on the exact owned drawable, UI/protection/pbuffer/foreign-drawable refusal, reset and teardown\n",variants);
+    std::puts("LIMIT: authored EGL/GL state doubles only, no GL driver/game pixels, protected GPU memory or physical GPU/player certification");
 }

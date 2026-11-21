@@ -121,6 +121,37 @@ int main(){
     std::thread a([&]{if(runtime.claimPresentation(Renderer::OpenGLES,101,window))++claims;});
     std::thread b([&]{if(runtime.claimPresentation(Renderer::Direct3D11,202,window))++claims;});
     a.join();b.join();require(claims==1,"concurrent presentation callbacks must claim exactly one source BEFORE either backend can process pixels");
+    runtime.configureRenderer(RendererFamily::Automatic);runtime.setTexture({true,true});
+    require(!runtime.isPresentation(Renderer::OpenGLES,901,window)&&!runtime.metrics().observed,
+            "a read-only draw authorization check cannot claim an unobserved route");
+    runtime.textureReport(3,"unobserved must not count",true,TextureDrawReason::Prepared);
+    require(!runtime.metrics().textureDraws&&!runtime.metrics().textureInspected,"no presentation means no texture evidence, even if a stale callback tries to report bindings");
+    require(runtime.claimPresentation(Renderer::OpenGLES,901,window)&&runtime.isPresentation(Renderer::OpenGLES,901,window)
+            &&!runtime.isPresentation(Renderer::OpenGLES,902,window)&&!runtime.isPresentation(Renderer::OpenGL,901,window),
+            "draw authorization requires the already-selected renderer, presentation identity and exact game window");
+    runtime.textureReport(0,"armed only",true);
+    require(!runtime.metrics().textureInspected&&!runtime.metrics().textureDraws,"hook availability is not an inspected or prepared scene call");
+    runtime.textureReport(0,"compositor depth bypass",true,TextureDrawReason::Depth);
+    runtime.textureReport(0,"scene without mip samplers",true,TextureDrawReason::NoSampler);
+    runtime.textureReport(2,"private scene preparation",true,TextureDrawReason::Prepared);
+    runtime.textureReport(0,"later UI bypass",true,TextureDrawReason::Blended);
+    m=runtime.metrics();
+    require(m.textureInspected==4&&m.textureSceneDraws==2&&m.textureDraws==1&&m.textureBindings==2
+            &&m.textureDepthBypasses==1&&m.textureBlendBypasses==1&&m.textureSamplerBypasses==1
+            &&m.textureStatus=="private scene preparation"&&m.textureLastBypass=="later UI bypass",
+            "aggregate scene/bypass evidence is truthful and a final HUD call does not erase earlier real sampler preparation");
+    runtime.setTexture({false,true});runtime.textureReport(2,"off must not count",true,TextureDrawReason::Prepared);
+    require(!runtime.metrics().textureDraws&&!runtime.metrics().textureInspected&&!runtime.metrics().textureSupported,
+            "off clears old evidence instead of reusing lifetime sampler counts");
+    runtime.setTexture({true,true});runtime.textureReport(1,"new enabled preparation",true,TextureDrawReason::Prepared);
+    require(runtime.metrics().textureDraws==1,"on starts a new evidence interval");
+    runtime.releasePresentation(Renderer::OpenGLES,901);
+    require(!runtime.isPresentation(Renderer::OpenGLES,901,window)&&!runtime.metrics().textureDraws&&!runtime.metrics().textureBindings
+            &&runtime.metrics().textureLastBypass.empty(),"source destruction revokes scene authorization and texture counters/last bypass");
+    require(runtime.claimPresentation(Renderer::Direct3D11,903,window),"another actual renderer can replace the destroyed GL source");
+    runtime.textureReport(4,"a presentation shader is not a D3D texture implementation",true,TextureDrawReason::Prepared);
+    require(!runtime.metrics().textureDraws&&!runtime.metrics().textureSupported,"missing D3D/Vulkan texture binding implementation cannot be reported as successful");
+    runtime.releasePresentation(Renderer::Direct3D11,903);runtime.setTexture({});
     runtime.configureRenderer(RendererFamily::Automatic);
 #ifdef _WIN32
     DestroyWindow(child);DestroyWindow(root);

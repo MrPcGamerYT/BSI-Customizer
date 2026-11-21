@@ -2,6 +2,7 @@
 #ifdef _WIN32
 #include "GlPipeline.h"
 #include "GlTextureOverride.h"
+#include "GlDrawCalls.h"
 #include "PresentationHooks.h"
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -21,6 +22,8 @@
 #include <memory>
 #include <mutex>
 #include <thread>
+#include <tuple>
+#include <utility>
 #include <vector>
 
 namespace BsiShaders {
@@ -40,8 +43,10 @@ using EglQuery=unsigned(WINAPI*)(void*,void*,int,int*);
 using EglProc=void*(WINAPI*)(const char*);
 using EglQueryApi=unsigned(WINAPI*)();
 using EglString=const char*(WINAPI*)(void*,int);
-constexpr unsigned maximumEglProviders=4,drawKinds=5,drawSlots=8;
+constexpr unsigned maximumEglProviders=4,drawKinds=glDrawKinds,drawSlots=32;
+static_assert(drawSlots>=(maximumEglProviders+1)*glDrawAliases,"bound all independent provider/alias targets");
 using DrawableKey=std::pair<std::uintptr_t,std::uintptr_t>; // display + surface (or 0 + WGL DC)
+using ContextKey=std::tuple<unsigned,std::uintptr_t,std::uintptr_t>; // provider + display + context
 struct EglProvider {
     HMODULE module=nullptr;
     EglSwap swap=nullptr;EglCreate create=nullptr,createPlatformExt=nullptr;
@@ -71,7 +76,7 @@ struct Hooks {
     std::array<EglProvider,maximumEglProviders> egl;
     unsigned eglCount=0;
     // 0 = WGL; each EGL provider has its own identity, procedures and lifecycle.
-    std::map<std::pair<unsigned,std::uintptr_t>,std::unique_ptr<GameContext>> contexts;
+    std::map<ContextKey,std::unique_ptr<GameContext>> contexts;
     std::array<std::array<DrawHook,drawSlots>,drawKinds> draws;
     struct Detour {void *replacement;void *original;};
     std::map<void*,Detour> targets;
@@ -108,9 +113,31 @@ HWND drawableFor(unsigned provider,DrawableKey *key){
     std::lock_guard<std::mutex> lock(h.surfaceMutex);const auto it=p.surfaces.find(*key);
     return it==p.surfaces.end()?nullptr:it->second;
 }
+bool installDrawHooks(unsigned provider,void *user);
+bool extension(const char *list,const char *name);
+Renderer rendererFor(unsigned provider){
+    if(!provider)return Renderer::OpenGL;
+    auto &p=hooks().egl[provider-1];const auto api=p.api?p.api():0;
+    return api==0x30a0u?Renderer::OpenGLES:api==0x30a2u?Renderer::OpenGL:Renderer::Unknown;
+}
+bool unprotectedEgl(EglProvider &p,DrawableKey drawable,std::uintptr_t context,bool *externalProtectionPossible){
+    const auto display=reinterpret_cast<void*>(drawable.first),surface=reinterpret_cast<void*>(drawable.second);
+    if(p.currentDisplay()!=display||p.currentSurface(0x3059)!=surface
+       ||reinterpret_cast<std::uintptr_t>(p.current())!=context)return false;
+    const char *extensions=p.strings(display,0x3055); // EGL_EXTENSIONS
+    if(!extensions)return false;
+    const bool content=extension(extensions,"EGL_EXT_protected_content");
+    const bool surfaces=content||extension(extensions,"EGL_EXT_protected_surface");
+    int protectedSurface=0,protectedContext=0;
+    if(externalProtectionPossible)*externalProtectionPossible=surfaces;
+    return (!surfaces||(p.query(display,surface,0x32c0,&protectedSurface)&&!protectedSurface))
+        &&(!content||(p.queryContext(display,reinterpret_cast<void*>(context),0x32c0,&protectedContext)&&!protectedContext));
+}
 // Provider-shared draw entry points may be returned by several EGL DLLs.
-// Inspect the CURRENT tracked context/drawable of every registered provider;
-// the first UI-only DLL must not steal another provider's draw callbacks.
+// A translator may draw the scene with another context on the SAME game
+// drawable and only swap with its compositor context. A draw may use that
+// already-proven presentation, but may NEVER claim a route from a context alone.
+// No pbuffer/offscreen/share-group/other-window ownership is guessed.
 struct GameDraw {
     std::unique_lock<std::mutex> lock;
     GameContext *selected=nullptr;
@@ -125,14 +152,32 @@ struct GameDraw {
                 DrawableKey drawable{};const HWND window=drawableFor(provider,&drawable);
                 if(!Runtime::instance().eligible(reinterpret_cast<std::uintptr_t>(window)))continue;
                 if(!lock.owns_lock()&&!lock.try_lock())return;
-                const auto found=h.contexts.find({provider,context});
-                if(found==h.contexts.end()||found->second->window!=window||found->second->drawable!=drawable||!found->second->drawHooks)continue;
+                const auto renderer=rendererFor(provider);
+                GameContext *source=nullptr;
+                for(const auto &entry:h.contexts){
+                    auto &session=*entry.second;
+                    if(std::get<0>(entry.first)==provider&&session.window==window&&session.drawable==drawable&&session.drawHooks
+                       &&Runtime::instance().isPresentation(renderer,reinterpret_cast<std::uintptr_t>(&session),reinterpret_cast<std::uintptr_t>(window))){source=&session;break;}
+                }
+                if(!source)continue;
+                auto *egl=provider?&h.egl[provider-1]:nullptr;bool protectionPossible=false;
+                if(egl&&!unprotectedEgl(*egl,drawable,context,&protectionPossible))continue;
+                const ContextKey key{provider,drawable.first,context};auto found=h.contexts.find(key);
+                if(found==h.contexts.end()){
+                    if(h.contexts.size()>=16)continue;
+                    found=h.contexts.emplace(key,std::make_unique<GameContext>()).first;
+                }
                 auto &session=*found->second;
-                if(!Runtime::instance().claimPresentation(session.renderer,reinterpret_cast<std::uintptr_t>(&session),reinterpret_cast<std::uintptr_t>(window)))continue;
+                session.window=window;session.drawable=drawable;session.renderer=renderer;
                 selected=&session;previous=presenting;presenting=true;guarding=true;
                 std::string detail;
-                const auto changed=selected->potato.begin(quality.quality(),quality.externalOverridesReviewed,primitive,&detail);
-                Runtime::instance().textureReport(changed,detail,true);return;
+                if(!session.drawHooks){
+                    session.drawHooks=session.potato.initialize(resolve,egl,&detail,protectionPossible)&&installDrawHooks(provider,egl);
+                    if(!session.drawHooks){Runtime::instance().textureReport(0,detail.empty()?"This game scene context has no safe draw-inspection path; native sampling retained.":detail,false);return;}
+                }
+                TextureDrawReason reason=TextureDrawReason::NotInspected;
+                const auto changed=selected->potato.begin(quality.quality(),quality.externalOverridesReviewed,primitive,&detail,&reason);
+                Runtime::instance().textureReport(changed,detail,true,reason);return;
             }
             if(lock.owns_lock())lock.unlock();
         }catch(...){
@@ -144,32 +189,42 @@ struct GameDraw {
     }
     ~GameDraw(){if(selected)selected->potato.end();if(guarding)presenting=previous;}
 };
-using Arrays=void(WINAPI*)(unsigned,int,int);
-using Elements=void(WINAPI*)(unsigned,int,unsigned,const void*);
-using ArraysInstanced=void(WINAPI*)(unsigned,int,int,int);
-using ElementsInstanced=void(WINAPI*)(unsigned,int,unsigned,const void*,int);
-using RangeElements=void(WINAPI*)(unsigned,unsigned,unsigned,int,unsigned,const void*);
-template<unsigned Index> void WINAPI drawArrays(unsigned mode,int first,int count){auto &d=hooks().draws[0][Index];GameDraw guard(d.providers.load(std::memory_order_acquire),mode);reinterpret_cast<Arrays>(d.original.load(std::memory_order_acquire))(mode,first,count);}
-template<unsigned Index> void WINAPI drawElements(unsigned mode,int count,unsigned type,const void *indices){auto &d=hooks().draws[1][Index];GameDraw guard(d.providers.load(std::memory_order_acquire),mode);reinterpret_cast<Elements>(d.original.load(std::memory_order_acquire))(mode,count,type,indices);}
-template<unsigned Index> void WINAPI drawArraysInstanced(unsigned mode,int first,int count,int instances){auto &d=hooks().draws[2][Index];GameDraw guard(d.providers.load(std::memory_order_acquire),mode);reinterpret_cast<ArraysInstanced>(d.original.load(std::memory_order_acquire))(mode,first,count,instances);}
-template<unsigned Index> void WINAPI drawElementsInstanced(unsigned mode,int count,unsigned type,const void *indices,int instances){auto &d=hooks().draws[3][Index];GameDraw guard(d.providers.load(std::memory_order_acquire),mode);reinterpret_cast<ElementsInstanced>(d.original.load(std::memory_order_acquire))(mode,count,type,indices,instances);}
-template<unsigned Index> void WINAPI drawRangeElements(unsigned mode,unsigned start,unsigned end,int count,unsigned type,const void *indices){auto &d=hooks().draws[4][Index];GameDraw guard(d.providers.load(std::memory_order_acquire),mode);reinterpret_cast<RangeElements>(d.original.load(std::memory_order_acquire))(mode,start,end,count,type,indices);}
-#define DRAW_CALLBACKS(name) {reinterpret_cast<void*>(&name<0>),reinterpret_cast<void*>(&name<1>),reinterpret_cast<void*>(&name<2>),reinterpret_cast<void*>(&name<3>),reinterpret_cast<void*>(&name<4>),reinterpret_cast<void*>(&name<5>),reinterpret_cast<void*>(&name<6>),reinterpret_cast<void*>(&name<7>)}
-void *const drawCallbacks[drawKinds][drawSlots]={DRAW_CALLBACKS(drawArrays),DRAW_CALLBACKS(drawElements),DRAW_CALLBACKS(drawArraysInstanced),DRAW_CALLBACKS(drawElementsInstanced),DRAW_CALLBACKS(drawRangeElements)};
-#undef DRAW_CALLBACKS
+// Preserve every argument and call the original once, including bypasses.
+// The RAII guard brackets a whole multi/indirect API call; it never reads or
+// rewrites a CPU/GPU command buffer, index offset, instance count or base vertex.
+#define BSI_DRAW_CALLBACK(id,params,args,...) \
+    template<unsigned Index> void WINAPI draw##id params { \
+        auto &d=hooks().draws[static_cast<unsigned>(GlDrawKind::id)][Index]; \
+        GameDraw guard(d.providers.load(std::memory_order_acquire),mode); \
+        using Function=void(WINAPI*)params; \
+        reinterpret_cast<Function>(d.original.load(std::memory_order_acquire)) args; \
+    } \
+    template<std::size_t... Index> std::array<void*,drawSlots> callbacks##id(std::index_sequence<Index...>){ \
+        return {{reinterpret_cast<void*>(&draw##id<Index>)...}}; \
+    }
+BSI_GL_DRAW_CALLS(BSI_DRAW_CALLBACK)
+#undef BSI_DRAW_CALLBACK
+const std::array<std::array<void*,drawSlots>,drawKinds> drawCallbacks{{
+#define BSI_DRAW_CALLBACK_ROW(id,params,args,...) callbacks##id(std::make_index_sequence<drawSlots>{}),
+    BSI_GL_DRAW_CALLS(BSI_DRAW_CALLBACK_ROW)
+#undef BSI_DRAW_CALLBACK_ROW
+}};
+#undef BSI_GL_DRAW_CALLS
 bool installDrawHooks(unsigned provider,void *user){
-    static const char *names[]{"glDrawArrays","glDrawElements","glDrawArraysInstanced","glDrawElementsInstanced","glDrawRangeElements"};
     bool any=false;auto &h=hooks();
     for(unsigned kind=0;kind<drawKinds;++kind){
-        void *target=resolve(names[kind],user);if(!target)continue;
-        for(unsigned slot=0;slot<drawSlots;++slot){
-            auto &d=h.draws[kind][slot];
-            if(d.target==target){d.providers.fetch_or(1u<<provider,std::memory_order_release);any=d.original.load()!=nullptr||any;break;}
-            if(d.target)continue;
-            d.target=target;d.providers.store(1u<<provider,std::memory_order_release);
-            if(installPublished(target,drawCallbacks[kind][slot],nullptr,&d.original))any=true;
-            else {d.providers.store(0);d.target=nullptr;}
-            break;
+        for(const auto *name:glDrawNames[kind]){
+            if(!name)continue;
+            void *target=resolve(name,user);if(!target)continue;
+            for(unsigned slot=0;slot<drawSlots;++slot){
+                auto &d=h.draws[kind][slot];
+                if(d.target==target){d.providers.fetch_or(1u<<provider,std::memory_order_release);any=d.original.load()!=nullptr||any;break;}
+                if(d.target)continue;
+                d.target=target;d.providers.store(1u<<provider,std::memory_order_release);
+                if(installPublished(target,drawCallbacks[kind][slot],nullptr,&d.original))any=true;
+                else {d.providers.store(0);d.target=nullptr;}
+                break;
+            }
         }
     }
     return any;
@@ -184,13 +239,18 @@ void process(unsigned provider,std::uintptr_t context,HWND window,DrawableKey dr
     std::unique_lock<std::mutex> lock(h.renderMutex,std::try_to_lock);if(!lock.owns_lock())return;
     Recursion guard;
     try {
-        const auto key=std::make_pair(provider,context);auto it=h.contexts.find(key);
+        const ContextKey key{provider,drawable.first,context};auto it=h.contexts.find(key);
         if(it==h.contexts.end()){
             if(h.contexts.size()>=16){Runtime::instance().report(true,true,false,"Too many game contexts; shaders safely bypassed.",false,renderer);return;}
             it=h.contexts.emplace(key,std::make_unique<GameContext>()).first;
         }
-        auto &session=*it->second;session.window=window;session.drawable=drawable;session.renderer=renderer;
-        if(!Runtime::instance().claimPresentation(renderer,reinterpret_cast<std::uintptr_t>(&session),reinterpret_cast<std::uintptr_t>(window)))return;
+        auto &session=*it->second;
+        const auto token=reinterpret_cast<std::uintptr_t>(&session);
+        if((session.window!=window||session.drawable!=drawable)
+           &&Runtime::instance().isPresentation(session.renderer,token,reinterpret_cast<std::uintptr_t>(session.window)))
+            Runtime::instance().releasePresentation(session.renderer,token);
+        session.window=window;session.drawable=drawable;session.renderer=renderer;
+        if(!Runtime::instance().claimPresentation(renderer,token,reinterpret_cast<std::uintptr_t>(window)))return;
         std::string error;
         const auto quality=Runtime::instance().texture();
         if(quality.enabled){
@@ -213,12 +273,12 @@ void processWgl(HDC dc){
     RECT rect{};if(GetClientRect(window,&rect))process(0,reinterpret_cast<std::uintptr_t>(h.currentWgl()),window,{0,reinterpret_cast<std::uintptr_t>(dc)},rect.right,rect.bottom);
 }
 template<int Index> BOOL WINAPI swapWgl(HDC dc){try{processWgl(dc);}catch(...){}Recursion guard;return hooks().swaps[Index](dc);}
-void removeContextState(unsigned provider,std::uintptr_t context){
-    auto &h=hooks();std::lock_guard<std::mutex> lock(h.renderMutex);const auto it=h.contexts.find({provider,context});
+void removeContextState(unsigned provider,std::uintptr_t display,std::uintptr_t context){
+    auto &h=hooks();std::lock_guard<std::mutex> lock(h.renderMutex);const auto it=h.contexts.find({provider,display,context});
     if(it==h.contexts.end())return;
     Runtime::instance().releasePresentation(it->second->renderer,reinterpret_cast<std::uintptr_t>(it->second.get()));h.contexts.erase(it);
 }
-BOOL WINAPI removeWgl(HGLRC context){const BOOL okay=hooks().deleteWgl(context);if(okay)try{removeContextState(0,reinterpret_cast<std::uintptr_t>(context));}catch(...){}return okay;}
+BOOL WINAPI removeWgl(HGLRC context){const BOOL okay=hooks().deleteWgl(context);if(okay)try{removeContextState(0,0,reinterpret_cast<std::uintptr_t>(context));}catch(...){}return okay;}
 template<typename Attribute> void trackSurface(EglProvider &p,void *display,void *surface,void *window,const Attribute *attrs)noexcept{
     try {
         bool protectedContent=false,terminated=attrs==nullptr;
@@ -247,7 +307,7 @@ template<unsigned Index> unsigned WINAPI removeSurface(void *display,void *surfa
         const DrawableKey drawable{reinterpret_cast<std::uintptr_t>(display),reinterpret_cast<std::uintptr_t>(surface)};
         {std::lock_guard<std::mutex> lock(h.surfaceMutex);p.surfaces.erase(drawable);}
         std::lock_guard<std::mutex> lock(h.renderMutex);for(const auto &entry:h.contexts)
-            if(entry.first.first==Index+1&&entry.second->drawable==drawable){
+            if(std::get<0>(entry.first)==Index+1&&entry.second->drawable==drawable){
                 Runtime::instance().releasePresentation(entry.second->renderer,reinterpret_cast<std::uintptr_t>(entry.second.get()));
                 entry.second->window=nullptr;entry.second->drawable={};
             }
@@ -256,7 +316,7 @@ template<unsigned Index> unsigned WINAPI removeSurface(void *display,void *surfa
 }
 template<unsigned Index> unsigned WINAPI removeContext(void *display,void *context){
     const auto okay=hooks().egl[Index].destroyContext(display,context);
-    if(okay)try{removeContextState(Index+1,reinterpret_cast<std::uintptr_t>(context));}catch(...){}return okay;
+    if(okay)try{removeContextState(Index+1,reinterpret_cast<std::uintptr_t>(display),reinterpret_cast<std::uintptr_t>(context));}catch(...){}return okay;
 }
 bool extension(const char *list,const char *name){
     if(!list)return false;
@@ -275,19 +335,12 @@ template<unsigned Index> unsigned WINAPI swapEgl(void *display,void *surface){
         const auto context=p.current();
         if(Runtime::instance().eligible(reinterpret_cast<std::uintptr_t>(window))&&context
            &&p.currentDisplay()==display&&p.currentSurface(0x3059)==surface){
-            // Creation attributes alone do not qualify a protected context, and
-            // protected-surface extensions can permit protected resources even
-            // in regular contexts. Check legal EGL state before any GL work.
-            const char *extensions=p.strings(display,0x3055); // EGL_EXTENSIONS
-            if(extensions){
-                const bool content=extension(extensions,"EGL_EXT_protected_content");
-                const bool surfaces=content||extension(extensions,"EGL_EXT_protected_surface");
-                int protectedSurface=0,protectedContext=0,width=0,height=0;
-                const bool safeSurface=!surfaces||(p.query(display,surface,0x32c0,&protectedSurface)&&!protectedSurface);
-                const bool safeContext=!content||(p.queryContext(display,context,0x32c0,&protectedContext)&&!protectedContext);
-                if(safeSurface&&safeContext&&p.query(display,surface,0x3057,&width)&&p.query(display,surface,0x3056,&height))
-                    process(Index+1,reinterpret_cast<std::uintptr_t>(context),window,drawable,width,height,surfaces);
-            }
+            // Apply the SAME legal protection/current-drawable checks to swap
+            // and alternate scene contexts before any optional GL inspection.
+            bool protectionPossible=false;int width=0,height=0;
+            if(unprotectedEgl(p,drawable,reinterpret_cast<std::uintptr_t>(context),&protectionPossible)
+               &&p.query(display,surface,0x3057,&width)&&p.query(display,surface,0x3056,&height))
+                process(Index+1,reinterpret_cast<std::uintptr_t>(context),window,drawable,width,height,protectionPossible);
         }
     }catch(...){} // Optional effects must never prevent the native present.
     Recursion guard;return p.swap(display,surface);

@@ -105,6 +105,9 @@ int main(int argc,char **argv){
         Fixture f;auto values=mode(f.preferences,2);
         const auto reviewed=f.preferences.previewPotato(2).value(QStringLiteral("reviewKey")).toString();
         require(reviewed.size()==64&&!QFile::exists(f.path)&&f.backend.writes==0,QStringLiteral("Read-only preview issues an exact-size concurrency stamp before any dialog/write"));
+        const auto message=f.preferences.previewPotato(2).value(QStringLiteral("msg")).toString();
+        require(message.contains(QChar(0x00d7))&&message.contains(QChar(0x2192))&&!message.contains(QChar(0x00c3)),
+                QStringLiteral("Native preview dimensions/arrows are Unicode on every compiler code page, not UTF-8 bytes decoded as an ANSI literal"));
         f.backend.external({1600,900,false}); // same target, different unreviewed source size
         require(!success(f.preferences.apply(values,false,reviewed))&&f.backend.writes==0&&f.backend.commits==0&&!QFile::exists(f.path),
                 QStringLiteral("Restart confirmation cannot silently replan an externally changed source, even when its eventual target is the same"));
@@ -146,6 +149,8 @@ int main(int argc,char **argv){
                 &&preview.value(QStringLiteral("height")).toInt()==current.height
                 &&preview.value(QStringLiteral("custom")).toBool()==current.custom&&f.backend.writes==0&&!QFile::exists(f.path),
                 QStringLiteral("Current-size preview is read-only and reports no Display change or restart"));
+        require(preview.value(QStringLiteral("msg")).toString().contains(QChar(0x00d7)),
+                QStringLiteral("The user's already-current resolution message paints a real multiplication sign, including on Windows ANSI builds"));
         auto values=mode(f.preferences,profile);values[QStringLiteral("enabled")]=true;values[QStringLiteral("contrast")]=27;
         values[QStringLiteral("potatoGraphic")]=true;values[QStringLiteral("textureOverridesReviewed")]=true;
         const auto response=f.preferences.apply(values,false,preview.value(QStringLiteral("reviewKey")).toString());

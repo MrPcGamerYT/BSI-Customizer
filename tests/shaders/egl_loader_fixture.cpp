@@ -2,11 +2,12 @@
 // Two differently named DLLs exercise the production provider/HWND detours.
 #include <windows.h>
 #include <cstdint>
+#include "egl_gl_fixture.h"
 
 #define API extern "C" __declspec(dllexport)
 namespace {
 struct Surface { HWND window=nullptr;bool protectedContent=false; } surfaces[32];
-struct Context { bool protectedContent=false; } contexts[16];
+struct Context { bool protectedContent=false;EglDrawFixture::State gl; } contexts[16];
 unsigned surfaceCount=0,contextCount=0;
 int displayToken=0;
 thread_local Surface *currentSurface=nullptr;
@@ -19,6 +20,10 @@ template<typename Attribute>void *create(void *window,const Attribute *attrs){
     if(attrs)for(unsigned i=0;i<128&&attrs[i]!=0x3038;i+=2)if(attrs[i]==0x32c0)surface.protectedContent=attrs[i+1]!=0;
     return &surface;
 }
+}
+namespace EglDrawFixture {
+State &state(){static State unbound;return currentContext?currentContext->gl:unbound;}
+bool protectedContext(){return currentContext&&currentContext->protectedContent;}
 }
 API void *WINAPI eglGetCurrentContext(){return currentContext;}
 API void *WINAPI eglGetCurrentDisplay(){return currentContext?&displayToken:nullptr;}
@@ -43,7 +48,7 @@ API unsigned WINAPI eglQueryContext(void*,void *value,int name,int *out){
     if(!value||!out||name!=0x32c0)return 0;InterlockedIncrement(&protectionQueries);
     if(!extensions)InterlockedIncrement(&illegalQueries);*out=static_cast<Context*>(value)->protectedContent;return 1;
 }
-API void *WINAPI eglGetProcAddress(const char*){InterlockedIncrement(&glQueries);return nullptr;}
+API void *WINAPI eglGetProcAddress(const char *name){InterlockedIncrement(&glQueries);return EglDrawFixture::resolve(name);}
 API unsigned WINAPI eglSwapBuffers(void*,void*){InterlockedIncrement(&calls);return 1;}
 API unsigned WINAPI eglMakeCurrent(void*,void *draw,void*,void *context){
     currentSurface=static_cast<Surface*>(draw);currentContext=static_cast<Context*>(context);return 1;
@@ -55,3 +60,15 @@ API LONG bsiFixtureGlQueries(){return glQueries;}
 API LONG bsiFixtureProtectionQueries(){return protectionQueries;}
 API LONG bsiFixtureIllegalQueries(){return illegalQueries;}
 API void bsiFixtureExtensions(int available){extensions=available!=0;InterlockedExchange(&protectionQueries,0);}
+API void bsiFixtureDraw(unsigned kind,unsigned alias,unsigned mode){EglDrawFixture::invoke(kind,alias,mode);}
+API LONG bsiFixtureDrawCalls(){return EglDrawFixture::draws;}
+API LONG bsiFixturePrivateDraws(){return EglDrawFixture::privateDraws;}
+API LONG bsiFixtureInvalidGl(){return EglDrawFixture::invalid;}
+API LONG bsiFixtureLastPrivateBindings(){return LONG(EglDrawFixture::lastPrivateBindings);}
+API LONG bsiFixtureArgumentsIntact(){return EglDrawFixture::lastHash==EglDrawFixture::expectedHash;}
+API LONG bsiFixtureBindingsRestored(){return EglDrawFixture::restored();}
+API void bsiFixtureSceneState(unsigned flags){
+    auto &g=EglDrawFixture::state();g.depth=!(flags&1);g.depthWrite=!(flags&2);
+    g.depthFunction=flags&4?0x0207:0x0203;g.depthBits=flags&8?0:24;
+    g.blend=(flags&16)!=0;g.mips=!(flags&32);g.protectedTexture=(flags&64)!=0;
+}

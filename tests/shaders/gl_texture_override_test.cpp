@@ -150,7 +150,8 @@ int main(){
     {
         g.reset();GlTextureOverride quality;std::string error;
         require(quality.initialize(resolve,nullptr,&error),"unprotected GLES with no protected-texture extension is supported without illegal enum queries");
-        require(quality.begin(TextureQuality::Strong,true,4,&error)==2,"two ordinary test-owned mipmapped colors qualify");
+        TextureDrawReason reason=TextureDrawReason::NotInspected;
+        require(quality.begin(TextureQuality::Strong,true,4,&error,&reason)==2&&reason==TextureDrawReason::Prepared,"two ordinary test-owned mipmapped colors qualify with an explicit prepared outcome");
         require(g.active==3&&g.bindings[0]>=16&&g.bindings[1]>=16,"private bindings persist only until end, active unit restores before draw");
         require(g.flagsQueries==0&&g.textureProtectionQueries==0&&g.illegalQueries==0,"never query extension-only enums when extension is absent");
         quality.end();unchanged();quality.release();require(g.creations==g.deletions,"release all owned sampler names");
@@ -185,8 +186,20 @@ int main(){
     for(bool noDepth:{false,true}){
         g.reset();if(noDepth)g.depthBits=0;else g.depthFunction=0x0207;
         GlTextureOverride quality;std::string error;
-        require(quality.initialize(resolve,nullptr,&error)&&quality.begin(TextureQuality::Strong,true,4,&error)==0,
-                "an enabled depth-test bit alone cannot qualify an always-pass UI/no-depth-buffer draw");
+        TextureDrawReason reason=TextureDrawReason::NotInspected;
+        require(quality.initialize(resolve,nullptr,&error)&&quality.begin(TextureQuality::Strong,true,4,&error,&reason)==0&&reason==TextureDrawReason::Depth,
+                "an enabled depth-test bit alone cannot qualify an always-pass UI/no-depth-buffer draw; diagnose the depth bypass");
+        unchanged();quality.release();
+    }
+    {
+        g.reset();GlTextureOverride quality;std::string error;TextureDrawReason reason;
+        require(quality.initialize(resolve,nullptr,&error),"initialize explicit inspection outcomes");
+        require(!quality.begin(TextureQuality::Native,true,4,&error,&reason)&&reason==TextureDrawReason::NotInspected,"native/off does not pretend to inspect a game call");
+        require(!quality.begin(TextureQuality::Strong,false,4,&error,&reason)&&reason==TextureDrawReason::Unreviewed,"unreviewed driver state remains a refusal");
+        require(!quality.begin(TextureQuality::Strong,true,1,&error,&reason)&&reason==TextureDrawReason::Primitive,"non-triangle outcome is not stale prior scene evidence");
+        g.blend=true;require(!quality.begin(TextureQuality::Strong,true,4,&error,&reason)&&reason==TextureDrawReason::Blended,"blend bypass is separate from depth/UI qualification");
+        g.blend=false;g.program=0;
+        require(!quality.begin(TextureQuality::Strong,true,4,&error,&reason)&&reason==TextureDrawReason::NoSampler&&!error.empty(),"a scene without an inspectable program cannot inherit a previous preparation detail");
         unchanged();quality.release();
     }
     unsigned failures=0;bool unitFailure=false,bindingFailure=false,completed=false;

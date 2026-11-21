@@ -35,9 +35,10 @@ int main(int argc, char **argv)
     QCoreApplication app(argc, argv);
     const auto counts = pageCounts();
     const auto baseWindow = window();
+    for (bool persistentModel : {false, true})
     for (bool list : {false, true}) {
         for (bool crlf : {false, true}) {
-            QString original = player(list);
+            QString original = player(list, persistentModel);
             if (crlf) original.replace(QStringLiteral("\n"), QStringLiteral("\r\n"));
             const auto plan = ShaderSettingsSource::prepare(original, baseWindow, counts);
             require(plan.ok && !plan.alreadyApplied && plan.tabIndex == 12, QStringLiteral("native row/bootstrap plan: ") + plan.error);
@@ -187,15 +188,17 @@ int main(int argc, char **argv)
                 && !NativeSettingsModel::literalQmlString(QStringLiteral("'A.qml'"), 0, 7, nullptr),
             QStringLiteral("shared literal reader refuses invalid bounds and missing output"));
     require(NativeSettingsModel::locate(QString(), counts, nullptr).nameBegin < 0, QStringLiteral("optional discovery diagnostics cannot crash on an unsupported model"));
-    if (app.arguments().size() == 4 && app.arguments().at(1) == QLatin1String("--emit")) {
+    if (app.arguments().size() == 4 && (app.arguments().at(1) == QLatin1String("--emit")
+                                      || app.arguments().at(1) == QLatin1String("--emit-persistent"))) {
         const QString directory = app.arguments().at(2);
         const auto nativeWindow = read(app.arguments().at(3));
-        const auto plan = ShaderSettingsSource::prepare(player(), nativeWindow, counts);
+        const auto nativePlayer = player(false, app.arguments().at(1) == QLatin1String("--emit-persistent"));
+        const auto plan = ShaderSettingsSource::prepare(nativePlayer, nativeWindow, counts);
         require(plan.ok, QStringLiteral("complete native Settings-window integration: ") + plan.error);
         require(QDir().mkpath(directory), QStringLiteral("create integration fixture directory"));
         write(QDir(directory).filePath(QStringLiteral("Player.qml")), plan.player);
         write(QDir(directory).filePath(QStringLiteral("UiSettingsWindow.qml")), plan.window);
-        write(QDir(directory).filePath(QStringLiteral("PlayerBase.qml")), player());
+        write(QDir(directory).filePath(QStringLiteral("PlayerBase.qml")), nativePlayer);
     }
     std::puts("PASS: shared live native-model discovery, optional normal-DLL bootstrap, appended shader-only row, native discard/close predicates, hidden/unloaded missing-module path, idempotence and exact reversible source surgery (LF/CRLF and both model forms)");
     std::puts("LIMIT: source planning and Qt contract fixtures are not a running player, DLL deployment or physical GPU certification");

@@ -136,7 +136,7 @@ bool decodeConfig(const QJsonObject &root,ShaderSavedConfiguration *c,ShaderDisp
     }
     return true;
 }
-QString dimensions(const DisplayResolution &r){return QStringLiteral("%1 × %2").arg(r.width).arg(r.height);}
+QString dimensions(const DisplayResolution &r){return QStringLiteral("%1 \u00d7 %2").arg(r.width).arg(r.height);}
 }
 void ShaderPreferences::load(const QString &path){
     file=path;saved={};pending={};restartTarget={};nativeDisplay={};lastError.clear();displayDetail.clear();restartRequired=false;
@@ -245,10 +245,10 @@ QVariantMap ShaderPreferences::previewPotato(int mode)const{
     const bool changes=current!=target;
     QString message;
     if(!changes)message=QStringLiteral("Display is already %1. This selection needs no Display write or restart; other shader changes can still be saved.").arg(dimensions(target));
-    else if(!mode)message=QStringLiteral("Restore original Display: %1 → %2. Save, then restart. Later external Display edits are preserved.").arg(dimensions(current),dimensions(target));
+    else if(!mode)message=QStringLiteral("Restore original Display: %1 \u2192 %2. Save, then restart. Later external Display edits are preserved.").arg(dimensions(current),dimensions(target));
     else {
         const auto difference=int(std::int64_t(target.width)*target.height*100/(std::int64_t(current.width)*current.height))-100;
-        message=QStringLiteral("%1 → %2 (about %3% %4 configured pixels). Save, then restart. DPI/FPS caps are unchanged; game resolution and FPS are not measured.")
+        message=QStringLiteral("%1 \u2192 %2 (about %3% %4 configured pixels). Save, then restart. DPI/FPS caps are unchanged; game resolution and FPS are not measured.")
             .arg(dimensions(current),dimensions(target)).arg(std::abs(difference))
             .arg(difference>0?QStringLiteral("more"):QStringLiteral("fewer"));
     }

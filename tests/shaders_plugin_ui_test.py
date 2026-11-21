@@ -598,6 +598,14 @@ Window {
         assert native_display.commits == 0 and not native_display.writes and not evaluate("!!restartPrompt")
         assert "Saved setting: On" in item("shaderPotatoTextureStatus").property("text")
         assert evaluate("Engine.metrics.textureDraws") == 0, "a saved switch without an observed game draw is not a successful sampler pass"
+        assert "No texture override confirmed" in item("shaderPotatoTextureStatus").property("text")
+        assert "Inspected calls: 0" in item("shaderPotatoTextureStatus").property("text")
+        assert "Eligible scene calls: 0" in item("shaderPotatoTextureStatus").property("text")
+        assert item("shaderFooterStatus").property("text") == "Potato saved; no texture override confirmed"
+        click(item("shaderCopyStatus"))
+        diagnostics = QGuiApplication.clipboard().text()
+        assert "calls=0; eligible scene calls=0; depth/UI bypass=0" in diagnostics
+        assert "not measured game pixels/FPS" in diagnostics
         click(item("shaderEnhance")); click(item("shaderReset"))
         assert evaluate("draft.potatoGraphic") and not page.property("pEnableSave"), "visual presets/reset must preserve texture choice"
         click(item("shaderPotatoReview")); click(item("shaderPotatoGraphic")); click(save_button)
@@ -616,7 +624,9 @@ Window {
         for width, height, mode, expected_modes in ((1280, 720, 1, [0, 1, 2]), (960, 540, 2, [0, 2])):
             external_size(width, height)
             assert [row["mode"] for row in options()] == expected_modes, options()
-            assert any(row["mode"] == mode and "current" in row["text"] for row in options())
+            assert any(row["mode"] == mode and "current; no resize" in row["text"] for row in options())
+            if height == 540:
+                assert "already at the 540 px short-edge minimum" in item("shaderResolutionAvailability").property("text")
             select_potato(mode, wait_poll=True)
             click(item("shaderEnhance"))
             click(save_button)

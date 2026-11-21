@@ -56,8 +56,10 @@ do not establish that your player's game presentation works on your GPU/driver.
    reviewed flow. A DLL-only update invalidates old install/remove reviews.
 5. Launch that exact player EXE normally. Use the retained sidebar **Settings**
    button. **Drag/scroll the horizontal top-tab strip left to its right-hand end**
-   to find **Shaders** after the existing categories. Its icon can be customized
-   or hidden through the Settings-panel editor like the other tab icons.
+   to find **Shaders immediately before About**. Check this before opening the
+   page, after a Settings refresh and after closing/reopening Settings, including
+   with hidden/custom-icon tabs. Native About callbacks and icons must stay
+   correct. Its icon can be customized or hidden like the other tab icons.
 
 The owned module directory contains exactly four files:
 
@@ -138,6 +140,13 @@ a GL 3.3/GLES 3.1 draw-time path only. No supplied DLL is installed. See
    qualified GL/GLES path compare the same game textures, not just status or
    counters; record the result. Depth/UI/data/shared-resource behavior must also
    be checked. Prepared binding counts are not proof of changed game pixels.
+   **Saved On with prepared draws 0 is not an active effect.** Record Inspected
+   calls / Eligible scene calls, close Settings while the scene runs, then reopen
+   and use **Copy rendering status**. An inspected compositor/depth bypass is not
+   scene texture evidence. The build must not modify UI/no-depth/protected or
+   unowned offscreen textures just to increase a counter. If still zero after
+   updating the actual installed module, send this text with the same-scene
+   before/after result; a separate guest renderer may be outside this safe path.
 4. Save off and verify exact native sampling/image restoration. Presets/Reset
    visuals must not alter texture flags or resolution. Check reopen/per-instance
    persistence and resize/context recreation.
@@ -161,8 +170,10 @@ See [exact limits and recovery](POTATO-NATIVE-RESOLUTION.md).
    the previews must be 1280×720 / 960×540 respectively. Portrait/ultrawide aspect
    ratios must be preserved. Unsupported profiles and profiles above the original
    short edge must be absent, with a reason shown; never force upscaling or a
-   below-540 target. At exactly 720/540, the matching choice is **(current)**:
-   combine it with visual/texture edits and Save. It must report already
+   below-540 target. At exactly 720/540, the matching choice is **(current; no
+   resize)**: combine it with visual/texture edits and Save. In the reported
+   960×540 case, 540 is already the minimum; selecting it again cannot change
+   the image, and 720 would upscale the original. It must report already
    configured, with no Display write/commit/restart or pretend pixel reduction.
    If an external edit invalidates a draft, **Keep saved resolution** must drop
    only that draft, retaining the visual/texture edits for independent Save.

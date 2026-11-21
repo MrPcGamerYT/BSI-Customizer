@@ -28,7 +28,7 @@ endif()
 add_library(BSIShaders MODULE ShaderPlugin.cpp ShaderBridge.cpp ShaderBridge.h
     ShaderPreferences.cpp ShaderPreferences.h NativeDisplayBinding.cpp NativeDisplayBinding.h PotatoResolution.h Runtime.cpp
     Runtime.h RendererCapabilities.h Parameters.h ShaderSources.h GlPipeline.cpp GlPipeline.h
-    GlTextureOverride.cpp GlTextureOverride.h TextureQuality.h GlTextureQuality.h
+    GlTextureOverride.cpp GlTextureOverride.h GlDrawCalls.h TextureQuality.h GlTextureQuality.h
     VulkanPipeline.cpp VulkanPipeline.h VulkanSpirv.h PresentationHooks.cpp shaders.qrc)
 target_include_directories(BSIShaders PRIVATE ../third_party/vulkan/include)
 target_link_libraries(BSIShaders PRIVATE Qt${QT_VERSION_MAJOR}::Core Qt${QT_VERSION_MAJOR}::Gui Qt${QT_VERSION_MAJOR}::Qml)

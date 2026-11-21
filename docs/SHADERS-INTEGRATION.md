@@ -152,6 +152,14 @@ or `vulkan-1.dll`. The existing arbitrary startup-DLL feature remains separate.
   and prepare an optional, caught regular-plugin bootstrap in `iAppwin`'s startup
   handler. Missing modules leave native startup running and the shader row/page
   inactive. There is no mandatory `import BSIShaders` in the player root.
+- Navigation displays **Shaders immediately before About**, without changing
+  native row/callback/icon indices. The module discovers its identity from the
+  live model URL, defers/retries until Window/navigation/model population is
+  ready, and recovers native view refreshes. It retains the original delegate
+  when Qt transfers it to `DelegateModel` (the view can then report a null
+  delegate). Native page Loaders remain hard discovery boundaries. Tests cover
+  both per-window and persistent models, missing optional index arguments,
+  delayed navigation, screenshot-like hidden tabs, refresh and reopen.
 - Shader drafts now participate in the native navigation/close No/Discard
   prompts. The source overlay can be removed exactly, including original LF or
   CRLF bytes. Ambiguous roots, nested decoys, unknown fragments, dynamic rows,
@@ -221,6 +229,17 @@ Vulkan support or that its final host presentation is Vulkan. See the
 no Qt/UI fallback or relabeling another host API as Vulkan. The later user
 report records actual OpenGL/GLES presentation under the Vulkan hint; it does
 not retroactively certify the earlier zero-frame session.
+
+The latest screenshot report is **saved Potato On / prepared draws 0**, not the
+earlier unsaved/off case. The optional resolution is already 960×540 (the
+captured original), so selecting 540 again cannot reduce it. Neither screenshot
+proves a successful texture effect or a failed native resolution commit/restart.
+The texture repair expands the previous five basic draw hooks to 20 signatures /
+46 names and permits a second scene context only on the exact selected owned
+presentation drawable. Protected/UI/no-depth checks are retained; offscreen
+producer ownership is not inferred. These known interception gaps may explain
+the pattern, but their use by the actual game is unproven. New per-interval
+inspection/scene/bypass diagnostics distinguish that limitation from saving.
 
 The latest Shaders flow keeps every control resource-backed, moves/reveals the
 required Potato driver-review checkbox beside its switch, and explicitly

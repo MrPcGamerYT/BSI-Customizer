@@ -94,6 +94,10 @@ QVariantMap ShaderBridge::metrics()const{
             {"processedFrames",number(m.processed)},{"status",QString::fromStdString(m.status)},
             {"potatoGraphicEnabled",Runtime::instance().texture().enabled},{"textureSupported",m.textureSupported},
             {"textureDraws",number(m.textureDraws)},{"textureBindings",number(m.textureBindings)},{"textureStatus",QString::fromStdString(m.textureStatus)},
+            {"textureInspected",number(m.textureInspected)},{"textureSceneDraws",number(m.textureSceneDraws)},
+            {"textureDepthBypasses",number(m.textureDepthBypasses)},{"textureBlendBypasses",number(m.textureBlendBypasses)},
+            {"textureSamplerBypasses",number(m.textureSamplerBypasses)},{"textureOtherBypasses",number(m.textureOtherBypasses)},
+            {"textureLastBypass",QString::fromStdString(m.textureLastBypass)},
             {"vulkanLoaders",number(m.vulkan.loaders)},{"vulkanInstances",number(m.vulkan.instances)},
             {"vulkanDevices",number(m.vulkan.devices)},{"vulkanSurfaces",number(m.vulkan.surfaces)},
             {"vulkanSwapchains",number(m.vulkan.swapchains)},{"vulkanPresents",number(m.vulkan.presents)},
@@ -111,10 +115,15 @@ QString ShaderBridge::diagnostics()const{
         .arg(QString::fromLatin1(QT_VERSION_STR),QString::fromLatin1(qVersion()),
              QStringLiteral("Configured emulator renderer (hint only): %1\nDetection uses owned host game presentation, not the Android guest API or Qt UI.\n%2")
                  .arg(m.value("configuredRenderer").toString(),
-                      QStringLiteral("Prepared Potato sampler bindings: %1 across %2 draw calls; supported path: %3 (not measured game pixels/FPS)\n%4\n%5")
+                      QStringLiteral("Prepared Potato sampler bindings: %1 across %2 draw calls; inspection armed: %3 (not measured game pixels/FPS)\n%4\n%5\n%6")
                           .arg(m.value("textureBindings").toString(),m.value("textureDraws").toString(),
                                m.value("textureSupported").toBool()?QStringLiteral("yes"):QStringLiteral("no"),
-                               m.value("textureStatus").toString(),error())));
+                               m.value("textureStatus").toString(),
+                               QStringLiteral("Texture inspection since the latest setting/source change: calls=%1; eligible scene calls=%2; depth/UI bypass=%3; blended bypass=%4; scene without qualified samplers=%5; other bypass=%6\nLatest bypass: %7\nOffscreen/pbuffer/foreign scene contexts are not inferred from presentation or a share group.")
+                                   .arg(m.value("textureInspected").toString(),m.value("textureSceneDraws").toString(),
+                                        m.value("textureDepthBypasses").toString(),m.value("textureBlendBypasses").toString(),
+                                        m.value("textureSamplerBypasses").toString(),m.value("textureOtherBypasses").toString(),
+                                        m.value("textureLastBypass").toString()),error())));
 }
 void ShaderBridge::copyDiagnostics()const{if(auto *clipboard=QGuiApplication::clipboard())clipboard->setText(diagnostics());}
 void ShaderBridge::attach(QObject *object,const QString &instance,const QString &graphicsRenderer){

@@ -140,6 +140,7 @@ jobs:
           python tests/shaders/run_ci_tests.py --command python -X faulthandler -u tests/shaders_native_service_test.py
           python tests/shaders/run_ci_tests.py --command python -X faulthandler -u tests/shaders_plugin_ui_test.py
           python tests/shaders/run_ci_tests.py --command python -X faulthandler -u tests/shaders_native_settings_test.py
+          python tests/shaders/run_ci_tests.py --command python -X faulthandler -u tests/shaders_native_settings_test.py --persistent-model
           python tests/shaders/run_ci_tests.py --command python -X faulthandler -u tests/shaders_native_settings_test.py --missing-module
       - name: Live plugin preview shares one theme, stays opaque on every tab and preserves physical No/Discard
         run: python tests/run_qt_runtime_test.py tests/shaders_preview_ui_test.py
@@ -282,7 +283,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Shader configuration failed' }
           python tests/shaders/run_ci_tests.py --command cmake --build build-shaders --config Release --parallel 2
           if ($LASTEXITCODE -ne 0) { throw 'Shader build failed' }
-      - name: Native API pixels, routing and EGL/DXGI/Vulkan presentation lifecycle contracts
+      - name: Native API pixels, routing, real GL draw detours and EGL/DXGI/Vulkan lifecycle contracts
         run: python tests/shaders/run_ci_tests.py --test-dir build-shaders -C Release --output-on-failure --timeout 60
       - name: Read-only actual module/provider contract against the independent host runtime
         run: |
@@ -325,6 +326,8 @@ jobs:
         run: |
           python tests/shaders/run_ci_tests.py --command python -X faulthandler -u tests/shaders_native_settings_test.py
           if ($LASTEXITCODE -ne 0) { throw 'Native Settings contract fixture failed' }
+          python tests/shaders/run_ci_tests.py --command python -X faulthandler -u tests/shaders_native_settings_test.py --persistent-model
+          if ($LASTEXITCODE -ne 0) { throw 'Persistent Settings model, delayed navigation and hidden-tab ordering fixture failed' }
           python tests/shaders/run_ci_tests.py --command python -X faulthandler -u tests/shaders_native_settings_test.py --missing-module
           if ($LASTEXITCODE -ne 0) { throw 'Missing shader module fallback failed' }
       - name: Live plugin preview shares one theme, stays opaque on every tab and preserves physical No/Discard

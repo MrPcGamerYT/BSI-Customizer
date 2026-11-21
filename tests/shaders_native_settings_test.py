@@ -76,7 +76,7 @@ class Backend(NativeDisplayFixture):
         self.shortcuts = value
 
 
-def fixtures(directory):
+def fixtures(directory, screenshot_tabs=False):
     module = directory / "BsiNativeFixture"
     module.mkdir()
     declarations = {
@@ -174,7 +174,8 @@ Item {
     about = re.search(r'QString generated = QStringLiteral\(R"QML\((.*?)\)QML"\);', cpp, re.S)[1]
     for key, value in {"DEVELOPER": json.dumps("Native Settings contract"),
                        "TAGLINE": json.dumps("Not an installed emulator"),
-                       "TAB_ICONS": "({})", "LINKS": "", "LOGO_SOURCE": json.dumps("")}.items():
+                       "TAB_ICONS": ('({"3":"","5":"","6":"","8":"","9":"","10":""})' if screenshot_tabs else "({})"),
+                       "LINKS": "", "LOGO_SOURCE": json.dumps("")}.items():
         about = about.replace("@@BSI_" + key + "@@", value)
     assert "@@BSI_" not in about
     about = about.replace("import QtQuick.Controls 2.15", "import QtQuick.Controls 2.15\nimport BsiNativeFixture 1.0")
@@ -187,6 +188,7 @@ def main():
         from shaders.windows_diagnostics import install
         native_diagnostics = install()
     missing = "--missing-module" in sys.argv
+    persistent = "--persistent-model" in sys.argv
     planner = Path(os.environ["BSI_SHADERS_SOURCE_TEST"]).resolve()
     module_root = Path(os.environ["BSI_SHADERS_MODULE_ROOT"]).resolve()
     assert planner.is_file()
@@ -195,15 +197,27 @@ def main():
     app = QGuiApplication.instance() or QGuiApplication([])
     with tempfile.TemporaryDirectory(prefix="bsi-native-shaders-") as temp, ExitStack() as cleanup:
         directory = Path(temp)
-        fixtures(directory)
+        fixtures(directory, screenshot_tabs=persistent)
         # Assemble the complete approved shell from the measured native source,
         # not a fake centered tab strip. This import also checks its slot budget.
         from settings_panel_window_budget_test import compact
         stock = re.sub(r'^import (?:DialogButtonModel|DialogButtonModelList|UiDialogWindow|SettingElementModel|SettingElementModelList) 1\.0\r?\n', "", compact, flags=re.M)
         stock = "import BsiNativeFixture 1.0\n" + stock
+        if persistent:
+            # Delay navigation readiness past the native page onLoaded. The old
+            # one-shot sort misses this; it must recover without a page reopen.
+            assert stock.count("orientation:Qt.Horizontal;") == 1
+            stock = stock.replace("orientation:Qt.Horizontal;", "orientation:Qt.Vertical;")
         source_path = directory / "NativeSettingsBase.qml"
         source_path.write_text(stock)
-        subprocess.run([str(planner), "--emit", str(directory), str(source_path)], check=True)
+        subprocess.run([str(planner), "--emit-persistent" if persistent else "--emit", str(directory), str(source_path)], check=True)
+        if persistent:
+            # Compatibility with an earlier root/model lacking optional module
+            # arguments. Native row identity must come from its actual URL.
+            emitted = directory / "Player.qml"
+            source = emitted.read_text()
+            assert source.count("'bsiTabIndex':12,") == 1
+            emitted.write_text(source.replace("'bsiTabIndex':12,", ""))
         engine = QQmlEngine()
         engine.setImportPathList(([str(module_root)] if not missing else []) + [str(directory), runtime_qml, "qrc:/qt-project.org/imports", "qrc:/qt/qml"])
         # The native pages and module must see the SAME live singleton/context
@@ -287,6 +301,18 @@ def main():
             assert window and window.isVisible(), warnings
             assert (window.width(), window.height()) == (780, 500), "native geometry/gutters regressed"
             assert evaluate(window, "pSettingsItems.pSettingElements.length") == 13
+            if persistent:
+                strip = next(i for i in tree(window.contentItem()) if i.metaObject().className().endswith("ListView"))
+                if not missing:
+                    loaded = evaluate(window, "pSettingsItems.pSettingElements[12].pComponentObj")
+                    assert not loaded.property("tabsArranged"), "the delayed-navigation negative control did not delay the original sort"
+                evaluate(strip, "orientation = Qt.Horizontal")
+                if not missing:
+                    for _ in range(50):
+                        if loaded.property("tabsArranged"):
+                            break
+                        QTest.qWait(20)
+                    assert loaded.property("tabsArranged"), "late navigation/model attachment was never sorted"
             return window
 
         def tab(window, index, pointer_scroll=False):
@@ -387,6 +413,18 @@ def main():
             shader_label = next(i for i in tree(strip) if i.metaObject().indexOfProperty("text") >= 0 and i.property("text") == "Shaders")
             about_label = next(i for i in tree(strip) if i.metaObject().indexOfProperty("text") >= 0 and i.property("text") == "About")
             assert shader_label.mapToItem(strip, QPointF(0, 0)).x() < about_label.mapToItem(strip, QPointF(0, 0)).x(), "Shaders is not visually before About"
+            if persistent:
+                # A native model/view refresh must not silently restore the old
+                # About -> Shaders order or duplicate/misindex icon delegates.
+                evaluate(strip, "model = pSettingsItems.pSettingElements")
+                QTest.qWait(240)
+                shader_label = next(i for i in tree(strip) if i.metaObject().indexOfProperty("text") >= 0 and i.property("text") == "Shaders")
+                about_label = next(i for i in tree(strip) if i.metaObject().indexOfProperty("text") >= 0 and i.property("text") == "About")
+                assert shader_label.mapToItem(strip, QPointF(0, 0)).x() < about_label.mapToItem(strip, QPointF(0, 0)).x(), "native refresh undid Shaders-before-About sorting"
+            tab(window, 11)
+            assert window.property("pCurrentTabIndex") == 11, "visual ordering changed About's native callback index"
+            tab(window, 12)
+            assert window.property("pCurrentTabIndex") == 12, "visual ordering changed Shaders' native callback index"
             about = evaluate(window, "pSettingsItems.pSettingElements[11].pComponentObj")
             assert about.objectName() == "aboutSettings" and evaluate(page, "bsiTheme !== null")
             # The generated material must preserve the shader controls' own
@@ -526,6 +564,8 @@ def main():
         engine.deleteLater()
         app.processEvents()
     print("PASS: " + ("missing regular DLL does not block native startup; shader row/page are inactive, all native callback loops and Settings close remain intact" if missing else "production optional bootstrap imports the real plugin with complete generated About glass; Shaders sorts before About without changing native indexes, retains themed controls, mouse-drag navigation across 13 tabs, native No/Discard on tab and close, real native-size Potato draft/Save/restore independent of effects, persistence/reopen, reset and intact 750x470 layout"))
+    if persistent and not missing:
+        print("PASS: persistent native model, screenshot-like hidden tabs, missing optional index argument, delayed navigation, external model refresh, exact Shaders-before-About order and native callback indexes survive reopen")
     print("LIMIT: Qt/native-contract fixture only; no installed emulator, real game frames, deployment recovery or physical Intel/AMD/NVIDIA coverage is implied")
 
 

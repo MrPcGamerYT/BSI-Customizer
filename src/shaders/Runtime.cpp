@@ -10,6 +10,12 @@
 #endif
 namespace BsiShaders {
 Runtime &Runtime::instance(){static auto *runtime=new Runtime;return *runtime;}
+void Runtime::resetTextureEvidence(){
+    state.textureSupported=false;
+    state.textureDraws=state.textureBindings=state.textureInspected=state.textureSceneDraws=0;
+    state.textureDepthBypasses=state.textureBlendBypasses=state.textureSamplerBypasses=state.textureOtherBypasses=0;
+    state.textureLastBypass.clear();
+}
 void Runtime::start(std::uintptr_t window){
     setWindow(window);
     startPresentationHooks();
@@ -19,7 +25,7 @@ void Runtime::setWindow(std::uintptr_t window){
     if(host==window)return;
     host=window;presentationObject=0;presentationWindow=0;
     state.observed=false;state.active=false;state.deviceReady=false;state.renderer=Renderer::Unknown;
-    state.textureSupported=false;
+    resetTextureEvidence();
     if(currentTexture.enabled)state.textureStatus="The native player surface changed; waiting for a newly qualified game scene draw.";
     state.status=window?"Waiting for the identified player's game presentation surface.":"The native player surface is not available; no effects are active.";
 }
@@ -29,20 +35,22 @@ void Runtime::set(const Parameters &settings){
     std::lock_guard<std::mutex> lock(mutex);current=settings;
     if(settings.neutral()){
         state.active=false;
-        if(canRoute(state.renderer,state.observed,state.deviceReady,state.requested))state.status="Neutral bypass — game pixels are untouched.";
+        if(canRoute(state.renderer,state.observed,state.deviceReady,state.requested))state.status="Neutral bypass - game pixels are untouched.";
     }
 }
 void Runtime::selectRenderer(RendererFamily requested){
     std::lock_guard<std::mutex> lock(mutex);
     state.requested=requested;presentationObject=0;presentationWindow=0;
     state.renderer=Renderer::Unknown;state.observed=false;state.active=false;state.deviceReady=false;
+    resetTextureEvidence();
+    if(currentTexture.enabled)state.textureStatus="Waiting for a newly qualified game presentation; no texture override is confirmed.";
     state.status="Waiting for an identified game surface matching the player's renderer setting. No effects have been confirmed.";
 }
 void Runtime::configureRenderer(RendererFamily configured){
     std::lock_guard<std::mutex> lock(mutex);
     state.configured=configured;state.requested=RendererFamily::Automatic;presentationObject=0;presentationWindow=0;
     state.renderer=Renderer::Unknown;state.observed=false;state.active=false;state.deviceReady=false;
-    state.textureSupported=false;
+    resetTextureEvidence();
     if(currentTexture.enabled)state.textureStatus="Automatically waiting for a qualified game scene draw; a graphics setting is not proof of texture reduction.";
     state.status="Automatically detecting the owned game's actual host presentation API. The emulator graphics setting is only a hint.";
 }
@@ -63,7 +71,7 @@ bool Runtime::claimPresentation(Renderer renderer,std::uintptr_t object,std::uin
     // leave automatic routing pinned to that dead presentation source.
     if(presentationWindow&&!IsWindow(reinterpret_cast<HWND>(presentationWindow))){
         presentationObject=0;presentationWindow=0;state.renderer=Renderer::Unknown;
-        state.observed=false;state.deviceReady=false;state.active=false;
+        state.observed=false;state.deviceReady=false;state.active=false;resetTextureEvidence();
     }
 #endif
     if(!matches(state.requested,renderer))return false;
@@ -71,18 +79,22 @@ bool Runtime::claimPresentation(Renderer renderer,std::uintptr_t object,std::uin
         return state.renderer==renderer&&presentationObject==object&&presentationWindow==window;
     if(state.observed&&!matches(family(state.renderer),renderer))return false;
     presentationObject=object;presentationWindow=window;state.renderer=renderer;
-    state.observed=true;state.deviceReady=false;state.active=false;
-    if(currentTexture.enabled&&family(renderer)!=RendererFamily::OpenGL){
-        state.textureSupported=false;
-        state.textureStatus="Potato graphic is not implemented for the observed DirectX/Vulkan texture-binding path. Original textures are retained; presentation shaders remain independent.";
-    }
+    state.observed=true;state.deviceReady=false;state.active=false;resetTextureEvidence();
+    if(currentTexture.enabled)state.textureStatus=family(renderer)!=RendererFamily::OpenGL
+        ?"Potato graphic is not implemented for the observed DirectX/Vulkan texture-binding path. Original textures are retained; presentation shaders remain independent."
+        :"Owned GL/GLES presentation identified. Waiting for eligible scene samplers; a compositor frame alone does not prove texture reduction.";
     return true;
+}
+bool Runtime::isPresentation(Renderer renderer,std::uintptr_t object,std::uintptr_t window){
+    std::lock_guard<std::mutex> lock(mutex);
+    return object&&window&&state.observed&&state.renderer==renderer
+        &&presentationObject==object&&presentationWindow==window;
 }
 void Runtime::releasePresentation(Renderer renderer,std::uintptr_t object){
     std::lock_guard<std::mutex> lock(mutex);
     if(!object||presentationObject!=object||state.renderer!=renderer)return;
     presentationObject=0;presentationWindow=0;state.observed=false;state.active=false;state.deviceReady=false;state.renderer=Renderer::Unknown;
-    state.textureSupported=false;
+    resetTextureEvidence();
     if(currentTexture.enabled)state.textureStatus="The previous game presentation source was destroyed; no texture override is confirmed on a replacement yet.";
     state.status="The previous game presentation source was destroyed; automatically detecting its replacement. No new effects have been confirmed.";
 }
@@ -90,19 +102,32 @@ Parameters Runtime::settings(){std::lock_guard<std::mutex> lock(mutex);return cu
 void Runtime::setTexture(const TextureConfiguration &settings){
     std::lock_guard<std::mutex> lock(mutex);
     if(currentTexture.enabled==settings.enabled&&currentTexture.externalOverridesReviewed==settings.externalOverridesReviewed)return;
-    currentTexture=settings;state.textureSupported=false;
+    currentTexture=settings;resetTextureEvidence();
     state.textureStatus=!settings.enabled?"Potato graphic is off; native texture sampling retained.":
         state.observed&&family(state.renderer)!=RendererFamily::OpenGL?
         "Potato graphic is not implemented for the observed DirectX/Vulkan texture-binding path. Original textures are retained; presentation shaders remain independent.":
         "Potato graphic saved. Waiting for a qualified owned GL/GLES scene draw; no texture reduction is confirmed yet.";
 }
 TextureConfiguration Runtime::texture(){std::lock_guard<std::mutex> lock(mutex);return currentTexture;}
-void Runtime::textureReport(unsigned bindings,const std::string &detail,bool supported){
+void Runtime::textureReport(unsigned bindings,const std::string &detail,bool supported,TextureDrawReason reason){
     std::lock_guard<std::mutex> lock(mutex);
-    if(!currentTexture.enabled)return;
+    if(!currentTexture.enabled||!state.observed||family(state.renderer)!=RendererFamily::OpenGL)return;
     state.textureSupported=supported;
-    if(!detail.empty())state.textureStatus=detail;
-    if(bindings&&supported){++state.textureDraws;state.textureBindings+=bindings;}
+    if(reason!=TextureDrawReason::NotInspected){
+        ++state.textureInspected;
+        switch(reason){
+        case TextureDrawReason::Depth:++state.textureDepthBypasses;break;
+        case TextureDrawReason::Blended:++state.textureBlendBypasses;break;
+        case TextureDrawReason::NoSampler:++state.textureSceneDraws;++state.textureSamplerBypasses;break;
+        case TextureDrawReason::Prepared:++state.textureSceneDraws;break;
+        default:++state.textureOtherBypasses;break;
+        }
+        if(!bindings&&!detail.empty())state.textureLastBypass=detail;
+    }
+    // A subsequent HUD/compositor draw is not evidence that an earlier scene
+    // preparation failed. Retain that evidence AND expose the latest bypass.
+    if(!detail.empty()&&(!state.textureDraws||bindings||!supported))state.textureStatus=detail;
+    if(bindings&&supported&&reason==TextureDrawReason::Prepared){++state.textureDraws;state.textureBindings+=bindings;}
 }
 Metrics Runtime::metrics(){std::lock_guard<std::mutex> lock(mutex);return state;}
 void Runtime::waiting(bool hooks,const std::string &status){
@@ -157,7 +182,7 @@ void Runtime::report(bool hooks,bool observed,bool active,const std::string &sta
     }
     const bool routed=canRoute(state.renderer,state.observed,state.deviceReady,selected);
     state.active=active&&routed&&!current.neutral();
-    state.status=(current.neutral()&&routed)?"Neutral bypass — game pixels are untouched.":status;
+    state.status=(current.neutral()&&routed)?"Neutral bypass - game pixels are untouched.":status;
     if(active&&!routed)state.status="The observed game renderer's backend/device requirements are not validated; no effects were confirmed.";
     if(processed&&state.active)++state.processed;
 }

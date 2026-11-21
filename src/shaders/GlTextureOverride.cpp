@@ -195,19 +195,23 @@ bool GlTextureOverride::initialize(ResolveGl resolve,void *user,std::string *err
     g.srgbDecode=g.extension("GL_EXT_texture_sRGB_decode");g.minmax=g.extension("GL_EXT_texture_filter_minmax");
     g.changed.reserve(32);g.ready=true;return true;
 }
-unsigned GlTextureOverride::begin(TextureQuality mode,bool reviewed,U primitive,std::string *detail){
+unsigned GlTextureOverride::begin(TextureQuality mode,bool reviewed,U primitive,std::string *detail,TextureDrawReason *reason){
     auto &g=*impl;end();
-    const auto fail=[&](const char *message)->U{if(detail)*detail=message;return 0;};
+    if(reason)*reason=TextureDrawReason::NotInspected;
+    const auto fail=[&](TextureDrawReason why,const char *message)->U{if(reason)*reason=why;if(detail)*detail=message;return 0;};
     if(!g.ready||mode==TextureQuality::Native)return 0;
-    if(!reviewed)return fail("Potato is not applied: review existing driver LOD/AA overrides first; no profile is reset.");
-    if(primitive!=0x0004&&primitive!=0x0005&&primitive!=0x0006)return 0;
+    if(!reviewed)return fail(TextureDrawReason::Unreviewed,"Potato is not applied: review existing driver LOD/AA overrides first; no profile is reset.");
+    if(primitive!=0x0004&&primitive!=0x0005&&primitive!=0x0006)
+        return fail(TextureDrawReason::Primitive,"Potato bypass: non-triangle draw retains native sampling.");
     if(!g.sceneDepth())
-        return fail("Potato bypass: this is not a qualified depth-tested, depth-writing game scene draw (UI/always-pass/no-depth targets stay native).");
+        return fail(TextureDrawReason::Depth,"No eligible scene draw here: depth-tested, depth-writing geometry with a real depth attachment is required. UI/always-pass/no-depth composition stays native.");
     // Blended UI/transparent passes remain native, even in the game context.
-    if(g.IsEnabled(0x0be2))return fail("Potato bypass: blended/UI draw retains native sampling.");
-    I program=0,count=0,maxName=0;g.GetIntegerv(0x8b8d,&program);if(!program)return 0;
+    if(g.IsEnabled(0x0be2))return fail(TextureDrawReason::Blended,"Potato bypass: blended/UI draw retains native sampling.");
+    if(reason)*reason=TextureDrawReason::NoSampler;
+    I program=0,count=0,maxName=0;g.GetIntegerv(0x8b8d,&program);
+    if(!program)return fail(TextureDrawReason::NoSampler,"Potato bypass: no inspectable scene shader program; native sampling retained.");
     g.GetProgramiv(U(program),0x8b86,&count);g.GetProgramiv(U(program),0x8b87,&maxName);
-    if(count<0||count>256||maxName<0||maxName>512)return fail("Potato bypass: shader uniform layout exceeds safe inspection bounds.");
+    if(count<0||count>256||maxName<0||maxName>512)return fail(TextureDrawReason::NoSampler,"Potato bypass: shader uniform layout exceeds safe inspection bounds.");
     Impl::Inspection inspection(g);
     std::set<U> used;
     for(I i=0;i<count;++i){
@@ -242,6 +246,7 @@ unsigned GlTextureOverride::begin(TextureQuality mode,bool reviewed,U primitive,
         }
     }
     if(detail)*detail=g.changed.empty()?"No qualified scene-color mip sampler in this game draw; native sampling retained.":"Potato prepared private coarser-mip samplers for an owned game scene draw; original bindings restore immediately afterward. This is not a measurement of game output or FPS.";
+    if(reason&&!g.changed.empty())*reason=TextureDrawReason::Prepared;
     inspection.keepBindings=true;
     return U(g.changed.size());
 }

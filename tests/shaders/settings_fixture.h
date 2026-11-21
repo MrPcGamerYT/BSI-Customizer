@@ -36,7 +36,7 @@ inline QHash<QString, int> pageCounts()
     for (const auto &page : pages) out.insert(page.toCaseFolded(), 1);
     return out;
 }
-inline QString player(bool list = false)
+inline QString player(bool list = false, bool persistentModel = false)
 {
     QString source = QStringLiteral(R"QML(import QtQuick 2.15
 import QtQuick.Window 2.15
@@ -51,8 +51,9 @@ property bool pCompLoaded:false
 Component.onCompleted:{pCompLoaded=true}
 Rectangle{width:40;height:40;color:'#123456'
 MouseArea{objectName:'nativeSettingsButton';anchors.fill:parent;onClicked:fOpenSettingsWindow()}}
-Component{id:iSettingsItems;SettingElementModelList{
 )QML");
+    source += persistentModel ? QStringLiteral("property SettingElementModelList pSettingsItems:SettingElementModelList{\n")
+                              : QStringLiteral("Component{id:iSettingsItems;SettingElementModelList{\n");
     if (list) source += QStringLiteral("pSettingElements:[\n");
     for (int i = 0; i < pages.size(); ++i) {
         source += QStringLiteral("SettingElementModel{pButtonText:'%1';pQmlSource:'%2';pComponentArgs:{'pParentWindow':'plr'}}")
@@ -60,8 +61,8 @@ Component{id:iSettingsItems;SettingElementModelList{
         source += list && i + 1 < pages.size() ? QStringLiteral(",\n") : QStringLiteral("\n");
     }
     if (list) source += QStringLiteral("]\n");
-    source += QStringLiteral(R"QML(}}
-function fOpenSettingsWindow(){
+    source += persistentModel ? QStringLiteral("}\n") : QStringLiteral("}}\n");
+    source += QStringLiteral(R"QML(function fOpenSettingsWindow(){
 if(pSettingsWindow!==null)return
 var component=Qt.createComponent('UiSettingsWindow.qml')
 if(component.status!==Component.Ready)throw new Error(component.errorString())
@@ -71,6 +72,7 @@ pSettingsWindow.show()
 }
 }
 )QML");
+    if (persistentModel) source.replace(QStringLiteral("iSettingsItems.createObject()"), QStringLiteral("pSettingsItems"));
     return source;
 }
 inline QString window()

@@ -10,6 +10,9 @@
 // never mutate a game's sampler or infer ownership from a loaded graphics DLL.
 namespace BsiShaders {
 enum class TextureQuality { Native, Light, Strong };
+// Inspection outcomes, NOT proof of changed game pixels. Keeping these separate
+// avoids a final UI/compositor draw hiding whether any scene samplers qualified.
+enum class TextureDrawReason { NotInspected, Unreviewed, Primitive, Depth, Blended, NoSampler, Prepared };
 struct TextureConfiguration {
     bool enabled=false,externalOverridesReviewed=false;
     TextureQuality quality()const{return enabled?TextureQuality::Strong:TextureQuality::Native;}

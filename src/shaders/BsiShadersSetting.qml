@@ -55,11 +55,16 @@ Rectangle {
     readonly property color accent: bsiTheme.colors.accentNormal
     readonly property int presetIndex: selectedPreset()
 
-    // DelegateModel reorders DISPLAY groups without mutating the native list or
-    // its `index` role. About/custom/hidden icon indexes and native callbacks
-    // therefore stay valid across install, update, reopen and exact removal.
+    // Sort only the navigation's DISPLAY group. Never insert/reindex native
+    // rows: About icons, native page callbacks and hidden tabs use those indexes.
     DelegateModel { id: orderedTabs }
     property bool tabsArranged: false
+    property var tabView: null
+    property var tabModel: null
+    property var tabDelegate: null
+    property int tabShader: -1
+    property int tabAbout: -1
+    property int tabCount: 0
     function settingsHost() {
         var host = parent
         while (host && host.bIcons === undefined) host = host.parent
@@ -71,27 +76,74 @@ Rectangle {
         bsiTheme = Qt.binding(function() { return UiTheme })
     }
     function arrangeTabs() {
-        if (tabsArranged || bsiTabIndex < 0) return
-        var window = page.Window.window
-        if (!window || !window.pSettingsItems) return
-        var rows = window.pSettingsItems.pSettingElements, aboutIndex = -1
-        for (var i = 0; i < rows.length; ++i)
-            if (/\/?PlrAboutSetting\.qml$/i.test(String(rows[i].pQmlSource))) aboutIndex = i
-        if (aboutIndex < 0 || aboutIndex === bsiTabIndex) return
-        var host = settingsHost(), queue = host ? [host] : [], count = 0
+        var window = page.Window.window, host = settingsHost()
+        if (!window || !window.pSettingsItems || !host) return
+        var model = window.pSettingsItems, rows = model.pSettingElements
+        if (!rows || rows.length > 33) return
+        var aboutIndex = -1, shaderIndex = -1
+        for (var i = 0; i < rows.length; ++i) {
+            var source = String(rows[i].pQmlSource).replace(/\\/g, "/")
+            if (/(^|\/)PlrAboutSetting\.qml$/i.test(source)) aboutIndex = i
+            if (source === "qrc:/bsi-shaders/BsiShadersSetting.qml") shaderIndex = i
+        }
+        if (aboutIndex < 0 || shaderIndex < 0) return
+        // Derive identity from the LIVE model, not optional Loader arguments or
+        // a visual delegate position. Older roots can omit bsiTabIndex entirely.
+        bsiTabIndex = shaderIndex
+        if (host.bIcons[shaderIndex] === undefined) {
+            var icons = Object.assign({}, host.bIcons)
+            icons[shaderIndex] = "qrc:/bsi-shaders/shaders.png"
+            host.bIcons = icons
+        }
+        var queue = [host], candidates = [], count = 0
         while (queue.length && count++ < 2048) {
             var item = queue.pop()
-            if (item.orientation === Qt.Horizontal && item.positionViewAtIndex !== undefined && item.delegate) {
-                orderedTabs.model = rows
-                orderedTabs.delegate = item.delegate
-                item.model = orderedTabs
-                orderedTabs.items.move(bsiTabIndex, aboutIndex > bsiTabIndex ? aboutIndex - 1 : aboutIndex)
-                tabsArranged = true
-                return
-            }
+            // HARD boundary at every page Loader: do not reorder a native
+            // combo, gamepad list or any other control inside a Settings page.
+            if (item.item !== undefined && item.source !== undefined) continue
+            if (item.orientation === Qt.Horizontal && item.positionViewAtIndex !== undefined
+                    && (item.delegate || item === tabView && tabDelegate)) candidates.push(item)
             var children = item.children || []
             for (var j = 0; j < children.length && queue.length < 2048; ++j) queue.push(children[j])
         }
+        if (candidates.length !== 1) return
+        var view = candidates[0]
+        if (tabView !== view || tabModel !== model || tabShader !== shaderIndex
+                || tabAbout !== aboutIndex || tabCount !== rows.length || view.model !== orderedTabs) {
+            tabsArranged = false
+            // Qt transfers the delegate to an external DelegateModel and can
+            // then report view.delegate === null. Keep the ORIGINAL component
+            // across native model refreshes; never replace it with that null.
+            if (view.delegate) tabDelegate = view.delegate
+            orderedTabs.model = null
+            orderedTabs.delegate = tabDelegate
+            orderedTabs.model = rows
+            tabView = view; tabModel = model; tabShader = shaderIndex; tabAbout = aboutIndex; tabCount = rows.length
+            view.model = orderedTabs
+        }
+        // DelegateModel population and Window attachment can finish AFTER the
+        // native Loader's onLoaded. Retry then; never mark a failed move done.
+        if (!tabsArranged && orderedTabs.items.count === rows.length) {
+            var beforeAbout = aboutIndex > shaderIndex ? aboutIndex - 1 : aboutIndex
+            if (shaderIndex !== beforeAbout) orderedTabs.items.move(shaderIndex, beforeAbout)
+            tabsArranged = true
+        }
+    }
+    Connections {
+        target: page.Window.window
+        ignoreUnknownSignals: true
+        function onPSettingsItemsChanged() { Qt.callLater(page.arrangeTabs) }
+        function onVisibleChanged() { Qt.callLater(page.arrangeTabs) }
+    }
+    Connections {
+        target: page.tabView
+        ignoreUnknownSignals: true
+        function onModelChanged() { Qt.callLater(page.arrangeTabs) }
+    }
+    Timer {
+        interval: 160; repeat: true
+        running: page.pCompLoaded && page.Window.window !== null && page.Window.window.visible
+        onTriggered: page.arrangeTabs()
     }
     function publishDirty() {
         var window = page.Window.window
@@ -101,6 +153,10 @@ Rectangle {
     onPEnableSaveChanged: publishDirty()
     Component.onDestruction: {
         closeRestartPrompt()
+        if (tabView && tabModel && tabView.model === orderedTabs) {
+            tabView.model = tabModel.pSettingElements
+            tabView.delegate = tabDelegate
+        }
         var window = page.Window.window
         if (window && window.bsiShaderDirty2 !== undefined) window.bsiShaderDirty2 = false
         else if (window && window.bsiShaderDirty !== undefined) window.bsiShaderDirty = false
@@ -135,13 +191,8 @@ Rectangle {
         // repeatedly reinitialize a user's draft on the status-poll timer.
         Qt.callLater(initializeDisplay)
         fInitUi(); pCompLoaded = true; publishDirty()
-        var host = settingsHost()
-        if (host && bsiTabIndex >= 0 && host.bIcons[bsiTabIndex] === undefined) {
-            var icons = Object.assign({}, host.bIcons)
-            icons[bsiTabIndex] = "qrc:/bsi-shaders/shaders.png"
-            host.bIcons = icons
-        }
         arrangeTabs()
+        Qt.callLater(arrangeTabs)
     }
     function fSetPreviousState() { fInitUi() }
     function fDiscardChanges() { fInitUi() }
@@ -190,7 +241,7 @@ Rectangle {
             var plan = Engine.previewPotato(mode)
             if (!plan.ok) continue
             var label = mode === 1 ? qsTr("Light · 720 px short edge") : qsTr("Strong · 540 px short edge")
-            if (!plan.displayChanged) label += qsTr(" (current)")
+            if (!plan.displayChanged) label += qsTr(" (current; no resize)")
             choices.push({text: label, mode: mode})
         }
         return choices
@@ -202,6 +253,8 @@ Rectangle {
             var plan = Engine.previewPotato(mode)
             if (!plan.ok) missing.push((mode === 1 ? qsTr("720 px: ") : qsTr("540 px: ")) + plan.msg)
         }
+        if (Math.min(Number(Engine.display.width), Number(Engine.display.height)) === 540)
+            missing.push(qsTr("Display is already at the 540 px short-edge minimum. Selecting 540 px again cannot reduce it further; texture sampling and visual presets are independent."))
         return missing.join("\n")
     }
     function resolutionIndex() {
@@ -228,6 +281,8 @@ Rectangle {
                 + " " + qsTr("Current saved setting: %1.").arg(current)
         }
         return qsTr("Saved setting: %1. ").arg(Engine.saved.potatoGraphic ? qsTr("On") : qsTr("Off"))
+            + (Engine.saved.potatoGraphic && !Number(Engine.metrics.textureDraws || 0)
+                ? qsTr("No texture override confirmed; game texture detail has not been shown to change. ") : "")
             + (Engine.metrics.textureStatus || qsTr("No qualified texture draw has been confirmed."))
     }
     function closeRestartPrompt() {
@@ -486,7 +541,9 @@ Rectangle {
                         visible: !!page.draft.potatoGraphic || !!Engine.metrics.potatoGraphicEnabled || page.textureDraftChanged
                         Layout.fillWidth: true; wrapMode: Text.Wrap
                         text: page.potatoStatus()
-                            + (Engine.metrics.potatoGraphicEnabled ? "\n" + qsTr("Runtime prepared draws: ") + (Engine.metrics.textureDraws || 0)
+                            + (Engine.metrics.potatoGraphicEnabled ? "\n" + qsTr("Inspected calls: ") + (Engine.metrics.textureInspected || 0)
+                                + qsTr(" · Eligible scene calls: ") + (Engine.metrics.textureSceneDraws || 0)
+                                + "\n" + qsTr("Runtime prepared draws: ") + (Engine.metrics.textureDraws || 0)
                                 + qsTr(" · Bindings: ") + (Engine.metrics.textureBindings || 0) + qsTr(" (not measured game pixels or FPS)") : "")
                         color: page.needsTextureReview ? page.bsiTheme.colors.primary20 : page.bsiTheme.colors.primary30
                         font: page.bsiTheme.fonts.bodySmall
@@ -699,10 +756,13 @@ Rectangle {
                 pImageWidth: 12; pImageHeight: 12
             }
             Text {
+                objectName: "shaderFooterStatus"
                 Layout.fillWidth: true; elide: Text.ElideRight
                 text: page.needsTextureReview ? qsTr("Confirm the Potato driver review before saving")
                     : page.resolutionDraftChanged && !page.keepCurrentDisplay && page.resolutionPreview.ok && page.resolutionPreview.displayChanged
-                        ? qsTr("Save changes to review the restart prompt") : qsTr("Effects apply after saving")
+                        ? qsTr("Save changes to review the restart prompt")
+                        : !page.pEnableSave && Engine.saved.potatoGraphic && !Number(Engine.metrics.textureDraws || 0)
+                            ? qsTr("Potato saved; no texture override confirmed") : qsTr("Effects apply after saving")
                 color: page.bsiTheme.colors.primary20; font: page.bsiTheme.fonts.bodySmall
             }
             Native.UiButton {
