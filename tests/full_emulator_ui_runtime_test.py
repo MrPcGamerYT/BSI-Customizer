@@ -140,7 +140,9 @@ Window {
     from PySide6.QtCore import QMetaObject
     QMetaObject.invokeMethod(window,'addLateSidebarButton');settle()
     sidebar=visual(root,'testLateSidebar');face=visual(sidebar,'voidReferenceSidebarFace')
-    assert face is not None and face.property('known') and face.property('iconKey')=='advanced'
+    assert face is not None, 'late sidebar face missing'
+    assert face.property('iconKey')=='advanced', face.property('iconKey')
+    assert face.property('known'), str(warnings)
     assert sidebar.property('contentItem').property('opacity')==0
     if args.screenshot:
         args.screenshot.parent.mkdir(parents=True,exist_ok=True)
