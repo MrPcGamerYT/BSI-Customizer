@@ -67,8 +67,10 @@ In the user's 960×540 screenshot, 540 already equals both current and captured
 original. No further reduction is supported and 720 would upscale it; this is
 not evidence that a native write/restart failed. The page now repeats that
 minimum-size limitation beside the selector. C++ preview/status dimensions and
-arrows use explicit Unicode escapes so Windows compiler code pages cannot turn
-the multiplication sign into mojibake. Native size/restart behavior is unchanged.
+arrows use explicit UTF-16 `QChar` code units, not narrow Unicode escapes (which
+MSVC can still encode through its execution code page before Qt widens them).
+The reduction, restore and already-current previews all assert the actual Unicode
+symbols. Native size/restart behavior is unchanged.
 
 The exact original is captured once when enabling a reduction. Strength changes
 always plan from that original, not from an already reduced target. Restoration

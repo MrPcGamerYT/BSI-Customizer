@@ -136,7 +136,13 @@ bool decodeConfig(const QJsonObject &root,ShaderSavedConfiguration *c,ShaderDisp
     }
     return true;
 }
-QString dimensions(const DisplayResolution &r){return QStringLiteral("%1 \u00d7 %2").arg(r.width).arg(r.height);}
+// MSVC can encode a narrow universal-character escape in the execution code
+// page before Qt 5's adjacent u"" literal widens it. Build these two symbols
+// from UTF-16 code units instead, independent of source/execution encodings.
+QString dimensions(const DisplayResolution &r){return QStringLiteral("%1 %2 %3").arg(r.width).arg(QChar(0x00d7)).arg(r.height);}
+QString transition(const DisplayResolution &before,const DisplayResolution &after){
+    return dimensions(before)+QLatin1Char(' ')+QChar(0x2192)+QLatin1Char(' ')+dimensions(after);
+}
 }
 void ShaderPreferences::load(const QString &path){
     file=path;saved={};pending={};restartTarget={};nativeDisplay={};lastError.clear();displayDetail.clear();restartRequired=false;
@@ -245,11 +251,11 @@ QVariantMap ShaderPreferences::previewPotato(int mode)const{
     const bool changes=current!=target;
     QString message;
     if(!changes)message=QStringLiteral("Display is already %1. This selection needs no Display write or restart; other shader changes can still be saved.").arg(dimensions(target));
-    else if(!mode)message=QStringLiteral("Restore original Display: %1 \u2192 %2. Save, then restart. Later external Display edits are preserved.").arg(dimensions(current),dimensions(target));
+    else if(!mode)message=QStringLiteral("Restore original Display: %1. Save, then restart. Later external Display edits are preserved.").arg(transition(current,target));
     else {
         const auto difference=int(std::int64_t(target.width)*target.height*100/(std::int64_t(current.width)*current.height))-100;
-        message=QStringLiteral("%1 \u2192 %2 (about %3% %4 configured pixels). Save, then restart. DPI/FPS caps are unchanged; game resolution and FPS are not measured.")
-            .arg(dimensions(current),dimensions(target)).arg(std::abs(difference))
+        message=QStringLiteral("%1 (about %2% %3 configured pixels). Save, then restart. DPI/FPS caps are unchanged; game resolution and FPS are not measured.")
+            .arg(transition(current,target)).arg(std::abs(difference))
             .arg(difference>0?QStringLiteral("more"):QStringLiteral("fewer"));
     }
     return {{"ok",true},{"width",target.width},{"height",target.height},{"custom",target.custom},

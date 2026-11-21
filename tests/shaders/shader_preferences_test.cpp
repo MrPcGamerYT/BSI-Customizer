@@ -106,7 +106,7 @@ int main(int argc,char **argv){
         const auto reviewed=f.preferences.previewPotato(2).value(QStringLiteral("reviewKey")).toString();
         require(reviewed.size()==64&&!QFile::exists(f.path)&&f.backend.writes==0,QStringLiteral("Read-only preview issues an exact-size concurrency stamp before any dialog/write"));
         const auto message=f.preferences.previewPotato(2).value(QStringLiteral("msg")).toString();
-        require(message.contains(QChar(0x00d7))&&message.contains(QChar(0x2192))&&!message.contains(QChar(0x00c3)),
+        require(message.count(QChar(0x00d7))==2&&message.count(QChar(0x2192))==1&&!message.contains(QChar(0x00c3))&&!message.contains(QChar(0x00e2)),
                 QStringLiteral("Native preview dimensions/arrows are Unicode on every compiler code page, not UTF-8 bytes decoded as an ANSI literal"));
         f.backend.external({1600,900,false}); // same target, different unreviewed source size
         require(!success(f.preferences.apply(values,false,reviewed))&&f.backend.writes==0&&f.backend.commits==0&&!QFile::exists(f.path),
@@ -115,6 +115,11 @@ int main(int argc,char **argv){
         require(fresh!=reviewed,QStringLiteral("A new source/restore snapshot needs a fresh review"));
         require(success(f.preferences.apply(values,false,fresh))&&f.backend.configured==DisplayResolution{960,540,true}&&f.backend.commits==1,
                 QStringLiteral("The exact reviewed target commits through the existing durable journal and read-back"));
+        const auto restorePreview=f.preferences.previewPotato(0);
+        const auto restoreMessage=restorePreview.value(QStringLiteral("msg")).toString();
+        require(success(restorePreview)&&restoreMessage.count(QChar(0x00d7))==2&&restoreMessage.count(QChar(0x2192))==1
+                &&!restoreMessage.contains(QChar(0x00c3))&&!restoreMessage.contains(QChar(0x00e2)),
+                QStringLiteral("Original-size restore uses the same code-page-independent Unicode symbols as reduction and current-size previews"));
         const auto saved=bytes(f.path);const int writes=f.backend.writes;
         require(!success(f.preferences.apply(values,false,fresh))&&bytes(f.path)==saved&&f.backend.writes==writes&&f.backend.commits==1,
                 QStringLiteral("A confirmed/replayed review cannot write or commit a second time"));

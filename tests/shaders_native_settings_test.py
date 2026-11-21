@@ -317,6 +317,18 @@ def main():
 
         def tab(window, index, pointer_scroll=False):
             strip = next(i for i in tree(window.contentItem()) if i.metaObject().className().endswith("ListView"))
+            # The callback index is deliberately native; positionViewAtIndex
+            # takes the DISPLAY-group index. In particular, About's native 11
+            # is now visual 12. Using 11 only happened to leave About's center
+            # clickable with narrower Linux fonts; Windows correctly rejected
+            # that clipped hit. Resolve by row identity, not either label/size.
+            visual_index = evaluate(strip, "(function() {"
+                + f"var target = pSettingsItems.pSettingElements[{index}];"
+                + f"if (!model || !model.items) return {index};"
+                + "for (var i = 0; i < model.items.count; ++i)"
+                + "if (model.items.get(i).model.modelData === target) return i;"
+                + "return -1; })()")
+            assert visual_index >= 0, f"native row {index} is absent from the actual display group"
 
             def settled():
                 # A ListView may already report atXEnd while its overshoot or
@@ -350,13 +362,13 @@ def main():
                 assert strip.property("atXEnd"), "the native top strip cannot be scrolled to Shaders with a real mouse drag"
             else:
                 strip.setProperty("cacheBuffer", 10000)
-                evaluate(strip, f"positionViewAtIndex({index}, ListView.Contain)")
+                evaluate(strip, f"positionViewAtIndex({visual_index}, ListView.Contain)")
             QTest.qWait(80)
             settled()
             text = evaluate(window, f"pSettingsItems.pSettingElements[{index}].pButtonText")
             label = next(i for i in tree(window.contentItem()) if i.metaObject().indexOfProperty("text") >= 0 and i.property("text") == text)
             click(window, label.parentItem())
-            return {"requested": index, "selected": window.property("pCurrentTabIndex"),
+            return {"requested": index, "visualIndex": visual_index, "selected": window.property("pCurrentTabIndex"),
                     "contentX": strip.property("contentX"), "contentWidth": strip.property("contentWidth"),
                     "atXEnd": strip.property("atXEnd"), "moving": strip.property("moving"),
                     "flicking": strip.property("flicking"), "dragging": strip.property("dragging"),
@@ -403,6 +415,7 @@ def main():
             assert not profile.exists()
         else:
             navigation = tab(window, 12, pointer_scroll=True)
+            assert navigation["visualIndex"] == 11, f"Shaders' visual position is not its native callback index: {navigation}"
             assert window.property("pCurrentTabIndex") == 12, f"physical Shaders activation failed after pointer scrolling: {navigation}"
             page = evaluate(window, "pSettingsItems.pSettingElements[12].pComponentObj")
             assert page and evaluate(page, "Engine.controls.length") == 10
@@ -421,7 +434,8 @@ def main():
                 shader_label = next(i for i in tree(strip) if i.metaObject().indexOfProperty("text") >= 0 and i.property("text") == "Shaders")
                 about_label = next(i for i in tree(strip) if i.metaObject().indexOfProperty("text") >= 0 and i.property("text") == "About")
                 assert shader_label.mapToItem(strip, QPointF(0, 0)).x() < about_label.mapToItem(strip, QPointF(0, 0)).x(), "native refresh undid Shaders-before-About sorting"
-            tab(window, 11)
+            navigation = tab(window, 11)
+            assert navigation["visualIndex"] == 12, f"About's native identity was not mapped to its last visual position: {navigation}"
             assert window.property("pCurrentTabIndex") == 11, "visual ordering changed About's native callback index"
             tab(window, 12)
             assert window.property("pCurrentTabIndex") == 12, "visual ordering changed Shaders' native callback index"
