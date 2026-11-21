@@ -736,6 +736,8 @@ QString buildAbout(const QString &developerName, const QString &tagline,
     // and a binding selects it only at the existing selected opacity (.2).
     // Switching tabs/hovering detaches/reuses it, not a per-frame allocation.
     // Qt 5/6 represent unset gradient as null OR undefined; use == null.
+    // Explicitly set BOTH stops: older Qt leaves an omitted position
+    // uninitialized (QTBUG-140364), causing random/NaN gradient geometry.
     // Defer first discovery until Loader bindings settle. The bounded,
     // visible-window timer discovers only new generated tab delegates (including
     // Shaders' reorder). Layered items, other windows and UiTheme stay untouched.
@@ -770,7 +772,7 @@ onClicked:if(/^https?:\/\//i.test(modelData.url))Qt.openUrlExternally(modelData.
 function fOnQmlLoaded(){var p=parent;while(p&&p.bIcons===undefined)p=p.parent;if(p)p.bIcons=bsiTabIcons;Qt.callLater(fGlassTabs)}
 function fCheckForUpdateCallback(s,d){if(s===0){var j=JSON.parse(d);pUpdateAvailable=/^true$/i.test(j.update_available);pIsInCompatibleUpdateVersion=pUpdateAvailable&&!/^true$/i.test(j.update_details.is_build_compatible);if(pUpdateAvailable){pUpdateVersion=j.update_details.client_version;pMoreInfoURL=j.update_details.detailed_changelogs_url;pDownloadURL=j.update_details.download_url}}else{pUpdateAvailable=false;pIsInCompatibleUpdateVersion=false}}
 function fUpdateShortDisplayName(n){pShortDisplayName=String(n||"")}
-Component{id:g;Gradient{property var s;property color c:s.color;GradientStop{color:Qt.lighter(c,1.7)}GradientStop{position:1;color:Qt.rgba(c.r,c.g,c.b,c.a*.88)}}}
+Component{id:g;Gradient{property var s;property color c:s.color;GradientStop{position:0;color:Qt.lighter(c,1.7)}GradientStop{position:1;color:Qt.rgba(c.r,c.g,c.b,c.a*.88)}}}
 function fGlassTab(o){var v=g.createObject(o,{s:o});o.objectName='bsiTabGlass';o.gradient=Qt.binding(()=>o.opacity===.2?v:null)}
 function fGlassTabs(){var r=parent;while(r&&r.bIcons===undefined)r=r.parent;if(!r)return;var q=[r],n=0;while(q.length&&n++<4096){var o=q.pop();if(!o||o.minimumSize!==undefined||o.item!==undefined&&o.source!==undefined||o.layer&&o.layer.enabled)continue;if(o.border&&o.gradient==null&&o.parent&&o.parent.containsMouse!==undefined&&o.color.a&&o.objectName!=='bsiTabGlass')fGlassTab(o);var c=o.children||[];for(var i=0;i<c.length&&q.length<4096;i++)q.push(c[i])}}
 Connections{target:a.Window.window;function onPCurrentTabIndexChanged(){fGlassTabs()}}
@@ -1387,6 +1389,8 @@ State analyze(const QString &exePath)
     }
     if (state.applied && !sources.window.text.contains(kWindowDesignMarker))
         state.detail += QStringLiteral(" An older Settings design is installed; choose Update rebuilt Settings panel for the opaque native theme and selected-tab-only glass.");
+    else if (state.applied && !sources.about.text.contains(QLatin1String("GradientStop{position:0;color:Qt.lighter(c,1.7)}")))
+        state.detail += QStringLiteral(" An older tab-reflection material is installed; choose Update rebuilt Settings panel to initialize both gradient endpoints for Qt 5/6.");
     if (ShaderSettingsSource::hasWindow(sources.window.text)) {
         state.restorable = false;
         state.detail += QStringLiteral(" Remove the dependent native Shaders integration before restoring the underlying Settings design.");

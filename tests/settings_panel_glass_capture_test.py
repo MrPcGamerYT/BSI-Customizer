@@ -11,6 +11,12 @@ import sys
 
 
 def main():
+    # An omitted stop reads recycled native memory on older Qt 5/6. Exercise
+    # the exact production factory independently before the full DPI matrix;
+    # this never retries a failed frame or replaces any pixel assertion.
+    subprocess.run([sys.executable, "-X", "faulthandler", "-u",
+                    str(Path(__file__).with_name("settings_panel_gradient_test.py"))],
+                   check=True, timeout=30)
     test = Path(__file__).with_name("settings_panel_glass_test.py")
     artifacts = os.environ.get("BSI_GLASS_ARTIFACTS")
     for negative in (None, "flat", "frame"):

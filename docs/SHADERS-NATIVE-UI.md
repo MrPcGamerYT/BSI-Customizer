@@ -131,9 +131,21 @@ real changing pixels, immutable snapshots and a rejected nonpainting negative
 without needing a shader module or OEM resources. One scene-update boundary is
 used before each capture; no capture-until-pass retry. Selected-tab contrast
 compares two original sample points in **one** frame with the unchanged strict
-`>6` lightness delta. This synchronization hardening alone does not diagnose a
-Windows Qt 6.8 reflection failure or certify a physical renderer. Failure
-annotations retain the actual tail/values and frames for follow-up.
+`>6` lightness delta. Synchronization alone did not resolve the intermittent
+Windows Qt 6.8 reflection failure. The generated material now explicitly sets
+**both** GradientStop positions to 0 and 1: the tested Qt 5/6 releases leave an
+omitted position uninitialized, despite the documented default. Public QML
+allocation/destruction reproduced stale 0.73/other positions on all three local
+runtimes. This matches upstream [QTBUG-140364 and its initialization fix](https://github.com/qt/qtdeclarative/commit/ed607c86a4eff425a708111a63aa2b3feb6d4e66).
+`settings_panel_gradient_test.py` checks the exact generated factory after heap
+reuse, 192 explicit endpoint pairs, live colors and actual painted reflection;
+a poisoned endpoint must fail the same strict pixel check. The full DPI/flat
+negative matrix remains unchanged and prints endpoint positions on failure.
+Already-patched players require **Update rebuilt Settings panel** and a player
+restart to regenerate the owned About material; updating the shader DLL alone
+does not rewrite it. This is not proof that the reported in-player stretched
+triangles share this cause, nor physical GPU certification. Failure annotations
+retain the actual tail/values and frames for follow-up.
 
 These are real Qt control/source/material tests. They do **not** establish an
 installed player result, readable font paint in the fontless stress case, game

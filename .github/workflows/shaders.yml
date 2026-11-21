@@ -37,6 +37,7 @@ on:
       - 'tests/settings_panel_window_budget_test.py'
       - 'tests/settings_panel_glass_test.py'
       - 'tests/settings_panel_glass_capture_test.py'
+      - 'tests/settings_panel_gradient_test.py'
       - '.harness/settings_window_preview.py'
       - '.harness/settings_preview*'
       - 'tests/fixtures/settings-window-*'

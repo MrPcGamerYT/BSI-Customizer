@@ -120,6 +120,8 @@ for count in (12, 13):
         doc = doc.replace("@@BSI_" + token + "@@", value)
     assert "@@BSI_" not in doc
     assert "function fGlassTabs()" in doc and "o.opacity===.2?v:null" in doc
+    assert "GradientStop{position:0;color:Qt.lighter(c,1.7)}" in doc
+    assert "GradientStop{position:1;color:Qt.rgba(c.r,c.g,c.b,c.a*.88)}" in doc
     assert "o.color.a" in doc and "o.objectName!=='bsiTabGlass'" in doc
     assert "o.c===a.c" not in doc and "border.color=Qt.binding" not in doc, "never decorate the outer Settings frame"
     assert "o.minimumSize!==undefined" in doc and "o.layer&&o.layer.enabled" in doc

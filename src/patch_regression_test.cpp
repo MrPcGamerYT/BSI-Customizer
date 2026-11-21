@@ -3599,14 +3599,53 @@ Timer{interval:160;running:a.Window.window&&a.Window.window.visible;repeat:true;
                       && updatedWindow.contains(QStringLiteral("//BSI v21"))
                       && !updatedWindow.contains(QStringLiteral("//BSI v20"))
                       && updatedAbout.contains(QStringLiteral("o.opacity===.2?v:null"))
+                      && updatedAbout.contains(QStringLiteral("GradientStop{position:0;color:Qt.lighter(c,1.7)}"))
+                      && updatedAbout.contains(QStringLiteral("GradientStop{position:1;color:Qt.rgba(c.r,c.g,c.b,c.a*.88)}"))
                       && !updatedAbout.contains(QStringLiteral("o.c===a.c"))
                       && !updatedAbout.contains(QStringLiteral("fGlassAll"))
                       && !updatedAbout.contains(QStringLiteral("property color edge:"))
                       && SettingsPanelPatcher::analyze(path).tabs.size() == 13,
                   QStringLiteral("v20 to v21 Settings Update restores the flat native frame/selected-only glass, preserves the owned shader navigation/dirty overlay and accepts its hidden/customizable icon id (%1)")
                       .arg(update.value(QStringLiteral("msg")).toString()));
+            // The first v21 About factory omitted the initial stop position.
+            // Model its genuine earlier recovery hash, while keeping the SAME
+            // v21 window/shader overlay. Update must regenerate the material,
+            // not require a window-version bump or relax source ownership.
+            QString oldV21About = updatedAbout;
+            oldV21About.replace(QStringLiteral("GradientStop{position:0;color:Qt.lighter(c,1.7)}"),
+                                QStringLiteral("GradientStop{color:Qt.lighter(c,1.7)}"));
+            auto oldV21Image = updated;
+            check(oldV21About != updatedAbout
+                      && ShaderSettingsImage::replaceSource(oldV21Image, QStringLiteral("PlrAboutSetting.qml"), oldV21About.toUtf8(), &error)
+                      && PatchFile::writeVerified(path, updated, oldV21Image, &error),
+                  QStringLiteral("stage the earlier owned v21 material with its omitted endpoint (%1)").arg(error));
+            auto oldV21Recovery = QJsonDocument::fromJson(read(recoveryPath)).object();
+            auto oldV21Records = oldV21Recovery.value(QStringLiteral("sources")).toArray();
+            for (int index = 0; index < oldV21Records.size(); ++index) {
+                auto record = oldV21Records.at(index).toObject();
+                if (QFileInfo(record.value(QStringLiteral("path")).toString()).fileName() != QLatin1String("PlrAboutSetting.qml")) continue;
+                auto accepted = record.value(QStringLiteral("acceptedSha256")).toArray();
+                accepted.append(QString::fromLatin1(QCryptographicHash::hash(oldV21About.toUtf8(), QCryptographicHash::Sha256).toHex()));
+                record.insert(QStringLiteral("acceptedSha256"), accepted);
+                oldV21Records.replace(index, record);
+            }
+            oldV21Recovery.insert(QStringLiteral("sources"), oldV21Records);
+            write(recoveryPath, QJsonDocument(oldV21Recovery).toJson(QJsonDocument::Compact));
+            const auto oldV21State = SettingsPanelPatcher::analyze(path);
+            check(oldV21State.supported && oldV21State.applied
+                      && oldV21State.detail.contains(QStringLiteral("initialize both gradient endpoints")),
+                  "the earlier v21 material remains owned and reports the required Settings Update");
+            const auto materialUpdate = SettingsPanelPatcher::apply(path, QStringLiteral("Updated shader fixture"), {}, options, true);
+            check(materialUpdate.value(QStringLiteral("ok")).toBool()
+                      && linkedResourceText(read(path), QStringLiteral("PlrAboutSetting.qml")) == updatedAbout
+                      && linkedResourceText(read(path), QStringLiteral("UiSettingsWindow.qml")) == updatedWindow
+                      && read(path).size() == updated.size()
+                      && !SettingsPanelPatcher::analyze(path).detail.contains(QStringLiteral("older tab-reflection")),
+                  QStringLiteral("same-version v21 Update initializes both endpoints without window/shader changes or file growth (%1)")
+                      .arg(materialUpdate.value(QStringLiteral("msg")).toString()));
+            const auto afterMaterialUpdate = read(path);
             const auto repeat = SettingsPanelPatcher::apply(path, QStringLiteral("Updated shader fixture"), {}, options, true);
-            check(repeat.value(QStringLiteral("ok")).toBool() && read(path) == updated,
+            check(repeat.value(QStringLiteral("ok")).toBool() && read(path) == afterMaterialUpdate,
                   "an identical Settings Update with shaders remains byte-idempotent");
             const auto remove = ShaderSettingsImage::prepare(read(path), false);
             check(remove.ok && PatchFile::writeVerified(path, read(path), remove.output, &error),

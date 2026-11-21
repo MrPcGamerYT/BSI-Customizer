@@ -88,7 +88,7 @@ Item {
         background: Rectangle {
             gradient: Gradient {
                 objectName: "nativeGradient"
-                GradientStop { color: "#554433" }
+                GradientStop { position: 0; color: "#554433" }
                 GradientStop { position: 1; color: "#221100" }
             }
         }
@@ -255,7 +255,9 @@ def main():
         "size": [selected_fill.width(), selected_fill.height()],
         "origin": [selected_fill.mapToScene(m.QPointF()).x(), selected_fill.mapToScene(m.QPointF()).y()],
         "opacity": selected_fill.opacity(), "stripX": preview.strip.property("contentX"),
-        "gradient": evaluate(selected_fill, "[String(gradient.stops[0].color),String(gradient.stops[1].color)].join(',')")}), flush=True)
+        "gradient": evaluate(selected_fill, "[String(gradient.stops[0].color),String(gradient.stops[1].color)].join(',')"),
+        "positions": evaluate(selected_fill, "[gradient.stops[0].position,gradient.stops[1].position].join(',')")}), flush=True)
+    assert evaluate(selected_fill, "gradient.stops[0].position === 0 && gradient.stops[1].position === 1"), "selected-tab endpoints must never read Qt's uninitialized default"
     assert tab_top.lightness() > tab_bottom.lightness() + 6, ("the selected-tab reflection is not present in the rendered pixels", tab_top.name(), tab_bottom.name(), tab_top.lightness(), tab_bottom.lightness())
     # Both frame and page/footer must stay native-primary80 over a repainting
     # game; no brighter outer frame/dark inset rectangle as in the screenshot.

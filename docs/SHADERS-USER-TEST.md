@@ -42,7 +42,9 @@ do not establish that your player's game presentation works on your GPU/driver.
    **PATCHER → Player interface → Settings panel**. Apply the native top-tabs
    Settings redesign, or **Update rebuilt Settings panel** on an earlier design.
    The current v21 design has one flat, opaque native-theme background and glass
-   only on the selected tab; a module-only update cannot replace that shell.
+   only on the selected tab. Update even an earlier v21 build to initialize both
+   tab-gradient endpoints, then fully restart the player; a module-only update
+   cannot replace the shell/owned About material.
    This is a required, separately reviewed step; shader installation does not
    guess/replace an unknown shell.
 3. In the same Player interface page, open **Shaders → 1. Inspect compatibility**.
