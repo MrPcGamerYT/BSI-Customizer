@@ -28,6 +28,7 @@
   let resources = [], selected = null, resourceData = null, dirty = false, filter = '', offset = 0;
   let operationResult = '', logs = [], editors = null, windowMaximized = false;
   const drafts = {};
+  let aboutLinksWork = null; // working copy of the About buttons while editing
   let bootLogoPreview = '';
   const enabled = () => !!transport && state.authorized && !state.busy && !pending;
   const panel = body => `<div class="panel"><div class="pscroll">${body}</div></div>`;
@@ -101,20 +102,23 @@
     return {
       developerName: profile.developerName || 'Mr.Pc Gamer & Romulos',
       tagline: profile.tagline || 'BlueStacks tools · with contributor Nova',
-      links: Array.from({length:4}, (_, i) => ({ kind: links[i]?.kind || ['github','discord','youtube','youtube'][i], title: links[i]?.title || '', url: links[i]?.url || '' }))
+      links: links.slice(0, 8).map(link => ({ kind: link.kind || 'custom', title: link.title || '', url: link.url || '' }))
     };
   }
   function aboutPreview(data = settingsAboutData()) {
     const links = data.links.filter(link => link.title && link.url);
-    return `<div class="about-profile-preview"><img src="icon.png" alt="BSI Customizer emulator icon"><b>BSI CUSTOMIZER</b><h3>${esc(data.developerName)}</h3><p>${esc(data.tagline||'')}</p><small>Version ${esc(state.version||'—')}</small><div class="about-profile-links">${links.map(link=>`<span class="about-link-chip"><i>${link.kind==='discord'?'D':link.kind==='youtube'?'▶':'GH'}</i>${esc(link.title)}</span>`).join('')||'<span class="about-empty">Add up to four links below</span>'}</div></div>`;
+    return `<div class="about-profile-preview"><img src="icon.png" alt="BSI Customizer emulator icon"><b>BSI CUSTOMIZER</b><h3>${esc(data.developerName)}</h3><p>${esc(data.tagline||'')}</p><small>Version ${esc(state.version||'—')}</small><div class="about-profile-links">${links.map(link=>`<span class="about-link-chip"><i>${link.kind==='github'?'GH':link.kind==='discord'?'D':link.kind==='youtube'?'▶':'↗'}</i>${esc(link.title)}</span>`).join('')||'<span class="about-empty">Add link buttons below</span>'}</div></div>`;
   }
   function settingsAbout() {
     const data = settingsAboutData();
+    const links = aboutLinksWork || data.links;
+    const rows = links.map((link,index)=>`<div class="settings-link-row" data-about-link="${index}"><span class="settings-link-index">0${index+1}</span><label class="editor-field"><span>Service</span><select class="inp" data-about-field="kind"><option value="github" ${link.kind==='github'?'selected':''}>GitHub</option><option value="discord" ${link.kind==='discord'?'selected':''}>Discord</option><option value="youtube" ${link.kind==='youtube'?'selected':''}>YouTube</option><option value="custom" ${link.kind==='custom'?'selected':''}>Custom</option></select></label><label class="editor-field"><span>Link label</span><input class="inp" maxlength="64" data-about-field="title" value="${esc(link.title)}" placeholder="e.g. Project source"></label><label class="editor-field"><span>HTTP(S) URL</span><input class="inp" maxlength="512" data-about-field="url" value="${esc(link.url)}" placeholder="https://…"></label>${button('✕','about-link-remove',false,`data-index="${index}"`)}</div>`).join('');
     return `<div class="settings-section-head"><span class="settings-eyebrow">YOUR PROFILE</span><h3>About BSI Customizer</h3><p>Build the About card shown in this app. Your profile is saved on this PC.</p></div>
-      <div id="about-profile-preview-host">${aboutPreview(data)}</div>
-      <section class="settings-card about-profile-editor"><div class="settings-card-head"><div><b>Profile details</b><p>Your name, short description, and four optional social links.</p></div></div>
+      <div id="about-profile-preview-host">${aboutPreview({ developerName: data.developerName, tagline: data.tagline, links })}</div>
+      <section class="settings-card about-profile-editor"><div class="settings-card-head"><div><b>Profile details</b><p>Your name, short description, and custom link buttons (up to eight).</p></div></div>
       <div class="settings-about-fields"><label class="editor-field"><span>Developer name</span><input class="inp" maxlength="80" data-about-field="developerName" value="${esc(data.developerName)}"></label><label class="editor-field"><span>Tagline</span><input class="inp" maxlength="120" data-about-field="tagline" value="${esc(data.tagline)}"></label></div>
-      <div class="settings-link-list">${data.links.map((link,index)=>`<div class="settings-link-row" data-about-link="${index}"><span class="settings-link-index">0${index+1}</span><label class="editor-field"><span>Service</span><select class="inp" data-about-field="kind"><option value="github" ${link.kind==='github'?'selected':''}>GitHub</option><option value="discord" ${link.kind==='discord'?'selected':''}>Discord</option><option value="youtube" ${link.kind==='youtube'?'selected':''}>YouTube</option></select></label><label class="editor-field"><span>Link label</span><input class="inp" maxlength="64" data-about-field="title" value="${esc(link.title)}" placeholder="e.g. Project source"></label><label class="editor-field"><span>HTTP(S) URL</span><input class="inp" maxlength="512" data-about-field="url" value="${esc(link.url)}" placeholder="https://…"></label></div>`).join('')}</div>
+      <div class="settings-link-list">${rows}</div>
+      <div class="button-grid">${button('+ Add button','about-link-add',false,links.length>=8?'disabled title="Up to eight buttons"':'')}</div>
       <div class="button-grid">${button('Save About profile','settings-about-save',true)}${button('Restore defaults','settings-about-reset')}</div></section>`;
   }
   function renderSettingsTab() {
@@ -136,6 +140,7 @@
   function openSettings(tab = settingsTab) {
     if (!['appearance','updates','about'].includes(tab)) tab = 'appearance';
     settingsTab = tab;
+    aboutLinksWork = null;
     const dialog = $('#settings-dialog');
     if (!dialog.open) dialog.showModal();
     renderSettingsTab();
@@ -144,16 +149,18 @@
     if ($('#settings-dialog')?.open) renderSettingsTab();
     else renderView();
   }
+  function readAboutFormLinks() {
+    return Array.from(document.querySelectorAll('#settings-dialog [data-about-link]')).map(row => ({
+      kind: row.querySelector('[data-about-field="kind"]')?.value || 'custom',
+      title: row.querySelector('[data-about-field="title"]')?.value || '',
+      url: row.querySelector('[data-about-field="url"]')?.value || ''
+    }));
+  }
   function updateAboutPreviewFromForm() {
     const host = $('#about-profile-preview-host');
     if (!host) return;
     const read = (name, fallback='') => host.closest('#settings-dialog')?.querySelector(`[data-about-field="${name}"]`)?.value ?? fallback;
-    const links = Array.from(document.querySelectorAll('[data-about-link]')).map(row => ({
-      kind: row.querySelector('[data-about-field="kind"]')?.value || 'github',
-      title: row.querySelector('[data-about-field="title"]')?.value || '',
-      url: row.querySelector('[data-about-field="url"]')?.value || ''
-    }));
-    host.innerHTML = aboutPreview({developerName:read('developerName','Your name'),tagline:read('tagline',''),links});
+    host.innerHTML = aboutPreview({developerName:read('developerName','Your name'),tagline:read('tagline',''),links:readAboutFormLinks()});
   }
   function updateWindowMode(maximized) {
     windowMaximized = !!maximized;
@@ -343,6 +350,18 @@
     else if (name === 'bootVideoBrowse') { const path = await transport.chooseFile('boot-video'); if (!path) return; drafts.bootVideo = path; }
     else if (name === 'path') { if (!await confirmDiscard()) return; const role = el.dataset.role; await request('setPaths', { [role]: $('#path-' + role).value }); }
     else if (name === 'appearance') await request('setAppearance', { theme: Number($('#appearance-mode').value), accent: $('#accent').value });
+    else if (name === 'about-link-add' || name === 'about-link-remove') {
+      const links = readAboutFormLinks();
+      if (name === 'about-link-add') {
+        if (links.length >= 8) { toast('You can use up to eight About buttons.'); return; }
+        links.push({ kind: 'custom', title: '', url: '' });
+      } else {
+        links.splice(Number(el.dataset.index) || 0, 1);
+      }
+      aboutLinksWork = links;
+      renderSettingsTab();
+      return;
+    }
     else if (name === 'settings-about-save' || name === 'settings-about-reset') {
       const profile = name === 'settings-about-reset' ? {
         developerName: 'Mr.Pc Gamer & Romulos', tagline: 'BlueStacks tools · with contributor Nova',
@@ -355,13 +374,10 @@
       } : {
         developerName: $('#settings-dialog [data-about-field="developerName"]').value,
         tagline: $('#settings-dialog [data-about-field="tagline"]').value,
-        links: Array.from(document.querySelectorAll('#settings-dialog [data-about-link]')).map(row => ({
-          kind: row.querySelector('[data-about-field="kind"]').value,
-          title: row.querySelector('[data-about-field="title"]').value,
-          url: row.querySelector('[data-about-field="url"]').value
-        }))
+        links: readAboutFormLinks()
       };
       await request('setAboutProfile', profile);
+      aboutLinksWork = null;
       if (name === 'settings-about-save') toast('About profile saved on this PC.', 'success');
       else toast('Default About profile restored.', 'success');
     }

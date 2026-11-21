@@ -226,16 +226,16 @@ QVariantMap WebBridge::invoke(const QString &method, const QVariantMap &args)
         const QString developer = text("developerName").trimmed();
         const QString tagline = text("tagline").trimmed();
         const QVariantList links = args.value("links").toList();
-        if (developer.isEmpty() || developer.size() > 80 || tagline.size() > 120 || links.size() != 4)
-            return failure(QStringLiteral("Enter a developer name (up to 80 characters), a tagline (up to 120), and exactly four link slots."));
+        if (developer.isEmpty() || developer.size() > 80 || tagline.size() > 120 || links.size() > 8)
+            return failure(QStringLiteral("Enter a developer name (up to 80 characters), a tagline (up to 120), and up to eight custom link buttons."));
         for (const QVariant &entry : links) {
             const QVariantMap link = entry.toMap();
             const QString kind = link.value("kind").toString();
             const QString title = link.value("title").toString().trimmed();
             const QString urlText = link.value("url").toString().trimmed();
-            if ((kind != QLatin1String("github") && kind != QLatin1String("discord") && kind != QLatin1String("youtube"))
+            if ((kind != QLatin1String("github") && kind != QLatin1String("discord") && kind != QLatin1String("youtube") && kind != QLatin1String("custom"))
                 || title.size() > 64 || urlText.size() > 512 || title.isEmpty() != urlText.isEmpty())
-                return failure(QStringLiteral("Each About link must use GitHub, Discord or YouTube and have both a label and HTTP(S) URL, or leave both blank."));
+                return failure(QStringLiteral("Each About button needs a service (GitHub, Discord, YouTube or Custom) and both a label and HTTP(S) URL, or leave both blank."));
             if (!urlText.isEmpty()) {
                 const QUrl url(urlText, QUrl::StrictMode);
                 const QString scheme = url.scheme().toLower();
@@ -252,16 +252,16 @@ QVariantMap WebBridge::invoke(const QString &method, const QVariantMap &args)
         const QString developer = text("developerName").trimmed();
         const QString tagline = text("tagline").trimmed();
         const QVariantList links = args.value("links").toList();
-        if (developer.isEmpty() || developer.size() > 80 || tagline.size() > 120 || links.size() != 4)
-            return failure(QStringLiteral("Enter a developer name, tagline, and four optional link slots."));
+        if (developer.isEmpty() || developer.size() > 80 || tagline.size() > 120 || links.size() > 8)
+            return failure(QStringLiteral("Enter a developer name, tagline, and up to eight custom link buttons."));
         for (const QVariant &entry : links) {
             const QVariantMap link = entry.toMap();
             const QString kind = link.value("kind").toString();
             const QString title = link.value("title").toString().trimmed();
             const QString urlText = link.value("url").toString().trimmed();
-            if ((kind != QLatin1String("github") && kind != QLatin1String("discord") && kind != QLatin1String("youtube"))
+            if ((kind != QLatin1String("github") && kind != QLatin1String("discord") && kind != QLatin1String("youtube") && kind != QLatin1String("custom"))
                 || title.size() > 64 || urlText.size() > 512 || title.isEmpty() != urlText.isEmpty())
-                return failure(QStringLiteral("Each link needs a label and HTTP(S) URL, or both fields left blank."));
+                return failure(QStringLiteral("Each link needs a service (GitHub, Discord, YouTube or Custom), a label and HTTP(S) URL, or both fields left blank."));
             if (!urlText.isEmpty()) {
                 const QUrl url(urlText, QUrl::StrictMode);
                 const QString scheme = url.scheme().toLower();
