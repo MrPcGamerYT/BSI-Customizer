@@ -105,7 +105,7 @@ Item {
             fillMode: Image.PreserveAspectFit
             smooth: true
             opacity: !skin.available ? 0.35 : skin.hovered || skin.pressed || skin.active ? 1 : 0.75
-            source: skin.svg ? "data:image/svg+xml;charset=utf-8," +
+            source: skin.iconKey === "optimizer" ? "BSISettingsIcons/png/optimizer.png" : skin.svg ? "data:image/svg+xml;charset=utf-8," +
                     encodeURIComponent(skin.svg.replace(/ICON_COLOR/g, Theme.text.toString())) : ""
             RotationAnimation on rotation {
                 from: 0; to: 360; duration: 1100; loops: Animation.Infinite

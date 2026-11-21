@@ -66,6 +66,32 @@ class SuiteTests(unittest.TestCase):
             self.assertEqual((root/'HD-Player.exe').read_bytes(),original)
             self.assertFalse((root/U.UI_STATE).exists())
 
+    def test_upgrade_tracked_v5_with_current_optimizer_and_exact_undo(self):
+        source=(ROOT/'reference/full-emulator-ui/legacy_installer.py').read_bytes()
+        import types
+        old=types.ModuleType('old_suite_fixture');old.__file__=str(ROOT/'tools/full-emulator-ui/suite.py')
+        sys.modules[old.__name__]=old;exec(compile(source,'old-fixture.py','exec'),old.__dict__)
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder)/'Upgraded Player';fixture(root)
+            E.commit(old.plan_install(root,full_emulator_ui=True)[0])
+            # Simulate the state-aware Studio04 repair, not an untracked overwrite.
+            state_file=root/U.UI_STATE;state=json.loads(state_file.read_bytes())
+            source_root=ROOT/'assets/optimizer-repair/Assets'
+            for path in source_root.rglob('*'):
+                if not path.is_file():continue
+                relative=S.PREFIX+path.relative_to(source_root).as_posix()
+                target=root/relative;target.parent.mkdir(parents=True,exist_ok=True);target.write_bytes(path.read_bytes())
+                state['assets'][relative]=S.sha(path.read_bytes())
+            state_file.write_text(json.dumps(state))
+            before=files(root)
+            planned,report=U.plan_install(root)
+            backup=E.commit(planned)
+            self.assertEqual([c.relative for c in U.plan_install(root)[0].changes],[])
+            E.restore(backup,root)
+            # Recovery journals themselves remain, all pre-upgrade files return.
+            for name,digest in before.items():
+                self.assertEqual(S.sha((root/name).read_bytes()),digest,name)
+
     def test_asset_mismatch_is_not_adopted(self):
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder)/'Player';fixture(root);E.commit(U.plan_install(root)[0])
