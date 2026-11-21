@@ -1,10 +1,33 @@
-# VOID OLED Studio 09 — six live native themes
+# VOID OLED Studio 10 — six live native themes
 
 **𝓥𝓞𝓘𝓓 · Developed By NOVA XIS · https://www.youtube.com/@nova_xis20**
 
 This changes the emulator, not the customizer. It is not another optimizer-only
 ZIP or a set of disconnected mock QML screens. Actual mapped native sources and
 their compiled-cache owners are patched in the established backed-up transaction.
+
+## Studio 10 — first-frame chrome and unified command rail
+
+- Replaces the pack-owned legacy inline sidebar bridge that still referenced a
+  fixed `C:/Program Files/.../BSISidebarVisual.qml`. The actual rail and its inline
+  icons now import the same installed theme module as Settings.
+- Initial titlebar/sidebar discovery and visible native controls are prepared
+  synchronously. Settings uses a source-bound synchronous Loader, rather than
+  waiting for Component.onCompleted to request its shell. No sleep, whole-window
+  visibility override, extra startup delay or boot/auth callback replacement.
+- Known icons reserve their visual slot while decoded PNG masks become available;
+  unknown/missing icons retain their native fallback. No competing inline/discovery
+  icon faces. Late/overflow delegates still use event-coalesced discovery.
+- The active rail, edge, normal icon tint, hover/pressed states and motion follow
+  all six palettes without requiring hover. Window reactivation refreshes persisted
+  choices for separately loaded QML engines (no idle polling).
+- Settings has a framed workspace navigation panel, larger rows, selected icon
+  badges, a current-theme footer and a bordered native-content canvas. Native page
+  coordinates, tab indices, Save/discard guards and backend callbacks are kept.
+- Tests include a first capture with conspicuous stock-color sentinels, the exact
+  old inline bridge, a persisted non-default palette at construction, all six live
+  sidebar palettes, missing/unknown fallback and native click delivery. These are
+  Qt fixtures, not a guarantee that every proprietary host paints identically.
 
 ## Scope
 
@@ -29,7 +52,7 @@ changed, protected, verified/unchanged resources and unsupported visual bindings
 missing resources are not silently advertised as redesigned. The source-only test
 snapshot does not prove compatibility or exact appearance on a live OEM player.
 
-## OLED Studio 09 — live native Appearance
+## OLED Studio 10 — live native Appearance
 
 Open native **Settings → Themes** (top-right). Choose **OLED Black** (default),
 **Midnight Blue**, **Amethyst**, **Forest**, **Ember**, or **Rose Noir**. These are
@@ -59,7 +82,7 @@ one Carbon skin. Each also has its own corner and transition defaults.
 
 ### Native window/dialog coverage retained
 
-The Settings badge is **OLED STUDIO 09**. Native surface handling includes:
+The Settings badge is **OLED STUDIO 10**. Native surface handling includes:
 
 - Native Window/Popup `contentItem` and separate Dialog header/footer are visited.
   Previously a Window-root editor could get source colors but no control adapter.
@@ -126,7 +149,7 @@ No optimizer or helper is installed.
    permission elevation, if required, uses the existing explicit installer flow.
    Nothing disables security controls. Backup/journal and read-back checks cover
    every changed binary, external asset and the UI state.
-6. Restart the player. Settings must show **OLED STUDIO 09**. Test every native
+6. Restart the player. Settings must show **OLED STUDIO 10**. Test every native
    page's controls/Save/discard, sidebar/topbar, volume/game-controls/exit popups,
    controls editor. Boot/auth must behave exactly as before.
 7. If a different/cached page appears or any safety check refuses, STOP. Run

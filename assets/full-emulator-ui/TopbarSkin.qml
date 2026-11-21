@@ -1,5 +1,6 @@
 // Passive titlebar glyphs: native UiImageButton retains input, tooltips and actions.
 import QtQuick 2.15
+import QtQuick.Window 2.15
 import "Icons.js" as Icons
 Item {
     id: skin
@@ -48,15 +49,20 @@ Item {
         target:owner
         function onChildrenChanged(){skin.enqueue(owner)}
     } }
-    onHostChanged:enqueue(host)
-    Component.onCompleted:enqueue(host)
+    property bool initialized:false
+    onHostChanged:if(initialized)walk(host,0)
+    Component.onCompleted:{initialized=true;Theme.sync();walk(host,0)}
+    Connections {
+        target:skin.host ? skin.host.Window.window : null
+        function onActiveChanged(){if(target && target.active)Theme.sync()}
+    }
     Component { id:face
         Item {
             id:visual
             objectName:"voidReferenceTopbarFace"
             property var control
             readonly property string key:skin.icon(control.asset)
-            readonly property bool ready:key!=="" && glyph.status===Image.Ready
+            readonly property bool ready:key!=="" && glyph.status!==Image.Error
             anchors.fill:parent;z:5
             Rectangle { anchors.fill:parent;anchors.margins:3;radius:9;color:control.down?Theme.raised:Theme.surface;visible:visual.ready && control.enabled && (control.hovered||control.down);border.width:1;border.color:Theme.border }
             ThemeIcon { id:glyph;tint:control.hovered||control.down?Theme.accent:Theme.text;anchors.centerIn:parent;width:16;height:16;sourceSize.width:32;sourceSize.height:32;source:visual.key?"SharedIcons/"+visual.key+".png":"";opacity:!control.enabled?0.3:control.hovered||control.down?1:0.75 }

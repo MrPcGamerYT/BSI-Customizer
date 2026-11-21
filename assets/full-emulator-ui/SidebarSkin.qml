@@ -9,6 +9,7 @@ Item {
     property var pendingNodes: new Set()
     property bool scheduled: false
     property int visitedNodes: 0
+    property bool initialized: false
     function enqueue(item) {
         if (!item) return
         pendingNodes.add(item)
@@ -43,7 +44,15 @@ Item {
             watcher.createObject(item,{owner:item,cleanup:function(){seen.delete(item);queue.delete(item);buttons.delete(item)}})
         }
         if (/UiImageButton/.test(String(item)) && item.contentItem && item.pVoidElementId !== undefined) {
-            if (!controls.has(item)) { controls.add(item); visual.createObject(item,{control:item}) }
+            if (!controls.has(item)) {
+                controls.add(item)
+                var inline=null
+                if(item.children)for(var c=0;c<item.children.length;++c)
+                    if(/BsiSidebarInlineVisual/.test(String(item.children[c])))inline=item.children[c]
+                // The direct inline bridge already owns these visuals. Do not
+                // compete with its asset guard or create a second icon face.
+                if(!inline)visual.createObject(item,{control:item})
+            }
         }
         if (item.children) for (var j=0;j<item.children.length;++j) walk(item.children[j],depth+1)
     }
@@ -51,9 +60,14 @@ Item {
         enqueue(host)
         if (host && host.pKebabMenuWin) enqueue(host.pKebabMenuWin.contentItem)
     }
-    onHostChanged: { refresh(); SurfaceRegistry.attach(skin, host ? host.Window.window : null) }
+    onHostChanged: { if(initialized){Theme.sync();walk(host,0)}; SurfaceRegistry.attach(skin, host ? host.Window.window : null) }
     Component.onDestruction: SurfaceRegistry.detach(skin)
-    Component.onCompleted: refresh()
+    Component.onCompleted: { initialized=true;Theme.sync();walk(host,0);refresh() }
+    Connections {
+        target:skin.host ? skin.host.Window.window : null
+        function onActiveChanged(){if(target && target.active)Theme.sync()}
+        function onVisibleChanged(){if(target && target.visible){Theme.sync();skin.refresh()}}
+    }
     Connections {
         target: skin.host
         function onPKebabMenuWinChanged() { skin.refresh() }
@@ -71,6 +85,7 @@ Item {
             pressed: control.down
             available: control.enabled
             animating: control.pImageAnimationRunning
+            active: control.checked === true || /Active/.test(String(control.asset))
             function updateNative() {
                 if (!control || !control.contentItem) return
                 control.contentItem.opacity = Qt.binding(function() { return face.known ? 0 : 1 })

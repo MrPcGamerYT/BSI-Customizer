@@ -1,4 +1,4 @@
-// Black animated RIGHT emulator sidebar. Passive visuals only; native input stays native.
+// Theme-bound native emulator command rail. Passive visuals only; native input stays native.
 import QtQuick 2.15
 import "Icons.js" as Icons
 
@@ -13,8 +13,9 @@ Item {
     property bool active: false
     property bool animating: false
     property bool motionEnabled: Theme.motionEnabled
-    // The caller removes the native glyph ONLY after its replacement has loaded.
-    readonly property bool known: glyph.status === Image.Ready && mode === "button"
+    // Reserve recognized glyphs during creation; never paint a stock icon while
+    // its replacement warms up. A missing PNG restores the native fallback.
+    readonly property bool known: iconKey !== "" && glyph.status !== Image.Error && mode === "button"
     readonly property string iconKey: resolveIcon()
     readonly property color ink: !available ? Theme.border : pressed ? Theme.text :
                                 hovered || active ? Theme.text : Theme.text
@@ -56,14 +57,16 @@ Item {
     }
 
     Rectangle {
+        objectName:"voidRailBackground"
         anchors.fill: parent
         visible: skin.mode === "rail"
         gradient: Gradient {
-            GradientStop { position: 0; color: Theme.background }
+            GradientStop { position: 0; color: Theme.surface }
             GradientStop { position: 0.42; color: Theme.background }
             GradientStop { position: 1; color: Theme.background }
         }
-        Rectangle { width: 1; height: parent.height; color: Theme.raised; opacity: 0.55 }
+        Rectangle { objectName:"voidRailEdge";width:1;height:parent.height;color:Theme.border }
+        Rectangle {anchors.top:parent.top;anchors.topMargin:12;anchors.horizontalCenter:parent.horizontalCenter;width:Math.max(8,parent.width-18);height:2;radius:1;color:Theme.accent;opacity:0.8}
         Rectangle { anchors.right: parent.right; width: 1; height: parent.height; color: Theme.background }
     }
 
@@ -76,13 +79,13 @@ Item {
         Rectangle {
             anchors.fill: parent
             anchors.margins: 3
-            radius: 9
+            radius: Math.min(12,Theme.corner)
             // Unknown icons must remain visible underneath this passive overlay.
             color: Theme.raised
             Behavior on border.color { enabled: skin.motionEnabled; ColorAnimation { duration: Theme.duration } }
             opacity: !skin.available ? 0 : !skin.known ? (skin.pressed ? 0.14 : skin.hovered ? 0.08 : 0) :
-                     skin.pressed ? 0.96 : skin.active ? 0.85 : skin.hovered ? 0.8 : 0
-            border.width: 1
+                     skin.pressed ? 0.96 : skin.active ? 0.95 : skin.hovered ? 0.85 : 0.22
+            border.width: skin.hovered || skin.active || skin.pressed ? 1 : 0
             border.color: skin.pressed ? Theme.muted : Theme.border
             Behavior on opacity { enabled: skin.motionEnabled; NumberAnimation { duration: Theme.duration } }
         }
@@ -90,7 +93,7 @@ Item {
             width: 2; height: skin.active ? 15 : 5; radius: 1
             Behavior on height { enabled: skin.motionEnabled; NumberAnimation { duration: Theme.duration; easing.type: Easing.OutBack } }
             anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
-            color: Theme.text
+            color: Theme.accent
             opacity: skin.active && skin.available ? 1 : 0
             Behavior on opacity { enabled: skin.motionEnabled; NumberAnimation { duration: Theme.duration } }
         }
@@ -103,12 +106,12 @@ Item {
             Behavior on scale { enabled: skin.motionEnabled; NumberAnimation { duration: Theme.duration; easing.type: Easing.OutBack; easing.overshoot: 1.1 } }
             sourceSize.width: 38; sourceSize.height: 38
             fillMode: Image.PreserveAspectFit
-            tint: skin.hovered || skin.active || skin.pressed ? Theme.accent : Theme.text
+            tint: Theme.accent
             opacity: !skin.available ? 0.35 : skin.hovered || skin.pressed || skin.active ? 1 : 0.75
             source: skin.svg ? "SharedIcons/"+skin.iconKey+".png" : ""
             RotationAnimation on rotation {
                 from: 0; to: 360; duration: 1100; loops: Animation.Infinite
-                running: skin.animating && skin.available && skin.visible && skin.mode === "button"
+                running: skin.motionEnabled && skin.animating && skin.available && skin.visible && skin.mode === "button"
                 onRunningChanged: if (!running) glyph.rotation = 0
             }
         }

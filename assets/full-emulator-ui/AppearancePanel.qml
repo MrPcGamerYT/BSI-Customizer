@@ -33,6 +33,7 @@ Popup {
         ScrollView {
             Layout.fillWidth:true;Layout.fillHeight:true;clip:true
             contentWidth:availableWidth
+            ScrollBar.vertical:ScrollBar {policy:ScrollBar.AlwaysOn;palette.mid:Theme.border;palette.dark:Theme.accent}
             ColumnLayout {
                 width:parent.width
                 spacing:18

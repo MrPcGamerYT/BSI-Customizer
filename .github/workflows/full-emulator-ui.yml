@@ -30,6 +30,8 @@ jobs:
       - run: python -m pip install PySide6==6.8.3
       - name: Full source inventory, guarded transaction and exact restore tests
         run: python tests/run_qt_runtime_test.py tests/full_emulator_ui_suite_test.py
+      - name: First-frame chrome and six live sidebar themes
+        run: python tests/run_qt_runtime_test.py tests/full_emulator_ui_chrome_test.py
       - name: Real Qt shell, native input, popup and passive chrome tests
         run: python tests/run_qt_runtime_test.py tests/full_emulator_ui_runtime_test.py
       - name: Native dialog/popup/control-editor surfaces and isolation
@@ -55,7 +57,7 @@ jobs:
           git diff --cached --quiet
           if ($LASTEXITCODE -eq 0) { exit 0 }
           if ($LASTEXITCODE -ne 1) { exit $LASTEXITCODE }
-          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m 'Package Windows-tested OLED Studio 09'
+          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m 'Package Windows-tested OLED Studio 10'
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           git push origin arena/cee7044d-bsi-customizer
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

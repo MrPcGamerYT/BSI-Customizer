@@ -1,4 +1,4 @@
-"""VOID OLED Studio 09: full eligible native-QML visual pass, using pinned transactions.
+"""VOID OLED Studio 10: full eligible native-QML visual pass, using pinned transactions.
 No resource scanning occurs on import. Check/Apply/Export are explicit commands.
 """
 import argparse
@@ -63,11 +63,11 @@ def runtime():
             raise RuntimeError('Pinned replacement hook changed; review required.')
         text = text.replace(before, after, 1)
     text = text.replace('Settings now uses the reference shell and contains the VOID Optimizer tab.', 'Settings now uses OLED Studio with live Appearance controls (no optimizer).')
-    text=text.replace('VOID FULL UI V5 — Carbon palette / incremental styling / native session tools; boot logic protected','VOID OLED STUDIO 09 - six dark presets / native UI / no optimizer')
+    text=text.replace('VOID FULL UI V5 — Carbon palette / incremental styling / native session tools; boot logic protected','VOID OLED STUDIO 10 - six dark presets / native UI / no optimizer')
     exec(compile(text, 'pinned-void-ui-engine.py', 'exec'), module.__dict__)
     module.live_names=set()
     module.live_coverage=[]
-    module.remove_optimizer = lambda desired, url: live_theme_sources(module, without_optimizer(module, desired, url), url)
+    module.remove_optimizer = lambda desired, url: live_theme_sources(module, first_frame_sources(module, without_optimizer(module, desired, url), url), url)
     module.replacing_ui = False
     module.replacement_state = lambda root, current, owners, url: replacement_state(module, root, current, owners, url)
     packed = module.payload()
@@ -173,7 +173,7 @@ def runtime():
             item = rows.setdefault(row['name'], {})
             item.update(row)
             item.setdefault('status', 'changed' if row['changed'] else 'verified')
-        report['suite'] = 'VOID OLED Studio 09'
+        report['suite'] = 'VOID OLED Studio 10'
         report['live_theme_bindings']=module.live_coverage
         report['theme_presets']=[entry['name'] for entry in json.loads(assets['themes.json'])]
         report['all_ui_runtime_certified'] = False
@@ -409,6 +409,44 @@ def without_optimizer(module, desired, url):
     return result
 
 
+def first_frame_sources(module, desired, url):
+    """Rebind ONLY our owned visual bridges; preserve native model/action bytes.
+    Replace the old absolute-path inline skin with the theme module directly.
+    No delay, window visibility changes, sleeps or native startup callbacks.
+    """
+    result=dict(desired);manager=module.manager()
+    for name in ('PlrSidebar.qml','PlrTopbar.qml','UiSettingsWindow.qml'):
+        if name not in result:continue
+        body=result[name];source=body.decode('utf-8-sig');before=source
+        namespace='import '+json.dumps(url)+' as VoidChrome10\n'
+        if name=='PlrSidebar.qml':
+            tokens,pairs=module.scan(manager,source)
+            definitions=[i for i in range(len(tokens)-4) if [t.text for t in tokens[i:i+5]]==['component','BsiSidebarInlineVisual',':','Item','{']]
+            manager.require(len(definitions)<=1,'Ambiguous owned sidebar bridge.')
+            if definitions:
+                i=definitions[0];end=pairs[i+4]
+                owned=source[tokens[i].start:tokens[end].end]
+                manager.require('BSISidebarVisual.qml' in owned and 'setSource(' in owned and 'function ' not in owned,'Unrecognized old inline sidebar visual; no native replacement.')
+                source=source[:tokens[i].start]+'component BsiSidebarInlineVisual: VoidChrome10.SidebarVisual {}'+source[tokens[end].end:]
+            # Both fresh installs and tracked Studio09 upgrades use the same bridge.
+            old='Loader { objectName:"voidReferenceSidebarSkinLoader"; source:'+json.dumps(url+'SidebarSkin.qml')+'; onLoaded:item.host=iSidebar }'
+            source=source.replace(old,'VoidChrome10.SidebarSkin { objectName:"voidReferenceSidebarSkinLoader"; host:iSidebar }')
+        elif name=='PlrTopbar.qml':
+            old='Loader { objectName:"voidReferenceTopbarLoader"; source:'+json.dumps(url+'TopbarSkin.qml')+'; onLoaded:item.host=parent }'
+            source=source.replace(old,'VoidChrome10.TopbarSkin { objectName:"voidReferenceTopbarLoader"; host:parent }')
+        else:
+            delayed='Component.onCompleted: setSource('+json.dumps(url+'SettingsShell.qml')+', {bsiHost:iSettingsWindow,bsiTheme:UiTheme})'
+            source=source.replace(delayed,'asynchronous: false\n    source: '+json.dumps(url+'SettingsShell.qml'))
+            source=source.replace('onLoaded: {\n        iSelectedSettingControl.parent = item.pageContainer','onLoaded: {\n        item.bsiHost=iSettingsWindow; item.bsiTheme=UiTheme\n        iSelectedSettingControl.parent = item.pageContainer')
+        if source!=before and 'VoidChrome10.' in source and namespace not in source:
+            imports=list(re.finditer(r'^import[^\r\n]*[\r\n]+',source,re.M))
+            manager.require(bool(imports),'Missing chrome imports.')
+            at=imports[-1].end();source=source[:at]+namespace+source[at:]
+        module.scan(manager,source)
+        result[name]=( ('\ufeff' if body.startswith(b'\xef\xbb\xbf') else '')+source).encode('utf-8')
+    return result
+
+
 def configure(design, original):
     if set(design) != {'format', 'name', 'font', 'radius', 'motion', 'durationMs', 'palette'} or design['format'] != 1:
         raise RuntimeError('Unsupported design schema.')
@@ -575,7 +613,7 @@ def main(argv=None):
     module.replacing_ui = '--replace-ui' in argv
     if module.replacing_ui:
         print('REPLACE UI: old UI files/state will be replaced; apps/data and independent helpers are not removed.')
-    print('VOID OLED STUDIO 09 - live native appearance / six presets / custom colors')
+    print('VOID OLED STUDIO 10 - live native appearance / six presets / custom colors')
     if '--export-sources' in argv:
         parser = argparse.ArgumentParser()
         parser.add_argument('--export-sources', type=Path, required=True)

@@ -6,28 +6,37 @@ Item {
     property color tint: Theme.text
     property size sourceSize: Qt.size(64,64)
     property int fillMode: Image.PreserveAspectFit
-    property int status: Image.Null
+    readonly property int status: mask.status
     function update() {
-        status=source.toString().length ? Image.Loading : Image.Null
-        if(!canvas.available)return
+        if(!canvas || !canvas.available)return
         if(source.toString().length) {
             canvas.loadImage(source)
-            if(canvas.isImageLoaded(source))status=Image.Ready
         }
         canvas.requestPaint()
     }
     onSourceChanged: update()
-    onTintChanged: canvas.requestPaint()
-    onWidthChanged: canvas.requestPaint()
-    onHeightChanged: canvas.requestPaint()
+    onTintChanged: if(canvas)canvas.requestPaint()
+    onWidthChanged: if(canvas)canvas.requestPaint()
+    onHeightChanged: if(canvas)canvas.requestPaint()
     Component.onCompleted: update()
+    // Synchronous PNG decode supplies deterministic known/error state before
+    // first paint. The Canvas only tints; it never decides native visibility.
+    Image {
+        id:mask
+        visible:false
+        source:icon.source
+        sourceSize:icon.sourceSize
+        asynchronous:false
+        cache:true
+        onStatusChanged:if(status===Image.Ready)icon.update()
+    }
     Canvas {
         id: canvas
         anchors.fill: parent
         // Keep logical canvas and viewport equal: a larger canvas clips icons.
         canvasSize: Qt.size(Math.max(1,width),Math.max(1,height))
         onAvailableChanged: if(available)icon.update()
-        onImageLoaded: {icon.status=Image.Ready;requestPaint()}
+        onImageLoaded: requestPaint()
         onPaint: {
             var ctx=getContext("2d");ctx.reset()
             if(!icon.source.toString().length || !isImageLoaded(icon.source))return
@@ -35,7 +44,6 @@ Item {
             ctx.globalCompositeOperation="source-in"
             ctx.fillStyle=icon.tint;ctx.fillRect(0,0,canvasSize.width,canvasSize.height)
             ctx.globalCompositeOperation="source-over"
-            icon.status=Image.Ready
         }
     }
 }

@@ -23,7 +23,7 @@ Item {
     }
     readonly property int selectedIndex: bsiHost ? bsiHost.pCurrentTabIndex : 0
     property alias pageContainer: bsiPageBody
-    function stylePage(page) { nativeStyle.schedule(page) }
+    function stylePage(page) { nativeStyle.prepare(page) }
 
     function iconForEntry(entry) {
         return Icons.kindForTab(entry.pButtonId, entry.pQmlSource || "", entry.pButtonText)
@@ -42,6 +42,11 @@ Item {
         host.y=Math.max(area.y,Math.min(host.y,area.y+area.height-host.height))
     }
     onBsiHostChanged: SurfaceRegistry.attach(shell, bsiHost)
+    Connections {
+        target:shell.bsiHost
+        ignoreUnknownSignals:true
+        function onVisibleChanged(){if(target && target.visible){Theme.sync();nativeStyle.prepare(bsiPageBody)}}
+    }
     Component.onDestruction: SurfaceRegistry.detach(shell)
     Component.onCompleted: { Qt.callLater(fitHost); SurfaceRegistry.attach(shell, bsiHost) }
     component BsiOutlineIcon: ThemeIcon {
@@ -72,12 +77,12 @@ Item {
             height: 76
             Text {
                 anchors.left: parent.left; anchors.leftMargin: 18; anchors.top: parent.top; anchors.topMargin: 9
-                text: "𝓥𝓞𝓘𝓓  /  EMULATOR INTERFACE"; color: Theme.muted; font.family: Theme.fontFamily; font.pixelSize: 9; font.letterSpacing: 1.3
+                text: "𝓥𝓞𝓘𝓓  /  NATIVE CONTROL CENTER"; color: Theme.muted; font.family: Theme.fontFamily; font.pixelSize: 9; font.letterSpacing: 1.3
             }
             Text {
                 objectName: "voidFullUiVersion"
                 anchors.right: appearanceButton.left; anchors.rightMargin: 14; anchors.verticalCenter: parent.verticalCenter
-                text: Theme.name+"  /  OLED STUDIO 09"; color: Theme.muted; font.family: Theme.fontFamily; font.pixelSize: 9; font.letterSpacing: 1.2
+                text: "OLED STUDIO 10  /  "+Theme.name; color: Theme.muted; font.family: Theme.fontFamily; font.pixelSize: 9; font.letterSpacing: 1.2
             }
             Rectangle {
                 anchors.bottom: parent.bottom; anchors.left: parent.left; anchors.right: parent.right; anchors.margins: 18
@@ -131,10 +136,25 @@ Item {
             anchors.top: header.bottom; anchors.topMargin: 8
             anchors.bottom: parent.bottom; anchors.bottomMargin: 16
             width: shell.bsiRailWidth
+            Rectangle {
+                anchors.fill:parent;anchors.margins:-5
+                radius:Math.max(0,Theme.corner-2);color:Theme.surface;border.width:1;border.color:Theme.border
+            }
+            Text {
+                x:12;y:9;text:shell.bsiCompact?"UI":"WORKSPACE"
+                color:Theme.muted;font.family:Theme.fontFamily;font.pixelSize:9;font.letterSpacing:1.3
+            }
+            Rectangle {
+                anchors.left:parent.left;anchors.right:parent.right;anchors.bottom:parent.bottom
+                anchors.margins:8;height:46;radius:Math.min(10,Theme.corner);color:Theme.raised
+                Rectangle {x:10;anchors.verticalCenter:parent.verticalCenter;width:6;height:6;radius:3;color:Theme.accent}
+                Text {x:24;anchors.verticalCenter:parent.verticalCenter;width:parent.width-28;elide:Text.ElideRight;text:Theme.name;visible:!shell.bsiCompact;color:Theme.text;font.family:Theme.fontFamily;font.pixelSize:11}
+                MouseArea {anchors.fill:parent;cursorShape:Qt.PointingHandCursor;onClicked:appearance.open()}
+            }
             ListView {
                 id: navigation
                 objectName: "bsiSettingsNavigation"
-                anchors.fill: parent
+                anchors.fill: parent;anchors.topMargin:32;anchors.bottomMargin:64
                 model: shell.bsiTabs
                 currentIndex: shell.selectedIndex
                 onCurrentIndexChanged: if (currentIndex >= 0) positionViewAtIndex(currentIndex,ListView.Contain)
@@ -144,7 +164,7 @@ Item {
                 delegate: ItemDelegate {
                     id: tab
                     objectName: "bsiSettingsTab_" + index
-                    width: navigation.width; height: 38
+                    width: navigation.width; height: 44
                     property var nativeRow: model.modelData
                     property var nativeEntry: nativeRow.entry
                     readonly property bool selected: index === shell.selectedIndex
@@ -160,7 +180,7 @@ Item {
                             anchors.left: parent.left
                             anchors.leftMargin: shell.bsiCompact ? 14 : 14
                             anchors.verticalCenter: parent.verticalCenter
-                            width: 24; height: 24; color: "transparent"
+                            width: 28; height: 28;radius:8;color:tab.selected?Theme.accent_transparent:Theme.raised
                             BsiOutlineIcon {
                                 anchors.centerIn: parent; width: 20; height: 20
                                 kind: shell.iconForEntry(tab.nativeEntry)
@@ -186,8 +206,8 @@ Item {
                         border.width: tab.selected || tab.hovered || tab.activeFocus ? 1 : 0
                         border.color: tab.selected || tab.activeFocus ? Theme.accent : tab.hovered ? Theme.border : "transparent"
                         gradient: Gradient {
-                            GradientStop { position: 0; color: tab.selected ? Theme.raised : tab.hovered ? Theme.surface : Theme.background }
-                            GradientStop { position: 1; color: tab.selected ? Theme.surface : tab.hovered ? Theme.surface : Theme.background }
+                            GradientStop { position: 0; color: tab.selected ? Theme.accent_transparent : tab.hovered ? Theme.raised : Theme.surface }
+                            GradientStop { position: 1; color: tab.selected ? Theme.raised : Theme.surface }
                         }
                         Behavior on border.color { enabled:shell.motionEnabled; ColorAnimation { duration: Theme.duration } }
                         Rectangle {
@@ -217,6 +237,10 @@ Item {
             anchors.top: rail.top; anchors.topMargin: 5
             anchors.bottom: parent.bottom; anchors.bottomMargin: 22
             width: 1; color: Theme.surface
+        }
+        Rectangle {
+            anchors.fill:bsiPageBody;anchors.margins:-6
+            color:Theme.background;radius:Math.max(0,Theme.corner-2);border.width:1;border.color:Theme.border
         }
         // Reparented native StackLayout lives here. No fake settings controls,
         // duplicate Save button, duplicate page title or substitute backend.

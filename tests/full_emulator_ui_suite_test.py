@@ -62,9 +62,15 @@ class SuiteTests(unittest.TestCase):
                 self.assertIn(b'VOID SUITE07 PASSIVE CONTROLS',after[name])
                 self.assertIn(b'backend.',after[name])
                 self.assertIn(b'VoidLiveTheme.Theme.',after[name])
+            self.assertNotIn(b'BSISidebarVisual.qml',after['PlrSidebar.qml'])
+            self.assertNotIn(b'file:///C:/Program%20Files/',after['PlrSidebar.qml'])
+            self.assertIn(b'component BsiSidebarInlineVisual: VoidChrome10.SidebarVisual {}',after['PlrSidebar.qml'])
+            self.assertIn(b'VoidChrome10.SidebarSkin',after['PlrSidebar.qml'])
+            self.assertIn(b'asynchronous: false',after['UiSettingsWindow.qml'])
+            self.assertNotIn(b'Component.onCompleted: setSource(',after['UiSettingsWindow.qml'])
             self.assertIn(b'VoidLiveTheme.Theme.',after['UiPerformanceSetting.qml'])
             self.assertNotIn(b'VoidLiveTheme.Theme.',after['UiDialog.qml'])
-            self.assertIn(b'OLED STUDIO 09',(root/'Assets/VOIDReferenceUI/SettingsShell.qml').read_bytes())
+            self.assertIn(b'OLED STUDIO 10',(root/'Assets/VOIDReferenceUI/SettingsShell.qml').read_bytes())
             self.assertFalse((root/'Assets/VOIDReferenceUI/OptimizerPage.qml').exists())
             for name in ('UiSettingsWindow.qml', 'PlrSidebar.qml'):
                 for token in (b'voidOptimizer', b'pVoidOptimizer', b'VoidUiNav', b'F9'):
@@ -160,7 +166,7 @@ class SuiteTests(unittest.TestCase):
             self.assertTrue(any(change.relative.endswith('old-optimizer.qml') and change.after is None for change in planned.changes))
             backup=E.commit(planned)
             self.assertFalse(old.exists())
-            self.assertIn(b'OLED STUDIO 09',shell.read_bytes())
+            self.assertIn(b'OLED STUDIO 10',shell.read_bytes())
             self.assertEqual(U.plan_install(root)[0].changes,[])
             E.restore(backup,root)
             for name,digest in before.items():self.assertEqual(S.sha((root/name).read_bytes()),digest,name)
@@ -258,6 +264,25 @@ Item {
         self.assertIn(b'text:"#f2f7ff";color:VoidLiveTheme.Theme.text',result)
         self.assertIn(b'font:Qt.font({family:VoidLiveTheme.Theme.fontFamily,pixelSize:14})',result)
         self.assertIn(b'radius:VoidLiveTheme.Theme.corner',result)
+
+    def test_studio09_upgrade_removes_old_absolute_sidebar_bridge(self):
+        import types
+        package=ROOT/'deliverables/VOID-OLED-Emulator-UI.zip'
+        with zipfile.ZipFile(package) as archive:
+            source=archive.read('VOID-OLED-Emulator-UI/VOID-Full-UI.py')
+        # The CI pack becomes 10 later in the job; use 09 only when available.
+        if b'first_frame_sources' in source:self.skipTest('delivered ZIP is already Studio10')
+        old=types.ModuleType('studio09_fixture');old.__file__=str(ROOT/'.cache/old-studio09/VOID-Full-UI.py')
+        sys.modules[old.__name__]=old;exec(compile(source,'studio09-fixture.py','exec'),old.__dict__)
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder)/'Upgrade09';fixture(root)
+            E.commit(old.runtime().plan_install(root)[0])
+            self.assertIn(b'BSISidebarVisual.qml',inventory((root/'HD-Player.exe').read_bytes())['PlrSidebar.qml'])
+            prior=files(root);backup=E.commit(U.plan_install(root)[0])
+            self.assertNotIn(b'BSISidebarVisual.qml',inventory((root/'HD-Player.exe').read_bytes())['PlrSidebar.qml'])
+            self.assertEqual(U.plan_install(root)[0].changes,[])
+            E.restore(backup,root)
+            self.assertEqual({k:v for k,v in files(root).items() if not k.startswith("VOID-UI-Backups/")},{k:v for k,v in prior.items() if not k.startswith("VOID-UI-Backups/")})
 
     def test_design_is_data_not_qml(self):
         design=json.loads((ROOT/'assets/full-emulator-ui/design.json').read_text())

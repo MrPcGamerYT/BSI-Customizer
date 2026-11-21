@@ -64,7 +64,7 @@ print('PASS extracted runtime and external design')
         assert result.returncode == 0, result.stdout+result.stderr
         assert not old.exists()
         assert (player/'HD-Player.exe').read_bytes() != original
-        assert b'OLED STUDIO 09' in (player/'Assets/VOIDReferenceUI/SettingsShell.qml').read_bytes()
+        assert b'OLED STUDIO 10' in (player/'Assets/VOIDReferenceUI/SettingsShell.qml').read_bytes()
         result = subprocess.run([sys.executable, str(target/'VOID-Full-UI.py'), '--restore-latest', '--yes', '--install-dir', str(player)], cwd=target, text=True, capture_output=True, timeout=120)
         assert result.returncode == 0, result.stdout+result.stderr
         assert (player/'HD-Player.exe').read_bytes() == original

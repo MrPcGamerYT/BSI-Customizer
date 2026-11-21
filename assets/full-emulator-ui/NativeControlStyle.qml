@@ -20,12 +20,18 @@ Item {
     property int visitedNodes: 0
     property int flushCount: 0
     property var pendingNodes: new Set()
+    property bool initialized: false
     property bool scheduled: false
     property bool themeSyncScheduled: false
     function syncAppearance() {
         if(themeSyncScheduled)return
         themeSyncScheduled=true
         Qt.callLater(function(){themeSyncScheduled=false;Theme.sync()})
+    }
+    function prepare(item) {
+        if(!item)return
+        if(!styled.has(item))install(item,0)
+        else installChildren(item,0)
     }
     function schedule(item) {
         if (!item) return
@@ -66,7 +72,7 @@ Item {
         function onHeaderChanged() { skin.schedule(owner) }
         function onFooterChanged() { skin.schedule(owner) }
         function onChildrenChanged() { skin.schedule(owner) }
-        function onVisibleChanged() { if (owner && owner.visible) { skin.syncAppearance();skin.schedule(owner) } }
+        function onVisibleChanged() { if (owner && owner.visible) { skin.syncAppearance();skin.prepare(owner) } }
     } }
     property bool motionEnabled: Theme.motionEnabled
     function findSliderTrack(node,owner,depth) {
@@ -195,8 +201,8 @@ Item {
         if (control.popup && control.popup.background) overlay(buttonVisual, control, control.popup.background, "popup")
         if (control.popup && control.popup.contentItem) install(control.popup.contentItem, 0)
     }
-    onPagesChanged: { schedule(pages); registerHost() }
-    Component.onCompleted: schedule(pages)
+    onPagesChanged: { if(initialized)prepare(pages);else schedule(pages); registerHost() }
+    Component.onCompleted: {initialized=true;prepare(pages)}
     function controlIcon(asset) {
         var names={Tap:"Tap",RepeatedTap:"RepeatedTap",Dpad:"Dpad",Aim:"Aim",FreeLook:"FreeLook",Script:"Script",Swipe:"Swipe",Zoom:"Zoom",Tilt:"Tilt","MOBA-PAD":"MOBA-PAD",SkillPad:"SkillPad",Rotate:"Rotate",EdgeScroll:"EdgeScroll",Scroll:"Scroll",MouseZoom:"MouseZoom",State:"State",DontForwardKeys:"DontForwardKeys",SendOriginalKeys:"SendOriginalKeys",Callback:"Callback",MouseLock:"MouseLock",SmartScroll:"SmartScroll",NativeCursor:"NativeCursor"}
         return names[String(asset)] || ""
