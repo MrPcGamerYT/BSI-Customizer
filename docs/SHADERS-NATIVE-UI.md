@@ -117,8 +117,13 @@ the production `shader-settings-image-test` exporter. Per matching Qt family it:
    live theme at identical coordinates in clean, enabled, hover and pressed
    states. The reference is outside the shell decorator's scope. Also compares
    the restart dialog pixel-for-pixel against a separate stock factory with the
-   same theme/product strings; changing the reference's painted title must
-   fail image equality (readable-font runs only).
+   same theme/product strings; changing one painted title glyph, without
+   changing the title length, must fail image equality (readable-font runs only).
+   Normal offscreen tests explicitly register the repo's Inter font in the test
+   process, without changing any native theme font property. Windows offscreen
+   QPA need not discover desktop fonts; box glyphs are not readable-text proof.
+   The separate empty-font stress process installs no font and keeps its wide-
+   metric/layout/input checks; it is not substituted for the normal pixel test.
 5. Physically exercises the checkbox, combos, slider, Save, Enhance and all ten
    right-aligned, fully visible Reset buttons at 750/420 px. Includes empty-font
    layout stress with no repeated reveal, click retry or property-only fallback.
@@ -162,8 +167,9 @@ The native-page opacity and Save oracle use the public asynchronous
 `QQuickItem.grabToImage()` path. `QQuickWindow.grabWindow()` returns an empty
 image on the independent Qt 5 software hosts; that is a capture-API limitation,
 not permission to skip pixels. `shaders_qt_capture_test.py` independently checks
-real changing pixels, immutable snapshots and a rejected nonpainting negative
-without needing a shader module or OEM resources. One scene-update boundary is
+real changing pixels, a same-length readable-glyph change, immutable snapshots
+and separate rejected nonpainting text/patch negatives without needing a shader
+module or OEM resources. One scene-update boundary is
 used before each capture; no capture-until-pass retry. Selected-tab contrast
 compares two original sample points in **one** frame with the unchanged strict
 `>6` lightness delta. Synchronization alone did not resolve the intermittent

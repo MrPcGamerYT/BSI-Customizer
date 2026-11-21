@@ -190,6 +190,9 @@ def main():
         # exact new profile that this test owns, even when an assertion fails.
         QStandardPaths.setTestModeEnabled(True)
         app = QGuiApplication.instance() or QGuiApplication([])
+        if os.environ.get("BSI_SHADERS_TEST_FONTLESS") != "1":
+            from shaders.qt_fonts import install_readable_test_font
+            install_readable_test_font(app)
         instance = "Fixture-" + uuid.uuid4().hex
         executable = QFileInfo(QCoreApplication.applicationFilePath()).canonicalFilePath()
         key = hashlib.sha256((executable + "\n" + instance).encode()).hexdigest()
@@ -657,9 +660,14 @@ Window {
         QTest.mouseMove(reference_dialog, QPointF(10, reference_dialog.height() - 10).toPoint())
         expected_restart_pixels = capture_window(reference_dialog)
         if os.environ.get("BSI_SHADERS_TEST_FONTLESS") != "1":
-            reference_dialog.setTitle("Different restart title")
+            # Change one glyph, not the title's length/line count. Missing-font
+            # boxes must fail the text oracle, not pass via unrelated reflow.
+            reference_dialog.setTitle(reference_dialog.title().replace("Restart", "Reztart", 1))
             changed_restart_pixels = capture_window(reference_dialog)
-            assert changed_restart_pixels.size() == expected_restart_pixels.size() and changed_restart_pixels != expected_restart_pixels, "restart pixel oracle did not detect changed painted text"
+            assert changed_restart_pixels.size() == expected_restart_pixels.size() and changed_restart_pixels != expected_restart_pixels, (
+                "restart pixel oracle did not detect changed painted text",
+                "expectedSize", expected_restart_pixels.size(), "changedSize", changed_restart_pixels.size(),
+                "identical", changed_restart_pixels == expected_restart_pixels)
         click(dialog_button(reference_dialog, 1), target_window=reference_dialog)
         select_potato(2)
         before_prompt = profile.read_bytes()
