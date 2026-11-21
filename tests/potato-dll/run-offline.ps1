@@ -100,12 +100,12 @@ try {
                             if ($r.$key -isnot [bool]) { throw 'Nonboolean child evidence field' }
                             $row[$key] = $r.$key
                         }
-                        foreach ($key in @('textureBias','textureMinLod','samplerBias','samplerMinLod','bindOnlyBias','bindOnlyMinLod','bindExportOnlyBias','bindExportOnlyMinLod','sampledMip','warmupAttempts','firstRemainingGlError')) {
+                        foreach ($key in @('textureBias','textureMinLod','samplerBias','samplerMinLod','bindOnlyBias','bindOnlyMinLod','bindExportOnlyBias','bindExportOnlyMinLod','sampledMip','minifiedMip','warmupAttempts','firstRemainingGlError')) {
                             $value = [double]$r.$key
                             if ([double]::IsNaN($value) -or [double]::IsInfinity($value) -or [math]::Abs($value) -gt 1000000) { throw 'Invalid numeric child evidence field' }
                             $row[$key] = $value
                         }
-                        foreach ($key in @('beforePixel','afterPixel')) {
+                        foreach ($key in @('beforePixel','afterPixel','nativeMinifiedPixel','minifiedPixel')) {
                             if ($r.$key.Count -ne 4) { throw 'Bad pixel evidence' }
                             $pixel = @();foreach ($channel in $r.$key) { $n=[int]$channel;if ($n -lt 0 -or $n -gt 255) { throw 'Bad pixel channel' };$pixel += $n }
                             $row[$key] = $pixel
@@ -116,7 +116,8 @@ try {
                             ($sampling -ne 'sampler' -or ($row.samplerBias -eq $case.expectedLod -and $row.samplerMinLod -eq $expectedMinimum))
                         }
                         $bindParameters = $row.bindOnlyBias -eq $case.expectedLod -and $row.bindOnlyMinLod -eq $expectedMinimum
-                        $row.passed = $exit -eq 0 -and $row.containedBeforeResume -and $row.mechanismObserved -and $row.softwareRenderer -and $parameters -and $bindParameters -and -not $row.anchorCalled -and -not $row.depthTestEnabled -and $row.activeUnitRestored -and -not $row.gameExecuted -and -not $row.physicalGpuTested -and ($row.importLoaded -eq ($kind -ne 'control'))
+                        $expectedMinified = if ($kind -eq 'control') { 4 } else { 6 }
+                        $row.passed = $exit -eq 0 -and $row.minifiedMip -eq $expectedMinified -and $row.containedBeforeResume -and $row.mechanismObserved -and $row.softwareRenderer -and $parameters -and $bindParameters -and -not $row.anchorCalled -and -not $row.depthTestEnabled -and $row.activeUnitRestored -and -not $row.gameExecuted -and -not $row.physicalGpuTested -and ($row.importLoaded -eq ($kind -ne 'control'))
                     } else { throw 'Unknown child evidence kind' }
                 }
                 $rows += $row
@@ -159,18 +160,18 @@ try {
                 $row.failureStage = [int]$r.failureStage
                 $row.win32Error = [long]$r.win32Error
             } elseif ($r.kind -eq 'independent-owned-resource-WGL-alternative') {
-                foreach ($key in @('originalDllLoaded','softwareRenderer','depthTestEnabled','offExact','sourceParametersUnchanged','unrelatedSamplerUntouched','minimumLodsVerified','gameExecuted','physicalGpuTested')) {
+                foreach ($key in @('originalDllLoaded','softwareRenderer','depthTestEnabled','offExact','sourceParametersUnchanged','unrelatedSamplerUntouched','minimumLodsVerified','biasFloorDifferenceObserved','privateBiasOffExact','gameExecuted','physicalGpuTested')) {
                     if ($r.$key -isnot [bool]) { throw 'Nonboolean independent evidence field' }
                     $row[$key] = $r.$key
                 }
                 $row.cycles = [int]$r.cycles
                 $row.firstGlError = [int]$r.firstGlError
-                foreach ($key in @('beforePixel','lightPixel','strongPixel','offPixel')) {
+                foreach ($key in @('beforePixel','lightPixel','strongPixel','offPixel','nativeMinifiedPixel','lightFloorMinifiedPixel','strongFloorMinifiedPixel','privateBiasPixel','privateBiasMinifiedPixel','privateBiasOffMinifiedPixel')) {
                     if ($r.$key.Count -ne 4) { throw 'Bad independent pixel evidence' }
                     $pixel = @();foreach ($channel in $r.$key) { $n=[int]$channel;if ($n -lt 0 -or $n -gt 255) { throw 'Bad independent pixel channel' };$pixel += $n }
                     $row[$key] = $pixel
                 }
-                $row.passed = $exit -eq 0 -and $row.containedBeforeResume -and $r.passed -eq $true -and -not $row.originalDllLoaded -and $row.softwareRenderer -and -not $row.depthTestEnabled -and $row.offExact -and $row.sourceParametersUnchanged -and $row.unrelatedSamplerUntouched -and $row.minimumLodsVerified -and $row.cycles -eq 32 -and $row.firstGlError -eq 0 -and -not $row.gameExecuted -and -not $row.physicalGpuTested -and (($row.offPixel -join ',') -eq ($row.beforePixel -join ','))
+                $row.passed = $exit -eq 0 -and $row.containedBeforeResume -and $r.passed -eq $true -and -not $row.originalDllLoaded -and $row.softwareRenderer -and -not $row.depthTestEnabled -and $row.offExact -and $row.sourceParametersUnchanged -and $row.unrelatedSamplerUntouched -and $row.minimumLodsVerified -and $row.biasFloorDifferenceObserved -and $row.privateBiasOffExact -and $row.cycles -eq 32 -and $row.firstGlError -eq 0 -and -not $row.gameExecuted -and -not $row.physicalGpuTested -and (($row.offPixel -join ',') -eq ($row.beforePixel -join ','))
             } else { throw 'Unknown independent evidence kind' }
         }
         $alternatives += $row
@@ -194,4 +195,4 @@ try {
     if ($alternatives.Count -gt 0) { Write-BoundedEvidence -Title 'Independent owned sampler cases' -Data $alternatives }
 }
 if (-not $allPassed) { throw 'One or more actual original-DLL or independent comparison cases failed; inspect their separate evidence, do not claim a game fix' }
-'PASS: five unique original DLLs, normal renamed import (anchor NOT called), actual detours and real Mesa software mip pixels with depth disabled; separately, private samplers change explicitly owned resources and restore exact Off output/state over 64 cycles. Outbound block and bounded child lifetime. NOT player/physical-GPU acceptance.' | Out-File $env:GITHUB_STEP_SUMMARY -Append
+'PASS: five unique original DLLs, normal renamed import (anchor NOT called), actual detours and real Mesa software mip pixels with depth disabled; separately, private floor samplers restore exact Off output/state over 64 cycles; a private desktop bias+floor comparison matches the original Strong mip choices at native and minified gradients and also restores Off. Outbound block and bounded child lifetime. NOT player/physical-GPU acceptance.' | Out-File $env:GITHUB_STEP_SUMMARY -Append

@@ -128,8 +128,9 @@ a GL 3.3/GLES 3.1 draw-time path only. No supplied DLL is installed. See
 
 **Known reported failure, not another request to repeat this procedure:** the
 saved/armed-On follow-up had 1,235 processed frames and 2,468 inspected calls,
-all first-rejected because depth testing is disabled, with zero eligible,
-prepared, overridden or nested calls. The earlier advancing-3D/Settings-closed
+all first-rejected because depth testing is disabled, with zero eligible/
+prepared calls/overridden bindings and zero nested inspected/prepared counts.
+The earlier advancing-3D/Settings-closed
 confirmation already stands. The nested-wrapper repair did not fix this game
 case; another Save or lower-resolution choice is not a remedy. Work now
 includes an [actual original-DLL and reversible owned-resource experiment](POTATO-DLL-PROBE.md).

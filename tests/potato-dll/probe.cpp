@@ -148,22 +148,27 @@ int probe(const wchar_t *report,bool sampler,bool independent=false){
     LOAD(void,CompileShader,GLuint);LOAD(void,GetShaderiv,GLuint,GLenum,GLint*);
     LOAD(GLuint,CreateProgram);LOAD(void,AttachShader,GLuint,GLuint);LOAD(void,LinkProgram,GLuint);
     LOAD(void,GetProgramiv,GLuint,GLenum,GLint*);LOAD(void,UseProgram,GLuint);
-    LOAD(GLint,GetUniformLocation,GLuint,const char*);LOAD(void,Uniform1i,GLint,GLint);
+    LOAD(GLint,GetUniformLocation,GLuint,const char*);LOAD(void,Uniform1i,GLint,GLint);LOAD(void,Uniform1f,GLint,GLfloat);
     LOAD(void,ActiveTexture,GLenum);LOAD(void,BindTexture,GLenum,GLuint);
     LOAD(void,GenVertexArrays,GLsizei,GLuint*);LOAD(void,BindVertexArray,GLuint);
     LOAD(void,DrawArrays,GLenum,GLint,GLsizei);LOAD(void,GenSamplers,GLsizei,GLuint*);
     LOAD(void,SamplerParameteri,GLuint,GLenum,GLint);LOAD(void,SamplerParameterf,GLuint,GLenum,GLfloat);
     LOAD(void,GetSamplerParameterfv,GLuint,GLenum,GLfloat*);LOAD(void,BindSampler,GLuint,GLuint);LOAD(void,DeleteSamplers,GLsizei,const GLuint*);
     const auto shader=[&](GLenum kind,const char *source){const auto s=CreateShader(kind);ShaderSource(s,1,&source,nullptr);CompileShader(s);GLint okay=0;GetShaderiv(s,0x8b81,&okay);require(okay!=0,"test shader compile");return s;};
-    const char *vertex="#version 330\nout vec2 uv;void main(){vec2 p=vec2(float((gl_VertexID&1)*2-1),float((gl_VertexID>>1)*2-1));uv=(p+1.0)*0.5;gl_Position=vec4(p,0,1);}";
+    const char *vertex="#version 330\nout vec2 uv;uniform float sampleScale;void main(){vec2 p=vec2(float((gl_VertexID&1)*2-1),float((gl_VertexID>>1)*2-1));uv=(p+1.0)*0.5*sampleScale;gl_Position=vec4(p,0,1);}";
     const char *fragment="#version 330\nin vec2 uv;out vec4 outputColor;uniform sampler2D sourceColor;void main(){outputColor=texture(sourceColor,uv);}";
     const auto program=CreateProgram();AttachShader(program,shader(0x8b31,vertex));AttachShader(program,shader(0x8b30,fragment));LinkProgram(program);
     GLint linked=0;GetProgramiv(program,0x8b82,&linked);require(linked!=0,"test program link");UseProgram(program);Uniform1i(GetUniformLocation(program,"sourceColor"),0);
+    const auto scaleLocation=GetUniformLocation(program,"sampleScale");require(scaleLocation>=0,"authored texture-gradient control");Uniform1f(scaleLocation,1.f);
     GLuint vao=0;GenVertexArrays(1,&vao);BindVertexArray(vao);
     diagnosticStage=40;
     ActiveTexture(0x84c0);GLuint texture=0;glGenTextures(1,&texture);BindTexture(GL_TEXTURE_2D,texture);
     glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_NEAREST_MIPMAP_NEAREST);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_NEAREST);
     const unsigned char colors[7][4]{{255,0,0,255},{0,255,0,255},{0,0,255,255},{255,255,0,255},{0,255,255,255},{255,0,255,255},{255,255,255,255}};
+    const auto mipFor=[&](const std::array<unsigned char,4> &value){
+        for(int i=0;i<7;++i)if(std::equal(value.begin(),value.end(),colors[i]))return i;
+        return -1;
+    };
     for(unsigned mip=0;mip<7;++mip){const auto length=side>>mip;std::vector<unsigned char> data(length*length*4);
         for(std::size_t i=0;i<data.size();i+=4)std::copy(colors[mip],colors[mip]+4,data.begin()+std::ptrdiff_t(i));
         glTexImage2D(GL_TEXTURE_2D,GLint(mip),0x8058,GLsizei(length),GLsizei(length),0,GL_RGBA,GL_UNSIGNED_BYTE,data.data());
@@ -179,6 +184,9 @@ int probe(const wchar_t *report,bool sampler,bool independent=false){
         ActiveTexture(GLenum(active));return p;};
     draw();const auto before=pixel();const auto native=params();
     require(before==std::array<unsigned char,4>{{255,0,0,255}}&&native[0]==0&&native[1]==-1000,"native unmodified mip-zero baseline BEFORE any swap");
+    Uniform1f(scaleLocation,16.f);draw();const auto nativeMinified=pixel();
+    require(mipFor(nativeMinified)==4,"16-times texture gradients select native mip four before hooks");
+    Uniform1f(scaleLocation,1.f);draw();require(pixel()==before,"restore baseline texture gradients");
     require(glGetError()==GL_NO_ERROR,"test-owned setup has no GL errors");
     if(independent){
         diagnosticStage=70;
@@ -219,7 +227,7 @@ int probe(const wchar_t *report,bool sampler,bool independent=false){
             ActiveTexture(GLenum(result[0]));return result;
         };
         const auto savedState=state();
-        std::array<unsigned char,4> coarse[2]{},restored=before;
+        std::array<unsigned char,4> coarse[2]{},floorMinified[2]{},restored=before;
         bool exact=true,unrelatedUntouched=true,actualLods=true;unsigned cycles=0;
         for(unsigned mode=0;mode<2;++mode){
             const auto setting=mode?BsiShaders::TextureQuality::Strong:BsiShaders::TextureQuality::Light;
@@ -240,21 +248,49 @@ int probe(const wchar_t *report,bool sampler,bool independent=false){
                 exact=exact&&restored==before&&sourceState()==savedSource&&state()==savedState;
                 ++cycles;
             }
+            // A floor is NOT an additive bias: a native lambda of four stays
+            // at mip four even with either tested floor (1.5 or 3.0).
+            Uniform1f(scaleLocation,16.f);BindSampler(0,replacement);draw();floorMinified[mode]=pixel();
+            BindSampler(0,nativeSampler);draw();exact=exact&&pixel()==nativeMinified;
+            Uniform1f(scaleLocation,1.f);draw();restored=pixel();
+            exact=exact&&restored==before&&sourceState()==savedSource&&state()==savedState;
             DeleteSamplers(1,&replacement);
         }
+        // Another independently authored, DESKTOP-GL-only alternative: put
+        // bias + floor in a private sampler on this explicitly known resource,
+        // not into the application's objects. Never stack unknown overrides.
+        // This is separate from (and does not modify) production's floor plan.
+        GLuint biased=0;GenSamplers(1,&biased);
+        SamplerParameteri(biased,GL_TEXTURE_MIN_FILTER,source.minimumFilter);SamplerParameteri(biased,GL_TEXTURE_MAG_FILTER,GL_NEAREST);
+        SamplerParameterf(biased,0x813a,3.f);SamplerParameterf(biased,0x8501,3.f);
+        GLfloat actualBias=0,actualFloor=0;GetSamplerParameterfv(biased,0x8501,&actualBias);GetSamplerParameterfv(biased,0x813a,&actualFloor);
+        BindSampler(0,biased);draw();const auto biasedPixel=pixel();
+        Uniform1f(scaleLocation,16.f);draw();const auto biasedMinified=pixel();
+        BindSampler(0,nativeSampler);draw();const auto biasedOffMinified=pixel();
+        Uniform1f(scaleLocation,1.f);draw();restored=pixel();
+        const bool biasedOffExact=biasedOffMinified==nativeMinified&&restored==before&&sourceState()==savedSource&&state()==savedState;
+        const bool biasMatches=actualBias==3.f&&actualFloor==3.f&&mipFor(biasedPixel)==3&&mipFor(biasedMinified)==6;
+        DeleteSamplers(1,&biased);
+        const bool gradientDifference=floorMinified[0]==nativeMinified&&floorMinified[1]==nativeMinified&&biasMatches;
         const bool depth=glIsEnabled(GL_DEPTH_TEST)!=0;
         const auto error=glGetError();
-        const bool okay=coarse[0]!=before&&coarse[1]!=before&&exact&&unrelatedUntouched&&actualLods&&!depth&&error==GL_NO_ERROR;
+        const bool okay=coarse[0]!=before&&coarse[1]!=before&&exact&&unrelatedUntouched&&actualLods&&gradientDifference&&biasedOffExact&&!depth&&error==GL_NO_ERROR;
         FILE *file=nullptr;require(_wfopen_s(&file,report,L"wb")==0&&file,"create independent comparison report");
         const auto truth=[](bool value){return value?"true":"false";};
         std::fprintf(file,
             "{\"kind\":\"independent-owned-resource-WGL-alternative\",\"originalDllLoaded\":false,"
             "\"softwareRenderer\":true,\"depthTestEnabled\":%s,\"offExact\":%s,\"sourceParametersUnchanged\":%s,"
             "\"unrelatedSamplerUntouched\":%s,\"minimumLodsVerified\":%s,\"cycles\":%u,\"firstGlError\":%u,"
-            "\"beforePixel\":%s,\"lightPixel\":%s,\"strongPixel\":%s,\"offPixel\":%s,\"passed\":%s,"
+            "\"beforePixel\":%s,\"lightPixel\":%s,\"strongPixel\":%s,\"offPixel\":%s,"
+            "\"nativeMinifiedPixel\":%s,\"lightFloorMinifiedPixel\":%s,\"strongFloorMinifiedPixel\":%s,"
+            "\"privateBiasPixel\":%s,\"privateBiasMinifiedPixel\":%s,\"privateBiasOffMinifiedPixel\":%s,"
+            "\"biasFloorDifferenceObserved\":%s,\"privateBiasOffExact\":%s,\"passed\":%s,"
             "\"gameExecuted\":false,\"physicalGpuTested\":false}\n",
             truth(depth),truth(exact),truth(sourceState()==savedSource),truth(unrelatedUntouched),truth(actualLods),cycles,error,
-            color(before).c_str(),color(coarse[0]).c_str(),color(coarse[1]).c_str(),color(restored).c_str(),truth(okay));
+            color(before).c_str(),color(coarse[0]).c_str(),color(coarse[1]).c_str(),color(restored).c_str(),
+            color(nativeMinified).c_str(),color(floorMinified[0]).c_str(),color(floorMinified[1]).c_str(),
+            color(biasedPixel).c_str(),color(biasedMinified).c_str(),color(biasedOffMinified).c_str(),
+            truth(gradientDifference),truth(biasedOffExact),truth(okay));
         std::fclose(file);BindSampler(1,0);DeleteSamplers(1,&unrelated);
         return okay?0:3;
     }
@@ -270,6 +306,8 @@ int probe(const wchar_t *report,bool sampler,bool independent=false){
     }
     // A second draw WITHOUT a new bind/swap observes persistent mutation.
     draw();const bool persistent=params()==changed;
+    Uniform1f(scaleLocation,16.f);draw();const auto minifiedPixel=pixel();const auto minifiedMip=mipFor(minifiedPixel);
+    Uniform1f(scaleLocation,1.f);draw();
     GLint active=0;glGetIntegerv(0x84e0,&active);const bool depth=glIsEnabled(GL_DEPTH_TEST)!=0;
     const auto swapHook=entryLeadsIntoOriginal(reinterpret_cast<const void*>(swap));
     const auto drawHook=entryLeadsIntoOriginal(reinterpret_cast<const void*>(DrawArrays));
@@ -287,12 +325,11 @@ int probe(const wchar_t *report,bool sampler,bool independent=false){
     BindTexture(GL_TEXTURE_2D,texture);ActiveTexture(GLenum(active));
     const auto remainingError=glGetError();
     const bool mutated=changed[0]>0&&(sampler?changed[2]>0:true),pixelsChanged=before!=after;
-    int sampledMip=-1;
-    for(int i=0;i<7;++i)if(std::equal(after.begin(),after.end(),colors[i]))sampledMip=i;
+    const auto sampledMip=mipFor(after);
     const bool drawMutation=beforeDraw==native&&changed!=native;
     const bool okay=imported?
-        (mutated&&pixelsChanged&&sampledMip>0&&persistent&&drawMutation&&bindBias>0&&swapHook&&drawHook&&bindHook&&!depth&&active==0x84c3):
-        (!mutated&&!pixelsChanged&&sampledMip==0&&!swapHook&&!drawHook&&!bindHook&&!depth&&active==0x84c3);
+        (mutated&&pixelsChanged&&sampledMip>0&&minifiedMip==6&&persistent&&drawMutation&&bindBias>0&&swapHook&&drawHook&&bindHook&&!depth&&active==0x84c3):
+        (!mutated&&!pixelsChanged&&sampledMip==0&&minifiedMip==4&&!swapHook&&!drawHook&&!bindHook&&!depth&&active==0x84c3);
     diagnosticStage=60;
     FILE *file=nullptr;require(_wfopen_s(&file,report,L"wb")==0&&file,"create sanitized report");
     const auto truth=[](bool value){return value?"true":"false";};
@@ -301,6 +338,7 @@ int probe(const wchar_t *report,bool sampler,bool independent=false){
         "\"importLoaded\":%s,\"anchorCalled\":false,\"samplerBound\":%s,"
         "\"depthTestEnabled\":%s,\"activeUnitRestored\":%s,\"softwareRenderer\":true,"
         "\"renderer\":%s,\"version\":%s,\"beforePixel\":%s,\"afterPixel\":%s,"
+        "\"nativeMinifiedPixel\":%s,\"minifiedPixel\":%s,\"minifiedMip\":%d,"
         "\"textureBias\":%.3f,\"textureMinLod\":%.3f,\"samplerBias\":%.3f,\"samplerMinLod\":%.3f,"
         "\"parametersPersistAfterDraw\":%s,\"pixelsChanged\":%s,\"sampledMip\":%d,"
         "\"drawMutationAfterSwap\":%s,\"bindOnlyBias\":%.3f,\"bindOnlyMinLod\":%.3f,"
@@ -309,7 +347,8 @@ int probe(const wchar_t *report,bool sampler,bool independent=false){
         "\"warmupAttempts\":%u,\"firstRemainingGlError\":%u,\"mechanismObserved\":%s,"
         "\"gameExecuted\":false,\"physicalGpuTested\":false}\n",
         truth(imported),truth(sampler),truth(depth),truth(active==0x84c3),json(renderer).c_str(),json(version).c_str(),
-        color(before).c_str(),color(after).c_str(),changed[0],changed[1],changed[2],changed[3],truth(persistent),truth(pixelsChanged),sampledMip,
+        color(before).c_str(),color(after).c_str(),color(nativeMinified).c_str(),color(minifiedPixel).c_str(),minifiedMip,
+        changed[0],changed[1],changed[2],changed[3],truth(persistent),truth(pixelsChanged),sampledMip,
         truth(drawMutation),bindBias,bindMinimum,truth(swapHook),truth(drawHook),truth(bindHook),
         truth(bindExportHook),truth(bindEntriesDiffer),exportBias,exportMinimum,
         attempts<100?attempts+1:100,remainingError,truth(okay));

@@ -5,8 +5,9 @@ support. PR121 stays draft.** The native Shaders page now has a **Potato graphic
 switch, separate from both the ten visual effects and
 [Render resolution (optional)](POTATO-NATIVE-RESOLUTION.md). It arms independently
 authored draw-time private samplers, not a final-image blur or a disguised
-resolution reduction. No supplied DLL, instruction bytes or source was copied.
-See the [static archive review](POTATO-DLL-REVIEW.md).
+resolution reduction. The production module contains no supplied DLL,
+transplanted instruction bytes or recovered proxy source. See the
+[static archive review and separate executed original-DLL probe](POTATO-DLL-REVIEW.md).
 
 ## Exact implemented boundary
 
@@ -61,10 +62,12 @@ eligible/prepared calls/bindings and zero nested inspected/prepared calls. No
 counted draw reached shader/sampler qualification; no-mip/blend/producer/API
 conclusions can be inferred from the zero later buckets. Repeating the already
 answered active-gameplay/Save/report questions is not the next implementation
-step. A separate [original-DLL runtime experiment](POTATO-DLL-PROBE.md) tests the
-actual supplied bytes and an independently authored reversible known-resource
-alternative with depth disabled, without removing production ownership,
-protection, depth or UI gates or adopting unknown producers.
+step. The separate [original-DLL runtime experiment](POTATO-DLL-PROBE.md) has
+now executed the actual supplied bytes: all five unique originals changed
+known mip pixels with depth disabled, and the independently authored private-
+sampler alternative passed 64 exact fixture Off cycles. This confirms a real
+mechanism difference, without removing production ownership, protection,
+depth or UI gates, adopting unknown producers or certifying the player's path.
 
 A zero-binding outer wrapper must release the inspection recursion guard and
 render mutex **before calling its original**: that original may establish real

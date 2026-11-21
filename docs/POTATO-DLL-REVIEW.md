@@ -65,6 +65,12 @@ Paths below are relative to the archive's `POTATO FF DLL 7FARFF/` directory.
 | `Nvidia  AMD/BS MSI 5/forte/version.dll` | 3.0 | LOD bias and minimum LOD | D |
 | `Nvidia  AMD/BS MSI 5/leve/version.dll` | 1.5 | LOD bias and minimum LOD | E |
 
+The [executed Windows experiment](POTATO-DLL-PROBE.md) now confirms expected
+LOD and coarser-mip pixels for **all five identities**, in texture-object and
+sampler-object modes with depth testing disabled. It also records an unhooked
+Mesa import-export bind alias separately from the hooked WGL-resolved entry.
+Those results do not establish in-player behavior or physical-driver safety.
+
 The values are observable floating-point constants, not inferred from folder
 names alone. For example, the MSI 5 pair has identical `.text` bytes and uses
 its 3.0/1.5 constant at RVA `0x1f518`. Its routines at RVAs `0x1000` and `0x11d0`
