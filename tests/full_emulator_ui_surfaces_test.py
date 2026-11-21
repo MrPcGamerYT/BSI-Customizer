@@ -104,13 +104,14 @@ Window {
  property bool pIsBootComplete:false
  property int saved:0
  property int muted:0
+ property bool dragCheck:false
  property var tileImages:["Tap","RepeatedTap","Dpad","Aim","FreeLook","Script","Swipe","Zoom","Tilt","MOBA-PAD","SkillPad","Rotate","EdgeScroll","Scroll","MouseZoom"]
  Text{x:24;y:20;text:"CARBON • native surface fixture — NOT a live emulator capture";color:"white";font.pixelSize:16}
  Item{id:rail;property var pKebabMenuWin:null}
  Skin.SidebarSkin{host:rail}
  Flow {id:tiles;x:24;y:65;width:330;spacing:10
   Repeater {model:host.tileImages
-   KmmEditorDragControls {property string image:modelData;property string type:modelData;property string label:modelData;objectName:"tile_"+modelData;width:95;height:92}
+   KmmEditorDragControls {property string image:modelData;property string type:modelData;property string label:modelData;objectName:"tile_"+modelData;Component.onCompleted:pMouseArea.objectName="nativeDrag_"+modelData;width:95;height:92}
   }
  }
  Skin.NativeControlStyle {objectName:"editorStyle";pages:host;stylePanels:true;registerNativeWindow:true;visible:false}
@@ -130,7 +131,7 @@ Window {
  }
  function openDialogs(){restart.open();untouched.open()}
  function closeAll(){restart.close();untouched.close();volume.visible=false;standalone.visible=false;host.visible=false}
- function dragWorked(){return Utils.starts>0 && Utils.ends>0}
+ function checkDrag(){dragCheck=Utils.starts>0 && Utils.ends>0}
 }'''.replace('ASSETS',url))
     component=QQmlComponent(engine,QUrl.fromLocalFile(str(temp/'Window.qml')))
     assert not component.isError(),'\n'.join(e.toString() for e in component.errors())
@@ -163,7 +164,16 @@ Window {
     click(volume,mute);assert window.property('muted')==1
     tile=find(window.contentItem(),'tile_Tap');assert tile is not None
     assert tile.property('radius')==10
-    assert tile.property('pMouseArea').property('enabled')
+    drag=find(window.contentItem(),'nativeDrag_Tap')
+    assert drag is not None and drag.property('enabled')
+    QMetaObject.invokeMethod(restart,'close');settle()
+    p=tile.mapToScene(QPointF(tile.width()/2,tile.height()/2))
+    point=QPoint(round(p.x()),round(p.y()))
+    QTest.mousePress(window,Qt.LeftButton,Qt.NoModifier,point)
+    QTest.mouseMove(window,point+QPoint(8,4))
+    QTest.mouseRelease(window,Qt.LeftButton,Qt.NoModifier,point+QPoint(8,4));settle()
+    QMetaObject.invokeMethod(window,'checkDrag');settle()
+    assert window.property('dragCheck'), 'native tile drag press/release callbacks lost'
     icon=next(child for child in tile.findChildren(QObject) if child.property('asset')=='Tap')
     assert icon.property('source').toString().endswith('ControlIcons/Tap.png')
     # Late delegate discovery + no timer/polling work while idle.
