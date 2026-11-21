@@ -22,3 +22,4 @@ updater-bot/.state.json
 # Python bytecode
 __pycache__/
 *.pyc
+*.whl
