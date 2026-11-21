@@ -44,10 +44,13 @@ one Carbon skin. Each also has its own corner and transition defaults.
 - Already-open integrated controls, dialogs, editor cards/key chips and popups
   bind to the active theme in the same QML engine. A separately loaded engine
   reads the persisted choice when its window reopens. No polling is added.
-- Choices persist per Windows user in Qt's GenericConfigLocation under
+- When the emulator ships Qt.labs.settings, choices persist per Windows user in Qt's GenericConfigLocation under
   `VOID-Emulator-Themes-v9.ini`, separate from tracked UI asset files. Therefore
   changing a theme does not invalidate the install record. Undo restores UI files,
   not user preferences; use Reset before undo if you want preferences cleared.
+- A stripped OEM Qt build missing that optional plugin keeps working with live
+  session-only themes and a visible Appearance notice, rather than failing to load
+  the entire shell. No Qt DLLs or plugins are replaced by this pack.
 - `design.json` remains the validated install-time OLED default; runtime custom
   choices override it. Hex colors only, no executable design strings. Fonts must
   already be installed. Text contrast warning is advisory, not a color lock.

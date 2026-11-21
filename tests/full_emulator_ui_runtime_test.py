@@ -194,6 +194,25 @@ QtObject {
     assert probe.property('surface').name()=='#101820'
     assert probe.property('corner')==21 and not probe.property('motion')
     probe.deleteLater();settle();probe_engine.deleteLater();settle()
+    fallback_dir=temp/'without-settings-plugin';fallback_dir.mkdir()
+    (fallback_dir/'Theme.qml').write_bytes((ROOT/'assets/full-emulator-ui/Theme.qml').read_bytes())
+    (fallback_dir/'qmldir').write_text('singleton Theme 1.0 Theme.qml\n')
+    (fallback_dir/'PreferencesStore.qml').write_text('import VoidMissingSettingsPlugin 1.0\nQtObject {}')
+    fallback_engine=QQmlEngine();fallback_component=QQmlComponent(fallback_engine)
+    fallback_source='''import QtQuick 2.15
+import "FALLBACK" as Skin
+QtObject {
+ property bool available:Skin.Theme.persistenceAvailable
+ property string selected:Skin.Theme.selectedId
+ property string notice:Skin.Theme.persistenceNotice
+ Component.onCompleted:Skin.Theme.choose("midnight")
+}'''.replace('FALLBACK',QUrl.fromLocalFile(str(fallback_dir)).toString())
+    fallback_component.setData(fallback_source.encode(),QUrl.fromLocalFile(str(temp/'Fallback.qml')))
+    fallback=fallback_component.create();assert fallback,'\n'.join(e.toString() for e in fallback_component.errors())
+    settle()
+    assert not fallback.property('available') and fallback.property('selected')=='midnight'
+    assert 'Session-only' in fallback.property('notice')
+    fallback.deleteLater();settle();fallback_engine.deleteLater();settle()
     QMetaObject.invokeMethod(window,'resetAppearance');settle()
     if args.screenshot:
         args.screenshot.parent.mkdir(parents=True,exist_ok=True)

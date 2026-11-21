@@ -1,6 +1,5 @@
 pragma Singleton
 import QtQuick 2.15
-import Qt.labs.settings 1.1
 import Qt.labs.platform 1.1
 
 QtObject {
@@ -8,15 +7,27 @@ QtObject {
     readonly property var presets: PRESET_DEFINITIONS
     readonly property var defaults: DEFAULT_DESIGN
     property string preferencesFile: StandardPaths.writableLocation(StandardPaths.GenericConfigLocation) + "/VOID-Emulator-Themes-v9.ini"
-    property QtObject preferences: Settings {
-        fileName: theme.preferencesFile
-        category: "NativeAppearance"
+    property QtObject memoryPreferences: QtObject {
         property string selectedPreset: "oled"
         property string customJson: ""
         property string chosenFont: theme.defaults.font
         property int radiusOverride: -1
         property int durationOverride: -1
         property bool motion: theme.defaults.motion
+        property var stored: ({})
+        function setValue(key,value) {stored[key]=value}
+        function value(key,fallback) {return stored[key]===undefined?fallback:stored[key]}
+        function sync() {}
+    }
+    property QtObject preferences: memoryPreferences
+    readonly property bool persistenceAvailable: preferences!==memoryPreferences
+    readonly property string persistenceNotice: persistenceAvailable ? "" : "Session-only appearance: this emulator Qt build does not include the settings plugin."
+    Component.onCompleted: {
+        var component=Qt.createComponent(Qt.resolvedUrl("PreferencesStore.qml"))
+        if(component.status===Component.Ready) {
+            var store=component.createObject(theme,{fileName:Qt.binding(function(){return theme.preferencesFile}),chosenFont:defaults.font,motion:defaults.motion})
+            if(store)preferences=store
+        }
     }
     readonly property string selectedId: preferences.selectedPreset
     readonly property var activePreset: findPreset(selectedId)

@@ -36,6 +36,7 @@ Popup {
             ColumnLayout {
                 width:parent.width
                 spacing:18
+                Label {Layout.fillWidth:true;wrapMode:Text.Wrap;color:Theme.warning;visible:!Theme.persistenceAvailable;text:Theme.persistenceNotice}
                 GridLayout {
                     columns:2;columnSpacing:10;rowSpacing:10;Layout.fillWidth:true
                     Repeater {
