@@ -4,12 +4,16 @@
 #include <cmath>
 #include <cstdint>
 
-// Independently authored, data-only experimental sampling policy. This is NOT
-// a presentation effect or an installed game-texture interception path. Callers
+// Independently authored sampling policy, also used by the conservative GL
+// draw-scoped private-sampler path. This is NOT a presentation filter. Callers
 // must prove the resource contract and create a PRIVATE sampler replacement;
 // never mutate a game's sampler or infer ownership from a loaded graphics DLL.
 namespace BsiShaders {
 enum class TextureQuality { Native, Light, Strong };
+struct TextureConfiguration {
+    bool enabled=false,externalOverridesReviewed=false;
+    TextureQuality quality()const{return enabled?TextureQuality::Strong:TextureQuality::Native;}
+};
 enum class TextureUse { Unknown, SampledColor, UserInterface, Depth, Integer, RenderTarget, Presentation };
 struct TextureQualityProof {
     Renderer renderer=Renderer::Unknown;

@@ -61,6 +61,8 @@ class NativeDisplayFixture(QObject):
         self.commits = 0
         self.discards = 0
         self.writes = []
+        self.restarts = 0
+        self.reject_restart = False
 
     @Property(bool, notify=flickableMovingChanged)
     def pFlickableMoving(self): return self._moving
@@ -115,6 +117,11 @@ class NativeDisplayFixture(QObject):
     def confCommit(self):
         self.committed = dict(self.draft)
         self.commits += 1
+
+    @Slot(result=bool)
+    def restartPlayer(self):
+        self.restarts += 1
+        return not self.reject_restart
 
     @Slot()
     def confDiscard(self):
@@ -183,6 +190,7 @@ def main():
         cleanup.callback(unregister_native_ui)
         native_display = NativeDisplayFixture()
         engine.rootContext().setContextProperty("uiBackend", native_display)
+        engine.rootContext().setContextProperty("plrBackend", native_display)
         # install-qt-action supplies QML2_IMPORT_PATH for the C++ build SDK. The
         # Python host is a separate, ABI-compatible Qt distribution (not always
         # the identical patch release). Letting both register Controls loads the
@@ -226,7 +234,7 @@ Window {
         pColor: UiTheme.buttons.colors.accent
         text: qsTranslate("QObject", "Save changes")
     }
-    Bootstrap { hostWindow: host; instanceName: "Fixture-Nougat64"; graphicsRenderer: "gl" }
+    Bootstrap { hostWindow: host; instanceName: "Fixture-Nougat64"; graphicsRenderer: "vlcn" }
     Item {
         anchors.fill: parent
         property var bIcons: ({})
@@ -367,8 +375,11 @@ Window {
         assert item("shaderSave").property("implicitHeight") == reference.property("implicitHeight")
         assert item("shaderSave").property("font") == reference.property("font"), "Save font differs from the native button"
         initial = settings()
-        assert initial["enabled"] is False and initial["potatoMode"] == 0 and len(initial) == 12
+        assert initial["enabled"] is False and initial["potatoMode"] == 0 and len(initial) == 14
         assert evaluate("Engine.display.available"), evaluate("Engine.display.detail")
+        assert evaluate("Engine.metrics.requestedRenderer") == "Automatic"
+        assert evaluate("Engine.metrics.configuredRenderer") == "Vulkan"
+        assert evaluate("Engine.metrics.gameSurfaceObserved") is False, "a config hint/loader is not observed game evidence"
         assert native_display.commits == 0 and not native_display.writes, "opening must not change native Display"
         assert not page.property("pEnableSave") and not window.property("bsiShaderDirty"), "a new neutral profile must not start dirty"
         save_button = item("shaderSave")
@@ -411,6 +422,8 @@ Window {
         keys = list(initial.keys())
         keys.remove("enabled")
         keys.remove("potatoMode")
+        keys.remove("potatoGraphic")
+        keys.remove("textureOverridesReviewed")
         for width in (750, 420, 750):
             window.setWidth(width)
             QTest.qWait(30)
@@ -477,6 +490,22 @@ Window {
             QTest.qWait(30)
             assert evaluate("draft.potatoMode") == index
 
+        # A genuine texture switch has its own persisted draft/acknowledgement,
+        # never silently substitutes a resolution change or a final-image blur.
+        click(item("shaderPotatoGraphic"))
+        assert evaluate("draft.potatoGraphic") and not settings()["potatoGraphic"]
+        click(save_button)
+        assert page.property("saveFailed") and not settings()["potatoGraphic"] and not native_display.writes
+        click(item("shaderPotatoReview"))
+        click(save_button)
+        assert settings()["potatoGraphic"] and settings()["textureOverridesReviewed"] and not settings()["enabled"]
+        assert native_display.commits == 0 and not native_display.writes
+        assert evaluate("Engine.metrics.textureDraws") == 0, "a saved switch without an observed game draw is not a successful sampler pass"
+        click(item("shaderEnhance")); click(item("shaderReset"))
+        assert evaluate("draft.potatoGraphic") and not page.property("pEnableSave"), "visual presets/reset must preserve texture choice"
+        click(item("shaderPotatoReview")); click(item("shaderPotatoGraphic")); click(save_button)
+        assert settings() == initial and not native_display.writes
+
         original_display = dict(native_display.committed)
         select_potato(2)
         assert page.property("pEnableSave") and window.property("bsiShaderDirty")
@@ -490,7 +519,7 @@ Window {
         assert native_display.committed["fb_width"] == 960 and native_display.committed["fb_height"] == 540
         assert native_display.committed["custom_resolution_selected"] is True and native_display.commits == 1
         stored = json.loads(profile.read_text())
-        assert stored["schema"] == "bsi.shaders.v2" and stored["display"]["original"] == {"width": 1920, "height": 1080, "custom": False}
+        assert stored["schema"] == "bsi.shaders.v3" and stored["display"]["original"] == {"width": 1920, "height": 1080, "custom": False}
         assert "pendingDisplay" not in stored and evaluate("Engine.display.restartRequired")
         assert "restart" in item("shaderPotatoStatus").property("text").lower()
         assert save_button.mapToItem(page, QPointF(0, 0)) == footer_position, "Potato feedback must not move Save"
@@ -542,13 +571,35 @@ Window {
         stored = json.loads(profile.read_text())
         assert stored["display"] == {} and "pendingDisplay" not in stored
         assert not evaluate("Engine.display.conflict") and not keep.isVisible()
+        # The save/restart distinction is visible and the actual typed native
+        # restart method is only invoked AFTER two explicit clicks. A failed
+        # request neither hides the player nor loses the successful save.
+        window.setWidth(750)
+        select_potato(2); click(save_button)
+        assert evaluate("Engine.display.restartRequired && Engine.display.canRestart")
+        assert not page.property("saveFailed") and "Save succeeded" in page.property("feedback")
+        commits, writes = native_display.commits, list(native_display.writes)
+        restart = item("shaderResolutionRestart")
+        click(restart)
+        assert page.property("restartConfirmation") and native_display.restarts == 0
+        click(item("shaderResolutionLater"))
+        assert not page.property("restartConfirmation") and native_display.restarts == 0 and window.isVisible()
+        native_display.reject_restart = True
+        click(restart); click(restart)
+        assert page.property("saveFailed") and native_display.restarts == 1 and window.isVisible()
+        assert evaluate("Engine.display.restartRequired"), "a refused restart must retain the saved/manual-restart requirement"
+        native_display.reject_restart = False
+        click(restart); click(restart)
+        assert native_display.restarts == 2 and not window.isVisible()
+        assert native_display.commits == commits and native_display.writes == writes, "restart must never commit again or write other config"
+        assert not evaluate("Engine.display.restartRequired"), "accepted request must not be issued twice from a stale button"
         assert not warnings, "QML runtime warnings:\n" + "\n".join(warnings)
         window.setVisible(False)
         window.deleteLater()
         QTest.qWait(20)
         engine.deleteLater()
         app.processEvents()
-    print("PASS: real C++ regular-plugin import, single native-style Save footer/clean opacity, physical enable/slider/Save/Enhance and all ten fully visible right-aligned Reset buttons at two widths, native discard callback, preset/reset, atomic isolated persistence, physical native-size Potato Save/Discard/restore independent of visual effects, and clean QML bindings")
+    print("PASS: real C++ regular-plugin auto-hint diagnostics, independent physical texture toggle/review/Save/reset with no fake game success, native resolution save and two-click restart/Later/refusal/acceptance without extra commits; regular-plugin import, single native-style Save footer/clean opacity, physical enable/slider/Save/Enhance and all ten fully visible right-aligned Reset buttons at two widths, native discard callback, preset/reset, atomic isolated persistence, physical native-size Potato Save/Discard/restore independent of visual effects, and clean QML bindings")
     print("LIMIT: fixture window only; native player installation and category navigation, Windows hooks, DirectX/Vulkan and hardware GPU coverage are not certified")
 
 

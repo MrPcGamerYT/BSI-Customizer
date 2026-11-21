@@ -45,7 +45,10 @@ def main():
     assert client_version in (2, 3), "The fixture supports GLES 2 or GLES 3 contexts"
     assert native("eglBindAPI", U, U)(0x30A2 if desktop else 0x30A0)
     renderable = 8 if desktop else (0x40 if client_version == 3 else 4)
-    attrs = (I * 17)(0x3033, 1, 0x3040, renderable, 0x3024, 8, 0x3023, 8, 0x3022, 8, 0x3021, 8, 0x3031, 0, 0x3032, 0, EGL_NONE)
+    attributes = [0x3033, 1, 0x3040, renderable, 0x3024, 8, 0x3023, 8, 0x3022, 8, 0x3021, 8, 0x3031, 0, 0x3032, 0]
+    if os.environ.get("BSI_TEST_TEXTURE_QUALITY"):
+        attributes += [0x3025, 24]  # a real depth buffer, not merely GL_DEPTH_TEST enabled
+    attrs = (I * (len(attributes) + 1))(*attributes, EGL_NONE)
     config, count = P(), I()
     assert native("eglChooseConfig", U, P, C.POINTER(I), C.POINTER(P), I, C.POINTER(I))(display, attrs, C.byref(config), 1, C.byref(count)) and count.value
     context_attrs = (I * 7)(0x3098, 3, 0x30FB, 3, 0x30FD, 1, EGL_NONE) if desktop else (I * 3)(0x3098, client_version, EGL_NONE)
@@ -116,7 +119,7 @@ def main():
     with tempfile.TemporaryDirectory(prefix="bsi-shader-gpu-") as temp:
         library = Path(temp) / "pipeline.so"
         subprocess.run([os.environ.get("CXX", "g++"), "-std=c++17", "-O2", "-Wall", "-Wextra", "-Werror", "-shared", "-fPIC",
-                        "-Isrc/shaders", "src/shaders/GlPipeline.cpp", "tests/shaders/gpu_adapter.cpp", "-o", str(library)], cwd=ROOT, check=True)
+                        "-Isrc/shaders", "src/shaders/GlPipeline.cpp", "src/shaders/GlTextureOverride.cpp", "tests/shaders/gpu_adapter.cpp", "-o", str(library)], cwd=ROOT, check=True)
         core = C.CDLL(str(library))
         core.bsi_test_initialize.argtypes = [RESOLVE, P, C.c_char_p, I]
         core.bsi_test_render.argtypes = [I, I, I, C.POINTER(I), C.c_char_p, I]
@@ -177,7 +180,7 @@ def main():
         assert get_error() == 0
         if os.environ.get("BSI_TEST_TEXTURE_QUALITY"):
             from shaders.texture_quality_gl_pixels import exercise
-            exercise(gl, core, desktop, SIZE)
+            exercise(gl, core, desktop, SIZE, resolver)
             assert get_error() == 0
     make_current(display, None, None, None)
     native("eglDestroySurface", U, P, P)(display, surface)

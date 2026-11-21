@@ -66,6 +66,24 @@ struct Api {
         const int minor=dot?std::atoi(dot+1):0;
         if(major<2){*error="OpenGL 2.0 / OpenGL ES 2.0 or newer is required";return false;}
         modern=major>=3;
+        // EXT_protected_textures exposes protected-context state publicly.
+        // Query extensions without consuming the application's error queue.
+        bool protectedExtension=false;
+        if(modern){
+            using Stringi=const unsigned char*(BSI_GL_CALL*)(Enum,UInt);
+            const auto stringi=reinterpret_cast<Stringi>(resolve("glGetStringi",user));
+            if(!stringi){*error="Modern GL extension/protected-context inspection is unavailable";return false;}
+            Int count=0;GetIntegerv(0x821d,&count);
+            if(count<0||count>4096){*error="GL extension list exceeds safe inspection bounds";return false;}
+            for(Int i=0;i<count;++i){const auto *extension=stringi(0x1f03,UInt(i));
+                if(!extension){*error="GL extension/protection inspection is incomplete";return false;}
+                if(std::strcmp(reinterpret_cast<const char*>(extension),"GL_EXT_protected_textures")==0)protectedExtension=true;}
+        }else{
+            const auto *raw=GetString(0x1f03);
+            const std::string extensions=raw?reinterpret_cast<const char*>(raw):"";
+            protectedExtension=(" "+extensions+" ").find(" GL_EXT_protected_textures ")!=std::string::npos;
+        }
+        if(protectedExtension){Int flags=0;GetIntegerv(0x821e,&flags);if(flags&0x10){*error="Protected GL contexts are never processed";return false;}}
         if(!es && (major>3 || (major==3 && minor>=2))){Int profile=0;GetIntegerv(0x9126,&profile);core=(profile&1)!=0;}
         if(core){
             GenVertexArrays=reinterpret_cast<GenVertexArraysFn>(resolve("glGenVertexArrays",user));

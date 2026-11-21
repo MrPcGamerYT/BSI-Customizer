@@ -23,6 +23,8 @@ public:
     QVariantMap bridgeInfo() const;
     QVariantMap display() const;
     Q_INVOKABLE bool bindNativeDisplay(QObject *backend);
+    Q_INVOKABLE bool bindNativePlayer(QObject *backend);
+    Q_INVOKABLE QVariantMap restartPlayer();
     Q_INVOKABLE QVariantMap previewPotato(int mode) const;
     Q_INVOKABLE QVariantMap apply(const QVariantMap &values,bool keepCurrentDisplay=false);
     Q_INVOKABLE QString diagnostics() const;

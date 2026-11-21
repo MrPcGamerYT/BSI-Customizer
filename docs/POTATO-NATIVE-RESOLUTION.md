@@ -3,10 +3,12 @@
 **Experimental Display convenience; not completion of the video-like Potato
 request, and no installed-player, FPS or universal GPU claim.** The native
 **Settings → Shaders** page labels this separate option **Render resolution
-(optional)**. Resolution reduction is not an accepted substitute for the
-requested texture-detail effect. No texture-LOD selector is presented as working.
-The old internal `potatoMode`/`previewPotato` names remain only for v2 preference
-and recovery/API compatibility; they do not identify a texture feature.
+(optional)**. Resolution reduction is not a substitute for texture detail.
+The independent default-off **Potato graphic** experiment now arms private
+GL 3.3/GLES 3.1 draw-time samplers; its exact boundaries and remaining resource/
+player qualification are in [the texture guide](TEXTURE-QUALITY-PORTABILITY.md).
+The old internal `potatoMode`/`previewPotato` names remain for resolution-profile
+and recovery/API compatibility; they do not identify the texture switch.
 
 ## What this separate option does and does not do
 
@@ -19,10 +21,11 @@ A safe portable texture-only implementation also needs proven game-color
 resource/view ownership, valid existing mipmaps, private replacement samplers,
 qualified bindings and lifetimes, API-specific synchronization and review of
 external driver overrides. D3D12 static/root and Vulkan immutable samplers are
-not mutable GL texture parameters. Those game-binding paths are **not
-implemented**; the [sampler policy experiment](TEXTURE-QUALITY-PORTABILITY.md)
-remains disconnected from game resources. No supplied binary/source was copied,
-no NVIDIA profile is reset, and the reported profile conflict is not fixed.
+not mutable GL texture parameters. DirectX/Vulkan game texture-binding paths
+are **not implemented**. The independent GL draw-time experiment is no longer
+policy-only, but owned software-context pixels are not proof of real game
+resource semantics or performance. No supplied binary/source was copied, no
+NVIDIA profile is reset, and the reported profile conflict is not fixed.
 
 Separately, this option requests the player's **own native framebuffer size**,
 through the same public config calls used by Display. It does not implement or
@@ -66,9 +69,18 @@ favorites list is changed. Visual effects can add work independently.
   native Display and requests its native commit. The stationary footer and
   approved Settings geometry remain. A successful config read-back is not a
   measurement of the still-running game.
-- Fully close/restart the player after saving a native size. There is **no
-  automatic restart** and no claim of a live resolution switch. The page retains
-  a restart notice after the current process saves it.
+- A successful queued native config Save is reported as **saved, restart
+  required**, not as a failed hot resize. There is no silent restart or claim of
+  a live resolution switch. The page retains a notice after this session saves.
+- Where the existing player exposes the exact public `restartPlayer()` method,
+  **Restart player…** first asks for confirmation; **Restart now** invokes it.
+  **Later** leaves the saved configuration alone. Unsupported/refused methods
+  retain the manual-restart requirement. An accepted invocation is not proof
+  that the player restarted or that the running game's dimensions changed.
+- Restart is allowed only for a finalized change from this session, with an
+  unchanged exact target, a live GUI-thread backend and no native unsaved draft
+  or pending recovery. Shaders never kills a process, guesses a CLI, commits
+  unrelated settings or restarts just because the page was opened.
 - **Enable visual effects**, Enhance/presets and **Reset visuals** affect only
   the original ten visual effects. They neither disable nor enable the resolution option.
   A native reduction works with postprocessing off; a neutral shader status
@@ -118,9 +130,12 @@ requested visual parameters or pretending a restart happened.
 
 Preferences remain per executable + native instance, in Qt's user config area:
 `BSICustomizer/Shaders/<SHA256(canonical-player-path + newline + instance)>.json`.
-Released `bsi.shaders.v1` visual settings are read without changes on open and
-migrate to **v2** only on Save, initially with Native mode. V2 contains the ten
-visual values + enabled, independent mode and bounded original/target metadata.
+Released `bsi.shaders.v1` visual and `bsi.shaders.v2` resolution settings are
+read without changes on open and migrate to **v3** only on Save. V1 starts with
+Native resolution and texture off; v2 keeps its exact original/target recovery
+metadata and starts with texture off. V3 contains ten visual values + enabled,
+independent resolution mode, texture enable/review flags and bounded display
+metadata. The display journal accepts released v2 and current v3 next records.
 Unknown fields/types, nonfinite/fractional values and oversized files are refused.
 A corrupt or unknown restore snapshot is never silently replaced on Save.
 
@@ -149,12 +164,13 @@ Implemented automated coverage includes:
 
 - C++ real planning and public meta-method invocation; landscape, portrait,
   square, ultrawide, native bounds and exact custom/predefined restoration;
-- actual temporary-file v1 migration/v2 persistence, conflict/Keep semantics,
+- actual temporary-file v1/v2 migration and v3 persistence, conflict/Keep semantics,
   independent visual saves, unrelated-draft refusal and no global Discard;
 - native setter/commit refusal, partial-stage rollback, interrupted saves,
   real final preference I/O failure after native commit and exact-side recovery;
 - competing writer, external preference change, invalid metadata and destroyed /
-  wrong-thread backend rejection;
+  wrong-thread backend rejection; exact restart acceptance/refusal, stale-target,
+  missing/destroyed restart method and unrelated-native-draft guards;
 - actual C++ plugin import and physical QML mode-popup/Save/Discard/restoration,
   with visual effects off, plus complete native-shell No/Discard/close callbacks,
   stationary Save, preset/reset independence and clean bindings;
@@ -175,6 +191,6 @@ Before calling this working in a player, record: initial Display size/custom
 selection, Light/Strong Save and full restart, actual guest/game size and same
 scene before/after, exact Native restoration, external Display conflict, No /
 Discard, persistence, per-instance separation and the game API/GPU/driver.
-Keep the texture-only feature explicitly unimplemented unless its separate
-resource-binding and driver-profile requirements are met. **Do not merge PR121
-on these config/UI fixtures alone.**
+Keep the GL texture experiment's qualification and missing DirectX/Vulkan
+texture paths explicit; resolution is not their substitute. **Do not merge
+PR121 on these config/UI fixtures alone.**

@@ -125,8 +125,12 @@ QtObject {
             logoFallback: true, logoStatus: "", detail: "Editable player QML sources found."
         };
     }
-    function saveSettingsPanelProfile(developerName, tagline, hiddenTabs, availableTabs) {
+    function saveSettingsPanelProfile(developerName, tagline, hiddenTabs, availableTabs, links) {
         hidden = hiddenTabs;
+        const profile = settings.settingsPanelProfile || {};
+        const icons = Object.assign({}, profile.linkIcons || {});
+        for (const id in icons) if (!links.some(row => row.id === id)) delete icons[id];
+        settings.settingsPanelProfile = Object.assign({}, profile, {hiddenTabs: hiddenTabs, links: links, linkIcons: icons});
         calls = calls.concat(["saveSettingsPanelProfile:" + developerName + "|" + tagline
                               + "|" + hiddenTabs.join(",") + "|" + availableTabs.join(",")]);
         return {ok: true, msg: "Options saved."};
@@ -134,17 +138,21 @@ QtObject {
     function setSettingsPanelAsset(kind, id, path) {
         calls = calls.concat(["setSettingsPanelAsset:" + kind + ":" + id + ":" + path]);
         const profile = settings.settingsPanelProfile || {};
-        const icons = Object.assign({}, profile.tabIcons || {});
+        const key = kind === "link-icon" ? "linkIcons" : "tabIcons";
+        const icons = Object.assign({}, profile[key] || {});
         icons[id] = selectedAsset;
-        settings.settingsPanelProfile = {hiddenTabs: profile.hiddenTabs || [], tabIcons: icons};
+        const next = Object.assign({}, profile); next[key] = icons;
+        settings.settingsPanelProfile = next;
         return {ok: true, msg: "Asset saved."};
     }
     function clearSettingsPanelAsset(kind, id) {
         calls = calls.concat(["clearSettingsPanelAsset:" + kind + ":" + id]);
         const profile = settings.settingsPanelProfile || {};
-        const icons = Object.assign({}, profile.tabIcons || {});
+        const key = kind === "link-icon" ? "linkIcons" : "tabIcons";
+        const icons = Object.assign({}, profile[key] || {});
         delete icons[id];
-        settings.settingsPanelProfile = {hiddenTabs: profile.hiddenTabs || [], tabIcons: icons};
+        const next = Object.assign({}, profile); next[key] = icons;
+        settings.settingsPanelProfile = next;
         return {ok: true, msg: "Asset cleared."};
     }
     // Mirrors the real patcher's answers: normally ok, but a player patched by
@@ -405,7 +413,7 @@ Window {
     joined = "\n".join(content)
     for expected in ["Rebuild the BlueStacks Settings panel", "Patch support", "Supported",
                      "Custom rebuild installed" if False else "Original panel",
-                     "Native Settings tabs", "7 discovered · 2 visible",
+                     "Native Settings tabs", "7 discovered · 1 visible",
                      "Verified QML dependencies", "Embedded compiled QML", "2 found · 0 active",
                      "Logo verification", "Built-in fallback available",
                      "Editable player QML sources found.", "UiSettingsWindow.qml",
@@ -451,6 +459,43 @@ Window {
                 return
             pending.extend(item.childItems())
         raise AssertionError("Native UI text not reachable: " + value)
+
+    # Physically add/edit/save more than four links using the real native
+    # delegates; choosing an icon must not erase another row's typed text.
+    settings.setProperty("aboutLinks", [{"kind": "github", "title": "Customizer only", "url": "https://example.org/own"}])
+    link_ids = []
+    for index in range(6):
+        click_item(items(window.contentItem(), "settingsPanelLinkAdd")[0])
+        rows = page.property("panelLinks").toVariant()
+        link_id = rows[-1]["id"]
+        link_ids.append(link_id)
+        for name, text in (("Title", "custom link " + str(index + 1)), ("Url", "https://example.net/custom/" + str(index + 1))):
+            field = items(window.contentItem(), "settingsPanelLink" + name + "-" + link_id)[0]
+            click_item(field)
+            for character in text:
+                modifier = Qt.ShiftModifier if character.isupper() else Qt.NoModifier
+                QTest.keyClick(window, Qt.Key(ord(character.upper())), modifier)
+        QTest.qWait(20)
+    assert len(set(link_ids)) == 6
+    QMetaObject.invokeMethod(page, "setPanelAsset", Q_ARG("QVariant", "link-icon"),
+                             Q_ARG("QVariant", link_ids[2]), Q_ARG("QVariant", "/chosen/link.svg"))
+    click_item(items(window.contentItem(), "settingsPanelLinkRemove-" + link_ids[0])[0])
+    click_text("Save rebuild options")
+    saved_profile = settings.property("settingsPanelProfile").toVariant()
+    assert len(saved_profile["links"]) == 5, saved_profile
+    assert saved_profile["links"][1]["id"] == link_ids[2]
+    assert saved_profile["links"][1]["title"] == "custom link 3", saved_profile["links"]
+    assert saved_profile["linkIcons"][link_ids[2]]["data"] == CUSTOM_ICON["data"]
+    own_links = settings.property("aboutLinks")
+    if hasattr(own_links, "toVariant"): own_links = own_links.toVariant()
+    assert own_links[0]["title"] == "Customizer only"
+    for link_id in link_ids[1:]:
+        click_item(items(window.contentItem(), "settingsPanelLinkRemove-" + link_id)[0])
+    click_text("Save rebuild options")
+    assert settings.property("settingsPanelProfile").toVariant()["links"] == []
+    page.setProperty("panelLinksReady", False)
+    QMetaObject.invokeMethod(page, "refreshPanel")
+    assert page.property("panelLinks").toVariant() == [], "zero saved rows must not repopulate from own-About defaults"
 
     click_text("Layout & clean-up")
     assert page.property("currentSection") == 0
@@ -653,5 +698,5 @@ QtObject {
     engine = None
     QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
     QTest.qWait(1)
-    print("PASS: real native Player-interface page; Settings-panel rebuild tab renders player "
+    print("PASS: real native variable About add/type/remove/custom-icon/save/empty-reload controls; Player-interface page; Settings-panel rebuild tab renders player "
           "state, previews pack/default overrides and drives profile save/apply/restore, cleanup Settings-access migration and one combined title-details removal")

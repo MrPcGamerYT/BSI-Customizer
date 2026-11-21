@@ -17,7 +17,10 @@ void Runtime::start(std::uintptr_t window){
 void Runtime::setWindow(std::uintptr_t window){
     std::lock_guard<std::mutex> lock(mutex);
     if(host==window)return;
-    host=window;state.observed=false;state.active=false;state.deviceReady=false;state.renderer=Renderer::Unknown;
+    host=window;presentationObject=0;presentationWindow=0;
+    state.observed=false;state.active=false;state.deviceReady=false;state.renderer=Renderer::Unknown;
+    state.textureSupported=false;
+    if(currentTexture.enabled)state.textureStatus="The native player surface changed; waiting for a newly qualified game scene draw.";
     state.status=window?"Waiting for the identified player's game presentation surface.":"The native player surface is not available; no effects are active.";
 }
 void Runtime::stop(){stopPresentationHooks();}
@@ -31,30 +34,96 @@ void Runtime::set(const Parameters &settings){
 }
 void Runtime::selectRenderer(RendererFamily requested){
     std::lock_guard<std::mutex> lock(mutex);
-    state.requested=requested;state.renderer=Renderer::Unknown;state.observed=false;state.active=false;state.deviceReady=false;
+    state.requested=requested;presentationObject=0;presentationWindow=0;
+    state.renderer=Renderer::Unknown;state.observed=false;state.active=false;state.deviceReady=false;
     state.status="Waiting for an identified game surface matching the player's renderer setting. No effects have been confirmed.";
+}
+void Runtime::configureRenderer(RendererFamily configured){
+    std::lock_guard<std::mutex> lock(mutex);
+    state.configured=configured;state.requested=RendererFamily::Automatic;presentationObject=0;presentationWindow=0;
+    state.renderer=Renderer::Unknown;state.observed=false;state.active=false;state.deviceReady=false;
+    state.textureSupported=false;
+    if(currentTexture.enabled)state.textureStatus="Automatically waiting for a qualified game scene draw; a graphics setting is not proof of texture reduction.";
+    state.status="Automatically detecting the owned game's actual host presentation API. The emulator graphics setting is only a hint.";
 }
 bool Runtime::accepts(Renderer observed){
     std::lock_guard<std::mutex> lock(mutex);
-    // EGL may itself present through DXGI. Honor the player's graphics setting
-    // and, in auto mode, bind to the first identified game API family so a
-    // translation layer cannot grade the same image a second time.
+    // EGL may itself present through DXGI. Bind automatic routing to the first
+    // identified GAME presentation family, not a loaded DLL/device/config hint,
+    // so a translation layer cannot grade the same image a second time.
     const auto selected=(state.requested==RendererFamily::Automatic&&state.observed)
         ?family(state.renderer):state.requested;
     return canRoute(observed,true,true,selected);
 }
+bool Runtime::claimPresentation(Renderer renderer,std::uintptr_t object,std::uintptr_t window){
+    if(!object||!window||renderer==Renderer::Unknown)return false;
+    std::lock_guard<std::mutex> lock(mutex);
+#ifdef _WIN32
+    // A destroyed HWND can precede its context's eventual deletion. Do not
+    // leave automatic routing pinned to that dead presentation source.
+    if(presentationWindow&&!IsWindow(reinterpret_cast<HWND>(presentationWindow))){
+        presentationObject=0;presentationWindow=0;state.renderer=Renderer::Unknown;
+        state.observed=false;state.deviceReady=false;state.active=false;
+    }
+#endif
+    if(!matches(state.requested,renderer))return false;
+    if(presentationObject)
+        return state.renderer==renderer&&presentationObject==object&&presentationWindow==window;
+    if(state.observed&&!matches(family(state.renderer),renderer))return false;
+    presentationObject=object;presentationWindow=window;state.renderer=renderer;
+    state.observed=true;state.deviceReady=false;state.active=false;
+    if(currentTexture.enabled&&family(renderer)!=RendererFamily::OpenGL){
+        state.textureSupported=false;
+        state.textureStatus="Potato graphic is not implemented for the observed DirectX/Vulkan texture-binding path. Original textures are retained; presentation shaders remain independent.";
+    }
+    return true;
+}
+void Runtime::releasePresentation(Renderer renderer,std::uintptr_t object){
+    std::lock_guard<std::mutex> lock(mutex);
+    if(!object||presentationObject!=object||state.renderer!=renderer)return;
+    presentationObject=0;presentationWindow=0;state.observed=false;state.active=false;state.deviceReady=false;state.renderer=Renderer::Unknown;
+    state.textureSupported=false;
+    if(currentTexture.enabled)state.textureStatus="The previous game presentation source was destroyed; no texture override is confirmed on a replacement yet.";
+    state.status="The previous game presentation source was destroyed; automatically detecting its replacement. No new effects have been confirmed.";
+}
 Parameters Runtime::settings(){std::lock_guard<std::mutex> lock(mutex);return current;}
+void Runtime::setTexture(const TextureConfiguration &settings){
+    std::lock_guard<std::mutex> lock(mutex);
+    if(currentTexture.enabled==settings.enabled&&currentTexture.externalOverridesReviewed==settings.externalOverridesReviewed)return;
+    currentTexture=settings;state.textureSupported=false;
+    state.textureStatus=!settings.enabled?"Potato graphic is off; native texture sampling retained.":
+        state.observed&&family(state.renderer)!=RendererFamily::OpenGL?
+        "Potato graphic is not implemented for the observed DirectX/Vulkan texture-binding path. Original textures are retained; presentation shaders remain independent.":
+        "Potato graphic saved. Waiting for a qualified owned GL/GLES scene draw; no texture reduction is confirmed yet.";
+}
+TextureConfiguration Runtime::texture(){std::lock_guard<std::mutex> lock(mutex);return currentTexture;}
+void Runtime::textureReport(unsigned bindings,const std::string &detail,bool supported){
+    std::lock_guard<std::mutex> lock(mutex);
+    if(!currentTexture.enabled)return;
+    state.textureSupported=supported;
+    if(!detail.empty())state.textureStatus=detail;
+    if(bindings&&supported){++state.textureDraws;state.textureBindings+=bindings;}
+}
 Metrics Runtime::metrics(){std::lock_guard<std::mutex> lock(mutex);return state;}
 void Runtime::waiting(bool hooks,const std::string &status){
     std::lock_guard<std::mutex> lock(mutex);
     state.hooks=state.hooks||hooks;
     // A worker's stale 'not observed' snapshot must not clear a render thread's
     // newer confirmed active result, or overwrite a precise Vulkan blocker.
-    if(!state.observed)state.status=state.requested==RendererFamily::Vulkan?state.vulkan.waiting():status;
+    if(!state.observed){
+        if(state.requested==RendererFamily::Vulkan)state.status=state.vulkan.waiting();
+        else if(state.requested==RendererFamily::Automatic&&(state.configured==RendererFamily::Vulkan||state.vulkan.loaders))
+            state.status="Automatic game-presentation detection is still scanning OpenGL/EGL, DirectX and Vulkan. "+state.vulkan.waiting();
+        else state.status=status;
+    }
 }
 void Runtime::vulkanEvent(VulkanEvent event,const std::string &detail){
     std::lock_guard<std::mutex> lock(mutex);state.vulkan.note(event,detail);
-    if(!state.observed&&state.requested==RendererFamily::Vulkan)state.status=state.vulkan.waiting();
+    if(!state.observed){
+        if(state.requested==RendererFamily::Vulkan)state.status=state.vulkan.waiting();
+        else if(state.requested==RendererFamily::Automatic)
+            state.status="Automatic detection is not locked to the configured renderer; other owned game presentation APIs remain eligible. "+state.vulkan.waiting();
+    }
 }
 std::string Runtime::gameWindowDiagnostic(std::uintptr_t surface){
 #ifdef _WIN32

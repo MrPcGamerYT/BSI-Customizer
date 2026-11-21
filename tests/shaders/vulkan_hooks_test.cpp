@@ -6,6 +6,7 @@
 #define VK_NO_PROTOTYPES
 #include <windows.h>
 #include <vulkan/vulkan.h>
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -71,6 +72,10 @@ struct Fixture {
         VkPresentInfoKHR info{VK_STRUCTURE_TYPE_PRESENT_INFO_KHR};info.swapchainCount=1;info.pSwapchains=&chain;info.pImageIndices=&image;
         okay(function<PFN_vkQueuePresentKHR>("vkQueuePresentKHR")(queue,&info),"call the correct provider's original present exactly once");
     }
+    void remove(VkSwapchainKHR chain){
+        function<PFN_vkDestroySwapchainKHR>("vkDestroySwapchainKHR")(device,chain,nullptr);
+        chains.erase(std::remove(chains.begin(),chains.end(),chain),chains.end());
+    }
     LONG calls(){return reinterpret_cast<LONG(*)()>(reinterpret_cast<void*>(GetProcAddress(module,"bsiFixturePresentCalls")))();}
     void close(){
         for(auto c:chains)function<PFN_vkDestroySwapchainKHR>("vkDestroySwapchainKHR")(device,c,nullptr);
@@ -89,7 +94,7 @@ int main(int argc,char **argv){
     HWND ui=CreateWindowExW(0,cls.lpszClassName,L"test-owned excluded UI",WS_CHILD,0,0,640,360,root,nullptr,cls.hInstance,nullptr);
     require(root&&game&&ui,"create owned native windows");
     Fixture a,b;a.open(argv[1]);
-    auto &runtime=Runtime::instance();runtime.selectRenderer(RendererFamily::Vulkan);runtime.start(reinterpret_cast<std::uintptr_t>(root));
+    auto &runtime=Runtime::instance();runtime.configureRenderer(RendererFamily::OpenGL);runtime.start(reinterpret_cast<std::uintptr_t>(root));
     const auto initial=runtime.metrics().vulkan.loaders;
     require(initial>=1,"scan hooks a complete loader whose filename is NOT vulkan-1.dll");
     b.open(argv[2]);
@@ -104,10 +109,16 @@ int main(int argc,char **argv){
     const auto gameA=a.chain(game);a.present(gameA);b.present(gameB);
     require(a.calls()==2&&b.calls()==2,"interleaved providers each reach only their own original present");
     require(runtime.metrics().vulkan.devices==2&&runtime.metrics().vulkan.swapchains==3,"every captured lifecycle belongs to the correct provider registry");
-    runtime.selectRenderer(RendererFamily::DirectX);a.present(gameA);
-    require(!runtime.metrics().observed&&runtime.metrics().processed==0,"the DirectX selection blocks Vulkan game routing without changing native presents");
-    a.close();b.close();runtime.stop();
+    runtime.configureRenderer(RendererFamily::DirectX);a.present(gameA);
+    require(runtime.metrics().observed&&runtime.metrics().renderer==Renderer::Vulkan&&runtime.metrics().configured==RendererFamily::DirectX
+            &&runtime.metrics().requested==RendererFamily::Automatic&&runtime.metrics().processed==0,
+            "actual Vulkan presentation stays eligible under DirectX/OpenGL config hints; it is never relabeled or counted as an effect pass");
+    b.remove(gameB);require(runtime.metrics().observed,"destroying another provider's chain must not revoke the selected source");
+    a.remove(gameA);require(!runtime.metrics().observed,"destroying the selected swapchain re-arms automatic detection");
+    const auto replacement=b.chain(game);b.present(replacement);
+    require(runtime.metrics().observed&&runtime.metrics().processed==0,"a replacement native source is adopted without fake processing");
+    a.close();b.close();require(!runtime.metrics().observed,"normal Vulkan context/device teardown cannot leave a stale routing claim");runtime.stop();
     DestroyWindow(ui);DestroyWindow(game);DestroyWindow(root);UnregisterClassW(cls.lpszClassName,cls.hInstance);
-    std::cout<<"PASS: production detours across two differently named Vulkan-loader doubles, independent originals and handle registries, late provider scan, proc-only queue/acquire2, Qt HWND exclusion, neutral no-pass and native-setting isolation\n";
+    std::cout<<"PASS: production detours across two differently named Vulkan-loader doubles, independent originals and handle registries, late provider scan, proc-only queue/acquire2, Qt HWND exclusion, neutral no-pass, config-independent actual Vulkan routing and selected/nonselected source-teardown re-detection\n";
     std::cout<<"LIMIT: authored loader contract only, no Vulkan ICD/game shader execution or GPU/player certification\n";
 }

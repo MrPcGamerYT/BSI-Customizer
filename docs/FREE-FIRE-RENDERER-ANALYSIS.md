@@ -67,24 +67,30 @@ BlueStacks session is using Android 15 ANGLE or that changing ANGLE fixes it**.
 
 The in-repository code was inspected, not just the label in Settings:
 
-- `ShaderBridge::attach()` maps the native `gl` / `dx` / `vlcn` configuration
-  into a **requested family**, not a measurement of the running Android app.
+- In the reported older build, `ShaderBridge::attach()` mapped native `gl` /
+  `dx` / `vlcn` into a requested-family gate. Current source records this as a
+  **configuration hint** and uses automatic owned-host-presentation routing.
+  Neither value measures the running Android app's original API.
 - `VulkanHooks.cpp` tracks Vulkan loader/instance/device lifetimes, captured
   `vkCreateWin32SurfaceKHR` HWNDs, swapchains and presentation queues.
 - `Runtime::eligible()` requires an identified same-process player **child**
   window, excludes the Qt/Chrome UI, and requires sufficient client bounds.
-- `Runtime::accepts()` refuses a different family from the configured one.
-  Thus “Not detected” while requesting Vulkan does **not** rule out an
-  otherwise-present GL/EGL or DXGI path. It also does not prove one exists.
+- Current `Runtime` accepts the first actual owned source independently of the
+  configured hint, holds its API/object/window claim to avoid translation-layer
+  double processing, and releases it on teardown. EGL uses independent providers
+  and exact current display/drawable identity; Qt/UI-first or loaded-device
+  evidence is insufficient. A bypass remains a bypass, not a Vulkan success.
 - No Android game-process API identification, offscreen Vulkan image ownership,
   shared-image interop chain or external-process presentation adoption is
   implemented by these counters. The shader must not touch such images on a guess.
 
 Plausible explanations still to distinguish are **a different game/presentation
 API**, **offscreen/interop presentation**, and **a missed surface/provider/process
-lifecycle**. These are hypotheses, not diagnoses. This investigation does not
-remove the Vulkan request gate, substitute the Qt/interface surface, force a
-renderer change or count another API as successful Vulkan processing.
+lifecycle**. These remain hypotheses for the reported session. The automatic
+routing change removes the configuration gate without changing the emulator's
+renderer or adopting UI/offscreen images. Authored Windows loader/lifecycle tests
+and software pipelines do not establish that the affected player is now captured.
+Record the actual observed API; do not count another API as Vulkan acceptance.
 
 ## Smallest useful next evidence
 

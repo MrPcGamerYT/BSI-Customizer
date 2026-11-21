@@ -52,7 +52,10 @@ Item {
                            detail: qsTr("Load the player UI to inspect its Settings window.") })
     // Only overrides live in the saved profile. The inspected state's
     // defaultTabIcons supplies the bundled pack without seeding QSettings.
-    property var panelProfile: ({ hiddenTabs: [], tabIcons: {}, logo: null })
+    property var panelProfile: ({ hiddenTabs: [], tabIcons: {}, linkIcons: {}, logo: null })
+    property var panelLinks: []
+    property bool panelLinksReady: false
+    property int panelLinkSerial: 0
     property string panelMsg: ""
     // True when the player carries a patch whose recovery snapshot is unusable,
     // so only the stock .bak can unblock a rebuild.
@@ -272,7 +275,15 @@ Item {
         const profile = settings.settingsPanelProfile || {};
         page.panelProfile = { hiddenTabs: profile.hiddenTabs || [],
                               tabIcons: profile.tabIcons || {},
+                              linkIcons: profile.linkIcons || {},
                               logo: profile.logo || null };
+        if (!page.panelLinksReady) {
+            const links = profile.links !== undefined ? profile.links : (settings.aboutLinks || []);
+            page.panelLinks = links.filter(row => row.id || row.title || row.url).map((row, index) => ({
+                id: row.id || "link-" + (index + 1), kind: row.kind || "link", title: row.title || "", url: row.url || ""
+            }));
+            page.panelLinksReady = true;
+        }
         page.panelReady = true;
     }
 
@@ -323,12 +334,36 @@ Item {
         const result = backend.saveSettingsPanelProfile(
                     name === undefined ? settings.aboutDeveloperName : name,
                     tagline === undefined ? settings.aboutTagline : tagline,
-                    hidden || page.panelProfile.hiddenTabs || [], ids);
+                    hidden || page.panelProfile.hiddenTabs || [], ids, page.panelLinks);
         page.panelMsg = (result && result.msg) ? result.msg : "";
         if (result && result.ok) {
             page.refreshPanel();
             page.notify(result.msg);
         }
+    }
+
+    function addPanelLink() {
+        if (page.panelLinks.length >= 24) return;
+        let id;
+        do { id = "link-" + (++page.panelLinkSerial); } while (page.panelLinks.some(row => row.id === id));
+        page.panelLinks = page.panelLinks.concat([{id: id, kind: "link", title: "", url: ""}]);
+    }
+
+    function removePanelLink(id) {
+        page.panelLinks = page.panelLinks.filter(row => row.id !== id);
+    }
+
+    function editPanelLink(id, key, value) {
+        // Repeater's modelData can be a value-copy of a JS object. Update the
+        // actual draft, without replacing the model on every keystroke (which
+        // would destroy the focused field). Add/remove/save consume this array.
+        for (let i = 0; i < page.panelLinks.length; ++i)
+            if (page.panelLinks[i].id === id) { page.panelLinks[i][key] = value; return; }
+    }
+
+    function panelLinkIconSource(id) {
+        const asset = (page.panelProfile.linkIcons || {})[id];
+        return asset && asset.mime && asset.data ? "data:" + asset.mime + ";base64," + asset.data : "";
     }
 
     function savePanelIdentity() {
@@ -359,6 +394,8 @@ Item {
         const icons = page.panelProfile.tabIcons || {};
         for (const id in icons)
             backend.clearSettingsPanelAsset("tab-icon", id);
+        for (const linkId in (page.panelProfile.linkIcons || {}))
+            backend.clearSettingsPanelAsset("link-icon", linkId);
         if (page.panelProfile.logo)
             backend.clearSettingsPanelAsset("logo", "");
         page.savePanelOptions([]);
@@ -431,7 +468,7 @@ Item {
                             embeddedQmlResourceCount: 0, qmlResourceSamples: [],
                             logoStatus: "", logoFallback: false,
                             detail: qsTr("Load the player UI to inspect its Settings window.") });
-            page.panelReady = false;
+            page.panelReady = false; page.panelLinksReady = false; page.panelLinks = [];
             page.panelMsg = "";
         }
         // Worker completion marks stale, never starts another synchronous scan.
@@ -2002,9 +2039,9 @@ Item {
                             Layout.fillWidth: true
                             wrapMode: Text.Wrap
                             text: qsTr("This is the About page inside the emulator’s rebuilt Settings "
-                                       + "window. The logo and the fields below come from your local "
-                                       + "profile; the links are edited in the About preview & editor "
-                                       + "tab and applied with them.")
+                                       + "window. Edit its logo, identity and links here. This list is "
+                                       + "independent of the Customizer’s own About page. Add or remove "
+                                       + "up to 24 HTTP(S) links, with custom icons saved as local assets.")
                             color: Theme.textDim
                             font.pixelSize: 10
                             font.italic: true
@@ -2124,6 +2161,83 @@ Item {
                             }
                         }
 
+                        Repeater {
+                            model: page.panelLinks
+                            delegate: ColumnLayout {
+                                required property var modelData
+                                required property int index
+                                objectName: "settingsPanelLinkRow-" + modelData.id
+                                Layout.fillWidth: true
+                                spacing: 6
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 8
+                                    Text { text: qsTr("Link ") + (index + 1); color: Theme.textDim; font.pixelSize: 11 }
+                                    StudioComboBox {
+                                        objectName: "settingsPanelLinkKind-" + modelData.id
+                                        model: [qsTr("Website / custom"), "GitHub", "Discord", "YouTube"]
+                                        currentIndex: Math.max(0, ["link", "github", "discord", "youtube"].indexOf(modelData.kind))
+                                        onActivated: page.editPanelLink(modelData.id, "kind", ["link", "github", "discord", "youtube"][currentIndex])
+                                    }
+                                    StudioTextField {
+                                        objectName: "settingsPanelLinkTitle-" + modelData.id
+                                        Layout.fillWidth: true
+                                        placeholderText: qsTr("Link label")
+                                        text: modelData.title
+                                        maximumLength: 80
+                                        onTextEdited: page.editPanelLink(modelData.id, "title", text)
+                                    }
+                                    ActionButton {
+                                        objectName: "settingsPanelLinkRemove-" + modelData.id
+                                        text: "−"
+                                        Accessible.name: qsTr("Remove About link ") + (index + 1)
+                                        onClicked: page.removePanelLink(modelData.id)
+                                    }
+                                }
+                                StudioTextField {
+                                    objectName: "settingsPanelLinkUrl-" + modelData.id
+                                    Layout.fillWidth: true
+                                    placeholderText: "https://example.com"
+                                    text: modelData.url
+                                    maximumLength: 512
+                                    onTextEdited: page.editPanelLink(modelData.id, "url", text)
+                                }
+                                RowLayout {
+                                    Layout.fillWidth: true
+                                    Image {
+                                        source: page.panelLinkIconSource(modelData.id)
+                                        visible: source.toString().length > 0
+                                        Layout.preferredWidth: 26; Layout.preferredHeight: 26
+                                        fillMode: Image.PreserveAspectFit
+                                    }
+                                    ActionButton {
+                                        objectName: "settingsPanelLinkIcon-" + modelData.id
+                                        implicitHeight: 28
+                                        text: page.panelLinkIconSource(modelData.id) ? qsTr("Replace icon…") : qsTr("Choose icon…")
+                                        onClicked: {
+                                            panelAssetDialog.targetKind = "link-icon";
+                                            panelAssetDialog.targetId = modelData.id;
+                                            panelAssetDialog.nameFilters = [qsTr("Link icon (*.svg *.png *.jpg *.jpeg *.webp)")];
+                                            panelAssetDialog.open();
+                                        }
+                                    }
+                                    ActionButton {
+                                        implicitHeight: 28
+                                        visible: page.panelLinkIconSource(modelData.id).length > 0
+                                        text: qsTr("Clear icon")
+                                        onClicked: page.clearPanelAsset("link-icon", modelData.id)
+                                    }
+                                    Item { Layout.fillWidth: true }
+                                }
+                            }
+                        }
+                        ActionButton {
+                            objectName: "settingsPanelLinkAdd"
+                            text: qsTr("+ Add link")
+                            enabled: page.panelLinks.length < 24 && !backend.busy
+                            onClicked: page.addPanelLink()
+                        }
+
                         // ---- actions -------------------------------------
                         RowLayout {
                             Layout.fillWidth: true
@@ -2221,7 +2335,10 @@ Item {
         property string targetKind: ""
         property string targetId: ""
         title: targetKind === "logo" ? qsTr("Choose the About logo")
-                                     : qsTr("Choose the tab SVG icon")
+             : targetKind === "link-icon" ? qsTr("Choose an About link icon")
+                                         : qsTr("Choose the tab SVG icon")
+        nameFilters: targetKind === "tab-icon" ? [qsTr("SVG image (*.svg)")]
+                     : [qsTr("Image (*.svg *.png *.jpg *.jpeg *.webp)")]
         onAccepted: page.setPanelAsset(targetKind, targetId, backend.localFilePath(selectedFile))
     }
     Dialog {

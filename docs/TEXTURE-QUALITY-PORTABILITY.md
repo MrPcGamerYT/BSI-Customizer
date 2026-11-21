@@ -1,149 +1,158 @@
-# Portable texture-quality experiment — not an enabled player feature
+# Potato graphic — experimental GL/GLES texture sampling
 
-**No universal texture-LOD Potato mode is implemented or enabled in Shaders.
-No merge is approved by this experiment.** The separate
-[optional render-resolution control](POTATO-NATIVE-RESOLUTION.md) changes actual
-Display configuration after Save, not game texture/sampler bindings. This is independently authored, Visual
-Studio-buildable source for the common sampler policy and API descriptor
-adapters. It does not intercept game textures, rewrite descriptor bindings, or
-replace a system DLL. The existing ten visual controls, native Save/Discard,
-6 px tabs and game presentation paths are unchanged.
+**Implemented as a default-off experiment, not universal renderer/player/GPU
+support. PR121 stays draft.** The native Shaders page now has a **Potato graphic**
+switch, separate from both the ten visual effects and
+[Render resolution (optional)](POTATO-NATIVE-RESOLUTION.md). It arms independently
+authored draw-time private samplers, not a final-image blur or a disguised
+resolution reduction. No supplied DLL, instruction bytes or source was copied.
+See the [static archive review](POTATO-DLL-REVIEW.md).
 
-See the [supplied archive review](POTATO-DLL-REVIEW.md) for the reference's actual
-behavior and hashes. None of that archive's code or binaries was incorporated.
+## Exact implemented boundary
 
-## Can it work on every renderer and GPU?
-
-**Not unconditionally.** Vendor-neutral source can cover several APIs without
-an Intel/AMD/NVIDIA allowlist. That does not guarantee a useful or safe texture
-reduction on every GPU, game, driver, profile or emulator.
-
-- Texture detail reduction needs existing, valid mipmaps and an eligible color
-  resource. A one-level texture has no coarser mip to select. Samplerless
-  `Load`/`texelFetch`/image-fetch operations ignore sampler LOD limits. Creating
-  mipmaps blindly costs work/memory and is unsafe for depth, integer and UI resources.
-- OpenGL/GLES, D3D11, D3D12 and Vulkan bind resources/samplers differently.
-  D3D12 static/root samplers and Vulkan immutable samplers cannot be treated as
-  ordinary mutable sampling state. Descriptors/command buffers already in use
-  by the GPU cannot safely be rewritten by a presentation callback.
-- GL sampler objects/minimum LOD require GL 3.3 or GLES 3 (or a separately
-  qualified extension path). GL 2 / GLES 2 are bypasses in this design, not
-  silently called supported. Legacy D3D9/10 are not implemented adapters.
-- Native HDR/protected/unsupported paths must retain their original rendering.
-- An NVIDIA Profile Inspector override is external driver state. GL sampler
-  queries do not prove that every such override is absent. No profile reset,
-  registry change or universal conflict-detection claim is appropriate.
-
-For a broadly portable **performance** adjustment now, use the emulator's own
-Display settings to lower its render resolution while preserving the required
-aspect ratio. The new Shaders native-size control wires that same config path
-through explicit Save, original-size restoration and recovery. It reduces the
-configured native framebuffer independently of GPU vendor/API but is not the
-same texture-only appearance as the reference DLL; apps can choose their own
-internal resolution. No setting changes on mode selection/open/Discard. Actual
-player restart/render size and FPS remain separately unverified.
-
-## Implemented source boundary
-
-| File | Purpose |
+| Path | Texture-detail implementation |
 | --- | --- |
-| `src/shaders/TextureQuality.h` | Data-only shared policy and explicit refusal diagnostics |
-| `src/shaders/GlTextureQuality.h` | Relevant GL/GLES sampler-field plan |
-| `src/shaders/D3dTextureQuality.h` | Typed D3D11, D3D12 dynamic and D3D12 static sampler descriptor copies |
-| `src/shaders/VulkanTextureQuality.h` | Conservative basic `VkSamplerCreateInfo` copy; unknown extensions refused |
+| Desktop OpenGL 3.3+ / GLES 3.1+ | Experimental draw-scoped private sampler replacement after an owned WGL/EGL game presentation is observed |
+| GL 2 / GLES 2 / GLES 3.0 | Bypass; the required sampler/texture-level inspection contract is incomplete |
+| D3D11 / D3D12 / Vulkan | Shared policy and typed descriptor adapters/tests only; **no game texture-binding interception** |
+| Ten presentation effects | Independent processing; their pixel tests are not proof of Potato texture reduction |
+| Render resolution | Independent native Display configuration, requiring Save and restart |
 
-The experiment sets a **minimum-LOD floor** of 1.5 (light) or 3.0 (strong),
-clamped to the view's visible mip count and the source sampler's maximum LOD.
-It does not stack a positive bias on another bias. Minimum LOD is available in
-GLES 3, unlike desktop texture-LOD bias, and avoids changing Vulkan device bias
-features. This is a consistent bounded policy, **not a byte-for-byte clone** of
-the proxy's combined min-LOD/bias behavior.
+The UI switch uses a minimum-LOD floor of **3.0**, clamped to existing exposed
+mips and the original sampler's maximum LOD. The shared policy also supports
+**1.5** for tests/future callers; there is no second texture-strength selector.
+Positive floors select coarser existing mips. They do not shrink allocated
+textures, create mipmaps, remove geometry, change the game's draw distance,
+change DPI/FPS caps or guarantee any FPS improvement. `texelFetch` and other
+samplerless accesses may ignore this policy.
 
-Every input descriptor is retained. The output is data for a **private sampler
-replacement**, not permission to mutate the original application's sampler.
-Only the planned minimum-LOD field changes; bindings, wrap/border/filtering,
-comparison behavior, maximum LOD and bias must remain intact. The GL adapter
-contains the relevant planning fields, so a future caller must separately copy
-the **full** original GL sampler description when allocating a private sampler.
+The regular `BSIShaders` module observes selected public draw entry points
+(arrays/elements, range and instanced variants). It does not cover every
+multi-draw/indirect/extension entry point. A context is armed only after a
+qualified presentation; earlier draws remain native. Off and unsupported paths
+retain the original calls, and the original draw/present executes once.
 
-All prerequisites default to **false/unknown**. A plan requires:
+### State and resource checks
 
-1. An identified game surface and a matching, implemented game API, not the Qt
-   Settings renderer or a merely loaded graphics library.
-2. Proven ownership of a sampled, nonprotected **game-color** resource and a
-   valid view exposing at least two mips (bounded to at most 32).
-3. A supported, private replacement mechanism with correct resource lifetimes.
-4. Explicit review of external overrides. **The source does not detect or clear
-   NVIDIA profiles.** The test fixtures' reviewed flag is test metadata only;
-   it is not proof of a user's real driver configuration.
-5. Finite, valid source sampling limits. Existing nonzero bias/minimum LOD,
-   anisotropic/comparison/reduction/unnormalized sampling, unknown descriptor
-   extensions and unsupported resources are unchanged bypasses. The GL adapter
-   recognizes its exact API-default minimum LOD of **-1000** as unrestricted;
-   other nonzero GL floors remain unchanged overrides, not accidental opt-ins.
+`GlTextureOverride` currently requires:
 
-The policy has bounded CPU work, no allocation, no vendor checks, no registry or
-file access, no render-thread GL queries and no per-draw scan/clear of every
-texture unit. Actual game integration could still introduce cost; only a
-qualified binding/lifecycle cache and measurements can establish performance.
+- A tracked current context and the **exact current drawable**, on an eligible
+  non-Qt/non-Chrome child HWND owned by the attached player. The setting or a
+  loaded graphics DLL is not proof. EGL identities include provider, display and
+  surface; one UI provider does not monopolize a later game's provider.
+- An opaque triangle draw, depth testing and depth writes enabled, a real depth
+  attachment of at least 16 bits, and a depth function other than NEVER/ALWAYS.
+  Merely enabling the depth-test bit on a UI/no-depth target is insufficient.
+- An active ordinary `sampler2D`, a normalized RGB/RGBA format, dimensions at
+  least 64×64, and a matching existing mip chain. Depth, integer, HDR, external,
+  array/cube and current draw-attachment textures are not selected.
+- Ordinary mip filtering, no comparison/reduction/anisotropic policy and no
+  existing nondefault minimum-LOD or bias override. The exact GL default
+  minimum of -1000 is unrestricted, not an existing custom override. GLES
+  extension-only border/mirror-clamp wrap descriptors are bypassed.
+- Complete public GL extension/protection queries. Protection enums are queried
+  only when advertised. Protected EGL surfaces/contexts and GL protected
+  contexts/textures are excluded. If EGL permits protected resources but GL
+  cannot inspect per-texture protection, texture Potato refuses that context.
+- Explicit user review of external driver LOD/AA overrides. This is an
+  acknowledgement, **not detection or certification** of the real profile.
+  No NVIDIA/AMD/Intel profile is inspected, reset or modified.
 
-## Evidence and limits
+**Important remaining provenance limit:** an owned context, ordinary color
+format and scene-like draw state do not independently prove that every sampled
+texture is a game's diffuse/albedo color. Normal/data maps, shared resources or
+unusual UI passes can look similar to these checks. The policy's proof fields
+are caller metadata, not a hardware attestation. These conservative checks are
+not universal resource-semantic safety, protected-driver certification, or
+installed-game acceptance. Do not present this experiment as such.
 
-Local development checks:
+### Private replacements and failure behavior
 
-| Check | Result / what it proves |
+Original texture/sampler descriptors are never edited. All inspected sampler
+fields are cloned into a private sampler; only its minimum LOD differs. Wrap,
+filter, comparison, border color (desktop), decode/reduction and other supported
+fields are retained. A queried replacement must match its requested descriptor
+before it is bound. Original sampler bindings restore immediately after the
+original draw, and `ACTIVE_TEXTURE` restores before that draw.
+
+Inspection is bounded (32 used units/draw, 256 uniforms, 128 private cached
+samplers/context, 16 tracked active game contexts). It performs render-thread
+queries and allocations; it is **not a free performance optimization**. RAII
+rolls back partial bindings/active-unit changes before the original draw on
+allocation or diagnostic failure. Pending GL errors are not consumed to test
+our own work. Cache exhaustion or an incomplete/unsupported state is a bypass.
+
+Surface/context destruction releases the presentation claim so a replacement
+can be detected. Module/callback code remains pinned while a trampoline could
+still be used. Native share-group/object lifetime, multi-threaded driver
+behavior and private GPU-object cleanup across real context recreation still
+need player/driver review; the isolated explicit-release leak tests below do
+not certify those lifetimes.
+
+## Save and diagnostics
+
+- Both texture flags default off. Selecting the switch/review checkbox is only
+  a draft; existing native Save/Discard/navigation semantics are retained.
+- Enabling without review is refused. Presets, Enhance and Reset visuals preserve
+  the texture flags and independent native-resolution mode.
+- `bsi.shaders.v3` stores 14 values: ten visual steps, visual enable, resolution
+  mode, texture enable and external-override review. Released v1/v2 profiles are
+  read without writes and migrate on Save, retaining resolution recovery data.
+- Texture Save alone never writes native Display. The texture option does not
+  require a restart for arming subsequent eligible draws, but hooks must have
+  captured a qualified game presentation. This is not evidence of changed game
+  pixels or a hot native-framebuffer resize.
+- Prepared sampler draw/binding counters are separate from processed
+  presentation-shader frames. Neither counter measures texture appearance,
+  FPS, successful guest rendering or driver-profile compatibility.
+- On an observed DirectX/Vulkan texture path, status explicitly says texture
+  interception is unimplemented. It never substitutes resolution or relabels a
+  GL/UI surface as Vulkan success.
+
+## Automated evidence and limits
+
+Current local source checks (CI must run against the pushed review head):
+
+| Check | What passed |
 | --- | --- |
-| Shared policy + GL/Vulkan descriptor tests | Pass; five API routes, per-API rejection, view bounds, unchanged inputs and conservative refusal behavior |
-| ASan/UBSan shared policy | Pass with leak detection and halt-on-error; not game-hook validation |
-| Windows x64 cross-compilation/link | Pass for typed D3D11/D3D12 adapters and complete native fixtures; **not MSVC or Windows execution** |
-| Real GLES 3.1 sampler pixels through ANGLE/SwiftShader | Pass; seven solid-color test-owned mips demonstrate 1.5 interpolation and 3.0 selection, original sampler/pixels restore |
-| Native SwiftShader Vulkan sampler creation/destruction | Pass; bounded descriptors accepted; **not a texture-quality pixel or game-binding test** |
-| Complete ordinary native CTests | 13/13 pass, including unchanged package/source/recovery and existing Vulkan pixels |
-| Linux Qt 5.15.2 / Qt 5.15.19 / Qt 6.8.3 topbar scenes | All 20 pass on each with strict painted-text comparison; Windows result must be checked independently |
+| Strict C++ policy/GL safety | Descriptor preservation, extension legality, protected/unknown-protection refusal, depth/UI/border guards, cache/rollback behavior |
+| ASan/UBSan + leak detection | Eight injected allocation failures, partial-binding/active-unit rollback, explicit-release sampler cleanup; public-API doubles, not a protected driver |
+| Actual ANGLE/SwiftShader GLES 3.1 pixels | Production private samplers select test-owned mip colors at 1.5/3.0, restore exact native pixels/samplers, preserve pending errors and reject depth/UI/no-mip/existing-override cases |
+| Native core CTest | 16/16, including v3 preferences, routing, GL safety, native source/image/recovery and existing Vulkan pixels; software fixtures only |
+| Windows x64 cross-compile/link | Complete EGL/DXGI/Vulkan hook test executables; compilation/linking is **not execution** |
+| Actual Qt 6 plugin and editors | Texture review/toggle/Save/Discard/preset independence, truthful no-game diagnostics and independent native-resolution/restart controls |
 
-CI additionally requires desktop GL core and GLES 3 mip-selection pixels,
-Windows MSVC/WARP D3D11 sampler creation/GetDesc, and D3D12 dynamic sampler-heap
-and static-sampler root-signature creation. The D3D/Vulkan **existing ten-effect
-pixel tests are not Potato pixel tests**. Neither descriptor construction nor
-an existing color-grading pass establishes that a game's textures were changed.
+Windows CI additionally builds/runs real MinHook detours with authored EGL/Vulkan
+lifecycle DLL doubles, native HWND ownership and DirectX WARP. Those tests do
+not execute an EGL game driver, protected GPU memory or an emulator. Software
+CI also requires GLES and desktop-core pixels and sanitizer tests; a pending or
+failed check is not a pass. The D3D/Vulkan descriptor tests and their existing
+ten-effect pixels remain distinct from missing Potato game-binding tests.
 
-No physical Intel, AMD or NVIDIA player, NVIDIA profile conflict, actual game
-texture binding, FPS/latency improvement or complete universal mode is verified
-by these results. Test failures/pending checks must not be called passes.
+## Build and remaining acceptance
 
-### Build the policy tests with Visual Studio, without Qt
-
-From an x64 Visual Studio 2022 developer PowerShell with CMake/Windows SDK:
+From an x64 Visual Studio 2022 developer PowerShell, without Qt for policy and
+hook tests:
 
 ```powershell
 cmake -S tests/shaders -B build-texture-quality -G "Visual Studio 17 2022" `
   -A x64 -T v143 -DBSI_TEST_VULKAN=OFF
-cmake --build build-texture-quality --config Release --target shader-texture-quality-test
-ctest --test-dir build-texture-quality -C Release -R shader-texture-quality-policy --output-on-failure
+cmake --build build-texture-quality --config Release
+ctest --test-dir build-texture-quality -C Release --output-on-failure
 ```
 
-Build `shader-d3d-pixels-test` and run its D3D11/12 CTests for the separate WARP
-API fixtures. Vulkan/GL software tests need their explicitly configured ICD/EGL
-runtime. Building a test executable does not install a player feature.
+Use the matching Qt SDK and `src/shaders/CMakeLists.txt` to build the regular
+plugin; see [integration](SHADERS-INTEGRATION.md). A successful build does not
+install or certify it.
 
-## Required before enablement or merge
+Before calling texture Potato accepted, verify actual game mip-selection/image
+changes and exact off restoration; ordinary and shared resource semantics;
+resize/context/device teardown and provider/translation layers; driver profiles;
+and repeatable image quality/frame times on the target physical GPUs. Implement
+and validate resource/view/descriptor ownership and synchronization before
+claiming D3D11/D3D12/Vulkan texture support (including static/immutable samplers).
+The reported NVIDIA startup issue still needs the affected profile, player,
+GPU/driver and existing failure evidence; no fix is established here.
 
-- Implement and independently review renderer-specific **resource/view
-  ownership, private sampler/descriptor binding and synchronization** paths,
-  including D3D12 static/root and Vulkan immutable/extended descriptors. Never
-  infer that all a device's textures belong to the game from one swapchain.
-- Prove no changes to native/UI/depth/integer/protected resources, with correct
-  lifetime, sharing, descriptor reuse, context/device recreation and rollback.
-- Prove off/neutral is original rendering, with no postprocess pass masquerading
-  as reduced game work. Integrate drafts/persistence/native Save/Discard only
-  after that path exists; do not ship an enabled-looking but ineffective preset.
-- Verify actual game mip-selection pixels on every claimed backend, then measure
-  image quality and frame times in repeatable scenes on the real target GPUs.
-- Obtain the affected `.nip` profile, emulator/renderer, GPU/driver and existing
-  failure log to reproduce and validate the reported NVIDIA startup issue.
-- Complete all current-head full/reference/package/browser checks and the
-  installed-player requirements in [the integration guide](SHADERS-INTEGRATION.md).
-
-PR121 remains a draft until the requested feature and these conditions are
-actually satisfied. A green software-only CI run is not, by itself, authority
-to merge an unfinished universal texture-quality feature.
+**Do not merge on software fixtures alone. No universal-renderer, physical-GPU,
+FPS, anti-cheat/account-safety or NVIDIA-conflict claim is made.**

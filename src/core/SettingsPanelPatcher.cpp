@@ -1,4 +1,5 @@
 #include "SettingsPanelPatcher.h"
+#include "SettingsPanelLinks.h"
 
 #include "BsDetector.h"
 #include "CustomizationWorkspace.h"
@@ -256,7 +257,7 @@ struct StagedAssetFiles
 // Immutable, content-addressed names also invalidate QML's image cache when an
 // icon is replaced. Never overwrite a live icon before the EXE write succeeds.
 QString writeAssetFile(const QString &exePath, const QByteArray &bytes,
-                       StagedAssetFiles *staged, QString *error)
+                       StagedAssetFiles *staged, QString *error, const QString &suffix = QStringLiteral(".png"))
 {
     const QString dir = assetDirectory(exePath);
     if (dir.isEmpty() || bytes.isEmpty() || !QDir().mkpath(dir)) {
@@ -264,7 +265,7 @@ QString writeAssetFile(const QString &exePath, const QByteArray &bytes,
         return {};
     }
     const QString file = QDir(dir).filePath(QString::fromLatin1(sha256(bytes).left(24))
-                                           + QStringLiteral(".png"));
+                                           + suffix);
     const QFileInfo info(file);
     if (info.exists() || info.isSymLink()) {
         QByteArray existing;
@@ -678,7 +679,8 @@ QVariantMap byTabIndex(const QVariantMap &byId, const QVariantList &tabs)
 
 QString buildAbout(const QString &developerName, const QString &tagline,
                    const QVariantList &links, const QString &logoSource,
-                   const QStringList &hiddenTabs, const QVariantMap &tabIcons)
+                   const QStringList &hiddenTabs, const QVariantMap &tabIcons,
+                   const QString &linkModelSource = QString(), bool linkArtwork = false)
 {
     QString rows;
     for (const QVariant &entry : links) {
@@ -782,6 +784,12 @@ Timer{interval:160;running:a.Window.window&&a.Window.window.visible;repeat:true;
     generated.replace(QStringLiteral("@@BSI_DEVELOPER@@"), qDeveloper);
     generated.replace(QStringLiteral("@@BSI_TAGLINE@@"), qTagline);
     generated.replace(QStringLiteral("@@BSI_TAB_ICONS@@"), iconLiteral);
+    if (!linkModelSource.isEmpty())
+        generated.replace(QStringLiteral("Repeater{model:[@@BSI_LINKS@@]"),
+            QStringLiteral("Loader{id:lm;source:%1}\nRepeater{model:lm.item?lm.item.links:[]").arg(qmlString(linkModelSource)));
+    if (linkArtwork)
+        generated.replace(QStringLiteral("rightPadding:38;text:modelData.title;"),
+            QStringLiteral("rightPadding:38;icon{source:modelData.icon||'';width:20;height:20;color:'transparent'}text:modelData.title;"));
     generated.replace(QStringLiteral("@@BSI_LINKS@@"), rows);
     generated.replace(QStringLiteral("@@BSI_LOGO_SOURCE@@"), qmlString(logoSource));
     return generated;
@@ -920,28 +928,11 @@ QVariantList operationsFor(const QMap<QString, QByteArray> &replacement)
 bool validateProfile(const QString &developerName, const QVariantList &links, QString *error)
 {
     if (developerName.trimmed().isEmpty() || developerName.trimmed().size() > 80
-        || developerName.contains(QChar(0)) || links.size() > 4) {
-        *error = QStringLiteral("Enter a developer name up to 80 characters and no more than four About links.");
+        || QRegularExpression(QStringLiteral("[\\x00-\\x1f\\x7f]")).match(developerName).hasMatch()) {
+        *error = QStringLiteral("Enter a developer name up to 80 characters without control characters.");
         return false;
     }
-    for (const QVariant &value : links) {
-        const QVariantMap link = value.toMap();
-        const QString title = link.value(QStringLiteral("title")).toString().trimmed();
-        const QString urlText = link.value(QStringLiteral("url")).toString().trimmed();
-        if (title.isEmpty() && urlText.isEmpty()) continue;
-        if (title.isEmpty() || title.size() > 80 || urlText.size() > 512
-            || QRegularExpression(QStringLiteral("[\\x00-\\x1f\\x7f]")).match(urlText).hasMatch()) {
-            *error = QStringLiteral("Every About link needs a label up to 80 characters and a valid HTTP(S) URL.");
-            return false;
-        }
-        const QUrl url(urlText, QUrl::StrictMode);
-        if (!url.isValid() || url.host().isEmpty() || !url.userInfo().isEmpty()
-            || (url.scheme().compare(QLatin1String("http"), Qt::CaseInsensitive) != 0
-                && url.scheme().compare(QLatin1String("https"), Qt::CaseInsensitive) != 0)) {
-            *error = QStringLiteral("About links must be valid HTTP or HTTPS URLs.");
-            return false;
-        }
-    }
+    if (!SettingsPanelLinks::clean(links, nullptr, error)) return false;
     return true;
 }
 
@@ -1277,7 +1268,8 @@ QVariantMap defaultTabIcons(const QVariantList &tabs, QString *error)
 
 QVariantMap readCustomAsset(const QString &path, const QString &kind)
 {
-    if (kind != QLatin1String("tab-icon") && kind != QLatin1String("logo"))
+    if (kind != QLatin1String("tab-icon") && kind != QLatin1String("logo")
+        && kind != QLatin1String("link-icon"))
         return fail(QStringLiteral("Unknown Settings-panel asset type."));
     const QFileInfo info(path);
     if (path.isEmpty() || !info.isFile() || info.isSymLink())
@@ -1296,7 +1288,7 @@ QVariantMap readCustomAsset(const QString &path, const QString &kind)
     const QVariantMap shrunk = shrinkAsset(
         {{QStringLiteral("mime"), mime},
          {QStringLiteral("data"), QString::fromLatin1(bytes.toBase64())}},
-        kind, artworkBudget(emptyPagePayload(), 0));
+        kind, kind == QLatin1String("link-icon") ? 0 : artworkBudget(emptyPagePayload(), 0));
     const QByteArray stored = QByteArray::fromBase64(
         shrunk.value(QStringLiteral("data")).toString().toLatin1());
     mime = shrunk.value(QStringLiteral("mime")).toString();
@@ -1565,8 +1557,13 @@ QVariantMap apply(const QString &exePath, const QString &developerName,
     if (!validateProfile(developerName, links, &profileError)) return fail(profileError);
     for (auto it = profile.cbegin(); it != profile.cend(); ++it)
         if (it.key() != QLatin1String("hiddenTabs") && it.key() != QLatin1String("tabIcons")
-            && it.key() != QLatin1String("logo") && it.key() != QLatin1String("tagline"))
+            && it.key() != QLatin1String("logo") && it.key() != QLatin1String("tagline")
+            && it.key() != QLatin1String("links") && it.key() != QLatin1String("linkIcons"))
             return fail(QStringLiteral("Unknown Settings-panel profile option: %1.").arg(it.key()));
+    QVariantList normalizedLinks;
+    if (!SettingsPanelLinks::clean(links, &normalizedLinks, &profileError)) return fail(profileError);
+    const QVariantMap linkIcons = profile.value(QStringLiteral("linkIcons")).toMap();
+    if (linkIcons.size() > 64) return fail(QStringLiteral("Too many saved About link icons."));
     const QString tagline = profile.value(QStringLiteral("tagline")).toString().trimmed();
     if (tagline.size() > 120 || tagline.contains(QChar(0))
         || QRegularExpression(QStringLiteral("[\\x00-\\x1f\\x7f]")).match(tagline).hasMatch())
@@ -1779,9 +1776,45 @@ QVariantMap apply(const QString &exePath, const QString &developerName,
     QString publishedLogoSource = logoSource;
     StagedAssetFiles stagedAssets;
     int referencedAssets = 0;
+    QString linkModelSource;
+    // A bounded, generated data-only QML object avoids both Qt 5 file-XHR
+    // restrictions and the fixed compressed EXE slot. It contains escaped
+    // literal strings only, never QML/JS supplied by a profile or SVG.
+    const auto stageLinkModel = [&]() -> QString {
+        if (!linkModelSource.isEmpty()) return QString();
+        QString rows, error;
+        for (const QVariant &value : normalizedLinks) {
+            const QVariantMap row = value.toMap();
+            QString icon;
+            const QString id = row.value(QStringLiteral("id")).toString();
+            if (linkIcons.contains(id)) {
+                const QVariantMap asset = shrinkAsset(linkIcons.value(id).toMap(), QStringLiteral("link-icon"), 0);
+                QString checked;
+                if (!storedAssetSource(asset, QStringLiteral("link-icon"), &checked, &error)) return error;
+                const QByteArray png = runtimeAssetPng(asset, true);
+                if (png.isEmpty()) return QStringLiteral("An About link icon could not be rendered. Choose it again.");
+                icon = writeAssetFile(exePath, png, &stagedAssets, &error);
+                if (icon.isEmpty()) return error;
+                ++referencedAssets;
+            }
+            if (!rows.isEmpty()) rows += QLatin1Char(',');
+            rows += QStringLiteral("{title:%1,url:%2,icon:%3}").arg(
+                qmlString(row.value(QStringLiteral("title")).toString()),
+                qmlString(row.value(QStringLiteral("url")).toString()), qmlString(icon));
+        }
+        const QByteArray model = (QStringLiteral("import QtQml 2.15\nQtObject{property var links:[")
+            + rows + QStringLiteral("]}\n")).toUtf8();
+        if (model.size() > 64 * 1024) return QStringLiteral("The About link data exceeds its safe asset budget.");
+        linkModelSource = writeAssetFile(exePath, model, &stagedAssets, &error, QStringLiteral(".qml"));
+        return linkModelSource.isEmpty() ? error : QString();
+    };
+    if (normalizedLinks.size() > 4 || !linkIcons.isEmpty()) {
+        const QString error = stageLinkModel();
+        if (!error.isEmpty()) return fail(error);
+    }
     const auto fits = [&](const QVariantMap &icons, const QString &logoSrc) {
-        return aboutFitProblem(image, buildAbout(developerName, tagline, links, logoSrc,
-                                                 hiddenTabs, icons).toUtf8()).isEmpty();
+        return aboutFitProblem(image, buildAbout(developerName, tagline, normalizedLinks, logoSrc,
+                                                 hiddenTabs, icons, linkModelSource, !linkIcons.isEmpty()).toUtf8()).isEmpty();
     };
     // buildAssets stores the logo under its own key, not directly in this map.
     // Reading bestLogoFiles as an asset wrote an empty file for every logo.
@@ -1825,8 +1858,12 @@ QVariantMap apply(const QString &exePath, const QString &developerName,
         publishedIcons = byFile;
         publishedLogoSource = logoByFile;
     }
-    const QString rebuiltAbout = buildAbout(developerName, tagline, links, publishedLogoSource,
-                                            hiddenTabs, publishedIcons);
+    if (linkModelSource.isEmpty() && !fits(publishedIcons, publishedLogoSource)) {
+        const QString error = stageLinkModel();
+        if (!error.isEmpty()) return fail(error);
+    }
+    const QString rebuiltAbout = buildAbout(developerName, tagline, normalizedLinks, publishedLogoSource,
+                                            hiddenTabs, publishedIcons, linkModelSource, !linkIcons.isEmpty());
     if (rebuiltAbout.isEmpty())
         return fail(QStringLiteral("The About page could not be generated; no file was changed."));
     QMap<QString, QByteArray> replacements {

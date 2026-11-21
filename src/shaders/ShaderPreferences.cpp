@@ -38,12 +38,14 @@ bool integer(const QVariant &value,int minimum,int maximum,int *out){
     *out=int(number);return true;
 }
 QVariantMap configValues(const ShaderSavedConfiguration &c){
-    QVariantMap result{{QStringLiteral("enabled"),c.visual.enabled},{QStringLiteral("potatoMode"),int(c.potato)}};
+    QVariantMap result{{QStringLiteral("enabled"),c.visual.enabled},{QStringLiteral("potatoMode"),int(c.potato)},
+        {QStringLiteral("potatoGraphic"),c.texture.enabled},{QStringLiteral("textureOverridesReviewed"),c.texture.externalOverridesReviewed}};
     for(std::size_t i=0;i<controls.size();++i)result.insert(QString::fromLatin1(controls[i].key),c.visual.values[i]);
     return result;
 }
-bool decodeValues(const QVariantMap &map,ShaderSavedConfiguration *c,QString *error,bool legacy=false){
-    if(map.size()!=int(controls.size())+(legacy?1:2)||map.value(QStringLiteral("enabled")).userType()!=QMetaType::Bool)
+bool decodeValues(const QVariantMap &map,ShaderSavedConfiguration *c,QString *error,int version=3){
+    const bool legacy=version==1;
+    if(map.size()!=int(controls.size())+(legacy?1:version==2?2:4)||map.value(QStringLiteral("enabled")).userType()!=QMetaType::Bool)
         return refuse(error,QStringLiteral("Shader settings have an invalid schema."));
     c->visual.enabled=map.value(QStringLiteral("enabled")).toBool();
     for(std::size_t i=0;i<controls.size();++i)
@@ -52,6 +54,15 @@ bool decodeValues(const QVariantMap &map,ShaderSavedConfiguration *c,QString *er
     int mode=0;
     if(!legacy&&!integer(map.value(QStringLiteral("potatoMode")),0,2,&mode))
         return refuse(error,QStringLiteral("Resolution mode must be Native, Light or Strong."));
+    if(version>=3){
+        if(map.value(QStringLiteral("potatoGraphic")).userType()!=QMetaType::Bool
+           ||map.value(QStringLiteral("textureOverridesReviewed")).userType()!=QMetaType::Bool)
+            return refuse(error,QStringLiteral("Potato graphic and its driver-override review must be booleans."));
+        c->texture.enabled=map.value(QStringLiteral("potatoGraphic")).toBool();
+        c->texture.externalOverridesReviewed=map.value(QStringLiteral("textureOverridesReviewed")).toBool();
+        if(c->texture.enabled&&!c->texture.externalOverridesReviewed)
+            return refuse(error,QStringLiteral("Review existing driver LOD/AA overrides before enabling experimental Potato graphic. No NVIDIA/AMD/Intel profile is reset or certified by this switch."));
+    }
     c->potato=PotatoMode(mode);return true;
 }
 QJsonObject resolutionJson(const DisplayResolution &r){return {{QStringLiteral("width"),r.width},{QStringLiteral("height"),r.height},{QStringLiteral("custom"),r.custom}};}
@@ -68,17 +79,18 @@ bool decodeResolution(const QJsonValue &value,DisplayResolution *out){
 QJsonObject configJson(const ShaderSavedConfiguration &c){
     QJsonObject display;
     if(c.potato!=PotatoMode::Native)display={{QStringLiteral("original"),resolutionJson(c.original)},{QStringLiteral("target"),resolutionJson(c.target)}};
-    return {{QStringLiteral("schema"),QStringLiteral("bsi.shaders.v2")},
+    return {{QStringLiteral("schema"),QStringLiteral("bsi.shaders.v3")},
         {QStringLiteral("values"),QJsonObject::fromVariantMap(configValues(c))},{QStringLiteral("display"),display}};
 }
 bool decodeConfig(const QJsonObject &root,ShaderSavedConfiguration *c,ShaderDisplayPending *pending,QString *error){
     const auto schema=root.value(QStringLiteral("schema")).toString();
     const bool legacy=schema==QLatin1String("bsi.shaders.v1");
+    const int version=legacy?1:schema==QLatin1String("bsi.shaders.v2")?2:3;
     const bool journal=root.contains(QStringLiteral("pendingDisplay"));
-    if((!legacy&&schema!=QLatin1String("bsi.shaders.v2"))||root.size()!=(legacy?2:journal?4:3)
+    if((!legacy&&schema!=QLatin1String("bsi.shaders.v2")&&schema!=QLatin1String("bsi.shaders.v3"))||root.size()!=(legacy?2:journal?4:3)
        ||(legacy&&journal)||(!pending&&journal)||!root.value(QStringLiteral("values")).isObject())
         return refuse(error,QStringLiteral("Saved shader preferences have an unknown or invalid format; no native display setting was changed."));
-    if(!decodeValues(root.value(QStringLiteral("values")).toObject().toVariantMap(),c,error,legacy))return false;
+    if(!decodeValues(root.value(QStringLiteral("values")).toObject().toVariantMap(),c,error,version))return false;
     if(!legacy){
         if(!root.value(QStringLiteral("display")).isObject())return refuse(error,QStringLiteral("Invalid native Display recovery metadata."));
         const auto display=root.value(QStringLiteral("display")).toObject();
@@ -99,7 +111,8 @@ bool decodeConfig(const QJsonObject &root,ShaderSavedConfiguration *c,ShaderDisp
         if(transaction.size()!=3||!decodeResolution(transaction.value(QStringLiteral("before")),&pending->before)
            ||!decodeResolution(transaction.value(QStringLiteral("target")),&pending->target)
            ||!transaction.value(QStringLiteral("next")).isObject()
-           ||transaction.value(QStringLiteral("next")).toObject().value(QStringLiteral("schema")).toString()!=QLatin1String("bsi.shaders.v2")
+           ||(transaction.value(QStringLiteral("next")).toObject().value(QStringLiteral("schema")).toString()!=QLatin1String("bsi.shaders.v2")
+              &&transaction.value(QStringLiteral("next")).toObject().value(QStringLiteral("schema")).toString()!=QLatin1String("bsi.shaders.v3"))
            ||!decodeConfig(transaction.value(QStringLiteral("next")).toObject(),&pending->next,nullptr,error))
             return refuse(error,QStringLiteral("Invalid pending Display recovery evidence; no native value was overwritten."));
         const bool restoring=pending->next.potato==PotatoMode::Native;
@@ -115,7 +128,7 @@ bool decodeConfig(const QJsonObject &root,ShaderSavedConfiguration *c,ShaderDisp
 QString dimensions(const DisplayResolution &r){return QStringLiteral("%1 × %2").arg(r.width).arg(r.height);}
 }
 void ShaderPreferences::load(const QString &path){
-    file=path;saved={};pending={};nativeDisplay={};lastError.clear();displayDetail.clear();restartRequired=false;
+    file=path;saved={};pending={};restartTarget={};nativeDisplay={};lastError.clear();displayDetail.clear();restartRequired=false;
     persistedBytes.clear();persistedExists=QFileInfo::exists(file);readable=readFile(file,&persistedBytes);
     if(!readable){lastError=QStringLiteral("Saved shader settings are unreadable, linked or too large; neutral bypass is active.");return;}
     if(!persistedExists)return;
@@ -168,6 +181,23 @@ bool ShaderPreferences::bindDisplay(QObject *backend){
     else lastError.clear();
     return okay;
 }
+bool ShaderPreferences::bindPlayer(QObject *backend){
+    QString error;
+    return nativeDisplay.bindPlayer(backend,&error);
+}
+QVariantMap ShaderPreferences::requestRestart(){
+    const auto fail=[](const QString &message){return QVariantMap{{"ok",false},{"msg",message}};};
+    if(!readable||pending.active||!restartRequired)
+        return fail(QStringLiteral("No finalized resolution change from this session is awaiting restart. Nothing was restarted."));
+    DisplayResolution actual;QString error;bool modified=true;
+    if(!nativeDisplay.read(&actual,&error)||!nativeDisplay.modified(&modified,&error))return fail(error);
+    if(modified)return fail(QStringLiteral("Save or Discard the player's other unsaved settings before restarting. Shaders did not commit or discard them."));
+    if(actual!=restartTarget)return fail(QStringLiteral("Display changed after this resolution save. Review it in Display before restarting; no stale target was assumed."));
+    if(!nativeDisplay.restart(&error))return fail(error);
+    // Accepted invocation != proof of completed restart/live guest resolution.
+    restartRequired=false;
+    return {{"ok",true},{"accepted",true},{"msg",QStringLiteral("The player's native restart request was accepted. Running apps may close; verify the game size after it reopens.")}};
+}
 QVariantMap ShaderPreferences::displayStatus()const{
     DisplayResolution current;QString readError;bool modified=false;
     const bool available=readable&&nativeDisplay.read(&current,&readError)&&nativeDisplay.modified(&modified,&readError);
@@ -183,7 +213,7 @@ QVariantMap ShaderPreferences::displayStatus()const{
     }
     return {{"available",available},{"width",current.width},{"height",current.height},{"custom",current.custom},
         {"nativeUnsaved",modified},{"mode",int(saved.potato)},{"pending",pending.active},{"conflict",conflict},
-        {"restartRequired",restartRequired},{"originalWidth",saved.original.width},{"originalHeight",saved.original.height},
+        {"restartRequired",restartRequired},{"canRestart",available&&restartRequired&&current==restartTarget&&nativeDisplay.canRestart()&&!pending.active&&!modified},{"originalWidth",saved.original.width},{"originalHeight",saved.original.height},
         {"targetWidth",saved.target.width},{"targetHeight",saved.target.height},{"detail",detail}};
 }
 QVariantMap ShaderPreferences::previewPotato(int mode)const{
@@ -214,7 +244,7 @@ QVariantMap ShaderPreferences::apply(const QVariantMap &input,bool keepCurrentDi
     QLockFile lock(file+QStringLiteral(".lock"));
     if(!lock.tryLock(0))return fail(QStringLiteral("Another shader-settings writer is active; nothing was changed."));
     if(pending.active&&!keepCurrentDisplay&&!reconcile(&error))return fail(error);
-    ShaderSavedConfiguration next=saved;next.visual=requested.visual;next.potato=requested.potato;
+    ShaderSavedConfiguration next=saved;next.visual=requested.visual;next.texture=requested.texture;next.potato=requested.potato;
     DisplayResolution before,target;bool nativeChange=false;
     if(keepCurrentDisplay||next.potato!=saved.potato){
         bool modified=false;
@@ -258,9 +288,9 @@ QVariantMap ShaderPreferences::apply(const QVariantMap &input,bool keepCurrentDi
         if(error.isEmpty())error=QStringLiteral("The native Display commit did not produce a clean, exact configured size.");
         return fail(error+QStringLiteral(" Pending recovery retained. No visual settings were activated; do not treat this as a successful resolution save."));
     }
-    restartRequired=true;
+    restartRequired=true;restartTarget=target;
     if(!persist(next,{},&error))return fail(QStringLiteral("Native render size was submitted successfully; restart is required, but preference finalization failed. Recovery is retained. ")+error);
     saved=next;pending={};lastError.clear();displayDetail.clear();
-    return {{"ok",true},{"displayChanged",true},{"msg",QStringLiteral("Native render size saved: %1. Fully restart the player to apply it. No automatic restart, texture-only LOD override, DPI change or FPS gain is claimed.").arg(dimensions(target))}};
+    return {{"ok",true},{"displayChanged",true},{"msg",QStringLiteral("Native render size saved: %1. Fully restart the player to apply it. Save succeeded. Use Restart player to request the supported native restart, or restart manually. No hot resize, DPI change or FPS gain is claimed.").arg(dimensions(target))}};
 }
 } // namespace BsiShaders

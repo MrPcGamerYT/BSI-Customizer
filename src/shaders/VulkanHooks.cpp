@@ -236,7 +236,9 @@ VKAPI_ATTR VkResult VKAPI_CALL createDevice(VkPhysicalDevice physical,const VkDe
 }
 VKAPI_ATTR void VKAPI_CALL destroyDevice(VkDevice device,const VkAllocationCallbacks *alloc){
     auto d=deviceFor(device);
-    if(d){std::lock_guard<std::mutex> lock(d->mutex);d->api.DeviceWaitIdle(device);d->chains.clear();}
+    if(d){std::lock_guard<std::mutex> lock(d->mutex);d->api.DeviceWaitIdle(device);
+        for(const auto &entry:d->chains)Runtime::instance().releasePresentation(Renderer::Vulkan,reinterpret_cast<std::uintptr_t>(entry.first));
+        d->chains.clear();}
     {auto &s=state();std::lock_guard<std::mutex> lock(s.mutex);for(auto it=s.queues.begin();it!=s.queues.end();)if(it->second.device==d)it=s.queues.erase(it);else ++it;s.devices.erase(device);}
     original<PFN_vkDestroyDevice>("vkDestroyDevice")(device,alloc);
 }
@@ -298,6 +300,7 @@ VKAPI_ATTR VkResult VKAPI_CALL createSwapchain(VkDevice device,const VkSwapchain
 }
 VKAPI_ATTR void VKAPI_CALL destroySwapchain(VkDevice device,VkSwapchainKHR chain,const VkAllocationCallbacks *alloc){
     auto d=deviceFor(device);if(d){std::lock_guard<std::mutex> lock(d->mutex);auto it=d->chains.find(chain);if(it!=d->chains.end()){if(it->second->pipeline)d->api.DeviceWaitIdle(device);d->chains.erase(it);}}
+    Runtime::instance().releasePresentation(Renderer::Vulkan,reinterpret_cast<std::uintptr_t>(chain));
     original<PFN_vkDestroySwapchainKHR>("vkDestroySwapchainKHR")(device,chain,alloc);
 }
 void acquired(VkDevice device,VkSwapchainKHR chain,std::uint32_t image){
@@ -338,6 +341,7 @@ VKAPI_ATTR VkResult VKAPI_CALL present(VkQueue queue,const VkPresentInfoKHR *inf
             if(!Runtime::instance().eligible(reinterpret_cast<std::uintptr_t>(chain.window))){
                 Runtime::instance().vulkanEvent(VulkanEvent::WindowRejected,Runtime::instance().gameWindowDiagnostic(reinterpret_cast<std::uintptr_t>(chain.window)));continue;
             }
+            if(!Runtime::instance().claimPresentation(Renderer::Vulkan,reinterpret_cast<std::uintptr_t>(info->pSwapchains[i]),reinterpret_cast<std::uintptr_t>(chain.window)))continue;
             identified=true;
             const auto image=info->pImageIndices[i];const bool fresh=image<chain.acquired.size()&&chain.acquired[image];
             if(image<chain.acquired.size())chain.acquired[image]=false;

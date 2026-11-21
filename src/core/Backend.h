@@ -234,7 +234,8 @@ public:
     Q_INVOKABLE QVariantMap saveSettingsPanelProfile(const QString &developerName,
                                                      const QString &tagline,
                                                      const QStringList &hiddenTabs,
-                                                     const QStringList &availableTabs);
+                                                     const QStringList &availableTabs,
+                                                     const QVariantList &links);
     Q_INVOKABLE QVariantMap setSettingsPanelAsset(const QString &kind, const QString &id,
                                                   const QString &path);
     Q_INVOKABLE QVariantMap clearSettingsPanelAsset(const QString &kind, const QString &id);

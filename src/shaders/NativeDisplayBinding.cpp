@@ -62,6 +62,18 @@ bool NativeDisplayBinding::bind(QObject *object,QString *error){
     if(!read(&resolution,error)){backend=nullptr;return false;}
     return true;
 }
+bool NativeDisplayBinding::bindPlayer(QObject *object,QString *error){
+    player=nullptr;
+    // Exact public call made by the stock Display restart prompt. No process
+    // killing, shell command, CLI guessing, global config commit or hot resize.
+    if(!method(object,"restartPlayer",{},QMetaType::Void,true).isValid())
+        return refuse(error,"This player has no supported public restartPlayer() method on its GUI thread. Save succeeded; restart it manually.");
+    player=object;return true;
+}
+bool NativeDisplayBinding::canRestart()const{return method(player,"restartPlayer",{},QMetaType::Void,true).isValid();}
+bool NativeDisplayBinding::restart(QString *error)const{
+    return callWrite(player,"restartPlayer")?true:refuse(error,"The native player restart request was refused or its backend was destroyed. Your saved resolution remains configured; restart manually.");
+}
 bool NativeDisplayBinding::available()const{return guiThread(backend);}
 bool NativeDisplayBinding::read(DisplayResolution *resolution,QString *error)const{
     DisplayResolution current;

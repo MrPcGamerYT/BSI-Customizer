@@ -94,13 +94,18 @@ if(WIN32)
     target_link_libraries(shader-renderer-routing-test PRIVATE user32)
 endif()
 add_test(NAME shader-renderer-routing COMMAND shader-renderer-routing-test)
-# Experimental descriptor policy only: deliberately not wired to player hooks.
+# Shared conservative descriptor policy; GL uses it in draw-scoped hooks.
+# D3D/Vulkan descriptor adapters are still policy-only, not game interception.
 add_executable(shader-texture-quality-test texture_quality_test.cpp)
 target_include_directories(shader-texture-quality-test PRIVATE "${shader_dir}" "${shader_dir}/../third_party/vulkan/include")
 if(WIN32)
     target_compile_definitions(shader-texture-quality-test PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
 endif()
 add_test(NAME shader-texture-quality-policy COMMAND shader-texture-quality-test)
+add_executable(shader-gl-texture-safety-test gl_texture_override_test.cpp
+    "${shader_dir}/GlTextureOverride.cpp" "${shader_dir}/GlPipeline.cpp")
+target_include_directories(shader-gl-texture-safety-test PRIVATE "${shader_dir}")
+add_test(NAME shader-gl-texture-safety COMMAND shader-gl-texture-safety-test)
 add_executable(shader-vulkan-present-test vulkan_present_test.cpp)
 target_include_directories(shader-vulkan-present-test PRIVATE "${shader_dir}" "${shader_dir}/../third_party/vulkan/include")
 add_test(NAME shader-vulkan-present-contract COMMAND shader-vulkan-present-test)
@@ -123,7 +128,7 @@ if(WIN32)
     set(minhook_dir "${shader_dir}/../third_party/minhook")
     add_library(shader-presentation-test-code OBJECT
         "${shader_dir}/Runtime.cpp" "${shader_dir}/PresentationHooks.cpp" "${shader_dir}/DxgiHooks.cpp"
-        "${shader_dir}/VulkanHooks.cpp" "${shader_dir}/GlPipeline.cpp" "${shader_dir}/VulkanPipeline.cpp"
+        "${shader_dir}/VulkanHooks.cpp" "${shader_dir}/GlPipeline.cpp" "${shader_dir}/GlTextureOverride.cpp" "${shader_dir}/VulkanPipeline.cpp"
         "${shader_dir}/D3d11Pipeline.cpp" "${shader_dir}/D3d12Pipeline.cpp"
         "${minhook_dir}/src/buffer.c" "${minhook_dir}/src/hook.c" "${minhook_dir}/src/trampoline.c" "${minhook_dir}/src/hde/hde64.c")
     target_include_directories(shader-presentation-test-code PUBLIC "${shader_dir}" "${minhook_dir}/include" "${shader_dir}/../third_party/vulkan/include")
@@ -140,7 +145,16 @@ if(WIN32)
         target_include_directories(shader-vulkan-fixture-${provider} PRIVATE "${shader_dir}/../third_party/vulkan/include")
         target_compile_definitions(shader-vulkan-fixture-${provider} PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
         set_target_properties(shader-vulkan-fixture-${provider} PROPERTIES PREFIX "" OUTPUT_NAME "BsiVulkanFixture${provider}")
+        add_library(shader-egl-fixture-${provider} SHARED egl_loader_fixture.cpp)
+        target_compile_definitions(shader-egl-fixture-${provider} PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
+        target_link_libraries(shader-egl-fixture-${provider} PRIVATE user32)
+        set_target_properties(shader-egl-fixture-${provider} PROPERTIES PREFIX "" OUTPUT_NAME "BsiEglFixture${provider}")
     endforeach()
+    add_executable(shader-egl-hooks-test egl_hooks_test.cpp)
+    target_link_libraries(shader-egl-hooks-test PRIVATE shader-presentation-test-code)
+    add_dependencies(shader-egl-hooks-test shader-egl-fixture-A shader-egl-fixture-B)
+    add_test(NAME shader-egl-loader-hooks-contract COMMAND shader-egl-hooks-test
+        "$<TARGET_FILE:shader-egl-fixture-A>" "$<TARGET_FILE:shader-egl-fixture-B>")
     add_executable(shader-vulkan-hooks-test vulkan_hooks_test.cpp)
     target_link_libraries(shader-vulkan-hooks-test PRIVATE shader-presentation-test-code)
     add_dependencies(shader-vulkan-hooks-test shader-vulkan-fixture-A shader-vulkan-fixture-B)

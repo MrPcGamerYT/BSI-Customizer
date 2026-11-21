@@ -282,7 +282,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Shader configuration failed' }
           python tests/shaders/run_ci_tests.py --command cmake --build build-shaders --config Release --parallel 2
           if ($LASTEXITCODE -ne 0) { throw 'Shader build failed' }
-      - name: Native DirectX 11 and 12 WARP frame pixels
+      - name: Native API pixels, routing and EGL/DXGI/Vulkan presentation lifecycle contracts
         run: python tests/shaders/run_ci_tests.py --test-dir build-shaders -C Release --output-on-failure --timeout 60
       - name: Read-only actual module/provider contract against the independent host runtime
         run: |

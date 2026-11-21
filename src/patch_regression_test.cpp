@@ -63,7 +63,11 @@
 #include <QLibraryInfo>
 #include <QProcess>
 #include <QProcessEnvironment>
+#include <QJSValue>
 #include <QQmlComponent>
+#include <QQmlContext>
+#include <QQmlExpression>
+#include <QQmlProperty>
 #include <QQmlEngine>
 #include <QQuickItem>
 #include <QSettings>
@@ -3478,6 +3482,134 @@ int runPatchRegressionTests()
         if (logoOnly.value(QStringLiteral("ok")).toBool())
             SettingsPanelPatcher::apply(logoOnlyPath, QString(), {}, {}, false);
         QDir(assetDirFor(logoOnlyPath)).removeRecursively();
+        // Dynamic player-About links use immutable data assets rather than
+        // growing a fixed compressed EXE resource or changing own-About slots.
+        const auto aboutLinksRun = [&temp](const QString &about, const QVariantList &expected, int artwork) {
+            // Run the ACTUAL applied QML and its ACTUAL staged model while the
+            // immutable files still exist. No string-template replacement and
+            // no player/EXE execution; just this app's independent Qt host.
+            QQmlEngine engine;
+            QStringList warnings;
+            QObject::connect(&engine, &QQmlEngine::warnings, &engine, [&warnings](const QList<QQmlError> &errors) {
+                for (const auto &error : errors) warnings << error.toString();
+            });
+            QQmlComponent theme(&engine);
+            theme.setData(QByteArrayLiteral(
+                "import QtQuick 2.15\nQtObject{property QtObject colors:QtObject{"
+                "property color primary10:'#eeeeee';property color primary30:'#aaaaaa';"
+                "property color primary60:'#444444';property color accentNormal:'#55aaff'}"
+                "property QtObject fonts:QtObject{property font bodyLarge:Qt.font({pixelSize:17});"
+                "property font bodyMedium:Qt.font({pixelSize:14});property font bodySmall:Qt.font({pixelSize:12})}}"), QUrl());
+            std::unique_ptr<QObject> themeObject(theme.create());
+            if (!themeObject) { check(false, QStringLiteral("About runtime theme: %1").arg(theme.errorString())); return; }
+            engine.rootContext()->setContextProperty(QStringLiteral("UiTheme"), themeObject.get());
+            QQmlComponent component(&engine);
+            component.setData(about.toUtf8(), QUrl::fromLocalFile(temp.filePath(QStringLiteral("AppliedAbout.qml"))));
+            std::unique_ptr<QObject> page(component.create());
+            if (!page) { check(false, QStringLiteral("Actual generated About runtime: %1").arg(component.errorString())); return; }
+            page->setProperty("width", 568); page->setProperty("height", 340);
+            QCoreApplication::processEvents();
+            auto search = engine.evaluate(QStringLiteral("(function(root){var q=[root],r=[];while(q.length){var o=q.pop();if(o.objectName==='bsiAboutDeveloperLink')r.push(o);var c=o.children||[];for(var i=0;i<c.length;i++)q.push(c[i])}return r})"));
+            const auto rows = search.call({engine.newQObject(page.get())});
+            const int count = rows.property(QStringLiteral("length")).toInt();
+            bool values = !rows.isError() && count == expected.size(); int icons = 0;
+            for (int i = 0; i < count; ++i) {
+                QObject *row = rows.property(quint32(i)).toQObject();
+                if (!row) { values = false; continue; }
+                const QString label = row->property("text").toString();
+                const auto match = std::find_if(expected.cbegin(), expected.cend(), [&label](const QVariant &value) {
+                    return value.toMap().value(QStringLiteral("title")).toString() == label;
+                });
+                QQmlExpression url(QQmlEngine::contextForObject(row), row, QStringLiteral("modelData.url"));
+                const QString actual = url.evaluate().toString();
+                values = values && match != expected.cend() && !url.hasError()
+                    && actual == (match == expected.cend() ? QString() : match->toMap().value(QStringLiteral("url")).toString());
+                const QUrl icon = QQmlProperty(row, QStringLiteral("icon.source")).read().toUrl();
+                if (!icon.isEmpty()) { ++icons; values = values && icon.isLocalFile() && !QImage(icon.toLocalFile()).isNull(); }
+            }
+            check(values && icons == artwork && warnings.isEmpty(),
+                  QStringLiteral("actual applied About Loader executes local literal model: %1 rows, exact escaped labels/URLs, %2 readable custom PNGs and no QML warnings (%3)")
+                      .arg(count).arg(icons).arg(warnings.join(QLatin1Char('\n'))));
+        };
+        for (const bool qt5 : {true, false}) {
+            const QString path = temp.filePath(qt5 ? QStringLiteral("dynamic-links-qt5.exe") : QStringLiteral("dynamic-links-qt6.exe"));
+            const QByteArray original = qt5 ? qt5Player : qt6Player;
+            write(path, original);
+            QVariantList links;
+            for (int i = 0; i < 24; ++i) links << QVariantMap{
+                {QStringLiteral("id"), QStringLiteral("custom-%1").arg(i)},
+                {QStringLiteral("kind"), QStringLiteral("link")},
+                {QStringLiteral("title"), QStringLiteral("Link %1 \" }; not executable <b>text</b>").arg(i)},
+                {QStringLiteral("url"), QStringLiteral("https://example.com/custom/%1?value=").arg(i) + QString(400, QLatin1Char('x'))}};
+            const QVariantMap options{{QStringLiteral("linkIcons"), QVariantMap{
+                {QStringLiteral("custom-0"), iconAsset}, {QStringLiteral("custom-23"), iconAsset}}},
+                {QStringLiteral("logo"), iconAsset}};
+            const auto applied = SettingsPanelPatcher::apply(path, QStringLiteral("Dynamic link regression"), links, options, true);
+            check(applied.value(QStringLiteral("ok")).toBool() && read(path).size() == original.size(),
+                  QStringLiteral("24 long custom links and PNG-backed custom icons fit without EXE growth on Qt %1 (%2)")
+                      .arg(qt5 ? 5 : 6).arg(applied.value(QStringLiteral("msg")).toString()));
+            if (!applied.value(QStringLiteral("ok")).toBool()) continue;
+            const QByteArray patched = read(path);
+            const QString about = linkedResourceText(patched, QStringLiteral("PlrAboutSetting.qml"));
+            const QString modelUrl = QRegularExpression(QStringLiteral("Loader\\{id:lm;source:\"([^\"]+)\""))
+                .match(about).captured(1);
+            const QByteArray model = read(QUrl(modelUrl).toLocalFile());
+            check(QUrl(modelUrl).isLocalFile() && model.startsWith("import QtQml 2.15\nQtObject{property var links:[")
+                      && model.count("{title:") == 24 && model.contains("custom/23")
+                      && model.contains("\\\" }; not executable <b>text</b>")
+                      && about.contains(QStringLiteral("icon{source:modelData.icon||''"))
+                      && !about.contains(QStringLiteral("example.com/custom"))
+                      && EmbeddedResources::payloadSizeFor(about.toUtf8(), 1) <= 2337,
+                  "dynamic data is bounded escaped QML literals, loaded from a local content-addressed asset, not inline code/EXE growth");
+            aboutLinksRun(about, links, 2);
+            const auto repeated = SettingsPanelPatcher::apply(path, QStringLiteral("Dynamic link regression"), links, options, true);
+            check(repeated.value(QStringLiteral("ok")).toBool() && read(path) == patched
+                      && read(QUrl(modelUrl).toLocalFile()) == model,
+                  "identical dynamic links preserve exact EXE and immutable model bytes");
+            QVariantList invalid = links;
+            invalid << links.first();
+            check(!SettingsPanelPatcher::apply(path, QStringLiteral("Dynamic link regression"), invalid, options, true)
+                      .value(QStringLiteral("ok")).toBool() && read(path) == patched,
+                  "25 links are refused before any EXE change");
+            invalid = links; invalid[1] = invalid.first();
+            check(!SettingsPanelPatcher::apply(path, QStringLiteral("Dynamic link regression"), invalid, options, true)
+                      .value(QStringLiteral("ok")).toBool() && read(path) == patched,
+                  "duplicate stable ids cannot attach one icon to two link rows");
+            for (const QString &unsafe : {QStringLiteral("javascript:Qt.quit()"), QStringLiteral("file:///private"),
+                                          QStringLiteral("https://name:secret@example.com"), QStringLiteral("https://example.com/\ninvalid")}) {
+                QVariantMap row = links.first().toMap(); row.insert(QStringLiteral("url"), unsafe);
+                check(!SettingsPanelPatcher::apply(path, QStringLiteral("Dynamic link regression"), {row}, options, true)
+                          .value(QStringLiteral("ok")).toBool() && read(path) == patched,
+                      "unsafe schemes, credentials and control characters cannot become player links");
+            }
+            links.removeFirst();
+            const auto removed = SettingsPanelPatcher::apply(path, QStringLiteral("Dynamic link regression"), links, options, true);
+            const QString changedAbout = linkedResourceText(read(path), QStringLiteral("PlrAboutSetting.qml"));
+            const QString nextUrl = QRegularExpression(QStringLiteral("Loader\\{id:lm;source:\"([^\"]+)\""))
+                .match(changedAbout).captured(1);
+            const QByteArray next = read(QUrl(nextUrl).toLocalFile());
+            check(removed.value(QStringLiteral("ok")).toBool() && nextUrl != modelUrl && next.count("{title:") == 23
+                      && !next.contains("custom/0?") && next.contains("custom/23?")
+                      && read(QUrl(modelUrl).toLocalFile()) == model,
+                  "removing one row preserves other ids/icons and never overwrites the old live data asset");
+            aboutLinksRun(changedAbout, links, 1);
+            const QByteArray beforeDamage = read(path);
+            write(QUrl(nextUrl).toLocalFile(), QByteArrayLiteral("damaged model"));
+            const auto corrupt = SettingsPanelPatcher::apply(path, QStringLiteral("Dynamic link regression"), links, options, true);
+            check(!corrupt.value(QStringLiteral("ok")).toBool() && read(path) == beforeDamage,
+                  "a damaged existing model asset is refused, never silently overwritten");
+            write(QUrl(nextUrl).toLocalFile(), next);
+            const auto empty = SettingsPanelPatcher::apply(path, QStringLiteral("Dynamic link regression"), {}, {{QStringLiteral("logo"), iconAsset}}, true);
+            const QString emptyAbout = linkedResourceText(read(path), QStringLiteral("PlrAboutSetting.qml"));
+            check(empty.value(QStringLiteral("ok")).toBool() && emptyAbout.contains(QStringLiteral("Repeater{model:[]")),
+                  "removing every About link is a persistent valid empty list, not a reset to four defaults");
+            aboutLinksRun(emptyAbout, {}, 0);
+            check(SettingsPanelPatcher::apply(path, QString(), {}, {}, false).value(QStringLiteral("ok")).toBool()
+                      && linkedResourceText(read(path), QStringLiteral("PlrAboutSetting.qml"))
+                          == linkedResourceText(original, QStringLiteral("PlrAboutSetting.qml")),
+                  "dynamic About updates retain exact selective Restore of the original page");
+            QDir(assetDirFor(path)).removeRecursively();
+        }
         check(read(validPath) == validModel.f.bytes,
               "the synthetic icon tests leave their original player input untouched");
 

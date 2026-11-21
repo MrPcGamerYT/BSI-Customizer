@@ -27,6 +27,7 @@ Rectangle {
     property string feedback: ""
     property bool saveFailed: false
     property bool keepCurrentDisplay: false
+    property bool restartConfirmation: false
     readonly property color textColor: bsiTheme.colors.primary10
     readonly property color mutedColor: bsiTheme.colors.primary30
     readonly property color accent: bsiTheme.colors.accentNormal
@@ -75,7 +76,7 @@ Rectangle {
         if (window && window.bsiShaderDirty2 !== undefined) window.bsiShaderDirty2 = pEnableSave
         else if (window && window.bsiShaderDirty !== undefined) window.bsiShaderDirty = pEnableSave
     }
-    onPEnableSaveChanged: publishDirty()
+    onPEnableSaveChanged: { publishDirty(); restartConfirmation = false }
     Component.onDestruction: {
         var window = page.Window.window
         if (window && window.bsiShaderDirty2 !== undefined) window.bsiShaderDirty2 = false
@@ -84,6 +85,8 @@ Rectangle {
     function differs() {
         if (keepCurrentDisplay || Number(draft.potatoMode || 0) !== Number(Engine.saved.potatoMode || 0)) return true
         if (!!draft.enabled !== !!Engine.saved.enabled) return true
+        if (!!draft.potatoGraphic !== !!Engine.saved.potatoGraphic
+            || !!draft.textureOverridesReviewed !== !!Engine.saved.textureOverridesReviewed) return true
         for (var i = 0; i < Engine.controls.length; ++i) {
             var key = Engine.controls[i].key
             if (Number(draft[key] || 0) !== Number(Engine.saved[key] || 0)) return true
@@ -91,13 +94,14 @@ Rectangle {
         return false
     }
     function fInitUi() {
-        draft = JSON.parse(JSON.stringify(Engine.saved)); keepCurrentDisplay = false; feedback = ""; saveFailed = false
+        draft = JSON.parse(JSON.stringify(Engine.saved)); keepCurrentDisplay = false; feedback = ""; saveFailed = false; restartConfirmation = false
     }
     function initializeDisplay() {
         // Use exactly the context object used by native Display, not config-file
         // guessing or an unserializable QObject passed through pComponentArgs.
         // The C++ bridge verifies public method types/thread and read-back.
         if (typeof uiBackend !== "undefined") Engine.bindNativeDisplay(uiBackend)
+        if (typeof plrBackend !== "undefined") Engine.bindNativePlayer(plrBackend)
         fInitUi()
     }
     function fOnQmlLoaded() {
@@ -123,7 +127,8 @@ Rectangle {
     }
     function presetValues(index) {
         // Visual presets/Reset must not silently change the native render size.
-        var next = {enabled: index > 0, potatoMode: Number(draft.potatoMode || 0)}
+        var next = {enabled: index > 0, potatoMode: Number(draft.potatoMode || 0),
+                    potatoGraphic: !!draft.potatoGraphic, textureOverridesReviewed: !!draft.textureOverridesReviewed}
         for (var i = 0; i < Engine.controls.length; ++i) next[Engine.controls[i].key] = 0
         if (index === 1) {
             next.sharpen = 30; next.fxaa = 30
@@ -152,6 +157,7 @@ Rectangle {
     function reset() { draft = presetValues(0) }
     function preset(index) { if (index >= 0 && index <= 4) draft = presetValues(index) }
     function save() {
+        restartConfirmation = false
         var response = Engine.apply(draft, keepCurrentDisplay)
         saveFailed = !response.ok
         feedback = response.msg
@@ -159,7 +165,7 @@ Rectangle {
             draft = JSON.parse(JSON.stringify(Engine.saved)); keepCurrentDisplay = false
             var window = page.Window.window
             if (window && typeof window.fShowToast === "function") {
-                window.fShowToast(response.displayChanged ? qsTr("Render size saved — restart the player") : qsTr("Changes saved"))
+                window.fShowToast(response.displayChanged ? qsTr("Resolution saved successfully") : qsTr("Changes saved"))
                 if (!response.displayChanged) feedback = ""
             }
         }
@@ -258,6 +264,40 @@ Rectangle {
                         color: page.bsiTheme.colors.primary30; font: page.bsiTheme.fonts.bodySmall
                     }
                     Rectangle { Layout.fillWidth: true; height: 1; color: page.bsiTheme.colors.seperator }
+                    Native.UiCheckBox {
+                        objectName: "shaderPotatoGraphic"
+                        pSize: page.bsiTheme.checkBoxes.sizes.medium
+                        Layout.fillWidth: true
+                        text: qsTr("Potato graphic")
+                        checked: !!page.draft.potatoGraphic
+                        onToggled: page.setValue("potatoGraphic", checked)
+                    }
+                    Text {
+                        Layout.fillWidth: true; wrapMode: Text.Wrap
+                        text: qsTr("Experimental texture-detail reduction, independent of visual effects and resolution. Uses private coarser-mip samplers on qualified GL 3.3 / GLES 3.1 game scene draws; restores the original sampler after each draw. DirectX/Vulkan texture interception, protected/unknown resources, blended UI draws and existing LOD/anisotropic overrides are not modified. No FPS gain is promised.")
+                        color: page.bsiTheme.colors.primary30; font: page.bsiTheme.fonts.bodySmall
+                    }
+                    Native.UiCheckBox {
+                        objectName: "shaderPotatoReview"
+                        visible: !!page.draft.potatoGraphic
+                        pSize: page.bsiTheme.checkBoxes.sizes.medium
+                        Layout.fillWidth: true
+                        text: qsTr("I reviewed existing driver LOD / AA overrides")
+                        checked: !!page.draft.textureOverridesReviewed
+                        onToggled: page.setValue("textureOverridesReviewed", checked)
+                        Accessible.description: qsTr("No NVIDIA, AMD or Intel driver profile is reset. Conflicting external overrides can prevent the intended effect; this acknowledgement is not hardware certification.")
+                    }
+                    Text {
+                        objectName: "shaderPotatoTextureStatus"
+                        visible: !!page.draft.potatoGraphic || !!Engine.metrics.potatoGraphicEnabled
+                        Layout.fillWidth: true; wrapMode: Text.Wrap
+                        text: (Engine.metrics.textureStatus || qsTr("Save to arm texture sampling; no reduction has been confirmed."))
+                            + "\n" + qsTr("Prepared sampler draws: ") + (Engine.metrics.textureDraws || 0)
+                            + qsTr(" · Bindings: ") + (Engine.metrics.textureBindings || 0)
+                            + qsTr(" (not measured game pixels or FPS)")
+                        color: page.bsiTheme.colors.primary30; font: page.bsiTheme.fonts.bodySmall
+                    }
+                    Rectangle { Layout.fillWidth: true; height: 1; color: page.bsiTheme.colors.seperator }
                     Text {
                         objectName: "shaderResolutionHeading"
                         // An unwrapped heading becomes the ColumnLayout's
@@ -268,7 +308,7 @@ Rectangle {
                     }
                     Text {
                         Layout.fillWidth: true; wrapMode: Text.Wrap
-                        text: qsTr("Display resolution only. This is separate from the texture-detail Potato effect shown in the video; texture LOD is not implemented here.")
+                        text: qsTr("Display resolution only. This is optional and separate from the Potato graphic texture-sampling switch above; it is not a substitute for texture detail reduction.")
                         color: page.bsiTheme.colors.primary30; font: page.bsiTheme.fonts.bodySmall
                     }
                     Native.UiRowLayout {
@@ -305,6 +345,43 @@ Rectangle {
                         Layout.fillWidth: true; wrapMode: Text.Wrap
                         text: qsTr("Configured native Display: ") + Engine.display.width + " × " + Engine.display.height + "\n" + Engine.display.detail
                         color: page.bsiTheme.colors.primary30; font: page.bsiTheme.fonts.bodySmall
+                    }
+                    Native.UiRowLayout {
+                        visible: !!Engine.display.restartRequired
+                        Layout.fillWidth: true; spacing: 12
+                        Native.UiButton {
+                            objectName: "shaderResolutionRestart"
+                            pSize: page.bsiTheme.buttons.sizes.medium
+                            pColor: page.bsiTheme.buttons.colors.secondary
+                            text: page.restartConfirmation ? qsTr("Restart now") : qsTr("Restart player…")
+                            enabled: !!Engine.display.canRestart && !page.pEnableSave
+                            onClicked: {
+                                if (!page.restartConfirmation) { page.restartConfirmation = true; return }
+                                var response = Engine.restartPlayer()
+                                page.saveFailed = !response.ok; page.feedback = response.msg
+                                page.restartConfirmation = false
+                                if (response.ok) {
+                                    var window = page.Window.window
+                                    if (window && typeof window.showRestartLoader === "function") window.showRestartLoader()
+                                    if (window) window.hide()
+                                }
+                            }
+                        }
+                        Native.UiButton {
+                            objectName: "shaderResolutionLater"
+                            visible: page.restartConfirmation
+                            pSize: page.bsiTheme.buttons.sizes.medium
+                            pColor: page.bsiTheme.buttons.colors.secondary
+                            text: qsTr("Later")
+                            onClicked: page.restartConfirmation = false
+                        }
+                        Text {
+                            Layout.fillWidth: true; wrapMode: Text.Wrap
+                            text: page.restartConfirmation ? qsTr("Restart the player now? Running games/apps may close. Your resolution was already saved.")
+                                : Engine.display.canRestart ? qsTr("Saved, not failed. A restart is required to recreate the native game framebuffer.")
+                                : qsTr("Resolution is saved. Restart manually on this player, or finish other unsaved native settings first.")
+                            color: page.bsiTheme.colors.primary30; font: page.bsiTheme.fonts.bodySmall
+                        }
                     }
                     Rectangle { Layout.fillWidth: true; height: 1; color: page.bsiTheme.colors.seperator }
                     Repeater {
@@ -364,7 +441,8 @@ Rectangle {
                     Text {
                         objectName: "shaderRendererStatus"
                         Layout.fillWidth: true; wrapMode: Text.Wrap
-                        text: qsTr("Requested API: ") + Engine.metrics.requestedRenderer + "\n"
+                        text: qsTr("Detection: ") + Engine.metrics.requestedRenderer + "\n"
+                            + qsTr("Configured emulator API (hint only): ") + (Engine.metrics.configuredRenderer || "Unknown") + "\n"
                             + qsTr("Observed game API: ") + Engine.metrics.renderer + "\n" + Engine.metrics.status
                         color: Engine.metrics.active ? page.bsiTheme.colors.accentNormal : page.bsiTheme.colors.primary30; font: page.bsiTheme.fonts.bodySmall
                     }
@@ -378,7 +456,7 @@ Rectangle {
                     }
                     Text {
                         objectName: "shaderCaptureDetails"
-                        visible: Engine.metrics.requestedRenderer === "Vulkan"
+                        visible: Engine.metrics.configuredRenderer === "Vulkan" || Engine.metrics.renderer === "Vulkan" || Number(Engine.metrics.vulkanLoaders || 0) > 0
                         Layout.fillWidth: true; wrapMode: Text.Wrap
                         text: qsTr("Vulkan capture (not processed game frames): ")
                             + Engine.metrics.vulkanLoaders + qsTr(" loaders · ") + Engine.metrics.vulkanInstances + qsTr(" instances · ")

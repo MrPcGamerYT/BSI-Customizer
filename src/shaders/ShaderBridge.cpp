@@ -64,7 +64,14 @@ bool ShaderBridge::bindNativeDisplay(QObject *backend){
     auto &s=state();
     if(!s.attached)return false;
     const bool okay=s.preferences.bindDisplay(backend);
-    Runtime::instance().set(s.preferences.parameters());notify();return okay;
+    Runtime::instance().set(s.preferences.parameters());Runtime::instance().setTexture(s.preferences.texture());notify();return okay;
+}
+bool ShaderBridge::bindNativePlayer(QObject *backend){
+    if(!state().attached)return false;
+    const bool okay=state().preferences.bindPlayer(backend);notify();return okay;
+}
+QVariantMap ShaderBridge::restartPlayer(){
+    const auto response=state().preferences.requestRestart();notify();return response;
 }
 QVariantMap ShaderBridge::bridgeInfo()const{
     return {{"moduleQtVersion",QString::fromLatin1(QT_VERSION_STR)},
@@ -78,12 +85,15 @@ QVariantList ShaderBridge::controlList()const{
 QVariantMap ShaderBridge::metrics()const{
     const auto m=Runtime::instance().metrics();
     const auto number=[](std::uint64_t value){return QVariant::fromValue<qulonglong>(value);};
-    const char *requested=m.requested==RendererFamily::Vulkan?"Vulkan":m.requested==RendererFamily::DirectX?"DirectX":m.requested==RendererFamily::OpenGL?"OpenGL":"Automatic";
+    const auto label=[](RendererFamily f){return f==RendererFamily::Vulkan?"Vulkan":f==RendererFamily::DirectX?"DirectX":f==RendererFamily::OpenGL?"OpenGL":"Automatic / unknown";};
     return {{"hooksAttached",m.hooks},{"gameSurfaceObserved",m.observed},{"active",m.active},
-            {"requestedRenderer",QString::fromLatin1(requested)},
+            {"requestedRenderer",m.requested==RendererFamily::Automatic?QStringLiteral("Automatic"):QString::fromLatin1(label(m.requested))},
+            {"configuredRenderer",QString::fromLatin1(label(m.configured))},
             {"renderer",QString::fromLatin1(capability(m.renderer).label)},
             {"backendImplemented",capability(m.renderer).pipelineImplemented},{"deviceRequirementsMet",m.deviceReady},
             {"processedFrames",number(m.processed)},{"status",QString::fromStdString(m.status)},
+            {"potatoGraphicEnabled",Runtime::instance().texture().enabled},{"textureSupported",m.textureSupported},
+            {"textureDraws",number(m.textureDraws)},{"textureBindings",number(m.textureBindings)},{"textureStatus",QString::fromStdString(m.textureStatus)},
             {"vulkanLoaders",number(m.vulkan.loaders)},{"vulkanInstances",number(m.vulkan.instances)},
             {"vulkanDevices",number(m.vulkan.devices)},{"vulkanSurfaces",number(m.vulkan.surfaces)},
             {"vulkanSwapchains",number(m.vulkan.swapchains)},{"vulkanPresents",number(m.vulkan.presents)},
@@ -98,7 +108,13 @@ QString ShaderBridge::diagnostics()const{
         .arg(m.value("requestedRenderer").toString(),m.value("renderer").toString(),m.value("status").toString())
         .arg(m.value("processedFrames").toString(),m.value("gameSurfaceObserved").toBool()?QStringLiteral("yes"):QStringLiteral("no"),m.value("active").toBool()?QStringLiteral("yes"):QStringLiteral("no"))
         .arg(m.value("vulkanLoaders").toString(),m.value("vulkanInstances").toString(),m.value("vulkanDevices").toString(),m.value("vulkanSurfaces").toString(),m.value("vulkanSwapchains").toString(),m.value("vulkanPresents").toString(),m.value("vulkanMissedQueues").toString(),m.value("vulkanRejectedWindows").toString(),m.value("vulkanLoader").toString())
-        .arg(QString::fromLatin1(QT_VERSION_STR),QString::fromLatin1(qVersion()),error());
+        .arg(QString::fromLatin1(QT_VERSION_STR),QString::fromLatin1(qVersion()),
+             QStringLiteral("Configured emulator renderer (hint only): %1\nDetection uses owned host game presentation, not the Android guest API or Qt UI.\n%2")
+                 .arg(m.value("configuredRenderer").toString(),
+                      QStringLiteral("Prepared Potato sampler bindings: %1 across %2 draw calls; supported path: %3 (not measured game pixels/FPS)\n%4\n%5")
+                          .arg(m.value("textureBindings").toString(),m.value("textureDraws").toString(),
+                               m.value("textureSupported").toBool()?QStringLiteral("yes"):QStringLiteral("no"),
+                               m.value("textureStatus").toString(),error())));
 }
 void ShaderBridge::copyDiagnostics()const{if(auto *clipboard=QGuiApplication::clipboard())clipboard->setText(diagnostics());}
 void ShaderBridge::attach(QObject *object,const QString &instance,const QString &graphicsRenderer){
@@ -112,11 +128,10 @@ void ShaderBridge::attach(QObject *object,const QString &instance,const QString 
     if(graphicsRenderer==QLatin1String("gl"))requested=RendererFamily::OpenGL;
     else if(graphicsRenderer==QLatin1String("dx"))requested=RendererFamily::DirectX;
     else if(graphicsRenderer==QLatin1String("vlcn"))requested=RendererFamily::Vulkan;
-    else {
-        s.error=QStringLiteral("The player's graphics renderer setting is unknown. No shader processing was enabled.");
-        s.attached=false;Runtime::instance().set(Parameters{});notify();return;
-    }
-    s.attached=true;Runtime::instance().selectRenderer(requested);Runtime::instance().set(s.preferences.parameters());
+    // Unknown/new combined settings must not disable capture either: only an
+    // owned game presentation can identify the processing backend. Keep the
+    // setting for diagnostics; never call another API "Vulkan" to hide a miss.
+    s.attached=true;Runtime::instance().configureRenderer(requested);Runtime::instance().set(s.preferences.parameters());Runtime::instance().setTexture(s.preferences.texture());
     if(s.surfaceObserver)delete s.surfaceObserver;
     s.surfaceObserver=new SurfaceObserver(window);
     Runtime::instance().start(window->handle()?std::uintptr_t(window->winId()):0);
@@ -129,7 +144,7 @@ QVariantMap ShaderBridge::apply(const QVariantMap &values,bool keepCurrentDispla
         return {{"ok",false},{"msg",QStringLiteral("Shader settings must be saved on the player GUI thread.")}};
     if(!s.attached){s.error=QStringLiteral("No native player instance is attached.");notify();return {{"ok",false},{"msg",s.error}};}
     auto response=s.preferences.apply(values,keepCurrentDisplay);
-    if(response.value(QStringLiteral("ok")).toBool()){s.error.clear();Runtime::instance().set(s.preferences.parameters());}
+    if(response.value(QStringLiteral("ok")).toBool()){s.error.clear();Runtime::instance().set(s.preferences.parameters());Runtime::instance().setTexture(s.preferences.texture());}
     notify();return response;
 }
 } // namespace BsiShaders

@@ -117,6 +117,33 @@ No/Discard prompts on tab switching and close, per-instance separation, native
 callbacks/Save/footer, resize/fullscreen, changing monitors and hybrid GPUs.
 Test custom/default/hidden icons and Settings Update without losing Shaders.
 
+## Potato graphic — experimental texture sampling
+
+This is separate from visual effects and Display resolution. It defaults off,
+requires explicit review of existing driver LOD/AA overrides, and currently has
+a GL 3.3/GLES 3.1 draw-time path only. No supplied DLL is installed. See
+[exact coverage and resource-provenance limits](TEXTURE-QUALITY-PORTABILITY.md).
+
+1. Record the actual observed host API, player/game versions, GPU/driver, native
+   size, current driver profile and a repeatable scene. Configuration is only a
+   hint; Automatic may legitimately observe another host API, never the Qt UI.
+2. Switch **Potato graphic** on without Save, navigate away and exercise native
+   No/Discard. The draft must not arm sampler overrides or change Display.
+3. After reviewing existing overrides, Save with visual effects off. On a
+   qualified GL/GLES path compare the same game textures, not just status or
+   counters; record the result. Depth/UI/data/shared-resource behavior must also
+   be checked. Prepared binding counts are not proof of changed game pixels.
+4. Save off and verify exact native sampling/image restoration. Presets/Reset
+   visuals must not alter texture flags or resolution. Check reopen/per-instance
+   persistence and resize/context recreation.
+5. DirectX/Vulkan texture paths must explicitly bypass; resolution or a visual
+   postprocess must not be substituted. No driver profile is reset. Measure
+   frame times before claiming a performance benefit; report failures rather
+   than forcing a renderer/profile to hide them.
+
+This is not universal texture support or an NVIDIA startup-conflict fix. Player,
+resource semantics and physical-driver acceptance remain required.
+
 ## Render resolution (optional) — not the video's Potato effect
 
 This separate control changes **native Display configuration**, not the requested
@@ -132,10 +159,15 @@ See [exact limits and recovery](POTATO-NATIVE-RESOLUTION.md).
    Changes** must revert it, without changing native Display. There is still one
    stationary Save footer, no second selector in Display or separate overlay.
 3. Select again and **Save changes**. Verify the configured native size and
-   restart notice. The running game's render size is **not** proven changed by
-   this notice. Fully restart the player and verify actual guest/game dimensions
-   and the same game scene. Measure frame times if assessing performance; fewer
-   configured pixels do not guarantee an FPS gain.
+   **saved, restart required** notice, not a failed-save message. The running
+   game's size is not proven changed by this notice. If supported, **Restart
+   player…** must ask first; **Later** must not restart, and **Restart now** may
+   invoke only the player's native method. Refusal/unsupported contracts retain
+   the successful Save and manual instructions. An accepted call is not proof
+   of completed restart. Fully restart, then verify actual guest/game dimensions
+   and the same scene. Measure frame times; fewer configured pixels do not
+   guarantee an FPS gain. A later native Display change or any unsaved draft
+   must prevent stale-target restart without committing/discarding that draft.
 4. Test with visual effects off. Enhance/presets/**Reset visuals** must not alter
    the native mode. Reopen and check saved mode/size, including another instance
    retaining its separate configuration.

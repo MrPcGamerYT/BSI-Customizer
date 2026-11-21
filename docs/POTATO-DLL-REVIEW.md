@@ -4,8 +4,11 @@
 incorporated. Their texture-only LOD effect and the reported NVIDIA startup
 failure have not been reproduced/fixed in the player.** This review does not
 certify these binaries as safe. Subsequent independently authored sampler-policy
-work is described in [the portability experiment](TEXTURE-QUALITY-PORTABILITY.md);
-it remains disconnected from game bindings. The separately implemented
+work is described in [the texture experiment](TEXTURE-QUALITY-PORTABILITY.md).
+It now has a default-off **Potato graphic** switch and experimental GL 3.3 /
+GLES 3.1 draw-scoped private samplers, with owned software-context pixel tests;
+DirectX/Vulkan texture binding and real game/resource/driver qualification
+remain outstanding. The separately implemented
 [optional render-resolution control](POTATO-NATIVE-RESOLUTION.md) changes native
 Display configuration after Save, not these binaries or their texture LOD.
 Neither path turns the supplied binaries into an installed/verified feature.
@@ -173,16 +176,19 @@ final-frame effect pass:
   frame times and image quality on the **real** player with/without the profile.
   Software fixtures alone cannot certify NVIDIA driver compatibility.
 
-**This remains the texture-only implementation boundary, not an implemented
-texture-LOD mode or NVIDIA-conflict fix.** The native-render-size control and
-existing final-frame visual effects are separate mechanisms, not this behavior.
+**The independent GL/GLES draw-time experiment is not universal texture
+support, an exact clone or an NVIDIA-conflict fix.** It does not use the supplied
+proxies. Its conservative draw/format checks do not independently establish all
+game-resource semantics, and the reported player issue is still unreproduced.
+The native-render-size control and final-frame effects are separate mechanisms.
 
 ### Existing Visual Studio-buildable shader source
 
 The repository already has independently authored C++ source and a standalone
 CMake project at `src/shaders/CMakeLists.txt`. The following generates a Visual
-Studio solution for the **existing** regular shader module; it does **not**
-recover the supplied proxy source or add its texture-quality effect.
+Studio solution for the regular shader module, including the separately
+authored GL sampler experiment; it does **not** recover the supplied proxy source,
+redistribute it, certify the experiment or prove matching in-game behavior.
 
 From an x64 Visual Studio 2022 developer PowerShell, with CMake and the matching
 release x64 Qt SDK installed, substitute your Qt path:

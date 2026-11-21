@@ -373,3 +373,9 @@ body[data-light=true] .spine{background:rgba(245,244,248,.96)}
 @media(prefers-reduced-motion:reduce){.player-preview *{animation:none!important;transition:none!important}}
 
 @font-face{font-family:'VOID Math';src:url('fonts/NotoSansMath-Regular.ttf') format('truetype');font-display:swap}.pack-sample>b,.preview-top>b{font-family:'VOID Math','Cambria Math',serif}.collection>.note,.pack-spec>.note{color:var(--m)}
+
+/* Added link-editor controls only; the approved in-player Settings theme and
+   existing tab/page materials are not changed by these Customizer forms. */
+.settings-player-link .settings-link-art{grid-column:2/-1;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.settings-player-link .settings-link-art img{width:26px;height:26px;object-fit:contain}
+.settings-player-link .settings-link-art button:last-child{margin-left:auto;min-width:32px}

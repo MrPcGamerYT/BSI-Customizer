@@ -49,9 +49,10 @@ bool process(IDXGISwapChain *chain,UINT flags){
     Renderer api=Renderer::Unknown;
     if(SUCCEEDED(chain->GetDevice(IID_PPV_ARGS(&d11))))api=Renderer::Direct3D11;
     else if(SUCCEEDED(chain->GetDevice(IID_PPV_ARGS(&d12))))api=Renderer::Direct3D12;
-    if(!Runtime::instance().accepts(api))return false;
-    const auto parameters=Runtime::instance().settings();
     if(flags&DXGI_PRESENT_TEST)return false;
+    if(!Runtime::instance().accepts(api)
+       ||!Runtime::instance().claimPresentation(api,reinterpret_cast<std::uintptr_t>(chain),reinterpret_cast<std::uintptr_t>(desc.OutputWindow)))return false;
+    const auto parameters=Runtime::instance().settings();
     if(parameters.neutral()){Runtime::instance().report(true,true,false,"Neutral bypass",false,api);return false;}
     if(flags&DXGI_PRESENT_DO_NOT_WAIT){Runtime::instance().report(true,true,false,"Nonblocking DXGI presentation is safely bypassed to avoid grading an unpresented frame twice.",false,api);return false;}
     auto saved=find(chain,true);if(!saved)return false;
@@ -115,6 +116,8 @@ ULONG STDMETHODCALLTYPE release(IDXGISwapChain *chain){
         auto &s=state();std::lock_guard<std::mutex> lock(s.mutex);auto it=s.chains.find(chain);
         if(it!=s.chains.end()){removed=std::move(it->second);s.chains.erase(it);}
     }
+    if(!count){Runtime::instance().releasePresentation(Renderer::Direct3D11,reinterpret_cast<std::uintptr_t>(chain));
+        Runtime::instance().releasePresentation(Renderer::Direct3D12,reinterpret_cast<std::uintptr_t>(chain));}
     // Release COM objects after leaving the registry lock: their own native
     // Release methods may in turn pass through a DXGI detour.
     return count;

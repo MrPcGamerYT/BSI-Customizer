@@ -1,6 +1,7 @@
 #pragma once
 #include "NativeDisplayBinding.h"
 #include "Parameters.h"
+#include "TextureQuality.h"
 #include <QByteArray>
 #include <QString>
 #include <QVariantMap>
@@ -8,6 +9,7 @@
 namespace BsiShaders {
 struct ShaderSavedConfiguration {
     Parameters visual;
+    TextureConfiguration texture;
     PotatoMode potato=PotatoMode::Native;
     DisplayResolution original,target;
 };
@@ -22,9 +24,12 @@ class ShaderPreferences {
 public:
     void load(const QString &path);
     Parameters parameters()const{return saved.visual;}
+    TextureConfiguration texture()const{return saved.texture;}
     QVariantMap values()const;
     QString error()const{return lastError;}
     bool bindDisplay(QObject *backend);
+    bool bindPlayer(QObject *backend);
+    QVariantMap requestRestart();
     QVariantMap displayStatus()const;
     QVariantMap previewPotato(int mode)const;
     QVariantMap apply(const QVariantMap &values,bool keepCurrentDisplay=false);
@@ -35,6 +40,7 @@ private:
     QByteArray persistedBytes;
     ShaderSavedConfiguration saved;
     ShaderDisplayPending pending;
+    DisplayResolution restartTarget;
     NativeDisplayBinding nativeDisplay;
     bool readable=true,persistedExists=false,restartRequired=false;
 };

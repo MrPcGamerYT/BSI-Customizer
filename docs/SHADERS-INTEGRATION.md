@@ -22,11 +22,13 @@ The latest requirement is **vendor-neutral, renderer-aware support for Intel,
 AMD and NVIDIA**, covering the player's **OpenGL, DirectX and Vulkan** choices.
 The existing OpenGL prototype alone does not satisfy that requirement.
 
-The running game's actual presentation API must agree with the player renderer
-setting. Loading a graphics DLL, seeing a Qt Settings window, or saving values
-is not evidence of game-frame processing. ANGLE may implement OpenGL ES using
-DirectX or Vulkan underneath; that must not cause double-processing or be
-mistaken for a native DirectX/Vulkan game-backend test.
+Automatically detect the owned game's **actual Windows presentation**, even
+when it differs from the emulator renderer configuration. The setting is a
+hint for diagnostics, not a routing gate or proof of the Android guest API.
+Loading a graphics DLL, seeing a Qt Settings window, or saving values is not
+evidence of game-frame processing. ANGLE may implement OpenGL ES using DirectX
+or Vulkan underneath; bind one actual source and suppress nested presentation
+processing, rather than grading twice or relabeling GLES as native Vulkan.
 
 "Any GPU" cannot responsibly mean an unconditional promise for every historical
 GPU, feature level, driver and operating system. There must be no vendor-ID
@@ -40,19 +42,18 @@ The separately supplied **Free Fire Potato DLL** archive has now been downloaded
 and statically inspected. See [the Potato DLL review](POTATO-DLL-REVIEW.md) for
 verified identities, the observed 1.5/3.0 OpenGL texture-LOD behavior, compatibility
 risks and Visual Studio build instructions for the existing regular module.
-It contains no source/license and has not been executed or incorporated. No
-texture-only Potato mode or NVIDIA Profile Inspector startup-conflict fix is
-implemented. The separate **Render resolution (optional)** control is a Display
-convenience, **not completion or a visual match of the requested Potato effect**:
-see [implementation and safety](POTATO-NATIVE-RESOLUTION.md).
-It lowers the real native Display configuration (Save + restart), not texture
-LOD, and is not proof of a live game-resolution/FPS improvement. The archive
-report distinguishes observed binary behavior from the still-unreproduced
-failure and prerequisites for separate texture-binding work. The
-independent [texture-quality portability experiment](TEXTURE-QUALITY-PORTABILITY.md)
-now provides a guarded shared sampler policy, typed API descriptor adapters and
-owned-resource tests. It is **not wired to game resources or enabled as a preset**;
-that document separates API evidence from missing player/performance qualification.
+It contains no source/license and has not been executed or incorporated.
+The separately authored default-off **Potato graphic** experiment now arms
+private samplers around qualified GL 3.3/GLES 3.1 scene-like draws. It changes
+mip selection, not native Display or final-image blur. DirectX/Vulkan texture
+binding, independent game-resource semantic proof, player/hardware acceptance
+and the reported NVIDIA startup-conflict fix remain outstanding. See
+[the exact texture boundary and tests](TEXTURE-QUALITY-PORTABILITY.md).
+The separate **Render resolution (optional)** control changes native Display
+configuration (Save + restart); it is not a substitute or proof of texture
+reduction, a live game-resolution change or FPS improvement. See
+[resolution/restart safety](POTATO-NATIVE-RESOLUTION.md). No driver profile reset,
+system-library replacement or universal GPU certification was added.
 
 Reference upload: [`zlag-dll-source.zip`](https://github.com/dsajgddghdsaakovvgheww/BSI-Customizer/blob/main/zlag-dll-source.zip).
 Inspected Git blob: `7d5f717ba1f76d2c41bc9244a24cd83636064f16`
@@ -99,8 +100,10 @@ or `vulkan-1.dll`. The existing arbitrary startup-DLL feature remains separate.
   calls, aspect-preserving 720/540-short-edge plans, original/target snapshots,
   native commit/read-back, external-change refusal/explicit Keep and bounded
   interrupted-save recovery. Presets/Reset visuals leave the native mode alone.
-  This is actual native configuration, not a final-frame effect or texture LOD;
-  restart/game-resolution/performance validation remains required.
+  A finalized Save reports restart required, not a failed hot resize; the exact
+  optional public native restart method requires explicit two-step confirmation,
+  a clean unchanged target and live backend. Accepted invocation is not restart
+  completion. Native configuration is not game-size/performance measurement.
 - Independent OpenGL/GLES, DirectX 11, DirectX 12 (Microsoft D3D11On12 on the
   actual captured D3D12 queue), and native Vulkan processing pipelines, sharing
   original effect math: saturation, contrast, warmth, shadow lift, tonal pop,
@@ -112,13 +115,23 @@ or `vulkan-1.dll`. The existing arbitrary startup-DLL feature remains separate.
   Up to four complete export-discovered Vulkan providers have independent
   originals/TLS routes and handle registries, including late-loaded differently
   named providers. Normal created queues are captured before an explicit getter.
-  Surface/window ownership, native setting and capability checks gate effects.
+  Surface/window ownership and capability/protection checks gate effects.
   **Not certified in a running player or on physical GPU hardware.** A DLL
   hooking some graphics entry points alone is not proof of game integration.
-- Vendor-neutral renderer-family routing. The player setting (`gl`, `dx`,
-  `vlcn`) gates the observed API; a loaded OpenGL library cannot substitute for
-  DirectX/Vulkan. An automatic route binds to one observed game-API family so
-  an ANGLE translation layer cannot grade the same image again.
+- Vendor-neutral **automatic** presentation routing. The player setting (`gl`,
+  `dx`, `vlcn`, or unknown) is recorded independently; all implemented host APIs
+  remain eligible. One actual owned source (family + object + window) holds the
+  claim until teardown; a loaded DLL/device/UI surface cannot claim it. Nested
+  WGL/EGL→DXGI/Vulkan presentation cannot grade the same image again. Labels
+  name the observed host API, not a guessed Android game API.
+- EGL discovery handles up to four complete providers (including late-loaded,
+  differently named DLLs), exported/proc-resolved platform-window creators and
+  exact current display/DRAW binding. Surface/context destruction revokes only
+  the matching source; unknown/pre-existing/untracked surfaces fail closed.
+- Default-off **Potato graphic**, independent of visual enable/resolution, uses
+  private GL/GLES samplers with after-draw restoration and explicit driver-
+  override review. Its format/draw/protection checks and resource-provenance
+  limits are documented separately; DirectX/Vulkan texture paths remain absent.
 - Explicit per-device success gates: an implemented adapter is not enough to
   report active processing. The actual pipeline must confirm device/image
   requirements and successful submission before any processed-frame counter

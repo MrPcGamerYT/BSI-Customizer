@@ -49,16 +49,16 @@ const ctx = {
       layout: [{ ...cleanup }], removals: ['Remove title details', 'Sidebar Rotate'], about: {}, settingsPanel: panelState
     };
     if (method === 'applyLayoutTweak') cleanup = { ...cleanup, applied: args.enabled, needsUpdate: false };
-    if (method === 'setSettingsPanelAsset') profile.tabIcons[args.id] = custom;
-    if (method === 'clearSettingsPanelAsset') delete profile.tabIcons[args.id];
-    if (method === 'saveSettingsPanelProfile') profile.hiddenTabs = args.hiddenTabs;
+    if (method === 'setSettingsPanelAsset') (args.kind === 'link-icon' ? (profile.linkIcons ||= {}) : profile.tabIcons)[args.id] = custom;
+    if (method === 'clearSettingsPanelAsset') delete (args.kind === 'link-icon' ? (profile.linkIcons ||= {}) : profile.tabIcons)[args.id];
+    if (method === 'saveSettingsPanelProfile') { profile.hiddenTabs = args.hiddenTabs; profile.links = args.links; const kept = new Set(args.links.map(row => row.id)); for (const id of Object.keys(profile.linkIcons || {})) if (!kept.has(id)) delete profile.linkIcons[id]; }
     if (method === 'applySettingsPanelRebuild') {
       panelState = { ...panelState, supported: true, applied: !!args.enabled, restorable: !!args.enabled, detail: 'Regression state.' };
       return { ok: true, msg: 'applied' };
     }
     return { ok: true };
   },
-  chooseFile: async () => '/chosen/custom.svg',
+  chooseFile: async role => { requests.push({ method: 'chooseFile', args: { role } }); return '/chosen/custom.svg'; },
   getState: () => ({
     authorized: true, busy: false, settingsPanelProfile: profile, aboutProfile: {
       developerName: 'Panel Test', links: [
@@ -154,6 +154,40 @@ assert.deepEqual(Object.keys(profile.tabIcons), []);
 assert.ok(view.includes(defaults[graphicsId].data) && view.includes(defaults[devicesId].data));
 assert.ok(!view.includes(custom.data), 'reset must restore pack icons, not leave stale custom previews');
 
+// Rebuilt player About has variable rows, arbitrary website links and stable
+// per-link artwork. It must never be repadded to four or alter own-About links.
+view = editors.render(6);
+assert.equal((view.match(/data-link-row=/g) || []).length, 2);
+assert.match(view, /Website \/ custom/);
+assert.match(view, /\+ Add link/);
+for (let i = 0; i < 4; ++i) await editors.action('settings-panel-link-add', null, 6);
+view = editors.render(6);
+const ids = [...view.matchAll(/data-link-row="([^"]+)"/g)].map(match => match[1]);
+assert.equal(ids.length, 6);
+assert.equal(new Set(ids).size, 6);
+for (const id of ids.slice(2)) {
+  editors.input({ dataset: { editorField: `settings-panel:link:${id}:title` }, value: `Custom ${id}` });
+  editors.input({ dataset: { editorField: `settings-panel:link:${id}:url` }, value: `https://example.net/${id}` });
+}
+await editors.action('settings-panel-link-icon', { dataset: { linkId: ids[2] } }, 6);
+assert.equal(requests.filter(x => x.method === 'chooseFile').at(-1).args.role, 'settings-panel-link-icon');
+assert.equal(JSON.stringify(requests.filter(x => x.method === 'setSettingsPanelAsset').at(-1).args),
+  JSON.stringify({ kind: 'link-icon', id: ids[2], path: '/chosen/custom.svg' }));
+assert.match(editors.render(6), /Custom link icon/);
+await editors.action('settings-panel-link-remove', { dataset: { linkId: ids[0] } }, 6);
+await editors.action('settings-panel-save', null, 6);
+assert.equal(profile.links.length, 5);
+assert.equal(profile.links[1].id, ids[2]);
+assert.equal(profile.linkIcons[ids[2]].data, custom.data);
+assert.equal(ctx.getState().aboutProfile.links.length, 2, 'player link edits must not touch Customizer own-About data');
+for (const row of [...profile.links]) await editors.action('settings-panel-link-remove', { dataset: { linkId: row.id } }, 6);
+await editors.action('settings-panel-save', null, 6);
+assert.equal(profile.links.length, 0);
+assert.deepEqual(Object.keys(profile.linkIcons), []);
+assert.match(editors.render(6), /No links. Use \+ to add one/);
+await editors.action('interface-load', null, 6);
+assert.equal((editors.render(6).match(/data-link-row=/g) || []).length, 0, 'empty player link list must survive reload, not restore own-About defaults');
+
 panelState = { ...panelState, supported: false, embeddedQmlResourceCount: 12, qmlResourceSamples: ['plr.qml', 'UiSettingsWindow.qml'] };
 await editors.action('interface-load', null, 6);
 view = editors.render(6);
@@ -172,4 +206,4 @@ assert.equal(JSON.stringify(requests.filter(x => x.method === 'applySettingsPane
 assert.equal(panelState.applied, true);
 await editors.action('settings-panel-restore', null, 6);
 assert.equal(JSON.stringify(requests.filter(x => x.method === 'applySettingsPanelRebuild').at(-1)?.args), '{"enabled":false}');
-console.log('PASS: Chromium cleanup Update/Restore migration, one combined title-details control, default pack previews, per-tab SVG overrides, Use default, reset and explicit Settings-panel apply/restore');
+console.log('PASS: Chromium variable About add/remove/empty/reload, arbitrary website links and stable custom icon assets isolated from own-About; cleanup Update/Restore migration, one combined title-details control, default pack previews, per-tab SVG overrides, Use default, reset and explicit Settings-panel apply/restore');

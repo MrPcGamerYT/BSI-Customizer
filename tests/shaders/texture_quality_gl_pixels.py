@@ -1,16 +1,19 @@
-"""Real GL/GLES mip-selection proof on TEST-OWNED resources, not game hooks."""
+"""Real GL/GLES pixels through production private-sampler code on owned resources.
+
+The Windows detour/HWND contracts are separate; this is not emulator evidence.
+"""
 import ctypes as C
 import re
 
 I, U, F, P = C.c_int, C.c_uint, C.c_float, C.c_void_p
 
 
-def exercise(gl, policy, desktop, size):
+def exercise(gl, policy, desktop, size, resolver):
     version = gl("glGetString", C.c_char_p, U)(0x1F02).decode()
     match = re.search(r"(\d+)\.(\d+)", version)
     assert match, version
     actual = tuple(map(int, match.groups()))
-    assert actual >= ((3, 3) if desktop else (3, 0)), "The mandatory quality pixel fixture requires GL 3.3/GLES 3 sampler objects; never skip-pass"
+    assert actual >= ((3, 3) if desktop else (3, 1)), "The production quality fixture requires GL 3.3/GLES 3.1 texture-level queries and private sampler objects; never skip-pass"
     policy.bsi_test_quality_minimum.argtypes = [I, I, I, U, F, F, F, I, C.POINTER(F)]
     policy.bsi_test_quality_minimum.restype = I
 
@@ -129,6 +132,85 @@ def exercise(gl, policy, desktop, size):
     get_sampler(samplers[0], 0x813A, C.byref(original_min))
     get_sampler(samplers[0], 0x813B, C.byref(original_max))
     assert (original_min.value, original_max.value) == (-1000, 6), "quality plan mutated the original sampler"
+    # Exercise the ACTUAL production draw-scoped implementation, not just the
+    # descriptor planner or a Python replacement. Its changed sampler must be
+    # bound during the real draw, then restore the original binding and pixels.
+    policy.bsi_test_quality_initialize.argtypes = [type(resolver), P, C.c_char_p, I]
+    policy.bsi_test_quality_initialize.restype = I
+    policy.bsi_test_quality_begin.argtypes = [I, I, U, C.c_char_p, I]
+    policy.bsi_test_quality_begin.restype = U
+    message = C.create_string_buffer(2048)
+    assert policy.bsi_test_quality_initialize(resolver, None, message, len(message)), message.value.decode()
+    bind_sampler(0, samplers[0])
+    gl("glEnable", None, U)(0x0B71)
+    gl("glDepthMask", None, C.c_ubyte)(1)
+    gl("glDepthFunc", None, U)(0x0203)  # LEQUAL: repeated real depth-tested scene draws
+    if desktop:
+        gl("glClearDepth", None, C.c_double)(1)
+    else:
+        gl("glClearDepthf", None, F)(1)
+    gl("glClear", None, U)(0x0100)  # clear the test-owned depth attachment
+    active = gl("glActiveTexture", None, U)
+    get_int = gl("glGetIntegerv", None, U, C.POINTER(I))
+    def get_binding(value):
+        # GLES exposes SAMPLER_BINDING through the active unit's GetIntegerv,
+        # not the desktop-only indexed query for this enum.
+        active(0x84C0)
+        get_int(0x8919, C.byref(value))
+        active(0x84C3)
+    active(0x84C3)
+
+    def production(mode, reviewed=1, primitive=0x0004):
+        before, after = I(), I()
+        get_binding(before)
+        count = policy.bsi_test_quality_begin(mode, reviewed, primitive, message, len(message))
+        current = I()
+        get_int(0x84E0, C.byref(current))
+        assert current.value == 0x84C3, "inspection must restore ACTIVE_TEXTURE before the actual draw"
+        get_binding(after)
+        assert (after.value != before.value) == bool(count), message.value.decode()
+        draw(primitive, 0, 3)
+        policy.bsi_test_quality_end()
+        get_binding(after)
+        assert before.value == after.value == samplers[0], "draw-scoped binding did not restore exactly"
+        pixel = (C.c_ubyte * 4)()
+        read(size // 2, size // 2, 1, 1, 0x1908, 0x1401, pixel)
+        return count, tuple(pixel)
+
+    assert production(0) == (0, native)
+    assert production(2) == (1, colors[3]), message.value.decode()
+    assert production(2, reviewed=0) == (0, native), "no driver review must leave original sampler/pixels untouched"
+    count, actual_light = production(1)
+    assert count == 1 and all(abs(a - b) <= 2 for a, b in zip(actual_light, (0, 128, 128, 173)))
+    assert production(0) == (0, native), "switch off restores exact native pixels without recreating texture resources"
+    gl("glDisable", None, U)(0x0B71)
+    assert production(2) == (0, native), "depth-disabled/UI draws must stay untouched"
+    gl("glEnable", None, U)(0x0B71)
+    gl("glDepthFunc", None, U)(0x0207)
+    assert production(2) == (0, native), "always-pass UI-like depth state is not scene qualification"
+    gl("glDepthFunc", None, U)(0x0203)
+    gl("glDepthMask", None, C.c_ubyte)(0)
+    assert production(2) == (0, native), "non-depth-writing passes must stay untouched"
+    gl("glDepthMask", None, C.c_ubyte)(1)
+    gl("glEnable", None, U)(0x0BE2)
+    assert production(2) == (0, native), "blended/UI draws must stay untouched"
+    gl("glDisable", None, U)(0x0BE2)
+    sampler_f(samplers[0], 0x813A, .5)
+    assert production(2)[0] == 0, "existing sampler minimum-LOD overrides must not be stacked/reset"
+    sampler_f(samplers[0], 0x813A, -1000)
+    active(0x84C0)
+    gl("glTexParameteri", None, U, U, I)(0x0DE1, 0x813D, 0)
+    active(0x84C3)
+    assert production(2) == (0, native), "a one-level view is not a reducible mip chain"
+    active(0x84C0)
+    gl("glTexParameteri", None, U, U, I)(0x0DE1, 0x813D, 1000)
+    active(0x84C3)
+    assert get_error() == 0, message.value.decode()
+    gl("glEnable", None, U)(0xDEADBEEF)
+    assert production(2) == (1, colors[3])
+    assert get_error() == 0x0500 and get_error() == 0, "sampler inspection must not consume the application's pending API error"
+    policy.bsi_test_quality_release()
+    active(0x84C0)
     bind_sampler(0, 0)
     gl("glDeleteSamplers", None, I, C.POINTER(U))(3, samplers)
     gl("glBindTexture", None, U, U)(0x0DE1, 0)
@@ -138,6 +220,6 @@ def exercise(gl, policy, desktop, size):
     gl("glUseProgram", None, U)(0)
     gl("glDeleteProgram", None, U)(program)
     assert get_error() == 0
-    print("PASS: experimental C++ minimum-LOD policy selects real test-owned " + ("OpenGL" if desktop else "GLES 3")
-          + " mip colors at 1.5/3.0; original sampler and exact pixels restore; no-mip/override/unqualified bypass")
+    print("PASS: production draw-scoped private samplers AND C++ policy select real test-owned " + ("OpenGL" if desktop else "GLES 3")
+          + " mip colors at 1.5/3.0; sampler/active-unit/exact native pixels restore; depth/UI/no-mip/override/review bypass and pending errors preserved")
     print("LIMIT: owned software-context sampler proof, not game interception, physical GPU, profile compatibility or FPS evidence")

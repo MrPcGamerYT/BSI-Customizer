@@ -1,10 +1,11 @@
 #include "GlPipeline.h"
 #include "GlTextureQuality.h"
+#include "GlTextureOverride.h"
 #include <cstring>
 #include <memory>
 
 // Test-only C bridge to the production pipeline, not a reimplementation.
-namespace { std::unique_ptr<BsiShaders::GlPipeline> pipeline; }
+namespace { std::unique_ptr<BsiShaders::GlPipeline> pipeline; std::unique_ptr<BsiShaders::GlTextureOverride> quality; }
 extern "C" {
 int bsi_test_initialize(BsiShaders::ResolveGl resolve,void *user,char *message,int capacity){
     pipeline=std::make_unique<BsiShaders::GlPipeline>();std::string error;
@@ -34,5 +35,17 @@ int bsi_test_quality_minimum(int mode,int es,int supported,unsigned mips,float m
     const auto plan=planGlTextureQuality(static_cast<TextureQuality>(mode),proof,source);
     *out=plan.descriptor.minimumLod;return plan.changed();
 }
+int bsi_test_quality_initialize(BsiShaders::ResolveGl resolve,void *user,char *message,int capacity){
+    quality=std::make_unique<BsiShaders::GlTextureOverride>();std::string error;
+    const bool okay=quality->initialize(resolve,user,&error);
+    if(capacity>0){std::strncpy(message,error.c_str(),capacity-1);message[capacity-1]=0;}return okay;
+}
+unsigned bsi_test_quality_begin(int mode,int reviewed,unsigned primitive,char *message,int capacity){
+    std::string detail;
+    const auto count=quality->begin(static_cast<BsiShaders::TextureQuality>(mode),reviewed!=0,primitive,&detail);
+    if(capacity>0){std::strncpy(message,detail.c_str(),capacity-1);message[capacity-1]=0;}return count;
+}
+void bsi_test_quality_end(){quality->end();}
+void bsi_test_quality_release(){if(quality)quality->release();quality.reset();}
 void bsi_test_release(){if(pipeline)pipeline->release();pipeline.reset();}
 }

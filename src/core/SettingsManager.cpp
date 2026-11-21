@@ -47,8 +47,8 @@ SettingsManager::SettingsManager(QObject *parent, bool initialize)
         m_aboutDeveloperName = QStringLiteral("Mr.Pc Gamer & Romulos");
     m_aboutTagline = settings.value(QStringLiteral("about/tagline"),
                                     QStringLiteral("BlueStacks tools · with contributor Nova")).toString().trimmed();
-    if (m_aboutTagline.isEmpty())
-        m_aboutTagline = QStringLiteral("BlueStacks tools · with contributor Nova");
+    // An explicitly saved empty subtitle hides it. Only an absent key uses
+    // the default above; reopening must not resurrect removed About text.
     m_aboutLinks = settings.value(QStringLiteral("about/links")).toList();
     if (m_aboutLinks.size() != 4) {
         m_aboutLinks = defaultAboutLinks();

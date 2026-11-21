@@ -3,6 +3,17 @@
 #include "Runtime.h"
 #include <cstdio>
 #include <cstdlib>
+#include <atomic>
+#include <thread>
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#endif
 
 using namespace BsiShaders;
 namespace {
@@ -33,13 +44,13 @@ int main(){
     auto m=runtime.metrics();
     require(!m.active&&!m.deviceReady&&m.processed==0,"an unvalidated Vulkan device cannot claim processed frames");
     require(m.renderer==Renderer::Vulkan,"observed API is not silently changed to OpenGL");
-    require(!runtime.accepts(Renderer::OpenGL),"Vulkan setting blocks GL hooks even if OpenGL is loaded");
+    require(!runtime.accepts(Renderer::OpenGL),"explicit Vulkan-only test policy rejects GL; this is NOT an emulator-config hint");
     runtime.set(Parameters{});
     require(runtime.metrics().status.find("not validated")!=std::string::npos,"neutral state must not hide an unvalidated-device diagnostic");
     runtime.selectRenderer(RendererFamily::DirectX);runtime.set(p);
     runtime.report(true,true,true,"must not be reported active",true,Renderer::Direct3D11);
     require(!runtime.metrics().active&&runtime.metrics().processed==0,"an unvalidated DX11 device must not count a frame");
-    require(!runtime.accepts(Renderer::OpenGLES),"DirectX setting blocks the GL/GLES fallback");
+    require(!runtime.accepts(Renderer::OpenGLES),"explicit DirectX-only test policy rejects GL/GLES, separate from automatic config hints");
     runtime.selectRenderer(RendererFamily::Automatic);
     runtime.report(true,false,true,"unidentified",true,Renderer::OpenGL,true);
     require(!runtime.metrics().active&&runtime.metrics().processed==0,"a surface must actually be identified");
@@ -75,11 +86,50 @@ int main(){
     require(!runtime.metrics().observed&&!runtime.metrics().active&&runtime.metrics().processed==1
             &&runtime.metrics().status.find("no instance creation")!=std::string::npos,
             "loader/stage diagnostics never fabricate observed game frames or weaken routing");
+#ifdef _WIN32
+    const auto root=CreateWindowExW(0,L"STATIC",L"routing unit root",WS_OVERLAPPEDWINDOW,0,0,900,600,nullptr,nullptr,GetModuleHandleW(nullptr),nullptr);
+    const auto child=CreateWindowExW(0,L"STATIC",L"routing unit game",WS_CHILD,0,0,640,480,root,nullptr,GetModuleHandleW(nullptr),nullptr);
+    require(root&&child,"create live routing-unit HWND identities");
+    runtime.setWindow(reinterpret_cast<std::uintptr_t>(root));
+    const auto window=reinterpret_cast<std::uintptr_t>(child);
+    require(runtime.eligible(window)&&!runtime.eligible(reinterpret_cast<std::uintptr_t>(root)),"only the live game child passes native ownership/size gates, never the root UI");
+#else
+    const std::uintptr_t window=303;
+#endif
+    for(const auto hint:{RendererFamily::OpenGL,RendererFamily::DirectX,RendererFamily::Vulkan,RendererFamily::Automatic}){
+        runtime.configureRenderer(hint);runtime.set(p);
+        const auto before=runtime.metrics().processed;
+        runtime.vulkanEvent(VulkanEvent::DeviceTracked);
+        require(runtime.accepts(Renderer::OpenGLES)&&runtime.accepts(Renderer::Direct3D11)&&runtime.accepts(Renderer::Vulkan)
+                &&!runtime.metrics().observed,"every configured/unknown hint keeps all actual presentation APIs eligible; a Vulkan device alone cannot lock routing");
+        require(!runtime.claimPresentation(Renderer::Unknown,11,window)&&!runtime.claimPresentation(Renderer::OpenGL,0,window),"invalid presentation identities cannot claim a route");
+        require(runtime.claimPresentation(Renderer::OpenGLES,11,window),"actual owned GLES presentation can claim even under a Vulkan hint");
+        require(!runtime.claimPresentation(Renderer::Direct3D11,33,window)&&!runtime.claimPresentation(Renderer::OpenGL,44,window)
+                &&!runtime.claimPresentation(Renderer::OpenGLES,55,window),"arbitration precedes processing, rejecting nested cross-family AND same-family translation providers");
+        runtime.report(true,true,true,"actual GLES pass",true,Renderer::OpenGLES,true);
+        require(runtime.metrics().requested==RendererFamily::Automatic&&runtime.metrics().configured==hint
+                &&runtime.metrics().renderer==Renderer::OpenGLES&&runtime.metrics().processed==before+1,"hint and actual game API remain distinct; only the actual pass increments counters");
+        runtime.releasePresentation(Renderer::OpenGL,11);
+        require(!runtime.accepts(Renderer::Vulkan),"the wrong renderer cannot revoke another source's arbitration token");
+        runtime.releasePresentation(Renderer::OpenGLES,11);
+        require(runtime.accepts(Renderer::Vulkan)&&!runtime.metrics().observed,"destroying the selected game source re-arms automatic detection");
+        require(runtime.claimPresentation(Renderer::Vulkan,66,window),"a replacement native Vulkan source can be adopted after old GLES teardown");
+        runtime.releasePresentation(Renderer::Vulkan,66);
+    }
+    runtime.configureRenderer(RendererFamily::Vulkan);
+    std::atomic<unsigned> claims{0};
+    std::thread a([&]{if(runtime.claimPresentation(Renderer::OpenGLES,101,window))++claims;});
+    std::thread b([&]{if(runtime.claimPresentation(Renderer::Direct3D11,202,window))++claims;});
+    a.join();b.join();require(claims==1,"concurrent presentation callbacks must claim exactly one source BEFORE either backend can process pixels");
+    runtime.configureRenderer(RendererFamily::Automatic);
+#ifdef _WIN32
+    DestroyWindow(child);DestroyWindow(root);
+#endif
     for(std::size_t i=0;i<controls.size();++i){
         Parameters v;v.enabled=true;v.values[i]=controls[i].minimum;
         require(v.valid(),"minimum value validation");
         v.values[i]=controls[i].maximum;require(v.valid(),"maximum value validation");
         v.values[i]=controls[i].maximum+1;require(!v.valid(),"out of range validation");
     }
-    std::puts("PASS: vendor-neutral renderer-family routing, native-setting isolation, actual-surface and device-feature gating, no ANGLE double-processing, no unvalidated success counters, strict neutral bypass and value bounds");
+    std::puts("PASS: automatic actual-presentation routing across all config hints, concurrent/nested/same-family arbitration and source-teardown re-detection, explicit backend qualification, actual-surface and device-feature gating, no ANGLE double-processing, no unvalidated success counters, strict neutral bypass and value bounds");
 }

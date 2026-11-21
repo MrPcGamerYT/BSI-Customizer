@@ -19,6 +19,7 @@
 #include "IntegrityPatcher.h"
 #include "AboutPatcher.h"
 #include "SettingsPanelPatcher.h"
+#include "SettingsPanelLinks.h"
 #include "DebloatPatcher.h"
 #include "LayoutPatcher.h"
 #include "RootVhd.h"
@@ -2112,7 +2113,9 @@ QVariantMap Backend::applySettingsPanelRebuild(bool enabled)
     QVariantMap panelProfile = m_settings->settingsPanelProfile();
     panelProfile.insert(QStringLiteral("tagline"), m_settings->aboutTagline());
     const auto response = SettingsPanelPatcher::apply(m_settings->exePath(),
-        m_settings->aboutDeveloperName(), m_settings->aboutLinks(), panelProfile, enabled);
+        m_settings->aboutDeveloperName(),
+        panelProfile.contains(QStringLiteral("links")) ? panelProfile.value(QStringLiteral("links")).toList() : m_settings->aboutLinks(),
+        panelProfile, enabled);
     if (response.value(QStringLiteral("ok")).toBool()) emit resourcesChanged();
     return result(response.value(QStringLiteral("ok")).toBool(),
                   response.value(QStringLiteral("msg")).toString(),
@@ -2132,19 +2135,25 @@ bool validPanelTabId(const QString &id)
 QVariantMap Backend::saveSettingsPanelProfile(const QString &developerName,
                                               const QString &tagline,
                                               const QStringList &hiddenTabs,
-                                              const QStringList &availableTabs)
+                                              const QStringList &availableTabs,
+                                              const QVariantList &links)
 {
     if (actionsLocked()) return lockedMap();
     const QString developer = developerName.trimmed();
     const QString subtitle = tagline.trimmed();
-    if (developer.isEmpty() || developer.size() > 80)
-        return result(false, QStringLiteral("Enter a name under the logo (up to 80 characters)."),
+    if (developer.isEmpty() || developer.size() > 80
+        || QRegularExpression(QStringLiteral("[\\x00-\\x1f\\x7f]")).match(developerName).hasMatch())
+        return result(false, QStringLiteral("Enter a name under the logo (up to 80 characters, without control characters)."),
                       QStringLiteral("red"));
     if (subtitle.size() > 120
         || QRegularExpression(QStringLiteral("[\\x00-\\x1f\\x7f]")).match(subtitle).hasMatch())
         return result(false, QStringLiteral("The About subtitle must be no longer than 120 characters "
                                             "and contain no control characters."),
                       QStringLiteral("red"));
+    QVariantList cleanLinks;
+    QString linkError;
+    if (!SettingsPanelLinks::clean(links, &cleanLinks, &linkError))
+        return result(false, linkError, QStringLiteral("red"));
     // Only tabs of the player that is selected now: a stale id from another
     // version must never turn into a hidden page after an update. The ids are
     // the ones the page inspected, not a fresh multi-MB EXE read per click.
@@ -2169,6 +2178,14 @@ QVariantMap Backend::saveSettingsPanelProfile(const QString &developerName,
     m_settings->setAboutTagline(subtitle);
     QVariantMap panelProfile = m_settings->settingsPanelProfile();
     panelProfile.insert(QStringLiteral("hiddenTabs"), cleaned);
+    panelProfile.insert(QStringLiteral("links"), cleanLinks);
+    // Removing a row removes its saved override, never another row's icon.
+    QVariantMap icons = panelProfile.value(QStringLiteral("linkIcons")).toMap();
+    QSet<QString> kept;
+    for (const QVariant &link : cleanLinks) kept.insert(link.toMap().value(QStringLiteral("id")).toString());
+    for (auto it = icons.begin(); it != icons.end(); )
+        if (!kept.contains(it.key())) it = icons.erase(it); else ++it;
+    panelProfile.insert(QStringLiteral("linkIcons"), icons);
     m_settings->setSettingsPanelProfile(panelProfile);
     return result(true, QStringLiteral("Settings-panel options saved on this PC. Apply the rebuild "
                                        "to write them into the selected player."),
@@ -2183,18 +2200,23 @@ QVariantMap Backend::setSettingsPanelAsset(const QString &kind, const QString &i
     if (kind == QLatin1String("tab-icon") && !validPanelTabId(assetId))
         return result(false, QStringLiteral("Choose a tab from the inspected player first."),
                       QStringLiteral("red"));
+    if (kind == QLatin1String("link-icon") && !SettingsPanelLinks::validId(assetId))
+        return result(false, QStringLiteral("Choose an About link row first."), QStringLiteral("red"));
     const QVariantMap loaded = SettingsPanelPatcher::readCustomAsset(path, kind);
     if (!loaded.value(QStringLiteral("ok")).toBool())
         return result(false, loaded.value(QStringLiteral("msg")).toString(), QStringLiteral("red"));
     QVariantMap panelProfile = m_settings->settingsPanelProfile();
-    if (kind == QLatin1String("tab-icon")) {
-        QVariantMap icons = panelProfile.value(QStringLiteral("tabIcons")).toMap();
+    if (kind == QLatin1String("tab-icon") || kind == QLatin1String("link-icon")) {
+        const QString key = kind == QLatin1String("tab-icon") ? QStringLiteral("tabIcons") : QStringLiteral("linkIcons");
+        QVariantMap icons = panelProfile.value(key).toMap();
+        if (!icons.contains(assetId) && icons.size() >= 64)
+            return result(false, QStringLiteral("Too many custom icons. Save the link list to remove stale artwork first."), QStringLiteral("red"));
         icons.insert(assetId, loaded.value(QStringLiteral("asset")));
-        panelProfile.insert(QStringLiteral("tabIcons"), icons);
+        panelProfile.insert(key, icons);
     } else if (kind == QLatin1String("logo")) {
         panelProfile.insert(QStringLiteral("logo"), loaded.value(QStringLiteral("asset")));
     } else {
-        return result(false, QStringLiteral("Choose a tab SVG icon or an About logo image."),
+        return result(false, QStringLiteral("Choose a tab SVG, About link icon or About logo image."),
                       QStringLiteral("red"));
     }
     m_settings->setSettingsPanelProfile(panelProfile);
@@ -2205,18 +2227,21 @@ QVariantMap Backend::clearSettingsPanelAsset(const QString &kind, const QString 
 {
     if (actionsLocked()) return lockedMap();
     QVariantMap panelProfile = m_settings->settingsPanelProfile();
-    if (kind == QLatin1String("tab-icon")) {
-        QVariantMap icons = panelProfile.value(QStringLiteral("tabIcons")).toMap();
+    if (kind == QLatin1String("tab-icon") || kind == QLatin1String("link-icon")) {
+        const QString key = kind == QLatin1String("tab-icon") ? QStringLiteral("tabIcons") : QStringLiteral("linkIcons");
+        QVariantMap icons = panelProfile.value(key).toMap();
         icons.remove(id.trimmed().toCaseFolded());
-        panelProfile.insert(QStringLiteral("tabIcons"), icons);
+        panelProfile.insert(key, icons);
     } else if (kind == QLatin1String("logo")) {
         panelProfile.remove(QStringLiteral("logo"));
     } else {
-        return result(false, QStringLiteral("Choose a tab icon or a logo to clear."),
+        return result(false, QStringLiteral("Choose a tab icon, About link icon or logo to clear."),
                       QStringLiteral("red"));
     }
     m_settings->setSettingsPanelProfile(panelProfile);
-    return result(true, kind == QLatin1String("tab-icon")
+    return result(true, kind == QLatin1String("link-icon")
+        ? QStringLiteral("About link icon cleared. Apply the rebuild to update the player.")
+        : kind == QLatin1String("tab-icon")
         ? QStringLiteral("Custom icon cleared. The bundled pack icon will be used where available. Apply the rebuild to update the selected player.")
         : QStringLiteral("Custom logo cleared. Apply the rebuild to use the player/fallback logo."),
         QStringLiteral("green"));

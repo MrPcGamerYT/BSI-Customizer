@@ -199,6 +199,53 @@ authored test host, not production player fonts, and does not weaken the paint
 check. These scenes do not certify a real installed player; carry out the
 manual checks above too.
 
+## Editable About links and saved artwork
+
+Both the Chromium and native **Settings panel rebuild** editors now support
+**0–24** rebuilt-player About links, with **+ / −** controls, arbitrary HTTP(S)
+website labels/URLs and an optional per-row SVG/raster icon. The developer name,
+logo and subtitle remain editable. Saving options stores preferences on this PC;
+**Apply Settings panel rebuild** is still the separate operation that writes the
+player. Native tabs, theme and Save/Discard callbacks are not redesigned.
+
+1. Add at least six links, type distinct labels/URLs and choose different icons
+   on two nonadjacent rows. Save, close/reopen the editor and verify every value
+   and icon. Name and an intentionally empty subtitle must also survive reopen.
+2. Remove the first link, save and reopen. Only that stable id's icon should be
+   pruned; later rows must keep their own labels/URLs/artwork, not shift icons.
+   Remove all links and save: the empty list must persist, not reset to four.
+   Rebuilt-player links do not overwrite the Customizer's own fixed-four links.
+3. Invalid/duplicate ids, more than 24 rows, incomplete labels/URLs, credentials,
+   file/javascript schemes, control characters and unexpected fields must be
+   refused by the shared native validator before changing the saved profile.
+4. Apply to a disposable copy and restart the test player. Verify logo aspect
+   bounds, name/subtitle, correct row count, icon paint, scrolling, keyboard/
+   pointer activation and that links open the intended HTTP(S) destinations.
+   Do not launch untrusted destinations merely to test rejection.
+5. Apply a changed list/icon, then repeat unchanged; verify idempotence/no EXE
+   growth and exact feature-local Restore without undoing unrelated edits.
+
+Stable ids attach artwork to rows rather than list positions. Editable original
+assets remain in the profile. Runtime images are bounded PNGs under
+`AppLocalData/settings-panel-assets/<canonical-exe-path SHA>/`; large/custom-icon
+link lists use an escaped **QtQml 2.15 literal-model asset** (at most 64 KiB).
+URLs are encoded absolute local file references, not user-authored QML. Files are
+content-addressed and immutable: a changed row/model gets a new URL and corrupt
+existing bytes cause refusal, not silent overwrite. Keep these files while a
+patched player/recovery snapshot references them; moving/deleting the app-data
+folder can break those references. Failed staging cleans only that attempt's
+new files; successful prior versions are not deleted under a live player.
+
+Automated coverage executes the actual applied About QML and staged model in an
+independent Qt 6 host for both resource-format fixtures: **24 → 23 → 0 rows**,
+exact escaped labels/URLs and **2 → 1 → 0** readable local PNG icon sources,
+without QML warnings. It caught and fixed an illegal semicolon after a grouped
+`icon` property that static string checks had missed. The application self-test
+also exercises real Backend/QSettings persistence and validator rejection;
+editor-only tests use explicit service doubles. These do not certify the player,
+Windows/Qt 5 runtime, painted custom-icon output, external link launch or GPU.
+Current-head CI results must be checked independently.
+
 ## Default pack and custom-icon regression
 
 Use a disposable player copy and an empty Settings-panel profile for the first check:
