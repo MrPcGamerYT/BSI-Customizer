@@ -14,6 +14,8 @@ void Runtime::resetTextureEvidence(){
     state.textureSupported=false;
     state.textureDraws=state.textureBindings=state.textureInspected=state.textureSceneDraws=0;
     state.textureDepthBypasses=state.textureBlendBypasses=state.textureSamplerBypasses=state.textureOtherBypasses=0;
+    state.textureDepthReasons.fill(0);
+    state.textureNestedInspected=state.textureNestedDraws=0;
     state.textureLastBypass.clear();
 }
 void Runtime::start(std::uintptr_t window){
@@ -109,14 +111,20 @@ void Runtime::setTexture(const TextureConfiguration &settings){
         "Potato graphic saved. Waiting for a qualified owned GL/GLES scene draw; no texture reduction is confirmed yet.";
 }
 TextureConfiguration Runtime::texture(){std::lock_guard<std::mutex> lock(mutex);return currentTexture;}
-void Runtime::textureReport(unsigned bindings,const std::string &detail,bool supported,TextureDrawReason reason){
+void Runtime::textureReport(unsigned bindings,const std::string &detail,bool supported,TextureDrawReason reason,TextureDepthFailure depthFailure,bool nested){
     std::lock_guard<std::mutex> lock(mutex);
     if(!currentTexture.enabled||!state.observed||family(state.renderer)!=RendererFamily::OpenGL)return;
     state.textureSupported=supported;
     if(reason!=TextureDrawReason::NotInspected){
         ++state.textureInspected;
+        if(nested)++state.textureNestedInspected;
         switch(reason){
-        case TextureDrawReason::Depth:++state.textureDepthBypasses;break;
+        case TextureDrawReason::Depth:{
+            ++state.textureDepthBypasses;
+            const auto index=static_cast<std::size_t>(depthFailure);
+            ++state.textureDepthReasons[index<state.textureDepthReasons.size()?index:0];
+            break;
+        }
         case TextureDrawReason::Blended:++state.textureBlendBypasses;break;
         case TextureDrawReason::NoSampler:++state.textureSceneDraws;++state.textureSamplerBypasses;break;
         case TextureDrawReason::Prepared:++state.textureSceneDraws;break;
@@ -127,7 +135,10 @@ void Runtime::textureReport(unsigned bindings,const std::string &detail,bool sup
     // A subsequent HUD/compositor draw is not evidence that an earlier scene
     // preparation failed. Retain that evidence AND expose the latest bypass.
     if(!detail.empty()&&(!state.textureDraws||bindings||!supported))state.textureStatus=detail;
-    if(bindings&&supported&&reason==TextureDrawReason::Prepared){++state.textureDraws;state.textureBindings+=bindings;}
+    if(bindings&&supported&&reason==TextureDrawReason::Prepared){
+        ++state.textureDraws;state.textureBindings+=bindings;
+        if(nested)++state.textureNestedDraws;
+    }
 }
 Metrics Runtime::metrics(){std::lock_guard<std::mutex> lock(mutex);return state;}
 void Runtime::waiting(bool hooks,const std::string &status){

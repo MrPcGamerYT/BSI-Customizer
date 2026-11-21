@@ -61,11 +61,17 @@ API LONG bsiFixtureProtectionQueries(){return protectionQueries;}
 API LONG bsiFixtureIllegalQueries(){return illegalQueries;}
 API void bsiFixtureExtensions(int available){extensions=available!=0;InterlockedExchange(&protectionQueries,0);}
 API void bsiFixtureDraw(unsigned kind,unsigned alias,unsigned mode){EglDrawFixture::invoke(kind,alias,mode);}
+API void bsiFixtureNestedDraw(unsigned mode){
+    using namespace EglDrawFixture;
+    nestedMode=mode;nestedPrivateBindings=0;nestedArgumentsIntact=true;
+    invoke(static_cast<U>(BsiShaders::GlDrawKind::Arrays),0,4);nestedMode=0;
+}
+API LONG bsiFixtureNestedPrivateBindings(){return LONG(EglDrawFixture::nestedPrivateBindings);}
 API LONG bsiFixtureDrawCalls(){return EglDrawFixture::draws;}
 API LONG bsiFixturePrivateDraws(){return EglDrawFixture::privateDraws;}
 API LONG bsiFixtureInvalidGl(){return EglDrawFixture::invalid;}
 API LONG bsiFixtureLastPrivateBindings(){return LONG(EglDrawFixture::lastPrivateBindings);}
-API LONG bsiFixtureArgumentsIntact(){return EglDrawFixture::lastHash==EglDrawFixture::expectedHash;}
+API LONG bsiFixtureArgumentsIntact(){return EglDrawFixture::nestedArgumentsIntact&&EglDrawFixture::lastHash==EglDrawFixture::expectedHash;}
 API LONG bsiFixtureBindingsRestored(){return EglDrawFixture::restored();}
 API void bsiFixtureSceneState(unsigned flags){
     auto &g=EglDrawFixture::state();g.depth=!(flags&1);g.depthWrite=!(flags&2);

@@ -131,23 +131,38 @@ int main(){
             "draw authorization requires the already-selected renderer, presentation identity and exact game window");
     runtime.textureReport(0,"armed only",true);
     require(!runtime.metrics().textureInspected&&!runtime.metrics().textureDraws,"hook availability is not an inspected or prepared scene call");
-    runtime.textureReport(0,"compositor depth bypass",true,TextureDrawReason::Depth);
+    runtime.textureReport(0,"compositor depth bypass",true,TextureDrawReason::Depth,TextureDepthFailure::TestDisabled);
     runtime.textureReport(0,"scene without mip samplers",true,TextureDrawReason::NoSampler);
-    runtime.textureReport(2,"private scene preparation",true,TextureDrawReason::Prepared);
+    runtime.textureReport(2,"private scene preparation",true,TextureDrawReason::Prepared,TextureDepthFailure::None,true);
     runtime.textureReport(0,"later UI bypass",true,TextureDrawReason::Blended);
     m=runtime.metrics();
     require(m.textureInspected==4&&m.textureSceneDraws==2&&m.textureDraws==1&&m.textureBindings==2
             &&m.textureDepthBypasses==1&&m.textureBlendBypasses==1&&m.textureSamplerBypasses==1
+            &&m.textureDepthReasons[static_cast<std::size_t>(TextureDepthFailure::TestDisabled)]==1
+            &&m.textureNestedInspected==1&&m.textureNestedDraws==1
             &&m.textureStatus=="private scene preparation"&&m.textureLastBypass=="later UI bypass",
-            "aggregate scene/bypass evidence is truthful and a final HUD call does not erase earlier real sampler preparation");
+            "aggregate/depth/nested evidence is truthful and a final HUD call does not erase earlier real sampler preparation");
+    for(std::size_t i=0;i<static_cast<std::size_t>(TextureDepthFailure::Count);++i)
+        runtime.textureReport(0,"separate first depth blocker",true,TextureDrawReason::Depth,static_cast<TextureDepthFailure>(i),true);
+    runtime.textureReport(0,"unknown depth reason stays unspecified",true,TextureDrawReason::Depth,static_cast<TextureDepthFailure>(999));
+    const auto beforeUninspected=runtime.metrics().textureNestedInspected;
+    runtime.textureReport(0,"armed is not inspected",true,TextureDrawReason::NotInspected,TextureDepthFailure::Always,true);
+    m=runtime.metrics();std::uint64_t depthSum=0;for(const auto count:m.textureDepthReasons)depthSum+=count;
+    require(depthSum==m.textureDepthBypasses&&m.textureDepthReasons[0]==2&&m.textureNestedInspected==beforeUninspected
+            &&m.textureNestedDraws==1,"first-blocker categories sum exactly to the aggregate; unreported/invalid reasons stay bounded and arming cannot count as a nested scene call");
     runtime.setTexture({false,true});runtime.textureReport(2,"off must not count",true,TextureDrawReason::Prepared);
-    require(!runtime.metrics().textureDraws&&!runtime.metrics().textureInspected&&!runtime.metrics().textureSupported,
-            "off clears old evidence instead of reusing lifetime sampler counts");
-    runtime.setTexture({true,true});runtime.textureReport(1,"new enabled preparation",true,TextureDrawReason::Prepared);
-    require(runtime.metrics().textureDraws==1,"on starts a new evidence interval");
+    m=runtime.metrics();
+    require(!m.textureDraws&&!m.textureInspected&&!m.textureSupported&&!m.textureNestedInspected&&!m.textureNestedDraws
+            &&m.textureDepthReasons==decltype(m.textureDepthReasons){},
+            "off clears old depth/nested/preparation evidence instead of reusing lifetime sampler counts");
+    runtime.setTexture({true,true});runtime.textureReport(1,"new enabled preparation",true,TextureDrawReason::Prepared,TextureDepthFailure::None,true);
+    runtime.textureReport(0,"new source depth bypass",true,TextureDrawReason::Depth,TextureDepthFailure::Always,true);
+    require(runtime.metrics().textureDraws==1&&runtime.metrics().textureNestedInspected==2,"on starts a new evidence interval");
     runtime.releasePresentation(Renderer::OpenGLES,901);
-    require(!runtime.isPresentation(Renderer::OpenGLES,901,window)&&!runtime.metrics().textureDraws&&!runtime.metrics().textureBindings
-            &&runtime.metrics().textureLastBypass.empty(),"source destruction revokes scene authorization and texture counters/last bypass");
+    m=runtime.metrics();
+    require(!runtime.isPresentation(Renderer::OpenGLES,901,window)&&!m.textureDraws&&!m.textureBindings
+            &&!m.textureNestedInspected&&!m.textureNestedDraws&&m.textureDepthReasons==decltype(m.textureDepthReasons){}
+            &&m.textureLastBypass.empty(),"source destruction revokes scene authorization and every depth/nested/preparation counter/last bypass");
     require(runtime.claimPresentation(Renderer::Direct3D11,903,window),"another actual renderer can replace the destroyed GL source");
     runtime.textureReport(4,"a presentation shader is not a D3D texture implementation",true,TextureDrawReason::Prepared);
     require(!runtime.metrics().textureDraws&&!runtime.metrics().textureSupported,"missing D3D/Vulkan texture binding implementation cannot be reported as successful");

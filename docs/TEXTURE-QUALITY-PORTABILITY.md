@@ -46,6 +46,33 @@ producer's scene resources. These are repaired interception gaps, **not proof
 that either was the cause in the user's game**; installed-player evidence is
 still required.
 
+### Nested translator draws and the active-gameplay failure
+
+A later confirmed active-gameplay report had **27,620 inspected calls, all
+27,620 rejected by the depth gate, and zero eligible/prepared draws/bindings**,
+while ordinary host-OpenGL presentation effects were processing. This is a real
+negative texture result, not an unsaved switch or a lobby-only test. It does
+not identify which subcheck failed or prove ownership of another producer.
+See the [report and remaining uncertainty](FREE-FIRE-RENDERER-ANALYSIS.md).
+
+A zero-binding outer wrapper must release the inspection recursion guard and
+render mutex **before calling its original**: that original may establish real
+scene state and call another intercepted entry. Previously the bypass retained
+both leases until after that original, hiding its inner draw. The production
+`GlDrawScope` policy now distinguishes this normal bypass from a live private
+sampler override. Applied outer bindings stay protected through their original;
+inner aliases cannot double-override/count them. Inspection exceptions retain
+the fail-closed lease, presentation-internal draws remain excluded, and nested
+inspection is bounded to eight API levels. Each original still executes once;
+no indirect/index memory is read. The same exact route/protection/scene/sampler
+checks apply at each newly inspectable level.
+
+The portable scope regression includes an old-guard-equivalent failing negative;
+the Windows fixture separately exercises both originals through actual MinHook,
+checks private bindings **inside** each, and refuses nested UI/protected/other-
+drawable/unmapped calls. This is a demonstrable guard gap, **not proof the user's
+player uses this nested pattern** and not certification of game texture changes.
+
 ### State and resource checks
 
 `GlTextureOverride` currently requires:
@@ -134,6 +161,17 @@ not certify those lifetimes.
   success cannot masquerade as activity after a new toggle/context. A later HUD
   bypass cannot erase earlier preparation evidence; its latest reason is kept
   separately in **Copy rendering status**. Arming hooks is not a prepared draw.
+- **Copy rendering status** splits the depth gate into its **first blocking
+  check per call**: test disabled, writes disabled, NEVER, ALWAYS, no attachment,
+  or fewer than 16 depth bits. An unreported/unknown reason stays unspecified;
+  it is not guessed to be a GL state. Rejection stops before shader/sampler
+  queries, and the depth-disabled case needs only its enabled-state query.
+  All subcounts sum to the depth aggregate and reset with the same source or
+  setting change. No depth/UI/protection condition is weakened to raise counts.
+- Nested inspected/prepared API calls are reported separately. Nested aliases
+  are not additional frames or unique game geometry, and their presence is not
+  a producer/resource-ownership proof. Presentation-frame and texture counters
+  can have different reset epochs; do not infer a draws-per-frame ratio.
 - Texture counters are separate from processed presentation-shader frames.
   Neither measures texture appearance, FPS, successful guest rendering or
   driver-profile compatibility. A scene in an unowned/offscreen producer is
@@ -151,7 +189,7 @@ Current local source checks (CI must run against the pushed review head):
 | Strict C++ policy/GL safety | Descriptor preservation, extension legality, protected/unknown-protection refusal, depth/UI/border guards, cache/rollback behavior |
 | ASan/UBSan + leak detection | Eight injected allocation failures, partial-binding/active-unit rollback, explicit-release sampler cleanup; public-API doubles, not a protected driver |
 | Actual ANGLE/SwiftShader GLES 3.1 pixels | Production private samplers select test-owned mip colors at 1.5/3.0, restore exact native pixels/samplers, preserve pending errors and reject depth/UI/no-mip/existing-override cases |
-| Native core CTest | 16/16, including v3 preferences, routing, GL safety, native source/image/recovery and existing Vulkan pixels; software fixtures only |
+| Native core CTest | 17 tests, including the production nested-draw lease policy, v3 preferences, depth-reason accounting, GL safety, native source/image/recovery and existing Vulkan pixels; software fixtures only |
 | Windows x64 cross-compile/link | Complete EGL/DXGI/Vulkan hook test executables; compilation/linking is **not execution** |
 | Actual Qt 6 plugin and editors | Texture review/toggle/Save/Discard/preset independence, truthful no-game diagnostics and independent native-resolution/restart controls |
 

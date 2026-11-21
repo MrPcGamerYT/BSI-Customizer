@@ -22,7 +22,7 @@ public:
     // Call end() AFTER the original draw; begin() already restores ACTIVE_TEXTURE
     // and rolls back every binding before propagating an inspection exception.
     unsigned begin(TextureQuality mode,bool externalOverridesReviewed,unsigned primitive,std::string *detail,
-                   TextureDrawReason *reason=nullptr);
+                   TextureDrawReason *reason=nullptr,TextureDepthFailure *depthFailure=nullptr);
     void end()noexcept;
     // Only with the owning context CURRENT. Destruction otherwise abandons
     // names to that context's driver teardown, never deletes in another context.

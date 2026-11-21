@@ -1,6 +1,52 @@
 # Free Fire: configured Vulkan is not a captured game renderer
 
-## Later user report: working host OpenGL presentation under a Vulkan hint
+## Newest report: active gameplay, working presentation, zero texture draws
+
+The user supplied a full report and separately confirmed an advancing 3D scene
+with Settings closed, not merely a lobby or paused Settings window:
+
+```text
+Configured hint / observed host API: OpenGL / OpenGL
+Processed game frames: 13416; observed: yes; presentation processing: yes
+Texture inspection armed: yes
+Inspected calls: 27620; eligible scene calls: 0
+Depth/UI bypass: 27620; blended / no-sampler / other bypass: 0 / 0 / 0
+Prepared Potato draws / bindings: 0 / 0
+Qt bridge / host: 5.15.2 / 5.15.4
+Vulkan initialization: 1 loader, 1 instance, 1 device; 0 WSI surfaces/presents
+```
+
+**Texture Potato did not work in this active-gameplay run.** The earlier draw
+signature/alternate-context repair did not resolve this case. This is not an
+unsaved/off toggle, a native-resolution no-op, a failed Qt import, a missing
+mip chain proved by inspection, or a reason to force Vulkan. Every inspected
+call stopped at the *combined depth gate*, before program/texture/sampler
+qualification. The old report does not distinguish disabled depth testing,
+disabled depth writes, NEVER/ALWAYS, a missing attachment or insufficient depth
+precision. It also does not prove that all actual game geometry reached this
+hook or that a separate offscreen producer is safe to adopt. Presentation and
+texture counters have different reset intervals; their ratio is not a measured
+number of game draws per frame.
+
+The follow-up repairs an independently testable guard gap: a normally bypassed
+outer wrapper retained the render mutex and recursion guard until *after* its
+original returned, suppressing any state-setting inner draw entry it called.
+A zero-binding bypass now releases those leases **before the original**. A live
+private override, an inspection exception, or presentation-internal work keeps
+its guard; nested inspection is bounded to eight API levels. Native call/argument
+forwarding and the exact owned-drawable/protection/depth/UI/resource gates stay
+unchanged. The regression includes a depth-disabled wrapper whose original
+establishes legal depth then calls another real detoured entry, and negatives
+for two depth-disabled calls and a still-live outer override.
+
+This gap is **not established as this player's root cause**. The follow-up also
+reports each exact first depth blocker and nested inspected/prepared API calls,
+without additional resource adoption or an appearance change. A continued zero
+result must remain an unresolved/unsupported texture path, not be relabelled a
+working effect. A real same-scene image change and exact off restoration are
+still required; software/dispatch tests cannot supply that acceptance.
+
+## Earlier user report: working host OpenGL presentation under a Vulkan hint
 
 The user subsequently reported that the effects now work with Vulkan selected
 and supplied these runtime facts:

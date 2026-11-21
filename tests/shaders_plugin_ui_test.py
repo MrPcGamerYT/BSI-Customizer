@@ -605,6 +605,9 @@ Window {
         click(item("shaderCopyStatus"))
         diagnostics = QGuiApplication.clipboard().text()
         assert "calls=0; eligible scene calls=0; depth/UI bypass=0" in diagnostics
+        assert "test disabled=0; writes disabled=0; NEVER=0; ALWAYS=0; missing attachment=0; under 16 bits=0; unspecified=0" in diagnostics
+        assert "Nested API calls: inspected=0; prepared=0" in diagnostics
+        assert "not additional game frames or proof of game-resource ownership" in diagnostics
         assert "not measured game pixels/FPS" in diagnostics
         click(item("shaderEnhance")); click(item("shaderReset"))
         assert evaluate("draft.potatoGraphic") and not page.property("pEnableSave"), "visual presets/reset must preserve texture choice"

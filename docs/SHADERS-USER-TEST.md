@@ -147,6 +147,15 @@ a GL 3.3/GLES 3.1 draw-time path only. No supplied DLL is installed. See
    unowned offscreen textures just to increase a counter. If still zero after
    updating the actual installed module, send this text with the same-scene
    before/after result; a separate guest renderer may be outside this safe path.
+   The report now identifies the **first depth blocker** (test off, writes off,
+   NEVER/ALWAYS, missing attachment or depth under 16 bits) and nested API calls
+   inspected/prepared. These diagnose different boundaries; they are not an
+   instruction to change game depth state or a guarantee of texture access.
+   A zero-binding wrapper no longer suppresses its later nested draw, but that
+   repaired guard gap is not established as the active-gameplay report's cause.
+   If the new build still has no eligible scene calls during advancing gameplay
+   with Settings closed, keep the result recorded as **not working**, not fixed
+   by more Save clicks, a resolution change or forced UI/offscreen adoption.
 4. Save off and verify exact native sampling/image restoration. Presets/Reset
    visuals must not alter texture flags or resolution. Check reopen/per-instance
    persistence and resize/context recreation.

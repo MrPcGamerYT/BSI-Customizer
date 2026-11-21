@@ -37,7 +37,8 @@ struct Sampler {
 struct Fake {
     bool protectionExtension=false,protectedContext=false,protectedTexture=false,incompleteExtensions=false;
     I extensionCount=0,illegalQueries=0,flagsQueries=0,textureProtectionQueries=0;
-    I active=3,program=1,depthWrite=1,depthFunction=0x0203,depthBits=24;
+    I active=3,program=1,depthWrite=1,depthFunction=0x0203,depthBits=24,framebuffer=0;
+    I depthWriteQueries=0,depthFunctionQueries=0,depthAttachmentQueries=0,shaderQueries=0;
     bool depth=true,blend=false;
     std::array<Sampler,256> samplers{};
     std::array<U,4> bindings{{1,2,0,0}},textures{{1,2,0,0}};
@@ -58,16 +59,16 @@ void GL_CALL getInteger(U name,I *out){
     case 0x821d:*out=g.extensionCount;break;
     case 0x821e:++g.flagsQueries;if(!g.protectionExtension)++g.illegalQueries;*out=g.protectedContext?0x10:0;break;
     case 0x8b4d:case 0x8cdf:*out=4;break;
-    case 0x8b8d:*out=g.program;break;
-    case 0x0b74:*out=g.depthFunction;break;
+    case 0x8b8d:++g.shaderQueries;*out=g.program;break;
+    case 0x0b74:++g.depthFunctionQueries;*out=g.depthFunction;break;
     case 0x84e0:*out=0x84c0+g.active;break;
     case 0x8069:*out=I(g.textures.at(std::size_t(g.active)));break;
     case 0x8919:*out=I(g.bindings.at(std::size_t(g.active)));break;
-    case 0x8ca6:*out=0;break;
+    case 0x8ca6:*out=g.framebuffer;break;
     default:require(false,"unexpected integer query in sampler fixture");
     }
 }
-void GL_CALL getBoolean(U name,B *out){require(name==0x0b72,"only inspect depth write mask");*out=B(g.depthWrite);}
+void GL_CALL getBoolean(U name,B *out){require(name==0x0b72,"only inspect depth write mask");++g.depthWriteQueries;*out=B(g.depthWrite);}
 B GL_CALL enabled(U name){return B(name==0x0b71?g.depth:name==0x0be2?g.blend:false);}
 void GL_CALL active(U unit){g.active=I(unit-0x84c0);g.refresh();}
 void GL_CALL program(U,U name,I *out){*out=name==0x8b86?2:128;}
@@ -100,9 +101,10 @@ void GL_CALL samplerFloat(U sampler,U name,F *out){
 }
 void GL_CALL textureFloat(U,U name,F *out){samplerFloat(0,name,out);}
 void GL_CALL attachment(U target,U attachment,U name,I *out){
-    require(target==0x8ca9&&attachment==0x1801,"inspect default depth attachment, not nonexistent color texture attachments");
-    require(name==0x8cd0||name==0x8216,"only public default depth type/bit-size queries");
-    *out=name==0x8cd0?(g.depthBits?0x8218:0):g.depthBits;
+    require(target==0x8ca9&&attachment==(g.framebuffer?0x8d00u:0x1801u),"use the legal FBO/default depth attachment enum");
+    require(name==0x8cd0||name==0x8216,"only public depth type/bit-size queries");
+    ++g.depthAttachmentQueries;
+    *out=name==0x8cd0?(g.depthBits?(g.framebuffer?0x8d41:0x8218):0):g.depthBits;
 }
 void GL_CALL gen(I count,U *out){
     for(I i=0;i<count;++i){require(g.next<g.samplers.size(),"private sampler fixture capacity");out[i]=g.next++;g.live[out[i]]=true;++g.creations;}
@@ -183,12 +185,41 @@ int main(){
                 "extension-only GLES border state is preserved by bypass, not silently replaced with default borders");
         quality.end();quality.release();unchanged();
     }
-    for(bool noDepth:{false,true}){
-        g.reset();if(noDepth)g.depthBits=0;else g.depthFunction=0x0207;
-        GlTextureOverride quality;std::string error;
-        TextureDrawReason reason=TextureDrawReason::NotInspected;
-        require(quality.initialize(resolve,nullptr,&error)&&quality.begin(TextureQuality::Strong,true,4,&error,&reason)==0&&reason==TextureDrawReason::Depth,
-                "an enabled depth-test bit alone cannot qualify an always-pass UI/no-depth-buffer draw; diagnose the depth bypass");
+    for(bool framebuffer:{false,true}){
+        for(const auto expected:{TextureDepthFailure::TestDisabled,TextureDepthFailure::WritesDisabled,TextureDepthFailure::Never,
+                                 TextureDepthFailure::Always,TextureDepthFailure::MissingAttachment,TextureDepthFailure::InsufficientPrecision}){
+            g.reset();g.framebuffer=framebuffer?7:0;
+            switch(expected){
+            case TextureDepthFailure::TestDisabled:g.depth=false;break;
+            case TextureDepthFailure::WritesDisabled:g.depthWrite=0;break;
+            case TextureDepthFailure::Never:g.depthFunction=0x0200;break;
+            case TextureDepthFailure::Always:g.depthFunction=0x0207;break;
+            case TextureDepthFailure::MissingAttachment:g.depthBits=0;break;
+            case TextureDepthFailure::InsufficientPrecision:g.depthBits=8;break;
+            default:require(false,"only explicit failing depth fixtures");
+            }
+            GlTextureOverride quality;std::string error;TextureDrawReason reason;
+            TextureDepthFailure depth=TextureDepthFailure::None;
+            require(quality.initialize(resolve,nullptr,&error)&&!quality.begin(TextureQuality::Strong,true,4,&error,&reason,&depth)
+                    &&reason==TextureDrawReason::Depth&&depth==expected&&!error.empty(),
+                    "all six precise depth failures stay refusals on default AND offscreen-FBO draw targets");
+            require(!g.shaderQueries&&!g.creations,"depth rejection is BEFORE program/texture/sampler inspection or allocation");
+            if(expected==TextureDepthFailure::TestDisabled)
+                require(!g.depthWriteQueries&&!g.depthFunctionQueries&&!g.depthAttachmentQueries,"depth-disabled composition stops after its enabled-state query");
+            else if(expected==TextureDepthFailure::WritesDisabled)
+                require(g.depthWriteQueries==1&&!g.depthFunctionQueries&&!g.depthAttachmentQueries,"read-only depth stops before function/attachment queries");
+            else if(expected==TextureDepthFailure::Never||expected==TextureDepthFailure::Always)
+                require(g.depthWriteQueries==1&&g.depthFunctionQueries==1&&!g.depthAttachmentQueries,"NEVER/ALWAYS fail before attachment or sampler queries");
+            else require(g.depthAttachmentQueries==(expected==TextureDepthFailure::MissingAttachment?1:2),"only query depth precision for an existing attachment");
+            require(!quality.begin(TextureQuality::Native,true,4,&error,&reason,&depth)&&depth==TextureDepthFailure::None,
+                    "a non-inspected call cannot retain the preceding depth subreason");
+            unchanged();quality.release();
+        }
+        g.reset();g.framebuffer=framebuffer?7:0;g.depthBits=16;g.program=0;
+        GlTextureOverride quality;std::string error;TextureDrawReason reason;TextureDepthFailure depth=TextureDepthFailure::Always;
+        require(quality.initialize(resolve,nullptr,&error)&&!quality.begin(TextureQuality::Strong,true,4,&error,&reason,&depth)
+                &&reason==TextureDrawReason::NoSampler&&depth==TextureDepthFailure::None&&g.depthAttachmentQueries==2&&g.shaderQueries==1,
+                "legal 16-bit FBO/default scene depth passes the unchanged threshold, then separately rejects a missing program");
         unchanged();quality.release();
     }
     {

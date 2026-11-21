@@ -26,7 +26,9 @@ State &state();
 bool protectedContext();
 inline volatile LONG draws=0,privateDraws=0,invalid=0;
 inline std::uint64_t expectedHash=0,lastHash=0;
-inline U lastPrivateBindings=0;
+inline U lastPrivateBindings=0,nestedPrivateBindings=0,nestedMode=0;
+inline bool nestedArgumentsIntact=true;
+inline void nestedOriginal(U kind);
 inline void bad(){InterlockedIncrement(&invalid);}
 inline const unsigned char *WINAPI getString(U name){return reinterpret_cast<const unsigned char*>(name==0x1f02?"OpenGL ES 3.1 BSI dispatch double":"");}
 inline const unsigned char *WINAPI getStringi(U,U){return reinterpret_cast<const unsigned char*>("GL_EXT_protected_textures");}
@@ -100,6 +102,7 @@ template<typename... Args>void record(U kind,U alias,Args... args){
     template<U Alias> void WINAPI draw##id params { \
         const auto native=[&](auto... values){record(static_cast<U>(BsiShaders::GlDrawKind::id),Alias,values...);}; \
         native args; \
+        nestedOriginal(static_cast<U>(BsiShaders::GlDrawKind::id)); \
     } \
     template<std::size_t... Index> std::array<void*,sizeof...(Index)> callbacks##id(std::index_sequence<Index...>){return {{reinterpret_cast<void*>(&draw##id<Index>)...}};}
 BSI_GL_DRAW_CALLS(BSI_FIXTURE_DRAW)
@@ -136,7 +139,10 @@ inline void invoke(U kind,U alias,U mode){
     const auto original=[&](auto... values){
         expectedHash=hash(kind,alias,values...);
         using Function=void(WINAPI*)(decltype(values)...);
-        reinterpret_cast<Function>(callbacks[kind][alias])(values...);
+        // Even a fixture-internal constant-kind nested call must go THROUGH
+        // the detoured entry, not an optimizer-inlined copy of its original.
+        void *volatile target=callbacks[kind][alias];
+        reinterpret_cast<Function>(target)(values...);
     };
     switch(static_cast<BsiShaders::GlDrawKind>(kind)){
 #define BSI_FIXTURE_INVOKE(id,params,args,...) case BsiShaders::GlDrawKind::id:original args;break;
@@ -144,6 +150,23 @@ inline void invoke(U kind,U alias,U mode){
 #undef BSI_FIXTURE_INVOKE
     default:bad();break;
     }
+}
+// Model a translator which sets real depth state only INSIDE its original
+// outer entry, then calls another detoured entry. This is authored dispatch,
+// not evidence that the user's player has this particular call stack.
+inline void nestedOriginal(U kind){
+    if(!nestedMode||kind!=static_cast<U>(BsiShaders::GlDrawKind::Arrays))return;
+    auto &g=state();const auto previousDepth=g.depth;
+    const auto outerExpected=expectedHash,outerHash=lastHash;
+    const auto outerPrivate=lastPrivateBindings;
+    if(nestedMode==1)g.depth=true;
+    if(nestedMode==3)g.depth=false;
+    invoke(static_cast<U>(BsiShaders::GlDrawKind::ElementsBaseVertex),0,4);
+    nestedArgumentsIntact=nestedArgumentsIntact&&lastHash==expectedHash;
+    nestedPrivateBindings=lastPrivateBindings;
+    // Restore only the fixture's own depth state and argument oracle. Never
+    // mask a bad production sampler/active-unit restoration by resetting GL.
+    g.depth=previousDepth;expectedHash=outerExpected;lastHash=outerHash;lastPrivateBindings=outerPrivate;
 }
 #undef BSI_GL_DRAW_CALLS
 } // namespace EglDrawFixture

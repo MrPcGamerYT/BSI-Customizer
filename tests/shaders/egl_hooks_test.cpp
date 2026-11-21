@@ -56,6 +56,16 @@ struct Fixture {
         require(count("bsiFixtureLastPrivateBindings")==bindings&&count("bsiFixturePrivateDraws")==privateBefore+(bindings?1:0),
                 "private coarser-LOD samplers are visible INSIDE the original draw, never merely counted afterward");
     }
+    void nestedDraw(unsigned mode,LONG outerBindings,LONG innerBindings){
+        const auto before=count("bsiFixtureDrawCalls"),privateBefore=count("bsiFixturePrivateDraws");
+        function<void(*)(unsigned)>("bsiFixtureNestedDraw")(mode);
+        require(count("bsiFixtureDrawCalls")==before+2,"outer and inner originals each execute exactly once through real detours");
+        require(count("bsiFixtureArgumentsIntact")&&count("bsiFixtureBindingsRestored")&&!count("bsiFixtureInvalidGl"),
+                "nested originals retain exact independent arguments and restore the original samplers/active unit");
+        require(count("bsiFixtureLastPrivateBindings")==outerBindings&&count("bsiFixtureNestedPrivateBindings")==innerBindings
+                &&count("bsiFixturePrivateDraws")==privateBefore+(outerBindings?1:0)+(innerBindings?1:0),
+                "check private samplers INSIDE both outer and nested originals, not just report counters");
+    }
     void removeSurface(void *value){require(function<unsigned(WINAPI*)(void*,void*)>("eglDestroySurface")(display,value)!=0,"native surface teardown");}
     void removeContext(void *value){require(function<unsigned(WINAPI*)(void*,void*)>("eglDestroyContext")(display,value)!=0,"native context teardown");}
 };
@@ -150,6 +160,38 @@ int main(int argc,char **argv){
     a.scene(0);a.draw(GlDrawKind::ElementsBaseVertex,0,0,1); // lines, not scene triangles
     m=runtime.metrics();require(m.textureInspected==inspected+8&&m.textureDepthBypasses==6&&m.textureBlendBypasses==1
             &&m.textureSamplerBypasses==2&&m.textureOtherBypasses==1,"depth/write/always-pass/no-depth, blended, missing/protected mips and primitive bypasses remain distinct and never prepared");
+    require(m.textureDepthReasons[static_cast<std::size_t>(TextureDepthFailure::TestDisabled)]==3
+            &&m.textureDepthReasons[static_cast<std::size_t>(TextureDepthFailure::WritesDisabled)]==1
+            &&m.textureDepthReasons[static_cast<std::size_t>(TextureDepthFailure::Always)]==1
+            &&m.textureDepthReasons[static_cast<std::size_t>(TextureDepthFailure::MissingAttachment)]==1,
+            "the aggregate depth bypass records the actual first blocker, not a guessed missing mip chain");
+
+    // Reproduce the guard-only failure independently of any claim about the
+    // user's driver: an outer no-depth wrapper sets real depth inside its
+    // original, then issues a different hooked draw on this EXACT owned route.
+    runtime.setTexture({false,true});runtime.setTexture({true,true});
+    a.scene(1);a.nestedDraw(1,0,2);
+    m=runtime.metrics();
+    require(m.textureInspected==2&&m.textureDepthBypasses==1&&m.textureSceneDraws==1&&m.textureDraws==1&&m.textureBindings==2
+            &&m.textureNestedInspected==1&&m.textureNestedDraws==1,
+            "a zero-binding wrapper cannot keep its recursion guard/render lock around the later qualifying inner original");
+    a.scene(1);a.nestedDraw(3,0,0); // both calls genuinely lack scene depth
+    m=runtime.metrics();
+    require(m.textureInspected==4&&m.textureDepthBypasses==3&&m.textureDraws==1&&m.textureNestedInspected==2&&m.textureNestedDraws==1,
+            "nested inspection is not permission to force depth-disabled UI/composition through the policy");
+    a.scene(0);a.nestedDraw(2,2,2);
+    m=runtime.metrics();
+    require(m.textureInspected==5&&m.textureDraws==2&&m.textureBindings==4&&m.textureNestedInspected==2&&m.textureNestedDraws==1,
+            "a prepared outer draw retains its lease until its original returns; inner callbacks cannot double-override/count borrowed samplers");
+    inspected=m.textureInspected;
+    const auto beforeProtectedNested=a.count("bsiFixtureGlQueries");
+    a.current(target,protectedScene);a.scene(1);a.nestedDraw(1,0,0);
+    require(a.count("bsiFixtureGlQueries")==beforeProtectedNested,"nested protected-context calls still perform no optional GL initialization");
+    for(auto *unowned:{sameWindowOtherDrawable,uiTarget,secret,static_cast<void*>(nullptr)}){
+        a.current(unowned,scene);a.scene(1);a.nestedDraw(1,0,0);
+    }
+    require(runtime.metrics().textureInspected==inspected,"nested draws cannot infer another drawable, UI, protected or unmapped producer's ownership");
+    a.current(target,scene);a.scene(0);
     runtime.setTexture({false,true});a.draw(GlDrawKind::ElementsBaseVertex,0,0);
     require(!runtime.metrics().textureDraws&&!runtime.metrics().textureBindings&&!runtime.metrics().textureInspected,"off clears prior texture evidence and cannot reuse lifetime success as current activity");
     runtime.setTexture({true,true});a.draw();require(runtime.metrics().textureDraws==1,"on can arm an already tracked scene without a restart");
@@ -175,6 +217,6 @@ int main(int argc,char **argv){
     b.removeContext(second);b.removeSurface(secondTarget);a.removeContext(uiContext);a.removeSurface(uiTarget);
     require(!runtime.metrics().observed&&!runtime.metrics().textureDraws&&!a.count("bsiFixtureInvalidGl")&&!b.count("bsiFixtureInvalidGl"),"teardown and dispatch fixtures leave no stale presentation/texture success or invalid GL state");
     runtime.setTexture({});runtime.stop();DestroyWindow(ui);DestroyWindow(game);DestroyWindow(root);UnregisterClassW(cls.lpszClassName,cls.hInstance);
-    std::printf("PASS: production EGL/MinHook lifecycle plus %u draw signature/alias detours; exact arguments/once-only native draws, private samplers DURING base-vertex/multi/indirect/instanced draws, alternate context on the exact owned drawable, UI/protection/pbuffer/foreign-drawable refusal, reset and teardown\n",variants);
+    std::printf("PASS: production EGL/MinHook lifecycle plus %u draw signature/alias detours; exact arguments/once-only native draws, private samplers DURING base-vertex/multi/indirect/instanced draws, zero-binding wrapper -> nested scene versus live-override guards, precise first depth blockers, alternate context on the exact owned drawable, UI/protection/pbuffer/foreign-drawable refusal, reset and teardown\n",variants);
     std::puts("LIMIT: authored EGL/GL state doubles only, no GL driver/game pixels, protected GPU memory or physical GPU/player certification");
 }

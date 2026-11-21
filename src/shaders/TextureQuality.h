@@ -13,6 +13,9 @@ enum class TextureQuality { Native, Light, Strong };
 // Inspection outcomes, NOT proof of changed game pixels. Keeping these separate
 // avoids a final UI/compositor draw hiding whether any scene samplers qualified.
 enum class TextureDrawReason { NotInspected, Unreviewed, Primitive, Depth, Blended, NoSampler, Prepared };
+// First blocking depth check only. None also represents an older/external
+// aggregate report without a subreason; it must not invent a queried GL state.
+enum class TextureDepthFailure { None, TestDisabled, WritesDisabled, Never, Always, MissingAttachment, InsufficientPrecision, Count };
 struct TextureConfiguration {
     bool enabled=false,externalOverridesReviewed=false;
     TextureQuality quality()const{return enabled?TextureQuality::Strong:TextureQuality::Native;}

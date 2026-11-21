@@ -85,6 +85,7 @@ QVariantList ShaderBridge::controlList()const{
 QVariantMap ShaderBridge::metrics()const{
     const auto m=Runtime::instance().metrics();
     const auto number=[](std::uint64_t value){return QVariant::fromValue<qulonglong>(value);};
+    const auto depth=[&](TextureDepthFailure reason){return number(m.textureDepthReasons[static_cast<std::size_t>(reason)]);};
     const auto label=[](RendererFamily f){return f==RendererFamily::Vulkan?"Vulkan":f==RendererFamily::DirectX?"DirectX":f==RendererFamily::OpenGL?"OpenGL":"Automatic / unknown";};
     return {{"hooksAttached",m.hooks},{"gameSurfaceObserved",m.observed},{"active",m.active},
             {"requestedRenderer",m.requested==RendererFamily::Automatic?QStringLiteral("Automatic"):QString::fromLatin1(label(m.requested))},
@@ -97,6 +98,11 @@ QVariantMap ShaderBridge::metrics()const{
             {"textureInspected",number(m.textureInspected)},{"textureSceneDraws",number(m.textureSceneDraws)},
             {"textureDepthBypasses",number(m.textureDepthBypasses)},{"textureBlendBypasses",number(m.textureBlendBypasses)},
             {"textureSamplerBypasses",number(m.textureSamplerBypasses)},{"textureOtherBypasses",number(m.textureOtherBypasses)},
+            {"textureDepthTestDisabled",depth(TextureDepthFailure::TestDisabled)},{"textureDepthWritesDisabled",depth(TextureDepthFailure::WritesDisabled)},
+            {"textureDepthNever",depth(TextureDepthFailure::Never)},{"textureDepthAlways",depth(TextureDepthFailure::Always)},
+            {"textureDepthMissingAttachment",depth(TextureDepthFailure::MissingAttachment)},{"textureDepthInsufficientPrecision",depth(TextureDepthFailure::InsufficientPrecision)},
+            {"textureDepthUnspecified",depth(TextureDepthFailure::None)},
+            {"textureNestedInspected",number(m.textureNestedInspected)},{"textureNestedDraws",number(m.textureNestedDraws)},
             {"textureLastBypass",QString::fromStdString(m.textureLastBypass)},
             {"vulkanLoaders",number(m.vulkan.loaders)},{"vulkanInstances",number(m.vulkan.instances)},
             {"vulkanDevices",number(m.vulkan.devices)},{"vulkanSurfaces",number(m.vulkan.surfaces)},
@@ -108,6 +114,16 @@ QString ShaderBridge::diagnostics()const{
     // User-triggered clipboard output only; no upload, persistent log or private
     // process/module path. Lifecycle counters are NOT confirmed game frames.
     const auto m=metrics();
+    const auto depthReport=QStringLiteral("Depth rejection first blocker (samplers not inspected): test disabled=%1; writes disabled=%2; NEVER=%3; ALWAYS=%4; missing attachment=%5; under 16 bits=%6; unspecified=%7\nNested API calls: inspected=%8; prepared=%9. Nested/alias calls are not additional game frames or proof of game-resource ownership.")
+        .arg(m.value("textureDepthTestDisabled").toString(),m.value("textureDepthWritesDisabled").toString(),
+             m.value("textureDepthNever").toString(),m.value("textureDepthAlways").toString(),
+             m.value("textureDepthMissingAttachment").toString(),m.value("textureDepthInsufficientPrecision").toString(),
+             m.value("textureDepthUnspecified").toString(),m.value("textureNestedInspected").toString(),m.value("textureNestedDraws").toString());
+    const auto inspectionReport=QStringLiteral("Texture inspection since the latest setting/source change: calls=%1; eligible scene calls=%2; depth/UI bypass=%3; blended bypass=%4; scene without qualified samplers=%5; other bypass=%6\nLatest bypass: %7\nOffscreen/pbuffer/foreign scene contexts are not inferred from presentation or a share group.")
+        .arg(m.value("textureInspected").toString(),m.value("textureSceneDraws").toString(),
+             m.value("textureDepthBypasses").toString(),m.value("textureBlendBypasses").toString(),
+             m.value("textureSamplerBypasses").toString(),m.value("textureOtherBypasses").toString(),
+             m.value("textureLastBypass").toString())+QLatin1Char('\n')+depthReport;
     return QStringLiteral("Requested API: %1\nObserved game API: %2\n%3\nProcessed game frames: %4\nGame surface observed: %5; processing active: %6\nVulkan capture: loaders=%7; instances=%8; devices=%9; Win32 surfaces=%10; swapchains=%11; presents=%12; missing queues=%13; excluded windows=%14\nLast hooked loader: %15\nQt bridge: %16; host: %17\n%18")
         .arg(m.value("requestedRenderer").toString(),m.value("renderer").toString(),m.value("status").toString())
         .arg(m.value("processedFrames").toString(),m.value("gameSurfaceObserved").toBool()?QStringLiteral("yes"):QStringLiteral("no"),m.value("active").toBool()?QStringLiteral("yes"):QStringLiteral("no"))
@@ -119,11 +135,7 @@ QString ShaderBridge::diagnostics()const{
                           .arg(m.value("textureBindings").toString(),m.value("textureDraws").toString(),
                                m.value("textureSupported").toBool()?QStringLiteral("yes"):QStringLiteral("no"),
                                m.value("textureStatus").toString(),
-                               QStringLiteral("Texture inspection since the latest setting/source change: calls=%1; eligible scene calls=%2; depth/UI bypass=%3; blended bypass=%4; scene without qualified samplers=%5; other bypass=%6\nLatest bypass: %7\nOffscreen/pbuffer/foreign scene contexts are not inferred from presentation or a share group.")
-                                   .arg(m.value("textureInspected").toString(),m.value("textureSceneDraws").toString(),
-                                        m.value("textureDepthBypasses").toString(),m.value("textureBlendBypasses").toString(),
-                                        m.value("textureSamplerBypasses").toString(),m.value("textureOtherBypasses").toString(),
-                                        m.value("textureLastBypass").toString()),error())));
+                               inspectionReport,error())));
 }
 void ShaderBridge::copyDiagnostics()const{if(auto *clipboard=QGuiApplication::clipboard())clipboard->setText(diagnostics());}
 void ShaderBridge::attach(QObject *object,const QString &instance,const QString &graphicsRenderer){

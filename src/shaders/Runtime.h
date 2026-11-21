@@ -3,6 +3,7 @@
 #include "RendererCapabilities.h"
 #include "VulkanCapture.h"
 #include "TextureQuality.h"
+#include <array>
 #include <cstdint>
 #include <mutex>
 #include <string>
@@ -21,6 +22,8 @@ struct Metrics {
     // success carried over from a different game context or an earlier toggle.
     std::uint64_t textureDraws=0,textureBindings=0,textureInspected=0,textureSceneDraws=0;
     std::uint64_t textureDepthBypasses=0,textureBlendBypasses=0,textureSamplerBypasses=0,textureOtherBypasses=0;
+    std::array<std::uint64_t,static_cast<std::size_t>(TextureDepthFailure::Count)> textureDepthReasons{};
+    std::uint64_t textureNestedInspected=0,textureNestedDraws=0;
     std::string textureLastBypass;
     std::string textureStatus="Potato graphic is off; native texture sampling retained.";
     std::string status="Waiting for the game's presentation API. Multi-renderer support is not complete.";
@@ -52,7 +55,8 @@ public:
     void setTexture(const TextureConfiguration &settings);
     TextureConfiguration texture();
     void textureReport(unsigned bindings,const std::string &detail,bool supported,
-                       TextureDrawReason reason=TextureDrawReason::NotInspected);
+                       TextureDrawReason reason=TextureDrawReason::NotInspected,
+                       TextureDepthFailure depthFailure=TextureDepthFailure::None,bool nested=false);
     Metrics metrics();
     void waiting(bool hooks,const std::string &status);
     void vulkanEvent(VulkanEvent event,const std::string &detail={});

@@ -32,6 +32,17 @@ bool colorFormat(I f){
         ||(f>=0x83f0&&f<=0x83f3)||(f>=0x8c4c&&f<=0x8c4f)||f==0x8d64
         ||(f>=0x9274&&f<=0x9279)||(f>=0x93b0&&f<=0x93bd)||(f>=0x93d0&&f<=0x93dd)||f==0x8e8c||f==0x8e8d;
 }
+const char *depthRejection(TextureDepthFailure reason){
+    switch(reason){
+    case TextureDepthFailure::TestDisabled:return "Potato bypass: depth testing is disabled on this captured draw. No scene sampler was inspected; UI/composition stays native.";
+    case TextureDepthFailure::WritesDisabled:return "Potato bypass: depth writes are disabled on this captured draw. Read-only-depth passes are not qualified; native sampling retained.";
+    case TextureDepthFailure::Never:return "Potato bypass: the captured draw uses depth function NEVER. No scene sampler was inspected.";
+    case TextureDepthFailure::Always:return "Potato bypass: the captured draw uses depth function ALWAYS. UI/composition stays native.";
+    case TextureDepthFailure::MissingAttachment:return "Potato bypass: the current draw framebuffer has no depth attachment. No scene sampler was inspected; composition stays native.";
+    case TextureDepthFailure::InsufficientPrecision:return "Potato bypass: the current draw depth attachment has fewer than 16 bits. No scene sampler was inspected.";
+    default:return "Potato bypass: scene depth could not be qualified. Native sampling retained.";
+    }
+}
 }
 struct GlTextureOverride::Impl {
 #define GL_FUNCTION(result,name,args) using name##Type=result(BSI_GL_CALL*)args;name##Type name=nullptr;
@@ -131,18 +142,23 @@ struct GlTextureOverride::Impl {
         for(I i=0;i<attachments;++i)if(match(0x8ce0+U(i)))return true;
         return match(0x8d00)||match(0x8d20);
     }
-    bool sceneDepth(){
+    TextureDepthFailure sceneDepth(){
+        // Stop at the FIRST blocker. Besides making the rejection actionable,
+        // a depth-disabled compositor needs one query, not sampler inspection.
+        if(!IsEnabled(0x0b71))return TextureDepthFailure::TestDisabled;
         B write=0;GetBooleanv(0x0b72,&write);
+        if(!write)return TextureDepthFailure::WritesDisabled;
         I function=0;GetIntegerv(0x0b74,&function);
-        if(!IsEnabled(0x0b71)||!write||function==0x0200||function==0x0207)return false;
+        if(function==0x0200)return TextureDepthFailure::Never;
+        if(function==0x0207)return TextureDepthFailure::Always;
         I framebuffer=0,type=0,bits=0;GetIntegerv(0x8ca6,&framebuffer);
         const U attachment=framebuffer?0x8d00:0x1801; // FBO depth vs default GL_DEPTH
         GetFramebufferAttachmentParameteriv(0x8ca9,attachment,0x8cd0,&type);
-        if(!type)return false;
+        if(!type)return TextureDepthFailure::MissingAttachment;
         // GL_DEPTH_BITS was removed from desktop core: use the legal GL3/ES3
         // attachment query instead, including for the default framebuffer.
         GetFramebufferAttachmentParameteriv(0x8ca9,attachment,0x8216,&bits);
-        return bits>=16;
+        return bits>=16?TextureDepthFailure::None:TextureDepthFailure::InsufficientPrecision;
     }
     I mipLevels(){
         if(protectedTextures){I protectedContent=1;GetTexParameteriv(texture2d,0x8bfa,&protectedContent);if(protectedContent)return 0;}
@@ -195,16 +211,20 @@ bool GlTextureOverride::initialize(ResolveGl resolve,void *user,std::string *err
     g.srgbDecode=g.extension("GL_EXT_texture_sRGB_decode");g.minmax=g.extension("GL_EXT_texture_filter_minmax");
     g.changed.reserve(32);g.ready=true;return true;
 }
-unsigned GlTextureOverride::begin(TextureQuality mode,bool reviewed,U primitive,std::string *detail,TextureDrawReason *reason){
+unsigned GlTextureOverride::begin(TextureQuality mode,bool reviewed,U primitive,std::string *detail,TextureDrawReason *reason,TextureDepthFailure *depthFailure){
     auto &g=*impl;end();
     if(reason)*reason=TextureDrawReason::NotInspected;
+    if(depthFailure)*depthFailure=TextureDepthFailure::None;
     const auto fail=[&](TextureDrawReason why,const char *message)->U{if(reason)*reason=why;if(detail)*detail=message;return 0;};
     if(!g.ready||mode==TextureQuality::Native)return 0;
     if(!reviewed)return fail(TextureDrawReason::Unreviewed,"Potato is not applied: review existing driver LOD/AA overrides first; no profile is reset.");
     if(primitive!=0x0004&&primitive!=0x0005&&primitive!=0x0006)
         return fail(TextureDrawReason::Primitive,"Potato bypass: non-triangle draw retains native sampling.");
-    if(!g.sceneDepth())
-        return fail(TextureDrawReason::Depth,"No eligible scene draw here: depth-tested, depth-writing geometry with a real depth attachment is required. UI/always-pass/no-depth composition stays native.");
+    const auto depth=g.sceneDepth();
+    if(depth!=TextureDepthFailure::None){
+        if(depthFailure)*depthFailure=depth;
+        return fail(TextureDrawReason::Depth,depthRejection(depth));
+    }
     // Blended UI/transparent passes remain native, even in the game context.
     if(g.IsEnabled(0x0be2))return fail(TextureDrawReason::Blended,"Potato bypass: blended/UI draw retains native sampling.");
     if(reason)*reason=TextureDrawReason::NoSampler;

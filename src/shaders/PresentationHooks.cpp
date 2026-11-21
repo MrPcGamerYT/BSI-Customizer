@@ -3,6 +3,7 @@
 #include "GlPipeline.h"
 #include "GlTextureOverride.h"
 #include "GlDrawCalls.h"
+#include "GlDrawScope.h"
 #include "PresentationHooks.h"
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
@@ -139,19 +140,18 @@ bool unprotectedEgl(EglProvider &p,DrawableKey drawable,std::uintptr_t context,b
 // already-proven presentation, but may NEVER claim a route from a context alone.
 // No pbuffer/offscreen/share-group/other-window ownership is guessed.
 struct GameDraw {
-    std::unique_lock<std::mutex> lock;
+    GlDrawScope scope;
     GameContext *selected=nullptr;
-    bool previous=false,guarding=false;
-    GameDraw(unsigned providers,unsigned primitive)noexcept:lock(hooks().renderMutex,std::defer_lock){
+    GameDraw(unsigned providers,unsigned primitive)noexcept:scope(hooks().renderMutex,presenting){
         try {
-            auto &h=hooks();if(presenting||h.stopping.load())return;
+            auto &h=hooks();if(!scope.mayInspect()||h.stopping.load())return;
             const auto quality=Runtime::instance().texture();if(!quality.enabled)return;
             for(unsigned provider=0;provider<=maximumEglProviders;++provider){
                 if(!(providers&(1u<<provider)))continue;
                 const auto context=contextFor(provider);if(!context)continue;
                 DrawableKey drawable{};const HWND window=drawableFor(provider,&drawable);
                 if(!Runtime::instance().eligible(reinterpret_cast<std::uintptr_t>(window)))continue;
-                if(!lock.owns_lock()&&!lock.try_lock())return;
+                if(!scope.ownsLock()&&!scope.tryLock())return;
                 const auto renderer=rendererFor(provider);
                 GameContext *source=nullptr;
                 for(const auto &entry:h.contexts){
@@ -169,25 +169,41 @@ struct GameDraw {
                 }
                 auto &session=*found->second;
                 session.window=window;session.drawable=drawable;session.renderer=renderer;
-                selected=&session;previous=presenting;presenting=true;guarding=true;
+                selected=&session;scope.guardInspection();
                 std::string detail;
                 if(!session.drawHooks){
                     session.drawHooks=session.potato.initialize(resolve,egl,&detail,protectionPossible)&&installDrawHooks(provider,egl);
-                    if(!session.drawHooks){Runtime::instance().textureReport(0,detail.empty()?"This game scene context has no safe draw-inspection path; native sampling retained.":detail,false);return;}
+                    if(!session.drawHooks){
+                        Runtime::instance().textureReport(0,detail.empty()?"This game scene context has no safe draw-inspection path; native sampling retained.":detail,false);
+                        selected=nullptr;scope.releaseBypass();return;
+                    }
                 }
                 TextureDrawReason reason=TextureDrawReason::NotInspected;
-                const auto changed=selected->potato.begin(quality.quality(),quality.externalOverridesReviewed,primitive,&detail,&reason);
-                Runtime::instance().textureReport(changed,detail,true,reason);return;
+                TextureDepthFailure depth=TextureDepthFailure::None;
+                const auto changed=selected->potato.begin(quality.quality(),quality.externalOverridesReviewed,primitive,&detail,&reason,&depth);
+                Runtime::instance().textureReport(changed,detail,true,reason,depth,scope.nested());
+                if(!changed){
+                    // No bindings are borrowed by the outer original. A
+                    // translator can establish its real depth state/context
+                    // INSIDE that original and call a second hooked entry.
+                    // Do not hide it behind this bypass's guard/render lock.
+                    selected=nullptr;scope.releaseBypass();
+                }
+                return;
             }
-            if(lock.owns_lock())lock.unlock();
+            scope.releaseBypass();
         }catch(...){
+            // Even an allocation failure BEFORE selecting/initializing a
+            // context must fail closed around the original. Idempotent when
+            // the inspection/diagnostic that failed already owns the guard.
+            scope.guardInspection();
             // A failed inspection must not change the original draw. begin()
             // already rolls back; also handle an exception in diagnostics.
             if(selected)selected->potato.end();
             try{Runtime::instance().textureReport(0,"Potato inspection failed; native game sampler bindings retained.",false);}catch(...){}
         }
     }
-    ~GameDraw(){if(selected)selected->potato.end();if(guarding)presenting=previous;}
+    ~GameDraw(){if(selected)selected->potato.end();} // restore bindings BEFORE scope releases its guard/lock
 };
 // Preserve every argument and call the original once, including bypasses.
 // The RAII guard brackets a whole multi/indirect API call; it never reads or
