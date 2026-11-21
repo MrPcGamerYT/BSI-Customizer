@@ -9,7 +9,11 @@ Item {
     property int status: Image.Null
     function update() {
         status=source.toString().length ? Image.Loading : Image.Null
-        if(source.toString().length)canvas.loadImage(source)
+        if(!canvas.available)return
+        if(source.toString().length) {
+            canvas.loadImage(source)
+            if(canvas.isImageLoaded(source))status=Image.Ready
+        }
         canvas.requestPaint()
     }
     onSourceChanged: update()
@@ -21,6 +25,7 @@ Item {
         id: canvas
         anchors.fill: parent
         canvasSize: Qt.size(Math.max(1,width*2),Math.max(1,height*2))
+        onAvailableChanged: if(available)icon.update()
         onImageLoaded: {icon.status=Image.Ready;requestPaint()}
         onPaint: {
             var ctx=getContext("2d");ctx.reset()

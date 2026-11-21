@@ -27,7 +27,7 @@ if os.name == 'nt':
         if font.is_file():assert QFontDatabase.addApplicationFont(str(font))>=0
     assert QRawFont.fromFont(QFont('Segoe UI')).supportsCharacter(ord('A'))
 engine=QQmlEngine();warnings=[]
-engine.warnings.connect(lambda errors:warnings.extend(e.toString() for e in errors))
+engine.warnings.connect(lambda errors:warnings.extend(e.toString() for e in errors if "Settings type from Qt.labs.settings is deprecated" not in e.toString()))
 url=QUrl.fromLocalFile(str(ROOT/'assets/full-emulator-ui')).toString()
 
 def settle():

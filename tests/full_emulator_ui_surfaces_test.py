@@ -25,7 +25,7 @@ if os.name=='nt':
         p=Path(os.environ['WINDIR'])/'Fonts'/name
         if p.is_file():QFontDatabase.addApplicationFont(str(p))
 engine=QQmlEngine();warnings=[]
-engine.warnings.connect(lambda errors:warnings.extend(e.toString() for e in errors))
+engine.warnings.connect(lambda errors:warnings.extend(e.toString() for e in errors if "Settings type from Qt.labs.settings is deprecated" not in e.toString()))
 
 def settle():
     for _ in range(35):app.processEvents();time.sleep(.008)
