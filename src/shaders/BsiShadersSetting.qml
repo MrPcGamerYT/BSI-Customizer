@@ -335,7 +335,14 @@ Item {
                                     text: qsTr("Reset")
                                     enabled: Number(page.draft[group.controlData.key] || 0) !== 0
                                     Accessible.name: qsTr("Reset ") + group.controlData.label
-                                    onClicked: page.setValue(group.controlData.key, 0)
+                                    onClicked: {
+                                        // This action disables itself. Return focus to the
+                                        // viewport BEFORE changing enabled: ScrollView's
+                                        // deferred focus-follow must not snap back to a
+                                        // disabled old row after scrolling/resizing.
+                                        viewport.forceActiveFocus(Qt.OtherFocusReason)
+                                        page.setValue(group.controlData.key, 0)
+                                    }
                                 }
                             }
                             ShaderSlider {

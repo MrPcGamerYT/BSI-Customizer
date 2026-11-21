@@ -342,6 +342,7 @@ Window {
                 click(reset_button)
                 assert evaluate("draft['" + key + "']") == 0
                 assert not reset_button.isEnabled() and settings() == enhanced, "row Reset must not save implicitly"
+                assert evaluate("activeFocus", viewport) and not evaluate("activeFocus", reset_button), "a self-disabling Reset must hand focus back to the viewport, not trigger stale row auto-scrolling"
         evaluate("fDiscardChanges()")
         # Exercise preset/reset value semantics without pretending these
         # function calls are physical category navigation in HD-Player.

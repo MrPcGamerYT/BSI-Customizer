@@ -92,6 +92,13 @@ meta-methods with the known QString/int/bool signatures:
 - `confGetInstanceI32`, `confGetInstanceBool`, `confIsModified`;
 - `confSetInstanceI32`, `confSetInstanceBool`, `confCommit`.
 
+Read-only inspection of the `UiBackend` Qt metaobjects in all four hash-pinned
+[reference EXEs](../tests/fixtures/emulator-qt-evidence.json) confirms these six
+**public slots**, with QString/int/bool arguments and **void** setters/commit.
+The string/metadata tables were paired through their static metaobject pointers;
+no reference code was loaded or executed. This is signature evidence, not proof
+of a running backend, disk flush, restart or game-resolution change.
+
 Void and boolean-returning setters/commit are supported; boolean refusals are
 honored. Unknown/incomplete contracts, invalid dimensions, destroyed backends
 or cross-thread objects make Potato unavailable, not an active-looking no-op.
