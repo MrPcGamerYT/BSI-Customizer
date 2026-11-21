@@ -86,37 +86,36 @@ try {
                         $row.failureStage = [int]$r.failureStage
                         $row.win32Error = [long]$r.win32Error
                     } elseif ($r.kind -eq 'original-supplied-DLL-WGL-software-probe') {
-                    # Select only known schema fields; never upload raw child
-                    # files, logs, module paths, dumps, IDs or original bytes.
-                    foreach ($key in @('importLoaded','anchorCalled','samplerBound','depthTestEnabled','activeUnitRestored','softwareRenderer','parametersPersistAfterDraw','pixelsChanged','drawMutationAfterSwap','swapEntryLeadsIntoOriginal','drawEntryLeadsIntoOriginal','bindEntryLeadsIntoOriginal','mechanismObserved','gameExecuted','physicalGpuTested')) {
-                        if ($r.$key -isnot [bool]) { throw 'Nonboolean child evidence field' }
-                        $row[$key] = $r.$key
-                    }
-                    foreach ($key in @('textureBias','textureMinLod','samplerBias','samplerMinLod','bindOnlyBias','bindOnlyMinLod','sampledMip','warmupAttempts','firstRemainingGlError')) {
-                        $value = [double]$r.$key
-                        if ([double]::IsNaN($value) -or [double]::IsInfinity($value) -or [math]::Abs($value) -gt 1000000) { throw 'Invalid numeric child evidence field' }
-                        $row[$key] = $value
-                    }
-                    foreach ($key in @('beforePixel','afterPixel')) {
-                        if ($r.$key.Count -ne 4) { throw 'Bad pixel evidence' }
-                        $pixel = @();foreach ($channel in $r.$key) { $n=[int]$channel;if ($n -lt 0 -or $n -gt 255) { throw 'Bad pixel channel' };$pixel += $n }
-                        $row[$key] = $pixel
-                    }
-                    $expectedMinimum = if ($case.forcesMinimumLod) { [double]$case.expectedLod } else { -1000.0 }
-                    $parameters = if ($kind -eq 'control') { $row.textureBias -eq 0 -and $row.textureMinLod -eq -1000 } else {
-                        $row.textureBias -eq $case.expectedLod -and $row.textureMinLod -eq $expectedMinimum -and
-                        ($sampling -ne 'sampler' -or ($row.samplerBias -eq $case.expectedLod -and $row.samplerMinLod -eq $expectedMinimum))
-                    }
-                    $bindParameters = $row.bindOnlyBias -eq $case.expectedLod -and $row.bindOnlyMinLod -eq $expectedMinimum
-                    $row.passed = $exit -eq 0 -and $row.containedBeforeResume -and $row.mechanismObserved -and $row.softwareRenderer -and $parameters -and $bindParameters -and -not $row.anchorCalled -and -not $row.depthTestEnabled -and $row.activeUnitRestored -and -not $row.gameExecuted -and -not $row.physicalGpuTested -and ($row.importLoaded -eq ($kind -ne 'control'))
+                        # Select only known schema fields; never upload raw child
+                        # files, logs, module paths, dumps, IDs or original bytes.
+                        foreach ($key in @('importLoaded','anchorCalled','samplerBound','depthTestEnabled','activeUnitRestored','softwareRenderer','parametersPersistAfterDraw','pixelsChanged','drawMutationAfterSwap','swapEntryLeadsIntoOriginal','drawEntryLeadsIntoOriginal','bindEntryLeadsIntoOriginal','bindExportEntryLeadsIntoOriginal','bindEntriesDiffer','mechanismObserved','gameExecuted','physicalGpuTested')) {
+                            if ($r.$key -isnot [bool]) { throw 'Nonboolean child evidence field' }
+                            $row[$key] = $r.$key
+                        }
+                        foreach ($key in @('textureBias','textureMinLod','samplerBias','samplerMinLod','bindOnlyBias','bindOnlyMinLod','bindExportOnlyBias','bindExportOnlyMinLod','sampledMip','warmupAttempts','firstRemainingGlError')) {
+                            $value = [double]$r.$key
+                            if ([double]::IsNaN($value) -or [double]::IsInfinity($value) -or [math]::Abs($value) -gt 1000000) { throw 'Invalid numeric child evidence field' }
+                            $row[$key] = $value
+                        }
+                        foreach ($key in @('beforePixel','afterPixel')) {
+                            if ($r.$key.Count -ne 4) { throw 'Bad pixel evidence' }
+                            $pixel = @();foreach ($channel in $r.$key) { $n=[int]$channel;if ($n -lt 0 -or $n -gt 255) { throw 'Bad pixel channel' };$pixel += $n }
+                            $row[$key] = $pixel
+                        }
+                        $expectedMinimum = if ($case.forcesMinimumLod) { [double]$case.expectedLod } else { -1000.0 }
+                        $parameters = if ($kind -eq 'control') { $row.textureBias -eq 0 -and $row.textureMinLod -eq -1000 } else {
+                            $row.textureBias -eq $case.expectedLod -and $row.textureMinLod -eq $expectedMinimum -and
+                            ($sampling -ne 'sampler' -or ($row.samplerBias -eq $case.expectedLod -and $row.samplerMinLod -eq $expectedMinimum))
+                        }
+                        $bindParameters = $row.bindOnlyBias -eq $case.expectedLod -and $row.bindOnlyMinLod -eq $expectedMinimum
+                        $row.passed = $exit -eq 0 -and $row.containedBeforeResume -and $row.mechanismObserved -and $row.softwareRenderer -and $parameters -and $bindParameters -and -not $row.anchorCalled -and -not $row.depthTestEnabled -and $row.activeUnitRestored -and -not $row.gameExecuted -and -not $row.physicalGpuTested -and ($row.importLoaded -eq ($kind -ne 'control'))
                     } else { throw 'Unknown child evidence kind' }
                 }
                 $rows += $row
                 $safeEvidence = ($row | ConvertTo-Json -Compress -Depth 5)
                 Write-Output $safeEvidence
-                # Same sanitized schema via the ordinary check-annotation API;
-                # retrieval must not depend on access to private raw log hosts.
-                Write-Output ('::notice title=Potato probe result::' + $safeEvidence)
+                # Publish the complete selected schema once in finally below;
+                # per-row notices hit the runner's per-step annotation cap.
                 if ((Get-FileHash $target -Algorithm SHA256).Hash -ne $hashes[$kind]) { throw 'Host bytes changed' }
                 if ($kind -ne 'control' -and (Get-FileHash $dll -Algorithm SHA256).Hash.ToLowerInvariant() -ne $case.sha256) { throw 'Original DLL bytes changed during test' }
             }
@@ -167,7 +166,7 @@ try {
             } else { throw 'Unknown independent evidence kind' }
         }
         $alternatives += $row
-        Write-Output ('::notice title=Independent owned sampler result::' + ($row | ConvertTo-Json -Compress -Depth 5))
+        Write-Output ($row | ConvertTo-Json -Compress -Depth 5)
         if ((Get-FileHash $target -Algorithm SHA256).Hash -ne $hashes['control']) { throw 'Independent test host bytes changed' }
     }
     $complete = $true
@@ -178,7 +177,11 @@ try {
     $originalsPassed = $complete -and $rows.Count -eq 12 -and @($rows | Where-Object { -not $_.passed }).Count -eq 0
     $alternativesPassed = $complete -and $alternatives.Count -eq 2 -and @($alternatives | Where-Object { -not $_.passed }).Count -eq 0
     $allPassed = $originalsPassed -and $alternativesPassed
-    [ordered]@{ scope='Original supplied Potato DLLs AND independent known-resource comparison in authored WGL/llvmpipe hosts, NOT a player/game';archiveSha256=$manifest.archiveSha256;mesaArchiveSha256=$manifest.mesaArchiveSha256;complete=$complete;allMechanismCasesPassed=$originalsPassed;allIndependentCasesPassed=$alternativesPassed;rows=$rows;independentComparisons=$alternatives;installed=$false;redistributed=$false;gameAcceptance=$false } | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $Results 'supplied-potato-results.json') -Encoding utf8
+    $evidence = [ordered]@{ scope='Original supplied Potato DLLs AND independent known-resource comparison in authored WGL/llvmpipe hosts, NOT a player/game';archiveSha256=$manifest.archiveSha256;mesaArchiveSha256=$manifest.mesaArchiveSha256;complete=$complete;allMechanismCasesPassed=$originalsPassed;allIndependentCasesPassed=$alternativesPassed;rows=$rows;independentComparisons=$alternatives;installed=$false;redistributed=$false;gameAcceptance=$false }
+    $evidence | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $Results 'supplied-potato-results.json') -Encoding utf8
+    $compact = $evidence | ConvertTo-Json -Compress -Depth 8
+    if ($compact.Length -gt 60000) { throw 'Sanitized annotation exceeds fixed reporting budget' }
+    Write-Output ('::notice title=Potato probe evidence::' + $compact)
 }
 if (-not $allPassed) { throw 'One or more actual original-DLL or independent comparison cases failed; inspect their separate evidence, do not claim a game fix' }
 'PASS: five unique original DLLs, normal renamed import (anchor NOT called), actual detours and real Mesa software mip pixels with depth disabled; separately, private samplers change explicitly owned resources and restore exact Off output/state over 64 cycles. Outbound block and bounded child lifetime. NOT player/physical-GPU acceptance.' | Out-File $env:GITHUB_STEP_SUMMARY -Append

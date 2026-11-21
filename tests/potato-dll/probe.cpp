@@ -149,7 +149,8 @@ int probe(const wchar_t *report,bool sampler,bool independent=false){
     LOAD(GLuint,CreateProgram);LOAD(void,AttachShader,GLuint,GLuint);LOAD(void,LinkProgram,GLuint);
     LOAD(void,GetProgramiv,GLuint,GLenum,GLint*);LOAD(void,UseProgram,GLuint);
     LOAD(GLint,GetUniformLocation,GLuint,const char*);LOAD(void,Uniform1i,GLint,GLint);
-    LOAD(void,ActiveTexture,GLenum);LOAD(void,GenVertexArrays,GLsizei,GLuint*);LOAD(void,BindVertexArray,GLuint);
+    LOAD(void,ActiveTexture,GLenum);LOAD(void,BindTexture,GLenum,GLuint);
+    LOAD(void,GenVertexArrays,GLsizei,GLuint*);LOAD(void,BindVertexArray,GLuint);
     LOAD(void,DrawArrays,GLenum,GLint,GLsizei);LOAD(void,GenSamplers,GLsizei,GLuint*);
     LOAD(void,SamplerParameteri,GLuint,GLenum,GLint);LOAD(void,SamplerParameterf,GLuint,GLenum,GLfloat);
     LOAD(void,GetSamplerParameterfv,GLuint,GLenum,GLfloat*);LOAD(void,BindSampler,GLuint,GLuint);LOAD(void,DeleteSamplers,GLsizei,const GLuint*);
@@ -160,7 +161,7 @@ int probe(const wchar_t *report,bool sampler,bool independent=false){
     GLint linked=0;GetProgramiv(program,0x8b82,&linked);require(linked!=0,"test program link");UseProgram(program);Uniform1i(GetUniformLocation(program,"sourceColor"),0);
     GLuint vao=0;GenVertexArrays(1,&vao);BindVertexArray(vao);
     diagnosticStage=40;
-    ActiveTexture(0x84c0);GLuint texture=0;glGenTextures(1,&texture);glBindTexture(GL_TEXTURE_2D,texture);
+    ActiveTexture(0x84c0);GLuint texture=0;glGenTextures(1,&texture);BindTexture(GL_TEXTURE_2D,texture);
     glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_NEAREST_MIPMAP_NEAREST);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_NEAREST);
     const unsigned char colors[7][4]{{255,0,0,255},{0,255,0,255},{0,0,255,255},{255,255,0,255},{0,255,255,255},{255,0,255,255},{255,255,255,255}};
     for(unsigned mip=0;mip<7;++mip){const auto length=side>>mip;std::vector<unsigned char> data(length*length*4);
@@ -272,12 +273,18 @@ int probe(const wchar_t *report,bool sampler,bool independent=false){
     GLint active=0;glGetIntegerv(0x84e0,&active);const bool depth=glIsEnabled(GL_DEPTH_TEST)!=0;
     const auto swapHook=entryLeadsIntoOriginal(reinterpret_cast<const void*>(swap));
     const auto drawHook=entryLeadsIntoOriginal(reinterpret_cast<const void*>(DrawArrays));
-    const auto bindEntry=GetProcAddress(GetModuleHandleW(L"opengl32.dll"),"glBindTexture");
-    const auto bindHook=entryLeadsIntoOriginal(reinterpret_cast<const void*>(bindEntry));
-    // Separately demonstrate bind-time mutation BEFORE drawing this new object.
-    ActiveTexture(0x84c0);GLuint bindOnly=0;glGenTextures(1,&bindOnly);glBindTexture(GL_TEXTURE_2D,bindOnly);
+    const auto bindExport=GetProcAddress(GetModuleHandleW(L"opengl32.dll"),"glBindTexture");
+    const auto bindHook=entryLeadsIntoOriginal(reinterpret_cast<const void*>(BindTexture));
+    const auto bindExportHook=entryLeadsIntoOriginal(reinterpret_cast<const void*>(bindExport));
+    const bool bindEntriesDiffer=reinterpret_cast<const void*>(BindTexture)!=reinterpret_cast<const void*>(bindExport);
+    // Test BOTH real entry paths. Mesa exposes a distinct imported export and
+    // wglGetProcAddress dispatch stub; the original only detours the latter in
+    // this provider. Record the uncovered alias, don't relabel it as hooked.
+    ActiveTexture(0x84c0);GLuint bindOnly=0;glGenTextures(1,&bindOnly);BindTexture(GL_TEXTURE_2D,bindOnly);
     GLfloat bindBias=0,bindMinimum=0;glGetTexParameterfv(GL_TEXTURE_2D,0x8501,&bindBias);glGetTexParameterfv(GL_TEXTURE_2D,0x813a,&bindMinimum);
-    glBindTexture(GL_TEXTURE_2D,texture);ActiveTexture(GLenum(active));
+    GLuint exportOnly=0;glGenTextures(1,&exportOnly);glBindTexture(GL_TEXTURE_2D,exportOnly);
+    GLfloat exportBias=0,exportMinimum=0;glGetTexParameterfv(GL_TEXTURE_2D,0x8501,&exportBias);glGetTexParameterfv(GL_TEXTURE_2D,0x813a,&exportMinimum);
+    BindTexture(GL_TEXTURE_2D,texture);ActiveTexture(GLenum(active));
     const auto remainingError=glGetError();
     const bool mutated=changed[0]>0&&(sampler?changed[2]>0:true),pixelsChanged=before!=after;
     int sampledMip=-1;
@@ -298,11 +305,13 @@ int probe(const wchar_t *report,bool sampler,bool independent=false){
         "\"parametersPersistAfterDraw\":%s,\"pixelsChanged\":%s,\"sampledMip\":%d,"
         "\"drawMutationAfterSwap\":%s,\"bindOnlyBias\":%.3f,\"bindOnlyMinLod\":%.3f,"
         "\"swapEntryLeadsIntoOriginal\":%s,\"drawEntryLeadsIntoOriginal\":%s,\"bindEntryLeadsIntoOriginal\":%s,"
+        "\"bindExportEntryLeadsIntoOriginal\":%s,\"bindEntriesDiffer\":%s,\"bindExportOnlyBias\":%.3f,\"bindExportOnlyMinLod\":%.3f,"
         "\"warmupAttempts\":%u,\"firstRemainingGlError\":%u,\"mechanismObserved\":%s,"
         "\"gameExecuted\":false,\"physicalGpuTested\":false}\n",
         truth(imported),truth(sampler),truth(depth),truth(active==0x84c3),json(renderer).c_str(),json(version).c_str(),
         color(before).c_str(),color(after).c_str(),changed[0],changed[1],changed[2],changed[3],truth(persistent),truth(pixelsChanged),sampledMip,
         truth(drawMutation),bindBias,bindMinimum,truth(swapHook),truth(drawHook),truth(bindHook),
+        truth(bindExportHook),truth(bindEntriesDiffer),exportBias,exportMinimum,
         attempts<100?attempts+1:100,remainingError,truth(okay));
     std::fclose(file);
     // Original proxy owns live worker/hooks. Never FreeLibrary it beneath

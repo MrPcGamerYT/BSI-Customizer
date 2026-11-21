@@ -132,6 +132,29 @@ again correctly skipped. The pinned dependency is now the release's recommended
 x64 MinGW build. Actual DLL and independent rendering outcomes follow here
 only after execution.
 
+Run [44914982007](https://github.com/dsajgddghdsaakovvgheww/BSI-Customizer/actions/runs/44914982007)
+(head `c8db7012998a4a653eece30ed6c72ca59f6b3c69`) passed the original/Mesa data
+preparation and **actually executed original DLL code** under the verified
+outbound block and bounded jobs. Retrieved check annotations positively record
+A/B/C/D loading, swap/draw detours, persistent expected texture/sampler LOD and
+red mip 0 changing to blue mip 2 (Light) / yellow mip 3 (Strong), with depth
+disabled, in both texture/sampler modes. Negative controls stayed red/native.
+
+The run is still **failed**, not silently accepted: the imported Mesa
+`glBindTexture` export was not detoured and its new bind-only texture stayed at
+native LOD, so that strict bind-path assertion failed. The probe now exercises
+and reports **both** its WGL-resolved bind dispatch entry and the distinct import
+export, including uncovered-alias measurements; no original hook is patched by
+the probe. Per-row notices also reached the runner's annotation cap before the
+last original/independent rows could be retrieved. The sanitized artifact
+[14710939475](https://github.com/dsajgddghdsaakovvgheww/BSI-Customizer/actions/runs/44914982007/artifacts/14710939475)
+exists (1,603 compressed bytes, digest
+`377e69e423d0119d598d86647449d363399244ae84364fd8c009801efb72cac3`), but
+its unexamined rows are **not evidence**. A single bounded aggregate annotation
+now publishes the entire sanitized schema without relying on private raw-log or
+artifact download hosts. E and the independent comparison are not called
+verified on the basis of the truncated annotations.
+
 Even a completely passing authored-host result cannot establish which player
 contexts/programs/textures produce the real scene, authorize unrelated/UI
 resources, prove NVIDIA profile compatibility, reduce allocated texture memory,

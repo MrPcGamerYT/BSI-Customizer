@@ -126,6 +126,16 @@ requires explicit review of existing driver LOD/AA overrides, and currently has
 a GL 3.3/GLES 3.1 draw-time path only. No supplied DLL is installed. See
 [exact coverage and resource-provenance limits](TEXTURE-QUALITY-PORTABILITY.md).
 
+**Known reported failure, not another request to repeat this procedure:** the
+saved/armed-On follow-up had 1,235 processed frames and 2,468 inspected calls,
+all first-rejected because depth testing is disabled, with zero eligible,
+prepared, overridden or nested calls. The earlier advancing-3D/Settings-closed
+confirmation already stands. The nested-wrapper repair did not fix this game
+case; another Save or lower-resolution choice is not a remedy. Work now
+includes an [actual original-DLL and reversible owned-resource experiment](POTATO-DLL-PROBE.md).
+Its outcomes are not installed-player acceptance. The generic steps below
+remain for a different/new test installation, not as a repeated prerequisite.
+
 1. Record the actual observed host API, player/game versions, GPU/driver, native
    size, current driver profile and a repeatable scene. Configuration is only a
    hint; Automatic may legitimately observe another host API, never the Qt UI.

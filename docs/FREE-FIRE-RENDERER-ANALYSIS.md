@@ -1,6 +1,38 @@
 # Free Fire: configured Vulkan is not a captured game renderer
 
-## Newest report: active gameplay, working presentation, zero texture draws
+## Latest follow-up: all 2,468 inspected calls have depth testing disabled
+
+The saved/armed-On follow-up after the nested-wrapper repair remains a **failed
+texture result**, despite working host OpenGL grading:
+
+```text
+Requested API: Automatic; configured / observed host API: OpenGL / OpenGL
+Processed frames: 1235; texture inspected calls: 2468
+First depth blocker: TestDisabled=2468; all other depth subcounts=0
+Eligible / prepared calls / overridden bindings: 0 / 0 / 0
+Nested inspected / nested prepared: 0 / 0
+Qt bridge / host: 5.15.2 / 5.15.4
+Vulkan: 1 loader, 1 instance, 1 device; 0 surfaces/swapchains/presents
+```
+
+Every counted call stops **before** shader/sampler qualification. Zero later
+blended/no-sampler buckets do not prove an absence of blending or mip chains;
+those properties were not queried after the first rejection. Zero nested
+inspected calls does not describe excluded/unhooked activity. This result does
+not prove an offscreen producer, another renderer/process, or a safe resource
+boundary to adopt. It also does not justify repeating the already answered
+Save/gameplay/Settings-closed questions or asking for the same report again.
+
+Work continues with an [actual original-Potato-DLL experiment and a separate
+reversible known-resource comparison](POTATO-DLL-PROBE.md), not another speculative
+claim that the installed texture path is fixed. The original's inspected
+bind/draw-time LOD mutation is independent of depth testing; the production
+path's conservative depth gate is a demonstrated mechanism difference, not
+proof that deleting it safely qualifies the player's compositor/scene textures.
+Original loading, detours and test-owned mip pixels must be measured separately
+from actual game pixels, exact in-game Off restoration and FPS.
+
+## Earlier report: confirmed active gameplay, working presentation, zero texture draws
 
 The user supplied a full report and separately confirmed an advancing 3D scene
 with Settings closed, not merely a lobby or paused Settings window:
@@ -174,7 +206,12 @@ above separately supplies working GL presentation counters. It does not explain
 or retroactively turn the historical zero-frame run into a success. Record the
 actual observed API; do not count another API as Vulkan acceptance.
 
-## Smallest useful next evidence
+## Historical evidence checklist (not a repeated request for the reported case)
+
+The reported case has since supplied active gameplay and the exact first depth
+blocker above. Do not resend this checklist as a prerequisite for trying the
+original DLL or the independently owned-resource experiments. The version/API
+items remain useful when evaluating a genuinely different installation.
 
 1. Record exact MSI/BlueStacks version, Android instance (Nougat/Pie/11/13),
    Free Fire versus MAX and app version, and both native Graphics and Interface
@@ -199,8 +236,10 @@ actual observed API; do not count another API as Vulkan acceptance.
 
 The later session needs no forced renderer change merely to relabel its
 working host GL path. If the user elects to compare another native renderer,
-record it as a separate run, not a Vulkan acceptance shortcut. The next Potato
-check is explicit driver review → Save → the same qualified game scene, with
-actual prepared-draw/binding evidence and off/on images. Current native Display
-dimensions and exact resolution preview belong in the separate size test.
-Texture appearance, real Vulkan presentation and FPS gains remain unconfirmed.
+record it as a separate run, not a Vulkan acceptance shortcut. The reported
+case has already supplied saved/armed-On state and the latest precise negative
+result; another Save or resolution change is not a repair. The original-DLL
+and reversible owned-resource experiments above proceed without replacing that
+negative game result with a fixture success. Current native Display dimensions
+belong in the separate size test. Game texture appearance, real Vulkan
+presentation and FPS gains remain unconfirmed.

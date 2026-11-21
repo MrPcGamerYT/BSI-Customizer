@@ -1,10 +1,14 @@
-# Supplied Free Fire Potato DLL: static review
+# Supplied Free Fire Potato DLL: static review and isolated runtime follow-up
 
-**Status: analysis only. No supplied DLL was executed, installed, patched, or
-incorporated. Their texture-only LOD effect and the reported NVIDIA startup
-failure have not been reproduced/fixed in the player.** This review does not
-certify these binaries as safe. Subsequent independently authored sampler-policy
-work is described in [the texture experiment](TEXTURE-QUALITY-PORTABILITY.md).
+**Status: original DLLs have now executed in a disposable Windows software-WGL
+probe on authored mipmapped resources, not in a player/game. No supplied DLL is
+installed, patched, redistributed or incorporated into the production feature.
+The reported player's texture failure and NVIDIA startup conflict remain
+unfixed/unverified.** Actual loading, detour/LOD/pixel outcomes and limitations
+are recorded in the [separate runtime experiment](POTATO-DLL-PROBE.md); they are
+not a game/FPS or physical-driver result. This review does not certify these
+binaries as safe. Subsequent independently authored sampler-policy work is
+described in [the texture experiment](TEXTURE-QUALITY-PORTABILITY.md).
 It now has a default-off **Potato graphic** switch and experimental GL 3.3 /
 GLES 3.1 draw-scoped private samplers, with owned software-context pixel tests;
 DirectX/Vulkan texture binding and real game/resource/driver qualification
@@ -32,10 +36,13 @@ Downloaded through the user's connected Drive, with read-only operations.
 
 Archive members were checked for path traversal, symlinks and size limits, then
 read as data into hash-named, non-executable `.bin` files under the ignored
-`.cache/shader-build/potato-review/` directory. The supplied DLLs were never
-passed to `LoadLibrary`, Wine, a player, or a DLL registration tool. PE imports,
-exports, sections, constants and x64 instructions were parsed with pefile and
-Capstone. UnRAR was built as an analysis tool from upstream mirror commit
+`.cache/shader-build/potato-review/` directory. At that **static-analysis stage**,
+no archive member was executed: PE imports, exports, sections, constants and
+x64 instructions were parsed with pefile and Capstone. The later explicitly
+opted-in Windows experiment loads exact hashes through an original test host's
+normal import table after network/process controls, not through a player,
+registration tool or an explicit forwarding-export/initializer call. Those
+execution results must not be misreported as static-only analysis. UnRAR was built as an analysis tool from upstream mirror commit
 [`cacdcb8cbe1813b6151e3f92f2ccec7afe4d6a41`](https://github.com/pmachapman/unrar/commit/cacdcb8cbe1813b6151e3f92f2ccec7afe4d6a41);
 no archive member or bundled script was used as an analysis tool. Extracted
 binaries, disassembly and the archive are not Git/release deliverables.

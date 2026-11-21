@@ -55,6 +55,17 @@ negative texture result, not an unsaved switch or a lobby-only test. It does
 not identify which subcheck failed or prove ownership of another producer.
 See the [report and remaining uncertainty](FREE-FIRE-RENDERER-ANALYSIS.md).
 
+The follow-up after that repair is also **not working**: 1,235 processed frames,
+2,468 inspected calls, all 2,468 first-rejected as **depth test disabled**, zero
+eligible/prepared calls/bindings and zero nested inspected/prepared calls. No
+counted draw reached shader/sampler qualification; no-mip/blend/producer/API
+conclusions can be inferred from the zero later buckets. Repeating the already
+answered active-gameplay/Save/report questions is not the next implementation
+step. A separate [original-DLL runtime experiment](POTATO-DLL-PROBE.md) tests the
+actual supplied bytes and an independently authored reversible known-resource
+alternative with depth disabled, without removing production ownership,
+protection, depth or UI gates or adopting unknown producers.
+
 A zero-binding outer wrapper must release the inspection recursion guard and
 render mutex **before calling its original**: that original may establish real
 scene state and call another intercepted entry. Previously the bypass retained
