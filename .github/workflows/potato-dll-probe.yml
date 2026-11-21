@@ -1,0 +1,65 @@
+name: Original Potato DLL offline WGL probe
+
+# NEVER run original supplied code on pull_request/push/schedule. Called only
+# from CI's explicit, mutually-exclusive Potato opt-in on the current branch.
+# No emulator, account, physical GPU/profile, installer, release or player file.
+on:
+  workflow_call:
+    inputs:
+      execute_original_dll:
+        description: 'Explicitly permit the exact hash-pinned original Potato bytes in this disposable test'
+        required: true
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  offline-software-wgl:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.execute_original_dll }}
+    name: Five original Potato DLLs (Windows x64, outbound blocked, software WGL)
+    runs-on: windows-2022
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install data-only PE and archive parsers
+        run: python -m pip install pefile==2024.8.26 rarfile==4.2
+      - name: Test fixed-file confirmation and hash refusal with synthetic data only
+        run: python -m unittest discover -s tests/potato-dll -p '*_test.py'
+      - name: Build independent x64 hosts (no original DLL present)
+        shell: pwsh
+        run: |
+          cmake -S tests/potato-dll -B build-potato-probe -A x64
+          if ($LASTEXITCODE -ne 0) { throw 'Original test-host configuration failed' }
+          cmake --build build-potato-probe --config Release --parallel
+          if ($LASTEXITCODE -ne 0) { throw 'Original test-host build failed' }
+          $tokens = $null; $parseErrors = $null
+          [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $env:GITHUB_WORKSPACE 'tests/potato-dll/run-offline.ps1'), [ref]$tokens, [ref]$parseErrors) | Out-Null
+          if ($parseErrors.Count -ne 0) { throw 'Offline runner PowerShell syntax validation failed' }
+      - name: Download and verify the two exact archives as data only
+        shell: pwsh
+        run: |
+          python tests/potato-dll/prepare.py --download --work "$env:RUNNER_TEMP/potato-probe-data" --sevenzip "$env:ProgramFiles/7-Zip/7z.exe"
+          if ($LASTEXITCODE -ne 0) { throw 'Pinned original/Mesa data verification failed; no original DLL executed' }
+      - name: Actually run original DLLs against owned mipmapped WGL textures offline
+        shell: pwsh
+        run: |
+          ./tests/potato-dll/run-offline.ps1 -ExplicitlyAllowOriginalDll -Prepared "$env:RUNNER_TEMP/potato-probe-data" -Build "$env:GITHUB_WORKSPACE/build-potato-probe" -Results "$env:RUNNER_TEMP/potato-probe-results"
+      - name: Upload sanitized mechanism evidence only (never original binaries or logs)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: original-potato-wgl-evidence-${{ github.run_id }}
+          path: ${{ runner.temp }}/potato-probe-results/*.json
+          if-no-files-found: ignore
+          retention-days: 7
+      - name: Remove private original data from this disposable runner
+        if: always()
+        shell: pwsh
+        run: |
+          Remove-Item -LiteralPath "$env:RUNNER_TEMP/potato-probe-data" -Recurse -Force -ErrorAction SilentlyContinue

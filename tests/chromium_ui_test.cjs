@@ -89,7 +89,7 @@ const server = http.createServer((req, res) => {
       new MutationObserver(() => { if(window.__autoConfirm) document.querySelector('#confirm-dialog[open] button[value="yes"]')?.click(); }).observe(document, {subtree:true,childList:true,attributes:true,attributeFilter:['open']});
       const signal = () => ({ handlers: [], connect(fn) { this.handlers.push(fn); }, emit(...args) { this.handlers.forEach(fn => fn(...args)); } });
       window.__calls = [];
-      let profile = {}, operations = [];
+      let profile = {}, operations = [], cleanupNeedsUpdate = true, cleanupApplied = true;
       const state = { protocol: 1, authorized: true, busy: false, exeFound: true, exePath: 'C:\\fixture\\HD-Player.exe', version: 'test-only', resourceRevision: 0, workspaceRevision: 0, updates: { configured: true, state: 'idle' }, aboutProfile: { developerName: 'Fixture developer', tagline: 'Fixture tagline', links: [{kind:'github',title:'Source',url:'https://example.test/source'},{kind:'discord',title:'Community',url:'https://example.test/chat'},{kind:'youtube',title:'Video',url:'https://example.test/video'},{kind:'youtube',title:'More videos',url:'https://example.test/more'}] }, themeStatus: 'Fixture palette', themeMethod: 'qml' };
       const colors = [{ name: 'testAccent', value: '#123456', edit: '', purpose: 'Test fixture only' }];
       const svgPreview = 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI+PGNpcmNsZSBjeD0iMTIiIGN5PSIxMiIgcj0iOCIvPjwvc3ZnPg==';
@@ -116,8 +116,9 @@ const server = http.createServer((req, res) => {
           if (method === 'fpsPatch') value = { ok: false, msg: 'Fixture: target is unsupported; no write' };
           if (method === 'bootLogoPreview') value = { available: true, logo: svgPreview };
           if (method === 'bootPatch') value = { ok: true, msg: 'Built-in Aurora HTML boot animation installed; no supported completion gate was found; requested 4567 ms hold was not applied.' };
+          if (method === 'applyLayoutTweak') { cleanupNeedsUpdate = false; cleanupApplied = args.enabled; value = { ok: true, msg: 'Fixture cleanup updated.' }; }
           if (method === 'readInterface') value = {
-            removals: ['Fixture sidebar', 'Fixture banner'], layout: [{ id: 'test-layout', label: 'Fixture layout', supported: true, applied: false }],
+            removals: ['Remove title details', 'Fixture sidebar'], layout: [{ id: 'clean-player-ui', label: 'Clean player UI', supported: true, applied: cleanupApplied, needsUpdate: cleanupNeedsUpdate, detail: 'Hide the three-line title-bar menu while keeping sidebar Settings accessible.' }],
             about: { supported: true, text: 'Original fixture About', showSections: true, links: [{ id: 'website', name: 'Website', label: 'Original label', url: 'https://example.test', hidden: false }] }
           };
           if (method === 'rpcidNames') value = { ok: true, entries: [{ key: 'ProductName', value: 'Fixture', max: 40 }] };
@@ -173,13 +174,23 @@ const server = http.createServer((req, res) => {
     assert.equal(await maxButton.getAttribute('aria-label'), 'Maximize', 'Restored window returns to the maximize affordance');
     await page.locator('[data-window="min"]').evaluate(el => el.click());
     await page.waitForFunction(() => __windowActions?.includes('min'));
-    await page.locator('#spine [data-page="8"]').evaluate(el => el.click());
+    // The mock records minimize without hiding/restoring a native window. Wait
+    // for the real presentation recovery instead of racing its pointer guard
+    // and letting scroll-into-view run against a scaled, noninteractive app.
+    await page.waitForFunction(() => !document.body.classList.contains('minimizing')
+      && getComputedStyle(document.querySelector('.app')).pointerEvents !== 'none', null, { timeout: 5000 });
+    // Busy-state snapshots may briefly disable navigation; use real input so
+    // the Settings-open click is not silently dropped on a disabled button.
+    await page.locator('#spine [data-page="8"]').click();
+    await page.waitForFunction(() => document.querySelector('#settings-dialog').open);
     await page.locator('[data-settings-tab="about"]').click();
     await page.locator('[data-about-field="developerName"]').fill('Updated Fixture Developer');
     await page.locator('[data-about-field="tagline"]').fill('A customized About panel');
     await page.locator('[data-about-link="0"] [data-about-field="title"]').fill('My project');
     await page.locator('[data-about-link="0"] [data-about-field="url"]').fill('https://example.test/my-project');
-    await page.locator('[data-action="settings-about-save"]').evaluate(el => el.click());
+    // A programmatic click on a briefly disabled button is discarded. Wait
+    // for the real control to accept input rather than racing bridge updates.
+    await page.locator('[data-action="settings-about-save"]').click();
     await page.waitForFunction(() => __calls.some(c => c.method === 'setAboutProfile'));
     const profileCall = await page.evaluate(() => __calls.findLast(c => c.method === 'setAboutProfile'));
     assert.equal(profileCall.args.developerName, 'Updated Fixture Developer');
@@ -247,18 +258,36 @@ const server = http.createServer((req, res) => {
     // New HTML editors must dispatch the original backend contracts rather
     // than opening a native-editor placeholder.
     const nav = async index => {
+      // Observing an RPC call is not its completion: the native snapshot and
+      // renderer can still be busy. Navigation intentionally refuses that
+      // state, so wait before dispatch, then require the requested destination.
+      await page.waitForFunction(() => !document.body.dataset.confirming && !document.body.classList.contains('busy'));
       await page.locator(`#spine [data-page="${index}"]`).evaluate(el => el.click());
-      await page.waitForFunction(() => !document.body.classList.contains('busy'));
+      await page.waitForFunction(destination =>
+        !document.body.classList.contains('busy') &&
+        (destination === 8 ? document.querySelector('#settings-dialog').open
+          : document.querySelector(`#spine [data-page="${destination}"]`)?.getAttribute('aria-current') === 'page'), index);
     };
     const edit = key => page.locator(`[data-editor-field="${key}"]`);
     const click = async name => { await page.locator(`[data-action="editor:${name}"]`).evaluate(el => el.click()); await page.waitForFunction(() => !document.body.dataset.confirming && !document.body.classList.contains('busy')); };
     const last = method => page.evaluate(name => __calls.filter(c => c.method === name).at(-1), method);
     await nav(6);
     await click('interface-load');
+    assert.match(await page.locator('#main').innerText(), /three-line title-bar menu while keeping sidebar Settings accessible/);
+    await page.getByRole('button', { name: 'Update this tweak', exact: true }).click();
+    await page.waitForFunction(() => !document.body.dataset.confirming && !document.body.classList.contains('busy'));
+    assert.deepEqual((await last('applyLayoutTweak')).args, { id: 'clean-player-ui', enabled: true }, 'migration must repair Settings without restoring all extras');
+    await page.getByRole('button', { name: 'Restore this tweak', exact: true }).click();
+    await page.waitForFunction(() => !document.body.dataset.confirming && !document.body.classList.contains('busy'));
+    assert.deepEqual((await last('applyLayoutTweak')).args, { id: 'clean-player-ui', enabled: false }, 'Restore remains reachable after a successful migration');
+    await page.getByRole('button', { name: 'Apply this tweak', exact: true }).waitFor();
     await page.locator('[data-interface-tab="remove"]').evaluate(el => el.click());
+    assert.equal(await page.locator('label').filter({ hasText: /^Remove title details$/ }).count(), 1, 'one combined title-details choice');
+    assert.equal(await page.getByText('Titlebar Version', { exact: true }).count(), 0);
+    assert.equal(await page.getByText('Titlebar Instance Label', { exact: true }).count(), 0);
     await edit('remove:0').check();
     await click('removals');
-    assert.deepEqual((await last('applyRemovals')).args.names, ['Fixture sidebar']);
+    assert.deepEqual((await last('applyRemovals')).args.names, ['Remove title details']);
     await page.locator('[data-interface-tab="about"]').evaluate(el => el.click());
     await edit('about:text').fill('Edited About fixture');
     await page.waitForFunction(() => document.querySelector('#interface-about-preview')?.innerText.includes('Edited About fixture'));
@@ -483,4 +512,14 @@ const server = http.createServer((req, res) => {
     assert.deepEqual(errors, []);
     console.log('PASS: 15 routes including six Add-ons previews and stage/dry-run/apply/recovery; picker commit/cancel, styled cancellation and reduced-motion window effects; sidebar/debloat/ADB/disk requests; Qt preview controls; offline native actions disabled; manual scans; pagination/search; safe text rendering; real request arguments; failed-engine errors; integrated About/removal/RPC/GIF/boot/gradient/workspace/updater contracts; sign-out lock. UI test transport only.');
   } finally { await browser.close(); }
-})().then(() => server.close()).catch(error => { console.error(error); server.close(); process.exitCode = 1; });
+})().then(() => server.close()).catch(error => {
+  console.error(error);
+  if (process.env.GITHUB_ACTIONS) {
+    // Preserve the real assertion/locator error in check annotations too:
+    // failed-job log downloads can be unavailable to repository API clients.
+    const message = String(error.stack || error).replaceAll('%', '%25').replaceAll('\r', '%0D').replaceAll('\n', '%0A');
+    console.error(`::error file=tests/chromium_ui_test.cjs::${message}`);
+  }
+  server.close();
+  process.exitCode = 1;
+});

@@ -34,6 +34,9 @@ add_library(bsi_7z STATIC
 target_include_directories(bsi_7z PUBLIC src/third_party/7zip/C)
 target_compile_definitions(bsi_7z PRIVATE Z7_EXTRACT_ONLY Z7_PPMD_SUPPORT)
 
+# Lossless, bounded fallback for fixed Qt-resource slots. No runtime dependency.
+add_subdirectory(src/third_party/zopfli)
+
 find_package(Qt6 6.5 REQUIRED COMPONENTS Core Gui Network Qml Quick QuickControls2 Svg Multimedia)
 
 qt_standard_project_setup(REQUIRES 6.5)
@@ -109,14 +112,34 @@ qt_add_executable(BSICustomizer
     src/core/EmbeddedResources.cpp
     src/core/ExtrasPatcher.h
     src/core/ExtrasPatcher.cpp
+    src/core/TitlebarDetails.h
+    src/core/TitlebarDetails.cpp
     src/core/QmlText.h
     src/core/QmlText.cpp
+    src/core/NativeSettingsModel.h
+    src/core/NativeSettingsModel.cpp
+    src/core/ShaderSettingsSource.h
+    src/core/ShaderSettingsSource.cpp
+    src/core/ShaderSettingsImage.h
+    src/core/ShaderSettingsImage.cpp
+    src/core/ShaderPackage.h
+    src/core/ShaderPackage.cpp
+    src/core/ShaderInstall.h
+    src/core/ShaderInstall.cpp
+    src/core/ShaderBundle.h
+    src/core/ShaderBundle.cpp
+    src/core/ShaderActions.h
+    src/core/ShaderActions.cpp
     src/core/PlayerAppearanceScan.h
     src/core/PlayerAppearanceScan.cpp
     src/core/PlayerAppearancePatcher.h
     src/core/PlayerAppearancePatcher.cpp
     src/core/LayoutPatcher.h
     src/core/LayoutPatcher.cpp
+    src/core/PhoneProfiles.h
+    src/core/PhoneProfiles.cpp
+    src/core/PhoneProfilesInstall.h
+    src/core/PhoneProfilesInstall.cpp
     src/core/AboutPatcher.h
     src/core/AboutPatcher.cpp
     src/core/SettingsPanelPatcher.h
@@ -208,7 +231,7 @@ set_target_properties(BSICustomizer PROPERTIES
 target_compile_definitions(BSICustomizer PRIVATE
     BSI_VERSION="${PROJECT_VERSION}"
 )
-target_link_libraries(BSICustomizer PRIVATE bsi_7z)
+target_link_libraries(BSICustomizer PRIVATE bsi_7z bsi_zopfli)
 target_include_directories(BSICustomizer PRIVATE src)
 
 # ---------------------------------------------------------------------------
@@ -309,8 +332,10 @@ if(BSI_EXE_TEST_FILE)
     target_compile_definitions(BSICustomizer PRIVATE BSI_EXE_TEST_FILE="${_bsi_exe_reference}")
 endif()
 
-# The supplied Settings-tab pack is embedded in both UI builds. No download or
-# user profile seeding is needed: an empty profile automatically uses this pack.
+# The supplied Settings-tab pack and original reserved Shaders icon are embedded
+# in both UI builds. The catalog only maps discovered page ids; reserving artwork
+# does not create a Settings page or claim a native shader renderer exists.
+# No download or profile seeding is needed for the existing native page defaults.
 qt_add_resources(BSICustomizer "settings_panel_icons"
     PREFIX "/settings-panel-icons"
     BASE "${CMAKE_CURRENT_SOURCE_DIR}/src/assets/settings-panel-icons"
@@ -319,6 +344,7 @@ qt_add_resources(BSICustomizer "settings_panel_icons"
         src/assets/settings-panel-icons/performance.svg
         src/assets/settings-panel-icons/display.svg
         src/assets/settings-panel-icons/graphics.svg
+        src/assets/settings-panel-icons/shaders.svg
         src/assets/settings-panel-icons/game-settings.svg
         src/assets/settings-panel-icons/devices.svg
         src/assets/settings-panel-icons/preferences.svg
@@ -353,6 +379,7 @@ qt_add_qml_module(BSICustomizer
         src/qml/components/LoadingStrip.qml
         src/qml/components/LazyFeature.qml
         src/qml/components/DllStartupPanel.qml
+        src/qml/components/ShaderInstallPanel.qml
         src/qml/components/Card.qml
         src/qml/components/ActionButton.qml
         src/qml/components/StudioTextField.qml
@@ -474,6 +501,24 @@ if(BSI_CHROMIUM_UI)
             src/web/fonts/manrope-LICENSE.txt src/web/fonts/plus-jakarta-sans-LICENSE.txt)
 endif()
 
+include(cmake/EmbedShaderBundle.cmake)
+bsi_embed_shader_bundle(BSICustomizer)
+# Mandatory notices for the regular shader module embedded in test/release
+# builds. Keep them in ordinary deployments as well as the one-file payload.
+add_custom_command(TARGET BSICustomizer POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:BSICustomizer>/licenses/shaders/vulkan"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/third_party/minhook/LICENSE.txt"
+        "$<TARGET_FILE_DIR:BSICustomizer>/licenses/shaders/MinHook.txt"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/third_party/vulkan/LICENSE.md"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/third_party/vulkan/LICENSES/Apache-2.0.txt"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/third_party/vulkan/LICENSES/MIT.txt"
+        "$<TARGET_FILE_DIR:BSICustomizer>/licenses/shaders/vulkan")
+install(FILES src/third_party/minhook/LICENSE.txt DESTINATION bin/licenses/shaders RENAME MinHook.txt)
+install(FILES src/third_party/vulkan/LICENSE.md src/third_party/vulkan/LICENSES/Apache-2.0.txt
+    src/third_party/vulkan/LICENSES/MIT.txt DESTINATION bin/licenses/shaders/vulkan)
+
 install(TARGETS BSICustomizer RUNTIME DESTINATION bin)
 # Discord Rich Presence discovery/patching is compiled into the application,
 # UI and command line alike (BSI-Customizer.exe --rpcid ...). The build and
@@ -486,6 +531,15 @@ add_custom_command(TARGET BSICustomizer POST_BUILD
         "$<TARGET_FILE_DIR:BSICustomizer>/THIRD-PARTY-NOTICES.txt"
 )
 install(FILES src/third_party/hde64/LICENSE.txt DESTINATION bin RENAME THIRD-PARTY-NOTICES.txt)
+add_custom_command(TARGET BSICustomizer POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:BSICustomizer>/licenses/zopfli"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/third_party/zopfli/LICENSE"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/third_party/zopfli/README.bsi.md"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/third_party/zopfli/UPSTREAM.json"
+        "$<TARGET_FILE_DIR:BSICustomizer>/licenses/zopfli")
+install(FILES src/third_party/zopfli/LICENSE src/third_party/zopfli/README.bsi.md
+    src/third_party/zopfli/UPSTREAM.json DESTINATION bin/licenses/zopfli)
 
 # Packaging belongs to the build graph as well as the release workflow. This
 # allows the existing Windows CI build to validate the one-file artifact.
@@ -501,13 +555,17 @@ if(BSI_BUILD_PORTABLE)
     find_program(BSI_PWSH pwsh REQUIRED)
     get_filename_component(_bsi_qt_prefix "${Qt6_DIR}/../../.." ABSOLUTE)
     set(BSI_PORTABLE_EXE "${CMAKE_CURRENT_BINARY_DIR}/artifacts/BSI-Customizer-${PROJECT_VERSION}-win64.exe")
+    set(_bsi_shader_package_test)
+    if(BSI_REQUIRE_SHADER_BUNDLE)
+        list(APPEND _bsi_shader_package_test -RequireShaderBundle)
+    endif()
     add_custom_target(BSI-Portable ALL
         COMMAND "${BSI_PWSH}" -NoProfile -File "${CMAKE_CURRENT_SOURCE_DIR}/scripts/Build-SingleExe.ps1"
             -AppExecutable "$<TARGET_FILE:BSICustomizer>" -QtPrefix "${_bsi_qt_prefix}"
             -Version "${PROJECT_VERSION}" -BuildRoot "${CMAKE_CURRENT_BINARY_DIR}/portable"
             -OutputDirectory "${CMAKE_CURRENT_BINARY_DIR}/artifacts"
         COMMAND "${BSI_PWSH}" -NoProfile -File "${CMAKE_CURRENT_SOURCE_DIR}/scripts/Test-SingleExe.ps1"
-            -ExecutablePath "${BSI_PORTABLE_EXE}"
+            -ExecutablePath "${BSI_PORTABLE_EXE}" ${_bsi_shader_package_test}
         DEPENDS BSICustomizer
         BYPRODUCTS "${BSI_PORTABLE_EXE}"
         USES_TERMINAL VERBATIM

@@ -11,7 +11,12 @@ on:
   workflow_dispatch:
     inputs:
       test_supplied_dll:
-        description: 'Opt in: test the pinned supplied DLL in an offline disposable Windows probe (not the emulator)'
+        description: 'Opt in: test the pinned Z-Lag DLL in an offline disposable Windows probe (not the emulator)'
+        type: boolean
+        required: false
+        default: false
+      test_potato_dll:
+        description: 'Opt in: run the exact supplied Potato DLLs in an offline software-WGL probe (not the emulator)'
         type: boolean
         required: false
         default: false
@@ -30,13 +35,27 @@ env:
   BSI_SKIN_REFERENCE_DIR: ${{ github.workspace }}/player-ui-source
 
 jobs:
+  payload-choice:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.test_supplied_dll && inputs.test_potato_dll }}
+    name: Refuse simultaneous unrelated payload tests
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo '::error::Choose either Z-Lag or Potato, never both in one probe run.' && exit 1
+
   supplied-dll-validation:
     name: Opt-in supplied DLL test
-    if: ${{ github.event_name == 'workflow_dispatch' && inputs.test_supplied_dll }}
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.test_supplied_dll && !inputs.test_potato_dll }}
     uses: ./.github/workflows/dll-payload-test.yml
 
+  potato-dll-validation:
+    name: Opt-in original Potato DLL test
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.test_potato_dll && !inputs.test_supplied_dll }}
+    uses: ./.github/workflows/potato-dll-probe.yml
+    with:
+      execute_original_dll: ${{ inputs.test_potato_dll }}
+
   rpc-scan-regression:
-    if: ${{ github.event_name != 'workflow_dispatch' || !inputs.test_supplied_dll }}
+    if: ${{ github.event_name != 'workflow_dispatch' || (!inputs.test_supplied_dll && !inputs.test_potato_dll) }}
     name: RPC scan equivalence (Linux, Qt-free)
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -61,7 +80,7 @@ jobs:
           /tmp/dll-startup-test
 
   resources-ui-regression:
-    if: ${{ github.event_name != 'workflow_dispatch' || !inputs.test_supplied_dll }}
+    if: ${{ github.event_name != 'workflow_dispatch' || (!inputs.test_supplied_dll && !inputs.test_potato_dll) }}
     name: Resources manual scan and search (Qt 6.8)
     # Keep the Qt 5/6 pixel-test toolchain on the same tested LTS as Chromium,
     # rather than allowing an ubuntu-latest image migration to change it.
@@ -81,6 +100,7 @@ jobs:
         run: |
           node tests/dll_startup_contract_test.mjs
           node tests/dll_startup_payload_contract_test.mjs
+          node tests/potato_dll_probe_contract_test.mjs
       - name: Test resource search matching and large lists
         run: node tests/resource_search_test.mjs
       - name: Test Chromium Settings-panel rebuild controls and profile flow
@@ -92,10 +112,13 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+      - name: Test Potato reference identities with synthetic data only (no supplied DLL execution)
+        run: python -m unittest discover -s tests/potato-dll -p '*_test.py'
       - name: Verify bundled Settings-tab pack and complete resource budgets
         run: |
           python tests/settings_panel_icon_pack_test.py
           python tests/settings_panel_window_budget_test.py
+          python tests/shaders/bundle_notices_test.py
       - name: Check DLL-startup audit input guards (no patcher or payload execution)
         run: python tests/dll_startup_audit_test.py
       - name: Install Qt runtime test dependencies
@@ -147,6 +170,22 @@ jobs:
             $(pkg-config --libs Qt6Core) -o /tmp/player-skin-compile-test
           /tmp/player-skin-compile-test player-ui-source "${{ runner.temp }}/generated-player-skins"
           python tests/player_skin_syntax_test.py "${{ runner.temp }}/generated-player-skins"
+      - name: Generate titlebar details fixtures through the production C++ rewrite
+        run: |
+          g++ -std=c++17 -O1 -Wall -Wextra -Werror -fPIC -Isrc \
+            $(pkg-config --cflags Qt6Core) tests/titlebar_details_test.cpp \
+            src/core/TitlebarDetails.cpp src/core/QmlText.cpp \
+            $(pkg-config --libs Qt6Core) -o /tmp/titlebar-details-test
+          /tmp/titlebar-details-test "${{ runner.temp }}/titlebar-details" player-ui-source/PlrTopbar.qml
+      - name: Render combined title-details removal and intact Settings text in Qt 6
+        env:
+          BSI_TITLE_DETAILS_FIXTURES: ${{ runner.temp }}/titlebar-details
+        run: python tests/run_qt_runtime_test.py tests/titlebar_details_gui_test.py
+      - name: Render the same title-details and Settings-text regression in Qt 5
+        env:
+          BSI_TITLE_DETAILS_FIXTURES: ${{ runner.temp }}/titlebar-details
+          BSI_TEST_QT_API: PyQt5
+        run: python tests/run_qt_runtime_test.py tests/titlebar_details_gui_test.py
       - name: Type-check Workspace and Theme QML against real Qt metadata
         run: python tests/workspace_qml_lint_test.py
       - name: Exercise opt-in native startup-DLL review and recovery controls
@@ -174,6 +213,12 @@ jobs:
         env:
           BSI_TEST_QT_API: PyQt5
         run: python tests/run_qt_runtime_test.py tests/settings_panel_post_patch_gui_test.py
+      - name: Full generated Settings glass pixels, translucency and native-control input (Qt 6)
+        run: python tests/run_qt_runtime_test.py tests/settings_panel_glass_test.py
+      - name: The same complete glass resources, inputs and popup behavior (independent Qt 5)
+        env:
+          BSI_TEST_QT_API: PyQt5
+        run: python tests/run_qt_runtime_test.py tests/settings_panel_glass_test.py
       - name: Exercise the interactive generated-Settings live preview (sample services)
         run: python tests/run_qt_runtime_test.py tests/settings_window_preview_test.py
       - name: Exercise adaptive boot player against synthetic Qt6, Qt5 and WebEngine APIs
@@ -187,7 +232,7 @@ jobs:
         run: python tests/run_qt_runtime_test.py tests/ui_page_settings_panel_test.py
 
   dll-startup-windows:
-    if: ${{ github.event_name != 'workflow_dispatch' || !inputs.test_supplied_dll }}
+    if: ${{ github.event_name != 'workflow_dispatch' || (!inputs.test_supplied_dll && !inputs.test_potato_dll) }}
     name: Regular DLL normal startup (Windows x64, no proxy/runtime)
     runs-on: windows-latest
     timeout-minutes: 20
@@ -246,7 +291,7 @@ jobs:
           'PASS: three ordinary launches; only EXE + regular DLL; export resolved but not called; patcher already exited; no interpreter/Qt/SDK on PATH.' | Out-File $env:GITHUB_STEP_SUMMARY -Append
 
   build-windows:
-    if: ${{ github.event_name != 'workflow_dispatch' || !inputs.test_supplied_dll }}
+    if: ${{ github.event_name != 'workflow_dispatch' || (!inputs.test_supplied_dll && !inputs.test_potato_dll) }}
     name: Build & self-test (Windows x64 · ${{ matrix.label }})
     runs-on: windows-latest
     # The two "latest package" jobs legitimately run ~58 minutes (build + the
@@ -410,6 +455,9 @@ jobs:
         env:
           QT_QPA_PLATFORM: offscreen
           __COMPAT_LAYER: RUNASINVOKER
+          # Export authored scenes through the actual resource patchers, not
+          # QML read from the reference player. Physical checks run below.
+          BSI_TOPBAR_TEST_FIXTURES: ${{ runner.temp }}/topbar-ui
         run: |
           $log = Join-Path $env:RUNNER_TEMP 'selftest.log'
           $err = Join-Path $env:RUNNER_TEMP 'selftest.err'
@@ -456,6 +504,26 @@ jobs:
             throw "self-test failed (exit code $($p.ExitCode))"
           }
 
+      - name: Install Qt 5 and Qt 6 hosts for physical topbar regression scenes
+        if: matrix.label == 'MSI latest package'
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Prepare isolated Qt contract-scene runtimes
+        if: matrix.label == 'MSI latest package'
+        run: python -m pip install PySide6==6.8.3 PyQt5==5.15.11
+      - name: Physically test production topbar scenes with host/isolated fonts and a nonpainting negative in Qt 6
+        if: matrix.label == 'MSI latest package'
+        env:
+          BSI_TOPBAR_TEST_FIXTURES: ${{ runner.temp }}/topbar-ui
+        run: python tests/run_qt_runtime_test.py tests/clean_player_ui_capture_test.py
+      - name: Test the same production-written scenes with host/isolated fonts and a nonpainting negative in Qt 5
+        if: matrix.label == 'MSI latest package'
+        env:
+          BSI_TOPBAR_TEST_FIXTURES: ${{ runner.temp }}/topbar-ui
+          BSI_TEST_QT_API: PyQt5
+        run: python tests/run_qt_runtime_test.py tests/clean_player_ui_capture_test.py
+
       - name: Manual Settings-panel tester (safe-copy apply)
         if: matrix.label == 'MSI latest package'
         shell: pwsh
@@ -468,6 +536,16 @@ jobs:
           $target = Join-Path $env:GITHUB_WORKSPACE 'HD-Player.exe'
           $manualTester = Join-Path $env:GITHUB_WORKSPACE 'scripts/Test-SettingsPanel-Manual.ps1'
           & $manualTester -CustomizerPath $env:exe -PlayerPath $target -NoLaunch
+
+      - name: Upload actual topbar paint/control regression pixels
+        if: always() && matrix.label == 'MSI latest package'
+        uses: actions/upload-artifact@v4
+        with:
+          name: topbar-qt-pixels-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/topbar-ui/**/*.png
+            ${{ runner.temp }}/topbar-ui/capture-validation/**/result.log
+          if-no-files-found: ignore
 
       # A failing job's log cannot be read back through the API on this account,
       # and the annotations only carry the lines that mention failure. The whole

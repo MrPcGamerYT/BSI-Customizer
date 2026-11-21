@@ -33,6 +33,7 @@
 #include "core/AuthManager.h"
 #include "core/SettingsManager.h"
 #include "core/SettingsPanelPatcher.h"
+#include "core/ShaderActions.h"
 #include "core/SysInfo.h"
 #include "core/ThemeEngine.h"
 #include "core/ThemeManager.h"
@@ -269,6 +270,30 @@ int main(int argc, char *argv[])
         ensureConsoleOutput();
         return runBootPlayerRuntimeTest(args);
     }
+    // Read-only shader diagnostics never load a player/plugin DLL or bypass
+    // authorization for writes. The packaged EXE uses this to verify that its
+    // version-contract shader payloads survived single-file bundling.
+    if (args.contains(QStringLiteral("--shader-bundle-check"))) {
+        ensureConsoleOutput();
+        const auto report = ShaderActions::bundleInfo();
+        writeJsonReport(QJsonObject::fromVariantMap(report));
+        if (report.value(QStringLiteral("ok")).toBool()) {
+            std::puts("SHADER BUNDLE CHECK PASSED");
+            return 0;
+        }
+        return 1;
+    }
+    const int shadersInspectAt = args.indexOf(QStringLiteral("--shaders-inspect"));
+    if (shadersInspectAt >= 0) {
+        ensureConsoleOutput();
+        if (shadersInspectAt + 1 >= args.size()) {
+            std::fprintf(stderr, "usage: BSI-Customizer --shaders-inspect <path-to-HD-Player.exe>\n");
+            return 2;
+        }
+        const auto report = ShaderActions::inspect(args.at(shadersInspectAt + 1));
+        writeJsonReport(QJsonObject::fromVariantMap(report));
+        return report.value(QStringLiteral("ok")).toBool() ? 0 : 1;
+    }
     if (args.contains(QStringLiteral("--selftest"))) {
         ensureConsoleOutput();
         return runSelfTest();
@@ -372,6 +397,16 @@ int main(int argc, char *argv[])
     std::unique_ptr<QTemporaryDir> deploymentSettings;
     if (deploymentTest) {
         ensureConsoleOutput();
+#ifdef BSI_EMBEDDED_SHADER_BUNDLE
+        const auto bundle = ShaderActions::bundleInfo();
+        if (!bundle.value(QStringLiteral("ok")).toBool()) {
+            writeJsonReport(QJsonObject::fromVariantMap(bundle));
+            return 2;
+        }
+        std::puts("DEPLOYMENT_SHADER_BUNDLE=1");
+#else
+        std::puts("DEPLOYMENT_SHADER_BUNDLE=0");
+#endif
         deploymentSettings = std::make_unique<QTemporaryDir>();
         if (!deploymentSettings->isValid())
             return 2;

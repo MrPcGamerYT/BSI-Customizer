@@ -1,4 +1,5 @@
 #include "SettingsPanelPatcher.h"
+#include "SettingsPanelLinks.h"
 
 #include "BsDetector.h"
 #include "CustomizationWorkspace.h"
@@ -6,6 +7,8 @@
 #include "PatchFile.h"
 #include "PeUtils.h"
 #include "QmlText.h"
+#include "NativeSettingsModel.h"
+#include "ShaderSettingsSource.h"
 #include "QtResources.h"
 #include "ThemeEngine.h"
 
@@ -49,7 +52,12 @@ const QString kWindowDesignMarkerV12 = QStringLiteral("BSI Settings v12");
 const QString kWindowDesignMarkerV13 = QStringLiteral("BSI Settings v13");
 const QString kWindowDesignMarkerV14 = QStringLiteral("BSI Settings v14");
 const QString kWindowDesignMarkerV15 = QStringLiteral("BSI v15");
-const QString kWindowDesignMarker = QStringLiteral("BSI v16");
+const QString kWindowDesignMarkerV16 = QStringLiteral("BSI v16");
+const QString kWindowDesignMarkerV17 = QStringLiteral("BSI v17");
+const QString kWindowDesignMarkerV18 = QStringLiteral("BSI v18");
+const QString kWindowDesignMarkerV19 = QStringLiteral("BSI v19");
+const QString kWindowDesignMarkerV20 = QStringLiteral("BSI v20");
+const QString kWindowDesignMarker = QStringLiteral("BSI v21");
 const QString kAboutMarker = QStringLiteral("BSI CUSTOMIZER: redesigned About page v1");
 const QString kSchema = QStringLiteral("bsi.settings-panel.recovery");
 const QString kWindowLeaf = QStringLiteral("UiSettingsWindow.qml");
@@ -249,7 +257,7 @@ struct StagedAssetFiles
 // Immutable, content-addressed names also invalidate QML's image cache when an
 // icon is replaced. Never overwrite a live icon before the EXE write succeeds.
 QString writeAssetFile(const QString &exePath, const QByteArray &bytes,
-                       StagedAssetFiles *staged, QString *error)
+                       StagedAssetFiles *staged, QString *error, const QString &suffix = QStringLiteral(".png"))
 {
     const QString dir = assetDirectory(exePath);
     if (dir.isEmpty() || bytes.isEmpty() || !QDir().mkpath(dir)) {
@@ -257,7 +265,7 @@ QString writeAssetFile(const QString &exePath, const QByteArray &bytes,
         return {};
     }
     const QString file = QDir(dir).filePath(QString::fromLatin1(sha256(bytes).left(24))
-                                           + QStringLiteral(".png"));
+                                           + suffix);
     const QFileInfo info(file);
     if (info.exists() || info.isSymLink()) {
         QByteArray existing;
@@ -320,211 +328,15 @@ bool sourceFor(const QByteArray &image, const QString &exePath, const QString &l
     return true;
 }
 
-bool literalQmlString(const QString &source, int begin, int end, QString *value)
-{
-    while (begin < end && source.at(begin).isSpace()) ++begin;
-    if (begin >= end || (source.at(begin) != QLatin1Char('\"')
-                         && source.at(begin) != QLatin1Char('\'')))
-        return false;
-    const QChar quote = source.at(begin++);
-    QString decoded;
-    bool closed = false;
-    while (begin < end) {
-        const QChar ch = source.at(begin++);
-        if (ch == quote) { closed = true; break; }
-        if (ch == QLatin1Char('\\')) {
-            if (begin >= end) return false;
-            const QChar escaped = source.at(begin++);
-            if (escaped == QLatin1Char('\\') || escaped == quote || escaped == QLatin1Char('/'))
-                decoded += escaped;
-            else if (escaped == QLatin1Char('n')) decoded += QLatin1Char('\n');
-            else if (escaped == QLatin1Char('r')) decoded += QLatin1Char('\r');
-            else if (escaped == QLatin1Char('t')) decoded += QLatin1Char('\t');
-            else return false;
-        } else {
-            if (ch == QLatin1Char('\n') || ch == QLatin1Char('\r')) return false;
-            decoded += ch;
-        }
-    }
-    if (!closed || !decoded.endsWith(QLatin1String(".qml"), Qt::CaseInsensitive)) return false;
-    *value = decoded;
-    return true;
-}
-
 bool readSettingsModelPages(const QString &playerText, const QHash<QString, QList<QtResources::File>> &qmlByLeaf,
                             QSet<QString> *pageNames, QVariantList *tabs, QString *error)
 {
+    QHash<QString, int> pageCounts;
+    for (auto it = qmlByLeaf.cbegin(); it != qmlByLeaf.cend(); ++it)
+        pageCounts.insert(it.key(), it.value().size());
+    const auto model = NativeSettingsModel::locate(playerText, pageCounts, error);
+    if (model.nameBegin < 0) return false;
     const QString masked = QmlText::mask(playerText);
-    const QRegularExpression inlineModelDeclaration(
-        QStringLiteral("\\bproperty\\s+(?:[A-Za-z_][A-Za-z0-9_]*\\s+)*SettingElementModelList\\s+pSettingsItems\\b"));
-    const bool inlineSettingsModel = inlineModelDeclaration.match(masked).hasMatch();
-    const QRegularExpression componentSettingsBindingPattern(
-        QStringLiteral("\\bpSettingsWindow\\s*(?:=|:)\\s*[A-Za-z_][A-Za-z0-9_]*\\.createObject\\s*\\([^;]*(?:[\\\"']pSettingsItems[\\\"']|\\bpSettingsItems\\b)\\s*:\\s*([A-Za-z_][A-Za-z0-9_]*)"));
-    QRegularExpressionMatch componentSettingsBinding = componentSettingsBindingPattern.match(playerText);
-    if (!componentSettingsBinding.hasMatch()) {
-        // Some MSI builds create UiSettingsWindow first and assign its model
-        // immediately afterward instead of passing it in createObject's map.
-        const QRegularExpression separateSettingsModelBinding(
-            QStringLiteral("\\bpSettingsWindow\\s*(?:\\.\\s*pSettingsItems|\\[\\s*[\\\"']pSettingsItems[\\\"']\\s*\\])\\s*=\\s*([A-Za-z_][A-Za-z0-9_]*)"));
-        componentSettingsBinding = separateSettingsModelBinding.match(playerText);
-    }
-    const bool liveComponentBinding = componentSettingsBinding.hasMatch();
-    const QString settingsComponentId = liveComponentBinding
-        ? componentSettingsBinding.captured(1) : QString();
-
-    QList<QmlText::Object> settingsComponents;
-    if (liveComponentBinding) {
-        const QRegularExpression settingsId(
-            QStringLiteral("\\bid\\s*:\\s*%1\\b").arg(QRegularExpression::escape(settingsComponentId)));
-        for (const auto &component : QmlText::objects(masked, QStringLiteral("Component"))) {
-            const QString body = masked.mid(component.open, component.end - component.open);
-            if (settingsId.match(body).hasMatch()) settingsComponents << component;
-        }
-    }
-
-    const auto allModels = QmlText::objects(masked, QStringLiteral("SettingElementModelList"));
-    QList<QmlText::Object> models;
-    QList<QmlText::Object> inlineSettingsModels;
-    for (const auto &model : allModels) {
-        bool inlineOwner = false;
-        if (inlineSettingsModel) {
-            QRegularExpressionMatch nearestDeclaration;
-            auto declarations = inlineModelDeclaration.globalMatch(masked.left(model.nameBegin));
-            while (declarations.hasNext()) nearestDeclaration = declarations.next();
-            if (nearestDeclaration.hasMatch()) {
-                const QString between = masked.mid(nearestDeclaration.capturedEnd(),
-                                                   model.nameBegin - nearestDeclaration.capturedEnd());
-                inlineOwner = QRegularExpression(QStringLiteral("^\\s*:\\s*$"))
-                                  .match(between).hasMatch();
-            }
-        }
-        bool componentOwner = false;
-        for (const auto &component : settingsComponents) {
-            if (model.nameBegin > component.open && model.end <= component.end) {
-                componentOwner = true;
-                break;
-            }
-        }
-        if (inlineOwner) inlineSettingsModels << model;
-        if (inlineOwner || componentOwner) models << model;
-    }
-    // Some older Player QML packages declare the native model in plr.qml but
-    // inherit/compose its element list without a local pSettingElements
-    // binding. If there is exactly one model and a real Settings-window
-    // connection, it is still unambiguous; scope discovery to that model body.
-    if (models.isEmpty() && allModels.size() == 1
-        && (inlineSettingsModel || (liveComponentBinding && settingsComponents.size() == 1)))
-        models << allModels.first();
-    // Older MSI player QML can declare several model objects, but the one
-    // directly initialized by the property named pSettingsItems is the model
-    // consumed by UiSettingsWindow. If no unique matching Component exists,
-    // prefer that unique inline owner rather than rejecting it alongside nested
-    // models for subpages.
-    if (models.size() > 1 && settingsComponents.size() != 1 && inlineSettingsModels.size() == 1)
-        models = inlineSettingsModels;
-
-    // When plr.qml constructs the window with
-    // `pSettingsItems: someSettingsItems.createObject(...)`, that Component is
-    // the object actually passed to UiSettingsWindow. Prefer its root model
-    // (especially an explicitly named pSettingsItems model) over stale inline
-    // declarations and nested page-local models elsewhere in plr.qml.
-    if (models.size() > 1 && liveComponentBinding) {
-        QList<QmlText::Object> namedSettingsModels;
-        QList<QmlText::Object> componentRootModels;
-        for (const auto &model : models) {
-            for (const auto &component : settingsComponents) {
-                if (model.nameBegin <= component.open || model.end > component.end) continue;
-                int depth = 0;
-                for (int i = component.open + 1; i < model.nameBegin; ++i) {
-                    if (masked.at(i) == QLatin1Char('{')) ++depth;
-                    else if (masked.at(i) == QLatin1Char('}')) --depth;
-                }
-                if (depth != 0) continue;
-                componentRootModels << model;
-                QmlText::Binding idBinding;
-                if (QmlText::binding(masked, model.open, model.end - 1,
-                                     QStringLiteral("id"), &idBinding)
-                    && masked.mid(idBinding.valueBegin,
-                                  idBinding.valueEnd - idBinding.valueBegin).trimmed()
-                        == QLatin1String("pSettingsItems"))
-                    namedSettingsModels << model;
-            }
-        }
-        if (namedSettingsModels.size() == 1) models = namedSettingsModels;
-        else if (componentRootModels.size() == 1) models = componentRootModels;
-    }
-    if (models.size() > 1) {
-        QList<QmlText::Object> explicitlyNamed;
-        for (const auto &candidate : models) {
-            QmlText::Binding idBinding;
-            if (QmlText::binding(masked, candidate.open, candidate.end - 1,
-                                 QStringLiteral("id"), &idBinding)
-                && masked.mid(idBinding.valueBegin,
-                              idBinding.valueEnd - idBinding.valueBegin).trimmed()
-                    == QLatin1String("pSettingsItems"))
-                explicitlyNamed << candidate;
-        }
-        if (explicitlyNamed.size() == 1) models = explicitlyNamed;
-    }
-    // A live Component can contain several nested SettingElementModelList
-    // objects (for page subviews as well as the tab strip). Prefer the unique
-    // model whose page list resolves to the About page and the full native tab
-    // set; unrelated page-local models must not make the actual Settings panel
-    // look unsupported.
-    if (models.size() > 1) {
-        QList<QmlText::Object> completeModels;
-        const QRegularExpression pageSource(QStringLiteral("\\bpQmlSource\\s*:"));
-        for (const auto &candidate : models) {
-            int begin = candidate.open;
-            int end = candidate.end - 1;
-            QmlText::Binding list;
-            if (QmlText::binding(masked, candidate.open, candidate.end - 1,
-                                 QStringLiteral("pSettingElements"), &list)) {
-                begin = list.valueBegin;
-                end = list.valueEnd;
-            }
-            int resolved = 0;
-            bool hasAbout = false;
-            auto sources = pageSource.globalMatch(masked.mid(begin, end - begin));
-            while (sources.hasNext()) {
-                const auto source = sources.next();
-                const int valueBegin = begin + source.capturedEnd();
-                QString path;
-                if (!literalQmlString(playerText, valueBegin, end, &path)) continue;
-                const QString leaf = QFileInfo(path).fileName();
-                const auto found = qmlByLeaf.constFind(leaf.toCaseFolded());
-                if (found == qmlByLeaf.cend() || found.value().size() != 1) continue;
-                ++resolved;
-                if (leaf.compare(kAboutLeaf, Qt::CaseInsensitive) == 0) hasAbout = true;
-            }
-            if (hasAbout && resolved >= 8) completeModels << candidate;
-        }
-        if (completeModels.size() == 1) models = completeModels;
-    }
-    if (playerText.isEmpty() || models.size() != 1) {
-        if (models.isEmpty()) {
-            *error = QStringLiteral("The registered plr.qml does not expose a live native Settings tab model; this player layout is unsupported.");
-        } else {
-            QStringList candidateIds;
-            for (const auto &candidate : models) {
-                QmlText::Binding idBinding;
-                QString id = QStringLiteral("<anonymous>");
-                if (QmlText::binding(masked, candidate.open, candidate.end - 1,
-                                     QStringLiteral("id"), &idBinding))
-                    id = masked.mid(idBinding.valueBegin,
-                                    idBinding.valueEnd - idBinding.valueBegin).trimmed();
-                candidateIds << id;
-            }
-            const QString binding = liveComponentBinding
-                ? QStringLiteral("the pSettingsItems binding resolves to object id %1").arg(settingsComponentId)
-                : QStringLiteral("no pSettingsItems Component binding was resolved from pSettingsWindow");
-            *error = QStringLiteral("The registered plr.qml exposes multiple possible live Settings tab models (%1); refusing to guess. %2.")
-                         .arg(candidateIds.join(QStringLiteral(", ")), binding);
-        }
-        return false;
-    }
-
-    const auto &model = models.first();
     int sourceBegin = model.open;
     int sourceEnd = model.end - 1;
     QmlText::Binding elements;
@@ -541,7 +353,7 @@ bool readSettingsModelPages(const QString &playerText, const QHash<QString, QLis
         const int valueBegin = colon + 1;
         if (valueBegin >= sourceEnd) break;
         QString page;
-        if (!literalQmlString(playerText, valueBegin, sourceEnd, &page)) {
+        if (!NativeSettingsModel::literalQmlString(playerText, valueBegin, sourceEnd, &page)) {
             *error = QStringLiteral("A page in the live Settings tab model has a dynamic or malformed pQmlSource; it cannot be resolved safely.");
             return false;
         }
@@ -552,7 +364,13 @@ bool readSettingsModelPages(const QString &playerText, const QHash<QString, QLis
             return false;
         }
         const auto found = qmlByLeaf.constFind(leaf.toCaseFolded());
-        if (found == qmlByLeaf.cend() || found.value().size() != 1) {
+        const bool shaderModulePage = page == ShaderSettingsSource::pageUrl()
+            && ShaderSettingsSource::hasPlayer(playerText);
+        // The only external page admitted here is our intact, independently
+        // validated native shader integration. A similarly named missing page
+        // or an arbitrary file URL must never weaken native graph validation.
+        if (shaderModulePage ? found != qmlByLeaf.cend()
+                             : (found == qmlByLeaf.cend() || found.value().size() != 1)) {
             *error = QStringLiteral("The Settings tab QML page %1 is missing or ambiguous in the registered player resources.").arg(leaf);
             return false;
         }
@@ -625,6 +443,16 @@ TargetSources readSources(const QString &exePath, const QByteArray &image)
     QSet<QString> pageNames;
     if (!readSettingsModelPages(playerText, qmlByLeaf, &pageNames, &out.tabs, &out.error))
         return out;
+    if (ShaderSettingsSource::hasPlayer(playerText) || ShaderSettingsSource::hasWindow(out.window.text)) {
+        QHash<QString, int> pageCounts;
+        for (auto it = qmlByLeaf.cbegin(); it != qmlByLeaf.cend(); ++it)
+            pageCounts.insert(it.key(), it.value().size());
+        const auto shaderPlan = ShaderSettingsSource::prepare(playerText, out.window.text, pageCounts);
+        if (!shaderPlan.ok) {
+            out.error = shaderPlan.error;
+            return out;
+        }
+    }
     bool hasAboutPage = false;
     for (const QString &path : pageNames)
         if (QFileInfo(path).fileName().compare(kAboutLeaf, Qt::CaseInsensitive) == 0)
@@ -782,7 +610,12 @@ QString buildWindow(const QString &stock)
     // address bIcons by the public shell id, never by r.parent.
     //
     // Keep the native 568 px page column, footer clearance and loader callbacks.
-    // Only the selected tab gains a soft themed highlight; hover is quieter.
+    // Only the selected tab gains a soft themed highlight and a full-colour 1 px
+    // outline; hover is quieter. A separate transparent rectangle keeps the
+    // outline opaque instead of fading it with the .2-opacity background.
+    // Retain the approved 6 px tab corners; glass must not turn them into pills.
+    // Grouped icon properties and shared title-font metrics retain the complete
+    // legacy 2468-byte slot budget, including its required 32-byte headroom.
     // A public Controls ToolButton paints/tints each PNG icon, with no optional
     // SVG decoder, GraphicalEffects or private Controls.impl import. Its disabled,
     // background-free surface leaves all input to the enclosing tab MouseArea.
@@ -793,18 +626,22 @@ QString buildWindow(const QString &stock)
     // or adding space between the title and tabs.
     // StackLayout fills its Loader children by default; anchoring those children
     // as well conflicts with its geometry and produces native Qt warnings.
+    // The whole native page/footer gets an independent flat, opaque backing.
+    // Never rely on a rounded/gradient shell for transparent native pages.
+    // The unused generated stack id has no native callback references; omitting
+    // it funds that backing within the real compressed resource-slot budget.
     // Keep the template small, but the *whole* compressed Window (including
     // native callbacks, copyright header and geometry helper) must fit the slot.
     // Template length alone cannot predict that compression budget.
-    QString replacement = QStringLiteral(R"QML(UiShadowContainer{//BSI v16
+    QString replacement = QStringLiteral(R"QML(UiShadowContainer{//BSI v21
 id:iSettingsWindowShadowContainer;anchors.fill:parent
 property var bIcons:({})
-Rectangle{id:r;property var q:UiTheme.colors;anchors.fill:parent;radius:14;color:r.q.primary80
+Rectangle{id:r;property var c:UiTheme.colors;anchors.fill:parent;radius:14;color:r.c.primary80
 Column{Item{width:r.width;height:56
-MouseArea{anchors.fill:parent;onPressed:iSettingsWindow.startSystemMove()}Text{id:h;text:qsTr('Settings');color:r.q.primary10;font:UiTheme.fonts.bodyLarge;anchors.centerIn:parent}UiImageButton{asset:'CloseIcon';x:r.width-32;y:12;onClicked:iSettingsWindow.close()}}ListView{width:Math.max(0,Math.min(contentWidth,r.width-48));height:44;x:(r.width-width)/2;clip:true;orientation:Qt.Horizontal;model:pSettingsItems.pSettingElements;spacing:4
+MouseArea{anchors.fill:parent;onPressed:iSettingsWindow.startSystemMove()}Text{id:h;text:qsTr('Settings');color:r.c.primary10;font:UiTheme.fonts.bodyLarge;anchors.centerIn:parent}UiImageButton{asset:'CloseIcon';x:r.width-32;y:12;onClicked:iSettingsWindow.close()}}ListView{width:Math.max(0,Math.min(contentWidth,r.width-48));height:44;x:(r.width-width)/2;clip:true;orientation:Qt.Horizontal;model:pSettingsItems.pSettingElements;spacing:4
 delegate:MouseArea{hoverEnabled:true;visible:c!=='';property var c:iSettingsWindowShadowContainer.bIcons[index];width:c===''?-4:m.boundingRect.width+22;height:44;onClicked:{fChangeSelectedSetting(index);forceActiveFocus()}
-Rectangle{anchors.fill:parent;radius:6;color:t.color;opacity:index==pCurrentTabIndex?.2:parent.containsMouse?.1:0}Text{id:t;text:modelData.pButtonText;font:h.font;x:11-m.boundingRect.x;y:c?0:22-height/2;color:r.q[index==pCurrentTabIndex?'subWindowHeaderClick':'primary20']}TextMetrics{id:m;text:t.text;font:t.font}Rectangle{visible:modelData.pShowRedDot;x:parent.width-8;y:t.y+6;width:6;height:6;radius:3;color:r.q.dangerNormal}ToolButton{width:18;height:18;x:parent.width/2-9;y:24;enabled:false;padding:0;background:null;icon.source:c||'';icon.color:index==pCurrentTabIndex?t.color:'transparent';icon.width:18;icon.height:18}}}Item{width:Math.min(r.width-48,568);x:(r.width-width)/2;height:r.height-118
-StackLayout{id:iSelectedSettingControl;anchors.fill:parent;currentIndex:pCurrentTabIndex;anchors.topMargin:12
+Rectangle{anchors.fill:parent;radius:6;color:t.color;opacity:index==pCurrentTabIndex?.2:parent.containsMouse?.1:0}Rectangle{anchors.fill:parent;radius:6;border.color:index==pCurrentTabIndex?t.color:'transparent';color:'transparent'}Text{id:t;text:modelData.pButtonText;font:h.font;x:11-m.boundingRect.x;y:c?0:22-height/2;color:r.c[index==pCurrentTabIndex?'subWindowHeaderClick':'primary20']}TextMetrics{id:m;text:t.text;font:h.font}Rectangle{visible:modelData.pShowRedDot;x:parent.width-8;y:t.y+6;width:6;height:6;radius:3;color:r.c.dangerNormal}ToolButton{width:18;height:18;x:parent.width/2-9;y:24;enabled:false;padding:0;background:null;icon{width:18;height:18;color:index==pCurrentTabIndex?t.color:'transparent';source:c||''}}}}Rectangle{color:r.color;width:Math.min(r.width-48,568);x:(r.width-width)/2;height:r.height-118
+StackLayout{anchors.fill:parent;currentIndex:pCurrentTabIndex;anchors.topMargin:12
 Repeater{model:pSettingsItems.pSettingElements;delegate:Loader{Component.onCompleted:setSource(modelData.pQmlSource,modelData.pComponentArgs||{});onLoaded:{item.anchors.fill=item.parent;modelData.pComponentObj=item;item.fOnQmlLoaded&&item.fOnQmlLoaded()}}}}}}}}
 )QML");
     // Older MSI/BlueStacks sources have a 2468-byte compressed slot. Retaining
@@ -814,10 +651,11 @@ Repeater{model:pSettingsItems.pSettingElements;delegate:Loader{Component.onCompl
     QString out = QmlText::compactWhitespace(stock.left(target.nameBegin));
     out += replacement;
     out += stock.mid(target.end);
-    // Latest 1301x665 reference: visible border x=140..1177, y=49..629.
-    // Match its 1038x581 frame plus the unchanged 15 px shadow: 1068x611.
+    // Capture_LI.jpg marks the oversized side bands, not the native controls.
+    // Keep the 568 px page with 91 px side gutters: a 750x470 visible frame
+    // (780x500 with the native shadow), wide rather than a near-square crop.
     // Retain viewport guards, centering, theme, controls and native page sizes.
-    const QString helper = QStringLiteral(R"QML(onVisibleChanged:if(visible&&transientParent){var t=transientParent;width=Math.min(t.width*.96,1068);height=Math.min(t.height*.94,611);x=t.x+t.width/2-width/2;y=t.y+t.height/2-height/2})QML");
+    const QString helper = QStringLiteral(R"QML(onVisibleChanged:if(visible&&transientParent){var t=transientParent;width=Math.min(t.width*.96,780);height=Math.min(t.height*.94,500);x=(t.width-width)/2+t.x;y=(t.height-height)/2+t.y})QML");
     const int rootClose = out.lastIndexOf(QLatin1String("\n}"));
     if (rootClose < 0) return {};
     out.insert(rootClose, helper);
@@ -841,7 +679,8 @@ QVariantMap byTabIndex(const QVariantMap &byId, const QVariantList &tabs)
 
 QString buildAbout(const QString &developerName, const QString &tagline,
                    const QVariantList &links, const QString &logoSource,
-                   const QStringList &hiddenTabs, const QVariantMap &tabIcons)
+                   const QStringList &hiddenTabs, const QVariantMap &tabIcons,
+                   const QString &linkModelSource = QString(), bool linkArtwork = false)
 {
     QString rows;
     for (const QVariant &entry : links) {
@@ -852,12 +691,6 @@ QString buildAbout(const QString &developerName, const QString &tagline,
         rows += QStringLiteral("\n        { title: %1, url: %2 },")
             .arg(qmlString(label), qmlString(url));
     }
-    QString hiddenLiteral = QStringLiteral("[");
-    for (const QString &page : hiddenTabs) {
-        if (hiddenLiteral.size() > 1) hiddenLiteral += QLatin1Char(',');
-        hiddenLiteral += qmlString(page.toCaseFolded());
-    }
-    hiddenLiteral += QLatin1Char(']');
     QString iconLiteral = QStringLiteral("({");
     for (auto it = tabIcons.cbegin(); it != tabIcons.cend(); ++it) {
         if (iconLiteral.size() > 2) iconLiteral += QLatin1Char(',');
@@ -883,13 +716,38 @@ QString buildAbout(const QString &developerName, const QString &tagline,
     // compact - whitespace and repeated token spellings are the difference
     // between "the icon applies" and "needs 2495 bytes but its slot only holds
     // 2337".
-    // The logo is a ColumnLayout child: plain width/height lose to a decoded
-    // image's implicit size. Use preferred AND maximum layout hints so large
-    // native/custom artwork stays small without stretching its aspect ratio.
+    // A plain Column, explicit 160x60 image bounds and the public ItemDelegate
+    // replace the heavier nested Layouts/handmade link buttons. Identity strings
+    // bind directly to Text; the unused hidden-list property is retired (empty
+    // numeric icon-map entries still hide tabs). The selected-tab material fits
+    // the two existing resource slots, even with thirteen PNG URLs and four
+    // links. No companion QML/script/DLL or new resource is needed.
+    //
+    // About is eagerly loaded by the native Repeater even when its tab is hidden.
+    // v21 restores one FLAT, OPAQUE native primary80 across the complete window.
+    // Only the selected generated tab's fill may have a reflection. Never add
+    // a shell gradient/rim: the brighter frame around an inset dark page was
+    // the mismatch in the user's screenshot. Hover remains a flat quiet tint.
+    // Every Loader is a HARD boundary: never enter any native page or the
+    // Shaders controls, and never follow background/handle/popup pointers into
+    // lazy native parts or the global Overlay. Native gradients, colors,
+    // geometry, validation, opacity and input remain exactly native.
+    // The generated delegate has one opaque-color fill under its transparent
+    // outline; do not decorate the outline, badges or shell. A private runtime
+    // marker prevents duplicate factories. Each fill retains ONE owned Gradient
+    // and a binding selects it only at the existing selected opacity (.2).
+    // Switching tabs/hovering detaches/reuses it, not a per-frame allocation.
+    // Qt 5/6 represent unset gradient as null OR undefined; use == null.
+    // Explicitly set BOTH stops: older Qt leaves an omitted position
+    // uninitialized (QTBUG-140364), causing random/NaN gradient geometry.
+    // Defer first discovery until Loader bindings settle. The bounded,
+    // visible-window timer discovers only new generated tab delegates (including
+    // Shaders' reorder). Layered items, other windows and UiTheme stay untouched.
+    // Public QtQuick 2.15 only: no optional blur/private implementation imports.
     QString generated = QStringLiteral(R"QML(import QtQuick 2.15
 import QtQuick.Controls 2.15
-import QtQuick.Layouts 1.15
-Item{objectName:"aboutSettings"
+import QtQuick.Window 2.15
+Item{id:a;objectName:"aboutSettings"
 property bool pUpdateAvailable:false
 property string pUpdateVersion:""
 property string pMoreInfoURL:""
@@ -897,70 +755,41 @@ property string pDownloadURL:""
 property bool pIsInCompatibleUpdateVersion:false
 property string pParentWindow:""
 property string pShortDisplayName:""
-property string pDeveloperName:@@BSI_DEVELOPER@@
-property string pDeveloperTagline:@@BSI_TAGLINE@@
-property var bsiHiddenTabs:@@BSI_HIDDEN_TABS@@
 property var bsiTabIcons:@@BSI_TAB_ICONS@@
-property var pDeveloperLinks:[@@BSI_LINKS@@]
+property var bsiTheme:UiTheme
+property var c:UiTheme.colors
 // BSI CUSTOMIZER: redesigned About page v1
-ColumnLayout{anchors.fill:parent;spacing:0
-ScrollView{Layout.fillWidth:true;Layout.fillHeight:true;clip:true
-background:Rectangle{color:"transparent"}
-contentWidth:availableWidth;contentHeight:iAboutD.implicitHeight+48
-ColumnLayout{id:iAboutD;width:Math.min(440,parent.width-24);anchors.horizontalCenter:parent.horizontalCenter
-Layout.alignment:Qt.AlignHCenter|Qt.AlignTop;spacing:16
-Item{Layout.fillWidth:true;Layout.preferredHeight:28}
-Image{objectName:"bsiAboutEmulatorLogo";source:@@BSI_LOGO_SOURCE@@
-Layout.preferredWidth:160;Layout.preferredHeight:60;Layout.maximumWidth:160;Layout.maximumHeight:60
-fillMode:Image.PreserveAspectFit;Layout.alignment:Qt.AlignHCenter}
-Text{objectName:"bsiAboutDeveloperName";text:pDeveloperName;font:UiTheme.fonts.bodyLarge
-color:UiTheme.colors.primary10;horizontalAlignment:Text.AlignHCenter
-wrapMode:Text.Wrap;Layout.fillWidth:true}
-Text{objectName:"bsiAboutDeveloperTagline";visible:pDeveloperTagline.length>0
-text:pDeveloperTagline;font:UiTheme.fonts.bodySmall;color:UiTheme.colors.primary30
-horizontalAlignment:Text.AlignHCenter;wrapMode:Text.Wrap;Layout.fillWidth:true}
-Rectangle{Layout.fillWidth:true;Layout.preferredHeight:1;color:UiTheme.colors.primary60}
-Repeater{model:pDeveloperLinks
-delegate:Rectangle{objectName:"bsiAboutDeveloperLink"
-Layout.fillWidth:true;Layout.preferredHeight:42
-property bool hovered:false
-radius:10;border.width:1
-color:hovered?Qt.rgba(UiTheme.colors.accentNormal.r,UiTheme.colors.accentNormal.g,UiTheme.colors.accentNormal.b,.16)
-:Qt.rgba(UiTheme.colors.primary60.r,UiTheme.colors.primary60.g,UiTheme.colors.primary60.b,.42)
-border.color:hovered?UiTheme.colors.accentNormal:UiTheme.colors.primary60
-Text{anchors.left:parent.left;anchors.right:parent.right;anchors.leftMargin:14
-anchors.rightMargin:38;anchors.verticalCenter:parent.verticalCenter
-text:modelData.title;font:UiTheme.fonts.bodyMedium;elide:Text.ElideRight
-color:parent.hovered?UiTheme.colors.accentNormal:UiTheme.colors.primary10}
-Text{anchors.right:parent.right;anchors.rightMargin:14
-anchors.verticalCenter:parent.verticalCenter;text:"\u2197"
-color:UiTheme.colors.accentNormal;font.pixelSize:16}
-MouseArea{anchors.fill:parent;hoverEnabled:true;cursorShape:Qt.PointingHandCursor
-onEntered:parent.hovered=true;onExited:parent.hovered=false
-onClicked:{var t=String(modelData.url||"");if(/^https?:\/\//i.test(t))Qt.openUrlExternally(t)}}}}
-Text{visible:pDeveloperLinks.length===0
-text:qsTranslate("QObject","Add up to four developer links in BSI Customizer.")
-color:UiTheme.colors.primary30;font:UiTheme.fonts.bodySmall
-horizontalAlignment:Text.AlignHCenter;wrapMode:Text.Wrap;Layout.fillWidth:true}
-Item{Layout.fillWidth:true;Layout.preferredHeight:28}}}}
-
-// Publish icons and hidden sentinels by walking up to the owning shell.
-function fOnQmlLoaded(){var p=parent;while(p&&p.bIcons===undefined)p=p.parent;if(p)p.bIcons=bsiTabIcons}
-function fCheckForUpdateCallback(apiCallStatus,jsonData){
-if(apiCallStatus===0){var j=JSON.parse(jsonData)
-pUpdateAvailable=String(j.update_available).toLowerCase()==="true"
-pIsInCompatibleUpdateVersion=pUpdateAvailable&&String(j.update_details.is_build_compatible).toLowerCase()!=="true"
-if(pUpdateAvailable){pUpdateVersion=j.update_details.client_version
-pMoreInfoURL=j.update_details.detailed_changelogs_url
-pDownloadURL=j.update_details.download_url}}
-else{pUpdateAvailable=false;pIsInCompatibleUpdateVersion=false}}
+ScrollView{anchors.fill:parent;clip:true;contentWidth:availableWidth;contentHeight:d.height+24;background:null
+Column{id:d;width:Math.min(440,parent.width-24);anchors.horizontalCenter:parent.horizontalCenter;spacing:16;topPadding:16;bottomPadding:16
+Image{objectName:"bsiAboutEmulatorLogo";source:@@BSI_LOGO_SOURCE@@;width:160;height:60;fillMode:Image.PreserveAspectFit;anchors.horizontalCenter:parent.horizontalCenter}
+Text{objectName:"bsiAboutDeveloperName";text:@@BSI_DEVELOPER@@;font:UiTheme.fonts.bodyLarge;color:a.c.primary10;horizontalAlignment:Text.AlignHCenter;wrapMode:Text.Wrap;width:parent.width}
+Text{objectName:"bsiAboutDeveloperTagline";visible:text.length>0;text:@@BSI_TAGLINE@@;font:UiTheme.fonts.bodySmall;color:a.c.primary30;horizontalAlignment:Text.AlignHCenter;wrapMode:Text.Wrap;width:parent.width}
+Rectangle{width:parent.width;height:1;color:a.c.primary60}
+Repeater{model:[@@BSI_LINKS@@]
+delegate:ItemDelegate{objectName:"bsiAboutDeveloperLink";width:d.width;height:42;hoverEnabled:true;leftPadding:14;rightPadding:38;text:modelData.title;font:UiTheme.fonts.bodyMedium;palette.text:hovered?a.c.accentNormal:a.c.primary10
+background:Rectangle{radius:10;color:parent.hovered?Qt.rgba(a.c.accentNormal.r,a.c.accentNormal.g,a.c.accentNormal.b,.16):Qt.rgba(a.c.primary60.r,a.c.primary60.g,a.c.primary60.b,.42);border.color:parent.hovered?a.c.accentNormal:a.c.primary60}
+Text{anchors{right:parent.right;rightMargin:14;verticalCenter:parent.verticalCenter}text:"\u2197";color:a.c.accentNormal;font.pixelSize:16}
+onClicked:if(/^https?:\/\//i.test(modelData.url))Qt.openUrlExternally(modelData.url)}}
+}}
+function fOnQmlLoaded(){var p=parent;while(p&&p.bIcons===undefined)p=p.parent;if(p)p.bIcons=bsiTabIcons;Qt.callLater(fGlassTabs)}
+function fCheckForUpdateCallback(s,d){if(s===0){var j=JSON.parse(d);pUpdateAvailable=/^true$/i.test(j.update_available);pIsInCompatibleUpdateVersion=pUpdateAvailable&&!/^true$/i.test(j.update_details.is_build_compatible);if(pUpdateAvailable){pUpdateVersion=j.update_details.client_version;pMoreInfoURL=j.update_details.detailed_changelogs_url;pDownloadURL=j.update_details.download_url}}else{pUpdateAvailable=false;pIsInCompatibleUpdateVersion=false}}
 function fUpdateShortDisplayName(n){pShortDisplayName=String(n||"")}
+Component{id:g;Gradient{property var s;property color c:s.color;GradientStop{position:0;color:Qt.lighter(c,1.7)}GradientStop{position:1;color:Qt.rgba(c.r,c.g,c.b,c.a*.88)}}}
+function fGlassTab(o){var v=g.createObject(o,{s:o});o.objectName='bsiTabGlass';o.gradient=Qt.binding(()=>o.opacity===.2?v:null)}
+function fGlassTabs(){var r=parent;while(r&&r.bIcons===undefined)r=r.parent;if(!r)return;var q=[r],n=0;while(q.length&&n++<4096){var o=q.pop();if(!o||o.minimumSize!==undefined||o.item!==undefined&&o.source!==undefined||o.layer&&o.layer.enabled)continue;if(o.border&&o.gradient==null&&o.parent&&o.parent.containsMouse!==undefined&&o.color.a&&o.objectName!=='bsiTabGlass')fGlassTab(o);var c=o.children||[];for(var i=0;i<c.length&&q.length<4096;i++)q.push(c[i])}}
+Connections{target:a.Window.window;function onPCurrentTabIndexChanged(){fGlassTabs()}}
+Timer{interval:160;running:a.Window.window&&a.Window.window.visible;repeat:true;onTriggered:fGlassTabs()}
 }
 )QML");
     generated.replace(QStringLiteral("@@BSI_DEVELOPER@@"), qDeveloper);
     generated.replace(QStringLiteral("@@BSI_TAGLINE@@"), qTagline);
-    generated.replace(QStringLiteral("@@BSI_HIDDEN_TABS@@"), hiddenLiteral);
     generated.replace(QStringLiteral("@@BSI_TAB_ICONS@@"), iconLiteral);
+    if (!linkModelSource.isEmpty())
+        generated.replace(QStringLiteral("Repeater{model:[@@BSI_LINKS@@]"),
+            QStringLiteral("Loader{id:lm;source:%1}\nRepeater{model:lm.item?lm.item.links:[]").arg(qmlString(linkModelSource)));
+    if (linkArtwork)
+        generated.replace(QStringLiteral("rightPadding:38;text:modelData.title;"),
+            QStringLiteral("rightPadding:38;icon{source:modelData.icon||'';width:20;height:20;color:'transparent'}text:modelData.title;"));
     generated.replace(QStringLiteral("@@BSI_LINKS@@"), rows);
     generated.replace(QStringLiteral("@@BSI_LOGO_SOURCE@@"), qmlString(logoSource));
     return generated;
@@ -990,6 +819,16 @@ QVariantMap readRecovery(const QString &path, const QString &exePath)
     return map;
 }
 
+bool withoutShaderWindow(const QByteArray &bytes, QByteArray *base)
+{
+    const QString text = EmbeddedResources::decodeText(bytes);
+    if (!ShaderSettingsSource::hasWindow(text)) return false;
+    QString stripped, error;
+    if (!ShaderSettingsSource::removeWindow(text, &stripped, &error)) return false;
+    *base = utf8PreservingBom(stripped, bytes);
+    return true;
+}
+
 QVariantList sourceRecords(const TargetSources &sources, const QMap<QString, QByteArray> &originals,
                            const QMap<QString, QByteArray> &patched = {})
 {
@@ -1002,6 +841,16 @@ QVariantList sourceRecords(const TargetSources &sources, const QMap<QString, QBy
         const QString replacementHash = QString::fromLatin1(sha256(replacement));
         acceptedHashes << currentHash;
         if (replacementHash != currentHash) acceptedHashes << replacementHash;
+        // The independently owned shader overlay may be installed/removed
+        // between design updates. Accept only an exact reversible overlay of
+        // one of our hashed base sources, never arbitrary later window edits.
+        for (const auto &bytes : {source->bytes, replacement}) {
+            QByteArray base;
+            if (withoutShaderWindow(bytes, &base)) {
+                const QString hash = QString::fromLatin1(sha256(base));
+                if (!acceptedHashes.contains(hash)) acceptedHashes << hash;
+            }
+        }
         records << QVariantMap {
             {QStringLiteral("path"), source->path},
             {QStringLiteral("original"), QString::fromLatin1(original.toBase64())},
@@ -1049,15 +898,17 @@ QMap<QString, QByteArray> originalsFromRecovery(const QVariantMap &recovery,
 
 bool recoveryAcceptsCurrent(const QVariantMap &record, const QByteArray &current)
 {
-    const QString digest = QString::fromLatin1(sha256(current));
+    QStringList digests{QString::fromLatin1(sha256(current))};
+    QByteArray base;
+    if (withoutShaderWindow(current, &base)) digests << QString::fromLatin1(sha256(base));
     const QVariantList accepted = record.value(QStringLiteral("acceptedSha256")).toList();
     if (!accepted.isEmpty()) {
         for (const QVariant &hash : accepted)
-            if (hash.toString() == digest) return true;
+            if (digests.contains(hash.toString())) return true;
         return false;
     }
     // Read the first, not-yet-deployed schema during an in-place upgrade.
-    return record.value(QStringLiteral("patchedSha256")).toString() == digest;
+    return digests.contains(record.value(QStringLiteral("patchedSha256")).toString());
 }
 
 QVariantList operationsFor(const QMap<QString, QByteArray> &replacement)
@@ -1077,28 +928,11 @@ QVariantList operationsFor(const QMap<QString, QByteArray> &replacement)
 bool validateProfile(const QString &developerName, const QVariantList &links, QString *error)
 {
     if (developerName.trimmed().isEmpty() || developerName.trimmed().size() > 80
-        || developerName.contains(QChar(0)) || links.size() > 4) {
-        *error = QStringLiteral("Enter a developer name up to 80 characters and no more than four About links.");
+        || QRegularExpression(QStringLiteral("[\\x00-\\x1f\\x7f]")).match(developerName).hasMatch()) {
+        *error = QStringLiteral("Enter a developer name up to 80 characters without control characters.");
         return false;
     }
-    for (const QVariant &value : links) {
-        const QVariantMap link = value.toMap();
-        const QString title = link.value(QStringLiteral("title")).toString().trimmed();
-        const QString urlText = link.value(QStringLiteral("url")).toString().trimmed();
-        if (title.isEmpty() && urlText.isEmpty()) continue;
-        if (title.isEmpty() || title.size() > 80 || urlText.size() > 512
-            || QRegularExpression(QStringLiteral("[\\x00-\\x1f\\x7f]")).match(urlText).hasMatch()) {
-            *error = QStringLiteral("Every About link needs a label up to 80 characters and a valid HTTP(S) URL.");
-            return false;
-        }
-        const QUrl url(urlText, QUrl::StrictMode);
-        if (!url.isValid() || url.host().isEmpty() || !url.userInfo().isEmpty()
-            || (url.scheme().compare(QLatin1String("http"), Qt::CaseInsensitive) != 0
-                && url.scheme().compare(QLatin1String("https"), Qt::CaseInsensitive) != 0)) {
-            *error = QStringLiteral("About links must be valid HTTP or HTTPS URLs.");
-            return false;
-        }
-    }
+    if (!SettingsPanelLinks::clean(links, nullptr, error)) return false;
     return true;
 }
 
@@ -1174,7 +1008,10 @@ bool hasWindowMarker(const QString &text)
         || text.contains(kWindowDesignMarkerV8) || text.contains(kWindowDesignMarkerV9)
         || text.contains(kWindowDesignMarkerV10) || text.contains(kWindowDesignMarkerV12)
         || text.contains(kWindowDesignMarkerV13) || text.contains(kWindowDesignMarkerV14)
-        || text.contains(kWindowDesignMarkerV15) || text.contains(kWindowDesignMarker);
+        || text.contains(kWindowDesignMarkerV15) || text.contains(kWindowDesignMarkerV16)
+        || text.contains(kWindowDesignMarkerV17) || text.contains(kWindowDesignMarkerV18)
+        || text.contains(kWindowDesignMarkerV19) || text.contains(kWindowDesignMarkerV20)
+        || text.contains(kWindowDesignMarker);
 }
 
 // Standalone Image sources do not inherit the QML/HTML text's currentColor.
@@ -1431,7 +1268,8 @@ QVariantMap defaultTabIcons(const QVariantList &tabs, QString *error)
 
 QVariantMap readCustomAsset(const QString &path, const QString &kind)
 {
-    if (kind != QLatin1String("tab-icon") && kind != QLatin1String("logo"))
+    if (kind != QLatin1String("tab-icon") && kind != QLatin1String("logo")
+        && kind != QLatin1String("link-icon"))
         return fail(QStringLiteral("Unknown Settings-panel asset type."));
     const QFileInfo info(path);
     if (path.isEmpty() || !info.isFile() || info.isSymLink())
@@ -1450,7 +1288,7 @@ QVariantMap readCustomAsset(const QString &path, const QString &kind)
     const QVariantMap shrunk = shrinkAsset(
         {{QStringLiteral("mime"), mime},
          {QStringLiteral("data"), QString::fromLatin1(bytes.toBase64())}},
-        kind, artworkBudget(emptyPagePayload(), 0));
+        kind, kind == QLatin1String("link-icon") ? 0 : artworkBudget(emptyPagePayload(), 0));
     const QByteArray stored = QByteArray::fromBase64(
         shrunk.value(QStringLiteral("data")).toString().toLatin1());
     mime = shrunk.value(QStringLiteral("mime")).toString();
@@ -1540,6 +1378,14 @@ State analyze(const QString &exePath)
     } else {
         state.detail = QStringLiteral("The Settings window has %1 native page roots and a verified %2-resource QML dependency closure. Source files are ready; no emulator UI change is claimed yet.")
             .arg(state.settingsPageCount).arg(state.settingsQmlResourceCount);
+    }
+    if (state.applied && !sources.window.text.contains(kWindowDesignMarker))
+        state.detail += QStringLiteral(" An older Settings design is installed; choose Update rebuilt Settings panel for the opaque native theme and selected-tab-only glass.");
+    else if (state.applied && !sources.about.text.contains(QLatin1String("GradientStop{position:0;color:Qt.lighter(c,1.7)}")))
+        state.detail += QStringLiteral(" An older tab-reflection material is installed; choose Update rebuilt Settings panel to initialize both gradient endpoints for Qt 5/6.");
+    if (ShaderSettingsSource::hasWindow(sources.window.text)) {
+        state.restorable = false;
+        state.detail += QStringLiteral(" Remove the dependent native Shaders integration before restoring the underlying Settings design.");
     }
     if (!state.logoStatus.isEmpty()) state.detail += QLatin1Char(' ') + state.logoStatus;
     return state;
@@ -1676,6 +1522,8 @@ QVariantMap apply(const QString &exePath, const QString &developerName,
     const bool hadRecovery = !recovery.isEmpty();
 
     if (!enabled) {
+        if (ShaderSettingsSource::hasWindow(current.window.text))
+            return fail(QStringLiteral("Remove the native Shaders integration before restoring the underlying Settings-panel design. No source or recovery snapshot was changed."));
         if (recovery.isEmpty()) return fail(QStringLiteral("No verified Settings-panel recovery snapshot was found; nothing was changed."));
         RecoveryProblem restoreProblem = RecoveryProblem::None;
         const QMap<QString, QByteArray> originals = originalsFromRecovery(recovery, &restoreProblem);
@@ -1709,8 +1557,13 @@ QVariantMap apply(const QString &exePath, const QString &developerName,
     if (!validateProfile(developerName, links, &profileError)) return fail(profileError);
     for (auto it = profile.cbegin(); it != profile.cend(); ++it)
         if (it.key() != QLatin1String("hiddenTabs") && it.key() != QLatin1String("tabIcons")
-            && it.key() != QLatin1String("logo") && it.key() != QLatin1String("tagline"))
+            && it.key() != QLatin1String("logo") && it.key() != QLatin1String("tagline")
+            && it.key() != QLatin1String("links") && it.key() != QLatin1String("linkIcons"))
             return fail(QStringLiteral("Unknown Settings-panel profile option: %1.").arg(it.key()));
+    QVariantList normalizedLinks;
+    if (!SettingsPanelLinks::clean(links, &normalizedLinks, &profileError)) return fail(profileError);
+    const QVariantMap linkIcons = profile.value(QStringLiteral("linkIcons")).toMap();
+    if (linkIcons.size() > 64) return fail(QStringLiteral("Too many saved About link icons."));
     const QString tagline = profile.value(QStringLiteral("tagline")).toString().trimmed();
     if (tagline.size() > 120 || tagline.contains(QChar(0))
         || QRegularExpression(QStringLiteral("[\\x00-\\x1f\\x7f]")).match(tagline).hasMatch())
@@ -1906,9 +1759,14 @@ QVariantMap apply(const QString &exePath, const QString &developerName,
     const QString originalAboutText = EmbeddedResources::decodeText(originals.value(current.about.path));
     if (originalWindowText.isEmpty() || originalAboutText.isEmpty())
         return fail(QStringLiteral("A saved original QML source could not be decoded; the executable was not changed."));
-    const QString rebuiltWindow = buildWindow(originalWindowText);
+    QString rebuiltWindow = buildWindow(originalWindowText);
     if (rebuiltWindow.isEmpty())
         return fail(QStringLiteral("This BlueStacks build's Settings-window structure is not recognized. No file was changed."));
+    if (ShaderSettingsSource::hasWindow(current.window.text)) {
+        QString integrated, error;
+        if (!ShaderSettingsSource::addWindow(rebuiltWindow, &integrated, &error)) return fail(error);
+        rebuiltWindow = integrated;
+    }
     // The About page carries URLs, while the saved profile retains the
     // editable SVGs. Qt 5 (and unidentified players) get local PNG copies even
     // when data URIs would fit: the URI scheme and the SVG decoder are separate
@@ -1918,9 +1776,45 @@ QVariantMap apply(const QString &exePath, const QString &developerName,
     QString publishedLogoSource = logoSource;
     StagedAssetFiles stagedAssets;
     int referencedAssets = 0;
+    QString linkModelSource;
+    // A bounded, generated data-only QML object avoids both Qt 5 file-XHR
+    // restrictions and the fixed compressed EXE slot. It contains escaped
+    // literal strings only, never QML/JS supplied by a profile or SVG.
+    const auto stageLinkModel = [&]() -> QString {
+        if (!linkModelSource.isEmpty()) return QString();
+        QString rows, error;
+        for (const QVariant &value : normalizedLinks) {
+            const QVariantMap row = value.toMap();
+            QString icon;
+            const QString id = row.value(QStringLiteral("id")).toString();
+            if (linkIcons.contains(id)) {
+                const QVariantMap asset = shrinkAsset(linkIcons.value(id).toMap(), QStringLiteral("link-icon"), 0);
+                QString checked;
+                if (!storedAssetSource(asset, QStringLiteral("link-icon"), &checked, &error)) return error;
+                const QByteArray png = runtimeAssetPng(asset, true);
+                if (png.isEmpty()) return QStringLiteral("An About link icon could not be rendered. Choose it again.");
+                icon = writeAssetFile(exePath, png, &stagedAssets, &error);
+                if (icon.isEmpty()) return error;
+                ++referencedAssets;
+            }
+            if (!rows.isEmpty()) rows += QLatin1Char(',');
+            rows += QStringLiteral("{title:%1,url:%2,icon:%3}").arg(
+                qmlString(row.value(QStringLiteral("title")).toString()),
+                qmlString(row.value(QStringLiteral("url")).toString()), qmlString(icon));
+        }
+        const QByteArray model = (QStringLiteral("import QtQml 2.15\nQtObject{property var links:[")
+            + rows + QStringLiteral("]}\n")).toUtf8();
+        if (model.size() > 64 * 1024) return QStringLiteral("The About link data exceeds its safe asset budget.");
+        linkModelSource = writeAssetFile(exePath, model, &stagedAssets, &error, QStringLiteral(".qml"));
+        return linkModelSource.isEmpty() ? error : QString();
+    };
+    if (normalizedLinks.size() > 4 || !linkIcons.isEmpty()) {
+        const QString error = stageLinkModel();
+        if (!error.isEmpty()) return fail(error);
+    }
     const auto fits = [&](const QVariantMap &icons, const QString &logoSrc) {
-        return aboutFitProblem(image, buildAbout(developerName, tagline, links, logoSrc,
-                                                 hiddenTabs, icons).toUtf8()).isEmpty();
+        return aboutFitProblem(image, buildAbout(developerName, tagline, normalizedLinks, logoSrc,
+                                                 hiddenTabs, icons, linkModelSource, !linkIcons.isEmpty()).toUtf8()).isEmpty();
     };
     // buildAssets stores the logo under its own key, not directly in this map.
     // Reading bestLogoFiles as an asset wrote an empty file for every logo.
@@ -1964,8 +1858,12 @@ QVariantMap apply(const QString &exePath, const QString &developerName,
         publishedIcons = byFile;
         publishedLogoSource = logoByFile;
     }
-    const QString rebuiltAbout = buildAbout(developerName, tagline, links, publishedLogoSource,
-                                            hiddenTabs, publishedIcons);
+    if (linkModelSource.isEmpty() && !fits(publishedIcons, publishedLogoSource)) {
+        const QString error = stageLinkModel();
+        if (!error.isEmpty()) return fail(error);
+    }
+    const QString rebuiltAbout = buildAbout(developerName, tagline, normalizedLinks, publishedLogoSource,
+                                            hiddenTabs, publishedIcons, linkModelSource, !linkIcons.isEmpty());
     if (rebuiltAbout.isEmpty())
         return fail(QStringLiteral("The About page could not be generated; no file was changed."));
     QMap<QString, QByteArray> replacements {
@@ -2032,7 +1930,7 @@ QVariantMap apply(const QString &exePath, const QString &developerName,
                         .arg(referencedAssets);
     }
     return {{QStringLiteral("ok"), true},
-            {QStringLiteral("msg"), QStringLiteral("The screenshot-sized Settings window, themed selected tabs/icons and customizable About page were applied. A selective recovery snapshot was saved; restart BlueStacks to see it.") + assetNote},
+            {QStringLiteral("msg"), QStringLiteral("The opaque native-themed Settings window, selected-tab-only glass and customizable About page were applied. Native page/control materials are unchanged. A selective recovery snapshot was saved; restart BlueStacks to see it.") + assetNote},
             {QStringLiteral("recovery"), result.value(QStringLiteral("id"))}};
 }
 

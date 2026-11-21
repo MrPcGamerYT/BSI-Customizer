@@ -270,6 +270,16 @@ option refuses to write while BlueStacks is running, keeps the original
 `.bak`, verifies the rewritten QML by reading it back, and clears the player's
 QML disk cache so the change is picked up on the next start.
 
+**Extra phones in the stock Phone dropdown.** Adds ASUS ROG Phone 9/8,
+REDMAGIC 10/9 Pro, OnePlus 13/12 and Galaxy S25/S24 Ultra **first in the existing
+Settings → Phone dropdown**, keeping its stock appearance and existing choices.
+Choose a phone and use native Save changes/Discard; Apply alone does not select
+an identity or change FPS/root settings. Keep the feature's **local helper and
+recovery folder** in Customizer app data—the patched EXE is not self-contained.
+Saving a different identity retains the player's Android-framework-data warning.
+Game-specific high-FPS options are **not guaranteed**. See [profiles, recovery,
+tests and limitations](docs/PHONE-PROFILES.md).
+
 **Clean player UI (one click).** One apply hides every extra button.
 
 * **Title bar:** help, menu/settings, quests, rewards, raw-mode warning,
@@ -1032,6 +1042,8 @@ scripts/Run-SettingsPanel-Manual.cmd
 ```
 
 It reports the Customizer backend's real detection analysis and QML resource inventory, exercises apply on a temporary copy, and confirms the selected HD-Player.exe hash is unchanged. It then opens the GUI directly to **Interface → Settings panel rebuild** against a second disposable copy; the Apply button stays available so native diagnostics are visible instead of hidden by a UI support gate. The same page lets you center the native content, choose visible tabs, upload safe SVG tab icons, and customize the in-player About logo, name, and links. Uploaded artwork is stored only in the app profile and written to the disposable/selected player only on Apply. In manual mode, profile edits and apply/restore are restricted to temporary app settings and that copy. The CLI diagnostic is also available directly with `BSI-Customizer.exe --settings-panel-test <HD-Player.exe>`; see [the manual tester guide](docs/SETTINGS_PANEL_MANUAL_TEST.md).
+
+**Experimental native shaders:** the native **PATCHER → Player interface → Shaders** tab provides reviewed compatibility inspection, install/update, shader-only removal and recovery. The revised Single EXE workflow builds regular x64 release MSVC modules on genuine **Qt 5.15.2 / 6.2.4 public-API baselines**, not a `version.dll` proxy. New V3 modules can qualify on newer/equal same-major player runtimes only after full provider/symbol checks; older V2 downloads remain exact-version only. Apply the native Settings top-tabs redesign first. Incompatible or unknown installations refuse without replacing runtimes. Actual player game-frame effects and Intel/AMD/NVIDIA renderer combinations still require user verification: this is neither a universal-support nor a merge-ready claim. See the [Qt research and coverage limits](docs/EMULATOR-QT-COMPATIBILITY.md), [test/build/recovery guide](docs/SHADERS-USER-TEST.md) and [implementation limits](docs/SHADERS-INTEGRATION.md).
 
 The separately supplied **Pay Load Patcher** was reviewed for proxy-free DLL startup; it is **not enabled or bundled** as an installer. Python/JavaScript structural checks on four disposable player references passed, but safety failures and the distinction between loading a DLL and calling its initializer remain integration blockers. See the [direct-DLL review and pinned-source audit](docs/DLL-STARTUP-REVIEW.md); no actual payload DLL or live player was executed.
 

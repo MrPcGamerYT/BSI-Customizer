@@ -18,9 +18,9 @@ on:
         description: 'Windows runner (self-hosted requires your registered Windows x64 PC)'
         type: choice
         options:
-          - windows-latest
+          - windows-2022
           - self-hosted
-        default: windows-latest
+        default: windows-2022
       version:
         # Type the version here when running manually: the whole run (built
         # EXE name, BSI_VERSION inside the binary, tag and release) follows it,
@@ -60,10 +60,14 @@ jobs:
     name: Build & self-test (Windows x64)
     # Only an explicit manual run can select a self-hosted PC. PR code always
     # uses an isolated hosted runner, never a contributor-controlled local job.
-    runs-on: ${{ inputs.runner == 'self-hosted' && fromJSON('["self-hosted", "Windows", "X64"]') || 'windows-latest' }}
+    # Pin VS 2022: the genuine Qt 6.2.4 shader headers use stdext array
+    # iterators that were removed in the VS 2026 STL on windows-latest.
+    runs-on: ${{ inputs.runner == 'self-hosted' && fromJSON('["self-hosted", "Windows", "X64"]') || 'windows-2022' }}
     timeout-minutes: 60
     permissions:
       contents: write
+      # Read back the published test ZIPs, not just the pre-upload local EXEs.
+      actions: read
       # The build step republishes a failure as a PR comment: the job log of a
       # failed run is not readable from this account's API.
       pull-requests: write
@@ -80,6 +84,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v5
+
+      - name: Test archive integrity verifier offline (no EXEs executed)
+        run: python tests/artifact_download_test.py -v
 
       - name: Resolve and validate release version
         id: meta
@@ -141,6 +148,28 @@ jobs:
           sparse-checkout-cone-mode: false
           sparse-checkout: '/*.qml'
 
+      - name: Install Qt 5 tools for the separate regular shader module
+        uses: jurplel/install-qt-action@v4.3.1
+        with:
+          version: '5.15.2'
+          host: windows
+          target: desktop
+          arch: win64_msvc2019_64
+          cache: true
+      - name: Remember the Qt 5 SDK without linking it into the Customizer
+        run: '"BSI_SHADER_QT5_PREFIX=$env:QT_ROOT_DIR" >> $env:GITHUB_ENV'
+
+      - name: Install the older public-API Qt 6 shader bridge SDK
+        uses: jurplel/install-qt-action@v4.3.1
+        with:
+          version: '6.2.4'
+          host: windows
+          target: desktop
+          arch: win64_msvc2019_64
+          cache: true
+      - name: Remember the Qt 6 shader SDK separately from the Customizer SDK
+        run: '"BSI_SHADER_QT6_PREFIX=$env:QT_ROOT_DIR" >> $env:GITHUB_ENV'
+
       - name: Install Qt 6 build tools
         uses: jurplel/install-qt-action@v4.3.1
         with:
@@ -151,12 +180,17 @@ jobs:
           modules: qtmultimedia
           cache: true
 
+      - name: Build and verify the public-API regular shader payload baselines
+        run: |
+          python tests/shaders/run_ci_tests.py --command pwsh -NoProfile -File ./scripts/Build-ShaderBundle.ps1 -Qt5Prefix $env:BSI_SHADER_QT5_PREFIX -Qt6Prefix $env:BSI_SHADER_QT6_PREFIX `
+            -BuildRoot build-shader-payloads -OutputDirectory "$env:RUNNER_TEMP/bsi-shader-payloads"
+
       - name: Configure application and one-file package
         env:
           # Whole auth.json to bake into the released EXE; the release build
           # fails closed if this secret is missing and locks out runtime overrides.
           ZLP_AUTH_JSON: ${{ secrets.ZLP_AUTH_JSON || secrets.BSIC_AUTH_JSON }}
-        run: cmake -S . -B build -A x64 -DCMAKE_BUILD_TYPE=Release -DBSI_TEST_QT5_REFERENCE=ON -DBSI_BUILD_PORTABLE=ON -DBSI_REQUIRE_EMBEDDED_AUTH=ON -DBSI_CHROMIUM_UI=OFF
+        run: cmake -S . -B build -A x64 -DCMAKE_BUILD_TYPE=Release -DBSI_TEST_QT5_REFERENCE=ON -DBSI_BUILD_PORTABLE=ON -DBSI_REQUIRE_EMBEDDED_AUTH=ON -DBSI_CHROMIUM_UI=OFF -DBSI_REQUIRE_SHADER_BUNDLE=ON "-DBSI_SHADER_BUNDLE_DIR=$env:RUNNER_TEMP/bsi-shader-payloads"
 
       # Also bundles the runtime and runs the portable-EXE smoke tests.
       #
@@ -362,24 +396,74 @@ jobs:
       # Test builds need a downloadable EXE too, without creating a tag or
       # publishing a release. Keep retention short to limit storage usage.
       - name: Upload tested portable EXE
+        id: portable_upload
         if: ${{ !startsWith(github.ref, 'refs/tags/') && !inputs.publish_release }}
         uses: actions/upload-artifact@v4
         with:
-          name: BSI-Customizer-${{ steps.meta.outputs.version }}-win64-${{ github.run_id }}
+          name: BSI-Customizer-${{ steps.meta.outputs.version }}-win64-${{ github.run_id }}-r${{ github.run_attempt }}
           path: build/artifacts/${{ steps.meta.outputs.exe_name }}
           if-no-files-found: error
-          retention-days: 1
-          compression-level: 0
+          retention-days: 3
+          compression-level: 6
 
       - name: Upload tested installer
+        id: setup_upload
         if: ${{ !startsWith(github.ref, 'refs/tags/') && !inputs.publish_release }}
         uses: actions/upload-artifact@v4
         with:
-          name: BSI-Customizer-${{ steps.meta.outputs.version }}-setup-${{ github.run_id }}
+          name: BSI-Customizer-${{ steps.meta.outputs.version }}-setup-${{ github.run_id }}-r${{ github.run_attempt }}
           path: build/artifacts/${{ steps.meta.outputs.setup_name }}
           if-no-files-found: error
           retention-days: 3
-          compression-level: 0
+          compression-level: 6
+
+      # Local smoke tests cannot certify the actual ZIP the user downloads.
+      # Read BOTH uploaded artifacts back from GitHub, verify ZIP/CRC + outer
+      # digest + exact inner EXE, then extract with Windows' own ZIP reader.
+      - name: Download both published ZIPs and verify CRC, hashes and Windows extraction
+        if: ${{ !startsWith(github.ref, 'refs/tags/') && !inputs.publish_release }}
+        timeout-minutes: 5
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PORTABLE_ID: ${{ steps.portable_upload.outputs.artifact-id }}
+          PORTABLE_ZIP_SHA: ${{ steps.portable_upload.outputs.artifact-digest }}
+          PORTABLE_URL: ${{ steps.portable_upload.outputs.artifact-url }}
+          PORTABLE_NAME: ${{ steps.meta.outputs.exe_name }}
+          PORTABLE_SHA: ${{ steps.artifact.outputs.sha256 }}
+          SETUP_ID: ${{ steps.setup_upload.outputs.artifact-id }}
+          SETUP_ZIP_SHA: ${{ steps.setup_upload.outputs.artifact-digest }}
+          SETUP_URL: ${{ steps.setup_upload.outputs.artifact-url }}
+          SETUP_NAME: ${{ steps.meta.outputs.setup_name }}
+          SETUP_SHA: ${{ steps.installer.outputs.sha256 }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $root = Join-Path $env:RUNNER_TEMP "bsi-verified-downloads-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
+          if (Test-Path -LiteralPath $root) { throw 'Download verification requires a new directory' }
+          New-Item -ItemType Directory -Path $root | Out-Null
+          $cases = @(
+            @{Kind='portable'; Id=$env:PORTABLE_ID; ZipSha=$env:PORTABLE_ZIP_SHA; Name=$env:PORTABLE_NAME; Sha=$env:PORTABLE_SHA; Url=$env:PORTABLE_URL},
+            @{Kind='setup'; Id=$env:SETUP_ID; ZipSha=$env:SETUP_ZIP_SHA; Name=$env:SETUP_NAME; Sha=$env:SETUP_SHA; Url=$env:SETUP_URL}
+          )
+          foreach ($case in $cases) {
+            $zip = Join-Path $root "$($case.Kind).zip"
+            $report = Join-Path $root "$($case.Kind).json"
+            $source = Join-Path 'build/artifacts' $case.Name
+            python scripts/Verify-ArtifactDownload.py --artifact-id $case.Id --repository $env:GITHUB_REPOSITORY `
+              --archive $zip --archive-sha256 $case.ZipSha --source $source --source-sha256 $case.Sha --report $report
+            if ($LASTEXITCODE -ne 0) { throw "Published $($case.Kind) ZIP failed download/CRC/hash verification" }
+            $unpacked = Join-Path $root $case.Kind
+            Expand-Archive -LiteralPath $zip -DestinationPath $unpacked
+            $files = @(Get-ChildItem -LiteralPath $unpacked -Recurse -File)
+            if ($files.Count -ne 1 -or $files[0].Name -cne $case.Name) { throw 'Windows ZIP extraction produced unexpected files' }
+            $sha = (Get-FileHash -LiteralPath $files[0].FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($sha -ne $case.Sha) { throw 'Windows-extracted EXE differs from the tested build' }
+            $checked = Get-Content -LiteralPath $report -Raw | ConvertFrom-Json
+            Write-Host "::notice title=Windows ZIP extraction verified::$($case.Name) | EXE SHA256=$sha"
+            "### Verified $($case.Kind) download" >> $env:GITHUB_STEP_SUMMARY
+            "[$($case.Name)]($($case.Url)) — ZIP CRC and Windows extraction passed." >> $env:GITHUB_STEP_SUMMARY
+            "ZIP bytes: $($checked.archiveBytes); ZIP SHA-256: ``$($checked.archiveSha256)``" >> $env:GITHUB_STEP_SUMMARY
+            "EXE SHA-256: ``$sha``" >> $env:GITHUB_STEP_SUMMARY
+          }
 
       # Publish directly from the same Windows job that built and tested the
       # executable. A cross-job upload/download through Actions artifacts can

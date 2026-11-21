@@ -1,0 +1,3 @@
+module BSIShaders
+plugin BSIShaders
+classname BSIShadersPlugin

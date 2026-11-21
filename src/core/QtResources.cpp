@@ -6,7 +6,9 @@
 
 #include <limits>
 #include <QDir>
+#include <QDirIterator>
 #include <QStandardPaths>
+#include <QFile>
 #include <QFileInfo>
 #include <QHash>
 #include <QRegularExpression>
@@ -720,6 +722,61 @@ int clearPlayerQmlCache(const QString &exePath)
             continue;
         if (clearCacheDir(path))
             ++removed;
+    }
+    return removed;
+}
+
+int clearSourceQmlCache(const QString &exePath, const QStringList &sourceNames,
+                        const QStringList &identifiers)
+{
+    const QFileInfo player(exePath);
+    if (!player.exists() || sourceNames.isEmpty()) return 0;
+    const bool fixture = player.absolutePath().startsWith(QDir::cleanPath(QDir::tempPath()),
+                                                         Qt::CaseInsensitive);
+    const auto safeAncestors = [](QString path) {
+        for (;;) {
+            const QFileInfo info(path);
+            if (info.isSymLink() || info.isJunction()) return false;
+            const QString parent = info.absolutePath();
+            if (parent == path) return true;
+            path = parent;
+        }
+    };
+    int removed = 0;
+    int budget = 4096;
+    const QStringList extensions { QStringLiteral("qmlc"), QStringLiteral("jsc"), QStringLiteral("mjsc") };
+    std::function<void(const QString &, int)> visit = [&](const QString &path, int depth) {
+        if (depth > 8 || budget <= 0) return;
+        QDirIterator entries(path, QDir::AllEntries | QDir::NoDotAndDotDot | QDir::Hidden | QDir::System);
+        while (budget > 0 && entries.hasNext()) {
+            const QString filePath = entries.next();
+            --budget;
+            const auto info = entries.fileInfo();
+            if (info.isSymLink() || info.isJunction()) continue;
+            if (info.isDir()) { visit(filePath, depth + 1); continue; }
+            if (!info.isFile() || !extensions.contains(info.suffix().toLower())
+                || info.size() < 248 || info.size() > 32LL * 1024 * 1024) continue;
+            QFile file(filePath);
+            if (!file.open(QIODevice::ReadOnly)) continue;
+            auto unit = file.readAll();
+            file.close();
+            // Hashed cache filenames do not establish ownership. A valid QV4
+            // source identity (or all distinctive ids for source-less Qt 5)
+            // does; a Settings unit merely importing PlrTopbar does not.
+            if (!unit.startsWith(QByteArray("qv4cdata", 8))
+                || sourceUnits(unit, sourceNames, identifiers) == 0) continue;
+            if (QFile::remove(filePath)) ++removed;
+        }
+    };
+    for (const QString &path : playerCacheRoots(exePath, !fixture)) {
+        const QFileInfo cache(path);
+        // Check ancestors explicitly: canonical-path string equality would
+        // unnecessarily reject ordinary Windows 8.3 paths as well as links.
+        if (!cache.isDir() || !safeAncestors(cache.absoluteFilePath())) continue;
+        visit(path, 0);
+        // Do not remove whole folders, even empty ones: this operation owns
+        // only the identified compilation units, not a cache directory.
+        if (budget <= 0) break;
     }
     return removed;
 }

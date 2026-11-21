@@ -200,6 +200,15 @@ public:
                                             const QString &dllSha256, bool riskAcknowledged, const QString &requiredExport);
     Q_INVOKABLE QVariantMap dllStartupRestore();
 
+    // ---- native game shaders (regular matching-Qt module, never a proxy) ----
+    Q_INVOKABLE QVariantMap shadersInspect();
+    Q_INVOKABLE QVariantMap shadersApply(const QString &bundleId, const QString &exeSha256,
+                                          const QString &packageSha256, const QString &reviewSha256,
+                                          bool riskAcknowledged);
+    Q_INVOKABLE QVariantMap shadersRemove(const QString &exeSha256, const QString &stateSha256,
+                                           bool riskAcknowledged);
+    Q_INVOKABLE QVariantMap shadersRecover(const QString &journalSha256, bool riskAcknowledged);
+
     // ---- extras ----
     Q_INVOKABLE QVariantMap applyRemovals(const QStringList &names);
     Q_INVOKABLE QVariantList layoutTweaks();
@@ -225,7 +234,8 @@ public:
     Q_INVOKABLE QVariantMap saveSettingsPanelProfile(const QString &developerName,
                                                      const QString &tagline,
                                                      const QStringList &hiddenTabs,
-                                                     const QStringList &availableTabs);
+                                                     const QStringList &availableTabs,
+                                                     const QVariantList &links);
     Q_INVOKABLE QVariantMap setSettingsPanelAsset(const QString &kind, const QString &id,
                                                   const QString &path);
     Q_INVOKABLE QVariantMap clearSettingsPanelAsset(const QString &kind, const QString &id);

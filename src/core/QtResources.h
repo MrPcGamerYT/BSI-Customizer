@@ -84,6 +84,11 @@ int activeUnits(const QByteArray &data, const QStringList &sourceNames,
 // Also drop the on-disk qmlcache next to HD-Player.exe (BlueStacks uses
 // <install>/cache/qmlcache). Only qmlcache-named folders are removed.
 int clearPlayerQmlCache(const QString &exePath);
+// Remove only on-disk units proven to belong to the named source(s), using the
+// same exact-source/all-identifiers rule as sourceUnits(). Unknown files,
+// Settings/import-only caches, directory links and other cache contents stay.
+int clearSourceQmlCache(const QString &exePath, const QStringList &sourceNames,
+                        const QStringList &identifiers);
 // Exact source filename, or ALL distinctive identifiers when sourceFileIndex is
 // empty. Unlike the legacy broad matcher, this never matches component imports.
 int sourceUnits(QByteArray &data, const QStringList &names, const QStringList &ids,

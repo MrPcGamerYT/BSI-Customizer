@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([Parameter(Mandatory)][string]$ExecutablePath)
+param([Parameter(Mandatory)][string]$ExecutablePath, [switch]$RequireShaderBundle)
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 trap {
@@ -55,6 +55,7 @@ function Check-Probe($Result, [bool]$Wrapped) {
         throw "Portable launch failed ($($Result.Code))`n$($Result.Out)`n$($Result.Err)"
     }
     if ($Wrapped -and $Result.Out -notmatch 'DEPLOYMENT_PORTABLE=1') { throw 'The portable launcher was not exercised' }
+    if ($RequireShaderBundle -and $Result.Out -notmatch 'DEPLOYMENT_SHADER_BUNDLE=1') { throw 'The required embedded regular shader bundle was not exercised' }
 }
 try {
     # Test the actual copy helpers without running the packaging script again.
@@ -114,11 +115,20 @@ try {
     $extracted = Join-Path $clean 'explicit extraction'
     $result = Run-Clean $portable @('--extract-to', $extracted)
     if ($result.Code -ne 0) { throw "Explicit extraction failed: $($result.Err)" }
-    foreach ($file in @('BSI-Customizer.exe', 'Qt6Core.dll', 'qt.conf', 'licenses/Qt/QT-NOTICES.txt', 'licenses/HDE64.txt', 'licenses/7zip/LICENSE.txt')) {
+    foreach ($file in @('BSI-Customizer.exe', 'Qt6Core.dll', 'qt.conf', 'licenses/Qt/QT-NOTICES.txt', 'licenses/HDE64.txt', 'licenses/7zip/LICENSE.txt', 'licenses/zopfli/LICENSE', 'licenses/zopfli/README.bsi.md', 'licenses/zopfli/UPSTREAM.json', 'licenses/shaders/MinHook.txt', 'licenses/shaders/vulkan/LICENSE.md', 'licenses/shaders/vulkan/Apache-2.0.txt', 'licenses/shaders/vulkan/MIT.txt')) {
         if (-not (Test-Path -LiteralPath (Join-Path $extracted $file))) { throw "Explicit extraction missing $file" }
     }
     $inner = Join-Path $extracted 'BSI-Customizer.exe'
     Check-Probe (Run-Clean $inner @('--deployment-test')) $false
+    if ($RequireShaderBundle) {
+        foreach ($file in @($portable, $inner)) {
+            $bundle = Run-Clean $file @('--shader-bundle-check')
+            if ($bundle.Code -ne 0 -or $bundle.Out -notmatch 'SHADER BUNDLE CHECK PASSED') {
+                throw "Packed regular shader bundle failed: $($bundle.Out) $($bundle.Err)"
+            }
+        }
+        Write-Host 'PASS embedded regular shader DLL descriptors, pinned hashes and bundle index / clean PATH / packed and extracted EXE'
+    }
     if (Test-Path -LiteralPath (Join-Path $extracted 'Qt6WebEngineCore.dll')) {
         # Execute from the real packed launcher with no SDK on PATH. Merely
         # checking a file list would miss helpers/locales and QML imports.

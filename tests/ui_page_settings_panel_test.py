@@ -1,8 +1,9 @@
 """Load the real native Player-interface page in Qt 6.8 with a mock backend.
 
 Checks that the Settings-panel rebuild section exists as a fifth tab next to
-its siblings, renders the inspected player state, and drives the real
-invokables (profile save, apply, restore) with the native tab list.
+its siblings, renders the inspected player state, and drives profile save,
+apply and restore with the native tab list. Physical full-Main.qml navigation
+also exercises cleanup migration and the one combined title-details choice.
 
 Requires PySide6==6.8.3. No player executable is touched.
 QT_QPA_PLATFORM=offscreen python3 tests/ui_page_settings_panel_test.py
@@ -17,7 +18,7 @@ from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 os.environ.setdefault("QSG_RHI_BACKEND", "software")
-from PySide6.QtCore import QObject, QUrl, QCoreApplication, QEvent, QMetaObject, QPoint, QPointF, Qt
+from PySide6.QtCore import QObject, QUrl, QCoreApplication, QEvent, QMetaObject, QPoint, QPointF, QRectF, Qt
 from PySide6.QtGui import QGuiApplication, QWindow
 from PySide6.QtQml import QQmlComponent, QQmlEngine
 from PySide6.QtQuick import QQuickItem
@@ -93,11 +94,17 @@ with tempfile.TemporaryDirectory() as directory:
 QtObject {
     property string exePath: "player.exe"
     property bool busy: false
+    property var installs: []
+    signal workspaceChanged()
+    signal resourcesChanged()
     property var resourceInfos: []
     property var themeEntries: []
     property var workspaceOperations: []
     property var customizationProfile: ({})
     property var calls: []
+    property var removalNames: ["Remove title details", "Sidebar Rotate"]
+    property bool cleanupNeedsUpdate: true
+    property bool cleanupApplied: true
     property var hidden: []
     property var packIcons: ({})
     property var selectedAsset: ({})
@@ -118,8 +125,12 @@ QtObject {
             logoFallback: true, logoStatus: "", detail: "Editable player QML sources found."
         };
     }
-    function saveSettingsPanelProfile(developerName, tagline, hiddenTabs, availableTabs) {
+    function saveSettingsPanelProfile(developerName, tagline, hiddenTabs, availableTabs, links) {
         hidden = hiddenTabs;
+        const profile = settings.settingsPanelProfile || {};
+        const icons = Object.assign({}, profile.linkIcons || {});
+        for (const id in icons) if (!links.some(row => row.id === id)) delete icons[id];
+        settings.settingsPanelProfile = Object.assign({}, profile, {hiddenTabs: hiddenTabs, links: links, linkIcons: icons});
         calls = calls.concat(["saveSettingsPanelProfile:" + developerName + "|" + tagline
                               + "|" + hiddenTabs.join(",") + "|" + availableTabs.join(",")]);
         return {ok: true, msg: "Options saved."};
@@ -127,17 +138,21 @@ QtObject {
     function setSettingsPanelAsset(kind, id, path) {
         calls = calls.concat(["setSettingsPanelAsset:" + kind + ":" + id + ":" + path]);
         const profile = settings.settingsPanelProfile || {};
-        const icons = Object.assign({}, profile.tabIcons || {});
+        const key = kind === "link-icon" ? "linkIcons" : "tabIcons";
+        const icons = Object.assign({}, profile[key] || {});
         icons[id] = selectedAsset;
-        settings.settingsPanelProfile = {hiddenTabs: profile.hiddenTabs || [], tabIcons: icons};
+        const next = Object.assign({}, profile); next[key] = icons;
+        settings.settingsPanelProfile = next;
         return {ok: true, msg: "Asset saved."};
     }
     function clearSettingsPanelAsset(kind, id) {
         calls = calls.concat(["clearSettingsPanelAsset:" + kind + ":" + id]);
         const profile = settings.settingsPanelProfile || {};
-        const icons = Object.assign({}, profile.tabIcons || {});
+        const key = kind === "link-icon" ? "linkIcons" : "tabIcons";
+        const icons = Object.assign({}, profile[key] || {});
         delete icons[id];
-        settings.settingsPanelProfile = {hiddenTabs: profile.hiddenTabs || [], tabIcons: icons};
+        const next = Object.assign({}, profile); next[key] = icons;
+        settings.settingsPanelProfile = next;
         return {ok: true, msg: "Asset cleared."};
     }
     // Mirrors the real patcher's answers: normally ok, but a player patched by
@@ -156,9 +171,48 @@ QtObject {
         recoveryBlocked = false;
         return {ok: true, msg: "Restored from backup."};
     }
-    function layoutTweaks() { return []; }
+    function layoutTweaks() { return [{id: "clean-player-ui", supported: true,
+        applied: cleanupApplied, needsUpdate: cleanupNeedsUpdate, label: "Clean player UI", detail: ""}]; }
+    function applyLayoutTweak(id, enabled) {
+        calls = calls.concat(["applyLayoutTweak:" + id + ":" + enabled]);
+        cleanupApplied = enabled; cleanupNeedsUpdate = false;
+        return {ok: true, msg: "Clean UI updated."};
+    }
+    function applyRemovals(names) {
+        calls = calls.concat(["applyRemovals:" + names.join(",")]);
+        return {ok: true, msg: "Removed title details only."};
+    }
     function sidebarButtonRows() { return {supported: false, applied: false, buttons: [], detail: ""}; }
     function aboutPageState() { return {supported: false, applied: false, detail: "", text: "", links: []}; }
+    property bool shadersInstalled: false
+    property bool shadersPending: false
+    property bool shadersIncompatible: false
+    function shadersInspect() {
+        calls = calls.concat(["shadersInspect"]);
+        return {ok: !shadersPending, installed: shadersInstalled, sourcePresent: shadersInstalled,
+                canApply: !shadersPending && !shadersIncompatible, canRemove: shadersInstalled && !shadersPending,
+                canRecover: shadersPending, recoveryRequired: shadersPending, bundleId: "qt-5.15.2",
+                exeSha256: "reviewed-shader-exe", packageSha256: "reviewed-shader-package",
+                stateSha256: "reviewed-shader-state", applyReviewSha256: "reviewed-shader-runtime",
+                journalSha256: shadersPending ? "reviewed-shader-journal" : "",
+                msg: shadersPending ? "Pending shader transaction" : shadersIncompatible ? "Exact Qt mismatch" : "Shader fixture inspection"};
+    }
+    function shadersApply(id, exe, packageHash, review, ack) {
+        if (id !== "qt-5.15.2" || exe !== "reviewed-shader-exe" || packageHash !== "reviewed-shader-package"
+            || review !== "reviewed-shader-runtime" || ack !== true) throw Error("Unreviewed shader apply");
+        calls = calls.concat(["shadersApply"]); shadersInstalled = true; workspaceChanged();
+        return {ok: true, changed: true, msg: "Shader fixture installed; no files accessed"};
+    }
+    function shadersRemove(exe, state, ack) {
+        if (exe !== "reviewed-shader-exe" || state !== "reviewed-shader-state" || ack !== true) throw Error("Unreviewed shader removal");
+        calls = calls.concat(["shadersRemove"]); shadersInstalled = false; resourcesChanged();
+        return {ok: true, changed: true, msg: "Shader fixture removed; no files accessed"};
+    }
+    function shadersRecover(journal, ack) {
+        if (journal !== "reviewed-shader-journal" || ack !== true) throw Error("Unreviewed shader recovery");
+        calls = calls.concat(["shadersRecover"]); shadersPending = false; workspaceChanged();
+        return {ok: true, changed: true, msg: "Shader fixture recovered; no files accessed"};
+    }
     function localFilePath(url) { return String(url); }
 }''')
     themes = create('''import QtQuick
@@ -205,7 +259,7 @@ Window {
     tab = window.findChild(QObject, "settingsPanelRebuildTab")
     assert tab is not None, "the Settings-panel rebuild tab must exist"
     strip = window.findChild(QObject, "playerUiSections")
-    assert strip is not None and strip.property("count") == 5, strip.property("count")
+    assert strip is not None and strip.property("count") == 6, strip.property("count")
     labels = []
     pending = [strip]
     while pending:
@@ -218,7 +272,7 @@ Window {
     # the walk is depth-first from the last child: de-duplicate, then reverse.
     labels = list(dict.fromkeys(labels))[::-1]
     assert labels == ["Layout & clean-up", "About preview & editor", "Remove items",
-                      "Appearance studio", "Settings panel"], labels
+                      "Appearance studio", "Settings panel", "Shaders"], labels
 
     # Opening the tab is the only thing that inspects the player.
     assert "settingsPanelRebuildState" not in backend.property("calls").toVariant()
@@ -359,7 +413,7 @@ Window {
     joined = "\n".join(content)
     for expected in ["Rebuild the BlueStacks Settings panel", "Patch support", "Supported",
                      "Custom rebuild installed" if False else "Original panel",
-                     "Native Settings tabs", "7 discovered · 2 visible",
+                     "Native Settings tabs", "7 discovered · 1 visible",
                      "Verified QML dependencies", "Embedded compiled QML", "2 found · 0 active",
                      "Logo verification", "Built-in fallback available",
                      "Editable player QML sources found.", "UiSettingsWindow.qml",
@@ -369,12 +423,257 @@ Window {
                      "Name under logo", "Subtitle"]:
         assert expected in joined, expected
 
-    # Three messages come from the mock doubles, not from the page: the fixture
-    # has no removalNames list, no about "source" text and a Controls Dialog
-    # wrapped in a plain Window. They appear identically on the unmodified page;
-    # anything else - and anything from the rebuild section - is a failure.
-    fixture_noise = ("removalNames", "page.about.source",
-                     'Binding loop detected for property "implicitHeight"')
+    # Drive the actual native cleanup migration and the one combined removal
+    # with physical clicks, not a source-only contract or an invoked handler.
+    def click_item(item):
+        assert item.isVisible() and item.isEnabled() and item.width() > 0 and item.height() > 0
+        ancestors = []
+        parent = item.parentItem()
+        while parent:
+            ancestors.append(parent)
+            parent = parent.parentItem()
+        for parent in reversed(ancestors):
+            if parent.metaObject().indexOfProperty("contentY") < 0:
+                continue
+            top = item.mapToItem(parent, QPointF(0, 0)).y()
+            delta = top - 8 if top < 8 else max(0, top + item.height() - parent.height() + 8)
+            maximum = max(0, parent.property("contentHeight") - parent.height())
+            parent.setProperty("contentY", max(0, min(maximum, parent.property("contentY") + delta)))
+            QTest.qWait(30)
+        point = item.mapToScene(QPointF(item.width() / 2, item.height() / 2))
+        visible = QRectF(0, 0, window.width(), window.height())
+        for parent in ancestors:
+            assert parent.isVisible() and parent.opacity() > 0
+            if parent.clip():
+                visible = visible.intersected(parent.mapRectToScene(parent.boundingRect()))
+        assert visible.contains(point), (item, point, visible)
+        QTest.mouseClick(window, Qt.LeftButton, Qt.NoModifier, point.toPoint())
+        QTest.qWait(80)
+
+    def click_text(value):
+        pending = [window.contentItem()]
+        while pending:
+            item = pending.pop()
+            if item.isVisible() and item.property("text") == value:
+                click_item(item)
+                return
+            pending.extend(item.childItems())
+        raise AssertionError("Native UI text not reachable: " + value)
+
+    # Physically add/edit/save more than four links using the real native
+    # delegates; choosing an icon must not erase another row's typed text.
+    settings.setProperty("aboutLinks", [{"kind": "github", "title": "Customizer only", "url": "https://example.org/own"}])
+    link_ids = []
+    for index in range(6):
+        click_item(items(window.contentItem(), "settingsPanelLinkAdd")[0])
+        rows = page.property("panelLinks").toVariant()
+        link_id = rows[-1]["id"]
+        link_ids.append(link_id)
+        for name, text in (("Title", "custom link " + str(index + 1)), ("Url", "https://example.net/custom/" + str(index + 1))):
+            field = items(window.contentItem(), "settingsPanelLink" + name + "-" + link_id)[0]
+            click_item(field)
+            for character in text:
+                modifier = Qt.ShiftModifier if character.isupper() else Qt.NoModifier
+                QTest.keyClick(window, Qt.Key(ord(character.upper())), modifier)
+        QTest.qWait(20)
+    assert len(set(link_ids)) == 6
+    QMetaObject.invokeMethod(page, "setPanelAsset", Q_ARG("QVariant", "link-icon"),
+                             Q_ARG("QVariant", link_ids[2]), Q_ARG("QVariant", "/chosen/link.svg"))
+    click_item(items(window.contentItem(), "settingsPanelLinkRemove-" + link_ids[0])[0])
+    click_text("Save rebuild options")
+    saved_profile = settings.property("settingsPanelProfile").toVariant()
+    assert len(saved_profile["links"]) == 5, saved_profile
+    assert saved_profile["links"][1]["id"] == link_ids[2]
+    assert saved_profile["links"][1]["title"] == "custom link 3", saved_profile["links"]
+    assert saved_profile["linkIcons"][link_ids[2]]["data"] == CUSTOM_ICON["data"]
+    own_links = settings.property("aboutLinks")
+    if hasattr(own_links, "toVariant"): own_links = own_links.toVariant()
+    assert own_links[0]["title"] == "Customizer only"
+    for link_id in link_ids[1:]:
+        click_item(items(window.contentItem(), "settingsPanelLinkRemove-" + link_id)[0])
+    click_text("Save rebuild options")
+    assert settings.property("settingsPanelProfile").toVariant()["links"] == []
+    page.setProperty("panelLinksReady", False)
+    QMetaObject.invokeMethod(page, "refreshPanel")
+    assert page.property("panelLinks").toVariant() == [], "zero saved rows must not repopulate from own-About defaults"
+
+    click_text("Layout & clean-up")
+    assert page.property("currentSection") == 0
+    click_text("Refresh UI" if not page.property("inspectionStale") else "Load player UI")
+    clean_action = page.findChild(QObject, "cleanPlayerUiAction")
+    assert clean_action.property("text") == "Update clean-up"
+    assert any("Title bar: three-line menu, help" in text for text in texts(window.contentItem()))
+    assert not any("Settings/menu stays" in text for text in texts(window.contentItem()))
+    click_item(clean_action)
+    assert backend.property("cleanupApplied") and not backend.property("cleanupNeedsUpdate")
+    assert "applyLayoutTweak:clean-player-ui:true" in backend.property("calls").toVariant()
+    assert clean_action.property("text") == "Restore stock UI"
+    click_item(clean_action)
+    assert not backend.property("cleanupApplied")
+    assert "applyLayoutTweak:clean-player-ui:false" in backend.property("calls").toVariant()
+    click_text("Remove items")
+    assert page.property("currentSection") == 2
+    removal = page.findChild(QObject, "playerUiRemovalList")
+    assert removal.property("count") == 2
+    assert "Titlebar Version" not in texts(window.contentItem())
+    assert "Titlebar Instance Label" not in texts(window.contentItem())
+    click_text("Remove title details")
+    assert page.property("checkedCount") == 1
+    click_item(page.findChild(QObject, "applyPlayerUiRemovals"))
+    assert "applyRemovals:Remove title details" in backend.property("calls").toVariant()
+
+    # Follow the actual default application's sidebar too. This catches a
+    # perfectly working standalone page that is missing/unreachable in Main.
+    window.close()
+    auth = create('''import QtQuick
+QtObject {
+    property bool authorized: false
+    property bool busy: false
+    property bool hasSavedSession: false
+    property var savedUser: ({})
+    property string savedMeta: ""
+    property real progress: 0
+    property bool progressIndeterminate: false
+    property string note: ""
+    property string noteKind: ""
+    property string inviteUrl: ""
+    property string setupHint: ""
+    function signOut() { authorized = false; }
+    function startDiscord() { return {Manual: true}; }
+    function continueSaved() {}
+    function completeManual(value) {}
+    function forgetSaved() {}
+}''')
+    updates = create('''import QtQuick
+QtObject {
+    property bool available: false
+    property bool skipped: false
+    property string state: "idle"
+    property string noteKind: ""
+    property string latestVersion: ""
+    property string downloadHost: ""
+    property string downloadSize: ""
+    property string releaseNotes: ""
+    property real progress: 0
+    property bool readyToInstall: false
+}''')
+    engine.rootContext().setContextProperty("auth", auth)
+    engine.rootContext().setContextProperty("updates", updates)
+    themes.setProperty("reduceMotion", True)
+    window = create("import BSICustomizer\nMain {}")
+    window.resize(1440, 930)
+    loader = window.findChild(QObject, "featureInterface")
+    assert loader is not None and loader.property("item") is None
+    auth.setProperty("authorized", True)  # Only the mock, never production sign-in.
+    QTest.qWait(150)
+    click_item(items(window.contentItem(), "navGroup1")[0])
+    click_item(items(window.contentItem(), "featureNav6")[0])
+    for _ in range(150):
+        if loader.property("item") is not None:
+            break
+        QTest.qWait(20)
+    page = loader.property("item")
+    assert page is not None and window.property("currentPage") == 6
+    for width, height in ((1440, 930), (980, 640)):
+        window.resize(width, height)
+        QTest.qWait(80)
+        click_text("Layout & clean-up")
+        backend.setProperty("cleanupApplied", True)
+        backend.setProperty("cleanupNeedsUpdate", True)
+        click_text("Load player UI" if page.property("inspectionStale") else "Refresh UI")
+        clean_action = page.findChild(QObject, "cleanPlayerUiAction")
+        assert clean_action.property("text") == "Update clean-up"
+        assert any("Title bar: three-line menu, help" in text for text in texts(window.contentItem()))
+        click_item(clean_action)
+        assert backend.property("cleanupApplied") and not backend.property("cleanupNeedsUpdate")
+        assert clean_action.property("text") == "Restore stock UI"
+        click_item(clean_action)
+        assert not backend.property("cleanupApplied")
+        click_text("Remove items")
+        assert page.findChild(QObject, "playerUiRemovalList").property("count") == 2
+        if page.property("checkedCount"):
+            click_text("Remove title details")
+        click_text("Remove title details")
+        assert page.property("checkedCount") == 1
+        before_removals = backend.property("calls").toVariant().count("applyRemovals:Remove title details")
+        click_item(page.findChild(QObject, "applyPlayerUiRemovals"))
+        assert backend.property("calls").toVariant().count("applyRemovals:Remove title details") == before_removals + 1
+        click_item(page.findChild(QObject, "settingsPanelRebuildTab"))
+        assert page.property("currentSection") == 4 and page.property("panelReady")
+        print(f"PASS: full Main.qml PATCHER > Player interface physical navigation, cleanup Update/Restore, combined removal and Settings tab at {width}x{height}")
+
+        def shader_named(name):
+            matches = items(window.contentItem(), name)
+            obj = matches[0] if matches else window.findChild(QObject, name)
+            if obj is None:
+                obj = page.findChild(QObject, name)
+            assert obj is not None, name
+            return obj
+
+        before_shader = backend.property("calls").toVariant()
+        click_item(shader_named("nativeShadersTab"))
+        assert page.property("currentSection") == 5
+        assert backend.property("calls").toVariant() == before_shader, "opening Shaders never inspects or installs automatically"
+        assert not shader_named("installShaders").isEnabled() and not shader_named("removeShaders").isEnabled()
+        click_item(shader_named("inspectShaders"))
+        assert shader_named("installShaders").isEnabled()
+        click_item(shader_named("installShaders"))
+        assert shader_named("shaderInstallConfirm").property("opened")
+        assert not shader_named("confirmShaderOperation").isEnabled(), "acknowledgment defaults OFF"
+        QMetaObject.invokeMethod(shader_named("shaderInstallPanel"), "runReviewed")
+        assert backend.property("calls").toVariant().count("shadersApply") == before_shader.count("shadersApply")
+        QTest.keyClick(window, Qt.Key_Escape)
+        QTest.qWait(80)
+        assert not shader_named("shaderInstallConfirm").property("opened"), "cancel must close without a write"
+        click_item(shader_named("installShaders"))
+        click_item(shader_named("shaderInstallAcknowledge"))
+        assert shader_named("confirmShaderOperation").isEnabled()
+        click_item(shader_named("confirmShaderOperation"))
+        assert backend.property("shadersInstalled") and shader_named("removeShaders").isEnabled()
+        assert "Shader fixture installed" in shader_named("shaderInstallReport").property("text")
+        click_item(shader_named("removeShaders"))
+        assert not shader_named("confirmShaderOperation").isEnabled(), "each operation needs a fresh acknowledgment"
+        click_item(shader_named("shaderInstallAcknowledge"))
+        click_item(shader_named("confirmShaderOperation"))
+        assert not backend.property("shadersInstalled") and not shader_named("removeShaders").isEnabled()
+        backend.setProperty("shadersPending", True)
+        click_item(shader_named("inspectShaders"))
+        assert shader_named("recoverShaders").isEnabled() and not shader_named("installShaders").isEnabled()
+        click_item(shader_named("recoverShaders"))
+        assert not shader_named("confirmShaderOperation").isEnabled()
+        click_item(shader_named("shaderInstallAcknowledge"))
+        click_item(shader_named("confirmShaderOperation"))
+        assert not backend.property("shadersPending") and "shadersRecover" in backend.property("calls").toVariant()
+        backend.setProperty("shadersIncompatible", True)
+        click_item(shader_named("inspectShaders"))
+        assert not shader_named("installShaders").isEnabled()
+        assert "Exact Qt mismatch" in shader_named("shaderInstallReport").property("text")
+        backend.setProperty("shadersIncompatible", False)
+        click_item(shader_named("inspectShaders"))
+        backend.setProperty("busy", True)
+        QTest.qWait(30)
+        assert not shader_named("inspectShaders").isEnabled() and not shader_named("installShaders").isEnabled()
+        backend.setProperty("busy", False)
+        click_item(shader_named("installShaders"))
+        QMetaObject.invokeMethod(backend, "resourcesChanged")
+        QTest.qWait(50)
+        assert not shader_named("installShaders").isEnabled() and not shader_named("shaderInstallConfirm").property("opened"), "another patch invalidates the review and open confirmation"
+        click_item(shader_named("inspectShaders"))
+        backend.setProperty("exePath", "other-player.exe")
+        QTest.qWait(30)
+        assert not shader_named("installShaders").isEnabled(), "target changes invalidate shader reviews"
+        backend.setProperty("exePath", "player.exe")
+        click_item(shader_named("shaderPreparePanel"))
+        assert page.property("currentSection") == 4, "the prerequisite link reaches the actual native panel-preparation section"
+        print(f"PASS: full Main.qml native Shaders installer physical tab/inspect/cancel/ack/install/remove/recovery, exact-version refusal and stale/busy guards at {width}x{height} (mock services, no player files)")
+    auth.setProperty("authorized", False)
+    QTest.qWait(80)
+    assert loader.property("item") is None, "sign-out must unload the feature page"
+
+    # Known mock-only messages come from the missing About "source" text and
+    # a Controls Dialog wrapped in a plain Window. The removalNames list and
+    # cleanup state are real fixture contracts now, not tolerated warnings.
+    fixture_noise = ("page.about.source", 'Binding loop detected for property "implicitHeight"')
     unexpected = [w for w in errors
                   if not any(token in w for token in fixture_noise + ("TypeError: Type error",
                                                                      "Unable to assign [undefined]"))]
@@ -399,5 +698,5 @@ Window {
     engine = None
     QCoreApplication.sendPostedEvents(None, QEvent.DeferredDelete)
     QTest.qWait(1)
-    print("PASS: real native Player-interface page; Settings-panel rebuild tab renders player "
-          "state, previews pack/default overrides and drives profile save, apply and restore")
+    print("PASS: real native variable About add/type/remove/custom-icon/save/empty-reload controls; Player-interface page; Settings-panel rebuild tab renders player "
+          "state, previews pack/default overrides and drives profile save/apply/restore, cleanup Settings-access migration and one combined title-details removal")

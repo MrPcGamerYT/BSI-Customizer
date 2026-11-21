@@ -1,0 +1,31 @@
+{
+  "repository": "https://github.com/google/zopfli",
+  "tag": "zopfli-1.0.3",
+  "commit": "bd64b2f0553d4f1ef4e6627647c5d9fc8c71ffc0",
+  "upstreamPath": "src/zopfli/",
+  "files": {
+    "LICENSE": "018b1cb87efdf7a04c2fcc13d57ed63f62149113fb207b27ea13430d64f13513",
+    "blocksplitter.c": "e75ecc73c4c45d266924963b9f322c7fa84d0512e27e90004c9b186911a59c20",
+    "blocksplitter.h": "3db4f4b63fa25f4c135c8438d880a4be9ae7403b40a4ed1a1fd5f461be7dda06",
+    "cache.c": "cd53f0e948ab6b6031a027622b89f619b1a4ec510209926ae44e27ea13e08c43",
+    "cache.h": "1c041868ad624b37736b52db0af81562a6c0fdb163f459315ea596e8552770a8",
+    "deflate.c": "5b35044bd740af59d6f2c3ca5fdac118357a13a178133f282ab0833c28db7425",
+    "deflate.h": "fa62fff6aab5e047412eb9a46e7972c91a17a9bcd230adddd4ce44df2a00e8b4",
+    "hash.c": "e0c8ea7a44b230de73ebc749ae23a21e5cbaf72ab5cd6946c5f9b2de5bfd86d5",
+    "hash.h": "51ea819f5e8d64ca6ee4498abc7b57a1053d93fd21df14b8c93a20c9186be4a2",
+    "katajainen.c": "a06e74fd04150ef0d3da81abdf9608a2b482dcfe053beac2aced98a69acfbd77",
+    "katajainen.h": "eaf4b6da83c24bc341612f8ccbad2b10287bc1242e2b4a75b950fdaf805e2d69",
+    "lz77.c": "fa207873b711a6bb4d271912dfa088a341f352c59accd0599a583ce7e817512c",
+    "lz77.h": "9d3ac03cfb94c2b1a1eb6d4bf9044dc4f86436f062699828bce8a103fb8ef12c",
+    "squeeze.c": "71e6c18331c682fe06377c8a45f43bee35abc39f6a6ad6bb7dd365c5ae2d49a3",
+    "squeeze.h": "47db13efe62c0876e4ea53004885b96327f40cf0b9c6107a74f9ef94c1e0235a",
+    "symbols.h": "2ab04edd4c135b46a8255ac766040c37a5f10c3b2f908a255e68db3d7c53056f",
+    "tree.c": "5ecbbffeb1e6fd046ad40dfadeb2e42f9d909c76cb1f8554eb46b79958ad6324",
+    "tree.h": "396977e269ee143a0c5fa3393fe002f78a605c525f35a9e4fa5ac2250bfd0a07",
+    "util.c": "84bb4c5e6a04ee55feee3550225b3cff59fea8cf1a32fe20b63afd679d26d926",
+    "util.h": "72730de4d23c65de01057c8c8167bb90364999a6914c1520c20c4837afa5db73",
+    "zlib_container.c": "999e51750a075717fb1b6256c3071454193534cc048dc9bb125e2b59b7de18c4",
+    "zlib_container.h": "7744d8afea2acca76c8e9f823c4f8df3c7545ec8c9fbe0ea14b67d35f5f7c52f",
+    "zopfli.h": "9cff9d2ed11be71b8bc82aed0afd2ed47391609c138ae2bb3dc18730e62ddcb1"
+  }
+}

@@ -18,6 +18,7 @@
 #include <QFontDatabase>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QImage>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QQuickStyle>
@@ -293,6 +294,102 @@ int runSelfTest()
         check(!backend.busy() && transitions == 2, "failed patch clears busy state exactly once");
         backend.integrityPatch();
         check(!backend.busy() && transitions == 4, "another operation can run after failure");
+    }
+
+    // ------------------------------------------------------------------
+    // Real shared Backend + QSettings, not either editor's service double.
+    // ------------------------------------------------------------------
+    {
+        std::printf("[settings-panel-profile] shared backend validation, persisted links/artwork and empty subtitle\n");
+        const QString previousName = QCoreApplication::applicationName();
+        QCoreApplication::setApplicationName(previousName + QStringLiteral("-panel-") + QFileInfo(tmp.path()).fileName());
+        {
+            SettingsManager settings;
+            Backend backend(&settings);
+            const auto ownLinks = settings.aboutLinks();
+            check(!settings.settingsPanelProfile().contains(QStringLiteral("links")) && ownLinks.size() == 4,
+                  "legacy own-About links stay available only when the rebuilt-panel list is absent");
+            QVariantList links;
+            for (int i = 0; i < 6; ++i)
+                links << QVariantMap{{"id", QStringLiteral("row-%1").arg(i)}, {"kind", QStringLiteral("link")},
+                                     {"title", QStringLiteral("Link %1 <&\"'>").arg(i)},
+                                     {"url", QStringLiteral("https://example.com/%1?q=one&two=%22quoted%22").arg(i)}};
+            const QString name = QStringLiteral("Custom <&\"'> name");
+            const QStringList tabs{QStringLiteral("display.qml"), QStringLiteral("about.qml")};
+            const QStringList hidden{QStringLiteral("display.qml")};
+            QImage icon(48, 48, QImage::Format_ARGB32);
+            icon.fill(QColor(QStringLiteral("#ff6633")));
+            const QString firstIcon = tmp.filePath(QStringLiteral("panel-first.png"));
+            const QString secondIcon = tmp.filePath(QStringLiteral("panel-second.png"));
+            check(icon.save(firstIcon), "write test-owned About artwork");
+            icon.fill(QColor(QStringLiteral("#3388ff")));
+            check(icon.save(secondIcon), "write distinct second About icon");
+            check(backend.setSettingsPanelAsset(QStringLiteral("link-icon"), QStringLiteral("row-0"), firstIcon).value("ok").toBool()
+                      && backend.setSettingsPanelAsset(QStringLiteral("link-icon"), QStringLiteral("row-4"), secondIcon).value("ok").toBool()
+                      && backend.setSettingsPanelAsset(QStringLiteral("logo"), {}, firstIcon).value("ok").toBool(),
+                  "real backend accepts per-link icons for draft ids and a separate About logo");
+            check(backend.saveSettingsPanelProfile(name, {}, hidden, tabs, links).value("ok").toBool(),
+                  "real backend saves more than four escaped website links and an explicitly empty subtitle");
+            QSettings().sync();
+            SettingsManager reopened;
+            const QVariantMap saved = settings.settingsPanelProfile();
+            check(reopened.settingsPanelProfile() == saved && saved.value("links").toList() == links
+                      && saved.value("linkIcons").toMap().size() == 2 && saved.value("logo").toMap().contains("data")
+                      && reopened.aboutDeveloperName() == name && reopened.aboutTagline().isEmpty()
+                      && reopened.aboutLinks() == ownLinks,
+                  "new SettingsManager reloads exact identity, six links, stable-id PNG assets and empty subtitle without overwriting own-About links");
+            const auto refuse = [&](const QString &developer, const QString &subtitle,
+                                    const QStringList &hiddenIds, const QVariantList &rows) {
+                const auto response = backend.saveSettingsPanelProfile(developer, subtitle, hiddenIds, tabs, rows);
+                return !response.value("ok").toBool() && settings.settingsPanelProfile() == saved
+                    && settings.aboutDeveloperName() == name && settings.aboutTagline().isEmpty()
+                    && settings.aboutLinks() == ownLinks;
+            };
+            bool rejected = refuse({}, {}, hidden, links)
+                && refuse(QString(81, QLatin1Char('x')), {}, hidden, links)
+                && refuse(QStringLiteral("bad\nname"), {}, hidden, links)
+                && refuse(name, QString(121, QLatin1Char('x')), hidden, links)
+                && refuse(name, QStringLiteral("bad\nsubtitle"), hidden, links)
+                && refuse(name, {}, tabs, links)
+                && refuse(name, {}, {QStringLiteral("unknown.qml")}, links)
+                && refuse(name, {}, {QStringLiteral("display.qml"), QStringLiteral("display.qml")}, links);
+            for (const auto &url : {QStringLiteral("javascript:alert(1)"), QStringLiteral("file:///private/path"),
+                                    QStringLiteral("https://user:secret@example.com/"), QStringLiteral("https://example.com/\nunsafe")}) {
+                auto invalid = links; auto row = invalid[0].toMap(); row.insert(QStringLiteral("url"), url); invalid[0] = row;
+                rejected = refuse(name, {}, hidden, invalid) && rejected;
+            }
+            for (const auto &field : {QStringLiteral("id"), QStringLiteral("kind"), QStringLiteral("title"), QStringLiteral("url")}) {
+                auto invalid = links; auto row = invalid[0].toMap(); row.insert(field, true); invalid[0] = row;
+                rejected = refuse(name, {}, hidden, invalid) && rejected;
+            }
+            auto duplicate = links; duplicate[1] = duplicate[0];
+            auto unknown = links; auto row = unknown[0].toMap(); row.insert(QStringLiteral("script"), QStringLiteral("not allowed")); unknown[0] = row;
+            auto oversized = links; while (oversized.size() <= 24) oversized << links[0];
+            check(rejected && refuse(name, {}, hidden, duplicate) && refuse(name, {}, hidden, unknown)
+                      && refuse(name, {}, hidden, oversized),
+                  "invalid names/subtitles/tabs, unsafe URLs, mistyped/unknown fields, duplicate ids and oversized lists refuse atomically before any preference changes");
+            check(!backend.setSettingsPanelAsset(QStringLiteral("link-icon"), QStringLiteral("../escape"), firstIcon).value("ok").toBool()
+                      && settings.settingsPanelProfile() == saved,
+                  "invalid link asset ids cannot change the saved profile");
+            links.removeAt(0);
+            check(backend.saveSettingsPanelProfile(name, {}, hidden, tabs, links).value("ok").toBool()
+                      && !settings.settingsPanelProfile().value("linkIcons").toMap().contains("row-0")
+                      && settings.settingsPanelProfile().value("linkIcons").toMap().value("row-4")
+                         == saved.value("linkIcons").toMap().value("row-4"),
+                  "removing a link prunes exactly its artwork, preserving another row's stable icon");
+            check(backend.saveSettingsPanelProfile(name, {}, {}, tabs, {}).value("ok").toBool(),
+                  "the real backend accepts zero links without reseeding the old fixed-four list");
+            QSettings().sync();
+            SettingsManager empty;
+            check(empty.settingsPanelProfile().contains(QStringLiteral("links"))
+                      && empty.settingsPanelProfile().value("links").toList().isEmpty()
+                      && empty.settingsPanelProfile().value("linkIcons").toMap().isEmpty()
+                      && empty.aboutLinks() == ownLinks && empty.aboutTagline().isEmpty(),
+                  "explicit empty links/subtitle survive real persistence; removed icons stay removed and own-About remains isolated");
+        }
+        QSettings().clear();
+        QSettings().sync();
+        QCoreApplication::setApplicationName(previousName);
     }
 
     // ------------------------------------------------------------------
@@ -1912,6 +2009,13 @@ int runSelfTest()
                 check(!startupResult.value("ok").toBool()
                           && startupResult.value("error").toString().contains(QStringLiteral("Sign in with Discord")),
                       "regular-DLL inspect/apply/restore respect the native Discord gate before file access");
+            }
+            for (const auto &shaderResult : {gated.shadersInspect(),
+                      gated.shadersApply(QStringLiteral("qt-5.15.2"), {}, {}, {}, true),
+                      gated.shadersRemove({}, {}, true), gated.shadersRecover({}, true)}) {
+                check(!shaderResult.value("ok").toBool()
+                          && shaderResult.value("error").toString().contains(QStringLiteral("Sign in with Discord")),
+                      "native shader inspect/install/remove/recover respect authorization before file access");
             }
             Backend ungated(&gateSettings);
             check(ungated.patchThemeQml().value(QStringLiteral("error")).toString()

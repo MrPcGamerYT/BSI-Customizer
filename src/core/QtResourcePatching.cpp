@@ -2,6 +2,7 @@
 #include "ByteUtils.h"
 #include "PeUtils.h"
 #include "QtResourceRegistration.h"
+#include "ZlibUtils.h"
 #include <algorithm>
 #include <limits>
 
@@ -302,7 +303,10 @@ bool replaceResource(QByteArray &data, qint64 entry, const Link &snapshot,
     const auto oldPayload = data.mid(entry + 4, stored);
     if (link.compression != 0 && link.compression != 1) return refuse(QStringLiteral("Unsupported resource compression."));
     const auto oldSource = link.compression == 1 ? qUncompress(oldPayload) : oldPayload;
-    const QByteArray payload = oldSource == source ? oldPayload : (link.compression == 1 ? qCompress(source, 9) : source);
+    const qint64 end = entrySpaceEnd(data, link, entry, error);
+    if (end < 0) return false;
+    const QByteArray payload = oldSource == source ? oldPayload
+        : (link.compression == 1 ? ZlibUtils::compressForCapacity(source, end - entry - 4) : source);
     if ((link.compression == 1 && payload.size() < 6)
         || (link.compression == 1 ? qUncompress(payload) : payload) != source)
         return refuse(QStringLiteral("Resource compression did not verify."));
@@ -311,8 +315,6 @@ bool replaceResource(QByteArray &data, qint64 entry, const Link &snapshot,
     QByteArray changed = data;
     if (!PeUtils::sectionForRaw(PeUtils::sections(changed), entry))
         return refuse(QStringLiteral("Resource is not mapped by a PE section."));
-    const qint64 end = entrySpaceEnd(changed, link, entry, error);
-    if (end < 0) return false;
     qint64 destination = entry;
     if (record.size() > end - entry) {
         if (forcedDestination >= 0) {
@@ -366,9 +368,14 @@ bool replaceResource(QByteArray &data, qint64 entry, const Link &snapshot,
         return refuse(QStringLiteral("The resource source was prepared, but %1 matching compiled QML unit(s) remain active; the player may ignore this edit. Nothing was written. Retry on a supported player build or restore its backup.")
                           .arg(compiledStillActive));
     const auto verified = findLink(changed, destination, link.sourceName);
-    if (!verified.found || verified.ambiguous || verified.nodes != link.nodes
+    // Qt 5.15.2's QList equality instantiates MSVC stdext array iterators that
+    // newer toolsets have removed. Public const iterators preserve the exact
+    // size/order comparison without depending on those obsolete SDK helpers.
+    const bool sameNodes = verified.nodes.size() == link.nodes.size()
+        && std::equal(verified.nodes.cbegin(), verified.nodes.cend(), link.nodes.cbegin());
+    if (!verified.found || verified.ambiguous || !sameNodes
         || verified.compression != link.compression
-        || readFile(changed, { link.sourceName, destination, link.compression }, 50000000) != source)
+        || readFile(changed, { link.sourceName, destination, link.compression, QString() }, 50000000) != source)
         return refuse(QStringLiteral("Rewritten resource did not pass verification; no file was written."));
     data = changed;
     if (newEntry) *newEntry = destination;

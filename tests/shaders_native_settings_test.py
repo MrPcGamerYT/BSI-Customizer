@@ -1,0 +1,587 @@
+"""Production source planner + plugin + native Settings callbacks in Qt fixtures.
+
+Not a running emulator: native proprietary C++ model/controls/backend types are
+contract fixtures; the root bootstrap, window source/callbacks, appended row,
+shader module and shader controls are production code. Run missing-module mode
+in a separate process so a previously registered plugin cannot mask a failure.
+"""
+from contextlib import ExitStack
+import hashlib
+import json
+import os
+from pathlib import Path
+import re
+import subprocess
+import sys
+import tempfile
+import uuid
+
+# This imports one Qt binding and applies the same runtime/style choices as the
+# existing real plugin test. It does not import/register the shader QML module.
+from shaders_plugin_ui_test import (
+    QCoreApplication, QFileInfo, QGuiApplication, QLibraryInfo, QObject, QPointF,
+    QQmlComponent, QQmlEngine, QQmlExpression, QStandardPaths, Qt, QTest, QUrl,
+    configure_host_qt, NativeDisplayFixture,
+)
+if os.environ.get("BSI_TEST_QT_API") == "PyQt5":
+    from PyQt5.QtCore import pyqtProperty as Property, pyqtSlot as Slot
+else:
+    from PySide6.QtCore import Property, Slot
+
+REPO = Path(__file__).resolve().parents[1]
+
+
+class Backend(NativeDisplayFixture):
+    def __init__(self, instance):
+        super().__init__()
+        self.instance = instance
+        self.shortcuts = True
+        self.discards = 0
+
+    @Slot(str, result=bool)
+    def confGetBool(self, _key):
+        return False
+
+    @Slot(str, result=str)
+    def confGetInstanceString(self, key):
+        assert key == "graphics_renderer"
+        return "gl"
+
+    @Slot(result=str)
+    def getVmName(self):
+        return self.instance
+
+    @Slot()
+    def confDiscard(self):
+        super().confDiscard()
+
+    @Slot()
+    def setSettingsWindowObject(self):
+        pass
+
+    @Slot()
+    def clearSettingsWindowObject(self):
+        pass
+
+    @Slot(bool)
+    def shortcutsEditingMode(self, _enable):
+        pass
+
+    @Property(bool)
+    def pIsShortcutsEnabled(self):
+        return self.shortcuts
+
+    @pIsShortcutsEnabled.setter
+    def pIsShortcutsEnabled(self, value):
+        self.shortcuts = value
+
+
+def fixtures(directory, screenshot_tabs=False):
+    module = directory / "BsiNativeFixture"
+    module.mkdir()
+    declarations = {
+        "SettingElementModel": '''import QtQml 2.15
+QtObject {
+ property string pButtonText: ""
+ property string pButtonId: ""
+ property url pQmlSource: ""
+ property var pComponentArgs: null
+ property QtObject pComponentObj: null
+ property bool pIsVisible: true
+ property bool pShowRedDot: false
+}
+''',
+        "SettingElementModelList": '''import QtQml 2.15
+QtObject { default property list<QtObject> pSettingElements }
+''',
+        "DialogButtonModel": '''import QtQuick 2.15
+QtObject { property string pText: ""; property var pColor: null; signal clicked() }
+''',
+        "DialogButtonModelList": '''import QtQml 2.15
+QtObject { property list<QtObject> pButtons }
+''',
+        "UiDialogWindow": '''import QtQml 2.15
+QtObject { enum Kind { Simple, SimpleNarrow, Tall } }
+''',
+        "UiMessageDialog": '''import QtQuick 2.15
+import QtQuick.Window 2.15
+import QtQuick.Controls 2.15
+Window {
+ id:dialog;objectName:"nativeDiscardPrompt";width:390;height:190
+ // Match the native dialog's modal/transient and JS-owned close lifecycle.
+ flags:Qt.Dialog|Qt.FramelessWindowHint
+ modality:Qt.ApplicationModal
+ onVisibleChanged:if(!visible)dialog.destroy()
+ property int pDialogType:0
+ property string pDescription:""
+ property var pButtonsList:null
+ Text {text:dialog.pDescription;width:370;wrapMode:Text.Wrap;x:10;y:15}
+ Row {x:10;y:120;spacing:10
+ Repeater {model:dialog.pButtonsList?dialog.pButtonsList.pButtons:[]
+ delegate:Button {objectName:"nativePromptButton"+index;text:modelData.pText;onClicked:modelData.clicked()}}}
+}
+''',
+        "UiShadowContainer": '''import QtQuick 2.15
+Item {
+ default property alias children:content.data
+ property real shadowThickness:15
+ Item {id:content;anchors.fill:parent;anchors.margins:shadowThickness}
+}
+''',
+        "UiImageButton": '''import QtQuick 2.15
+Item {
+ property string asset:""
+ objectName:asset
+ signal clicked()
+ width:24;height:24
+ MouseArea{anchors.fill:parent;onClicked:parent.clicked()}
+}
+''',
+        "UiToastPopup": '''import QtQml 2.15
+QtObject {
+ property string pToastMessage:""
+ function fShowMessage(_value){}
+ function fClosePopup(){}
+}
+''',
+    }
+    from shaders.native_ui_fixture import theme_source
+    theme = theme_source(singleton=True)
+    qmldir = "module BsiNativeFixture\nsingleton UiTheme 1.0 UiTheme.qml\n"
+    for name, source in declarations.items():
+        (module / (name + ".qml")).write_text(source)
+        qmldir += f"{name} 1.0 {name}.qml\n"
+    (module / "UiTheme.qml").write_text(theme)
+    (module / "qmldir").write_text(qmldir)
+    # URLs are case sensitive on Linux; use the planner fixture's actual native
+    # spellings, not the artwork catalog's many historical filename aliases.
+    pages = re.findall(r'QStringLiteral\("([A-Za-z]+Setting.qml)"\)', (REPO / "tests/shaders/settings_fixture.h").read_text())
+    assert len(pages) == 12
+    for name in pages:
+        (directory / name).write_text('''import QtQuick 2.15
+Item {
+ property string pParentWindow:""
+ property bool pEnableSave:false
+ function fOnQmlLoaded(){}
+ function fDiscardChanges(){}
+ Text {text:"Untouched native-page fixture"}
+}
+''')
+    # Use the complete generated About/material alongside the actual native
+    # shell and public plugin. Standalone shader controls cannot catch styling
+    # that accidentally rewrites a native indicator/background or model index.
+    cpp = (REPO / "src/core/SettingsPanelPatcher.cpp").read_text()
+    about = re.search(r'QString generated = QStringLiteral\(R"QML\((.*?)\)QML"\);', cpp, re.S)[1]
+    for key, value in {"DEVELOPER": json.dumps("Native Settings contract"),
+                       "TAGLINE": json.dumps("Not an installed emulator"),
+                       "TAB_ICONS": ('({"3":"","5":"","6":"","8":"","9":"","10":""})' if screenshot_tabs else "({})"),
+                       "LINKS": "", "LOGO_SOURCE": json.dumps("")}.items():
+        about = about.replace("@@BSI_" + key + "@@", value)
+    assert "@@BSI_" not in about
+    about = about.replace("import QtQuick.Controls 2.15", "import QtQuick.Controls 2.15\nimport BsiNativeFixture 1.0")
+    (directory / "PlrAboutSetting.qml").write_text(about)
+
+
+def main():
+    native_diagnostics = None
+    if sys.platform == "win32" and os.environ.get("BSI_SHADERS_DIAGNOSTICS"):
+        from shaders.windows_diagnostics import install
+        native_diagnostics = install()
+    missing = "--missing-module" in sys.argv
+    persistent = "--persistent-model" in sys.argv
+    planner = Path(os.environ["BSI_SHADERS_SOURCE_TEST"]).resolve()
+    module_root = Path(os.environ["BSI_SHADERS_MODULE_ROOT"]).resolve()
+    assert planner.is_file()
+    runtime_qml = configure_host_qt()
+    QStandardPaths.setTestModeEnabled(True)
+    app = QGuiApplication.instance() or QGuiApplication([])
+    with tempfile.TemporaryDirectory(prefix="bsi-native-shaders-") as temp, ExitStack() as cleanup:
+        directory = Path(temp)
+        fixtures(directory, screenshot_tabs=persistent)
+        # Assemble the complete approved shell from the measured native source,
+        # not a fake centered tab strip. This import also checks its slot budget.
+        from settings_panel_window_budget_test import compact
+        stock = re.sub(r'^import (?:DialogButtonModel|DialogButtonModelList|UiDialogWindow|SettingElementModel|SettingElementModelList) 1\.0\r?\n', "", compact, flags=re.M)
+        stock = "import BsiNativeFixture 1.0\n" + stock
+        if persistent:
+            # Delay navigation readiness past the native page onLoaded. The old
+            # one-shot sort misses this; it must recover without a page reopen.
+            assert stock.count("orientation:Qt.Horizontal;") == 1
+            stock = stock.replace("orientation:Qt.Horizontal;", "orientation:Qt.Vertical;")
+        source_path = directory / "NativeSettingsBase.qml"
+        source_path.write_text(stock)
+        subprocess.run([str(planner), "--emit-persistent" if persistent else "--emit", str(directory), str(source_path)], check=True)
+        if persistent:
+            # Compatibility with an earlier root/model lacking optional module
+            # arguments. Native row identity must come from its actual URL.
+            emitted = directory / "Player.qml"
+            source = emitted.read_text()
+            assert source.count("'bsiTabIndex':12,") == 1
+            emitted.write_text(source.replace("'bsiTabIndex':12,", ""))
+        engine = QQmlEngine()
+        engine.setImportPathList(([str(module_root)] if not missing else []) + [str(directory), runtime_qml, "qrc:/qt-project.org/imports", "qrc:/qt/qml"])
+        # The native pages and module must see the SAME live singleton/context
+        # theme, not two independently authored lookalike palettes.
+        theme_component = QQmlComponent(engine)
+        theme_component.setData(b'import QtQml 2.15; import BsiNativeFixture 1.0; QtObject { property QtObject selectedTheme: UiTheme }', QUrl.fromLocalFile(str(directory / "ThemeHost.qml")))
+        assert theme_component.status() == QQmlComponent.Status.Ready, [e.toString() for e in theme_component.errors()]
+        theme_holder = theme_component.create()
+        assert theme_holder, [e.toString() for e in theme_component.errors()]
+        theme_holder.setParent(engine)
+        from shaders.native_ui_fixture import install as install_native_ui
+        native_theme, unregister_native_ui = install_native_ui(engine, directory, theme_holder.property("selectedTheme"))
+        cleanup.callback(unregister_native_ui)
+        warnings = []
+        engine.warnings.connect(lambda errors: warnings.extend(e.toString() for e in errors))
+        backend = Backend("NativeFixture-" + uuid.uuid4().hex)
+        engine.rootContext().setContextProperty("uiBackend", backend)
+        engine.rootContext().setContextProperty("plrBackend", backend)
+        executable = QFileInfo(QCoreApplication.applicationFilePath()).canonicalFilePath()
+        key = hashlib.sha256((executable + "\n" + backend.instance).encode()).hexdigest()
+        profile = Path(QStandardPaths.writableLocation(QStandardPaths.StandardLocation.GenericConfigLocation)) / "BSICustomizer/Shaders" / (key + ".json")
+        assert not profile.exists() and not profile.is_symlink()
+        cleanup.callback(lambda: profile.unlink(missing_ok=True))
+        component = QQmlComponent(engine, QUrl.fromLocalFile(str(directory / "Player.qml")))
+        assert component.status() == QQmlComponent.Status.Ready, [e.toString() for e in component.errors()]
+        player = component.create()
+        assert player, [e.toString() for e in component.errors()]
+        QTest.qWait(80)
+        assert player.property("pCompLoaded"), "optional shader bootstrap interrupted native startup"
+        assert player.property("bsiShaderReady") is (not missing), warnings
+
+        def evaluate(context, expression):
+            expr = QQmlExpression(QQmlEngine.contextForObject(context) or engine.rootContext(), context, expression)
+            result = expr.evaluate()
+            assert not expr.hasError(), expr.error().toString()
+            return result[0] if isinstance(result, tuple) else result
+
+        def tree(item):
+            pending = list(item.childItems())
+            while pending:
+                child = pending.pop()
+                yield child
+                pending.extend(child.childItems())
+
+        def named(root, name):
+            return next(item for item in tree(root) if item.objectName() == name)
+
+        def click(window, control):
+            # A Quick item stays isVisible() even when a focused ScrollView has
+            # scrolled it behind a clipped header/footer (notably Qt 5 Windows).
+            # Reveal it using the real Flickable, then reject any clipped hit.
+            ancestor = control.parentItem()
+            while ancestor:
+                if ancestor.metaObject().indexOfProperty("contentY") >= 0:
+                    center = control.mapToItem(ancestor, QPointF(control.width() / 2, control.height() / 2))
+                    margin = min(control.height() / 2 + 2, ancestor.height() / 2)
+                    offset = min(center.y() - margin, 0) + max(center.y() - ancestor.height() + margin, 0)
+                    maximum = max(0, ancestor.property("contentHeight") - ancestor.height())
+                    ancestor.setProperty("contentY", max(0, min(maximum, ancestor.property("contentY") + offset)))
+                    QTest.qWait(20)
+                ancestor = ancestor.parentItem()
+            ancestor = control.parentItem()
+            while ancestor:
+                if ancestor.clip():
+                    center = control.mapToItem(ancestor, QPointF(control.width() / 2, control.height() / 2))
+                    assert 0 <= center.x() < ancestor.width() and 0 <= center.y() < ancestor.height(), f"physical target {name_of(control)} is clipped by {name_of(ancestor)}"
+                ancestor = ancestor.parentItem()
+            point = control.mapToScene(QPointF(control.width() / 2, control.height() / 2)).toPoint()
+            assert control.isVisible() and 0 <= point.x() < window.width() and 0 <= point.y() < window.height(), name_of(control)
+            QTest.mouseMove(window, point)
+            QTest.qWait(20)
+            QTest.mouseClick(window, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, point)
+            QTest.qWait(40)
+
+        def name_of(control):
+            return control.objectName() or control.metaObject().className()
+
+        def open_settings():
+            click(player, named(player.contentItem(), "nativeSettingsButton"))
+            window = player.property("pSettingsWindow")
+            assert window and window.isVisible(), warnings
+            assert (window.width(), window.height()) == (780, 500), "native geometry/gutters regressed"
+            assert evaluate(window, "pSettingsItems.pSettingElements.length") == 13
+            if persistent:
+                strip = next(i for i in tree(window.contentItem()) if i.metaObject().className().endswith("ListView"))
+                if not missing:
+                    loaded = evaluate(window, "pSettingsItems.pSettingElements[12].pComponentObj")
+                    assert not loaded.property("tabsArranged"), "the delayed-navigation negative control did not delay the original sort"
+                evaluate(strip, "orientation = Qt.Horizontal")
+                if not missing:
+                    for _ in range(50):
+                        if loaded.property("tabsArranged"):
+                            break
+                        QTest.qWait(20)
+                    assert loaded.property("tabsArranged"), "late navigation/model attachment was never sorted"
+            return window
+
+        def tab(window, index, pointer_scroll=False):
+            strip = next(i for i in tree(window.contentItem()) if i.metaObject().className().endswith("ListView"))
+            # The callback index is deliberately native; positionViewAtIndex
+            # takes the DISPLAY-group index. In particular, About's native 11
+            # is now visual 12. Using 11 only happened to leave About's center
+            # clickable with narrower Linux fonts; Windows correctly rejected
+            # that clipped hit. Resolve by row identity, not either label/size.
+            visual_index = evaluate(strip, "(function() {"
+                + f"var target = pSettingsItems.pSettingElements[{index}];"
+                + f"if (!model || !model.items) return {index};"
+                + "for (var i = 0; i < model.items.count; ++i)"
+                + "if (model.items.get(i).model.modelData === target) return i;"
+                + "return -1; })()")
+            assert visual_index >= 0, f"native row {index} is absent from the actual display group"
+
+            def settled():
+                # A ListView may already report atXEnd while its overshoot or
+                # kinetic animation is still running (Qt 6 Windows). A real
+                # click during that motion only stops the flick and must not
+                # be mistaken for a category activation. Wait for ordinary
+                # pointer-driven scrolling to finish; never cancel/position it.
+                for _ in range(150):
+                    if not any(strip.property(p) for p in ("moving", "flicking", "dragging")):
+                        return
+                    QTest.qWait(20)
+                assert False, "native top-strip scrolling did not settle after a real pointer drag"
+
+            if pointer_scroll:
+                # Prove the appended category is reachable with an ordinary
+                # mouse, not only positionViewAtIndex/contentX assignment. Drag
+                # the native horizontal ListView left to expose its right end.
+                for _ in range(8):
+                    if strip.property("atXEnd"):
+                        break
+                    start = strip.mapToScene(QPointF(strip.width() * .85, strip.height() / 2)).toPoint()
+                    end = strip.mapToScene(QPointF(strip.width() * .15, strip.height() / 2)).toPoint()
+                    QTest.mouseMove(window, start)
+                    QTest.mousePress(window, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, start)
+                    for step in range(1, 13):
+                        point = start + (end - start) * (step / 12)
+                        QTest.mouseMove(window, point, 15)
+                    QTest.mouseRelease(window, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, end)
+                    QTest.qWait(20)
+                    settled()
+                assert strip.property("atXEnd"), "the native top strip cannot be scrolled to Shaders with a real mouse drag"
+            else:
+                strip.setProperty("cacheBuffer", 10000)
+                evaluate(strip, f"positionViewAtIndex({visual_index}, ListView.Contain)")
+            QTest.qWait(80)
+            settled()
+            text = evaluate(window, f"pSettingsItems.pSettingElements[{index}].pButtonText")
+            label = next(i for i in tree(window.contentItem()) if i.metaObject().indexOfProperty("text") >= 0 and i.property("text") == text)
+            click(window, label.parentItem())
+            return {"requested": index, "visualIndex": visual_index, "selected": window.property("pCurrentTabIndex"),
+                    "contentX": strip.property("contentX"), "contentWidth": strip.property("contentWidth"),
+                    "atXEnd": strip.property("atXEnd"), "moving": strip.property("moving"),
+                    "flicking": strip.property("flicking"), "dragging": strip.property("dragging"),
+                    "rowVisible": evaluate(window, f"pSettingsItems.pSettingElements[{index}].pIsVisible"),
+                    "hit": (label.mapToScene(QPointF(label.width() / 2, label.height() / 2)).x(),
+                            label.mapToScene(QPointF(label.width() / 2, label.height() / 2)).y()),
+                    "warnings": warnings}
+
+        def visible_prompts():
+            return [w for w in QGuiApplication.topLevelWindows() if w.objectName() == "nativeDiscardPrompt" and w.isVisible()]
+
+        def prompt_button(text):
+            # The Windows Qt 5 platform can queue modal/transient changes. Wait
+            # for the actual window, never invoke a mocked handler or turn a
+            # missing prompt into a pass. Keep diagnostics useful on CI.
+            for _ in range(50):
+                if visible_prompts():
+                    break
+                QTest.qWait(20)
+            prompts = visible_prompts()
+            assert len(prompts) == 1, (
+                "native dirty-state prompt not shown exactly once: "
+                + repr([(w.objectName(), w.isVisible(), w.property("bsiShaderDirty2"))
+                        for w in QGuiApplication.topLevelWindows()])
+                + f"; QML warnings: {warnings}"
+            )
+            prompt = prompts[0]
+            button = next(i for i in tree(prompt.contentItem()) if i.objectName().startswith("nativePromptButton") and i.property("text") == text)
+            click(prompt, button)
+            assert not visible_prompts(), "native prompt remained visible after its physical button click"
+
+        window = open_settings()
+        if missing:
+            # The row's placeholder object keeps unrelated native callback loops
+            # safe even though no shader page is loaded from the absent module.
+            for callback in ("fRefreshAudioSettingModels(false)", "fPreferenceSettingChangedClbk(false)", "fAdvanceSettingChangedClbk(false)", "fReloadSettingComboboxes()"):
+                evaluate(window, callback)
+            assert not evaluate(window, "pSettingsItems.pSettingElements[12].pIsVisible")
+            assert not window.property("bsiShaderDirty2")
+            assert not any(i.objectName() == "shaderEnabled" for i in tree(window.contentItem()))
+            window.close()
+            QTest.qWait(60)
+            assert player.property("pSettingsWindow") is None
+            assert not profile.exists()
+        else:
+            navigation = tab(window, 12, pointer_scroll=True)
+            assert navigation["visualIndex"] == 11, f"Shaders' visual position is not its native callback index: {navigation}"
+            assert window.property("pCurrentTabIndex") == 12, f"physical Shaders activation failed after pointer scrolling: {navigation}"
+            page = evaluate(window, "pSettingsItems.pSettingElements[12].pComponentObj")
+            assert page and evaluate(page, "Engine.controls.length") == 10
+            assert page.property("tabsArranged"), "Shaders must sort visually before About"
+            assert page.property("bsiTabIndex") == 12, "visual sorting changed the native callback index"
+            assert evaluate(window, "String(pSettingsItems.pSettingElements[11].pQmlSource).endsWith('PlrAboutSetting.qml')")
+            strip = next(i for i in tree(window.contentItem()) if i.metaObject().className().endswith("ListView"))
+            shader_label = next(i for i in tree(strip) if i.metaObject().indexOfProperty("text") >= 0 and i.property("text") == "Shaders")
+            about_label = next(i for i in tree(strip) if i.metaObject().indexOfProperty("text") >= 0 and i.property("text") == "About")
+            assert shader_label.mapToItem(strip, QPointF(0, 0)).x() < about_label.mapToItem(strip, QPointF(0, 0)).x(), "Shaders is not visually before About"
+            if persistent:
+                # A native model/view refresh must not silently restore the old
+                # About -> Shaders order or duplicate/misindex icon delegates.
+                evaluate(strip, "model = pSettingsItems.pSettingElements")
+                QTest.qWait(240)
+                shader_label = next(i for i in tree(strip) if i.metaObject().indexOfProperty("text") >= 0 and i.property("text") == "Shaders")
+                about_label = next(i for i in tree(strip) if i.metaObject().indexOfProperty("text") >= 0 and i.property("text") == "About")
+                assert shader_label.mapToItem(strip, QPointF(0, 0)).x() < about_label.mapToItem(strip, QPointF(0, 0)).x(), "native refresh undid Shaders-before-About sorting"
+            navigation = tab(window, 11)
+            assert navigation["visualIndex"] == 12, f"About's native identity was not mapped to its last visual position: {navigation}"
+            assert window.property("pCurrentTabIndex") == 11, "visual ordering changed About's native callback index"
+            tab(window, 12)
+            assert window.property("pCurrentTabIndex") == 12, "visual ordering changed Shaders' native callback index"
+            about = evaluate(window, "pSettingsItems.pSettingElements[11].pComponentObj")
+            assert about.objectName() == "aboutSettings" and evaluate(page, "bsiTheme !== null")
+            # The generated material must preserve the shader controls' own
+            # surfaces and live native palette, not substitute a fixed theme.
+            combo = named(page, "shaderPresets")
+            slider = named(page, "shaderValue-saturation")
+            check = named(page, "shaderEnabled")
+            assert combo.property("bsiFixtureKind") == "UiComboBox"
+            assert slider.property("bsiFixtureKind") == "UiSlider"
+            assert check.property("bsiFixtureKind") == "UiCheckBox"
+            assert evaluate(combo, "pSize === UiTheme.comboBoxes.sizes.medium")
+            assert evaluate(slider, "pSize === UiTheme.sliders.sizes.medium")
+            assert evaluate(check, "pSize === UiTheme.checkBoxes.sizes.medium")
+            native_save = named(page, "shaderSave")
+            assert native_save.property("bsiFixtureKind") == "UiButton"
+            assert evaluate(native_save, "pSize === UiTheme.buttons.sizes.medium && pColor === UiTheme.buttons.colors.accent")
+            assert evaluate(native_save, "pColor.normal.borderGradient != null"), "the real theme's button-border material must not be flattened or replaced"
+            evaluate(about, "UiTheme.colors.accentNormal = '#ab5544'")
+            assert evaluate(page, "String(bsiTheme.colors.accentNormal)") == "#ab5544"
+            evaluate(about, "UiTheme.colors.accentNormal = '#54c8ff'")
+            QTest.qWait(50)
+            assert evaluate(page, "viewport.contentHeight === Math.ceil(form.implicitHeight) + 20"), "native themed scroll extent did not settle"
+            assert not window.property("bsiShaderDirty2")
+            initial = evaluate(page, "JSON.stringify(Engine.saved)")
+            assert evaluate(page, "Engine.display.available"), evaluate(page, "Engine.display.detail")
+
+            def select_potato(index):
+                control = named(page, "shaderPotatoModes")
+                click(window, control)
+                assert evaluate(control, "popup.visible")
+                QTest.keyClick(window, Qt.Key.Key_Home)
+                for _ in range(index):
+                    QTest.keyClick(window, Qt.Key.Key_Down)
+                QTest.keyClick(window, Qt.Key.Key_Return)
+                QTest.qWait(30)
+                assert evaluate(page, "draft.potatoMode") == index
+
+            def shader_restart_choice(index):
+                prompts = [candidate for candidate in QGuiApplication.allWindows()
+                           if candidate.objectName() == "shaderRestartPrompt" and candidate.isVisible()]
+                assert len(prompts) == 1 and prompts[0].property("bsiFixtureKind") == "UiMessageDialog"
+                assert evaluate(page, "restartPrompt.transientParent === page.Window.window")
+                prompt = prompts[0]
+                assert prompt.modality() == Qt.WindowModality.ApplicationModal
+                label = evaluate(prompt, "pButtonsList.pButtons[" + str(index) + "].pText")
+                assert label == ("Restart Now" if index == 0 else "Discard Changes")
+                button = named(prompt.contentItem(), "nativeDialogButton" + str(index))
+                assert button.property("bsiFixtureKind") == "UiButton"
+                click(prompt, button)
+                assert not evaluate(page, "!!restartPrompt")
+
+            original_display = dict(backend.committed)
+            # A refused native restart leaves this authored fixture available
+            # for navigation/reopen assertions. It is not a guest restart.
+            backend.reject_restart = True
+            select_potato(2)
+            assert window.property("bsiShaderDirty2") and not backend.writes and backend.commits == 0
+            tab(window, 0)
+            prompt_button("No")
+            assert window.property("pCurrentTabIndex") == 12 and evaluate(page, "draft.potatoMode") == 2
+            tab(window, 0)
+            prompt_button("Discard Changes")
+            assert window.property("pCurrentTabIndex") == 0 and evaluate(page, "draft.potatoMode") == 0
+            assert not backend.writes and backend.commits == 0, "native No/Discard must not apply a Potato draft"
+            tab(window, 12)
+            select_potato(2)
+            click(window, named(page, "shaderSave"))
+            assert not backend.writes and backend.commits == 0 and window.property("bsiShaderDirty2")
+            assert evaluate(page, "Engine.saved.potatoMode") == 0
+            shader_restart_choice(1)
+            assert not backend.writes and backend.commits == 0 and not window.property("bsiShaderDirty2")
+            select_potato(2)
+            click(window, named(page, "shaderSave"))
+            shader_restart_choice(0)
+            assert window.isVisible() and backend.restarts == 1 and page.property("saveFailed"), "refused native restart must retain the saved state and visible Settings"
+            assert backend.committed["fb_width"] == 960 and backend.committed["fb_height"] == 540 and backend.commits == 1
+            assert evaluate(page, "Engine.saved.potatoMode") == 2 and not evaluate(page, "Engine.saved.enabled")
+            assert not window.property("bsiShaderDirty2") and not backend.confIsModified()
+            assert "restart" in named(page, "shaderPotatoStatus").property("text").lower()
+            select_potato(0)
+            click(window, named(page, "shaderSave"))
+            assert backend.commits == 1, "Native restoration also waits for the stock confirmation"
+            shader_restart_choice(0)
+            assert backend.committed == original_display and backend.commits == 2 and backend.discards == 0
+            assert evaluate(page, "JSON.stringify(Engine.saved)") == initial
+            click(window, named(page, "shaderEnabled"))
+            assert window.property("bsiShaderDirty2")
+            tab(window, 0)
+            assert window.property("pCurrentTabIndex") == 12, "native navigation silently lost unsaved shader edits"
+            prompt_button("No")
+            assert window.property("pCurrentTabIndex") == 12 and page.property("pEnableSave")
+            tab(window, 0)
+            prompt_button("Discard Changes")
+            assert window.property("pCurrentTabIndex") == 0 and not window.property("bsiShaderDirty2")
+            assert evaluate(page, "JSON.stringify(Engine.saved)") == initial
+            tab(window, 12)
+            click(window, named(page, "shaderEnabled"))
+            # Saved values, not draft bindings, drive the real C++ bridge.
+            click(window, named(page, "shaderSave"))
+            saved = evaluate(page, "JSON.stringify(Engine.saved)")
+            assert json.loads(saved)["enabled"] and profile.is_file()
+            assert not window.property("bsiShaderDirty2")
+            click(window, named(page, "shaderEnabled"))
+            assert page.property("pEnableSave") and window.property("bsiShaderDirty2"), (
+                "physical post-Save edit did not publish native dirty state: "
+                + repr({"checked": named(page, "shaderEnabled").property("checked"),
+                        "controlEnabled": named(page, "shaderEnabled").property("enabled"),
+                        "draft": evaluate(page, "JSON.stringify(draft)"),
+                        "saved": evaluate(page, "JSON.stringify(Engine.saved)"),
+                        "pageDirty": page.property("pEnableSave"),
+                        "nativeDirty": window.property("bsiShaderDirty2"), "warnings": warnings})
+            )
+            # Use the actual native header close action, not a Python wrapper
+            # call, and require both No and Discard to traverse onClosing.
+            click(window, named(window.contentItem(), "CloseIcon"))
+            prompt_button("No")
+            assert window.isVisible() and window.property("bsiShaderDirty2")
+            click(window, named(window.contentItem(), "CloseIcon"))
+            prompt_button("Discard Changes")
+            QTest.qWait(60)
+            assert player.property("pSettingsWindow") is None, "native close/discard recursed or left a dirty window alive"
+            assert backend.discards == 1
+            window = open_settings()
+            tab(window, 12)
+            page = evaluate(window, "pSettingsItems.pSettingElements[12].pComponentObj")
+            assert evaluate(page, "JSON.stringify(Engine.saved)") == saved
+            assert not page.property("pEnableSave") and not window.property("bsiShaderDirty2")
+            evaluate(page, "reset()")
+            click(window, named(page, "shaderSave"))
+            assert evaluate(page, "JSON.stringify(Engine.saved)") == initial
+            window.close()
+            QTest.qWait(60)
+        assert not warnings, "QML runtime warnings:\n" + "\n".join(warnings)
+        player.close()
+        player.deleteLater()
+        QTest.qWait(30)
+        engine.deleteLater()
+        app.processEvents()
+    print("PASS: " + ("missing regular DLL does not block native startup; shader row/page are inactive, all native callback loops and Settings close remain intact" if missing else "production optional bootstrap imports the real plugin with complete generated About glass; Shaders sorts before About without changing native indexes, retains themed controls, mouse-drag navigation across 13 tabs, native No/Discard on tab and close, real native-size Potato draft/Save/restore independent of effects, persistence/reopen, reset and intact 750x470 layout"))
+    if persistent and not missing:
+        print("PASS: persistent native model, screenshot-like hidden tabs, missing optional index argument, delayed navigation, external model refresh, exact Shaders-before-About order and native callback indexes survive reopen")
+    print("LIMIT: Qt/native-contract fixture only; no installed emulator, real game frames, deployment recovery or physical Intel/AMD/NVIDIA coverage is implied")
+
+
+if __name__ == "__main__":
+    main()

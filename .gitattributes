@@ -1,0 +1,3 @@
+# These upstream files have byte-exact provenance hashes. A Windows checkout
+# must not rewrite them to CRLF, including the copied Apache license text.
+src/third_party/zopfli/* -text

@@ -27,6 +27,7 @@ bool fileRole(const QString &role) {
         || role == QLatin1String("profile-open") || role == QLatin1String("profile-save")
         || role == QLatin1String("report-save") || role == QLatin1String("image-open")
         || role == QLatin1String("settings-panel-svg") || role == QLatin1String("settings-panel-logo")
+        || role == QLatin1String("settings-panel-link-icon")
         || role == QLatin1String("image-save") || role == QLatin1String("video-open")
         || role == QLatin1String("disk-open") || role == QLatin1String("disk-source")
         || role == QLatin1String("disk-extract") || role == QLatin1String("disk-folder")
@@ -249,84 +250,18 @@ QVariantMap WebBridge::invoke(const QString &method, const QVariantMap &args)
         m_settings.setAboutLinks(links);
         value = true;
     } else if (method == QLatin1String("saveSettingsPanelProfile")) {
-        const QString developer = text("developerName").trimmed();
-        const QString tagline = text("tagline").trimmed();
-        const QVariantList links = args.value("links").toList();
-        if (developer.isEmpty() || developer.size() > 80 || tagline.size() > 120 || links.size() != 4)
-            return failure(QStringLiteral("Enter a developer name, tagline, and four optional link slots."));
-        for (const QVariant &entry : links) {
-            const QVariantMap link = entry.toMap();
-            const QString kind = link.value("kind").toString();
-            const QString title = link.value("title").toString().trimmed();
-            const QString urlText = link.value("url").toString().trimmed();
-            if ((kind != QLatin1String("github") && kind != QLatin1String("discord") && kind != QLatin1String("youtube"))
-                || title.size() > 64 || urlText.size() > 512 || title.isEmpty() != urlText.isEmpty())
-                return failure(QStringLiteral("Each link needs a label and HTTP(S) URL, or both fields left blank."));
-            if (!urlText.isEmpty()) {
-                const QUrl url(urlText, QUrl::StrictMode);
-                const QString scheme = url.scheme().toLower();
-                if (!url.isValid() || url.host().isEmpty()
-                    || (scheme != QLatin1String("http") && scheme != QLatin1String("https")))
-                    return failure(QStringLiteral("About links must be valid HTTP or HTTPS URLs."));
-            }
-        }
-        QStringList hiddenTabs;
-        QSet<QString> uniqueHidden;
-        static const QRegularExpression tabIdPattern(QStringLiteral("^[a-z0-9_.-]{1,128}$"));
-        for (const QVariant &entry : args.value("hiddenTabs").toList()) {
-            const QString id = entry.toString().trimmed().toCaseFolded();
-            if (!tabIdPattern.match(id).hasMatch() || uniqueHidden.contains(id))
-                return failure(QStringLiteral("The hidden Settings-tab selection is invalid or duplicated."));
-            uniqueHidden.insert(id);
-            hiddenTabs << id;
-        }
-        const QVariantList liveTabs = m_backend.settingsPanelRebuildState().value("tabs").toList();
-        if (!liveTabs.isEmpty()) {
-            QSet<QString> available;
-            for (const QVariant &tab : liveTabs) available.insert(tab.toMap().value("id").toString().toCaseFolded());
-            for (const QString &id : hiddenTabs)
-                if (!available.contains(id)) return failure(QStringLiteral("A hidden tab does not belong to the selected player. Inspect the player UI again."));
-            if (hiddenTabs.size() >= available.size())
-                return failure(QStringLiteral("Keep at least one native Settings tab visible."));
-        }
-        m_settings.setAboutDeveloperName(developer);
-        m_settings.setAboutTagline(tagline);
-        m_settings.setAboutLinks(links);
-        QVariantMap panelProfile = m_settings.settingsPanelProfile();
-        panelProfile.insert(QStringLiteral("hiddenTabs"), hiddenTabs);
-        m_settings.setSettingsPanelProfile(panelProfile);
-        value = QStringLiteral("Settings-panel options and About identity saved on this PC. Apply the rebuild to write them into the selected player.");
+        QStringList available, hidden;
+        for (const QVariant &tab : m_backend.settingsPanelRebuildState().value("tabs").toList())
+            available << tab.toMap().value("id").toString();
+        for (const QVariant &id : args.value("hiddenTabs").toList()) hidden << id.toString();
+        // One native validator/transaction for both frontends. Rebuilt-player
+        // links no longer overwrite the Customizer's fixed own-About profile.
+        value = m_backend.saveSettingsPanelProfile(text("developerName"), text("tagline"),
+                                                   hidden, available, args.value("links").toList());
     } else if (method == QLatin1String("setSettingsPanelAsset")) {
-        const QString kind = text("kind");
-        const QString id = text("id").trimmed().toCaseFolded();
-        if (kind == QLatin1String("tab-icon")
-            && !QRegularExpression(QStringLiteral("^[a-z0-9_.-]{1,128}$")).match(id).hasMatch())
-            return failure(QStringLiteral("Choose a tab from the inspected player model first."));
-        const QVariantMap loaded = SettingsPanelPatcher::readCustomAsset(text("path"), kind);
-        if (!loaded.value("ok").toBool()) return failure(loaded.value("msg").toString());
-        QVariantMap panelProfile = m_settings.settingsPanelProfile();
-        if (kind == QLatin1String("tab-icon")) {
-            QVariantMap icons = panelProfile.value(QStringLiteral("tabIcons")).toMap();
-            icons.insert(id, loaded.value(QStringLiteral("asset")));
-            panelProfile.insert(QStringLiteral("tabIcons"), icons);
-        } else if (kind == QLatin1String("logo")) {
-            panelProfile.insert(QStringLiteral("logo"), loaded.value(QStringLiteral("asset")));
-        } else return failure(QStringLiteral("Choose a tab SVG icon or About logo image."));
-        m_settings.setSettingsPanelProfile(panelProfile);
-        value = loaded.value("msg");
+        value = m_backend.setSettingsPanelAsset(text("kind"), text("id"), text("path"));
     } else if (method == QLatin1String("clearSettingsPanelAsset")) {
-        const QString kind = text("kind");
-        QVariantMap panelProfile = m_settings.settingsPanelProfile();
-        if (kind == QLatin1String("tab-icon")) {
-            QVariantMap icons = panelProfile.value(QStringLiteral("tabIcons")).toMap();
-            icons.remove(text("id").trimmed().toCaseFolded());
-            panelProfile.insert(QStringLiteral("tabIcons"), icons);
-        } else if (kind == QLatin1String("logo")) panelProfile.remove(QStringLiteral("logo"));
-        else return failure(QStringLiteral("Choose a tab icon or logo to clear."));
-        m_settings.setSettingsPanelProfile(panelProfile);
-        value = kind == QLatin1String("tab-icon")
-            ? QStringLiteral("Custom icon cleared. The bundled pack icon will be used where available. Apply the rebuild to update the selected player.")
-            : QStringLiteral("Custom logo cleared. Apply the rebuild to use the player/fallback logo.");
+        value = m_backend.clearSettingsPanelAsset(text("kind"), text("id"));
     } else if (method == QLatin1String("readInterface")) {
         value = QVariantMap{{"removals", m_backend.removalNames()}, {"layout", m_backend.layoutTweaks()},
                             {"about", m_backend.aboutPageState()},

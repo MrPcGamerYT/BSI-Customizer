@@ -1,0 +1,12 @@
+{
+  "attachment": "Capture_LI.jpg",
+  "sha256": "d61fb079a6f9316d879c782eef3761f16bc49198a5f23693b1d28b00851456f0",
+  "image": { "width": 1440, "height": 900 },
+  "opaquePanel": { "width": 750, "height": 470 },
+  "nativeShadowInset": 15,
+  "outerWindow": { "width": 780, "height": 500 },
+  "nativePageWidth": 568,
+  "horizontalPageGutter": 91,
+  "minimumWideAspectRatio": 1.5,
+  "measurement": "Layout target for removing the cyan-marked side bands in the existing-window screenshot, not a pixel measurement of that screenshot. Keep the native form size; reduce equal outer gutters from 235 to 91 px and retain a clearly wide rectangular frame. Smaller viewports may clamp it."
+}

@@ -20,7 +20,8 @@ from PySide6.QtTest import QTest
 def main():
     preview = preview_module.SettingsPreview()
     state = preview.state()
-    assert (state["visibleWidth"], state["visibleHeight"]) == (1038, 581)
+    assert (state["visibleWidth"], state["visibleHeight"]) == (750, 470)
+    assert state["visibleWidth"] / state["visibleHeight"] >= 1.5, "the gutter fix must keep Settings wide"
     assert preview.frame().startswith(b"\x89PNG\r\n\x1a\n")
     frames = set()
     for index, label in enumerate(preview_module.LABELS):
@@ -33,6 +34,20 @@ def main():
     QTest.qWait(20)
     tree = list(preview_module.items(preview.window.contentItem()))
     slider = next(i for i in tree if preview_module.prop(i, "to") == 540)
+    # Reach lower controls by real wheel input when needed, without
+    # overriding the gutter-trimmed window or clicking outside the scroll area.
+    scroll = slider.parentItem()
+    while preview_module.prop(scroll, "contentY") is None:
+        scroll = scroll.parentItem()
+    wheel_point = scroll.mapToScene(QPointF(scroll.width() / 2, scroll.height() / 2))
+    for _ in range(8):
+        point = slider.mapToItem(scroll, QPointF(slider.width() * .7, slider.height() / 2))
+        if 10 < point.y() < scroll.height() - 10:
+            break
+        preview.event({"type": "wheel", "x": wheel_point.x(), "y": wheel_point.y(), "dy": 120})
+        QTest.qWait(80)
+    point = slider.mapToItem(scroll, QPointF(slider.width() * .7, slider.height() / 2))
+    assert 0 < point.y() < scroll.height(), "the compact Settings form cannot scroll to its lower controls"
     point = slider.mapToScene(QPointF(slider.width() * .7, slider.height() / 2))
     for kind in ("down", "up"):
         preview.event({"type": kind, "x": point.x(), "y": point.y()})
@@ -53,7 +68,7 @@ def main():
     assert abs(state["width"] - 760 * .96) <= 1 and abs(state["height"] - 480 * .94) <= 1
     assert preview.frame().startswith(b"\x89PNG")
     state = preview.event({"type": "resize", "small": False})
-    assert (state["width"], state["height"]) == (1068, 611)
+    assert (state["width"], state["height"]) == (780, 500)
     close = next(i for i in tree if preview_module.prop(i, "asset") == "CloseIcon")
     point = close.mapToScene(QPointF(close.width() / 2, close.height() / 2))
     for kind in ("down", "up"):

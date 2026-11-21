@@ -1,0 +1,370 @@
+name: Experimental shader backends (not player certification)
+
+on:
+  pull_request:
+    paths:
+      - 'src/shaders/**'
+      - 'src/core/NativeSettingsModel.*'
+      - 'src/core/PhoneProfiles*'
+      - 'src/core/LayoutPatcher.*'
+      - 'src/core/PatchFile.*'
+      - 'tests/phone_profiles*'
+      - 'docs/PHONE-PROFILES.md'
+      - 'src/core/ShaderSettings*'
+      - 'src/core/ShaderPackage.*'
+      - 'src/core/ShaderInstall.*'
+      - 'src/core/ShaderBundle.*'
+      - 'src/core/ShaderActions.*'
+      - 'src/core/Backend.*'
+      - 'src/qml/components/ShaderInstallPanel.qml'
+      - 'src/qml/pages/UiPage.qml'
+      - 'src/assets/shader-notices.inc'
+      - 'cmake/EmbedShaderBundle.cmake'
+      - 'scripts/Build-ShaderBundle.ps1'
+      - 'scripts/Inspect-EmulatorQt.py'
+      - 'tests/emulator_qt_report_test.py'
+      - 'tests/fixtures/emulator-qt-evidence.json'
+      - 'docs/EMULATOR-QT-COMPATIBILITY.md'
+      - 'tests/ui_page_settings_panel_test.py'
+      - 'src/core/SettingsPanelPatcher.*'
+      - 'src/core/QmlText.*'
+      - 'src/core/QtResource*'
+      - 'src/core/PeUtils.*'
+      - 'src/core/ZlibUtils.*'
+      - 'src/core/BoundedZopfli.*'
+      - 'src/core/ZopfliAllocator.h'
+      - 'src/core/ZopfliMatch.cmake'
+      - 'tests/settings_panel_window_budget_test.py'
+      - 'tests/settings_panel_glass_test.py'
+      - 'tests/settings_panel_glass_capture_test.py'
+      - 'tests/settings_panel_gradient_test.py'
+      - '.harness/settings_window_preview.py'
+      - '.harness/settings_preview*'
+      - 'tests/fixtures/settings-window-*'
+      - 'src/third_party/minhook/**'
+      - 'src/third_party/vulkan/**'
+      - 'src/third_party/zopfli/**'
+      - 'src/assets/settings-panel-icons/shaders.*'
+      - 'tests/shaders/**'
+      - 'tests/shaders_*'
+      - '.github/workflows/shaders.yml'
+      - '.gitattributes'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: shader-api-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  qt-evidence:
+    name: Qt inventory and Phone-source recovery on four pinned player samples
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install pefile==2024.8.26
+      - uses: actions/checkout@v5
+        with:
+          repository: MrPcGamerYT/HD-Player
+          ref: 6e4dc894eb1b6956060b3f76d13fc438e5178d03
+          path: player-references
+          persist-credentials: false
+      - name: Verify fixed-version, import-tag and compiler-header evidence without executing players
+        env:
+          BSI_QT_REFERENCE_DIR: ${{ github.workspace }}/player-references
+        run: python tests/shaders/run_ci_tests.py --command python tests/emulator_qt_report_test.py -v
+      - name: Build the production Phone source and disk installer (Qt Core only)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qt6-base-dev
+          cmake -S tests/shaders -B build-phone-profiles -DCMAKE_BUILD_TYPE=Debug -DBSI_TEST_NATIVE_SETTINGS=ON -DBSI_TEST_VULKAN=OFF -DCMAKE_CXX_FLAGS='-Wall -Wextra -Werror -pedantic'
+          python tests/shaders/run_ci_tests.py --command cmake --build build-phone-profiles --target phone-profiles-test --parallel 2
+      - name: Realistic helper URLs, no-growth planning and disk recovery on disposable pinned-player copies
+        env:
+          BSI_PHONE_PROFILES_TEST: ${{ github.workspace }}/build-phone-profiles/phone-profiles-test
+          BSI_PHONE_REFERENCE_DIR: ${{ github.workspace }}/player-references
+          BSI_TEST_COMMAND_TIMEOUT: '600'
+        run: python tests/shaders/run_ci_tests.py --command python tests/phone_profiles_references_test.py
+      - name: Source-only public Qt bridge boundary guard
+        run: python tests/shaders/public_qt_api_contract_test.py
+      - name: Failure and timeout diagnostics never turn a failed test into a pass
+        run: python tests/shaders/ci_diagnostics_test.py -v
+      - name: Independent Windows host path layouts never fall back to a build SDK
+        run: python tests/shaders/qt_host_paths_test.py -v
+
+  linux-public-qt5:
+    name: Actual Qt 5 public bridge on a newer independent Qt 5 runtime (Linux fixture)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      BSI_TEST_QT_API: PyQt5
+      BSI_SHADERS_MODULE_ROOT: ${{ github.workspace }}/build-qt5-bridge/module
+      BSI_SHADERS_SOURCE_TEST: ${{ github.workspace }}/build-qt5-bridge/tests/shader-settings-source-test
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install distro Qt 5 build SDK and a separate Python Qt 5 runtime
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qtbase5-dev qtdeclarative5-dev libgl1 libegl1 libxkbcommon0 libdbus-1-3
+          python -m pip install PyQt5==5.15.11
+          echo "BSI_SHADERS_EXPECT_BUILD_QT=$(qmake -query QT_VERSION)" >> "$GITHUB_ENV"
+      - uses: actions/checkout@v5
+        with:
+          repository: MrPcGamerYT/HD-Player
+          ref: 6e4dc894eb1b6956060b3f76d13fc438e5178d03
+          path: player-references
+          persist-credentials: false
+      - name: Build the actual Qt 5 plugin, not a mocked bridge
+        run: |
+          cmake -S src/shaders -B build-qt5-bridge -DCMAKE_BUILD_TYPE=Release -DBSI_SHADERS_QT_MAJOR=5 -DBSI_SHADERS_BUILD_TESTS=ON -DBSI_TEST_NATIVE_SETTINGS=ON -DBSI_TEST_VULKAN=OFF
+          python tests/shaders/run_ci_tests.py --command cmake --build build-qt5-bridge --parallel 2
+      - name: Stock Phone dropdown, native Save/Discard contract and qrc-to-local helper on Qt 5
+        env:
+          BSI_PHONE_PROFILES_TEST: ${{ github.workspace }}/build-qt5-bridge/tests/phone-profiles-test
+          BSI_PHONE_RCC: /usr/lib/qt5/bin/rcc
+        run: python tests/run_qt_runtime_test.py tests/phone_profiles_gui_test.py
+      - name: Physical controls, persistence, navigation and missing-module fallback on the independent host
+        env:
+          BSI_TEST_COMMAND_TIMEOUT: '180'
+        run: |
+          python tests/shaders/run_ci_tests.py --command python -X faulthandler -u tests/shaders_qt_capture_test.py
+          python tests/shaders/run_ci_tests.py --command python -X faulthandler -u tests/shaders_native_service_test.py
+          python tests/shaders/run_ci_tests.py --command python -X faulthandler -u tests/shaders_plugin_ui_test.py
+          python tests/shaders/run_ci_tests.py --command python -X faulthandler -u tests/shaders_native_settings_test.py
+          python tests/shaders/run_ci_tests.py --command python -X faulthandler -u tests/shaders_native_settings_test.py --persistent-model
+          python tests/shaders/run_ci_tests.py --command python -X faulthandler -u tests/shaders_native_settings_test.py --missing-module
+      - name: Live plugin preview shares one theme, stays opaque on every tab and preserves physical No/Discard
+        run: python tests/run_qt_runtime_test.py tests/shaders_preview_ui_test.py
+      - name: Missing-font metrics cannot widen the Shaders form beyond its clip
+        run: python tests/run_qt_runtime_test.py tests/shaders_fontless_ui_test.py
+      - name: Unmodified native Qt 5 controls/theme, exact Save pixels, opacity and physical input on both pinned player families
+        env:
+          BSI_SHADERS_IMAGE_TEST: ${{ github.workspace }}/build-qt5-bridge/tests/shader-settings-image-test
+          BSI_QT_REFERENCE_DIR: ${{ github.workspace }}/player-references
+          BSI_PHONE_RCC: /usr/lib/qt5/bin/rcc
+          BSI_TEST_COMMAND_TIMEOUT: '600'
+        run: python tests/shaders/run_ci_tests.py --command python -X faulthandler -u tests/shaders_native_controls_test.py
+      - name: Selected-tab glass at host, 100/125/150/200 percent DPI and strict flat-image negative controls
+        env:
+          BSI_GLASS_ARTIFACTS: ${{ runner.temp }}/settings-glass-captures
+          BSI_TEST_COMMAND_TIMEOUT: '600'
+        run: python tests/shaders/run_ci_tests.py --command python -X faulthandler -u tests/settings_panel_glass_capture_test.py
+      - name: Retain glass capture diagnostics and negative controls
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: glass-captures-linux-qt5
+          path: ${{ runner.temp }}/settings-glass-captures
+          if-no-files-found: ignore
+      - name: Record scope
+        run: echo 'Actual Linux Qt bridge cross-patch fixture, not Windows Qt 5.15.4 or installed-player/game/GPU certification.' >> "$GITHUB_STEP_SUMMARY"
+
+  native-vulkan-gl:
+    name: Native Vulkan and GLES pixels (Mesa software; not hardware)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      LIBGL_ALWAYS_SOFTWARE: '1'
+      ASAN_OPTIONS: 'detect_leaks=1'
+      UBSAN_OPTIONS: 'halt_on_error=1:print_stacktrace=1'
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install real software graphics APIs
+        run: sudo apt-get update && sudo apt-get install -y mesa-vulkan-drivers vulkan-validationlayers libvulkan1 libegl1 libegl-mesa0 libgles2 qt6-base-dev
+      - name: Check committed SPIR-V matches the shared original source
+        run: |
+          python3 tests/shaders/run_ci_tests.py --command python3 tests/shaders/public_qt_api_contract_test.py
+          python3 tests/shaders/run_ci_tests.py --command python3 tests/shaders/zopfli_provenance_test.py
+          python3 tests/shaders/run_ci_tests.py --command python3 tests/shaders/bundle_notices_test.py
+          npm install --prefix "$RUNNER_TEMP/spirv-tools" --no-fund --no-audit --save-exact @webgpu/glslang@0.0.15
+          BSI_CHECK_GENERATED=1 node tests/shaders/compile_spirv.cjs "$RUNNER_TEMP/spirv-tools/node_modules/@webgpu/glslang"
+      - name: Native Mesa Vulkan pixels with mandatory Khronos lifetime/API validation
+        env:
+          BSI_SHADERS_VULKAN_VALIDATION: '1'
+        run: |
+          cmake -S tests/shaders -B build-shader-tests -DCMAKE_BUILD_TYPE=Debug -DBSI_TEST_NATIVE_SETTINGS=ON -DCMAKE_CXX_FLAGS='-Wall -Wextra -Werror -pedantic'
+          python3 tests/shaders/run_ci_tests.py --command cmake --build build-shader-tests --parallel 2
+          python3 tests/shaders/run_ci_tests.py --test-dir build-shader-tests --output-on-failure --timeout 60
+      - name: ASan/UBSan routing and native Vulkan on a second software ICD
+        # Mesa/LLVM leaves process-global JIT allocations reported by LSan.
+        # Do not blanket-disable leak detection to hide them: run Mesa above
+        # with Vulkan object/lifetime validation and run this sanitizer build
+        # against pinned SwiftShader instead. No test assertion is skipped.
+        run: |
+          npm install --prefix "$RUNNER_TEMP/spirv-tools" --no-fund --no-audit --save-exact @sparticuz/chromium@133.0.0
+          mkdir -p "$RUNNER_TEMP/shader-icd"
+          node -e "const fs=require('node:fs'),z=require('node:zlib');fs.writeFileSync(process.env.RUNNER_TEMP+'/shader-icd/swiftshader.tar',z.brotliDecompressSync(fs.readFileSync(process.env.RUNNER_TEMP+'/spirv-tools/node_modules/@sparticuz/chromium/bin/swiftshader.tar.br')));"
+          tar -xf "$RUNNER_TEMP/shader-icd/swiftshader.tar" -C "$RUNNER_TEMP/shader-icd"
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined -fno-omit-frame-pointer -pthread -Isrc/shaders tests/shaders/renderer_capabilities_test.cpp src/shaders/Runtime.cpp -o "$RUNNER_TEMP/routing-asan"
+          python3 tests/shaders/run_ci_tests.py --command "$RUNNER_TEMP/routing-asan"
+          g++ -std=c++17 -O1 -g -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined -fno-omit-frame-pointer -Isrc/shaders -Isrc/third_party/vulkan/include tests/shaders/vulkan_pixels_test.cpp src/shaders/VulkanPipeline.cpp -ldl -o "$RUNNER_TEMP/vulkan-asan"
+          BSI_SHADERS_VULKAN_LIBRARY="$RUNNER_TEMP/shader-icd/libvk_swiftshader.so" python3 tests/shaders/run_ci_tests.py --command "$RUNNER_TEMP/vulkan-asan"
+      - name: ASan/UBSan native source, package, file recovery and every encoder allocation failure
+        run: |
+          cmake -S tests/shaders -B build-shader-core-asan -DCMAKE_BUILD_TYPE=Debug -DBSI_TEST_NATIVE_SETTINGS=ON -DBSI_TEST_VULKAN=OFF -DCMAKE_C_FLAGS='-O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer' -DCMAKE_CXX_FLAGS='-O1 -g -Wall -Wextra -Werror -pedantic -fsanitize=address,undefined -fno-omit-frame-pointer' -DCMAKE_EXE_LINKER_FLAGS='-fsanitize=address,undefined'
+          python3 tests/shaders/run_ci_tests.py --command cmake --build build-shader-core-asan --parallel 2
+          python3 tests/shaders/run_ci_tests.py --test-dir build-shader-core-asan --output-on-failure --timeout 180
+      - name: Production GLES and desktop OpenGL core pixels/state restoration
+        env:
+          BSI_TEXTURE_PIXEL_ARTIFACT_DIR: ${{ runner.temp }}/authored-texture-pixels
+        run: |
+          python3 tests/shaders/run_ci_tests.py --command python3 tests/shaders_gpu_test.py
+          BSI_TEST_TEXTURE_QUALITY=1 BSI_SHADERS_EGL_CLIENT_VERSION=3 python3 tests/shaders/run_ci_tests.py --command python3 tests/shaders_gpu_test.py
+          BSI_TEST_TEXTURE_QUALITY=1 BSI_SHADERS_EGL_API=opengl python3 tests/shaders/run_ci_tests.py --command python3 tests/shaders_gpu_test.py
+      - name: Retain authored native/Strong/Off texture images and measured mip evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: authored-texture-pixels-${{ github.run_id }}
+          path: ${{ runner.temp }}/authored-texture-pixels
+          if-no-files-found: error
+      - name: Record scope of results
+        run: echo 'Software/API tests only. No HD-Player installation, Win32 presentation hook or Intel/AMD/NVIDIA hardware certification is implied.' >> "$GITHUB_STEP_SUMMARY"
+
+  windows-plugin:
+    name: Windows x64 bridge ${{ matrix.qt }} -> host ${{ matrix.host-qt }} and WARP
+    # Qt 6.2 headers still use stdext array iterators removed in VS 2026.
+    # Use the actual supported v143 toolchain, not patched SDK headers.
+    runs-on: windows-2022
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - qt: '6.2.4'
+            host-qt: '6.7.3'
+            arch: win64_msvc2019_64
+            python-api: PySide6
+            python-package: PySide6==6.7.3
+          - qt: '6.2.4'
+            host-qt: '6.8.3'
+            arch: win64_msvc2019_64
+            python-api: PySide6
+            python-package: PySide6==6.8.3
+          - qt: '5.15.2'
+            host-qt: 'PyQt5-bundled-5.15'
+            arch: win64_msvc2019_64
+            python-api: PyQt5
+            python-package: PyQt5==5.15.11
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/checkout@v5
+        with:
+          repository: MrPcGamerYT/HD-Player
+          ref: 6e4dc894eb1b6956060b3f76d13fc438e5178d03
+          path: player-references
+          persist-credentials: false
+      - uses: jurplel/install-qt-action@v4.3.1
+        with:
+          version: ${{ matrix.qt }}
+          host: windows
+          target: desktop
+          arch: ${{ matrix.arch }}
+          cache: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install an independent Qt Python host for actual cross-version plugin tests
+        run: python -m pip install '${{ matrix.python-package }}'
+      - name: Build regular plugin, MinHook and native DirectX tests (no system proxy)
+        run: |
+          python tests/shaders/run_ci_tests.py --command python tests/shaders/qt_host_paths_test.py -v
+          if ($LASTEXITCODE -ne 0) { throw 'Independent Qt host path selection failed' }
+          python tests/shaders/run_ci_tests.py --command python tests/shaders/public_qt_api_contract_test.py
+          if ($LASTEXITCODE -ne 0) { throw 'Public Qt bridge source boundary failed' }
+          python tests/shaders/run_ci_tests.py --command python tests/shaders/zopfli_provenance_test.py
+          if ($LASTEXITCODE -ne 0) { throw 'Pinned compression provenance check failed' }
+          python tests/shaders/run_ci_tests.py --command python tests/shaders/bundle_notices_test.py
+          if ($LASTEXITCODE -ne 0) { throw 'Complete shader binary redistribution notices check failed' }
+          python tests/shaders/run_ci_tests.py --command cmake -S src/shaders -B build-shaders -G "Visual Studio 17 2022" -A x64 -T v143 -DBSI_SHADERS_BUILD_TESTS=ON -DBSI_TEST_NATIVE_SETTINGS=ON -DBSI_TEST_VULKAN=OFF
+          if ($LASTEXITCODE -ne 0) { throw 'Shader configuration failed' }
+          python tests/shaders/run_ci_tests.py --command cmake --build build-shaders --config Release --parallel 2
+          if ($LASTEXITCODE -ne 0) { throw 'Shader build failed' }
+      - name: Native API pixels, routing, real GL draw detours and EGL/DXGI/Vulkan lifecycle contracts
+        run: python tests/shaders/run_ci_tests.py --test-dir build-shaders -C Release --output-on-failure --timeout 60
+      - name: Read-only actual module/provider contract against the independent host runtime
+        run: |
+          $hostBin = (& python -c "import ${{ matrix.python-api }};from pathlib import Path;p=Path(${{ matrix.python-api }}.__file__).parent;print(p/'Qt5'/'bin' if '${{ matrix.python-api }}' == 'PyQt5' else p)").Trim()
+          if ($LASTEXITCODE -ne 0) { throw 'Cannot locate the explicit Python Qt host runtime' }
+          python tests/shaders/run_ci_tests.py --command build-shaders/tests/Release/shader-package-test.exe build-shaders/module/BSIShaders "$hostBin"
+          if ($LASTEXITCODE -ne 0) { throw 'Actual cross-version module/provider preflight failed' }
+      - name: Actual C++ plugin import and physical shader-page controls (Qt fixture only)
+        env:
+          BSI_TEST_COMMAND_TIMEOUT: '180'
+          BSI_TEST_QT_API: ${{ matrix.python-api }}
+          BSI_SHADERS_MODULE_ROOT: ${{ github.workspace }}/build-shaders/module
+          BSI_SHADERS_DIAGNOSTICS: '1'
+          BSI_SHADERS_EXPECT_BUILD_QT: ${{ matrix.qt }}
+        run: |
+          python tests/shaders/run_ci_tests.py --command python -X faulthandler -u tests/shaders_qt_capture_test.py
+          if ($LASTEXITCODE -ne 0) { throw 'Independent Qt real-pixel capture contract failed' }
+          python tests/shaders/run_ci_tests.py --command python -X faulthandler -u tests/shaders_native_service_test.py
+          if ($LASTEXITCODE -ne 0) { throw 'Nonpainting native-service adapter lifetime contract failed' }
+          python tests/shaders/run_ci_tests.py --command python -X faulthandler -u tests/shaders_plugin_ui_test.py
+          if ($LASTEXITCODE -ne 0) { throw 'Actual shader plugin/control fixture failed' }
+      - name: Unmodified native controls/theme, exact Save pixels, opacity and physical input on both pinned matching-Qt players
+        env:
+          BSI_TEST_COMMAND_TIMEOUT: '600'
+          BSI_TEST_QT_API: ${{ matrix.python-api }}
+          BSI_SHADERS_MODULE_ROOT: ${{ github.workspace }}/build-shaders/module
+          BSI_SHADERS_IMAGE_TEST: ${{ github.workspace }}/build-shaders/tests/Release/shader-settings-image-test.exe
+          BSI_QT_REFERENCE_DIR: ${{ github.workspace }}/player-references
+          BSI_SHADERS_DIAGNOSTICS: '1'
+          BSI_SHADERS_EXPECT_BUILD_QT: ${{ matrix.qt }}
+        run: python tests/shaders/run_ci_tests.py --command python -X faulthandler -u tests/shaders_native_controls_test.py
+      - name: Physical native Settings navigation, prompts and missing-module fallback (contract fixture)
+        env:
+          BSI_TEST_COMMAND_TIMEOUT: '180'
+          BSI_TEST_QT_API: ${{ matrix.python-api }}
+          BSI_SHADERS_MODULE_ROOT: ${{ github.workspace }}/build-shaders/module
+          BSI_SHADERS_SOURCE_TEST: ${{ github.workspace }}/build-shaders/tests/Release/shader-settings-source-test.exe
+          BSI_SHADERS_DIAGNOSTICS: '1'
+          BSI_SHADERS_EXPECT_BUILD_QT: ${{ matrix.qt }}
+        run: |
+          python tests/shaders/run_ci_tests.py --command python -X faulthandler -u tests/shaders_native_settings_test.py
+          if ($LASTEXITCODE -ne 0) { throw 'Native Settings contract fixture failed' }
+          python tests/shaders/run_ci_tests.py --command python -X faulthandler -u tests/shaders_native_settings_test.py --persistent-model
+          if ($LASTEXITCODE -ne 0) { throw 'Persistent Settings model, delayed navigation and hidden-tab ordering fixture failed' }
+          python tests/shaders/run_ci_tests.py --command python -X faulthandler -u tests/shaders_native_settings_test.py --missing-module
+          if ($LASTEXITCODE -ne 0) { throw 'Missing shader module fallback failed' }
+      - name: Live plugin preview shares one theme, stays opaque on every tab and preserves physical No/Discard
+        env:
+          BSI_TEST_COMMAND_TIMEOUT: '180'
+          BSI_TEST_QT_API: ${{ matrix.python-api }}
+          BSI_SHADERS_MODULE_ROOT: ${{ github.workspace }}/build-shaders/module
+          BSI_SHADERS_DIAGNOSTICS: '1'
+          BSI_SHADERS_EXPECT_BUILD_QT: ${{ matrix.qt }}
+        run: python tests/shaders/run_ci_tests.py --command python -X faulthandler -u tests/shaders_preview_ui_test.py
+      - name: Stock Phone dropdown, native Save/Discard contract and qrc-to-local helper on Windows
+        env:
+          BSI_TEST_QT_API: ${{ matrix.python-api }}
+          BSI_PHONE_PROFILES_TEST: ${{ github.workspace }}/build-shaders/tests/Release/phone-profiles-test.exe
+        run: python tests/run_qt_runtime_test.py tests/phone_profiles_gui_test.py
+      - name: Actual selected-tab glass pixels/input at host, 100/125/150/200 percent DPI and strict flat-image negative controls
+        env:
+          BSI_TEST_QT_API: ${{ matrix.python-api }}
+          BSI_GLASS_ARTIFACTS: ${{ runner.temp }}/settings-glass-captures
+          BSI_TEST_COMMAND_TIMEOUT: '600'
+        run: python tests/shaders/run_ci_tests.py --command python -X faulthandler -u tests/settings_panel_glass_capture_test.py
+      - name: Retain glass capture diagnostics and negative controls
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: glass-captures-windows-${{ matrix.qt }}-${{ matrix.host-qt }}
+          path: ${{ runner.temp }}/settings-glass-captures
+          if-no-files-found: ignore
+      - name: Record limits rather than claim universal support
+        shell: pwsh
+        run: "'Windows Qt fixture + WARP API tests only. Not HD-Player category navigation, game presentation hooks or physical Intel/AMD/NVIDIA certification. No merge authorized by these tests alone.' | Out-File $env:GITHUB_STEP_SUMMARY -Append"

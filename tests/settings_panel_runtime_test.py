@@ -66,20 +66,20 @@ match = re.search(
 )
 assert match, "Could not find the generated Settings-window QML template"
 replacement = match.group(1)
-assert "BSI v16" in replacement
+assert "BSI v21" in replacement
 assert "pSettingsItems.pSettingElements" in replacement
 # The About page publishes the hidden-tab list and the icon map to the shell.
 # It must find that shell by walking up: counting parents landed on the window
 # instead of the UiShadowContainer, which threw
 # "Cannot assign to non-existent property bHidden" and silently dropped every
 # custom tab icon (the file applied, nothing ever showed).
-assert "function fOnQmlLoaded(){var p=parent;while(p&&p.bIcons===undefined)p=p.parent;if(p)p.bIcons=bsiTabIcons}" in cpp, \
+assert "function fOnQmlLoaded(){var p=parent;while(p&&p.bIcons===undefined)p=p.parent;if(p)p.bIcons=bsiTabIcons;Qt.callLater(fGlassTabs)}" in cpp, \
     "the About page must walk up to the shell, not count parents"
 # One map now carries both icons and hidden sentinels. Retiring the unused
 # bHidden channel buys room for the selection effect in legacy resource slots.
 assert "property var bHidden" not in replacement, "hidden sentinels use the single icon-map channel"
 assert "property var bIcons:({})" in replacement, "the shell must declare bIcons"
-assert "property var bsiHiddenTabs:@@BSI_HIDDEN_TABS@@" in cpp
+assert "property var bsiHiddenTabs:" not in cpp, "the unused hidden list must not duplicate numeric icon-map sentinels"
 # A tab icon may only be an SVG: validateAssetBytes() rejects any other MIME for
 # that kind. Rasterising an oversized icon therefore produced an asset that the
 # very next step refused, and the icon disappeared from the rebuilt page with no
@@ -94,9 +94,9 @@ assert "property var bsiTabIcons:@@BSI_TAB_ICONS@@" in cpp
 # The shell must not ship its own palette: it paints with the player's own
 # theme object, exactly like the stock Settings window, so it follows whatever
 # the emulator currently looks like instead of a colour frozen into the patch.
-assert "property var q:UiTheme.colors" in replacement
-assert "color:r.q.primary80" in replacement
-assert "color:r.q.primary10" in replacement
+assert "property var c:UiTheme.colors" in replacement
+assert "color:r.c.primary80" in replacement
+assert "color:r.c.primary10" in replacement
 assert "#0d0f14" not in replacement and 'color:"white"' not in replacement, \
     "the rebuilt shell must not hard-code colours"
 assert 'color:"' not in replacement, "no literal colours may be baked into the shell"
@@ -163,7 +163,7 @@ assert "UiSettingsButton{" not in replacement, \
     "the stock tab button's private label is left aligned"
 assert "Text{id:t;text:modelData.pButtonText;font:h.font;" in replacement
 assert "font:UiTheme.fonts.bodyLarge;anchors.centerIn:parent" in replacement
-assert "TextMetrics{id:m;text:t.text;font:t.font}" in replacement, \
+assert "TextMetrics{id:m;text:t.text;font:h.font}" in replacement, \
     "width and bearing must use the actual label's font and text"
 assert "width:c===''?-4:m.boundingRect.width+22;height:44" in replacement, \
     "each hit target must fit its own label plus 11 px on each side"
@@ -174,7 +174,7 @@ assert ";spacing:4" in replacement, \
     "all hit-target gaps must be exactly 4 px (all label gaps exactly 26 px)"
 assert "y:c?0:22-height/2" in replacement, \
     "labels must be centred vertically or lifted above their icon"
-assert "ToolButton{width:18;height:18;x:parent.width/2-9;y:24;enabled:false;padding:0;background:null;icon.source:c||'';icon.color:index==pCurrentTabIndex?t.color:'transparent';icon.width:18;icon.height:18}" in replacement
+assert "ToolButton{width:18;height:18;x:parent.width/2-9;y:24;enabled:false;padding:0;background:null;icon{width:18;height:18;color:index==pCurrentTabIndex?t.color:'transparent';source:c||''}}" in replacement
 # The badge must not shift the label, and the full padded tab remains clickable.
 assert "x:parent.width-8;y:t.y+6;width:6;height:6" in replacement
 assert "visible:modelData.pShowRedDot" in replacement
@@ -197,23 +197,25 @@ assert "clip:true" in replacement, \
 assert "item.anchors.fill=item.parent" in replacement
 # The native page is still a flat centred column, not an extra content card.
 # The latest request explicitly adds a selected-tab effect, including its icon.
-assert "Item{width:Math.min(r.width-48,568);x:(r.width-width)/2;height:r.height-118" in replacement, \
-    "the page host must leave room for the footer inside the rounded window"
+assert "Rectangle{color:r.color;width:Math.min(r.width-48,568);x:(r.width-width)/2;height:r.height-118" in replacement, \
+    "the full native page/footer must have a flat opaque foundation inside the rounded window"
 assert "radius:12" not in replacement, "do not wrap the native page in a new card"
 assert "Rectangle{anchors.fill:parent;radius:6;color:t.color;opacity:index==pCurrentTabIndex?.2:parent.containsMouse?.1:0}" in replacement, \
     "selection and quieter hover must use the label's native theme colour"
-assert "icon.color:index==pCurrentTabIndex?t.color:'transparent'" in replacement, \
+assert "icon{width:18;height:18;color:index==pCurrentTabIndex?t.color:'transparent'" in replacement, \
     "tint the actual selected icon and preserve custom colours when deselected"
+assert "Rectangle{anchors.fill:parent;radius:6;border.color:index==pCurrentTabIndex?t.color:'transparent';color:'transparent'}" in replacement, \
+    "the selected tab needs a separate full-opacity themed outline; hover must not acquire one"
 assert "GraphicalEffects" not in replacement and "ShaderEffect" not in replacement, \
     "selection must work on both player Qt generations without optional effects"
-assert "Rectangle{id:r;property var q:UiTheme.colors;anchors.fill:parent;radius:14;color:r.q.primary80" in replacement, \
-    "the window itself stays a single flat rounded surface"
-assert "StackLayout{id:iSelectedSettingControl;anchors.fill:parent;currentIndex:pCurrentTabIndex" in replacement
+assert "Rectangle{id:r;property var c:UiTheme.colors;anchors.fill:parent;radius:14;color:r.c.primary80" in replacement, \
+    "the window keeps its native base colour; the About-hosted material decorates that surface"
+assert "StackLayout{anchors.fill:parent;currentIndex:pCurrentTabIndex" in replacement
 # Keep a coarse template-bloat guard, but this is not proof that the compressed
 # whole window fits: native callbacks/prefix and compression entropy matter too.
 # settings_panel_window_budget_test reconstructs the complete 2468-byte legacy
 # resource, including the original native prefix and the geometry helper.
-assert len(replacement.encode()) <= 1976, (
+assert len(replacement.encode()) <= 2080, (
     f"shell grew to {len(replacement.encode())} bytes; the tightest known "
     "UiSettingsWindow.qml slot is 2468 bytes"
 )
@@ -249,10 +251,10 @@ assert about_marker.group(1) in about_doc, (
     "the rebuild refuses to write a page that fails this check")
 
 about_payload = len(zlib.compress(about_doc.encode(), 9))
-assert about_payload <= 1700, (
+assert about_payload <= 1950, (
     f"the About page compresses to {about_payload} bytes with one embedded icon; "
     "the smallest known player slot is 2337 bytes and a logo goes in the same "
-    "document, so keep it comfortably below that"
+    "document; the complete 12/13-icon cases are separately pinned below 2337"
 )
 assert "bsiAboutDeveloperName" in about_doc and "bsiAboutDeveloperLink" in about_doc, \
     "compacting the About page must keep its object names"
@@ -275,7 +277,7 @@ assert "fCheckForUpdateCallback" in about_doc and "fUpdateShortDisplayName" in a
     "the native About callbacks must survive compaction"
 assert "delegate:Loader{Component.onCompleted:setSource(modelData.pQmlSource" in replacement
 assert "text:modelData.pButtonText" in replacement
-assert "color:r.q[index==pCurrentTabIndex?'subWindowHeaderClick':'primary20']" in replacement
+assert "color:r.c[index==pCurrentTabIndex?'subWindowHeaderClick':'primary20']" in replacement
 assert "visible:modelData.pShowRedDot" in replacement
 assert "fChangeSelectedSetting(index)" in replacement
 
@@ -309,10 +311,10 @@ assert helper_match, "Could not find the compact Settings-window geometry helper
 helper = helper_match.group(1)
 assert "onVisibleChanged:if(visible&&transientParent)" in helper
 assert "var t=transientParent" in helper
-assert "width=Math.min(t.width*.96,1068)" in helper
-assert "height=Math.min(t.height*.94,611)" in helper
-assert "x=t.x+t.width/2-width/2" in helper
-assert "y=t.y+t.height/2-height/2" in helper
+assert "width=Math.min(t.width*.96,780)" in helper
+assert "height=Math.min(t.height*.94,500)" in helper
+assert "x=(t.width-width)/2+t.x" in helper
+assert "y=(t.height-height)/2+t.y" in helper
 replacement = replacement.replace("@@BSI_HIDDEN_TABS@@", "[]")
 replacement = replacement.replace("@@BSI_TAB_ICONS@@", "({})")
 
@@ -412,11 +414,17 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
     if obj is None:
         raise AssertionError("Settings QML failed to create: " + "\n".join(e.toString() for e in component.errors()))
 
-    window = QQuickWindow()
+    # The shipping About material listens to this native Window property. A
+    # bare C++ QQuickWindow has no matching signal, unlike the player's root.
+    window_component = QQmlComponent(engine)
+    window_component.setData(b'import QtQuick.Window 2.15; Window { property int pCurrentTabIndex: 0 }', QUrl("SettingsWindowContract.qml"))
+    window = window_component.create()
+    assert window is not None, [e.toString() for e in window_component.errors()]
     window.resize(int(player.width), int(player.height))
     obj.setWidth(player.width)
     obj.setHeight(player.height)
     obj.setParentItem(window.contentItem())
+    obj.setParent(window)
     window.show()
     obj.setVisible(True)
     QTest.qWait(120)
@@ -515,8 +523,8 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
     assert not missing, f"Missing controls: {missing}; found object names: {found_names}"
     panel_center = panel.mapToItem(window.contentItem(), QPointF(panel.width() / 2, panel.height() / 2))
     assert abs(panel_center.x() - window.width() / 2) < 2 and abs(panel_center.y() - window.height() / 2) < 2, "The compact Settings shell should stay centered in the player window"
-    assert abs(obj.width() - 1068) < 2 and abs(obj.height() - 611) < 2, "Settings must match the screenshot frame, including the native shadow allowance"
-    assert abs(obj.x() - 216) < 2 and abs(obj.y() - 144.5) < 2, "The screenshot-sized Settings window should remain centered"
+    assert abs(obj.width() - 780) < 2 and abs(obj.height() - 500) < 2, "Settings must trim the marked side space while retaining the native shadow allowance"
+    assert abs(obj.x() - 360) < 2 and abs(obj.y() - 200) < 2, "The screenshot-sized Settings window should remain centered"
     title_center = settings_title.mapToItem(obj, QPointF(settings_title.width() / 2, settings_title.height() / 2))
     assert abs(title_center.x() - obj.width() / 2) < 2, "The Settings title should be centered in the title bar"
     # Gaps: one spacing value for the whole strip, so the distance between any
@@ -625,8 +633,8 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
     assert about_match, "Could not find the generated About-page QML template"
     about_qml = about_match.group(1)
     about_qml = about_qml.replace(
-        "import QtQuick.Layouts 1.15",
-        "import QtQuick.Layouts 1.15\nimport BsiSettingsFixture 1.0",
+        "import QtQuick.Controls 2.15",
+        "import QtQuick.Controls 2.15\nimport BsiSettingsFixture 1.0",
     )
     about_qml = about_qml.replace("@@BSI_DEVELOPER@@", '"Runtime Developer"')
     about_qml = about_qml.replace("@@BSI_TAGLINE@@", '"Runtime subtitle"')
@@ -656,8 +664,8 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
         raise AssertionError("About QML failed to create: " + "\n".join(e.toString() for e in about_component.errors()))
     about_tree = visual_items(about_obj)
     about_links = [item for item in about_tree if item.objectName() == "bsiAboutDeveloperLink"]
-    assert about_obj.property("pDeveloperName") == "Runtime Developer", "About page did not retain the customizable developer name"
-    assert about_obj.property("pDeveloperTagline") == "Runtime subtitle", "About page did not render the customizable subtitle"
+    assert next(i for i in about_tree if i.objectName() == "bsiAboutDeveloperName").property("text") == "Runtime Developer", "About page did not retain the customizable developer name"
+    assert next(i for i in about_tree if i.objectName() == "bsiAboutDeveloperTagline").property("text") == "Runtime subtitle", "About page did not render the customizable subtitle"
     assert any(item.objectName() == "bsiAboutDeveloperTagline" for item in about_tree), "About page did not create its subtitle element"
     assert len(about_links) == 2, "About page did not render the configured developer links"
     assert any(item.objectName() == "bsiAboutEmulatorLogo" for item in about_tree), "About page did not create its centered emulator logo"
@@ -665,7 +673,7 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
     # left of its scroll area, so the logo, name and link rows all sat left of
     # centre in a window that is otherwise centred. It is centred in its
     # viewport, and no fixed contentWidth overrides that.
-    assert "ColumnLayout{id:iAboutD;width:Math.min(440,parent.width-24);anchors.horizontalCenter:parent.horizontalCenter" \
+    assert "Column{id:d;width:Math.min(440,parent.width-24);anchors.horizontalCenter:parent.horizontalCenter" \
         in about_source, "the About content column must be centred in its viewport"
     assert "contentWidth:availableWidth" in about_source, \
         "the About content must span the viewport so its column is centred in the page"
@@ -680,6 +688,7 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
                          if item.metaObject().className().endswith("Loader")
                          and item.isVisible() and item.width() > 100)
     about_obj.setParentItem(active_loader)
+    about_obj.setParent(active_loader)
     about_obj.setWidth(active_loader.width())
     about_obj.setHeight(active_loader.height())
     logo = next(item for item in about_tree if item.objectName() == "bsiAboutEmulatorLogo")
@@ -722,6 +731,7 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
     about_child = mounted_component.create()
     assert about_child is not None, "The generated About page did not load inside the shell"
     about_child.setParentItem(page_loader)
+    about_child.setParent(page_loader)
     QTest.qWait(30)
     # The player's Loader calls this after loading; do the same.
     from PySide6.QtCore import QMetaObject
@@ -822,8 +832,12 @@ with tempfile.TemporaryDirectory(prefix="bsi-settings-qml-") as temp:
     about_component.deleteLater()
     mounted_component.deleteLater()
     window.close()
-    obj.deleteLater()
+    window.deleteLater()
     component.deleteLater()
+    # Destroy mounted objects before their engine-owned theme singleton.
+    from PySide6.QtCore import QCoreApplication, QEvent
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    QTest.qWait(10)
     engine.deleteLater()
     QTest.qWait(10)
 

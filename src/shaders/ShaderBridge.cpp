@@ -1,0 +1,184 @@
+#include "ShaderBridge.h"
+#include "ShaderPreferences.h"
+#include "Runtime.h"
+#include <QCoreApplication>
+#include <QClipboard>
+#include <QGuiApplication>
+#include <QCryptographicHash>
+#include <QDir>
+#include <QFileInfo>
+#include <QPlatformSurfaceEvent>
+#include <QPointer>
+#include <QSet>
+#include <QStandardPaths>
+#include <QThread>
+#include <QTimer>
+#include <QWindow>
+
+namespace BsiShaders {
+namespace {
+// A child Bootstrap completes before its QML Window necessarily does. Do not
+// force QWindow::create()/winId() in that partially constructed Quick window
+// (notably Qt 5). Install API hooks early, and attach HWND ownership when Qt
+// has actually created its platform surface. Also revoke it on recreation.
+class SurfaceObserver final : public QObject {
+public:
+    explicit SurfaceObserver(QWindow *window):QObject(window),window(window){window->installEventFilter(this);}
+    bool eventFilter(QObject *object,QEvent *event) override {
+        if(object==window&&event->type()==QEvent::PlatformSurface){
+            const auto *surface=static_cast<QPlatformSurfaceEvent*>(event);
+            if(surface->surfaceEventType()==QPlatformSurfaceEvent::SurfaceAboutToBeDestroyed)Runtime::instance().setWindow(0);
+            else if(window&&window->handle())Runtime::instance().setWindow(std::uintptr_t(window->winId()));
+        }
+        return false;
+    }
+private:
+    QPointer<QWindow> window;
+};
+struct State {
+    ShaderPreferences preferences;
+    QString instance,error;
+    QSet<ShaderBridge*> bridges;
+    QPointer<SurfaceObserver> surfaceObserver;
+    bool attached=false,connected=false;
+};
+State &state(){static auto *s=new State;return *s;}
+QString fileFor(const QString &instance){
+    const auto key=QCryptographicHash::hash((QFileInfo(QCoreApplication::applicationFilePath()).canonicalFilePath()+QLatin1Char('\n')+instance).toUtf8(),QCryptographicHash::Sha256).toHex();
+    return QDir(QStandardPaths::writableLocation(QStandardPaths::GenericConfigLocation))
+        .filePath(QStringLiteral("BSICustomizer/Shaders/")+QString::fromLatin1(key)+QStringLiteral(".json"));
+}
+void notify(){for(auto *bridge:state().bridges){emit bridge->settingsChanged();emit bridge->metricsChanged();}}
+}
+ShaderBridge::ShaderBridge(QObject *parent):QObject(parent){
+    state().bridges.insert(this);
+    auto *timer=new QTimer(this);timer->setInterval(1000);
+    connect(timer,&QTimer::timeout,this,&ShaderBridge::metricsChanged);timer->start();
+}
+ShaderBridge::~ShaderBridge(){state().bridges.remove(this);}
+QVariantMap ShaderBridge::saved()const{return state().preferences.values();}
+QString ShaderBridge::error()const{return state().error.isEmpty()?state().preferences.error():state().error;}
+QVariantMap ShaderBridge::display()const{return state().preferences.displayStatus();}
+QVariantMap ShaderBridge::previewPotato(int mode)const{return state().preferences.previewPotato(mode);}
+bool ShaderBridge::bindNativeDisplay(QObject *backend){
+    auto &s=state();
+    if(!s.attached)return false;
+    const bool okay=s.preferences.bindDisplay(backend);
+    Runtime::instance().set(s.preferences.parameters());Runtime::instance().setTexture(s.preferences.texture());notify();return okay;
+}
+bool ShaderBridge::bindNativePlayer(QObject *backend){
+    if(!state().attached)return false;
+    const bool okay=state().preferences.bindPlayer(backend);notify();return okay;
+}
+QVariantMap ShaderBridge::restartPlayer(){
+    const auto response=state().preferences.requestRestart();notify();return response;
+}
+QVariantMap ShaderBridge::bridgeInfo()const{
+    return {{"moduleQtVersion",QString::fromLatin1(QT_VERSION_STR)},
+            {"runtimeQtVersion",QString::fromLatin1(qVersion())},{"publicQtApi",true}};
+}
+QVariantList ShaderBridge::controlList()const{
+    QVariantList out;
+    for(const auto &c:controls)out<<QVariantMap{{"key",QString::fromLatin1(c.key)},{"label",QString::fromLatin1(c.label)},{"minimum",c.minimum},{"maximum",c.maximum}};
+    return out;
+}
+QVariantMap ShaderBridge::metrics()const{
+    const auto m=Runtime::instance().metrics();
+    const auto texture=Runtime::instance().texture();
+    const auto number=[](std::uint64_t value){return QVariant::fromValue<qulonglong>(value);};
+    const auto depth=[&](TextureDepthFailure reason){return number(m.textureDepthReasons[static_cast<std::size_t>(reason)]);};
+    const auto label=[](RendererFamily f){return f==RendererFamily::Vulkan?"Vulkan":f==RendererFamily::DirectX?"DirectX":f==RendererFamily::OpenGL?"OpenGL":"Automatic / unknown";};
+    return {{"hooksAttached",m.hooks},{"gameSurfaceObserved",m.observed},{"active",m.active},
+            {"requestedRenderer",m.requested==RendererFamily::Automatic?QStringLiteral("Automatic"):QString::fromLatin1(label(m.requested))},
+            {"configuredRenderer",QString::fromLatin1(label(m.configured))},
+            {"renderer",QString::fromLatin1(capability(m.renderer).label)},
+            {"backendImplemented",capability(m.renderer).pipelineImplemented},{"deviceRequirementsMet",m.deviceReady},
+            {"processedFrames",number(m.processed)},{"status",QString::fromStdString(m.status)},
+            {"potatoGraphicEnabled",texture.enabled},{"textureSupported",m.textureSupported},
+            {"textureDepthIndependent",m.texturePolicy==TextureDrawPolicy::OwnedMipCompatibility},
+            {"texturePolicy",m.texturePolicy==TextureDrawPolicy::OwnedMipCompatibility?QStringLiteral("Owned mip compatibility (depth independent)"):QStringLiteral("Depth-qualified scene")},
+            {"textureEligibleDraws",number(m.textureSceneDraws)},
+            {"textureDraws",number(m.textureDraws)},{"textureBindings",number(m.textureBindings)},{"textureStatus",QString::fromStdString(m.textureStatus)},
+            {"textureInspected",number(m.textureInspected)},{"textureSceneDraws",number(m.textureSceneDraws)},
+            {"textureDepthBypasses",number(m.textureDepthBypasses)},{"textureBlendBypasses",number(m.textureBlendBypasses)},
+            {"textureSamplerBypasses",number(m.textureSamplerBypasses)},{"textureOtherBypasses",number(m.textureOtherBypasses)},
+            {"textureDepthTestDisabled",depth(TextureDepthFailure::TestDisabled)},{"textureDepthWritesDisabled",depth(TextureDepthFailure::WritesDisabled)},
+            {"textureDepthNever",depth(TextureDepthFailure::Never)},{"textureDepthAlways",depth(TextureDepthFailure::Always)},
+            {"textureDepthMissingAttachment",depth(TextureDepthFailure::MissingAttachment)},{"textureDepthInsufficientPrecision",depth(TextureDepthFailure::InsufficientPrecision)},
+            {"textureDepthUnspecified",depth(TextureDepthFailure::None)},
+            {"textureNestedInspected",number(m.textureNestedInspected)},{"textureNestedDraws",number(m.textureNestedDraws)},
+            {"textureLastBypass",QString::fromStdString(m.textureLastBypass)},
+            {"vulkanLoaders",number(m.vulkan.loaders)},{"vulkanInstances",number(m.vulkan.instances)},
+            {"vulkanDevices",number(m.vulkan.devices)},{"vulkanSurfaces",number(m.vulkan.surfaces)},
+            {"vulkanSwapchains",number(m.vulkan.swapchains)},{"vulkanPresents",number(m.vulkan.presents)},
+            {"vulkanMissedQueues",number(m.vulkan.missedQueues)},{"vulkanRejectedWindows",number(m.vulkan.rejectedWindows)},
+            {"vulkanLoader",QString::fromStdString(m.vulkan.loader)}};
+}
+QString ShaderBridge::diagnostics()const{
+    // User-triggered clipboard output only; no upload, persistent log or private
+    // process/module path. Lifecycle counters are NOT confirmed game frames.
+    const auto m=metrics();
+    const auto depthReport=QStringLiteral("Depth rejection first blocker (samplers not inspected): test disabled=%1; writes disabled=%2; NEVER=%3; ALWAYS=%4; missing attachment=%5; under 16 bits=%6; unspecified=%7\nNested API calls: inspected=%8; prepared=%9. Nested/alias calls are not additional game frames or proof of game-resource ownership.")
+        .arg(m.value("textureDepthTestDisabled").toString(),m.value("textureDepthWritesDisabled").toString(),
+             m.value("textureDepthNever").toString(),m.value("textureDepthAlways").toString(),
+             m.value("textureDepthMissingAttachment").toString(),m.value("textureDepthInsufficientPrecision").toString(),
+             m.value("textureDepthUnspecified").toString(),m.value("textureNestedInspected").toString(),m.value("textureNestedDraws").toString());
+    const auto inspectionReport=QStringLiteral("Texture inspection since the latest setting/source change: calls=%1; sampler-inspection calls=%2; conservative depth bypass=%3; blended bypass=%4; no eligible mip sampler=%5; other bypass=%6\nLatest bypass: %7\nOffscreen/pbuffer/foreign scene contexts are not inferred from presentation or a share group.")
+        .arg(m.value("textureInspected").toString(),m.value("textureEligibleDraws").toString(),
+             m.value("textureDepthBypasses").toString(),m.value("textureBlendBypasses").toString(),
+             m.value("textureSamplerBypasses").toString(),m.value("textureOtherBypasses").toString(),
+             m.value("textureLastBypass").toString())+QLatin1Char('\n')+depthReport;
+    const auto policyReport=QStringLiteral("Texture sampling policy: %1. Compatibility inspects mipmapped color without a depth-test requirement; opaque mipmapped in-game HUD may also change, as may RGB-packed data maps.")
+        .arg(m.value("texturePolicy").toString());
+    return QStringLiteral("Requested API: %1\nObserved game API: %2\n%3\nProcessed game frames: %4\nGame surface observed: %5; processing active: %6\nVulkan capture: loaders=%7; instances=%8; devices=%9; Win32 surfaces=%10; swapchains=%11; presents=%12; missing queues=%13; excluded windows=%14\nLast hooked loader: %15\nQt bridge: %16; host: %17\n%18")
+        .arg(m.value("requestedRenderer").toString(),m.value("renderer").toString(),m.value("status").toString())
+        .arg(m.value("processedFrames").toString(),m.value("gameSurfaceObserved").toBool()?QStringLiteral("yes"):QStringLiteral("no"),m.value("active").toBool()?QStringLiteral("yes"):QStringLiteral("no"))
+        .arg(m.value("vulkanLoaders").toString(),m.value("vulkanInstances").toString(),m.value("vulkanDevices").toString(),m.value("vulkanSurfaces").toString(),m.value("vulkanSwapchains").toString(),m.value("vulkanPresents").toString(),m.value("vulkanMissedQueues").toString(),m.value("vulkanRejectedWindows").toString(),m.value("vulkanLoader").toString())
+        .arg(QString::fromLatin1(QT_VERSION_STR),QString::fromLatin1(qVersion()),
+             QStringLiteral("Configured emulator renderer (hint only): %1\nDetection uses owned host game presentation, not the Android guest API or Qt UI.\n%2")
+                 .arg(m.value("configuredRenderer").toString(),
+                      QStringLiteral("Prepared Potato sampler bindings: %1 across %2 draw calls; inspection armed: %3 (not measured game pixels/FPS)\n%4\n%5\n%6")
+                          .arg(m.value("textureBindings").toString(),m.value("textureDraws").toString(),
+                               m.value("textureSupported").toBool()?QStringLiteral("yes"):QStringLiteral("no"),
+                               m.value("textureStatus").toString(),
+                               policyReport+QLatin1Char('\n')+inspectionReport,error())));
+}
+void ShaderBridge::copyDiagnostics()const{if(auto *clipboard=QGuiApplication::clipboard())clipboard->setText(diagnostics());}
+void ShaderBridge::attach(QObject *object,const QString &instance,const QString &graphicsRenderer){
+    if(!QCoreApplication::instance()||QThread::currentThread()!=QCoreApplication::instance()->thread())return;
+    auto *window=qobject_cast<QWindow*>(object);
+    auto &s=state();
+    if(!window||instance.trimmed().isEmpty()||instance.size()>128){s.error=QStringLiteral("The native player window/instance could not be identified. Shaders remain disabled.");notify();return;}
+    if(s.attached&&s.instance!=instance){s.error=QStringLiteral("A different instance is already attached in this process; shaders remain unchanged.");notify();return;}
+    s.instance=instance;s.error.clear();s.preferences.load(fileFor(instance));
+    auto requested=RendererFamily::Automatic;
+    if(graphicsRenderer==QLatin1String("gl"))requested=RendererFamily::OpenGL;
+    else if(graphicsRenderer==QLatin1String("dx"))requested=RendererFamily::DirectX;
+    else if(graphicsRenderer==QLatin1String("vlcn"))requested=RendererFamily::Vulkan;
+    // Unknown/new combined settings must not disable capture either: only an
+    // owned game presentation can identify the processing backend. Keep the
+    // setting for diagnostics; never call another API "Vulkan" to hide a miss.
+    s.attached=true;Runtime::instance().configureRenderer(requested);Runtime::instance().set(s.preferences.parameters());Runtime::instance().setTexture(s.preferences.texture());
+    if(s.surfaceObserver)delete s.surfaceObserver;
+    s.surfaceObserver=new SurfaceObserver(window);
+    Runtime::instance().start(window->handle()?std::uintptr_t(window->winId()):0);
+    if(!s.connected){s.connected=true;QObject::connect(QCoreApplication::instance(),&QCoreApplication::aboutToQuit,[] {Runtime::instance().stop();});}
+    notify();
+}
+QVariantMap ShaderBridge::apply(const QVariantMap &values,bool keepCurrentDisplay){
+    return applyConfiguration(values,keepCurrentDisplay,{});
+}
+QVariantMap ShaderBridge::applyReviewed(const QVariantMap &values,const QString &reviewKey){
+    if(reviewKey.size()!=64)return {{"ok",false},{"msg",QStringLiteral("A current Display preview is required before confirming the restart dialog. Nothing was saved or restarted.")}};
+    return applyConfiguration(values,false,reviewKey);
+}
+QVariantMap ShaderBridge::applyConfiguration(const QVariantMap &values,bool keepCurrentDisplay,const QString &reviewKey){
+    auto &s=state();
+    if(!QCoreApplication::instance()||QThread::currentThread()!=QCoreApplication::instance()->thread())
+        return {{"ok",false},{"msg",QStringLiteral("Shader settings must be saved on the player GUI thread.")}};
+    if(!s.attached){s.error=QStringLiteral("No native player instance is attached.");notify();return {{"ok",false},{"msg",s.error}};}
+    auto response=s.preferences.apply(values,keepCurrentDisplay,reviewKey);
+    if(response.value(QStringLiteral("ok")).toBool()){s.error.clear();Runtime::instance().set(s.preferences.parameters());Runtime::instance().setTexture(s.preferences.texture());}
+    notify();return response;
+}
+} // namespace BsiShaders

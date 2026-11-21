@@ -6,6 +6,7 @@
 #include "PatchFile.h"
 #include "QtResources.h"
 #include "ThemeEngine.h"
+#include "ZlibUtils.h"
 
 #include <QBuffer>
 #include <QFile>
@@ -616,7 +617,8 @@ Result replaceBytes(const QString &exePath, const QString &path, const QByteArra
                                              "was written.")
                             : room.detail };
 
-    const qint64 payload = payloadSizeFor(bytes, entry.flags);
+    const qint64 payload = entry.flags == 1
+        ? ZlibUtils::compressForCapacity(bytes, room.capacity).size() : bytes.size();
     qint64 destination = -1;
     if (payload > room.capacity) {
         // The compressed payload no longer fits its own slot. Rebuilding it in

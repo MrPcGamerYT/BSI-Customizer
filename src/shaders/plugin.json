@@ -1,0 +1,11 @@
+{
+  "api": 1,
+  "scope": "shader-only",
+  "proxy": false,
+  "status": "experimental; opt-in native Settings module, not player/GPU certification",
+  "qtApiContract": "public-v1; separate Qt 5 and 6 build baselines",
+  "targetRenderers": ["OpenGL", "DirectX 11", "DirectX 12", "Vulkan"],
+  "renderers": ["OpenGL", "OpenGL ES via EGL", "DirectX 11", "DirectX 12 via D3D11On12", "Vulkan"],
+  "unsupported": ["DirectX 9/10", "HDR output", "protected images", "unidentified game surfaces"],
+  "hardwareValidation": "pending; no Intel, AMD or NVIDIA compatibility certification"
+}

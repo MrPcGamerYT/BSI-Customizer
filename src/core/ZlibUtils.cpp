@@ -1,5 +1,6 @@
 #include "ZlibUtils.h"
 #include "ByteUtils.h"
+#include "BoundedZopfli.h"
 
 namespace ZlibUtils {
 
@@ -34,6 +35,29 @@ QByteArray compress(const QByteArray &data)
     if (withHeader.size() <= 4)
         return {};
     return withHeader.mid(4); // strip qCompress' 4-byte BE size header
+}
+
+QByteArray compressForCapacity(const QByteArray &data, qint64 capacity)
+{
+    const QByteArray ordinary = qCompress(data, 9);
+    constexpr qsizetype maxTightInput = 256 * 1024;
+    if (capacity < 0 || ordinary.size() <= capacity || data.isEmpty() || data.size() > maxTightInput)
+        return ordinary;
+    if (ordinary.size() <= 10) return ordinary;
+    // A strictly smaller result is the only useful result. Upstream allocations
+    // and exit paths are contained by a bounded, leak-cleaning C guard, with no
+    // longjmp across Qt/C++ frames. OOM/failure keeps ordinary compression; the
+    // caller still refuses a slot that does not fit it, before any disk write.
+    QByteArray tight(ordinary.size() - 1, '\0');
+    size_t size = 0;
+    if (!bsiBoundedZopfli(reinterpret_cast<const unsigned char *>(data.constData()), size_t(data.size()),
+                          reinterpret_cast<unsigned char *>(tight.data() + 4), size_t(tight.size() - 4), &size))
+        return ordinary;
+    tight.resize(4 + int(size));
+    ByteUtils::putBe32(tight, 0, quint32(data.size()));
+    // Same decoder as the player. Keep all source bytes, including BOM/CRLF,
+    // and never trust an encoder result merely because it is shorter.
+    return qUncompress(tight) == data ? tight : ordinary;
 }
 
 QByteArray inflateLoose(const QByteArray &rawStream, qint64 sizeHint)

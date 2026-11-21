@@ -2,6 +2,14 @@
 
 Research date: 2026-11-08. This is a feature proposal, not an implementation or a claim of Windows runtime verification.
 
+**Qt/shader follow-up:** the [current Qt compatibility research](EMULATOR-QT-COMPATIBILITY.md)
+rechecks the four hash-pinned players using actual PE imports, compiler-cache
+headers and fixed version resources. It distinguishes build evidence from an
+installed runtime, and documents the new public-API bridge baselines and their
+unverified player/GPU gates. The older string/stream observations below are not
+an exhaustive Qt version matrix and do not authorize installation or performance
+changes; this shader work adds no optimizer/tuning features from this proposal.
+
 ## What was inspected
 
 The four executables supplied in [MrPcGamerYT/HD-Player](https://github.com/MrPcGamerYT/HD-Player) were downloaded outside this repository and inspected statically. No supplied executable or DLL was run. The labels below reproduce the sample filenames; “latest” does not establish the newest publicly available build.

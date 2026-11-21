@@ -6,6 +6,8 @@
 #include "QmlText.h"
 #include "QtResources.h"
 #include "ThemeEngine.h"
+#include "TitlebarDetails.h"
+#include "ZlibUtils.h"
 
 #include <QFile>
 #include <QFileInfo>
@@ -52,25 +54,13 @@ const QMap<QString, QString> &removeStrings()
     return m;
 }
 
-// The title bar prints the player version and the engine label next to it, both
-// as their own Text element in PlrTopbar.qml:
-//
-//     Text { id: iVersionTxt; text: plrBackend.version ... }
-//     Text { id: iImageTxt;   text: "N32" ... }
-//
-// "Titlebar Version" used to be an entry of the string table above, with the
-// needle "version". That nulls *every* UTF-16 "version" in the file - property
-// names in compiled QML caches and translator tables included, not just the
-// one label - and the player then fails to load its own UI (reported as the
-// 0x…05 start error against the latest build). Both rows are QML edits now:
-// the element is hidden, the string table is not touched.
-const QMap<QString, QString> &titlebarHides()
+// One combined title-bar-only action. Keep old API/profile names as aliases,
+// but never offer separate version/instance removals in either UI any more.
+const QString kTitleDetails = QStringLiteral("Remove title details");
+bool titleDetailsRemoval(const QString &name)
 {
-    static const QMap<QString, QString> m = {
-        { "Titlebar Version", "iVersionTxt" },
-        { "Titlebar Instance Label", "iImageTxt" },
-    };
-    return m;
+    return name == kTitleDetails || name == QLatin1String("Titlebar Version")
+        || name == QLatin1String("Titlebar Instance Label");
 }
 
 struct ContextualRemoval
@@ -153,149 +143,6 @@ int disableSidebarElements(QString &qml, const QStringList &assets)
     return hidden;
 }
 
-// ---------------------------------------------------------------- title bar
-// The player's title bar prints `plrBackend.version` and the engine label
-// (`"N32"`, `"P64"`, ...) as two Text elements with stable ids in
-// PlrTopbar.qml - the same ids in the 5.9, 5.10 and current builds:
-//
-//     Text { id: iVersionTxt; text: plrBackend.version; ... }
-//     Text { id: iImageTxt;   text: "N32"; ... }
-//
-// Hiding them keeps every binding the player relies on. An existing `visible:`
-// member is ANDed with false (so the expression is kept, just never true);
-// an element without one gets a tagged `visible: false` member added.
-const QString kTitlebarHideTag = QStringLiteral("BSI CUSTOMIZER: titlebar hide");
-const QString kTitlebarHidePrefix = QStringLiteral("false /* BSI CUSTOMIZER: titlebar hide */ && (");
-
-struct TitlebarEdit { int begin = 0, length = 0; QString text; };
-
-bool titlebarHiddenSite(const QString &qml, const QmlText::Object &object, int *at, QString *text)
-{
-    const QString nl = qml.contains(QLatin1String("\r\n")) ? QStringLiteral("\r\n")
-                                                          : QStringLiteral("\n");
-    int probe = object.open + 1;
-    while (probe < qml.size() && (qml.at(probe) == QLatin1Char(' ') || qml.at(probe) == QLatin1Char('\t')))
-        ++probe;
-    const bool membersOnNewLine = probe < object.end
-        && (qml.at(probe) == QLatin1Char('\n') || qml.at(probe) == QLatin1Char('\r'));
-    if (membersOnNewLine) {
-        // Insert a tagged member on its own line, indented like the first one
-        // already inside the element.
-        const int newline = qml.indexOf(QLatin1Char('\n'), probe);
-        if (newline < 0 || newline >= object.end) return false;
-        const int lineStart = newline + 1;
-        QString indent;
-        int i = lineStart;
-        while (i < qml.size() && (qml.at(i) == QLatin1Char(' ') || qml.at(i) == QLatin1Char('\t')))
-            indent += qml.at(i++);
-        *at = lineStart;
-        *text = indent + QStringLiteral("visible: false // ") + kTitlebarHideTag + nl;
-        return true;
-    }
-    // A one-liner (`Text { id: iVersionTxt; text: ... }`) cannot take a line
-    // comment without swallowing the members that follow it.
-    *at = object.open + 1;
-    *text = QStringLiteral(" visible: false /* ") + kTitlebarHideTag + QStringLiteral(" */;");
-    return true;
-}
-
-// Hide the object whose `id:` is one of `ids`. Returns how many were hidden.
-//
-// Every edit below is measured so that it cannot grow the document. A player
-// record has a fixed size, and growing it means finding free space in a 24 MB
-// EXE that has none - which is the "needs N bytes but its record only holds M"
-// error these two rows used to end in on a real build. The stock elements have
-// no `visible:` member, so the label is emptied instead:
-//
-//     text: plrBackend.version   ->   text: ""
-//
-// The element stays, every binding the layout reads stays, and nothing is
-// added to the file.
-int hideTitlebarElements(QString &qml, const QStringList &ids)
-{
-    const QString masked = QmlText::mask(qml);
-    const QList<QmlText::Object> all = QmlText::objects(masked, QStringLiteral("Text"));
-    QList<TitlebarEdit> edits;
-    int hidden = 0;
-    for (const QString &id : ids) {
-        for (const QmlText::Object &object : all) {
-            QmlText::Binding idBinding;
-            if (!QmlText::binding(masked, object.open, object.end, QStringLiteral("id"), &idBinding))
-                continue;
-            if (qml.mid(idBinding.valueBegin, idBinding.valueEnd - idBinding.valueBegin) != id)
-                continue;
-            // A tag from an older version of this row, or the edit itself, is
-            // what "already hidden" looks like. The current edit adds no tag -
-            // a tag would be bytes the record does not have - so the marker is
-            // structural: a label that prints nothing, or a `visible` member
-            // that is dead.
-            const QString body = qml.mid(object.open, object.end - object.open);
-            if (body.contains(kTitlebarHideTag)) break;
-            // 1) A member the player already reads is switched off in place.
-            //    `false` fits wherever the expression was at least five
-            //    characters long; anything shorter takes `!1`, also false.
-            QmlText::Binding visible;
-            if (QmlText::binding(masked, object.open, object.end, QStringLiteral("visible"), &visible)) {
-                const QString value = qml.mid(visible.valueBegin, visible.valueEnd - visible.valueBegin);
-                const QString trimmed = value.trimmed();
-                if (trimmed == QLatin1String("false") || trimmed == QLatin1String("0")
-                    || trimmed == QLatin1String("!1"))
-                    break; // switched off by an earlier pass
-                const QString replacement = value.size() >= 5 ? QStringLiteral("false")
-                                           : value.size() >= 2 ? QStringLiteral("!1")
-                                                               : QStringLiteral("0");
-                edits << TitlebarEdit { visible.valueBegin, int(value.size()), replacement };
-                ++hidden;
-                break;
-            }
-            // 2) The label prints nothing: its text binding is emptied. No
-            //    byte is added, so the record never has to move.
-            QmlText::Binding text;
-            if (QmlText::binding(masked, object.open, object.end, QStringLiteral("text"), &text)) {
-                const QString value = qml.mid(text.valueBegin, text.valueEnd - text.valueBegin);
-                // Already empty (the quotes may or may not be part of the
-                // value): this label was hidden by an earlier pass.
-                if (value.trimmed().isEmpty() || value == QLatin1String("\"\"")) break;
-                // A one-character expression cannot be replaced by an empty
-                // string without adding a byte, so it is left to the fallback.
-                if (value.size() < 2) break;
-                edits << TitlebarEdit { text.valueBegin, int(value.size()), QStringLiteral("\"\"") };
-                // An empty label still reserves its left margin; zero it in
-                // the same pass so the row really closes up.
-                QmlText::Binding margin;
-                if (QmlText::binding(masked, object.open, object.end,
-                                     QStringLiteral("Layout.leftMargin"), &margin)) {
-                    const QString spacing =
-                        qml.mid(margin.valueBegin, margin.valueEnd - margin.valueBegin);
-                    if (spacing.trimmed() != QLatin1String("0") && spacing.size() >= 1)
-                        edits << TitlebarEdit { margin.valueBegin, int(spacing.size()),
-                                                QStringLiteral("0") };
-                }
-                ++hidden;
-                break;
-            }
-            {
-                int at = 0;
-                QString text;
-                if (!titlebarHiddenSite(qml, object, &at, &text)) break;
-                edits << TitlebarEdit { at, 0, text };
-            }
-            ++hidden;
-            break;
-        }
-    }
-    std::sort(edits.begin(), edits.end(), [](const TitlebarEdit &a, const TitlebarEdit &b) {
-        return a.begin > b.begin;
-    });
-    int boundary = qml.size();
-    for (const auto &edit : edits) {
-        if (edit.begin + edit.length > boundary) continue;
-        qml.replace(edit.begin, edit.length, edit.text);
-        boundary = edit.begin;
-    }
-    return hidden;
-}
-
 // Locate the sidebar document in the image's Qt resources and disable the
 // removed buttons inside it. Players without an embedded PlrSidebar.qml are
 // not an error: their removals are string-only and there is no layout to
@@ -334,11 +181,11 @@ bool collapseSidebarButtons(QByteArray &data, const QStringList &assets, int *hi
 }
 
 // Find PlrTopbar.qml in the image's Qt resource pools and hide the title-bar
-// labels named by `ids` inside it. The entry is compressed in every build seen
+// version and instance details together, with the player name vertically centred. The entry is compressed in every build seen
 // so far, so the rewrite goes through the same capacity rule as the resource
 // editor: the record has to fit the slot it already owns, or move into verified
 // free space inside the same file. The EXE never grows.
-bool hideTitlebarLabels(QByteArray &data, const QStringList &ids, int *hidden, QString *error)
+bool hideTitlebarLabels(QByteArray &data, int *hidden, QString *error)
 {
     const auto refuse = [&](const QString &message) { if (error) *error = message; return false; };
     auto files = QtResources::registeredFiles(data);
@@ -359,17 +206,31 @@ bool hideTitlebarLabels(QByteArray &data, const QStringList &ids, int *hidden, Q
         QString qml = QString::fromUtf8(bom ? bytes.mid(3) : bytes);
         if (qml.toUtf8() != (bom ? bytes.mid(3) : bytes))
             return refuse(QStringLiteral("The title bar QML is not UTF-8; no file was written."));
-        const int count = hideTitlebarElements(qml, ids);
-        if (hidden) *hidden = count;
+        const QString rewritten = TitlebarDetails::hide(qml, error);
+        if (rewritten.isEmpty()) return false;
+        if (hidden) *hidden = rewritten == qml ? 0 : 2;
+        qml = rewritten;
         const QByteArray header = bom ? QByteArray::fromHex("efbbbf") : QByteArray();
         const QByteArray source = header + qml.toUtf8();
-        if (source == bytes) return true;
+        // Use exact source ownership, not the broad legacy string matcher:
+        // Settings units importing/mentioning PlrTopbar must stay untouched.
+        const QStringList ids { QStringLiteral("iVersionTxt"), QStringLiteral("iImageTxt") };
+        if (source == bytes) {
+            QtResources::sourceUnits(data, { QStringLiteral("PlrTopbar.qml") }, ids, true);
+            return true;
+        }
         const auto link = QtResources::findLink(data, file.entryOff, file.name);
         if (!link.found || link.ambiguous)
             return refuse(QStringLiteral("The title bar QML resource mapping is ambiguous; no file was written."));
-        const qint64 payload = file.flags == 1 ? qCompress(source, 9).size() : source.size();
-        qint64 destination = -1;
         const qint64 capacity = QtResources::inPlaceCapacity(data, file.entryOff, file.name);
+        // Use the writer's actual bounded lossless encoding, not an ordinary
+        // qCompress estimate. Clean UI can already occupy a full/tightly
+        // encoded record: the old preflight refused before replaceResource()
+        // could try the exact same safe encoding that made the clean-up fit.
+        // This changes neither source bytes nor the no-growth/ownership rule.
+        const qint64 payload = file.flags == 1
+            ? ZlibUtils::compressForCapacity(source, capacity).size() : source.size();
+        qint64 destination = -1;
         if (capacity >= 0 && payload > capacity) {
             destination = QtResources::findFreeSpace(data, link, 4 + payload, error);
             if (destination < 0)
@@ -380,14 +241,11 @@ bool hideTitlebarLabels(QByteArray &data, const QStringList &ids, int *hidden, Q
         }
         qint64 newEntry = file.entryOff;
         if (!QtResources::replaceResource(data, file.entryOff, link, source, error, &newEntry,
-                                          /*allowGrowth=*/false, destination))
+                                          /*allowGrowth=*/false, destination, ids))
             return false;
         return true;
     }
-    // A player without an embedded title bar (older launchers keep it in a
-    // separate QML file) has nothing to hide here; that is not an error.
-    if (hidden) *hidden = 0;
-    return true;
+    return refuse(QStringLiteral("The selected player has no registered PlrTopbar.qml; no title details or Settings text were changed."));
 }
 
 // Instance detection patterns from bluestacks.conf.
@@ -411,8 +269,7 @@ QStringList removalNames()
     QStringList names = removeStrings().keys();
     for (const ContextualRemoval &cr : contextualRemovals())
         names << cr.name;
-    for (const QString &name : titlebarHides().keys())
-        names << name;
+    names << kTitleDetails;
     return names;
 }
 
@@ -468,14 +325,9 @@ Result applyRemovals(const QString &exePath, const QStringList &enabledNames)
         if (it != sidebarButtonAssets().constEnd() && !hiddenAssets.contains(*it))
             hiddenAssets << *it;
     }
-    QStringList titlebarIds;
-    for (const QString &name : enabledNames) {
-        const auto it = titlebarHides().constFind(name);
-        if (it != titlebarHides().constEnd() && !titlebarIds.contains(*it))
-            titlebarIds << *it;
-    }
-
-    if (replacements.isEmpty() && hiddenAssets.isEmpty() && titlebarIds.isEmpty())
+    const bool titleDetailsWanted = std::any_of(enabledNames.cbegin(), enabledNames.cend(),
+                                                  titleDetailsRemoval);
+    if (replacements.isEmpty() && hiddenAssets.isEmpty() && !titleDetailsWanted)
         return { false, QStringLiteral("No matching strings found.") };
 
     std::sort(replacements.begin(), replacements.end(),
@@ -501,10 +353,11 @@ Result applyRemovals(const QString &exePath, const QStringList &enabledNames)
     // from the file: nulling the string "version" also hit the compiled QML
     // caches and the translator tables, and the player then refused to start.
     int hiddenLabels = 0;
-    if (!titlebarIds.isEmpty() && hasResources) {
+    if (titleDetailsWanted) {
+        if (!hasResources)
+            return { false, QStringLiteral("The selected file has no supported player resources; nothing was written.") };
         QString error;
-        if (!hideTitlebarLabels(data, titlebarIds, &hiddenLabels, &error))
-            return { false, error };
+        if (!hideTitlebarLabels(data, &hiddenLabels, &error)) return { false, error };
     }
 
     if (data.size() != originalSize)
@@ -521,11 +374,14 @@ Result applyRemovals(const QString &exePath, const QStringList &enabledNames)
         msg += QStringLiteral(" Hid %1 removed sidebar button(s) in the player QML so the sidebar closes up without leaving a gap.")
                    .arg(hidden);
     if (hiddenLabels > 0)
-        msg += QStringLiteral(" Hid %1 title-bar label(s) in the player QML; the strings themselves are "
-                              "untouched, so nothing the player reads was changed.")
-                   .arg(hiddenLabels);
-    else if (!titlebarIds.isEmpty() && hasResources)
-        msg += QStringLiteral(" The title-bar label was already hidden in this player.");
+        msg += QStringLiteral(" Hid both title-bar details (version and instance label) and vertically centred the player name. Settings pages and shared strings were not edited.");
+    else if (titleDetailsWanted)
+        msg += QStringLiteral(" Both title-bar details were already hidden; Settings text was left untouched.");
+    if (titleDetailsWanted) {
+        QtResources::clearSourceQmlCache(exePath, { QStringLiteral("PlrTopbar.qml") },
+            { QStringLiteral("iVersionTxt"), QStringLiteral("iImageTxt") });
+        msg += QStringLiteral(" Restart BlueStacks. Use Restore EXE backup to undo this removal.");
+    }
     return { true, msg };
 }
 
