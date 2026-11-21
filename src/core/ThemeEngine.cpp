@@ -1596,6 +1596,16 @@ QStringList nameVariants(const QString &name)
     return (name == lo) ? QStringList { name } : QStringList { name, lo };
 }
 
+// Identifier-continuation characters. QML color names (primary90,
+// accentNormal, ...) are ASCII identifiers; binary surroundings like a raw
+// 0x4242 padding pair are NOT identifier text and must not veto a name.
+bool isIdentChar(const QChar &ch)
+{
+    const ushort u = ch.unicode();
+    return (u >= '0' && u <= '9') || (u >= 'A' && u <= 'Z') || (u >= 'a' && u <= 'z')
+           || u == '_' || u == '$';
+}
+
 bool qmlNameEndOk(const QByteArray &data, qint64 end, const QString &enc)
 {
     QChar ch;
@@ -1608,7 +1618,7 @@ bool qmlNameEndOk(const QByteArray &data, qint64 end, const QString &enc)
             return true;
         ch = QChar(uchar(data[int(end)]));
     }
-    return !(ch.isLetterOrNumber() || ch == QLatin1Char('_'));
+    return !isIdentChar(ch);
 }
 
 // Symmetric to qmlNameEndOk: the name must not be the tail of a longer
@@ -1626,7 +1636,7 @@ bool qmlNameStartOk(const QByteArray &data, qint64 start, const QString &enc)
             return true;
         ch = QChar(uchar(data[int(start) - 1]));
     }
-    return !(ch.isLetterOrNumber() || ch == QLatin1Char('_'));
+    return !isIdentChar(ch);
 }
 
 QList<QPair<qint64, QString>> iterQmlNames(const QByteArray &data, const QString &name)
@@ -1694,7 +1704,7 @@ bool findHexAfter(const QByteArray &data, qint64 namePos, qint64 nameLen, const 
         const int after = at + step * len;
         if (after + step > tail.size())
             return true;
-        return !QChar(unitAt(after)).isLetterOrNumber();
+        return !isIdentChar(QChar(unitAt(after)));
     };
 
     auto takeValue = [&](int at, int len) {
