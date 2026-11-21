@@ -125,6 +125,14 @@ Item {
             if (item.background) overlay(buttonVisual,item,item.background,"dialog")
             styledControls++
         }
+        if (/KmmEditorTextEditBox/.test(name) && item.color !== undefined && item.border) {
+            // These native key chips inherit Rectangle's white default; literal
+            // palette rewriting cannot see that implicit color.
+            item.color=Theme.surface;item.border.color=Theme.muted;item.border.width=1
+            item.radius=Qt.binding(function(){return item.height/2})
+        }
+        if (/Text/.test(name) && !/TextField/.test(name) && item.parent && /KmmEditorTextEditBox/.test(String(item.parent)) && item.color !== undefined)
+            item.color=Theme.text
         if (/KmmEditorDragControls/.test(name) && item.pMouseArea && item.border) {
             item.radius=Math.max(0,Theme.corner-2)
             item.color=Qt.binding(function(){return item.pMouseArea.containsMouse ? Theme.raised : Theme.surface})
@@ -166,7 +174,7 @@ Item {
             if (item.indicator) overlay(chevronVisual, item, item.indicator, "chevron")
             if (item.popup) popupHook.createObject(skin, {control:item})
             styledControls++
-        } else if (/Button(_|\()|UiButton|ItemDelegate|TextField|SpinBox/.test(name) && item.background) {
+        } else if (!/UiImageButton/.test(name) && /Button(_|\()|UiButton|ItemDelegate|TextField|SpinBox/.test(name) && item.background) {
             overlay(buttonVisual, item, item.background, "button"); styledControls++
         }
         // Text/panel palettes are edited in native sources, not assigned here.

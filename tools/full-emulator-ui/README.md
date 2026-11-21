@@ -45,6 +45,8 @@ coverage, not just palette literals:
   backgrounds, instance-local text/button palettes and native button input.
 - Native volume/game-control popup controls and opaque neutral layout panels get
   the same control styling; bindings to native values/actions remain in place.
+- Native editor key chips explicitly get a dark fill and legible light labels;
+  their previous white fill was an implicit Rectangle default, not a color literal.
 - Controls-editor cards get rounded hover states and 22 isolated neutral tool
   symbols, without replacing drag areas, scheme models or save/delete behavior.
 - All 57 shared icon names remain available; separate raster glyphs improve

@@ -65,8 +65,9 @@ with tempfile.TemporaryDirectory() as folder:
     put('KmmEditorDragControls.qml',tile)
     put('KmmUtils.js','.pragma library\nvar starts=0; var ends=0; function startDrag(mouse,type){starts++} function continueDrag(mouse,type){} function endDrag(mouse,type){ends++}\n')
     put('UiImage.qml','import QtQuick 2.15\nImage { property string asset:""; property string extn:".svg"; property real pImageWidth:20; property real pImageHeight:20; width:pImageWidth; height:pImageHeight; source:""; fillMode:Image.PreserveAspectFit }')
-    put('UiImageButton.qml','import QtQuick 2.15\nimport QtQuick.Controls 2.15\nButton { property string asset:""; property real pImageWidth:20; property real pImageHeight:20; width:24; height:24; text:"×" }')
+    put('UiImageButton.qml','import QtQuick 2.15\nimport QtQuick.Controls 2.15\nButton { property string asset:""; property real pImageWidth:20; property real pImageHeight:20; width:24; height:24; implicitWidth:24; implicitHeight:24; contentItem:Text {text:"×";color:"#eeeef4";horizontalAlignment:Text.AlignHCenter;verticalAlignment:Text.AlignVCenter}; background:Rectangle {color:"transparent"} }')
     put('UiCheckBox.qml','import QtQuick 2.15\nimport QtQuick.Controls 2.15\nCheckBox {property QtObject pSize; palette.windowText:"white"}')
+    put('KmmEditorTextEditBox.qml','import QtQuick 2.15\nRectangle {width:34;height:22;Text {objectName:"keyChipText";anchors.centerIn:parent;text:"W";color:"#111111"}}')
     put('UiShadowContainer.qml','import QtQuick 2.15\nItem { property int shadowThickness:8; property bool shadowVisibility:true; anchors.fill:parent }')
     put('DialogButtonModelList/qmldir','module DialogButtonModelList\nDialogButtonModelList 1.0 Model.qml\n')
     put('DialogButtonModelList/Model.qml','import QtQuick 2.15\nQtObject {property list<QtObject> pButtons:[]}')
@@ -114,6 +115,7 @@ Window {
    KmmEditorDragControls {property string image:modelData;property string type:modelData;property string label:modelData;objectName:"tile_"+modelData;Component.onCompleted:pMouseArea.objectName="nativeDrag_"+modelData;width:95;height:92}
   }
  }
+ KmmEditorTextEditBox {objectName:"keyChip";x:410;y:370}
  Skin.NativeControlStyle {objectName:"editorStyle";pages:host;stylePanels:true;registerNativeWindow:true;visible:false}
  UiDialog {
   id:restart;objectName:"restartDialog";x:400;y:90;title:"Restart needed";pDescription:"Some changes need a restart. Restart now?";pDialogType:UiDialogWindow.Simple
@@ -177,6 +179,9 @@ Window {
     icon=next(child for child in tile.findChildren(QObject) if child.property('asset')=='Tap')
     assert icon.property('source').toString().endswith('ControlIcons/Tap.png')
     QMetaObject.invokeMethod(restart,'open');settle()
+    chip=find(window.contentItem(),'keyChip')
+    assert chip.property('color').name()=='#111116'
+    assert find(chip,'keyChipText').property('color').name()=='#eeeef4'
     # Late delegate discovery + no timer/polling work while idle.
     style=window.findChild(QObject,'editorStyle');count=style.property('visitedNodes');flush=style.property('flushCount')
     settle();assert style.property('visitedNodes')==count and style.property('flushCount')==flush
