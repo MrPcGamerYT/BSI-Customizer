@@ -10,6 +10,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <iostream>
+#include <set>
 #include <thread>
 #include <vector>
 using namespace BsiShaders;
@@ -33,6 +34,15 @@ struct Fixture {
         instanceProc=reinterpret_cast<PFN_vkGetInstanceProcAddr>(reinterpret_cast<void*>(GetProcAddress(module,"vkGetInstanceProcAddr")));
         deviceProc=reinterpret_cast<PFN_vkGetDeviceProcAddr>(reinterpret_cast<void*>(GetProcAddress(module,"vkGetDeviceProcAddr")));
         require(instanceProc&&deviceProc,"test provider exports genuine getProc-shaped entry points");
+        const char *names[]{"vkGetInstanceProcAddr","vkGetDeviceProcAddr","vkCreateInstance","vkDestroyInstance",
+            "vkEnumeratePhysicalDevices","vkCreateWin32SurfaceKHR","vkDestroySurfaceKHR","vkCreateDevice",
+            "vkDestroyDevice","vkGetDeviceQueue","vkCreateSwapchainKHR","vkDestroySwapchainKHR",
+            "vkAcquireNextImageKHR","vkQueuePresentKHR"};
+        std::set<FARPROC> entries;
+        for(const auto *name:names){
+            const auto entry=GetProcAddress(module,name);
+            require(entry&&entries.insert(entry).second,"fixture exports must have distinct, detourable dispatch addresses (no ICF-folded aliases)");
+        }
     }
     void create(){
         VkInstanceCreateInfo info{VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO};
