@@ -11,6 +11,9 @@ namespace BsiShaders {
 // provider or a share group. No original sampler/texture/profile is edited.
 // Conservative scope: GL 3.3 / GLES 3.1, depth-tested/depth-writing triangle
 // draws, ordinary sampler2D uniforms and complete, normalized-color mip chains.
+// Qualified desktop GL uses a queried, bounded private LOD bias plus floor;
+// GLES retains its floor-only policy and never queries/writes desktop bias.
+// Neither capability changes scene/resource qualification or owns a new draw.
 class GlTextureOverride {
 public:
     GlTextureOverride();

@@ -49,6 +49,7 @@ struct GlTextureOverride::Impl {
     GL_FUNCTION(const unsigned char*,GetString,(U))
     GL_FUNCTION(const unsigned char*,GetStringi,(U,U))
     GL_FUNCTION(void,GetIntegerv,(U,I*))
+    GL_FUNCTION(void,GetFloatv,(U,F*))
     GL_FUNCTION(void,GetBooleanv,(U,B*))
     GL_FUNCTION(B,IsEnabled,(U))
     GL_FUNCTION(void,ActiveTexture,(U))
@@ -70,6 +71,7 @@ struct GlTextureOverride::Impl {
     GL_FUNCTION(void,BindSampler,(U,U))
 #undef GL_FUNCTION
     bool ready=false,es=false,anisotropic=false,srgbDecode=false,minmax=false,protectedTextures=false;
+    GlQualityCapabilities qualityCapabilities;
     I units=0,attachments=0,extensionCount=0;
     std::map<std::array<F,17>,U> cache;
     struct Binding {U unit,original;};
@@ -205,6 +207,16 @@ bool GlTextureOverride::initialize(ResolveGl resolve,void *user,std::string *err
     g.protectedTextures=g.extension("GL_EXT_protected_textures");
     if(externalProtectionPossible&&!g.protectedTextures)return fail("Protected EGL resources are possible but per-texture protection inspection is unavailable; native sampling retained.");
     if(g.protectedTextures){I flags=0;g.GetIntegerv(0x821e,&flags);if(flags&0x10)return fail("Protected GL contexts are never modified by Potato.");}
+    g.qualityCapabilities={};
+    if(!g.es){
+        // Desktop sampler bias is legal here; NEVER query this enum on GLES.
+        // A missing/invalid query is not permission to assume the tested 3.0.
+        g.GetFloatv=reinterpret_cast<Impl::GetFloatvType>(resolve("glGetFloatv",user));
+        if(!g.GetFloatv)return fail("Desktop Potato needs a queryable LOD-bias limit; native sampling retained.");
+        g.GetFloatv(0x84fd,&g.qualityCapabilities.maximumLodBias); // GL_MAX_TEXTURE_LOD_BIAS
+        if(!std::isfinite(g.qualityCapabilities.maximumLodBias)||g.qualityCapabilities.maximumLodBias<=0)
+            return fail("Desktop LOD-bias support could not be qualified; native sampling retained.");
+    }
     g.GetIntegerv(0x8b4d,&g.units);g.GetIntegerv(0x8cdf,&g.attachments);
     if(g.units<1||g.units>256||g.attachments<1||g.attachments>32)return fail("Unqualified GL sampler/attachment limits; original textures retained.");
     g.anisotropic=g.extension("GL_EXT_texture_filter_anisotropic")||g.extension("GL_ARB_texture_filter_anisotropic");
@@ -260,8 +272,9 @@ unsigned GlTextureOverride::begin(TextureQuality mode,bool reviewed,U primitive,
             proof.privateReplacementSupported=true;proof.externalOverridesReviewed=reviewed;proof.visibleMipLevels=U(levels);
             GlQualitySampler source;source.minimumFilter=sampler.min;source.comparisonMode=sampler.compare;
             source.minimumLod=sampler.lo;source.maximumLod=sampler.hi;source.lodBias=sampler.bias;source.maximumAnisotropy=sampler.anisotropy;
-            const auto plan=planGlTextureQuality(mode,proof,source);if(!plan.changed())continue;
-            sampler.lo=plan.descriptor.minimumLod;const U replacement=g.privateSampler(sampler);if(!replacement)continue;
+            const auto plan=planGlTextureQuality(mode,proof,source,g.qualityCapabilities);if(!plan.changed())continue;
+            sampler.lo=plan.descriptor.minimumLod;sampler.bias=plan.descriptor.lodBias;
+            const U replacement=g.privateSampler(sampler);if(!replacement)continue;
             g.changed.push_back({U(unit),U(original)});g.BindSampler(U(unit),replacement);
         }
     }

@@ -123,6 +123,62 @@ void gl(){
     source.minimumFilter=0xdead;require(!planGlTextureQuality(TextureQuality::Strong,proof,source).changed(),"unknown filter bypass");source=before;
     source.comparisonMode=0x884e;require(!planGlTextureQuality(TextureQuality::Strong,proof,source).changed(),"comparison sampler bypass");source=before;
     source.maximumAnisotropy=16;require(!planGlTextureQuality(TextureQuality::Strong,proof,source).changed(),"existing anisotropy preserved");
+
+    source=before;proof=qualified();GlQualityCapabilities capabilities{16};
+    for(const auto mode:{TextureQuality::Light,TextureQuality::Strong}){
+        const auto biased=planGlTextureQuality(mode,proof,source,capabilities);
+        auto wanted=source;wanted.minimumLod=wanted.lodBias=mode==TextureQuality::Light?1.5f:3.f;
+        require(biased.changed()&&sameGl(biased.descriptor,wanted)&&sameGl(source,before),
+                "queried desktop bias+floor changes only PRIVATE planned fields and leaves source native");
+    }
+    capabilities.maximumLodBias=1;
+    const auto limited=planGlTextureQuality(TextureQuality::Strong,proof,source,capabilities);
+    require(limited.changed()&&limited.descriptor.lodBias==1&&limited.descriptor.minimumLod==3,
+            "desktop device bias limit bounds the additive component, not the requested floor");
+    capabilities.maximumLodBias=16;source.maximumLod=.75f;
+    auto bounded=planGlTextureQuality(TextureQuality::Strong,proof,source,capabilities);
+    require(bounded.changed()&&bounded.descriptor.minimumLod==.75f&&bounded.descriptor.lodBias==.75f,
+            "desktop bias and floor respect the source maximum LOD");
+    source=before;proof.visibleMipLevels=2;bounded=planGlTextureQuality(TextureQuality::Strong,proof,source,capabilities);
+    require(bounded.changed()&&bounded.descriptor.minimumLod==1&&bounded.descriptor.lodBias==1,
+            "desktop bias and floor respect view-relative mip bounds");
+    proof=qualified();capabilities.maximumLodBias=0;
+    bounded=planGlTextureQuality(TextureQuality::Strong,proof,source,capabilities);
+    require(bounded.changed()&&bounded.descriptor.minimumLod==3&&bounded.descriptor.lodBias==0,
+            "an unspecified desktop bias capability does not invent support; retain the portable floor plan");
+    for(float invalid:{-1.f,std::numeric_limits<float>::quiet_NaN(),std::numeric_limits<float>::infinity()}){
+        capabilities.maximumLodBias=invalid;
+        const auto refused=planGlTextureQuality(TextureQuality::Strong,proof,source,capabilities);
+        require(!refused.changed()&&sameGl(refused.descriptor,source),"invalid bias capability preserves every source field");
+    }
+    capabilities.maximumLodBias=16;proof.renderer=Renderer::OpenGLES;
+    bounded=planGlTextureQuality(TextureQuality::Strong,proof,source,capabilities);
+    require(!bounded.changed()&&sameGl(bounded.descriptor,source),"desktop bias capability cannot authorize GLES sampler bias");
+    capabilities.maximumLodBias=0;bounded=planGlTextureQuality(TextureQuality::Strong,proof,source,capabilities);
+    require(bounded.changed()&&bounded.descriptor.minimumLod==3&&bounded.descriptor.lodBias==0,
+            "GLES stays floor-only with no desktop bias enum/capability");
+    proof=qualified();capabilities.maximumLodBias=16;
+    for(float existing:{-2.f,.5f,3.f}){
+        source=before;source.lodBias=existing;
+        const auto refused=planGlTextureQuality(TextureQuality::Strong,proof,source,capabilities);
+        require(!refused.changed()&&sameGl(refused.descriptor,source),"new desktop policy never stacks or resets an existing source bias");
+        source=before;source.minimumLod=existing;
+        const auto floorRefused=planGlTextureQuality(TextureQuality::Strong,proof,source,capabilities);
+        require(!floorRefused.changed()&&sameGl(floorRefused.descriptor,source),"new desktop policy preserves nondefault existing floors");
+    }
+    source=before;
+    for(unsigned refusal=0;refusal<5;++refusal){
+        proof=qualified();
+        if(refusal==0)proof.resourceOwnershipProven=false;
+        if(refusal==1)proof.gameSurfaceIdentified=false;
+        if(refusal==2)proof.protectedContent=true;
+        if(refusal==3)proof.externalOverridesReviewed=false;
+        if(refusal==4)proof.use=TextureUse::UserInterface;
+        const auto refused=planGlTextureQuality(TextureQuality::Strong,proof,source,capabilities);
+        require(!refused.changed()&&sameGl(refused.descriptor,source),"bias capability cannot bypass ownership, routing, protection, review or UI refusal");
+    }
+    proof=qualified();const auto off=planGlTextureQuality(TextureQuality::Native,proof,source,capabilities);
+    require(!off.changed()&&sameGl(off.descriptor,source),"desktop bias+floor Off returns exact native source fields");
 }
 void vulkan(){
     auto proof=qualified(Renderer::Vulkan);

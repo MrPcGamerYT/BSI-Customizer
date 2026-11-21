@@ -1,20 +1,21 @@
-# Free Fire: configured Vulkan is not a captured game renderer
+# Free Fire: host presentation is not scene-texture capture
 
-## Latest follow-up: all 2,468 inspected calls have depth testing disabled
+## Latest follow-up: all 4,506 inspected calls have depth testing disabled
 
 The saved/armed-On follow-up after the nested-wrapper repair remains a **failed
 texture result**, despite working host OpenGL grading:
 
 ```text
 Requested API: Automatic; configured / observed host API: OpenGL / OpenGL
-Processed frames: 1235; texture inspected calls: 2468
-First depth blocker: TestDisabled=2468; all other depth subcounts=0
+Processed presentation-shader frames: 2375; texture inspected calls: 4506
+First depth blocker: TestDisabled=4506; all other depth subcounts=0
 Eligible / prepared calls / overridden bindings: 0 / 0 / 0
 Nested inspected / nested prepared: 0 / 0
 Qt bridge / host: 5.15.2 / 5.15.4
 Vulkan: 1 loader, 1 instance, 1 device; 0 surfaces/swapchains/presents
 ```
 
+The preceding 1,235-frame / 2,468-call follow-up had the same exact first blocker.
 Every counted call stops **before** shader/sampler qualification. Zero later
 blended/no-sampler buckets do not prove an absence of blending or mip chains;
 those properties were not queried after the first rejection. Zero nested
@@ -27,11 +28,14 @@ The [actual original-Potato-DLL experiment and separate reversible known-resourc
 comparison](POTATO-DLL-PROBE.md) have now executed successfully on Windows:
 all five unique originals changed known mip pixels with depth disabled, and
 the independent private-sampler alternative restored exact fixture Off pixels
-and checked state over 64 cycles. A further test-only private desktop bias+floor
-sampler also matches the original Strong pixels at native and minified gradients
-and restores Off without mutating source objects; the floor-only plan does not
-match that minified case. This is actual original-code/rendering evidence,
-not another speculative installed-game fix. The originals' persistent
+and checked state over 64 cycles. A further independent private desktop
+bias+floor sampler matches the original Strong pixels at native and minified
+gradients and restores Off without mutating source objects; the floor-only plan
+does not match that minified case. The subsequent [bounded desktop integration](POTATO-DESKTOP-BIAS.md)
+uses an actually queried device limit on already-qualified draws. It neither
+removes this report's earlier depth rejection nor authorizes a new resource.
+This is an independently testable sampling-fidelity improvement, **not a fix for
+the reported zero preparation or another player deployment/retest request**. The originals' persistent
 bind/draw-time LOD mutation is independent of depth testing; the production
 path's conservative depth gate is a demonstrated mechanism difference, not
 proof that deleting it safely qualifies the player's compositor/scene textures.

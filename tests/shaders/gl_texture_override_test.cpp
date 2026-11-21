@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <limits>
 #include <new>
 #include <string>
 
@@ -32,9 +33,16 @@ void require(bool value,const char *message){if(!value){std::fprintf(stderr,"FAI
 using U=unsigned;using I=int;using F=float;using B=unsigned char;
 struct Sampler {
     I min=0x2703,mag=0x2601,s=0x812f,t=0x812f,r=0x812f,compare=0,function=0x0203;
-    F low=-1000,high=1000;
+    F low=-1000,high=1000,bias=0;
+    std::array<F,4> border{};
+    bool operator==(const Sampler &other)const{
+        return min==other.min&&mag==other.mag&&s==other.s&&t==other.t&&r==other.r&&compare==other.compare
+            &&function==other.function&&low==other.low&&high==other.high&&bias==other.bias&&border==other.border;
+    }
 };
 struct Fake {
+    bool desktop=false,missingBiasQuery=false;
+    F maximumBias=16;I biasLimitQueries=0;
     bool protectionExtension=false,protectedContext=false,protectedTexture=false,incompleteExtensions=false;
     I extensionCount=0,illegalQueries=0,flagsQueries=0,textureProtectionQueries=0;
     I active=3,program=1,depthWrite=1,depthFunction=0x0203,depthBits=24,framebuffer=0;
@@ -49,7 +57,7 @@ struct Fake {
     void refresh(){activeChanged=active!=3;privateBound=bindings[0]>=16||bindings[1]>=16;}
 } g;
 const unsigned char *GL_CALL getString(U name){
-    return reinterpret_cast<const unsigned char*>(name==0x1f02?"OpenGL ES 3.1 BSI protection fixture":"");
+    return reinterpret_cast<const unsigned char*>(name==0x1f02?(g.desktop?"4.5 BSI desktop bias fixture":"OpenGL ES 3.1 BSI protection fixture"):"");
 }
 const unsigned char *GL_CALL getStringi(U,U){
     return g.incompleteExtensions?nullptr:reinterpret_cast<const unsigned char*>("GL_EXT_protected_textures");
@@ -67,6 +75,10 @@ void GL_CALL getInteger(U name,I *out){
     case 0x8ca6:*out=g.framebuffer;break;
     default:require(false,"unexpected integer query in sampler fixture");
     }
+}
+void GL_CALL getFloat(U name,F *out){
+    require(g.desktop&&name==0x84fd,"MAX_TEXTURE_LOD_BIAS is queried only on identified desktop GL");
+    ++g.biasLimitQueries;*out=g.maximumBias;
 }
 void GL_CALL getBoolean(U name,B *out){require(name==0x0b72,"only inspect depth write mask");++g.depthWriteQueries;*out=B(g.depthWrite);}
 B GL_CALL enabled(U name){return B(name==0x0b71?g.depth:name==0x0be2?g.blend:false);}
@@ -97,7 +109,10 @@ void GL_CALL textureInteger(U,U name,I *out){
 }
 void GL_CALL samplerInt(U sampler,U name,I *out){samplerInteger(g.samplers.at(sampler),name,out);}
 void GL_CALL samplerFloat(U sampler,U name,F *out){
-    const auto &s=g.samplers.at(sampler);*out=name==0x813a?s.low:name==0x813b?s.high:1;
+    const auto &s=g.samplers.at(sampler);
+    if(name==0x1004){require(g.desktop,"GLES border queries are not legal without a qualified extension");std::copy(s.border.begin(),s.border.end(),out);return;}
+    if(name==0x8501){require(g.desktop,"never query desktop sampler bias on GLES");*out=s.bias;return;}
+    *out=name==0x813a?s.low:name==0x813b?s.high:1;
 }
 void GL_CALL textureFloat(U,U name,F *out){samplerFloat(0,name,out);}
 void GL_CALL attachment(U target,U attachment,U name,I *out){
@@ -118,14 +133,19 @@ void GL_CALL parameterInt(U sampler,U name,I value){
 }
 void GL_CALL parameterFloat(U sampler,U name,F value){
     if(name==0x813a)g.samplers.at(sampler).low=value;else if(name==0x813b)g.samplers.at(sampler).high=value;
+    else if(name==0x8501){require(g.desktop,"never write desktop sampler bias on GLES");g.samplers.at(sampler).bias=value;}
     else require(false,"unexpected replacement sampler float parameter");
 }
-void GL_CALL parameterVector(U,U,const F*){require(false,"GLES border-clamp state must be bypassed, not cloned incorrectly");}
+void GL_CALL parameterVector(U sampler,U name,const F *values){
+    require(g.desktop&&name==0x1004,"GLES border-clamp state must be bypassed, not cloned incorrectly");
+    std::copy(values,values+4,g.samplers.at(sampler).border.begin());
+}
 void GL_CALL bind(U unit,U sampler){g.bindings.at(unit)=sampler;g.refresh();}
 void GL_CALL unexpected(){require(false,"protected GL pipeline must stop before allocating/compiling/drawing");}
 void *resolve(const char *name,void*){
+    if(g.missingBiasQuery&&std::strcmp(name,"glGetFloatv")==0)return nullptr;
 #define ENTRY(gl,fn) if(std::strcmp(name,"gl" #gl)==0)return reinterpret_cast<void*>(&fn)
-    ENTRY(GetString,getString);ENTRY(GetStringi,getStringi);ENTRY(GetIntegerv,getInteger);ENTRY(GetBooleanv,getBoolean);
+    ENTRY(GetString,getString);ENTRY(GetStringi,getStringi);ENTRY(GetIntegerv,getInteger);ENTRY(GetFloatv,getFloat);ENTRY(GetBooleanv,getBoolean);
     ENTRY(IsEnabled,enabled);ENTRY(ActiveTexture,active);ENTRY(GetProgramiv,program);ENTRY(GetActiveUniform,uniform);
     ENTRY(GetUniformLocation,location);ENTRY(GetUniformiv,uniformValue);ENTRY(GetTexLevelParameteriv,level);
     ENTRY(GetTexParameteriv,textureInteger);ENTRY(GetTexParameterfv,textureFloat);ENTRY(GetSamplerParameteriv,samplerInt);
@@ -155,8 +175,54 @@ int main(){
         TextureDrawReason reason=TextureDrawReason::NotInspected;
         require(quality.begin(TextureQuality::Strong,true,4,&error,&reason)==2&&reason==TextureDrawReason::Prepared,"two ordinary test-owned mipmapped colors qualify with an explicit prepared outcome");
         require(g.active==3&&g.bindings[0]>=16&&g.bindings[1]>=16,"private bindings persist only until end, active unit restores before draw");
-        require(g.flagsQueries==0&&g.textureProtectionQueries==0&&g.illegalQueries==0,"never query extension-only enums when extension is absent");
+        require(g.flagsQueries==0&&g.textureProtectionQueries==0&&g.illegalQueries==0&&g.biasLimitQueries==0,
+                "GLES never queries desktop bias or absent extension enums");
         quality.end();unchanged();quality.release();require(g.creations==g.deletions,"release all owned sampler names");
+    }
+    for(float limit:{1.f,16.f}){
+        g.reset();g.desktop=true;g.maximumBias=limit;g.samplers[1].border={{.125f,.25f,.5f,1.f}};
+        const auto first=g.samplers[1],second=g.samplers[2];
+        GlTextureOverride quality;std::string error;
+        require(quality.initialize(resolve,nullptr,&error)&&g.biasLimitQueries==1,"desktop bias support is queried once per context initialization");
+        for(const auto mode:{TextureQuality::Light,TextureQuality::Strong}){
+            const auto floor=mode==TextureQuality::Light?1.5f:3.f;
+            auto wanted=first;wanted.low=floor;wanted.bias=(std::min)(floor,limit);
+            require(quality.begin(mode,true,4,&error)==2&&g.samplers[g.bindings[0]]==wanted,
+                    "actual production desktop replacement has bounded additive bias AND floor, with all source border/wrap/filter state cloned");
+            quality.end();unchanged();
+            require(g.samplers[1]==first&&g.samplers[2]==second,"production desktop substitution never edits source sampler descriptors");
+            require(!quality.begin(TextureQuality::Native,true,4,&error),"desktop Off creates/binds no replacement");
+            unchanged();
+        }
+        quality.release();require(g.creations==g.deletions,"desktop private bias samplers are released without leaks");
+    }
+    for(float invalid:{0.f,-1.f,std::numeric_limits<float>::quiet_NaN(),std::numeric_limits<float>::infinity()}){
+        g.reset();g.desktop=true;g.maximumBias=invalid;GlTextureOverride quality;std::string error;
+        require(!quality.initialize(resolve,nullptr,&error)&&g.biasLimitQueries==1&&!g.creations,
+                "unknown/nonfinite/nonpositive desktop bias limits fail closed before sampler creation");
+        unchanged();
+    }
+    {
+        g.reset();g.desktop=true;g.missingBiasQuery=true;GlTextureOverride quality;std::string error;
+        require(!quality.initialize(resolve,nullptr,&error)&&!g.biasLimitQueries&&!g.creations,
+                "missing desktop capability query is not permission to assume bias support");
+        unchanged();
+    }
+    {
+        g.reset();g.desktop=true;g.depth=false;GlTextureOverride quality;std::string error;
+        TextureDrawReason reason=TextureDrawReason::NotInspected;TextureDepthFailure depth=TextureDepthFailure::None;
+        require(quality.initialize(resolve,nullptr,&error)&&!quality.begin(TextureQuality::Strong,true,4,&error,&reason,&depth)
+                &&reason==TextureDrawReason::Depth&&depth==TextureDepthFailure::TestDisabled&&!g.shaderQueries&&!g.creations,
+                "new desktop bias capability does NOT remove the reported depth gate or inspect its refused samplers");
+        unchanged();quality.release();
+    }
+    {
+        g.reset();g.desktop=true;g.samplers[1].bias=.5f;const auto original=g.samplers[1];
+        GlTextureOverride quality;std::string error;
+        require(quality.initialize(resolve,nullptr,&error)&&quality.begin(TextureQuality::Strong,true,4,&error)==1
+                &&g.bindings[0]==1&&g.samplers[1]==original,
+                "production desktop path preserves an existing application bias instead of stacking on it");
+        quality.end();unchanged();quality.release();
     }
     {
         g.reset();GlTextureOverride quality;std::string error;
@@ -233,22 +299,24 @@ int main(){
         require(!quality.begin(TextureQuality::Strong,true,4,&error,&reason)&&reason==TextureDrawReason::NoSampler&&!error.empty(),"a scene without an inspectable program cannot inherit a previous preparation detail");
         unchanged();quality.release();
     }
-    unsigned failures=0;bool unitFailure=false,bindingFailure=false,completed=false;
-    for(int allocation=0;allocation<100&&!completed;++allocation){
-        g.reset();GlTextureOverride quality;std::string detail;
-        require(quality.initialize(resolve,nullptr,&detail),"initialize before targeted begin-only allocation failures");
-        failedAfterUnitChange=failedAfterBinding=false;failAfter=allocation;
-        try {
-            require(quality.begin(TextureQuality::Strong,true,4,&detail)==2,"uninterrupted inspection prepares two replacements");
-            failAfter=-1;quality.end();completed=true;
-        }catch(const std::bad_alloc&){
-            failAfter=-1;++failures;unitFailure=unitFailure||failedAfterUnitChange;bindingFailure=bindingFailure||failedAfterBinding;
-            unchanged(); // This is BEFORE end(): a failed draw must already be native.
+    for(bool desktop:{false,true}){
+        unsigned failures=0;bool unitFailure=false,bindingFailure=false,completed=false;
+        for(int allocation=0;allocation<100&&!completed;++allocation){
+            g.reset();g.desktop=desktop;GlTextureOverride quality;std::string detail;
+            require(quality.initialize(resolve,nullptr,&detail),"initialize before targeted begin-only allocation failures");
+            failedAfterUnitChange=failedAfterBinding=false;failAfter=allocation;
+            try {
+                require(quality.begin(TextureQuality::Strong,true,4,&detail)==2,"uninterrupted inspection prepares two replacements");
+                failAfter=-1;quality.end();completed=true;
+            }catch(const std::bad_alloc&){
+                failAfter=-1;++failures;unitFailure=unitFailure||failedAfterUnitChange;bindingFailure=bindingFailure||failedAfterBinding;
+                unchanged(); // This is BEFORE end(): a failed draw must already be native.
+            }
+            failAfter=-1;quality.end();unchanged();quality.release();
+            require(g.creations==g.deletions,"allocation failure cannot leak a newly generated sampler while inserting its cache entry");
         }
-        failAfter=-1;quality.end();unchanged();quality.release();
-        require(g.creations==g.deletions,"allocation failure cannot leak a newly generated sampler while inserting its cache entry");
+        require(completed&&failures>=4&&unitFailure&&bindingFailure,"inject every inspection allocation, including after unit change AND after a prior sampler replacement");
+        std::printf("PASS: production %s sampler protection/extension/border guards and %u injected allocation failures; active-unit/partial-binding rollback before the game draw and no sampler-name leaks\n",desktop?"desktop bias+floor":"GLES floor-only",failures);
     }
-    require(completed&&failures>=4&&unitFailure&&bindingFailure,"inject every inspection allocation, including after unit change AND after a prior sampler replacement");
-    std::printf("PASS: production GL sampler protection/extension/border guards and %u injected allocation failures; active-unit/partial-binding rollback before the game draw and no sampler-name leaks\n",failures);
     std::puts("LIMIT: public-API doubles, not a protected driver, game-resource semantic proof, Windows interception or GPU certification");
 }

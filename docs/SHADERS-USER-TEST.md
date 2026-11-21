@@ -127,14 +127,17 @@ a GL 3.3/GLES 3.1 draw-time path only. No supplied DLL is installed. See
 [exact coverage and resource-provenance limits](TEXTURE-QUALITY-PORTABILITY.md).
 
 **Known reported failure, not another request to repeat this procedure:** the
-saved/armed-On follow-up had 1,235 processed frames and 2,468 inspected calls,
-all first-rejected because depth testing is disabled, with zero eligible/
-prepared calls/overridden bindings and zero nested inspected/prepared counts.
-The earlier advancing-3D/Settings-closed
-confirmation already stands. The nested-wrapper repair did not fix this game
-case; another Save or lower-resolution choice is not a remedy. Work now
-includes an [actual original-DLL and reversible owned-resource experiment](POTATO-DLL-PROBE.md).
-Its outcomes are not installed-player acceptance. The generic steps below
+first follow-up had 1,235 processed frames / 2,468 inspected calls; the latest
+has **2,375 / 4,506**, all first-rejected because depth testing is disabled, with
+zero eligible/prepared calls/overridden bindings and zero nested inspected/
+prepared counts. The earlier advancing-3D/Settings-closed confirmation stands.
+The nested-wrapper repair did not fix this game case; another Save or lower-
+resolution choice is not a remedy. Work includes an [actual original-DLL and
+reversible owned-resource experiment](POTATO-DLL-PROBE.md) and the subsequent
+[bounded desktop private-bias integration](POTATO-DESKTOP-BIAS.md). The latter
+improves already-qualified sampling only; it **does not remove the first depth
+blocker or request another player deployment/retest for this report**.
+Neither is installed-player acceptance. The generic steps below
 remain for a different/new test installation, not as a repeated prerequisite.
 
 1. Record the actual observed host API, player/game versions, GPU/driver, native

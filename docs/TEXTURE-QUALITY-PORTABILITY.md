@@ -13,28 +13,32 @@ transplanted instruction bytes or recovered proxy source. See the
 
 | Path | Texture-detail implementation |
 | --- | --- |
-| Desktop OpenGL 3.3+ / GLES 3.1+ | Experimental draw-scoped private sampler replacement after an owned WGL/EGL game presentation is observed |
+| Desktop OpenGL 3.3+ | Experimental private bias + minimum floor, bounded by the queried device limit, on already-qualified owned scene draws |
+| GLES 3.1+ | Experimental private minimum-LOD floor on already-qualified owned scene draws; no desktop bias query/state |
 | GL 2 / GLES 2 / GLES 3.0 | Bypass; the required sampler/texture-level inspection contract is incomplete |
 | D3D11 / D3D12 / Vulkan | Shared policy and typed descriptor adapters/tests only; **no game texture-binding interception** |
 | Ten presentation effects | Independent processing; their pixel tests are not proof of Potato texture reduction |
 | Render resolution | Independent native Display configuration, requiring Save and restart |
 
 The UI switch uses a minimum-LOD floor of **3.0**, clamped to existing exposed
-mips and the original sampler's maximum LOD. The shared policy also supports
-**1.5** for tests/future callers; there is no second texture-strength selector.
-Positive floors select coarser existing mips. They do not shrink allocated
-textures, create mipmaps, remove geometry, change the game's draw distance,
-change DPI/FPS caps or guarantee any FPS improvement. `texelFetch` and other
-samplerless accesses may ignore this policy.
+mips and the original sampler's maximum LOD. Qualified **desktop GL** now also
+uses private additive bias, bounded by that floor and the queried
+`GL_MAX_TEXTURE_LOD_BIAS`; GLES remains floor-only and never queries that enum.
+The shared policy also supports **1.5** for tests/future callers; there is no
+second texture-strength selector. Positive bias/floors select existing mips.
+They do not shrink allocated textures, create mipmaps, remove geometry, change
+the game's draw distance, change DPI/FPS caps or guarantee an FPS improvement.
+`texelFetch` and other samplerless accesses may ignore this policy.
 
 **A minimum-LOD floor is not additive LOD bias.** The [executed original-DLL
 comparison](POTATO-DLL-PROBE.md#bias-versus-minimum-lod-floor-a-second-measured-difference)
-found that an already-minified native mip-4 sample stays at mip 4 under this
-floor-only policy, while the originals' bias selects this fixture's last mip 6.
-A test-only private desktop bias+floor sampler matched the original Strong result
-at both tested gradients and restored native Off pixels/state. That candidate
-is not integrated into production; it neither fixes the earlier depth rejection
-nor authorizes unidentified player resources.
+found that an already-minified native mip-4 sample stayed at mip 4 under the
+former floor-only plan, while the originals selected this fixture's last mip 6.
+A separate private desktop bias+floor sampler matched the original Strong result
+at both tested gradients and restored native Off pixels/state. The subsequent
+[bounded production integration and latest negative report](POTATO-DESKTOP-BIAS.md)
+close this fidelity gap **only for already-qualified desktop scene resources**;
+they do not fix the earlier depth rejection or authorize a new producer.
 
 The regular `BSIShaders` module observes **20 draw signatures / 46 core and
 extension names**: arrays/elements, range, instancing, base vertex/base instance,
@@ -65,10 +69,11 @@ negative texture result, not an unsaved switch or a lobby-only test. It does
 not identify which subcheck failed or prove ownership of another producer.
 See the [report and remaining uncertainty](FREE-FIRE-RENDERER-ANALYSIS.md).
 
-The follow-up after that repair is also **not working**: 1,235 processed frames,
-2,468 inspected calls, all 2,468 first-rejected as **depth test disabled**, zero
-eligible/prepared calls/bindings and zero nested inspected/prepared calls. No
-counted draw reached shader/sampler qualification; no-mip/blend/producer/API
+Both follow-ups after that repair are **not working**: first 1,235 processed
+presentation frames / 2,468 inspected calls, then **2,375 / 4,506**. All 4,506
+latest calls were first-rejected as **depth test disabled**, with zero eligible/
+prepared calls/bindings and zero nested inspected/prepared calls. No counted
+draw reached shader/sampler qualification; no-mip/blend/producer/API
 conclusions can be inferred from the zero later buckets. Repeating the already
 answered active-gameplay/Save/report questions is not the next implementation
 step. The separate [original-DLL runtime experiment](POTATO-DLL-PROBE.md) has
@@ -135,9 +140,9 @@ installed-game acceptance. Do not present this experiment as such.
 ### Private replacements and failure behavior
 
 Original texture/sampler descriptors are never edited. All inspected sampler
-fields are cloned into a private sampler; only its minimum LOD differs. Wrap,
-filter, comparison, border color (desktop), decode/reduction and other supported
-fields are retained. A queried replacement must match its requested descriptor
+fields are cloned into a private sampler; only its planned minimum LOD and,
+on qualified desktop GL, bounded additive bias differ. Wrap, filter, comparison,
+border color (desktop), decode/reduction and other supported fields are retained. A queried replacement must match its requested descriptor
 before it is bound. Original sampler bindings restore immediately after the
 original draw, and `ACTIVE_TEXTURE` restores before that draw.
 
@@ -209,9 +214,9 @@ Current local source checks (CI must run against the pushed review head):
 
 | Check | What passed |
 | --- | --- |
-| Strict C++ policy/GL safety | Descriptor preservation, extension legality, protected/unknown-protection refusal, depth/UI/border guards, cache/rollback behavior |
-| ASan/UBSan + leak detection | Eight injected allocation failures, partial-binding/active-unit rollback, explicit-release sampler cleanup; public-API doubles, not a protected driver |
-| Actual ANGLE/SwiftShader GLES 3.1 pixels | Production private samplers select test-owned mip colors at 1.5/3.0, restore exact native pixels/samplers, preserve pending errors and reject depth/UI/no-mip/existing-override cases |
+| Strict C++ policy/GL safety | Desktop bias-limit querying/clamping, source descriptor preservation, GLES enum legality, protected/unknown-protection refusal, unchanged depth/UI/border guards, cache/rollback behavior |
+| ASan/UBSan + leak detection | Eight injected allocation failures **per desktop/GLES path**, partial-binding/active-unit rollback, explicit-release sampler cleanup; public-API doubles, not a protected driver |
+| Actual ANGLE/SwiftShader GLES 3.1 pixels | Actual production floor-only samplers, native LOD 0/4, texture and sampler sources, 64 exact Off/source-LOD cycles, pending errors and depth/UI/no-mip/existing-override refusals |
 | Native core CTest | 17 tests, including the production nested-draw lease policy, v3 preferences, depth-reason accounting, GL safety, native source/image/recovery and existing Vulkan pixels; software fixtures only |
 | Windows x64 cross-compile/link | Complete EGL/DXGI/Vulkan hook test executables; compilation/linking is **not execution** |
 | Actual Qt 6 plugin and editors | Texture review/toggle/Save/Discard/preset independence, truthful no-game diagnostics and independent native-resolution/restart controls |

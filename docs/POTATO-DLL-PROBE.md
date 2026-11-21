@@ -11,9 +11,10 @@ through the GitHub check-annotation API and checked independently.
 This is **software WGL on authored textures, not a player/game fix, physical-GPU
 test or FPS result**. No original DLL/archive/disassembly/Mesa binary is committed,
 redistributed or installed in a player. The unrelated Z-Lag startup workflow is
-not used as Potato evidence. Production `src/` remains identical to `f05734c`;
-these experiments do not change Shaders/About order, approved Settings appearance,
-Save/Discard/callback identity or production ownership/protection/depth gates.
+not used as Potato evidence. At the executed probe head, production `src/` was
+identical to `f05734c`. The subsequent [bounded desktop-bias integration](POTATO-DESKTOP-BIAS.md)
+changes qualified sampling policy only, not Shaders/About order, approved Settings
+appearance, Save/Discard/callback identity or ownership/protection/depth gates.
 
 ## Measured original behavior
 
@@ -115,20 +116,22 @@ scales. Both source modes passed, with no original DLL, disabled depth and zero
 GL errors. Its queried private bias/floor were both exactly 3.0. No unknown
 existing override was stacked: all source resources/defaults are authored here.
 
-This is an additional **test-only candidate**, not a silent production policy
-change, a GLES bias-state capability claim or an exact clone across arbitrary
-lookup instructions/gradients/drivers. Production still uses its conservative
-floor-only plan and the same eligibility checks; no player resource was newly
-authorized. This difference cannot explain the player's zero prepared calls by
-itself, because its counted calls stop earlier at the depth gate.
+This was an additional **test-only candidate at the recorded probe head**,
+not a GLES bias-state capability claim or an exact clone across arbitrary lookup
+instructions/gradients/drivers. The subsequent [bounded desktop integration](POTATO-DESKTOP-BIAS.md)
+applies the independently authored bias+floor mechanism only to already-qualified
+scene draws, using a queried device limit; GLES remains floor-only. No player
+resource is newly authorized and the eligibility gates remain. This difference
+cannot explain the player's zero prepared calls by itself, because its counted
+calls stop earlier at the depth gate.
 
 ## What this changes about the investigation
 
-The player's latest result is still **not working**: 1,235 processed frames,
-2,468 inspected calls, all first-rejected as `TestDisabled`, zero eligible/
-prepared calls or overridden bindings and zero nested inspected/prepared counts.
-The earlier active-3D/Settings-closed
-confirmation stands. No repeat Save/gameplay/full-report request is needed.
+The player's latest result is still **not working**: **2,375 processed
+presentation-shader frames / 4,506 inspected calls**, all first-rejected as
+`TestDisabled`, with zero eligible/prepared calls/overridden bindings and zero
+nested inspected/prepared counts. The preceding 1,235 / 2,468 follow-up had the
+same blocker. The earlier active-3D/Settings-closed confirmation stands. No repeat Save/gameplay/full-report request is needed.
 
 The experiments establish a concrete difference: the original applies LOD to
 binds/draws regardless of depth testing; our production eligibility gate rejects
@@ -228,10 +231,13 @@ The supplied archive and all five DLL byte sequences remain unchanged.
 - All three standalone hosts strictly cross-compile for Windows x64; the actual
   MSVC build and original DLL execution are independently established by the
   Windows runs above, not inferred from cross-linking.
-- The unchanged production native suite passes **17/17 in 42.29 s** with the
-  pinned software Vulkan library. An initial invocation omitted that mandatory
+- At review head `89c340b`, the unchanged production native suite passed
+  **17/17 in 42.29 s** with the pinned software Vulkan library. An initial
+  invocation omitted that mandatory
   library environment variable and correctly failed the Vulkan pixel test;
   the full corrected run passed, with no test skipped or requirement weakened.
 - All four read-only player-reference EXE hashes still match their pre-review
-  values. No player/reference EXE was executed or modified. `src/` has no diff
-  from production baseline `f05734c`; no new game-fix binary is implied.
+  values. No player/reference EXE was executed or modified. Production `src/`
+  had no diff from `f05734c` at that review head; see the separate bounded-bias
+  integration for subsequent production changes and their validation. No
+  game-fix binary is implied by either experiment.

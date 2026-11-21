@@ -3,6 +3,7 @@
 The Windows detour/HWND contracts are separate; this is not emulator evidence.
 """
 import ctypes as C
+import math
 import re
 
 I, U, F, P = C.c_int, C.c_uint, C.c_float, C.c_void_p
@@ -58,7 +59,7 @@ def exercise(gl, policy, desktop, size, resolver):
         assert status.value, log.value.decode()
         return obj
 
-    vertex = shader(0x8B31, "out vec2 uv;void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);uv=p;gl_Position=vec4(p*2.-1.,0.,1.);}")
+    vertex = shader(0x8B31, "out vec2 uv;uniform float sampleScale;void main(){vec2 p=vec2((gl_VertexID<<1)&2,gl_VertexID&2);uv=p*sampleScale;gl_Position=vec4(p*2.-1.,0.,1.);}")
     fragment = shader(0x8B30, "in vec2 uv;uniform sampler2D sourceTexture;out vec4 color;void main(){color=texture(sourceTexture,uv);}")
     program = create_program()
     attach(program, vertex)
@@ -73,6 +74,14 @@ def exercise(gl, policy, desktop, size, resolver):
     location = gl("glGetUniformLocation", I, U, C.c_char_p)(program, b"sourceTexture")
     assert location >= 0
     gl("glUniform1i", None, I, I)(location, 0)
+    scale_location = gl("glGetUniformLocation", I, U, C.c_char_p)(program, b"sampleScale")
+    assert scale_location >= 0
+    sample_scale = gl("glUniform1f", None, I, F)
+    sample_scale(scale_location, 1)
+    maximum_bias = F(0)
+    if desktop:
+        gl("glGetFloatv", None, U, C.POINTER(F))(0x84FD, C.byref(maximum_bias))
+        assert math.isfinite(maximum_bias.value) and maximum_bias.value > 0, "desktop bias limit must be real, not assumed"
     vao = U()
     gl("glGenVertexArrays", None, I, C.POINTER(U))(1, C.byref(vao))
     gl("glBindVertexArray", None, U)(vao)
@@ -159,6 +168,7 @@ def exercise(gl, policy, desktop, size, resolver):
         get_int(0x8919, C.byref(value))
         active(0x84C3)
     active(0x84C3)
+    native_binding = samplers[0]
 
     def production(mode, reviewed=1, primitive=0x0004):
         before, after = I(), I()
@@ -169,10 +179,14 @@ def exercise(gl, policy, desktop, size, resolver):
         assert current.value == 0x84C3, "inspection must restore ACTIVE_TEXTURE before the actual draw"
         get_binding(after)
         assert (after.value != before.value) == bool(count), message.value.decode()
+        if count and desktop:
+            actual_bias = F()
+            get_sampler(after.value, 0x8501, C.byref(actual_bias))
+            assert actual_bias.value == min(1.5 if mode == 1 else 3, maximum_bias.value), "production private bias is bounded by the queried device limit"
         draw(primitive, 0, 3)
         policy.bsi_test_quality_end()
         get_binding(after)
-        assert before.value == after.value == samplers[0], "draw-scoped binding did not restore exactly"
+        assert before.value == after.value == native_binding, "draw-scoped binding did not restore exactly"
         pixel = (C.c_ubyte * 4)()
         read(size // 2, size // 2, 1, 1, 0x1908, 0x1401, pixel)
         return count, tuple(pixel)
@@ -206,6 +220,59 @@ def exercise(gl, policy, desktop, size, resolver):
     gl("glTexParameteri", None, U, U, I)(0x0DE1, 0x813D, 1000)
     active(0x84C3)
     assert get_error() == 0, message.value.decode()
+
+    # Native minification distinguishes an additive bias from a floor. Exercise
+    # the ACTUAL production begin/draw/end for BOTH source sampling modes, not
+    # just the descriptor adapter or a manually authored replacement sampler.
+    active(0x84C0)
+    texture_i = gl("glTexParameteri", None, U, U, I)
+    texture_f = gl("glTexParameterf", None, U, U, F)
+    for key, value in ((0x2801, 0x2703), (0x2800, 0x2600), (0x2802, 0x812F), (0x2803, 0x812F)):
+        texture_i(0x0DE1, key, value)
+    texture_f(0x0DE1, 0x813A, -1000)
+    texture_f(0x0DE1, 0x813B, 6)
+    active(0x84C3)
+
+    def source_lods():
+        state = []
+        active(0x84C0)
+        keys = (0x813A, 0x813B, 0x8501) if desktop else (0x813A, 0x813B)
+        for key in keys:
+            value = F()
+            gl("glGetTexParameterfv", None, U, U, C.POINTER(F))(0x0DE1, key, C.byref(value))
+            state.append(value.value)
+            get_sampler(samplers[0], key, C.byref(value))
+            state.append(value.value)
+        active(0x84C3)
+        return tuple(state)
+
+    def interpolated(lod):
+        lod = min(6, lod)
+        lower, upper = math.floor(lod), min(6, math.ceil(lod))
+        amount = lod - lower
+        return tuple(round(a * (1 - amount) + b * amount) for a, b in zip(colors[lower], colors[upper]))
+
+    saved_source_lods = source_lods()
+    cycles = 0
+    for native_binding in (samplers[0], 0):
+        bind_sampler(0, native_binding)
+        for scale, native_lod in ((1, 0), (16, 4)):
+            sample_scale(scale_location, scale)
+            assert production(0) == (0, colors[native_lod]), "test gradient must really select native mip 0/4"
+            for mode, floor in ((1, 1.5), (2, 3)):
+                bias = min(floor, maximum_bias.value) if desktop else 0
+                expected = interpolated(max(floor, native_lod + bias))
+                for _ in range(8):
+                    count, observed = production(mode)
+                    assert count == 1 and all(abs(a - b) <= 2 for a, b in zip(observed, expected)), ("actual production minification", desktop, native_binding, scale, mode, observed, expected)
+                    assert production(0) == (0, colors[native_lod]), "Off must restore exact pixels at BOTH gradients/source modes"
+                    assert source_lods() == saved_source_lods, "source texture/sampler LOD state must remain unchanged on every cycle"
+                    cycles += 1
+    assert cycles == 64
+    sample_scale(scale_location, 1)
+    native_binding = samplers[0]
+    bind_sampler(0, native_binding)
+    assert get_error() == 0, message.value.decode()
     gl("glEnable", None, U)(0xDEADBEEF)
     assert production(2) == (1, colors[3])
     assert get_error() == 0x0500 and get_error() == 0, "sampler inspection must not consume the application's pending API error"
@@ -220,6 +287,6 @@ def exercise(gl, policy, desktop, size, resolver):
     gl("glUseProgram", None, U)(0)
     gl("glDeleteProgram", None, U)(program)
     assert get_error() == 0
-    print("PASS: production draw-scoped private samplers AND C++ policy select real test-owned " + ("OpenGL" if desktop else "GLES 3")
-          + " mip colors at 1.5/3.0; sampler/active-unit/exact native pixels restore; depth/UI/no-mip/override/review bypass and pending errors preserved")
+    print("PASS: production draw-scoped " + ("desktop OpenGL queried bias+floor" if desktop else "GLES 3 floor-only")
+          + " selects real test-owned mip colors at native lambda 0 AND 4 in both texture/sampler source modes; 64 exact Off/source-LOD restoration cycles; active-unit/depth/UI/no-mip/override/review bypass and pending errors preserved")
     print("LIMIT: owned software-context sampler proof, not game interception, physical GPU, profile compatibility or FPS evidence")
