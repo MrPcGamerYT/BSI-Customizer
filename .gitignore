@@ -23,3 +23,7 @@ updater-bot/.state.json
 __pycache__/
 *.pyc
 *.whl
+
+# Local Python tooling
+.venv/
+.harness/out/

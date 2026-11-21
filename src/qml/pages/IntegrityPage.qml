@@ -73,7 +73,7 @@ Item {
                     radius: 8
                     color: Theme.raised
                     border.color: Theme.border
-                    TextArea {
+                    StudioTextArea {
                         id: statusText
                         width: parent.width
                         anchors.verticalCenter: parent.verticalCenter

@@ -64,3 +64,23 @@ the workflow tests actual install, installed-file SHA-256, administrator
 manifest, reinstall/upgrade and uninstall, rather than only verifying the
 installer's PE header. This does not substitute for interactive/UAC testing on
 the user's Windows configuration.
+
+## V2 startup compatibility repair
+
+V2 adds the missing `GetFileVersionInfoByHandle` export and explicit Windows
+version.dll ordinals 1–17; the custom schema export is isolated at ordinal 1000.
+V1 had allowed the linker to allocate ordinals alongside that extra export,
+which is not a compatible contract for clients importing Windows APIs by ordinal.
+This is a concrete proxy defect, not yet proof of the reported PC's crash cause.
+V1 is still recognized for safe removal/upgrading.
+
+The RPC worker now uses the CRT-aware thread entry point, catches C++ exceptions,
+and delays its IPC work until after initial player startup. A bounded
+`bsi-gif-rpc.log` beside the DLL records that the worker started. No credentials or
+activity text is logged. Forwarded Windows API calls are not delayed.
+
+Windows selftests additionally launch an isolated `HD-Player.exe`-named test host
+against the deployed proxy. It checks all named exports and ordinal identities
+against System32, makes real version-resource queries, parses an enabled INI,
+and survives worker startup/normal exit. This is not a live emulator boot or
+Discord GIF acceptance test. Leave the old DLL removed until testing the V2 build.

@@ -33,7 +33,7 @@ Rectangle {
         elide: Text.ElideRight
     }
 
-    NumberAnimation { id: fadeIn;  target: toast; property: "opacity"; to: 1; duration: 150 }
-    NumberAnimation { id: fadeOut; target: toast; property: "opacity"; to: 0; duration: 300 }
+    NumberAnimation { id: fadeIn;  target: toast; property: "opacity"; to: 1; duration: Theme.motionDuration }
+    NumberAnimation { id: fadeOut; target: toast; property: "opacity"; to: 0; duration: Theme.revealDuration }
     Timer { id: hideTimer; interval: 2400; onTriggered: fadeOut.start() }
 }

@@ -26,7 +26,7 @@ Item {
         color: button.active ? Theme.accentSoft : (hoverArea.containsMouse ? Theme.raised : "transparent")
         border.width: button.activeFocus ? 1 : 0
         border.color: Theme.accent
-        Behavior on color { ColorAnimation { duration: 120 } }
+        Behavior on color { ColorAnimation { duration: Theme.motionDuration } }
 
         Rectangle {
             visible: button.active

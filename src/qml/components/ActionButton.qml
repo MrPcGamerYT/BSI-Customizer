@@ -17,26 +17,35 @@ Rectangle {
 
     implicitWidth: buttonLabel.implicitWidth + 30
     implicitHeight: 36
-    radius: 10
+    radius: height / 2
 
-    color: button.accent ? (buttonArea.pressed ? Qt.darker(Theme.accent, 1.12) : Theme.accent)
-                         : (buttonArea.pressed || buttonArea.containsMouse ? Theme.raised : Theme.card)
+    // Press feedback stays inside the hit target; no layout scaling or delays.
+    Behavior on border.color { ColorAnimation { duration: Theme.motionDuration } }
+    Behavior on color { ColorAnimation { duration: Theme.motionDuration } }
+    color: button.accent ? (buttonArea.pressed ? "#d8d8df" : Theme.text)
+                         : (buttonArea.pressed || buttonArea.containsMouse ? Theme.hoverFill : "transparent")
     border.width: 1
     border.color: button.activeFocus ? Theme.accent
-                  : (button.accent ? Theme.accent : (buttonArea.containsMouse ? Theme.borderStrong : Theme.border))
+                  : (button.accent ? Theme.text : (buttonArea.containsMouse ? Theme.hoverBorder : Theme.border))
     activeFocusOnTab: true
     Accessible.role: Accessible.Button
     Accessible.name: button.text
     Keys.onReturnPressed: if (button.enabled) button.clicked()
     Keys.onSpacePressed: if (button.enabled) button.clicked()
     opacity: button.enabled ? 1.0 : 0.45
-    Behavior on opacity { NumberAnimation { duration: 120 } }
+    Behavior on opacity { NumberAnimation { duration: Theme.motionDuration } }
 
+    Rectangle {
+        anchors.fill: parent; radius: parent.radius
+        color: Qt.alpha(Theme.accent, button.accent ? 0.16 : 0.08)
+        opacity: buttonArea.pressed ? 1 : 0
+        Behavior on opacity { NumberAnimation { duration: Theme.motionDuration } }
+    }
     Text {
         id: buttonLabel
         anchors.centerIn: parent
         text: button.text
-        color: button.accent && button.enabled ? Theme.primaryText : Theme.text
+        color: button.accent ? Theme.window : Theme.text
         font.pixelSize: 12
         font.weight: Font.DemiBold
     }

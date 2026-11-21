@@ -194,6 +194,12 @@ public:
     Q_INVOKABLE QVariantMap gifRpcApply(const QString &path, const QVariantMap &settings, bool replaceExisting = false);
     Q_INVOKABLE QVariantMap gifRpcRestore(const QString &path);
 
+    // ---- regular startup DLL (not the separate GIF-RPC proxy) ----
+    Q_INVOKABLE QVariantMap dllStartupInspect(const QString &dllName, const QString &requiredExport);
+    Q_INVOKABLE QVariantMap dllStartupApply(const QString &dllName, const QString &exeSha256,
+                                            const QString &dllSha256, bool riskAcknowledged, const QString &requiredExport);
+    Q_INVOKABLE QVariantMap dllStartupRestore();
+
     // ---- extras ----
     Q_INVOKABLE QVariantMap applyRemovals(const QStringList &names);
     Q_INVOKABLE QVariantList layoutTweaks();
@@ -210,6 +216,19 @@ public:
     Q_INVOKABLE QString aboutPageReport();
     Q_INVOKABLE QVariantMap settingsPanelRebuildState();
     Q_INVOKABLE QVariantMap applySettingsPanelRebuild(bool enabled = true);
+    // The rebuild *options* (which native tabs stay visible, the About identity
+    // and the local artwork) as the native Player-interface page edits them.
+    // Validated exactly like the Chromium bridge and stored on this PC only:
+    // nothing reaches the player until applySettingsPanelRebuild() runs.
+    // `availableTabs` is what the page just inspected: validating against it
+    // keeps a checkbox click from re-reading the whole executable.
+    Q_INVOKABLE QVariantMap saveSettingsPanelProfile(const QString &developerName,
+                                                     const QString &tagline,
+                                                     const QStringList &hiddenTabs,
+                                                     const QStringList &availableTabs);
+    Q_INVOKABLE QVariantMap setSettingsPanelAsset(const QString &kind, const QString &id,
+                                                  const QString &path);
+    Q_INVOKABLE QVariantMap clearSettingsPanelAsset(const QString &kind, const QString &id);
     Q_INVOKABLE QVariantMap restoreBackup(const QString &path);
 
     // ---- BlueStacks Debloat (config, hosts, cloud companions) ----
@@ -292,6 +311,7 @@ signals:
     void log(const QString &message, const QString &color);
 
 private:
+    void invalidatePlayerAnalysis();
     QVariantMap runBackground(const std::function<QVariantMap(Backend &)> &operation);
     void copyPatchState(const Backend &source);
     bool m_busy = false;

@@ -1,22 +1,118 @@
-# BSI Customizer 3.0.1
-
-> **3.0.1 HTML UI:** the normal Windows build uses the actual animated HTML/glass frontend with all 13 BSI feature areas connected to the original native engines. No `--web-ui` flag or editor switching is needed. See [the feature/verification map](docs/UNIFIED-UI.md).
-
+# BSI Customizer 4.0.1
 
 [![CI](https://github.com/MrPcGamerYT/BSI-Customizer/actions/workflows/ci.yml/badge.svg)](https://github.com/MrPcGamerYT/BSI-Customizer/actions/workflows/ci.yml)
 
-Windows desktop customizer for BlueStacks / MSI App Player. Version **3.0.1** integrates the Chromium workspace with the existing C++ engines and Discord login.
+Windows desktop customizer for **BlueStacks / MSI App Player**, with a
+Forge-inspired dark workspace, the existing C++ patch engines and Discord sign-in.
+The source version is **4.0.1**; that label does not mean this exact source snapshot
+has been published as a release. Check the build's commit and verification results
+before downloading.
 
-Use the standard portable or installer build for the animated interface; both now include Chromium. `--native-ui` is an emergency compatibility fallback, not the normal editing flow. Browser-only previews cannot patch files or bypass Discord authorization. This version label does not imply a published release.
+## GUI and navigation
 
-Search/scan performance findings, benchmarks and the optimization roadmap:
-[performance review](docs/PERFORMANCE.md).
+- **Default frontend (4.0.1): QML + Qt Quick Controls**, backed by C++.
+  Standard portable/installer builds set `BSI_CHROMIUM_UI=OFF`; no HTML renderer
+  or Chromium runtime is required for the Customizer UI.
+- **Windows typography:** installed Inter / JetBrains Mono fonts. Microsoft
+  font binaries are not redistributed. Non-Windows tests retain bundled fallbacks.
+- **Legacy frontend:** the HTML workspace is retained for compatibility development
+  only. Build with `BSI_CHROMIUM_UI=ON` and explicitly launch `--web-ui` to use it;
+  `--native-ui` still forces the native shell.
+- **Authorization:** the redesigned native login retains Discord, saved-session
+  revalidation and manual callback flows. UI styling does not bypass backend guards.
 
-Tabs: **Dashboard**, **Theme**, **Resources**, **FPS**, **Integrity**, **Boot
-Video**, **UI** (clean-up, title-bar row and button order, removals, About page, Appearance Studio),
-**Debloat** (live ADB debloat, the Deep Engine Image Debloater for `Root.vhd`
-and VHDX, and the ads/telemetry/cloud/hosts/companion switches),
-**Discord RPC**, **Appearance**, **About**.
+The shell has a stable labelled sidebar, graphite surfaces, a subtle gradient
+background, backend activity logs and these navigation groups:
+
+| Group | Destinations |
+| --- | --- |
+| Home | Overview |
+| Patcher | Theme studio, Resource explorer, Performance, Integrity & safety, Boot experience, Player interface |
+| Presence | Discord presence, Animated presence |
+| App | Settings, About BSI |
+| Tools | Patch workspace, Debloat & Android |
+| Recovery | Backups |
+| Collection | Add-ons |
+
+This table describes the legacy Chromium navigation; native editors remain available through the labelled QML sidebar. Customizer **Settings** opens
+as a modal with Appearance, Updates and About tabs; it is separate from the
+emulator's Settings-panel rebuild. The native shell retains its eleven original
+editors plus Backups and Add-ons. **Resource scans are manual**: opening a page
+does not start Scan Resources.
+
+### Native Skin Studio (4.0.1)
+
+The screenshot-inspired native collection grid opens six editable bases. Set your
+own pack name, accent, surface, geometry, icon family and preview motion. Save/import
+portable `bsi.skin` JSON profiles; imports do not apply anything. Advanced controls
+allow exact detected palette-property and numeric-token overrides. Map individual
+SVG resources from an **explicit manual resource scan** to built-in line, rounded
+or bold icons, or import a custom static SVG (up to 32 KB per icon). SVG scripts,
+external references, DTDs and unsupported elements are refused. Icon replacements
+join the same verified EXE batch.
+
+**Full emulator skins are not complete.** Names and motion settings are currently
+profile/preview metadata, not injected player branding or animations. The writer
+supports verified palette/design tokens and explicitly mapped SVG resources, not
+all MSI windows, native dialogs, raster art, optimizer, boot or arbitrary QML.
+Unsupported properties are refused, never silently reported as installed.
+
+### Add-ons: six player collections
+
+| Collection | Palette | Button design |
+| --- | --- | --- |
+| VOID / Carbon | OLED neutral | Compact, 4px corners |
+| Amethyst | Violet | Soft, 12px corners |
+| Arctic | Dark blue | Balanced, 8px corners |
+| Ember | Red dark | Sharp, 2px corners |
+| Matrix | Green | Dense, square corners |
+| Nord | Frost / teal | Spacious, 10px corners |
+
+These packs change **matched QML palette colors and supported literal button
+radius, height and horizontal-padding values**. A player must expose both a
+supported QML palette and cataloged button-design tokens; unsupported or ambiguous
+targets are refused. Preview selection alone never patches the player.
+
+**Animations are preview-only.** Packs do not install player animations, icon or
+font packs, optimizer changes, native dialogs or boot changes. They are not six
+complete variants of the separate full VOID emulator UI. Previews are illustrative,
+not runtime screenshots or a promise of an exact Forge replica.
+
+To apply a collection safely:
+
+1. Select the correct `HD-Player.exe` in Settings.
+2. Open **Add-ons**, choose a collection and **Stage this pack**. Existing Workspace
+   batches are never silently cleared; review or explicitly clear them first.
+3. Run **Verify Dry Run** and review the plan. In the native frontend, staging opens
+   Patch workspace for the dry run and apply steps.
+4. Close every player instance, then confirm **Review & apply**. The native engine
+   rechecks the source and planned output hashes before committing the transaction.
+5. Use **Backups → Refresh snapshots** for recovery. Restore requires the recorded
+   post-patch file hash; updates or unrelated edits block a stale restore. Legacy
+   editor backups remain available through their original workflows.
+
+See [Add-ons scope and safety](docs/FORGE-ADDONS.md),
+[the UI/engine verification map](docs/UNIFIED-UI.md) and
+[the performance review](docs/PERFORMANCE.md).
+
+### Regular startup DLL (no proxy or recurring launcher)
+
+**PATCHER → DLL patcher** uses a native C++ writer to add an ordinary
+AMD64 DLL as a required dependency of the selected HD-Player.exe. The **Collection**
+page also has an **Open DLL patcher** shortcut above the skin packs. Copy your
+trusted DLL beside the EXE, enter its filename (default `zlag.dll`) and an exact
+existing native function export (default `zlag_init`), inspect the hash-bound
+plan, then explicitly review/confirm. Protected unique backups and
+verified restore are separate from GIF RPC; the uploaded scripts are not run or
+bundled. The optional Chromium collection opens the same native controls.
+
+After patching, recipients need the **EXE with that DLL and its dependencies** in
+a compatible emulator installation, **not Python, Node, scripts or BSI running**.
+Windows performs normal DLL initialization; **no exported initializer such as
+`zlag_init` is called**. A missing or incompatible DLL can stop startup and
+patching invalidates the EXE signature. No payload DLL is included or certified.
+See [the feature, recovery and verification guide](docs/DLL-STARTUP.md) and
+[the supplied-script safety review](docs/DLL-STARTUP-REVIEW.md).
 
 ## Sign-in gate (Discord only)
 
@@ -34,27 +130,40 @@ an embedded server-role policy and ignore local auth-file/environment overrides;
 see [docs/AUTH.md](docs/AUTH.md) for the security limits of a client-side gate.
 Setup: [docs/AUTH.md](docs/AUTH.md) and `auth.example.json`.
 
-## Download: installer (and the single EXE next to it)
+## Downloads: installer, single EXE and test bundles
 
-The release download is **`BSI-Customizer-<version>-setup.exe`** — a normal
-installer that puts the app in `C:\Program Files\BSI Customizer`, adds a Start
-menu shortcut and an uninstaller, and starts it when it is done.
+Use [GitHub Releases](https://github.com/MrPcGamerYT/BSI-Customizer/releases) for
+published builds, or [GitHub Actions](https://github.com/MrPcGamerYT/BSI-Customizer/actions)
+for development/test artifacts. **A source merge or a green browser test does not
+by itself mean a new portable EXE or installer has been built or released.** An
+older release may not contain the GUI and Add-ons described on this branch.
 
-The same release also carries **`BSI-Customizer-<version>-win64.exe`**, which is
-the whole app in one file: Qt/QML plugins, SVG support and the VC runtime DLLs
-included. A native launcher unpacks into a private temporary directory, runs the
-app, and cleans up on normal exit. Nothing is installed and nothing is
-downloaded at runtime, so it runs from a USB stick — it just cannot update
-itself, because Windows will not let a running program overwrite its own file.
+| Build type | What to run | Important distinction |
+| --- | --- | --- |
+| Installer | `BSI-Customizer-<version>-setup.exe` | Installs the app, Start menu shortcut and uninstaller. |
+| Single portable EXE | `BSI-Customizer-<version>-win64.exe` | One distributable EXE that extracts its bundled runtime when launched. |
+| Chromium Windows test bundle | Extract the artifact ZIP and run `BSI-Customizer.exe` inside | Keep all bundled Qt/Chromium files alongside it; this is **not** the single-file package. |
 
-That is the reason the installer is the default download: **the built-in updater
-runs the setup**, so an update replaces the installed files properly and starts
-the new build. See [the full portable workflow/build guide](docs/PORTABLE.md)
-for Actions, local builds, clean-environment tests, temporary-file behavior, and
-license/DLL extraction. Every push and pull request builds the Windows x64 EXE
-on a GitHub-hosted runner, compiles the installer and runs the whole engine
-self-test there (`--selftest`), so a change is only mergeable when the real MSVC
-build is green.
+The **Single EXE Release** workflow builds and verifies the portable EXE, builds
+the installer, checks updater acceptance, and exercises installation, upgrade and
+uninstallation on a disposable hosted runner. Check that the relevant steps passed
+for the commit you want. A manual dispatch with `publish_release=false` produces
+test artifacts without publishing a public release. Artifacts expire and may
+require a GitHub sign-in to download; published release assets are separate.
+
+The portable launcher bundles the native application runtime, including Qt/QML
+plugins, SVG support and VC runtime dependencies. Chromium is bundled only in
+explicitly enabled legacy builds. It extracts into a private
+temporary directory and cleans up on normal exit; it does not download the runtime
+on launch. This is **not** an offline authorization bypass: Discord sign-in still
+requires network access. The running portable EXE cannot overwrite itself; the
+configured updater uses the installer to replace installed files.
+
+See [the portable workflow/build guide](docs/PORTABLE.md) and
+[Chromium deployment and verification](docs/CHROMIUM-UI.md) for packaging,
+clean-environment tests, temporary-file behavior and licensing. CI runs builds and
+regressions on its configured events; always inspect the actual run results rather
+than assuming that a merge means every check passed.
 
 ## Player Appearance Studio
 
@@ -891,7 +1000,7 @@ the intent, mention the bot in the message, or let `publish.mjs` post it).
 
 ## Build and verify
 
-Requires CMake 3.21+, C++17, and Qt 6.5+ with Core, Gui, Qml, Quick, QuickControls2, and Svg. **Qt 6 builds the customizer UI; it does not limit FPS patching to Qt 6 installations. Qt 5 and Qt 6 target DLLs use the same patching engine.**
+Requires CMake 3.21+, C++17, and Qt 6.5+ with Core, Gui, Network, Qml, Quick, QuickControls2, Svg and Multimedia. The optional legacy frontend additionally requires WebEngineQuick and WebChannel. Standard 4.0.1 Windows packaging uses native Qt 6.8.3 with Multimedia. **Qt 6 builds the customizer UI; it does not limit FPS patching to Qt 6 installations. Qt 5 and Qt 6 target DLLs use the same patching engine.**
 
 ```sh
 cmake -B build -DCMAKE_BUILD_TYPE=Release
@@ -923,6 +1032,8 @@ scripts/Run-SettingsPanel-Manual.cmd
 ```
 
 It reports the Customizer backend's real detection analysis and QML resource inventory, exercises apply on a temporary copy, and confirms the selected HD-Player.exe hash is unchanged. It then opens the GUI directly to **Interface → Settings panel rebuild** against a second disposable copy; the Apply button stays available so native diagnostics are visible instead of hidden by a UI support gate. The same page lets you center the native content, choose visible tabs, upload safe SVG tab icons, and customize the in-player About logo, name, and links. Uploaded artwork is stored only in the app profile and written to the disposable/selected player only on Apply. In manual mode, profile edits and apply/restore are restricted to temporary app settings and that copy. The CLI diagnostic is also available directly with `BSI-Customizer.exe --settings-panel-test <HD-Player.exe>`; see [the manual tester guide](docs/SETTINGS_PANEL_MANUAL_TEST.md).
+
+The separately supplied **Pay Load Patcher** was reviewed for proxy-free DLL startup; it is **not enabled or bundled** as an installer. Python/JavaScript structural checks on four disposable player references passed, but safety failures and the distinction between loading a DLL and calling its initializer remain integration blockers. See the [direct-DLL review and pinned-source audit](docs/DLL-STARTUP-REVIEW.md); no actual payload DLL or live player was executed.
 
 For an unsupported real EXE, collect a read-only diagnostic report:
 
@@ -970,6 +1081,11 @@ UTF-8 report, with regression coverage for the real redirected CLI. This fixes
 still refuses an unvalidated resource tree.
 
 ## Third-party notices
+
+The GUI bundles Manrope, Plus Jakarta Sans and Noto Sans Math with their font
+licenses. See [native font notices](src/qml/fonts/) and
+[Chromium font notices](src/web/fonts/). Noto Sans Math supplies the stylized VOID
+branding glyphs; this does not install a font pack into the emulator.
 
 The restricted x64 prologue decoder uses [HDE64 from MinHook v1.3.4](src/third_party/hde64/README.md), under its BSD license. The notice below is included in the README shipped with binary releases. CMake builds and installations also include `THIRD-PARTY-NOTICES.txt`.
 
@@ -1066,13 +1182,33 @@ A diagnostic EXE can be supplied with `-DBSI_EXE_TEST_FILE=<absolute-path>`. The
 
 Compatibility is version-adaptive, not a guarantee for every past/future build: FPS detours currently support Windows x64 Qt 5/Qt 6 setters, and boot rewriting requires a recognizable boot-controller/media API with a validated resource mapping. Unknown architectures, ambiguous runtime selection and unrecognized resource layouts are refused instead of reporting a false success. Integrity behavior is not changed by these detection improvements.
 
-### Animated HTML workspace
+### Frontend build options
 
-The supplied HTML frontend is now the default (`BSI_CHROMIUM_UI=ON`). Install
+The QML frontend is the default (`BSI_CHROMIUM_UI=OFF`). To build the optional legacy HTML frontend, explicitly enable `BSI_CHROMIUM_UI=ON`. Install
 Qt WebEngine, WebChannel, Positioning, SerialPort (Positioning plugin dependency)
 and Multimedia development modules when
 building it locally. The existing Discord login and C++ engines are unchanged.
 The standard portable/installer workflows include the complete runtime.
-`--native-ui` selects the emergency recovery shell; `BSI_CHROMIUM_UI=OFF` is an
-explicit native-only developer build. See [UI/engine mapping](docs/UNIFIED-UI.md)
+`--web-ui` selects the legacy frontend when compiled in; `--native-ui` forces QML; `BSI_CHROMIUM_UI=OFF` is an
+native-only build (the standard distribution default). See [UI/engine mapping](docs/UNIFIED-UI.md)
 and [deployment requirements and verification](docs/CHROMIUM-UI.md).
+
+### Quiet control-center redesign and startup behavior
+
+The native Collection uses a 200px grouped navigation rail, violet/cobalt/terracotta/
+salmon/teal bento art, a fixed 280px selected-design inspector, a framed preview,
+and recent activity. Inter and JetBrains Mono are bundled under their OFL licenses.
+Only cards lift 2px on hover (150ms); there are no automatic preview animations,
+shader blurs, glow pulses or page-wide entrance effects. Small screens move the
+inspector below the collection instead of crushing three columns beside it.
+
+Feature pages are loaded asynchronously on first authenticated use, retaining
+unsaved edits while navigating. No emulator/disk/installation detection happens
+at shell startup. Use **Detect installations** on Home; **Load player UI**,
+**Load/Reload**, **Refresh**, and **Load installation status** explicitly inspect
+their targets. Boot preview playback is opt-in and pauses offscreen; this does
+not change the installed player's boot behavior. Busy operations remain serialized
+and target/write guards stay in C++, but no modal curtain blocks reading/scrolling.
+
+Palette/design/SVG deployment is still verified and bounded; animations are
+preview-only, not full-emulator runtime skin injection.

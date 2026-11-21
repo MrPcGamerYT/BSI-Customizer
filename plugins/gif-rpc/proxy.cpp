@@ -1,17 +1,19 @@
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
+#include <process.h>
 #include <string>
 #include <vector>
 #include <algorithm>
 #include <cstdint>
 #include <ctime>
 #include <cwchar>
+#include <cstring>
 #include "RpcPayload.h"
 
 // Marker + explicit export identify OUR app-local payload. No other version.dll
 // is modified implicitly. No Discord SDK, optimizer, hooks or hotkeys are used.
-extern "C" __declspec(dllexport) const char *BsiGifRpcSchema() { return "BSI_GIF_RPC_PROXY_V1"; }
+extern "C" __declspec(dllexport) const char *BsiGifRpcSchema() { return "BSI_GIF_RPC_PROXY_V2"; }
 static HMODULE systemVersion=nullptr;
 static INIT_ONCE versionOnce=INIT_ONCE_STATIC_INIT;
 static HANDLE stopEvent=nullptr;
@@ -31,6 +33,7 @@ static FARPROC original(const char *name) {
 }
 #define FWD(ret,name,args,callargs) extern "C" ret WINAPI BSI_##name args { \
     using Fn=ret (WINAPI*)args; auto fn=reinterpret_cast<Fn>(original(#name));return fn?fn callargs:ret(0); }
+FWD(BOOL,GetFileVersionInfoByHandle,(DWORD a,HANDLE b,DWORD c,LPVOID d),(a,b,c,d))
 FWD(DWORD,GetFileVersionInfoSizeA,(LPCSTR a,LPDWORD b),(a,b))
 FWD(DWORD,GetFileVersionInfoSizeW,(LPCWSTR a,LPDWORD b),(a,b))
 FWD(DWORD,GetFileVersionInfoSizeExA,(DWORD a,LPCSTR b,LPDWORD c),(a,b,c))
@@ -84,7 +87,15 @@ static bool frame(HANDLE pipe,unsigned opcode,const std::string &json) {
 static unsigned little(const std::string &s,size_t at) {
     unsigned v=0;for(unsigned i=0;i<4;++i)v|=unsigned(static_cast<unsigned char>(s[at+i]))<<(i*8);return v;
 }
-static DWORD WINAPI worker(void *module) {
+static void diagnostic(const std::wstring &path, const char *message) noexcept {
+    HANDLE file=CreateFileW(path.c_str(),FILE_APPEND_DATA|GENERIC_READ,FILE_SHARE_READ|FILE_SHARE_WRITE,
+                            nullptr,OPEN_ALWAYS,FILE_ATTRIBUTE_NORMAL,nullptr);
+    if(file==INVALID_HANDLE_VALUE)return;
+    LARGE_INTEGER size{};
+    if(GetFileSizeEx(file,&size)&&size.QuadPart>65536){CloseHandle(file);return;}
+    DWORD written=0;WriteFile(file,message,static_cast<DWORD>(strlen(message)),&written,nullptr);CloseHandle(file);
+}
+static unsigned workerImpl(void *module) {
     // Prevent explicit unload while our worker is running. No joins, waits,
     // LoadLibrary, IPC or C++ thread objects execute inside DllMain.
     HMODULE pinned=nullptr;
@@ -93,10 +104,14 @@ static DWORD WINAPI worker(void *module) {
     wchar_t filename[32768];const DWORD length=GetModuleFileNameW(static_cast<HMODULE>(module),filename,32768);
     if(!length||length==32768) return 0;
     std::wstring settings(filename,length);settings.resize(settings.find_last_of(L"\\/")+1);settings+=L"bsi-gif-rpc.ini";
+    std::wstring logPath=settings.substr(0,settings.find_last_of(L"\\/")+1)+L"bsi-gif-rpc.log";
+    diagnostic(logPath,"BSI GIF RPC V2: worker started; proxy forwarding remains independent.\r\n");
+    if(WaitForSingleObject(stopEvent,1500)!=WAIT_TIMEOUT)return 0;
     HANDLE pipe=INVALID_HANDLE_VALUE;std::string activeId,buffer;bool ready=false;unsigned index=0,nonce=0;
-    ULONGLONG next=0,handshakeDeadline=0;const auto start=static_cast<std::int64_t>(std::time(nullptr));
+    ULONGLONG next=0,handshakeDeadline=0,reload=0; GifRpcPayload::Config current;const auto start=static_cast<std::int64_t>(std::time(nullptr));
     while(WaitForSingleObject(stopEvent,250)==WAIT_TIMEOUT) {
-        const auto c=config(settings);
+        if(GetTickCount64()>=reload){current=config(settings);reload=GetTickCount64()+5000;}
+        const auto &c=current;
         if(!c.enabled||c.appId!=activeId){if(pipe!=INVALID_HANDLE_VALUE)CloseHandle(pipe);pipe=INVALID_HANDLE_VALUE;ready=false;buffer.clear();activeId=c.appId;}
         if(!c.enabled)continue;
         if(pipe==INVALID_HANDLE_VALUE) {
@@ -137,6 +152,11 @@ static DWORD WINAPI worker(void *module) {
     if(pipe!=INVALID_HANDLE_VALUE)CloseHandle(pipe);
     return 0;
 }
+static unsigned __stdcall worker(void *module) noexcept {
+    // A malformed INI/allocation error must not unwind into the emulator.
+    try { return workerImpl(module); }
+    catch (...) { OutputDebugStringW(L"BSI GIF RPC: RPC worker stopped after a C++ exception.\n"); return 0; }
+}
 BOOL WINAPI DllMain(HINSTANCE module,DWORD reason,LPVOID) {
     if(reason==DLL_PROCESS_ATTACH) {
         // Keep CRT thread notifications: this proxy uses the static CRT (/MT).
@@ -145,7 +165,7 @@ BOOL WINAPI DllMain(HINSTANCE module,DWORD reason,LPVOID) {
         const wchar_t *base=host;for(const wchar_t *p=host;*p;++p)if(*p==L'\\'||*p==L'/')base=p+1;
         if(_wcsicmp(base,L"HD-Player.exe")!=0)return TRUE;
         stopEvent=CreateEventW(nullptr,TRUE,FALSE,nullptr);
-        if(stopEvent){HANDLE thread=CreateThread(nullptr,0,worker,module,0,nullptr);if(thread)CloseHandle(thread);}
+        if(stopEvent){uintptr_t thread=_beginthreadex(nullptr,0,worker,module,0,nullptr);if(thread)CloseHandle(reinterpret_cast<HANDLE>(thread));}
     } else if(reason==DLL_PROCESS_DETACH&&stopEvent)SetEvent(stopEvent);
     return TRUE;
 }

@@ -23,7 +23,7 @@ RowLayout {
         Layout.preferredWidth: 130
     }
 
-    TextField {
+    StudioTextField {
         id: field
         readOnly: row.readOnly
         Layout.fillWidth: true

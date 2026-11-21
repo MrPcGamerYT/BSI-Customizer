@@ -37,7 +37,7 @@
 - A batch commits **one EXE only**. Boot Assets, About DLLs/RCCs and GIF RPC configuration/proxy operations are separate. No cross-file atomicity or automatic rollback is promised.
 - Ordinary resource replacement cannot grow the EXE. Theme relocation is only attempted through the writer's supported mapped-storage checks; there is no universal force-replace mode.
 - Raw compiled cache replacement is refused. Source edits invalidate supported compiled units and player disk caches instead.
-- Workspace limits: EXE/input/output 256 MiB, resource 32 MiB, aggregate decoded replacements 64 MiB, 32 operations. Profiles 256 KiB. Images at most 16 megapixels, with bounded source size and crop-before-scale to avoid oversized intermediates.
+- Workspace limits: EXE/input/output 256 MiB, resource 32 MiB, aggregate decoded replacements 64 MiB, 128 operations. Profiles 256 KiB. Images at most 16 megapixels, with bounded source size and crop-before-scale to avoid oversized intermediates.
 - History contains original EXE bytes and installation paths. Keep it private. Journals/snapshots must not be linked files or reside under linked/junction directories.
 - Hash checks plus atomic replacement protect the intended workflow; they are not a cross-process compare-and-swap against arbitrary external writers. Do not update the emulator or run other patch tools during Apply/Restore.
 - A commit or final verification can fail after replacement. Read the result carefully: the preserved journal can recover the EXE only when its current hash matches the recorded post-patch hash.

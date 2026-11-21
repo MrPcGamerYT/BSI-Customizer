@@ -35,17 +35,17 @@ Item {
         Accessible.name: title
         background: Rectangle {
             radius: 17
-            color: tile.primary ? Qt.alpha(Theme.accent, tile.hovered ? 0.92 : 0.8) : Qt.alpha(Theme.card, tile.hovered ? 1 : 0.8)
+            color: tile.hovered ? Theme.raised : Theme.card
             border.color: tile.activeFocus || tile.hovered ? Theme.accent : Theme.border
         }
         contentItem: Item {
-            Image { x: 20; y: 20; width: 22; height: 22; source: Icons.icon(tile.iconPath, tile.primary ? Theme.primaryText : Theme.accentText) }
-            Text { anchors.right: parent.right; anchors.top: parent.top; anchors.margins: 20; text: tile.number; color: tile.primary ? Qt.alpha(Theme.primaryText, 0.6) : Theme.textDim; font.pixelSize: 10 }
+            Image { x: 20; y: 20; width: 22; height: 22; source: Icons.icon(tile.iconPath, Theme.textDim) }
+            Text { anchors.right: parent.right; anchors.top: parent.top; anchors.margins: 20; text: tile.number; color: Theme.tertiary; font.pixelSize: 10 }
             ColumnLayout {
                 anchors.left: parent.left; anchors.right: parent.right; anchors.bottom: parent.bottom
                 anchors.margins: 20; spacing: 9
-                Text { Layout.fillWidth: true; text: tile.title; color: tile.primary ? Theme.primaryText : Theme.text; font.family: Theme.headingFont; font.pixelSize: 16; font.weight: Font.Bold; wrapMode: Text.Wrap }
-                Text { Layout.fillWidth: true; text: tile.description; color: tile.primary ? Qt.alpha(Theme.primaryText, 0.8) : Theme.textDim; font.pixelSize: 11; wrapMode: Text.Wrap }
+                Text { Layout.fillWidth: true; text: tile.title; color: Theme.text; font.family: Theme.headingFont; font.pixelSize: 16; font.weight: Font.Bold; wrapMode: Text.Wrap }
+                Text { Layout.fillWidth: true; text: tile.description; color: Theme.textDim; font.pixelSize: 11; wrapMode: Text.Wrap }
             }
         }
         onClicked: activated()
@@ -62,7 +62,7 @@ Item {
             Rectangle {
                 Layout.fillWidth: true
                 Layout.preferredHeight: 145
-                radius: 17; color: Qt.alpha(Theme.accent, Theme.dark ? 0.09 : 0.05); border.color: Theme.border
+                radius: 17; color: Theme.card; border.color: Theme.border
                 ColumnLayout {
                     anchors.fill: parent; anchors.margins: 24; spacing: 10
                     Text { text: qsTr("CONTROL CENTER / DASHBOARD"); color: Theme.textDim; font.pixelSize: 10; font.letterSpacing: 2 }

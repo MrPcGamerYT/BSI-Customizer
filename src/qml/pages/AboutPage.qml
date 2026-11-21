@@ -195,7 +195,7 @@ Item {
                                 color: linkArea.containsMouse ? Theme.accentSoft : Theme.cardLow
                                 border.width: 1
                                 border.color: linkArea.containsMouse ? Theme.borderStrong : Theme.border
-                                Behavior on color { ColorAnimation { duration: 120 } }
+                                Behavior on color { ColorAnimation { duration: Theme.motionDuration } }
 
                                 RowLayout {
                                     anchors.fill: parent
@@ -284,7 +284,7 @@ Item {
                         columns: width < 560 ? 1 : 2
                         columnSpacing: 10
                         rowSpacing: 8
-                        TextField {
+                        StudioTextField {
                             id: developerNameInput
                             Layout.fillWidth: true
                             placeholderText: qsTr("Developer name")
@@ -292,7 +292,7 @@ Item {
                             font.pixelSize: 11
                             background: Rectangle { color: Theme.cardLow; radius: 8; border.color: Theme.border }
                         }
-                        TextField {
+                        StudioTextField {
                             id: taglineInput
                             Layout.fillWidth: true
                             placeholderText: qsTr("Short tagline")
@@ -330,7 +330,7 @@ Item {
                                     border.color: Theme.border
                                 }
                             }
-                            TextField {
+                            StudioTextField {
                                 id: linkTitleInput
                                 property alias value: linkTitleInput.text
                                 Layout.preferredWidth: 205
@@ -341,7 +341,7 @@ Item {
                                 font.pixelSize: 10
                                 background: Rectangle { color: Theme.cardLow; radius: 7; border.color: Theme.border }
                             }
-                            TextField {
+                            StudioTextField {
                                 id: linkUrlInput
                                 property alias value: linkUrlInput.text
                                 Layout.fillWidth: true

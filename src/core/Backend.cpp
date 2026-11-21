@@ -4,11 +4,15 @@
 #include "AndroidCleanup.h"
 #include "AuthManager.h"
 #include "CustomizationWorkspace.h"
+#include "AddonPacks.h"
+#include "SkinProfiles.h"
+#include "PlayerSkinCompiler.h"
 #include <QCryptographicHash>
 #include "BootVideoPatcher.h"
 #include "PlayerCache.h"
 #include "PlayerAppearancePatcher.h"
 #include "GifRpc.h"
+#include "DllStartup.h"
 #include "BsDetector.h"
 #include "ExtrasPatcher.h"
 #include "IntegrityPatcher.h"
@@ -24,11 +28,13 @@
 #include "ThemePresets.h"
 
 #include <QColor>
+#include <QSet>
 #include <QDateTime>
 #include <QDir>
 #include <QEventLoop>
 #include <QFile>
 #include <QFileInfo>
+#include <QRegularExpression>
 #include <QStringList>
 #include <QThread>
 
@@ -43,33 +49,36 @@ Backend::Backend(SettingsManager *settings, QObject *parent)
     connect(settings, &SettingsManager::dllPathChanged, this, &Backend::dllPathChanged);
     connect(settings, &SettingsManager::confPathChanged, this, &Backend::confPathChanged);
     connect(settings, &SettingsManager::exePathChanged, this, [this] {
-        m_workspaceOperations.clear(); m_workspaceHash.clear(); m_themeFileHash.clear(); m_resourceFileHash.clear();
-        emit workspaceChanged();
-        m_themeInfo = {};
-        m_themeEntries.clear();
-        m_gradientTargets.clear();
-        emit gradientTargetsChanged();
-        m_hexQmlColors.clear();
-        m_edits.clear();
-        m_themeFilePath.clear();
-        m_themeStatus.clear();
-        m_themeDetection.clear();
-        m_detectedQtMajor = 0;
-        m_qmlThemeAvailable = false;
-        m_svgs.clear();
-        m_resources.clear();
-        m_resourceInfos.clear();
-        ++m_resourceRevision;
-        m_resourcesIncludeBinary = true;
+        invalidatePlayerAnalysis();
         emit exePathChanged();
-        emit themeChanged();
-        emit svgsChanged();
-        // The Resources tab reads entry offsets out of this list: keeping it on
-        // screen after the target changed made every preview read the new file
-        // at the old file's offsets, which looks like "the pictures do not
-        // show" on whichever build was selected second.
-        emit resourcesChanged();
     });
+}
+
+void Backend::invalidatePlayerAnalysis()
+{
+    m_workspaceOperations.clear(); m_workspaceHash.clear(); m_themeFileHash.clear(); m_resourceFileHash.clear();
+    m_themeInfo = {};
+    m_themeEntries.clear();
+    m_gradientTargets.clear();
+    m_hexQmlColors.clear();
+    m_edits.clear();
+    m_themeFilePath.clear();
+    m_themeStatus.clear();
+    m_themeDetection.clear();
+    m_detectedQtMajor = 0;
+    m_qmlThemeAvailable = false;
+    m_svgs.clear();
+    m_resources.clear();
+    m_resourceInfos.clear();
+    ++m_resourceRevision;
+    m_resourcesIncludeBinary = true;
+    emit workspaceChanged();
+    emit gradientTargetsChanged();
+    emit themeChanged();
+    emit svgsChanged();
+    // Never leave a reviewed workspace, theme or resource offset cache valid
+    // after changing targets OR applying/restoring a startup import.
+    emit resourcesChanged();
 }
 
 // An isolated facade/settings snapshot keeps all engine state thread-local.
@@ -177,7 +186,15 @@ QVariantMap Backend::runBackground(const std::function<QVariantMap(Backend &)> &
 }
 
 QString Backend::exePath() const { return m_settings->exePath(); }
-void Backend::setExePath(const QString &p) { if (!m_busy) m_settings->setExePath(p); }
+void Backend::setExePath(const QString &p)
+{
+    if (actionsLocked()) return;
+    if (!m_backgroundWorker) {
+        runBackground([=](Backend &worker) { worker.setExePath(p); return QVariantMap{}; });
+        return;
+    }
+    m_settings->setExePath(p);
+}
 QString Backend::dllPath() const { return m_settings->dllPath(); }
 void Backend::setDllPath(const QString &p) { if (!m_busy) m_settings->setDllPath(p); }
 QString Backend::confPath() const { return m_settings->confPath(); }
@@ -274,6 +291,8 @@ QString Backend::localFilePath(const QUrl &url) const
 QVariantList Backend::detectInstalls()
 {
     if (actionsLocked()) return {};
+    if (!m_backgroundWorker)
+        return runBackground([](Backend &worker) { return QVariantMap{{QStringLiteral("rows"), worker.detectInstalls()}}; }).value(QStringLiteral("rows")).toList();
     m_installs = BsDetector::findBlueStacks();
     emit installsChanged();
     if (m_installs.isEmpty())
@@ -291,6 +310,10 @@ QVariantList Backend::detectInstalls()
 void Backend::useInstall(int index)
 {
     if (actionsLocked()) return;
+    if (!m_backgroundWorker) {
+        runBackground([=](Backend &worker) { worker.useInstall(index); return QVariantMap{}; });
+        return;
+    }
     if (index < 0 || index >= m_installs.size())
         return;
     const QVariantMap m = m_installs.at(index).toMap();
@@ -1434,6 +1457,9 @@ QVariantMap Backend::bootPatch(int holdMs, const QString &mode, const QString &v
 QVariantMap Backend::bootLogoPreview()
 {
     if (actionsLocked()) return lockedMap();
+    if (!m_backgroundWorker)
+        return runBackground([](Backend &worker) { return worker.bootLogoPreview(); });
+    if (actionsLocked()) return lockedMap();
     const QString logo = BootVideoPatcher::logoPreviewDataUrl(m_settings->exePath());
     return {{QStringLiteral("available"), !logo.isEmpty()},
             {QStringLiteral("logo"), logo}};
@@ -1473,6 +1499,45 @@ QVariantMap Backend::gifRpcRestore(const QString &path)
         return runBackground([=](Backend &worker) { return worker.gifRpcRestore(path); });
     const auto r = GifRpc::restore(path);
     doLog(r.value(QStringLiteral("msg")).toString(), r.value(QStringLiteral("ok")).toBool() ? QStringLiteral("green") : QStringLiteral("red"));
+    return r;
+}
+
+// -------------------------------------------------------- regular startup DLL
+
+QVariantMap Backend::dllStartupInspect(const QString &dllName, const QString &requiredExport)
+{
+    if (actionsLocked()) return lockedMap();
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) { return worker.dllStartupInspect(dllName, requiredExport); });
+    const auto r = DllStartup::inspect(m_settings->exePath(), dllName, requiredExport);
+    doLog(r.value("msg").toString(), r.value("ok").toBool() ? QStringLiteral("blue") : QStringLiteral("red"));
+    return r;
+}
+
+QVariantMap Backend::dllStartupApply(const QString &dllName, const QString &exeSha256,
+                                    const QString &dllSha256, bool riskAcknowledged, const QString &requiredExport)
+{
+    if (actionsLocked()) return lockedMap();
+    if (!m_backgroundWorker)
+        return runBackground([=](Backend &worker) { return worker.dllStartupApply(dllName, exeSha256, dllSha256, riskAcknowledged, requiredExport); });
+    if (BsDetector::isProcessRunning(QStringLiteral("HD-Player.exe")))
+        return result(false, QStringLiteral("Close every HD-Player instance before changing its startup dependencies."), QStringLiteral("red"));
+    const auto r = DllStartup::apply(m_settings->exePath(), dllName, exeSha256, dllSha256, riskAcknowledged, requiredExport);
+    if (r.value("changed").toBool()) invalidatePlayerAnalysis();
+    doLog(r.value("msg").toString(), r.value("ok").toBool() ? QStringLiteral("green") : QStringLiteral("red"));
+    return r;
+}
+
+QVariantMap Backend::dllStartupRestore()
+{
+    if (actionsLocked()) return lockedMap();
+    if (!m_backgroundWorker)
+        return runBackground([](Backend &worker) { return worker.dllStartupRestore(); });
+    if (BsDetector::isProcessRunning(QStringLiteral("HD-Player.exe")))
+        return result(false, QStringLiteral("Close every HD-Player instance before restoring its EXE."), QStringLiteral("red"));
+    const auto r = DllStartup::restore(m_settings->exePath());
+    if (r.value("changed").toBool()) invalidatePlayerAnalysis();
+    doLog(r.value("msg").toString(), r.value("ok").toBool() ? QStringLiteral("green") : QStringLiteral("red"));
     return r;
 }
 
@@ -1775,6 +1840,9 @@ QVariantMap Backend::applyRemovals(const QStringList &names)
 
 QVariantList Backend::layoutTweaks()
 {
+    if (actionsLocked()) return {};
+    if (!m_backgroundWorker)
+        return runBackground([](Backend &worker) { return QVariantMap{{QStringLiteral("rows"), worker.layoutTweaks()}}; }).value(QStringLiteral("rows")).toList();
     QVariantList out;
     QByteArray image;
     const QString path = m_settings->exePath();
@@ -1808,6 +1876,9 @@ QVariantList Backend::layoutTweaks()
 
 QVariantMap Backend::sidebarButtonRows()
 {
+    if (actionsLocked()) return lockedMap();
+    if (!m_backgroundWorker)
+        return runBackground([](Backend &worker) { return worker.sidebarButtonRows(); });
     const auto state = LayoutPatcher::buttonRows(readExe());
     QVariantList buttons;
     for (const auto &button : state.buttons) {
@@ -1846,6 +1917,9 @@ QVariantMap Backend::applyLayoutTweak(const QString &id, bool enabled)
 
 QVariantMap Backend::aboutPageState()
 {
+    if (actionsLocked()) return lockedMap();
+    if (!m_backgroundWorker)
+        return runBackground([](Backend &worker) { return worker.aboutPageState(); });
     QVariantMap map {
         { QStringLiteral("supported"), false },
         { QStringLiteral("applied"), false },
@@ -1969,6 +2043,8 @@ QString Backend::aboutPageReport()
 QVariantMap Backend::settingsPanelRebuildState()
 {
     const auto state = SettingsPanelPatcher::analyze(m_settings->exePath());
+    QString iconError;
+    const auto defaultIcons = SettingsPanelPatcher::defaultTabIcons(state.tabs, &iconError);
     return {{QStringLiteral("supported"), state.supported},
             {QStringLiteral("applied"), state.applied},
             {QStringLiteral("restorable"), state.restorable},
@@ -1979,6 +2055,8 @@ QVariantMap Backend::settingsPanelRebuildState()
             {QStringLiteral("embeddedQmlResourceCount"), state.embeddedQmlResourceCount},
             {QStringLiteral("qmlResourceSamples"), state.qmlResourceSamples},
             {QStringLiteral("tabs"), state.tabs},
+            {QStringLiteral("defaultTabIcons"), defaultIcons},
+            {QStringLiteral("defaultIconError"), iconError},
             {QStringLiteral("logoFallback"), state.logoFallback},
             {QStringLiteral("logoStatus"), state.logoStatus},
             {QStringLiteral("detail"), state.detail}};
@@ -1997,6 +2075,109 @@ QVariantMap Backend::applySettingsPanelRebuild(bool enabled)
     return result(response.value(QStringLiteral("ok")).toBool(),
                   response.value(QStringLiteral("msg")).toString(),
                   response.value(QStringLiteral("ok")).toBool() ? QStringLiteral("green") : QStringLiteral("red"));
+}
+
+namespace {
+// Shared by the native Player-interface page and (through the same rules) the
+// Chromium bridge: which native tabs may be hidden, and in what form.
+bool validPanelTabId(const QString &id)
+{
+    static const QRegularExpression pattern(QStringLiteral("^[a-z0-9_.-]{1,128}$"));
+    return pattern.match(id).hasMatch();
+}
+} // namespace
+
+QVariantMap Backend::saveSettingsPanelProfile(const QString &developerName,
+                                              const QString &tagline,
+                                              const QStringList &hiddenTabs,
+                                              const QStringList &availableTabs)
+{
+    if (actionsLocked()) return lockedMap();
+    const QString developer = developerName.trimmed();
+    const QString subtitle = tagline.trimmed();
+    if (developer.isEmpty() || developer.size() > 80)
+        return result(false, QStringLiteral("Enter a name under the logo (up to 80 characters)."),
+                      QStringLiteral("red"));
+    if (subtitle.size() > 120
+        || QRegularExpression(QStringLiteral("[\\x00-\\x1f\\x7f]")).match(subtitle).hasMatch())
+        return result(false, QStringLiteral("The About subtitle must be no longer than 120 characters "
+                                            "and contain no control characters."),
+                      QStringLiteral("red"));
+    // Only tabs of the player that is selected now: a stale id from another
+    // version must never turn into a hidden page after an update. The ids are
+    // the ones the page inspected, not a fresh multi-MB EXE read per click.
+    QSet<QString> available;
+    for (const QString &id : availableTabs)
+        available.insert(id.trimmed().toCaseFolded());
+    QStringList cleaned;
+    for (const QString &entry : hiddenTabs) {
+        const QString id = entry.trimmed().toCaseFolded();
+        if (!validPanelTabId(id) || cleaned.contains(id))
+            return result(false, QStringLiteral("The hidden Settings-tab selection is invalid or "
+                                                "duplicated."), QStringLiteral("red"));
+        if (!available.isEmpty() && !available.contains(id))
+            return result(false, QStringLiteral("A hidden tab does not belong to the selected player. "
+                                                "Inspect the player UI again."), QStringLiteral("red"));
+        cleaned << id;
+    }
+    if (!available.isEmpty() && cleaned.size() >= available.size())
+        return result(false, QStringLiteral("Keep at least one native Settings tab visible."),
+                      QStringLiteral("red"));
+    m_settings->setAboutDeveloperName(developer);
+    m_settings->setAboutTagline(subtitle);
+    QVariantMap panelProfile = m_settings->settingsPanelProfile();
+    panelProfile.insert(QStringLiteral("hiddenTabs"), cleaned);
+    m_settings->setSettingsPanelProfile(panelProfile);
+    return result(true, QStringLiteral("Settings-panel options saved on this PC. Apply the rebuild "
+                                       "to write them into the selected player."),
+                  QStringLiteral("green"));
+}
+
+QVariantMap Backend::setSettingsPanelAsset(const QString &kind, const QString &id,
+                                           const QString &path)
+{
+    if (actionsLocked()) return lockedMap();
+    const QString assetId = id.trimmed().toCaseFolded();
+    if (kind == QLatin1String("tab-icon") && !validPanelTabId(assetId))
+        return result(false, QStringLiteral("Choose a tab from the inspected player first."),
+                      QStringLiteral("red"));
+    const QVariantMap loaded = SettingsPanelPatcher::readCustomAsset(path, kind);
+    if (!loaded.value(QStringLiteral("ok")).toBool())
+        return result(false, loaded.value(QStringLiteral("msg")).toString(), QStringLiteral("red"));
+    QVariantMap panelProfile = m_settings->settingsPanelProfile();
+    if (kind == QLatin1String("tab-icon")) {
+        QVariantMap icons = panelProfile.value(QStringLiteral("tabIcons")).toMap();
+        icons.insert(assetId, loaded.value(QStringLiteral("asset")));
+        panelProfile.insert(QStringLiteral("tabIcons"), icons);
+    } else if (kind == QLatin1String("logo")) {
+        panelProfile.insert(QStringLiteral("logo"), loaded.value(QStringLiteral("asset")));
+    } else {
+        return result(false, QStringLiteral("Choose a tab SVG icon or an About logo image."),
+                      QStringLiteral("red"));
+    }
+    m_settings->setSettingsPanelProfile(panelProfile);
+    return result(true, loaded.value(QStringLiteral("msg")).toString(), QStringLiteral("green"));
+}
+
+QVariantMap Backend::clearSettingsPanelAsset(const QString &kind, const QString &id)
+{
+    if (actionsLocked()) return lockedMap();
+    QVariantMap panelProfile = m_settings->settingsPanelProfile();
+    if (kind == QLatin1String("tab-icon")) {
+        QVariantMap icons = panelProfile.value(QStringLiteral("tabIcons")).toMap();
+        icons.remove(id.trimmed().toCaseFolded());
+        panelProfile.insert(QStringLiteral("tabIcons"), icons);
+    } else if (kind == QLatin1String("logo")) {
+        panelProfile.remove(QStringLiteral("logo"));
+    } else {
+        return result(false, QStringLiteral("Choose a tab icon or a logo to clear."),
+                      QStringLiteral("red"));
+    }
+    m_settings->setSettingsPanelProfile(panelProfile);
+    return result(true, kind == QLatin1String("tab-icon")
+        ? QStringLiteral("Custom icon cleared. The bundled pack icon will be used where available. Apply the rebuild to update the selected player.")
+        : QStringLiteral("Custom logo cleared. Apply the rebuild to use the player/fallback logo."),
+        QStringLiteral("green"));
 }
 
 QVariantMap Backend::restoreBackup(const QString &path)
@@ -2112,6 +2293,96 @@ QVariantMap Backend::workspace(const QString &action, const QVariantMap &options
     QVariantMap edits; for (auto it = m_edits.cbegin(); it != m_edits.cend(); ++it) edits[it.key()] = it.value();
     QVariantMap r;
     if (action == QLatin1String("inspect")) r = W::inspect(path, edits);
+    else if (action == QLatin1String("skin-icon-load")) r = SkinProfiles::readIcon(options.value("file").toString());
+    else if (action == QLatin1String("skin-save")) r = SkinProfiles::save(options.value("file").toString(), options.value("profile").toMap());
+    else if (action == QLatin1String("skin-load")) r = SkinProfiles::read(options.value("file").toString());
+    else if (action == QLatin1String("skin-plan")) {
+        const auto bytes=readExe();
+        if(m_resourceFileHash!=QCryptographicHash::hash(bytes,QCryptographicHash::Sha256))
+            return {{"ok",false},{"msg","Scan Resources manually for this exact EXE first."}};
+        QStringList paths;for(const auto &v:m_resourceInfos)paths<<v.toMap().value("path").toString();
+        r=PlayerSkinCompiler::plan(bytes,options.value("profile").toMap(),paths);
+        r.remove("operations"); // inspection never queues or exports raw source
+    }
+    else if (action == QLatin1String("queue-skin")) {
+        const auto profile = options.value("profile").toMap();
+        r = SkinProfiles::validate(profile);
+        if (!r.value("ok").toBool()) return r;
+        if (!m_workspaceOperations.isEmpty()) return {{"ok",false},{"msg","Review or clear your existing Workspace batch first. Nothing was discarded."}};
+        const QByteArray bytes = readExe();
+        const auto *base = AddonPacks::find(profile.value("base").toString());
+        const auto *preset = ThemePresets::byId(QLatin1String(base->preset));
+        const auto info = ThemeEngine::detectTheme(bytes, QStringLiteral("qml"));
+        const auto entries = ThemeEngine::parseQmlEntries(info.qml);
+        const auto analysis = PlayerAppearancePatcher::analyze(bytes);
+        if (entries.isEmpty() || !analysis.ok) return {{"ok",false},{"msg","This player does not expose verified palette and design sources. No skin was staged."}};
+        auto colors = ThemePresets::matchEntries(*preset,entries);
+        const auto overrides = profile.value("palette").toMap();
+        QSet<QString> matched;
+        for (const auto &entry : entries) {
+            const QString normalized = ThemePresets::normalize(entry.name);
+            if (normalized == QLatin1String("accentnormal")) colors[entry.name]=profile.value("accent").toString();
+            if (normalized == QLatin1String("primary100")) colors[entry.name]=profile.value("surface").toString();
+            if (overrides.contains(entry.name)) { colors[entry.name]=overrides.value(entry.name).toString(); matched.insert(entry.name); }
+        }
+        if (matched.size()!=overrides.size()) return {{"ok",false},{"msg","Some palette override names are not present in this player. Inspect and correct them; no edits were discarded."}};
+        AddonPacks::Pack custom = *base;
+        custom.radius=profile.value("radius").toInt(); custom.height=profile.value("height").toInt(); custom.padding=profile.value("padding").toInt();
+        auto design = AddonPacks::designEdits(custom,analysis);
+        const auto tokens=profile.value("tokens").toMap();
+        for (auto it=tokens.cbegin();it!=tokens.cend();++it) design[it.key()]=it.value();
+        const auto validation = PlayerAppearancePatcher::validateEdits(bytes,design);
+        if (!validation.value("ok").toBool()) return validation;
+        QVariantMap palette;for(auto it=colors.cbegin();it!=colors.cend();++it) palette[it.key()]=it.value();
+        QVariantList pending{QVariantMap{{"kind","theme"},{"pack",profile.value("base")},{"name",profile.value("name")},{"edits",palette},{"design",design}}};
+        QVariantList coverage;
+        if(profile.value("playerUi",false).toBool()) {
+            if(m_resourceFileHash!=QCryptographicHash::hash(bytes,QCryptographicHash::Sha256))
+                return {{"ok",false},{"msg","Scan Resources manually before staging the player GUI components and icons."}};
+            QStringList paths;for(const auto &v:m_resourceInfos)paths<<v.toMap().value("path").toString();
+            const auto gui=PlayerSkinCompiler::plan(bytes,profile,paths);
+            if(!gui.value("ok").toBool())return gui;
+            pending.append(gui.value("operations").toList());coverage=gui.value("coverage").toList();
+        }
+        const auto icons=profile.value("icons").toList();
+        if (!icons.isEmpty() && m_resourceFileHash != QCryptographicHash::hash(bytes,QCryptographicHash::Sha256))
+            return {{"ok",false},{"msg","Scan Resources manually for this exact EXE before staging mapped icons."}};
+        for (const auto &v:icons) {
+            const auto mapping=v.toMap();const QString resource=mapping.value("path").toString();
+            int found=0;for(const auto &row:m_resourceInfos) if(row.toMap().value("path").toString()==resource) ++found;
+            if(found!=1) return {{"ok",false},{"msg","An icon target is missing or ambiguous in your manual scan. No pack was queued."}};
+            const auto svg=SkinProfiles::mappedIcon(mapping,profile.value("iconStyle").toString(),profile.value("accent").toString());
+            // Explicit user mappings override generated icon-family defaults.
+            for(int i=pending.size()-1;i>=0;--i)if(pending[i].toMap().value("path").toString()==resource)pending.removeAt(i);
+            pending << QVariantMap{{"kind","resource"},{"path",resource},{"data",QString::fromLatin1(svg.toBase64())},{"sha256",W::digest(svg)}};
+        }
+        if(pending.size()>128)return {{"ok",false},{"msg","Pack exceeds the 128-operation limit. No edits were queued."}};
+        m_workspaceOperations=pending;m_workspaceHash=W::digest(bytes);
+        r={{"ok",true},{"coverage",coverage},{"msg",profile.value("playerUi",false).toBool()
+            ? "Player palette, geometry, rounded QML controls, interaction/popup animations and icon families staged together. Dry Run is required. Native/Android windows, raster art, external DLLs/RCCs and boot remain unchanged."
+            : "Palette, numeric tokens and mapped icons staged. Player GUI deployment is off; motion is preview-only."}};
+    }
+    else if (action == QLatin1String("queue-addon")) {
+        // A pack is an isolated, fixed catalog operation. Never discard the user's batch.
+        const auto *pack = AddonPacks::find(options.value("id").toString());
+        const auto *preset = pack ? ThemePresets::byId(QLatin1String(pack->preset)) : nullptr;
+        const QByteArray bytes = readExe();
+        const auto theme = ThemeEngine::detectTheme(bytes, QStringLiteral("qml"));
+        const auto entries = ThemeEngine::parseQmlEntries(theme.qml);
+        const auto colors = preset ? ThemePresets::matchEntries(*preset, entries) : QMap<QString, QString>();
+        const auto analysis = PlayerAppearancePatcher::analyze(bytes);
+        if (!pack || !preset) r = {{"ok", false}, {"msg", "Unknown add-on pack."}};
+        else if (!m_workspaceOperations.isEmpty()) r = {{"ok", false}, {"msg", "Review or clear your existing Workspace batch before staging an add-on. Nothing was discarded."}};
+        else if (colors.isEmpty() || !analysis.ok || AddonPacks::designEdits(*pack, analysis).isEmpty())
+            r = {{"ok", false}, {"msg", "This player does not expose both a supported QML palette and cataloged button design tokens. No pack was staged. Use Color studio for palette-only targets."}};
+        else {
+            QVariantMap matched;
+            for (auto it = colors.cbegin(); it != colors.cend(); ++it) matched[it.key()] = it.value();
+            m_workspaceOperations << QVariantMap{{"kind", "theme"}, {"pack", options.value("id")}, {"edits", matched}};
+            m_workspaceHash = W::digest(bytes);
+            r = {{"ok", true}, {"msg", "Pack palette and button geometry staged. Run Dry Run, then review Apply. Player animations, icons, boot and native dialogs are not changed."}};
+        }
+    }
     else if (action == QLatin1String("appearance-inspect")) r = W::inspectAppearance(path);
     else if (action == QLatin1String("theme-dry-run")) {
         const auto bytes = readExe();

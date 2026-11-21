@@ -53,6 +53,7 @@ env:
   # that only builds and verifies the EXE (the publish step below uses the
   # script directly).
   BSI_NO_UPDATER: "1"
+  BSI_SKIN_REFERENCE_DIR: ${{ github.workspace }}/player-ui-source
 
 jobs:
   build-windows:
@@ -130,6 +131,16 @@ jobs:
           "exe_name=BSI-Customizer-$version-win64.exe" >> $env:GITHUB_OUTPUT
           "setup_name=BSI-Customizer-$version-setup.exe" >> $env:GITHUB_OUTPUT
 
+      - name: Checkout pinned player UI source contracts (data only)
+        uses: actions/checkout@v5
+        with:
+          repository: husainprime20/src-code
+          ref: ee557954ee9e1a251f20fe667d2bbcc1f711d26b
+          path: player-ui-source
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: '/*.qml'
+
       - name: Install Qt 6 build tools
         uses: jurplel/install-qt-action@v4.3.1
         with:
@@ -137,7 +148,7 @@ jobs:
           host: windows
           target: desktop
           arch: win64_msvc2022_64
-          modules: qtmultimedia qtwebengine qtwebchannel qtpositioning qtserialport
+          modules: qtmultimedia
           cache: true
 
       - name: Configure application and one-file package
@@ -145,7 +156,7 @@ jobs:
           # Whole auth.json to bake into the released EXE; the release build
           # fails closed if this secret is missing and locks out runtime overrides.
           ZLP_AUTH_JSON: ${{ secrets.ZLP_AUTH_JSON || secrets.BSIC_AUTH_JSON }}
-        run: cmake -S . -B build -A x64 -DCMAKE_BUILD_TYPE=Release -DBSI_TEST_QT5_REFERENCE=ON -DBSI_BUILD_PORTABLE=ON -DBSI_REQUIRE_EMBEDDED_AUTH=ON -DBSI_CHROMIUM_UI=ON
+        run: cmake -S . -B build -A x64 -DCMAKE_BUILD_TYPE=Release -DBSI_TEST_QT5_REFERENCE=ON -DBSI_BUILD_PORTABLE=ON -DBSI_REQUIRE_EMBEDDED_AUTH=ON -DBSI_CHROMIUM_UI=OFF
 
       # Also bundles the runtime and runs the portable-EXE smoke tests.
       #

@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.21)
 
-project(BSICustomizer VERSION 3.0.1 LANGUAGES C CXX)
+project(BSICustomizer VERSION 4.0.1 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -41,7 +41,7 @@ qt_standard_project_setup(REQUIRES 6.5)
 # Staged UI migration: keep native builds/deployment unchanged unless requested.
 # Qt WebEngine ships Chromium helpers, locales and .pak data; it is not a
 # system-browser/localhost service and needs a complete Qt deployment.
-option(BSI_CHROMIUM_UI "Build the animated HTML desktop workspace" ON)
+option(BSI_CHROMIUM_UI "Build optional legacy Chromium workspace" OFF)
 if(BSI_CHROMIUM_UI)
     find_package(Qt6 6.5 REQUIRED COMPONENTS WebEngineQuick WebChannel)
 endif()
@@ -95,6 +95,11 @@ qt_add_executable(BSICustomizer
     src/core/VersionResource.cpp
     src/core/GifRpc.h
     src/core/GifRpc.cpp
+    src/core/DllStartupImport.h
+    src/core/DllStartupImport.cpp
+    src/core/DllStartup.h
+    src/core/DllStartup.cpp
+    tests/dll-startup/file_test.cpp
     src/core/PlayerCache.h
     src/core/PlayerCache.cpp
     src/core/BootVideoPatcher.h
@@ -135,6 +140,10 @@ qt_add_executable(BSICustomizer
     src/core/BsDetector.cpp
     src/core/CustomizationWorkspace.h
     src/core/CustomizationWorkspace.cpp
+    src/core/SkinProfiles.h
+    src/core/SkinProfiles.cpp
+    src/core/PlayerSkinCompiler.h
+    src/core/PlayerSkinCompiler.cpp
     src/core/Backend.h
     src/core/CrashDiagnostics.cpp src/core/CrashDiagnostics.h
     src/core/Backend.cpp
@@ -200,6 +209,7 @@ target_compile_definitions(BSICustomizer PRIVATE
     BSI_VERSION="${PROJECT_VERSION}"
 )
 target_link_libraries(BSICustomizer PRIVATE bsi_7z)
+target_include_directories(BSICustomizer PRIVATE src)
 
 # ---------------------------------------------------------------------------
 # Optional build-time auth embed ("zip auth json"): the whole auth.json blob
@@ -299,12 +309,33 @@ if(BSI_EXE_TEST_FILE)
     target_compile_definitions(BSICustomizer PRIVATE BSI_EXE_TEST_FILE="${_bsi_exe_reference}")
 endif()
 
+# The supplied Settings-tab pack is embedded in both UI builds. No download or
+# user profile seeding is needed: an empty profile automatically uses this pack.
+qt_add_resources(BSICustomizer "settings_panel_icons"
+    PREFIX "/settings-panel-icons"
+    BASE "${CMAKE_CURRENT_SOURCE_DIR}/src/assets/settings-panel-icons"
+    FILES
+        src/assets/settings-panel-icons/default-icons.json
+        src/assets/settings-panel-icons/performance.svg
+        src/assets/settings-panel-icons/display.svg
+        src/assets/settings-panel-icons/graphics.svg
+        src/assets/settings-panel-icons/game-settings.svg
+        src/assets/settings-panel-icons/devices.svg
+        src/assets/settings-panel-icons/preferences.svg
+        src/assets/settings-panel-icons/phone.svg
+        src/assets/settings-panel-icons/shortcuts.svg
+        src/assets/settings-panel-icons/user-data.svg
+        src/assets/settings-panel-icons/advanced.svg
+        src/assets/settings-panel-icons/about.svg
+)
+
 qt_add_qml_module(BSICustomizer
     URI BSICustomizer
     VERSION 1.0
     QML_FILES
         src/qml/Main.qml
         src/qml/Theme.qml
+        src/qml/SkinCatalog.js
         src/qml/Icons.js
         src/qml/WindowGeometry.js
         src/qml/ResourceSearch.js
@@ -312,8 +343,25 @@ qt_add_qml_module(BSICustomizer
         src/qml/UpdateBanner.qml
         src/qml/components/SidebarButton.qml
         src/qml/components/WinControls.qml
+        src/qml/components/SkinPreview.qml
+        src/qml/components/MicroLabel.qml
+        src/qml/components/CircleButton.qml
+        src/qml/components/FrameCorners.qml
+        src/qml/components/MiniPlayer.qml
+        src/qml/components/CollectionCard.qml
+        src/qml/components/ControlCenterBackdrop.qml
+        src/qml/components/LoadingStrip.qml
+        src/qml/components/LazyFeature.qml
+        src/qml/components/DllStartupPanel.qml
         src/qml/components/Card.qml
         src/qml/components/ActionButton.qml
+        src/qml/components/StudioTextField.qml
+        src/qml/components/StudioTextArea.qml
+        src/qml/components/StudioComboBox.qml
+        src/qml/components/StudioSpinBox.qml
+        src/qml/components/StudioCheckBox.qml
+        src/qml/components/StudioTabBar.qml
+        src/qml/components/StudioTabButton.qml
         src/qml/components/ToggleSwitch.qml
         src/qml/components/Stepper.qml
         src/qml/components/ChoiceChips.qml
@@ -327,12 +375,15 @@ qt_add_qml_module(BSICustomizer
         src/qml/components/SettingsPanel.qml
         src/qml/pages/DashboardPage.qml
         src/qml/pages/ThemePage.qml
+        src/qml/pages/AddonsPage.qml
+        src/qml/pages/BackupsPage.qml
         src/qml/pages/ResourcesPage.qml
         src/qml/pages/FpsPage.qml
         src/qml/pages/IntegrityPage.qml
         src/qml/pages/BootVideoPage.qml
         src/qml/pages/UiPage.qml
         src/qml/pages/GifRpcPage.qml
+        src/qml/pages/DllStartupPage.qml
         src/qml/pages/WorkspacePage.qml
         src/qml/pages/DebloatPage.qml
         src/qml/pages/RpcidPage.qml
@@ -340,7 +391,13 @@ qt_add_qml_module(BSICustomizer
         src/qml/pages/UpdatesPage.qml
         src/qml/pages/AboutPage.qml
     RESOURCES
+        src/qml/fonts/NotoSansMath-Regular.ttf
+        src/qml/fonts/NotoSansMath-LICENSE.txt
         "BSI CUSTOMIZER.ico"
+        src/qml/fonts/Inter.ttf
+        src/qml/fonts/Inter-OFL.txt
+        src/qml/fonts/JetBrainsMono.ttf
+        src/qml/fonts/JetBrainsMono-OFL.txt
         src/qml/fonts/Manrope.ttf
         src/qml/fonts/PlusJakartaSans.ttf
         src/qml/fonts/Manrope-OFL.txt
@@ -379,6 +436,12 @@ if(WIN32 AND MSVC AND CMAKE_SIZEOF_VOID_P EQUAL 8)
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/gif-rpc"
         MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
     target_compile_features(BsiGifRpcProxy PRIVATE cxx_std_17)
+    add_executable(BsiGifRpcSmoke plugins/gif-rpc/smoke.cpp)
+    set_target_properties(BsiGifRpcSmoke PROPERTIES AUTOMOC OFF AUTOUIC OFF AUTORCC OFF
+        OUTPUT_NAME HD-Player RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/gif-rpc-smoke"
+        MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+    add_dependencies(BSICustomizer BsiGifRpcSmoke)
+    target_compile_definitions(BSICustomizer PRIVATE BSI_GIF_RPC_SMOKE="$<TARGET_FILE:BsiGifRpcSmoke>")
     set(_gif_rc "${CMAKE_CURRENT_BINARY_DIR}/gif-rpc-payload-$<CONFIG>.rc")
     add_custom_command(OUTPUT "${_gif_rc}"
         COMMAND ${CMAKE_COMMAND} "-DDLL=$<TARGET_FILE:BsiGifRpcProxy>" "-DOUTPUT=${_gif_rc}"
@@ -405,8 +468,9 @@ if(BSI_CHROMIUM_UI)
         FILES src/chromium/ChromiumMain.qml)
     qt_add_resources(BSICustomizer "bsi_chromium_assets"
         PREFIX "/bsi-web" BASE "src/web"
-        FILES src/web/index.html src/web/styles.css src/web/transport.js src/web/resource-search.js src/web/editors.js src/web/maintenance.js src/web/effects.js src/web/app.js src/web/icon.png
+        FILES src/web/index.html src/web/styles.css src/web/transport.js src/web/resource-search.js src/web/editors.js src/web/maintenance.js src/web/effects.js src/web/addons.js src/web/app.js src/web/icon.png
             src/web/fonts/manrope-latin.woff2 src/web/fonts/plus-jakarta-sans-latin.woff2
+            src/web/fonts/NotoSansMath-Regular.ttf src/web/fonts/NotoSansMath-LICENSE.txt
             src/web/fonts/manrope-LICENSE.txt src/web/fonts/plus-jakarta-sans-LICENSE.txt)
 endif()
 

@@ -133,7 +133,7 @@ import BSICustomizer
         RowLayout {
             Layout.fillWidth: true
             spacing: 8
-            ComboBox {
+            StudioComboBox {
                 id: targetBox
                 Layout.fillWidth: true
                 Layout.preferredHeight: 40
@@ -168,7 +168,7 @@ import BSICustomizer
                     background: Rectangle { color: targetDelegate.highlighted ? Theme.raised : "transparent" }
                 }
             }
-            TextField {
+            StudioTextField {
                 id: filterField
                 Layout.preferredWidth: 150
                 Layout.preferredHeight: 40
@@ -194,13 +194,13 @@ import BSICustomizer
         }
         RowLayout {
             Layout.fillWidth: true
-            ComboBox {
+            StudioComboBox {
                 Layout.fillWidth: true
                 model: [qsTr("Gradient"), qsTr("Solid fallback")]
                 currentIndex: editor.useGradient ? 0 : 1
                 onActivated: (index) => editor.useGradient = index === 0
             }
-            ComboBox {
+            StudioComboBox {
                 Layout.fillWidth: true
                 enabled: editor.useGradient && editor.targetSupportsOrientation
                 model: [qsTr("Left → right"), qsTr("Top → bottom")]

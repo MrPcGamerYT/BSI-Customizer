@@ -324,7 +324,9 @@ QVariantMap WebBridge::invoke(const QString &method, const QVariantMap &args)
         } else if (kind == QLatin1String("logo")) panelProfile.remove(QStringLiteral("logo"));
         else return failure(QStringLiteral("Choose a tab icon or logo to clear."));
         m_settings.setSettingsPanelProfile(panelProfile);
-        value = QStringLiteral("Custom asset cleared. Apply the rebuild to update the selected player.");
+        value = kind == QLatin1String("tab-icon")
+            ? QStringLiteral("Custom icon cleared. The bundled pack icon will be used where available. Apply the rebuild to update the selected player.")
+            : QStringLiteral("Custom logo cleared. Apply the rebuild to use the player/fallback logo.");
     } else if (method == QLatin1String("readInterface")) {
         value = QVariantMap{{"removals", m_backend.removalNames()}, {"layout", m_backend.layoutTweaks()},
                             {"about", m_backend.aboutPageState()},
@@ -364,7 +366,7 @@ QVariantMap WebBridge::invoke(const QString &method, const QVariantMap &args)
     } else if (method == QLatin1String("workspace")) {
         const QString action = text("action");
         const QStringList allowed{ "inspect", "theme-dry-run", "diagnostics", "profile-load", "profile-save", "profile-section",
-            "clear", "queue-theme", "queue-resource", "queue-appearance", "appearance-inspect", "dry-run", "apply", "history", "restore", "image", "video", "rpc" };
+            "clear", "queue-addon", "queue-theme", "queue-resource", "queue-appearance", "appearance-inspect", "dry-run", "apply", "history", "restore", "image", "video", "rpc" };
         if (!allowed.contains(action)) return failure(QStringLiteral("Unknown workspace action."));
         auto response = m_backend.workspace(action, args.value("options").toMap());
         if (action == QLatin1String("video") && response.value("ok").toBool())
@@ -470,7 +472,7 @@ QVariantMap WebBridge::invoke(const QString &method, const QVariantMap &args)
         else return failure(QStringLiteral("Unknown maintenance action."));
     } else if (method == QLatin1String("openNativeTool")) {
         bool valid = false; const int page = args.value("page").toInt(&valid);
-        if (!valid || page < 0 || page > 12) return failure(QStringLiteral("Invalid native tool page."));
+        if (!valid || page < 0 || page > 13) return failure(QStringLiteral("Invalid native tool page."));
         emit nativeToolRequested(page);
     } else if (method == QLatin1String("signOut")) m_auth.signOut();
     else return failure(QStringLiteral("Unknown bridge command: %1").arg(method));

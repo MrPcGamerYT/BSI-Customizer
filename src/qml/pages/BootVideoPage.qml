@@ -18,8 +18,8 @@ Item {
         page.bootLogoUrl = preview.logo || "";
     }
 
-    Component.onCompleted: refreshBootLogo()
-    onVisibleChanged: if (visible) refreshBootLogo()
+    property bool previewPlaying: false
+    onVisibleChanged: if (!visible) previewPlaying = false
 
     property string lastProfileBoot: JSON.stringify((backend.customizationProfile || {}).boot || {})
     Connections {
@@ -29,7 +29,7 @@ Item {
             const value = JSON.stringify(b);
             if (value !== page.lastProfileBoot) { page.lastProfileBoot = value; bootHold.value = b.holdMs === undefined ? 3000 : b.holdMs; }
         }
-        function onExePathChanged() { page.refreshBootLogo(); }
+        function onExePathChanged() { page.bootLogoUrl = ""; }
     }
     ScrollView {
         id: bootScroller
@@ -66,8 +66,10 @@ Item {
 
                 RowLayout {
                     Layout.fillWidth: true
+                    ActionButton { text: page.previewPlaying ? qsTr("Pause preview") : qsTr("Play preview"); onClicked: page.previewPlaying = !page.previewPlaying }
+                    ActionButton { text: qsTr("Load logo"); enabled: !backend.busy; onClicked: page.refreshBootLogo() }
                     Text { text: qsTr("Boot style"); color: Theme.text; font.weight: Font.DemiBold }
-                    ComboBox {
+                    StudioComboBox {
                         id: bootStyle
                         Layout.preferredWidth: 270
                         model: [qsTr("Aurora glow"), qsTr("Orbit rings"), qsTr("Pulse wave"), qsTr("Solar flare"), qsTr("Custom MP4")]
@@ -82,7 +84,7 @@ Item {
                     }
                 }
                 Label { text: qsTr("Startup message (leave blank for default)"); color: Theme.text }
-                TextField {
+                StudioTextField {
                     id: bootStartupText
                     Layout.fillWidth: true
                     maximumLength: 120
@@ -102,7 +104,7 @@ Item {
                         anchors.verticalCenter: parent.verticalCenter
                         anchors.verticalCenterOffset: -10
                         color: page.bootMode === "solar" ? "#633C2F" : "#16496B"
-                        SequentialAnimation on opacity { loops: Animation.Infinite; NumberAnimation { from: 0.18; to: 0.40; duration: page.bootMode === "pulse" ? 1800 : 2900; easing.type: Easing.InOutSine } NumberAnimation { to: 0.18; duration: page.bootMode === "pulse" ? 1800 : 2900; easing.type: Easing.InOutSine } }
+                        SequentialAnimation on opacity { running: page.visible && page.previewPlaying && !Theme.reduceMotion; loops: Animation.Infinite; NumberAnimation { from: 0.18; to: 0.40; duration: page.bootMode === "pulse" ? 1800 : 2900; easing.type: Easing.InOutSine } NumberAnimation { to: 0.18; duration: page.bootMode === "pulse" ? 1800 : 2900; easing.type: Easing.InOutSine } }
                     }
                     Rectangle {
                         id: previewRingTrack
@@ -116,7 +118,7 @@ Item {
                         visible: page.bootMode === "orbit"
                         width: previewRingTrack.width * 1.35; height: width
                         anchors.centerIn: previewRingTrack
-                        RotationAnimation on rotation { from: 0; to: 360; duration: 8200; loops: Animation.Infinite; easing.type: Easing.Linear }
+                        RotationAnimation on rotation { from: 0; to: 360; duration: 8200; running: page.visible && page.previewPlaying && !Theme.reduceMotion; loops: Animation.Infinite; easing.type: Easing.Linear }
                         Rectangle { width: 8; height: 8; radius: 4; anchors.horizontalCenter: parent.horizontalCenter; y: -4; color: "#B8EFFF"; border.color: "white"; border.width: 1 }
                     }
                     Rectangle {
@@ -124,8 +126,8 @@ Item {
                         width: previewRingTrack.width; height: width; radius: width / 2
                         anchors.centerIn: previewRingTrack
                         color: "transparent"; border.width: 2; border.color: "#75D9FF"
-                        SequentialAnimation on scale { loops: Animation.Infinite; NumberAnimation { from: 0.78; to: 1.5; duration: 2200; easing.type: Easing.OutCubic } }
-                        SequentialAnimation on opacity { loops: Animation.Infinite; NumberAnimation { from: 0.5; to: 0; duration: 2200; easing.type: Easing.OutCubic } }
+                        SequentialAnimation on scale { running: page.visible && page.previewPlaying && !Theme.reduceMotion; loops: Animation.Infinite; NumberAnimation { from: 0.78; to: 1.5; duration: 2200; easing.type: Easing.OutCubic } }
+                        SequentialAnimation on opacity { running: page.visible && page.previewPlaying && !Theme.reduceMotion; loops: Animation.Infinite; NumberAnimation { from: 0.5; to: 0; duration: 2200; easing.type: Easing.OutCubic } }
                     }
                     Canvas {
                         id: previewLoadingRing
@@ -142,7 +144,7 @@ Item {
                             ctx.arc(width / 2, height / 2, width / 2 - ctx.lineWidth, -Math.PI * 0.70, Math.PI * 0.88, false);
                             ctx.stroke();
                         }
-                        RotationAnimation on rotation { from: 0; to: 360; duration: page.bootMode === "orbit" ? 4300 : page.bootMode === "pulse" ? 3600 : 3100; loops: Animation.Infinite; easing.type: Easing.Linear }
+                        RotationAnimation on rotation { from: 0; to: 360; duration: page.bootMode === "orbit" ? 4300 : page.bootMode === "pulse" ? 3600 : 3100; running: page.visible && page.previewPlaying && !Theme.reduceMotion; loops: Animation.Infinite; easing.type: Easing.Linear }
                     }
                     Rectangle {
                         visible: page.bootLogoUrl.length === 0
@@ -159,7 +161,7 @@ Item {
                         source: page.bootLogoUrl
                         fillMode: Image.PreserveAspectFit
                         smooth: true; mipmap: true
-                        SequentialAnimation on scale { loops: Animation.Infinite; NumberAnimation { to: 1.018; duration: 2300; easing.type: Easing.InOutSine } NumberAnimation { to: 1.0; duration: 2300; easing.type: Easing.InOutSine } }
+                        SequentialAnimation on scale { running: page.visible && page.previewPlaying && !Theme.reduceMotion; loops: Animation.Infinite; NumberAnimation { to: 1.018; duration: 2300; easing.type: Easing.InOutSine } NumberAnimation { to: 1.0; duration: 2300; easing.type: Easing.InOutSine } }
                     }
                     Text {
                         anchors.horizontalCenter: parent.horizontalCenter
@@ -188,14 +190,14 @@ Item {
 
                 RowLayout {
                     Label { text: qsTr("Boot hold after ready (ms)"); color: Theme.text }
-                    SpinBox { id: bootHold; from: 0; to: 15000; value: 3000; stepSize: 500; editable: true }
+                    StudioSpinBox { id: bootHold; from: 0; to: 15000; value: 3000; stepSize: 500; editable: true }
                     Label { text: qsTr("0 disables the extra delay"); color: Theme.textDim }
                     ActionButton { text: qsTr("Save to profile"); onClicked: { const r = backend.workspace("profile-section", {section: "boot", value: {holdMs: bootHold.value}}); page.state = r.msg || ""; } }
                 }
 
                 RowLayout {
                     Layout.fillWidth: true
-                    TextArea {
+                    StudioTextArea {
                         Layout.fillWidth: true
                         readOnly: true
                         selectByMouse: true

@@ -1,5 +1,8 @@
 // Standalone Qt Core/Gui/Network test; never executes an emulator or accesses Discord.
 #include "core/CustomizationWorkspace.h"
+#include "core/AddonPacks.h"
+#include "core/SkinProfiles.h"
+#include "core/PlayerSkinCompiler.h"
 #include "core/ThemeEngine.h"
 #include "core/EmbeddedResources.h"
 #include "core/QtResources.h"
@@ -92,6 +95,25 @@ int run()
 {
     failures = 0;
     QTemporaryDir temp; check(temp.isValid(),"isolated test directory");
+    {
+        const QStringList ids{"pMaxDropDownHeight","pVisibilityRole","pContentRightPadding"};
+        const auto target=qv4Unit(ids);
+        const auto imported=qv4Unit({"UiComboBox","pMaxDropDownHeight"});
+        const auto substring=qv4Unit({"xpMaxDropDownHeight","xpVisibilityRole","xpContentRightPadding"});
+        auto bytes=target+imported+substring;
+        check(QtResources::sourceUnits(bytes,{"UiComboBox.qml"},ids)==1,
+              "exact source matching requires all full identifiers, not an importing component or substring");
+        check(QtResources::sourceUnits(bytes,{"UiComboBox.qml"},ids,true)==1
+                  && le32(bytes,8)==0 && le32(bytes,target.size()+8)!=0,
+              "precise cache invalidation leaves importing/unrelated QML units active");
+        auto named=qv4Unit({":/qml/OtherWindow.qml","pMaxDropDownHeight","pVisibilityRole","pContentRightPadding"});
+        putLe32(named,236,0);
+        check(QtResources::sourceUnits(named,{"UiComboBox.qml"},ids)==0,
+              "a known different source filename never falls back to property identifiers");
+        auto duplicate=target+target;
+        check(QtResources::sourceUnits(duplicate,{"UiComboBox.qml"},ids)==2,
+              "duplicate compiled source identities remain detectable and cannot masquerade as one");
+    }
     const auto original=fixture(); const QString exe=temp.filePath(QStringLiteral("HD-Player.exe")); write(exe,original);
     auto inspection=W::inspect(exe,{{"primary100","#abcdef"}});
     if (!inspection.value("themeSupported").toBool()) std::printf("inspection: %s\n",qPrintable(inspection.value("msg").toString()));
@@ -107,6 +129,96 @@ int run()
     bad=profile;bad["boot"]=QVariantMap{{"holdMs",3.5}};check(!W::validateProfile(bad).value("ok").toBool(),"fractional boot durations refused");
     bad=profile;bad["about"]=QVariantMap{{"links",QVariantList{QVariantMap{{"id","bad"},{"url","file:///C:/Windows/test.exe"}}}}};
     check(!W::validateProfile(bad).value("ok").toBool(),"unsafe About links refused");
+    QVariantMap skin{{"schema","bsi.skin"},{"version",1},{"name","My editable skin"},{"base","carbon"},
+        {"accent","#aabbcc"},{"surface","#101012"},{"radius",7},{"height",35},{"padding",14},
+        {"motion","rise"},{"duration",240},{"iconStyle","rounded"},{"palette",QVariantMap{}},{"tokens",QVariantMap{}},{"icons",QVariantList{}}};
+    check(SkinProfiles::validate(skin).value("ok").toBool(),"custom names and geometry are not locked to a built-in pack");
+    auto invalidSkin=skin;invalidSkin["radius"]=true;
+    check(!SkinProfiles::validate(invalidSkin).value("ok").toBool(),"boolean geometry refused");
+    invalidSkin=skin;invalidSkin["script"]="run()";
+    check(!SkinProfiles::validate(invalidSkin).value("ok").toBool(),"skin imports refuse scripts and unknown fields");
+    invalidSkin=skin;invalidSkin["palette"]=QVariantMap{{"primary100","#fff; bad()"}};
+    check(!SkinProfiles::validate(invalidSkin).value("ok").toBool(),"skin palette cannot inject QML expressions");
+    invalidSkin=skin;invalidSkin["icons"]=QVariantList{QVariantMap{{"path","../unsafe.svg"},{"glyph","home"}}};
+    check(!SkinProfiles::validate(invalidSkin).value("ok").toBool(),"skin SVG mappings reject traversal");
+    for(const auto &style:{"line","rounded","bold"})
+        check(!SkinProfiles::icon("home",QLatin1String(style),"#aabbcc").isEmpty(),"three safe generated SVG icon styles");
+    check(SkinProfiles::icon("unknown","line","#aabbcc").isEmpty(),"unknown glyph refused");
+    for(const auto &glyph:{"close","minimize","maximize","menu","chat","help","gallery","record","stop","rotate","shake","location","apk","instances","macro","memory","pin","account","volume-muted","sidepanel"})
+        check(!SkinProfiles::icon(QLatin1String(glyph),"rounded","#aabbcc").isEmpty(),"generated sidebar/topbar function glyph preserves a distinct semantic symbol");
+    const QString svgFile=temp.filePath(QStringLiteral("custom.svg"));
+    write(svgFile,"<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M2 2h20v20H2z'/></svg>");
+    const auto importedIcon=SkinProfiles::readIcon(svgFile);
+    check(importedIcon.value("ok").toBool(),"user static SVG icons are importable");
+    const QVariantMap customIcon{{"path","ui/home.svg"},{"svg",importedIcon.value("svg")}};
+    check(!SkinProfiles::mappedIcon(customIcon,"line","#aabbcc").isEmpty(),"custom SVG bytes preserved in portable mapping");
+    write(svgFile,"<svg xmlns='http://www.w3.org/2000/svg'><script>alert(1)</script></svg>");
+    check(!SkinProfiles::readIcon(svgFile).value("ok").toBool(),"SVG scripts refused");
+    write(svgFile,"<svg xmlns='http://www.w3.org/2000/svg'><path fill='url(https://invalid.example/icon.svg)'/></svg>");
+    check(!SkinProfiles::readIcon(svgFile).value("ok").toBool(),"SVG external references refused");
+    write(svgFile,"<!DOCTYPE svg [<!ENTITY x SYSTEM 'file:///etc/passwd'>]><svg xmlns='http://www.w3.org/2000/svg'/>");
+    check(!SkinProfiles::readIcon(svgFile).value("ok").toBool(),"SVG DTD/entity declarations refused");
+    auto uiSkin=skin;uiSkin["playerUi"]=true;
+    check(SkinProfiles::validate(uiSkin).value("ok").toBool(),"strict player GUI deployment is a typed profile option");
+    auto badUiSkin=uiSkin;badUiSkin["playerUi"]="true";
+    check(!SkinProfiles::validate(badUiSkin).value("ok").toBool(),"string GUI deployment flag refused");
+    check(!PlayerSkinCompiler::plan(original,uiSkin,{}).value("ok").toBool(),"incomplete EXE cannot report a full GUI pack success");
+    check(!PlayerSkinCompiler::compile("Unknown.qml","Item {}",uiSkin).value("ok").toBool(),"unknown player source refused");
+    const QString sourceDir=qEnvironmentVariable("BSI_SKIN_REFERENCE_DIR");
+    if(!sourceDir.isEmpty()) {
+        for(const auto &leaf:PlayerSkinCompiler::components()) {
+            const auto source=read(QDir(sourceDir).filePath(leaf));
+            check(!source.isEmpty(),qPrintable("pinned player UI source present: "+leaf));
+            for(const auto &id:QStringList{"carbon","amethyst","arctic","matrix","ember","nord"}) {
+                auto generatedProfile=uiSkin;generatedProfile["base"]=id;
+                generatedProfile["radius"]=AddonPacks::find(id)->radius;
+                const auto generated=PlayerSkinCompiler::compile(leaf,source,generatedProfile);
+                if(!generated.value("ok").toBool())std::printf("compiler: %s\n",qPrintable(generated.value("msg").toString()));
+                check(generated.value("ok").toBool(),qPrintable("compile player component: "+leaf+" / "+id));
+                const auto output=generated.value("source").toByteArray();
+                if(output.isEmpty())continue;
+                auto changed=generatedProfile;changed["radius"]=19;changed["duration"]=0;
+                const auto second=PlayerSkinCompiler::compile(leaf,output,changed);
+                check(second.value("ok").toBool() && second.value("source").toByteArray().count("BSI_PLAYER_SKIN_V1_BEGIN")==1,
+                      "switching packs updates settings without stacking behaviors");
+                check(output.count("onClicked:")==source.count("onClicked:") && output.count("onClosing:")==source.count("onClosing:"),
+                      "player actions and close handlers survive style compilation");
+            }
+        }
+    }
+    const QString skinFile=temp.filePath(QStringLiteral("editable-skin.json"));
+    check(SkinProfiles::save(skinFile,skin).value("ok").toBool() && SkinProfiles::read(skinFile).value("profile").toMap()==skin,"custom skin profile save/load round trip");
+    check(!SkinProfiles::save(exe,skin).value("ok").toBool() && read(exe)==original,"skin export never overwrites the player");
+    const QVariantList customOps{QVariantMap{{"kind","theme"},{"pack","carbon"},{"name","Renamed skin"},
+        {"edits",QVariantMap{{"primary100","#101012"}}},
+        {"design",QVariantMap{{"UiThemeObject.qml#root.buttons.sizes.large.radius",7}}}}};
+    QByteArray customPrepared;
+    const auto customDry=W::simulate(exe,customOps,W::digest(original),&customPrepared);
+    check(customDry.value("ok").toBool() && read(exe)==original,"custom skin palette and user geometry prepare together without writes");
+    bool customReadback=false;
+    for(const auto &file:QtResources::registeredFiles(customPrepared)) if(file.name==QLatin1String("UiThemeObject.qml"))
+        customReadback=QtResources::readFile(customPrepared,file).contains("property real radius: 7");
+    check(customReadback,"user-defined geometry reads back from the real Qt resource tree");
+    check(AddonPacks::find(QStringLiteral("unknown")) == nullptr, "unknown add-on refused");
+    for (const auto &id : {"carbon", "amethyst", "arctic", "ember", "matrix", "nord"}) {
+        const auto *pack = AddonPacks::find(QLatin1String(id));
+        check(pack && ThemePresets::byId(QLatin1String(pack->preset)), "pack references a real palette");
+        if (!pack) continue;
+        const QVariantList packOperations{QVariantMap{{"kind","theme"},{"pack",QLatin1String(id)},
+            {"edits",QVariantMap{{"primary100","#0b0b0e"},{"accentNormal","#abcdef"}}}}};
+        QByteArray packed;
+        const auto dry = W::simulate(exe,packOperations,W::digest(original),&packed);
+        if (!dry.value("ok").toBool()) std::printf("pack dry run %s: %s\n",id,qPrintable(dry.value("msg").toString()));
+        check(dry.value("ok").toBool() && read(exe)==original,"add-on palette and geometry prepare without writing");
+        bool designReadBack=false;
+        for (const auto &file : QtResources::registeredFiles(packed)) if (file.name==QLatin1String("UiThemeObject.qml"))
+            designReadBack=QtResources::readFile(packed,file).contains("property real radius: "+QByteArray::number(pack->radius));
+        check(designReadBack,"add-on radius read back through real Qt resource tree");
+        auto conflicting=packOperations;
+        conflicting << QVariantMap{{"kind","appearance"},{"edits",QVariantMap{{"UiThemeObject.qml#root.buttons.sizes.large.radius",8}}}};
+        check(!W::simulate(exe,conflicting,W::digest(original)).value("ok").toBool(),"add-on conflicts with later same-payload appearance edit");
+    }
+    check(!W::simulate(exe,{QVariantMap{{"kind","theme"},{"pack","unknown"},{"edits",QVariantMap{{"primary100","#abcdef"}}}}},W::digest(original)).value("ok").toBool(),"unknown pack dry run refused");
     auto appearanceProfile=profile;appearanceProfile["appearance"]=QVariantMap{{"UiThemeObject.qml#root.buttons.sizes.large.radius",8}};
     check(W::validateProfile(appearanceProfile).value("ok").toBool(),"appearance profile section validated");
     bad=appearanceProfile;bad["appearance"]=QVariantMap{{"UiThemeObject.qml#root.buttons.sizes.large.radius",true}};

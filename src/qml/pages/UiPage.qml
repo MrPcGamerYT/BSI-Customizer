@@ -41,6 +41,25 @@ Item {
     property var appearanceRows: []
     property string appearanceMsg: qsTr("Inspect the selected player to discover safe numeric appearance tokens.")
     property var appearancePlan: ({})
+    // In-player Settings window rebuild (native mirror of the Chromium
+    // "Settings panel rebuild" tab). The options live on this PC; the player
+    // only changes when the Apply button runs the real patcher.
+    property var panel: ({ supported: false, applied: false, restorable: false, tabs: [],
+                           settingsPageCount: 0, settingsQmlResourceCount: 0,
+                           compiledUnitsDetected: 0, compiledUnitsActive: 0,
+                           embeddedQmlResourceCount: 0, qmlResourceSamples: [],
+                           logoStatus: "", logoFallback: false,
+                           detail: qsTr("Load the player UI to inspect its Settings window.") })
+    // Only overrides live in the saved profile. The inspected state's
+    // defaultTabIcons supplies the bundled pack without seeding QSettings.
+    property var panelProfile: ({ hiddenTabs: [], tabIcons: {}, logo: null })
+    property string panelMsg: ""
+    // True when the player carries a patch whose recovery snapshot is unusable,
+    // so only the stock .bak can unblock a rebuild.
+    property bool panelNeedsBackup: false
+    // false until the player was actually read: the card then explains what it
+    // needs instead of printing a wall of zeros.
+    property bool panelReady: false
 
     readonly property var previewLinks: {
         const revision = page.aboutPreviewRevision;
@@ -244,34 +263,192 @@ Item {
             page.notify(result.msg);
     }
 
+    // ---------------- in-player Settings window rebuild ----------------
+
+    // Everything the rebuild card shows: what the player contains right now
+    // plus the options saved on this PC (hidden tabs, custom artwork).
+    function refreshPanel() {
+        page.panel = backend.settingsPanelRebuildState();
+        const profile = settings.settingsPanelProfile || {};
+        page.panelProfile = { hiddenTabs: profile.hiddenTabs || [],
+                              tabIcons: profile.tabIcons || {},
+                              logo: profile.logo || null };
+        page.panelReady = true;
+    }
+
+    function panelTabAsset(id) {
+        return (page.panelProfile.tabIcons || {})[id]
+                || (page.panel.defaultTabIcons || {})[id] || null;
+    }
+
+    function panelTabIconSource(id) {
+        const asset = page.panelTabAsset(id);
+        return asset && asset.mime && asset.data
+                ? "data:" + asset.mime + ";base64," + asset.data : "";
+    }
+
+    function panelTabVisible(id) {
+        const hidden = page.panelProfile.hiddenTabs || [];
+        return hidden.indexOf(id) < 0;
+    }
+
+    // The tabs are a checkbox each; the tick writes the saved profile, never
+    // the player. The last visible tab cannot be hidden - the window would
+    // have no native page left to show.
+    function setPanelTabVisible(id, visible) {
+        const hidden = (page.panelProfile.hiddenTabs || []).slice();
+        const at = hidden.indexOf(id);
+        if (!visible) {
+            if (at >= 0)
+                return;
+            const total = (page.panel.tabs || []).length;
+            if (total > 0 && hidden.length >= total - 1) {
+                page.panelMsg = qsTr("Keep at least one native Settings tab visible.");
+                return;
+            }
+            hidden.push(id);
+        } else if (at >= 0) {
+            hidden.splice(at, 1);
+        }
+        page.savePanelOptions(hidden);
+    }
+
+    // `name`/`tagline` are omitted when only a tab tick changed, so the saved
+    // identity is kept; the two fields pass what they hold.
+    function savePanelOptions(hidden, name, tagline) {
+        const ids = [];
+        const tabs = page.panel.tabs || [];
+        for (let i = 0; i < tabs.length; ++i)
+            ids.push(tabs[i].id);
+        const result = backend.saveSettingsPanelProfile(
+                    name === undefined ? settings.aboutDeveloperName : name,
+                    tagline === undefined ? settings.aboutTagline : tagline,
+                    hidden || page.panelProfile.hiddenTabs || [], ids);
+        page.panelMsg = (result && result.msg) ? result.msg : "";
+        if (result && result.ok) {
+            page.refreshPanel();
+            page.notify(result.msg);
+        }
+    }
+
+    function savePanelIdentity() {
+        page.savePanelOptions(undefined, panelDeveloperField.text, panelTaglineField.text);
+    }
+
+    function setPanelAsset(kind, id, path) {
+        const result = backend.setSettingsPanelAsset(kind, id, path);
+        page.panelMsg = (result && result.msg) ? result.msg : "";
+        if (result && result.ok) {
+            page.refreshPanel();
+            page.notify(result.msg);
+        }
+    }
+
+    function clearPanelAsset(kind, id) {
+        const result = backend.clearSettingsPanelAsset(kind, id);
+        page.panelMsg = (result && result.msg) ? result.msg : "";
+        if (result && result.ok) {
+            page.refreshPanel();
+            page.notify(result.msg);
+        }
+    }
+
+    // Reset drops the saved tab visibility and every custom SVG/logo; the
+    // player is untouched until the rebuild is applied again.
+    function resetPanelOptions() {
+        const icons = page.panelProfile.tabIcons || {};
+        for (const id in icons)
+            backend.clearSettingsPanelAsset("tab-icon", id);
+        if (page.panelProfile.logo)
+            backend.clearSettingsPanelAsset("logo", "");
+        page.savePanelOptions([]);
+        page.refreshPanel();
+        page.panelMsg = qsTr("Tab visibility is reset and bundled pack icons are selected. Apply the rebuild to update the player.");
+    }
+
+    // Apply / Restore run the real patcher: it verifies every embedded QML
+    // resource, writes a feature-local recovery snapshot, then commits.
+    function applyPanel(enabled) {
+        const result = backend.applySettingsPanelRebuild(enabled);
+        page.panelMsg = (result && result.msg) ? result.msg : "";
+        page.refreshPanel();
+        if (result && result.msg)
+            page.notify(result.msg);
+        // A player patched by an older run whose snapshot was lost needs a
+        // clean base before this rebuild can write again. The stock backup the
+        // tool takes before its first write is exactly that base, and it is
+        // the only recovery path this page can offer from here.
+        const stuck = result && !result.ok && (result.msg || "").indexOf("recovery snapshot is unusable") >= 0;
+        page.panelNeedsBackup = !!stuck;
+    }
+
+    function panelLabel() {
+        if (page.panel.applied)
+            return qsTr("Custom rebuild installed");
+        if (Number(page.panel.compiledUnitsActive || 0) > 0 && page.panel.restorable)
+            return qsTr("Compiled copy still active");
+        return qsTr("Original panel");
+    }
+
+    function panelLogoLabel() {
+        if (page.panelProfile.logo && page.panelProfile.logo.data)
+            return qsTr("Custom logo selected on this PC");
+        if (page.panel.logoFallback)
+            return qsTr("Built-in fallback available");
+        return page.panel.logoStatus ? qsTr("Player logo found") : qsTr("Not yet verified");
+    }
+
+    function panelVisibleTabCount() {
+        const total = (page.panel.tabs || []).length;
+        const hidden = (page.panelProfile.hiddenTabs || []).length;
+        return Math.max(0, total - hidden);
+    }
+
+    property bool inspectionStale: true
     function reloadAll() {
+        if (backend.busy) return;
         refreshLayout();
         refreshButtonRows();
         refreshAbout(true);
+        refreshPanel();
+        inspectionStale = false;
     }
 
-    Component.onCompleted: reloadAll()
-
-    onVisibleChanged: if (visible) reloadAll()
+    // Explicit inspection only: never re-read multi-MB EXEs on page entry.
 
     Connections {
         target: backend
         function onExePathChanged() {
-            page.reloadAll();
+            page.inspectionStale = true;
+            page.layoutTweaks = []; page.buttonRows = []; page.buttonOrderReady = false;
+            page.aboutLinks = []; page.about = {supported:false,applied:false,detail:qsTr("Load the selected player UI to inspect it.")};
             page.appearanceRows = [];
             page.appearancePlan = ({});
             page.appearanceMsg = qsTr("Target changed. Inspect appearance tokens again.");
+            page.panel = ({ supported: false, applied: false, restorable: false, tabs: [],
+                            settingsPageCount: 0, settingsQmlResourceCount: 0,
+                            compiledUnitsDetected: 0, compiledUnitsActive: 0,
+                            embeddedQmlResourceCount: 0, qmlResourceSamples: [],
+                            logoStatus: "", logoFallback: false,
+                            detail: qsTr("Load the player UI to inspect its Settings window.") });
+            page.panelReady = false;
+            page.panelMsg = "";
         }
-        // A layout write happens in a worker; when it is done the row of
-        // buttons has changed (or the title-bar move was reverted), so the
-        // order card follows without asking the user to reopen the tab.
-        function onBusyChanged() {
-            if (backend.busy)
-                return;
-            // Only the two card states that depend on the file: the About
-            // editor keeps whatever the user has typed.
-            page.refreshLayout();
-            page.refreshButtonRows();
+        // Worker completion marks stale, never starts another synchronous scan.
+        function onBusyChanged() { if (!backend.busy) page.inspectionStale = true; }
+    }
+
+    // The rebuild reads the whole selected EXE, so it runs on the explicit
+    // Load/Refresh press and when its own tab is opened - never on page entry,
+    // and not again while the state on screen is still current: the EXE may
+    // only have changed through another tab, which marks the inspection stale.
+    Connections {
+        target: page
+        function onCurrentSectionChanged() {
+            // 4 = Settings panel.
+            if (page.currentSection === 4 && !backend.busy
+                    && (!page.panelReady || page.inspectionStale))
+                page.refreshPanel();
         }
     }
 
@@ -322,6 +499,12 @@ Item {
 
                     ActionButton {
                         Layout.alignment: Qt.AlignTop
+                        text: page.inspectionStale ? qsTr("Load player UI") : qsTr("Refresh UI")
+                        enabled: !backend.busy
+                        onClicked: page.reloadAll()
+                    }
+                    ActionButton {
+                        Layout.alignment: Qt.AlignTop
                         text: qsTr("Open Folder")
                         onClicked: settings.openExeFolder()
                     }
@@ -339,16 +522,17 @@ Item {
                     onLoad: backend.exePath = text
                 }
 
-                TabBar {
+                StudioTabBar {
                     id: uiSections
                     objectName: "playerUiSections"
                     Layout.fillWidth: true
                     currentIndex: page.currentSection
                     onCurrentIndexChanged: page.currentSection = currentIndex
-                    TabButton { text: qsTr("Layout & clean-up") }
-                    TabButton { text: qsTr("About preview & editor") }
-                    TabButton { text: qsTr("Remove items") }
-                    TabButton { text: qsTr("Appearance studio") }
+                    StudioTabButton { text: qsTr("Layout & clean-up") }
+                    StudioTabButton { text: qsTr("About preview & editor") }
+                    StudioTabButton { text: qsTr("Remove items") }
+                    StudioTabButton { text: qsTr("Appearance studio") }
+                    StudioTabButton { objectName: "settingsPanelRebuildTab"; text: qsTr("Settings panel") }
                 }
 
                 // ---------------- one-click clean-up ----------------
@@ -479,7 +663,7 @@ Item {
                                 // A tick means "this is the state I want". It starts
                                 // from what the EXE currently has, so an applied tweak
                                 // unticks to "restore" and a stock one ticks to apply.
-                                CheckBox {
+                                StudioCheckBox {
                                     id: tweakCheck
                                     Layout.alignment: Qt.AlignTop
                                     checked: !!modelData.applied
@@ -661,7 +845,7 @@ Item {
                                     enabled: page.buttonOrderReady && index < page.buttonRows.length - 1
                                     onClicked: page.moveButtonRow(index, 1)
                                 }
-                                CheckBox {
+                                StudioCheckBox {
                                     id: showCheck
                                     visible: modelData.canHide
                                     enabled: page.buttonOrderReady
@@ -900,7 +1084,7 @@ Item {
                                     Text { text: modelData.label + " · " + modelData.group; color: Theme.text; font.pixelSize: 12 }
                                     Text { text: modelData.key + " · current " + modelData.value; color: Theme.textDim; font.pixelSize: 10; elide: Text.ElideMiddle; Layout.fillWidth: true }
                                 }
-                                SpinBox {
+                                StudioSpinBox {
                                     from: modelData.minimum
                                     to: modelData.maximum
                                     stepSize: modelData.step || 1
@@ -910,7 +1094,7 @@ Item {
                                 }
                             }
                         }
-                        TextArea {
+                        StudioTextArea {
                             Layout.fillWidth: true
                             Layout.preferredHeight: 120
                             readOnly: true
@@ -1073,7 +1257,7 @@ Item {
                             Layout.preferredHeight: 210
                             spacing: 10
 
-                            TextArea {
+                            StudioTextArea {
                                 id: aboutText
                                 Layout.fillWidth: true
                                 Layout.fillHeight: true
@@ -1265,7 +1449,7 @@ Item {
                                     Layout.fillWidth: true
                                     spacing: 8
 
-                                    CheckBox {
+                                    StudioCheckBox {
                                         id: linkShow
                                         text: qsTr("Show")
                                         checked: !modelData.hidden
@@ -1275,7 +1459,7 @@ Item {
                                         palette.buttonText: Theme.text
                                         property bool checkedToggle: checked
                                     }
-                                    TextField {
+                                    StudioTextField {
                                         id: linkNameField
                                         Layout.preferredWidth: 190
                                         // The page's record for this row cannot
@@ -1296,7 +1480,7 @@ Item {
                                             border.color: linkNameField.activeFocus ? Theme.accent : Theme.border
                                         }
                                     }
-                                    TextField {
+                                    StudioTextField {
                                         id: linkLabelField
                                         Layout.preferredWidth: 190
                                         maximumLength: modelData.labelMax > 0 ? modelData.labelMax
@@ -1314,7 +1498,7 @@ Item {
                                             border.color: linkLabelField.activeFocus ? Theme.accent : Theme.border
                                         }
                                     }
-                                    TextField {
+                                    StudioTextField {
                                         id: linkUrlField
                                         Layout.fillWidth: true
                                         maximumLength: modelData.urlMax > 0 ? modelData.urlMax : 32767
@@ -1485,8 +1669,546 @@ Item {
                         }
                     }
                 }
+
+                // ---------------- in-player Settings window rebuild --------
+                // Native mirror of the Chromium "Settings panel rebuild" tab: it
+                // centres the native page content, keeps any subset of the live
+                // Settings tabs, swaps tab/About artwork and rewrites the About
+                // identity - all through the same verified patcher and its
+                // feature-local recovery snapshot.
+                Card {
+                    visible: page.currentSection === 4
+                    Layout.fillWidth: true
+                    pad: 18
+
+                    ColumnLayout {
+                        anchors.fill: parent
+                        spacing: 12
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 10
+
+                            ColumnLayout {
+                                Layout.fillWidth: true
+                                spacing: 3
+                                Text {
+                                    text: qsTr("Rebuild the BlueStacks Settings panel")
+                                    color: Theme.text
+                                    font.pixelSize: 15
+                                    font.weight: Font.Bold
+                                }
+                                Text {
+                                    Layout.fillWidth: true
+                                    wrapMode: Text.Wrap
+                                    text: qsTr("Customize the in-player Settings window: centre the "
+                                               + "native page content, choose which native tabs stay "
+                                               + "visible, give each tab its own SVG icon and edit the "
+                                               + "About logo, name and links. These choices are saved "
+                                               + "on this PC; the selected HD-Player.exe changes only "
+                                               + "when you apply.")
+                                    color: Theme.textDim
+                                    font.pixelSize: 11
+                                }
+                            }
+
+                            ActionButton {
+                                Layout.alignment: Qt.AlignTop
+                                implicitHeight: 30
+                                text: qsTr("Re-inspect")
+                                enabled: !backend.busy
+                                onClicked: page.refreshPanel()
+                            }
+                        }
+
+                        // ---- what the player holds right now --------------
+                        ColumnLayout {
+                            objectName: "settingsPanelReadouts"
+                            Layout.fillWidth: true
+                            visible: page.panelReady
+                            spacing: 6
+
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: 10
+                                MicroLabel { Layout.preferredWidth: 200; font.pixelSize: 9; text: qsTr("Patch support") }
+                                Text {
+                                    Layout.fillWidth: true
+                                    text: page.panel.supported ? qsTr("Supported") : qsTr("Not supported")
+                                    color: page.panel.supported ? Theme.text : Theme.warn
+                                    font.pixelSize: 12
+                                }
+                            }
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: 10
+                                MicroLabel { Layout.preferredWidth: 200; font.pixelSize: 9; text: qsTr("Current panel") }
+                                Text {
+                                    Layout.fillWidth: true
+                                    text: page.panelLabel()
+                                    color: page.panel.applied ? Theme.green : Theme.text
+                                    font.pixelSize: 12
+                                }
+                            }
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: 10
+                                MicroLabel { Layout.preferredWidth: 200; font.pixelSize: 9; text: qsTr("Native Settings tabs") }
+                                Text {
+                                    Layout.fillWidth: true
+                                    text: qsTr("%1 discovered · %2 visible")
+                                          .arg(Number(page.panel.settingsPageCount || 0))
+                                          .arg(page.panelVisibleTabCount())
+                                    color: Theme.text
+                                    font.pixelSize: 12
+                                }
+                            }
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: 10
+                                MicroLabel { Layout.preferredWidth: 200; font.pixelSize: 9; text: qsTr("Verified QML dependencies") }
+                                Text {
+                                    Layout.fillWidth: true
+                                    text: String(Number(page.panel.settingsQmlResourceCount || 0))
+                                    color: Theme.text
+                                    font.pixelSize: 12
+                                }
+                            }
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: 10
+                                MicroLabel { Layout.preferredWidth: 200; font.pixelSize: 9; text: qsTr("Embedded compiled QML") }
+                                Text {
+                                    Layout.fillWidth: true
+                                    text: qsTr("%1 found · %2 active")
+                                          .arg(Number(page.panel.compiledUnitsDetected || 0))
+                                          .arg(Number(page.panel.compiledUnitsActive || 0))
+                                    color: Number(page.panel.compiledUnitsActive || 0) > 0
+                                           ? Theme.warn : Theme.text
+                                    font.pixelSize: 12
+                                }
+                            }
+                            RowLayout {
+                                Layout.fillWidth: true
+                                spacing: 10
+                                MicroLabel { Layout.preferredWidth: 200; font.pixelSize: 9; text: qsTr("Logo verification") }
+                                Text {
+                                    Layout.fillWidth: true
+                                    text: page.panelLogoLabel()
+                                    color: Theme.text
+                                    font.pixelSize: 12
+                                }
+                            }
+                        }
+
+                        Text {
+                            objectName: "settingsPanelEmptyHint"
+                            Layout.fillWidth: true
+                            wrapMode: Text.Wrap
+                            text: !page.panelReady
+                                  ? qsTr("No player has been read yet. Press “Load player UI” to "
+                                         + "inspect the selected HD-Player.exe and list its live "
+                                         + "Settings tabs.")
+                                  : (page.panel.detail
+                                     || qsTr("Inspect the selected player UI to check its embedded "
+                                             + "QML resources."))
+                            color: !page.panelReady ? Theme.textDim
+                                                    : (page.panel.supported ? Theme.textDim : Theme.warn)
+                            font.pixelSize: 11
+                        }
+
+                        // The registered QML resources, verbatim - the same list the
+                        // Chromium tab shows behind its details disclosure.
+                        Rectangle {
+                            Layout.fillWidth: true
+                            visible: page.panelReady && (page.panel.qmlResourceSamples || []).length > 0
+                            implicitHeight: panelSamples.implicitHeight + 16
+                            radius: 8
+                            color: Theme.raised
+                            border.width: 1
+                            border.color: Theme.border
+
+                            Text {
+                                id: panelSamples
+                                anchors.fill: parent
+                                anchors.margins: 8
+                                text: qsTr("Verified QML resources (")
+                                      + Number(page.panel.embeddedQmlResourceCount || 0)
+                                      + qsTr(" registered)\n") + (page.panel.qmlResourceSamples || []).join("\n")
+                                color: Theme.textDim
+                                font.family: "Consolas"
+                                font.pixelSize: 10
+                                wrapMode: Text.Wrap
+                                maximumLineCount: 8
+                                elide: Text.ElideRight
+                            }
+                        }
+
+                        // ---- native tab visibility + per-tab artwork --------
+                        Text {
+                            objectName: "settingsPanelTabList"
+                            visible: page.panelReady
+                            text: qsTr("Native Settings tabs")
+                            color: Theme.text
+                            font.pixelSize: 13
+                            font.weight: Font.DemiBold
+                        }
+                        Text {
+                            Layout.fillWidth: true
+                            wrapMode: Text.Wrap
+                            visible: page.panelReady
+                            text: qsTr("The bundled icon pack is selected by default. Replace any SVG, "
+                                       + "or choose Use default to undo a custom icon, then Apply. "
+                                       + "Untick a tab to hide it — at least one must stay visible. "
+                                       + "Runtime PNG copies are kept in the Customizer’s data folder; "
+                                       + "your saved SVGs stay editable.")
+                            color: Theme.textDim
+                            font.pixelSize: 10
+                            font.italic: true
+                        }
+                        Text {
+                            Layout.fillWidth: true
+                            wrapMode: Text.Wrap
+                            visible: page.panelReady && (page.panel.tabs || []).length === 0
+                            text: qsTr("Inspect a supported player to list its live tabs.")
+                            color: Theme.textDim
+                            font.pixelSize: 11
+                        }
+
+                        Text {
+                            Layout.fillWidth: true
+                            visible: !!page.panel.defaultIconError
+                            text: page.panel.defaultIconError || ""
+                            color: Theme.warn
+                            wrapMode: Text.Wrap
+                            font.pixelSize: 11
+                        }
+
+                        Repeater {
+                            model: page.panel.tabs || []
+                            delegate: RowLayout {
+                                required property var modelData
+                                Layout.fillWidth: true
+                                spacing: 8
+
+                                StudioCheckBox {
+                                    id: panelTabCheck
+                                    Layout.alignment: Qt.AlignVCenter
+                                    checked: page.panelTabVisible(modelData.id)
+                                    padding: 0
+                                    implicitWidth: 18
+                                    implicitHeight: 18
+                                    indicator: Rectangle {
+                                        implicitWidth: 18
+                                        implicitHeight: 18
+                                        radius: 5
+                                        color: panelTabCheck.checked ? Theme.accent : "transparent"
+                                        border.width: 1
+                                        border.color: panelTabCheck.checked ? Theme.accent
+                                                                            : Theme.borderStrong
+                                        Text {
+                                            anchors.centerIn: parent
+                                            visible: panelTabCheck.checked
+                                            text: "\u2713"
+                                            color: Theme.primaryText
+                                            font.pixelSize: 11
+                                            font.weight: Font.Black
+                                        }
+                                    }
+                                    onToggled: page.setPanelTabVisible(modelData.id, checked)
+                                }
+
+                                ColumnLayout {
+                                    Layout.fillWidth: true
+                                    spacing: 1
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: modelData.label || modelData.page || modelData.id
+                                        color: page.panelTabVisible(modelData.id) ? Theme.text
+                                                                                  : Theme.textDim
+                                        font.pixelSize: 12
+                                        elide: Text.ElideRight
+                                    }
+                                    Text {
+                                        Layout.fillWidth: true
+                                        text: modelData.page || modelData.id
+                                        color: Theme.textDim
+                                        font.pixelSize: 10
+                                        elide: Text.ElideMiddle
+                                    }
+                                }
+
+                                Image {
+                                    objectName: "settingsPanelTabIcon-" + modelData.id
+                                    Layout.preferredWidth: 22
+                                    Layout.preferredHeight: 22
+                                    Layout.alignment: Qt.AlignVCenter
+                                    visible: !!page.panelTabAsset(modelData.id)
+                                    source: page.panelTabIconSource(modelData.id)
+                                    sourceSize.width: 22
+                                    sourceSize.height: 22
+                                    fillMode: Image.PreserveAspectFit
+                                }
+                                MicroLabel {
+                                    Layout.alignment: Qt.AlignVCenter
+                                    visible: !!page.panelTabAsset(modelData.id)
+                                    text: (page.panelProfile.tabIcons || {})[modelData.id]
+                                          ? qsTr("custom SVG") : qsTr("pack default")
+                                    color: Theme.accentText
+                                }
+                                ActionButton {
+                                    implicitHeight: 26
+                                    text: page.panelTabAsset(modelData.id)
+                                          ? qsTr("Replace SVG") : qsTr("Choose SVG")
+                                    onClicked: {
+                                        panelAssetDialog.targetKind = "tab-icon";
+                                        panelAssetDialog.targetId = modelData.id;
+                                        panelAssetDialog.nameFilters = [qsTr("Self-contained SVG (*.svg)")];
+                                        panelAssetDialog.open();
+                                    }
+                                }
+                                ActionButton {
+                                    implicitHeight: 26
+                                    visible: !!(page.panelProfile.tabIcons || {})[modelData.id]
+                                    text: (page.panel.defaultTabIcons || {})[modelData.id]
+                                          ? qsTr("Use default") : qsTr("Clear")
+                                    onClicked: page.clearPanelAsset("tab-icon", modelData.id)
+                                }
+                            }
+                        }
+
+                        // ---- About identity -------------------------------
+                        Text {
+                            text: qsTr("About page identity")
+                            color: Theme.text
+                            font.pixelSize: 13
+                            font.weight: Font.DemiBold
+                        }
+                        Text {
+                            Layout.fillWidth: true
+                            wrapMode: Text.Wrap
+                            text: qsTr("This is the About page inside the emulator’s rebuilt Settings "
+                                       + "window. The logo and the fields below come from your local "
+                                       + "profile; the links are edited in the About preview & editor "
+                                       + "tab and applied with them.")
+                            color: Theme.textDim
+                            font.pixelSize: 10
+                            font.italic: true
+                        }
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 10
+
+                            Rectangle {
+                                implicitWidth: 56
+                                implicitHeight: 56
+                                radius: 12
+                                color: Theme.cardLow
+                                border.width: 1
+                                border.color: Theme.border
+
+                                Image {
+                                    id: panelLogoPreview
+                                    anchors.fill: parent
+                                    anchors.margins: 6
+                                    fillMode: Image.PreserveAspectFit
+                                    visible: status === Image.Ready
+                                    source: {
+                                        const logo = page.panelProfile.logo;
+                                        if (logo && logo.data)
+                                            return "data:" + (logo.mime || "image/svg+xml") + ";base64," + logo.data;
+                                        return "";
+                                    }
+                                }
+                                Text {
+                                    anchors.centerIn: parent
+                                    visible: !panelLogoPreview.visible
+                                    text: qsTr("Logo")
+                                    color: Theme.textDim
+                                    font.pixelSize: 10
+                                }
+                            }
+
+                            ColumnLayout {
+                                Layout.fillWidth: true
+                                spacing: 3
+                                Text {
+                                    text: qsTr("About logo")
+                                    color: Theme.text
+                                    font.pixelSize: 12
+                                }
+                                Text {
+                                    Layout.fillWidth: true
+                                    wrapMode: Text.Wrap
+                                    text: (page.panelProfile.logo && page.panelProfile.logo.data)
+                                          ? qsTr("A validated custom logo is selected in your local "
+                                                 + "profile; apply the rebuild to write it to the player.")
+                                          : (page.panel.logoStatus
+                                             || qsTr("Choose a custom logo or use the safe built-in fallback."))
+                                    color: Theme.textDim
+                                    font.pixelSize: 10
+                                }
+                            }
+
+                            ActionButton {
+                                Layout.alignment: Qt.AlignTop
+                                implicitHeight: 28
+                                text: (page.panelProfile.logo && page.panelProfile.logo.data)
+                                      ? qsTr("Replace logo…") : qsTr("Choose logo…")
+                                onClicked: {
+                                    panelAssetDialog.targetKind = "logo";
+                                    panelAssetDialog.targetId = "";
+                                    panelAssetDialog.nameFilters = [qsTr("Logo image (*.svg *.png *.jpg *.jpeg *.webp)")];
+                                    panelAssetDialog.open();
+                                }
+                            }
+                            ActionButton {
+                                Layout.alignment: Qt.AlignTop
+                                implicitHeight: 28
+                                visible: !!(page.panelProfile.logo && page.panelProfile.logo.data)
+                                text: qsTr("Use player/fallback logo")
+                                onClicked: page.clearPanelAsset("logo", "")
+                            }
+                        }
+
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 10
+
+                            ColumnLayout {
+                                Layout.fillWidth: true
+                                spacing: 3
+                                Text {
+                                    text: qsTr("Name under logo")
+                                    color: Theme.textDim
+                                    font.pixelSize: 11
+                                }
+                                StudioTextField {
+                                    id: panelDeveloperField
+                                    Layout.fillWidth: true
+                                    text: settings.aboutDeveloperName
+                                    placeholderText: qsTr("Mr.Pc Gamer & Romulos")
+                                    onEditingFinished: page.savePanelIdentity()
+                                }
+                            }
+                            ColumnLayout {
+                                Layout.fillWidth: true
+                                spacing: 3
+                                Text {
+                                    text: qsTr("Subtitle")
+                                    color: Theme.textDim
+                                    font.pixelSize: 11
+                                }
+                                StudioTextField {
+                                    id: panelTaglineField
+                                    Layout.fillWidth: true
+                                    text: settings.aboutTagline
+                                    placeholderText: qsTr("BlueStacks tools · with contributor Nova")
+                                    onEditingFinished: page.savePanelIdentity()
+                                }
+                            }
+                        }
+
+                        // ---- actions -------------------------------------
+                        RowLayout {
+                            Layout.fillWidth: true
+                            spacing: 8
+
+                            ActionButton {
+                                implicitHeight: 30
+                                text: qsTr("Save rebuild options")
+                                enabled: !backend.busy
+                                onClicked: page.savePanelIdentity()
+                            }
+                            ActionButton {
+                                implicitHeight: 30
+                                text: qsTr("Reset tab visibility & artwork")
+                                enabled: !backend.busy
+                                onClicked: page.resetPanelOptions()
+                            }
+                            Item { Layout.fillWidth: true }
+                            ActionButton {
+                                implicitHeight: 30
+                                text: qsTr("Restore original Settings panel")
+                                enabled: !backend.busy && !!page.panel.restorable
+                                onClicked: page.applyPanel(false)
+                            }
+                            ActionButton {
+                                implicitHeight: 30
+                                accent: true
+                                enabled: !backend.busy
+                                text: page.panel.applied ? qsTr("Update rebuilt Settings panel")
+                                                         : qsTr("Apply Settings panel rebuild")
+                                onClicked: page.applyPanel(true)
+                            }
+                        }
+
+                        Text {
+                            objectName: "settingsPanelMsg"
+                            Layout.fillWidth: true
+                            wrapMode: Text.Wrap
+                            visible: page.panelMsg.length > 0
+                            text: page.panelMsg
+                            color: page.panel.applied ? Theme.green : Theme.textDim
+                            font.pixelSize: 11
+                            font.weight: Font.DemiBold
+                        }
+
+                        // Only shown when this player is patched but its snapshot
+                        // is unusable: restoring the stock backup is the one way
+                        // out, and it is already a button on this page.
+                        RowLayout {
+                            objectName: "settingsPanelBackupHint"
+                            Layout.fillWidth: true
+                            spacing: 10
+                            visible: page.panelNeedsBackup
+                            Text {
+                                Layout.fillWidth: true
+                                wrapMode: Text.Wrap
+                                text: qsTr("This player was patched by an earlier run and its recovery " +
+                                           "snapshot is damaged, so a rebuild cannot record the originals. " +
+                                           "Press “Restore Backup” above to put the stock HD-Player.exe " +
+                                           "back (the .bak the tool saved before its first write), then apply again.")
+                                color: Theme.warn
+                                font.pixelSize: 11
+                            }
+                            ActionButton {
+                                implicitHeight: 30
+                                text: qsTr("Restore Backup")
+                                enabled: !backend.busy
+                                onClicked: {
+                                    backend.restoreBackup(backend.exePath);
+                                    page.panelNeedsBackup = false;
+                                    page.refreshPanel();
+                                }
+                            }
+                        }
+
+                        Text {
+                            Layout.fillWidth: true
+                            wrapMode: Text.Wrap
+                            text: qsTr("A feature-local recovery snapshot is saved before the single EXE "
+                                       + "commit, so restoring this panel never reverts other edits. "
+                                       + "Close every HD-Player window first; restart BlueStacks after "
+                                       + "applying or restoring.")
+                            color: Theme.textDim
+                            font.pixelSize: 10
+                            font.italic: true
+                        }
+                    }
+                }
+
             }
         }
+    }
+    FileDialog {
+        id: panelAssetDialog
+        property string targetKind: ""
+        property string targetId: ""
+        title: targetKind === "logo" ? qsTr("Choose the About logo")
+                                     : qsTr("Choose the tab SVG icon")
+        onAccepted: page.setPanelAsset(targetKind, targetId, backend.localFilePath(selectedFile))
     }
     Dialog {
         id: appearanceApplyDialog

@@ -33,8 +33,11 @@ Row {
 
         width: 46
         height: controls.barHeight
-        color: area.containsMouse ? (closeButton ? "#c42b1c" : Qt.rgba(1, 1, 1, 0.08))
+        color: area.containsMouse ? (closeButton ? "#c42b1c" : Theme.hoverFill)
                                   : "transparent"
+
+        radius: 8
+        Behavior on color { ColorAnimation { duration: Theme.motionDuration } }
 
         Text {
             anchors.centerIn: parent

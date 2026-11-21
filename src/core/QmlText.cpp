@@ -39,6 +39,68 @@ QString mask(const QString &qml)
     return out;
 }
 
+QString compactIndentation(const QString &qml)
+{
+    // mask() is not a full JS lexer: template interpolation and regex literals
+    // can contain quotes. Leave ambiguous fragments untouched rather than
+    // accidentally strip whitespace from a literal. This also conservatively
+    // skips fragments with division; native Settings prefixes do not need it.
+    if (qml.contains(QLatin1Char('`'))) return qml;
+    const QString masked = mask(qml);
+    if (masked.contains(QLatin1Char('/'))) return qml;
+    QString out;
+    out.reserve(qml.size());
+    bool lineStart = true;
+    for (qsizetype i = 0; i < qml.size(); ++i) {
+        const QChar c = qml.at(i);
+        if (lineStart && (c == QLatin1Char(' ') || c == QLatin1Char('\t'))
+            && masked.at(i) == c)
+            continue;
+        out += c;
+        lineStart = c == QLatin1Char('\n') || c == QLatin1Char('\r');
+    }
+    return out;
+}
+
+QString compactWhitespace(const QString &qml)
+{
+    if (qml.contains(QLatin1Char('`'))) return qml;
+    const QString masked = mask(qml);
+    if (masked.contains(QLatin1Char('/'))) return qml;
+    const QString separators = QStringLiteral("(){}[]:;,");
+    const QString operators = QStringLiteral("=!<>&|");
+    const QString operatorChars = QStringLiteral("=!<>+-*/%&|^~?.");
+    QString out;
+    out.reserve(qml.size());
+    bool lineStart = true;
+    for (qsizetype i = 0; i < qml.size();) {
+        const QChar c = qml.at(i);
+        if ((c == QLatin1Char(' ') || c == QLatin1Char('\t')) && masked.at(i) == c) {
+            qsizetype end = i + 1;
+            while (end < qml.size()
+                   && (qml.at(end) == QLatin1Char(' ') || qml.at(end) == QLatin1Char('\t'))
+                   && masked.at(end) == qml.at(end)) ++end;
+            const QChar left = i > 0 ? masked.at(i - 1) : QChar();
+            const QChar right = end < qml.size() ? masked.at(end) : QChar();
+            const bool besideSeparator = separators.contains(left) || separators.contains(right);
+            const bool besideOperator = (operators.contains(left) || operators.contains(right))
+                && !(operatorChars.contains(left) && operatorChars.contains(right));
+            if (!lineStart && !besideSeparator && !besideOperator) {
+                out += qml.mid(i, end - i);
+                lineStart = false;
+            }
+            // Consume the whole run even when retaining it: repeatedly scanning
+            // a long alignment run would otherwise make this quadratic.
+            i = end;
+            continue;
+        }
+        out += c;
+        lineStart = c == QLatin1Char('\n') || c == QLatin1Char('\r');
+        ++i;
+    }
+    return out;
+}
+
 static int closeBrace(const QString &m, int open)
 {
     int depth = 0;

@@ -47,9 +47,12 @@
 #include <QUrl>
 #include <QFileInfo>
 #include <QImage>
+#include <QPainter>
+#include <QSvgRenderer>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QStandardPaths>
 #include <QLibraryInfo>
 #include <QProcess>
 #include <QProcessEnvironment>
@@ -59,6 +62,7 @@
 #include <QSettings>
 #include <QSet>
 #include <QTemporaryDir>
+#include <QXmlStreamReader>
 
 #include <algorithm>
 #include <cmath>
@@ -2319,6 +2323,85 @@ int runPatchRegressionTests()
         ThemeEngine::buildQml(qml, entries, { { QStringLiteral("missingColor"), QStringLiteral("#abcdef") } },
                               true, &skipped);
         check(!skipped.isEmpty(), "missing staged properties are reported, not silently discarded");
+
+        const QString indented = QStringLiteral(
+            "  import QtQml 2.15\r\n"
+            "  QtObject {\r\n"
+            "    // Copyright Example; keep this notice and all callbacks.\r\n"
+            "    property string literal: \"  { // not a comment\"\r\n"
+            "    property string continued: \"first\\\r\n"
+            "      second\"\r\n"
+            "\tproperty string single: '  preserve spaces'\r\n"
+            "  }\r\n");
+        const QString compact = QmlText::compactIndentation(indented);
+        const QString expected = QStringLiteral(
+            "import QtQml 2.15\r\n"
+            "QtObject {\r\n"
+            "// Copyright Example; keep this notice and all callbacks.\r\n"
+            "property string literal: \"  { // not a comment\"\r\n"
+            "property string continued: \"first\\\r\n"
+            "      second\"\r\n"
+            "property string single: '  preserve spaces'\r\n"
+            "}\r\n");
+        check(compact == expected && QmlText::compactIndentation(compact) == compact,
+              "QML indentation compaction preserves literals, notices, CRLF and statement boundaries");
+        QQmlComponent compactComponent(&engine);
+        compactComponent.setData(compact.toUtf8(), QUrl());
+        std::unique_ptr<QObject> compactObject(compactComponent.create());
+        check(compactObject
+                  && compactObject->property("literal").toString() == QLatin1String("  { // not a comment")
+                  && compactObject->property("continued").toString() == QLatin1String("first      second")
+                  && compactObject->property("single").toString() == QLatin1String("  preserve spaces"),
+              "indentation-compacted QML compiles with unchanged multiline and quoted text");
+        const QString dense = QmlText::compactWhitespace(indented);
+        check(dense.contains(QStringLiteral("literal:\"  { // not a comment\""))
+                  && dense.contains(QStringLiteral("// Copyright Example; keep this notice and all callbacks.\r\n"))
+                  && dense.contains(QStringLiteral("\"first\\\r\n      second\""))
+                  && dense.count(QLatin1Char('\n')) == indented.count(QLatin1Char('\n'))
+                  && dense.count(QLatin1Char('\r')) == indented.count(QLatin1Char('\r'))
+                  && QmlText::compactWhitespace(dense) == dense,
+              "QML separator compaction preserves literal whitespace, notices, CRLF and is idempotent");
+        QQmlComponent denseComponent(&engine);
+        denseComponent.setData(dense.toUtf8(), QUrl());
+        std::unique_ptr<QObject> denseObject(denseComponent.create());
+        check(denseObject && compactObject
+                  && denseObject->property("literal") == compactObject->property("literal")
+                  && denseObject->property("continued") == compactObject->property("continued")
+                  && denseObject->property("single") == compactObject->property("single"),
+              "separator-compacted QML compiles with identical quoted values");
+        const QString operators = QStringLiteral(
+            "  import QtQml 2.15\r\n"
+            "  QtObject {\r\n"
+            "    property int result: 0\r\n"
+            "    property bool compare: 1 <= 2 && 2 !== 3\r\n"
+            "    function calculate(a, b) { return a + +b - -b }\r\n"
+            "    function increment() { result = calculate(6, 2) }\r\n"
+            "    function newlineReturn() { return\r\n  42 }\r\n"
+            "  }\r\n");
+        const QString smallOperators = QmlText::compactWhitespace(operators);
+        QQmlComponent operatorsComponent(&engine);
+        operatorsComponent.setData(smallOperators.toUtf8(), QUrl());
+        std::unique_ptr<QObject> operatorsObject(operatorsComponent.create());
+        check(operatorsObject && operatorsObject->property("compare").toBool()
+                  && QMetaObject::invokeMethod(operatorsObject.get(), "increment")
+                  && operatorsObject->property("result").toInt() == 10
+                  && smallOperators.contains(QStringLiteral("a + +b - -b"))
+                  && smallOperators.contains(QStringLiteral("return\r\n42"))
+                  && QmlText::compactWhitespace(QStringLiteral("x < < y; x = = y"))
+                      == QLatin1String("x< <y;x= =y"),
+              "QML compaction preserves operator token boundaries, callbacks and JS automatic semicolon insertion");
+        const QString templateLiteral = QStringLiteral("  QtObject { property string t: `first\n    ${1 + 2} second` }\n");
+        check(QmlText::compactIndentation(templateLiteral) == templateLiteral
+                  && QmlText::compactWhitespace(templateLiteral) == templateLiteral,
+              "QML compaction conservatively leaves template literals untouched");
+        const QString regexLiteral = QStringLiteral("  QtObject { function f() { return /'/g; } property string t: 'first\\\n    second' }\n");
+        check(QmlText::compactIndentation(regexLiteral) == regexLiteral
+                  && QmlText::compactWhitespace(regexLiteral) == regexLiteral
+                  && QmlText::compactWhitespace(QStringLiteral("  Item { width: 100 / 2 }\n"))
+                      == QLatin1String("  Item { width: 100 / 2 }\n")
+                  && QmlText::compactIndentation(QStringLiteral("  Item { width: 100 / 2 }\n"))
+                      == QLatin1String("  Item { width: 100 / 2 }\n"),
+              "QML prefix compaction preserves ambiguous regex quotes and slash expressions");
     }
 
 #if defined(Q_OS_WIN) && defined(Q_PROCESSOR_X86_64)
@@ -2987,42 +3070,48 @@ int runPatchRegressionTests()
     std::printf("[settings-model] scope page discovery to the live Settings model\n");
     {
         const QStringList pages {
-            QStringLiteral("General.qml"), QStringLiteral("Display.qml"),
-            QStringLiteral("Graphics.qml"), QStringLiteral("Audio.qml"),
-            QStringLiteral("Keyboard.qml"), QStringLiteral("Preferences.qml"),
-            QStringLiteral("Advanced.qml"), QStringLiteral("PlrAboutSetting.qml")
+            QStringLiteral("UiPerformanceSetting.qml"), QStringLiteral("UiDisplaySetting.qml"),
+            QStringLiteral("UiGraphicsSetting.qml"), QStringLiteral("PlrGameSetting.qml"),
+            QStringLiteral("PlrAudioSetting.qml"), QStringLiteral("PlrGamepadSetting.qml"),
+            QStringLiteral("PlrPreferencesSetting.qml"), QStringLiteral("PlrDeviceSetting.qml"),
+            QStringLiteral("PlrShortcutsSetting.qml"), QStringLiteral("PlrUserDataSetting.qml"),
+            QStringLiteral("PlrAdvancedSetting.qml"), QStringLiteral("PlrAboutSetting.qml")
         };
         const auto makePlayer = [&](bool duplicateLivePage) {
             QString rows;
             for (const QString &page : pages)
                 rows += QStringLiteral("{ pQmlSource: \"%1\" },\n").arg(page);
             if (duplicateLivePage)
-                rows += QStringLiteral("{ pQmlSource: \"General.qml\" },\n");
+                rows += QStringLiteral("{ pQmlSource: \"UiPerformanceSetting.qml\" },\n");
             return QStringLiteral(
                 "import QtQuick\nItem {\n"
                 " property SettingElementModelList pSettingsItems: SettingElementModelList {\n"
                 "  pSettingElements: [\n%1  ]\n"
                 " }\n"
                 " property SettingElementModelList pPreviewItems: SettingElementModelList { pSettingElements: [{ pQmlSource: \"Preview.qml\" }] }\n"
-                " Component { id: unrelatedPreview; Item { property string pQmlSource: \"General.qml\" } }\n"
+                " Component { id: unrelatedPreview; Item { property string pQmlSource: \"UiPerformanceSetting.qml\" } }\n"
                 "}\n").arg(rows);
         };
         const QString settingsWindow = QStringLiteral(
-            "import QtQuick\nUiShadowContainer { id: iSettingsWindowShadowContainer;\n"
+            "import QtQuick\nItem {\nUiShadowContainer { id: iSettingsWindowShadowContainer;\n"
             " property var model: pSettingsItems.pSettingElements\n"
             " function fChangeSelectedSetting(index) { setSource(model.modelData.pQmlSource); model.modelData.pComponentObj = item }\n"
-            "}\n");
+            "}\n}\n");
         QList<QPair<QString, QByteArray>> files {
             { QStringLiteral("plr.qml"), makePlayer(false).toUtf8() },
             { QStringLiteral("UiSettingsWindow.qml"), settingsWindow.toUtf8() },
             { QStringLiteral("PlrAboutSetting.qml"), aboutPageFixture().toUtf8() },
-            { QStringLiteral("General.qml"), QByteArray("Item { }\n") },
-            { QStringLiteral("Display.qml"), QByteArray("Item { }\n") },
-            { QStringLiteral("Graphics.qml"), QByteArray("Item { }\n") },
-            { QStringLiteral("Audio.qml"), QByteArray("Item { }\n") },
-            { QStringLiteral("Keyboard.qml"), QByteArray("Item { }\n") },
-            { QStringLiteral("Preferences.qml"), QByteArray("Item { }\n") },
-            { QStringLiteral("Advanced.qml"), QByteArray("Item { }\n") },
+            { QStringLiteral("UiPerformanceSetting.qml"), QByteArray("Item { }\n") },
+            { QStringLiteral("UiDisplaySetting.qml"), QByteArray("Item { }\n") },
+            { QStringLiteral("UiGraphicsSetting.qml"), QByteArray("Item { }\n") },
+            { QStringLiteral("PlrGameSetting.qml"), QByteArray("Item { }\n") },
+            { QStringLiteral("PlrAudioSetting.qml"), QByteArray("Item { }\n") },
+            { QStringLiteral("PlrGamepadSetting.qml"), QByteArray("Item { }\n") },
+            { QStringLiteral("PlrPreferencesSetting.qml"), QByteArray("Item { }\n") },
+            { QStringLiteral("PlrDeviceSetting.qml"), QByteArray("Item { }\n") },
+            { QStringLiteral("PlrShortcutsSetting.qml"), QByteArray("Item { }\n") },
+            { QStringLiteral("PlrUserDataSetting.qml"), QByteArray("Item { }\n") },
+            { QStringLiteral("PlrAdvancedSetting.qml"), QByteArray("Item { }\n") },
             { QStringLiteral("qrcAssets/BlueStacks5Beta.svg"), QByteArray("<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 64 64\"><circle cx=\"32\" cy=\"32\" r=\"24\"/></svg>") },
             { QStringLiteral("qrcAssets/Loader_bright.svg"), QByteArray("<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 16 16\"><circle cx=\"8\" cy=\"8\" r=\"6\"/></svg>") }
         };
@@ -3083,6 +3172,256 @@ int runPatchRegressionTests()
         check(!duplicate.supported && duplicate.detail.contains(QStringLiteral("duplicate QML page path")),
               QStringLiteral("a repeated page in the live Settings model is still refused safely (%1)")
                   .arg(duplicate.detail));
+
+        QString packError;
+        const auto defaults = SettingsPanelPatcher::defaultTabIcons(scoped.tabs, &packError);
+        check(packError.isEmpty() && defaults.size() == pages.size(),
+              "all discovered native tabs have embedded default SVGs without a saved profile");
+        const QVariantList fullPackTabs = scoped.tabs;
+        const auto fullPack = SettingsPanelPatcher::defaultTabIcons(fullPackTabs, &packError);
+        check(packError.isEmpty() && fullPack.size() == 12
+                  && fullPack.value(QStringLiteral("plraudiosetting.qml"))
+                        != fullPack.value(QStringLiteral("plrdevicesetting.qml"))
+                  && fullPack.value(QStringLiteral("plrgamesetting.qml"))
+                        == fullPack.value(QStringLiteral("plrgamepadsetting.qml")),
+              "all eleven pack icons map by page identity, including Devices/Phone and the shared Gamepad controller");
+        QVariantList reordered = fullPackTabs;
+        std::reverse(reordered.begin(), reordered.end());
+        for (QVariant &value : reordered) {
+            QVariantMap tab = value.toMap();
+            tab.insert(QStringLiteral("label"), QStringLiteral("translated label"));
+            value = tab;
+        }
+        check(SettingsPanelPatcher::defaultTabIcons(reordered) == fullPack,
+              "reordering or translating the Settings model cannot change its default icon mapping");
+
+        // These regressions do not require a user-supplied HD-Player. Exercise
+        // the same upload -> profile -> apply -> file -> published map path on
+        // a registered synthetic Qt 5 player, not just an injected QML map.
+        const QString iconPath = temp.filePath(QStringLiteral("tab-icon-spaced.svg"));
+        const QByteArray spacedSvg = QByteArrayLiteral(
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\">\n"
+            "  <circle cx=\"12\" cy=\"12\" r=\"9\" fill=\"#55aaff\" />\n</svg>");
+        write(iconPath, spacedSvg);
+        const auto uploaded = SettingsPanelPatcher::readCustomAsset(iconPath, QStringLiteral("tab-icon"));
+        const QVariantMap iconAsset = uploaded.value(QStringLiteral("asset")).toMap();
+        const QByteArray compactSvg = QByteArray::fromBase64(iconAsset.value(QStringLiteral("data")).toByteArray());
+        QXmlStreamReader compactXml(compactSvg);
+        while (!compactXml.atEnd()) compactXml.readNext();
+        check(uploaded.value(QStringLiteral("ok")).toBool() && !compactXml.hasError()
+                  && compactSvg.contains("/>") && !compactSvg.contains(" />"),
+              "SVG cleanup preserves self-closing drawing elements as valid XML");
+        const QString brokenIconPath = temp.filePath(QStringLiteral("tab-icon-malformed.svg"));
+        write(brokenIconPath, QByteArrayLiteral(
+            "<svg xmlns=\"http://www.w3.org/2000/svg\"><path d=\"M0 0h24v24z\"></svg>"));
+        check(!SettingsPanelPatcher::readCustomAsset(brokenIconPath, QStringLiteral("tab-icon"))
+                   .value(QStringLiteral("ok")).toBool(),
+              "a malformed SVG is refused at selection instead of applying as an invisible icon");
+
+        const QString colorIconPath = temp.filePath(QStringLiteral("tab-icon-current-color.svg"));
+        const QByteArray currentColorSvg = QByteArrayLiteral(
+            "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\">"
+            "<circle cx=\"12\" cy=\"12\" r=\"9\" fill=\"currentColor\"/></svg>");
+        const auto renderIcon = [](const QByteArray &svg) {
+            QImage image(32, 32, QImage::Format_ARGB32_Premultiplied);
+            image.fill(Qt::transparent);
+            QSvgRenderer renderer(svg);
+            QPainter painter(&image);
+            renderer.render(&painter);
+            painter.end();
+            return image.pixelColor(16, 16);
+        };
+        write(colorIconPath, currentColorSvg);
+        const auto readableAsset = SettingsPanelPatcher::readCustomAsset(colorIconPath, QStringLiteral("tab-icon"));
+        const QByteArray readableSvg = QByteArray::fromBase64(readableAsset.value(QStringLiteral("asset"))
+            .toMap().value(QStringLiteral("data")).toByteArray());
+        check(readableAsset.value(QStringLiteral("ok")).toBool()
+                  && readableSvg.size() > currentColorSvg.size()
+                  && renderIcon(readableSvg) == QColor(QStringLiteral("#e7e9f2")),
+              "currentColor SVGs retain a readable standalone foreground even when normalization increases their size");
+        for (const QByteArray &attribute : {QByteArrayLiteral("color=\"#33dd77\" "),
+                                           QByteArrayLiteral("style=\"color: #33dd77\" ")}) {
+            QByteArray coloredSvg = currentColorSvg;
+            coloredSvg.replace("<svg ", QByteArrayLiteral("<svg ") + attribute);
+            write(colorIconPath, coloredSvg);
+            const auto colored = SettingsPanelPatcher::readCustomAsset(colorIconPath, QStringLiteral("tab-icon"));
+            const QByteArray normalized = QByteArray::fromBase64(colored.value(QStringLiteral("asset"))
+                .toMap().value(QStringLiteral("data")).toByteArray());
+            check(colored.value(QStringLiteral("ok")).toBool()
+                      && !normalized.contains("#e7e9f2")
+                      && renderIcon(normalized) == QColor(QStringLiteral("#33dd77")),
+                  "an explicit SVG root color or style is preserved instead of overwritten by the pack foreground");
+        }
+
+        QByteArray qt5Player = validModel.f.bytes;
+        qt5Player.replace(0x1200, 12, QByteArray("Qt5Core.dll\0", 12));
+        putLe32(qt5Player, 0x98 + 108, 16);
+        putLe32(qt5Player, 0x98 + 60, 0x1000);
+        const auto imports = PeUtils::importedModules(qt5Player);
+        check(imports.ok && imports.modules.contains(QStringLiteral("Qt5Core.dll"), Qt::CaseInsensitive),
+              "the icon regression fixture really identifies as a Qt 5 player");
+        const QString qt5Path = temp.filePath(QStringLiteral("settings-icons-qt5.exe"));
+        write(qt5Path, qt5Player);
+        const QString qt6DefaultPath = temp.filePath(QStringLiteral("settings-default-icons-qt6.exe"));
+        QByteArray qt6Player = validModel.f.bytes;
+        putLe32(qt6Player, 0x98 + 108, 16);
+        putLe32(qt6Player, 0x98 + 60, 0x1000);
+        const auto qt6Imports = PeUtils::importedModules(qt6Player);
+        check(qt6Imports.ok && qt6Imports.modules.contains(QStringLiteral("Qt6Core.dll"), Qt::CaseInsensitive),
+              "the default-pack regression fixture really identifies as a Qt 6 player");
+        write(qt6DefaultPath, qt6Player);
+        const QVariantMap noOverrides;
+        const auto defaultsApply = SettingsPanelPatcher::apply(qt6DefaultPath,
+            QStringLiteral("Default icon regression"), {}, noOverrides, true);
+        check(defaultsApply.value(QStringLiteral("ok")).toBool() && noOverrides.isEmpty(),
+              QStringLiteral("an empty profile installs the bundled pack on Qt 6 (%1)")
+                  .arg(defaultsApply.value(QStringLiteral("msg")).toString()));
+
+        QVariantMap iconOptions {
+            {QStringLiteral("tabIcons"), QVariantMap{
+                {QStringLiteral("uiperformancesetting.qml"), iconAsset},
+                {QStringLiteral("uigraphicssetting.qml"), iconAsset}}},
+            {QStringLiteral("hiddenTabs"), QVariantList{QStringLiteral("uidisplaysetting.qml")}},
+            {QStringLiteral("logo"), iconAsset}
+        };
+        const auto iconApply = SettingsPanelPatcher::apply(qt5Path,
+            QStringLiteral("Icon regression"), {}, iconOptions, true);
+        check(iconApply.value(QStringLiteral("ok")).toBool(),
+              QStringLiteral("a Qt 5 player applies multiple SVG icons plus a logo (%1)")
+                  .arg(iconApply.value(QStringLiteral("msg")).toString()));
+        const auto iconMapFor = [](const QString &qml) {
+            const QRegularExpression property(QStringLiteral("property var bsiTabIcons:\\((\\{[^\\n]*\\})\\)"));
+            const auto match = property.match(qml);
+            return QJsonDocument::fromJson(match.captured(1).toUtf8()).toVariant().toMap();
+        };
+        const auto logoUrlFor = [](const QString &qml) {
+            return QRegularExpression(QStringLiteral("bsiAboutEmulatorLogo\\\";source:\\\"([^\\\"]+)\\\""))
+                .match(qml).captured(1);
+        };
+        const auto assetDirFor = [](const QString &exe) {
+            return QDir(QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation)
+                        + QStringLiteral("/settings-panel-assets"))
+                .filePath(QString::fromLatin1(QCryptographicHash::hash(
+                    QFileInfo(exe).canonicalFilePath().toUtf8(), QCryptographicHash::Sha256).toHex()));
+        };
+        if (defaultsApply.value(QStringLiteral("ok")).toBool()) {
+            const auto icons = iconMapFor(linkedResourceText(read(qt6DefaultPath), QStringLiteral("PlrAboutSetting.qml")));
+            bool readable = icons.size() == pages.size();
+            for (const auto &value : icons) {
+                const QImage png(QUrl(value.toString()).toLocalFile());
+                bool lightStroke = false;
+                for (int y = 0; y < png.height() && !lightStroke; ++y)
+                    for (int x = 0; x < png.width(); ++x) {
+                        const QColor c = png.pixelColor(x, y);
+                        if (c.alpha() > 64 && c.red() > 128 && c.green() > 128 && c.blue() > 128) {
+                            lightStroke = true;
+                            break;
+                        }
+                    }
+                readable = readable && png.size() == QSize(54, 54) && lightStroke;
+            }
+            check(readable,
+                  "an empty-profile patch publishes all 12 defaults as painted, light-coloured PNGs, not invisible currentColor strokes");
+            const QString fullAbout = linkedResourceText(read(qt6DefaultPath), QStringLiteral("PlrAboutSetting.qml"));
+            check(EmbeddedResources::payloadSizeFor(fullAbout.toUtf8(), 1) <= 2337,
+                  "the real generated About payload with all 12 pack defaults fits the smallest known 2337-byte slot");
+            SettingsPanelPatcher::apply(qt6DefaultPath, QString(), {}, {}, false);
+        }
+        QDir(assetDirFor(qt6DefaultPath)).removeRecursively();
+
+        if (iconApply.value(QStringLiteral("ok")).toBool()) {
+            const QString about = linkedResourceText(read(qt5Path), QStringLiteral("PlrAboutSetting.qml"));
+            const QVariantMap icons = iconMapFor(about);
+            const QString iconUrl = icons.value(QStringLiteral("0")).toString();
+            const QString iconFile = QUrl(iconUrl).toLocalFile();
+            const QImage painted(iconFile);
+            const QString logoFile = QUrl(logoUrlFor(about)).toLocalFile();
+            const QImage paintedLogo(logoFile);
+            check(icons.size() == pages.size() && icons.contains(QStringLiteral("1"))
+                      && icons.value(QStringLiteral("1")).toString().isEmpty()
+                      && icons.value(QStringLiteral("2")).toString() == iconUrl
+                      && QUrl(iconUrl).isLocalFile() && iconUrl.endsWith(QLatin1String(".png"))
+                      && painted.size() == QSize(54, 54) && painted.pixelColor(27, 27).alpha() > 0,
+                  "file-backed icons publish only numeric tab keys, retain hidden tabs and decode as painted PNGs");
+            check(!paintedLogo.isNull() && paintedLogo.pixelColor(paintedLogo.width() / 2,
+                                                                  paintedLogo.height() / 2).alpha() > 0,
+                  "the referenced About logo contains actual image bytes, not an empty wrapper map");
+            const QByteArray previousIcon = read(iconFile);
+            const auto identical = SettingsPanelPatcher::apply(qt5Path,
+                QStringLiteral("Icon regression"), {}, iconOptions, true);
+            check(identical.value(QStringLiteral("ok")).toBool() && read(iconFile) == previousIcon,
+                  "an identical apply keeps the referenced artwork alive");
+
+            const QString replacementPath = temp.filePath(QStringLiteral("tab-icon-replacement.svg"));
+            QByteArray greenSvg = spacedSvg;
+            greenSvg.replace("#55aaff", "#33dd77");
+            write(replacementPath, greenSvg);
+            const auto replacement = SettingsPanelPatcher::readCustomAsset(replacementPath, QStringLiteral("tab-icon"));
+            QVariantMap replacedIcons = iconOptions.value(QStringLiteral("tabIcons")).toMap();
+            replacedIcons.insert(QStringLiteral("uiperformancesetting.qml"), replacement.value(QStringLiteral("asset")));
+            iconOptions.insert(QStringLiteral("tabIcons"), replacedIcons);
+            const auto updated = SettingsPanelPatcher::apply(qt5Path,
+                QStringLiteral("Icon regression"), {}, iconOptions, true);
+            const auto updatedIcons = iconMapFor(linkedResourceText(read(qt5Path), QStringLiteral("PlrAboutSetting.qml")));
+            const QString newUrl = updatedIcons.value(QStringLiteral("0")).toString();
+            const QImage newImage(QUrl(newUrl).toLocalFile());
+            check(updated.value(QStringLiteral("ok")).toBool() && newUrl != iconUrl
+                      && !newImage.isNull() && newImage.pixelColor(27, 27).green() > 180
+                      && read(iconFile) == previousIcon,
+                  "replacing a tab icon changes its cached URL without overwriting the previous icon");
+
+            replacedIcons.remove(QStringLiteral("uiperformancesetting.qml"));
+            iconOptions.insert(QStringLiteral("tabIcons"), replacedIcons);
+            const auto cleared = SettingsPanelPatcher::apply(qt5Path,
+                QStringLiteral("Icon regression"), {}, iconOptions, true);
+            const auto clearedIcons = iconMapFor(linkedResourceText(read(qt5Path), QStringLiteral("PlrAboutSetting.qml")));
+            const QString restoredDefault = clearedIcons.value(QStringLiteral("0")).toString();
+            check(cleared.value(QStringLiteral("ok")).toBool()
+                      && restoredDefault != iconUrl && restoredDefault != newUrl
+                      && !QImage(QUrl(restoredDefault).toLocalFile()).isNull()
+                      && clearedIcons.value(QStringLiteral("2")).toString() == iconUrl,
+                  "Use default restores one pack icon while preserving the other custom SVG override");
+            const auto reset = SettingsPanelPatcher::apply(qt5Path,
+                QStringLiteral("Icon regression"), {}, {}, true);
+            const auto resetIcons = iconMapFor(linkedResourceText(read(qt5Path), QStringLiteral("PlrAboutSetting.qml")));
+            check(reset.value(QStringLiteral("ok")).toBool() && resetIcons.size() == pages.size()
+                      && resetIcons.value(QStringLiteral("0")).toString() == restoredDefault
+                      && resetIcons.value(QStringLiteral("2")).toString() != iconUrl,
+                  "resetting all overrides reapplies the complete built-in pack rather than removing tab icons");
+
+            const QString blockedPath = temp.filePath(QStringLiteral("settings-icons-blocked.exe"));
+            write(blockedPath, qt5Player);
+            const QString blocker = assetDirFor(blockedPath);
+            write(blocker, QByteArrayLiteral("not a directory"));
+            const auto blocked = SettingsPanelPatcher::apply(blockedPath,
+                QStringLiteral("Icon regression"), {}, iconOptions, true);
+            check(!blocked.value(QStringLiteral("ok")).toBool()
+                      && blocked.value(QStringLiteral("msg")).toString().contains(QStringLiteral("artwork folder"))
+                      && read(blockedPath) == qt5Player && read(iconFile) == previousIcon
+                      && !QFileInfo::exists(SettingsPanelPatcher::recoveryPathFor(blockedPath)),
+                  "a required artwork write failure leaves the EXE unchanged instead of falling back to unloadable data URIs");
+            QFile::remove(blocker);
+            check(SettingsPanelPatcher::apply(qt5Path, QString(), {}, {}, false)
+                      .value(QStringLiteral("ok")).toBool(),
+                  "icon updates retain a usable selective Settings-panel restore");
+        }
+        QDir(assetDirFor(qt5Path)).removeRecursively();
+
+        const QString logoOnlyPath = temp.filePath(QStringLiteral("settings-logo-only-qt5.exe"));
+        write(logoOnlyPath, qt5Player);
+        const auto logoOnly = SettingsPanelPatcher::apply(logoOnlyPath,
+            QStringLiteral("Logo-only regression"), {}, {{QStringLiteral("logo"), iconAsset}}, true);
+        const QString logoOnlyAbout = linkedResourceText(read(logoOnlyPath), QStringLiteral("PlrAboutSetting.qml"));
+        const QString logoOnlyFile = QUrl(logoUrlFor(logoOnlyAbout)).toLocalFile();
+        check(logoOnly.value(QStringLiteral("ok")).toBool() && !QImage(logoOnlyFile).isNull()
+                  && !logoOnlyAbout.contains(QStringLiteral("data:image/")),
+              "a Qt 5 logo-only apply also references a loadable PNG even with no custom tab icons");
+        if (logoOnly.value(QStringLiteral("ok")).toBool())
+            SettingsPanelPatcher::apply(logoOnlyPath, QString(), {}, {}, false);
+        QDir(assetDirFor(logoOnlyPath)).removeRecursively();
+        check(read(validPath) == validModel.f.bytes,
+              "the synthetic icon tests leave their original player input untouched");
+
     }
 
     std::printf("[settings-gradient] settings panel surface in both gradient editors\n");
@@ -4935,6 +5274,14 @@ Window {
         const auto bytes=GifRpc::bundledProxy();
         check(GifRpc::isOurProxy(bytes,&error),QStringLiteral("embedded RPC-only DLL has a valid x64 PE/DLL header, schema and all forwarding exports: %1").arg(error));
         check(!GifRpc::isOurProxy(bytes.left(128),&error),"truncated RPC DLLs are refused");
+        auto corruptOrdinal=bytes;
+        const auto exportOffset=PeUtils::rvaToRaw(PeUtils::sections(bytes),PeUtils::exportRva(bytes));
+        const auto ordinalOffset=PeUtils::rvaToRaw(PeUtils::sections(bytes),ByteUtils::le32(bytes,exportOffset+36));
+        if(ordinalOffset>=0 && ordinalOffset+2<=corruptOrdinal.size()) {
+            ByteUtils::putLe16(corruptOrdinal,ordinalOffset,0xffff);
+            check(!GifRpc::isOurProxy(corruptOrdinal,&error),"V2 proxy with a corrupt API ordinal is refused before deployment");
+        } else check(false,"bundled V2 ordinal table is readable");
+
         const auto folder=temp.filePath(QStringLiteral("gif-rpc-install"));QDir().mkpath(folder);
         const auto exe=QDir(folder).filePath(QStringLiteral("HD-Player.exe"));write(exe,peFile());
         const auto dll=QDir(folder).filePath(QStringLiteral("version.dll"));
@@ -4955,10 +5302,23 @@ Window {
             const auto size=reinterpret_cast<Size>(GetProcAddress(proxy,"GetFileVersionInfoSizeW"));
             wchar_t windows[MAX_PATH];GetSystemDirectoryW(windows,MAX_PATH);
             const QString kernel=QDir(QString::fromWCharArray(windows)).filePath(QStringLiteral("kernel32.dll"));DWORD handle=0;
-            check(schema&&QByteArray(schema())=="BSI_GIF_RPC_PROXY_V1"&&size&&size(reinterpret_cast<LPCWSTR>(kernel.utf16()),&handle)>0,
+            check(schema&&QByteArray(schema())=="BSI_GIF_RPC_PROXY_V2"&&size&&size(reinterpret_cast<LPCWSTR>(kernel.utf16()),&handle)>0,
                   "proxy schema and actual System32 version API forwarding work");
             FreeLibrary(proxy);
         }
+#ifdef BSI_GIF_RPC_SMOKE
+        QProcess rpcHost;
+        rpcHost.setProcessChannelMode(QProcess::MergedChannels);
+        rpcHost.start(QString::fromUtf8(BSI_GIF_RPC_SMOKE),{dll});
+        const bool started=rpcHost.waitForStarted(5000);
+        bool finished=started && rpcHost.waitForFinished(12000);
+        if(!finished){rpcHost.kill();rpcHost.waitForFinished(5000);}
+        std::printf("RPC startup smoke: %s\n",rpcHost.readAll().constData());
+        check(finished && rpcHost.exitStatus()==QProcess::NormalExit && rpcHost.exitCode()==0,
+              "HD-Player-named host survives proxy worker startup and named/ordinal version queries");
+        check(read(QDir(folder).filePath(QStringLiteral("bsi-gif-rpc.log"))).contains("worker started"),
+              "startup smoke actually executes the RPC worker, unlike the customizer host");
+#endif
         check(GifRpc::restore(exe).value(QStringLiteral("ok")).toBool()&&!QFileInfo::exists(dll),
               "removing a new RPC deployment does not delete saved settings or unrelated files");
         const QByteArray original=peFile();write(dll,original);
@@ -5157,6 +5517,57 @@ Window {
             check(safePanelSvg.value(QStringLiteral("ok")).toBool()
                       && safePanelLogo.value(QStringLiteral("ok")).toBool(),
                   QStringLiteral("the Settings rebuild accepts safe self-contained SVGs for icons and logos"));
+            // An editor-emitted icon is several times the size of its drawing.
+            // The About document it is embedded in has a small slot in the
+            // player EXE, so the stored form must be compacted - otherwise every
+            // icon upload fails with "needs N bytes but its slot only holds M".
+            const QString paddedPanelSvgPath = QDir(panelDir).filePath(QStringLiteral("padded-panel-icon.svg"));
+            const QByteArray paddedIcon = QByteArrayLiteral(
+                "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n"
+                "<!-- Created with Inkscape -->\n"
+                "<svg\n   xmlns=\"http://www.w3.org/2000/svg\"\n   viewBox=\"0 0 24 24\">\n"
+                "  <metadata id=\"m\"><info/></metadata>\n"
+                "  <g\n     id=\"g1\">\n"
+                "    <circle cx=\"12\" cy=\"12\" r=\"9\" fill=\"#55aaff\" />\n"
+                "  </g>\n</svg>\n");
+            write(paddedPanelSvgPath, paddedIcon);
+            const QVariantMap paddedAsset = SettingsPanelPatcher::readCustomAsset(
+                paddedPanelSvgPath, QStringLiteral("tab-icon"));
+            const QByteArray storedIcon = QByteArray::fromBase64(
+                paddedAsset.value(QStringLiteral("asset")).toMap()
+                    .value(QStringLiteral("data")).toString().toLatin1());
+            check(paddedAsset.value(QStringLiteral("ok")).toBool()
+                      && !storedIcon.isEmpty() && storedIcon.size() < paddedIcon.size()
+                      && !storedIcon.contains("<!--") && !storedIcon.contains("<metadata")
+                      && !storedIcon.contains('\n')
+                      && storedIcon.contains("circle")
+                      && paddedAsset.value(QStringLiteral("msg")).toString()
+                             .contains(QStringLiteral("Minified")),
+                  QStringLiteral("a padded tab icon is stored compacted, with its drawing intact (%1 -> %2 bytes)")
+                      .arg(paddedIcon.size()).arg(storedIcon.size()));
+
+            // A tab icon is only ever allowed to be an SVG. An icon too big for
+            // its budget used to be rasterised to PNG here, which the validator
+            // then rejected, so the icon silently vanished from the rebuilt page.
+            // Over budget or not, the stored icon must stay a usable SVG.
+            const QString bigPanelSvgPath = QDir(panelDir).filePath(QStringLiteral("big-panel-icon.svg"));
+            QByteArray bigIcon = QByteArrayLiteral("<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\">");
+            bigIcon += "<path d=\"M2 2h20v20H2z\" fill=\"#55aaff\"/>";
+            while (bigIcon.size() < 4000) bigIcon += "<!-- pad -->";
+            bigIcon += QByteArrayLiteral("</svg>");
+            write(bigPanelSvgPath, bigIcon);
+            const QVariantMap bigAsset = SettingsPanelPatcher::readCustomAsset(
+                bigPanelSvgPath, QStringLiteral("tab-icon"));
+            const QVariantMap bigStored = bigAsset.value(QStringLiteral("asset")).toMap();
+            const QByteArray bigStoredBytes = QByteArray::fromBase64(
+                bigStored.value(QStringLiteral("data")).toString().toLatin1());
+            check(bigAsset.value(QStringLiteral("ok")).toBool()
+                      && bigStored.value(QStringLiteral("mime")).toString()
+                             == QStringLiteral("image/svg+xml")
+                      && bigStoredBytes.contains("<svg")
+                      && !bigStoredBytes.startsWith("\x89PNG"),
+                  QStringLiteral("an oversized tab icon stays a valid SVG instead of becoming a rejected PNG"));
+
             const QString unsafePanelSvgPath = QDir(panelDir).filePath(QStringLiteral("unsafe-panel-icon.svg"));
             write(unsafePanelSvgPath, QByteArrayLiteral("<svg xmlns=\"http://www.w3.org/2000/svg\"><script>alert(1)</script></svg>"));
             check(!SettingsPanelPatcher::readCustomAsset(unsafePanelSvgPath, QStringLiteral("tab-icon")).value(QStringLiteral("ok")).toBool(),
@@ -5190,29 +5601,83 @@ Window {
                     if (file.name.compare(QLatin1String("UiSettingsWindow.qml"), Qt::CaseInsensitive) == 0)
                         rebuiltWindow = QString::fromUtf8(QtResources::readFile(panelImage, file));
                 }
-                check(rebuiltWindow.contains(QStringLiteral("BSI Settings v7"))
-                          && rebuiltWindow.contains(QStringLiteral("property var bHidden:"))
-                          && rebuiltWindow.contains(QStringLiteral("property var bIcons:"))
-                          && rebuiltWindow.contains(QStringLiteral("Rectangle{anchors.fill:parent;color:UiTheme.colors.primary80;radius:12"))
-                          && rebuiltWindow.contains(QStringLiteral("Column{anchors.fill:parent;anchors.margins:12;spacing:8"))
-                          && rebuiltWindow.contains(QStringLiteral("pShowRedDot:modelData.pShowRedDot"))
+                check(rebuiltWindow.contains(QStringLiteral("BSI v16"))
+                          && !rebuiltWindow.contains(QStringLiteral("property var bHidden"))
+                          // The About page publishes the icon map into
+                          // bIcons, so the shell has to declare it or that
+                          // assignment silently throws and no icon is drawn.
+                          && rebuiltWindow.contains(QStringLiteral("property var bIcons:({})"))
+                          // The rebuilt shell paints with the player's own palette
+                          // (the same UiTheme.colors the stock window uses) instead
+                          // of a colour baked into the patch, so it keeps following
+                          // whatever theme the emulator currently has.
+                          && rebuiltWindow.contains(QStringLiteral("Rectangle{id:r;property var q:UiTheme.colors;anchors.fill:parent;radius:14;color:r.q.primary80"))
+                          && rebuiltWindow.contains(QStringLiteral("color:r.q.primary10"))
+                          && !rebuiltWindow.contains(QStringLiteral("#0d0f14"))
+                          // The page host is inset from every window edge and
+                          // stops short of the bottom, so the native page and its
+                          // "Save changes" footer cannot run into the rounded
+                          // corner the way they did when the host filled the shell.
+                          && rebuiltWindow.contains(QStringLiteral("Item{width:Math.min(r.width-48,568);x:(r.width-width)/2;height:r.height-118"))
+                          // Own the real label and measure its actual themed
+                          // font. The stock button's private label is left-aligned;
+                          // app-font metrics did not match its themed font either.
+                          && !rebuiltWindow.contains(QStringLiteral("UiSettingsButton{"))
+                          && rebuiltWindow.contains(QStringLiteral("Text{id:t;text:modelData.pButtonText;font:h.font;"))
+                          && rebuiltWindow.contains(QStringLiteral("font:UiTheme.fonts.bodyLarge"))
+                          && rebuiltWindow.contains(QStringLiteral("TextMetrics{id:m;text:t.text;font:t.font}"))
+                          // Centre the ink, including non-zero glyph bearings,
+                          // with 11 px of padding per side and one 4 px gap.
+                          && rebuiltWindow.contains(QStringLiteral("x:11-m.boundingRect.x"))
+                          && rebuiltWindow.contains(QStringLiteral("width:c===''?-4:m.boundingRect.width+22;height:44"))
+                          && rebuiltWindow.contains(QStringLiteral("MouseArea{anchors.fill:parent;onPressed:iSettingsWindow.startSystemMove()}"))
+                          && rebuiltWindow.contains(QStringLiteral("visible:modelData.pShowRedDot"))
                           && rebuiltWindow.contains(QStringLiteral("anchors.centerIn:parent"))
-                          && rebuiltWindow.contains(QStringLiteral("ListView{id:v;"))
-                          && rebuiltWindow.contains(QStringLiteral("orientation:ListView.Horizontal;model:pSettingsItems.pSettingElements"))
+                          // The strip is as wide as its own tabs, clamped to the
+                          // shell gutter, and centred under the title.
+                          && rebuiltWindow.contains(QStringLiteral("ListView{width:Math.max(0,Math.min(contentWidth,r.width-48))"))
+                          && rebuiltWindow.contains(QStringLiteral("orientation:Qt.Horizontal;model:pSettingsItems.pSettingElements"))
                           && rebuiltWindow.contains(QStringLiteral("item.anchors.fill=item.parent"))
-                          && rebuiltWindow.contains(QStringLiteral("Image{source:iSettingsWindowShadowContainer.bIcons[parent.k]||\"\";width:18;height:18"))
-                          && rebuiltWindow.contains(QStringLiteral("StackLayout{id:iSelectedSettingControl;anchors.fill:parent;anchors.margins:6"))
-                          && rebuiltWindow.contains(QStringLiteral("delegate:Loader{width:iSelectedSettingControl.width;height:iSelectedSettingControl.height;"))
-                          && rebuiltWindow.contains(QStringLiteral("model.modelData.pComponentObj=item"))
-                          && rebuiltWindow.contains(QStringLiteral("fChangeSelectedSetting(pSettingIdx)"))
+                          // The content-sized row is centred with at least 24 px
+                          // gutters; long/translated rows scroll within that inset.
+                          && rebuiltWindow.contains(QStringLiteral("ListView{width:Math.max(0,Math.min(contentWidth,r.width-48));height:44"))
+                          // The width clamp bounds the strip, but at small window
+                          // sizes the tabs inside it still painted past the
+                          // rounded edge until the strip itself clipped.
+                          && rebuiltWindow.contains(QStringLiteral("clip:true;orientation:Qt.Horizontal"))
+                          // Labels sit above their icons; file-backed runtime
+                          // PNGs already have a bounded 54 px source resolution.
+                          && rebuiltWindow.contains(QStringLiteral("y:c?0:22-height/2"))
+                          && rebuiltWindow.contains(QStringLiteral("ToolButton{width:18;height:18;x:parent.width/2-9;y:24;enabled:false;padding:0;background:null;icon.source:c||'';icon.color:index==pCurrentTabIndex?t.color:'transparent';icon.width:18;icon.height:18}"))
+                          // A hidden tab must not paint its label over the tabs
+                          // beside it: zeroing its width closed the slot but the
+                          // button inside kept drawing its text on top of the
+                          // neighbours, which is the smeared "Customise" and
+                          // "Advanced" seen in the window.
+                          && rebuiltWindow.contains(QStringLiteral("delegate:MouseArea{hoverEnabled:true;visible:c!=='';property var c:"))
+                          // Tabs are laid out label-sized with one spacing
+                          // value for the whole strip: equal-width slots made
+                          // long neighbours ("Game settings" / "Devices")
+                          // collide while short labels floated in dead space.
+                          && rebuiltWindow.contains(QStringLiteral(";spacing:4"))
+                          // The native page stays flat; only tabs get the requested
+                          // soft selected/hover surface and actual icon tint.
+                          && rebuiltWindow.contains(QStringLiteral("radius:6;color:t.color;opacity:index==pCurrentTabIndex?.2:parent.containsMouse?.1:0"))
+                          && !rebuiltWindow.contains(QStringLiteral("border.color"))
+                          && !rebuiltWindow.contains(QStringLiteral("visible:s"))
+                          && rebuiltWindow.contains(QStringLiteral("StackLayout{id:iSelectedSettingControl;anchors.fill:parent;currentIndex:pCurrentTabIndex;anchors.topMargin:12"))
+                          && rebuiltWindow.contains(QStringLiteral("delegate:Loader{"))
+                          && rebuiltWindow.contains(QStringLiteral("modelData.pComponentObj=item"))
+                          && rebuiltWindow.contains(QStringLiteral("onClicked:{fChangeSelectedSetting(index);forceActiveFocus()}"))
                           && rebuiltWindow.contains(QStringLiteral("onVisibleChanged:if(visible&&transientParent)"))
-                          && rebuiltWindow.contains(QStringLiteral("width=transientParent.width*.7"))
-                          && rebuiltWindow.contains(QStringLiteral("height=transientParent.height*.7"))
-                          && rebuiltWindow.contains(QStringLiteral("x=transientParent.x+transientParent.width*.15"))
-                          && rebuiltWindow.contains(QStringLiteral("y=transientParent.y+transientParent.height*.15"))
+                          && rebuiltWindow.contains(QStringLiteral("var t=transientParent"))
+                          && rebuiltWindow.contains(QStringLiteral("width=Math.min(t.width*.96,1068)"))
+                          && rebuiltWindow.contains(QStringLiteral("height=Math.min(t.height*.94,611)"))
+                          && rebuiltWindow.contains(QStringLiteral("x=t.x+t.width/2-width/2"))
+                          && rebuiltWindow.contains(QStringLiteral("y=t.y+t.height/2-height/2"))
                           && rebuiltWindow.contains(QStringLiteral("iSettingsWindow.startSystemMove()"))
-                          && rebuiltWindow.contains(QStringLiteral("asset:\"CloseIcon\"")),
-                      QStringLiteral("the rebuilt %1 Settings panel restores the PR #88 shell and adds customizable tabs while preserving native pages, selection, dragging, and close behavior")
+                          && rebuiltWindow.contains(QStringLiteral("asset:'CloseIcon'")),
+                      QStringLiteral("the rebuilt %1 Settings panel matches the latest screenshot size and tints selected tabs/icons while preserving native pages, selection, dragging, and close behavior")
                           .arg(QFileInfo(input).fileName()));
                 QString expectedLogoSource;
                 for (const auto &entry : EmbeddedResources::list(original, true)) {
@@ -5228,15 +5693,40 @@ Window {
                         rebuiltAbout = EmbeddedResources::decodeText(
                             EmbeddedResources::readEntry(panelCopy, entry.entryOff, entry.flags, 8 * 1024 * 1024));
                 }
+                // The About document is emitted compactly (property:value, no
+                // space after the colon) so that it fits the player's small
+                // resource slot; match both spellings so this stays about the
+                // page structure rather than its whitespace.
+                const auto fallbackLogoMatch = QRegularExpression(QStringLiteral(
+                    "bsiAboutEmulatorLogo\";source:\"([^\"]+)\""))
+                    .match(rebuiltAbout);
+                const QString fallbackLogoFile = QUrl(fallbackLogoMatch.captured(1)).toLocalFile();
                 const bool logoSourceVerified = expectedLogoSource.isEmpty()
-                    ? rebuiltAbout.contains(QStringLiteral("source: \"data:image/svg+xml;base64,"))
-                    : rebuiltAbout.contains(QStringLiteral("source: \"%1\"").arg(expectedLogoSource));
+                    ? (rebuiltAbout.contains(QStringLiteral("source:\"data:image/svg+xml;base64,"))
+                       || (!fallbackLogoFile.isEmpty() && !QImage(fallbackLogoFile).isNull()))
+                    : (rebuiltAbout.contains(QStringLiteral("source: \"%1\"").arg(expectedLogoSource))
+                       || rebuiltAbout.contains(QStringLiteral("source:\"%1\"").arg(expectedLogoSource)));
                 check(logoSourceVerified
-                          && rebuiltAbout.contains(QStringLiteral("objectName: \"bsiAboutEmulatorLogo\""))
-                          && rebuiltAbout.contains(QStringLiteral("objectName: \"bsiAboutDeveloperName\""))
-                          && rebuiltAbout.contains(QStringLiteral("text: pDeveloperName"))
+                          && (rebuiltAbout.contains(QStringLiteral("objectName: \"bsiAboutEmulatorLogo\""))
+                              || rebuiltAbout.contains(QStringLiteral("objectName:\"bsiAboutEmulatorLogo\"")))
+                          // Layout children prefer an image's decoded implicit
+                          // size over bare width/height. Bound the logo even
+                          // when a custom/runtime PNG is hundreds of pixels tall.
+                          && rebuiltAbout.contains(QStringLiteral("Layout.preferredWidth:160;Layout.preferredHeight:60"))
+                          && rebuiltAbout.contains(QStringLiteral("Layout.maximumWidth:160;Layout.maximumHeight:60"))
+                          && rebuiltAbout.contains(QStringLiteral("fillMode:Image.PreserveAspectFit"))
+                          && (rebuiltAbout.contains(QStringLiteral("objectName: \"bsiAboutDeveloperName\""))
+                              || rebuiltAbout.contains(QStringLiteral("objectName:\"bsiAboutDeveloperName\"")))
+                          && (rebuiltAbout.contains(QStringLiteral("text: pDeveloperName"))
+                              || rebuiltAbout.contains(QStringLiteral("text:pDeveloperName")))
                           && rebuiltAbout.contains(QStringLiteral("BSI Panel Regression"))
                           && rebuiltAbout.contains(QStringLiteral("Repeater"))
+                          // The About content is one centred column; it used
+                          // to sit hard against the left of its viewport. The
+                          // ScrollView must span the page first, or the column
+                          // is only centred inside a narrower content box.
+                          && rebuiltAbout.contains(QStringLiteral("contentWidth:availableWidth"))
+                          && rebuiltAbout.contains(QStringLiteral("anchors.horizontalCenter:parent.horizontalCenter"))
                           && rebuiltAbout.contains(QStringLiteral("Regression source"))
                           && rebuiltAbout.contains(QStringLiteral("Regression community"))
                           && rebuiltAbout.contains(QStringLiteral("Regression video")),
@@ -5251,6 +5741,17 @@ Window {
                 const QVariantList liveTabs = panelState.tabs;
                 const QString hiddenTabId = liveTabs.size() > 1
                     ? liveTabs.at(1).toMap().value(QStringLiteral("id")).toString() : QString();
+                // The strip delegate identifies a tab by its index, not by a name
+                // derived from pQmlSource: that value is a QML url, and a url has no
+                // toLowerCase() and stringifies percent-encoded, so a name key could
+                // never match. Everything published into the icon map - including the
+                // empty "hidden" sentinel - is therefore keyed by index.
+                const QString hiddenTabKey = liveTabs.size() > 1
+                    ? QString::number(liveTabs.at(1).toMap().value(QStringLiteral("index")).toInt())
+                    : QString();
+                const QString iconTabKey = liveTabs.isEmpty()
+                    ? QString()
+                    : QString::number(liveTabs.first().toMap().value(QStringLiteral("index")).toInt());
                 const QVariantMap panelOptions {
                     {QStringLiteral("tagline"), QStringLiteral("Regression subtitle")},
                     {QStringLiteral("hiddenTabs"), hiddenTabId.isEmpty() ? QVariantList{} : QVariantList{hiddenTabId}},
@@ -5272,12 +5773,32 @@ Window {
                         if (entry.leaf.compare(QLatin1String("PlrAboutSetting.qml"), Qt::CaseInsensitive) == 0)
                             updatedAbout = EmbeddedResources::decodeText(EmbeddedResources::readEntry(panelCopy, entry.entryOff, entry.flags, 8 * 1024 * 1024));
                     }
-                    check(updatedWindow.contains(QStringLiteral("property var bHidden:[]"))
+                    check(updatedWindow.contains(QStringLiteral("property var bIcons:({})"))
+                              && updatedWindow.contains(QStringLiteral("width:c===''?-4:"))
+                              && updatedWindow.contains(QStringLiteral("clip:true;orientation:Qt.Horizontal"))
                               && updatedAbout.contains(QStringLiteral("property var bsiHiddenTabs:"))
-                              && (hiddenTabId.isEmpty() || updatedAbout.contains(hiddenTabId))
+                              && (hiddenTabId.isEmpty() || updatedAbout.contains(hiddenTabKey))
+                              // Unticking a tab used to change nothing after a
+                              // patch: the hidden list was published into bHidden
+                              // and no strip delegate ever read it. buildAbout now
+                              // also marks each hidden page in the icon map with
+                              // an empty value, which the strip does collapse.
+                              && (hiddenTabId.isEmpty()
+                                  || updatedAbout.contains(
+                                      QStringLiteral("\"%1\":\"\"").arg(hiddenTabKey)))
                               && updatedAbout.contains(QStringLiteral("property var bsiTabIcons:"))
-                              && updatedAbout.contains(QStringLiteral("function fOnQmlLoaded(){parent.parent.parent.parent.parent.parent.parent.bHidden=bsiHiddenTabs;parent.parent.parent.parent.parent.parent.parent.bIcons=bsiTabIcons}"))
-                              && updatedAbout.contains(QStringLiteral("data:image/svg+xml;base64,"))
+                              // The page must find the shell by walking up: counting parents reached
+                              // the window and threw "Cannot assign to non-existent
+                              // property bHidden", which is exactly why a saved custom
+                              // tab icon applied and then never appeared.
+                              && updatedAbout.contains(QStringLiteral("function fOnQmlLoaded(){var p=parent;while(p&&p.bIcons===undefined)p=p.parent;if(p)p.bIcons=bsiTabIcons}"))
+                              // On a Qt 5 player the icon must NOT be embedded: its
+                              // Image cannot open a data: URI (measured: status Error,
+                              // while the same bytes load from a file), so it would
+                              // apply and then never appear. It is published as a
+                              // file:/// path instead.
+                              && (updatedAbout.contains(QStringLiteral("\"%1\":\"data:image/").arg(iconTabKey))
+                                  || updatedAbout.contains(QStringLiteral("\"%1\":\"file:///").arg(iconTabKey)))
                               && updatedAbout.contains(QStringLiteral("BSI Panel Regression Updated"))
                               && updatedAbout.contains(QStringLiteral("Regression subtitle")),
                           QStringLiteral("the real %1 Settings rebuild writes hidden tabs, custom SVG icons, and a custom About logo into regenerated QML")
@@ -5287,6 +5808,133 @@ Window {
                 check(restoredPanel.value(QStringLiteral("ok")).toBool(),
                       QStringLiteral("the real %1 panel restores only its two original QML sources (%2)")
                           .arg(QFileInfo(input).fileName(), restoredPanel.value(QStringLiteral("msg")).toString()));
+
+                // A new HD-Player.exe can replace the old file at exactly the
+                // same path while its AppLocalData recovery sidecar survives.
+                // Seed a valid old snapshot, make it describe a previous QML
+                // revision, then put the clean executable back at that path.
+                const auto seedRecovery = SettingsPanelPatcher::apply(panelCopy,
+                    QStringLiteral("Stale snapshot seed"), panelLinks, {}, true);
+                const bool seedRecoverySucceeded = seedRecovery.value(QStringLiteral("ok")).toBool();
+                check(seedRecoverySucceeded,
+                      QStringLiteral("the stale-recovery regression creates an initial patch snapshot (%1)")
+                          .arg(seedRecovery.value(QStringLiteral("msg")).toString()));
+                const QString canonicalPanelCopy = QFileInfo(panelCopy).canonicalFilePath();
+                const QString staleRecoveryPath = QDir(QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation)
+                    + QStringLiteral("/settings-panel-recovery"))
+                    .filePath(QString::fromLatin1(QCryptographicHash::hash(canonicalPanelCopy.toUtf8(),
+                        QCryptographicHash::Sha256).toHex()) + QStringLiteral(".json"));
+                bool staleSidecarPrepared = false;
+                if (seedRecoverySucceeded) {
+                    QFile sidecar(staleRecoveryPath);
+                    if (sidecar.open(QIODevice::ReadOnly)) {
+                        QJsonParseError sidecarError;
+                        const auto sidecarDoc = QJsonDocument::fromJson(sidecar.readAll(), &sidecarError);
+                        sidecar.close();
+                        QJsonObject recoveryObject = sidecarDoc.object();
+                        QJsonArray sourceRecords = recoveryObject.value(QStringLiteral("sources")).toArray();
+                        if (sidecarError.error == QJsonParseError::NoError && sourceRecords.size() == 2) {
+                            QJsonObject oldWindow = sourceRecords.at(0).toObject();
+                            QByteArray previousSource = QByteArray::fromBase64(
+                                oldWindow.value(QStringLiteral("original")).toString().toLatin1());
+                            previousSource.append('\n'); // another valid stock-QML revision
+                            const QByteArray previousHash = QCryptographicHash::hash(
+                                previousSource, QCryptographicHash::Sha256).toHex();
+                            oldWindow.insert(QStringLiteral("original"), QString::fromLatin1(previousSource.toBase64()));
+                            oldWindow.insert(QStringLiteral("originalSha256"), QString::fromLatin1(previousHash));
+                            QJsonArray previousAcceptedHashes;
+                            previousAcceptedHashes.append(QString::fromLatin1(previousHash));
+                            oldWindow.insert(QStringLiteral("acceptedSha256"), previousAcceptedHashes);
+                            sourceRecords.replace(0, oldWindow);
+                            recoveryObject.insert(QStringLiteral("sources"), sourceRecords);
+                            const QByteArray staleJson = QJsonDocument(recoveryObject).toJson(QJsonDocument::Compact);
+                            if (sidecar.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+                                staleSidecarPrepared = sidecar.write(staleJson) == staleJson.size();
+                                sidecar.close();
+                            }
+                        }
+                    }
+                }
+                check(staleSidecarPrepared,
+                      "a valid sidecar from the previous executable revision is staged at the same path");
+                const bool cleanExeWritten = write(panelCopy, original);
+                check(cleanExeWritten,
+                      "the clean reference is restored over the previously patched executable path");
+                if (cleanExeWritten && staleSidecarPrepared) {
+                    const auto appliedToFreshExe = SettingsPanelPatcher::apply(panelCopy,
+                        QStringLiteral("Fresh executable baseline"), panelLinks, {}, true);
+                    check(appliedToFreshExe.value(QStringLiteral("ok")).toBool(),
+                          QStringLiteral("a fresh executable at the old path ignores the stale recovery snapshot (%1)")
+                              .arg(appliedToFreshExe.value(QStringLiteral("msg")).toString()));
+                    if (appliedToFreshExe.value(QStringLiteral("ok")).toBool()) {
+                        const auto freshRestore = SettingsPanelPatcher::apply(panelCopy, QString(), {}, {}, false);
+                        const auto freshState = SettingsPanelPatcher::analyze(panelCopy);
+                        check(freshRestore.value(QStringLiteral("ok")).toBool()
+                                  && freshState.supported && !freshState.applied,
+                              QStringLiteral("the rebased recovery restores the clean executable sources (%1)")
+                                  .arg(freshRestore.value(QStringLiteral("msg")).toString()));
+                    }
+                }
+                // Regression: a sidecar that exists but cannot be used must not
+                // abort the rebuild of a clean player. It used to return
+                // "The Settings-panel recovery snapshot is incomplete; restore is
+                // blocked." for every apply, so the patch never ran and the user
+                // was stuck with a stale file keyed to this executable's path.
+                //
+                // Kept to a single scenario on purpose: every apply/restore costs
+                // three verified full-file writes, and these jobs already run
+                // close to their time budget on the largest reference packages.
+                {
+                    check(write(panelCopy, original), "the clean reference is restored before the stale-snapshot case");
+                    // A readable snapshot for *this* executable (the patcher
+                    // rejects a foreign target before reading sources) that
+                    // carries no usable source pair.
+                    const QByteArray staleSnapshot = QStringLiteral(
+                        "{\"schema\":\"bsi.settings-panel.recovery\",\"version\":1,"
+                        "\"target\":\"%1\",\"sources\":[]}")
+                        .arg(QFileInfo(panelCopy).canonicalFilePath()).toUtf8();
+                    const QString staleSidecarPath = SettingsPanelPatcher::recoveryPathFor(panelCopy);
+                    QDir().mkpath(QFileInfo(staleSidecarPath).absolutePath());
+                    QFile staleSidecar(staleSidecarPath);
+                    const bool staged = staleSidecar.open(QIODevice::WriteOnly | QIODevice::Truncate)
+                        && staleSidecar.write(staleSnapshot) == staleSnapshot.size();
+                    staleSidecar.close();
+                    check(staged, "an unusable recovery sidecar is staged for the selected executable");
+                    const auto appliedOverStale = SettingsPanelPatcher::apply(panelCopy,
+                        QStringLiteral("Stale snapshot recovery"), panelLinks, {}, true);
+                    check(appliedOverStale.value(QStringLiteral("ok")).toBool()
+                              && SettingsPanelPatcher::analyze(panelCopy).applied,
+                          QStringLiteral("an unusable recovery sidecar no longer blocks the rebuild of a clean player (%1)")
+                              .arg(appliedOverStale.value(QStringLiteral("msg")).toString()));
+                    // Now the executable carries this feature's markers, so an
+                    // unusable snapshot must refuse to write - and say why. Keep
+                    // the fresh snapshot the apply just wrote so restore can still
+                    // be exercised afterwards; this check itself writes nothing.
+                    const QByteArray patchedBytes = read(panelCopy);
+                    const QString goodSnapshotPath = staleSidecarPath + QStringLiteral(".good");
+                    const bool keptGood = QFile::copy(staleSidecarPath, goodSnapshotPath);
+                    QFile damaged(staleSidecarPath);
+                    const bool damagedStaged = damaged.open(QIODevice::WriteOnly | QIODevice::Truncate)
+                        && damaged.write(staleSnapshot) == staleSnapshot.size();
+                    damaged.close();
+                    const auto blockedApply = SettingsPanelPatcher::apply(panelCopy,
+                        QStringLiteral("Blocked"), panelLinks, {}, true);
+                    check(keptGood && damagedStaged && !blockedApply.value(QStringLiteral("ok")).toBool()
+                              && blockedApply.value(QStringLiteral("msg")).toString()
+                                     .contains(QStringLiteral("recovery snapshot is unusable"))
+                              && read(panelCopy) == patchedBytes,
+                          QStringLiteral("a patched player with an unusable sidecar refuses to write (%1)")
+                              .arg(blockedApply.value(QStringLiteral("msg")).toString()));
+                    if (keptGood) {
+                        QFile::remove(staleSidecarPath);
+                        QFile::rename(goodSnapshotPath, staleSidecarPath);
+                    }
+                    const auto restoredOverStale = SettingsPanelPatcher::apply(panelCopy, QString(), {}, {}, false);
+                    check(restoredOverStale.value(QStringLiteral("ok")).toBool(),
+                          QStringLiteral("the rebuild applied over an unusable sidecar still restores (%1)")
+                              .arg(restoredOverStale.value(QStringLiteral("msg")).toString()));
+                    QFile::remove(staleSidecarPath);
+                }
                 const auto finalPanel = SettingsPanelPatcher::analyze(panelCopy);
                 check(finalPanel.supported && !finalPanel.applied,
                       QStringLiteral("the original %1 Settings window is recognized again after restore")
@@ -5670,7 +6318,11 @@ Window {
         QSettings().setValue(QStringLiteral("fps/autoDetect"), true);
         SettingsManager settings;
         Backend backend(&settings);
-        check(settings.dllPath().endsWith(QLatin1String("Qt5QuickTemplates2.dll")), "startup corrects a stale saved Qt DLL target");
+        check(settings.dllPath() == qt6, "startup restores saved DLL metadata without parsing the player");
+        check(backend.fpsAnalyze().value(QStringLiteral("ok")).toBool()
+                  && settings.dllPath().endsWith(QLatin1String("Qt5QuickTemplates2.dll"))
+                  && read(qt5) == sliderDll(false) && read(qt6) == sliderDll(false),
+              "explicit Analyze corrects a stale saved Qt target without modifying either DLL");
         write(player, importedPlayer({ QStringLiteral("Qt6Core.dll") }));
         settings.setExePath(player);
         check(settings.dllPath().endsWith(QLatin1String("Qt6QuickTemplates2.dll")), "same-path in-place Qt upgrades refresh the selected DLL");
@@ -5891,10 +6543,13 @@ Window {
               "when both DLLs exist, player Qt6 dependency selects Qt6");
         QSettings().setValue(QStringLiteral("paths/exe"), exe);
         QSettings().setValue(QStringLiteral("paths/dll"), renderer);
+        QSettings().setValue(QStringLiteral("fps/autoDetect"), true);
         SettingsManager settings;
         Backend backend(&settings);
-        check(settings.dllPath().endsWith(QLatin1String("Qt6QuickTemplates2.dll")),
-              "old persisted OpenGL target migrates to the player's QuickTemplates2 DLL");
+        check(settings.dllPath().isEmpty(), "startup refuses a persisted renderer target without scanning DLLs");
+        backend.fpsAnalyze();
+        check(settings.dllPath().endsWith(QLatin1String("Qt6QuickTemplates2.dll")) && read(renderer) == sliderDll(false),
+              "explicit Analyze migrates the old OpenGL target without changing the renderer");
         int notifications = 0;
         QObject::connect(&backend, &Backend::dllPathChanged, [&notifications] { ++notifications; });
         settings.setDllPath(temp.filePath(QStringLiteral("Qt5QuickTemplates2.dll")));

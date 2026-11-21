@@ -179,7 +179,7 @@ QStringList unitNeedles(const QStringList &sourceNames, const QStringList &ident
 }
 
 QList<qsizetype> matchingUnitOffsets(const QByteArray &data, const QStringList &sourceNames,
-                                     const QStringList &identifiers)
+                                     const QStringList &identifiers, bool exact = false)
 {
     const QStringList needles = unitNeedles(sourceNames, identifiers);
     QList<qsizetype> matches;
@@ -198,9 +198,11 @@ QList<qsizetype> matchingUnitOffsets(const QByteArray &data, const QStringList &
             continue;
         const int header = qt >> 16 == 5 ? 24 : 4;
         bool match = false;
+        bool hasSource = false;
         if (source < count) {
             QString path = unitString(data, pos, size, table, source, header);
             path.replace(QLatin1Char('\\'), QLatin1Char('/'));
+            hasSource = !path.isEmpty();
             const QString file = path.section(QLatin1Char('/'), -1);
             for (const QString &sourceName : sourceNames) {
                 const QString requested = sourceName.section(QLatin1Char('/'), -1)
@@ -213,7 +215,13 @@ QList<qsizetype> matchingUnitOffsets(const QByteArray &data, const QStringList &
         }
         // Many MSI/BlueStacks Qt 5 units store an empty sourceFileIndex. Match
         // a bounded table of distinctive QML identifiers or visible strings.
-        if (!match && !needles.isEmpty() && count > 0 && count < 4096) {
+        if (exact && !match && !hasSource && !identifiers.isEmpty() && count < 4096) {
+            QSet<QString> strings;
+            for (quint32 i=0;i<count;++i) strings.insert(unitString(data,pos,size,table,i,header));
+            match = true;
+            for (const auto &id : identifiers) if (!strings.contains(id)) match = false;
+        }
+        if (!exact && !match && !needles.isEmpty() && count > 0 && count < 4096) {
             for (quint32 i = 0; i < count && !match; ++i) {
                 const QString value = unitString(data, pos, size, table, i, header);
                 if (value.isEmpty())
@@ -560,6 +568,17 @@ int activeUnits(const QByteArray &data, const QStringList &sourceNames,
         if (le32(data, pos + 8) != 0)
             ++active;
     return active;
+}
+
+int sourceUnits(QByteArray &data, const QStringList &names, const QStringList &ids, bool invalidate, bool activeOnly)
+{
+    int count=0;
+    for (const auto pos : matchingUnitOffsets(data,names,ids,true)) {
+        const bool active=le32(data,pos+8)!=0;
+        if (!activeOnly || active) ++count;
+        if (invalidate && active) putLe32(data,pos+8,0);
+    }
+    return count;
 }
 
 namespace {
