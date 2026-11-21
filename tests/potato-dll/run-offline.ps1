@@ -111,7 +111,11 @@ try {
                     } else { throw 'Unknown child evidence kind' }
                 }
                 $rows += $row
-                Write-Output ($row | ConvertTo-Json -Compress -Depth 5)
+                $safeEvidence = ($row | ConvertTo-Json -Compress -Depth 5)
+                Write-Output $safeEvidence
+                # Same sanitized schema via the ordinary check-annotation API;
+                # retrieval must not depend on access to private raw log hosts.
+                Write-Output ('::notice title=Potato probe result::' + $safeEvidence)
                 if ((Get-FileHash $target -Algorithm SHA256).Hash -ne $hashes[$kind]) { throw 'Host bytes changed' }
                 if ($kind -ne 'control' -and (Get-FileHash $dll -Algorithm SHA256).Hash.ToLowerInvariant() -ne $case.sha256) { throw 'Original DLL bytes changed during test' }
             }

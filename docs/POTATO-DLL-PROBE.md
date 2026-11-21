@@ -85,11 +85,18 @@ not replace a missing measurement with inferred success.
 
 ## Results
 
-The initial implementation has passed the non-executing data-integrity checks,
-contract tests and strict x64 Windows cross-compilation. **A Windows execution
-result has not yet been recorded in this document.** Replace this paragraph
-with the actual run/head, individual outcomes and limitations after execution;
-compilation alone is not loading/hook/pixel evidence.
+The initial implementation passed the non-executing data-integrity checks,
+contract tests, strict x64 Windows cross-compilation and control-host link. In
+Windows run [44914131709](https://github.com/dsajgddghdsaakovvgheww/BSI-Customizer/actions/runs/44914131709)
+(head `253e3faa6c6931f9e20493e54b96b9b1d1accf0b`), all three MSVC host
+builds succeeded, but data preparation failed **before the execution step**.
+This is not original-DLL loading, hook or pixel evidence. Raw log retrieval
+from the restricted workspace failed; a follow-up publishes small sanitized
+preparation errors and measurement rows through GitHub check annotations as
+well as the JSON artifact. No original archive was re-uploaded or made public;
+the retried archive URL is its existing webContentLink, re-read from Drive
+metadata and still constrained by the same hash. Actual outcomes follow here
+only after execution.
 
 Even a completely passing authored-host result cannot establish which player
 contexts/programs/textures produce the real scene, authorize unrelated/UI

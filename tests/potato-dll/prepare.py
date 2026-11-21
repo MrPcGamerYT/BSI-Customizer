@@ -10,8 +10,10 @@ import json
 from pathlib import Path, PurePosixPath
 import shutil
 import subprocess
+import urllib.error
 import urllib.request
 
+STAGE = "arguments"
 ARCHIVE_SHA256 = "80751bed1151e7f5bbcf186b51b8aada3b446af0278e5575384de7fa9eeb8b17"
 DRIVE_FILE_ID = "1QGBvjTpW0mRNPwv2eqj77UEsLQtNDV7Y"
 MESA_URL = "https://github.com/pal1000/mesa-dist-win/releases/download/26.2.7/mesa3d-26.2.7-release-msvc.7z"
@@ -105,12 +107,15 @@ def download(url, path, expected_size, digest):
 
 
 def prepare(archive, mesa, work, sevenzip):
+    global STAGE
+    STAGE = "archive-inventory"
     files = archive_inventory(archive)
     require(mesa.is_file() and mesa.stat().st_size == MESA_BYTES and sha(mesa.read_bytes()) == MESA_SHA256,
             "Different Mesa software-driver package")
     members = work / "members"
     members.mkdir(exist_ok=False)
     unique = {}
+    STAGE = "original-member-data-extraction"
     for relative, member in files.items():
         result = subprocess.run([sevenzip, "x", "-so", "-p70K", str(archive), member],
                                 capture_output=True, check=True, timeout=30)
@@ -119,6 +124,7 @@ def prepare(archive, mesa, work, sevenzip):
             # Data-only name until the offline runner stages the actual DLL.
             (members / (info["sha256"] + ".bin")).write_bytes(result.stdout)
             unique[info["sha256"]] = info
+    STAGE = "mesa-x64-data-extraction"
     mesa_dir = work / "mesa"
     mesa_dir.mkdir(exist_ok=False)
     # Trusted package pinned above, never its per-app deploy/system scripts.
@@ -137,6 +143,7 @@ def prepare(archive, mesa, work, sevenzip):
 
 
 def main():
+    global STAGE
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--work", type=Path, required=True)
     parser.add_argument("--archive", type=Path)
@@ -151,12 +158,32 @@ def main():
         archive, mesa = args.work / "original.rar", args.work / "mesa.7z"
         # The user's existing public file link, no Drive credentials, permission
         # changes or re-upload. Failure to fetch/verify stops before execution.
-        url = "https://drive.usercontent.google.com/download?id=" + DRIVE_FILE_ID + "&export=download&confirm=t"
+        # Exact webContentLink re-read from the connected Drive metadata.
+        url = "https://drive.google.com/uc?id=" + DRIVE_FILE_ID + "&export=download"
+        STAGE = "original-archive-download"
         download(url, archive, 344442, ARCHIVE_SHA256)
+        STAGE = "mesa-archive-download"
         download(MESA_URL, mesa, MESA_BYTES, MESA_SHA256)
     require(archive is not None and mesa is not None, "Both exact archives are required")
     prepare(archive.resolve(), mesa.resolve(), args.work.resolve(), args.sevenzip)
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as error:
+        # Make a small non-sensitive diagnostic available through GitHub's
+        # check-annotation API too; do not require fetching private raw logs or
+        # disclose signed redirect URLs, paths or response bodies.
+        detail = type(error).__name__
+        if isinstance(error, urllib.error.HTTPError):
+            detail += " HTTP " + str(error.code)
+        elif isinstance(error, subprocess.CalledProcessError):
+            detail += " tool exit " + str(error.returncode)
+        elif isinstance(error, ValueError):
+            detail += ": " + str(error)
+        elif isinstance(error, OSError):
+            detail += " OS code " + str(error.errno)
+        detail = detail.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+        print("::error title=Potato data preparation::" + STAGE + ": " + detail, flush=True)
+        raise SystemExit(1)
