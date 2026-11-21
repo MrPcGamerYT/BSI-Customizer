@@ -13,6 +13,14 @@ var transparency="";
 for(var a=0;a<256;++a)transparency+=String.fromCharCode(a);
 var alphaChunk=chunk("tRNS",transparency);
 var endChunk=chunk("IEND","");
+// Qt.btoa converts QString through UTF-8, corrupting binary PNG bytes >=128.
+// Encode the Latin-1 byte string ourselves instead (also works on Qt 5.15).
+function base64(data){
+    var alphabet="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/",out="";
+    for(var i=0;i<data.length;i+=3){var a=data.charCodeAt(i),b=i+1<data.length?data.charCodeAt(i+1):0,c=i+2<data.length?data.charCodeAt(i+2):0;
+        out+=alphabet[a>>>2]+alphabet[((a&3)<<4)|(b>>>4)]+(i+1<data.length?alphabet[((b&15)<<2)|(c>>>6)]:"=")+(i+2<data.length?alphabet[c&63]:"=");}
+    return out;
+}
 function colored(source,tint){
     var parts=decodeURIComponent(String(source)).split("/"),path=parts.slice(-2).join("/");
     if(!masks[path])path=parts.slice(-3).join("/");
@@ -23,7 +31,7 @@ function colored(source,tint){
     var palette="",pixel=String.fromCharCode(r,g,b);
     for(var i=0;i<256;++i)palette+=pixel;
     var png="\x89PNG\r\n\x1a\n"+chunk("IHDR",bytes32(mask[0])+bytes32(mask[1])+"\x08\x03\x00\x00\x00")+chunk("PLTE",palette)+alphaChunk+chunk("IDAT",mask[2])+endChunk;
-    var result="data:image/png;base64,"+Qt.btoa(png);
+    var result="data:image/png;base64,"+base64(png);
     cache[key]=result;order.push(key);
     if(order.length>128)delete cache[order.shift()];
     return result;

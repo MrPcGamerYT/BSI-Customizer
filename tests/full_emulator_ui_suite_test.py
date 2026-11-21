@@ -266,17 +266,13 @@ Item {
         self.assertIn(b'radius:VoidLiveTheme.Theme.corner',result)
 
     def test_studio09_upgrade_removes_old_absolute_sidebar_bridge(self):
-        import types
-        package=ROOT/'deliverables/VOID-OLED-Emulator-UI.zip'
-        with zipfile.ZipFile(package) as archive:
-            source=archive.read('VOID-OLED-Emulator-UI/VOID-Full-UI.py')
-        # The CI pack becomes 10 later in the job; use 09 only when available.
-        if b'first_frame_sources' in source:self.skipTest('delivered ZIP is already Studio10')
-        old=types.ModuleType('studio09_fixture');old.__file__=str(ROOT/'.cache/old-studio09/VOID-Full-UI.py')
-        sys.modules[old.__name__]=old;exec(compile(source,'studio09-fixture.py','exec'),old.__dict__)
+        # Recreate the 09 native bridge shape with the pinned planner, without
+        # relying on whichever ZIP happens to be present after a packaging run.
+        old=S.runtime()
+        old.remove_optimizer=lambda desired,url:S.live_theme_sources(old,S.without_optimizer(old,desired,url),url)
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder)/'Upgrade09';fixture(root)
-            E.commit(old.runtime().plan_install(root)[0])
+            E.commit(old.plan_install(root)[0])
             self.assertIn(b'BSISidebarVisual.qml',inventory((root/'HD-Player.exe').read_bytes())['PlrSidebar.qml'])
             prior=files(root);backup=E.commit(U.plan_install(root)[0])
             self.assertNotIn(b'BSISidebarVisual.qml',inventory((root/'HD-Player.exe').read_bytes())['PlrSidebar.qml'])
