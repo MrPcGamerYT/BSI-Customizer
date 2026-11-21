@@ -28,17 +28,71 @@ os.environ.setdefault("QT_QUICK_BACKEND", "software")
 # host's SDK/QML paths separate from the Python runtime's own QML plugins below.
 os.environ.setdefault("QT_QUICK_CONTROLS_STYLE", "Default" if os.environ.get("BSI_TEST_QT_API") == "PyQt5" else "Basic")
 if os.environ.get("BSI_TEST_QT_API") == "PyQt5":
+    from PyQt5.QtCore import pyqtSlot as Slot
     from PyQt5.QtCore import QCoreApplication, QFileInfo, QLibraryInfo, QObject, QPointF, QRectF, QStandardPaths, Qt, QUrl, qVersion
     from PyQt5.QtGui import QGuiApplication
     from PyQt5.QtQml import QQmlComponent, QQmlEngine, QQmlExpression
     from PyQt5.QtQuick import QQuickItem
     from PyQt5.QtTest import QTest
 else:
+    from PySide6.QtCore import Slot
     from PySide6.QtCore import QCoreApplication, QFileInfo, QLibraryInfo, QObject, QPointF, QRectF, QStandardPaths, Qt, QUrl, qVersion
     from PySide6.QtGui import QGuiApplication
     from PySide6.QtQml import QQmlComponent, QQmlEngine, QQmlExpression
     from PySide6.QtQuick import QQuickItem
     from PySide6.QtTest import QTest
+
+
+class NativeDisplayFixture(QObject):
+    """Authored native configuration contract, NOT a real guest or restart.
+
+    The real C++ module must invoke these typed public Qt methods. No QML mock
+    replaces Engine, preferences, native-method adapter or file transaction.
+    """
+    def __init__(self):
+        super().__init__()
+        self.committed = {"fb_width": 1920, "fb_height": 1080, "custom_resolution_selected": False,
+                          "dpi": 320, "fps": 90, "renderer": "vlcn", "unrelated": 42}
+        self.draft = dict(self.committed)
+        self.commits = 0
+        self.discards = 0
+        self.writes = []
+
+    @Slot(str, result=int)
+    def confGetInstanceI32(self, key):
+        assert key in ("fb_width", "fb_height"), key
+        return self.draft[key]
+
+    @Slot(str, result=bool)
+    def confGetInstanceBool(self, key):
+        assert key == "custom_resolution_selected", key
+        return self.draft[key]
+
+    @Slot(result=bool)
+    def confIsModified(self):
+        return self.draft != self.committed
+
+    @Slot(str, int)
+    def confSetInstanceI32(self, key, value):
+        assert key in ("fb_width", "fb_height"), key
+        self.writes.append((key, value))
+        self.draft[key] = value
+
+    @Slot(str, bool)
+    def confSetInstanceBool(self, key, value):
+        assert key == "custom_resolution_selected", key
+        self.writes.append((key, value))
+        self.draft[key] = value
+
+    @Slot()
+    def confCommit(self):
+        self.committed = dict(self.draft)
+        self.commits += 1
+
+    @Slot()
+    def confDiscard(self):
+        self.draft = dict(self.committed)
+        self.discards += 1
 
 
 _host_dll_directories = []
@@ -96,6 +150,8 @@ def main():
         assert not profile.exists() and not profile.is_symlink(), "test refuses to overwrite any existing profile"
         cleanup.callback(lambda: profile.unlink(missing_ok=True))
         engine = QQmlEngine()
+        native_display = NativeDisplayFixture()
+        engine.rootContext().setContextProperty("uiBackend", native_display)
         # install-qt-action supplies QML2_IMPORT_PATH for the C++ build SDK. The
         # Python host is a separate, ABI-compatible Qt distribution (not always
         # the identical patch release). Letting both register Controls loads the
@@ -178,7 +234,7 @@ Window {
                     and bounds.right() <= ancestor.width() + .5
                     and bounds.bottom() <= ancestor.height() + .5)
 
-        def click(control):
+        def click(control, x_ratio=.5):
             # Reset buttons exist on every row, including below the viewport.
             # Scroll the real Flickable rather than clicking a clipped item.
             # Focus-follow scrolling is deferred after a previously focused
@@ -208,7 +264,7 @@ Window {
                 if ancestor.clip():
                     assert inside_clip(control, ancestor), (control.objectName(), "is partially clipped", ancestor.width(), ancestor.height(), ancestor.metaObject().className(), window.width(), ancestor.property("contentY"), ancestor.property("contentHeight"))
                 ancestor = ancestor.parentItem()
-            point = control.mapToScene(QPointF(control.width() / 2, control.height() / 2)).toPoint()
+            point = control.mapToScene(QPointF(control.width() * x_ratio, control.height() / 2)).toPoint()
             assert 0 <= point.x() < window.width() and 0 <= point.y() < window.height(), "physical test target is offscreen"
             QTest.mouseClick(window, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, point)
             QTest.qWait(25)
@@ -223,7 +279,9 @@ Window {
             assert info["moduleQtVersion"] == expected, info
         print("ACTUAL loaded public Qt bridge:", json.dumps(info, sort_keys=True), flush=True)
         initial = settings()
-        assert initial["enabled"] is False and len(initial) == 11
+        assert initial["enabled"] is False and initial["potatoMode"] == 0 and len(initial) == 12
+        assert evaluate("Engine.display.available"), evaluate("Engine.display.detail")
+        assert native_display.commits == 0 and not native_display.writes, "opening must not change native Display"
         assert not page.property("pEnableSave") and not window.property("bsiShaderDirty"), "a new neutral profile must not start dirty"
         save_button = item("shaderSave")
         assert save_button.isVisible() and not save_button.isEnabled()
@@ -237,9 +295,7 @@ Window {
         assert settings() == initial, "unsaved native UI edits must not affect the live parameters"
         slider = item("shaderValue-saturation")
         assert slider.property("enabled")
-        point = slider.mapToScene(QPointF(slider.width() * .8, slider.height() / 2)).toPoint()
-        QTest.mouseClick(window, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, point)
-        QTest.qWait(20)
+        click(slider, .8)
         assert evaluate("draft.saturation") > 0, "real pointer input did not move the shader slider"
         assert settings() == initial
         click(item("shaderSave"))
@@ -264,6 +320,7 @@ Window {
         assert save_button.mapToItem(page, QPointF(0, 0)) == footer_position, "feedback must not move the native-style footer"
         keys = list(initial.keys())
         keys.remove("enabled")
+        keys.remove("potatoMode")
         for width in (750, 420, 750):
             window.setWidth(width)
             QTest.qWait(30)
@@ -295,19 +352,68 @@ Window {
         assert settings() == initial
         evaluate("reset()")
         assert not page.property("pEnableSave"), "map insertion order must not create false unsaved changes"
+        # Real popup/keyboard selection, real Save button and actual C++ native
+        # adapter. The config endpoint is an authored double, not a guest/FPS
+        # claim. Mode drafts/Discard must never touch it before Save.
+        def select_potato(index):
+            combo = item("shaderPotatoModes")
+            assert combo.isEnabled()
+            click(combo)
+            assert evaluate("popup.visible", combo), "physical click did not open the native-style mode popup"
+            QTest.keyClick(window, Qt.Key.Key_Home)
+            for _ in range(index):
+                QTest.keyClick(window, Qt.Key.Key_Down)
+            QTest.keyClick(window, Qt.Key.Key_Return)
+            QTest.qWait(30)
+            assert evaluate("draft.potatoMode") == index
+
+        original_display = dict(native_display.committed)
+        select_potato(2)
+        assert page.property("pEnableSave") and window.property("bsiShaderDirty")
+        assert settings() == initial and native_display.commits == 0 and not native_display.writes
+        assert "960" in item("shaderPotatoPreview").property("text")
+        evaluate("fDiscardChanges()")
+        assert not page.property("pEnableSave") and evaluate("draft.potatoMode") == 0 and not native_display.writes
+        select_potato(2)
+        click(save_button)
+        assert settings()["potatoMode"] == 2 and settings()["enabled"] is False, "real native workload reduction must be independent of the postprocess enable flag"
+        assert native_display.committed["fb_width"] == 960 and native_display.committed["fb_height"] == 540
+        assert native_display.committed["custom_resolution_selected"] is True and native_display.commits == 1
+        stored = json.loads(profile.read_text())
+        assert stored["schema"] == "bsi.shaders.v2" and stored["display"]["original"] == {"width": 1920, "height": 1080, "custom": False}
+        assert "pendingDisplay" not in stored and evaluate("Engine.display.restartRequired")
+        assert "restart" in item("shaderPotatoStatus").property("text").lower()
+        assert save_button.mapToItem(page, QPointF(0, 0)) == footer_position, "Potato feedback must not move Save"
+        click(item("shaderEnhance"))
+        assert evaluate("draft.potatoMode") == 2, "visual presets must not silently change native size"
+        click(item("shaderReset"))
+        assert evaluate("draft.potatoMode") == 2 and not page.property("pEnableSave"), "Reset visuals must not silently disable Potato"
+        select_potato(0)
+        click(save_button)
+        assert settings() == initial and native_display.committed == original_display and native_display.commits == 2
+        assert native_display.discards == 0, "shader Discard must not globally discard native settings"
+        assert all(key in ("fb_width", "fb_height", "custom_resolution_selected") for key, _ in native_display.writes)
         failure = evaluate("JSON.stringify(Engine.apply({enabled:true,saturation:NaN}))")
         assert json.loads(failure)["ok"] is False
         assert settings() == initial, "invalid input changed the live state"
         evaluate("setValue('enabled', true)")
         evaluate("fDiscardChanges()")
         assert not page.property("pEnableSave") and settings() == initial
+        assert evaluate("Engine.bindNativeDisplay(null)") is False
+        assert not item("shaderPotatoModes").isEnabled() and not evaluate("Engine.display.available"), "missing native methods must disable Potato, not display a working-looking no-op"
+        evaluate("preset(2)")
+        click(save_button)
+        assert settings()["saturation"] == 22 and native_display.commits == 2, "a missing Display adapter must not disable independent visual settings"
+        evaluate("reset()")
+        click(save_button)
+        assert settings() == initial and native_display.committed == original_display
         assert not warnings, "QML runtime warnings:\n" + "\n".join(warnings)
         window.setVisible(False)
         window.deleteLater()
         QTest.qWait(20)
         engine.deleteLater()
         app.processEvents()
-    print("PASS: real C++ regular-plugin import, single native-style Save footer/clean opacity, physical enable/slider/Save/Enhance and all ten fully visible right-aligned Reset buttons at two widths, native discard callback, preset/reset, atomic isolated persistence and clean QML bindings")
+    print("PASS: real C++ regular-plugin import, single native-style Save footer/clean opacity, physical enable/slider/Save/Enhance and all ten fully visible right-aligned Reset buttons at two widths, native discard callback, preset/reset, atomic isolated persistence, physical native-size Potato Save/Discard/restore independent of visual effects, and clean QML bindings")
     print("LIMIT: fixture window only; native player installation and category navigation, Windows hooks, DirectX/Vulkan and hardware GPU coverage are not certified")
 
 

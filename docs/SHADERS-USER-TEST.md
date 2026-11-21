@@ -93,8 +93,9 @@ inactive. This fallback still requires testing in the real player.
    counter alone is still not visual proof. Close Settings while comparing if
    the game pauses behind it, then reopen to check the count.
 4. Disable effects and Save. The original game image must return and processing
-   must bypass. **Reset all** restores the neutral disabled defaults. Zero values
-   also bypass processing. These are visual effects, not a promise of more FPS,
+   must bypass. **Reset visuals** restores the neutral disabled visual defaults
+   without changing the independent native Potato size. Zero values also bypass
+   postprocessing. These are visual effects, not a promise of more FPS,
    HDR display output or an exact copy of the uploaded shader algorithms.
 5. Repeat for **OpenGL, DirectX and Vulkan**, selecting the game's Graphics
    renderer and fully restarting the player after each change. A loaded graphics
@@ -106,6 +107,39 @@ Also check Save/reopen/restart persistence, individual reset, presets, Discard,
 No/Discard prompts on tab switching and close, per-instance separation, native
 callbacks/Save/footer, resize/fullscreen, changing monitors and hybrid GPUs.
 Test custom/default/hidden icons and Settings Update without losing Shaders.
+
+## Potato graphics — native render size
+
+This new control changes **native Display configuration**, not the archive's
+texture LOD, geometry or a final-frame blur. It is independent of Enable visual
+effects and Vulkan detection. See [why, exact limits and recovery](POTATO-NATIVE-RESOLUTION.md).
+
+1. Record the original native Display size/custom flag. In Shaders, choose
+   **Light · 720 px short edge** or **Strong · 540 px short edge**. At 1920×1080,
+   the previews must be 1280×720 / 960×540 respectively. Portrait/ultrawide aspect
+   ratios must be preserved; unsupported/already-small sizes are refused.
+2. Before saving, leave the tab. Native **No** must keep the draft and **Discard
+   Changes** must revert it, without changing native Display. There is still one
+   stationary Save footer, no second selector in Display or separate overlay.
+3. Select again and **Save changes**. Verify the configured native size and
+   restart notice. The running game's render size is **not** proven changed by
+   this notice. Fully restart the player and verify actual guest/game dimensions
+   and the same game scene. Measure frame times if assessing performance; fewer
+   configured pixels do not guarantee an FPS gain.
+4. Test with visual effects off. Enhance/presets/**Reset visuals** must not alter
+   the native mode. Reopen and check saved mode/size, including another instance
+   retaining its separate configuration.
+5. Choose **Native / restore original**, Save and restart. Verify the exact
+   original size/custom flag, not an assumed 1080p default.
+6. Separately change native Display while a Potato profile is configured. Shaders
+   must report a conflict rather than overwriting that newer size. **Keep current
+   display**, then Save, clears only the old restore snapshot. A native-size Save
+   must also refuse unrelated native unsaved drafts, never commit/discard them.
+
+A disabled/unavailable control is a failed native-method qualification, not a
+working Potato mode. Send its exact diagnostic. Do not force a smaller size,
+change DPI/FPS/renderer to hide a failure, or call saved values an actual-game
+pass. This does not implement or certify texture-only LOD/NVIDIA profile fixes.
 
 ### Vulkan says “Not detected”
 
@@ -159,8 +193,11 @@ Report a bypass/failure as such; do not force it or call saved values a pass.
   **PATCHER → Player interface → Shaders**, inspect again, then choose
   **Remove shaders only**, acknowledge and confirm. This removes the owned
   native source fragments and module, preserving the Settings redesign,
-  unrelated later customizations and saved (now inactive) shader preferences.
-  Remove shaders before using **Restore original Settings panel**.
+  unrelated later customizations and saved shader preferences. **Restore Native
+  render size in Shaders first if desired:** removal does not undo a committed
+  native Display size. With a missing/old module use native Display and restart.
+  Retain the v2 preferences for recovery. Remove shaders before using
+  **Restore original Settings panel**.
 - **Interrupted operation:** **do not launch the player**. Keep
   `<EXE>.bsi-shaders-transaction.json` and its sibling
   `<EXE>.bsi-shaders-<UUID>.recovery` directory. Close all instances, inspect, then

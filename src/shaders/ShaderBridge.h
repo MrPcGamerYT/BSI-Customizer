@@ -10,6 +10,7 @@ class ShaderBridge final : public QObject {
     Q_PROPERTY(QVariantMap saved READ saved NOTIFY settingsChanged)
     Q_PROPERTY(QVariantList controls READ controlList CONSTANT)
     Q_PROPERTY(QVariantMap metrics READ metrics NOTIFY metricsChanged)
+    Q_PROPERTY(QVariantMap display READ display NOTIFY metricsChanged)
     Q_PROPERTY(QString error READ error NOTIFY settingsChanged)
     Q_PROPERTY(QVariantMap bridgeInfo READ bridgeInfo CONSTANT)
 public:
@@ -20,7 +21,10 @@ public:
     QVariantMap metrics() const;
     QString error() const;
     QVariantMap bridgeInfo() const;
-    Q_INVOKABLE QVariantMap apply(const QVariantMap &values);
+    QVariantMap display() const;
+    Q_INVOKABLE bool bindNativeDisplay(QObject *backend);
+    Q_INVOKABLE QVariantMap previewPotato(int mode) const;
+    Q_INVOKABLE QVariantMap apply(const QVariantMap &values,bool keepCurrentDisplay=false);
     Q_INVOKABLE QString diagnostics() const;
     Q_INVOKABLE void copyDiagnostics() const;
     static void attach(QObject *window,const QString &instance,const QString &graphicsRenderer);

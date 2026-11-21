@@ -1,12 +1,14 @@
 # Supplied Free Fire Potato DLL: static review
 
 **Status: analysis only. No supplied DLL was executed, installed, patched, or
-incorporated. No Potato preset has been added and the reported NVIDIA startup
-failure has not been reproduced or fixed.** This review does not certify these
-binaries as safe. The regular `BSIShaders` runtime and native Settings
-behavior are unchanged. Subsequent independently authored sampler-policy work
-is described in [the portability experiment](TEXTURE-QUALITY-PORTABILITY.md);
-that source does not turn these binaries into an installed or verified feature.
+incorporated. Their texture-only LOD effect and the reported NVIDIA startup
+failure have not been reproduced/fixed in the player.** This review does not
+certify these binaries as safe. Subsequent independently authored sampler-policy
+work is described in [the portability experiment](TEXTURE-QUALITY-PORTABILITY.md);
+it remains disconnected from game bindings. The separately implemented
+[native render-size Potato control](POTATO-NATIVE-RESOLUTION.md) changes native
+Display configuration after Save, not these binaries or their texture LOD.
+Neither path turns the supplied binaries into an installed/verified feature.
 
 ## Input and integrity
 
@@ -171,9 +173,9 @@ final-frame effect pass:
   frame times and image quality on the **real** player with/without the profile.
   Software fixtures alone cannot certify NVIDIA driver compatibility.
 
-**This is the next implementation boundary, not an implemented Potato mode or
-an NVIDIA-conflict fix.** The existing final-frame Shaders controls remain
-independent of this analysis.
+**This remains the texture-only implementation boundary, not an implemented
+texture-LOD mode or NVIDIA-conflict fix.** The native-render-size control and
+existing final-frame visual effects are separate mechanisms, not this behavior.
 
 ### Existing Visual Studio-buildable shader source
 

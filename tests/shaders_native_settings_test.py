@@ -21,7 +21,7 @@ import uuid
 from shaders_plugin_ui_test import (
     QCoreApplication, QFileInfo, QGuiApplication, QLibraryInfo, QObject, QPointF,
     QQmlComponent, QQmlEngine, QQmlExpression, QStandardPaths, Qt, QTest, QUrl,
-    configure_host_qt,
+    configure_host_qt, NativeDisplayFixture,
 )
 if os.environ.get("BSI_TEST_QT_API") == "PyQt5":
     from PyQt5.QtCore import pyqtProperty as Property, pyqtSlot as Slot
@@ -31,7 +31,7 @@ else:
 REPO = Path(__file__).resolve().parents[1]
 
 
-class Backend(QObject):
+class Backend(NativeDisplayFixture):
     def __init__(self, instance):
         super().__init__()
         self.instance = instance
@@ -40,10 +40,6 @@ class Backend(QObject):
 
     @Slot(str, result=bool)
     def confGetBool(self, _key):
-        return False
-
-    @Slot(result=bool)
-    def confIsModified(self):
         return False
 
     @Slot(str, result=str)
@@ -57,7 +53,7 @@ class Backend(QObject):
 
     @Slot()
     def confDiscard(self):
-        self.discards += 1
+        super().confDiscard()
 
     @Slot()
     def setSettingsWindowObject(self):
@@ -419,6 +415,40 @@ def main():
             assert evaluate(page, "viewport.contentHeight === Math.ceil(form.implicitHeight) + 20"), "native themed scroll extent did not settle"
             assert not window.property("bsiShaderDirty2")
             initial = evaluate(page, "JSON.stringify(Engine.saved)")
+            assert evaluate(page, "Engine.display.available"), evaluate(page, "Engine.display.detail")
+
+            def select_potato(index):
+                control = named(page, "shaderPotatoModes")
+                click(window, control)
+                assert evaluate(control, "popup.visible")
+                QTest.keyClick(window, Qt.Key.Key_Home)
+                for _ in range(index):
+                    QTest.keyClick(window, Qt.Key.Key_Down)
+                QTest.keyClick(window, Qt.Key.Key_Return)
+                QTest.qWait(30)
+                assert evaluate(page, "draft.potatoMode") == index
+
+            original_display = dict(backend.committed)
+            select_potato(2)
+            assert window.property("bsiShaderDirty2") and not backend.writes and backend.commits == 0
+            tab(window, 0)
+            prompt_button("No")
+            assert window.property("pCurrentTabIndex") == 12 and evaluate(page, "draft.potatoMode") == 2
+            tab(window, 0)
+            prompt_button("Discard Changes")
+            assert window.property("pCurrentTabIndex") == 0 and evaluate(page, "draft.potatoMode") == 0
+            assert not backend.writes and backend.commits == 0, "native No/Discard must not apply a Potato draft"
+            tab(window, 12)
+            select_potato(2)
+            click(window, named(page, "shaderSave"))
+            assert backend.committed["fb_width"] == 960 and backend.committed["fb_height"] == 540 and backend.commits == 1
+            assert evaluate(page, "Engine.saved.potatoMode") == 2 and not evaluate(page, "Engine.saved.enabled")
+            assert not window.property("bsiShaderDirty2") and not backend.confIsModified()
+            assert "restart" in named(page, "shaderPotatoStatus").property("text").lower()
+            select_potato(0)
+            click(window, named(page, "shaderSave"))
+            assert backend.committed == original_display and backend.commits == 2 and backend.discards == 0
+            assert evaluate(page, "JSON.stringify(Engine.saved)") == initial
             click(window, named(page, "shaderEnabled"))
             assert window.property("bsiShaderDirty2")
             tab(window, 0)
@@ -472,7 +502,7 @@ def main():
         QTest.qWait(30)
         engine.deleteLater()
         app.processEvents()
-    print("PASS: " + ("missing regular DLL does not block native startup; shader row/page are inactive, all native callback loops and Settings close remain intact" if missing else "production optional bootstrap imports the real plugin with complete generated About glass; Shaders sorts before About without changing native indexes, retains themed controls, mouse-drag navigation across 13 tabs, native No/Discard on tab and close, Save, persistence/reopen, reset and intact 750x470 layout"))
+    print("PASS: " + ("missing regular DLL does not block native startup; shader row/page are inactive, all native callback loops and Settings close remain intact" if missing else "production optional bootstrap imports the real plugin with complete generated About glass; Shaders sorts before About without changing native indexes, retains themed controls, mouse-drag navigation across 13 tabs, native No/Discard on tab and close, real native-size Potato draft/Save/restore independent of effects, persistence/reopen, reset and intact 750x470 layout"))
     print("LIMIT: Qt/native-contract fixture only; no installed emulator, real game frames, deployment recovery or physical Intel/AMD/NVIDIA coverage is implied")
 
 

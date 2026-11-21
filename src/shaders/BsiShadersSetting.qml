@@ -19,6 +19,7 @@ Item {
     property bool pEnableSave: differs()
     property string feedback: ""
     property bool saveFailed: false
+    property bool keepCurrentDisplay: false
     readonly property color textColor: look.text
     readonly property color mutedColor: look.muted
     readonly property color accent: look.accent
@@ -100,6 +101,7 @@ Item {
         else if (window && window.bsiShaderDirty !== undefined) window.bsiShaderDirty = false
     }
     function differs() {
+        if (keepCurrentDisplay || Number(draft.potatoMode || 0) !== Number(Engine.saved.potatoMode || 0)) return true
         if (!!draft.enabled !== !!Engine.saved.enabled) return true
         for (var i = 0; i < Engine.controls.length; ++i) {
             var key = Engine.controls[i].key
@@ -108,10 +110,22 @@ Item {
         return false
     }
     function fInitUi() {
-        draft = JSON.parse(JSON.stringify(Engine.saved)); feedback = ""; saveFailed = false
+        draft = JSON.parse(JSON.stringify(Engine.saved)); keepCurrentDisplay = false; feedback = ""; saveFailed = false
+    }
+    function initializeDisplay() {
+        // Use exactly the context object used by native Display, not config-file
+        // guessing or an unserializable QObject passed through pComponentArgs.
+        // The C++ bridge verifies public method types/thread and read-back.
+        if (typeof uiBackend !== "undefined") Engine.bindNativeDisplay(uiBackend)
+        fInitUi()
     }
     function fOnQmlLoaded() {
-        resolveStyle(); fInitUi(); pCompLoaded = true; publishDirty()
+        resolveStyle()
+        // A page Loader can finish before the parent's Bootstrap completes.
+        // Bind once after construction, never call an unattached backend or
+        // repeatedly reinitialize a user's draft on the status-poll timer.
+        Qt.callLater(initializeDisplay)
+        fInitUi(); pCompLoaded = true; publishDirty()
         var host = settingsHost()
         if (host && bsiTabIndex >= 0 && host.bIcons[bsiTabIndex] === undefined) {
             var icons = Object.assign({}, host.bIcons)
@@ -127,7 +141,8 @@ Item {
         var next = Object.assign({}, draft); next[key] = value; draft = next
     }
     function presetValues(index) {
-        var next = {enabled: index > 0}
+        // Visual presets/Reset must not silently change the native render size.
+        var next = {enabled: index > 0, potatoMode: Number(draft.potatoMode || 0)}
         for (var i = 0; i < Engine.controls.length; ++i) next[Engine.controls[i].key] = 0
         if (index === 1) {
             next.sharpen = 30; next.fxaa = 30
@@ -156,15 +171,15 @@ Item {
     function reset() { draft = presetValues(0) }
     function preset(index) { if (index >= 0 && index <= 4) draft = presetValues(index) }
     function save() {
-        var response = Engine.apply(draft)
+        var response = Engine.apply(draft, keepCurrentDisplay)
         saveFailed = !response.ok
-        feedback = response.ok ? qsTr("Changes saved") : response.msg
+        feedback = response.msg
         if (response.ok) {
-            draft = JSON.parse(JSON.stringify(Engine.saved))
+            draft = JSON.parse(JSON.stringify(Engine.saved)); keepCurrentDisplay = false
             var window = page.Window.window
             if (window && typeof window.fShowToast === "function") {
-                window.fShowToast(qsTr("Changes saved"))
-                feedback = ""
+                window.fShowToast(response.displayChanged ? qsTr("Render size saved — restart the player") : qsTr("Changes saved"))
+                if (!response.displayChanged) feedback = ""
             }
         }
         return response.ok
@@ -243,7 +258,7 @@ Item {
                         ShaderButton {
                             objectName: "shaderReset"
                             shaderStyle: look
-                            text: qsTr("Reset all"); onClicked: page.reset()
+                            text: qsTr("Reset visuals"); onClicked: page.reset()
                         }
                         Item { Layout.fillWidth: true }
                     }
@@ -251,6 +266,47 @@ Item {
                         visible: !!page.draft.enabled && page.presetIndex === 0
                         Layout.fillWidth: true; wrapMode: Text.Wrap
                         text: qsTr("Neutral bypass: choose Enhance or a preset to change the image.")
+                        color: look.muted; font: look.smallFont
+                    }
+                    Rectangle { Layout.fillWidth: true; height: 1; color: look.separator }
+                    Text { text: qsTr("Potato graphics · native render size"); color: look.text; font: look.bodyFont }
+                    Text {
+                        Layout.fillWidth: true; wrapMode: Text.Wrap
+                        text: qsTr("Reduces the real native render resolution, independently of visual effects. Not texture-only LOD, geometry removal or a color preset.")
+                        color: look.muted; font: look.smallFont
+                    }
+                    RowLayout {
+                        Layout.fillWidth: true; spacing: 12
+                        ShaderComboBox {
+                            objectName: "shaderPotatoModes"
+                            shaderStyle: look
+                            Layout.preferredWidth: 270; Layout.fillWidth: true
+                            model: [qsTr("Native / restore original"), qsTr("Light · 720 px short edge"), qsTr("Strong · 540 px short edge")]
+                            currentIndex: Number(page.draft.potatoMode || 0)
+                            enabled: Engine.display.available && !Engine.display.pending && !Engine.display.conflict
+                            Accessible.description: qsTr("Change actual native Display framebuffer size. Only Save writes it, and a full player restart is required. This does not change texture LOD or FPS caps.")
+                            onActivated: { page.keepCurrentDisplay = false; page.setValue("potatoMode", currentIndex) }
+                        }
+                        ShaderButton {
+                            objectName: "shaderPotatoKeep"
+                            shaderStyle: look
+                            text: qsTr("Keep current display")
+                            visible: Engine.display.available && (Engine.display.conflict || Engine.display.pending)
+                            onClicked: { page.setValue("potatoMode", 0); page.keepCurrentDisplay = true }
+                        }
+                    }
+                    Text {
+                        objectName: "shaderPotatoPreview"
+                        Layout.fillWidth: true; wrapMode: Text.Wrap
+                        text: page.keepCurrentDisplay ? qsTr("Save to keep the current native Display size and forget the previous restore snapshot. No display value will be written.")
+                            : Engine.display.available ? Engine.previewPotato(Number(page.draft.potatoMode || 0)).msg : Engine.display.detail
+                        color: look.secondary; font: look.smallFont
+                    }
+                    Text {
+                        objectName: "shaderPotatoStatus"
+                        visible: Engine.display.available
+                        Layout.fillWidth: true; wrapMode: Text.Wrap
+                        text: qsTr("Configured native Display: ") + Engine.display.width + " × " + Engine.display.height + "\n" + Engine.display.detail
                         color: look.muted; font: look.smallFont
                     }
                     Rectangle { Layout.fillWidth: true; height: 1; color: look.separator }
@@ -328,7 +384,7 @@ Item {
                     }
                     Text {
                         Layout.fillWidth: true; wrapMode: Text.Wrap
-                        text: qsTr("Enhance is a balanced color and detail preset, not ray tracing. Tonal pop is not HDR display output. Unsupported or protected surfaces are left untouched. Experimental; actual GPU/driver validation is incomplete. No FPS or system tweaks.")
+                        text: qsTr("Enhance is a balanced color and detail preset, not ray tracing. Tonal pop is not HDR display output. Unsupported or protected surfaces are left untouched. Experimental; actual GPU/driver validation is incomplete. Native Potato size needs a restart and is not a texture override. No FPS-cap or driver-profile tweaks.")
                         color: look.muted; font: look.smallFont
                     }
                     Text {
@@ -350,7 +406,8 @@ Item {
             spacing: 4
             Text {
                 Layout.fillWidth: true; elide: Text.ElideRight
-                text: qsTr("Changes apply after saving")
+                text: Number(page.draft.potatoMode || 0) !== Number(Engine.saved.potatoMode || 0)
+                    ? qsTr("Render size needs a player restart") : qsTr("Effects apply after saving")
                 color: look.secondary; font: look.smallFont
             }
             ShaderButton {

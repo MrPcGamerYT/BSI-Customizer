@@ -1,7 +1,9 @@
 # Portable texture-quality experiment — not an enabled player feature
 
-**No universal Potato mode is implemented or enabled in Shaders. No merge is
-approved by this experiment.** This is independently authored, Visual
+**No universal texture-LOD Potato mode is implemented or enabled in Shaders.
+No merge is approved by this experiment.** The separate
+[native render-size Potato control](POTATO-NATIVE-RESOLUTION.md) changes actual
+Display configuration after Save, not game texture/sampler bindings. This is independently authored, Visual
 Studio-buildable source for the common sampler policy and API descriptor
 adapters. It does not intercept game textures, rewrite descriptor bindings, or
 replace a system DLL. The existing ten visual controls, native Save/Discard,
@@ -34,10 +36,12 @@ reduction on every GPU, game, driver, profile or emulator.
 
 For a broadly portable **performance** adjustment now, use the emulator's own
 Display settings to lower its render resolution while preserving the required
-aspect ratio. That changes actual rendering workload independently of GPU
-vendor/API, but is not the same texture-only appearance as the reference DLL;
-apps can also choose their own internal resolution. No resolution setting was
-changed automatically by this work. FPS remains workload-dependent.
+aspect ratio. The new Shaders native-size control wires that same config path
+through explicit Save, original-size restoration and recovery. It reduces the
+configured native framebuffer independently of GPU vendor/API but is not the
+same texture-only appearance as the reference DLL; apps can choose their own
+internal resolution. No setting changes on mode selection/open/Discard. Actual
+player restart/render size and FPS remain separately unverified.
 
 ## Implemented source boundary
 

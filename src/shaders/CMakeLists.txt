@@ -25,7 +25,8 @@ find_package(Qt${QT_VERSION_MAJOR} ${bsi_qt_minimum} REQUIRED COMPONENTS Core Gu
 if(WIN32 AND NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
     message(FATAL_ERROR "The shader plugin currently supports x64 players only")
 endif()
-add_library(BSIShaders MODULE ShaderPlugin.cpp ShaderBridge.cpp ShaderBridge.h Runtime.cpp
+add_library(BSIShaders MODULE ShaderPlugin.cpp ShaderBridge.cpp ShaderBridge.h
+    ShaderPreferences.cpp ShaderPreferences.h NativeDisplayBinding.cpp NativeDisplayBinding.h PotatoResolution.h Runtime.cpp
     Runtime.h RendererCapabilities.h Parameters.h ShaderSources.h GlPipeline.cpp GlPipeline.h
     VulkanPipeline.cpp VulkanPipeline.h VulkanSpirv.h PresentationHooks.cpp shaders.qrc)
 target_include_directories(BSIShaders PRIVATE ../third_party/vulkan/include)

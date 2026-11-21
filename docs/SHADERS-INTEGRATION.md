@@ -41,9 +41,13 @@ and statically inspected. See [the Potato DLL review](POTATO-DLL-REVIEW.md) for
 verified identities, the observed 1.5/3.0 OpenGL texture-LOD behavior, compatibility
 risks and Visual Studio build instructions for the existing regular module.
 It contains no source/license and has not been executed or incorporated. No
-Potato mode or NVIDIA Profile Inspector startup-conflict fix is implemented;
-that report distinguishes observed binary behavior from the still-unreproduced
-failure and the prerequisites for a separate source implementation. The
+texture-only Potato mode or NVIDIA Profile Inspector startup-conflict fix is
+implemented. A separate, independently authored **native render-size Potato**
+control is now wired into Shaders: see [implementation, rationale and safety](POTATO-NATIVE-RESOLUTION.md).
+It lowers the real native Display configuration (Save + restart), not texture
+LOD, and is not proof of a live game-resolution/FPS improvement. The archive
+report distinguishes observed binary behavior from the still-unreproduced
+failure and prerequisites for separate texture-binding work. The
 independent [texture-quality portability experiment](TEXTURE-QUALITY-PORTABILITY.md)
 now provides a guarded shared sampler policy, typed API descriptor adapters and
 owned-resource tests. It is **not wired to game resources or enabled as a preset**;
@@ -83,8 +87,14 @@ or `vulkan-1.dll`. The existing arbitrary startup-DLL feature remains separate.
   embedded in the Customizer's default/custom-icon catalog. A derived PNG is
   available for the experimental plugin's runtime icon.
 - Standalone experimental Qt plugin, native C++ settings bridge, bounded shader
-  values, atomic per-instance persistence, and a shader-only QML page with
-  presets, individual/all reset, Save/Discard and renderer diagnostics.
+  values, atomic per-instance persistence, and a Shaders QML page with
+  presets, individual/visual reset, Save/Discard and renderer diagnostics.
+- Independent **Potato graphics · native render size**: typed public Display
+  calls, aspect-preserving 720/540-short-edge plans, original/target snapshots,
+  native commit/read-back, external-change refusal/explicit Keep and bounded
+  interrupted-save recovery. Presets/Reset visuals leave the native mode alone.
+  This is actual native configuration, not a final-frame effect or texture LOD;
+  restart/game-resolution/performance validation remains required.
 - Independent OpenGL/GLES, DirectX 11, DirectX 12 (Microsoft D3D11On12 on the
   actual captured D3D12 queue), and native Vulkan processing pipelines, sharing
   original effect math: saturation, contrast, warmth, shadow lift, tonal pop,
@@ -93,6 +103,9 @@ or `vulkan-1.dll`. The existing arbitrary startup-DLL feature remains separate.
   exact implementation of the upload's FXAA algorithm.
 - Experimental WGL/EGL, DXGI factory/Present/Present1/resize/release/color-space,
   and Vulkan loader/getProc/device/surface/swapchain/acquire/present hooks.
+  Up to four complete export-discovered Vulkan providers have independent
+  originals/TLS routes and handle registries, including late-loaded differently
+  named providers. Normal created queues are captured before an explicit getter.
   Surface/window ownership, native setting and capability checks gate effects.
   **Not certified in a running player or on physical GPU hardware.** A DLL
   hooking some graphics entry points alone is not proof of game integration.
@@ -161,6 +174,33 @@ links to its separate Settings-panel preparation UI rather than guessing an
 unknown player's shell. Existing player installations change only after the
 explicit authorized operation. See [package/transaction safety and limits](SHADER-PACKAGE-TRANSACTIONS.md)
 and the [real-player verification checklist](SHADERS-USER-TEST.md).
+
+### Current rendering mitigation and capture evidence
+
+The v20 Settings design confines shell/tab material traversal to generated
+surfaces, with **every page Loader as a hard boundary**, an opaque flat native
+page/footer backing, and flat owned Shaders surfaces. It does not rewrite
+native backgrounds, slider handles or global Overlay popups. The measured
+legacy window is **2434/2468 bytes** (34-byte reserve). This responds to reports
+of game-through pages and stretched Shaders triangles; passing Qt fixtures is
+**not an installed-player root-cause diagnosis or confirmation of repair**.
+
+Vulkan diagnostics now separate requested/observed game API, processed frames,
+loader/instance/device/Win32-surface/swapchain/present lifecycle evidence and
+precise queue/HWND exclusion reasons. **Copy rendering status** is user-triggered
+clipboard output only. Worker scans cannot erase a newer active game result.
+Do not infer game ownership or shader success from lifecycle counters.
+
+At `250e98f`, [shader CI 44860490109](https://github.com/dsajgddghdsaakovvgheww/BSI-Customizer/actions/runs/44860490109)
+passes all six jobs, including Windows Qt 5.15.2 / 6.2.4 bridges, two distinct
+provider DLL doubles through actual MinHook, native Qt UI contracts, 35-phone
+recovery on four pinned images, strict glass pixels/negative controls, D3D WARP
+and separate Linux native Vulkan/GL software pixels/sanitizers. The first loader
+fixture failed because MSVC ICF folded identical authored destruction stubs;
+the corrected fixture gives each export a distinct observable body and asserts
+unique dispatch addresses before capture. No production safety assertion was
+removed. These runs **predate the native-resolution Potato extension** and do
+not verify the affected player's “Not detected” condition or physical GPUs.
 
 ### Fixed-resource capacity now passes read-only planning on four references
 

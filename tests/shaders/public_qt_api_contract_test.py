@@ -12,9 +12,14 @@ SHADERS = ROOT / "src/shaders"
 PUBLIC = {
     "ShaderPlugin.cpp": {"QQmlEngine", "QQmlExtensionPlugin", "QtQml/qqml.h"},
     "ShaderBridge.h": {"QObject", "QVariantMap", "QVariantList", "QQmlParserStatus"},
-    "ShaderBridge.cpp": {"QCoreApplication", "QClipboard", "QGuiApplication", "QCryptographicHash", "QDir", "QFile", "QFileInfo", "QJsonDocument",
-                         "QJsonObject", "QMetaType", "QPlatformSurfaceEvent", "QPointer", "QSaveFile", "QSet",
-                         "QStandardPaths", "QThread", "QTimer", "QWindow"},
+    "ShaderBridge.cpp": {"QCoreApplication", "QClipboard", "QGuiApplication", "QCryptographicHash", "QDir", "QFileInfo",
+                         "QPlatformSurfaceEvent", "QPointer", "QSet", "QStandardPaths", "QThread", "QTimer", "QWindow"},
+    # GUI-side native Display preferences; none of these Qt objects may cross
+    # into the renderer or its platform callbacks. Introspection is public API.
+    "NativeDisplayBinding.h": {"QObject", "QPointer", "QString"},
+    "NativeDisplayBinding.cpp": {"QCoreApplication", "QMetaMethod", "QMetaType", "QThread"},
+    "ShaderPreferences.h": {"QByteArray", "QString", "QVariantMap"},
+    "ShaderPreferences.cpp": {"QDir", "QFile", "QFileInfo", "QJsonDocument", "QJsonObject", "QLockFile", "QMetaType", "QSaveFile"},
 }
 for path in sorted((*SHADERS.glob("*.cpp"), *SHADERS.glob("*.h"))):
     source = path.read_text()
