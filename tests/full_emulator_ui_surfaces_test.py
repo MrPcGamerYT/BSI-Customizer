@@ -146,8 +146,8 @@ Window {
     assert restart.property('pColor').property('notice').name()=='#ffcc66','notice semantics lost'
     body=restart.property('contentItem');background=restart.property('background')
     # Dialog root + separate header/footer must all be traversed, not only contentItem.
-    face=find(background.parentItem(),'voidReferenceVisualBackground')
-    assert face is not None and face.property('radius')==12
+    face=next((child for child in background.parentItem().childItems() if child.property('visualKind')=='dialog'),None)
+    assert face is not None and face.property('radius')==12, str([(child.objectName(),child.property('visualKind'),child.property('radius')) for child in background.parentItem().childItems()])+str(warnings)
     footer=restart.property('footer')
     def by_text(item,text):
         if item.property('text')==text:return item
@@ -155,9 +155,9 @@ Window {
             match=by_text(child,text)
             if match is not None:return match
     save=by_text(footer,'Restart now');assert save is not None
-    click(window,save);assert window.property('saved')==1,'native dialog button callback lost'
+    click(window,save);assert window.property('saved')==1,'native dialog button callback lost: '+str(warnings)
     volume=window.findChild(QObject,'volumeWindow');mute=find(volume.contentItem(),'muteAll')
-    assert mute is not None and mute.property('pColor').property('normal').property('borderColor').name()=='#353542'
+    assert mute is not None and mute.property('pColor').property('normal').property('borderColor').name()=='#353542', str(warnings)
     slider=find(volume.contentItem(),'volumeSlider');before=slider.property('value')
     click(volume,slider);assert slider.property('value')!=before
     click(volume,mute);assert window.property('muted')==1
