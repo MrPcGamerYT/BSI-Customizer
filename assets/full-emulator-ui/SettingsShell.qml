@@ -14,22 +14,14 @@ Item {
     readonly property int bsiRailWidth: bsiCompact ? 58 : 182
     readonly property var nativeTabs: (bsiHost && bsiHost.pSettingsItems) ? bsiHost.pSettingsItems.pSettingElements : []
     readonly property var bsiTabs: tabEntries()
-    readonly property bool optimizerActive: bsiHost ? bsiHost.pVoidOptimizerActive : false
     property bool motionEnabled: Theme.motionEnabled
-    property bool optimizerLoaded: false
-    onOptimizerActiveChanged: if (optimizerActive) optimizerLoaded=true
-    readonly property int optimizerNavIndex: nativeTabs.length
     function tabEntries() {
         var result = []
-        var extra = {entry:{pButtonId:"voidOptimizer",pButtonText:"VOID Optimizer",pShowRedDot:false},nativeIndex:-1,optimizer:true}
-        if (!nativeTabs.length) return [extra]
-        for (var i = 0; i < nativeTabs.length; ++i) {
-            result.push({entry:nativeTabs[i],nativeIndex:i,optimizer:false})
-        }
-        result.push(extra)
+        for (var i = 0; i < nativeTabs.length; ++i)
+            result.push({entry:nativeTabs[i],nativeIndex:i})
         return result
     }
-    readonly property int selectedIndex: optimizerActive ? optimizerNavIndex : bsiHost ? bsiHost.pCurrentTabIndex : 0
+    readonly property int selectedIndex: bsiHost ? bsiHost.pCurrentTabIndex : 0
     property alias pageContainer: bsiPageBody
     function stylePage(page) { nativeStyle.schedule(page) }
 
@@ -55,7 +47,7 @@ Item {
         property color stroke: Theme.text
         sourceSize.width: 48; sourceSize.height: 48
         fillMode: Image.PreserveAspectFit
-        source: Icons.pngUrl(kind === "bolt" ? "optimizer" : kind)
+        source: Icons.pngUrl(kind)
         opacity: Qt.colorEqual(stroke,Theme.muted) ? 0.65 : 1
     }
 
@@ -206,8 +198,7 @@ Item {
                     }
                     // Native code alone decides whether an unsaved page can be left.
                     onClicked: if (shell.bsiHost) {
-                        if (nativeRow.optimizer) shell.bsiHost.fVoidSelectOptimizer()
-                        else shell.bsiHost.fVoidSelectNative(nativeRow.nativeIndex)
+                        shell.bsiHost.fVoidSelectNative(nativeRow.nativeIndex)
                     }
                     ToolTip.visible: hovered && (shell.bsiCompact || tabLabel.truncated)
                     ToolTip.text: nativeEntry.pButtonText; ToolTip.delay: 400
@@ -224,20 +215,11 @@ Item {
         // duplicate Save button, duplicate page title or substitute backend.
         Item {
             id: bsiPageBody
-            visible: !shell.optimizerActive
             objectName: "bsiSettingsPageContainer"
             anchors.left: rail.right; anchors.leftMargin: 24
             anchors.right: parent.right; anchors.rightMargin: 16
             anchors.top: header.bottom; anchors.topMargin: 12
             anchors.bottom: parent.bottom; anchors.bottomMargin: 22
-        }
-        Loader {
-            id: optimizer
-            objectName: "voidSettingsOptimizerLoader"
-            anchors.fill: bsiPageBody
-            active: shell.optimizerActive || shell.optimizerLoaded
-            visible: shell.optimizerActive
-            source: "OptimizerPage.qml"
         }
         NativeControlStyle { id: nativeStyle; objectName: "voidNativeControlStyle"; pages: bsiPageBody; visible: false }
     }

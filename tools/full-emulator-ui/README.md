@@ -11,15 +11,15 @@ their compiled-cache owners are patched in the established backed-up transaction
 - Black Settings shell with a full native-page stack, isolated source→ID→label
   Settings icons, rounded selected navigation, version badge and restrained motion.
 - All eligible native Settings pages; original models, validation, Save/discard,
-  page indices and backend callbacks remain. Optimizer is appended last.
+  page indices and backend callbacks remain. No optimizer tab is added.
 - Sidebar and topbar passive icon/hover styling; existing input/shortcuts remain.
 - Buttons, dropdowns, switches, checks/radios, fields and sliders on those surfaces.
 - All mapped eligible dialog/popup QML and controls-editor QML, including native
   volume/game-controls/exit/editor surfaces when they exist in the selected build.
   Palette/corners/hover color transitions are applied across the mapped inventory;
   supported window subtrees also receive the passive native-control adapter.
-- Studio04 optimizer page and the latest fixed Helper06 are retained. The complete
-  shared icon library stays separate from Settings symbols (no limited Icons.js).
+- No optimizer page, sidebar action, F9 optimizer shortcut or Helper executable
+  is included. The complete shared icon library stays separate from Settings symbols.
 
 **Not literally every UI-looking file can be rewritten safely.** Boot/loading,
 auth/account/legal, shared boot dependencies, Qt framework code, JavaScript
@@ -31,7 +31,7 @@ snapshot does not prove compatibility or exact appearance on a live OEM player.
 
 ## Windows installation
 
-1. Restore and close any optimizer session. Close all players and the multi-instance
+1. Close all players and the multi-instance
    manager. Keep `.VOID-Reference-UI.json` and all old backup folders.
 2. Extract the entire ZIP outside the emulator into a permanent folder. Python
    **3.9+** is required. The scripts do not download anything at installation time.
@@ -49,7 +49,7 @@ snapshot does not prove compatibility or exact appearance on a live OEM player.
    every changed binary, external asset and the UI state.
 6. Restart the player. Settings must show **CARBON SUITE 07**. Test every native
    page's controls/Save/discard, sidebar/topbar, volume/game-controls/exit popups,
-   controls editor and optimizer. Boot/auth must behave exactly as before.
+   controls editor. Boot/auth must behave exactly as before.
 7. If a different/cached page appears or any safety check refuses, STOP. Run
    **DIAGNOSE-UI.cmd** and review/share the diagnostic ZIP. Do not delete state,
    force replacement, or copy loose source-preview files over the emulator.
@@ -60,13 +60,13 @@ updates are refused, not blindly adopted. A different source contract/build can
 also be refused. In either case diagnostics are needed before a safe migration.
 Do not use the separate historical mixed-UI migration unless specifically audited.
 
-## Existing Helper06
+## No optimizer
 
-The optional **Helper/** directory is the complete tested Helper06 package.
-If your existing helper already says HELPER 06, keep that registered installation;
-Suite07 does not register another copy. Settings continues to use voidoptimizer-v3.
-If upgrading an older helper, restore/close it and replace its EXE + BUILD-REPORT
-in the same registered folder as previously instructed. Never delete recovery.
+This corrected pack removes the optimizer tab/sidebar entry and its F9 shortcut.
+It includes no optimizer/helper executable and registers no protocol. Existing
+separately registered helpers/recovery are not deleted or modified. When upgrading
+an already-applied tracked UI pack, old now-unreferenced optimizer asset files may
+remain on disk; the emulator no longer loads them. Keep original backups/state.
 
 ## Editing and recovery
 
@@ -90,7 +90,6 @@ merely to get around a mismatch. Do not run other installers concurrently.
 Synthetic PE/RCC tests exercise the full reviewed source inventory, source/cache
 mapping, all-source export, untouched boot/auth/JS, idempotence, asset-state mismatch
 refusal and byte-exact restoration. Qt tests exercise the connected shell, native
-control doubles, click routing, popup open/close, lazy optimizer and passive chrome.
+control doubles, click routing, popup open/close, absence of optimizer entries and passive chrome.
 Fixture screenshots are labelled examples, not live MSI/BlueStacks captures.
-Helper06's own tested ZIP/build report is included without rebuilding its binary.
 See `BUILD-REPORT.json` and `Source/PROVENANCE.json`. No player EXE/DLL is distributed.

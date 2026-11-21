@@ -17,7 +17,8 @@ LEGACY_B85 = b''  # bundled by build.py
 ASSETS_B85 = b''  # bundled by build.py
 LEGACY_SHA256 = ''
 ASSETS_SHA256 = ''
-ROOT = Path(__file__).resolve().parents[2]
+# A bundled release may live directly below a drive root (e.g. D:\VOID-UI).
+ROOT = Path(__file__).resolve().parent if LEGACY_B85 else Path(__file__).resolve().parents[2]
 PREFIX = 'Assets/VOIDReferenceUI/'
 
 
@@ -38,7 +39,16 @@ def runtime():
     module = types.ModuleType('void_suite07_native_engine')
     module.__file__ = __file__
     sys.modules[module.__name__] = module
-    exec(compile(source, 'pinned-void-ui-engine.py', 'exec'), module.__dict__)
+    # Extend the pinned planner AFTER native state/source checks and BEFORE cache,
+    # binary and state generation. This also removes additions on tracked upgrades.
+    anchor = "    if full_emulator_ui:\n        name='PlrSidebar.qml'"
+    text = source.decode('utf-8')
+    if text.count(anchor) != 1:
+        raise RuntimeError('Pinned planner hook changed; review required.')
+    text = text.replace(anchor, "    desired = remove_optimizer(desired, url)\n"+anchor, 1)
+    text = text.replace('Settings now uses the reference shell and contains the VOID Optimizer tab.', 'Settings now uses the native-only Carbon shell (no optimizer).')
+    exec(compile(text, 'pinned-void-ui-engine.py', 'exec'), module.__dict__)
+    module.remove_optimizer = lambda desired, url: without_optimizer(module, desired, url)
     packed = module.payload()
     if ASSETS_B85:
         data = base64.b85decode(ASSETS_B85)
@@ -59,6 +69,7 @@ def runtime():
     assets['design.json'] = design_bytes
     config = configure(design, json.loads(packed['theme.json']))
     assets['Theme.qml'] = theme_source(design, config)
+    packed = {name: value for name, value in packed.items() if not name.startswith(PREFIX)}
     packed.update({PREFIX+name: value for name, value in assets.items()})
     packed['theme.json'] = (json.dumps(config, indent=2)+'\n').encode('utf-8')
     module.payload = lambda: packed
@@ -93,6 +104,7 @@ def runtime():
     def plan(root, **kwargs):
         kwargs['full_emulator_ui'] = True
         planned, report = original_plan(root, **kwargs)
+        report['optimizer_included'] = False
         rows = {row['name']: dict(row) for row in report.get('native_coverage', [])}
         for row in report['resources']:
             item = rows.setdefault(row['name'], {})
@@ -108,6 +120,27 @@ def runtime():
 
     module.plan_install = plan
     return module
+
+
+def without_optimizer(module, desired, url):
+    """Remove only exact engine-owned additions; never rewrite native callbacks."""
+    result = dict(desired)
+    for name in ('UiSettingsWindow.qml', 'PlrSidebar.qml'):
+        original = result[name]
+        text = original.decode('utf-8-sig')
+        if name == 'UiSettingsWindow.qml':
+            text = text.replace(module.ROOT_BLOCK, '\n// VOID REFERENCE UI V3 NATIVE-ONLY\nfunction fVoidSelectNative(index) { fChangeSelectedSetting(index) }\n')
+            text = text.replace(module.SWITCH_BLOCK, '').replace(module.COMPLETE_BLOCK, '')
+        else:
+            block = module.SIDEBAR_BLOCK.replace('SIDEBAR_SKIN_URL', json.dumps(url+'SidebarSkin.qml'))
+            loader = '\n// VOID REFERENCE UI V3 NATIVE-ONLY\nLoader { objectName:"voidReferenceSidebarSkinLoader"; source:'+json.dumps(url+'SidebarSkin.qml')+'; onLoaded:item.host=iSidebar }\n'
+            text = text.replace(block, loader).replace(module.SIDEBAR_ITEM, '')
+        text = text.replace('import '+json.dumps(url+'Navigation.js')+' as VoidUiNav\n', '')
+        if any(token in text for token in ('fVoidSelectOptimizer', 'voidOptimizer', 'VoidUiNav', 'pVoidOptimizer')):
+            raise RuntimeError('Unrecognized optimizer integration; no partial removal: '+name)
+        module.scan(module.manager(), text)
+        result[name] = (('\ufeff' if original.startswith(b'\xef\xbb\xbf') else '')+text).encode('utf-8')
+    return result
 
 
 def configure(design, original):

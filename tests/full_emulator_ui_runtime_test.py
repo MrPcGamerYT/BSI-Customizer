@@ -50,7 +50,7 @@ with tempfile.TemporaryDirectory() as temporary:
     temp=Path(temporary)
     (temp/'UiImageButton.qml').write_text('''import QtQuick 2.15
 import QtQuick.Controls 2.15
-Button { property string asset:"SidebarEcoMode"; property string pVoidElementId:"voidOptimizer"; property bool pImageAnimationRunning:false; width:40; height:40 }
+Button { property string asset:"SidebarEcoMode"; property string pVoidElementId:"settings"; property bool pImageAnimationRunning:false; width:40; height:40 }
 ''')
     for name in ['UiSlider.qml','UiRowLayout.qml','UiColumnLayout.qml']:
         (temp/name).write_bytes((ROOT/'reference/full-emulator-ui/controls'/name).read_bytes())
@@ -105,7 +105,7 @@ Window {
  // Separate passive-sidebar fixture, initially empty to exercise late delegate discovery.
  Item{id:sidebar;objectName:"testSidebar";x:880;y:180;width:40;height:100;property var pKebabMenuWin:null}
  Skin.SidebarSkin{id:sidebarSkin;host:sidebar}
- Component{id:lateButton;UiImageButton{objectName:"testOptimizerSidebar"}}
+ Component{id:lateButton;UiImageButton{objectName:"testLateSidebar"}}
  function addLateSidebarButton(){lateButton.createObject(sidebar)}
  Text{z:1000;anchors.bottom:parent.bottom;anchors.horizontalCenter:parent.horizontalCenter;text:"Qt component test — native-page doubles; NOT live MSI";color:"#aaaaaa";font.pixelSize:9}
 }'''.replace('ASSETS',url)
@@ -130,22 +130,17 @@ Window {
     QTest.keyClick(window,Qt.Key_Escape);settle()
     field=visual(root,'testField');click(field);[QTest.keyClick(window,key) for key in (Qt.Key_N,Qt.Key_A,Qt.Key_T,Qt.Key_I,Qt.Key_V,Qt.Key_E)];assert field.property('text')=='native'
     style=visual(root,'voidNativeControlStyle');assert style.property('styledControls')>=6
-    # Clicking Optimizer follows the host's guard, not a synthetic native model index.
-    window.setProperty('blockSwitch',True);click(visual(root,'bsiSettingsTab_3'))
-    assert window.property('requested')==-2 and not window.property('pVoidOptimizerActive')
-    window.setProperty('blockSwitch',False);click(visual(root,'bsiSettingsTab_3'))
-    assert window.property('pVoidOptimizerActive') and window.property('pCurrentTabIndex')==0
-    panel=visual(root,'voidEmbeddedOptimizerPage');assert panel is not None
-    panel.setProperty('previewOnly',True);panel.setProperty('timer100ns',10000);panel.setProperty('keepAwake',True)
-    requests=[];panel.reviewRequested.connect(requests.append)
+    # No extra optimizer tab/page or shortcut. Native guard still owns switching.
+    assert visual(root,'bsiSettingsTab_3') is None
+    assert visual(root,'voidSettingsOptimizerLoader') is None
+    window.setProperty('blockSwitch',True);click(visual(root,'bsiSettingsTab_1'))
+    assert window.property('requested')==1 and window.property('pCurrentTabIndex')==0
+    window.setProperty('blockSwitch',False);click(visual(root,'bsiSettingsTab_1'))
+    assert window.property('pCurrentTabIndex')==1
     from PySide6.QtCore import QMetaObject
-    QMetaObject.invokeMethod(panel,'review');settle()
-    assert len(requests)==1 and requests[0].startswith('voidoptimizer-v3://review?') and 'timer=10000&awake=1&autorestore=1' in requests[0]
-    assert 'Preview only' in panel.property('feedback')
-    click(visual(root,'bsiSettingsTab_1'));assert not window.property('pVoidOptimizerActive') and window.property('pCurrentTabIndex')==1
     QMetaObject.invokeMethod(window,'addLateSidebarButton');settle()
-    sidebar=visual(root,'testOptimizerSidebar');face=visual(sidebar,'voidReferenceSidebarFace')
-    assert face is not None and face.property('known') and face.property('iconKey')=='optimizer'
+    sidebar=visual(root,'testLateSidebar');face=visual(sidebar,'voidReferenceSidebarFace')
+    assert face is not None and face.property('known') and face.property('iconKey')=='settings'
     assert sidebar.property('contentItem').property('opacity')==0
     if args.screenshot:
         args.screenshot.parent.mkdir(parents=True,exist_ok=True)
@@ -154,4 +149,4 @@ Window {
     assert not warnings,'\n'.join(warnings)
     window.setProperty('visible',False)
     window.deleteLater();settle()
-print('PASS: Qt component/input fixture: reference offsets, native Save/toggle/checkbox/field/dropdown input and ACTUAL src-code UiSlider/row/column rendering, guarded tab, extended URI, late sidebar glyph. NOT live emulator testing.')
+print('PASS: Qt component/input fixture: reference offsets, native Save/toggle/checkbox/field/dropdown input and ACTUAL src-code UiSlider/row/column rendering, guarded native tab, no optimizer, late sidebar glyph. NOT live emulator testing.')

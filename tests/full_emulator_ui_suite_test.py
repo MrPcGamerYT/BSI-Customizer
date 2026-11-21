@@ -59,7 +59,10 @@ class SuiteTests(unittest.TestCase):
                 self.assertIn(b'VOID SUITE07 PASSIVE CONTROLS',after[name])
                 self.assertIn(b'backend.',after[name])
             self.assertIn(b'CARBON SUITE 07',(root/'Assets/VOIDReferenceUI/SettingsShell.qml').read_bytes())
-            self.assertIn(b'voidoptimizer-v3://review',(root/'Assets/VOIDReferenceUI/OptimizerPage.qml').read_bytes())
+            self.assertFalse((root/'Assets/VOIDReferenceUI/OptimizerPage.qml').exists())
+            for name in ('UiSettingsWindow.qml', 'PlrSidebar.qml'):
+                for token in (b'voidOptimizer', b'pVoidOptimizer', b'VoidUiNav', b'F9'):
+                    self.assertNotIn(token, after[name])
             self.assertEqual((root/'Assets/VOIDReferenceUI/Icons.js').read_bytes(),(ROOT/'assets/settings-icons-repair/Shared-Recovery/Icons.js').read_bytes())
             self.assertEqual([c.relative for c in U.plan_install(root)[0].changes],[],'repeat must verify, not stack loaders/animations')
             E.restore(backup,root)
@@ -86,6 +89,7 @@ class SuiteTests(unittest.TestCase):
             before=files(root)
             planned,report=U.plan_install(root)
             backup=E.commit(planned)
+            self.assertNotIn(b'voidOptimizer', inventory((root/'HD-Player.exe').read_bytes())['PlrSidebar.qml'])
             self.assertEqual([c.relative for c in U.plan_install(root)[0].changes],[])
             E.restore(backup,root)
             # Recovery journals themselves remain, all pre-upgrade files return.
