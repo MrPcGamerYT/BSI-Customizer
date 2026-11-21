@@ -149,12 +149,79 @@ def runtime():
     module.plan_install = plan
     engine = module.manager().engine()
     original_commit = engine.commit
+    engine.atomic_write = atomic_write
     def commit(planned, writer=None):
         if getattr(planned, '_suite_replacement', False):
             return commit_replacement(engine, planned, writer)
-        return original_commit(planned) if writer is None else original_commit(planned, writer)
+        return original_commit(planned, engine.atomic_write if writer is None else writer)
     engine.commit = commit
     return module
+
+
+def writable_windows_target(path):
+    """Temporarily clear only the DOS read-only bit, never ACLs/security settings."""
+    import os
+    import stat
+    if os.name == 'nt' and path.exists():
+        mode = path.stat().st_mode
+        if not mode & stat.S_IWRITE:
+            os.chmod(path, mode | stat.S_IWRITE)
+            return mode
+    return None
+
+
+def remove_ui_file(path):
+    import os
+    previous_mode = writable_windows_target(path)
+    try:
+        path.unlink()
+    except BaseException:
+        if previous_mode is not None and path.exists():
+            os.chmod(path, previous_mode)
+        raise
+
+
+def atomic_write(path, body, mode=None):
+    """Windows-safe staging, including read-only EXE/assets and failed cleanup.
+    The historical writer chmod'ed the stage before replacing the target. On
+    Windows a read-only target blocks replace and a read-only stage blocks unlink,
+    masking the original error with WinError 5 on .void-stage-*.
+    """
+    import os
+    import tempfile
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary_name = tempfile.mkstemp(prefix='.void-stage-', dir=path.parent)
+    temporary = Path(temporary_name)
+    previous_mode = None
+    replaced = False
+    try:
+        with os.fdopen(fd, 'wb') as stream:
+            stream.write(body); stream.flush(); os.fsync(stream.fileno())
+        if os.name != 'nt' and mode is not None:
+            os.chmod(temporary, mode)
+        previous_mode = writable_windows_target(path)
+        os.replace(temporary, path)
+        replaced = True
+        if os.name == 'nt' and mode is not None:
+            os.chmod(path, mode)  # reapply read-only only AFTER successful replacement
+        if os.name != 'nt':
+            directory = os.open(path.parent, os.O_RDONLY | getattr(os, 'O_DIRECTORY', 0))
+            try:
+                os.fsync(directory)
+            finally:
+                os.close(directory)
+    finally:
+        active_error = sys.exc_info()[0] is not None
+        try:
+            if not replaced and previous_mode is not None and path.exists():
+                os.chmod(path, previous_mode)
+        finally:
+            if temporary.exists():
+                try:
+                    remove_ui_file(temporary)
+                except OSError:
+                    if not active_error:
+                        raise  # never hide the original write/replace failure
 
 
 def replacement_state(module, root, current, owners, url):
@@ -234,7 +301,7 @@ def commit_replacement(engine, planned, writer=None):
             target = engine.safe_target(planned.root, change.relative)
             engine.need(engine.current(target) == change.before, 'Target changed during replacement: '+change.relative)
             if change.after is None:
-                target.unlink()
+                remove_ui_file(target)
             else:
                 writer(target, change.after, row['mode'])
             engine.need(engine.current(target) == change.after, 'Replacement read-back failed: '+change.relative)
@@ -244,7 +311,8 @@ def commit_replacement(engine, planned, writer=None):
             engine.restore(folder, planned.root, rollback=True)
         except BaseException as recovery:
             raise engine.Refusal('Replacement interrupted; preserve backup: '+str(folder)+'\n'+str(recovery)) from error
-        raise engine.Refusal('Replacement failed; original files restored. Backup: '+str(folder)+'\n'+str(error)) from error
+        hint = '\nWindows denied the write. Close all player processes and run REPLACE-INSTALLED-UI.cmd as administrator. If access is still denied, check the folder/file permissions or file lock; this installer does not change ACLs or security software.' if isinstance(error, PermissionError) else ''
+        raise engine.Refusal('Replacement failed; original files restored. Backup: '+str(folder)+'\n'+str(error)+hint) from error
     return folder
 
 

@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import subprocess
+import stat
 import sys
 import tempfile
 import zipfile
@@ -56,6 +57,9 @@ print('PASS extracted runtime and external design')
         (player/'.VOID-Reference-UI.json').write_bytes(b'stale broken old record')
         old = player/'Assets/VOIDReferenceUI/obsolete-optimizer.qml'
         old.parent.mkdir(parents=True);old.write_bytes(b'old UI')
+        if os.name == 'nt':
+            (player/'HD-Player.exe').chmod(stat.S_IREAD)
+            old.chmod(stat.S_IREAD)
         result = subprocess.run([sys.executable, str(target/'VOID-Full-UI.py'), '--apply', '--replace-ui', '--yes', '--install-dir', str(player)], cwd=target, text=True, capture_output=True, timeout=120)
         assert result.returncode == 0, result.stdout+result.stderr
         assert not old.exists()
@@ -65,5 +69,8 @@ print('PASS extracted runtime and external design')
         assert result.returncode == 0, result.stdout+result.stderr
         assert (player/'HD-Player.exe').read_bytes() == original
         assert old.read_bytes() == b'old UI'
+        if os.name == 'nt':
+            assert not (player/'HD-Player.exe').stat().st_mode & stat.S_IWRITE
+            assert not old.stat().st_mode & stat.S_IWRITE
         assert (player/'.VOID-Reference-UI.json').read_bytes() == b'stale broken old record'
 print('PASS: ZIP hashes, no optimizer/helper, shallow drive-root startup and external profile on', sys.version)

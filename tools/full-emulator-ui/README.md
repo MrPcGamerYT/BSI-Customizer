@@ -82,6 +82,20 @@ also be refused. Use the explicit replacement mode above for stale state/missing
 Unknown source contracts still need adaptation.
 Do not use the separate historical mixed-UI migration unless specifically audited.
 
+## Windows access denied / read-only files
+
+For `Program Files`, accept the Windows administrator/UAC prompt. If Windows
+still denies the write, close the player and manager and run the CMD with
+**Run as administrator**. An administrator token does not override every file
+lock, ACL or security-software policy; these are not disabled by the installer.
+
+The corrected writer handles read-only EXE/UI files: it temporarily clears only
+the file's DOS read-only bit for replacement/deletion and preserves that bit on
+replacement/undo. Staging files remain writable until the atomic replacement;
+cleanup no longer masks the original error with a `.void-stage-*` access denial.
+If a replacement fails and reports `original files restored`, it rolled back;
+keep the backup, then retry after addressing the reported access problem.
+
 ## No optimizer
 
 This corrected pack removes the optimizer tab/sidebar entry and its F9 shortcut.

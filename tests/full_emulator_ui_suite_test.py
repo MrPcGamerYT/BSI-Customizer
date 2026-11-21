@@ -2,6 +2,8 @@
 import copy
 import importlib.util
 import json
+import os
+import stat
 from pathlib import Path
 import sys
 import tempfile
@@ -177,6 +179,45 @@ class SuiteTests(unittest.TestCase):
             for name,digest in before.items():self.assertEqual(S.sha((root/name).read_bytes()),digest,name)
             self.assertFalse((root/'fail-last.txt').exists())
             self.assertFalse((assets/'SettingsShell.qml').exists())
+
+    @unittest.skipUnless(os.name=='nt','Windows DOS read-only regression')
+    def test_windows_readonly_staging_cleanup_and_original_error(self):
+        from unittest.mock import patch
+        with tempfile.TemporaryDirectory() as folder:
+            target=Path(folder)/'readonly.exe';target.write_bytes(b'old')
+            target.chmod(stat.S_IREAD)
+            original_mode=stat.S_IMODE(target.stat().st_mode)
+            S.atomic_write(target,b'new',original_mode)
+            self.assertEqual(target.read_bytes(),b'new')
+            self.assertFalse(target.stat().st_mode & stat.S_IWRITE)
+            with patch('os.replace',side_effect=PermissionError(5,'SIMULATED TARGET LOCK',str(target))):
+                with self.assertRaisesRegex(PermissionError,'SIMULATED TARGET LOCK'):
+                    S.atomic_write(target,b'blocked',original_mode)
+            self.assertEqual(target.read_bytes(),b'new')
+            self.assertFalse(target.stat().st_mode & stat.S_IWRITE)
+            self.assertEqual(list(Path(folder).glob('.void-stage-*')),[])
+            S.remove_ui_file(target)
+            self.assertFalse(target.exists())
+
+    @unittest.skipUnless(os.name=='nt','Windows DOS read-only replacement')
+    def test_windows_readonly_player_assets_delete_and_exact_undo(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder)/'Read-only Player';original,_=fixture(root)
+            E.commit(U.plan_install(root)[0])
+            player=root/'HD-Player.exe';player.write_bytes(original)
+            shell=root/'Assets/VOIDReferenceUI/SettingsShell.qml';shell.write_bytes(b'EDITED SHELL')
+            old=root/'Assets/VOIDReferenceUI/obsolete.qml';old.write_bytes(b'OLD')
+            for path in (player,shell,old):path.chmod(stat.S_IREAD)
+            before=files(root)
+            planned,_=U.plan_install(root,replace_existing_ui=True)
+            backup=E.commit(planned)
+            self.assertFalse(old.exists())
+            self.assertFalse(player.stat().st_mode & stat.S_IWRITE)
+            self.assertFalse(shell.stat().st_mode & stat.S_IWRITE)
+            E.restore(backup,root)
+            for name,digest in before.items():self.assertEqual(S.sha((root/name).read_bytes()),digest,name)
+            for path in (player,shell,old):self.assertFalse(path.stat().st_mode & stat.S_IWRITE)
+            self.assertEqual(list(root.rglob('.void-stage-*')),[])
 
     def test_design_is_data_not_qml(self):
         design=json.loads((ROOT/'assets/full-emulator-ui/design.json').read_text())
