@@ -150,10 +150,20 @@ last original/independent rows could be retrieved. The sanitized artifact
 [14710939475](https://github.com/dsajgddghdsaakovvgheww/BSI-Customizer/actions/runs/44914982007/artifacts/14710939475)
 exists (1,603 compressed bytes, digest
 `377e69e423d0119d598d86647449d363399244ae84364fd8c009801efb72cac3`), but
-its unexamined rows are **not evidence**. A single bounded aggregate annotation
-now publishes the entire sanitized schema without relying on private raw-log or
-artifact download hosts. E and the independent comparison are not called
-verified on the basis of the truncated annotations.
+its unexamined rows are **not evidence**. E and the independent comparison are
+not called verified on the basis of those truncated annotations.
+
+Run [44915382019](https://github.com/dsajgddghdsaakovvgheww/BSI-Customizer/actions/runs/44915382019)
+(head `29ee08c5c5b49c3b87bd97641ffeeb6e9a83f7f4`) completed **successfully**:
+the strict Windows step requires all twelve original/control cases and both
+independent comparisons to pass. The retrieved summary flags are also true,
+and its visible rows demonstrate the corrected WGL bind hook while still
+recording the unhooked import export. However, GitHub truncates each annotation
+message at 4,096 characters, so a full single-annotation JSON object is not a
+complete downloadable measurement record. The exporter now emits a small
+summary plus paired rows (at most eight notices, each under 3,800 characters),
+solving both the per-step count cap and per-message truncation. The complete
+individual measurements are recorded only after that bounded export is read.
 
 Even a completely passing authored-host result cannot establish which player
 contexts/programs/textures produce the real scene, authorize unrelated/UI

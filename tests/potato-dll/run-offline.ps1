@@ -8,6 +8,14 @@ $ErrorActionPreference = 'Stop'
 # Nonzero child outcomes are evidence rows, not an excuse to stop after case 1.
 $PSNativeCommandUseErrorActionPreference = $false
 Set-StrictMode -Version Latest
+function Write-BoundedEvidence {
+    param([string]$Title, [object]$Data)
+    $compact = ConvertTo-Json -InputObject $Data -Compress -Depth 8
+    # Check messages truncate at 4096 characters, and per-row notices hit the
+    # per-step count cap. Pair rows: <=8 notices and <3800 characters each.
+    if ($compact.Length -gt 3800) { throw 'Sanitized annotation exceeds fixed reporting budget' }
+    Write-Output ('::notice title=' + $Title + '::' + $compact)
+}
 if (-not $ExplicitlyAllowOriginalDll) { throw 'Explicit original-DLL execution opt-in required' }
 $manifest = Get-Content (Join-Path $Prepared 'manifest.json') -Raw | ConvertFrom-Json
 if ($manifest.archiveSha256 -ne '80751bed1151e7f5bbcf186b51b8aada3b446af0278e5575384de7fa9eeb8b17' -or $manifest.mesaArchiveSha256 -ne '19c74aad7b09e682473b8de4c35b47e6498de97b71cae5511a231b8eb02f2b22' -or $manifest.variants.Count -ne 5) { throw 'Wrong reviewed archive/variant set' }
@@ -179,9 +187,11 @@ try {
     $allPassed = $originalsPassed -and $alternativesPassed
     $evidence = [ordered]@{ scope='Original supplied Potato DLLs AND independent known-resource comparison in authored WGL/llvmpipe hosts, NOT a player/game';archiveSha256=$manifest.archiveSha256;mesaArchiveSha256=$manifest.mesaArchiveSha256;complete=$complete;allMechanismCasesPassed=$originalsPassed;allIndependentCasesPassed=$alternativesPassed;rows=$rows;independentComparisons=$alternatives;installed=$false;redistributed=$false;gameAcceptance=$false }
     $evidence | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $Results 'supplied-potato-results.json') -Encoding utf8
-    $compact = $evidence | ConvertTo-Json -Compress -Depth 8
-    if ($compact.Length -gt 60000) { throw 'Sanitized annotation exceeds fixed reporting budget' }
-    Write-Output ('::notice title=Potato probe evidence::' + $compact)
+    Write-BoundedEvidence -Title 'Potato probe summary' -Data ([ordered]@{ scope=$evidence.scope;archiveSha256=$manifest.archiveSha256;mesaArchiveSha256=$manifest.mesaArchiveSha256;complete=$complete;allMechanismCasesPassed=$originalsPassed;allIndependentCasesPassed=$alternativesPassed;originalCaseCount=$rows.Count;independentCaseCount=$alternatives.Count;installed=$false;redistributed=$false;gameAcceptance=$false })
+    for ($i = 0; $i -lt $rows.Count; $i += 2) {
+        Write-BoundedEvidence -Title ('Potato original cases ' + $i) -Data @($rows | Select-Object -Skip $i -First 2)
+    }
+    if ($alternatives.Count -gt 0) { Write-BoundedEvidence -Title 'Independent owned sampler cases' -Data $alternatives }
 }
 if (-not $allPassed) { throw 'One or more actual original-DLL or independent comparison cases failed; inspect their separate evidence, do not claim a game fix' }
 'PASS: five unique original DLLs, normal renamed import (anchor NOT called), actual detours and real Mesa software mip pixels with depth disabled; separately, private samplers change explicitly owned resources and restore exact Off output/state over 64 cycles. Outbound block and bounded child lifetime. NOT player/physical-GPU acceptance.' | Out-File $env:GITHUB_STEP_SUMMARY -Append
