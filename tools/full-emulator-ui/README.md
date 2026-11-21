@@ -123,7 +123,7 @@ No optimizer or helper is installed.
    permission elevation, if required, uses the existing explicit installer flow.
    Nothing disables security controls. Backup/journal and read-back checks cover
    every changed binary, external asset and the UI state.
-6. Restart the player. Settings must show **CARBON SUITE 07**. Test every native
+6. Restart the player. Settings must show **OLED STUDIO 09**. Test every native
    page's controls/Save/discard, sidebar/topbar, volume/game-controls/exit popups,
    controls editor. Boot/auth must behave exactly as before.
 7. If a different/cached page appears or any safety check refuses, STOP. Run

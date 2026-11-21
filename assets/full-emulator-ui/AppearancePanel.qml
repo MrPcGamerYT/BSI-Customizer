@@ -28,7 +28,7 @@ Popup {
                 Label {text:"Six dark worlds. Your colors. The whole native interface.";color:Theme.muted;font.pixelSize:12}
             }
             Item {Layout.fillWidth:true}
-            ToolButton {objectName:"closeAppearance";text:"×";palette.buttonText:Theme.text;onClicked:panel.close()}
+            ToolButton {id:closeAppearance;objectName:"closeAppearance";text:"×";width:32;height:32;hoverEnabled:true;palette.buttonText:Theme.text;onClicked:panel.close();background:Rectangle {radius:8;color:closeAppearance.hovered?Theme.raised:Theme.surface;border.width:1;border.color:Theme.border}}
         }
         ScrollView {
             Layout.fillWidth:true;Layout.fillHeight:true;clip:true
@@ -60,7 +60,7 @@ Popup {
                                     Item {Layout.fillWidth:true}
                                     Rectangle {width:8;height:8;radius:4;color:modelData.palette.accent;visible:Theme.selectedId===modelData.id}
                                 }
-                                Label {text:modelData.description;color:modelData.palette.muted;font.pixelSize:11}
+                                Label {Layout.fillWidth:true;elide:Text.ElideRight;text:modelData.description;color:modelData.palette.muted;font.pixelSize:11}
                                 Row {
                                     spacing:4
                                     Repeater {model:[modelData.palette.surface,modelData.palette.raised,modelData.palette.border,modelData.palette.accent];Rectangle {width:26;height:5;radius:2;color:modelData}}
@@ -77,6 +77,9 @@ Popup {
                         delegate: RowLayout {
                             Layout.fillWidth:true;spacing:8
                             Rectangle {width:12;height:26;radius:4;color:panel.draft[modelData] || Theme.surface;border.width:1;border.color:Theme.border}
+                            ColumnLayout {
+                            Layout.fillWidth:true;spacing:3
+                            Label {text:modelData.charAt(0).toUpperCase()+modelData.slice(1);color:Theme.muted;font.pixelSize:10}
                             TextField {
                                 id:hex
                                 objectName:"customColor_"+modelData
@@ -90,6 +93,7 @@ Popup {
                                 background:Rectangle {radius:8;color:Theme.surface;border.width:1;border.color:hex.activeFocus?Theme.accent:Theme.border}
                                 ToolTip.visible:hovered;ToolTip.text:modelData
                                 Accessible.name:modelData+" color"
+                            }
                             }
                         }
                     }

@@ -1,4 +1,4 @@
-"""VOID Carbon Suite 07: full eligible native-QML visual pass, using pinned transactions.
+"""VOID OLED Studio 09: full eligible native-QML visual pass, using pinned transactions.
 No resource scanning occurs on import. Check/Apply/Export are explicit commands.
 """
 import argparse
@@ -510,7 +510,7 @@ def live_theme_sources(module, desired, url):
                     edits.append((token.start,token.end,'VoidLiveTheme.Theme.fontFamily'))
         _,decor_scopes,decorations=manager.decorative_slots(source)
         for start,end,kind,value,line,opening in decorations:
-            if kind=='radius' and float(value)==config['corners']['radius'] and manager.matches(name,config['corners']['files']):
+            if kind=='radius' and float(value)>0 and float(value)==config['corners']['radius'] and manager.matches(name,config['corners']['files']):
                 bindings=decor_scopes[opening]['bindings'];dimensions=[]
                 for dimension in ('width','height'):
                     span=bindings.get(dimension)

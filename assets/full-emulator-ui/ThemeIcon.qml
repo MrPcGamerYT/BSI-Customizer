@@ -24,7 +24,8 @@ Item {
     Canvas {
         id: canvas
         anchors.fill: parent
-        canvasSize: Qt.size(Math.max(1,width*2),Math.max(1,height*2))
+        // Keep logical canvas and viewport equal: a larger canvas clips icons.
+        canvasSize: Qt.size(Math.max(1,width),Math.max(1,height))
         onAvailableChanged: if(available)icon.update()
         onImageLoaded: {icon.status=Image.Ready;requestPaint()}
         onPaint: {

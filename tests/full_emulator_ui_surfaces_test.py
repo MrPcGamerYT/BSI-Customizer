@@ -180,6 +180,15 @@ Window {
     assert window.property('dragCheck'), 'native tile drag press/release callbacks lost'
     icon=next(child for child in tile.findChildren(QObject) if child.property('asset')=='Tap')
     assert icon.property('source').toString().endswith('ControlIcons/Tap.png')
+    glyph=find(tile,'voidReferenceVisualToolGlyph');assert glyph is not None
+    grab=glyph.grabToImage();settle();image=grab.image();assert not image.isNull()
+    pixels=[(x,y) for y in range(image.height()) for x in range(image.width()) if image.pixelColor(x,y).alpha()>50]
+    assert pixels
+    # Tap is a symmetric ring+dot. A 2x Canvas with a 1x viewport used to clip it
+    # to a quarter-circle even though Image.Ready and all input tests passed.
+    xs=[x for x,y in pixels];ys=[y for x,y in pixels]
+    assert abs(min(xs)+max(xs)-(image.width()-1))<=2,(min(xs),max(xs),image.width())
+    assert abs(min(ys)+max(ys)-(image.height()-1))<=2,(min(ys),max(ys),image.height())
     QMetaObject.invokeMethod(restart,'open');settle()
     chip=find(window.contentItem(),'keyChip')
     assert chip.property('color').name()=='#0b0f14'
