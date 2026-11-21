@@ -1,0 +1,239 @@
+// ORIGINAL TEST HOST, NOT HD-PLAYER. No game, account, driver profile or BSI
+// shader module. The optional import resolves an existing export but NEVER
+// calls it. Actual supplied DLL initialization/hooks execute only in the
+// explicit offline job, in a suspended-then-job-contained fresh child.
+#include <windows.h>
+#include <GL/gl.h>
+#include <algorithm>
+#include <array>
+#include <cstdio>
+#include <cstdint>
+#include <cstdlib>
+#include <cstring>
+#include <cwchar>
+#include <filesystem>
+#include <string>
+#include <vector>
+
+#if defined(BSI_IMPORT_DINPUT)
+extern "C" __declspec(dllimport) void proxy_DirectInput8Create();
+static void (*volatile importAnchor)() = &proxy_DirectInput8Create;
+#elif defined(BSI_IMPORT_VERSION)
+extern "C" __declspec(dllimport) void proxy_VerQueryValueW();
+static void (*volatile importAnchor)() = &proxy_VerQueryValueW;
+#endif
+namespace {
+constexpr unsigned side=64;
+const wchar_t *diagnosticReport=nullptr;
+unsigned diagnosticStage=0;
+[[noreturn]] void fail(const char *what){
+    const auto error=GetLastError();
+    std::fprintf(stderr,"PROBE FAILURE: %s (Win32 %lu, stage %u)\n",what,error,diagnosticStage);
+    if(diagnosticReport){
+        FILE *file=nullptr;
+        if(_wfopen_s(&file,diagnosticReport,L"wb")==0&&file){
+            std::fprintf(file,"{\"kind\":\"original-probe-prerequisite-failure\",\"failureStage\":%u,\"win32Error\":%lu}\n",diagnosticStage,error);
+            std::fclose(file);
+        }
+    }
+    std::exit(2);
+}
+void require(bool okay,const char *what){if(!okay)fail(what);}
+std::wstring exePath(){wchar_t out[32768]{};const auto n=GetModuleFileNameW(nullptr,out,32768);require(n>0&&n<32768,"probe EXE path");return {out,n};}
+std::string json(const char *text){
+    std::string out="\"";for(const unsigned char c:std::string(text?text:"")){
+        if(c=='"'||c=='\\'){out+='\\';out+=char(c);}else if(c>=32&&c<127)out+=char(c);else out+='?';
+    }return out+'"';
+}
+std::wstring quote(const std::wstring &s){require(s.find(L'"')==std::wstring::npos,"quoted test path");return L"\""+s+L"\"";}
+int launch(const wchar_t *program,const wchar_t *report,const wchar_t *sampling){
+    wchar_t approved[8]{};require(GetEnvironmentVariableW(L"BSI_POTATO_PROBE_APPROVED",approved,8)==1&&approved[0]==L'1',"explicit offline-probe approval");
+    // The workflow verifies an outbound firewall block for THIS exact child
+    // image before invoking us. A new job prevents any further process spawn.
+    HANDLE job=CreateJobObjectW(nullptr,nullptr);require(job!=nullptr,"create bounded probe job");
+    JOBOBJECT_EXTENDED_LIMIT_INFORMATION limit{};
+    limit.BasicLimitInformation.LimitFlags=JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE|JOB_OBJECT_LIMIT_ACTIVE_PROCESS;
+    limit.BasicLimitInformation.ActiveProcessLimit=1;
+    require(SetInformationJobObject(job,JobObjectExtendedLimitInformation,&limit,sizeof(limit))!=0,"no child-process escape");
+    wchar_t system[32768]{};
+    require(GetEnvironmentVariableW(L"SystemRoot",system,32768)>0,"Windows root");
+    // Construct, don't filter, the environment: no Actions/GitHub/Drive tokens,
+    // runner service endpoints, user profile, SDK, Qt or interpreter PATH.
+    const std::wstring root=std::filesystem::path(program).parent_path().wstring();
+    const std::vector<std::wstring> vars{
+        L"BSI_POTATO_PROBE_APPROVED=1",L"GALLIUM_DRIVER=llvmpipe",L"LIBGL_ALWAYS_SOFTWARE=1",
+        L"MESA_SHADER_CACHE_DISABLE=true",L"PATH="+std::wstring(system)+L"\\System32;"+system,
+        L"SystemRoot="+std::wstring(system),L"TEMP="+root,L"TMP="+root,L"USERPROFILE="+root};
+    std::vector<wchar_t> env;for(const auto &v:vars){env.insert(env.end(),v.begin(),v.end());env.push_back(0);}env.push_back(0);
+    std::wstring command=quote(program)+L" --probe "+quote(report)+L" "+quote(sampling);
+    STARTUPINFOW start{};start.cb=sizeof(start);PROCESS_INFORMATION process{};
+    SetErrorMode(SEM_FAILCRITICALERRORS|SEM_NOGPFAULTERRORBOX|SEM_NOOPENFILEERRORBOX);
+    require(CreateProcessW(program,command.data(),nullptr,nullptr,FALSE,CREATE_SUSPENDED|CREATE_UNICODE_ENVIRONMENT|CREATE_NO_WINDOW,
+                           env.data(),root.c_str(),&start,&process)!=0,"create suspended probe");
+    if(!AssignProcessToJobObject(job,process.hProcess)){
+        TerminateProcess(process.hProcess,90);CloseHandle(process.hThread);CloseHandle(process.hProcess);CloseHandle(job);fail("contain child BEFORE it runs");
+    }
+    require(ResumeThread(process.hThread)!=DWORD(-1),"resume contained probe");CloseHandle(process.hThread);
+    const auto waited=WaitForSingleObject(process.hProcess,30000);
+    if(waited!=WAIT_OBJECT_0){TerminateJobObject(job,91);WaitForSingleObject(process.hProcess,5000);}
+    DWORD code=92;GetExitCodeProcess(process.hProcess,&code);CloseHandle(process.hProcess);CloseHandle(job);
+    FILE *file=nullptr;
+    const auto launchReport=std::wstring(report)+L".launch.json";
+    require(_wfopen_s(&file,launchReport.c_str(),L"wb")==0&&file,"create parent-owned launch evidence");
+    std::fprintf(file,"{\"createdSuspended\":true,\"containedBeforeResume\":true,\"processLimit\":1,\"timeout\":%s,\"childExitCode\":%lu}\n",waited==WAIT_OBJECT_0?"false":"true",code);
+    std::fclose(file);
+    if(waited!=WAIT_OBJECT_0)return 91;
+    std::printf("Contained original-host exit: %lu\n",code);return code?1:0;
+}
+// Read-only, bounded inspection of common x64 detour/relay jumps. A positive
+// result means this real entry leads into the exact loaded payload allocation;
+// parameters/pixels below are separate evidence that interception executed.
+// This is not used to patch, initialize, or transplant any payload code.
+bool entryLeadsIntoOriginal(const void *entry){
+    const auto original=GetModuleHandleW(L"BsiPotatoOriginal.dll");
+    if(!original)return false;
+    auto cursor=reinterpret_cast<std::uintptr_t>(entry);
+    for(unsigned hop=0;hop<6;++hop){
+        MEMORY_BASIC_INFORMATION memory{};
+        if(!VirtualQuery(reinterpret_cast<const void*>(cursor),&memory,sizeof(memory)))return false;
+        if(memory.AllocationBase==original)return true;
+        unsigned char bytes[16]{};SIZE_T read=0;
+        if(!ReadProcessMemory(GetCurrentProcess(),reinterpret_cast<const void*>(cursor),bytes,sizeof(bytes),&read)||read!=sizeof(bytes))return false;
+        if(bytes[0]==0xe9){std::int32_t offset=0;std::memcpy(&offset,bytes+1,sizeof(offset));cursor=std::uintptr_t(std::intptr_t(cursor)+5+offset);}
+        else if(bytes[0]==0xeb){cursor=std::uintptr_t(std::intptr_t(cursor)+2+std::int8_t(bytes[1]));}
+        else if(bytes[0]==0xff&&bytes[1]==0x25){
+            std::int32_t offset=0;std::memcpy(&offset,bytes+2,sizeof(offset));
+            const auto location=std::uintptr_t(std::intptr_t(cursor)+6+offset);
+            if(!ReadProcessMemory(GetCurrentProcess(),reinterpret_cast<const void*>(location),&cursor,sizeof(cursor),&read)||read!=sizeof(cursor))return false;
+        }else return false;
+    }
+    return false;
+}
+template<class T>T gl(const char *name){
+    auto p=reinterpret_cast<void*>(wglGetProcAddress(name));const auto v=reinterpret_cast<std::intptr_t>(p);
+    if(!p||v==1||v==2||v==3||v==-1)p=reinterpret_cast<void*>(GetProcAddress(GetModuleHandleW(L"opengl32.dll"),name));
+    require(p!=nullptr,name);return reinterpret_cast<T>(p);
+}
+#define LOAD(ret,name,...) const auto name=gl<ret(APIENTRY*)(__VA_ARGS__)>("gl" #name)
+std::array<unsigned char,4> pixel(){std::array<unsigned char,4> p{};glReadPixels(32,32,1,1,GL_RGBA,GL_UNSIGNED_BYTE,p.data());return p;}
+std::string color(const std::array<unsigned char,4> &p){return "["+std::to_string(p[0])+","+std::to_string(p[1])+","+std::to_string(p[2])+","+std::to_string(p[3])+"]";}
+int probe(const wchar_t *report,bool sampler){
+    diagnosticReport=report;diagnosticStage=1;
+    require(sizeof(void*)==8,"AMD64 probe");
+    wchar_t approved[8]{};require(GetEnvironmentVariableW(L"BSI_POTATO_PROBE_APPROVED",approved,8)==1&&approved[0]==L'1',"offline child environment");
+    bool imported=false;
+#if defined(BSI_IMPORT_DINPUT) || defined(BSI_IMPORT_VERSION)
+    imported=GetModuleHandleW(L"BsiPotatoOriginal.dll")!=nullptr&&importAnchor!=nullptr;
+    require(imported,"original DLL loaded through normal PE import, no explicit initializer call");
+#else
+    require(GetModuleHandleW(L"BsiPotatoOriginal.dll")==nullptr,"negative control must not load a supplied DLL");
+#endif
+    diagnosticStage=10;
+    wchar_t provider[32768]{};require(GetModuleFileNameW(GetModuleHandleW(L"opengl32.dll"),provider,32768)>0,"GL provider path");
+    const auto expected=std::filesystem::path(exePath()).parent_path()/L"opengl32.dll";
+    require(_wcsicmp(provider,expected.c_str())==0,"pinned test-local Mesa provider, never system/physical GPU replacement");
+    diagnosticStage=20;
+    HWND window=CreateWindowExW(0,L"STATIC",L"Original Potato DLL test-owned pixels",WS_POPUP,0,0,side,side,nullptr,nullptr,GetModuleHandleW(nullptr),nullptr);
+    require(window!=nullptr,"private test HWND");HDC dc=GetDC(window);require(dc!=nullptr,"private WGL DC");
+    PIXELFORMATDESCRIPTOR format{};format.nSize=sizeof(format);format.nVersion=1;
+    format.dwFlags=PFD_DRAW_TO_WINDOW|PFD_SUPPORT_OPENGL|PFD_DOUBLEBUFFER;format.iPixelType=PFD_TYPE_RGBA;format.cColorBits=32;format.cDepthBits=24;
+    const auto index=ChoosePixelFormat(dc,&format);require(index&&SetPixelFormat(dc,index,&format),"software WGL pixel format");
+    HGLRC context=wglCreateContext(dc);require(context&&wglMakeCurrent(dc,context),"real Mesa WGL context");
+    const char *renderer=reinterpret_cast<const char*>(glGetString(GL_RENDERER));
+    const char *version=reinterpret_cast<const char*>(glGetString(GL_VERSION));
+    require(renderer&&std::strstr(renderer,"llvmpipe"),"software llvmpipe ONLY; no physical-driver claim");
+    diagnosticStage=30;
+    LOAD(GLuint,CreateShader,GLenum);LOAD(void,ShaderSource,GLuint,GLsizei,const char*const*,const GLint*);
+    LOAD(void,CompileShader,GLuint);LOAD(void,GetShaderiv,GLuint,GLenum,GLint*);
+    LOAD(GLuint,CreateProgram);LOAD(void,AttachShader,GLuint,GLuint);LOAD(void,LinkProgram,GLuint);
+    LOAD(void,GetProgramiv,GLuint,GLenum,GLint*);LOAD(void,UseProgram,GLuint);
+    LOAD(GLint,GetUniformLocation,GLuint,const char*);LOAD(void,Uniform1i,GLint,GLint);
+    LOAD(void,ActiveTexture,GLenum);LOAD(void,GenVertexArrays,GLsizei,GLuint*);LOAD(void,BindVertexArray,GLuint);
+    LOAD(void,DrawArrays,GLenum,GLint,GLsizei);LOAD(void,GenSamplers,GLsizei,GLuint*);
+    LOAD(void,SamplerParameteri,GLuint,GLenum,GLint);LOAD(void,GetSamplerParameterfv,GLuint,GLenum,GLfloat*);LOAD(void,BindSampler,GLuint,GLuint);
+    const auto shader=[&](GLenum kind,const char *source){const auto s=CreateShader(kind);ShaderSource(s,1,&source,nullptr);CompileShader(s);GLint okay=0;GetShaderiv(s,0x8b81,&okay);require(okay!=0,"test shader compile");return s;};
+    const char *vertex="#version 330\nout vec2 uv;void main(){vec2 p=vec2(float((gl_VertexID&1)*2-1),float((gl_VertexID>>1)*2-1));uv=(p+1.0)*0.5;gl_Position=vec4(p,0,1);}";
+    const char *fragment="#version 330\nin vec2 uv;out vec4 outputColor;uniform sampler2D sourceColor;void main(){outputColor=texture(sourceColor,uv);}";
+    const auto program=CreateProgram();AttachShader(program,shader(0x8b31,vertex));AttachShader(program,shader(0x8b30,fragment));LinkProgram(program);
+    GLint linked=0;GetProgramiv(program,0x8b82,&linked);require(linked!=0,"test program link");UseProgram(program);Uniform1i(GetUniformLocation(program,"sourceColor"),0);
+    GLuint vao=0;GenVertexArrays(1,&vao);BindVertexArray(vao);
+    diagnosticStage=40;
+    ActiveTexture(0x84c0);GLuint texture=0;glGenTextures(1,&texture);glBindTexture(GL_TEXTURE_2D,texture);
+    glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_NEAREST_MIPMAP_NEAREST);glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_NEAREST);
+    const unsigned char colors[7][4]{{255,0,0,255},{0,255,0,255},{0,0,255,255},{255,255,0,255},{0,255,255,255},{255,0,255,255},{255,255,255,255}};
+    for(unsigned mip=0;mip<7;++mip){const auto length=side>>mip;std::vector<unsigned char> data(length*length*4);
+        for(std::size_t i=0;i<data.size();i+=4)std::copy(colors[mip],colors[mip]+4,data.begin()+std::ptrdiff_t(i));
+        glTexImage2D(GL_TEXTURE_2D,GLint(mip),0x8058,GLsizei(length),GLsizei(length),0,GL_RGBA,GL_UNSIGNED_BYTE,data.data());
+    }
+    GLuint nativeSampler=0;
+    if(sampler){GenSamplers(1,&nativeSampler);SamplerParameteri(nativeSampler,GL_TEXTURE_MIN_FILTER,GL_NEAREST_MIPMAP_NEAREST);SamplerParameteri(nativeSampler,GL_TEXTURE_MAG_FILTER,GL_NEAREST);BindSampler(0,nativeSampler);}
+    glDisable(GL_DEPTH_TEST);glDisable(GL_BLEND);glDisable(GL_CULL_FACE);glViewport(0,0,side,side);glReadBuffer(GL_BACK);glDrawBuffer(GL_BACK);
+    ActiveTexture(0x84c3);
+    const auto draw=[&]{glClear(GL_COLOR_BUFFER_BIT);DrawArrays(GL_TRIANGLE_STRIP,0,4);glFinish();};
+    const auto params=[&]{std::array<float,4> p{};GLint active=0;glGetIntegerv(0x84e0,&active);ActiveTexture(0x84c0);
+        glGetTexParameterfv(GL_TEXTURE_2D,0x8501,&p[0]);glGetTexParameterfv(GL_TEXTURE_2D,0x813a,&p[1]);
+        if(sampler){GetSamplerParameterfv(nativeSampler,0x8501,&p[2]);GetSamplerParameterfv(nativeSampler,0x813a,&p[3]);}
+        ActiveTexture(GLenum(active));return p;};
+    draw();const auto before=pixel();const auto native=params();
+    require(before==std::array<unsigned char,4>{{255,0,0,255}}&&native[0]==0&&native[1]==-1000,"native unmodified mip-zero baseline BEFORE any swap");
+    require(glGetError()==GL_NO_ERROR,"test-owned setup has no GL errors");
+    const auto swap=reinterpret_cast<BOOL(WINAPI*)(HDC)>(reinterpret_cast<void*>(GetProcAddress(GetModuleHandleW(L"opengl32.dll"),"wglSwapBuffers")));
+    require(swap!=nullptr,"the actual wglSwapBuffers entry used by this DLL");
+    diagnosticStage=50;
+    std::array<float,4> changed{},beforeDraw{};std::array<unsigned char,4> after{};unsigned attempts=0;
+    for(;attempts<100;++attempts){
+        require(swap(dc)!=0,"test swap original succeeds");beforeDraw=params();
+        draw();changed=params();after=pixel();
+        if(changed[0]!=0||changed[1]!=-1000||(!imported&&attempts>=2))break;
+        Sleep(50);
+    }
+    // A second draw WITHOUT a new bind/swap observes persistent mutation.
+    draw();const bool persistent=params()==changed;
+    GLint active=0;glGetIntegerv(0x84e0,&active);const bool depth=glIsEnabled(GL_DEPTH_TEST)!=0;
+    const auto swapHook=entryLeadsIntoOriginal(reinterpret_cast<const void*>(swap));
+    const auto drawHook=entryLeadsIntoOriginal(reinterpret_cast<const void*>(DrawArrays));
+    const auto bindEntry=GetProcAddress(GetModuleHandleW(L"opengl32.dll"),"glBindTexture");
+    const auto bindHook=entryLeadsIntoOriginal(reinterpret_cast<const void*>(bindEntry));
+    // Separately demonstrate bind-time mutation BEFORE drawing this new object.
+    ActiveTexture(0x84c0);GLuint bindOnly=0;glGenTextures(1,&bindOnly);glBindTexture(GL_TEXTURE_2D,bindOnly);
+    GLfloat bindBias=0,bindMinimum=0;glGetTexParameterfv(GL_TEXTURE_2D,0x8501,&bindBias);glGetTexParameterfv(GL_TEXTURE_2D,0x813a,&bindMinimum);
+    glBindTexture(GL_TEXTURE_2D,texture);ActiveTexture(GLenum(active));
+    const auto remainingError=glGetError();
+    const bool mutated=changed[0]>0&&(sampler?changed[2]>0:true),pixelsChanged=before!=after;
+    int sampledMip=-1;
+    for(int i=0;i<7;++i)if(std::equal(after.begin(),after.end(),colors[i]))sampledMip=i;
+    const bool drawMutation=beforeDraw==native&&changed!=native;
+    const bool okay=imported?
+        (mutated&&pixelsChanged&&sampledMip>0&&persistent&&drawMutation&&bindBias>0&&swapHook&&drawHook&&bindHook&&!depth&&active==0x84c3):
+        (!mutated&&!pixelsChanged&&sampledMip==0&&!swapHook&&!drawHook&&!bindHook&&!depth&&active==0x84c3);
+    diagnosticStage=60;
+    FILE *file=nullptr;require(_wfopen_s(&file,report,L"wb")==0&&file,"create sanitized report");
+    const auto truth=[](bool value){return value?"true":"false";};
+    std::fprintf(file,
+        "{\"kind\":\"original-supplied-DLL-WGL-software-probe\","
+        "\"importLoaded\":%s,\"anchorCalled\":false,\"samplerBound\":%s,"
+        "\"depthTestEnabled\":%s,\"activeUnitRestored\":%s,\"softwareRenderer\":true,"
+        "\"renderer\":%s,\"version\":%s,\"beforePixel\":%s,\"afterPixel\":%s,"
+        "\"textureBias\":%.3f,\"textureMinLod\":%.3f,\"samplerBias\":%.3f,\"samplerMinLod\":%.3f,"
+        "\"parametersPersistAfterDraw\":%s,\"pixelsChanged\":%s,\"sampledMip\":%d,"
+        "\"drawMutationAfterSwap\":%s,\"bindOnlyBias\":%.3f,\"bindOnlyMinLod\":%.3f,"
+        "\"swapEntryLeadsIntoOriginal\":%s,\"drawEntryLeadsIntoOriginal\":%s,\"bindEntryLeadsIntoOriginal\":%s,"
+        "\"warmupAttempts\":%u,\"firstRemainingGlError\":%u,\"mechanismObserved\":%s,"
+        "\"gameExecuted\":false,\"physicalGpuTested\":false}\n",
+        truth(imported),truth(sampler),truth(depth),truth(active==0x84c3),json(renderer).c_str(),json(version).c_str(),
+        color(before).c_str(),color(after).c_str(),changed[0],changed[1],changed[2],changed[3],truth(persistent),truth(pixelsChanged),sampledMip,
+        truth(drawMutation),bindBias,bindMinimum,truth(swapHook),truth(drawHook),truth(bindHook),
+        attempts<100?attempts+1:100,remainingError,truth(okay));
+    std::fclose(file);
+    // Original proxy owns live worker/hooks. Never FreeLibrary it beneath
+    // callbacks or pretend Off restores its texture objects. Fresh process per
+    // variant; the outer job kills all remaining work on timeout/exit.
+    std::printf("%s: original-DLL=%d texture-bias=%.1f min=%.1f depth-disabled=%d pixels-changed=%d\n",okay?"PASS":"FAIL",int(imported),changed[0],changed[1],int(!depth),int(pixelsChanged));
+    return okay?0:3;
+}
+} // namespace
+int wmain(int argc,wchar_t **argv){
+    if(argc==5&&std::wcscmp(argv[1],L"--launch")==0)return launch(argv[2],argv[3],argv[4]);
+    if(argc==4&&std::wcscmp(argv[1],L"--probe")==0)return probe(argv[2],std::wcscmp(argv[3],L"sampler")==0);
+    std::fputs("Explicit offline test only: --launch test-host.exe report.json texture|sampler\n",stderr);return 64;
+}

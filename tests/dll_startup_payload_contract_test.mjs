@@ -9,7 +9,7 @@ const host = read('tests/dll-startup/supplied_payload_host.cpp');
 const cmake = read('tests/dll-startup/CMakeLists.txt');
 
 assert.match(ci, /test_supplied_dll:[\s\S]*?type: boolean[\s\S]*?default: false/);
-assert.match(ci, /if: \$\{\{ github\.event_name == 'workflow_dispatch' && inputs\.test_supplied_dll \}\}[\s\S]*?uses: \.\/\.github\/workflows\/dll-payload-test\.yml/);
+assert.match(ci, /if: \$\{\{ github\.event_name == 'workflow_dispatch' && inputs\.test_supplied_dll && !inputs\.test_potato_dll \}\}[\s\S]*?uses: \.\/\.github\/workflows\/dll-payload-test\.yml/);
 assert.match(ci, /node tests\/dll_startup_payload_contract_test\.mjs/);
 assert.match(workflow, /on:\s*\n  workflow_call:/);
 assert.doesNotMatch(workflow, /^\s*(pull_request|pull_request_target|push|schedule):/m);

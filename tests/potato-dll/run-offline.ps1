@@ -1,0 +1,132 @@
+param(
+    [Parameter(Mandatory=$true)][string]$Prepared,
+    [Parameter(Mandatory=$true)][string]$Build,
+    [Parameter(Mandatory=$true)][string]$Results,
+    [switch]$ExplicitlyAllowOriginalDll
+)
+$ErrorActionPreference = 'Stop'
+# Nonzero child outcomes are evidence rows, not an excuse to stop after case 1.
+$PSNativeCommandUseErrorActionPreference = $false
+Set-StrictMode -Version Latest
+if (-not $ExplicitlyAllowOriginalDll) { throw 'Explicit original-DLL execution opt-in required' }
+$manifest = Get-Content (Join-Path $Prepared 'manifest.json') -Raw | ConvertFrom-Json
+if ($manifest.archiveSha256 -ne '80751bed1151e7f5bbcf186b51b8aada3b446af0278e5575384de7fa9eeb8b17' -or $manifest.mesaArchiveSha256 -ne 'e61153fb1a8e58b9d80b403030cda619eaffbddd9ff99b34163b996ead03d596' -or $manifest.variants.Count -ne 5) { throw 'Wrong reviewed archive/variant set' }
+New-Item -ItemType Directory -Path $Results | Out-Null
+$recipient = Join-Path $Prepared 'offline recipients'
+New-Item -ItemType Directory -Path $recipient | Out-Null
+$programs = @{}
+$hashes = @{}
+foreach ($kind in @('control','dinput','version')) {
+    $dir = Join-Path $recipient $kind
+    New-Item -ItemType Directory -Path $dir | Out-Null
+    $program = Join-Path $dir 'PotatoProbe.exe'
+    Copy-Item (Join-Path $Build "Release/potato-probe-$kind.exe") $program
+    foreach ($entry in $manifest.mesaDlls) {
+        $source = Join-Path $manifest.mesaProviderDirectory $entry.name
+        if ((Get-FileHash $source -Algorithm SHA256).Hash.ToLowerInvariant() -ne $entry.sha256) { throw 'Mesa bytes changed after preparation' }
+        Copy-Item $source (Join-Path $dir $entry.name)
+    }
+    $programs[$kind] = $program
+    $hashes[$kind] = (Get-FileHash $program -Algorithm SHA256).Hash
+}
+# All DLLs above are trusted pinned Mesa; no supplied DLL has been made loadable
+# beside a host yet. Establish/verify the block BEFORE staging/running one.
+$profiles = @(Get-NetFirewallProfile | Select-Object Name,Enabled)
+$rules = @()
+$rows = @()
+$complete = $false
+try {
+    Set-NetFirewallProfile -Profile Domain,Private,Public -Enabled True
+    if (@(Get-NetFirewallProfile | Where-Object { $_.Enabled -ne 'True' }).Count -ne 0) { throw 'Firewall unavailable; original DLL NOT run' }
+    foreach ($kind in @('control','dinput','version')) {
+        $name = 'BSI-Potato-Offline-' + [guid]::NewGuid().ToString('N')
+        New-NetFirewallRule -Name $name -DisplayName $name -Direction Outbound -Program $programs[$kind] -Action Block -Profile Any -Enabled True | Out-Null
+        $rules += $name
+        $rule = Get-NetFirewallRule -Name $name
+        $app = $rule | Get-NetFirewallApplicationFilter
+        if ($rule.Enabled -ne 'True' -or $rule.Action -ne 'Block' -or $rule.Direction -ne 'Outbound' -or $app.Program -ne $programs[$kind]) { throw 'Per-image outbound block verification failed; original DLL NOT run' }
+    }
+    $env:BSI_POTATO_PROBE_APPROVED = '1'
+    # The launcher CONSTRUCTS an allowlisted child environment (no tokens) and
+    # resumes it only after assigning a kill-on-close / process-limit-one job.
+    $cases = @(@{ sha256='none';proxyKind='control';expectedLod=0.0;forcesMinimumLod=$false }) + @($manifest.variants)
+    foreach ($case in $cases) {
+        $kind = $case.proxyKind
+        $target = $programs[$kind]
+        $dll = Join-Path (Split-Path $target) 'BsiPotatoOriginal.dll'
+        if ($kind -ne 'control') {
+            if (Test-Path $dll) { throw 'Previous original DLL was not removed after its process exit' }
+            $source = Join-Path $Prepared ('members/' + $case.sha256 + '.bin')
+            if ((Get-FileHash $source -Algorithm SHA256).Hash.ToLowerInvariant() -ne $case.sha256) { throw 'Original bytes changed before test' }
+            Copy-Item $source $dll
+            if ((Get-FileHash $dll -Algorithm SHA256).Hash.ToLowerInvariant() -ne $case.sha256) { throw 'Staged original differs' }
+        }
+        try {
+            foreach ($sampling in @('texture','sampler')) {
+                $childReport = Join-Path $Prepared ($case.sha256 + '-' + $sampling + '.json')
+                $launcher = $programs['control']
+                & $launcher --launch $target $childReport $sampling
+                $exit = $LASTEXITCODE
+                $row = [ordered]@{ sha256=$case.sha256;proxyKind=$kind;sampling=$sampling;outboundBlocked=$true;launcherExitCode=$exit;containedBeforeResume=$false;reportAvailable=$false;passed=$false;gameExecuted=$false;physicalGpuTested=$false }
+                $parentReport = $childReport + '.launch.json'
+                if (Test-Path $parentReport) {
+                    if ((Get-Item $parentReport).Length -gt 1024) { throw 'Oversize parent report refused' }
+                    $launch = Get-Content $parentReport -Raw | ConvertFrom-Json
+                    if ($launch.createdSuspended -ne $true -or $launch.containedBeforeResume -ne $true -or $launch.processLimit -ne 1 -or $launch.timeout -isnot [bool]) { throw 'Parent did not verify bounded child execution' }
+                    $row.containedBeforeResume = $true
+                    $row.timeout = $launch.timeout
+                    $row.childExitCode = [long]$launch.childExitCode
+                }
+                if (Test-Path $childReport) {
+                    if ((Get-Item $childReport).Length -gt 8192) { throw 'Oversize child report refused' }
+                    $r = Get-Content $childReport -Raw | ConvertFrom-Json
+                    $row.reportAvailable = $true
+                    if ($r.kind -eq 'original-probe-prerequisite-failure') {
+                        $row.failureStage = [int]$r.failureStage
+                        $row.win32Error = [long]$r.win32Error
+                    } elseif ($r.kind -eq 'original-supplied-DLL-WGL-software-probe') {
+                    # Select only known schema fields; never upload raw child
+                    # files, logs, module paths, dumps, IDs or original bytes.
+                    foreach ($key in @('importLoaded','anchorCalled','samplerBound','depthTestEnabled','activeUnitRestored','softwareRenderer','parametersPersistAfterDraw','pixelsChanged','drawMutationAfterSwap','swapEntryLeadsIntoOriginal','drawEntryLeadsIntoOriginal','bindEntryLeadsIntoOriginal','mechanismObserved','gameExecuted','physicalGpuTested')) {
+                        if ($r.$key -isnot [bool]) { throw 'Nonboolean child evidence field' }
+                        $row[$key] = $r.$key
+                    }
+                    foreach ($key in @('textureBias','textureMinLod','samplerBias','samplerMinLod','bindOnlyBias','bindOnlyMinLod','sampledMip','warmupAttempts','firstRemainingGlError')) {
+                        $value = [double]$r.$key
+                        if ([double]::IsNaN($value) -or [double]::IsInfinity($value) -or [math]::Abs($value) -gt 1000000) { throw 'Invalid numeric child evidence field' }
+                        $row[$key] = $value
+                    }
+                    foreach ($key in @('beforePixel','afterPixel')) {
+                        if ($r.$key.Count -ne 4) { throw 'Bad pixel evidence' }
+                        $pixel = @();foreach ($channel in $r.$key) { $n=[int]$channel;if ($n -lt 0 -or $n -gt 255) { throw 'Bad pixel channel' };$pixel += $n }
+                        $row[$key] = $pixel
+                    }
+                    $expectedMinimum = if ($case.forcesMinimumLod) { [double]$case.expectedLod } else { -1000.0 }
+                    $parameters = if ($kind -eq 'control') { $row.textureBias -eq 0 -and $row.textureMinLod -eq -1000 } else {
+                        $row.textureBias -eq $case.expectedLod -and $row.textureMinLod -eq $expectedMinimum -and
+                        ($sampling -ne 'sampler' -or ($row.samplerBias -eq $case.expectedLod -and $row.samplerMinLod -eq $expectedMinimum))
+                    }
+                    $bindParameters = $row.bindOnlyBias -eq $case.expectedLod -and $row.bindOnlyMinLod -eq $expectedMinimum
+                    $row.passed = $exit -eq 0 -and $row.containedBeforeResume -and $row.mechanismObserved -and $row.softwareRenderer -and $parameters -and $bindParameters -and -not $row.anchorCalled -and -not $row.depthTestEnabled -and $row.activeUnitRestored -and -not $row.gameExecuted -and -not $row.physicalGpuTested -and ($row.importLoaded -eq ($kind -ne 'control'))
+                    } else { throw 'Unknown child evidence kind' }
+                }
+                $rows += $row
+                Write-Output ($row | ConvertTo-Json -Compress -Depth 5)
+                if ((Get-FileHash $target -Algorithm SHA256).Hash -ne $hashes[$kind]) { throw 'Host bytes changed' }
+                if ($kind -ne 'control' -and (Get-FileHash $dll -Algorithm SHA256).Hash.ToLowerInvariant() -ne $case.sha256) { throw 'Original DLL bytes changed during test' }
+            }
+        } finally {
+            # Every launcher has exited and closed/killed its contained job.
+            if (Test-Path $dll) { Remove-Item -LiteralPath $dll }
+        }
+    }
+    $complete = $true
+} finally {
+    foreach ($name in $rules) { Get-NetFirewallRule -Name $name -ErrorAction SilentlyContinue | Remove-NetFirewallRule }
+    foreach ($profile in $profiles) { Set-NetFirewallProfile -Profile $profile.Name -Enabled $profile.Enabled }
+    Remove-Item Env:BSI_POTATO_PROBE_APPROVED -ErrorAction SilentlyContinue
+    $allPassed = $complete -and $rows.Count -eq 12 -and @($rows | Where-Object { -not $_.passed }).Count -eq 0
+    [ordered]@{ scope='Original supplied Potato DLLs in an authored WGL/llvmpipe host, NOT a player/game';archiveSha256=$manifest.archiveSha256;mesaArchiveSha256=$manifest.mesaArchiveSha256;complete=$complete;allMechanismCasesPassed=$allPassed;rows=$rows;installed=$false;redistributed=$false;gameAcceptance=$false } | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $Results 'supplied-potato-results.json') -Encoding utf8
+}
+if (-not $allPassed) { throw 'One or more actual original-DLL mechanisms were NOT observed; inspect sanitized evidence, do not claim a game fix' }
+'PASS: five unique original DLLs, normal renamed import (anchor NOT called), real Mesa software mip pixels with depth disabled, texture and sampler modes, negative controls, outbound block and bounded child lifetime. NOT player/physical-GPU acceptance.' | Out-File $env:GITHUB_STEP_SUMMARY -Append
