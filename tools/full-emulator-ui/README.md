@@ -29,6 +29,27 @@ changed, protected, verified/unchanged resources and unsupported visual bindings
 missing resources are not silently advertised as redesigned. The source-only test
 snapshot does not prove compatibility or exact appearance on a live OEM player.
 
+## Replace the current installed UI (including stale state)
+
+Use **REPLACE-INSTALLED-UI.cmd** if you want the old UI removed/replaced instead
+of a state-verified upgrade. Select the folder containing `HD-Player.exe` and type
+**REPLACE**. Optional **CHECK-REPLACEMENT.cmd** previews this mode without writes.
+
+This mode ignores the previous UI record and uses the files actually present.
+It replaces existing pack assets, deletes obsolete files inside
+`Assets/VOIDReferenceUI`, rebuilds the mapped native UI and writes a new record.
+It handles a native/restored player with stale state and missing assets, as well
+as edited assets on a recognized installed native bridge. Nothing must be deleted
+manually first. Unknown native callback contracts can still require adaptation;
+this is not a tool for replacing arbitrary EXE bytes with a different build.
+
+Every replaced/deleted file and the old record are backed up in the same undo
+journal. A failed apply rolls back; **UNDO-UI.cmd** restores the pre-replacement
+files (including obsolete UI files). Apps, Android data, boot/auth, independent
+helper registration and previous backups are not removed. Only choose the pack's
+UI directory for its assets: obsolete files there are deliberately deleted.
+No optimizer or helper is installed.
+
 ## Windows installation
 
 1. Close all players and the multi-instance
@@ -57,7 +78,8 @@ snapshot does not prove compatibility or exact appearance on a live OEM player.
 A tracked earlier full-UI installation can be upgraded only when its current
 files match its state. In particular, manual icon/shell edits without state hash
 updates are refused, not blindly adopted. A different source contract/build can
-also be refused. In either case diagnostics are needed before a safe migration.
+also be refused. Use the explicit replacement mode above for stale state/missing or edited pack assets.
+Unknown source contracts still need adaptation.
 Do not use the separate historical mixed-UI migration unless specifically audited.
 
 ## No optimizer

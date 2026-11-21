@@ -58,7 +58,7 @@ exit /b 1
 '''
     def cmd(text):return text.replace('\n','\r\n').encode('utf-8')
     members['RUN-UI.cmd']=cmd(run)
-    for name,mode in [('CHECK-UI','--check'),('INSTALL-UI','--apply'),('UNDO-UI','--restore-latest')]:
+    for name,mode in [('CHECK-UI','--check'),('INSTALL-UI','--apply'),('REPLACE-INSTALLED-UI','--apply --replace-ui'),('CHECK-REPLACEMENT','--check --replace-ui'),('UNDO-UI','--restore-latest')]:
         members[name+'.cmd']=cmd('@echo off\ncall "%~dp0RUN-UI.cmd" '+mode+' --report "%~dp0UI-COVERAGE.json" %*\nset "RC=%ERRORLEVEL%"\npause\nexit /b %RC%\n')
     members['DIAGNOSE-UI.cmd']=cmd('@echo off\ncall "%~dp0RUN-UI.cmd" --diagnose-ui --diagnostic-output "%~dp0VOID-UI-Diagnostics.zip" %*\nset "RC=%ERRORLEVEL%"\npause\nexit /b %RC%\n')
     members['EXPORT-ALL-UI-SOURCES.cmd']=cmd('@echo off\ncall "%~dp0RUN-UI.cmd" --export-sources "%~dp0PLANNED-ALL-UI-SOURCES.zip" %*\nset "RC=%ERRORLEVEL%"\npause\nexit /b %RC%\n')
@@ -67,7 +67,7 @@ exit /b 1
     report={'suite':'VOID Carbon Suite 07','sourceCommit':subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip(),
             'legacyEngineSha256':suite.sha(legacy),'suiteSourceSha256':suite.sha((HERE/'suite.py').read_bytes()),
             'assetsSha256':{name:suite.sha(data) for name,data in assets.items()},
-            'optimizerIncluded':False,'helperIncluded':False,
+            'optimizerIncluded':False,'helperIncluded':False,'replacementInstallSupported':True,
             'proprietaryBinariesIncluded':False,'liveEmulatorExecuted':False,
             'scope':'All mapped eligible native QML/SVG files; boot/auth/JS/framework/dependencies protected; per-install coverage required.'}
     members['BUILD-REPORT.json']=(json.dumps(report,indent=2)+'\n').encode()

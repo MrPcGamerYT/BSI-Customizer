@@ -46,9 +46,27 @@ def runtime():
     if text.count(anchor) != 1:
         raise RuntimeError('Pinned planner hook changed; review required.')
     text = text.replace(anchor, "    desired = remove_optimizer(desired, url)\n"+anchor, 1)
+    hooks = {
+        "    state=m.read_json(state_before) if state_before else {}":
+            "    state={} if replacing_ui else (m.read_json(state_before) if state_before else {})",
+        "    migration_sources={};migration_info=None":
+            "    if replacing_ui: state=replacement_state(root,current,owners,url)\n    migration_sources={};migration_info=None",
+        "not known and (name not in CORE_NAMES or not state)":
+            "not known and (name not in CORE_NAMES or not state or replacing_ui)",
+        "    parser.add_argument('--install-dir',type=Path)":
+            "    parser.add_argument('--replace-ui',action='store_true',help='Replace previous UI files/state, retaining a complete undo backup.')\n    parser.add_argument('--install-dir',type=Path)",
+        "word='MIGRATE' if args.migrate_reviewed_legacy else 'APPLY'":
+            "word='REPLACE' if args.replace_ui else ('MIGRATE' if args.migrate_reviewed_legacy else 'APPLY')",
+    }
+    for before, after in hooks.items():
+        if text.count(before) != 1:
+            raise RuntimeError('Pinned replacement hook changed; review required.')
+        text = text.replace(before, after, 1)
     text = text.replace('Settings now uses the reference shell and contains the VOID Optimizer tab.', 'Settings now uses the native-only Carbon shell (no optimizer).')
     exec(compile(text, 'pinned-void-ui-engine.py', 'exec'), module.__dict__)
     module.remove_optimizer = lambda desired, url: without_optimizer(module, desired, url)
+    module.replacing_ui = False
+    module.replacement_state = lambda root, current, owners, url: replacement_state(module, root, current, owners, url)
     packed = module.payload()
     if ASSETS_B85:
         data = base64.b85decode(ASSETS_B85)
@@ -103,7 +121,17 @@ def runtime():
 
     def plan(root, **kwargs):
         kwargs['full_emulator_ui'] = True
-        planned, report = original_plan(root, **kwargs)
+        replace = kwargs.pop('replace_existing_ui', module.replacing_ui)
+        previous_mode = module.replacing_ui
+        module.replacing_ui = replace
+        try:
+            planned, report = original_plan(root, **kwargs)
+            if replace:
+                retire_old_assets(module, planned, packed)
+        finally:
+            module.replacing_ui = previous_mode
+        report['replacement_install'] = replace
+        report['changed_files'] = [change.relative for change in planned.changes]
         report['optimizer_included'] = False
         rows = {row['name']: dict(row) for row in report.get('native_coverage', [])}
         for row in report['resources']:
@@ -119,7 +147,105 @@ def runtime():
         return planned, report
 
     module.plan_install = plan
+    engine = module.manager().engine()
+    original_commit = engine.commit
+    def commit(planned, writer=None):
+        if getattr(planned, '_suite_replacement', False):
+            return commit_replacement(engine, planned, writer)
+        return original_commit(planned) if writer is None else original_commit(planned, writer)
+    engine.commit = commit
     return module
+
+
+def replacement_state(module, root, current, owners, url):
+    """Explicit replacement: derive identities from actual files, not stale state.
+    Fresh native core callbacks still go through the reviewed-source transformer.
+    Recognized already-installed bridge resources are retained and sanitized.
+    """
+    engine = module.manager().engine()
+    resources = {}
+    for name, value in current.items():
+        if name in module.RESOURCE_NAMES and (b'VOID REFERENCE UI V3' in value or b'VOID NATIVE SETTINGS V4' in value):
+            resources[name] = {'sha256': sha(value), 'container': owners[name].relative_to(root).as_posix()}
+    assets = {}
+    for name in module.payload():
+        if name.startswith(PREFIX):
+            target = engine.safe_target(root, name)
+            engine.need(not target.exists() or (target.is_file() and target.stat().st_size <= 2*1024*1024), 'Oversized/non-file UI asset: '+name)
+            assets[name] = engine.digest(target.read_bytes() if target.exists() else None)
+    return {'format': 1, 'edition': 5, 'assets_url': url, 'resources': resources, 'assets': assets}
+
+
+def retire_old_assets(module, planned, packed):
+    """Remove obsolete files ONLY within this pack's UI directory, with undo bytes."""
+    engine = module.manager().engine()
+    directory = engine.safe_target(planned.root, PREFIX.rstrip('/'))
+    count = total = 0
+    if directory.exists():
+        engine.need(directory.is_dir(), 'UI asset path must be a directory.')
+        for path in sorted(directory.rglob('*')):
+            relative = path.relative_to(planned.root).as_posix()
+            engine.safe_target(planned.root, relative)  # rejects links/junctions/escapes
+            if path.is_dir():
+                continue
+            count += 1
+            engine.need(path.is_file() and path.stat().st_size <= 2*1024*1024 and count <= 512, 'Oversized/unsupported old UI folder.')
+            total += path.stat().st_size
+            engine.need(total <= 32*1024*1024, 'Old UI asset folder exceeds replacement limit.')
+            if relative not in packed:
+                planned.changes.append(engine.Change(relative, path.read_bytes(), None))
+    engine.need(len(planned.changes) <= 256, 'Too many replacement files for a single undo journal.')
+    planned._suite_replacement = True
+
+
+def commit_replacement(engine, planned, writer=None):
+    """Pinned transaction semantics extended to journalled deletion of old UI files.
+    The pinned restore already supports after=None; no file is deleted pre-backup.
+    """
+    import os
+    import stat
+    from datetime import datetime, timezone
+    import uuid
+    writer = engine.atomic_write if writer is None else writer
+    if not planned.changes:
+        return None
+    engine.need(len(planned.changes) <= 256 and len({change.relative for change in planned.changes}) == len(planned.changes), 'Invalid replacement record count/duplicates.')
+    for change in planned.changes:
+        engine.need(engine.current(engine.safe_target(planned.root, change.relative)) == change.before, 'Target changed after preflight: '+change.relative)
+    backup_root = engine.safe_target(planned.root, 'VOID-UI-Backups')
+    backup_root.mkdir(exist_ok=True)
+    folder = backup_root/(datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ-')+uuid.uuid4().hex[:8])
+    folder.mkdir(mode=0o700)
+    state = {'format': 1, 'installation': str(planned.root), 'status': 'preparing', 'records': []}
+    for index, change in enumerate(planned.changes):
+        target = engine.safe_target(planned.root, change.relative)
+        info = target.stat() if target.exists() else None
+        row = {'path': change.relative, 'before': engine.digest(change.before), 'after': engine.digest(change.after),
+               'backup': 'files/%03d.bin' % index, 'mode': stat.S_IMODE(info.st_mode) if info else None,
+               'atime_ns': info.st_atime_ns if info else None, 'mtime_ns': info.st_mtime_ns if info else None}
+        if change.before is not None:
+            engine.atomic_write(folder/row['backup'], change.before, 0o600)
+            engine.need((folder/row['backup']).read_bytes() == change.before, 'Backup read-back failed.')
+        state['records'].append(row)
+    state['status'] = 'ready'; engine.save_state(folder, state)
+    try:
+        state['status'] = 'applying'; engine.save_state(folder, state)
+        for row, change in zip(state['records'], planned.changes):
+            target = engine.safe_target(planned.root, change.relative)
+            engine.need(engine.current(target) == change.before, 'Target changed during replacement: '+change.relative)
+            if change.after is None:
+                target.unlink()
+            else:
+                writer(target, change.after, row['mode'])
+            engine.need(engine.current(target) == change.after, 'Replacement read-back failed: '+change.relative)
+        state['status'] = 'applied'; engine.save_state(folder, state)
+    except BaseException as error:
+        try:
+            engine.restore(folder, planned.root, rollback=True)
+        except BaseException as recovery:
+            raise engine.Refusal('Replacement interrupted; preserve backup: '+str(folder)+'\n'+str(recovery)) from error
+        raise engine.Refusal('Replacement failed; original files restored. Backup: '+str(folder)+'\n'+str(error)) from error
+    return folder
 
 
 def without_optimizer(module, desired, url):
@@ -226,6 +352,9 @@ def export_sources(module, root, destination):
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
     module = runtime()
+    module.replacing_ui = '--replace-ui' in argv
+    if module.replacing_ui:
+        print('REPLACE UI: old UI files/state will be replaced; apps/data and independent helpers are not removed.')
     print('VOID CARBON SUITE 07 - full eligible native UI, guarded resources and exact recovery')
     if '--export-sources' in argv:
         parser = argparse.ArgumentParser()

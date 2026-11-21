@@ -15,6 +15,8 @@ with zipfile.ZipFile(ROOT/'deliverables/VOID-Full-Emulator-UI-Suite07.zip') as a
     assert not any('Helper/' in name or name.lower().endswith('.exe') or name.endswith('OptimizerPage.qml') for name in archive.namelist())
     report = json.loads(archive.read(prefix+'BUILD-REPORT.json'))
     assert report['optimizerIncluded'] is False and report['helperIncluded'] is False
+    assert report['replacementInstallSupported'] is True
+    assert '--apply --replace-ui' in archive.read(prefix+'REPLACE-INSTALLED-UI.cmd').decode()
     for line in archive.read(prefix+'MANIFEST-SHA256.txt').decode().splitlines():
         digest, name = line.split('  ', 1)
         assert hashlib.sha256(archive.read(prefix+name)).hexdigest() == digest, name
@@ -29,6 +31,7 @@ with zipfile.ZipFile(ROOT/'deliverables/VOID-Full-Emulator-UI-Suite07.zip') as a
         result = subprocess.run([sys.executable, str(target/'VOID-Full-UI.py'), '--help'], cwd=target, text=True, capture_output=True, timeout=60)
         assert result.returncode == 0, result.stdout+result.stderr
         assert 'Traceback' not in result.stderr
+        assert '--replace-ui' in result.stdout
         # Exercise the installed native-only payload, not just the argument parser.
         probe = '''import importlib.util
 from pathlib import Path
@@ -46,4 +49,21 @@ print('PASS extracted runtime and external design')
         (target/'design.json').write_text(json.dumps(profile))
         result = subprocess.run([sys.executable, '-c', probe], cwd=target, text=True, capture_output=True, timeout=60)
         assert result.returncode == 0, result.stdout+result.stderr
+        import runpy
+        helpers = runpy.run_path(str(ROOT/'tests/full_emulator_ui_suite_test.py'))
+        player = target/'Synthetic Player'
+        original, _ = helpers['fixture'](player)
+        (player/'.VOID-Reference-UI.json').write_bytes(b'stale broken old record')
+        old = player/'Assets/VOIDReferenceUI/obsolete-optimizer.qml'
+        old.parent.mkdir(parents=True);old.write_bytes(b'old UI')
+        result = subprocess.run([sys.executable, str(target/'VOID-Full-UI.py'), '--apply', '--replace-ui', '--yes', '--install-dir', str(player)], cwd=target, text=True, capture_output=True, timeout=120)
+        assert result.returncode == 0, result.stdout+result.stderr
+        assert not old.exists()
+        assert (player/'HD-Player.exe').read_bytes() != original
+        assert b'CARBON SUITE 07' in (player/'Assets/VOIDReferenceUI/SettingsShell.qml').read_bytes()
+        result = subprocess.run([sys.executable, str(target/'VOID-Full-UI.py'), '--restore-latest', '--yes', '--install-dir', str(player)], cwd=target, text=True, capture_output=True, timeout=120)
+        assert result.returncode == 0, result.stdout+result.stderr
+        assert (player/'HD-Player.exe').read_bytes() == original
+        assert old.read_bytes() == b'old UI'
+        assert (player/'.VOID-Reference-UI.json').read_bytes() == b'stale broken old record'
 print('PASS: ZIP hashes, no optimizer/helper, shallow drive-root startup and external profile on', sys.version)

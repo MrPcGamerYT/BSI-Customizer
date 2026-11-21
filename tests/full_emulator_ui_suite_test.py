@@ -120,6 +120,64 @@ class SuiteTests(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError,'outside the emulator'):
                 S.export_sources(U,root,root/'preview.zip')
 
+    def test_replace_stale_state_and_missing_assets_then_exact_undo(self):
+        import shutil
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder)/'Reset Player';original,_=fixture(root)
+            E.commit(U.plan_install(root)[0])
+            # Reproduce the report: original resources, old installed state, absent assets.
+            (root/'HD-Player.exe').write_bytes(original)
+            shutil.rmtree(root/'Assets/VOIDReferenceUI')
+            (root/'Apps').mkdir();(root/'Apps/user-data.bin').write_bytes(b'KEEP GAME DATA')
+            before=files(root)
+            with self.assertRaises(Exception):U.plan_install(root)
+            planned,report=U.plan_install(root,replace_existing_ui=True)
+            self.assertTrue(report['replacement_install'])
+            self.assertEqual(files(root),before,'replacement preflight must be read-only')
+            backup=E.commit(planned)
+            self.assertEqual(U.plan_install(root)[0].changes,[])
+            self.assertEqual((root/'Apps/user-data.bin').read_bytes(),b'KEEP GAME DATA')
+            self.assertNotIn(b'voidOptimizer',inventory((root/'HD-Player.exe').read_bytes())['PlrSidebar.qml'])
+            E.restore(backup,root)
+            for name,digest in before.items():self.assertEqual(S.sha((root/name).read_bytes()),digest,name)
+            self.assertFalse((root/'Assets/VOIDReferenceUI/SettingsShell.qml').exists())
+
+    def test_replace_edited_assets_deletes_obsolete_files_and_undo_restores_them(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder)/'Edited UI';fixture(root)
+            E.commit(U.plan_install(root)[0])
+            old=root/'Assets/VOIDReferenceUI/old-optimizer.qml';old.write_bytes(b'OLD UI')
+            shell=root/'Assets/VOIDReferenceUI/SettingsShell.qml';shell.write_bytes(b'OLD EDITED SHELL')
+            before=files(root)
+            with self.assertRaises(Exception):U.plan_install(root)
+            planned,_=U.plan_install(root,replace_existing_ui=True)
+            self.assertTrue(any(change.relative.endswith('old-optimizer.qml') and change.after is None for change in planned.changes))
+            backup=E.commit(planned)
+            self.assertFalse(old.exists())
+            self.assertIn(b'CARBON SUITE 07',shell.read_bytes())
+            self.assertEqual(U.plan_install(root)[0].changes,[])
+            E.restore(backup,root)
+            for name,digest in before.items():self.assertEqual(S.sha((root/name).read_bytes()),digest,name)
+
+    def test_replace_malformed_state_and_failure_rolls_back_deletions(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder)/'Broken state';fixture(root)
+            (root/U.UI_STATE).write_bytes(b'not json')
+            assets=root/'Assets/VOIDReferenceUI';assets.mkdir(parents=True)
+            old=assets/'obsolete.qml';old.write_bytes(b'OLD')
+            before=files(root)
+            planned,_=U.plan_install(root,replace_existing_ui=True)
+            # Force a failure AFTER the obsolete file is deleted, inside the journal.
+            planned.changes.append(E.Change('fail-last.txt',None,b'X'))
+            def fail_last(path,data,mode):
+                if path.name=='fail-last.txt':raise OSError('simulated disk failure')
+                E.atomic_write(path,data,mode)
+            with self.assertRaisesRegex(Exception,'original files restored'):
+                E.commit(planned,writer=fail_last)
+            for name,digest in before.items():self.assertEqual(S.sha((root/name).read_bytes()),digest,name)
+            self.assertFalse((root/'fail-last.txt').exists())
+            self.assertFalse((assets/'SettingsShell.qml').exists())
+
     def test_design_is_data_not_qml(self):
         design=json.loads((ROOT/'assets/full-emulator-ui/design.json').read_text())
         for key,value in [('font','Segoe UI"; backend.erase()'),('radius',True),('durationMs',9999),('motion','true')]:
