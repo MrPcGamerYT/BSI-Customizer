@@ -47,6 +47,17 @@ execution results must not be misreported as static-only analysis. UnRAR was bui
 no archive member or bundled script was used as an analysis tool. Extracted
 binaries, disassembly and the archive are not Git/release deliverables.
 
+## New ANSHU archive follow-up
+
+The subsequently supplied **`POTATO FF DLL BY ANSHU.rar`** (Drive ID
+`1Ex-E3YCwkq5wWschqaFMdNv9abB0MV9-`, password `ANSHUXPOTATO`) has now also
+been downloaded, hash-verified and inspected as data. **All six complete DLLs
+are byte-for-byte identical to the six members below, including the duplicate B
+identity.** Its different RAR hash/password/folder names do not supply a new
+implementation. No identical original was executed again for that comparison.
+See the [exact paths, full hashes, video assessment and reproducible comparison](POTATO-ANSHU-REFERENCE.md).
+This is not new installed-game, physical-driver or FPS acceptance evidence.
+
 ## What the effect actually does
 
 The inspected hook path uses desktop **OpenGL/WGL**, rather than a screen-space

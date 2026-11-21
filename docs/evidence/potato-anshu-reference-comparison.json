@@ -1,0 +1,83 @@
+{
+  "schema": 1,
+  "execution": "none; archives decompressed and PE headers/full bytes parsed as data only",
+  "previousArchive": {
+    "name": "POTATO FF DLL 7FARFF.rar",
+    "driveFileId": "1QGBvjTpW0mRNPwv2eqj77UEsLQtNDV7Y",
+    "bytes": 344442,
+    "sha256": "80751bed1151e7f5bbcf186b51b8aada3b446af0278e5575384de7fa9eeb8b17",
+    "entries": 17
+  },
+  "newArchive": {
+    "name": "POTATO FF DLL BY ANSHU.rar",
+    "driveFileId": "1Ex-E3YCwkq5wWschqaFMdNv9abB0MV9-",
+    "bytes": 345058,
+    "sha256": "ed56050e890d9bf9efa8df08cd5eee2f143041cb49b983760c231e2c1fbca449",
+    "entries": 18
+  },
+  "expandedFileBytes": 1465344,
+  "dllFiles": 6,
+  "uniqueDllByteSequences": 5,
+  "allDllBytesPreviouslyReviewed": true,
+  "sameUniqueDllSet": true,
+  "sameDllMultiplicity": true,
+  "identicalDllContents": true,
+  "members": [
+    {
+      "name": "POTATO FF DLL BY ANSHU/POTATO FF DLL BY ANSHU/Intel/LOW/dinput8.dll",
+      "bytes": 243712,
+      "sha256": "25da83f0c7f5d6052e67e279cb427d20643593321405f017331ebd450e5fdcf8",
+      "sameCompleteBytesAsPrevious": true,
+      "previousMembers": [
+        "POTATO FF DLL 7FARFF/Intel/Bajo/dinput8.dll"
+      ]
+    },
+    {
+      "name": "POTATO FF DLL BY ANSHU/POTATO FF DLL BY ANSHU/Intel/STRONG/dinput8.dll",
+      "bytes": 243712,
+      "sha256": "c956f2bd04b22212ecb8e65a0397c40addf64be136d8d1cd906e473661113554",
+      "sameCompleteBytesAsPrevious": true,
+      "previousMembers": [
+        "POTATO FF DLL 7FARFF/Intel/Fuerte/dinput8.dll",
+        "POTATO FF DLL 7FARFF/Nvidia  AMD/BS MSI 4/forte/dinput8.dll"
+      ]
+    },
+    {
+      "name": "POTATO FF DLL BY ANSHU/POTATO FF DLL BY ANSHU/Nvidia  AMD/BS MSI 4/forte/dinput8.dll",
+      "bytes": 243712,
+      "sha256": "c956f2bd04b22212ecb8e65a0397c40addf64be136d8d1cd906e473661113554",
+      "sameCompleteBytesAsPrevious": true,
+      "previousMembers": [
+        "POTATO FF DLL 7FARFF/Intel/Fuerte/dinput8.dll",
+        "POTATO FF DLL 7FARFF/Nvidia  AMD/BS MSI 4/forte/dinput8.dll"
+      ]
+    },
+    {
+      "name": "POTATO FF DLL BY ANSHU/POTATO FF DLL BY ANSHU/Nvidia  AMD/BS MSI 4/leve/dinput8.dll",
+      "bytes": 243712,
+      "sha256": "289e1eb34e815b886f4c2585c37efc78c489f58fd7b28942cfd5aeb1ec38b282",
+      "sameCompleteBytesAsPrevious": true,
+      "previousMembers": [
+        "POTATO FF DLL 7FARFF/Nvidia  AMD/BS MSI 4/leve/dinput8.dll"
+      ]
+    },
+    {
+      "name": "POTATO FF DLL BY ANSHU/POTATO FF DLL BY ANSHU/Nvidia  AMD/BS MSI 5/LIGHT/version.dll",
+      "bytes": 245248,
+      "sha256": "b68e5b3586ffd2a57c680a0426818e71b06eadc3ce60b80507f42679892b3558",
+      "sameCompleteBytesAsPrevious": true,
+      "previousMembers": [
+        "POTATO FF DLL 7FARFF/Nvidia  AMD/BS MSI 5/leve/version.dll"
+      ]
+    },
+    {
+      "name": "POTATO FF DLL BY ANSHU/POTATO FF DLL BY ANSHU/Nvidia  AMD/BS MSI 5/STRONG/version.dll",
+      "bytes": 245248,
+      "sha256": "7440db72c09af59e8a3249e17fff0a1e964e4409bc6ec7b9c1686b35368fac22",
+      "sameCompleteBytesAsPrevious": true,
+      "previousMembers": [
+        "POTATO FF DLL 7FARFF/Nvidia  AMD/BS MSI 5/forte/version.dll"
+      ]
+    }
+  ]
+}

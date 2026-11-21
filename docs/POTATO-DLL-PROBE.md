@@ -20,6 +20,12 @@ mipmapped HUD/RGB-data effects while preserving exact owned-route/protection,
 draw-scoped Off restoration, native Save/Discard and Shaders-before-About.
 Neither follow-up reuses the original code/binaries or establishes game success.
 
+The later [ANSHU reference review](POTATO-ANSHU-REFERENCE.md) verified that its
+six DLL members are **the same complete bytes** as these five unique tested
+identities. That was a separate data-only comparison, not another execution run
+or evidence about the tutorial author's player. The measurements below retain
+their original software-WGL environment and acceptance limits.
+
 ## Measured original behavior
 
 Each identity ran in two fresh children: texture-object sampling, then sampling

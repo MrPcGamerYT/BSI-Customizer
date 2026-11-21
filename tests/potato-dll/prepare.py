@@ -44,10 +44,12 @@ def sha(data):
 
 
 def archive_inventory(path):
-    import rarfile
     require(path.is_file() and not path.is_symlink(), "Regular archive required")
     require(path.stat().st_size == 344442, "Different archive size")
     require(sha(path.read_bytes()) == ARCHIVE_SHA256, "Different original archive SHA-256")
+    # Fixed-size/hash rejection needs stdlib only. Synthetic ordinary-CI tests
+    # must not depend on a parser/decompressor or download the private payload.
+    import rarfile
     with rarfile.RarFile(path) as archive:
         infos = archive.infolist()
         require(len(infos) == 17, "Different archive inventory")

@@ -5,6 +5,7 @@ const read = path => fs.readFileSync(new URL(`../${path}`, import.meta.url), 'ut
 const ci = read('.github/workflows/ci.yml');
 const workflow = read('.github/workflows/potato-dll-probe.yml');
 const prepare = read('tests/potato-dll/prepare.py');
+const compare = read('tests/potato-dll/compare_references.py');
 const run = read('tests/potato-dll/run-offline.ps1');
 const host = read('tests/potato-dll/probe.cpp');
 const cmake = read('tests/potato-dll/CMakeLists.txt');
@@ -15,6 +16,13 @@ assert.match(ci, /uses: \.\/\.github\/workflows\/potato-dll-probe\.yml\s+with:\s
 assert.equal((ci.match(/!inputs\.test_supplied_dll && !inputs\.test_potato_dll/g) || []).length, 4,
   'An explicit payload probe must not also queue ordinary application builds');
 assert.match(ci, /node tests\/potato_dll_probe_contract_test\.mjs/);
+assert.match(ci, /- name: Test Potato reference identities with synthetic data only \(no supplied DLL execution\)\s+run: python -m unittest discover -s tests\/potato-dll -p '\*_test\.py'/);
+assert.match(compare, /ed56050e890d9bf9efa8df08cd5eee2f143041cb49b983760c231e2c1fbca449/);
+assert.match(compare, /old\["data"\] == row\["data"\]/);
+assert.match(compare, /sameDllMultiplicity/);
+assert.doesNotMatch(compare, /\b(?:ctypes|WinDLL|CDLL|LoadLibrary|urllib|requests|socket|subprocess)\b/,
+  'Reference comparison must not load supplied code, acquire network data or launch an execution harness');
+assert.doesNotMatch(compare, /archive\.extract(?:all)?\s*\(/);
 assert.match(workflow, /on:\s*\n  workflow_call:/);
 assert.doesNotMatch(workflow, /^\s*(pull_request|pull_request_target|push|schedule|workflow_dispatch):/m);
 assert.match(workflow, /github\.event_name == 'workflow_dispatch' && inputs\.execute_original_dll/);
