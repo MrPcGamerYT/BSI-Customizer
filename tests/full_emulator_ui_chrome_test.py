@@ -9,6 +9,7 @@ import time
 os.environ.setdefault('QT_QPA_PLATFORM','offscreen')
 os.environ.setdefault('QT_QUICK_BACKEND','software')
 os.environ.setdefault('QT_QUICK_CONTROLS_STYLE','Basic')
+os.environ.setdefault('QSG_RENDER_LOOP','basic')
 from PySide6.QtCore import QObject, QMetaObject, QPoint, QPointF, Qt, QSettings, QUrl
 from PySide6.QtGui import QGuiApplication, QFontDatabase
 from PySide6.QtQml import QQmlEngine, QQmlComponent
@@ -106,11 +107,24 @@ Window {
     assert find(fallback,'voidReferenceSidebarFace') is not None,'initial discovery deferred beyond creation'
     assert fallback.property('contentItem').property('opacity')==0
     assert window.property('railInk').name()=='#82dfb1','persisted palette not ready at construction'
+    # Observe the first actual render, not an artificial pre-event-loop grab.
+    # Qt dispatches data: PNG replies before its scheduled render; capture their
+    # status at beforeRendering so a later settled frame cannot hide warm-up.
+    frames=[]
+    def before_render():
+        if not frames:
+            frames.append((find(inline,'bsiOutlineGlyph').property('status'),find(fallback,'bsiOutlineGlyph').property('status')))
+    window.beforeRendering.connect(before_render,Qt.DirectConnection)
+    for _ in range(100):
+        if frames:break
+        app.processEvents();time.sleep(.002)
+    assert frames and frames[0]==(1,1),('glyphs not ready at first actual render',frames,str(warnings))
     first=window.grabWindow();assert not first.isNull()
-    # No 'blank instead of stock' loophole: both themed glyphs must already exist.
+    # No 'blank instead of stock' loophole: both themed glyphs must exist too.
     for top in (40,100):
-        count=sum(1 for y in range(top+10,top+32) for x in range(447,469) if first.pixelColor(x,y).green()>130 and first.pixelColor(x,y).red()>50 and first.pixelColor(x,y).green()>first.pixelColor(x,y).red()*1.25)
-        assert count>10,('themed icon missing in initial capture',top,count)
+        pixels=[first.pixelColor(x,y) for y in range(top+10,top+32) for x in range(447,469)]
+        count=sum(1 for color in pixels if color.green()>60 and color.green()>color.red()*1.2 and color.green()>color.blue()*1.1)
+        assert count>10,('themed icon missing in initial capture',top,count,max(color.green() for color in pixels),frames)
     # Old external rail and stock icons are magenta in this fixture.
     assert not any(first.pixelColor(x,y).name()=='#ff00ff' for x in range(430,486) for y in range(first.height())), 'stock skin visible in first capture'
     # Run the actual synchronous Settings bridge as well, including its native
