@@ -41,7 +41,7 @@ def runtime():
     sys.modules[module.__name__] = module
     # Extend the pinned planner AFTER native state/source checks and BEFORE cache,
     # binary and state generation. This also removes additions on tracked upgrades.
-    anchor = "    if full_emulator_ui:\n        name='PlrSidebar.qml'"
+    anchor = "    accepted={name:[e.source_identity(source,name)] for name,source in current.items()}"
     text = source.decode('utf-8')
     if text.count(anchor) != 1:
         raise RuntimeError('Pinned planner hook changed; review required.')
@@ -62,10 +62,12 @@ def runtime():
         if text.count(before) != 1:
             raise RuntimeError('Pinned replacement hook changed; review required.')
         text = text.replace(before, after, 1)
-    text = text.replace('Settings now uses the reference shell and contains the VOID Optimizer tab.', 'Settings now uses the native-only Carbon shell (no optimizer).')
-    text=text.replace('VOID FULL UI V5 — Carbon palette / incremental styling / native session tools; boot logic protected','VOID CARBON SUITE 07 - SURFACES 08 / native UI / no optimizer')
+    text = text.replace('Settings now uses the reference shell and contains the VOID Optimizer tab.', 'Settings now uses OLED Studio with live Appearance controls (no optimizer).')
+    text=text.replace('VOID FULL UI V5 — Carbon palette / incremental styling / native session tools; boot logic protected','VOID OLED STUDIO 09 - six dark presets / native UI / no optimizer')
     exec(compile(text, 'pinned-void-ui-engine.py', 'exec'), module.__dict__)
-    module.remove_optimizer = lambda desired, url: without_optimizer(module, desired, url)
+    module.live_names=set()
+    module.live_coverage=[]
+    module.remove_optimizer = lambda desired, url: live_theme_sources(module, without_optimizer(module, desired, url), url)
     module.replacing_ui = False
     module.replacement_state = lambda root, current, owners, url: replacement_state(module, root, current, owners, url)
     packed = module.payload()
@@ -87,7 +89,9 @@ def runtime():
     design = json.loads(design_bytes)
     assets['design.json'] = design_bytes
     config = configure(design, json.loads(packed['theme.json']))
-    assets['Theme.qml'] = theme_source(design, config)
+    validate_presets(json.loads(assets['themes.json']))
+    assets['Theme.qml'] = theme_source(design, config, assets['ThemeRuntime.qml'], json.loads(assets['themes.json']))
+    module.design_config=config
     packed = {name: value for name, value in packed.items() if not name.startswith(PREFIX)}
     packed.update({PREFIX+name: value for name, value in assets.items()})
     packed['theme.json'] = (json.dumps(config, indent=2)+'\n').encode('utf-8')
@@ -140,6 +144,7 @@ def runtime():
             coverage=[entry for entry in coverage if entry['name']!=name]
             coverage.append({'name':name,'container':path.relative_to(root).as_posix(),
                              'status':'scoped-hook','reason':'Only a passive opt-in visual loader; original shared source, boot behavior and callbacks retained.'})
+        module.live_names=set(candidates).difference(shared_surfaces) | set(module.RESOURCE_NAMES)
         return candidates,config,coverage
     def style(manager, name, source, path, config, url):
         if name in shared_surfaces:
@@ -168,7 +173,9 @@ def runtime():
             item = rows.setdefault(row['name'], {})
             item.update(row)
             item.setdefault('status', 'changed' if row['changed'] else 'verified')
-        report['suite'] = 'VOID Carbon Suite 07'
+        report['suite'] = 'VOID OLED Studio 09'
+        report['live_theme_bindings']=module.live_coverage
+        report['theme_presets']=[entry['name'] for entry in json.loads(assets['themes.json'])]
         report['all_ui_runtime_certified'] = False
         report['coverage'] = sorted(rows.values(), key=lambda row: (row.get('container', ''), row['name']))
         report['asset_files'] = sorted(name for name in packed if name.startswith(PREFIX))
@@ -436,14 +443,69 @@ def configure(design, original):
     return config
 
 
-def theme_source(design, config):
-    rows = ['pragma Singleton', 'import QtQuick 2.15', 'QtObject {',
-            '    readonly property bool motionEnabled: '+str(design['motion']).lower(),
-            '    readonly property int duration: '+str(design['durationMs'] if design['motion'] else 0),
-            '    readonly property int corner: '+str(design['radius']),
-            '    readonly property string fontFamily: '+json.dumps(design['font'])]
-    rows += ['    readonly property color '+key+': '+json.dumps(value) for key, value in config['palette'].items()]
-    return ('\n'.join(rows)+'\n}\n').encode('utf-8')
+def validate_presets(presets):
+    if not isinstance(presets,list) or len(presets)!=6:
+        raise RuntimeError('Exactly six reviewed dark presets are required.')
+    ids=set()
+    for entry in presets:
+        if set(entry)!={'id','name','description','radius','durationMs','palette'} or not re.fullmatch(r'[a-z]{2,16}',entry['id']) or entry['id'] in ids:
+            raise RuntimeError('Invalid/duplicate preset definition.')
+        ids.add(entry['id'])
+        configure({'format':1,'name':entry['name'],'font':'Segoe UI','radius':entry['radius'],'motion':True,'durationMs':entry['durationMs'],'palette':entry['palette']},{'palette':{},'corners':{},'animations':{}})
+        if not isinstance(entry['description'],str) or len(entry['description'])>100:
+            raise RuntimeError('Invalid preset description.')
+    if presets[0]['id']!='oled':raise RuntimeError('OLED must be the default preset.')
+
+
+def theme_source(design, config, template=None, presets=None):
+    template=template if template is not None else (ROOT/'assets/full-emulator-ui/ThemeRuntime.qml').read_bytes()
+    presets=json.loads(json.dumps(presets if presets is not None else json.loads((ROOT/'assets/full-emulator-ui/themes.json').read_bytes())))
+    validate_presets(presets)
+    presets[0].update(palette=design['palette'],radius=design['radius'],durationMs=design['durationMs'])
+    return template.decode('utf-8').replace('PRESET_DEFINITIONS',json.dumps(presets,ensure_ascii=True)).replace('DEFAULT_DESIGN',json.dumps(design,ensure_ascii=True)).encode('utf-8')
+
+
+def live_theme_sources(module, desired, url):
+    """Convert only lexer-recognized visual literal slots to live Theme bindings.
+    Native functions, persistence, strings/actions/values and protected sources
+    are outside these slots; no source-wide color/string replacement is used.
+    """
+    manager=module.manager();config=module.design_config
+    aliases={}
+    # Earlier shipped native palettes are normalized on upgrade too.
+    historical=[{'background':'#080809','surface':'#111116','raised':'#23232d','border':'#353542','text':'#eeeef4','muted':'#a0a0b0'},config['palette']]
+    for palette in historical:
+        for role,value in palette.items():aliases.setdefault(value.lower(),role)
+    for role,value in config['palette'].items():aliases.setdefault(value.lower(),role)
+    for role in ('background','surface','raised','border','text','muted','accent'):
+        aliases[config['palette'][role].lower()]=role
+    result=dict(desired);coverage=[]
+    for name,body in desired.items():
+        if name not in module.live_names or not name.endswith('.qml'):continue
+        source=body.decode('utf-8-sig')
+        slots,unsupported,_,_=manager.visual_slots(source)
+        edits=[]
+        for start,end,kind,value,line,binding in slots:
+            role=None
+            if kind=='font':replacement='VoidLiveTheme.Theme.fontFamily'
+            else:
+                if kind=='qt':role={key.casefold():role for key,role in config['qt_colors'].items()}.get(value.casefold())
+                else:role=aliases.get(value.lower())
+                if role is None:continue
+                replacement='VoidLiveTheme.Theme.'+role
+            if source[start:end]!=replacement:edits.append((start,end,replacement))
+        if edits:
+            source=manager.substitute(source,edits)
+            imported='import '+json.dumps(url)+' as VoidLiveTheme\n'
+            if imported not in source:
+                imports=list(re.finditer(r'^import[^\r\n]*[\r\n]+',source,re.M))
+                manager.require(bool(imports),'Missing native imports: '+name)
+                at=imports[-1].end();source=source[:at]+imported+source[at:]
+            module.scan(manager,source)
+            result[name]=(('\ufeff' if body.startswith(b'\xef\xbb\xbf') else '')+source).encode('utf-8')
+        coverage.append({'name':name,'new_bindings':len(edits),'live': 'VoidLiveTheme.Theme.' in source,'unmapped_visual_bindings':unsupported})
+    module.live_coverage=coverage
+    return result
 
 
 def export_sources(module, root, destination):
@@ -488,7 +550,7 @@ def main(argv=None):
     module.replacing_ui = '--replace-ui' in argv
     if module.replacing_ui:
         print('REPLACE UI: old UI files/state will be replaced; apps/data and independent helpers are not removed.')
-    print('VOID CARBON SUITE 07 - full eligible native UI, guarded resources and exact recovery')
+    print('VOID OLED STUDIO 09 - live native appearance / six presets / custom colors')
     if '--export-sources' in argv:
         parser = argparse.ArgumentParser()
         parser.add_argument('--export-sources', type=Path, required=True)

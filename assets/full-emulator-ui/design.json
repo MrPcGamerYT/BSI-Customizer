@@ -1,17 +1,17 @@
 {
   "format": 1,
-  "name": "VOID Carbon Suite 07",
+  "name": "VOID OLED Studio 09",
   "font": "Segoe UI",
-  "radius": 12,
+  "radius": 16,
   "motion": true,
   "durationMs": 160,
   "palette": {
-    "background": "#080809",
-    "surface": "#111116",
-    "raised": "#23232d",
-    "border": "#353542",
-    "text": "#eeeeF4",
-    "muted": "#a0a0b0",
-    "accent": "#eeeef4"
+    "background": "#000000",
+    "surface": "#0b0f14",
+    "raised": "#172330",
+    "border": "#2c3b4e",
+    "text": "#f2f7ff",
+    "muted": "#9eafc4",
+    "accent": "#8cc8ff"
   }
 }

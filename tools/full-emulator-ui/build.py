@@ -68,7 +68,7 @@ exit /b 1
     if surface_screenshot.is_file():members['FIXTURE-SURFACES-NOT-OEM.png']=surface_screenshot.read_bytes()
     volume_screenshot=ROOT/'.cache/full-ui/volume-fixture.png'
     if volume_screenshot.is_file():members['FIXTURE-VOLUME-NOT-OEM.png']=volume_screenshot.read_bytes()
-    report={'surfaceRevision':8,'scopedNativeDialogAndPopupHooks':True,'idlePollingAdded':False,'suite':'VOID Carbon Suite 07','sourceCommit':subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip(),
+    report={'surfaceRevision':9,'scopedNativeDialogAndPopupHooks':True,'idlePollingAdded':False,'suite':'VOID OLED Studio 09','sourceCommit':subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip(),
             'legacyEngineSha256':suite.sha(legacy),'suiteSourceSha256':suite.sha((HERE/'suite.py').read_bytes()),
             'assetsSha256':{name:suite.sha(data) for name,data in assets.items()},
             'optimizerIncluded':False,'helperIncluded':False,'replacementInstallSupported':True,
@@ -76,9 +76,9 @@ exit /b 1
             'scope':'All mapped eligible native QML/SVG files; boot/auth/JS/framework/dependencies protected; per-install coverage required.'}
     members['BUILD-REPORT.json']=(json.dumps(report,indent=2)+'\n').encode()
     members['MANIFEST-SHA256.txt']=''.join(suite.sha(data)+'  '+name+'\n' for name,data in sorted(members.items())).encode()
-    destination=ROOT/'deliverables/VOID-Full-Emulator-UI-Suite07.zip'
+    destination=ROOT/'deliverables/VOID-OLED-Emulator-UI.zip'
     destination.parent.mkdir(exist_ok=True)
-    destination.write_bytes(archive({'VOID-Full-Emulator-UI-Suite07/'+name:data for name,data in members.items()}))
+    destination.write_bytes(archive({'VOID-OLED-Emulator-UI/'+name:data for name,data in members.items()}))
     destination.with_suffix('.zip.sha256').write_text(suite.sha(destination.read_bytes())+'  '+destination.name+'\n')
     print(destination,len(destination.read_bytes()))
 

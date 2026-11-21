@@ -44,30 +44,26 @@ Item {
     onBsiHostChanged: SurfaceRegistry.attach(shell, bsiHost)
     Component.onDestruction: SurfaceRegistry.detach(shell)
     Component.onCompleted: { Qt.callLater(fitHost); SurfaceRegistry.attach(shell, bsiHost) }
-    component BsiOutlineIcon: Image {
+    component BsiOutlineIcon: ThemeIcon {
         property string kind: "preferences"
         property color stroke: Theme.text
         sourceSize.width: 48; sourceSize.height: 48
         fillMode: Image.PreserveAspectFit
         source: Icons.pngUrl(kind)
-        opacity: Qt.colorEqual(stroke,Theme.muted) ? 0.65 : 1
+        tint: stroke
+        opacity: Qt.colorEqual(stroke,Theme.muted) ? 0.75 : 1
     }
 
     Rectangle {
         anchors.fill: parent
-        radius: 18
+        radius: Theme.corner
         clip: true
-        gradient: Gradient {
-            GradientStop { position: 0; color: Theme.background }
-            GradientStop { position: 0.24; color: Theme.background }
-            GradientStop { position: 0.74; color: Theme.background }
-            GradientStop { position: 1; color: Theme.surface }
-        }
+        color: Theme.background
         border.width: 1
         border.color: Theme.border
         Rectangle {
             anchors.fill: parent; anchors.margins: 1
-            radius: 17; color: "transparent"
+            radius: Math.max(0,Theme.corner-1); color: "transparent"
             border.width: 1; border.color: Theme.surface
         }
         Item {
@@ -80,8 +76,8 @@ Item {
             }
             Text {
                 objectName: "voidFullUiVersion"
-                anchors.right: closeButton.left; anchors.rightMargin: 16; anchors.verticalCenter: parent.verticalCenter
-                text: "CARBON SUITE 07 · SURFACES 08"; color: Theme.muted; font.family: Theme.fontFamily; font.pixelSize: 9; font.letterSpacing: 1.2
+                anchors.right: appearanceButton.left; anchors.rightMargin: 14; anchors.verticalCenter: parent.verticalCenter
+                text: Theme.name+"  /  OLED STUDIO 09"; color: Theme.muted; font.family: Theme.fontFamily; font.pixelSize: 9; font.letterSpacing: 1.2
             }
             Rectangle {
                 anchors.bottom: parent.bottom; anchors.left: parent.left; anchors.right: parent.right; anchors.margins: 18
@@ -93,7 +89,7 @@ Item {
                 }
             }
             MouseArea {
-                anchors.fill: parent; anchors.rightMargin: 64
+                anchors.fill: parent; anchors.rightMargin: 200
                 onPressed: if (shell.bsiHost) shell.bsiHost.startSystemMove()
             }
             Text {
@@ -101,6 +97,15 @@ Item {
                 anchors.verticalCenter: parent.verticalCenter; anchors.verticalCenterOffset: 8
                 text: qsTranslate("QObject", "Settings"); font.family: Theme.fontFamily
                 color: Theme.text; font.pixelSize: 20; font.weight: Font.DemiBold
+            }
+            ToolButton {
+                id: appearanceButton
+                objectName: "openAppearance"
+                anchors.right: closeButton.left;anchors.rightMargin:12;anchors.verticalCenter:closeButton.verticalCenter
+                width:94;height:30;text:"Themes";font.family:Theme.fontFamily;font.pixelSize:12
+                palette.buttonText:Theme.accent
+                background:Rectangle {radius:8;color:appearanceButton.hovered?Theme.raised:Theme.surface;border.width:1;border.color:Theme.border}
+                onClicked:appearance.open()
             }
             ToolButton {
                 id: closeButton
@@ -114,7 +119,7 @@ Item {
                 background: Rectangle {
                     radius: 7
                     color: closeButton.hovered ? Theme.raised : "transparent"
-                    Behavior on color { enabled:shell.motionEnabled; ColorAnimation { duration: 110 } }
+                    Behavior on color { enabled:shell.motionEnabled; ColorAnimation { duration: Theme.duration } }
                 }
                 onClicked: if (shell.bsiHost) shell.bsiHost.close()
                 ToolTip.visible: hovered; ToolTip.text: qsTranslate("QObject", "Close")
@@ -144,7 +149,7 @@ Item {
                     property var nativeEntry: nativeRow.entry
                     readonly property bool selected: index === shell.selectedIndex
                     scale: down ? 0.985 : 1
-                    Behavior on scale { enabled: shell.motionEnabled; NumberAnimation { duration: 120; easing.type: Easing.OutCubic } }
+                    Behavior on scale { enabled: shell.motionEnabled; NumberAnimation { duration: Theme.duration; easing.type: Easing.OutCubic } }
                     hoverEnabled: true
                     focusPolicy: Qt.StrongFocus
                     leftPadding: 0; rightPadding: 0; topPadding: 0; bottomPadding: 0
@@ -159,9 +164,9 @@ Item {
                             BsiOutlineIcon {
                                 anchors.centerIn: parent; width: 20; height: 20
                                 kind: shell.iconForEntry(tab.nativeEntry)
-                                stroke: tab.selected || tab.hovered ? Theme.text : Theme.muted
+                                stroke: tab.selected || tab.hovered ? Theme.accent : Theme.muted
                                 scale: 1
-                                Behavior on scale { enabled: shell.motionEnabled; NumberAnimation { duration: 160; easing.type: Easing.OutCubic } }
+                                Behavior on scale { enabled: shell.motionEnabled; NumberAnimation { duration: Theme.duration; easing.type: Easing.OutCubic } }
                             }
                         }
                         Text {
@@ -179,17 +184,17 @@ Item {
                     background: Rectangle {
                         radius: 10
                         border.width: tab.selected || tab.hovered || tab.activeFocus ? 1 : 0
-                        border.color: tab.selected || tab.activeFocus ? Theme.text : tab.hovered ? Theme.border : "transparent"
+                        border.color: tab.selected || tab.activeFocus ? Theme.accent : tab.hovered ? Theme.border : "transparent"
                         gradient: Gradient {
                             GradientStop { position: 0; color: tab.selected ? Theme.raised : tab.hovered ? Theme.surface : Theme.background }
                             GradientStop { position: 1; color: tab.selected ? Theme.surface : tab.hovered ? Theme.surface : Theme.background }
                         }
-                        Behavior on border.color { enabled:shell.motionEnabled; ColorAnimation { duration: 110 } }
+                        Behavior on border.color { enabled:shell.motionEnabled; ColorAnimation { duration: Theme.duration } }
                         Rectangle {
                             anchors.left: parent.left; anchors.leftMargin: 5
                             anchors.verticalCenter: parent.verticalCenter
                             width: 1; height: 20; radius: 0.5
-                            color: Theme.text; visible: tab.selected
+                            color: Theme.accent; visible: tab.selected
                         }
                         Rectangle {
                             width: 5; height: 5; radius: 2.5
@@ -223,6 +228,7 @@ Item {
             anchors.top: header.bottom; anchors.topMargin: 12
             anchors.bottom: parent.bottom; anchors.bottomMargin: 22
         }
-        NativeControlStyle { id: nativeStyle; objectName: "voidNativeControlStyle"; pages: bsiPageBody; visible: false }
+        AppearancePanel {id:appearance;parent:shell;x:(shell.width-width)/2;y:(shell.height-height)/2}
+        NativeControlStyle { id: nativeStyle;stylePanels:true; objectName: "voidNativeControlStyle"; pages: bsiPageBody; visible: false }
     }
 }

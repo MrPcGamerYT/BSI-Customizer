@@ -10,8 +10,8 @@ import tempfile
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
-with zipfile.ZipFile(ROOT/'deliverables/VOID-Full-Emulator-UI-Suite07.zip') as archive:
-    prefix = 'VOID-Full-Emulator-UI-Suite07/'
+with zipfile.ZipFile(ROOT/'deliverables/VOID-OLED-Emulator-UI.zip') as archive:
+    prefix = 'VOID-OLED-Emulator-UI/'
     assert archive.testzip() is None
     assert not any('Helper/' in name or name.lower().endswith('.exe') or name.endswith('OptimizerPage.qml') for name in archive.namelist())
     report = json.loads(archive.read(prefix+'BUILD-REPORT.json'))
@@ -64,7 +64,7 @@ print('PASS extracted runtime and external design')
         assert result.returncode == 0, result.stdout+result.stderr
         assert not old.exists()
         assert (player/'HD-Player.exe').read_bytes() != original
-        assert b'CARBON SUITE 07' in (player/'Assets/VOIDReferenceUI/SettingsShell.qml').read_bytes()
+        assert b'OLED STUDIO 09' in (player/'Assets/VOIDReferenceUI/SettingsShell.qml').read_bytes()
         result = subprocess.run([sys.executable, str(target/'VOID-Full-UI.py'), '--restore-latest', '--yes', '--install-dir', str(player)], cwd=target, text=True, capture_output=True, timeout=120)
         assert result.returncode == 0, result.stdout+result.stderr
         assert (player/'HD-Player.exe').read_bytes() == original

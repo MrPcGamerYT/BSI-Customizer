@@ -1,4 +1,4 @@
-# VOID Carbon Suite 07 — full eligible emulator UI
+# VOID OLED Studio 09 — six live native themes
 
 **𝓥𝓞𝓘𝓓 · Developed By NOVA XIS · https://www.youtube.com/@nova_xis20**
 
@@ -29,10 +29,34 @@ changed, protected, verified/unchanged resources and unsupported visual bindings
 missing resources are not silently advertised as redesigned. The source-only test
 snapshot does not prove compatibility or exact appearance on a live OEM player.
 
-## Surfaces 08 — native window/dialog completion pass
+## OLED Studio 09 — live native Appearance
 
-The Settings badge now includes **SURFACES 08**. This revision fixes visual-tree
-coverage, not just palette literals:
+Open native **Settings → Themes** (top-right). Choose **OLED Black** (default),
+**Midnight Blue**, **Amethyst**, **Forest**, **Ember**, or **Rose Noir**. These are
+six different background/surface/text/border/accent palettes, not six accents on
+one Carbon skin. Each also has its own corner and transition defaults.
+
+- Edit all seven color roles, font family, corners, motion and duration in Appearance.
+  **Apply my colors** stores a custom palette; **Reset** returns to OLED. Choosing
+  a preset clears corner/duration overrides but keeps your font/motion preference.
+- Theme-aware masks tint Settings, known titlebar/sidebar and editor tool icons;
+  the shared 57-name Icons.js contract is unchanged. Unknown native icons remain.
+- Already-open integrated controls, dialogs, editor cards/key chips and popups
+  bind to the active theme in the same QML engine. A separately loaded engine
+  reads the persisted choice when its window reopens. No polling is added.
+- Choices persist per Windows user in Qt's GenericConfigLocation under
+  `VOID-Emulator-Themes-v9.ini`, separate from tracked UI asset files. Therefore
+  changing a theme does not invalidate the install record. Undo restores UI files,
+  not user preferences; use Reset before undo if you want preferences cleared.
+- `design.json` remains the validated install-time OLED default; runtime custom
+  choices override it. Hex colors only, no executable design strings. Fonts must
+  already be installed. Text contrast warning is advisory, not a color lock.
+- `UI-COVERAGE.json` includes `live_theme_bindings` and `theme_presets`. Unsupported
+  native expressions/artwork are reported rather than globally overwritten.
+
+### Native window/dialog coverage retained
+
+The Settings badge is **OLED STUDIO 09**. Native surface handling includes:
 
 - Native Window/Popup `contentItem` and separate Dialog header/footer are visited.
   Previously a Window-root editor could get source colors but no control adapter.

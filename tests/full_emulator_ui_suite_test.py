@@ -28,8 +28,8 @@ def fixture(root):
     sources['PlrSidebar.qml']=payload['baseline/PlrSidebar.qml']
     sources['BootSplash.qml']=b'Item { function authBoot(){backend.authenticate()} Rectangle {color:"red"} }'
     sources['Login.qml']=b'Item { property string account:""; function signIn(){backend.login()} }'
-    sources['VolumePopup.qml']=b'Item { property real volume: 0.5; Rectangle { color: UiTheme.colors.primary80; border.width:1 } function apply(){ backend.setVolume(volume) } }'
-    sources['ExitDialog.qml']=b'Item { property bool accepted:false; Rectangle { color: UiTheme.colors.primary80; border.width:1 } function confirm(){backend.exitPlayer()} }'
+    sources['VolumePopup.qml']=b'import QtQuick 2.15\nItem { property real volume: 0.5; Rectangle { color: UiTheme.colors.primary80; border.width:1 } function apply(){ backend.setVolume(volume) } }'
+    sources['ExitDialog.qml']=b'import QtQuick 2.15\nItem { property bool accepted:false; Rectangle { color: UiTheme.colors.primary80; border.width:1 } function confirm(){backend.exitPlayer()} }'
     entries={'Player/'+name:(value,1) for name,value in sources.items()}
     body=F.pe(F.rcc(entries),registration=True,extra=b''.join(F.unit(name) for name in sources))
     (root/'HD-Player.exe').write_bytes(body)
@@ -52,6 +52,7 @@ class SuiteTests(unittest.TestCase):
             names={row['name'] for row in report['coverage']}
             self.assertTrue({'VolumePopup.qml','ExitDialog.qml','KmmEditorWindow.qml','PlrTopbar.qml','UiSettingsWindow.qml','UiPerformanceSetting.qml'}<=names)
             self.assertFalse(report['all_ui_runtime_certified'])
+            self.assertEqual(report['theme_presets'],['OLED Black','Midnight Blue','Amethyst','Forest','Ember','Rose Noir'])
             self.assertFalse((root/U.UI_STATE).exists(),'preflight is read-only')
             backup=E.commit(planned)
             after=inventory((root/'HD-Player.exe').read_bytes())
@@ -60,7 +61,10 @@ class SuiteTests(unittest.TestCase):
             for name in ('VolumePopup.qml','ExitDialog.qml'):
                 self.assertIn(b'VOID SUITE07 PASSIVE CONTROLS',after[name])
                 self.assertIn(b'backend.',after[name])
-            self.assertIn(b'CARBON SUITE 07',(root/'Assets/VOIDReferenceUI/SettingsShell.qml').read_bytes())
+                self.assertIn(b'VoidLiveTheme.Theme.',after[name])
+            self.assertIn(b'VoidLiveTheme.Theme.',after['UiPerformanceSetting.qml'])
+            self.assertNotIn(b'VoidLiveTheme.Theme.',after['UiDialog.qml'])
+            self.assertIn(b'OLED STUDIO 09',(root/'Assets/VOIDReferenceUI/SettingsShell.qml').read_bytes())
             self.assertFalse((root/'Assets/VOIDReferenceUI/OptimizerPage.qml').exists())
             for name in ('UiSettingsWindow.qml', 'PlrSidebar.qml'):
                 for token in (b'voidOptimizer', b'pVoidOptimizer', b'VoidUiNav', b'F9'):
@@ -156,7 +160,7 @@ class SuiteTests(unittest.TestCase):
             self.assertTrue(any(change.relative.endswith('old-optimizer.qml') and change.after is None for change in planned.changes))
             backup=E.commit(planned)
             self.assertFalse(old.exists())
-            self.assertIn(b'CARBON SUITE 07',shell.read_bytes())
+            self.assertIn(b'OLED STUDIO 09',shell.read_bytes())
             self.assertEqual(U.plan_install(root)[0].changes,[])
             E.restore(backup,root)
             for name,digest in before.items():self.assertEqual(S.sha((root/name).read_bytes()),digest,name)

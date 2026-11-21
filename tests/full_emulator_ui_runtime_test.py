@@ -66,6 +66,13 @@ Window {
  property int requested:-1
  property bool closeRequested:false
  property int saved:0
+ property string themeName:Skin.Theme.name
+ property color themeSurface:Skin.Theme.surface
+ function prepareAppearance(){Skin.Theme.preferencesFile="PREFERENCES";Skin.Theme.reset()}
+ function forestAppearance(){Skin.Theme.choose("forest")}
+ function customAppearance(){Skin.Theme.applyCustom({background:"#010203",surface:"#101820",raised:"#202830",border:"#405060",text:"#f0f0f0",muted:"#a0b0c0",accent:"#70ddb0"});Skin.Theme.setCorner(21);Skin.Theme.setMotion(false)}
+ function resetAppearance(){Skin.Theme.reset()}
+
  QtObject { id: initialSliderSize
    property int handleWidth:20; property int handleHeight:20; property int sliderHeight:4
    property font selectedValueFont:Qt.font({pixelSize:16})
@@ -108,12 +115,13 @@ Window {
  Component{id:lateButton;UiImageButton{objectName:"testLateSidebar"}}
  function addLateSidebarButton(){lateButton.createObject(sidebar)}
  Text{z:1000;anchors.bottom:parent.bottom;anchors.horizontalCenter:parent.horizontalCenter;text:"Qt component test — native-page doubles; NOT live MSI";color:"#aaaaaa";font.pixelSize:9}
-}'''.replace('ASSETS',url)
+}'''.replace('ASSETS',url).replace('PREFERENCES',str(temp/'appearance.ini').replace('\\','/'))
     (temp/'Window.qml').write_text(source)
     component=QQmlComponent(engine,QUrl.fromLocalFile(str(temp/'Window.qml')))
     assert not component.isError(),'\n'.join(e.toString() for e in component.errors())
     window=component.create();assert window,'\n'.join(e.toString() for e in component.errors())
-    settle()
+    from PySide6.QtCore import QMetaObject
+    QMetaObject.invokeMethod(window,'prepareAppearance');settle()
     assert isinstance(window,QQuickWindow),type(window)
     root=window.contentItem();shell=visual(root,'bsiSettingsShell');page=visual(root,'testNativePage')
     assert page is not None
@@ -144,6 +152,17 @@ Window {
     assert face.property('iconKey')=='advanced', face.property('iconKey')
     assert face.property('known'), str(warnings)
     assert sidebar.property('contentItem').property('opacity')==0
+    # Open the real Appearance popup and use its preset card, not an independent mock.
+    click(visual(root,'openAppearance'))
+    card=visual(root,'themePreset_forest');assert card is not None,str(warnings)
+    click(card);assert window.property('themeName')=='Forest'
+    assert slider.property('pColor').property('sliderFill').name()=='#82dfb1'
+    click(visual(root,'closeAppearance'))
+    QMetaObject.invokeMethod(window,'customAppearance');settle()
+    assert window.property('themeName')=='My theme'
+    assert slider.property('pColor').property('sliderFill').name()=='#70ddb0'
+    assert field.property('background').property('color').name()=='#101820'
+    QMetaObject.invokeMethod(window,'resetAppearance');settle()
     if args.screenshot:
         args.screenshot.parent.mkdir(parents=True,exist_ok=True)
         assert window.grabWindow().save(str(args.screenshot))

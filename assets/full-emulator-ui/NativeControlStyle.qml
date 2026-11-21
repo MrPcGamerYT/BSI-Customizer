@@ -60,7 +60,7 @@ Item {
         function onHeaderChanged() { skin.schedule(owner) }
         function onFooterChanged() { skin.schedule(owner) }
         function onChildrenChanged() { skin.schedule(owner) }
-        function onVisibleChanged() { if (owner && owner.visible) skin.schedule(owner) }
+        function onVisibleChanged() { if (owner && owner.visible) { Theme.sync();skin.schedule(owner) } }
     } }
     property bool motionEnabled: Theme.motionEnabled
     function findSliderTrack(node,owner,depth) {
@@ -128,13 +128,13 @@ Item {
         if (/KmmEditorTextEditBox/.test(name) && item.color !== undefined && item.border) {
             // These native key chips inherit Rectangle's white default; literal
             // palette rewriting cannot see that implicit color.
-            item.color=Theme.surface;item.border.color=Theme.muted;item.border.width=1
+            item.color=Qt.binding(function(){return Theme.surface});item.border.color=Qt.binding(function(){return Theme.muted});item.border.width=1
             item.radius=Qt.binding(function(){return item.height/2})
         }
         if (/Text/.test(name) && !/TextField/.test(name) && item.parent && /KmmEditorTextEditBox/.test(String(item.parent)) && item.color !== undefined)
-            item.color=Theme.text
+            item.color=Qt.binding(function(){return Theme.text})
         if (/KmmEditorDragControls/.test(name) && item.pMouseArea && item.border) {
-            item.radius=Math.max(0,Theme.corner-2)
+            item.radius=Qt.binding(function(){return Math.max(0,Theme.corner-2)})
             item.color=Qt.binding(function(){return item.pMouseArea.containsMouse ? Theme.raised : Theme.surface})
             item.border.color=Qt.binding(function(){return item.pMouseArea.containsMouse ? Theme.muted : Theme.border})
             item.border.width=1
@@ -142,15 +142,17 @@ Item {
             // Only opaque neutral native layout panels, never game/canvas overlays.
             var c=item.color
             if (Math.max(c.r,c.g,c.b)-Math.min(c.r,c.g,c.b)<0.16 && Math.max(c.r,c.g,c.b)<0.4) {
-                item.color=Theme.surface; item.radius=Math.max(0,Theme.corner-2)
-                if (item.border && item.border.width>0) item.border.color=Theme.border
+                item.color=Qt.binding(function(){return Theme.surface}); item.radius=Qt.binding(function(){return Math.max(0,Theme.corner-2)})
+                if (item.border && item.border.width>0) item.border.color=Qt.binding(function(){return Theme.border})
             }
         }
         if (/UiImage/.test(name) && item.asset !== undefined && item.source !== undefined) {
             var owner=item.parent, tile=false
             for(var d=0;owner && d<4;++d,owner=owner.parent) if(/KmmEditorDragControls/.test(String(owner)))tile=true
-            if (tile && controlIcon(item.asset))
+            if (tile && controlIcon(item.asset)) {
                 item.source=Qt.binding(function(){return Qt.resolvedUrl("ControlIcons/"+controlIcon(item.asset)+".png")})
+                overlay(toolGlyph,item,item,"glyph")
+            }
         }
         if (stylePanels && /UiButton/.test(name) && !/UiImageButton/.test(name) && item.pColor)
             item.pColor=buttonColor.createObject(item)
@@ -193,6 +195,18 @@ Item {
         var names={Tap:"Tap",RepeatedTap:"RepeatedTap",Dpad:"Dpad",Aim:"Aim",FreeLook:"FreeLook",Script:"Script",Swipe:"Swipe",Zoom:"Zoom",Tilt:"Tilt","MOBA-PAD":"MOBA-PAD",SkillPad:"SkillPad",Rotate:"Rotate",EdgeScroll:"EdgeScroll",Scroll:"Scroll",MouseZoom:"MouseZoom",State:"State",DontForwardKeys:"DontForwardKeys",SendOriginalKeys:"SendOriginalKeys",Callback:"Callback",MouseLock:"MouseLock",SmartScroll:"SmartScroll",NativeCursor:"NativeCursor"}
         return names[String(asset)] || ""
     }
+    Component { id:toolGlyph; ThemeIcon {
+        property var control
+        property var targetVisual
+        property var cleanup
+        property string visualKind
+        objectName:"voidReferenceVisualToolGlyph"
+        x:targetVisual.x;y:targetVisual.y;width:targetVisual.width;height:targetVisual.height
+        z:targetVisual.z+0.01
+        source:targetVisual.source
+        tint:Theme.accent
+        Component.onDestruction:if(cleanup)cleanup()
+    } }
     Component { id:dialogColor; QtObject {
         property var base
         property color background:Theme.background
@@ -275,15 +289,15 @@ Item {
         property font rangeValueFont:Qt.font({family:Theme.fontFamily,pixelSize:13})
     } }
     Component { id:sliderColor; QtObject {
-        property color handleBackground:Theme.text
+        property color handleBackground:Theme.accent
         property color handleBackgroundDisabled:Theme.border
-        property color handleBorder:Theme.text
+        property color handleBorder:Theme.accent
         property color selectedValue:Theme.text
         property color recommendedValue:Theme.muted
         property color rangeValue:Theme.muted
         property color sliderBackground:Theme.border
         property color sliderBackgroundDisabled:Theme.border
-        property color sliderFill:Theme.text
+        property color sliderFill:Theme.accent
         property color sliderFillDisabled:Theme.border
     } }
     Component {
@@ -310,7 +324,7 @@ Item {
                 GradientStop { position: 0; color: visualKind === "dialog" ? Theme.background : visualKind === "button" ? (control.down ? Theme.raised : control.hovered ? Theme.raised : Theme.surface) : Theme.surface }
                 GradientStop { position: 1; color: visualKind === "dialog" ? Theme.background : visualKind === "button" ? Theme.raised : Theme.surface }
             }
-            border.width: 1; border.color: control.activeFocus ? Theme.muted : control.hovered ? Theme.border : Theme.border
+            border.width: 1; border.color: control.activeFocus ? Theme.accent : control.hovered ? Theme.muted : Theme.border
             opacity: control.enabled === false ? 0.5 : 1
 
             Behavior on border.color { enabled: skin.motionEnabled; ColorAnimation { duration: Theme.duration } }
@@ -328,7 +342,7 @@ Item {
             x: targetVisual.x; y: targetVisual.y; width: targetVisual.width; height: targetVisual.height
             z: targetVisual.z+0.01; visible: targetVisual.visible
             radius: visualKind === "radio" ? height/2 : 3
-            color: control.checked ? Theme.text : Theme.surface
+            color: control.checked ? Theme.accent : Theme.surface
             border.width:1; border.color:control.activeFocus || control.hovered ? Theme.text : Theme.border
             Text { anchors.centerIn:parent; text: visualKind === "radio" ? "●" : control.checkState === 1 ? "−" : "✓"; visible:control.checked || control.checkState === 1; color:Theme.surface; font.pixelSize:14 }
             opacity: control.enabled === false ? 0.5 : 1
@@ -345,15 +359,15 @@ Item {
             objectName: "voidReferenceVisualSwitch"
             x: targetVisual.x; y: targetVisual.y; width: targetVisual.width; height: targetVisual.height
             z: targetVisual.z + 0.01; visible: targetVisual.visible; radius: height / 2
-            color: control.checked ? Theme.text : Theme.raised
+            color: control.checked ? Theme.accent : Theme.raised
             border.width: 1; border.color: control.hovered ? Theme.text : Theme.border
             Rectangle {
                 width: Math.max(4,parent.height-4); height: width; radius: width/2; y: 2
                 x: control.checked ? parent.width-width-2 : 2
-                color: control.checked ? Theme.surface : Theme.muted
-                Behavior on x { enabled: skin.motionEnabled; NumberAnimation { duration: 150; easing.type: Easing.OutCubic } }
+                color: control.checked ? Theme.background : Theme.muted
+                Behavior on x { enabled: skin.motionEnabled; NumberAnimation { duration: Theme.duration; easing.type: Easing.OutCubic } }
             }
-            Behavior on color { enabled: skin.motionEnabled; ColorAnimation { duration: 150 } }
+            Behavior on color { enabled: skin.motionEnabled; ColorAnimation { duration: Theme.duration } }
         }
     }
     Component {
@@ -368,7 +382,7 @@ Item {
             x: targetVisual.x; y: targetVisual.y; width: targetVisual.width; height: targetVisual.height
             z: targetVisual.z + 0.01; visible: targetVisual.visible
             Rectangle { width: parent.width; height: 2; anchors.verticalCenter: parent.verticalCenter; radius: 1; color: Theme.muted }
-            Rectangle { width: parent.width * control.visualPosition; height: 2; anchors.verticalCenter: parent.verticalCenter; radius: 1; color: Theme.text }
+            Rectangle { width: parent.width * control.visualPosition; height: 2; anchors.verticalCenter: parent.verticalCenter; radius: 1; color: Theme.accent }
         }
     }
     Component {
@@ -385,7 +399,7 @@ Item {
             Rectangle { width: Math.min(12,parent.width); height: width; radius: width/2; anchors.centerIn: parent
                 color: control.pressed ? Theme.text : Theme.text
                 scale: control.pressed ? 1.08 : 1
-                Behavior on scale { enabled: skin.motionEnabled; NumberAnimation { duration: 120 } }
+                Behavior on scale { enabled: skin.motionEnabled; NumberAnimation { duration: Theme.duration } }
             }
         }
     }

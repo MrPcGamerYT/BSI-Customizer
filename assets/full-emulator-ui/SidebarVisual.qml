@@ -72,38 +72,38 @@ Item {
         anchors.fill: parent
         visible: skin.mode === "button"
         scale: skin.pressed ? 0.96 : 1
-        Behavior on scale { enabled: skin.motionEnabled; NumberAnimation { duration: 140; easing.type: Easing.OutCubic } }
+        Behavior on scale { enabled: skin.motionEnabled; NumberAnimation { duration: Theme.duration; easing.type: Easing.OutCubic } }
         Rectangle {
             anchors.fill: parent
             anchors.margins: 3
             radius: 9
             // Unknown icons must remain visible underneath this passive overlay.
             color: Theme.raised
-            Behavior on border.color { enabled: skin.motionEnabled; ColorAnimation { duration: 140 } }
+            Behavior on border.color { enabled: skin.motionEnabled; ColorAnimation { duration: Theme.duration } }
             opacity: !skin.available ? 0 : !skin.known ? (skin.pressed ? 0.14 : skin.hovered ? 0.08 : 0) :
                      skin.pressed ? 0.96 : skin.active ? 0.85 : skin.hovered ? 0.8 : 0
             border.width: 1
             border.color: skin.pressed ? Theme.muted : Theme.border
-            Behavior on opacity { enabled: skin.motionEnabled; NumberAnimation { duration: 160 } }
+            Behavior on opacity { enabled: skin.motionEnabled; NumberAnimation { duration: Theme.duration } }
         }
         Rectangle {
             width: 2; height: skin.active ? 15 : 5; radius: 1
-            Behavior on height { enabled: skin.motionEnabled; NumberAnimation { duration: 200; easing.type: Easing.OutBack } }
+            Behavior on height { enabled: skin.motionEnabled; NumberAnimation { duration: Theme.duration; easing.type: Easing.OutBack } }
             anchors.left: parent.left; anchors.verticalCenter: parent.verticalCenter
             color: Theme.text
             opacity: skin.active && skin.available ? 1 : 0
-            Behavior on opacity { enabled: skin.motionEnabled; NumberAnimation { duration: 160 } }
+            Behavior on opacity { enabled: skin.motionEnabled; NumberAnimation { duration: Theme.duration } }
         }
-        Image {
+        ThemeIcon {
             id: glyph
             objectName: "bsiOutlineGlyph"
             anchors.centerIn: parent
             width: 19; height: 19
             scale: skin.pressed ? 0.95 : 1
-            Behavior on scale { enabled: skin.motionEnabled; NumberAnimation { duration: 170; easing.type: Easing.OutBack; easing.overshoot: 1.1 } }
+            Behavior on scale { enabled: skin.motionEnabled; NumberAnimation { duration: Theme.duration; easing.type: Easing.OutBack; easing.overshoot: 1.1 } }
             sourceSize.width: 38; sourceSize.height: 38
             fillMode: Image.PreserveAspectFit
-            smooth: true
+            tint: skin.hovered || skin.active || skin.pressed ? Theme.accent : Theme.text
             opacity: !skin.available ? 0.35 : skin.hovered || skin.pressed || skin.active ? 1 : 0.75
             source: skin.svg ? "SharedIcons/"+skin.iconKey+".png" : ""
             RotationAnimation on rotation {

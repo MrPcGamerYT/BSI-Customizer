@@ -59,7 +59,7 @@ Item {
             readonly property bool ready:key!=="" && glyph.status===Image.Ready
             anchors.fill:parent;z:5
             Rectangle { anchors.fill:parent;anchors.margins:3;radius:9;color:control.down?Theme.raised:Theme.surface;visible:visual.ready && control.enabled && (control.hovered||control.down);border.width:1;border.color:Theme.border }
-            Image { id:glyph;anchors.centerIn:parent;width:16;height:16;sourceSize.width:32;sourceSize.height:32;source:visual.key?"SharedIcons/"+visual.key+".png":"";opacity:!control.enabled?0.3:control.hovered||control.down?1:0.75 }
+            ThemeIcon { id:glyph;tint:control.hovered||control.down?Theme.accent:Theme.text;anchors.centerIn:parent;width:16;height:16;sourceSize.width:32;sourceSize.height:32;source:visual.key?"SharedIcons/"+visual.key+".png":"";opacity:!control.enabled?0.3:control.hovered||control.down?1:0.75 }
             function updateNative() {
                 control.contentItem.opacity=Qt.binding(function(){return visual.ready?0:1})
                 var children=control.children

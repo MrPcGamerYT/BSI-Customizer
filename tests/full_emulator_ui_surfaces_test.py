@@ -107,7 +107,7 @@ Window {
  property int muted:0
  property bool dragCheck:false
  property var tileImages:["Tap","RepeatedTap","Dpad","Aim","FreeLook","Script","Swipe","Zoom","Tilt","MOBA-PAD","SkillPad","Rotate","EdgeScroll","Scroll","MouseZoom"]
- Text{x:24;y:20;text:"CARBON • native surface fixture — NOT a live emulator capture";color:"white";font.pixelSize:16}
+ Text{x:24;y:20;text:"OLED • native surface fixture — NOT a live emulator capture";color:"white";font.pixelSize:16}
  Item{id:rail;property var pKebabMenuWin:null}
  Skin.SidebarSkin{host:rail}
  Flow {id:tiles;x:24;y:65;width:330;spacing:10
@@ -131,6 +131,8 @@ Window {
  Window {id:standalone;objectName:"unregisteredWindow";transientParent:null;width:420;height:220;visible:true;color:"#222532"
   UiDialog {id:untouched;objectName:"bootDialog";title:"Protected host";pDescription:"No registered native parent";pDialogType:UiDialogWindow.Simple}
  }
+ function resetAppearance(){Skin.Theme.reset()}
+ function forestAppearance(){Skin.Theme.choose("forest")}
  function openDialogs(){restart.open();untouched.open()}
  function closeAll(){restart.close();untouched.close();volume.visible=false;standalone.visible=false;host.visible=false}
  function checkDrag(){dragCheck=Utils.starts>0 && Utils.ends>0}
@@ -138,19 +140,19 @@ Window {
     component=QQmlComponent(engine,QUrl.fromLocalFile(str(temp/'Window.qml')))
     assert not component.isError(),'\n'.join(e.toString() for e in component.errors())
     window=component.create();assert window,'\n'.join(e.toString() for e in component.errors())
-    QMetaObject.invokeMethod(window,'openDialogs');settle()
+    QMetaObject.invokeMethod(window,'resetAppearance');QMetaObject.invokeMethod(window,'openDialogs');settle()
     from PySide6.QtCore import QObject
     restart=window.findChild(QObject,'restartDialog');untouched=window.findChild(QObject,'bootDialog')
     assert restart is not None and untouched is not None
     assert restart.property('pColor').property('background').name()=='#222532','boot-incomplete host must not opt in'
     window.setProperty('pIsBootComplete',True);settle()
-    assert restart.property('pColor').property('background').name()=='#080809'
+    assert restart.property('pColor').property('background').name()=='#000000'
     assert untouched.property('pColor').property('background').name()=='#222532', 'unregistered host changed: '+str(warnings)
     assert restart.property('pColor').property('notice').name()=='#ffcc66','notice semantics lost'
     body=restart.property('contentItem');background=restart.property('background')
     # Dialog root + separate header/footer must all be traversed, not only contentItem.
     face=next((child for child in background.parentItem().childItems() if child.property('visualKind')=='dialog'),None)
-    assert face is not None and face.property('radius')==12, str([(child.objectName(),child.property('visualKind'),child.property('radius')) for child in background.parentItem().childItems()])+str(warnings)
+    assert face is not None and face.property('radius')==16, str([(child.objectName(),child.property('visualKind'),child.property('radius')) for child in background.parentItem().childItems()])+str(warnings)
     footer=restart.property('footer')
     def by_text(item,text):
         if item.property('text')==text:return item
@@ -160,12 +162,12 @@ Window {
     save=by_text(footer,'Restart now');assert save is not None
     click(window,save);assert window.property('saved')==1,'native dialog button callback lost: '+str(warnings)
     volume=window.findChild(QObject,'volumeWindow');mute=find(volume.contentItem(),'muteAll')
-    assert mute is not None and mute.property('pColor').property('normal').property('borderColor').name()=='#353542', str(warnings)
+    assert mute is not None and mute.property('pColor').property('normal').property('borderColor').name()=='#2c3b4e', str(warnings)
     slider=find(volume.contentItem(),'volumeSlider');before=slider.property('value')
     click(volume,slider);assert slider.property('value')!=before
     click(volume,mute);assert window.property('muted')==1
     tile=find(window.contentItem(),'tile_Tap');assert tile is not None
-    assert tile.property('radius')==10
+    assert tile.property('radius')==14
     drag=find(window.contentItem(),'nativeDrag_Tap')
     assert drag is not None and drag.property('enabled')
     QMetaObject.invokeMethod(restart,'close');settle()
@@ -180,8 +182,16 @@ Window {
     assert icon.property('source').toString().endswith('ControlIcons/Tap.png')
     QMetaObject.invokeMethod(restart,'open');settle()
     chip=find(window.contentItem(),'keyChip')
-    assert chip.property('color').name()=='#111116'
-    assert find(chip,'keyChipText').property('color').name()=='#eeeef4'
+    assert chip.property('color').name()=='#0b0f14'
+    assert find(chip,'keyChipText').property('color').name()=='#f2f7ff'
+    # Already-open native dialogs, popups, key chips and drag cards update live.
+    QMetaObject.invokeMethod(window,'forestAppearance');settle()
+    assert restart.property('pColor').property('background').name()=='#07120f'
+    assert mute.property('pColor').property('normal').property('borderColor').name()=='#345548'
+    assert chip.property('color').name()=='#0f211c'
+    assert tile.property('radius')==10
+    assert untouched.property('pColor').property('background').name()=='#222532'
+    QMetaObject.invokeMethod(window,'resetAppearance');settle()
     # Late delegate discovery + no timer/polling work while idle.
     style=window.findChild(QObject,'editorStyle');count=style.property('visitedNodes');flush=style.property('flushCount')
     settle();assert style.property('visitedNodes')==count and style.property('flushCount')==flush
