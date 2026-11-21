@@ -150,6 +150,19 @@ int main(){
     m=runtime.metrics();std::uint64_t depthSum=0;for(const auto count:m.textureDepthReasons)depthSum+=count;
     require(depthSum==m.textureDepthBypasses&&m.textureDepthReasons[0]==2&&m.textureNestedInspected==beforeUninspected
             &&m.textureNestedDraws==1,"first-blocker categories sum exactly to the aggregate; unreported/invalid reasons stay bounded and arming cannot count as a nested scene call");
+    const auto framesBeforePolicy=runtime.metrics().processed;
+    runtime.setTexture({true,true,TextureDrawPolicy::OwnedMipCompatibility});
+    m=runtime.metrics();
+    require(m.texturePolicy==TextureDrawPolicy::OwnedMipCompatibility&&!m.textureInspected&&!m.textureDraws
+            &&!m.textureDepthBypasses&&m.textureDepthReasons==decltype(m.textureDepthReasons){}
+            &&m.processed==framesBeforePolicy&&runtime.isPresentation(Renderer::OpenGLES,901,window),
+            "policy-only change resets texture evidence atomically, preserves the exact selected source and does not invent presentation frames");
+    runtime.textureReport(2,"depth-independent private mip preparation",true,TextureDrawReason::Prepared);
+    require(runtime.metrics().textureDraws==1&&runtime.metrics().textureDepthBypasses==0,
+            "compatibility preparation is sampler evidence, not a manufactured passed depth check");
+    runtime.setTexture({true,true});
+    require(runtime.metrics().texturePolicy==TextureDrawPolicy::DepthQualifiedScene&&!runtime.metrics().textureInspected,
+            "changing back to conservative scope also starts a new evidence interval");
     runtime.setTexture({false,true});runtime.textureReport(2,"off must not count",true,TextureDrawReason::Prepared);
     m=runtime.metrics();
     require(!m.textureDraws&&!m.textureInspected&&!m.textureSupported&&!m.textureNestedInspected&&!m.textureNestedDraws

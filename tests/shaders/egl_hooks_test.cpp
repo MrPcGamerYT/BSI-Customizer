@@ -214,6 +214,38 @@ int main(int argc,char **argv){
     const auto second=b.context(),secondTarget=b.surface(game,2);b.current(secondTarget,second);b.swap(secondTarget);b.draw();
     require(runtime.metrics().observed&&runtime.metrics().textureDraws==1&&runtime.metrics().textureInspected==1,
             "independent late EGL provider draws are not stolen by an earlier UI provider or old game-source counters");
+    // The actual user-enabled compatibility policy must reach the ORIGINALS
+    // with private samplers despite depth test/write/attachment all absent.
+    // Keep legacy cases above: this is an explicit strategy, not a weakened
+    // ownership/protection route or a fabricated successful depth predicate.
+    runtime.setTexture({true,true,TextureDrawPolicy::OwnedMipCompatibility});
+    b.scene(1|2|8);unsigned compatibleVariants=0;
+    for(unsigned kind=0;kind<glDrawKinds;++kind)for(unsigned alias=0;alias<glDrawAliases;++alias)if(glDrawNames[kind][alias]){
+        b.draw(static_cast<GlDrawKind>(kind),alias);++compatibleVariants;
+    }
+    m=runtime.metrics();
+    require(compatibleVariants==variants&&m.texturePolicy==TextureDrawPolicy::OwnedMipCompatibility
+            &&m.textureInspected==variants&&m.textureSceneDraws==variants&&m.textureDraws==variants
+            &&m.textureBindings==variants*2&&!m.textureDepthBypasses&&m.textureDepthReasons==decltype(m.textureDepthReasons){},
+            "all 46 real detours apply depth-independent private mip sampling without inventing scene depth or extra frames");
+    for(unsigned flags:{1u|2u|8u|16u,1u|2u|8u|32u,1u|2u|8u|64u}){b.scene(flags);b.draw(GlDrawKind::ElementsBaseVertex,0,0);}
+    require(runtime.metrics().textureDraws==variants,"compatibility still refuses blended, incomplete-mip and protected resources");
+    inspected=runtime.metrics().textureInspected;
+    b.function<void(*)(int)>("bsiFixtureExtensions")(1);
+    const auto incompatibleDrawable=b.surface(game),compatSecret=b.surface(game,0,true),compatProtected=b.context(true);
+    for(auto *unowned:{incompatibleDrawable,compatSecret,static_cast<void*>(nullptr)}){
+        b.current(unowned,second);b.scene(1|2|8);b.draw(GlDrawKind::ElementsBaseVertex,0,0);
+    }
+    b.current(secondTarget,compatProtected);b.draw(GlDrawKind::ElementsBaseVertex,0,0);
+    require(runtime.metrics().textureInspected==inspected,"compatibility does not adopt another drawable, unmapped/pbuffer or protected route");
+    a.scene(1|2|8);a.draw(GlDrawKind::ElementsBaseVertex,0,0);
+    require(runtime.metrics().textureInspected==inspected,"compatibility still excludes the earlier Qt/UI provider");
+    b.current(secondTarget,second);b.scene(1|2|8);b.nestedDraw(3,2,2);
+    require(runtime.metrics().textureInspected==inspected+1&&runtime.metrics().textureDraws==variants+1,
+            "live compatibility bindings keep their recursion lease; a nested alias borrows them without double counting/preparation");
+    runtime.setTexture({false,true,TextureDrawPolicy::OwnedMipCompatibility});b.draw(GlDrawKind::ElementsBaseVertex,0,0);
+    require(!runtime.metrics().textureDraws&&!runtime.metrics().textureInspected,"compatibility Off restores native originals and clears evidence");
+    b.removeContext(compatProtected);b.removeSurface(incompatibleDrawable);b.removeSurface(compatSecret);
     b.removeContext(second);b.removeSurface(secondTarget);a.removeContext(uiContext);a.removeSurface(uiTarget);
     require(!runtime.metrics().observed&&!runtime.metrics().textureDraws&&!a.count("bsiFixtureInvalidGl")&&!b.count("bsiFixtureInvalidGl"),"teardown and dispatch fixtures leave no stale presentation/texture success or invalid GL state");
     runtime.setTexture({});runtime.stop();DestroyWindow(ui);DestroyWindow(game);DestroyWindow(root);UnregisterClassW(cls.lpszClassName,cls.hInstance);

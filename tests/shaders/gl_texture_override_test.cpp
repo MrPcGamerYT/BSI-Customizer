@@ -47,7 +47,8 @@ struct Fake {
     I extensionCount=0,illegalQueries=0,flagsQueries=0,textureProtectionQueries=0;
     I active=3,program=1,depthWrite=1,depthFunction=0x0203,depthBits=24,framebuffer=0;
     I depthWriteQueries=0,depthFunctionQueries=0,depthAttachmentQueries=0,shaderQueries=0;
-    bool depth=true,blend=false;
+    bool depth=true,blend=false,mips=true;
+    I format=0x8058;
     std::array<Sampler,256> samplers{};
     std::array<U,4> bindings{{1,2,0,0}},textures{{1,2,0,0}};
     std::array<bool,256> live{};
@@ -90,7 +91,7 @@ void GL_CALL uniform(U,U index,I,I *length,I *size,U *type,char *name){
 }
 I GL_CALL location(U,const char *name){return std::strcmp(name,uniforms[0])==0?0:std::strcmp(name,uniforms[1])==0?1:-1;}
 void GL_CALL uniformValue(U,I location,I *out){*out=location;}
-void GL_CALL level(U,I level,U name,I *out){*out=name==0x1003?0x8058:level<=6?(64>>level):0;}
+void GL_CALL level(U,I level,U name,I *out){*out=name==0x1003?g.format:level<=6&&(g.mips||!level)?(64>>level):0;}
 void samplerInteger(const Sampler &s,U name,I *out){
     switch(name){
     case 0x2801:*out=s.min;break;case 0x2800:*out=s.mag;break;
@@ -213,8 +214,51 @@ int main(){
         TextureDrawReason reason=TextureDrawReason::NotInspected;TextureDepthFailure depth=TextureDepthFailure::None;
         require(quality.initialize(resolve,nullptr,&error)&&!quality.begin(TextureQuality::Strong,true,4,&error,&reason,&depth)
                 &&reason==TextureDrawReason::Depth&&depth==TextureDepthFailure::TestDisabled&&!g.shaderQueries&&!g.creations,
-                "new desktop bias capability does NOT remove the reported depth gate or inspect its refused samplers");
+                "depth-qualified control still refuses before sampler inspection; desktop bias support alone is not a new draw policy");
         unchanged();quality.release();
+    }
+    for(bool desktop:{false,true}){
+        g.reset();g.desktop=desktop;g.depth=false;g.depthWrite=0;g.depthFunction=0x0207;g.depthBits=0;
+        GlTextureOverride quality;std::string error;TextureDrawReason reason;TextureDepthFailure depth;
+        const auto first=g.samplers[1],second=g.samplers[2];
+        require(quality.initialize(resolve,nullptr,&error),"initialize explicit owned-mip compatibility");
+        require(!quality.begin(TextureQuality::Strong,true,4,&error,&reason,&depth)
+                &&reason==TextureDrawReason::Depth&&depth==TextureDepthFailure::TestDisabled,
+                "legacy depth-qualified default remains a separately tested refusal");
+        require(quality.begin(TextureQuality::Strong,true,4,&error,&reason,&depth,TextureDrawPolicy::OwnedMipCompatibility)==2
+                &&reason==TextureDrawReason::Prepared&&depth==TextureDepthFailure::None&&g.shaderQueries==1,
+                "actual production compatibility inspects and replaces known color mips with depth test/write/attachment ALL absent");
+        require(g.depthWriteQueries==0&&g.depthFunctionQueries==0&&g.depthAttachmentQueries==0,
+                "compatibility does not use depth state as a hidden second gate");
+        require(g.samplers[g.bindings[0]].low==3&&g.samplers[g.bindings[0]].bias==(desktop?3.f:0.f),
+                "depth-independent private sampling uses desktop bias+floor or legal GLES floor");
+        quality.end();unchanged();require(g.samplers[1]==first&&g.samplers[2]==second,"compatibility restores Off without editing source objects");
+        const auto inspected=g.shaderQueries;
+        require(!quality.begin(TextureQuality::Strong,true,4,&error,&reason,&depth,static_cast<TextureDrawPolicy>(999))
+                &&reason==TextureDrawReason::Policy&&g.shaderQueries==inspected,"unknown policy cannot authorize sampler inspection");
+        quality.release();require(g.creations==g.deletions,"compatibility private samplers have explicit-release cleanup");
+    }
+    for(unsigned refusal=0;refusal<6;++refusal){
+        g.reset();g.depth=false;
+        if(refusal==0)g.blend=true;
+        if(refusal==1)g.mips=false;
+        if(refusal==2)g.format=0x81a6; // depth
+        if(refusal==3)g.format=0x8d7c; // integer RGBA
+        if(refusal==4)g.samplers[1].low=g.samplers[2].low=.5f;
+        GlTextureOverride quality;std::string error;
+        require(quality.initialize(resolve,nullptr,&error)
+                &&!quality.begin(TextureQuality::Strong,refusal!=5,4,&error,nullptr,nullptr,TextureDrawPolicy::OwnedMipCompatibility)
+                &&!g.creations,"compatibility still refuses blend/no-mip/depth-data/integer/existing-override/unreviewed resources");
+        unchanged();quality.release();
+    }
+    {
+        g.reset();g.depth=false;g.protectionExtension=true;g.extensionCount=1;g.protectedTexture=true;
+        GlTextureOverride quality;std::string error;
+        require(quality.initialize(resolve,nullptr,&error)
+                &&quality.begin(TextureQuality::Strong,true,4,&error,nullptr,nullptr,TextureDrawPolicy::OwnedMipCompatibility)==1
+                &&g.bindings[0]==1&&g.textureProtectionQueries==2,
+                "depth-independent compatibility still leaves a protected texture native in a mixed unprotected context");
+        quality.end();unchanged();quality.release();
     }
     {
         g.reset();g.desktop=true;g.samplers[1].bias=.5f;const auto original=g.samplers[1];
@@ -299,14 +343,15 @@ int main(){
         require(!quality.begin(TextureQuality::Strong,true,4,&error,&reason)&&reason==TextureDrawReason::NoSampler&&!error.empty(),"a scene without an inspectable program cannot inherit a previous preparation detail");
         unchanged();quality.release();
     }
-    for(bool desktop:{false,true}){
+    for(bool desktop:{false,true})for(auto policy:{TextureDrawPolicy::DepthQualifiedScene,TextureDrawPolicy::OwnedMipCompatibility}){
         unsigned failures=0;bool unitFailure=false,bindingFailure=false,completed=false;
         for(int allocation=0;allocation<100&&!completed;++allocation){
-            g.reset();g.desktop=desktop;GlTextureOverride quality;std::string detail;
+            g.reset();g.desktop=desktop;g.depth=policy==TextureDrawPolicy::DepthQualifiedScene;
+            GlTextureOverride quality;std::string detail;
             require(quality.initialize(resolve,nullptr,&detail),"initialize before targeted begin-only allocation failures");
             failedAfterUnitChange=failedAfterBinding=false;failAfter=allocation;
             try {
-                require(quality.begin(TextureQuality::Strong,true,4,&detail)==2,"uninterrupted inspection prepares two replacements");
+                require(quality.begin(TextureQuality::Strong,true,4,&detail,nullptr,nullptr,policy)==2,"uninterrupted inspection prepares two replacements");
                 failAfter=-1;quality.end();completed=true;
             }catch(const std::bad_alloc&){
                 failAfter=-1;++failures;unitFailure=unitFailure||failedAfterUnitChange;bindingFailure=bindingFailure||failedAfterBinding;
@@ -316,7 +361,7 @@ int main(){
             require(g.creations==g.deletions,"allocation failure cannot leak a newly generated sampler while inserting its cache entry");
         }
         require(completed&&failures>=4&&unitFailure&&bindingFailure,"inject every inspection allocation, including after unit change AND after a prior sampler replacement");
-        std::printf("PASS: production %s sampler protection/extension/border guards and %u injected allocation failures; active-unit/partial-binding rollback before the game draw and no sampler-name leaks\n",desktop?"desktop bias+floor":"GLES floor-only",failures);
+        std::printf("PASS: production %s %s sampler guards and %u injected allocation failures; active-unit/partial-binding rollback before the game draw and no sampler-name leaks\n",desktop?"desktop bias+floor":"GLES floor-only",policy==TextureDrawPolicy::OwnedMipCompatibility?"depth-independent compatibility":"depth-qualified control",failures);
     }
     std::puts("LIMIT: public-API doubles, not a protected driver, game-resource semantic proof, Windows interception or GPU certification");
 }

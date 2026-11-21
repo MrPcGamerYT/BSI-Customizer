@@ -45,6 +45,12 @@ unsigned bsi_test_quality_begin(int mode,int reviewed,unsigned primitive,char *m
     const auto count=quality->begin(static_cast<BsiShaders::TextureQuality>(mode),reviewed!=0,primitive,&detail);
     if(capacity>0){std::strncpy(message,detail.c_str(),capacity-1);message[capacity-1]=0;}return count;
 }
+unsigned bsi_test_quality_begin_compatibility(int mode,int reviewed,unsigned primitive,char *message,int capacity){
+    std::string detail;
+    const auto count=quality->begin(static_cast<BsiShaders::TextureQuality>(mode),reviewed!=0,primitive,&detail,
+                                    nullptr,nullptr,BsiShaders::TextureDrawPolicy::OwnedMipCompatibility);
+    if(capacity>0){std::strncpy(message,detail.c_str(),capacity-1);message[capacity-1]=0;}return count;
+}
 void bsi_test_quality_end(){quality->end();}
 void bsi_test_quality_release(){if(quality)quality->release();quality.reset();}
 void bsi_test_release(){if(pipeline)pipeline->release();pipeline.reset();}

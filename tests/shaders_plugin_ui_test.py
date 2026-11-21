@@ -600,11 +600,14 @@ Window {
         assert evaluate("Engine.metrics.textureDraws") == 0, "a saved switch without an observed game draw is not a successful sampler pass"
         assert "No texture override confirmed" in item("shaderPotatoTextureStatus").property("text")
         assert "Inspected calls: 0" in item("shaderPotatoTextureStatus").property("text")
-        assert "Eligible scene calls: 0" in item("shaderPotatoTextureStatus").property("text")
+        assert "Sampler-inspection calls: 0" in item("shaderPotatoTextureStatus").property("text")
+        assert evaluate("Engine.metrics.textureDepthIndependent"), "saved On must arm the actual depth-independent runtime policy"
         assert item("shaderFooterStatus").property("text") == "Potato saved; no texture override confirmed"
         click(item("shaderCopyStatus"))
         diagnostics = QGuiApplication.clipboard().text()
-        assert "calls=0; eligible scene calls=0; depth/UI bypass=0" in diagnostics
+        assert "calls=0; sampler-inspection calls=0; conservative depth bypass=0" in diagnostics
+        assert "Texture sampling policy: Owned mip compatibility (depth independent)" in diagnostics
+        assert "opaque mipmapped in-game HUD may also change" in diagnostics
         assert "test disabled=0; writes disabled=0; NEVER=0; ALWAYS=0; missing attachment=0; under 16 bits=0; unspecified=0" in diagnostics
         assert "Nested API calls: inspected=0; prepared=0" in diagnostics
         assert "not additional game frames or proof of game-resource ownership" in diagnostics

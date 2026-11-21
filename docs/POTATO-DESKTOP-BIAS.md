@@ -1,4 +1,12 @@
-# Potato: bounded private desktop LOD bias, not a fix for depth-rejected draws
+# Potato: initial bounded private desktop LOD-bias integration
+
+> **Historical integration at `9906981`, not the latest draw policy.** That
+> commit left the depth classifier unchanged and could not address the 4,506
+> depth-disabled calls. The subsequent [depth-independent owned-mip production
+> path](POTATO-DEPTH-COMPATIBILITY.md) now makes saved Potato On select an explicit
+> broader compatibility strategy. This page preserves the first integration's
+> evidence/boundary; it must not be read as saying current On still requires
+> depth. Installed-game success remains unverified.
 
 ## Latest installed-player result remains negative
 
@@ -33,8 +41,8 @@ to the originals' additive bias. A native mip-4 sample stayed at mip 4 under a
 floor of 3, whereas a private desktop sampler with bias 3 + floor 3 selected this
 fixture's last mip 6 and restored native Off pixels/state.
 
-That independently authored mechanism now reaches the production
-`GlTextureOverride` path **only after all existing scene/resource checks pass**:
+At `9906981`, that independently authored mechanism reached the production
+`GlTextureOverride` path **only after all then-existing scene/resource checks passed**:
 
 1. Identify desktop GL 3.3+, then complete the existing protection/extension
    checks. Resolve `glGetFloatv` and query the actual `GL_MAX_TEXTURE_LOD_BIAS`.
@@ -57,19 +65,27 @@ That independently authored mechanism now reaches the production
 
 The cache already keys the full supported descriptor, including bias. Existing
 allocation-failure rollback, bounded cache, active-unit restoration, recursion
-lease and pending-error preservation remain in force. No preferences/QML/native
-Settings source, save/restart behavior, Shaders-before-About order or protection/
-owned-drawable gate is changed. No original DLL code or binary is integrated.
+lease and pending-error preservation remained in force. That initial integration
+changed no preferences/QML/native Settings source, save/restart behavior,
+Shaders-before-About order or protection/owned-drawable gate. No original DLL
+code or binary was integrated.
 
-This closes a **sampling-fidelity gap on already-qualified desktop draws**. It
-cannot make the reported 4,506 calls reach preparation: they stop earlier at the
-unchanged depth gate. Depth is not a GL prerequisite for coarser mips, but the
-current implementation uses it as a conservative scene-classification rule.
-Simply deleting it would authorize unidentified/UI/composition resources rather
-than establish a real scene contract. No such deletion or offscreen/share-group
-adoption is made, and this change is not a new player-fix deployment request.
+This closed a **sampling-fidelity gap on already-qualified desktop draws**. It
+could not make the reported 4,506 calls reach preparation: they stopped earlier
+at the unchanged depth gate. Depth is not a GL prerequisite for coarser mips,
+but `9906981` used it as a conservative scene-classification rule. The follow-up
+now defines and tests an [explicit owned-mip compatibility contract](POTATO-DEPTH-COMPATIBILITY.md)
+without requiring depth or pretending broader bindings are proven albedo/scene
+textures. It discloses opaque mipmapped HUD/RGB-data effects while preserving
+ownership/protection/Off restoration; it does not adopt offscreen/share-group
+producers or establish installed-game acceptance.
 
-## Validation boundary
+## Validation boundary at the initial integration
+
+The following counts/results describe `9906981`; the subsequent compatibility
+regression expands real pixels to 128 cycles and adds depth-independent material
+images. See its separate current evidence rather than treating old passes as
+validation of new code.
 
 - Policy tests cover both strengths, actual device limits, exposed mip/max-LOD
   bounds, default floor-only behavior, invalid limits, GLES rejection of desktop

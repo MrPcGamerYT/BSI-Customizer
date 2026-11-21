@@ -223,20 +223,28 @@ bool GlTextureOverride::initialize(ResolveGl resolve,void *user,std::string *err
     g.srgbDecode=g.extension("GL_EXT_texture_sRGB_decode");g.minmax=g.extension("GL_EXT_texture_filter_minmax");
     g.changed.reserve(32);g.ready=true;return true;
 }
-unsigned GlTextureOverride::begin(TextureQuality mode,bool reviewed,U primitive,std::string *detail,TextureDrawReason *reason,TextureDepthFailure *depthFailure){
+unsigned GlTextureOverride::begin(TextureQuality mode,bool reviewed,U primitive,std::string *detail,TextureDrawReason *reason,TextureDepthFailure *depthFailure,TextureDrawPolicy policy){
     auto &g=*impl;end();
     if(reason)*reason=TextureDrawReason::NotInspected;
     if(depthFailure)*depthFailure=TextureDepthFailure::None;
     const auto fail=[&](TextureDrawReason why,const char *message)->U{if(reason)*reason=why;if(detail)*detail=message;return 0;};
     if(!g.ready||mode==TextureQuality::Native)return 0;
     if(!reviewed)return fail(TextureDrawReason::Unreviewed,"Potato is not applied: review existing driver LOD/AA overrides first; no profile is reset.");
+    if(policy!=TextureDrawPolicy::DepthQualifiedScene&&policy!=TextureDrawPolicy::OwnedMipCompatibility)
+        return fail(TextureDrawReason::Policy,"Potato bypass: unknown sampling policy; native bindings retained.");
     if(primitive!=0x0004&&primitive!=0x0005&&primitive!=0x0006)
         return fail(TextureDrawReason::Primitive,"Potato bypass: non-triangle draw retains native sampling.");
-    const auto depth=g.sceneDepth();
-    if(depth!=TextureDepthFailure::None){
-        if(depthFailure)*depthFailure=depth;
-        return fail(TextureDrawReason::Depth,depthRejection(depth));
+    if(policy==TextureDrawPolicy::DepthQualifiedScene){
+        const auto depth=g.sceneDepth();
+        if(depth!=TextureDepthFailure::None){
+            if(depthFailure)*depthFailure=depth;
+            return fail(TextureDrawReason::Depth,depthRejection(depth));
+        }
     }
+    // The user-enabled compatibility strategy follows the original's LOD
+    // approach WITHOUT depending on depth-test/write/attachment state. It is
+    // still scoped by the caller to the selected owned drawable, then by the
+    // real program, complete mip color, protection and descriptor checks below.
     // Blended UI/transparent passes remain native, even in the game context.
     if(g.IsEnabled(0x0be2))return fail(TextureDrawReason::Blended,"Potato bypass: blended/UI draw retains native sampling.");
     if(reason)*reason=TextureDrawReason::NoSampler;
@@ -278,7 +286,11 @@ unsigned GlTextureOverride::begin(TextureQuality mode,bool reviewed,U primitive,
             g.changed.push_back({U(unit),U(original)});g.BindSampler(U(unit),replacement);
         }
     }
-    if(detail)*detail=g.changed.empty()?"No qualified scene-color mip sampler in this game draw; native sampling retained.":"Potato prepared private coarser-mip samplers for an owned game scene draw; original bindings restore immediately afterward. This is not a measurement of game output or FPS.";
+    if(detail){
+        if(policy==TextureDrawPolicy::OwnedMipCompatibility)
+            *detail=g.changed.empty()?"Depth-independent Potato inspected this owned game draw but found no eligible mipmapped color sampler; native sampling retained.":"Depth-independent Potato prepared private coarser-mip samplers on the selected game drawable; original bindings restore after this draw. Opaque mipmapped HUD/RGB data maps may also change. Not measured game pixels/FPS.";
+        else *detail=g.changed.empty()?"No qualified scene-color mip sampler in this game draw; native sampling retained.":"Potato prepared private coarser-mip samplers for an owned game scene draw; original bindings restore immediately afterward. This is not a measurement of game output or FPS.";
+    }
     if(reason&&!g.changed.empty())*reason=TextureDrawReason::Prepared;
     inspection.keepBindings=true;
     return U(g.changed.size());

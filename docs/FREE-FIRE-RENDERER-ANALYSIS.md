@@ -1,6 +1,22 @@
 # Free Fire: host presentation is not scene-texture capture
 
-## Latest follow-up: all 4,506 inspected calls have depth testing disabled
+## Current implementation after the failed report
+
+Saved Potato On now selects an [explicit depth-independent owned-mip
+compatibility path](POTATO-DEPTH-COMPATIBILITY.md), not the old depth gate. This
+pursues the originals' demonstrated LOD mechanism using private draw-scoped
+samplers and exact Off restoration. Real production software pixels prove mip
+selection and full spatial-texture detail changes with depth disabled/no depth
+attachment; opaque mipmapped HUD/RGB-data effects are disclosed. Exact
+provider/display/drawable ownership, protection, unblended/mip/sampler checks
+remain. No unknown offscreen/share-group producer is adopted.
+
+This has **not** been deployed or verified on the reported game; its last
+installed-player result below remains negative. No repeat Save/gameplay/report
+request or lower-resolution substitute is proposed. Historical gate/guard
+statements below describe those earlier revisions, not the current On policy.
+
+## Latest installed-player follow-up: all 4,506 inspected calls have depth testing disabled
 
 The saved/armed-On follow-up after the nested-wrapper repair remains a **failed
 texture result**, despite working host OpenGL grading:
@@ -32,13 +48,13 @@ and checked state over 64 cycles. A further independent private desktop
 bias+floor sampler matches the original Strong pixels at native and minified
 gradients and restores Off without mutating source objects; the floor-only plan
 does not match that minified case. The subsequent [bounded desktop integration](POTATO-DESKTOP-BIAS.md)
-uses an actually queried device limit on already-qualified draws. It neither
-removes this report's earlier depth rejection nor authorizes a new resource.
-This is an independently testable sampling-fidelity improvement, **not a fix for
-the reported zero preparation or another player deployment/retest request**. The originals' persistent
-bind/draw-time LOD mutation is independent of depth testing; the production
-path's conservative depth gate is a demonstrated mechanism difference, not
-proof that deleting it safely qualifies the player's compositor/scene textures.
+used an actually queried device limit behind the existing classifier; it could
+not remove this report's earlier depth rejection. The current compatibility
+follow-up at the top of this page now explicitly addresses that mechanism
+difference with a broader disclosed owned-mip contract, rather than merely
+changing bias behind the same gate. Neither software experiment establishes
+resource semantics, authorizes a foreign producer or supplies installed-game
+texture acceptance; neither is a blind player deployment/retest request.
 Original loading, detours and test-owned mip pixels must be measured separately
 from actual game pixels, exact in-game Off restoration and FPS.
 

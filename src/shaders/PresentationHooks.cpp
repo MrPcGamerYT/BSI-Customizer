@@ -180,7 +180,7 @@ struct GameDraw {
                 }
                 TextureDrawReason reason=TextureDrawReason::NotInspected;
                 TextureDepthFailure depth=TextureDepthFailure::None;
-                const auto changed=selected->potato.begin(quality.quality(),quality.externalOverridesReviewed,primitive,&detail,&reason,&depth);
+                const auto changed=selected->potato.begin(quality.quality(),quality.externalOverridesReviewed,primitive,&detail,&reason,&depth,quality.drawPolicy);
                 Runtime::instance().textureReport(changed,detail,true,reason,depth,scope.nested());
                 if(!changed){
                     // No bindings are borrowed by the outer original. A
@@ -273,7 +273,10 @@ void process(unsigned provider,std::uintptr_t context,HWND window,DrawableKey dr
             if(!session.drawHooks){
                 const bool ready=session.potato.initialize(resolve,egl,&error,externalProtectionPossible);
                 session.drawHooks=ready&&installDrawHooks(provider,egl);
-                Runtime::instance().textureReport(0,session.drawHooks?"Potato is armed for subsequent qualified scene draws on the identified game context. No sampler override has been counted yet.":error.empty()?"Potato draw hooks could not be attached; native texture sampling retained.":error,session.drawHooks);
+                const char *armed=quality.drawPolicy==TextureDrawPolicy::OwnedMipCompatibility
+                    ?"Depth-independent Potato compatibility is armed on the selected game drawable. Waiting for eligible mip-color bindings; no texture change is confirmed yet."
+                    :"Potato is armed for subsequent qualified scene draws on the identified game context. No sampler override has been counted yet.";
+                Runtime::instance().textureReport(0,session.drawHooks?armed:error.empty()?"Potato draw hooks could not be attached; native texture sampling retained.":error,session.drawHooks);
             }
         }
         const auto p=Runtime::instance().settings();

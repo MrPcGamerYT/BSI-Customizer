@@ -533,7 +533,7 @@ Rectangle {
                     }
                     Text {
                         Layout.fillWidth: true; wrapMode: Text.Wrap
-                        text: qsTr("Experimental coarser texture sampling on qualified OpenGL / GLES game draws only. Independent of visual effects and resolution. DirectX/Vulkan textures, protected resources, UI and existing LOD/anisotropic overrides stay untouched. No driver profile is reset or FPS gain promised.")
+                        text: qsTr("Depth-independent mip sampling on the selected OpenGL / GLES game drawable. Opaque mipmapped HUD or RGB data maps may also change. Separate Qt windows, blended draws, protected textures and existing LOD/anisotropic overrides stay native. Separate from resolution; no profile reset or FPS promise.")
                         color: page.bsiTheme.colors.primary30; font: page.bsiTheme.fonts.bodySmall
                     }
                     Text {
@@ -542,7 +542,7 @@ Rectangle {
                         Layout.fillWidth: true; wrapMode: Text.Wrap
                         text: page.potatoStatus()
                             + (Engine.metrics.potatoGraphicEnabled ? "\n" + qsTr("Inspected calls: ") + (Engine.metrics.textureInspected || 0)
-                                + qsTr(" · Eligible scene calls: ") + (Engine.metrics.textureSceneDraws || 0)
+                                + qsTr(" · Sampler-inspection calls: ") + (Engine.metrics.textureEligibleDraws || 0)
                                 + "\n" + qsTr("Runtime prepared draws: ") + (Engine.metrics.textureDraws || 0)
                                 + qsTr(" · Bindings: ") + (Engine.metrics.textureBindings || 0) + qsTr(" (not measured game pixels or FPS)") : "")
                         color: page.needsTextureReview ? page.bsiTheme.colors.primary20 : page.bsiTheme.colors.primary30

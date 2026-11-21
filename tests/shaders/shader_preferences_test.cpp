@@ -240,10 +240,13 @@ int main(int argc,char **argv){
         values[QStringLiteral("textureOverridesReviewed")]=true;applied(f.preferences,values);
         require(f.preferences.texture().enabled&&f.preferences.parameters().neutral()&&f.backend.writes==0&&f.backend.configured==original,
                 QStringLiteral("Texture Potato saves independently of visual effects and changes NO native Display field"));
-        ShaderPreferences p;p.load(f.path);require(p.texture().enabled&&p.texture().externalOverridesReviewed,
-                QStringLiteral("Explicit texture toggle/review survive reopen"));
+        ShaderPreferences p;p.load(f.path);require(p.texture().enabled&&p.texture().externalOverridesReviewed
+                &&p.texture().drawPolicy==TextureDrawPolicy::OwnedMipCompatibility,
+                QStringLiteral("Saved/reopened Potato On actually selects depth-independent owned-mip compatibility, not the legacy depth gate"));
+        require(p.values().size()==14,QStringLiteral("Compatibility adds no persisted mode/flag, native Display edit or extra UI control"));
         values[QStringLiteral("potatoGraphic")]=false;applied(f.preferences,values);
-        require(!f.preferences.texture().enabled&&f.backend.writes==0,QStringLiteral("Turning texture Potato off is an exact native-sampling choice, not a resolution restore"));
+        require(!f.preferences.texture().enabled&&f.preferences.texture().drawPolicy==TextureDrawPolicy::DepthQualifiedScene
+                &&f.backend.writes==0,QStringLiteral("Turning texture Potato off disarms compatibility without a native Display write"));
         for(const QVariant &invalid:{QVariant(1),QVariant(QStringLiteral("true")),QVariant()}){
             values[QStringLiteral("potatoGraphic")]=invalid;
             require(!success(f.preferences.apply(values))&&!f.preferences.texture().enabled,QStringLiteral("Texture toggle has a strict boolean schema"));

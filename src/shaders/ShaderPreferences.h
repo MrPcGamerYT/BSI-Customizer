@@ -18,13 +18,20 @@ struct ShaderDisplayPending {
     DisplayResolution before,target;
     ShaderSavedConfiguration next;
 };
-// GUI-side preferences/transaction coordinator. Rendering still receives ONLY
-// Parameters; native display configuration is never changed on a render thread.
+// GUI-side preferences/transaction coordinator. Rendering receives visual and
+// texture settings only; native Display is never changed on a render thread.
 class ShaderPreferences {
 public:
     void load(const QString &path);
     Parameters parameters()const{return saved.visual;}
-    TextureConfiguration texture()const{return saved.texture;}
+    TextureConfiguration texture()const{
+        auto runtime=saved.texture;
+        // The default-off, explicitly enabled Potato switch now selects the
+        // depth-independent owned-mip compatibility path. This is a runtime
+        // strategy, not a new persisted flag or an automatic resource proof.
+        if(runtime.enabled)runtime.drawPolicy=TextureDrawPolicy::OwnedMipCompatibility;
+        return runtime;
+    }
     QVariantMap values()const;
     QString error()const{return lastError;}
     bool bindDisplay(QObject *backend);

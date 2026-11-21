@@ -84,6 +84,7 @@ QVariantList ShaderBridge::controlList()const{
 }
 QVariantMap ShaderBridge::metrics()const{
     const auto m=Runtime::instance().metrics();
+    const auto texture=Runtime::instance().texture();
     const auto number=[](std::uint64_t value){return QVariant::fromValue<qulonglong>(value);};
     const auto depth=[&](TextureDepthFailure reason){return number(m.textureDepthReasons[static_cast<std::size_t>(reason)]);};
     const auto label=[](RendererFamily f){return f==RendererFamily::Vulkan?"Vulkan":f==RendererFamily::DirectX?"DirectX":f==RendererFamily::OpenGL?"OpenGL":"Automatic / unknown";};
@@ -93,7 +94,10 @@ QVariantMap ShaderBridge::metrics()const{
             {"renderer",QString::fromLatin1(capability(m.renderer).label)},
             {"backendImplemented",capability(m.renderer).pipelineImplemented},{"deviceRequirementsMet",m.deviceReady},
             {"processedFrames",number(m.processed)},{"status",QString::fromStdString(m.status)},
-            {"potatoGraphicEnabled",Runtime::instance().texture().enabled},{"textureSupported",m.textureSupported},
+            {"potatoGraphicEnabled",texture.enabled},{"textureSupported",m.textureSupported},
+            {"textureDepthIndependent",m.texturePolicy==TextureDrawPolicy::OwnedMipCompatibility},
+            {"texturePolicy",m.texturePolicy==TextureDrawPolicy::OwnedMipCompatibility?QStringLiteral("Owned mip compatibility (depth independent)"):QStringLiteral("Depth-qualified scene")},
+            {"textureEligibleDraws",number(m.textureSceneDraws)},
             {"textureDraws",number(m.textureDraws)},{"textureBindings",number(m.textureBindings)},{"textureStatus",QString::fromStdString(m.textureStatus)},
             {"textureInspected",number(m.textureInspected)},{"textureSceneDraws",number(m.textureSceneDraws)},
             {"textureDepthBypasses",number(m.textureDepthBypasses)},{"textureBlendBypasses",number(m.textureBlendBypasses)},
@@ -119,11 +123,13 @@ QString ShaderBridge::diagnostics()const{
              m.value("textureDepthNever").toString(),m.value("textureDepthAlways").toString(),
              m.value("textureDepthMissingAttachment").toString(),m.value("textureDepthInsufficientPrecision").toString(),
              m.value("textureDepthUnspecified").toString(),m.value("textureNestedInspected").toString(),m.value("textureNestedDraws").toString());
-    const auto inspectionReport=QStringLiteral("Texture inspection since the latest setting/source change: calls=%1; eligible scene calls=%2; depth/UI bypass=%3; blended bypass=%4; scene without qualified samplers=%5; other bypass=%6\nLatest bypass: %7\nOffscreen/pbuffer/foreign scene contexts are not inferred from presentation or a share group.")
-        .arg(m.value("textureInspected").toString(),m.value("textureSceneDraws").toString(),
+    const auto inspectionReport=QStringLiteral("Texture inspection since the latest setting/source change: calls=%1; sampler-inspection calls=%2; conservative depth bypass=%3; blended bypass=%4; no eligible mip sampler=%5; other bypass=%6\nLatest bypass: %7\nOffscreen/pbuffer/foreign scene contexts are not inferred from presentation or a share group.")
+        .arg(m.value("textureInspected").toString(),m.value("textureEligibleDraws").toString(),
              m.value("textureDepthBypasses").toString(),m.value("textureBlendBypasses").toString(),
              m.value("textureSamplerBypasses").toString(),m.value("textureOtherBypasses").toString(),
              m.value("textureLastBypass").toString())+QLatin1Char('\n')+depthReport;
+    const auto policyReport=QStringLiteral("Texture sampling policy: %1. Compatibility inspects mipmapped color without a depth-test requirement; opaque mipmapped in-game HUD may also change, as may RGB-packed data maps.")
+        .arg(m.value("texturePolicy").toString());
     return QStringLiteral("Requested API: %1\nObserved game API: %2\n%3\nProcessed game frames: %4\nGame surface observed: %5; processing active: %6\nVulkan capture: loaders=%7; instances=%8; devices=%9; Win32 surfaces=%10; swapchains=%11; presents=%12; missing queues=%13; excluded windows=%14\nLast hooked loader: %15\nQt bridge: %16; host: %17\n%18")
         .arg(m.value("requestedRenderer").toString(),m.value("renderer").toString(),m.value("status").toString())
         .arg(m.value("processedFrames").toString(),m.value("gameSurfaceObserved").toBool()?QStringLiteral("yes"):QStringLiteral("no"),m.value("active").toBool()?QStringLiteral("yes"):QStringLiteral("no"))
@@ -135,7 +141,7 @@ QString ShaderBridge::diagnostics()const{
                           .arg(m.value("textureBindings").toString(),m.value("textureDraws").toString(),
                                m.value("textureSupported").toBool()?QStringLiteral("yes"):QStringLiteral("no"),
                                m.value("textureStatus").toString(),
-                               inspectionReport,error())));
+                               policyReport+QLatin1Char('\n')+inspectionReport,error())));
 }
 void ShaderBridge::copyDiagnostics()const{if(auto *clipboard=QGuiApplication::clipboard())clipboard->setText(diagnostics());}
 void ShaderBridge::attach(QObject *object,const QString &instance,const QString &graphicsRenderer){

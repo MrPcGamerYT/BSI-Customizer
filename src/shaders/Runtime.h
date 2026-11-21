@@ -18,8 +18,11 @@ struct Metrics {
     std::uint64_t processed=0;
     VulkanCapture vulkan;
     bool textureSupported=false;
+    TextureDrawPolicy texturePolicy=TextureDrawPolicy::DepthQualifiedScene;
     // Since the latest texture setting/presentation-source change, not lifetime
     // success carried over from a different game context or an earlier toggle.
+    // textureSceneDraws is a retained internal name: compatibility counts
+    // calls reaching sampler inspection, NOT proof of semantic 3D scene use.
     std::uint64_t textureDraws=0,textureBindings=0,textureInspected=0,textureSceneDraws=0;
     std::uint64_t textureDepthBypasses=0,textureBlendBypasses=0,textureSamplerBypasses=0,textureOtherBypasses=0;
     std::array<std::uint64_t,static_cast<std::size_t>(TextureDepthFailure::Count)> textureDepthReasons{};

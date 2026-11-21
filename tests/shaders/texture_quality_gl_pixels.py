@@ -3,10 +3,27 @@
 The Windows detour/HWND contracts are separate; this is not emulator evidence.
 """
 import ctypes as C
+import hashlib
+import json
 import math
+import os
+from pathlib import Path
 import re
+import struct
+import zlib
 
 I, U, F, P = C.c_int, C.c_uint, C.c_float, C.c_void_p
+
+
+def save_rgba(path, rgba, size):
+    """Optional authored-fixture evidence only; no application image capture."""
+    def chunk(kind, data):
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
+    # GL rows are bottom-up. PNG rows are top-down.
+    rows = b"".join(b"\0" + rgba[y * size * 4:(y + 1) * size * 4] for y in reversed(range(size)))
+    png = b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", size, size, 8, 6, 0, 0, 0))
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(png + chunk(b"IDAT", zlib.compress(rows)) + chunk(b"IEND", b""))
 
 
 def exercise(gl, policy, desktop, size, resolver):
@@ -148,6 +165,8 @@ def exercise(gl, policy, desktop, size, resolver):
     policy.bsi_test_quality_initialize.restype = I
     policy.bsi_test_quality_begin.argtypes = [I, I, U, C.c_char_p, I]
     policy.bsi_test_quality_begin.restype = U
+    policy.bsi_test_quality_begin_compatibility.argtypes = policy.bsi_test_quality_begin.argtypes
+    policy.bsi_test_quality_begin_compatibility.restype = U
     message = C.create_string_buffer(2048)
     assert policy.bsi_test_quality_initialize(resolver, None, message, len(message)), message.value.decode()
     bind_sampler(0, samplers[0])
@@ -170,10 +189,11 @@ def exercise(gl, policy, desktop, size, resolver):
     active(0x84C3)
     native_binding = samplers[0]
 
-    def production(mode, reviewed=1, primitive=0x0004):
+    def production(mode, reviewed=1, primitive=0x0004, compatibility=False):
         before, after = I(), I()
         get_binding(before)
-        count = policy.bsi_test_quality_begin(mode, reviewed, primitive, message, len(message))
+        begin = policy.bsi_test_quality_begin_compatibility if compatibility else policy.bsi_test_quality_begin
+        count = begin(mode, reviewed, primitive, message, len(message))
         current = I()
         get_int(0x84E0, C.byref(current))
         assert current.value == 0x84C3, "inspection must restore ACTIVE_TEXTURE before the actual draw"
@@ -254,28 +274,133 @@ def exercise(gl, policy, desktop, size, resolver):
 
     saved_source_lods = source_lods()
     cycles = 0
-    for native_binding in (samplers[0], 0):
-        bind_sampler(0, native_binding)
-        for scale, native_lod in ((1, 0), (16, 4)):
-            sample_scale(scale_location, scale)
-            assert production(0) == (0, colors[native_lod]), "test gradient must really select native mip 0/4"
-            for mode, floor in ((1, 1.5), (2, 3)):
-                bias = min(floor, maximum_bias.value) if desktop else 0
-                expected = interpolated(max(floor, native_lod + bias))
-                for _ in range(8):
-                    count, observed = production(mode)
-                    assert count == 1 and all(abs(a - b) <= 2 for a, b in zip(observed, expected)), ("actual production minification", desktop, native_binding, scale, mode, observed, expected)
-                    assert production(0) == (0, colors[native_lod]), "Off must restore exact pixels at BOTH gradients/source modes"
-                    assert source_lods() == saved_source_lods, "source texture/sampler LOD state must remain unchanged on every cycle"
-                    cycles += 1
-    assert cycles == 64
+    mip_evidence = []
+    for compatibility in (False, True):
+        # The real application now explicitly selects compatibility. Prove its
+        # output changes with hardware depth testing AND writes disabled, while
+        # retaining the independently tested conservative policy as a control.
+        gl("glDisable" if compatibility else "glEnable", None, U)(0x0B71)
+        gl("glDepthMask", None, C.c_ubyte)(not compatibility)
+        depth_mask = C.c_ubyte()
+        gl("glGetBooleanv", None, U, C.POINTER(C.c_ubyte))(0x0B72, C.byref(depth_mask))
+        assert bool(gl("glIsEnabled", C.c_ubyte, U)(0x0B71)) == (not compatibility)
+        assert bool(depth_mask.value) == (not compatibility)
+        for native_binding in (samplers[0], 0):
+            bind_sampler(0, native_binding)
+            for scale, native_lod in ((1, 0), (16, 4)):
+                sample_scale(scale_location, scale)
+                assert production(0, compatibility=compatibility) == (0, colors[native_lod]), "test gradient must really select native mip 0/4"
+                for mode, floor in ((1, 1.5), (2, 3)):
+                    bias = min(floor, maximum_bias.value) if desktop else 0
+                    expected = interpolated(max(floor, native_lod + bias))
+                    for repeat in range(8):
+                        count, observed = production(mode, compatibility=compatibility)
+                        assert count == 1 and all(abs(a - b) <= 2 for a, b in zip(observed, expected)), ("actual production minification", desktop, compatibility, native_binding, scale, mode, observed, expected)
+                        off = production(0, compatibility=compatibility)
+                        assert off == (0, colors[native_lod]), "Off must restore exact pixels at BOTH gradients/source modes/policies"
+                        if compatibility and repeat == 0:
+                            mip_evidence.append({"source": "sampler" if native_binding else "texture", "lambda": native_lod,
+                                                 "mode": mode, "rgba": observed, "off": off[1]})
+                        assert source_lods() == saved_source_lods, "source texture/sampler LOD state must remain unchanged on every cycle"
+                        cycles += 1
+    assert cycles == 128
     sample_scale(scale_location, 1)
     native_binding = samplers[0]
     bind_sampler(0, native_binding)
+    assert production(2, reviewed=0, compatibility=True) == (0, native), "compatibility still requires driver review"
+    gl("glEnable", None, U)(0x0BE2)
+    assert production(2, compatibility=True) == (0, native), "compatibility still excludes blended UI"
+    gl("glDisable", None, U)(0x0BE2)
+    gl("glDepthMask", None, C.c_ubyte)(1)
+    gl("glEnable", None, U)(0x0B71)
+
+    # An explicitly test-owned COLOR-ONLY FBO: no depth attachment exists at
+    # all. Legacy rejects it, compatibility changes real pixels and restores
+    # Off, without changing the window/context route or reading foreign data.
+    active(0x84C0)
+    color_target, color_fbo = U(), U()
+    gl("glGenTextures", None, I, C.POINTER(U))(1, C.byref(color_target))
+    gl("glBindTexture", None, U, U)(0x0DE1, color_target)
+    upload(0x0DE1, 0, 0x8058, size, size, 0, 0x1908, 0x1401, None)
+    gl("glGenFramebuffers", None, I, C.POINTER(U))(1, C.byref(color_fbo))
+    bind_framebuffer = gl("glBindFramebuffer", None, U, U)
+    bind_framebuffer(0x8D40, color_fbo)
+    gl("glFramebufferTexture2D", None, U, U, U, U, I)(0x8D40, 0x8CE0, 0x0DE1, color_target, 0)
+    assert gl("glCheckFramebufferStatus", U, U)(0x8D40) == 0x8CD5
+    depth_type = I(-1)
+    gl("glGetFramebufferAttachmentParameteriv", None, U, U, U, C.POINTER(I))(0x8CA9, 0x8D00, 0x8CD0, C.byref(depth_type))
+    assert depth_type.value == 0, "this compatibility proof must really have NO depth attachment"
+    gl("glBindTexture", None, U, U)(0x0DE1, texture)
+    active(0x84C3)
+    assert production(2) == (0, native), "conservative control rejects a color-only target"
+    color_only = production(2, compatibility=True)
+    assert color_only == (1, colors[3]), "compatibility coarsens real pixels with NO depth attachment"
+    assert production(0, compatibility=True) == (0, native), "color-only compatibility Off restores exact pixels"
+    assert source_lods() == saved_source_lods
+    bind_framebuffer(0x8D40, 0)
+    gl("glDeleteFramebuffers", None, I, C.POINTER(U))(1, C.byref(color_fbo))
+    gl("glDeleteTextures", None, I, C.POINTER(U))(1, C.byref(color_target))
     assert get_error() == 0, message.value.decode()
-    gl("glEnable", None, U)(0xDEADBEEF)
-    assert production(2) == (1, colors[3])
-    assert get_error() == 0x0500 and get_error() == 0, "sampler inspection must not consume the application's pending API error"
+    for compatibility in (False, True):
+        gl("glEnable", None, U)(0xDEADBEEF)
+        assert production(2, compatibility=compatibility) == (1, colors[3])
+        assert get_error() == 0x0500 and get_error() == 0, "neither policy may consume the application's pending API error"
+
+    # A second, spatial-detail fixture: upload an authored checker material and
+    # its actual box-filtered mips. No final-image grading or blur is involved.
+    # Production compatibility must remove high-frequency detail by sampling
+    # those existing mips, with depth disabled, at UNCHANGED resolution, then
+    # restore the full native image byte for byte in BOTH source modes.
+    assert size == 64, "spatial fixture is authored at the same 64x64 texture/target size"
+    data = [tuple((210, 160, 90, 173) if (x // 8 + y // 8) % 2 else (50, 100, 150, 173))
+            if (x + y) % 2 else (12, 24, 36, 173) for y in range(size) for x in range(size)]
+    active(0x84C0)
+    extent = size
+    for level in range(7):
+        raw = bytes(channel for pixel in data for channel in pixel)
+        upload(0x0DE1, level, 0x8058, extent, extent, 0, 0x1908, 0x1401, C.c_char_p(raw))
+        if extent > 1:
+            data = [tuple(sum(data[(2 * y + dy) * extent + 2 * x + dx][c] for dy in (0, 1) for dx in (0, 1)) // 4
+                          for c in range(4)) for y in range(extent // 2) for x in range(extent // 2)]
+            extent //= 2
+    active(0x84C3)
+    gl("glDisable", None, U)(0x0B71)
+    gl("glDepthMask", None, C.c_ubyte)(0)
+    material_evidence = []
+
+    def frame():
+        rgba = (C.c_ubyte * (size * size * 4))()
+        read(0, 0, size, size, 0x1908, 0x1401, rgba)
+        return bytes(rgba)
+
+    def edge_energy(rgba):
+        return sum(abs(rgba[(y * size + x) * 4 + c] - rgba[(yy * size + xx) * 4 + c])
+                   for y in range(size) for x in range(size) for yy, xx in ((y, x + 1), (y + 1, x))
+                   if xx < size and yy < size for c in range(3))
+
+    for native_binding in (samplers[0], 0):
+        bind_sampler(0, native_binding)
+        assert production(0, compatibility=True)[0] == 0
+        native_image = frame()
+        assert production(2, compatibility=True)[0] == 1
+        coarse_image = frame()
+        assert production(0, compatibility=True)[0] == 0
+        off_image = frame()
+        assert off_image == native_image and native_image != coarse_image, "compatibility must restore the ENTIRE native material image, not just a center pixel"
+        native_energy, coarse_energy = edge_energy(native_image), edge_energy(coarse_image)
+        assert 0 < coarse_energy < native_energy * .6, ("real material detail did not reduce", native_energy, coarse_energy)
+        assert native_image[3::4] == coarse_image[3::4] == bytes([173]) * (size * size)
+        assert source_lods() == saved_source_lods and get_error() == 0
+        source = "sampler" if native_binding else "texture"
+        material_evidence.append({"source": source, "nativeEdgeEnergy": native_energy, "strongEdgeEnergy": coarse_energy,
+                                  "nativeSha256": hashlib.sha256(native_image).hexdigest(), "strongSha256": hashlib.sha256(coarse_image).hexdigest(),
+                                  "offExact": off_image == native_image})
+        artifacts = os.environ.get("BSI_TEXTURE_PIXEL_ARTIFACT_DIR")
+        if artifacts:
+            folder = Path(artifacts) / ("desktop" if desktop else "gles")
+            for label, rgba in (("native", native_image), ("strong", coarse_image), ("off", off_image)):
+                save_rgba(folder / (source + "-" + label + ".png"), rgba, size)
+    gl("glDepthMask", None, C.c_ubyte)(1)
     policy.bsi_test_quality_release()
     active(0x84C0)
     bind_sampler(0, 0)
@@ -287,6 +412,21 @@ def exercise(gl, policy, desktop, size, resolver):
     gl("glUseProgram", None, U)(0)
     gl("glDeleteProgram", None, U)(program)
     assert get_error() == 0
+    evidence = {"api": "desktop" if desktop else "gles", "version": version,
+                "renderer": gl("glGetString", C.c_char_p, U)(0x1F01).decode(), "maxBias": maximum_bias.value,
+                "offCycles": cycles, "depthIndependentCycles": 64, "depthTestAndWritesDisabled": True,
+                "noDepthAttachmentRGBA": color_only[1], "mipPixels": mip_evidence, "material": material_evidence,
+                "limit": "authored software resources; NOT player, physical GPU, allocated-memory or FPS evidence"}
+    report = json.dumps(evidence, separators=(",", ":"))
+    if os.environ.get("BSI_TEXTURE_PIXEL_ARTIFACT_DIR"):
+        (folder / "evidence.json").write_text(json.dumps(evidence, indent=2) + "\n")
     print("PASS: production draw-scoped " + ("desktop OpenGL queried bias+floor" if desktop else "GLES 3 floor-only")
-          + " selects real test-owned mip colors at native lambda 0 AND 4 in both texture/sampler source modes; 64 exact Off/source-LOD restoration cycles; active-unit/depth/UI/no-mip/override/review bypass and pending errors preserved")
+          + " selects real test-owned mip colors at native lambda 0 AND 4 in both texture/sampler source modes; 128 exact Off/source-LOD cycles (64 depth-independent); color-only/no-depth-attachment pixels and full material-detail/Off images; legacy depth/blend/no-mip/override/review bypass and pending errors preserved")
+    print("Texture pixel evidence:", report)
+    if os.environ.get("GITHUB_ACTIONS") == "true":
+        # Keep measured SUCCESS evidence readable through GitHub's check API,
+        # not just a job conclusion or an inaccessible signed log/artifact URL.
+        assert len(report.encode()) < 3500, "bounded evidence must not be silently truncated by check annotations"
+        escaped = report.replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+        print("::notice title=Production depth-independent texture pixels (software)::" + escaped)
     print("LIMIT: owned software-context sampler proof, not game interception, physical GPU, profile compatibility or FPS evidence")

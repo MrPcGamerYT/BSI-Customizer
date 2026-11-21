@@ -4,20 +4,26 @@
 #include <cmath>
 #include <cstdint>
 
-// Independently authored sampling policy, also used by the conservative GL
-// draw-scoped private-sampler path. This is NOT a presentation filter. Callers
-// must prove the resource contract and create a PRIVATE sampler replacement;
+// Independently authored sampling policy, used by the explicit GL scene and
+// owned-mip compatibility strategies. This is NOT a presentation filter. Callers
+// must establish the resource contract and create a PRIVATE sampler replacement;
 // never mutate a game's sampler or infer ownership from a loaded graphics DLL.
 namespace BsiShaders {
 enum class TextureQuality { Native, Light, Strong };
 // Inspection outcomes, NOT proof of changed game pixels. Keeping these separate
 // avoids a final UI/compositor draw hiding whether any scene samplers qualified.
-enum class TextureDrawReason { NotInspected, Unreviewed, Primitive, Depth, Blended, NoSampler, Prepared };
+enum class TextureDrawReason { NotInspected, Unreviewed, Primitive, Depth, Blended, NoSampler, Prepared, Policy };
+// Depth is a scene heuristic, not a GL requirement for mip selection. The
+// explicit compatibility policy accepts inspected mip-color bindings on the
+// caller's EXACT owned game drawable without claiming semantic scene proof.
+// Neither policy authorizes another drawable, provider, protected or Qt surface.
+enum class TextureDrawPolicy { DepthQualifiedScene, OwnedMipCompatibility };
 // First blocking depth check only. None also represents an older/external
 // aggregate report without a subreason; it must not invent a queried GL state.
 enum class TextureDepthFailure { None, TestDisabled, WritesDisabled, Never, Always, MissingAttachment, InsufficientPrecision, Count };
 struct TextureConfiguration {
     bool enabled=false,externalOverridesReviewed=false;
+    TextureDrawPolicy drawPolicy=TextureDrawPolicy::DepthQualifiedScene;
     TextureQuality quality()const{return enabled?TextureQuality::Strong:TextureQuality::Native;}
 };
 enum class TextureUse { Unknown, SampledColor, UserInterface, Depth, Integer, RenderTarget, Presentation };
@@ -26,6 +32,8 @@ struct TextureQualityProof {
     RendererFamily requested=RendererFamily::Automatic;
     TextureUse use=TextureUse::Unknown;
     bool gameSurfaceIdentified=false;
+    // Caller evidence of use on its exact owned draw, not semantic albedo/UI
+    // classification or proof of the object's complete creation/share history.
     bool resourceOwnershipProven=false;
     bool privateReplacementSupported=false;
     bool protectedContent=false;

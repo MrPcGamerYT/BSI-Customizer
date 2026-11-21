@@ -13,8 +13,8 @@ transplanted instruction bytes or recovered proxy source. See the
 
 | Path | Texture-detail implementation |
 | --- | --- |
-| Desktop OpenGL 3.3+ | Experimental private bias + minimum floor, bounded by the queried device limit, on already-qualified owned scene draws |
-| GLES 3.1+ | Experimental private minimum-LOD floor on already-qualified owned scene draws; no desktop bias query/state |
+| Desktop OpenGL 3.3+ | Experimental private bias + minimum floor, bounded by the queried device limit, on inspected owned-drawable mip-color bindings; saved On selects depth-independent compatibility |
+| GLES 3.1+ | Experimental private minimum-LOD floor on the same depth-independent owned-mip path; no desktop bias query/state |
 | GL 2 / GLES 2 / GLES 3.0 | Bypass; the required sampler/texture-level inspection contract is incomplete |
 | D3D11 / D3D12 / Vulkan | Shared policy and typed descriptor adapters/tests only; **no game texture-binding interception** |
 | Ten presentation effects | Independent processing; their pixel tests are not proof of Potato texture reduction |
@@ -35,10 +35,15 @@ comparison](POTATO-DLL-PROBE.md#bias-versus-minimum-lod-floor-a-second-measured-
 found that an already-minified native mip-4 sample stayed at mip 4 under the
 former floor-only plan, while the originals selected this fixture's last mip 6.
 A separate private desktop bias+floor sampler matched the original Strong result
-at both tested gradients and restored native Off pixels/state. The subsequent
-[bounded production integration and latest negative report](POTATO-DESKTOP-BIAS.md)
-close this fidelity gap **only for already-qualified desktop scene resources**;
-they do not fix the earlier depth rejection or authorize a new producer.
+at both tested gradients and restored native Off pixels/state. The initial
+[bounded desktop integration](POTATO-DESKTOP-BIAS.md) closed that fidelity gap
+behind the existing depth gate and could not address the 4,506 early refusals.
+The subsequent [production owned-mip compatibility path](POTATO-DEPTH-COMPATIBILITY.md)
+now makes saved On independent of depth test/write/function/attachment, while
+retaining the exact owned-drawable/protection/resource checks and draw-scoped
+restoration. This is broader sampling, **not new scene/albedo semantic proof**:
+opaque mipmapped in-game HUD and RGB-packed data maps may also change. Separate
+Qt/Chrome windows and unknown offscreen/share-group producers are not adopted.
 
 The regular `BSIShaders` module observes **20 draw signatures / 46 core and
 extension names**: arrays/elements, range, instancing, base vertex/base instance,
@@ -79,9 +84,13 @@ answered active-gameplay/Save/report questions is not the next implementation
 step. The separate [original-DLL runtime experiment](POTATO-DLL-PROBE.md) has
 now executed the actual supplied bytes: all five unique originals changed
 known mip pixels with depth disabled, and the independently authored private-
-sampler alternative passed 64 exact fixture Off cycles. This confirms a real
-mechanism difference, without removing production ownership, protection,
-depth or UI gates, adopting unknown producers or certifying the player's path.
+sampler alternative passed 64 exact fixture Off cycles. This confirmed a real
+mechanism difference. The current independently authored compatibility policy
+now addresses that depth dependence explicitly, without removing the exact
+owned-route, protection, blend, mip/resource or existing-override checks,
+adopting unknown producers or certifying the player's path. Original behavior,
+new production software pixels and still-missing installed-game acceptance are
+separate results; no repeated Save/gameplay/report request follows from this.
 
 A zero-binding outer wrapper must release the inspection recursion guard and
 render mutex **before calling its original**: that original may establish real
@@ -92,8 +101,8 @@ sampler override. Applied outer bindings stay protected through their original;
 inner aliases cannot double-override/count them. Inspection exceptions retain
 the fail-closed lease, presentation-internal draws remain excluded, and nested
 inspection is bounded to eight API levels. Each original still executes once;
-no indirect/index memory is read. The same exact route/protection/scene/sampler
-checks apply at each newly inspectable level.
+no indirect/index memory is read. The same exact route/protection and selected
+policy's sampler checks apply at each newly inspectable level.
 
 The portable scope regression includes an old-guard-equivalent failing negative;
 the Windows fixture separately exercises both originals through actual MinHook,
@@ -111,9 +120,11 @@ player uses this nested pattern** and not certification of game texture changes.
   surface; context identities also include the provider/display. One UI provider
   does not monopolize a later game's provider. Alternate scene contexts repeat
   the same legal EGL protection checks before any GL initialization/inspection.
-- An opaque triangle draw, depth testing and depth writes enabled, a real depth
-  attachment of at least 16 bits, and a depth function other than NEVER/ALWAYS.
-  Merely enabling the depth-test bit on a UI/no-depth target is insufficient.
+- An ordinary **unblended triangle draw**. Saved Potato On explicitly selects
+  `OwnedMipCompatibility`, which does **not** require depth test/write/function
+  or a depth attachment and never changes those states. The conservative
+  `DepthQualifiedScene` policy remains a separate test/explicit-caller control;
+  it is not the hidden policy behind the UI switch. Unknown policies bypass.
 - An active ordinary `sampler2D`, a normalized RGB/RGBA format, dimensions at
   least 64×64, and a matching existing mip chain. Depth, integer, HDR, external,
   array/cube and current draw-attachment textures are not selected.
@@ -129,13 +140,16 @@ player uses this nested pattern** and not certification of game texture changes.
   acknowledgement, **not detection or certification** of the real profile.
   No NVIDIA/AMD/Intel profile is inspected, reset or modified.
 
-**Important remaining provenance limit:** an owned context, ordinary color
-format and scene-like draw state do not independently prove that every sampled
-texture is a game's diffuse/albedo color. Normal/data maps, shared resources or
-unusual UI passes can look similar to these checks. The policy's proof fields
-are caller metadata, not a hardware attestation. These conservative checks are
-not universal resource-semantic safety, protected-driver certification, or
-installed-game acceptance. Do not present this experiment as such.
+**Important broader-scope/provenance limit:** an exact owned draw and ordinary
+RGB/RGBA format do not prove that every sampled texture is diffuse/albedo color,
+or establish its complete creation/sharing history. Opaque mipmapped in-game
+HUD, RGB-packed data/normal maps and shared objects used on this draw may also
+be sampled more coarsely. The QML explanation and diagnostics disclose this;
+there is no blanket "UI/data untouched" assurance. Separate Qt/Chrome surfaces,
+foreign drawables, protected resources, blended draws and unsupported formats
+remain native. The proof fields are caller metadata, not hardware attestation
+or semantic classification. This is not universal resource-semantic safety,
+protected-driver certification or installed-game acceptance.
 
 ### Private replacements and failure behavior
 
@@ -173,9 +187,11 @@ not certify those lifetimes.
   armed runtime, and a saved toggle cannot imply successful game texture draws.
   Presets, Enhance and Reset visuals preserve the texture flags and independent
   native-resolution mode. Texture-only Save does not open a restart dialog.
-- `bsi.shaders.v3` stores 14 values: ten visual steps, visual enable, resolution
-  mode, texture enable and external-override review. Released v1/v2 profiles are
-  read without writes and migrate on Save, retaining resolution recovery data.
+- `bsi.shaders.v3` stores the same 14 values: ten visual steps, visual enable,
+  resolution mode, texture enable and external-override review. Runtime strategy
+  selection adds no persisted flag/control. An already saved On now selects
+  depth-independent compatibility on load; Off still disarms it. Released v1/v2
+  profiles are read without writes and migrate on Save, retaining recovery data.
 - Texture Save alone never writes native Display. The texture option does not
   require a restart for arming subsequent eligible draws, but hooks must have
   captured a qualified game presentation. This is not evidence of changed game
@@ -183,19 +199,21 @@ not certify those lifetimes.
 - A saved-On/zero-prepared report explicitly says **no texture override is
   confirmed**; it must not be diagnosed as an unsaved/off draft. The footer
   repeats this instead of implying that saving again will make it active.
-- Inspected calls, eligible scene calls, depth/UI, blended, no-qualified-sampler
-  and other bypasses are separate from prepared sampler draw/binding counts.
-  They reset on texture-setting or presentation-source changes; old lifetime
-  success cannot masquerade as activity after a new toggle/context. A later HUD
-  bypass cannot erase earlier preparation evidence; its latest reason is kept
-  separately in **Copy rendering status**. Arming hooks is not a prepared draw.
-- **Copy rendering status** splits the depth gate into its **first blocking
-  check per call**: test disabled, writes disabled, NEVER, ALWAYS, no attachment,
-  or fewer than 16 depth bits. An unreported/unknown reason stays unspecified;
-  it is not guessed to be a GL state. Rejection stops before shader/sampler
-  queries, and the depth-disabled case needs only its enabled-state query.
-  All subcounts sum to the depth aggregate and reset with the same source or
-  setting change. No depth/UI/protection condition is weakened to raise counts.
+- Inspected calls, **sampler-inspection calls**, conservative depth bypass,
+  blended/no-eligible-mip-sampler and other bypasses remain separate from
+  prepared sampler draw/binding counts. Compatibility eligibility is **not
+  semantic scene proof**. The retained legacy/internal `textureSceneDraws`
+  counter is also exposed as `textureEligibleDraws`; QML/diagnostics use the
+  truthful name. Policy/source/setting changes reset evidence. A later HUD
+  bypass cannot erase earlier preparation; its latest reason stays separate in
+  **Copy rendering status**. Hook arming is not a prepared draw or changed pixel.
+- **Copy rendering status** reports the actual `texturePolicy` and
+  `textureDepthIndependent` state and discloses possible opaque HUD/RGB-data
+  effects. Conservative-policy first depth blockers remain available: test
+  disabled, writes disabled, NEVER, ALWAYS, missing attachment, under 16 bits,
+  or unspecified. Compatibility skips depth qualification instead of inventing
+  a successful depth observation; it preserves the ownership/protection,
+  unblended-draw and sampler checks. Subcounts still sum/reset correctly.
 - Nested inspected/prepared API calls are reported separately. Nested aliases
   are not additional frames or unique game geometry, and their presence is not
   a producer/resource-ownership proof. Presentation-frame and texture counters
@@ -214,22 +232,25 @@ Current local source checks (CI must run against the pushed review head):
 
 | Check | What passed |
 | --- | --- |
-| Strict C++ policy/GL safety | Desktop bias-limit querying/clamping, source descriptor preservation, GLES enum legality, protected/unknown-protection refusal, unchanged depth/UI/border guards, cache/rollback behavior |
-| ASan/UBSan + leak detection | Eight injected allocation failures **per desktop/GLES path**, partial-binding/active-unit rollback, explicit-release sampler cleanup; public-API doubles, not a protected driver |
-| Actual ANGLE/SwiftShader GLES 3.1 pixels | Actual production floor-only samplers, native LOD 0/4, texture and sampler sources, 64 exact Off/source-LOD cycles, pending errors and depth/UI/no-mip/existing-override refusals |
-| Native core CTest | 17 tests, including the production nested-draw lease policy, v3 preferences, depth-reason accounting, GL safety, native source/image/recovery and existing Vulkan pixels; software fixtures only |
+| Strict C++ policy/GL safety | Explicit compatibility versus conservative controls, no hidden depth gate, invalid-policy refusal; desktop bias limits, descriptor preservation, GLES legality, protected/unknown-protection, blend/mip/format/review/existing-override/border checks |
+| ASan/UBSan + leak detection | Eight injected allocation failures **per desktop/GLES path per draw policy**, partial-binding/active-unit rollback and explicit-release cleanup; public-API doubles, not a protected driver |
+| Actual ANGLE/SwiftShader GLES 3.1 pixels | Production native LOD 0/4, both source modes/strengths, 128 exact Off/source-LOD cycles including 64 depth-independent; color-only FBO/no depth attachment; full spatial-material detail reduction and byte-exact full-image Off; pending errors |
+| Old-depth-gate negative controls | Restoring unconditional depth rejection fails both production C++ and actual GLES mip-pixel tests at the expected compatibility assertion |
+| Native core CTest | 17 tests, including saved/reopened On selecting actual runtime compatibility, policy-only evidence reset, nested-draw lease, depth accounting, GL safety, native source/image/no-growth recovery and mandatory Vulkan pixels |
 | Windows x64 cross-compile/link | Complete EGL/DXGI/Vulkan hook test executables; compilation/linking is **not execution** |
 | Actual Qt 6 plugin and editors | Texture review/toggle/Save/Discard/preset independence, truthful no-game diagnostics and independent native-resolution/restart controls |
 
 Windows CI additionally builds/runs real MinHook detours with authored EGL/GL
 state and Vulkan lifecycle DLL doubles, native HWND ownership and DirectX WARP.
 The EGL regression requires private minimum-LOD samplers **inside** each of the
-46 original draw entry points, exact argument forwarding/once-only calls,
-compositor-only zero-prepared behavior, another scene context on the exact
-selected drawable, UI/protected/pbuffer/other-drawable refusal, off/on evidence
-reset, source teardown and a late independent provider. Those tests do not
-execute an EGL game driver, protected GPU memory or an emulator. Software
-CI also requires GLES and desktop-core pixels and sanitizer tests; a pending or
+46 original draw entry points under both conservative controls and the actual
+compatibility policy with depth test/write/attachment absent. It checks exact
+arguments/once-only calls, restoration, live-override recursion, Qt/protected/
+pbuffer/other-drawable refusal, off/on evidence reset, teardown and an independent
+late provider. Those tests do not execute an EGL game driver, protected GPU
+memory or an emulator. Software CI separately requires real GLES/desktop-core
+pixels and sanitizers, retains authored native/Strong/Off PNG/JSON evidence and
+publishes bounded successful measured mip/material annotations. A pending or
 failed check is not a pass. The D3D/Vulkan descriptor tests and their existing
 ten-effect pixels remain distinct from missing Potato game-binding tests.
 

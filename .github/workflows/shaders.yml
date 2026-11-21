@@ -217,10 +217,19 @@ jobs:
           python3 tests/shaders/run_ci_tests.py --command cmake --build build-shader-core-asan --parallel 2
           python3 tests/shaders/run_ci_tests.py --test-dir build-shader-core-asan --output-on-failure --timeout 180
       - name: Production GLES and desktop OpenGL core pixels/state restoration
+        env:
+          BSI_TEXTURE_PIXEL_ARTIFACT_DIR: ${{ runner.temp }}/authored-texture-pixels
         run: |
           python3 tests/shaders/run_ci_tests.py --command python3 tests/shaders_gpu_test.py
           BSI_TEST_TEXTURE_QUALITY=1 BSI_SHADERS_EGL_CLIENT_VERSION=3 python3 tests/shaders/run_ci_tests.py --command python3 tests/shaders_gpu_test.py
           BSI_TEST_TEXTURE_QUALITY=1 BSI_SHADERS_EGL_API=opengl python3 tests/shaders/run_ci_tests.py --command python3 tests/shaders_gpu_test.py
+      - name: Retain authored native/Strong/Off texture images and measured mip evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: authored-texture-pixels-${{ github.run_id }}
+          path: ${{ runner.temp }}/authored-texture-pixels
+          if-no-files-found: error
       - name: Record scope of results
         run: echo 'Software/API tests only. No HD-Player installation, Win32 presentation hook or Intel/AMD/NVIDIA hardware certification is implied.' >> "$GITHUB_STEP_SUMMARY"
 

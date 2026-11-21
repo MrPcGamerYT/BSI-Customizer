@@ -134,11 +134,15 @@ prepared counts. The earlier advancing-3D/Settings-closed confirmation stands.
 The nested-wrapper repair did not fix this game case; another Save or lower-
 resolution choice is not a remedy. Work includes an [actual original-DLL and
 reversible owned-resource experiment](POTATO-DLL-PROBE.md) and the subsequent
-[bounded desktop private-bias integration](POTATO-DESKTOP-BIAS.md). The latter
-improves already-qualified sampling only; it **does not remove the first depth
-blocker or request another player deployment/retest for this report**.
-Neither is installed-player acceptance. The generic steps below
-remain for a different/new test installation, not as a repeated prerequisite.
+[initial bounded desktop private-bias integration](POTATO-DESKTOP-BIAS.md). That
+initial integration could not address the earlier depth refusal. The newer
+[depth-independent owned-mip production path](POTATO-DEPTH-COMPATIBILITY.md) now
+makes saved On skip depth qualification and has real software mip/material
+pixels plus exact Off restoration. Opaque mipmapped in-game HUD/RGB-data effects
+are disclosed; owned-route/protection, blend and resource checks remain. This
+is not installed-player acceptance or another blind deployment/retest request
+for the known report. The generic steps below are for a different/new reviewed
+test installation, not a repeated prerequisite for the user who supplied it.
 
 1. Record the actual observed host API, player/game versions, GPU/driver, native
    size, current driver profile and a repeatable scene. Configuration is only a
@@ -154,22 +158,20 @@ remain for a different/new test installation, not as a repeated prerequisite.
    qualified GL/GLES path compare the same game textures, not just status or
    counters; record the result. Depth/UI/data/shared-resource behavior must also
    be checked. Prepared binding counts are not proof of changed game pixels.
-   **Saved On with prepared draws 0 is not an active effect.** Record Inspected
-   calls / Eligible scene calls, close Settings while the scene runs, then reopen
-   and use **Copy rendering status**. An inspected compositor/depth bypass is not
-   scene texture evidence. The build must not modify UI/no-depth/protected or
-   unowned offscreen textures just to increase a counter. If still zero after
-   updating the actual installed module, send this text with the same-scene
-   before/after result; a separate guest renderer may be outside this safe path.
-   The report now identifies the **first depth blocker** (test off, writes off,
-   NEVER/ALWAYS, missing attachment or depth under 16 bits) and nested API calls
-   inspected/prepared. These diagnose different boundaries; they are not an
-   instruction to change game depth state or a guarantee of texture access.
-   A zero-binding wrapper no longer suppresses its later nested draw, but that
-   repaired guard gap is not established as the active-gameplay report's cause.
-   If the new build still has no eligible scene calls during advancing gameplay
-   with Settings closed, keep the result recorded as **not working**, not fixed
-   by more Save clicks, a resolution change or forced UI/offscreen adoption.
+   **Saved On with prepared draws 0 is not an active effect.** Copy rendering
+   status separates inspected calls, **sampler-inspection calls**, prepared
+   bindings and actual runtime sampling policy; none proves changed game pixels.
+   Current On uses **Owned mip compatibility (depth independent)**. Depth test,
+   writes and attachment are not prerequisites and must not be altered by the
+   feature. Opaque mipmapped HUD or RGB-packed data/normal maps on this owned
+   draw may change too; separate Qt/Chrome surfaces, blended draws, protected
+   resources and foreign/offscreen/share-group-only producers remain excluded.
+   Compatibility counters must not be called proof of eligible 3D scene draws.
+   Conservative first-depth-blocker and nested-call details are retained for
+   separate callers/debugging, not as a requirement to change game depth state
+   or a new repeated-diagnostics prerequisite. If textures still do not change,
+   retain **not working** rather than infer success from bindings, more Save
+   clicks, resolution changes or forced foreign/UI/offscreen adoption.
 4. Save off and verify exact native sampling/image restoration. Presets/Reset
    visuals must not alter texture flags or resolution. Check reopen/per-instance
    persistence and resize/context recreation.

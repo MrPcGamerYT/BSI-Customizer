@@ -28,7 +28,7 @@ void Runtime::setWindow(std::uintptr_t window){
     host=window;presentationObject=0;presentationWindow=0;
     state.observed=false;state.active=false;state.deviceReady=false;state.renderer=Renderer::Unknown;
     resetTextureEvidence();
-    if(currentTexture.enabled)state.textureStatus="The native player surface changed; waiting for a newly qualified game scene draw.";
+    if(currentTexture.enabled)state.textureStatus="The native player surface changed; waiting for eligible mip sampling on its selected game drawable.";
     state.status=window?"Waiting for the identified player's game presentation surface.":"The native player surface is not available; no effects are active.";
 }
 void Runtime::stop(){stopPresentationHooks();}
@@ -53,7 +53,7 @@ void Runtime::configureRenderer(RendererFamily configured){
     state.configured=configured;state.requested=RendererFamily::Automatic;presentationObject=0;presentationWindow=0;
     state.renderer=Renderer::Unknown;state.observed=false;state.active=false;state.deviceReady=false;
     resetTextureEvidence();
-    if(currentTexture.enabled)state.textureStatus="Automatically waiting for a qualified game scene draw; a graphics setting is not proof of texture reduction.";
+    if(currentTexture.enabled)state.textureStatus="Automatically waiting for eligible mip sampling on the selected game drawable; a graphics setting is not proof of texture reduction.";
     state.status="Automatically detecting the owned game's actual host presentation API. The emulator graphics setting is only a hint.";
 }
 bool Runtime::accepts(Renderer observed){
@@ -84,7 +84,7 @@ bool Runtime::claimPresentation(Renderer renderer,std::uintptr_t object,std::uin
     state.observed=true;state.deviceReady=false;state.active=false;resetTextureEvidence();
     if(currentTexture.enabled)state.textureStatus=family(renderer)!=RendererFamily::OpenGL
         ?"Potato graphic is not implemented for the observed DirectX/Vulkan texture-binding path. Original textures are retained; presentation shaders remain independent."
-        :"Owned GL/GLES presentation identified. Waiting for eligible scene samplers; a compositor frame alone does not prove texture reduction.";
+        :"Owned GL/GLES presentation identified. Waiting for eligible mip-color samplers; a compositor frame alone does not prove texture reduction.";
     return true;
 }
 bool Runtime::isPresentation(Renderer renderer,std::uintptr_t object,std::uintptr_t window){
@@ -103,11 +103,14 @@ void Runtime::releasePresentation(Renderer renderer,std::uintptr_t object){
 Parameters Runtime::settings(){std::lock_guard<std::mutex> lock(mutex);return current;}
 void Runtime::setTexture(const TextureConfiguration &settings){
     std::lock_guard<std::mutex> lock(mutex);
-    if(currentTexture.enabled==settings.enabled&&currentTexture.externalOverridesReviewed==settings.externalOverridesReviewed)return;
-    currentTexture=settings;resetTextureEvidence();
+    if(currentTexture.enabled==settings.enabled&&currentTexture.externalOverridesReviewed==settings.externalOverridesReviewed
+       &&currentTexture.drawPolicy==settings.drawPolicy)return;
+    currentTexture=settings;state.texturePolicy=settings.drawPolicy;resetTextureEvidence();
     state.textureStatus=!settings.enabled?"Potato graphic is off; native texture sampling retained.":
         state.observed&&family(state.renderer)!=RendererFamily::OpenGL?
         "Potato graphic is not implemented for the observed DirectX/Vulkan texture-binding path. Original textures are retained; presentation shaders remain independent.":
+        settings.drawPolicy==TextureDrawPolicy::OwnedMipCompatibility?
+        "Potato graphic saved: depth-independent owned-mip compatibility. Waiting for eligible sampled color mips; no game texture change is confirmed yet.":
         "Potato graphic saved. Waiting for a qualified owned GL/GLES scene draw; no texture reduction is confirmed yet.";
 }
 TextureConfiguration Runtime::texture(){std::lock_guard<std::mutex> lock(mutex);return currentTexture;}

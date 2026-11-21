@@ -12,9 +12,13 @@ This is **software WGL on authored textures, not a player/game fix, physical-GPU
 test or FPS result**. No original DLL/archive/disassembly/Mesa binary is committed,
 redistributed or installed in a player. The unrelated Z-Lag startup workflow is
 not used as Potato evidence. At the executed probe head, production `src/` was
-identical to `f05734c`. The subsequent [bounded desktop-bias integration](POTATO-DESKTOP-BIAS.md)
-changes qualified sampling policy only, not Shaders/About order, approved Settings
-appearance, Save/Discard/callback identity or ownership/protection/depth gates.
+identical to `f05734c`. The subsequent [initial bounded desktop-bias integration](POTATO-DESKTOP-BIAS.md)
+changed qualified sampling only and retained the depth gate. The newer
+[depth-independent production compatibility path](POTATO-DEPTH-COMPATIBILITY.md)
+now explicitly changes that classifier for saved On, disclosing opaque
+mipmapped HUD/RGB-data effects while preserving exact owned-route/protection,
+draw-scoped Off restoration, native Save/Discard and Shaders-before-About.
+Neither follow-up reuses the original code/binaries or establishes game success.
 
 ## Measured original behavior
 

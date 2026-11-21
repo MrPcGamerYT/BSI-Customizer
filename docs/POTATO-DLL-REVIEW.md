@@ -74,10 +74,14 @@ The minified-gradient follow-up also demonstrates that the independent minimum-
 LOD-only floor is not an additive bias. A separate private desktop sampler
 with bias 3 + floor 3 matches the original Strong pixels at both tested gradients
 and restores native Off pixels/state without source-object mutation. The
-subsequent [bounded desktop integration](POTATO-DESKTOP-BIAS.md) uses this
-independently authored mechanism with a queried device limit on already-qualified
-scene draws. It does not remove the reported depth blocker, authorize new player
-resources or make the installed-player result a pass.
+initial [bounded desktop integration](POTATO-DESKTOP-BIAS.md) used this
+independently authored mechanism behind the unchanged depth gate. The newer
+[production owned-mip compatibility path](POTATO-DEPTH-COMPATIBILITY.md) now
+explicitly addresses depth dependence for saved On, still with private samplers,
+exact owned-drawable/protection checks and source/Off restoration. Broader opaque
+mipmapped HUD/RGB-data effects are disclosed; no new producer is adopted. Its
+production software pixels remain distinct from the originals' persistent
+mutation and the still-unverified installed-player result.
 
 The values are observable floating-point constants, not inferred from folder
 names alone. For example, the MSI 5 pair has identical `.text` bytes and uses
