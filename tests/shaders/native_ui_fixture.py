@@ -273,6 +273,14 @@ CheckBox {
  readonly property string bsiFixtureKind: "UiCheckBox"
  property QtObject pSize
  font: pSize.textFont; spacing: pSize.spacing
+ // The standalone contract must remain readable on the dark sample host.
+ // These are public Qt palette roles, not a copy of the native indicator.
+ palette.windowText: UiTheme.colors.primary10
+ palette.text: UiTheme.colors.primary10
+ palette.button: UiTheme.colors.primary70
+ palette.light: UiTheme.colors.primary60
+ palette.dark: UiTheme.colors.primary60
+ palette.highlight: UiTheme.colors.accentNormal
  opacity: enabled ? 1 : 0.4
 }
 '''
@@ -283,6 +291,13 @@ ComboBox {
  property QtObject pSize
  implicitHeight: pSize.height
  font: UiTheme.fonts.bodyMedium
+ palette.button: UiTheme.colors.primary70
+ palette.buttonText: UiTheme.colors.primary10
+ palette.base: UiTheme.colors.primary80
+ palette.text: UiTheme.colors.primary10
+ palette.windowText: UiTheme.colors.primary10
+ palette.highlight: UiTheme.colors.accentNormal
+ palette.highlightedText: UiTheme.colors.primary80
 }
 '''
     sources["UiSlider.qml"] = '''import QtQuick 2.15

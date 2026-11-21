@@ -329,12 +329,13 @@ Window {
         print("ACTUAL loaded public Qt bridge:", json.dumps(info, sort_keys=True), flush=True)
         # The host deliberately has a changing game-like background. The whole
         # page AND footer must be opaque independently of any Settings redesign.
+        from shaders.qt_capture import capture_window
         def assert_opaque_page():
             expected = native_theme.property("colors").property("primary80")
             for background in ("#ff00ff", "#00ff00"):
                 evaluate("color = '" + background + "'", window)
                 QTest.qWait(40)
-                image = window.grabWindow()
+                image = capture_window(window)
                 assert not image.isNull(), "shader page capture failed"
                 for x, y in ((page.width() - 12, page.height() / 2), (4, page.height() - 4)):
                     point = page.mapToScene(QPointF(x, y))

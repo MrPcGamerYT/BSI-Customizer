@@ -211,8 +211,9 @@ def main():
             first_frame = False
         return image
 
-    def scene_pixel(point):
-        image = frame()
+    def scene_pixel(point, image=None):
+        if image is None:
+            image = frame()
         # QQuickItem.mapToScene returns logical window coordinates. Sampling
         # that directly in a high-DPI QImage tests a DIFFERENT item (or the
         # transparent shadow), not the intended material. Keep every existing
@@ -222,8 +223,8 @@ def main():
         assert 0 <= x < image.width() and 0 <= y < image.height(), (point, x, y, image.size())
         return image.pixelColor(x, y)
 
-    def pixel(item, x, y):
-        return scene_pixel(item.mapToScene(m.QPointF(x, y)))
+    def pixel(item, x, y, image=None):
+        return scene_pixel(item.mapToScene(m.QPointF(x, y)), image)
 
     about = named("aboutSettings", visible=False)
     surface = next(i for i in tree() if m.prop(i, "radius") == 14)
@@ -244,8 +245,17 @@ def main():
         # the same strict >6 painted-lightness delta and five-DPI coverage;
         # flattening it must still fail, not count as opaque-theme success.
         evaluate(selected_fill, "gradient.stops[0].color = gradient.stops[1].color")
-    tab_top = pixel(selected_fill, 5, 8)
-    tab_bottom = pixel(selected_fill, 5, selected_fill.height() - 8)
+    # Compare two pixels from ONE actual frame, not different render instants.
+    # Keep the original sample points and strict >6 contrast unchanged.
+    reflection = frame()
+    tab_top = pixel(selected_fill, 5, 8, reflection)
+    tab_bottom = pixel(selected_fill, 5, selected_fill.height() - 8, reflection)
+    print("Selected-tab paint:", json.dumps({"top": tab_top.name(), "bottom": tab_bottom.name(),
+        "lightness": [tab_top.lightness(), tab_bottom.lightness()],
+        "size": [selected_fill.width(), selected_fill.height()],
+        "origin": [selected_fill.mapToScene(m.QPointF()).x(), selected_fill.mapToScene(m.QPointF()).y()],
+        "opacity": selected_fill.opacity(), "stripX": preview.strip.property("contentX"),
+        "gradient": evaluate(selected_fill, "[String(gradient.stops[0].color),String(gradient.stops[1].color)].join(',')")}), flush=True)
     assert tab_top.lightness() > tab_bottom.lightness() + 6, ("the selected-tab reflection is not present in the rendered pixels", tab_top.name(), tab_bottom.name(), tab_top.lightness(), tab_bottom.lightness())
     # Both frame and page/footer must stay native-primary80 over a repainting
     # game; no brighter outer frame/dark inset rectangle as in the screenshot.

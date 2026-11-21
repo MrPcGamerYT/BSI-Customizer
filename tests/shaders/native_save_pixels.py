@@ -5,6 +5,7 @@ UiButton implementation and one live theme. A separately run background-opacity
 negative must fail this exact pixel equality, not a looser fallback assertion.
 """
 import os
+from .qt_capture import capture_window
 
 
 def assert_save_pixels(window, page, save, reference, evaluate, QTest, QPointF, Qt):
@@ -31,7 +32,7 @@ def assert_save_pixels(window, page, save, reference, evaluate, QTest, QPointF, 
             assert save.property("hovered"), "the native Save hover state was not exercised"
         if os.environ.get("BSI_SHADERS_TEST_SAVE_PIXEL_MISMATCH") == "1":
             evaluate("background.opacity = .25", save)
-        actual = window.grabWindow()
+        actual = capture_window(window)
         assert not actual.isNull(), "native Save capture is empty"
         sx, sy = actual.width() / window.width(), actual.height() / window.height()
         rect = (round(point.x() * sx), round(point.y() * sy), round(save.width() * sx), round(save.height() * sy))
@@ -41,7 +42,7 @@ def assert_save_pixels(window, page, save, reference, evaluate, QTest, QPointF, 
         reference.setProperty("visible", True)
         QTest.mouseMove(window, cursor.toPoint())
         QTest.qWait(40)
-        expected = window.grabWindow()
+        expected = capture_window(window)
         assert not expected.isNull() and actual.size() == expected.size()
         assert actual.copy(*rect) == expected.copy(*rect), ("Save differs from native UiButton pixels", state)
         reference.setProperty("visible", False)

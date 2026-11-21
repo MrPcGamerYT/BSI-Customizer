@@ -41,6 +41,10 @@ def main():
             assert save.property("bsiFixtureKind") == "UiButton", "the preview must not resurrect removed custom controls"
             assert m.evaluate(page, "bsiTheme === UiTheme"), "shell and Shaders must share the same full live theme"
             assert not save.isEnabled() and save.property("opacity") == .4
+            checkbox = next(i for i in tree if i.objectName() == "shaderEnabled")
+            combo = next(i for i in tree if i.objectName() == "shaderPresets")
+            assert m.evaluate(checkbox, "palette.windowText === UiTheme.colors.primary10"), "sample checkbox text must stay readable"
+            assert m.evaluate(combo, "palette.buttonText === UiTheme.colors.primary10 && palette.button === UiTheme.colors.primary70"), "sample selector must follow the live host palette"
         def click(item):
             assert item.isVisible() and item.isEnabled()
             point = item.mapToScene(m.QPointF(item.width() / 2, item.height() / 2))

@@ -132,10 +132,13 @@ jobs:
           BSI_PHONE_RCC: /usr/lib/qt5/bin/rcc
         run: python tests/run_qt_runtime_test.py tests/phone_profiles_gui_test.py
       - name: Physical controls, persistence, navigation and missing-module fallback on the independent host
+        env:
+          BSI_TEST_COMMAND_TIMEOUT: '180'
         run: |
-          python tests/run_qt_runtime_test.py tests/shaders_plugin_ui_test.py
-          python tests/run_qt_runtime_test.py tests/shaders_native_settings_test.py
-          python tests/run_qt_runtime_test.py tests/shaders_native_settings_test.py --missing-module
+          python tests/shaders/run_ci_tests.py --command python -X faulthandler -u tests/shaders_qt_capture_test.py
+          python tests/shaders/run_ci_tests.py --command python -X faulthandler -u tests/shaders_plugin_ui_test.py
+          python tests/shaders/run_ci_tests.py --command python -X faulthandler -u tests/shaders_native_settings_test.py
+          python tests/shaders/run_ci_tests.py --command python -X faulthandler -u tests/shaders_native_settings_test.py --missing-module
       - name: Live plugin preview shares one theme, stays opaque on every tab and preserves physical No/Discard
         run: python tests/run_qt_runtime_test.py tests/shaders_preview_ui_test.py
       - name: Missing-font metrics cannot widen the Shaders form beyond its clip
@@ -146,10 +149,11 @@ jobs:
           BSI_QT_REFERENCE_DIR: ${{ github.workspace }}/player-references
           BSI_PHONE_RCC: /usr/lib/qt5/bin/rcc
         run: python tests/run_qt_runtime_test.py tests/shaders_native_controls_test.py
-      - name: Production glass at host, 100/125/150/200 percent DPI and strict flat-image negative controls
+      - name: Selected-tab glass at host, 100/125/150/200 percent DPI and strict flat-image negative controls
         env:
           BSI_GLASS_ARTIFACTS: ${{ runner.temp }}/settings-glass-captures
-        run: python tests/run_qt_runtime_test.py tests/settings_panel_glass_capture_test.py
+          BSI_TEST_COMMAND_TIMEOUT: '600'
+        run: python tests/shaders/run_ci_tests.py --command python -X faulthandler -u tests/settings_panel_glass_capture_test.py
       - name: Retain glass capture diagnostics and negative controls
         if: always()
         uses: actions/upload-artifact@v4
@@ -290,7 +294,11 @@ jobs:
           BSI_SHADERS_MODULE_ROOT: ${{ github.workspace }}/build-shaders/module
           BSI_SHADERS_DIAGNOSTICS: '1'
           BSI_SHADERS_EXPECT_BUILD_QT: ${{ matrix.qt }}
-        run: python tests/shaders/run_ci_tests.py --command python -X faulthandler -u tests/shaders_plugin_ui_test.py
+        run: |
+          python tests/shaders/run_ci_tests.py --command python -X faulthandler -u tests/shaders_qt_capture_test.py
+          if ($LASTEXITCODE -ne 0) { throw 'Independent Qt real-pixel capture contract failed' }
+          python tests/shaders/run_ci_tests.py --command python -X faulthandler -u tests/shaders_plugin_ui_test.py
+          if ($LASTEXITCODE -ne 0) { throw 'Actual shader plugin/control fixture failed' }
       - name: Unmodified native controls/theme, exact Save pixels, opacity and physical input on both pinned matching-Qt players
         env:
           BSI_TEST_COMMAND_TIMEOUT: '600'
@@ -327,11 +335,12 @@ jobs:
           BSI_TEST_QT_API: ${{ matrix.python-api }}
           BSI_PHONE_PROFILES_TEST: ${{ github.workspace }}/build-shaders/tests/Release/phone-profiles-test.exe
         run: python tests/run_qt_runtime_test.py tests/phone_profiles_gui_test.py
-      - name: Actual generated glass pixels/input at host, 100/125/150/200 percent DPI and strict flat-image negative controls
+      - name: Actual selected-tab glass pixels/input at host, 100/125/150/200 percent DPI and strict flat-image negative controls
         env:
           BSI_TEST_QT_API: ${{ matrix.python-api }}
           BSI_GLASS_ARTIFACTS: ${{ runner.temp }}/settings-glass-captures
-        run: python tests/run_qt_runtime_test.py tests/settings_panel_glass_capture_test.py
+          BSI_TEST_COMMAND_TIMEOUT: '600'
+        run: python tests/shaders/run_ci_tests.py --command python -X faulthandler -u tests/settings_panel_glass_capture_test.py
       - name: Retain glass capture diagnostics and negative controls
         if: always()
         uses: actions/upload-artifact@v4

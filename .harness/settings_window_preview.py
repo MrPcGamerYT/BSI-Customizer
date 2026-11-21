@@ -354,7 +354,11 @@ Window {
     def frame(self):
         if self.window.isVisible():
             # Qt 5's software renderer needs the public asynchronous item
-            # capture API rather than QQuickWindow::grabWindow().
+            # capture API rather than QQuickWindow::grabWindow(). Give pending
+            # bindings a single update boundary before scheduling the grab;
+            # never repeat a capture until a pixel assertion happens to pass.
+            self.window.requestUpdate()
+            QTest.qWait(40)
             capture = self.window.contentItem().grabToImage()
             assert capture is not None
             ready = QSignalSpy(capture.ready)

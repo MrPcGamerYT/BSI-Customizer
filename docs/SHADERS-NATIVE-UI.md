@@ -113,6 +113,18 @@ the production plugin/page. Its authored preview prompt is not the player's
 native dialog. Existing strict glass paint/contrast, DPI, callback, persistence,
 bounded compression and recovery tests stay required.
 
+The native-page opacity and Save oracle use the public asynchronous
+`QQuickItem.grabToImage()` path. `QQuickWindow.grabWindow()` returns an empty
+image on the independent Qt 5 software hosts; that is a capture-API limitation,
+not permission to skip pixels. `shaders_qt_capture_test.py` independently checks
+real changing pixels, immutable snapshots and a rejected nonpainting negative
+without needing a shader module or OEM resources. One scene-update boundary is
+used before each capture; no capture-until-pass retry. Selected-tab contrast
+compares two original sample points in **one** frame with the unchanged strict
+`>6` lightness delta. This synchronization hardening alone does not diagnose a
+Windows Qt 6.8 reflection failure or certify a physical renderer. Failure
+annotations retain the actual tail/values and frames for follow-up.
+
 These are real Qt control/source/material tests. They do **not** establish an
 installed player result, readable font paint in the fontless stress case, game
 capture, Vulkan detection, texture sampling changes, frame times, NVIDIA profile
