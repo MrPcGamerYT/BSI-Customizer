@@ -176,11 +176,13 @@ Window {
     assert window.property('dragCheck'), 'native tile drag press/release callbacks lost'
     icon=next(child for child in tile.findChildren(QObject) if child.property('asset')=='Tap')
     assert icon.property('source').toString().endswith('ControlIcons/Tap.png')
+    QMetaObject.invokeMethod(restart,'open');settle()
     # Late delegate discovery + no timer/polling work while idle.
     style=window.findChild(QObject,'editorStyle');count=style.property('visitedNodes');flush=style.property('flushCount')
     settle();assert style.property('visitedNodes')==count and style.property('flushCount')==flush
     output=ROOT/'.cache/full-ui/surface-fixture.png';output.parent.mkdir(parents=True,exist_ok=True)
     assert window.grabWindow().save(str(output))
+    assert volume.grabWindow().save(str(output.with_name('volume-fixture.png')))
     QMetaObject.invokeMethod(window,'closeAll');settle();window.deleteLater();settle()
     assert not warnings,'\n'.join(warnings)
 print('PASS: native shared UiDialog and UiWindowedPopup opt-in, boot/unregistered isolation, real footer callback/volume input, native tile icon/rounded styling, zero idle polling. NOT a live OEM test.')

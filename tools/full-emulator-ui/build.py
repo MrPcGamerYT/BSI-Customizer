@@ -66,6 +66,8 @@ exit /b 1
     if screenshot.is_file():members['FIXTURE-PREVIEW-NOT-OEM.png']=screenshot.read_bytes()
     surface_screenshot=ROOT/'.cache/full-ui/surface-fixture.png'
     if surface_screenshot.is_file():members['FIXTURE-SURFACES-NOT-OEM.png']=surface_screenshot.read_bytes()
+    volume_screenshot=ROOT/'.cache/full-ui/volume-fixture.png'
+    if volume_screenshot.is_file():members['FIXTURE-VOLUME-NOT-OEM.png']=volume_screenshot.read_bytes()
     report={'surfaceRevision':8,'scopedNativeDialogAndPopupHooks':True,'idlePollingAdded':False,'suite':'VOID Carbon Suite 07','sourceCommit':subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip(),
             'legacyEngineSha256':suite.sha(legacy),'suiteSourceSha256':suite.sha((HERE/'suite.py').read_bytes()),
             'assetsSha256':{name:suite.sha(data) for name,data in assets.items()},
