@@ -124,7 +124,7 @@ Window {
    UiButton {objectName:"muteAll";text:"Mute all instances";pSize:UiTheme.buttons.sizes.medium;pColor:UiTheme.buttons.colors.accent;onClicked:host.muted++}
   }
  }
- Window {id:standalone;objectName:"unregisteredWindow";width:420;height:220;visible:true;color:"#222532"
+ Window {id:standalone;objectName:"unregisteredWindow";transientParent:null;width:420;height:220;visible:true;color:"#222532"
   UiDialog {id:untouched;objectName:"bootDialog";title:"Protected host";pDescription:"No registered native parent";pDialogType:UiDialogWindow.Simple}
  }
  function openDialogs(){restart.open();untouched.open()}
@@ -135,14 +135,13 @@ Window {
     assert not component.isError(),'\n'.join(e.toString() for e in component.errors())
     window=component.create();assert window,'\n'.join(e.toString() for e in component.errors())
     QMetaObject.invokeMethod(window,'openDialogs');settle()
-    restart=window.findChild(type(window),'unused')  # Popup is QObject, looked up below.
     from PySide6.QtCore import QObject
     restart=window.findChild(QObject,'restartDialog');untouched=window.findChild(QObject,'bootDialog')
     assert restart is not None and untouched is not None
     assert restart.property('pColor').property('background').name()=='#222532','boot-incomplete host must not opt in'
     window.setProperty('pIsBootComplete',True);settle()
     assert restart.property('pColor').property('background').name()=='#080809'
-    assert untouched.property('pColor').property('background').name()=='#222532','unregistered host changed'
+    assert untouched.property('pColor').property('background').name()=='#222532', 'unregistered host changed: '+str(warnings)
     assert restart.property('pColor').property('notice').name()=='#ffcc66','notice semantics lost'
     body=restart.property('contentItem');background=restart.property('background')
     # Dialog root + separate header/footer must all be traversed, not only contentItem.
