@@ -129,6 +129,8 @@ jobs:
           python tests/run_qt_runtime_test.py tests/shaders_plugin_ui_test.py
           python tests/run_qt_runtime_test.py tests/shaders_native_settings_test.py
           python tests/run_qt_runtime_test.py tests/shaders_native_settings_test.py --missing-module
+      - name: Missing-font metrics cannot widen the Shaders form beyond its clip
+        run: python tests/run_qt_runtime_test.py tests/shaders_fontless_ui_test.py
       - name: Production glass at host, 100/125/150/200 percent DPI and strict flat-image negative controls
         env:
           BSI_GLASS_ARTIFACTS: ${{ runner.temp }}/settings-glass-captures

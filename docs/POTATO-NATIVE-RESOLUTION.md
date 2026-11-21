@@ -153,7 +153,14 @@ Implemented automated coverage includes:
   wrong-thread backend rejection;
 - actual C++ plugin import and physical QML mode-popup/Save/Discard/restoration,
   with visual effects off, plus complete native-shell No/Discard/close callbacks,
-  stationary Save, preset/reset independence and clean bindings.
+  stationary Save, preset/reset independence and clean bindings;
+- every visual Reset at 750/420 px with full-control clipping checks, form/row
+  width assertions and a single reveal followed by actual pointer input. An
+  isolated empty-font search also exercises wide fallback metrics: section
+  headings wrap and the preset selector yields without eliding Reset buttons.
+  This caught a real horizontal overflow; changing focus alone did not fix it.
+  Missing-font layout stress is not a text-paint/readability certification, and
+  the independent strict painted-pixel/negative-control suites remain required.
 
 The native backend endpoints in these tests are **authored contract doubles**.
 They prove wiring, values and transaction behavior, not an actual player restart,

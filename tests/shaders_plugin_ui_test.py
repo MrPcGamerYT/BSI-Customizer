@@ -235,36 +235,29 @@ Window {
                     and bounds.bottom() <= ancestor.height() + .5)
 
         def click(control, x_ratio=.5):
-            # Reset buttons exist on every row, including below the viewport.
-            # Scroll the real Flickable rather than clicking a clipped item.
-            # Focus-follow scrolling is deferred after a previously focused
-            # Reset becomes disabled. Let it finish, then reveal the new target;
-            # never treat a click behind the clipping edge as successful input.
-            for _ in range(4):
-                ancestor = control.parentItem()
-                while ancestor:
-                    if ancestor.metaObject().indexOfProperty("contentY") >= 0:
-                        center = control.mapToItem(ancestor, QPointF(control.width() / 2, control.height() / 2))
-                        margin = min(control.height() / 2 + 2, ancestor.height() / 2)
-                        offset = min(center.y() - margin, 0) + max(center.y() - ancestor.height() + margin, 0)
-                        maximum = max(0, ancestor.property("contentHeight") - ancestor.height())
-                        ancestor.setProperty("contentY", max(0, min(maximum, ancestor.property("contentY") + offset)))
-                    ancestor = ancestor.parentItem()
-                QTest.qWait(30)
-                ancestor = control.parentItem()
-                clipped = False
-                while ancestor:
-                    if ancestor.clip():
-                        clipped |= not inside_clip(control, ancestor)
-                    ancestor = ancestor.parentItem()
-                if not clipped:
-                    break
+            # Settle the preceding layout/focus change, reveal the target ONCE,
+            # then require the entire control to fit before a real pointer hit.
+            # Vertical scrolling cannot repair an oversized horizontal layout.
+            # No repeated reveal, click retry or property-only action fallback.
+            QTest.qWait(30)
+            ancestor = control.parentItem()
+            while ancestor:
+                if ancestor.metaObject().indexOfProperty("contentY") >= 0:
+                    center = control.mapToItem(ancestor, QPointF(control.width() / 2, control.height() / 2))
+                    margin = min(control.height() / 2 + 2, ancestor.height() / 2)
+                    offset = min(center.y() - margin, 0) + max(center.y() - ancestor.height() + margin, 0)
+                    maximum = max(0, ancestor.property("contentHeight") - ancestor.height())
+                    ancestor.setProperty("contentY", max(0, min(maximum, ancestor.property("contentY") + offset)))
+                ancestor = ancestor.parentItem()
+            QTest.qWait(30)
             ancestor = control.parentItem()
             while ancestor:
                 if ancestor.clip():
-                    assert inside_clip(control, ancestor), (control.objectName(), "is partially clipped", ancestor.width(), ancestor.height(), ancestor.metaObject().className(), window.width(), ancestor.property("contentY"), ancestor.property("contentHeight"))
+                    bounds = control.mapRectToItem(ancestor, QRectF(0, 0, control.width(), control.height()))
+                    assert inside_clip(control, ancestor), (control.objectName(), "is partially clipped", bounds, ancestor.width(), ancestor.height(), ancestor.metaObject().className(), window.width(), ancestor.property("contentX"), ancestor.property("contentY"), ancestor.property("contentHeight"))
                 ancestor = ancestor.parentItem()
             point = control.mapToScene(QPointF(control.width() * x_ratio, control.height() / 2)).toPoint()
+            assert control.isVisible() and control.isEnabled(), "physical test target is not visible/enabled"
             assert 0 <= point.x() < window.width() and 0 <= point.y() < window.height(), "physical test target is offscreen"
             QTest.mouseClick(window, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, point)
             QTest.qWait(25)
@@ -330,6 +323,15 @@ Window {
             assert viewport.property("contentHeight") == extent, "scroll extent must follow the settled form layout"
             QTest.qWait(50)
             assert viewport.property("contentHeight") == extent, "idle form sizing did not settle"
+            minimum_width = evaluate("Layout.minimumWidth", form)
+            assert minimum_width <= form.width() + .5, ("form minimum overflows the viewport", width, minimum_width, form.width())
+            for child in form.childItems():
+                if child.isVisible():
+                    assert child.x() >= -.5 and child.x() + child.width() <= form.width() + .5, ("form row overflows horizontally", width, child.objectName(), child.x(), child.width(), form.width())
+            if width == 420 and os.environ.get("BSI_SHADERS_TEST_FONTLESS") == "1":
+                heading = item("shaderPotatoHeading")
+                assert heading.property("implicitWidth") > form.width(), "font-isolated control did not exercise wide fallback metrics"
+                assert heading.width() <= form.width() and heading.height() > evaluate("look.bodyFont.pixelSize"), "wide fallback heading must wrap instead of widening every row"
             for key in keys:
                 reset_button = item("shaderControlReset-" + key)
                 value_label = item("shaderValueLabel-" + key)

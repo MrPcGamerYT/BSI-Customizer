@@ -218,7 +218,10 @@ Item {
                     onImplicitHeightChanged: Qt.callLater(viewport.updateExtent)
                     width: Math.min(520, Math.max(0, viewport.width - 24))
                     spacing: 16
-                    Text { text: qsTr("Visual effects"); color: look.text; font: look.bodyFont }
+                    Text {
+                        Layout.fillWidth: true; wrapMode: Text.Wrap
+                        text: qsTr("Visual effects"); color: look.text; font: look.bodyFont
+                    }
                     Text {
                         objectName: "shaderFeedback"
                         visible: !!page.feedback
@@ -244,13 +247,19 @@ Item {
                             onClicked: page.preset(4)
                         }
                     }
-                    Text { text: qsTr("Preset"); color: look.text; font: look.bodyFont }
+                    Text {
+                        Layout.fillWidth: true; wrapMode: Text.Wrap
+                        text: qsTr("Preset"); color: look.text; font: look.bodyFont
+                    }
                     RowLayout {
                         Layout.fillWidth: true; spacing: 12
                         ShaderComboBox {
                             objectName: "shaderPresets"
                             shaderStyle: look
-                            Layout.preferredWidth: 200
+                            // Keep native-size buttons fully legible while the
+                            // selector yields to wide fallback/translated text.
+                            Layout.fillWidth: true; Layout.minimumWidth: 80
+                            Layout.preferredWidth: 200; Layout.maximumWidth: 200
                             model: [qsTr("Neutral"), qsTr("Clear"), qsTr("Vivid"), qsTr("Warm cinema"), qsTr("Enhanced"), qsTr("Custom")]
                             currentIndex: page.presetIndex
                             onActivated: page.preset(currentIndex)
@@ -269,7 +278,14 @@ Item {
                         color: look.muted; font: look.smallFont
                     }
                     Rectangle { Layout.fillWidth: true; height: 1; color: look.separator }
-                    Text { text: qsTr("Potato graphics · native render size"); color: look.text; font: look.bodyFont }
+                    Text {
+                        objectName: "shaderPotatoHeading"
+                        // An unwrapped heading becomes the ColumnLayout's
+                        // minimum width and can push EVERY row past the clip.
+                        // Font fallback and translations must wrap, not widen it.
+                        Layout.fillWidth: true; wrapMode: Text.Wrap
+                        text: qsTr("Potato graphics · native render size"); color: look.text; font: look.bodyFont
+                    }
                     Text {
                         Layout.fillWidth: true; wrapMode: Text.Wrap
                         text: qsTr("Reduces the real native render resolution, independently of visual effects. Not texture-only LOD, geometry removal or a color preset.")
@@ -358,7 +374,10 @@ Item {
                         }
                     }
                     Rectangle { Layout.fillWidth: true; height: 1; color: look.separator }
-                    Text { text: qsTr("Rendering status"); color: look.text; font: look.bodyFont }
+                    Text {
+                        Layout.fillWidth: true; wrapMode: Text.Wrap
+                        text: qsTr("Rendering status"); color: look.text; font: look.bodyFont
+                    }
                     Text {
                         objectName: "shaderRendererStatus"
                         Layout.fillWidth: true; wrapMode: Text.Wrap
