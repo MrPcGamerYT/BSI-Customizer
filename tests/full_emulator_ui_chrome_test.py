@@ -113,6 +113,35 @@ Window {
         assert count>10,('themed icon missing in initial capture',top,count)
     # Old external rail and stock icons are magenta in this fixture.
     assert not any(first.pixelColor(x,y).name()=='#ff00ff' for x in range(430,486) for y in range(first.height())), 'stock skin visible in first capture'
+    # Run the actual synchronous Settings bridge as well, including its native
+    # page callback/reparenting contract. No second event-loop adoption pass.
+    (temp/'UiShadowContainer.qml').write_text('import QtQuick 2.15\nItem {property int shadowThickness:8}')
+    (temp/'qmldir').write_text('singleton UiTheme 1.0 UiTheme.qml\n')
+    (temp/'UiTheme.qml').write_text('pragma Singleton\nimport QtQuick 2.15\nQtObject {}')
+    (temp/'Page.qml').write_text('import QtQuick 2.15\nItem {property bool nativeLoaded:false;function fOnQmlLoaded(){nativeLoaded=true}}')
+    bridge_source='''import QtQuick 2.15
+import QtQuick.Controls 2.15
+import QtQuick.Layouts 1.15
+import QtQuick.Window 2.15
+Window {
+ id:iSettingsWindow;visible:true;width:940;height:600
+ property int pCurrentTabIndex:0
+ property QtObject pSettingsItems:QtObject {property list<QtObject> pSettingElements:[QtObject {
+  property string pButtonId:"engine";property string pButtonText:"Performance";property bool pShowRedDot:false
+  property string pQmlSource:"PAGE";property var pComponentArgs:null;property var pComponentObj:null
+ }]}
+ property bool callbackDelivered:pSettingsItems.pSettingElements[0].pComponentObj!==null && pSettingsItems.pSettingElements[0].pComponentObj.nativeLoaded
+ function fVoidSelectNative(index){pCurrentTabIndex=index}
+ BRIDGE
+}'''.replace('PAGE',QUrl.fromLocalFile(str(temp/'Page.qml')).toString()).replace('BRIDGE',U.settings_bridge(url))
+    bridge_source=S.first_frame_sources(U,{'UiSettingsWindow.qml':bridge_source.encode()},url)['UiSettingsWindow.qml']
+    (temp/'Bridge.qml').write_bytes(bridge_source)
+    bridge_component=QQmlComponent(engine,QUrl.fromLocalFile(str(temp/'Bridge.qml')))
+    assert not bridge_component.isError(),'\n'.join(e.toString() for e in bridge_component.errors())
+    bridge_window=bridge_component.create();assert bridge_window,'\n'.join(e.toString() for e in bridge_component.errors())
+    assert bridge_window.property('callbackDelivered'),str(warnings)
+    assert find(bridge_window.contentItem(),'bsiSettingsShell') is not None
+    bridge_window.setVisible(False);bridge_window.deleteLater()
     settle()
     rail=find(root,'voidRailBackground');edge=find(root,'voidRailEdge')
     assert rail is not None and edge is not None

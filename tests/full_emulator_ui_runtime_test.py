@@ -106,8 +106,8 @@ Window {
        UiSlider{objectName:"testSlider";width:460;from:1;to:240;value:120;pSize:initialSliderSize;pColor:initialSliderColor;pSelectedValueText:"Frame rate: "+Math.round(value);pRangeValueVisibility:true}
        Switch{objectName:"testSwitch";text:"Native switch"}
        CheckBox{objectName:"testCheck";text:"Native checkbox"}
-       TextField{objectName:"testField";width:174;placeholderText:"Native field"}
-       Button{objectName:"testSave";width:112;height:29;text:"Save changes";onClicked:host.saved++}
+       TextField{property color testInk:palette.text;objectName:"testField";width:174;placeholderText:"Native field"}
+       Button{property color testInk:palette.buttonText;objectName:"testSave";width:112;height:29;text:"Save changes";onClicked:host.saved++}
      }
    }
  }
@@ -173,8 +173,8 @@ Window {
     assert window.property('themeName')=='My theme'
     assert slider.property('pColor').property('sliderFill').name()=='#70ddb0'
     assert window.property('themeSurface').name()=='#101820'
-    assert field.property('palette').property('text').name()=='#f0f0f0'
-    assert visual(root,'testSave').property('palette').property('buttonText').name()=='#f0f0f0'
+    assert field.property('testInk').name()=='#f0f0f0'
+    assert visual(root,'testSave').property('testInk').name()=='#f0f0f0'
     assert visual(field,'voidReferenceVisualBackground').property('radius')==18
     # Persistence is tested in a fresh QML engine, not just the same singleton.
     probe_engine=QQmlEngine()
