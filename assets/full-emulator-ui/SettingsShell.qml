@@ -41,7 +41,9 @@ Item {
         host.x=Math.max(area.x,Math.min(host.x,area.x+area.width-host.width))
         host.y=Math.max(area.y,Math.min(host.y,area.y+area.height-host.height))
     }
-    Component.onCompleted: Qt.callLater(fitHost)
+    onBsiHostChanged: SurfaceRegistry.attach(shell, bsiHost)
+    Component.onDestruction: SurfaceRegistry.detach(shell)
+    Component.onCompleted: { Qt.callLater(fitHost); SurfaceRegistry.attach(shell, bsiHost) }
     component BsiOutlineIcon: Image {
         property string kind: "preferences"
         property color stroke: Theme.text
@@ -79,7 +81,7 @@ Item {
             Text {
                 objectName: "voidFullUiVersion"
                 anchors.right: closeButton.left; anchors.rightMargin: 16; anchors.verticalCenter: parent.verticalCenter
-                text: "CARBON SUITE 07"; color: Theme.muted; font.family: Theme.fontFamily; font.pixelSize: 9; font.letterSpacing: 1.2
+                text: "CARBON SUITE 07 · SURFACES 08"; color: Theme.muted; font.family: Theme.fontFamily; font.pixelSize: 9; font.letterSpacing: 1.2
             }
             Rectangle {
                 anchors.bottom: parent.bottom; anchors.left: parent.left; anchors.right: parent.right; anchors.margins: 18

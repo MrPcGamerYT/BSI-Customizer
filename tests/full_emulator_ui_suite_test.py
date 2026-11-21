@@ -219,6 +219,20 @@ class SuiteTests(unittest.TestCase):
             for path in (player,shell,old):self.assertFalse(path.stat().st_mode & stat.S_IWRITE)
             self.assertEqual(list(root.rglob('.void-stage-*')),[])
 
+    def test_shared_surface_hooks_preserve_source_and_are_idempotent(self):
+        import re
+        url='file:///C:/Native%20Player/Assets/VOIDReferenceUI/'
+        for name in ('UiDialog.qml','UiWindowedPopup.qml'):
+            original=(ROOT/'reference/full-emulator-ui/native'/name).read_bytes()
+            after=S.scoped_surface_hook(U,M,name,original,url)
+            self.assertEqual(S.scoped_surface_hook(U,M,name,after,url),after)
+            text=after.decode('utf-8-sig')
+            self.assertIn('active:VoidSurfaceSkin.SurfaceRegistry.owns(',text)
+            text=text.replace('import '+json.dumps(url)+' as VoidSurfaceSkin\n','',1)
+            if name=='UiDialog.qml':text=text.replace('import QtQuick.Window 2.15\n','',1)
+            text=re.sub(r'\n// VOID REGISTERED NATIVE SURFACE V8\nLoader \{[^\n]*\}\n','',text,count=1)
+            self.assertEqual(text,original.decode('utf-8-sig'),name)
+
     def test_design_is_data_not_qml(self):
         design=json.loads((ROOT/'assets/full-emulator-ui/design.json').read_text())
         for key,value in [('font','Segoe UI"; backend.erase()'),('radius',True),('durationMs',9999),('motion','true')]:

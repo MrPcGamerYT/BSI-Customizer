@@ -64,7 +64,9 @@ exit /b 1
     members['EXPORT-ALL-UI-SOURCES.cmd']=cmd('@echo off\ncall "%~dp0RUN-UI.cmd" --export-sources "%~dp0PLANNED-ALL-UI-SOURCES.zip" %*\nset "RC=%ERRORLEVEL%"\npause\nexit /b %RC%\n')
     screenshot=ROOT/'.cache/full-ui/suite07-fixture.png'
     if screenshot.is_file():members['FIXTURE-PREVIEW-NOT-OEM.png']=screenshot.read_bytes()
-    report={'suite':'VOID Carbon Suite 07','sourceCommit':subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip(),
+    surface_screenshot=ROOT/'.cache/full-ui/surface-fixture.png'
+    if surface_screenshot.is_file():members['FIXTURE-SURFACES-NOT-OEM.png']=surface_screenshot.read_bytes()
+    report={'surfaceRevision':8,'scopedNativeDialogAndPopupHooks':True,'idlePollingAdded':False,'suite':'VOID Carbon Suite 07','sourceCommit':subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip(),
             'legacyEngineSha256':suite.sha(legacy),'suiteSourceSha256':suite.sha((HERE/'suite.py').read_bytes()),
             'assetsSha256':{name:suite.sha(data) for name,data in assets.items()},
             'optimizerIncluded':False,'helperIncluded':False,'replacementInstallSupported':True,

@@ -22,12 +22,41 @@ their compiled-cache owners are patched in the established backed-up transaction
   is included. The complete shared icon library stays separate from Settings symbols.
 
 **Not literally every UI-looking file can be rewritten safely.** Boot/loading,
-auth/account/legal, shared boot dependencies, Qt framework code, JavaScript
+auth/account/legal, shared boot behavior, Qt framework code, JavaScript
 business logic, Android/game content and OS-native dialogs are protected.
 Dynamic/custom C++ paint bindings may be unsupported. `UI-COVERAGE.json` lists
 changed, protected, verified/unchanged resources and unsupported visual bindings;
 missing resources are not silently advertised as redesigned. The source-only test
 snapshot does not prove compatibility or exact appearance on a live OEM player.
+
+## Surfaces 08 — native window/dialog completion pass
+
+The Settings badge now includes **SURFACES 08**. This revision fixes visual-tree
+coverage, not just palette literals:
+
+- Native Window/Popup `contentItem` and separate Dialog header/footer are visited.
+  Previously a Window-root editor could get source colors but no control adapter.
+- `UiDialog.qml` and `UiWindowedPopup.qml` receive only an additive passive loader.
+  They are NOT globally recolored. The loader activates only for a registered
+  player/Settings/editor window or its transient descendants, and not while the
+  registered player reports boot incomplete. Original shared source/callbacks
+  survive byte-for-byte after removing the hook. Framework/auth sources stay out.
+- Registered native message boxes (e.g. close/restart) receive black rounded
+  backgrounds, instance-local text/button palettes and native button input.
+- Native volume/game-control popup controls and opaque neutral layout panels get
+  the same control styling; bindings to native values/actions remain in place.
+- Controls-editor cards get rounded hover states and 22 isolated neutral tool
+  symbols, without replacing drag areas, scheme models or save/delete behavior.
+- All 57 shared icon names remain available; separate raster glyphs improve
+  compatibility on Qt builds where SVG image loading fails. Source generation is
+  in `generate-glyphs.cjs`. No rasterization dependency is needed at install time.
+- Discovery is coalesced on creation/visibility changes; no idle polling timer is
+  added. Conditional native validation/notice colors are not globally overwritten.
+
+Tests include reviewed native UiDialog/UiButton/layout/tile sources with OEM-only
+model/enum/tooltip doubles, real Qt windows and input, plus source-inverse proofs.
+The labelled fixture captures are not OEM screenshots or a claim that every
+possible player build/custom C++/Android surface has been runtime-certified.
 
 ## Replace the current installed UI (including stale state)
 

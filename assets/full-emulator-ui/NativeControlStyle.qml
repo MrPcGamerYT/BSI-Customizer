@@ -1,9 +1,18 @@
 // Page-scoped passive visuals. Original controls, input areas, values and callbacks stay alive.
 import QtQuick 2.15
+import QtQuick.Window 2.15
 
 Item {
     id: skin
     property var pages: null
+    property bool stylePanels: false
+    property bool registerNativeWindow: false
+    function registerHost() {
+        var window = pages ? (pages.contentItem && /Window/.test(String(pages)) ? pages : pages.Window.window) : null
+        SurfaceRegistry.attach(skin, registerNativeWindow ? window : null)
+    }
+    onRegisterNativeWindowChanged: registerHost()
+    Component.onDestruction: SurfaceRegistry.detach(skin)
     property var styled: new Set()
     property var styledTargets: new Set()
     property var watched: new Set()
@@ -35,12 +44,21 @@ Item {
         if (!item || !item.visible) return
         var children=item.children
         if (children) for (var i=0;i<children.length;++i) install(children[i],depth+1)
+        // Window/Popup are not Items. Their visual trees live behind contentItem;
+        // Dialog also owns separate header/footer trees outside contentItem.
+        if (item.contentItem && item.contentItem !== item) install(item.contentItem,depth+1)
+        if (item.header) install(item.header,depth+1)
+        if (item.footer) install(item.footer,depth+1)
     }
     Component { id: childHook; Connections {
         property var owner
         property var cleanup
         Component.onDestruction: if (cleanup) cleanup()
         target: owner
+        ignoreUnknownSignals: true
+        function onContentItemChanged() { skin.schedule(owner) }
+        function onHeaderChanged() { skin.schedule(owner) }
+        function onFooterChanged() { skin.schedule(owner) }
         function onChildrenChanged() { skin.schedule(owner) }
         function onVisibleChanged() { if (owner && owner.visible) skin.schedule(owner) }
     } }
@@ -91,7 +109,7 @@ Item {
         if (!item || (depth || 0) > 40 || styled.size >= 8192) return
         if (String(item.objectName || "").indexOf("voidReferenceVisual") === 0) return
         if (styled.has(item)) return
-        if (!watched.has(item) && item.children !== undefined) {
+        if (!watched.has(item) && item.visible !== undefined) {
             watched.add(item)
             var seen=styled,hooks=watched,queue=pendingNodes
             childHook.createObject(item,{owner:item,cleanup:function(){seen.delete(item);hooks.delete(item);queue.delete(item)}})
@@ -102,6 +120,34 @@ Item {
         visitedNodes++
         var already = false
         var name = String(item)
+        if (stylePanels && /Dialog/.test(name) && item.pDescription !== undefined && item.pColor) {
+            item.pColor=dialogColor.createObject(item,{base:item.pColor})
+            if (item.background) overlay(buttonVisual,item,item.background,"dialog")
+            styledControls++
+        }
+        if (/KmmEditorDragControls/.test(name) && item.pMouseArea && item.border) {
+            item.radius=Math.max(0,Theme.corner-2)
+            item.color=Qt.binding(function(){return item.pMouseArea.containsMouse ? Theme.raised : Theme.surface})
+            item.border.color=Qt.binding(function(){return item.pMouseArea.containsMouse ? Theme.muted : Theme.border})
+            item.border.width=1
+        } else if (stylePanels && /UiColumnLayout|UiRowLayout/.test(name) && item.color !== undefined && item.radius !== undefined && item.color.a > 0.9) {
+            // Only opaque neutral native layout panels, never game/canvas overlays.
+            var c=item.color
+            if (Math.max(c.r,c.g,c.b)-Math.min(c.r,c.g,c.b)<0.16 && Math.max(c.r,c.g,c.b)<0.4) {
+                item.color=Theme.surface; item.radius=Math.max(0,Theme.corner-2)
+                if (item.border && item.border.width>0) item.border.color=Theme.border
+            }
+        }
+        if (/UiImage/.test(name) && item.asset !== undefined && item.source !== undefined) {
+            var owner=item.parent, tile=false
+            for(var d=0;owner && d<4;++d,owner=owner.parent) if(/KmmEditorDragControls/.test(String(owner)))tile=true
+            if (tile && controlIcon(item.asset))
+                item.source=Qt.binding(function(){return Qt.resolvedUrl("ControlIcons/"+controlIcon(item.asset)+".png")})
+        }
+        if (stylePanels && /UiButton/.test(name) && !/UiImageButton/.test(name) && item.pColor)
+            item.pColor=buttonColor.createObject(item)
+        if (stylePanels && /Text/.test(name) && item.font !== undefined)
+            item.font.family=Theme.fontFamily
         if (/UiSlider/.test(name) && item.pSelectedValueText!==undefined && item.pSize && item.pColor) {
             if(!already){nativeSlider(item);styledControls++}
             return
@@ -133,8 +179,45 @@ Item {
         if (control.popup && control.popup.background) overlay(buttonVisual, control, control.popup.background, "popup")
         if (control.popup && control.popup.contentItem) install(control.popup.contentItem, 0)
     }
-    onPagesChanged: schedule(pages)
+    onPagesChanged: { schedule(pages); registerHost() }
     Component.onCompleted: schedule(pages)
+    function controlIcon(asset) {
+        var names={Tap:"Tap",RepeatedTap:"RepeatedTap",Dpad:"Dpad",Aim:"Aim",FreeLook:"FreeLook",Script:"Script",Swipe:"Swipe",Zoom:"Zoom",Tilt:"Tilt","MOBA-PAD":"MOBA-PAD",SkillPad:"SkillPad",Rotate:"Rotate",EdgeScroll:"EdgeScroll",Scroll:"Scroll",MouseZoom:"MouseZoom",State:"State",DontForwardKeys:"DontForwardKeys",SendOriginalKeys:"SendOriginalKeys",Callback:"Callback",MouseLock:"MouseLock",SmartScroll:"SmartScroll",NativeCursor:"NativeCursor"}
+        return names[String(asset)] || ""
+    }
+    Component { id:dialogColor; QtObject {
+        property var base
+        property color background:Theme.background
+        property color border:Theme.border
+        property color title:Theme.text
+        property color description:Theme.muted
+        property color subtitle:Theme.text
+        property color notice:base.notice !== undefined ? base.notice : Theme.muted
+    } }
+    Component { id:buttonColor; QtObject {
+        property QtObject normal:QtObject {
+            property color background:Theme.surface
+            property color borderColor:Theme.border
+            property color textColor:Theme.text
+            property color subTextColor:Theme.muted
+            property Gradient borderGradient:null
+        }
+        property QtObject hover:QtObject {
+            property color background:Theme.raised
+            property color borderColor:Theme.muted
+            property color textColor:Theme.text
+            property color subTextColor:Theme.muted
+            property Gradient borderGradient:null
+        }
+        property QtObject click:QtObject {
+            property color background:Theme.raised
+            property color borderColor:Theme.text
+            property color textColor:Theme.text
+            property color subTextColor:Theme.muted
+            property Gradient borderGradient:null
+        }
+        property QtObject disabled:normal
+    } }
     // Instance-local visual sizes; never mutate shared UiTheme/boot components.
     Component { id:fieldSize; QtObject {
         property var base
@@ -214,10 +297,10 @@ Item {
             objectName: "voidReferenceVisualBackground"
             x: targetVisual.x; y: targetVisual.y; width: targetVisual.width; height: targetVisual.height
             z: targetVisual.z + 0.01; visible: targetVisual.visible
-            radius: visualKind === "popup" ? Theme.corner : Math.max(0,Theme.corner-3)
+            radius: visualKind === "popup" || visualKind === "dialog" ? Theme.corner : Math.max(0,Theme.corner-3)
             gradient: Gradient {
-                GradientStop { position: 0; color: visualKind === "button" ? (control.down ? Theme.raised : control.hovered ? Theme.raised : Theme.surface) : Theme.surface }
-                GradientStop { position: 1; color: visualKind === "button" ? Theme.raised : Theme.surface }
+                GradientStop { position: 0; color: visualKind === "dialog" ? Theme.background : visualKind === "button" ? (control.down ? Theme.raised : control.hovered ? Theme.raised : Theme.surface) : Theme.surface }
+                GradientStop { position: 1; color: visualKind === "dialog" ? Theme.background : visualKind === "button" ? Theme.raised : Theme.surface }
             }
             border.width: 1; border.color: control.activeFocus ? Theme.muted : control.hovered ? Theme.border : Theme.border
             opacity: control.enabled === false ? 0.5 : 1

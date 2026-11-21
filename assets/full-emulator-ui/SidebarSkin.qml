@@ -1,5 +1,6 @@
 // Passive skin of real sidebar buttons. No replacement input/shortcut handlers.
 import QtQuick 2.15
+import QtQuick.Window 2.15
 Item {
     id: skin
     property var host
@@ -50,7 +51,8 @@ Item {
         enqueue(host)
         if (host && host.pKebabMenuWin) enqueue(host.pKebabMenuWin.contentItem)
     }
-    onHostChanged: refresh()
+    onHostChanged: { refresh(); SurfaceRegistry.attach(skin, host ? host.Window.window : null) }
+    Component.onDestruction: SurfaceRegistry.detach(skin)
     Component.onCompleted: refresh()
     Connections {
         target: skin.host

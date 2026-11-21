@@ -63,6 +63,7 @@ def runtime():
             raise RuntimeError('Pinned replacement hook changed; review required.')
         text = text.replace(before, after, 1)
     text = text.replace('Settings now uses the reference shell and contains the VOID Optimizer tab.', 'Settings now uses the native-only Carbon shell (no optimizer).')
+    text=text.replace('VOID FULL UI V5 — Carbon palette / incremental styling / native session tools; boot logic protected','VOID CARBON SUITE 07 - SURFACES 08 / native UI / no optimizer')
     exec(compile(text, 'pinned-void-ui-engine.py', 'exec'), module.__dict__)
     module.remove_optimizer = lambda desired, url: without_optimizer(module, desired, url)
     module.replacing_ui = False
@@ -95,6 +96,8 @@ def runtime():
 
     def adapter(manager, name, source, url):
         original = original_adapter(manager, name, source, url)
+        if name == 'KmmEditorWindow.qml':
+            original = original.replace('onLoaded:item.pages=parent }', 'onLoaded:{ item.stylePanels=true; item.pages=parent; item.registerNativeWindow=true } }')
         if original != source or 'VOID NATIVE SURFACE CONTROLS V5.1' in source:
             return original
         if not re.search(r'(?:Popup|Dialog|Window)\.qml$', name) or name == 'UiSettingsWindow.qml':
@@ -110,13 +113,40 @@ def runtime():
                  'UiDialog', 'UiMessageDialog', 'UiWindowedPopup', 'UiWindow', 'UiRowLayout', 'UiColumnLayout'}
         if tokens[opening-1].text not in roots:
             return source
-        block = '\n// VOID SUITE07 PASSIVE CONTROLS\nLoader { objectName:"voidSuite07Controls"; visible:false; source:'+json.dumps(url+'NativeControlStyle.qml')+'; onLoaded:item.pages=parent.contentItem || parent }\n'
+        block = '\n// VOID SUITE07 PASSIVE CONTROLS\nLoader { objectName:"voidSuite07Controls"; visible:false; source:'+json.dumps(url+'NativeControlStyle.qml')+'; onLoaded:{ item.stylePanels=true; item.pages=parent } }\n'
         after = source[:tokens[opening].end]+block+source[tokens[opening].end:]
         manager.require(after.replace(block, '', 1) == source, 'Passive window adapter altered native source: '+name)
         module.scan(manager, after)
         return after
 
     module.native_surface_adapter = adapter
+    original_inventory = module.full_ui_inventory
+    original_style = module.style_full_source
+    shared_surfaces = {'UiDialog.qml', 'UiWindowedPopup.qml'}
+    def inventory(manager, engine, images, root, current, owners):
+        candidates, config, coverage = original_inventory(manager, engine, images, root, current, owners)
+        for name in shared_surfaces:
+            matches=[]
+            for path, (body, records) in images.items():
+                for row in records:
+                    if row.name == name and not manager.framework_path(row.path):
+                        matches.append((path,row,engine.unpack_record(body,row.entry,row.flags)))
+            if not matches:
+                continue
+            engine.need(len(matches)==1, 'Ambiguous shared visual host: '+name)
+            path,row,value=matches[0]
+            key=path.relative_to(root).as_posix()+'/'+row.path
+            candidates[name]=(value,key); current[name]=value; owners[name]=path
+            coverage=[entry for entry in coverage if entry['name']!=name]
+            coverage.append({'name':name,'container':path.relative_to(root).as_posix(),
+                             'status':'scoped-hook','reason':'Only a passive opt-in visual loader; original shared source, boot behavior and callbacks retained.'})
+        return candidates,config,coverage
+    def style(manager, name, source, path, config, url):
+        if name in shared_surfaces:
+            return scoped_surface_hook(module, manager, name, source, url), ['registered-native-window-only visual hook'], []
+        return original_style(manager,name,source,path,config,url)
+    module.full_ui_inventory=inventory
+    module.style_full_source=style
     original_plan = module.plan_install
 
     def plan(root, **kwargs):
@@ -142,7 +172,7 @@ def runtime():
         report['all_ui_runtime_certified'] = False
         report['coverage'] = sorted(rows.values(), key=lambda row: (row.get('container', ''), row['name']))
         report['asset_files'] = sorted(name for name in packed if name.startswith(PREFIX))
-        report['protected_scope'] = ['boot/loading', 'auth/account/legal', 'boot-shared dependencies', 'Qt framework', 'JavaScript business logic', 'Android/game content', 'Windows-native dialogs']
+        report['protected_scope'] = ['boot/loading', 'auth/account/legal', 'boot-shared visual behavior (two opt-in native-host hooks only)', 'Qt framework', 'JavaScript business logic', 'Android/game content', 'Windows-native dialogs']
         report['note'] = 'All mapped eligible QML/SVG files are considered. Changed, protected, unchanged and unsupported fields are explicit; source coverage is not an OEM rendering guarantee.'
         return planned, report
 
@@ -156,6 +186,41 @@ def runtime():
         return original_commit(planned, engine.atomic_write if writer is None else writer)
     engine.commit = commit
     return module
+
+
+def scoped_surface_hook(module, manager, name, source, url):
+    """Shared controls are never blanket recolored: opt in after native host registration.
+    All existing bytes survive after removing this precisely bounded import/loader.
+    """
+    text=source.decode('utf-8-sig')
+    marker='// VOID REGISTERED NATIVE SURFACE V8'
+    if marker in text:
+        return source
+    tokens,pairs=module.scan(manager,text)
+    opening=next((i for i,token in enumerate(tokens) if token.text=='{'),None)
+    expected=('Dialog','iControl') if name=='UiDialog.qml' else ('Window','rootWindow')
+    manager.require(opening is not None and tokens[opening-1].text==expected[0], 'Unrecognized shared surface root: '+name)
+    identities=[]
+    i=opening+1
+    while i<pairs[opening]:
+        if tokens[i].text in ('{','[','(') and i in pairs:
+            i=pairs[i]+1;continue
+        if [token.text for token in tokens[i:i+2]]==['id',':']:
+            identities.append(tokens[i+2].text)
+        i+=1
+    manager.require(identities==[expected[1]], 'Unrecognized shared surface identity: '+name)
+    window=expected[1]+'.contentItem.Window.window' if name=='UiDialog.qml' else expected[1]
+    block='\n'+marker+'\nLoader { objectName:"voidRegisteredNativeSurface"; visible:false; active:VoidSurfaceSkin.SurfaceRegistry.owns('+window+'); source:'+json.dumps(url+'NativeControlStyle.qml')+'; onLoaded:{ item.stylePanels=true; item.pages='+expected[1]+' } }\n'
+    start=tokens[opening].end
+    added='import '+json.dumps(url)+' as VoidSurfaceSkin\n'
+    # The attached Window lookup is only used on the Popup contentItem (an Item).
+    window_import='' if re.search(r'^import QtQuick.Window ',text,re.M) else 'import QtQuick.Window 2.15\n'
+    result=text[:start]+block+text[start:]
+    at=tokens[opening-1].start
+    result=result[:at]+added+window_import+result[at:]
+    manager.require(result.replace(added+window_import,'',1).replace(block,'',1)==text, 'Shared surface callback preservation failed.')
+    module.scan(manager,result)
+    return (('\ufeff' if source.startswith(b'\xef\xbb\xbf') else '')+result).encode('utf-8')
 
 
 def writable_windows_target(path):

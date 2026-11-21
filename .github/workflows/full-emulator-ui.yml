@@ -32,6 +32,8 @@ jobs:
         run: python tests/run_qt_runtime_test.py tests/full_emulator_ui_suite_test.py
       - name: Real Qt shell, native input, popup and passive chrome tests
         run: python tests/run_qt_runtime_test.py tests/full_emulator_ui_runtime_test.py
+      - name: Native dialog/popup/control-editor surfaces and isolation
+        run: python tests/run_qt_runtime_test.py tests/full_emulator_ui_surfaces_test.py
       - name: Build self-contained native-only UI pack
         run: python tools/full-emulator-ui/build.py
       - name: Regression - launch extracted ZIP directly below drive root
