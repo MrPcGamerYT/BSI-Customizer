@@ -28,6 +28,8 @@ jobs:
         with:
           python-version: '3.13'
       - run: python -m pip install PySide6==6.8.3
+      - name: Synchronous indexed icon bytes and alpha coverage
+        run: node tests/full_emulator_ui_icon_masks_test.mjs
       - name: Full source inventory, guarded transaction and exact restore tests
         run: python tests/run_qt_runtime_test.py tests/full_emulator_ui_suite_test.py
       - name: First-frame chrome and six live sidebar themes
