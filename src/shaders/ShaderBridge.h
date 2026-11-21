@@ -21,6 +21,8 @@ public:
     QString error() const;
     QVariantMap bridgeInfo() const;
     Q_INVOKABLE QVariantMap apply(const QVariantMap &values);
+    Q_INVOKABLE QString diagnostics() const;
+    Q_INVOKABLE void copyDiagnostics() const;
     static void attach(QObject *window,const QString &instance,const QString &graphicsRenderer);
 signals:
     void settingsChanged();

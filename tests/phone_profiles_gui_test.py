@@ -116,7 +116,8 @@ def main():
         subprocess.run([str(planner), "--export", str(directory)], check=True)
         catalog = json.loads((directory / "catalog.json").read_text())
         expected_names = [p["name"] for p in catalog]
-        assert len(catalog) == 8 and catalog[0]["model"] == "ASUSAI2501A"
+        assert len(catalog) == 35 and catalog[0]["model"] == "ASUSAI2501A"
+        count = len(catalog)
         component = QQmlComponent(engine)
         component.setData(b'''import QtQuick 2.15
 import QtQuick.Window 2.15
@@ -193,7 +194,7 @@ function load(name){loader.source=name}
         page = load()
         assert names(page) == expected_names + ["Stock phone A", "Stock phone B"]
         assert metrics(page) == stock_metrics, "the stock controls/font/geometry changed"
-        assert named(page, "phoneDropdown").property("currentIndex") == 8
+        assert named(page, "phoneDropdown").property("currentIndex") == count
         assert not config.draft and not player.calls and not named(page, "save").isEnabled(), "loading must not select/write/apply a phone"
         receive(page)
         assert names(page) == expected_names + ["Stock phone A", "Stock phone B"], "cloud refresh duplicated or reordered stock profiles"
@@ -250,31 +251,31 @@ function load(name){loader.source=name}
         # Returning to the saved choice cancels only the selector's own draft.
         last = dict(config.saved)
         choose(page, 0)
-        choose(page, 7)
+        choose(page, count - 1)
         assert config.saved == last and not config.draft and not named(page, "save").isEnabled()
         choose(page, 0)
         before_calls = len(player.calls)
         evaluate(page, "fDiscardChanges()")
         receive(page)
         assert config.saved == last and not config.draft and len(player.calls) == before_calls
-        assert named(page, "phoneDropdown").property("currentIndex") == 7
+        assert named(page, "phoneDropdown").property("currentIndex") == count - 1
 
         # Native failure keeps the old identity; callbacks are not forged.
         choose(page, 0)
         click(named(page, "save"))
         evaluate(page, "fDeviceProfileSettingChangedClbk(1)")
         assert config.saved == last and not config.draft and "Failed" in toast.messages[-1]
-        assert named(page, "phoneDropdown").property("currentIndex") == 7
+        assert named(page, "phoneDropdown").property("currentIndex") == count - 1
 
         # Existing server profiles keep the real server API/code, below extras.
-        choose(page, 9)
+        choose(page, count + 1)
         click(named(page, "save"))
         assert player.calls[-1] == ("native", "stock-b", "carrier-a")
         evaluate(page, "fDeviceProfileSettingChangedClbk(0)")
         assert config.saved["device_profile_code"] == "stock-b" and config.saved["device_custom_model"] == ""
-        assert named(page, "phoneDropdown").property("currentIndex") == 9
+        assert named(page, "phoneDropdown").property("currentIndex") == count + 1
         choose(page, 0)
-        choose(page, 9)
+        choose(page, count + 1)
         assert not config.draft, "returning to the original cloud phone must clear stale local custom-field drafts"
 
         # Do not discard an unrelated staged carrier/setting on selection.
@@ -291,7 +292,7 @@ function load(name){loader.source=name}
         duplicate["device_profile_list"].append({"display_name": expected_names[0], "pcode": "real-rog9-cloud"})
         duplicate["device_profile_list"].append({"display_name": expected_names[0], "pcode": "duplicate-rog9-cloud"})
         page = load(payload=duplicate)
-        assert names(page).count(expected_names[0]) == 1 and names(page)[:8] == expected_names
+        assert names(page).count(expected_names[0]) == 1 and names(page)[:count] == expected_names
         choose(page, 0)
         click(named(page, "save"))
         assert player.calls[-1] == ("native", "real-rog9-cloud", "carrier-a")
@@ -369,7 +370,7 @@ function load(name){loader.source=name}
         window.hide()
         window.deleteLater()
         QTest.qWait(10)
-    print("PASS: stock dropdown controls/fonts/geometry retained; all eight phones first; physical selection/Save, catalogued-model native custom API arguments, draft-only selection, success/failure/duplicate-Save, persistence/reopen, Discard, cloud-code priority/no duplicates, native/manual/carrier flows, qrc-to-local-script import, missing-carrier refusal and untouched FPS/root/renderer settings")
+    print("PASS: stock dropdown controls/fonts/geometry retained; all 35 phones first; physical selection/Save, catalogued-model native custom API arguments, draft-only selection, success/failure/duplicate-Save, persistence/reopen, Discard, cloud-code priority/no duplicates, native/manual/carrier flows, qrc-to-local-script import, missing-carrier refusal and untouched FPS/root/renderer settings")
     print("LIMIT: authored native-service contract with production QML/JS on a real Qt host, not an installed player, guest build properties, game whitelist or measured FPS")
 
 

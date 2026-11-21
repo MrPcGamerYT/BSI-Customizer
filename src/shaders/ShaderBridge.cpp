@@ -2,6 +2,8 @@
 #include "Parameters.h"
 #include "Runtime.h"
 #include <QCoreApplication>
+#include <QClipboard>
+#include <QGuiApplication>
 #include <QCryptographicHash>
 #include <QDir>
 #include <QFile>
@@ -101,11 +103,30 @@ QVariantList ShaderBridge::controlList()const{
 }
 QVariantMap ShaderBridge::metrics()const{
     const auto m=Runtime::instance().metrics();
+    const auto number=[](std::uint64_t value){return QVariant::fromValue<qulonglong>(value);};
+    const char *requested=m.requested==RendererFamily::Vulkan?"Vulkan":m.requested==RendererFamily::DirectX?"DirectX":m.requested==RendererFamily::OpenGL?"OpenGL":"Automatic";
     return {{"hooksAttached",m.hooks},{"gameSurfaceObserved",m.observed},{"active",m.active},
+            {"requestedRenderer",QString::fromLatin1(requested)},
             {"renderer",QString::fromLatin1(capability(m.renderer).label)},
             {"backendImplemented",capability(m.renderer).pipelineImplemented},{"deviceRequirementsMet",m.deviceReady},
-            {"processedFrames",QVariant::fromValue<qulonglong>(m.processed)},{"status",QString::fromStdString(m.status)}};
+            {"processedFrames",number(m.processed)},{"status",QString::fromStdString(m.status)},
+            {"vulkanLoaders",number(m.vulkan.loaders)},{"vulkanInstances",number(m.vulkan.instances)},
+            {"vulkanDevices",number(m.vulkan.devices)},{"vulkanSurfaces",number(m.vulkan.surfaces)},
+            {"vulkanSwapchains",number(m.vulkan.swapchains)},{"vulkanPresents",number(m.vulkan.presents)},
+            {"vulkanMissedQueues",number(m.vulkan.missedQueues)},{"vulkanRejectedWindows",number(m.vulkan.rejectedWindows)},
+            {"vulkanLoader",QString::fromStdString(m.vulkan.loader)}};
 }
+QString ShaderBridge::diagnostics()const{
+    // User-triggered clipboard output only; no upload, persistent log or private
+    // process/module path. Lifecycle counters are NOT confirmed game frames.
+    const auto m=metrics();
+    return QStringLiteral("Requested API: %1\nObserved game API: %2\n%3\nProcessed game frames: %4\nGame surface observed: %5; processing active: %6\nVulkan capture: loaders=%7; instances=%8; devices=%9; Win32 surfaces=%10; swapchains=%11; presents=%12; missing queues=%13; excluded windows=%14\nLast hooked loader: %15\nQt bridge: %16; host: %17\n%18")
+        .arg(m.value("requestedRenderer").toString(),m.value("renderer").toString(),m.value("status").toString())
+        .arg(m.value("processedFrames").toString(),m.value("gameSurfaceObserved").toBool()?QStringLiteral("yes"):QStringLiteral("no"),m.value("active").toBool()?QStringLiteral("yes"):QStringLiteral("no"))
+        .arg(m.value("vulkanLoaders").toString(),m.value("vulkanInstances").toString(),m.value("vulkanDevices").toString(),m.value("vulkanSurfaces").toString(),m.value("vulkanSwapchains").toString(),m.value("vulkanPresents").toString(),m.value("vulkanMissedQueues").toString(),m.value("vulkanRejectedWindows").toString(),m.value("vulkanLoader").toString())
+        .arg(QString::fromLatin1(QT_VERSION_STR),QString::fromLatin1(qVersion()),state().error);
+}
+void ShaderBridge::copyDiagnostics()const{if(auto *clipboard=QGuiApplication::clipboard())clipboard->setText(diagnostics());}
 void ShaderBridge::attach(QObject *object,const QString &instance,const QString &graphicsRenderer){
     if(!QCoreApplication::instance()||QThread::currentThread()!=QCoreApplication::instance()->thread())return;
     auto *window=qobject_cast<QWindow*>(object);

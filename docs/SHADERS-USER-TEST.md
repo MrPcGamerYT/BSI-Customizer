@@ -107,6 +107,36 @@ No/Discard prompts on tab switching and close, per-instance separation, native
 callbacks/Save/footer, resize/fullscreen, changing monitors and hybrid GPUs.
 Test custom/default/hidden icons and Settings Update without losing Shaders.
 
+### Vulkan says “Not detected”
+
+Use **Copy rendering status** at the bottom of Shaders and send that text. It
+includes the requested/observed API, exact blocker, processed-frame count and
+separate Vulkan loader/instance/device/Win32-surface/swapchain/present counters.
+Copying is local; it uploads nothing and includes no module paths or tokens.
+Lifecycle counters do **not** mean game frames were processed.
+
+The current capture scans complete public loader exports rather than selecting
+only the first `vulkan-1.dll` basename. Up to four pinned providers have separate
+original functions and handle registries, so a player's bundled loader is not
+silently routed into the OS/Qt loader. Early priming uses the player's secure
+application/user DLL search directories plus System32, never the working
+folder. No system DLL is replaced. A provider created before capture still
+requires a full player restart; unknown queues/windows are not adopted.
+
+- No loader/instance: capture has not reached game-device startup; fully close
+  all instances and restart after updating both Settings and the shader module.
+- Device but no Win32 surface/swapchain: report that stage; external/non-Win32
+  presentation is not presumed supported.
+- Presents but excluded/missing HWND or queue: send the exact reason. Do not
+  relax ownership or use a UI/translation-layer framebuffer as a substitute.
+- Observed Vulkan but zero processed frames: send the separate capability,
+  image-usage, queue, acquisition or presentation-extension blocker. Do not
+  assume a shader compiler failure from “Not detected.”
+
+This addresses capture/diagnostic gaps in source; the affected player's Vulkan
+activation must still be retested. Windows loader doubles are not an ICD test,
+and native Vulkan software pixels are not installed-player evidence.
+
 ### Results to send back
 
 A screenshot/video of the actual same game scene with effects off/on, plus the

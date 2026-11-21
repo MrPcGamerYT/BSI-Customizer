@@ -95,6 +95,14 @@ int main(int argc, char **argv)
         require(currentRepeat.ok && currentRepeat.alreadyApplied && currentRepeat.window == current.window,
                 QStringLiteral("v19 shader idempotence: ") + currentRepeat.error);
         glass.replace(QStringLiteral("//BSI v19"), QStringLiteral("//BSI v20"));
+        const auto isolated = ShaderSettingsSource::prepare(player(), glass, counts);
+        require(isolated.ok && isolated.tabIndex == 12, QStringLiteral("page-isolated v20 shader integration: ") + isolated.error);
+        require(ShaderSettingsSource::removeWindow(isolated.window, &restored, &error) && restored == glass,
+                QStringLiteral("exact v20 shader removal: ") + error);
+        const auto isolatedRepeat = ShaderSettingsSource::prepare(isolated.player, isolated.window, counts);
+        require(isolatedRepeat.ok && isolatedRepeat.alreadyApplied && isolatedRepeat.window == isolated.window,
+                QStringLiteral("v20 shader idempotence: ") + isolatedRepeat.error);
+        glass.replace(QStringLiteral("//BSI v20"), QStringLiteral("//BSI v21"));
         require(!ShaderSettingsSource::prepare(player(), glass, counts).ok,
                 QStringLiteral("unknown future Settings designs must not be guessed"));
     }

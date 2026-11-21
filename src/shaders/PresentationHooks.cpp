@@ -198,7 +198,7 @@ void scan(){
     }
     const bool dxgi=scanDxgiHooks(install),vulkan=scanVulkanHooks(install);
     const bool attached=h.swaps[0]||h.swaps[1]||h.swapEgl||dxgi||vulkan;
-    if(!Runtime::instance().metrics().observed)Runtime::instance().report(attached,false,false,attached?"Waiting for an identified game surface matching the player's OpenGL, DirectX or Vulkan setting.":"Waiting for the game's presentation API; no eligible backend has been observed.");
+    Runtime::instance().waiting(attached,attached?"Waiting for an identified game surface matching the player's OpenGL, DirectX or Vulkan setting.":"Waiting for the game's presentation API; no eligible backend has been observed.");
 }
 }
 void *originalPresentationFunction(void *target){
@@ -221,7 +221,12 @@ void startPresentationHooks(){
     // swapchain creation between LoadLibrary and the next scan. No system DLL
     // is replaced and no other renderer is selected as a fallback.
     const auto requested=Runtime::instance().metrics().requested;
-    if(requested==RendererFamily::Vulkan)LoadLibraryExW(L"vulkan-1.dll",nullptr,LOAD_LIBRARY_SEARCH_SYSTEM32);
+    // Honor the player's application/user DLL directories before System32.
+    // Forcing only the OS Vulkan loader can hook a different provider from the
+    // one the game uses. scanVulkanHooks separately captures each complete
+    // already-loaded provider by exports, including a differently named DLL.
+    // Never search the current working directory or replace a system DLL.
+    if(requested==RendererFamily::Vulkan)LoadLibraryExW(L"vulkan-1.dll",nullptr,LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
     else if(requested==RendererFamily::DirectX){
         LoadLibraryExW(L"dxgi.dll",nullptr,LOAD_LIBRARY_SEARCH_SYSTEM32);
         LoadLibraryExW(L"d3d11.dll",nullptr,LOAD_LIBRARY_SEARCH_SYSTEM32);

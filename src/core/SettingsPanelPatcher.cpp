@@ -54,7 +54,8 @@ const QString kWindowDesignMarkerV15 = QStringLiteral("BSI v15");
 const QString kWindowDesignMarkerV16 = QStringLiteral("BSI v16");
 const QString kWindowDesignMarkerV17 = QStringLiteral("BSI v17");
 const QString kWindowDesignMarkerV18 = QStringLiteral("BSI v18");
-const QString kWindowDesignMarker = QStringLiteral("BSI v19");
+const QString kWindowDesignMarkerV19 = QStringLiteral("BSI v19");
+const QString kWindowDesignMarker = QStringLiteral("BSI v20");
 const QString kAboutMarker = QStringLiteral("BSI CUSTOMIZER: redesigned About page v1");
 const QString kSchema = QStringLiteral("bsi.settings-panel.recovery");
 const QString kWindowLeaf = QStringLiteral("UiSettingsWindow.qml");
@@ -623,18 +624,22 @@ QString buildWindow(const QString &stock)
     // or adding space between the title and tabs.
     // StackLayout fills its Loader children by default; anchoring those children
     // as well conflicts with its geometry and produces native Qt warnings.
+    // The whole native page/footer gets an independent flat, opaque backing.
+    // Never rely on a rounded/gradient shell for transparent native pages.
+    // The unused generated stack id has no native callback references; omitting
+    // it funds that backing within the real compressed resource-slot budget.
     // Keep the template small, but the *whole* compressed Window (including
     // native callbacks, copyright header and geometry helper) must fit the slot.
     // Template length alone cannot predict that compression budget.
-    QString replacement = QStringLiteral(R"QML(UiShadowContainer{//BSI v19
+    QString replacement = QStringLiteral(R"QML(UiShadowContainer{//BSI v20
 id:iSettingsWindowShadowContainer;anchors.fill:parent
 property var bIcons:({})
 Rectangle{id:r;property var c:UiTheme.colors;anchors.fill:parent;radius:14;color:r.c.primary80
 Column{Item{width:r.width;height:56
 MouseArea{anchors.fill:parent;onPressed:iSettingsWindow.startSystemMove()}Text{id:h;text:qsTr('Settings');color:r.c.primary10;font:UiTheme.fonts.bodyLarge;anchors.centerIn:parent}UiImageButton{asset:'CloseIcon';x:r.width-32;y:12;onClicked:iSettingsWindow.close()}}ListView{width:Math.max(0,Math.min(contentWidth,r.width-48));height:44;x:(r.width-width)/2;clip:true;orientation:Qt.Horizontal;model:pSettingsItems.pSettingElements;spacing:4
 delegate:MouseArea{hoverEnabled:true;visible:c!=='';property var c:iSettingsWindowShadowContainer.bIcons[index];width:c===''?-4:m.boundingRect.width+22;height:44;onClicked:{fChangeSelectedSetting(index);forceActiveFocus()}
-Rectangle{anchors.fill:parent;radius:6;color:t.color;opacity:index==pCurrentTabIndex?.2:parent.containsMouse?.1:0}Rectangle{anchors.fill:parent;radius:6;border.color:index==pCurrentTabIndex?t.color:'transparent';color:'transparent'}Text{id:t;text:modelData.pButtonText;font:h.font;x:11-m.boundingRect.x;y:c?0:22-height/2;color:r.c[index==pCurrentTabIndex?'subWindowHeaderClick':'primary20']}TextMetrics{id:m;text:t.text;font:h.font}Rectangle{visible:modelData.pShowRedDot;x:parent.width-8;y:t.y+6;width:6;height:6;radius:3;color:r.c.dangerNormal}ToolButton{width:18;height:18;x:parent.width/2-9;y:24;enabled:false;padding:0;background:null;icon{width:18;height:18;color:index==pCurrentTabIndex?t.color:'transparent';source:c||''}}}}Item{width:Math.min(r.width-48,568);x:(r.width-width)/2;height:r.height-118
-StackLayout{id:iSelectedSettingControl;anchors.fill:parent;currentIndex:pCurrentTabIndex;anchors.topMargin:12
+Rectangle{anchors.fill:parent;radius:6;color:t.color;opacity:index==pCurrentTabIndex?.2:parent.containsMouse?.1:0}Rectangle{anchors.fill:parent;radius:6;border.color:index==pCurrentTabIndex?t.color:'transparent';color:'transparent'}Text{id:t;text:modelData.pButtonText;font:h.font;x:11-m.boundingRect.x;y:c?0:22-height/2;color:r.c[index==pCurrentTabIndex?'subWindowHeaderClick':'primary20']}TextMetrics{id:m;text:t.text;font:h.font}Rectangle{visible:modelData.pShowRedDot;x:parent.width-8;y:t.y+6;width:6;height:6;radius:3;color:r.c.dangerNormal}ToolButton{width:18;height:18;x:parent.width/2-9;y:24;enabled:false;padding:0;background:null;icon{width:18;height:18;color:index==pCurrentTabIndex?t.color:'transparent';source:c||''}}}}Rectangle{color:r.color;width:Math.min(r.width-48,568);x:(r.width-width)/2;height:r.height-118
+StackLayout{anchors.fill:parent;currentIndex:pCurrentTabIndex;anchors.topMargin:12
 Repeater{model:pSettingsItems.pSettingElements;delegate:Loader{Component.onCompleted:setSource(modelData.pQmlSource,modelData.pComponentArgs||{});onLoaded:{item.anchors.fill=item.parent;modelData.pComponentObj=item;item.fOnQmlLoaded&&item.fOnQmlLoaded()}}}}}}}}
 )QML");
     // Older MSI/BlueStacks sources have a 2468-byte compressed slot. Retaining
@@ -716,25 +721,20 @@ QString buildAbout(const QString &developerName, const QString &tagline,
     // URLs and four links. No companion QML/script/DLL or new resource is needed.
     //
     // About is eagerly loaded by the native Repeater even when its tab is hidden.
-    // Its bounded, visible-window-only pass decorates only the owning shell and
-    // that shell's public Control.popup content/background, never the global
-    // Overlay, shared UiTheme or other player windows. Existing gradients and
-    // native color/validation/focus/opacity bindings survive; only empty gradient
-    // slots gain theme-bound reflective/translucent stops. Qt 5/6 represent an
-    // unset Rectangle.gradient as either null OR undefined: use == null, guarded
-    // by the Rectangle border API, not === null (which silently left Qt 6 flat).
-    // Loader swaps and lazy popup/page layout are picked up without replacing
-    // native controls, indicators, signals, input, models or save/discard logic.
-    // v19 limits decoration to public control backgrounds/slider parts and our
-    // own shell/tab surfaces. Never alter radii, native image indicators, scroll
-    // thumbs, arbitrary layout rectangles or layer/FBO-backed gradient borders:
-    // the old blanket rewrite could invalidate their native scene-graph paint.
-    // The outer surface stays opaque while reflecting the current theme; do not
-    // expose an uninitialized/black game surface during a first tab transition.
-    // Queue the initial pass until the Loader tree finishes its bindings: on
-    // Qt 5, gradients created in onLoaded can otherwise stay visually flat.
-    // Later tab changes are synchronous; the bounded Timer catches subsequent
-    // Loader/background replacements, without touching unrelated windows.
+    // v20 confines decoration to the owning generated shell/tab surfaces.
+    // Every Loader is a HARD boundary: never enter any native page or the
+    // Shaders controls, and never follow background/handle/popup pointers into
+    // lazy native parts or the global Overlay. The independent flat page/footer
+    // backing is not decorated. Native gradients, colors, geometry, validation,
+    // opacity and input remain exactly native. This removes a possible source
+    // of the reported transparency/triangles; it is not hardware root-cause
+    // proof. Layered items, unrelated windows and shared UiTheme stay untouched.
+    // Qt 5/6 represent unset gradient as null OR undefined: guard the Rectangle
+    // API and use == null. Existing gradients are never replaced.
+    // Keep the owned shell opaque, including first-tab paint. Defer the first
+    // pass until bindings settle (Qt 5 otherwise can leave a new gradient flat).
+    // The bounded visible-window timer only discovers new generated tab
+    // delegates, including Shaders' reorder, not native page/popup replacements.
     // Tiny badges/separators remain unchanged. Bound both visited nodes and the
     // queue to 4096; pause the Timer when the Settings window is hidden. Public
     // QtQuick 2.15 only: no optional blur/effects/private implementation imports.
@@ -770,7 +770,7 @@ function fOnQmlLoaded(){var p=parent;while(p&&p.bIcons===undefined)p=p.parent;if
 function fCheckForUpdateCallback(s,d){if(s===0){var j=JSON.parse(d);pUpdateAvailable=/^true$/i.test(j.update_available);pIsInCompatibleUpdateVersion=pUpdateAvailable&&!/^true$/i.test(j.update_details.is_build_compatible);if(pUpdateAvailable){pUpdateVersion=j.update_details.client_version;pMoreInfoURL=j.update_details.detailed_changelogs_url;pDownloadURL=j.update_details.download_url}}else{pUpdateAvailable=false;pIsInCompatibleUpdateVersion=false}}
 function fUpdateShortDisplayName(n){pShortDisplayName=String(n||"")}
 Component{id:g;Gradient{property var s;property color c:s.color;GradientStop{color:!c.a&&s.border.color.a&&s.parent.containsMouse!==undefined?a.edge:Qt.lighter(c,1.7)}GradientStop{position:1;color:s.c===a.c?c:Qt.rgba(c.r,c.g,c.b,c.a*.88)}}}
-function fGlassAll(){var r=parent;while(r&&r.bIcons===undefined)r=r.parent;if(!r)return;var q=[[r,0]],n=0;while(q.length&&n++<4096){var e=q.pop(),o=e[0],s=e[1];if(!o||o.minimumSize!==undefined||o.layer&&o.layer.enabled)continue;if(o.border&&o.gradient==null&&(s||o.c===a.c||o.parent&&o.parent.containsMouse!==undefined)){o.gradient=g.createObject(o,{s:o});if(o.c===a.c)o.border.color=Qt.binding(()=>a.edge)}if(o.background&&q.length<4096)q.push([o.background,1]);if(o.handle&&q.length<4094)q.push([o.handle,1],[o.contentItem,1]);if(o.popup&&q.length<4094)q.push([o.popup.background,1],[o.popup.contentItem,0]);var c=o.children||[];for(var i=0;i<c.length&&q.length<4096;i++)q.push([c[i],s])}}
+function fGlassAll(){var r=parent;while(r&&r.bIcons===undefined)r=r.parent;if(!r)return;var q=[r],n=0;while(q.length&&n++<4096){var o=q.pop();if(!o||o.minimumSize!==undefined||o.item!==undefined&&o.source!==undefined||o.layer&&o.layer.enabled)continue;if(o.border&&o.gradient==null&&(o.c===a.c||o.parent&&o.parent.containsMouse!==undefined)){o.gradient=g.createObject(o,{s:o});if(o.c===a.c)o.border.color=Qt.binding(()=>a.edge)}var c=o.children||[];for(var i=0;i<c.length&&q.length<4096;i++)q.push(c[i])}}
 Connections{target:a.Window.window;function onPCurrentTabIndexChanged(){fGlassAll()}}
 Timer{interval:160;running:a.Window.window&&a.Window.window.visible;repeat:true;onTriggered:fGlassAll()}
 }
@@ -1015,7 +1015,7 @@ bool hasWindowMarker(const QString &text)
         || text.contains(kWindowDesignMarkerV13) || text.contains(kWindowDesignMarkerV14)
         || text.contains(kWindowDesignMarkerV15) || text.contains(kWindowDesignMarkerV16)
         || text.contains(kWindowDesignMarkerV17) || text.contains(kWindowDesignMarkerV18)
-        || text.contains(kWindowDesignMarker);
+        || text.contains(kWindowDesignMarkerV19) || text.contains(kWindowDesignMarker);
 }
 
 // Standalone Image sources do not inherit the QML/HTML text's currentColor.

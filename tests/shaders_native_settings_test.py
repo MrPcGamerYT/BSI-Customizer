@@ -409,8 +409,8 @@ def main():
             combo = named(page, "shaderPresets")
             slider = named(page, "shaderValue-saturation")
             check = named(page, "shaderEnabled")
-            assert evaluate(combo, "background.gradient.stops.length") == 2
-            assert evaluate(slider, "handle.gradient.stops.length") == 2
+            assert evaluate(combo, "background.gradient == null"), "the combo must use the owned flat surface, not native restyling"
+            assert evaluate(slider, "handle.gradient == null"), "moving slider handles must stay on the flat paint path"
             assert evaluate(check, "indicator.radius") == 2
             evaluate(about, "UiTheme.colors.accentNormal = '#ab5544'")
             assert evaluate(combo, "String(shaderStyle.accent)") == "#ab5544"

@@ -5,6 +5,8 @@
 #include "VulkanPresent.h"
 #define VK_USE_PLATFORM_WIN32_KHR
 #include <windows.h>
+#include <psapi.h>
+#include <array>
 #include <vulkan/vulkan_win32.h>
 #include <algorithm>
 #include <atomic>
@@ -15,10 +17,6 @@
 
 namespace BsiShaders {
 namespace {
-#define BSI_VK_INTERCEPTED(X) \
- X(GetInstanceProcAddr) X(GetDeviceProcAddr) X(CreateInstance) X(DestroyInstance) X(EnumeratePhysicalDevices) \
- X(CreateWin32SurfaceKHR) X(DestroySurfaceKHR) X(CreateDevice) X(DestroyDevice) X(GetDeviceQueue) X(GetDeviceQueue2) \
- X(CreateSwapchainKHR) X(DestroySwapchainKHR) X(AcquireNextImageKHR) X(AcquireNextImage2KHR) X(QueuePresentKHR)
 VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL getInstanceProc(VkInstance,const char*);
 VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL getDeviceProc(VkDevice,const char*);
 VKAPI_ATTR VkResult VKAPI_CALL createInstance(const VkInstanceCreateInfo*,const VkAllocationCallbacks*,VkInstance*);
@@ -35,21 +33,7 @@ VKAPI_ATTR void VKAPI_CALL destroySwapchain(VkDevice,VkSwapchainKHR,const VkAllo
 VKAPI_ATTR VkResult VKAPI_CALL acquire(VkDevice,VkSwapchainKHR,std::uint64_t,VkSemaphore,VkFence,std::uint32_t*);
 VKAPI_ATTR VkResult VKAPI_CALL acquire2(VkDevice,const VkAcquireNextImageInfoKHR*,std::uint32_t*);
 VKAPI_ATTR VkResult VKAPI_CALL present(VkQueue,const VkPresentInfoKHR*);
-struct Entry {const char *name;void *callback;void *target=nullptr;};
-Entry entries[]{
-    {"vkGetInstanceProcAddr",reinterpret_cast<void*>(&getInstanceProc)}, {"vkGetDeviceProcAddr",reinterpret_cast<void*>(&getDeviceProc)},
-    {"vkCreateInstance",reinterpret_cast<void*>(&createInstance)}, {"vkDestroyInstance",reinterpret_cast<void*>(&destroyInstance)},
-    {"vkEnumeratePhysicalDevices",reinterpret_cast<void*>(&enumeratePhysical)}, {"vkCreateWin32SurfaceKHR",reinterpret_cast<void*>(&createSurface)},
-    {"vkDestroySurfaceKHR",reinterpret_cast<void*>(&destroySurface)}, {"vkCreateDevice",reinterpret_cast<void*>(&createDevice)},
-    {"vkDestroyDevice",reinterpret_cast<void*>(&destroyDevice)}, {"vkGetDeviceQueue",reinterpret_cast<void*>(&getQueue)},
-    {"vkGetDeviceQueue2",reinterpret_cast<void*>(&getQueue2)}, {"vkCreateSwapchainKHR",reinterpret_cast<void*>(&createSwapchain)},
-    {"vkDestroySwapchainKHR",reinterpret_cast<void*>(&destroySwapchain)}, {"vkAcquireNextImageKHR",reinterpret_cast<void*>(&acquire)},
-    {"vkAcquireNextImage2KHR",reinterpret_cast<void*>(&acquire2)}, {"vkQueuePresentKHR",reinterpret_cast<void*>(&present)}
-};
-template<typename Fn>Fn original(const char *name){
-    for(const auto &e:entries)if(std::strcmp(e.name,name)==0){auto trampoline=originalPresentationFunction(e.target);return reinterpret_cast<Fn>(trampoline?trampoline:e.target);}
-    return nullptr;
-}
+struct Entry {const char *name=nullptr;void *callback=nullptr;void *target=nullptr;};
 struct Instance {VkInstance handle=VK_NULL_HANDLE;};
 struct Swapchain {
     HWND window=nullptr;
@@ -75,14 +59,76 @@ struct Device {
 struct Queue {std::shared_ptr<Device> device;std::uint32_t family=~0u;bool protectedQueue=false;};
 struct State {
     std::mutex mutex;
-    std::atomic<bool> stopping{false};bool installed=false,addressesReady=false;
+    std::atomic<bool> stopping{false};
     std::map<VkInstance,std::shared_ptr<Instance>> instances;
     std::map<VkPhysicalDevice,std::shared_ptr<Instance>> physical;
     std::map<VkDevice,std::shared_ptr<Device>> devices;
     std::map<VkQueue,Queue> queues;
     std::map<VkSurfaceKHR,HWND> surfaces;
 };
-State &state(){static auto *s=new State;return *s;}
+// A player can ship its own Vulkan loader alongside the OS loader used by
+// Qt/ANGLE. Each provider needs its OWN originals and capture registry. Choosing
+// GetModuleHandle("vulkan-1.dll") once pins the wrong provider on such players;
+// sharing one trampoline table would dispatch their handles into another DLL.
+constexpr std::size_t maximumProviders=4, entryCount=16;
+struct Provider {
+    HMODULE module=nullptr;
+    std::array<Entry,entryCount> entries{};
+    State captured;
+    bool installed=false;
+};
+struct Providers {
+    std::mutex mutex;
+    std::atomic<bool> stopping{false};
+    std::array<Provider,maximumProviders> slots;
+    std::size_t count=0;
+};
+Providers &providers(){static auto *p=new Providers;return *p;}
+thread_local Provider *callingProvider=nullptr;
+struct ProviderScope {
+    Provider *previous=callingProvider;
+    explicit ProviderScope(Provider &p){callingProvider=&p;}
+    ~ProviderScope(){callingProvider=previous;}
+};
+Provider &provider(){return *callingProvider;}
+State &state(){return provider().captured;}
+#define BSI_VK_ROUTES(X) \
+ X(PFN_vkVoidFunction,GetInstanceProcAddr,getInstanceProc,(VkInstance i,const char *n),(i,n)) \
+ X(PFN_vkVoidFunction,GetDeviceProcAddr,getDeviceProc,(VkDevice d,const char *n),(d,n)) \
+ X(VkResult,CreateInstance,createInstance,(const VkInstanceCreateInfo *i,const VkAllocationCallbacks *a,VkInstance *o),(i,a,o)) \
+ X(void,DestroyInstance,destroyInstance,(VkInstance i,const VkAllocationCallbacks *a),(i,a)) \
+ X(VkResult,EnumeratePhysicalDevices,enumeratePhysical,(VkInstance i,std::uint32_t *n,VkPhysicalDevice *o),(i,n,o)) \
+ X(VkResult,CreateWin32SurfaceKHR,createSurface,(VkInstance i,const VkWin32SurfaceCreateInfoKHR *c,const VkAllocationCallbacks *a,VkSurfaceKHR *o),(i,c,a,o)) \
+ X(void,DestroySurfaceKHR,destroySurface,(VkInstance i,VkSurfaceKHR s,const VkAllocationCallbacks *a),(i,s,a)) \
+ X(VkResult,CreateDevice,createDevice,(VkPhysicalDevice p,const VkDeviceCreateInfo *i,const VkAllocationCallbacks *a,VkDevice *o),(p,i,a,o)) \
+ X(void,DestroyDevice,destroyDevice,(VkDevice d,const VkAllocationCallbacks *a),(d,a)) \
+ X(void,GetDeviceQueue,getQueue,(VkDevice d,std::uint32_t f,std::uint32_t i,VkQueue *o),(d,f,i,o)) \
+ X(void,GetDeviceQueue2,getQueue2,(VkDevice d,const VkDeviceQueueInfo2 *i,VkQueue *o),(d,i,o)) \
+ X(VkResult,CreateSwapchainKHR,createSwapchain,(VkDevice d,const VkSwapchainCreateInfoKHR *i,const VkAllocationCallbacks *a,VkSwapchainKHR *o),(d,i,a,o)) \
+ X(void,DestroySwapchainKHR,destroySwapchain,(VkDevice d,VkSwapchainKHR s,const VkAllocationCallbacks *a),(d,s,a)) \
+ X(VkResult,AcquireNextImageKHR,acquire,(VkDevice d,VkSwapchainKHR s,std::uint64_t t,VkSemaphore m,VkFence f,std::uint32_t *o),(d,s,t,m,f,o)) \
+ X(VkResult,AcquireNextImage2KHR,acquire2,(VkDevice d,const VkAcquireNextImageInfoKHR *i,std::uint32_t *o),(d,i,o)) \
+ X(VkResult,QueuePresentKHR,present,(VkQueue q,const VkPresentInfoKHR *i),(q,i))
+template<std::size_t Slot>struct Routes {
+#define ROUTE(result,name,implementation,params,args) \
+    static result VKAPI_CALL name params {ProviderScope scope(providers().slots[Slot]);return implementation args;}
+    BSI_VK_ROUTES(ROUTE)
+#undef ROUTE
+};
+template<std::size_t Slot>void initializeProvider(HMODULE module){
+    auto &p=providers().slots[Slot];
+    p.module=module;
+    p.entries={{
+#define ENTRY(result,name,implementation,params,args) {"vk" #name,reinterpret_cast<void*>(&Routes<Slot>::name),reinterpret_cast<void*>(GetProcAddress(module,"vk" #name))},
+        BSI_VK_ROUTES(ENTRY)
+#undef ENTRY
+    }};
+}
+#undef BSI_VK_ROUTES
+template<typename Fn>Fn original(const char *name){
+    for(const auto &e:provider().entries)if(std::strcmp(e.name,name)==0){auto trampoline=originalPresentationFunction(e.target);return reinterpret_cast<Fn>(trampoline?trampoline:e.target);}
+    return nullptr;
+}
 template<typename Fn>Fn instanceFunction(VkInstance instance,const char *name){return reinterpret_cast<Fn>(original<PFN_vkGetInstanceProcAddr>("vkGetInstanceProcAddr")(instance,name));}
 PFN_vkVoidFunction VKAPI_CALL resolveDevice(VkDevice device,const char *name){
     auto raw=original<PFN_vkGetDeviceProcAddr>("vkGetDeviceProcAddr")(device,name);
@@ -96,7 +142,7 @@ void physicalFor(VkInstance instance,std::uint32_t count,const VkPhysicalDevice 
 VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL getInstanceProc(VkInstance instance,const char *name){
     auto raw=original<PFN_vkGetInstanceProcAddr>("vkGetInstanceProcAddr")(instance,name);
     // These v2 entry points may be proc-only instead of loader exports.
-    if(raw&&name)for(const auto &e:entries)
+    if(raw&&name)for(const auto &e:provider().entries)
         if((e.target||std::strcmp(name,"vkGetDeviceQueue2")==0||std::strcmp(name,"vkAcquireNextImage2KHR")==0)
            &&std::strcmp(e.name,name)==0)return reinterpret_cast<PFN_vkVoidFunction>(e.callback);
     return raw;
@@ -104,7 +150,7 @@ VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL getInstanceProc(VkInstance instance,con
 VKAPI_ATTR PFN_vkVoidFunction VKAPI_CALL getDeviceProc(VkDevice device,const char *name){
     auto raw=original<PFN_vkGetDeviceProcAddr>("vkGetDeviceProcAddr")(device,name);
     // These v2 entry points may be proc-only instead of loader exports.
-    if(raw&&name)for(const auto &e:entries)
+    if(raw&&name)for(const auto &e:provider().entries)
         if((e.target||std::strcmp(name,"vkGetDeviceQueue2")==0||std::strcmp(name,"vkAcquireNextImage2KHR")==0)
            &&std::strcmp(e.name,name)==0)return reinterpret_cast<PFN_vkVoidFunction>(e.callback);
     return raw;
@@ -114,6 +160,7 @@ VKAPI_ATTR VkResult VKAPI_CALL createInstance(const VkInstanceCreateInfo *info,c
     if(hr==VK_SUCCESS&&out)try {
         auto instance=std::make_shared<Instance>();instance->handle=*out;auto &s=state();
         {std::lock_guard<std::mutex> lock(s.mutex);if(s.instances.size()>=16)return hr;s.instances[*out]=instance;}
+        Runtime::instance().vulkanEvent(VulkanEvent::InstanceCreated);
         auto enumerate=instanceFunction<PFN_vkEnumeratePhysicalDevices>(*out,"vkEnumeratePhysicalDevices");
         // Resolve through the trampoline if the loader gave us its own export.
         auto trampoline=originalPresentationFunction(reinterpret_cast<void*>(enumerate));if(trampoline)enumerate=reinterpret_cast<PFN_vkEnumeratePhysicalDevices>(trampoline);
@@ -131,7 +178,10 @@ VKAPI_ATTR VkResult VKAPI_CALL enumeratePhysical(VkInstance instance,std::uint32
 }
 VKAPI_ATTR VkResult VKAPI_CALL createSurface(VkInstance instance,const VkWin32SurfaceCreateInfoKHR *info,const VkAllocationCallbacks *alloc,VkSurfaceKHR *out){
     const auto hr=original<PFN_vkCreateWin32SurfaceKHR>("vkCreateWin32SurfaceKHR")(instance,info,alloc,out);
-    if(hr==VK_SUCCESS&&out&&info)try{auto &s=state();std::lock_guard<std::mutex> lock(s.mutex);if(s.surfaces.size()<128)s.surfaces[*out]=info->hwnd;}catch(...){}
+    if(hr==VK_SUCCESS&&out&&info)try{
+        {auto &s=state();std::lock_guard<std::mutex> lock(s.mutex);if(s.surfaces.size()<128)s.surfaces[*out]=info->hwnd;}
+        Runtime::instance().vulkanEvent(VulkanEvent::SurfaceCreated);
+    }catch(...){}
     return hr;
 }
 VKAPI_ATTR void VKAPI_CALL destroySurface(VkInstance instance,VkSurfaceKHR surface,const VkAllocationCallbacks *alloc){
@@ -139,15 +189,28 @@ VKAPI_ATTR void VKAPI_CALL destroySurface(VkInstance instance,VkSurfaceKHR surfa
 }
 VKAPI_ATTR VkResult VKAPI_CALL createDevice(VkPhysicalDevice physical,const VkDeviceCreateInfo *info,const VkAllocationCallbacks *alloc,VkDevice *out){
     const auto hr=original<PFN_vkCreateDevice>("vkCreateDevice")(physical,info,alloc,out);
-    if(hr==VK_SUCCESS&&out)try{
+    if(hr!=VK_SUCCESS||!out)return hr;
+    const auto rejected=[](const std::string &message){Runtime::instance().vulkanEvent(VulkanEvent::DeviceRejected,message);};
+    try{
         auto d=std::make_shared<Device>();d->handle=*out;d->physical=physical;auto &s=state();
-        {std::lock_guard<std::mutex> lock(s.mutex);auto it=s.physical.find(physical);if(it==s.physical.end()||s.devices.size()>=32)return hr;d->instance=it->second;}
-        std::string error;if(!d->api.load(*out,resolveDevice,&error))return hr;
+        {std::lock_guard<std::mutex> lock(s.mutex);
+            auto it=s.physical.find(physical);
+            if(it==s.physical.end()||s.devices.size()>=32){
+                rejected("Vulkan device creation was intercepted without its captured instance/physical-device mapping, or the bounded device registry is full. Fully restart the player; no ownership is guessed.");return hr;
+            }
+            d->instance=it->second;
+        }
+        std::string error;
+        if(!d->api.load(*out,resolveDevice,&error)){rejected("Vulkan device entry points are incomplete: "+error);return hr;}
         const auto instance=d->instance->handle;
         const auto memory=instanceFunction<PFN_vkGetPhysicalDeviceMemoryProperties>(instance,"vkGetPhysicalDeviceMemoryProperties");
         const auto queues=instanceFunction<PFN_vkGetPhysicalDeviceQueueFamilyProperties>(instance,"vkGetPhysicalDeviceQueueFamilyProperties");
-        if(!memory||!queues)return hr;memory(physical,&d->memory);std::uint32_t count=0;queues(physical,&count,nullptr);
-        if(!count||count>64)return hr;d->families.resize(count);queues(physical,&count,d->families.data());
+        if(!memory||!queues){rejected("Vulkan device memory/queue-family queries are unavailable.");return hr;}
+        memory(physical,&d->memory);std::uint32_t count=0;queues(physical,&count,nullptr);
+        if(!count||count>64){rejected("Vulkan queue-family count exceeds the supported capture bounds.");return hr;}
+        d->families.resize(count);queues(physical,&count,d->families.data());
+        if(!count||count>d->families.size()){rejected("Vulkan queue-family enumeration changed unexpectedly.");return hr;}
+        d->families.resize(count);
         if(info)for(std::uint32_t i=0;i<info->queueCreateInfoCount;++i){
             const auto family=info->pQueueCreateInfos[i].queueFamilyIndex;
             if(family<count&&(d->families[family].queueFlags&VK_QUEUE_GRAPHICS_BIT)
@@ -167,7 +230,8 @@ VKAPI_ATTR VkResult VKAPI_CALL createDevice(VkPhysicalDevice physical,const VkDe
         }
         {std::lock_guard<std::mutex> lock(s.mutex);s.devices[*out]=d;
             for(const auto &q:createdQueues)if(s.queues.size()<128)s.queues[q.first]={d,q.second,false};}
-    }catch(...){}
+        Runtime::instance().vulkanEvent(VulkanEvent::DeviceTracked);
+    }catch(...){rejected("Vulkan device capture failed; the original device continues without shader processing.");}
     return hr;
 }
 VKAPI_ATTR void VKAPI_CALL destroyDevice(VkDevice device,const VkAllocationCallbacks *alloc){
@@ -227,7 +291,8 @@ VKAPI_ATTR VkResult VKAPI_CALL createSwapchain(VkDevice device,const VkSwapchain
             else{chain->images.resize(count);if(images(device,*out,&count,chain->images.data())!=VK_SUCCESS)chain->eligible=false;chain->acquired.resize(count,false);}
             if(!chain->eligible)chain->diagnostic="Vulkan swapchain images could not be safely enumerated; original game frames retained.";
         }
-        std::lock_guard<std::mutex> lock(d->mutex);if(d->chains.size()<32)d->chains[*out]=chain;
+        {std::lock_guard<std::mutex> lock(d->mutex);if(d->chains.size()<32)d->chains[*out]=chain;}
+        Runtime::instance().vulkanEvent(VulkanEvent::SwapchainTracked);
     }catch(...){}
     return hr;
 }
@@ -251,14 +316,15 @@ VKAPI_ATTR VkResult VKAPI_CALL acquire2(VkDevice device,const VkAcquireNextImage
 VKAPI_ATTR VkResult VKAPI_CALL present(VkQueue queue,const VkPresentInfoKHR *info){
     const auto next=original<PFN_vkQueuePresentKHR>("vkQueuePresentKHR");auto &s=state();
     if(!info||s.stopping.load()||!Runtime::instance().accepts(Renderer::Vulkan))return next(queue,info);
+    Runtime::instance().vulkanEvent(VulkanEvent::Presented);
     Queue owner;{std::lock_guard<std::mutex> lock(s.mutex);auto it=s.queues.find(queue);if(it!=s.queues.end())owner=it->second;}
     if(!owner.device){
-        if(!Runtime::instance().metrics().observed)Runtime::instance().report(true,false,false,
-            "Vulkan presentation was intercepted, but its device/queue creation was not captured. Restart the player after applying the patch; unidentified frames remain untouched.");
+        Runtime::instance().vulkanEvent(VulkanEvent::QueueMissed,
+            "Vulkan presentation was intercepted, but its device/queue creation was not captured. Fully restart the player after applying the patch; unidentified frames remain untouched.");
         return next(queue,info);
     }
     VkSemaphore last=VK_NULL_HANDLE;
-    VulkanPresent presentation;std::string contractError;
+    VulkanPresent presentation;std::string contractError;bool identified=false;
     try{
         const bool contract=presentation.prepare(*info,&contractError);
         auto &d=*owner.device;std::lock_guard<std::mutex> lock(d.mutex);
@@ -269,7 +335,10 @@ VKAPI_ATTR VkResult VKAPI_CALL present(VkQueue queue,const VkPresentInfoKHR *inf
         const auto parameters=Runtime::instance().settings();
         for(std::uint32_t i=0;i<info->swapchainCount;++i){
             auto found=d.chains.find(info->pSwapchains[i]);if(found==d.chains.end())continue;auto &chain=*found->second;
-            if(!Runtime::instance().eligible(reinterpret_cast<std::uintptr_t>(chain.window)))continue;
+            if(!Runtime::instance().eligible(reinterpret_cast<std::uintptr_t>(chain.window))){
+                Runtime::instance().vulkanEvent(VulkanEvent::WindowRejected,Runtime::instance().gameWindowDiagnostic(reinterpret_cast<std::uintptr_t>(chain.window)));continue;
+            }
+            identified=true;
             const auto image=info->pImageIndices[i];const bool fresh=image<chain.acquired.size()&&chain.acquired[image];
             if(image<chain.acquired.size())chain.acquired[image]=false;
             std::string error=chain.diagnostic;bool rendered=false;
@@ -290,7 +359,10 @@ VKAPI_ATTR VkResult VKAPI_CALL present(VkQueue queue,const VkPresentInfoKHR *inf
             }
             Runtime::instance().report(true,true,rendered,rendered?"Shaders active on the identified native Vulkan game surface.":error,rendered,Renderer::Vulkan,rendered);
         }
-    }catch(...){Runtime::instance().report(true,true,false,"Vulkan shader processing failed; native presentation continues.",false,Renderer::Vulkan);}
+    }catch(...){
+        if(identified)Runtime::instance().report(true,true,false,"Vulkan shader processing failed; native presentation continues.",false,Renderer::Vulkan);
+        else Runtime::instance().vulkanEvent(VulkanEvent::DeviceRejected,"Vulkan presentation capture failed before game-window ownership was proven; original frames are retained.");
+    }
     // Each input binary semaphore is consumed once. Chained shader submissions
     // consume the previous pass's completion; WSI waits only for the last pass.
     VkPresentInfoKHR modified=presentation.info();if(last){modified.waitSemaphoreCount=1;modified.pWaitSemaphores=&last;}
@@ -300,15 +372,60 @@ VKAPI_ATTR VkResult VKAPI_CALL present(VkQueue queue,const VkPresentInfoKHR *inf
 }
 }
 bool scanVulkanHooks(InstallPresentationHook install){
-    auto &s=state();if(s.stopping.load())return false;if(s.installed)return true;
-    const auto request=Runtime::instance().metrics().requested;if(request!=RendererFamily::Automatic&&request!=RendererFamily::Vulkan)return false;
-    HMODULE module=GetModuleHandleW(L"vulkan-1.dll");if(!module)return false;
-    // Publish all export addresses before making getProc callbacks visible.
-    if(!s.addressesReady){for(auto &e:entries)e.target=reinterpret_cast<void*>(GetProcAddress(module,e.name));s.addressesReady=true;}
-    if(!entries[0].target||!entries[1].target)return false;
-    bool ready=true;for(auto &e:entries)if(e.target)ready=install(e.target,e.callback,nullptr)&&ready;
-    s.installed=ready;return ready;
+    auto &all=providers();if(!install||all.stopping.load())return false;
+    const auto request=Runtime::instance().metrics().requested;
+    if(request!=RendererFamily::Automatic&&request!=RendererFamily::Vulkan)return false;
+    std::lock_guard<std::mutex> lock(all.mutex);
+    HMODULE modules[512]{};DWORD required=0;
+    if(!EnumProcessModules(GetCurrentProcess(),modules,sizeof(modules),&required))return false;
+    const auto count=(std::min)(std::size_t(required/sizeof(HMODULE)),std::size_t(512));
+    for(std::size_t m=0;m<count;++m){
+        const auto module=modules[m];
+        const auto root=GetProcAddress(module,"vkGetInstanceProcAddr");
+        if(!root)continue;
+        bool known=false;
+        for(std::size_t i=0;i<all.count;++i)
+            if(all.slots[i].module==module||all.slots[i].entries[0].target==reinterpret_cast<void*>(root))known=true;
+        if(known||all.count==maximumProviders)continue;
+        // Match the public loader contract, NOT a filename, and never detour an
+        // ICD's unrelated negotiation functions. The two Vulkan-1.1 getters
+        // remain optional/proc-only; the complete base lifecycle is mandatory.
+        const char *requiredNames[]{"vkGetDeviceProcAddr","vkCreateInstance","vkDestroyInstance","vkEnumeratePhysicalDevices",
+            "vkCreateWin32SurfaceKHR","vkDestroySurfaceKHR","vkCreateDevice","vkDestroyDevice","vkGetDeviceQueue",
+            "vkCreateSwapchainKHR","vkDestroySwapchainKHR","vkAcquireNextImageKHR","vkQueuePresentKHR"};
+        bool complete=true;
+        for(const auto *name:requiredNames)complete=GetProcAddress(module,name)&&complete;
+        if(!complete)continue;
+        HMODULE pinned=nullptr;
+        if(!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS|GET_MODULE_HANDLE_EX_FLAG_PIN,
+                              reinterpret_cast<LPCWSTR>(root),&pinned))continue;
+        switch(all.count){
+        case 0:initializeProvider<0>(module);break;case 1:initializeProvider<1>(module);break;
+        case 2:initializeProvider<2>(module);break;case 3:initializeProvider<3>(module);break;
+        default:break;
+        }
+        ++all.count;
+    }
+    bool attached=false;
+    for(std::size_t i=0;i<all.count;++i){
+        auto &p=all.slots[i];
+        if(p.installed){attached=true;continue;}
+        // Every address/table is published before getProc callbacks can run.
+        bool ready=true;for(const auto &e:p.entries)if(e.target)ready=install(e.target,e.callback,nullptr)&&ready;
+        if(ready){
+            p.installed=true;attached=true;
+            wchar_t path[1024]{};GetModuleFileNameW(p.module,path,1024);
+            const wchar_t *leaf=path;for(const auto *c=path;*c;++c)if(*c==L'\\'||*c==L'/')leaf=c+1;
+            char label[1040]{};
+            WideCharToMultiByte(CP_UTF8,0,leaf,-1,label,sizeof(label),nullptr,nullptr);
+            Runtime::instance().vulkanEvent(VulkanEvent::LoaderHooked,label);
+        }
+    }
+    return attached;
 }
-void stopVulkanHooks(){state().stopping.store(true);}
+void stopVulkanHooks(){
+    auto &all=providers();all.stopping.store(true);
+    for(auto &p:all.slots)p.captured.stopping.store(true);
+}
 } // namespace BsiShaders
 #endif

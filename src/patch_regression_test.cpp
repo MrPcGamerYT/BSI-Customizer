@@ -5950,7 +5950,7 @@ Window {
                     if (file.name.compare(QLatin1String("UiSettingsWindow.qml"), Qt::CaseInsensitive) == 0)
                         rebuiltWindow = QString::fromUtf8(QtResources::readFile(panelImage, file));
                 }
-                check(rebuiltWindow.contains(QStringLiteral("BSI v19"))
+                check(rebuiltWindow.contains(QStringLiteral("BSI v20"))
                           && !rebuiltWindow.contains(QStringLiteral("property var bHidden"))
                           // The About page publishes the icon map into
                           // bIcons, so the shell has to declare it or that
@@ -6014,7 +6014,7 @@ Window {
                           && rebuiltWindow.contains(QStringLiteral("radius:6;color:t.color;opacity:index==pCurrentTabIndex?.2:parent.containsMouse?.1:0"))
                           && rebuiltWindow.contains(QStringLiteral("border.color:index==pCurrentTabIndex?t.color:'transparent';color:'transparent'"))
                           && !rebuiltWindow.contains(QStringLiteral("visible:s"))
-                          && rebuiltWindow.contains(QStringLiteral("StackLayout{id:iSelectedSettingControl;anchors.fill:parent;currentIndex:pCurrentTabIndex;anchors.topMargin:12"))
+                          && rebuiltWindow.contains(QStringLiteral("StackLayout{anchors.fill:parent;currentIndex:pCurrentTabIndex;anchors.topMargin:12"))
                           && rebuiltWindow.contains(QStringLiteral("delegate:Loader{"))
                           && rebuiltWindow.contains(QStringLiteral("modelData.pComponentObj=item"))
                           && rebuiltWindow.contains(QStringLiteral("onClicked:{fChangeSelectedSetting(index);forceActiveFocus()}"))

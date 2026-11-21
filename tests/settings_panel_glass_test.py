@@ -246,21 +246,33 @@ def main():
     assert backdrop is not None
     backdrop.setParentItem(content)
     backdrop.setParent(content)
+    page = named("glassSave").parentItem()
+    foundation = page.parentItem().parentItem().parentItem()
+    assert "Rectangle" in foundation.metaObject().className()
+    assert abs(foundation.width() - 568) < .1 and foundation.property("color").alpha() == 255
+    assert not evaluate(foundation, "gradient != null"), "the page/footer backing must stay on the flat, opaque paint path"
+    # Test INSIDE the native-page rectangle, not just the shell's side gutter.
+    # Every native page is transparent in this fixture. Changing the simulated
+    # game must not change even one of these page/footer-background samples.
+    probes = [(foundation.width() - 8, y) for y in (8, 100, foundation.height() - 8)]
+    before_page = [pixel(foundation, x, y) for x, y in probes]
+    backdrop.setProperty("color", m.QColor("#ff00ff"))
+    m.QTest.qWait(20)
+    assert [pixel(foundation, x, y) for x, y in probes] == before_page, "the native page/footer exposed the simulated game"
     m.QTest.qWait(20)
     glass_bottom = pixel(surface, 12, surface.height() - 30)
     glass_top = pixel(surface, 12, 30)
     assert glass_bottom == bottom and glass_top == top, "the Settings foundation leaked the unrelated/game surface below it"
-    assert evaluate(named("glassButtonBackground"), "gradient.stops[1].color.a") < .9, "control reflections should retain their translucent lower stop"
+    assert not gradient(named("glassButtonBackground")), "the shell pass must not replace native control materials"
     assert evaluate(backdrop, "gradient == null"), "Settings styling escaped into an unrelated sibling"
     backdrop.setProperty("visible", False)
     assert 0 < evaluate(surface, "border.color.a") < .3, "the outer glass rim must stay quiet"
 
     for name in ("glassButtonBackground", "glassFieldBackground", "glassTrack", "glassFill", "glassHandle", "glassDisabledBackground"):
-        assert gradient(named(name)), name + " is still flat"
+        assert not evaluate(named(name), "gradient != null"), name + " acquired an unsafe material"
     disabled = named("glassDisabled")
     assert not disabled.isEnabled()
-    assert evaluate(named("glassDisabledBackground"), "gradient.stops[0].color.a") == 0
-    assert evaluate(named("glassDisabledBackground"), "gradient.stops[1].color.a") == 0, "styling must not turn a disabled transparent button into an enabled-looking fill"
+    assert evaluate(named("glassDisabledBackground"), "color.a") == 0, "a disabled transparent native button must retain its fill"
     existing = named("glassExisting")
     assert evaluate(existing, "background.gradient.objectName") == "nativeGradient", "existing user/native gradients must not be overwritten"
     native_color = evaluate(existing, "String(background.gradient.stops[0].color)")
@@ -302,7 +314,7 @@ def main():
     # A button's native Loader is free to replace its entire background.
     page.setProperty("alternate", True)
     m.QTest.qWait(200)
-    assert gradient(named("glassReplacementBackground"))
+    assert not gradient(named("glassReplacementBackground")), "lazy native Loader content must remain unmodified"
     for _ in range(10):
         assert QMetaObject.invokeMethod(about, "fGlassAll") is not False
     assert not [i for i in m.items(named("glassToggle")) if i.objectName() == "bsiGlass"], "rescanning inserted a native-indicator overlay"
@@ -329,7 +341,7 @@ def main():
     click(combo)
     m.QTest.qWait(200)
     assert evaluate(combo, "popup.visible")
-    assert evaluate(combo, "popup.background.gradient != null"), "the reparented popup was not styled"
+    assert evaluate(combo, "popup.background.gradient == null"), "shell styling must not follow a native popup into the Overlay"
     choices = [i for i in tree() if i.objectName() == "glassChoice" and i.isVisible()]
     # Overlay items may be siblings of the shell; find through the whole window.
     assert len(choices) == 3
@@ -374,10 +386,10 @@ def main():
         m.QTest.qWait(180)
         assert window.property("pCurrentTabIndex") == index
         if index != 11:
-            assert gradient(named("glassFieldBackground")), "a newly visible native page stayed flat"
+            assert not gradient(named("glassFieldBackground")), "a newly visible native page was restyled"
     assert named("bsiAboutEmulatorLogo").width() == 160
     link = named("bsiAboutDeveloperLink")
-    assert evaluate(link, "background.gradient != null"), "the About link surface stayed flat"
+    assert evaluate(link, "background.gradient == null"), "the page Loader boundary must also protect About controls"
     point = link.mapToScene(m.QPointF(20, link.height() / 2)).toPoint()
     m.QTest.mouseMove(window, point)
     m.QTest.qWait(20)
@@ -401,7 +413,7 @@ def main():
     window.hide()
     window.deleteLater()
     m.QTest.qWait(20)
-    print(f"PASS Qt {qVersion()}: real generated full Settings glass pixels/alpha, native control input/validation/Loader/popup, preserved gradients, dark/light/accent bindings, selected/hover/indicator states, all twelve pages, bounds and no hidden-window work; authored services only")
+    print(f"PASS Qt {qVersion()}: real generated shell glass pixels/alpha, flat opaque page foundation, untouched native materials/input/validation/Loader/popup, preserved gradients, dark/light/accent bindings, selected/hover/indicator states, all twelve pages, bounds and no hidden-window work; authored services only")
 
 
 if __name__ == "__main__":

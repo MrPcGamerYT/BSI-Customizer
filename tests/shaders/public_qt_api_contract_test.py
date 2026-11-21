@@ -12,7 +12,7 @@ SHADERS = ROOT / "src/shaders"
 PUBLIC = {
     "ShaderPlugin.cpp": {"QQmlEngine", "QQmlExtensionPlugin", "QtQml/qqml.h"},
     "ShaderBridge.h": {"QObject", "QVariantMap", "QVariantList", "QQmlParserStatus"},
-    "ShaderBridge.cpp": {"QCoreApplication", "QCryptographicHash", "QDir", "QFile", "QFileInfo", "QJsonDocument",
+    "ShaderBridge.cpp": {"QCoreApplication", "QClipboard", "QGuiApplication", "QCryptographicHash", "QDir", "QFile", "QFileInfo", "QJsonDocument",
                          "QJsonObject", "QMetaType", "QPlatformSurfaceEvent", "QPointer", "QSaveFile", "QSet",
                          "QStandardPaths", "QThread", "QTimer", "QWindow"},
 }

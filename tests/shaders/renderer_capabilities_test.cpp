@@ -48,10 +48,33 @@ int main(){
     runtime.report(true,true,true,"underlying ANGLE DXGI present",true,Renderer::Direct3D11,true);
     require(runtime.metrics().renderer==Renderer::OpenGLES&&runtime.metrics().processed==1,
             "auto selection prevents double-processing through ANGLE's underlying DXGI layer");
+    runtime.waiting(true,"stale worker scan");
+    require(runtime.metrics().active&&runtime.metrics().processed==1,"a stale waiting scan must not erase a newer confirmed game frame");
+    runtime.vulkanEvent(VulkanEvent::LoaderHooked,"authored-test-provider.dll");
+    require(runtime.metrics().renderer==Renderer::OpenGLES&&runtime.metrics().processed==1,"Vulkan lifecycle evidence is not an observed game API or another processed frame");
     runtime.set(Parameters{});
     require(!runtime.metrics().active,"disabled/neutral settings report no active effects");
     runtime.report(true,true,true,"neutral frame",true,Renderer::OpenGLES,true);
     require(runtime.metrics().processed==1,"neutral bypass cannot count as an effect pass");
+    VulkanCapture capture;
+    require(capture.waiting().find("no complete Vulkan loader")!=std::string::npos,"missing-loader diagnostic");
+    capture.note(VulkanEvent::LoaderHooked,"first.dll");
+    require(capture.waiting().find("no instance creation")!=std::string::npos,"late lifecycle is diagnosed before shader compilation");
+    capture.note(VulkanEvent::InstanceCreated);
+    require(capture.waiting().find("device/queue")!=std::string::npos,"instance alone does not prove a device");
+    capture.note(VulkanEvent::DeviceRejected,"missing public device entry point");
+    require(capture.waiting()=="missing public device entry point","retain an actionable device-capture blocker");
+    capture.note(VulkanEvent::DeviceTracked);
+    require(capture.waiting().find("no Win32")!=std::string::npos,"non-Win32 surfaces are not guessed");
+    capture.note(VulkanEvent::SurfaceCreated);capture.note(VulkanEvent::SwapchainTracked);
+    capture.note(VulkanEvent::Presented);capture.note(VulkanEvent::WindowRejected,"Qt UI excluded");
+    require(capture.waiting()=="Qt UI excluded"&&capture.rejectedWindows==1,"ownership failures have a distinct diagnostic");
+    runtime.selectRenderer(RendererFamily::Vulkan);
+    runtime.vulkanEvent(VulkanEvent::QueueMissed,"device predates capture; restart required");
+    runtime.waiting(true,"generic scan must not hide the Vulkan stage");
+    require(!runtime.metrics().observed&&!runtime.metrics().active&&runtime.metrics().processed==1
+            &&runtime.metrics().status.find("no instance creation")!=std::string::npos,
+            "loader/stage diagnostics never fabricate observed game frames or weaken routing");
     for(std::size_t i=0;i<controls.size();++i){
         Parameters v;v.enabled=true;v.values[i]=controls[i].minimum;
         require(v.valid(),"minimum value validation");

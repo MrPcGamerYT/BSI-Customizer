@@ -32,7 +32,6 @@ T.Button {
     background: Rectangle {
         radius: control.shaderStyle.buttonRadius
         color: control.outline
-        gradient: control.primary ? control.shaderStyle.value(control.nativeState, "borderGradient", control.shaderStyle.buttonGradient) : null
         ShaderSurface {
             anchors.fill: parent; anchors.margins: control.quiet ? 0 : 1
             radius: Math.max(0, parent.radius - 1)

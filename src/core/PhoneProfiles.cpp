@@ -308,7 +308,34 @@ const QList<Profile> &catalog()
         {QStringLiteral("OnePlus 13"), QStringLiteral("OnePlus"), QStringLiteral("OnePlus"), QStringLiteral("CPH2649")},
         {QStringLiteral("OnePlus 12"), QStringLiteral("OnePlus"), QStringLiteral("OnePlus"), QStringLiteral("CPH2573")},
         {QStringLiteral("Samsung Galaxy S25 Ultra"), QStringLiteral("samsung"), QStringLiteral("samsung"), QStringLiteral("SM-S938B")},
-        {QStringLiteral("Samsung Galaxy S24 Ultra"), QStringLiteral("samsung"), QStringLiteral("samsung"), QStringLiteral("SM-S928B")}
+        {QStringLiteral("Samsung Galaxy S24 Ultra"), QStringLiteral("samsung"), QStringLiteral("samsung"), QStringLiteral("SM-S928B")},
+        {QStringLiteral("Infinix GT 50 Pro"), QStringLiteral("INFINIX"), QStringLiteral("Infinix"), QStringLiteral("Infinix X6891")},
+        {QStringLiteral("Infinix GT 30 Pro"), QStringLiteral("INFINIX"), QStringLiteral("Infinix"), QStringLiteral("Infinix X6873")},
+        {QStringLiteral("iQOO Neo 10"), QStringLiteral("vivo"), QStringLiteral("iQOO"), QStringLiteral("I2405")},
+        {QStringLiteral("iQOO 15"), QStringLiteral("vivo"), QStringLiteral("iQOO"), QStringLiteral("I2501")},
+        {QStringLiteral("iQOO 15R"), QStringLiteral("vivo"), QStringLiteral("iQOO"), QStringLiteral("I2508")},
+        {QStringLiteral("realme P3 Ultra 5G"), QStringLiteral("realme"), QStringLiteral("realme"), QStringLiteral("RMX5030")},
+        {QStringLiteral("realme P3 5G"), QStringLiteral("realme"), QStringLiteral("realme"), QStringLiteral("RMX5070")},
+        {QStringLiteral("realme GT 7"), QStringLiteral("realme"), QStringLiteral("realme"), QStringLiteral("RMX5061")},
+        {QStringLiteral("realme GT 6T"), QStringLiteral("realme"), QStringLiteral("realme"), QStringLiteral("RMX3853")},
+        {QStringLiteral("realme P4s 5G"), QStringLiteral("realme"), QStringLiteral("realme"), QStringLiteral("RMX5125")},
+        {QStringLiteral("realme GT 8 Pro"), QStringLiteral("realme"), QStringLiteral("realme"), QStringLiteral("RMX5210")},
+        {QStringLiteral("Redmi K60"), QStringLiteral("Xiaomi"), QStringLiteral("Redmi"), QStringLiteral("23013RK75C")},
+        {QStringLiteral("OnePlus 7 Pro"), QStringLiteral("OnePlus"), QStringLiteral("OnePlus"), QStringLiteral("GM1911")},
+        {QStringLiteral("OnePlus 15R"), QStringLiteral("OnePlus"), QStringLiteral("OnePlus"), QStringLiteral("CPH2767")},
+        {QStringLiteral("OnePlus Nord 5"), QStringLiteral("OnePlus"), QStringLiteral("OnePlus"), QStringLiteral("CPH2707")},
+        {QStringLiteral("Xiaomi 14 Ultra"), QStringLiteral("Xiaomi"), QStringLiteral("Xiaomi"), QStringLiteral("24030PN60G")},
+        {QStringLiteral("POCO F5 Pro"), QStringLiteral("Xiaomi"), QStringLiteral("POCO"), QStringLiteral("23013PC75G")},
+        {QStringLiteral("Samsung Galaxy S22"), QStringLiteral("samsung"), QStringLiteral("samsung"), QStringLiteral("SM-S901B")},
+        {QStringLiteral("Samsung Galaxy S22+"), QStringLiteral("samsung"), QStringLiteral("samsung"), QStringLiteral("SM-S906B")},
+        {QStringLiteral("Samsung Galaxy S22 Ultra"), QStringLiteral("samsung"), QStringLiteral("samsung"), QStringLiteral("SM-S908B")},
+        {QStringLiteral("Samsung Galaxy S23"), QStringLiteral("samsung"), QStringLiteral("samsung"), QStringLiteral("SM-S911B")},
+        {QStringLiteral("Samsung Galaxy S23+"), QStringLiteral("samsung"), QStringLiteral("samsung"), QStringLiteral("SM-S916B")},
+        {QStringLiteral("Samsung Galaxy S23 Ultra"), QStringLiteral("samsung"), QStringLiteral("samsung"), QStringLiteral("SM-S918B")},
+        {QStringLiteral("Samsung Galaxy S24"), QStringLiteral("samsung"), QStringLiteral("samsung"), QStringLiteral("SM-S921B")},
+        {QStringLiteral("Samsung Galaxy S24+"), QStringLiteral("samsung"), QStringLiteral("samsung"), QStringLiteral("SM-S926B")},
+        {QStringLiteral("vivo X300 Ultra"), QStringLiteral("vivo"), QStringLiteral("vivo"), QStringLiteral("V2547A")},
+        {QStringLiteral("OPPO Find X9 Ultra"), QStringLiteral("OPPO"), QStringLiteral("OPPO"), QStringLiteral("CPH2841")}
     };
     return profiles;
 }
@@ -359,7 +386,7 @@ State inspect(const QByteArray &image)
     state.applied=installed&&QtResources::sourceUnits(copy,{resourceName()},unitIds,false,true)==0;
     state.detail=state.applied
         ? QStringLiteral("Extra-phone source is installed. Keep the Customizer's local phone helper/recovery data. Select a phone and use native Save changes; game high-FPS options remain game/version dependent.")
-        : QStringLiteral("Ready to add eight phones first in the stock Phone dropdown. Apply adds choices only; it does not change the selected identity or FPS settings. Requires keeping a local helper/recovery folder in Customizer app data.");
+        : QStringLiteral("Ready to add %1 phones first in the stock Phone dropdown. Apply adds choices only; it does not change the selected identity or FPS settings. Requires keeping a local helper/recovery folder in Customizer app data.").arg(catalog().size());
     return state;
 }
 Plan prepare(const QByteArray &image, bool enabled, const QString &runtimeUrl, const QByteArray &originalSource)

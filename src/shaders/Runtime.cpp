@@ -45,6 +45,38 @@ bool Runtime::accepts(Renderer observed){
 }
 Parameters Runtime::settings(){std::lock_guard<std::mutex> lock(mutex);return current;}
 Metrics Runtime::metrics(){std::lock_guard<std::mutex> lock(mutex);return state;}
+void Runtime::waiting(bool hooks,const std::string &status){
+    std::lock_guard<std::mutex> lock(mutex);
+    state.hooks=state.hooks||hooks;
+    // A worker's stale 'not observed' snapshot must not clear a render thread's
+    // newer confirmed active result, or overwrite a precise Vulkan blocker.
+    if(!state.observed)state.status=state.requested==RendererFamily::Vulkan?state.vulkan.waiting():status;
+}
+void Runtime::vulkanEvent(VulkanEvent event,const std::string &detail){
+    std::lock_guard<std::mutex> lock(mutex);state.vulkan.note(event,detail);
+    if(!state.observed&&state.requested==RendererFamily::Vulkan)state.status=state.vulkan.waiting();
+}
+std::string Runtime::gameWindowDiagnostic(std::uintptr_t surface){
+#ifdef _WIN32
+    std::uintptr_t root;{std::lock_guard<std::mutex> lock(mutex);root=host;}
+    HWND window=reinterpret_cast<HWND>(surface),player=reinterpret_cast<HWND>(root);
+    if(!player||!IsWindow(player))return "Vulkan surface captured before the native player HWND was attached; waiting for platform-surface creation.";
+    if(!window||!IsWindow(window))return "Vulkan surface has no live, captured Win32 HWND. Unidentified frames remain untouched.";
+    if(window==player)return "Vulkan surface belongs to the player/UI root, not an identified game child. No UI framebuffer is processed.";
+    DWORD owner=0;GetWindowThreadProcessId(window,&owner);
+    if(owner!=GetCurrentProcessId())return "Vulkan HWND belongs to another process; external game windows are not adopted.";
+    if(!IsChild(player,window))return "Vulkan HWND is not a child of the attached player window; ownership is unproven. No unrelated window is processed.";
+    wchar_t type[160]{};
+    if(!GetClassNameW(window,type,160)||wcsncmp(type,L"Qt",2)==0||wcsncmp(type,L"Chrome",6)==0)
+        return "Vulkan HWND is a Qt/Chrome or unidentified UI surface; it is excluded from game effects.";
+    RECT rect{};
+    if(!GetClientRect(window,&rect)||rect.right<320||rect.bottom<200)
+        return "Captured Vulkan game child is not yet at least 320 by 200 pixels; waiting for native layout.";
+    return {};
+#else
+    (void)surface;return "Win32 game-window ownership checks are unavailable on this platform.";
+#endif
+}
 void Runtime::report(bool hooks,bool observed,bool active,const std::string &status,bool processed,Renderer renderer,bool deviceRequirementsMet){
     std::lock_guard<std::mutex> lock(mutex);
     state.hooks=state.hooks||hooks;

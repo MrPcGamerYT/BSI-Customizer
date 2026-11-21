@@ -59,12 +59,52 @@ void sourceTests()
 {
     const QString original=PhoneProfilesFixture::source();
     QSet<QString> names,models;
-    require(PhoneProfiles::catalog().size()==8,QStringLiteral("eight bounded catalog entries"));
+    require(PhoneProfiles::catalog().size()==35,QStringLiteral("35 bounded Android model entries, retaining the original eight"));
     for(const auto &p:PhoneProfiles::catalog()){
         require(!p.name.isEmpty()&&!p.manufacturer.isEmpty()&&!p.brand.isEmpty()&&!p.model.isEmpty(),QStringLiteral("complete configured manufacturer/brand/model triplet"));
         require(!names.contains(p.name)&&!models.contains(p.model),QStringLiteral("unique names and exact model identities"));names.insert(p.name);models.insert(p.model);
     }
     require(PhoneProfiles::catalog().first().model==QLatin1String("ASUSAI2501A"),QStringLiteral("ROG 9 must use the catalogued model, not a guessed device codename"));
+    const QStringList originalModels{QStringLiteral("ASUSAI2501A"), QStringLiteral("ASUS_AI2401_A"),
+        QStringLiteral("NX789J"), QStringLiteral("NX769J"), QStringLiteral("CPH2649"), QStringLiteral("CPH2573"),
+        QStringLiteral("SM-S938B"), QStringLiteral("SM-S928B")};
+    for(int i=0;i<originalModels.size();++i)
+        require(PhoneProfiles::catalog().at(i).model==originalModels.at(i),QStringLiteral("preserve all original identities and their dropdown order"));
+    const QMap<QString,QStringList> added{
+        {QStringLiteral("Infinix GT 50 Pro"), {QStringLiteral("INFINIX"), QStringLiteral("Infinix"), QStringLiteral("Infinix X6891")}},
+        {QStringLiteral("Infinix GT 30 Pro"), {QStringLiteral("INFINIX"), QStringLiteral("Infinix"), QStringLiteral("Infinix X6873")}},
+        {QStringLiteral("iQOO Neo 10"), {QStringLiteral("vivo"), QStringLiteral("iQOO"), QStringLiteral("I2405")}},
+        {QStringLiteral("iQOO 15"), {QStringLiteral("vivo"), QStringLiteral("iQOO"), QStringLiteral("I2501")}},
+        {QStringLiteral("iQOO 15R"), {QStringLiteral("vivo"), QStringLiteral("iQOO"), QStringLiteral("I2508")}},
+        {QStringLiteral("realme P3 Ultra 5G"), {QStringLiteral("realme"), QStringLiteral("realme"), QStringLiteral("RMX5030")}},
+        {QStringLiteral("realme P3 5G"), {QStringLiteral("realme"), QStringLiteral("realme"), QStringLiteral("RMX5070")}},
+        {QStringLiteral("realme GT 7"), {QStringLiteral("realme"), QStringLiteral("realme"), QStringLiteral("RMX5061")}},
+        {QStringLiteral("realme GT 6T"), {QStringLiteral("realme"), QStringLiteral("realme"), QStringLiteral("RMX3853")}},
+        {QStringLiteral("realme P4s 5G"), {QStringLiteral("realme"), QStringLiteral("realme"), QStringLiteral("RMX5125")}},
+        {QStringLiteral("realme GT 8 Pro"), {QStringLiteral("realme"), QStringLiteral("realme"), QStringLiteral("RMX5210")}},
+        {QStringLiteral("Redmi K60"), {QStringLiteral("Xiaomi"), QStringLiteral("Redmi"), QStringLiteral("23013RK75C")}},
+        {QStringLiteral("OnePlus 7 Pro"), {QStringLiteral("OnePlus"), QStringLiteral("OnePlus"), QStringLiteral("GM1911")}},
+        {QStringLiteral("OnePlus 15R"), {QStringLiteral("OnePlus"), QStringLiteral("OnePlus"), QStringLiteral("CPH2767")}},
+        {QStringLiteral("OnePlus Nord 5"), {QStringLiteral("OnePlus"), QStringLiteral("OnePlus"), QStringLiteral("CPH2707")}},
+        {QStringLiteral("Xiaomi 14 Ultra"), {QStringLiteral("Xiaomi"), QStringLiteral("Xiaomi"), QStringLiteral("24030PN60G")}},
+        {QStringLiteral("POCO F5 Pro"), {QStringLiteral("Xiaomi"), QStringLiteral("POCO"), QStringLiteral("23013PC75G")}},
+        {QStringLiteral("Samsung Galaxy S22"), {QStringLiteral("samsung"), QStringLiteral("samsung"), QStringLiteral("SM-S901B")}},
+        {QStringLiteral("Samsung Galaxy S22+"), {QStringLiteral("samsung"), QStringLiteral("samsung"), QStringLiteral("SM-S906B")}},
+        {QStringLiteral("Samsung Galaxy S22 Ultra"), {QStringLiteral("samsung"), QStringLiteral("samsung"), QStringLiteral("SM-S908B")}},
+        {QStringLiteral("Samsung Galaxy S23"), {QStringLiteral("samsung"), QStringLiteral("samsung"), QStringLiteral("SM-S911B")}},
+        {QStringLiteral("Samsung Galaxy S23+"), {QStringLiteral("samsung"), QStringLiteral("samsung"), QStringLiteral("SM-S916B")}},
+        {QStringLiteral("Samsung Galaxy S23 Ultra"), {QStringLiteral("samsung"), QStringLiteral("samsung"), QStringLiteral("SM-S918B")}},
+        {QStringLiteral("Samsung Galaxy S24"), {QStringLiteral("samsung"), QStringLiteral("samsung"), QStringLiteral("SM-S921B")}},
+        {QStringLiteral("Samsung Galaxy S24+"), {QStringLiteral("samsung"), QStringLiteral("samsung"), QStringLiteral("SM-S926B")}},
+        {QStringLiteral("vivo X300 Ultra"), {QStringLiteral("vivo"), QStringLiteral("vivo"), QStringLiteral("V2547A")}},
+        {QStringLiteral("OPPO Find X9 Ultra"), {QStringLiteral("OPPO"), QStringLiteral("OPPO"), QStringLiteral("CPH2841")}}
+    };
+    for(auto it=added.cbegin();it!=added.cend();++it){
+        bool found=false;
+        for(const auto &profile:PhoneProfiles::catalog())if(profile.name==it.key())
+            found=QStringList{profile.manufacturer,profile.brand,profile.model}==it.value();
+        require(found,QStringLiteral("requested Android identity and case-sensitive manufacturer/brand/model: ")+it.key());
+    }
     for(const auto &base:{original,QString(original).replace(QLatin1String("\n"),QLatin1String("\r\n")),QStringLiteral("// unrelated user comment\n")+original}){
         const auto add=PhoneProfiles::prepareSource(base,true);require(add.ok,add.error);
         const auto repeat=PhoneProfiles::prepareSource(add.output,true);require(repeat.ok&&repeat.output==add.output,QStringLiteral("idempotent source add: ")+repeat.error);
@@ -194,6 +234,50 @@ void diskCycle(const QByteArray &image,bool negatives)
     }
     require(QDir(root).removeRecursively(),QStringLiteral("clean only this test's per-target data"));
 }
+void catalogUpdateCycle(const QByteArray &image)
+{
+    QTemporaryDir directory;require(directory.isValid(),QStringLiteral("disposable catalog-update EXE directory"));
+    const QString exe=directory.filePath(QStringLiteral("HD-Player.exe"));write(exe,image);
+    const QString canonical=QFileInfo(exe).canonicalFilePath();
+    const QString root=QDir(QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation)).filePath(
+        QStringLiteral("phone-profiles/")+QString::fromLatin1(hash(canonical.toUtf8())));
+    require(QDir().mkpath(root),QStringLiteral("stage only this test's recovery folder"));
+    const QByteArray oldScript=QByteArray("// authored prior-catalog fixture, never executed\n")+PhoneProfiles::runtimeJavascript();
+    const QString oldHelper=QDir(root).filePath(QStringLiteral("PhoneProfiles-%1.js").arg(QString::fromLatin1(hash(oldScript))));
+    const QString oldUrl=QUrl::fromLocalFile(oldHelper).toString(QUrl::FullyEncoded);
+    const QString snapshot=QDir(root).filePath(QStringLiteral("recovery.json"));
+    const auto old=PhoneProfiles::prepare(image,true,oldUrl);require(old.ok,QStringLiteral("prepare a prior immutable helper URL: ")+old.error);
+    const QJsonObject record{{QStringLiteral("schema"),QStringLiteral("bsi.phone-profiles.v1")},
+        {QStringLiteral("target"),canonical},{QStringLiteral("original"),QString::fromLatin1(old.beforeSource.toBase64())},
+        {QStringLiteral("originalSha256"),QString::fromLatin1(hash(old.beforeSource))},
+        {QStringLiteral("patchedSha256"),QString::fromLatin1(hash(old.afterSource))},
+        {QStringLiteral("helperSha256"),QString::fromLatin1(hash(oldScript))}};
+    write(exe,old.output);write(oldHelper,oldScript);write(snapshot,QJsonDocument(record).toJson(QJsonDocument::Compact));
+    // Fail after staging the two-generation record, before replacing the EXE.
+    // Removal/retry must still accept ONLY the exact old import/native bytes.
+    require(QDir().mkpath(exe+QStringLiteral(".bak")),QStringLiteral("hold an invalid backup destination during update"));
+    require(!PhoneProfilesInstall::apply(exe,true).ok&&read(exe)==old.output,QStringLiteral("failed catalog update preserves the current player"));
+    auto staged=QJsonDocument::fromJson(read(snapshot)).object();
+    require(staged.value(QStringLiteral("previousHelperSha256")).toString().toLatin1()==hash(oldScript),QStringLiteral("failed update keeps exact previous helper evidence"));
+    require(QDir().rmdir(exe+QStringLiteral(".bak")),QStringLiteral("remove disposable backup failure before testing recovery"));
+    auto tampered=staged;tampered.insert(QStringLiteral("previousPatchedSha256"),QStringLiteral("invalid"));
+    write(snapshot,QJsonDocument(tampered).toJson(QJsonDocument::Compact));
+    require(!PhoneProfilesInstall::apply(exe,false).ok&&read(exe)==old.output,QStringLiteral("tampered previous-generation recovery cannot authorize removal"));
+    write(snapshot,QJsonDocument(staged).toJson(QJsonDocument::Compact));
+    const auto recovered=PhoneProfilesInstall::apply(exe,false);
+    require(recovered.ok&&resources(read(exe))==resources(image),QStringLiteral("failed update remains exactly removable with the newer build: ")+recovered.msg);
+    // Restore the authored old state and complete a real one-write update.
+    write(exe,old.output);write(snapshot,QJsonDocument(record).toJson(QJsonDocument::Compact));
+    const auto updated=PhoneProfilesInstall::apply(exe,true);
+    require(updated.ok,QStringLiteral("verified old catalog migrates to the new content-addressed helper: ")+updated.msg);
+    require(read(exe).size()==image.size()&&PhoneProfiles::inspect(read(exe)).applied&&read(oldHelper)==oldScript,
+            QStringLiteral("catalog update neither grows the EXE nor rewrites/deletes the previous immutable helper"));
+    require(read(exe+QStringLiteral(".bak"))==old.output,QStringLiteral("existing installed EXE is backed up, not a transient stock intermediate"));
+    const auto after=read(exe);
+    require(PhoneProfilesInstall::apply(exe,true).ok&&read(exe)==after,QStringLiteral("updated catalog reapply is an EXE no-op"));
+    require(PhoneProfilesInstall::apply(exe,false).ok&&resources(read(exe))==resources(image),QStringLiteral("updated catalog restores the original native source, not the prior import"));
+    require(QDir(root).removeRecursively(),QStringLiteral("clean test-only catalog-update recovery"));
+}
 }
 int main(int argc,char **argv)
 {
@@ -204,6 +288,7 @@ int main(int argc,char **argv)
     require(!QFileInfo::exists(testData),QStringLiteral("unique test-only application-data directory"));
     sourceTests();imageCycle(fixture(PhoneProfilesFixture::source()),windowsRuntimeUrl());
     diskCycle(fixture(PhoneProfilesFixture::source()),true);
+    catalogUpdateCycle(fixture(PhoneProfilesFixture::source()));
     imageCycle(fixture(QString(QChar(0xfeff))+PhoneProfilesFixture::source()));
     const auto args=app.arguments();
     if(args.size()==3&&args.at(1)==QLatin1String("--export")){
@@ -229,6 +314,6 @@ int main(int argc,char **argv)
         }
     }
     require(!QFileInfo::exists(testData)||QDir(testData).removeRecursively(),QStringLiteral("clean unique test-only application data"));
-    std::puts("PASS: eight model presets, stock-control source extension, strict contract/tamper/URL refusal, realistic helper URLs, missing/edited snapshot and helper refusal, writer locking, verified disk backup/install/removal/retry, idempotence, no EXE growth/import changes, unrelated resources preserved and exact decoded native-source removal");
+    std::puts("PASS: 35 distinct Android model presets, stock-control source extension, strict contract/tamper/URL refusal, realistic helper URLs, missing/edited snapshot and helper refusal, writer locking, verified disk backup/install/removal/retry, idempotence, no EXE growth/import changes, unrelated resources preserved and exact decoded native-source removal");
     std::puts("LIMIT: source/resource contract tests, not an installed emulator, guest Android identity or per-game 90/120/144-FPS certification");
 }

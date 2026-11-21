@@ -66,7 +66,7 @@ match = re.search(
 )
 assert match, "Could not find the generated Settings-window QML template"
 replacement = match.group(1)
-assert "BSI v19" in replacement
+assert "BSI v20" in replacement
 assert "pSettingsItems.pSettingElements" in replacement
 # The About page publishes the hidden-tab list and the icon map to the shell.
 # It must find that shell by walking up: counting parents landed on the window
@@ -197,8 +197,8 @@ assert "clip:true" in replacement, \
 assert "item.anchors.fill=item.parent" in replacement
 # The native page is still a flat centred column, not an extra content card.
 # The latest request explicitly adds a selected-tab effect, including its icon.
-assert "Item{width:Math.min(r.width-48,568);x:(r.width-width)/2;height:r.height-118" in replacement, \
-    "the page host must leave room for the footer inside the rounded window"
+assert "Rectangle{color:r.color;width:Math.min(r.width-48,568);x:(r.width-width)/2;height:r.height-118" in replacement, \
+    "the full native page/footer must have a flat opaque foundation inside the rounded window"
 assert "radius:12" not in replacement, "do not wrap the native page in a new card"
 assert "Rectangle{anchors.fill:parent;radius:6;color:t.color;opacity:index==pCurrentTabIndex?.2:parent.containsMouse?.1:0}" in replacement, \
     "selection and quieter hover must use the label's native theme colour"
@@ -210,7 +210,7 @@ assert "GraphicalEffects" not in replacement and "ShaderEffect" not in replaceme
     "selection must work on both player Qt generations without optional effects"
 assert "Rectangle{id:r;property var c:UiTheme.colors;anchors.fill:parent;radius:14;color:r.c.primary80" in replacement, \
     "the window keeps its native base colour; the About-hosted material decorates that surface"
-assert "StackLayout{id:iSelectedSettingControl;anchors.fill:parent;currentIndex:pCurrentTabIndex" in replacement
+assert "StackLayout{anchors.fill:parent;currentIndex:pCurrentTabIndex" in replacement
 # Keep a coarse template-bloat guard, but this is not proof that the compressed
 # whole window fits: native callbacks/prefix and compression entropy matter too.
 # settings_panel_window_budget_test reconstructs the complete 2468-byte legacy

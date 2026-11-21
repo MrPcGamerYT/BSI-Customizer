@@ -1,12 +1,8 @@
-// Self-contained paint: no layer/FBO, opacity mask or host-style dependency.
+// Flat, owned public-API paint for controls, including moving slider handles.
+// Do not replace native materials or add dynamic gradients/layers/masks here.
+// Keep the conservative surface path separate from the shell's glass styling.
 import QtQuick 2.15
 Rectangle {
-    id: surface
     property color base: "transparent"
-    property real reflection: 1.12
     color: base
-    gradient: Gradient {
-        GradientStop { color: Qt.lighter(surface.base, surface.reflection) }
-        GradientStop { position: 1; color: surface.base }
-    }
 }

@@ -115,13 +115,29 @@ if(WIN32)
     add_test(NAME shader-d3d11-warp-pixels COMMAND shader-d3d-pixels-test d3d11)
     add_test(NAME shader-d3d12-warp-pixels COMMAND shader-d3d-pixels-test d3d12)
     set(minhook_dir "${shader_dir}/../third_party/minhook")
-    add_executable(shader-dxgi-hooks-test dxgi_hooks_test.cpp
+    add_library(shader-presentation-test-code OBJECT
         "${shader_dir}/Runtime.cpp" "${shader_dir}/PresentationHooks.cpp" "${shader_dir}/DxgiHooks.cpp"
         "${shader_dir}/VulkanHooks.cpp" "${shader_dir}/GlPipeline.cpp" "${shader_dir}/VulkanPipeline.cpp"
         "${shader_dir}/D3d11Pipeline.cpp" "${shader_dir}/D3d12Pipeline.cpp"
         "${minhook_dir}/src/buffer.c" "${minhook_dir}/src/hook.c" "${minhook_dir}/src/trampoline.c" "${minhook_dir}/src/hde/hde64.c")
-    target_include_directories(shader-dxgi-hooks-test PRIVATE "${shader_dir}" "${minhook_dir}/include" "${shader_dir}/../third_party/vulkan/include")
-    target_compile_definitions(shader-dxgi-hooks-test PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
-    target_link_libraries(shader-dxgi-hooks-test PRIVATE user32 gdi32 psapi d3d11 dxgi)
+    target_include_directories(shader-presentation-test-code PUBLIC "${shader_dir}" "${minhook_dir}/include" "${shader_dir}/../third_party/vulkan/include")
+    target_compile_definitions(shader-presentation-test-code PUBLIC WIN32_LEAN_AND_MEAN NOMINMAX)
+    target_link_libraries(shader-presentation-test-code PUBLIC user32 gdi32 psapi)
+    add_executable(shader-dxgi-hooks-test dxgi_hooks_test.cpp)
+    target_link_libraries(shader-dxgi-hooks-test PRIVATE shader-presentation-test-code d3d11 dxgi)
     add_test(NAME shader-dxgi-presentation-hooks COMMAND shader-dxgi-hooks-test)
+    # No ICD is available on every Windows runner. These clearly labelled
+    # dispatch doubles exercise the actual MinHook/provider/HWND lifecycle;
+    # they never substitute for the separate real Vulkan pipeline pixel tests.
+    foreach(provider A B)
+        add_library(shader-vulkan-fixture-${provider} SHARED vulkan_loader_fixture.cpp)
+        target_include_directories(shader-vulkan-fixture-${provider} PRIVATE "${shader_dir}/../third_party/vulkan/include")
+        target_compile_definitions(shader-vulkan-fixture-${provider} PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
+        set_target_properties(shader-vulkan-fixture-${provider} PROPERTIES PREFIX "" OUTPUT_NAME "BsiVulkanFixture${provider}")
+    endforeach()
+    add_executable(shader-vulkan-hooks-test vulkan_hooks_test.cpp)
+    target_link_libraries(shader-vulkan-hooks-test PRIVATE shader-presentation-test-code)
+    add_dependencies(shader-vulkan-hooks-test shader-vulkan-fixture-A shader-vulkan-fixture-B)
+    add_test(NAME shader-vulkan-loader-hooks-contract COMMAND shader-vulkan-hooks-test
+        "$<TARGET_FILE:shader-vulkan-fixture-A>" "$<TARGET_FILE:shader-vulkan-fixture-B>")
 endif()

@@ -1,6 +1,7 @@
 #pragma once
 #include "Parameters.h"
 #include "RendererCapabilities.h"
+#include "VulkanCapture.h"
 #include <cstdint>
 #include <mutex>
 #include <string>
@@ -11,6 +12,7 @@ struct Metrics {
     Renderer renderer=Renderer::Unknown;
     RendererFamily requested=RendererFamily::Automatic;
     std::uint64_t processed=0;
+    VulkanCapture vulkan;
     std::string status="Waiting for the game's presentation API. Multi-renderer support is not complete.";
 };
 // One state per HD-Player process; Qt objects never cross the render-thread
@@ -26,6 +28,9 @@ public:
     bool accepts(Renderer observed);
     Parameters settings();
     Metrics metrics();
+    void waiting(bool hooks,const std::string &status);
+    void vulkanEvent(VulkanEvent event,const std::string &detail={});
+    std::string gameWindowDiagnostic(std::uintptr_t surface);
     void report(bool hooks,bool observed,bool active,const std::string &status,bool processed=false,
                 Renderer renderer=Renderer::Unknown,bool deviceRequirementsMet=false);
     // Identity without a size gate: a game child may still be 1x1 while its

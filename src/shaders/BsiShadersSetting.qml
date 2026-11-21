@@ -299,7 +299,8 @@ Item {
                     Text {
                         objectName: "shaderRendererStatus"
                         Layout.fillWidth: true; wrapMode: Text.Wrap
-                        text: qsTr("Observed game API: ") + Engine.metrics.renderer + "\n" + Engine.metrics.status
+                        text: qsTr("Requested API: ") + Engine.metrics.requestedRenderer + "\n"
+                            + qsTr("Observed game API: ") + Engine.metrics.renderer + "\n" + Engine.metrics.status
                         color: Engine.metrics.active ? look.accent : look.muted; font: look.smallFont
                     }
                     Text {
@@ -309,6 +310,21 @@ Item {
                             + qsTr(" · Game surface observed: ") + (Engine.metrics.gameSurfaceObserved ? qsTr("yes") : qsTr("no"))
                             + qsTr(" · Processing active: ") + (Engine.metrics.active ? qsTr("yes") : qsTr("no"))
                         color: look.muted; font: look.smallFont
+                    }
+                    Text {
+                        objectName: "shaderCaptureDetails"
+                        visible: Engine.metrics.requestedRenderer === "Vulkan"
+                        Layout.fillWidth: true; wrapMode: Text.Wrap
+                        text: qsTr("Vulkan capture (not processed game frames): ")
+                            + Engine.metrics.vulkanLoaders + qsTr(" loaders · ") + Engine.metrics.vulkanInstances + qsTr(" instances · ")
+                            + Engine.metrics.vulkanDevices + qsTr(" devices · ") + Engine.metrics.vulkanSurfaces + qsTr(" Win32 surfaces · ")
+                            + Engine.metrics.vulkanSwapchains + qsTr(" swapchains · ") + Engine.metrics.vulkanPresents + qsTr(" presents")
+                        color: look.muted; font: look.smallFont
+                    }
+                    ShaderButton {
+                        objectName: "shaderCopyStatus"
+                        shaderStyle: look; text: qsTr("Copy rendering status")
+                        onClicked: Engine.copyDiagnostics()
                     }
                     Text {
                         Layout.fillWidth: true; wrapMode: Text.Wrap
