@@ -30,6 +30,39 @@ QVariantList defaultAboutLinks()
     };
 }
 
+// About buttons are free-form: up to eight custom buttons, each with any
+// label and HTTP(S) URL. A row may stay blank (no label and no URL) to keep a
+// slot reserved; anything malformed is dropped instead of resetting the list.
+QVariantList sanitizeAboutLinks(const QVariantList &links)
+{
+    QVariantList clean;
+    for (const QVariant &value : links) {
+        if (clean.size() >= 8) break;
+        const QVariantMap row = value.toMap();
+        const QString kind = row.value(QStringLiteral("kind")).toString();
+        const QString title = row.value(QStringLiteral("title")).toString().trimmed().left(64);
+        const QString urlText = row.value(QStringLiteral("url")).toString().trimmed().left(512);
+        if (kind != QStringLiteral("github") && kind != QStringLiteral("discord")
+            && kind != QStringLiteral("youtube") && kind != QStringLiteral("custom"))
+            continue;
+        if (title.isEmpty() != urlText.isEmpty())
+            continue;
+        if (!urlText.isEmpty()) {
+            const QUrl url(urlText);
+            const QString scheme = url.scheme().toLower();
+            if (!url.isValid() || url.host().isEmpty()
+                || (scheme != QStringLiteral("https") && scheme != QStringLiteral("http")))
+                continue;
+        }
+        clean.append(QVariantMap {
+            { QStringLiteral("kind"), kind },
+            { QStringLiteral("title"), title },
+            { QStringLiteral("url"), urlText }
+        });
+    }
+    return clean;
+}
+
 } // namespace
 
 SettingsManager::SettingsManager(QObject *parent, bool initialize)
@@ -50,9 +83,15 @@ SettingsManager::SettingsManager(QObject *parent, bool initialize)
     if (m_aboutTagline.isEmpty())
         m_aboutTagline = QStringLiteral("BlueStacks tools · with contributor Nova");
     m_aboutLinks = settings.value(QStringLiteral("about/links")).toList();
-    if (m_aboutLinks.size() != 4) {
+    if (!settings.contains(QStringLiteral("about/links"))) {
         m_aboutLinks = defaultAboutLinks();
         settings.setValue(QStringLiteral("about/links"), m_aboutLinks);
+    } else {
+        const QVariantList clean = sanitizeAboutLinks(m_aboutLinks);
+        if (clean != m_aboutLinks) {
+            m_aboutLinks = clean;
+            settings.setValue(QStringLiteral("about/links"), m_aboutLinks);
+        }
     }
     m_settingsPanelProfile = settings.value(QStringLiteral("settingsPanel/profile")).toMap();
     // Startup restores preferences only. Registry/install discovery and DLL
@@ -137,18 +176,18 @@ void SettingsManager::setSettingsPanelProfile(const QVariantMap &profile)
 
 void SettingsManager::setAboutLinks(const QVariantList &links)
 {
-    if (links.size() != 4)
+    if (links.size() > 8)
         return;
 
     QVariantList cleanLinks;
-    cleanLinks.reserve(4);
+    cleanLinks.reserve(links.size());
     for (const QVariant &value : links) {
         const QVariantMap row = value.toMap();
         const QString kind = row.value(QStringLiteral("kind")).toString();
         const QString title = row.value(QStringLiteral("title")).toString().trimmed().left(64);
         const QString urlText = row.value(QStringLiteral("url")).toString().trimmed().left(512);
         if (kind != QStringLiteral("github") && kind != QStringLiteral("discord")
-            && kind != QStringLiteral("youtube"))
+            && kind != QStringLiteral("youtube") && kind != QStringLiteral("custom"))
             return;
         if (title.isEmpty() != urlText.isEmpty())
             return;

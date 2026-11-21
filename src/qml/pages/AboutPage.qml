@@ -10,30 +10,58 @@ Item {
     signal notify(string message)
 
     property bool editingProfile: false
+    // Working copy of the About buttons while the editor is open. Each entry is
+    // { kind, title, url }; kinds are "github", "discord", "youtube" or
+    // "custom" (generic link icon). Up to eight buttons, any label and URL.
+    property var draftLinks: []
 
     function iconFor(kind, color) {
         if (kind === "discord") return Icons.icon(Icons.discord, color);
         if (kind === "youtube") return Icons.icon(Icons.youtube, color);
+        if (kind === "custom") return Icons.icon(Icons.link, color);
         return Icons.icon(Icons.github, color);
     }
 
     function beginProfileEdit() {
+        page.draftLinks = settings.aboutLinks.map(l => ({ kind: l.kind, title: l.title, url: l.url }));
         page.editingProfile = true;
         developerNameInput.text = settings.aboutDeveloperName;
         taglineInput.text = settings.aboutTagline;
     }
 
-    function saveProfile() {
-        const links = [];
-        for (let i = 0; i < profileLinkRepeater.count; ++i) {
+    function captureDraftLinks() {
+        const rows = [];
+        for (let i = 0; i < page.draftLinks.length; ++i) {
             const row = profileLinkRepeater.itemAt(i);
-            if (!row) continue;
-            links.push({
-                kind: settings.aboutLinks[i].kind,
-                title: row.titleInput.text.trim(),
-                url: row.urlInput.text.trim()
+            const kinds = ["github", "discord", "youtube", "custom"];
+            rows.push({
+                kind: row ? kinds[Math.max(0, row.kindBox.currentIndex)] : page.draftLinks[i].kind,
+                title: row ? row.titleInput.text : (page.draftLinks[i].title || ""),
+                url: row ? row.urlInput.text : (page.draftLinks[i].url || "")
             });
         }
+        page.draftLinks = rows;
+    }
+
+    function addProfileLink() {
+        page.captureDraftLinks();
+        if (page.draftLinks.length >= 8) {
+            page.notify(qsTr("You can use up to eight About buttons."));
+            return;
+        }
+        page.draftLinks = page.draftLinks.concat([{ kind: "custom", title: "", url: "" }]);
+    }
+
+    function removeProfileLink(index) {
+        page.captureDraftLinks();
+        const copy = page.draftLinks.slice();
+        copy.splice(index, 1);
+        page.draftLinks = copy;
+    }
+
+    function saveProfile() {
+        page.captureDraftLinks();
+        const links = page.draftLinks.map(l => ({ kind: l.kind, title: l.title.trim(), url: l.url.trim() }));
         for (let i = 0; i < links.length; ++i) {
             if ((links[i].title.length === 0) !== (links[i].url.length === 0)) {
                 page.notify(qsTr("For each link, enter both a label and an HTTP or HTTPS URL, or leave both blank."));
@@ -60,6 +88,7 @@ Item {
             { kind: "youtube", title: qsTr("Mr.Pc Gamer on YouTube"), url: "https://www.youtube.com/@MR.PC_GAMER_YT?sub_confirmation=1" },
             { kind: "youtube", title: qsTr("Romulos on YouTube"), url: "https://www.youtube.com/@Romulus_FF?sub_confirmation=1" }
         ];
+        page.draftLinks = [];
         page.editingProfile = false;
         page.notify(qsTr("Default About profile restored."));
     }
@@ -87,7 +116,7 @@ Item {
             spacing: 13
 
             // Centered app identity: icon first, then the editable developer
-            // identity and a clean four-link grid.
+            // identity and the custom link-button grid.
             Card {
                 Layout.fillWidth: true
                 pad: 18
@@ -235,8 +264,8 @@ Item {
                 }
             }
 
-            // All visible profile text and four external links can be adjusted
-            // here and are stored in this user's QSettings profile.
+            // All visible profile text and every custom button link can be
+            // adjusted here and are stored in this user's QSettings profile.
             Card {
                 Layout.fillWidth: true
                 visible: page.editingProfile
@@ -274,20 +303,40 @@ Item {
                     }
                     Repeater {
                         id: profileLinkRepeater
-                        model: settings.aboutLinks
+                        model: page.draftLinks
                         delegate: RowLayout {
                             id: linkEditor
                             required property var modelData
                             required property int index
                             Layout.fillWidth: true
                             spacing: 8
+                            ComboBox {
+                                id: linkKindBox
+                                property var kinds: ["github", "discord", "youtube", "custom"]
+                                Layout.preferredWidth: 104
+                                model: [qsTr("GitHub"), qsTr("Discord"), qsTr("YouTube"), qsTr("Custom")]
+                                currentIndex: Math.max(0, kinds.indexOf(linkEditor.modelData.kind || "custom"))
+                                font.pixelSize: 10
+                                contentItem: Text {
+                                    text: linkKindBox.displayText
+                                    color: Theme.text
+                                    font.pixelSize: 10
+                                    verticalAlignment: Text.AlignVCenter
+                                    elide: Text.ElideRight
+                                }
+                                background: Rectangle {
+                                    color: Theme.cardLow
+                                    radius: 7
+                                    border.color: Theme.border
+                                }
+                            }
                             StudioTextField {
                                 id: linkTitleInput
                                 property alias value: linkTitleInput.text
                                 Layout.preferredWidth: 205
                                 Layout.fillWidth: true
                                 text: linkEditor.modelData.title || ""
-                                placeholderText: qsTr("Link label")
+                                placeholderText: qsTr("Button label")
                                 color: Theme.text
                                 font.pixelSize: 10
                                 background: Rectangle { color: Theme.cardLow; radius: 7; border.color: Theme.border }
@@ -302,9 +351,24 @@ Item {
                                 font.pixelSize: 10
                                 background: Rectangle { color: Theme.cardLow; radius: 7; border.color: Theme.border }
                             }
+                            ActionButton {
+                                text: "\u2715"
+                                onClicked: page.removeProfileLink(linkEditor.index)
+                            }
                             property alias titleInput: linkTitleInput
                             property alias urlInput: linkUrlInput
+                            property alias kindBox: linkKindBox
                         }
+                    }
+                    RowLayout {
+                        Layout.fillWidth: true
+                        spacing: 8
+                        ActionButton {
+                            text: page.draftLinks.length >= 8 ? qsTr("8 buttons max") : qsTr("+ Add button")
+                            enabled: page.draftLinks.length < 8
+                            onClicked: page.addProfileLink()
+                        }
+                        Item { Layout.fillWidth: true }
                     }
                     RowLayout {
                         Layout.fillWidth: true

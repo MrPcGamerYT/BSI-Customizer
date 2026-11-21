@@ -939,7 +939,7 @@ MouseArea{anchors.fill:parent;hoverEnabled:true;cursorShape:Qt.PointingHandCurso
 onEntered:parent.hovered=true;onExited:parent.hovered=false
 onClicked:{var t=String(modelData.url||"");if(/^https?:\/\//i.test(t))Qt.openUrlExternally(t)}}}}
 Text{visible:pDeveloperLinks.length===0
-text:qsTranslate("QObject","Add up to four developer links in BSI Customizer.")
+text:qsTranslate("QObject","Add custom developer buttons in BSI Customizer.")
 color:UiTheme.colors.primary30;font:UiTheme.fonts.bodySmall
 horizontalAlignment:Text.AlignHCenter;wrapMode:Text.Wrap;Layout.fillWidth:true}
 Item{Layout.fillWidth:true;Layout.preferredHeight:28}}}}
@@ -1077,8 +1077,8 @@ QVariantList operationsFor(const QMap<QString, QByteArray> &replacement)
 bool validateProfile(const QString &developerName, const QVariantList &links, QString *error)
 {
     if (developerName.trimmed().isEmpty() || developerName.trimmed().size() > 80
-        || developerName.contains(QChar(0)) || links.size() > 4) {
-        *error = QStringLiteral("Enter a developer name up to 80 characters and no more than four About links.");
+        || developerName.contains(QChar(0)) || links.size() > 8) {
+        *error = QStringLiteral("Enter a developer name up to 80 characters and no more than eight About buttons.");
         return false;
     }
     for (const QVariant &value : links) {

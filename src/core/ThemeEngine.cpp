@@ -1596,6 +1596,16 @@ QStringList nameVariants(const QString &name)
     return (name == lo) ? QStringList { name } : QStringList { name, lo };
 }
 
+// Identifier-continuation characters. QML color names (primary90,
+// accentNormal, ...) are ASCII identifiers; binary surroundings like a raw
+// 0x4242 padding pair are NOT identifier text and must not veto a name.
+bool isIdentChar(const QChar &ch)
+{
+    const ushort u = ch.unicode();
+    return (u >= '0' && u <= '9') || (u >= 'A' && u <= 'Z') || (u >= 'a' && u <= 'z')
+           || u == '_' || u == '$';
+}
+
 bool qmlNameEndOk(const QByteArray &data, qint64 end, const QString &enc)
 {
     QChar ch;
@@ -1608,7 +1618,25 @@ bool qmlNameEndOk(const QByteArray &data, qint64 end, const QString &enc)
             return true;
         ch = QChar(uchar(data[int(end)]));
     }
-    return !(ch.isLetterOrNumber() || ch == QLatin1Char('_'));
+    return !isIdentChar(ch);
+}
+
+// Symmetric to qmlNameEndOk: the name must not be the tail of a longer
+// identifier ("transparent" inside "dangerTransparent", "white" inside
+// "snowwhite" ...).
+bool qmlNameStartOk(const QByteArray &data, qint64 start, const QString &enc)
+{
+    QChar ch;
+    if (enc == QLatin1String("utf-16-le")) {
+        if (start < 2)
+            return true;
+        ch = QChar(uchar(data[int(start) - 2]) | uchar(data[int(start) - 1]) << 8);
+    } else {
+        if (start < 1)
+            return true;
+        ch = QChar(uchar(data[int(start) - 1]));
+    }
+    return !isIdentChar(ch);
 }
 
 QList<QPair<qint64, QString>> iterQmlNames(const QByteArray &data, const QString &name)
@@ -1622,7 +1650,7 @@ QList<QPair<qint64, QString>> iterQmlNames(const QByteArray &data, const QString
                 pos = data.indexOf(pat, pos);
                 if (pos < 0)
                     break;
-                if (qmlNameEndOk(data, pos + pat.size(), enc))
+                if (qmlNameEndOk(data, pos + pat.size(), enc) && qmlNameStartOk(data, pos, enc))
                     out << qMakePair(qint64(pos), enc);
                 pos += pat.size();
             }
@@ -1631,50 +1659,107 @@ QList<QPair<qint64, QString>> iterQmlNames(const QByteArray &data, const QString
     return out;
 }
 
-// "#RRGGBB"/"#AARRGGBB" right after a color name (ascii or utf-16le).
+// The color VALUE that belongs to a color name. Only two layouts are
+// accepted; anything else (SVG attribute values like fill="white" followed by
+// stroke="#EB2C43", unrelated nearby text...) must not be touched:
+//
+//   A. QML binding text:      name  [:|=]  ["']  #RRGGBB(AA)  ["']
+//   B. Compiled string pool:  name  [zero pad]  <QStringData header with
+//                              size == value length>  #RRGGBB(AA)  (utf-16le)
+//
+// Layout B is how the palette is stored in compiled Qt 5 players: the value
+// is a separate utf-16le string record right after the name's record
+// (24-byte header: FFFFFFFF, size, alloc=0, offset=24 twice, flags=0).
 bool findHexAfter(const QByteArray &data, qint64 namePos, qint64 nameLen, const QString &enc,
                   qint64 *hexOff, int *hexLen, QByteArray *hexRaw)
 {
     const qint64 tailStart = namePos + nameLen;
-    const QByteArray tail = data.mid(tailStart, qMin<qint64>(56, data.size() - tailStart));
+    const QByteArray tail = data.mid(tailStart, qMin<qint64>(64, data.size() - tailStart));
+    const bool u16 = (enc != QLatin1String("ascii"));
+    const int step = u16 ? 2 : 1;
 
-    if (enc == QLatin1String("ascii")) {
-        static const QRegularExpression re(QStringLiteral("#[0-9A-Fa-f]{6,8}"));
-        const auto m = re.match(QString::fromLatin1(tail));
-        if (!m.hasMatch())
+    // Code unit at byte offset i (utf-16le word, or one byte).
+    auto unitAt = [&tail, u16](int i) -> int {
+        if (u16)
+            return uchar(tail[i]) | (uchar(tail[i + 1]) << 8);
+        return uchar(tail[i]);
+    };
+
+    // "#RRGGBB" (7 chars) or "#AARRGGBB" (9 chars) at byte offset `at`; the
+    // value must not be the head of a longer hex run ("#123456789A").
+    auto valueAt = [&](int at, int len) -> bool {
+        if (len != 7 && len != 9)
             return false;
-        *hexOff = tailStart + m.capturedStart();
-        *hexLen = m.capturedLength();
-        *hexRaw = m.captured().toLatin1();
-        return true;
-    }
+        if (at + step * len > tail.size())
+            return false;
+        if (unitAt(at) != '#')
+            return false;
+        for (int m = 1; m < len; ++m) {
+            const int u = unitAt(at + step * m);
+            const bool hexChar = (u >= '0' && u <= '9') || (u >= 'a' && u <= 'f')
+                                 || (u >= 'A' && u <= 'F');
+            if (!hexChar)
+                return false;
+        }
+        const int after = at + step * len;
+        if (after + step > tail.size())
+            return true;
+        return !isIdentChar(QChar(unitAt(after)));
+    };
 
-    // utf-16le: "#\0" then 6-8 hex chars each followed by \0
-    for (int need = 8; need >= 6; --need) {
-        const int byteLen = 2 + need * 2;
-        if (tail.size() < byteLen)
-            continue;
-        for (int i = 0; i + byteLen <= tail.size(); ++i) {
-            if (tail[i] != '#' || tail[i + 1] != '\0')
-                continue;
-            bool ok = true;
-            for (int k = 0; k < need; ++k) {
-                const char c = tail[i + 2 + k * 2];
-                const char z = tail[i + 3 + k * 2];
-                const bool hexChar = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')
-                                     || (c >= 'A' && c <= 'F');
-                if (!hexChar || z != '\0') {
-                    ok = false;
-                    break;
+    auto takeValue = [&](int at, int len) {
+        *hexOff = tailStart + at;
+        *hexLen = u16 ? 2 * len : len;
+        *hexRaw = tail.mid(at, u16 ? 2 * len : len);
+    };
+
+    // ---- layout A: name [:|=] ["'] #hex ----
+    {
+        int at = 0;
+        while (at < tail.size() && (unitAt(at) == ' ' || unitAt(at) == '\t'))
+            at += step;
+        if (at + step <= tail.size() && (unitAt(at) == ':' || unitAt(at) == '=')) {
+            at += step;
+            while (at < tail.size() && (unitAt(at) == ' ' || unitAt(at) == '\t'))
+                at += step;
+            if (at + step <= tail.size() && (unitAt(at) == '"' || unitAt(at) == '\''))
+                at += step;
+            for (int len : { 7, 9 }) {
+                if (valueAt(at, len)) {
+                    takeValue(at, len);
+                    return true;
                 }
             }
-            if (ok) {
-                *hexOff = tailStart + i;
-                *hexLen = byteLen;
-                *hexRaw = tail.mid(i, byteLen);
-                return true;
-            }
+            return false;
         }
+    }
+
+    if (!u16)
+        return false;
+
+    // ---- layout B: string-pool record ----
+    // [0000 x k padding][FFFFFFFF][size:u32 in {7,9}][alloc=0][offset=24 x2][flags=0]
+    // then the value as utf-16le.
+    static const QByteArray hdrTail = QByteArray::fromHex("00000000180000001800000000000000");
+    for (int k = 0; k <= 4; ++k) {
+        const int g = 2 * k;
+        if (g + 24 > tail.size())
+            break;
+        if (tail[g] != '\xff' || tail[g + 1] != '\xff' || tail[g + 2] != '\xff'
+            || tail[g + 3] != '\xff')
+            continue;
+        quint32 size = 0;
+        for (int b = 0; b < 4; ++b)
+            size |= quint32(uchar(tail[g + 4 + b])) << (8 * b);
+        if (size != 7 && size != 9)
+            continue;
+        if (tail.mid(g + 8, 16) != hdrTail)
+            continue;
+        const int vstart = g + 24;
+        if (!valueAt(vstart, int(size)))
+            continue;
+        takeValue(vstart, int(size));
+        return true;
     }
     return false;
 }

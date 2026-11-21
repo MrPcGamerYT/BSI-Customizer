@@ -121,6 +121,21 @@ assert.deepEqual(Object.keys(profile.tabIcons), []);
 assert.ok(view.includes(defaults[graphicsId].data) && view.includes(defaults[devicesId].data));
 assert.ok(!view.includes(custom.data), 'reset must restore pack icons, not leave stale custom previews');
 
+
+view = editors.render(6);
+assert.match(view, /settings-panel-link-remove/);
+assert.match(view, /\+ Add button/);
+assert.match(view, />Custom</);
+await editors.action('settings-panel-link-add', null, 6);
+view = editors.render(6);
+assert.match(view, /settings-panel:link:2:kind/, 'Adding a button appends a custom row');
+await editors.action('settings-panel-link-remove', { dataset: { linkIndex: '1' } }, 6);
+view = editors.render(6);
+assert.doesNotMatch(view, /settings-panel:link:2:kind/, 'Removing a button shrinks the row list');
+await editors.action('settings-panel-save', null, 6);
+const savedProfile = requests.filter(x => x.method === 'saveSettingsPanelProfile').at(-1);
+assert.equal(savedProfile.args.links.length, 2, 'Saving keeps the edited custom button list');
+assert.equal(savedProfile.args.links[1].kind, 'custom', 'New buttons default to the custom kind');
 panelState = { ...panelState, supported: false, embeddedQmlResourceCount: 12, qmlResourceSamples: ['plr.qml', 'UiSettingsWindow.qml'] };
 await editors.action('interface-load', null, 6);
 view = editors.render(6);

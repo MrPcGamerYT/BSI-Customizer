@@ -845,7 +845,131 @@ int runSelfTest()
         check(repls.size() == 1 && repls.first().rep == utf16le(QStringLiteral("#88C0D0")),
               "presets: staged hex color replaces the EXE value");
     }
-        // ------------------------------------------------------------------
+
+    // ------------------------------------------------------------------
+    // 2f) Hex (old) targeting: only true name -> value pairs are rewritten
+    // ------------------------------------------------------------------
+    {
+        std::printf("[hex-target] compiled-pool and text bindings only\n");
+
+        // Compiled string-pool record as found in Qt 5 players: the value is a
+        // separate utf-16le string record right after the name's record
+        // (24-byte QStringData header: FFFFFFFF, size, alloc=0, offset=24 x2).
+        auto poolRecord = [](const QString &s, const QString &pad) {
+            QByteArray rec;
+            rec += QByteArray::fromHex("ffffffff");
+            rec += char(s.size() & 0xFF);
+            rec += char((s.size() >> 8) & 0xFF);
+            rec += QByteArray::fromHex("0000"); // size:u32 high half
+            rec += QByteArray::fromHex("00000000180000001800000000000000");
+            rec += utf16le(s);
+            rec += utf16le(pad);
+            return rec;
+        };
+        // The header of the FOLLOWING record must come with its zero padding,
+        // so build pairs as name-string + pad + header + value-string.
+        auto poolPair = [&poolRecord](const QString &name, const QString &pad,
+                                      const QString &value, const QString &tailPad) {
+            QByteArray rec;
+            rec += utf16le(name);
+            rec += utf16le(pad);
+            rec += poolRecord(value, tailPad);
+            return rec;
+        };
+
+        const QByteArray pool =
+            poolPair(QStringLiteral("accentNormal"), QString(QChar(0)).repeated(3),
+                     QStringLiteral("#1A90FF"), QString(QChar(0)).repeated(3))
+            + poolPair(QStringLiteral("white"), QString(QChar(0)).repeated(1),
+                       QStringLiteral("#0B0C0E"), QString(QChar(0)).repeated(3));
+        check(ThemeEngine::findQmlColor(pool, QStringLiteral("accentNormal"))
+                  == QStringLiteral("#1A90FF"),
+              "hex-target: pool record value is found");
+        check(ThemeEngine::findQmlColor(pool, QStringLiteral("white"))
+                  == QStringLiteral("#0B0C0E"),
+              "hex-target: pool record value is found for short names too");
+
+        // The name followed by a NON-value string is not a color binding.
+        const QByteArray poolNoise =
+            poolPair(QStringLiteral("notice"), QString(QChar(0)).repeated(3),
+                     QStringLiteral("error"), QString(QChar(0)).repeated(3));
+        check(ThemeEngine::findQmlColor(poolNoise, QStringLiteral("notice")).isEmpty(),
+              "hex-target: pool record followed by plain text is not a value");
+
+        // A color name inside a longer identifier is not a binding.
+        const QByteArray innerName =
+            poolPair(QStringLiteral("dangerTransparent"), QString(QChar(0)).repeated(3),
+                     QStringLiteral("#33EB553E"), QString(QChar(0)).repeated(3));
+        check(ThemeEngine::findQmlColor(innerName, QStringLiteral("transparent")).isEmpty(),
+              "hex-target: name inside a longer identifier is ignored");
+
+        // SVG attribute VALUES like fill="white" are not color names: the
+        // nearby stroke/fill hex belongs to the icon, not to the theme.
+        const QByteArray svg =
+            "<path d=\"M15.5 17V12\" fill=\"white\" stroke=\"#EB2C43\"/>\n"
+            "<circle cx=\"7\" cy=\"7\" r=\"4\" fill=\"#FF333B\"/>";
+        check(ThemeEngine::findQmlColor(svg, QStringLiteral("white")).isEmpty(),
+              "hex-target: SVG fill=\\\"white\\\" is not a color name binding");
+        HexColorItem whiteRow;
+        whiteRow.name = QStringLiteral("white");
+        whiteRow.color = QStringLiteral("#336699");
+        whiteRow.enabled = true;
+        check(ThemeEngine::collectThemeReplacements(svg, QStringLiteral("NXT"), {},
+                                                    QList<HexColorItem> { whiteRow })
+                  .isEmpty(),
+              "hex-target: no replacement is produced for an SVG-only name");
+        check(ThemeEngine::findQmlColor(svg, QStringLiteral("circle")).isEmpty()
+                  && ThemeEngine::findQmlColor(svg, QStringLiteral("path")).isEmpty(),
+              "hex-target: unrelated SVG text never yields values");
+
+        // QML binding text (plain and utf-16le) is a value.
+        const QByteArray textBind = "property color dangerNormal: \"#ED1C24\";";
+        check(ThemeEngine::findQmlColor(textBind, QStringLiteral("dangerNormal"))
+                  == QStringLiteral("#ED1C24"),
+              "hex-target: QML text binding value is found");
+        check(ThemeEngine::findQmlColor(
+                  utf16le(QStringLiteral("accentNormal: \"#1A90FF\",") ),
+                  QStringLiteral("accentNormal")) == QStringLiteral("#1A90FF"),
+              "hex-target: utf-16 QML text binding value is found");
+
+        // A longer hex run is not a value ("#123456789A" is not "#12345678").
+        check(ThemeEngine::findQmlColor(
+                  QByteArray("dangerNormal: \"#123456789A\";"),
+                  QStringLiteral("dangerNormal")).isEmpty(),
+              "hex-target: head of a longer hex run is not a value");
+
+        // End to end: applying a pool color rewrites the value record only.
+        {
+            QByteArray pe = pool;
+            pe += svg;
+            const QString exePath = tmp.path() + QStringLiteral("/hextarget.exe");
+            {
+                QFile f(exePath);
+                f.open(QIODevice::WriteOnly);
+                f.write(pe);
+            }
+            HexColorItem poolRow;
+            poolRow.name = QStringLiteral("accentNormal");
+            poolRow.currentHex = QStringLiteral("#1A90FF");
+            poolRow.color = QStringLiteral("#336699");
+            poolRow.enabled = true;
+            const auto r = ThemeEngine::applyHexTheme(
+                exePath, QStringLiteral("NXT"), {}, QList<HexColorItem> { poolRow });
+            check(r.ok, "hex-target: applyHexTheme rewrites the pool value");
+
+            QFile f(exePath);
+            f.open(QIODevice::ReadOnly);
+            const QByteArray after = f.readAll();
+            f.close();
+            check(after.size() == pe.size(), "hex-target: file size unchanged");
+            check(after.contains(utf16le(QStringLiteral("#336699"))),
+                  "hex-target: new pool value written");
+            check(after.mid(pool.size()) == svg,
+                  "hex-target: SVG data is untouched by the rewrite");
+        }
+    }
+
+    // ------------------------------------------------------------------
     // 2g) Toggle SVG recolor (PatchToggleSvgs): length-safe, knob preserved
     // ------------------------------------------------------------------
     {

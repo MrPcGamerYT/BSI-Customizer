@@ -8,6 +8,7 @@
       const maintenance = BsiMaintenance.create(ctx);
       let fields = {}, interfaceInfo = null, profile = {}, operations = [], plan = null;
       let history = [], gradients = [], output = {}, rpcNames = [], instances = [], appearance = null;
+      let settingsPanelLinksWork = null; // working copy of the About buttons while editing
       let videoSelected = false, videoStatus = '', interfaceTab = 'layout';
       let imageSource = '', comparison = null, original = null;
       const checked = key => !!fields[key];
@@ -22,6 +23,16 @@
       const actions = body => `<div class="button-grid">${body}</div>`;
       const confirmWrite = message => BsiEffects.confirm(message + '\nClose emulator instances first. Native validation and backups remain authoritative.');
       const gifFields = [['AppId', 'Discord application ID'], ['State', 'State'], ['LargeImage', 'Large image HTTPS URL / asset key'], ['LargeText', 'Large image tooltip'], ['SmallImage', 'Small image HTTPS URL / asset key'], ['SmallText', 'Small image tooltip'], ['Button1Label', 'Button 1 label'], ['Button1Url', 'Button 1 HTTPS URL'], ['Button2Label', 'Button 2 label'], ['Button2Url', 'Button 2 HTTPS URL']];
+      // The About section supports up to eight custom buttons; rows are added
+      // and removed freely, each with its own service icon, label and URL.
+      const settingsPanelLinkRows = () => (settingsPanelLinksWork ?? getState().aboutProfile?.links ?? []).map((link, index) => ({
+        kind: String(value(`settings-panel:link:${index}:kind`, link.kind || 'custom')),
+        title: String(value(`settings-panel:link:${index}:title`, link.title || '')),
+        url: String(value(`settings-panel:link:${index}:url`, link.url || ''))
+      }));
+      const resetSettingsPanelLinkFields = () => {
+        for (const key of Object.keys(fields)) if (key.startsWith('settings-panel:link:')) delete fields[key];
+      };
       function gifSettings() {
         const settings = Object.fromEntries(gifFields.map(([key]) => [key, String(value('gif:' + key))]));
         return { ...settings, Details: String(value('gif:Details')), Enabled: value('gif:Enabled', true), Timestamp: checked('gif:Timestamp'), Interval: Number(value('gif:Interval', 5)) };
@@ -111,9 +122,9 @@
             const tabs = panelState.tabs || [];
             const availableTabIds = new Set(tabs.map(tab => tab.id));
             const hiddenTabs = new Set((options.hiddenTabs || []).filter(id => availableTabIds.has(id)));
-            const savedLinks = Array.from({ length: 4 }, (_, index) => savedProfile.links?.[index] || {
-              kind: ['github', 'discord', 'youtube', 'youtube'][index], title: '', url: ''
-            });
+            const savedLinks = (settingsPanelLinksWork ?? savedProfile.links ?? []).slice(0, 8).map(link => ({
+              kind: link.kind || 'custom', title: link.title || '', url: link.url || ''
+            }));
             const logo = options.logo;
             const logoPreview = logo?.mime && logo?.data
               ? `<img class="settings-custom-logo" src="data:${esc(logo.mime)};base64,${esc(logo.data)}" alt="Selected About logo">`
@@ -130,8 +141,10 @@
               const visibleKey = `settings-panel:visible:${tab.id}`;
               return `<div class="settings-tab-option"><div class="settings-tab-check">${check(visibleKey, '', !hiddenTabs.has(tab.id))}<span><b>${esc(tab.label || tab.page)}</b><small>${esc(tab.page || tab.id)}</small></span></div><div class="settings-tab-art">${icon?.data ? `<img src="data:${esc(icon.mime)};base64,${esc(icon.data)}" alt="${custom ? 'Custom icon' : 'Pack default icon'}">${custom ? '' : '<span class="settings-art-empty">Pack default</span>'}` : '<span class="settings-art-empty">Player default</span>'}${btn(icon?.data ? 'Replace SVG' : 'Choose SVG', 'settings-panel-icon', false, `data-tab-id="${esc(tab.id)}"`)}${custom?.data ? btn(defaultTabIcons[tab.id] ? 'Use default' : 'Clear', 'settings-panel-icon-clear', false, `data-tab-id="${esc(tab.id)}"`) : ''}</div></div>`;
             }).join('');
-            const aboutLinks = savedLinks.map((link, index) => `<div class="settings-link-row"><span class="settings-link-index">0${index + 1}</span>${`<label class="editor-field"><span>Service</span><select class="inp" data-editor-field="settings-panel:link:${index}:kind"><option value="github" ${(value(`settings-panel:link:${index}:kind`, link.kind) === 'github') ? 'selected' : ''}>GitHub</option><option value="discord" ${(value(`settings-panel:link:${index}:kind`, link.kind) === 'discord') ? 'selected' : ''}>Discord</option><option value="youtube" ${(value(`settings-panel:link:${index}:kind`, link.kind) === 'youtube') ? 'selected' : ''}>YouTube</option></select></label>`}${field(`settings-panel:link:${index}:title`, 'Link label', link.title)}${field(`settings-panel:link:${index}:url`, 'HTTPS URL', link.url)}</div>`).join('');
-            section = card('Rebuild the BlueStacks Settings panel', `<p class="note">Customize the in-player Settings window here: center the native page content, choose which native tabs remain visible, use the bundled tab icons or replace individual SVGs, and edit the About logo, name and links. These choices are saved on this PC; the selected HD-Player.exe changes only when you apply.</p>${panelPreview}<div class="editor-grid"><div class="kv"><span>Patch support</span><b>${panelState.supported ? 'Supported' : 'Not supported'}</b></div><div class="kv"><span>Current panel</span><b>${panelState.applied ? 'Custom rebuild installed' : (Number(panelState.compiledUnitsActive || 0) > 0 && panelState.restorable ? 'Compiled copy still active' : 'Original panel')}</b></div><div class="kv"><span>Native Settings tabs</span><b>${Number(panelState.settingsPageCount || 0)} discovered · ${tabs.length - hiddenTabs.size} visible</b></div><div class="kv"><span>Verified QML dependencies</span><b>${Number(panelState.settingsQmlResourceCount || 0)}</b></div><div class="kv"><span>Embedded compiled QML</span><b>${Number(panelState.compiledUnitsDetected || 0)} found · ${Number(panelState.compiledUnitsActive || 0)} active</b></div><div class="kv"><span>Logo verification</span><b>${panelState.logoFallback ? 'Built-in fallback available' : (panelState.logoStatus ? 'Player logo found' : (panelState.supported ? 'Player logo found' : 'Not yet verified'))}</b></div></div><p class="note">${esc(panelState.detail || 'Inspect the selected player UI to check its embedded QML resources.')}</p>${panelState.qmlResourceSamples?.length ? `<details class="note"><summary>Verified QML resources (${Number(panelState.embeddedQmlResourceCount || 0)} registered)</summary><code>${esc(panelState.qmlResourceSamples.join('\n'))}</code></details>` : ''}${getState().settingsPanelManualTest ? '<p class="note">Manual tester mode: this session targets a disposable HD-Player copy. Apply and Restore cannot change the selected original executable.</p>' : ''}<section class="settings-customization-card"><h3>Native Settings tabs</h3><p class="note">The bundled icon pack is selected by default. Replace any SVG, or choose Use default to undo a custom icon, then Apply. Uncheck a tab to hide it. Runtime PNG copies are kept in the Customizer’s data folder; your saved SVGs stay editable.</p>${panelState.defaultIconError ? `<p class="note">${esc(panelState.defaultIconError)}</p>` : ''}${tabs.length ? `<div class="settings-tab-options">${tabOptions}</div>` : '<p class="note">Inspect a supported player to list its live tabs.</p>'}</section><section class="settings-customization-card"><h3>About page identity</h3><p class="note">This is the About page inside the emulator’s rebuilt Settings window.</p><div class="settings-about-identity">${logoPreview}<div><b>About logo</b><p class="note">${esc(logo?.data ? 'A validated custom logo is selected in your local profile; apply the rebuild to write it to the player.' : (panelState.logoStatus || 'Choose a custom logo or use the safe built-in fallback.'))}</p><div class="button-grid">${btn(logo?.data ? 'Replace logo…' : 'Choose logo…', 'settings-panel-logo')}${logo?.data ? btn('Use player/fallback logo', 'settings-panel-logo-clear') : ''}</div></div></div><div class="settings-about-fields">${field('settings-panel:developerName', 'Name under logo', savedProfile.developerName || 'Mr.Pc Gamer & Romulos')}${field('settings-panel:tagline', 'Subtitle', savedProfile.tagline || 'BlueStacks tools · with contributor Nova')}</div><div class="settings-link-list">${aboutLinks}</div></section><div class="button-grid">${btn('Save Settings rebuild options', 'settings-panel-save', true)}${btn('Reset tab visibility & custom artwork', 'settings-panel-reset')}</div>${actions(btn(panelState.applied ? 'Update rebuilt Settings panel' : 'Apply Settings panel rebuild', 'settings-panel-apply', true) + btn('Restore original Settings panel', 'settings-panel-restore', false, panelState.restorable ? '' : 'disabled title="No safe feature-specific recovery snapshot is available"'))}`);
+            const kindOptions = (index, kind) => ['github', 'discord', 'youtube', 'custom'].map(k =>
+              `<option value="${k}" ${(value(`settings-panel:link:${index}:kind`, kind) === k) ? 'selected' : ''}>${k === 'custom' ? 'Custom' : k.charAt(0).toUpperCase() + k.slice(1)}</option>`).join('');
+            const aboutLinks = savedLinks.map((link, index) => `<div class="settings-link-row"><span class="settings-link-index">0${index + 1}</span>${`<label class="editor-field"><span>Service</span><select class="inp" data-editor-field="settings-panel:link:${index}:kind">${kindOptions(index, link.kind)}</select></label>`}${field(`settings-panel:link:${index}:title`, 'Link label', link.title)}${field(`settings-panel:link:${index}:url`, 'HTTPS URL', link.url)}${btn('✕', 'settings-panel-link-remove', false, `data-link-index="${index}"`)}</div>`).join('');
+            section = card('Rebuild the BlueStacks Settings panel', `<p class="note">Customize the in-player Settings window here: center the native page content, choose which native tabs remain visible, use the bundled tab icons or replace individual SVGs, and edit the About logo, name and links. These choices are saved on this PC; the selected HD-Player.exe changes only when you apply.</p>${panelPreview}<div class="editor-grid"><div class="kv"><span>Patch support</span><b>${panelState.supported ? 'Supported' : 'Not supported'}</b></div><div class="kv"><span>Current panel</span><b>${panelState.applied ? 'Custom rebuild installed' : (Number(panelState.compiledUnitsActive || 0) > 0 && panelState.restorable ? 'Compiled copy still active' : 'Original panel')}</b></div><div class="kv"><span>Native Settings tabs</span><b>${Number(panelState.settingsPageCount || 0)} discovered · ${tabs.length - hiddenTabs.size} visible</b></div><div class="kv"><span>Verified QML dependencies</span><b>${Number(panelState.settingsQmlResourceCount || 0)}</b></div><div class="kv"><span>Embedded compiled QML</span><b>${Number(panelState.compiledUnitsDetected || 0)} found · ${Number(panelState.compiledUnitsActive || 0)} active</b></div><div class="kv"><span>Logo verification</span><b>${panelState.logoFallback ? 'Built-in fallback available' : (panelState.logoStatus ? 'Player logo found' : (panelState.supported ? 'Player logo found' : 'Not yet verified'))}</b></div></div><p class="note">${esc(panelState.detail || 'Inspect the selected player UI to check its embedded QML resources.')}</p>${panelState.qmlResourceSamples?.length ? `<details class="note"><summary>Verified QML resources (${Number(panelState.embeddedQmlResourceCount || 0)} registered)</summary><code>${esc(panelState.qmlResourceSamples.join('\n'))}</code></details>` : ''}${getState().settingsPanelManualTest ? '<p class="note">Manual tester mode: this session targets a disposable HD-Player copy. Apply and Restore cannot change the selected original executable.</p>' : ''}<section class="settings-customization-card"><h3>Native Settings tabs</h3><p class="note">The bundled icon pack is selected by default. Replace any SVG, or choose Use default to undo a custom icon, then Apply. Uncheck a tab to hide it. Runtime PNG copies are kept in the Customizer’s data folder; your saved SVGs stay editable.</p>${panelState.defaultIconError ? `<p class="note">${esc(panelState.defaultIconError)}</p>` : ''}${tabs.length ? `<div class="settings-tab-options">${tabOptions}</div>` : '<p class="note">Inspect a supported player to list its live tabs.</p>'}</section><section class="settings-customization-card"><h3>About page identity</h3><p class="note">This is the About page inside the emulator’s rebuilt Settings window.</p><div class="settings-about-identity">${logoPreview}<div><b>About logo</b><p class="note">${esc(logo?.data ? 'A validated custom logo is selected in your local profile; apply the rebuild to write it to the player.' : (panelState.logoStatus || 'Choose a custom logo or use the safe built-in fallback.'))}</p><div class="button-grid">${btn(logo?.data ? 'Replace logo…' : 'Choose logo…', 'settings-panel-logo')}${logo?.data ? btn('Use player/fallback logo', 'settings-panel-logo-clear') : ''}</div></div></div><div class="settings-about-fields">${field('settings-panel:developerName', 'Name under logo', savedProfile.developerName || 'Mr.Pc Gamer & Romulos')}${field('settings-panel:tagline', 'Subtitle', savedProfile.tagline || 'BlueStacks tools · with contributor Nova')}</div><div class="settings-link-list">${aboutLinks}</div><div class="button-grid">${btn(savedLinks.length >= 8 ? '8 buttons max' : '+ Add button', 'settings-panel-link-add', false, savedLinks.length >= 8 ? 'disabled' : '')}</div></section><div class="button-grid">${btn('Save Settings rebuild options', 'settings-panel-save', true)}${btn('Reset tab visibility & custom artwork', 'settings-panel-reset')}</div>${actions(btn(panelState.applied ? 'Update rebuilt Settings panel' : 'Apply Settings panel rebuild', 'settings-panel-apply', true) + btn('Restore original Settings panel', 'settings-panel-restore', false, panelState.restorable ? '' : 'disabled title="No safe feature-specific recovery snapshot is available"'))}`);
 
           }
           return card('Player interface', `<p class="note">Inspect once, then choose a focused task. No resources are scanned while navigating.</p>${actions(btn('Inspect player UI', 'interface-load', true) + btn('Export About report', 'about-report'))}${info ? `<p class="note">${esc(info.about?.detail || info.detail || 'Player UI capabilities loaded from the selected executable.')}</p>` : ''}`) + tabbar + section + result(page);
@@ -221,20 +234,28 @@
         } else if (name === 'settings-panel-icon-clear' || name === 'settings-panel-logo-clear') {
           const kind = name === 'settings-panel-icon-clear' ? 'tab-icon' : 'logo';
           response = await request('clearSettingsPanelAsset', { kind, id: el.dataset.tabId || '' });
+        } else if (name === 'settings-panel-link-add' || name === 'settings-panel-link-remove') {
+          const rows = settingsPanelLinkRows();
+          if (name === 'settings-panel-link-add') {
+            if (rows.length >= 8) throw new Error('You can use up to eight About buttons.');
+            rows.push({ kind: 'custom', title: '', url: '' });
+          } else {
+            rows.splice(Number(el?.dataset?.linkIndex) || 0, 1);
+          }
+          settingsPanelLinksWork = rows;
+          resetSettingsPanelLinkFields();
+          response = 'About button list updated.';
         } else if (name === 'settings-panel-save' || name === 'settings-panel-reset') {
           if (!interfaceInfo) throw new Error('Inspect player UI first.');
           const options = getState().settingsPanelProfile || {};
           const saved = getState().aboutProfile || {};
-          const savedLinks = Array.from({ length: 4 }, (_, index) => saved.links?.[index] || {
-            kind: ['github', 'discord', 'youtube', 'youtube'][index], title: '', url: ''
-          });
-          const linkValue = (index, name) => String(value(`settings-panel:link:${index}:${name}`, savedLinks[index][name] || ''));
+          const linkRows = settingsPanelLinkRows();
           if (name === 'settings-panel-reset') {
             if (!await BsiEffects.confirm('Reset visible tabs, restore the bundled icon pack and remove the custom About logo? Your About name and links will be kept.')) return;
             response = await request('saveSettingsPanelProfile', {
               developerName: String(value('settings-panel:developerName', saved.developerName || 'Mr.Pc Gamer & Romulos')),
               tagline: String(value('settings-panel:tagline', saved.tagline || '')),
-              links: savedLinks.map((link, index) => ({ kind: linkValue(index, 'kind'), title: linkValue(index, 'title'), url: linkValue(index, 'url') })),
+              links: linkRows,
               hiddenTabs: []
             });
             for (const id of Object.keys(options.tabIcons || {}))
@@ -248,10 +269,12 @@
             response = await request('saveSettingsPanelProfile', {
               developerName: String(value('settings-panel:developerName', saved.developerName || '')),
               tagline: String(value('settings-panel:tagline', saved.tagline || '')),
-              links: savedLinks.map((link, index) => ({ kind: linkValue(index, 'kind'), title: linkValue(index, 'title'), url: linkValue(index, 'url') })),
+              links: linkRows,
               hiddenTabs
             });
           }
+          settingsPanelLinksWork = null;
+          resetSettingsPanelLinkFields();
         } else if (name === 'settings-panel-apply' || name === 'settings-panel-restore') {
           if (!interfaceInfo) throw new Error('Inspect player UI first.');
           if (!await confirmWrite(name === 'settings-panel-apply'
