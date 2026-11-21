@@ -237,6 +237,28 @@ class SuiteTests(unittest.TestCase):
             text=re.sub(r'\n// VOID REGISTERED NATIVE SURFACE V8\nLoader \{[^\n]*\}\n','',text,count=1)
             self.assertEqual(text,original.decode('utf-8-sig'),name)
 
+    def test_live_visual_slots_preserve_data_callbacks_and_circles(self):
+        source=b'''import QtQuick 2.15
+Item {
+ property string storedColor:"#f2f7ff"
+ function save(){ backend.save("#f2f7ff",16,160) }
+ Rectangle {width:100;height:40;color:"#0b0f14";radius:16}
+ Rectangle {width:32;height:32;color:"#8cc8ff";radius:16}
+ Text {text:"#f2f7ff";color:"#f2f7ff";font:Qt.font({family:"Segoe UI",pixelSize:14})}
+}
+'''
+        old=U.live_names
+        try:
+            U.live_names={'ExitDialog.qml'}
+            result=S.live_theme_sources(U,{'ExitDialog.qml':source},'file:///theme/')['ExitDialog.qml']
+        finally:U.live_names=old
+        self.assertIn(b'property string storedColor:"#f2f7ff"',result)
+        self.assertIn(b'function save(){ backend.save("#f2f7ff",16,160) }',result)
+        self.assertIn(b'width:32;height:32;color:VoidLiveTheme.Theme.accent;radius:16',result)
+        self.assertIn(b'text:"#f2f7ff";color:VoidLiveTheme.Theme.text',result)
+        self.assertIn(b'font:Qt.font({family:VoidLiveTheme.Theme.fontFamily,pixelSize:14})',result)
+        self.assertIn(b'radius:VoidLiveTheme.Theme.corner',result)
+
     def test_design_is_data_not_qml(self):
         design=json.loads((ROOT/'assets/full-emulator-ui/design.json').read_text())
         for key,value in [('font','Segoe UI"; backend.erase()'),('radius',True),('durationMs',9999),('motion','true')]:

@@ -157,7 +157,7 @@ Item {
         if (stylePanels && /UiButton/.test(name) && !/UiImageButton/.test(name) && item.pColor)
             item.pColor=buttonColor.createObject(item)
         if (stylePanels && /Text/.test(name) && item.font !== undefined)
-            item.font.family=Theme.fontFamily
+            item.font.family=Qt.binding(function(){return Theme.fontFamily})
         if (/UiSlider/.test(name) && item.pSelectedValueText!==undefined && item.pSize && item.pColor) {
             if(!already){nativeSlider(item);styledControls++}
             return

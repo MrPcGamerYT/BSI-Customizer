@@ -66,6 +66,8 @@ Window {
  property int requested:-1
  property bool closeRequested:false
  property int saved:0
+ property string requestedTheme:"oled"
+ function chooseRequestedTheme(){Skin.Theme.choose(requestedTheme)}
  property string themeName:Skin.Theme.name
  property color themeSurface:Skin.Theme.surface
  function prepareAppearance(){Skin.Theme.preferencesFile="PREFERENCES";Skin.Theme.reset()}
@@ -152,6 +154,13 @@ Window {
     assert face.property('iconKey')=='advanced', face.property('iconKey')
     assert face.property('known'), str(warnings)
     assert sidebar.property('contentItem').property('opacity')==0
+    import json
+    for preset in json.loads((ROOT/'assets/full-emulator-ui/themes.json').read_text()):
+        window.setProperty('requestedTheme',preset['id'])
+        QMetaObject.invokeMethod(window,'chooseRequestedTheme');settle()
+        assert window.property('themeName')==preset['name']
+        assert window.property('themeSurface').name()==preset['palette']['surface']
+        assert slider.property('pColor').property('sliderFill').name()==preset['palette']['accent']
     # Open the real Appearance popup and use its preset card, not an independent mock.
     click(visual(root,'openAppearance'))
     card=visual(root,'themePreset_forest');assert card is not None,str(warnings)
@@ -161,7 +170,28 @@ Window {
     QMetaObject.invokeMethod(window,'customAppearance');settle()
     assert window.property('themeName')=='My theme'
     assert slider.property('pColor').property('sliderFill').name()=='#70ddb0'
-    assert field.property('background').property('color').name()=='#101820'
+    assert window.property('themeSurface').name()=='#101820'
+    assert visual(field,'voidReferenceVisualBackground').property('radius')==18
+    # Persistence is tested in a fresh QML engine, not just the same singleton.
+    probe_engine=QQmlEngine()
+    probe_engine.warnings.connect(lambda errors:warnings.extend(e.toString() for e in errors if "Settings type from Qt.labs.settings is deprecated" not in e.toString()))
+    probe_component=QQmlComponent(probe_engine)
+    probe_source='''import QtQuick 2.15
+import "ASSETS" as Skin
+QtObject {
+ property string selected:Skin.Theme.selectedId
+ property color surface:Skin.Theme.surface
+ property int corner:Skin.Theme.corner
+ property bool motion:Skin.Theme.motionEnabled
+ Component.onCompleted:{Skin.Theme.preferencesFile="PREFERENCES";Skin.Theme.sync()}
+}'''.replace('ASSETS',url).replace('PREFERENCES',str(temp/'appearance.ini').replace('\\','/'))
+    probe_component.setData(probe_source.encode(),QUrl.fromLocalFile(str(temp/'Probe.qml')))
+    probe=probe_component.create();assert probe,'\n'.join(e.toString() for e in probe_component.errors())
+    settle()
+    assert probe.property('selected')=='custom'
+    assert probe.property('surface').name()=='#101820'
+    assert probe.property('corner')==21 and not probe.property('motion')
+    probe.deleteLater();settle();probe_engine.deleteLater();settle()
     QMetaObject.invokeMethod(window,'resetAppearance');settle()
     if args.screenshot:
         args.screenshot.parent.mkdir(parents=True,exist_ok=True)

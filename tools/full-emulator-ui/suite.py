@@ -494,6 +494,31 @@ def live_theme_sources(module, desired, url):
                 if role is None:continue
                 replacement='VoidLiveTheme.Theme.'+role
             if source[start:end]!=replacement:edits.append((start,end,replacement))
+        # Dynamic font descriptors created by the native page-density transform.
+        # Restrict to the visual 'font' binding and its literal family member;
+        # do not walk arbitrary JS object data or native preference values.
+        tokens,scopes=manager.scopes_and_bindings(source)
+        occupied={(a,b) for a,b,_ in edits}
+        for scope in scopes.values():
+            span=scope['bindings'].get('font')
+            if not span:continue
+            a,b=span
+            if ''.join(token.text for token in tokens[a:min(a+4,b)])!='Qt.font(':continue
+            for i in range(a+4,b-2):
+                token=tokens[i+2]
+                if tokens[i].text=='family' and tokens[i+1].text==':' and token.kind=='string' and token.text[1:-1]==config['font_family'] and (token.start,token.end) not in occupied:
+                    edits.append((token.start,token.end,'VoidLiveTheme.Theme.fontFamily'))
+        _,decor_scopes,decorations=manager.decorative_slots(source)
+        for start,end,kind,value,line,opening in decorations:
+            if kind=='radius' and float(value)==config['corners']['radius'] and manager.matches(name,config['corners']['files']):
+                bindings=decor_scopes[opening]['bindings'];dimensions=[]
+                for dimension in ('width','height'):
+                    span=bindings.get(dimension)
+                    if span and span[1]==span[0]+1 and re.fullmatch(r'[0-9]+(?:\.[0-9]+)?',tokens[span[0]].text):dimensions.append(float(tokens[span[0]].text))
+                if len(dimensions)==2 and dimensions[0]==dimensions[1] and float(value)>=dimensions[0]/2:continue
+                edits.append((start,end,'VoidLiveTheme.Theme.corner'))
+            elif kind=='duration' and int(float(value))==config['animations']['color_ms'] and manager.matches(name,config['animations']['files']):
+                edits.append((start,end,'VoidLiveTheme.Theme.duration'))
         if edits:
             source=manager.substitute(source,edits)
             imported='import '+json.dumps(url)+' as VoidLiveTheme\n'
