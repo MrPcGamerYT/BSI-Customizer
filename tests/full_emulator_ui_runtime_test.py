@@ -166,6 +166,8 @@ Window {
     card=visual(root,'themePreset_forest');assert card is not None,str(warnings)
     click(card);assert window.property('themeName')=='Forest'
     assert slider.property('pColor').property('sliderFill').name()=='#82dfb1'
+    appearance_capture=ROOT/'.cache/full-ui/appearance-fixture.png';appearance_capture.parent.mkdir(parents=True,exist_ok=True)
+    assert window.grabWindow().save(str(appearance_capture))
     click(visual(root,'closeAppearance'))
     QMetaObject.invokeMethod(window,'customAppearance');settle()
     assert window.property('themeName')=='My theme'

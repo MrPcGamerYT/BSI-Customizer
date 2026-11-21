@@ -62,19 +62,26 @@ QtObject {
     function choose(id) {
         if(id!=="custom" && findPreset(id).id!==id)return false
         preferences.radiusOverride=-1;preferences.durationOverride=-1
-        preferences.selectedPreset=id;preferences.sync();return true
+        preferences.selectedPreset=id;persist();return true
     }
     function applyCustom(value) {
         if(!validPalette(value))return false
         preferences.customJson=JSON.stringify(value)
-        preferences.selectedPreset="custom";preferences.sync();return true
+        preferences.selectedPreset="custom";persist();return true
     }
-    function setCorner(value) {preferences.radiusOverride=Math.max(0,Math.min(24,Math.round(value)));preferences.sync()}
-    function setDuration(value) {preferences.durationOverride=Math.max(0,Math.min(400,Math.round(value)));preferences.sync()}
-    function setMotion(value) {preferences.motion=!!value;preferences.sync()}
+    function setCorner(value) {preferences.radiusOverride=Math.max(0,Math.min(24,Math.round(value)));persist()}
+    function setDuration(value) {preferences.durationOverride=Math.max(0,Math.min(400,Math.round(value)));persist()}
+    function setMotion(value) {preferences.motion=!!value;persist()}
     function setFont(value) {
         if(!/^[A-Za-z0-9 _-]{1,64}$/.test(value))return false
-        preferences.chosenFont=value;preferences.sync();return true
+        preferences.chosenFont=value;persist();return true
+    }
+    function persist() {
+        // Qt.labs.settings buffers QML property changes before QSettings.sync().
+        // Explicit setValue makes a just-clicked preset durable immediately.
+        var keys=["selectedPreset","customJson","chosenFont","radiusOverride","durationOverride","motion"]
+        for(var i=0;i<keys.length;++i)preferences.setValue(keys[i],preferences[keys[i]])
+        preferences.sync()
     }
     function sync() {
         // Pull persisted values when a separately loaded native window reopens.

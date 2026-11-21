@@ -68,7 +68,9 @@ exit /b 1
     if surface_screenshot.is_file():members['FIXTURE-SURFACES-NOT-OEM.png']=surface_screenshot.read_bytes()
     volume_screenshot=ROOT/'.cache/full-ui/volume-fixture.png'
     if volume_screenshot.is_file():members['FIXTURE-VOLUME-NOT-OEM.png']=volume_screenshot.read_bytes()
-    report={'surfaceRevision':9,'scopedNativeDialogAndPopupHooks':True,'idlePollingAdded':False,'suite':'VOID OLED Studio 09','sourceCommit':subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip(),
+    appearance_screenshot=ROOT/'.cache/full-ui/appearance-fixture.png'
+    if appearance_screenshot.is_file():members['FIXTURE-APPEARANCE-NOT-OEM.png']=appearance_screenshot.read_bytes()
+    report={'presetCount':6,'runtimeThemeSwitching':True,'customAppearance':True,'surfaceRevision':9,'scopedNativeDialogAndPopupHooks':True,'idlePollingAdded':False,'suite':'VOID OLED Studio 09','sourceCommit':subprocess.check_output(['git','rev-parse','HEAD'],cwd=ROOT,text=True).strip(),
             'legacyEngineSha256':suite.sha(legacy),'suiteSourceSha256':suite.sha((HERE/'suite.py').read_bytes()),
             'assetsSha256':{name:suite.sha(data) for name,data in assets.items()},
             'optimizerIncluded':False,'helperIncluded':False,'replacementInstallSupported':True,

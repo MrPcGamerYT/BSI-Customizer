@@ -21,6 +21,12 @@ Item {
     property int flushCount: 0
     property var pendingNodes: new Set()
     property bool scheduled: false
+    property bool themeSyncScheduled: false
+    function syncAppearance() {
+        if(themeSyncScheduled)return
+        themeSyncScheduled=true
+        Qt.callLater(function(){themeSyncScheduled=false;Theme.sync()})
+    }
     function schedule(item) {
         if (!item) return
         pendingNodes.add(item)
@@ -60,7 +66,7 @@ Item {
         function onHeaderChanged() { skin.schedule(owner) }
         function onFooterChanged() { skin.schedule(owner) }
         function onChildrenChanged() { skin.schedule(owner) }
-        function onVisibleChanged() { if (owner && owner.visible) { Theme.sync();skin.schedule(owner) } }
+        function onVisibleChanged() { if (owner && owner.visible) { skin.syncAppearance();skin.schedule(owner) } }
     } }
     property bool motionEnabled: Theme.motionEnabled
     function findSliderTrack(node,owner,depth) {
