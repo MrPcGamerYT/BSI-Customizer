@@ -95,8 +95,16 @@ from the restricted workspace failed; a follow-up publishes small sanitized
 preparation errors and measurement rows through GitHub check annotations as
 well as the JSON artifact. No original archive was re-uploaded or made public;
 the retried archive URL is its existing webContentLink, re-read from Drive
-metadata and still constrained by the same hash. Actual outcomes follow here
-only after execution.
+metadata and still constrained by the same hash.
+
+Run [44914376767](https://github.com/dsajgddghdsaakovvgheww/BSI-Customizer/actions/runs/44914376767)
+(head `5c0122f1a212d50fad8950010f3d614a191fe544`) again built all three hosts,
+but the original download returned nonmatching bytes and was refused, before
+any DLL was staged/executed. The next data-only correction handles Drive's
+fixed-file confirmation form/cookies without executing page scripts or changing
+permissions. Six synthetic no-network tests check that form, wrong-file/host
+refusals, exact hash requirements and no writes on rejected data. Actual DLL
+outcomes follow here only after execution.
 
 Even a completely passing authored-host result cannot establish which player
 contexts/programs/textures produce the real scene, authorize unrelated/UI

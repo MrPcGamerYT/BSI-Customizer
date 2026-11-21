@@ -6,11 +6,14 @@ No original DLL/archive/Mesa binary is a Git or uploaded-artifact deliverable.
 """
 import argparse
 import hashlib
+from html.parser import HTMLParser
+import http.cookiejar
 import json
 from pathlib import Path, PurePosixPath
 import shutil
 import subprocess
 import urllib.error
+import urllib.parse
 import urllib.request
 
 STAGE = "arguments"
@@ -90,6 +93,69 @@ def dll_info(data, relative):
         pe.close()
 
 
+class DriveDownloadForm(HTMLParser):
+    """Read only Drive's fixed-file confirmation form, never page scripts."""
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.in_form = False
+        self.action = None
+        self.fields = {}
+
+    def handle_starttag(self, tag, attributes):
+        attrs = dict(attributes)
+        if tag == "form":
+            self.in_form = attrs.get("id") == "download-form"
+            if self.in_form:
+                require(self.action is None, "Multiple Drive download forms refused")
+                self.action = attrs.get("action")
+        elif tag == "input" and self.in_form and attrs.get("type") == "hidden":
+            name, value = attrs.get("name"), attrs.get("value", "")
+            require(name in {"id", "export", "confirm", "uuid", "at", "authuser"}
+                    and len(value) <= 2048 and name not in self.fields,
+                    "Unexpected Drive confirmation field")
+            self.fields[name] = value
+
+    def handle_endtag(self, tag):
+        if tag == "form":
+            self.in_form = False
+
+    def url(self):
+        require(self.action == "https://drive.usercontent.google.com/download",
+                "Drive did not supply the expected public-file confirmation form")
+        require(self.fields.get("id") == DRIVE_FILE_ID and self.fields.get("export") == "download",
+                "Drive confirmation changed the original file identity")
+        return self.action + "?" + urllib.parse.urlencode(self.fields)
+
+
+def download_original(path):
+    # Encrypted RAR/DLL archives may receive Drive's download-confirmation HTML
+    # even at 344 kB. Retain its cookies and submit only its fixed-ID form.
+    # Do not execute HTML/scripts, acquire credentials, alter sharing, accept an
+    # alternate payload or continue if the exact archive hash does not match.
+    opener = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(http.cookiejar.CookieJar()))
+    url = "https://drive.google.com/uc?id=" + DRIVE_FILE_ID + "&export=download"
+    visited = set()
+    for attempt in range(3):
+        require(url not in visited, "Repeated Drive confirmation refused")
+        visited.add(url)
+        request = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 BSI-owned-WGL-probe"})
+        with opener.open(request, timeout=60) as response:
+            content = response.read(344443)
+            is_html = "text/html" in response.headers.get("Content-Type", "").lower()
+        if len(content) == 344442 and sha(content) == ARCHIVE_SHA256:
+            with path.open("xb") as file:
+                file.write(content)
+            return
+        print("::notice title=Potato original download::" + json.dumps({
+            "attempt": attempt + 1, "responseBytesAtMost": len(content), "htmlResponse": is_html,
+            "exactOriginalHash": False}), flush=True)
+        require(is_html and len(content) <= 344442, "Downloaded data is not the exact reviewed original")
+        form = DriveDownloadForm()
+        form.feed(content.decode("utf-8", errors="strict"))
+        url = form.url()
+    raise ValueError("Drive confirmation did not yield the exact reviewed original")
+
+
 def download(url, path, expected_size, digest):
     # Only fixed reviewed URLs are used by main; streaming cap also refuses an
     # error page/oversize response before an archive is ever parsed/executed.
@@ -159,9 +225,8 @@ def main():
         # The user's existing public file link, no Drive credentials, permission
         # changes or re-upload. Failure to fetch/verify stops before execution.
         # Exact webContentLink re-read from the connected Drive metadata.
-        url = "https://drive.google.com/uc?id=" + DRIVE_FILE_ID + "&export=download"
         STAGE = "original-archive-download"
-        download(url, archive, 344442, ARCHIVE_SHA256)
+        download_original(archive)
         STAGE = "mesa-archive-download"
         download(MESA_URL, mesa, MESA_BYTES, MESA_SHA256)
     require(archive is not None and mesa is not None, "Both exact archives are required")
