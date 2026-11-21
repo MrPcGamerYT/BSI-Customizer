@@ -35,10 +35,14 @@ files on explicitly test-owned mipmapped resources to separate those claims.
   Seventeen entries, paths, symlinks, expanded sizes, all six original members,
   five unique DLL hashes, AMD64 headers and native import anchors are checked
   **as data**, before making any original DLL loadable.
-- The software WGL provider is Mesa's MSVC 26.2.7 release archive, SHA-256
-  `e61153fb1a8e58b9d80b403030cda619eaffbddd9ff99b34163b996ead03d596`.
+- The software WGL provider is Mesa's MinGW x64 26.2.7 release archive, SHA-256
+  `19c74aad7b09e682473b8de4c35b47e6498de97b71cae5511a231b8eb02f2b22`.
   Only its test-local x64 DLLs are copied, not deployment/system-edit scripts.
-  The host refuses a system `opengl32.dll` or non-llvmpipe renderer.
+  The host refuses a system `opengl32.dll` or non-llvmpipe renderer. The prior
+  MSVC package was refused for missing WGL-provider data; the upstream
+  [26.2.7 notes](https://github.com/pal1000/mesa-dist-win/releases/tag/26.2.7)
+  describe an MSVC/32-bit software-rendering build problem and recommend x64
+  MinGW. This changes the test dependency, not any original Potato bytes.
 - Before staging an original DLL, all Windows Firewall profiles must be enabled
   and a verified outbound-block rule must cover each exact child image path.
   Failure aborts before execution. The launcher constructs an allowlisted
@@ -77,6 +81,20 @@ negative control, each with texture-object sampling and a bound sampler:
    recorded static expectations (1.5/3.0; bias-only versus bias + minimum LOD).
    Original GL errors are reported separately, not consumed/hidden as success.
 
+Two further fresh **no-original-DLL** children try a reversible alternative,
+once with a texture-object source and once with an existing sampler source.
+They use the independent `planGlTextureQuality` policy on the exact mip chain
+created by this host, **with depth testing still disabled**. Light/Strong private
+samplers are bound only for the explicitly known draw; the exact original
+binding restores before the next Off draw. Each source mode repeats 32 on/off
+cycles, checking source texture/sampler descriptors, active unit, other bindings,
+program, FBOs, VAO, viewport, depth/blend/cull state, native red Off pixels and an
+unrelated sampler sentinel. This is another actual rendering approach, not a
+mock of the original DLL or a weakening of production scene qualification. The
+proof booleans refer only to authored fixture resources, never the unidentified
+resources in the player's 2,468 rejected calls. Its outcomes are reported
+separately from original loading/hook/pixel outcomes.
+
 Only selected booleans, numeric measurements, known hashes, pixel channels and
 parent-owned child exit/timeout/containment status are uploaded as sanitized
 JSON. No original binaries, process dumps, module paths, raw child reports or
@@ -103,8 +121,16 @@ but the original download returned nonmatching bytes and was refused, before
 any DLL was staged/executed. The next data-only correction handles Drive's
 fixed-file confirmation form/cookies without executing page scripts or changing
 permissions. Six synthetic no-network tests check that form, wrong-file/host
-refusals, exact hash requirements and no writes on rejected data. Actual DLL
-outcomes follow here only after execution.
+refusals, exact hash requirements and no writes on rejected data.
+
+Run [44914638213](https://github.com/dsajgddghdsaakovvgheww/BSI-Customizer/actions/runs/44914638213)
+(head `96dbf73268614d922cc961c448de91b672a674f9`) passed those six synthetic
+tests, all MSVC builds/PowerShell parsing, the confirmed original archive
+SHA-256/inventory and all member hashes/PE-anchor checks. Preparation then
+refused the prior Mesa package's missing unique x64 WGL provider; execution was
+again correctly skipped. The pinned dependency is now the release's recommended
+x64 MinGW build. Actual DLL and independent rendering outcomes follow here
+only after execution.
 
 Even a completely passing authored-host result cannot establish which player
 contexts/programs/textures produce the real scene, authorize unrelated/UI

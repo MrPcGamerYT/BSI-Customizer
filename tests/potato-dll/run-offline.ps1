@@ -10,7 +10,7 @@ $PSNativeCommandUseErrorActionPreference = $false
 Set-StrictMode -Version Latest
 if (-not $ExplicitlyAllowOriginalDll) { throw 'Explicit original-DLL execution opt-in required' }
 $manifest = Get-Content (Join-Path $Prepared 'manifest.json') -Raw | ConvertFrom-Json
-if ($manifest.archiveSha256 -ne '80751bed1151e7f5bbcf186b51b8aada3b446af0278e5575384de7fa9eeb8b17' -or $manifest.mesaArchiveSha256 -ne 'e61153fb1a8e58b9d80b403030cda619eaffbddd9ff99b34163b996ead03d596' -or $manifest.variants.Count -ne 5) { throw 'Wrong reviewed archive/variant set' }
+if ($manifest.archiveSha256 -ne '80751bed1151e7f5bbcf186b51b8aada3b446af0278e5575384de7fa9eeb8b17' -or $manifest.mesaArchiveSha256 -ne '19c74aad7b09e682473b8de4c35b47e6498de97b71cae5511a231b8eb02f2b22' -or $manifest.variants.Count -ne 5) { throw 'Wrong reviewed archive/variant set' }
 New-Item -ItemType Directory -Path $Results | Out-Null
 $recipient = Join-Path $Prepared 'offline recipients'
 New-Item -ItemType Directory -Path $recipient | Out-Null
@@ -34,6 +34,7 @@ foreach ($kind in @('control','dinput','version')) {
 $profiles = @(Get-NetFirewallProfile | Select-Object Name,Enabled)
 $rules = @()
 $rows = @()
+$alternatives = @()
 $complete = $false
 try {
     Set-NetFirewallProfile -Profile Domain,Private,Public -Enabled True
@@ -124,13 +125,60 @@ try {
             if (Test-Path $dll) { Remove-Item -LiteralPath $dll }
         }
     }
+    # Another actual attempt: the independently authored policy on a directly
+    # known resource with depth disabled. No payload loaded; reversible private
+    # sampler binding rather than persistent host-object mutation. This is NOT
+    # a claim that the player's unidentified depth-disabled draws qualify.
+    foreach ($sampling in @('owned-texture','owned-sampler')) {
+        $target = $programs['control']
+        $childReport = Join-Path $Prepared ($sampling + '.json')
+        & $target --launch $target $childReport $sampling
+        $exit = $LASTEXITCODE
+        $row = [ordered]@{ sampling=$sampling;outboundBlocked=$true;launcherExitCode=$exit;containedBeforeResume=$false;reportAvailable=$false;passed=$false;gameExecuted=$false;physicalGpuTested=$false }
+        $parentReport = $childReport + '.launch.json'
+        if (Test-Path $parentReport) {
+            if ((Get-Item $parentReport).Length -gt 1024) { throw 'Oversize independent parent report refused' }
+            $launch = Get-Content $parentReport -Raw | ConvertFrom-Json
+            if ($launch.createdSuspended -ne $true -or $launch.containedBeforeResume -ne $true -or $launch.processLimit -ne 1 -or $launch.timeout -isnot [bool]) { throw 'Independent child was not bounded before execution' }
+            $row.containedBeforeResume = $true
+            $row.timeout = $launch.timeout
+            $row.childExitCode = [long]$launch.childExitCode
+        }
+        if (Test-Path $childReport) {
+            if ((Get-Item $childReport).Length -gt 8192) { throw 'Oversize independent report refused' }
+            $r = Get-Content $childReport -Raw | ConvertFrom-Json
+            $row.reportAvailable = $true
+            if ($r.kind -eq 'original-probe-prerequisite-failure') {
+                $row.failureStage = [int]$r.failureStage
+                $row.win32Error = [long]$r.win32Error
+            } elseif ($r.kind -eq 'independent-owned-resource-WGL-alternative') {
+                foreach ($key in @('originalDllLoaded','softwareRenderer','depthTestEnabled','offExact','sourceParametersUnchanged','unrelatedSamplerUntouched','minimumLodsVerified','gameExecuted','physicalGpuTested')) {
+                    if ($r.$key -isnot [bool]) { throw 'Nonboolean independent evidence field' }
+                    $row[$key] = $r.$key
+                }
+                $row.cycles = [int]$r.cycles
+                $row.firstGlError = [int]$r.firstGlError
+                foreach ($key in @('beforePixel','lightPixel','strongPixel','offPixel')) {
+                    if ($r.$key.Count -ne 4) { throw 'Bad independent pixel evidence' }
+                    $pixel = @();foreach ($channel in $r.$key) { $n=[int]$channel;if ($n -lt 0 -or $n -gt 255) { throw 'Bad independent pixel channel' };$pixel += $n }
+                    $row[$key] = $pixel
+                }
+                $row.passed = $exit -eq 0 -and $row.containedBeforeResume -and $r.passed -eq $true -and -not $row.originalDllLoaded -and $row.softwareRenderer -and -not $row.depthTestEnabled -and $row.offExact -and $row.sourceParametersUnchanged -and $row.unrelatedSamplerUntouched -and $row.minimumLodsVerified -and $row.cycles -eq 32 -and $row.firstGlError -eq 0 -and -not $row.gameExecuted -and -not $row.physicalGpuTested -and (($row.offPixel -join ',') -eq ($row.beforePixel -join ','))
+            } else { throw 'Unknown independent evidence kind' }
+        }
+        $alternatives += $row
+        Write-Output ('::notice title=Independent owned sampler result::' + ($row | ConvertTo-Json -Compress -Depth 5))
+        if ((Get-FileHash $target -Algorithm SHA256).Hash -ne $hashes['control']) { throw 'Independent test host bytes changed' }
+    }
     $complete = $true
 } finally {
     foreach ($name in $rules) { Get-NetFirewallRule -Name $name -ErrorAction SilentlyContinue | Remove-NetFirewallRule }
     foreach ($profile in $profiles) { Set-NetFirewallProfile -Profile $profile.Name -Enabled $profile.Enabled }
     Remove-Item Env:BSI_POTATO_PROBE_APPROVED -ErrorAction SilentlyContinue
-    $allPassed = $complete -and $rows.Count -eq 12 -and @($rows | Where-Object { -not $_.passed }).Count -eq 0
-    [ordered]@{ scope='Original supplied Potato DLLs in an authored WGL/llvmpipe host, NOT a player/game';archiveSha256=$manifest.archiveSha256;mesaArchiveSha256=$manifest.mesaArchiveSha256;complete=$complete;allMechanismCasesPassed=$allPassed;rows=$rows;installed=$false;redistributed=$false;gameAcceptance=$false } | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $Results 'supplied-potato-results.json') -Encoding utf8
+    $originalsPassed = $complete -and $rows.Count -eq 12 -and @($rows | Where-Object { -not $_.passed }).Count -eq 0
+    $alternativesPassed = $complete -and $alternatives.Count -eq 2 -and @($alternatives | Where-Object { -not $_.passed }).Count -eq 0
+    $allPassed = $originalsPassed -and $alternativesPassed
+    [ordered]@{ scope='Original supplied Potato DLLs AND independent known-resource comparison in authored WGL/llvmpipe hosts, NOT a player/game';archiveSha256=$manifest.archiveSha256;mesaArchiveSha256=$manifest.mesaArchiveSha256;complete=$complete;allMechanismCasesPassed=$originalsPassed;allIndependentCasesPassed=$alternativesPassed;rows=$rows;independentComparisons=$alternatives;installed=$false;redistributed=$false;gameAcceptance=$false } | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $Results 'supplied-potato-results.json') -Encoding utf8
 }
-if (-not $allPassed) { throw 'One or more actual original-DLL mechanisms were NOT observed; inspect sanitized evidence, do not claim a game fix' }
-'PASS: five unique original DLLs, normal renamed import (anchor NOT called), real Mesa software mip pixels with depth disabled, texture and sampler modes, negative controls, outbound block and bounded child lifetime. NOT player/physical-GPU acceptance.' | Out-File $env:GITHUB_STEP_SUMMARY -Append
+if (-not $allPassed) { throw 'One or more actual original-DLL or independent comparison cases failed; inspect their separate evidence, do not claim a game fix' }
+'PASS: five unique original DLLs, normal renamed import (anchor NOT called), actual detours and real Mesa software mip pixels with depth disabled; separately, private samplers change explicitly owned resources and restore exact Off output/state over 64 cycles. Outbound block and bounded child lifetime. NOT player/physical-GPU acceptance.' | Out-File $env:GITHUB_STEP_SUMMARY -Append

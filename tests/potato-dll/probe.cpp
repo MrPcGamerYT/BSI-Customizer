@@ -14,6 +14,7 @@
 #include <filesystem>
 #include <string>
 #include <vector>
+#include "GlTextureQuality.h" // independent policy only; no BSI runtime/module
 
 #if defined(BSI_IMPORT_DINPUT)
 extern "C" __declspec(dllimport) void proxy_DirectInput8Create();
@@ -117,7 +118,7 @@ template<class T>T gl(const char *name){
 #define LOAD(ret,name,...) const auto name=gl<ret(APIENTRY*)(__VA_ARGS__)>("gl" #name)
 std::array<unsigned char,4> pixel(){std::array<unsigned char,4> p{};glReadPixels(32,32,1,1,GL_RGBA,GL_UNSIGNED_BYTE,p.data());return p;}
 std::string color(const std::array<unsigned char,4> &p){return "["+std::to_string(p[0])+","+std::to_string(p[1])+","+std::to_string(p[2])+","+std::to_string(p[3])+"]";}
-int probe(const wchar_t *report,bool sampler){
+int probe(const wchar_t *report,bool sampler,bool independent=false){
     diagnosticReport=report;diagnosticStage=1;
     require(sizeof(void*)==8,"AMD64 probe");
     wchar_t approved[8]{};require(GetEnvironmentVariableW(L"BSI_POTATO_PROBE_APPROVED",approved,8)==1&&approved[0]==L'1',"offline child environment");
@@ -150,7 +151,8 @@ int probe(const wchar_t *report,bool sampler){
     LOAD(GLint,GetUniformLocation,GLuint,const char*);LOAD(void,Uniform1i,GLint,GLint);
     LOAD(void,ActiveTexture,GLenum);LOAD(void,GenVertexArrays,GLsizei,GLuint*);LOAD(void,BindVertexArray,GLuint);
     LOAD(void,DrawArrays,GLenum,GLint,GLsizei);LOAD(void,GenSamplers,GLsizei,GLuint*);
-    LOAD(void,SamplerParameteri,GLuint,GLenum,GLint);LOAD(void,GetSamplerParameterfv,GLuint,GLenum,GLfloat*);LOAD(void,BindSampler,GLuint,GLuint);
+    LOAD(void,SamplerParameteri,GLuint,GLenum,GLint);LOAD(void,SamplerParameterf,GLuint,GLenum,GLfloat);
+    LOAD(void,GetSamplerParameterfv,GLuint,GLenum,GLfloat*);LOAD(void,BindSampler,GLuint,GLuint);LOAD(void,DeleteSamplers,GLsizei,const GLuint*);
     const auto shader=[&](GLenum kind,const char *source){const auto s=CreateShader(kind);ShaderSource(s,1,&source,nullptr);CompileShader(s);GLint okay=0;GetShaderiv(s,0x8b81,&okay);require(okay!=0,"test shader compile");return s;};
     const char *vertex="#version 330\nout vec2 uv;void main(){vec2 p=vec2(float((gl_VertexID&1)*2-1),float((gl_VertexID>>1)*2-1));uv=(p+1.0)*0.5;gl_Position=vec4(p,0,1);}";
     const char *fragment="#version 330\nin vec2 uv;out vec4 outputColor;uniform sampler2D sourceColor;void main(){outputColor=texture(sourceColor,uv);}";
@@ -177,6 +179,84 @@ int probe(const wchar_t *report,bool sampler){
     draw();const auto before=pixel();const auto native=params();
     require(before==std::array<unsigned char,4>{{255,0,0,255}}&&native[0]==0&&native[1]==-1000,"native unmodified mip-zero baseline BEFORE any swap");
     require(glGetError()==GL_NO_ERROR,"test-owned setup has no GL errors");
+    if(independent){
+        diagnosticStage=70;
+        require(!imported,"independent comparison NEVER loads any original DLL");
+        // A REAL, explicitly authored resource contract; these booleans refer
+        // ONLY to this fixture, not to an unidentified player/game resource.
+        BsiShaders::TextureQualityProof proof;
+        proof.renderer=BsiShaders::Renderer::OpenGL;
+        proof.use=BsiShaders::TextureUse::SampledColor;
+        proof.gameSurfaceIdentified=proof.resourceOwnershipProven=true;
+        proof.privateReplacementSupported=proof.externalOverridesReviewed=true;
+        proof.visibleMipLevels=7;
+        BsiShaders::GlQualitySampler source;
+        source.minimumFilter=GL_NEAREST_MIPMAP_NEAREST;
+        // The host authored both source objects and their complete defaults;
+        // this is not a general sampler-cloning helper for foreign resources.
+        const auto sourceState=[&]{
+            std::array<GLfloat,30> result{};GLint activeUnit=0;glGetIntegerv(0x84e0,&activeUnit);ActiveTexture(0x84c0);
+            constexpr GLenum keys[]{0x2801,0x2800,0x2802,0x2803,0x8072,0x813a,0x813b,0x8501,0x884c,0x884d};
+            for(unsigned i=0;i<10;++i){glGetTexParameterfv(GL_TEXTURE_2D,keys[i],&result[i]);
+                if(sampler)GetSamplerParameterfv(nativeSampler,keys[i],&result[i+10]);}
+            glGetTexParameterfv(GL_TEXTURE_2D,0x1004,&result[20]);
+            if(sampler)GetSamplerParameterfv(nativeSampler,0x1004,&result[24]);
+            glGetTexParameterfv(GL_TEXTURE_2D,0x813c,&result[28]);glGetTexParameterfv(GL_TEXTURE_2D,0x813d,&result[29]);
+            ActiveTexture(GLenum(activeUnit));return result;
+        };
+        const auto savedSource=sourceState();
+        GLuint unrelated=0;GenSamplers(1,&unrelated);SamplerParameterf(unrelated,0x813a,2.f);SamplerParameterf(unrelated,0x8501,.25f);
+        BindSampler(1,unrelated);
+        const auto state=[&]{
+            std::array<GLint,17> result{};
+            glGetIntegerv(0x84e0,&result[0]);glGetIntegerv(0x8b8d,&result[1]);
+            glGetIntegerv(0x8ca6,&result[2]);glGetIntegerv(0x8caa,&result[3]);glGetIntegerv(0x85b5,&result[4]);
+            glGetIntegerv(GL_VIEWPORT,&result[5]);glGetIntegerv(GL_DEPTH_WRITEMASK,&result[9]);
+            result[10]=glIsEnabled(GL_DEPTH_TEST);result[11]=glIsEnabled(GL_BLEND);result[12]=glIsEnabled(GL_CULL_FACE);
+            ActiveTexture(0x84c0);glGetIntegerv(0x8069,&result[13]);glGetIntegerv(0x8919,&result[14]);
+            ActiveTexture(0x84c1);glGetIntegerv(0x8919,&result[15]);glGetIntegerv(0x8069,&result[16]);
+            ActiveTexture(GLenum(result[0]));return result;
+        };
+        const auto savedState=state();
+        std::array<unsigned char,4> coarse[2]{},restored=before;
+        bool exact=true,unrelatedUntouched=true,actualLods=true;unsigned cycles=0;
+        for(unsigned mode=0;mode<2;++mode){
+            const auto setting=mode?BsiShaders::TextureQuality::Strong:BsiShaders::TextureQuality::Light;
+            const auto plan=BsiShaders::planGlTextureQuality(setting,proof,source);
+            require(plan.changed(),"independent policy accepts this explicitly owned complete color mip chain");
+            GLuint replacement=0;GenSamplers(1,&replacement);
+            SamplerParameteri(replacement,GL_TEXTURE_MIN_FILTER,source.minimumFilter);SamplerParameteri(replacement,GL_TEXTURE_MAG_FILTER,GL_NEAREST);
+            SamplerParameterf(replacement,0x813a,plan.descriptor.minimumLod);
+            GLfloat readLod=0;GetSamplerParameterfv(replacement,0x813a,&readLod);
+            actualLods=actualLods&&readLod==(mode?3.f:1.5f);
+            for(unsigned cycle=0;cycle<16;++cycle){
+                BindSampler(0,replacement);draw();coarse[mode]=pixel();
+                GLfloat otherFloor=0,otherBias=0;GetSamplerParameterfv(unrelated,0x813a,&otherFloor);GetSamplerParameterfv(unrelated,0x8501,&otherBias);
+                unrelatedUntouched=unrelatedUntouched&&otherFloor==2.f&&otherBias==.25f;
+                // This is the actual Off operation: restore the exact original
+                // binding BEFORE the next draw. No source object was rewritten.
+                BindSampler(0,nativeSampler);draw();restored=pixel();
+                exact=exact&&restored==before&&sourceState()==savedSource&&state()==savedState;
+                ++cycles;
+            }
+            DeleteSamplers(1,&replacement);
+        }
+        const bool depth=glIsEnabled(GL_DEPTH_TEST)!=0;
+        const auto error=glGetError();
+        const bool okay=coarse[0]!=before&&coarse[1]!=before&&exact&&unrelatedUntouched&&actualLods&&!depth&&error==GL_NO_ERROR;
+        FILE *file=nullptr;require(_wfopen_s(&file,report,L"wb")==0&&file,"create independent comparison report");
+        const auto truth=[](bool value){return value?"true":"false";};
+        std::fprintf(file,
+            "{\"kind\":\"independent-owned-resource-WGL-alternative\",\"originalDllLoaded\":false,"
+            "\"softwareRenderer\":true,\"depthTestEnabled\":%s,\"offExact\":%s,\"sourceParametersUnchanged\":%s,"
+            "\"unrelatedSamplerUntouched\":%s,\"minimumLodsVerified\":%s,\"cycles\":%u,\"firstGlError\":%u,"
+            "\"beforePixel\":%s,\"lightPixel\":%s,\"strongPixel\":%s,\"offPixel\":%s,\"passed\":%s,"
+            "\"gameExecuted\":false,\"physicalGpuTested\":false}\n",
+            truth(depth),truth(exact),truth(sourceState()==savedSource),truth(unrelatedUntouched),truth(actualLods),cycles,error,
+            color(before).c_str(),color(coarse[0]).c_str(),color(coarse[1]).c_str(),color(restored).c_str(),truth(okay));
+        std::fclose(file);BindSampler(1,0);DeleteSamplers(1,&unrelated);
+        return okay?0:3;
+    }
     const auto swap=reinterpret_cast<BOOL(WINAPI*)(HDC)>(reinterpret_cast<void*>(GetProcAddress(GetModuleHandleW(L"opengl32.dll"),"wglSwapBuffers")));
     require(swap!=nullptr,"the actual wglSwapBuffers entry used by this DLL");
     diagnosticStage=50;
@@ -234,6 +314,11 @@ int probe(const wchar_t *report,bool sampler){
 } // namespace
 int wmain(int argc,wchar_t **argv){
     if(argc==5&&std::wcscmp(argv[1],L"--launch")==0)return launch(argv[2],argv[3],argv[4]);
-    if(argc==4&&std::wcscmp(argv[1],L"--probe")==0)return probe(argv[2],std::wcscmp(argv[3],L"sampler")==0);
-    std::fputs("Explicit offline test only: --launch test-host.exe report.json texture|sampler\n",stderr);return 64;
+    if(argc==4&&std::wcscmp(argv[1],L"--probe")==0){
+        const bool sampler=std::wcscmp(argv[3],L"sampler")==0||std::wcscmp(argv[3],L"owned-sampler")==0;
+        const bool independent=std::wcscmp(argv[3],L"owned-texture")==0||std::wcscmp(argv[3],L"owned-sampler")==0;
+        require(sampler||independent||std::wcscmp(argv[3],L"texture")==0,"known test case only");
+        return probe(argv[2],sampler,independent);
+    }
+    std::fputs("Explicit offline test only: --launch test-host.exe report.json texture|sampler|owned-texture|owned-sampler\n",stderr);return 64;
 }

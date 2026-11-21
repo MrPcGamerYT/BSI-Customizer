@@ -26,7 +26,7 @@ assert.match(workflow, /-ExplicitlyAllowOriginalDll/);
 assert.match(workflow, /potato-probe-results\/\*\.json/);
 assert.doesNotMatch(workflow, /path:.*\.(dll|exe|rar|7z|zip|log)/i);
 assert.match(prepare, /80751bed1151e7f5bbcf186b51b8aada3b446af0278e5575384de7fa9eeb8b17/);
-assert.match(prepare, /e61153fb1a8e58b9d80b403030cda619eaffbddd9ff99b34163b996ead03d596/);
+assert.match(prepare, /19c74aad7b09e682473b8de4c35b47e6498de97b71cae5511a231b8eb02f2b22/);
 for (const hash of [
   '25da83f0c7f5d6052e67e279cb427d20643593321405f017331ebd450e5fdcf8',
   'c956f2bd04b22212ecb8e65a0397c40addf64be136d8d1cd906e473661113554',
@@ -64,6 +64,13 @@ assert.match(host, /entryLeadsIntoOriginal/);
 assert.match(host, /ReadProcessMemory/);
 assert.match(host, /glReadPixels/);
 assert.match(host, /parametersPersistAfterDraw/);
+assert.match(host, /independent-owned-resource-WGL-alternative/);
+assert.match(host, /BsiShaders::planGlTextureQuality\(setting,proof,source\)/);
+assert.match(host, /require\(!imported,"independent comparison NEVER loads any original DLL"\)/);
+assert.match(host, /BindSampler\(0,nativeSampler\);draw\(\);restored=pixel\(\)/);
+assert.match(host, /restored==before&&sourceState\(\)==savedSource&&state\(\)==savedState/);
+assert.match(run, /\$alternatives.Count -eq 2/);
+assert.match(run, /allIndependentCasesPassed=\$alternativesPassed/);
 assert.doesNotMatch(host, /\b(?:LoadLibrary[AW]?|FreeLibrary)\s*\(/,
   'No explicit payload load or unsafe unload');
 assert.doesNotMatch(host, /^\s*proxy_(?:DirectInput8Create|VerQueryValueW)\s*\(/m,

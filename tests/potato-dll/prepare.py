@@ -19,9 +19,9 @@ import urllib.request
 STAGE = "arguments"
 ARCHIVE_SHA256 = "80751bed1151e7f5bbcf186b51b8aada3b446af0278e5575384de7fa9eeb8b17"
 DRIVE_FILE_ID = "1QGBvjTpW0mRNPwv2eqj77UEsLQtNDV7Y"
-MESA_URL = "https://github.com/pal1000/mesa-dist-win/releases/download/26.2.7/mesa3d-26.2.7-release-msvc.7z"
-MESA_SHA256 = "e61153fb1a8e58b9d80b403030cda619eaffbddd9ff99b34163b996ead03d596"
-MESA_BYTES = 55967650
+MESA_URL = "https://github.com/pal1000/mesa-dist-win/releases/download/26.2.7/mesa3d-26.2.7-release-mingw.7z"
+MESA_SHA256 = "19c74aad7b09e682473b8de4c35b47e6498de97b71cae5511a231b8eb02f2b22"
+MESA_BYTES = 55829223
 PREFIX = "POTATO FF DLL 7FARFF/"
 # IDs describe the exact uploaded bytes, not GPU/player compatibility.
 VARIANTS = {
@@ -197,6 +197,9 @@ def prepare(archive, mesa, work, sevenzip):
     subprocess.run([sevenzip, "x", "-y", "-o" + str(mesa_dir), str(mesa), "x64/*"],
                    check=True, timeout=90, stdout=subprocess.DEVNULL)
     candidates = list(mesa_dir.rglob("opengl32.dll"))
+    print("::notice title=Pinned Mesa WGL data::" + json.dumps({
+        "openglProviderCandidates": len(candidates), "x64DirectoryPresent": (mesa_dir / "x64").is_dir(),
+        "extractedFileCount": sum(p.is_file() for p in mesa_dir.rglob("*"))}), flush=True)
     require(len(candidates) == 1 and "x64" in candidates[0].parts, "Missing unique x64 Mesa WGL provider")
     provider = candidates[0].parent
     dlls = [{"name": p.name, "sha256": sha(p.read_bytes())} for p in sorted(provider.glob("*.dll"))]
