@@ -27,6 +27,15 @@ textures, create mipmaps, remove geometry, change the game's draw distance,
 change DPI/FPS caps or guarantee any FPS improvement. `texelFetch` and other
 samplerless accesses may ignore this policy.
 
+**A minimum-LOD floor is not additive LOD bias.** The [executed original-DLL
+comparison](POTATO-DLL-PROBE.md#bias-versus-minimum-lod-floor-a-second-measured-difference)
+found that an already-minified native mip-4 sample stays at mip 4 under this
+floor-only policy, while the originals' bias selects this fixture's last mip 6.
+A test-only private desktop bias+floor sampler matched the original Strong result
+at both tested gradients and restored native Off pixels/state. That candidate
+is not integrated into production; it neither fixes the earlier depth rejection
+nor authorizes unidentified player resources.
+
 The regular `BSIShaders` module observes **20 draw signatures / 46 core and
 extension names**: arrays/elements, range, instancing, base vertex/base instance,
 multi-draw and indirect/count variants. The earlier five-entry-point set could

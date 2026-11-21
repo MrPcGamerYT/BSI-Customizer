@@ -27,8 +27,11 @@ The [actual original-Potato-DLL experiment and separate reversible known-resourc
 comparison](POTATO-DLL-PROBE.md) have now executed successfully on Windows:
 all five unique originals changed known mip pixels with depth disabled, and
 the independent private-sampler alternative restored exact fixture Off pixels
-and checked state over 64 cycles. This is actual original-code/rendering
-evidence, not another speculative installed-game fix. The originals' persistent
+and checked state over 64 cycles. A further test-only private desktop bias+floor
+sampler also matches the original Strong pixels at native and minified gradients
+and restores Off without mutating source objects; the floor-only plan does not
+match that minified case. This is actual original-code/rendering evidence,
+not another speculative installed-game fix. The originals' persistent
 bind/draw-time LOD mutation is independent of depth testing; the production
 path's conservative depth gate is a demonstrated mechanism difference, not
 proof that deleting it safely qualifies the player's compositor/scene textures.

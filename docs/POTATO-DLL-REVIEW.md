@@ -70,6 +70,11 @@ LOD and coarser-mip pixels for **all five identities**, in texture-object and
 sampler-object modes with depth testing disabled. It also records an unhooked
 Mesa import-export bind alias separately from the hooked WGL-resolved entry.
 Those results do not establish in-player behavior or physical-driver safety.
+The minified-gradient follow-up also demonstrates that the independent minimum-
+LOD-only floor is not an additive bias. A separate test-only private desktop
+sampler with bias 3 + floor 3 matches the original Strong pixels at both tested
+gradients and restores native Off pixels/state without source-object mutation.
+This candidate has not changed production policy or authorized player resources.
 
 The values are observable floating-point constants, not inferred from folder
 names alone. For example, the MSI 5 pair has identical `.text` bytes and uses

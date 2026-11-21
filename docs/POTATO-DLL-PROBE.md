@@ -1,8 +1,9 @@
 # Original Potato DLL — executed Windows experiment
 
 **The actual five unique supplied DLLs have now run, not just been disassembled.**
-Windows run [44915621801](https://github.com/dsajgddghdsaakovvgheww/BSI-Customizer/actions/runs/44915621801)
-completed successfully at head `d2080aa167c043ba78fdc9f74c27441a9386048f`.
+Windows run [44916488098](https://github.com/dsajgddghdsaakovvgheww/BSI-Customizer/actions/runs/44916488098)
+completed successfully at head `cfc591461e57b691b26adfd3cb3e0f7a87af1721`,
+including the minified-gradient and private bias+floor follow-up.
 All **10 original-DLL cases, 2 no-DLL controls and 2 independent private-sampler
 comparisons passed**. Complete, nontruncated per-case measurements were retrieved
 through the GitHub check-annotation API and checked independently.
@@ -18,8 +19,9 @@ Save/Discard/callback identity or production ownership/protection/depth gates.
 
 Each identity ran in two fresh children: texture-object sampling, then sampling
 with an existing sampler object. A real GLSL shader sampled a complete 64×64
-color-coded mip chain. **Depth testing stayed disabled throughout.** Before any
-swap, every case read red mip 0, RGBA `[255,0,0,255]`.
+color-coded mip chain. **Depth testing stayed disabled throughout.** At 1:1
+texture gradients before any swap, every case read red mip 0, RGBA `[255,0,0,255]`.
+The table below is this 1:1 case; minified gradients are tested separately below.
 
 | Original identity / archive location | Texture bias | Texture minimum LOD | Actual sampled mip / pixel | Both source modes |
 | --- | ---: | ---: | --- | --- |
@@ -62,7 +64,7 @@ The corrected probe calls both real entries and retains the negative evidence.
 This is a provider-specific coverage finding, **not** proof that the player's
 entry points are identical, fully covered or responsible for its failure.
 
-## Another approach actually tried: reversible, resource-owned private samplers
+## Alternatives actually tried: reversible, resource-owned private samplers
 
 Two further fresh **no-original-DLL** children used the independent
 `planGlTextureQuality` policy directly on the texture created by this host.
@@ -83,6 +85,43 @@ depth/blend/cull state. This proves the mechanism can coarsen identified color
 mips reversibly without depth testing; it is not a production scene-discovery
 implementation or a claim that every possible GL state was tested.
 
+### Bias versus minimum-LOD floor: a second measured difference
+
+The same real shader then scales texture coordinates by 16. Its native
+lambda is 4, confirmed by cyan mip 4 `[0,255,255,255]` **before any original hook**.
+All original identities are tested at both gradient scales, as are the two
+independent source modes:
+
+| Sampling approach | Native lambda 0 | Native lambda 4 |
+| --- | --- | --- |
+| No override | Mip 0, red | Mip 4, cyan |
+| Original Light (A/C/E) | Mip 2, blue | Mip 6, white |
+| Original Strong (B/D) | Mip 3, yellow | Mip 6, white |
+| Independent private floor 1.5 | Mip 2, blue | **Mip 4, unchanged cyan** |
+| Independent private floor 3.0 | Mip 3, yellow | **Mip 4, unchanged cyan** |
+| New test-only private **bias 3 + floor 3** | Mip 3, yellow | **Mip 6, white** |
+
+A floor clamps the lower end of computed LOD; bias shifts computed LOD. Equal
+mip colors at lambda 0 were **not** proof of equal behavior under minification.
+The original bias selects a coarser mip even when the native LOD is already
+above the independent floor. Mip 6 is this fixture's last existing level, not a
+claim that every real-game texture ends at that level.
+
+The second independent candidate puts bias 3 and floor 3 in a **private desktop-
+OpenGL sampler**, not the application's texture/sampler. It matched the original
+Strong pixel at both tested scales, preserved the source descriptors and checked
+state, then restored red mip 0 / cyan mip 4 Off pixels at their respective
+scales. Both source modes passed, with no original DLL, disabled depth and zero
+GL errors. Its queried private bias/floor were both exactly 3.0. No unknown
+existing override was stacked: all source resources/defaults are authored here.
+
+This is an additional **test-only candidate**, not a silent production policy
+change, a GLES bias-state capability claim or an exact clone across arbitrary
+lookup instructions/gradients/drivers. Production still uses its conservative
+floor-only plan and the same eligibility checks; no player resource was newly
+authorized. This difference cannot explain the player's zero prepared calls by
+itself, because its counted calls stop earlier at the depth gate.
+
 ## What this changes about the investigation
 
 The player's latest result is still **not working**: 1,235 processed frames,
@@ -98,8 +137,10 @@ prerequisite for coarser mip selection.** It is a conservative classification
 rule in the current implementation, not evidence that a depth-disabled draw
 cannot sample scene textures.
 
-The independently tested alternative is **identified-resource, draw-scoped
-private sampling**, not the original's persistent process-wide mutation. Using
+The independently tested alternatives are **identified-resource, draw-scoped
+private sampling**, with the desktop bias+floor candidate matching more of the
+original's tested behavior than the floor-only plan, without its persistent
+process-wide object mutation. Using
 it in the player still requires a real scene/resource authorization contract;
 the existing owned presentation HWND alone does not identify every producer,
 shader or texture. These tests do not authorize UI, protected, foreign,
@@ -150,9 +191,9 @@ is part of this experiment.
 
 ### Retrieved evidence
 
-[Sanitized JSON artifact 14711531576](https://github.com/dsajgddghdsaakovvgheww/BSI-Customizer/actions/runs/44915621801/artifacts/14711531576):
-1,633 compressed bytes, SHA-256
-`afa3b30c3913cf76bbccfc07b781664499d333b46eed298e8bcf29eb1e911570`.
+[Sanitized JSON artifact 14712291539](https://github.com/dsajgddghdsaakovvgheww/BSI-Customizer/actions/runs/44916488098/artifacts/14712291539):
+1,757 compressed bytes, SHA-256
+`71d615cdade5f0e422f1ad4f396874be723ef199aab4119f3732279d31704862`.
 The independent retrieval used the **complete check annotations**, not an assumed
 artifact download. Summary plus paired rows stay below GitHub's per-step count
 and 4,096-character message limits; every pair is capped below 3,800 characters.
@@ -169,7 +210,8 @@ reports/logs, module paths or process dumps are uploaded.
 | [44914638213](https://github.com/dsajgddghdsaakovvgheww/BSI-Customizer/actions/runs/44914638213) | `96dbf73` | Original archive/member hashes passed; prior Mesa WGL package refused before execution |
 | [44914982007](https://github.com/dsajgddghdsaakovvgheww/BSI-Customizer/actions/runs/44914982007) | `c8db701` | Original code ran and mip pixels changed; import-export bind assertion failed; per-row annotation count capped retrieval |
 | [44915382019](https://github.com/dsajgddghdsaakovvgheww/BSI-Customizer/actions/runs/44915382019) | `29ee08c` | All strict execution checks passed; one large annotation was truncated, not treated as complete per-case data |
-| [44915621801](https://github.com/dsajgddghdsaakovvgheww/BSI-Customizer/actions/runs/44915621801) | `d2080aa` | **All 14 children passed; all individual measurements retrieved and checked** |
+| [44915621801](https://github.com/dsajgddghdsaakovvgheww/BSI-Customizer/actions/runs/44915621801) | `d2080aa` | All 14 children passed; full original/floor-only data retrieved and checked |
+| [44916488098](https://github.com/dsajgddghdsaakovvgheww/BSI-Customizer/actions/runs/44916488098) | `cfc5914` | **All 14 children passed again; full native/minified original, floor-only and private bias+floor data retrieved and checked** |
 
 Drive's fixed-file confirmation is handled with cookies and its fixed-ID form,
 without page-script execution, credential acquisition or sharing changes. Six
@@ -178,3 +220,18 @@ and no writes on rejected bytes. The prior MSVC Mesa package lacked the required
 provider; upstream [26.2.7 notes](https://github.com/pal1000/mesa-dist-win/releases/tag/26.2.7)
 flag the MSVC/32-bit software-rendering build issue and recommend x64 MinGW.
 The supplied archive and all five DLL byte sequences remain unchanged.
+
+### Other checks
+
+- Three non-executing native startup/payload/probe source-contract tests pass;
+  Potato remains distinct from Z-Lag and original execution stays manual-only.
+- All three standalone hosts strictly cross-compile for Windows x64; the actual
+  MSVC build and original DLL execution are independently established by the
+  Windows runs above, not inferred from cross-linking.
+- The unchanged production native suite passes **17/17 in 42.29 s** with the
+  pinned software Vulkan library. An initial invocation omitted that mandatory
+  library environment variable and correctly failed the Vulkan pixel test;
+  the full corrected run passed, with no test skipped or requirement weakened.
+- All four read-only player-reference EXE hashes still match their pre-review
+  values. No player/reference EXE was executed or modified. `src/` has no diff
+  from production baseline `f05734c`; no new game-fix binary is implied.
