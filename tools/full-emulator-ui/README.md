@@ -15,8 +15,9 @@ their compiled-cache owners are patched in the established backed-up transaction
   synchronously. Settings uses a source-bound synchronous Loader, rather than
   waiting for Component.onCompleted to request its shell. No sleep, whole-window
   visibility override, extra startup delay or boot/auth callback replacement.
-- Known icons reserve their visual slot while decoded PNG masks become available;
-  unknown/missing icons retain their native fallback. No competing inline/discovery
+- Known icons use synchronous indexed PNGs with the chosen color in their palette;
+  there is no Canvas warm-up or SVG-plugin dependency. Unknown sources retain
+  their native fallback. No competing inline/discovery
   icon faces. Late/overflow delegates still use event-coalesced discovery.
 - The active rail, edge, normal icon tint, hover/pressed states and motion follow
   all six palettes without requiring hover. Window reactivation refreshes persisted

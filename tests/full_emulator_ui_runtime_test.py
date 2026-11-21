@@ -173,6 +173,8 @@ Window {
     assert window.property('themeName')=='My theme'
     assert slider.property('pColor').property('sliderFill').name()=='#70ddb0'
     assert window.property('themeSurface').name()=='#101820'
+    assert field.property('palette').property('text').name()=='#f0f0f0'
+    assert visual(root,'testSave').property('palette').property('buttonText').name()=='#f0f0f0'
     assert visual(field,'voidReferenceVisualBackground').property('radius')==18
     # Persistence is tested in a fresh QML engine, not just the same singleton.
     probe_engine=QQmlEngine()

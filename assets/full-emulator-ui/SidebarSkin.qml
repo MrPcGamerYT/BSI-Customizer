@@ -89,6 +89,7 @@ Item {
             function updateNative() {
                 if (!control || !control.contentItem) return
                 control.contentItem.opacity = Qt.binding(function() { return face.known ? 0 : 1 })
+                if(control.background)control.background.opacity=Qt.binding(function(){return face.known?0:1})
                 // Old passive adapter layers are not input owners. Avoid double icons.
                 var children = control.children
                 if (children) for (var i=0;i<children.length;++i) {

@@ -132,6 +132,18 @@ Item {
         visitedNodes++
         var already = false
         var name = String(item)
+        // Instance palettes cover standard Qt controls too. Do not replace
+        // text/validation expressions: explicit native error colors still win.
+        if(item.palette && !/UiImageButton/.test(name) && /Button|ComboBox|TextField|TextArea|SpinBox|Slider|CheckBox|RadioButton|Switch/.test(name)) {
+            item.palette.buttonText=Qt.binding(function(){return Theme.text})
+            item.palette.windowText=Qt.binding(function(){return Theme.text})
+            item.palette.text=Qt.binding(function(){return Theme.text})
+            item.palette.placeholderText=Qt.binding(function(){return Theme.muted})
+            item.palette.highlight=Qt.binding(function(){return Theme.accent})
+            item.palette.highlightedText=Qt.binding(function(){return Theme.background})
+            item.palette.base=Qt.binding(function(){return Theme.surface})
+            item.palette.button=Qt.binding(function(){return Theme.surface})
+        }
         if (stylePanels && /Dialog/.test(name) && item.pDescription !== undefined && item.pColor) {
             item.pColor=dialogColor.createObject(item,{base:item.pColor})
             if (item.background) overlay(buttonVisual,item,item.background,"dialog")

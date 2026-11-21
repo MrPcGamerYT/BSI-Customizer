@@ -41,14 +41,14 @@ Item {
         host.x=Math.max(area.x,Math.min(host.x,area.x+area.width-host.width))
         host.y=Math.max(area.y,Math.min(host.y,area.y+area.height-host.height))
     }
-    onBsiHostChanged: SurfaceRegistry.attach(shell, bsiHost)
+    onBsiHostChanged: {SurfaceRegistry.attach(shell, bsiHost);if(bsiHost)fitHost()}
     Connections {
         target:shell.bsiHost
         ignoreUnknownSignals:true
-        function onVisibleChanged(){if(target && target.visible){Theme.sync();nativeStyle.prepare(bsiPageBody)}}
+        function onVisibleChanged(){if(target && target.visible){fitHost();Theme.sync();nativeStyle.prepare(bsiPageBody)}}
     }
     Component.onDestruction: SurfaceRegistry.detach(shell)
-    Component.onCompleted: { Qt.callLater(fitHost); SurfaceRegistry.attach(shell, bsiHost) }
+    Component.onCompleted: { fitHost(); SurfaceRegistry.attach(shell, bsiHost) }
     component BsiOutlineIcon: ThemeIcon {
         property string kind: "preferences"
         property color stroke: Theme.text

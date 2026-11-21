@@ -10,7 +10,7 @@ os.environ.setdefault('QT_QPA_PLATFORM','offscreen')
 os.environ.setdefault('QT_QUICK_BACKEND','software')
 os.environ.setdefault('QT_QUICK_CONTROLS_STYLE','Basic')
 from PySide6.QtCore import QObject, QMetaObject, QPoint, QPointF, Qt, QSettings, QUrl
-from PySide6.QtGui import QGuiApplication
+from PySide6.QtGui import QGuiApplication, QFontDatabase
 from PySide6.QtQml import QQmlEngine, QQmlComponent
 from PySide6.QtTest import QTest
 from PySide6.QtQuick import QQuickWindow
@@ -19,6 +19,10 @@ ROOT=Path(__file__).resolve().parents[1]
 sp=importlib.util.spec_from_file_location('chrome_suite',ROOT/'tools/full-emulator-ui/suite.py')
 S=importlib.util.module_from_spec(sp);sp.loader.exec_module(S);U=S.runtime()
 app=QGuiApplication([])
+if os.name=='nt':
+    for name in ('segoeui.ttf','seguisb.ttf','seguisym.ttf'):
+        font=Path(os.environ['WINDIR'])/'Fonts'/name
+        if font.is_file():QFontDatabase.addApplicationFont(str(font))
 warnings=[]
 
 def settle():
@@ -103,6 +107,10 @@ Window {
     assert fallback.property('contentItem').property('opacity')==0
     assert window.property('railInk').name()=='#82dfb1','persisted palette not ready at construction'
     first=window.grabWindow();assert not first.isNull()
+    # No 'blank instead of stock' loophole: both themed glyphs must already exist.
+    for top in (40,100):
+        count=sum(1 for y in range(top+10,top+32) for x in range(447,469) if first.pixelColor(x,y).green()>130 and first.pixelColor(x,y).red()>50 and first.pixelColor(x,y).green()>first.pixelColor(x,y).red()*1.25)
+        assert count>10,('themed icon missing in initial capture',top,count)
     # Old external rail and stock icons are magenta in this fixture.
     assert not any(first.pixelColor(x,y).name()=='#ff00ff' for x in range(430,486) for y in range(first.height())), 'stock skin visible in first capture'
     settle()
