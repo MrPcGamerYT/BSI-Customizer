@@ -113,6 +113,16 @@ the production plugin/page. Its authored preview prompt is not the player's
 native dialog. Existing strict glass paint/contrast, DPI, callback, persistence,
 bounded compression and recovery tests stay required.
 
+`shaders_native_service_test.py` isolates the nonpainting tooltip adapter,
+without a shader plugin or OEM resources. Bound bool/text attached properties
+must survive Python collection, remain independent per owner, and release all
+retained wrappers when owners are destroyed across three cycles. PyQt 5's
+attached-object factory otherwise lets the wrapper disappear before a later
+QML binding write; this was reproduced with a tiny authored Item and one
+unmodified native button, without loading the shader plugin. Explicit wrapper
+retention ends at QObject destruction. This fixes a test-service lifetime bug,
+not a diagnosed player renderer crash; no OEM QML/property types were changed.
+
 The native-page opacity and Save oracle use the public asynchronous
 `QQuickItem.grabToImage()` path. `QQuickWindow.grabWindow()` returns an empty
 image on the independent Qt 5 software hosts; that is a capture-API limitation,

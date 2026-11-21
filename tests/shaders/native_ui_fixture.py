@@ -49,34 +49,30 @@ def assert_component(item, kind):
 
 
 _service_types = []
+_service_objects = {}
 
 
-def install_player_resources(engine, directory, reference):
-    """Use unmodified, hash-checked extracted QML/assets, never OEM binaries.
-
-    The tooltip C++ service is a nonpainting attached-property double. Actual
-    button/checkbox/combo/textfield/slider/layout/scroll/image/theme code is
-    native, NOT rewritten to make it load. This is still not a running player.
-    """
+def register_tooltip_service():
+    """Nonpainting attached-property double, independent of OEM/player code."""
     if os.environ.get("BSI_TEST_QT_API") == "PyQt5":
-        from PyQt5.QtCore import QObject, QResource, QUrl, pyqtProperty as Property
-        from PyQt5.QtQml import QQmlComponent, qmlRegisterType
+        from PyQt5.QtCore import QObject, pyqtProperty as Property
+        from PyQt5.QtQml import qmlRegisterType
     else:
-        from PySide6.QtCore import QObject, Property, QResource, QUrl
-        from PySide6.QtQml import QQmlComponent, QmlAttached, qmlRegisterType
-    metadata = json.loads((reference / "inventory.json").read_text(encoding="utf-8"))
-    # Checking every payload here also prevents a hand-edited extracted control
-    # from being reported as original resource coverage.
-    for entry in metadata["resources"]:
-        payload = (reference / entry["path"]).read_bytes()
-        assert len(payload) == entry["bytes"] and hashlib.sha256(payload).hexdigest() == entry["sha256"], entry["path"]
-    assert "UiThemeObject.qml" in {e["path"] for e in metadata["resources"]}
+        from PySide6.QtCore import QObject, Property
+        from PySide6.QtQml import QmlAttached, qmlRegisterType
     assert not _service_types, "run each native resource family in its own process"
 
     class TipProperties(QObject):
         def __init__(self, parent=None):
             super().__init__(parent)
             self._visible, self._text = False, ""
+            # PyQt's attached-object factory does not keep its Python wrapper
+            # alive for later QML bindings, despite the QObject parent. A bound
+            # bool write then targets a freed object. Retain exactly until the
+            # native owner destroys it, not for the life of the test process.
+            identity = id(self)
+            _service_objects[identity] = self
+            self.destroyed.connect(lambda _=None, key=identity: _service_objects.pop(key, None))
 
         @Property(bool)
         def visible(self): return self._visible
@@ -101,6 +97,29 @@ def install_player_resources(engine, directory, reference):
         Tip = QmlAttached(TipProperties)(Tip)
         qmlRegisterType(Tip, "UiToolTipControl", 1, 0, "UiToolTip")
     _service_types.extend((TipProperties, Tip))
+
+
+def install_player_resources(engine, directory, reference):
+    """Use unmodified, hash-checked extracted QML/assets, never OEM binaries.
+
+    The tooltip C++ service is a nonpainting attached-property double. Actual
+    button/checkbox/combo/textfield/slider/layout/scroll/image/theme code is
+    native, NOT rewritten to make it load. This is still not a running player.
+    """
+    if os.environ.get("BSI_TEST_QT_API") == "PyQt5":
+        from PyQt5.QtCore import QResource, QUrl
+        from PyQt5.QtQml import QQmlComponent
+    else:
+        from PySide6.QtCore import QResource, QUrl
+        from PySide6.QtQml import QQmlComponent
+    metadata = json.loads((reference / "inventory.json").read_text(encoding="utf-8"))
+    # Checking every payload here also prevents a hand-edited extracted control
+    # from being reported as original resource coverage.
+    for entry in metadata["resources"]:
+        payload = (reference / entry["path"]).read_bytes()
+        assert len(payload) == entry["bytes"] and hashlib.sha256(payload).hexdigest() == entry["sha256"], entry["path"]
+    assert "UiThemeObject.qml" in {e["path"] for e in metadata["resources"]}
+    register_tooltip_service()
     binary = Path(directory) / "player-native.rcc"
     compile_resources(reference / "native.qrc", binary)
     assert QResource.registerResource(str(binary))

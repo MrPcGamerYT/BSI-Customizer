@@ -136,6 +136,7 @@ jobs:
           BSI_TEST_COMMAND_TIMEOUT: '180'
         run: |
           python tests/shaders/run_ci_tests.py --command python -X faulthandler -u tests/shaders_qt_capture_test.py
+          python tests/shaders/run_ci_tests.py --command python -X faulthandler -u tests/shaders_native_service_test.py
           python tests/shaders/run_ci_tests.py --command python -X faulthandler -u tests/shaders_plugin_ui_test.py
           python tests/shaders/run_ci_tests.py --command python -X faulthandler -u tests/shaders_native_settings_test.py
           python tests/shaders/run_ci_tests.py --command python -X faulthandler -u tests/shaders_native_settings_test.py --missing-module
@@ -148,7 +149,8 @@ jobs:
           BSI_SHADERS_IMAGE_TEST: ${{ github.workspace }}/build-qt5-bridge/tests/shader-settings-image-test
           BSI_QT_REFERENCE_DIR: ${{ github.workspace }}/player-references
           BSI_PHONE_RCC: /usr/lib/qt5/bin/rcc
-        run: python tests/run_qt_runtime_test.py tests/shaders_native_controls_test.py
+          BSI_TEST_COMMAND_TIMEOUT: '600'
+        run: python tests/shaders/run_ci_tests.py --command python -X faulthandler -u tests/shaders_native_controls_test.py
       - name: Selected-tab glass at host, 100/125/150/200 percent DPI and strict flat-image negative controls
         env:
           BSI_GLASS_ARTIFACTS: ${{ runner.temp }}/settings-glass-captures
@@ -297,6 +299,8 @@ jobs:
         run: |
           python tests/shaders/run_ci_tests.py --command python -X faulthandler -u tests/shaders_qt_capture_test.py
           if ($LASTEXITCODE -ne 0) { throw 'Independent Qt real-pixel capture contract failed' }
+          python tests/shaders/run_ci_tests.py --command python -X faulthandler -u tests/shaders_native_service_test.py
+          if ($LASTEXITCODE -ne 0) { throw 'Nonpainting native-service adapter lifetime contract failed' }
           python tests/shaders/run_ci_tests.py --command python -X faulthandler -u tests/shaders_plugin_ui_test.py
           if ($LASTEXITCODE -ne 0) { throw 'Actual shader plugin/control fixture failed' }
       - name: Unmodified native controls/theme, exact Save pixels, opacity and physical input on both pinned matching-Qt players
