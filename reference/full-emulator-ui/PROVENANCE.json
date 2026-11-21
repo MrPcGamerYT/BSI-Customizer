@@ -1,0 +1,7 @@
+{
+  "commit": "bc4c68522878f7c060e82a3524e127099d4b0c54",
+  "archiveGitBlob": "19cf0e3c813d47f890cf736b60b907dbc88018ec",
+  "installerSha256": "b68e40696be8998551dbbd0e6793a4c5e16a10f79e2f3bc07d23dc9643313f37",
+  "nativeSources": "Historical reference/emulator-src-code snapshot; provenance retained in native/SOURCE-MANIFEST.json",
+  "note": "Pinned existing transaction engine. No player EXE/DLL is bundled or executed."
+}

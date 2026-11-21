@@ -1,0 +1,57 @@
+name: Full emulator UI suite
+on:
+  workflow_dispatch:
+  push:
+    branches: [arena/cee7044d-bsi-customizer]
+    paths:
+      - 'tools/full-emulator-ui/**'
+      - 'assets/full-emulator-ui/**'
+      - 'reference/full-emulator-ui/**'
+      - 'tests/full_emulator_ui*'
+      - 'tests/full_ui_pe_fixture.py'
+      - '.github/workflows/full-emulator-ui.yml'
+permissions:
+  contents: write
+concurrency:
+  group: full-emulator-ui-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    env:
+      PYTHONUTF8: '1'
+    steps:
+      - run: git config --global core.autocrlf false
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m pip install PySide6==6.8.3
+      - name: Full source inventory, guarded transaction and exact restore tests
+        run: python tests/run_qt_runtime_test.py tests/full_emulator_ui_suite_test.py
+      - name: Real Qt shell, native input, popup and passive chrome tests
+        run: python tests/run_qt_runtime_test.py tests/full_emulator_ui_runtime_test.py
+      - name: Build self-contained full-UI pack with tested Helper06
+        run: python tools/full-emulator-ui/build.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: VOID-Full-Emulator-UI-Suite07
+          path: |
+            deliverables/VOID-Full-Emulator-UI-Suite07.zip
+            deliverables/VOID-Full-Emulator-UI-Suite07.zip.sha256
+          if-no-files-found: error
+      - name: Save only the tested suite on the current branch
+        if: github.ref == 'refs/heads/arena/cee7044d-bsi-customizer'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git add -- deliverables/VOID-Full-Emulator-UI-Suite07.zip deliverables/VOID-Full-Emulator-UI-Suite07.zip.sha256
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          git diff --cached --quiet
+          if ($LASTEXITCODE -eq 0) { exit 0 }
+          if ($LASTEXITCODE -ne 1) { exit $LASTEXITCODE }
+          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m 'Package tested full native emulator UI Suite07'
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          git push origin arena/cee7044d-bsi-customizer
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

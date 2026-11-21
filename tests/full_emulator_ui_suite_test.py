@@ -1,0 +1,102 @@
+"""Mapped source/PE transaction tests; no proprietary binary is executed."""
+import copy
+import importlib.util
+import json
+from pathlib import Path
+import sys
+import tempfile
+import unittest
+import zipfile
+
+ROOT=Path(__file__).resolve().parents[1]
+spec=importlib.util.spec_from_file_location('suite07',ROOT/'tools/full-emulator-ui/suite.py')
+S=importlib.util.module_from_spec(spec);spec.loader.exec_module(S)
+U=S.runtime();M=U.manager();E=M.engine()
+sys.path.insert(0,str(ROOT/'tests'))
+import full_ui_pe_fixture as F
+F.A=E
+
+
+def fixture(root):
+    root.mkdir()
+    payload=U.payload()
+    sources={p.name:p.read_bytes() for p in (ROOT/'reference/full-emulator-ui/native').glob('*') if p.suffix in ('.qml','.js')}
+    sources.update({name:payload['baseline/pages/'+name] for name in U.PAGE_NAMES})
+    sources['UiSettingsWindow.qml']=payload['baseline/UiSettingsWindow.qml']
+    sources['PlrSidebar.qml']=payload['baseline/PlrSidebar.qml']
+    sources['BootSplash.qml']=b'Item { function authBoot(){backend.authenticate()} Rectangle {color:"red"} }'
+    sources['Login.qml']=b'Item { property string account:""; function signIn(){backend.login()} }'
+    sources['VolumePopup.qml']=b'Item { property real volume: 0.5; Rectangle { color: UiTheme.colors.primary80; border.width:1 } function apply(){ backend.setVolume(volume) } }'
+    sources['ExitDialog.qml']=b'Item { property bool accepted:false; Rectangle { color: UiTheme.colors.primary80; border.width:1 } function confirm(){backend.exitPlayer()} }'
+    entries={'Player/'+name:(value,1) for name,value in sources.items()}
+    body=F.pe(F.rcc(entries),registration=True,extra=b''.join(F.unit(name) for name in sources))
+    (root/'HD-Player.exe').write_bytes(body)
+    return body,sources
+
+
+def inventory(body):
+    return {row.name:E.unpack_record(body,row.entry,row.flags) for row in E.resources_in(body,{},{})[1]}
+
+
+def files(root):
+    return {p.relative_to(root).as_posix():S.sha(p.read_bytes()) for p in root.rglob('*') if p.is_file()}
+
+
+class SuiteTests(unittest.TestCase):
+    def test_full_inventory_apply_idempotence_and_exact_restore(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder)/'Player with spaces';original,before=fixture(root)
+            planned,report=U.plan_install(root)
+            names={row['name'] for row in report['coverage']}
+            self.assertTrue({'VolumePopup.qml','ExitDialog.qml','KmmEditorWindow.qml','PlrTopbar.qml','UiSettingsWindow.qml','UiPerformanceSetting.qml'}<=names)
+            self.assertFalse(report['all_ui_runtime_certified'])
+            self.assertFalse((root/U.UI_STATE).exists(),'preflight is read-only')
+            backup=E.commit(planned)
+            after=inventory((root/'HD-Player.exe').read_bytes())
+            for name in ('BootSplash.qml','Login.qml','KmmUtils.js','plr.qml'):
+                self.assertEqual(after[name],before[name],name)
+            for name in ('VolumePopup.qml','ExitDialog.qml'):
+                self.assertIn(b'VOID SUITE07 PASSIVE CONTROLS',after[name])
+                self.assertIn(b'backend.',after[name])
+            self.assertIn(b'CARBON SUITE 07',(root/'Assets/VOIDReferenceUI/SettingsShell.qml').read_bytes())
+            self.assertIn(b'voidoptimizer-v3://review',(root/'Assets/VOIDReferenceUI/OptimizerPage.qml').read_bytes())
+            self.assertEqual((root/'Assets/VOIDReferenceUI/Icons.js').read_bytes(),(ROOT/'assets/settings-icons-repair/Shared-Recovery/Icons.js').read_bytes())
+            self.assertEqual([c.relative for c in U.plan_install(root)[0].changes],[],'repeat must verify, not stack loaders/animations')
+            E.restore(backup,root)
+            self.assertEqual((root/'HD-Player.exe').read_bytes(),original)
+            self.assertFalse((root/U.UI_STATE).exists())
+
+    def test_asset_mismatch_is_not_adopted(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder)/'Player';fixture(root);E.commit(U.plan_install(root)[0])
+            target=root/'Assets/VOIDReferenceUI/SettingsShell.qml';target.write_bytes(target.read_bytes()+b'\n// external edit\n')
+            before=files(root)
+            with self.assertRaisesRegex(RuntimeError,'asset changed externally'):
+                U.plan_install(root)
+            self.assertEqual(files(root),before)
+
+    def test_export_all_sources_is_read_only(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder)/'Player';fixture(root);before=files(root)
+            destination=Path(folder)/'source-preview.zip'
+            S.export_sources(U,root,destination)
+            self.assertEqual(files(root),before)
+            with zipfile.ZipFile(destination) as archive:
+                names=archive.namelist()
+                self.assertTrue(any(n.endswith('/KmmEditorWindow.qml') for n in names))
+                self.assertTrue(any(n.endswith('/VolumePopup.qml') for n in names))
+                self.assertFalse(any(n.lower().endswith(('.exe','.dll')) for n in names))
+                self.assertIn('COVERAGE.json',names)
+            with self.assertRaisesRegex(RuntimeError,'outside the emulator'):
+                S.export_sources(U,root,root/'preview.zip')
+
+    def test_design_is_data_not_qml(self):
+        design=json.loads((ROOT/'assets/full-emulator-ui/design.json').read_text())
+        for key,value in [('font','Segoe UI"; backend.erase()'),('radius',True),('durationMs',9999),('motion','true')]:
+            bad=copy.deepcopy(design);bad[key]=value
+            with self.assertRaises(RuntimeError):S.configure(bad,json.loads(U.payload()['theme.json']))
+        bad=copy.deepcopy(design);bad['palette']['text']='Qt.binding(function(){})'
+        with self.assertRaises(RuntimeError):S.configure(bad,json.loads(U.payload()['theme.json']))
+
+
+if __name__=='__main__':unittest.main(verbosity=2)

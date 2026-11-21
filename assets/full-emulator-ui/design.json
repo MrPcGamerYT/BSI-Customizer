@@ -1,0 +1,17 @@
+{
+  "format": 1,
+  "name": "VOID Carbon Suite 07",
+  "font": "Segoe UI",
+  "radius": 12,
+  "motion": true,
+  "durationMs": 160,
+  "palette": {
+    "background": "#080809",
+    "surface": "#111116",
+    "raised": "#23232d",
+    "border": "#353542",
+    "text": "#eeeeF4",
+    "muted": "#a0a0b0",
+    "accent": "#eeeef4"
+  }
+}
