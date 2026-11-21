@@ -139,11 +139,18 @@ void ShaderBridge::attach(QObject *object,const QString &instance,const QString 
     notify();
 }
 QVariantMap ShaderBridge::apply(const QVariantMap &values,bool keepCurrentDisplay){
+    return applyConfiguration(values,keepCurrentDisplay,{});
+}
+QVariantMap ShaderBridge::applyReviewed(const QVariantMap &values,const QString &reviewKey){
+    if(reviewKey.size()!=64)return {{"ok",false},{"msg",QStringLiteral("A current Display preview is required before confirming the restart dialog. Nothing was saved or restarted.")}};
+    return applyConfiguration(values,false,reviewKey);
+}
+QVariantMap ShaderBridge::applyConfiguration(const QVariantMap &values,bool keepCurrentDisplay,const QString &reviewKey){
     auto &s=state();
     if(!QCoreApplication::instance()||QThread::currentThread()!=QCoreApplication::instance()->thread())
         return {{"ok",false},{"msg",QStringLiteral("Shader settings must be saved on the player GUI thread.")}};
     if(!s.attached){s.error=QStringLiteral("No native player instance is attached.");notify();return {{"ok",false},{"msg",s.error}};}
-    auto response=s.preferences.apply(values,keepCurrentDisplay);
+    auto response=s.preferences.apply(values,keepCurrentDisplay,reviewKey);
     if(response.value(QStringLiteral("ok")).toBool()){s.error.clear();Runtime::instance().set(s.preferences.parameters());Runtime::instance().setTexture(s.preferences.texture());}
     notify();return response;
 }

@@ -3,6 +3,9 @@ import QtQuick.Controls 2.15
 import QtQuick.Layouts 1.15
 import QtQuick.Window 2.15
 import QtQml.Models 2.15
+import DialogButtonModel 1.0
+import DialogButtonModelList 1.0
+import UiDialogWindow 1.0
 import BSIShaders 1.0
 // Resolve the SAME resource-backed controls used by native Settings pages.
 // They remain in the player; no OEM QML/assets or imitation theme are bundled.
@@ -27,7 +30,26 @@ Rectangle {
     property string feedback: ""
     property bool saveFailed: false
     property bool keepCurrentDisplay: false
-    property bool restartConfirmation: false
+    property var restartPrompt: null
+    readonly property bool needsTextureReview: !!draft.potatoGraphic && !draft.textureOverridesReviewed
+    readonly property bool textureDraftChanged: !!draft.potatoGraphic !== !!Engine.saved.potatoGraphic
+        || !!draft.textureOverridesReviewed !== !!Engine.saved.textureOverridesReviewed
+    readonly property bool resolutionDraftChanged: keepCurrentDisplay
+        || Number(draft.potatoMode || 0) !== Number(Engine.saved.potatoMode || 0)
+    // Polling metrics must not rebuild an open native combo every second. Only
+    // the configuration/recovery facts used for planning invalidate its model.
+    readonly property string displayKey: JSON.stringify({available: !!Engine.display.available,
+        width: Engine.display.width, height: Engine.display.height, custom: Engine.display.custom,
+        mode: Engine.display.mode, originalWidth: Engine.display.originalWidth, originalHeight: Engine.display.originalHeight,
+        targetWidth: Engine.display.targetWidth, targetHeight: Engine.display.targetHeight,
+        pending: !!Engine.display.pending, conflict: !!Engine.display.conflict,
+        nativeUnsaved: !!Engine.display.nativeUnsaved, restartAvailable: !!Engine.display.restartAvailable,
+        restartRequired: !!Engine.display.restartRequired, canRestart: !!Engine.display.canRestart})
+    readonly property var resolutionOptions: availableResolutions(displayKey)
+    readonly property var resolutionPreview: previewResolution(displayKey, Number(draft.potatoMode || 0), Engine.saved)
+    readonly property string resolutionAvailability: unavailableResolutions(displayKey)
+    readonly property string playerName: typeof uiBackend !== "undefined" && typeof uiBackend.productName === "string"
+        && uiBackend.productName.length ? uiBackend.productName : qsTr("player")
     readonly property color textColor: bsiTheme.colors.primary10
     readonly property color mutedColor: bsiTheme.colors.primary30
     readonly property color accent: bsiTheme.colors.accentNormal
@@ -76,8 +98,9 @@ Rectangle {
         if (window && window.bsiShaderDirty2 !== undefined) window.bsiShaderDirty2 = pEnableSave
         else if (window && window.bsiShaderDirty !== undefined) window.bsiShaderDirty = pEnableSave
     }
-    onPEnableSaveChanged: { publishDirty(); restartConfirmation = false }
+    onPEnableSaveChanged: publishDirty()
     Component.onDestruction: {
+        closeRestartPrompt()
         var window = page.Window.window
         if (window && window.bsiShaderDirty2 !== undefined) window.bsiShaderDirty2 = false
         else if (window && window.bsiShaderDirty !== undefined) window.bsiShaderDirty = false
@@ -94,7 +117,8 @@ Rectangle {
         return false
     }
     function fInitUi() {
-        draft = JSON.parse(JSON.stringify(Engine.saved)); keepCurrentDisplay = false; feedback = ""; saveFailed = false; restartConfirmation = false
+        closeRestartPrompt()
+        draft = JSON.parse(JSON.stringify(Engine.saved)); keepCurrentDisplay = false; feedback = ""; saveFailed = false
     }
     function initializeDisplay() {
         // Use exactly the context object used by native Display, not config-file
@@ -156,20 +180,183 @@ Rectangle {
     }
     function reset() { draft = presetValues(0) }
     function preset(index) { if (index >= 0 && index <= 4) draft = presetValues(index) }
-    function save() {
-        restartConfirmation = false
-        var response = Engine.apply(draft, keepCurrentDisplay)
-        saveFailed = !response.ok
-        feedback = response.msg
+    // A newer shader Save also invalidates the review stamp, without rebuilding
+    // the eligibility combo. The next confirmation must use a fresh preview.
+    function previewResolution(key, mode, savedConfiguration) { return Engine.previewPotato(mode) }
+    function availableResolutions(key) {
+        var choices = [{text: qsTr("Native / restore original"), mode: 0}]
+        if (!Engine.display.available || Engine.display.pending || Engine.display.conflict) return choices
+        for (var mode = 1; mode <= 2; ++mode) {
+            var plan = Engine.previewPotato(mode)
+            if (!plan.ok) continue
+            var label = mode === 1 ? qsTr("Light · 720 px short edge") : qsTr("Strong · 540 px short edge")
+            if (!plan.displayChanged) label += qsTr(" (current)")
+            choices.push({text: label, mode: mode})
+        }
+        return choices
+    }
+    function unavailableResolutions(key) {
+        if (!Engine.display.available || Engine.display.pending || Engine.display.conflict) return ""
+        var missing = []
+        for (var mode = 1; mode <= 2; ++mode) {
+            var plan = Engine.previewPotato(mode)
+            if (!plan.ok) missing.push((mode === 1 ? qsTr("720 px: ") : qsTr("540 px: ")) + plan.msg)
+        }
+        return missing.join("\n")
+    }
+    function resolutionIndex() {
+        for (var i = 0; i < resolutionOptions.length; ++i)
+            if (resolutionOptions[i].mode === Number(draft.potatoMode || 0)) return i
+        return -1
+    }
+    function reveal(control) {
+        // Native ScrollView focus-follow is asynchronous on Qt 5. Reveal the
+        // review beside the toggle, not an offscreen red error at the page top.
+        Qt.callLater(function() {
+            var position = control.mapToItem(form, 0, 0)
+            viewport.contentY = Math.max(0, Math.min(position.y - 12,
+                Math.max(0, viewport.contentHeight - viewport.height)))
+            control.forceActiveFocus(Qt.OtherFocusReason)
+        })
+    }
+    function potatoStatus() {
+        if (textureDraftChanged) {
+            var current = Engine.saved.potatoGraphic ? qsTr("On") : qsTr("Off")
+            if (needsTextureReview) return qsTr("Not saved. Review driver LOD / AA overrides and confirm above, then Save changes. Current saved setting: %1.").arg(current)
+            return (draft.potatoGraphic ? qsTr("Not saved — Save changes to enable Potato graphic.")
+                : qsTr("Not saved — Save changes to disable Potato graphic."))
+                + " " + qsTr("Current saved setting: %1.").arg(current)
+        }
+        return qsTr("Saved setting: %1. ").arg(Engine.saved.potatoGraphic ? qsTr("On") : qsTr("Off"))
+            + (Engine.metrics.textureStatus || qsTr("No qualified texture draw has been confirmed."))
+    }
+    function closeRestartPrompt() {
+        var prompt = restartPrompt
+        restartPrompt = null
+        if (prompt) prompt.close()
+    }
+    function showRestartPrompt(staged) {
+        if (restartPrompt) { restartPrompt.raise(); restartPrompt.requestActivate(); return false }
+        var window = page.Window.window
+        if (!window) return false
+        var prompt = stockRestartPrompt.createObject(window, {staged: staged,
+            automaticRestart: !!Engine.display.restartAvailable, expectedDisplay: displayKey,
+            expectedDraft: JSON.stringify(draft), expectedKeep: keepCurrentDisplay,
+            expectedReviewKey: staged ? resolutionPreview.reviewKey : "",
+            transientParent: window})
+        if (!prompt) {
+            saveFailed = true; feedback = qsTr("The player's stock restart dialog could not be opened. Nothing was saved or restarted.")
+            return false
+        }
+        restartPrompt = prompt
+        prompt.show()
+        return false // staged, not a successful Save yet
+    }
+    function commitDraft(reviewKey) {
+        var response = arguments.length ? Engine.applyReviewed(draft, reviewKey) : Engine.apply(draft, keepCurrentDisplay)
+        saveFailed = !response.ok; feedback = response.msg
         if (response.ok) {
             draft = JSON.parse(JSON.stringify(Engine.saved)); keepCurrentDisplay = false
             var window = page.Window.window
             if (window && typeof window.fShowToast === "function") {
                 window.fShowToast(response.displayChanged ? qsTr("Resolution saved successfully") : qsTr("Changes saved"))
-                if (!response.displayChanged) feedback = ""
+                if (!response.displayChanged && !response.resolutionUnchanged) feedback = ""
             }
         }
+        return response
+    }
+    function restartSaved() {
+        var response = Engine.restartPlayer()
+        saveFailed = !response.ok; feedback = response.msg
+        // Like native Settings, use its restart loader and hide the Settings
+        // window. Unlike a fire-and-forget prompt, leave it visible on refusal.
+        if (response.ok) {
+            var window = page.Window.window
+            if (window && typeof window.showRestartLoader === "function") window.showRestartLoader()
+            if (window) window.hide()
+        }
         return response.ok
+    }
+    function confirmRestart(prompt) {
+        if (restartPrompt !== prompt) return
+        var staged = prompt.staged, automatic = prompt.automaticRestart, reviewKey = prompt.expectedReviewKey
+        var unchanged = prompt.expectedDisplay === displayKey && prompt.expectedDraft === JSON.stringify(draft)
+            && prompt.expectedKeep === keepCurrentDisplay
+        closeRestartPrompt()
+        if (!unchanged) {
+            saveFailed = true; feedback = qsTr("Settings changed while the restart dialog was open. Review the current size and Save again. Nothing was saved or restarted.")
+            return
+        }
+        if (staged && !commitDraft(reviewKey).ok) return
+        if (automatic && Engine.display.restartRequired) restartSaved()
+    }
+    function save() {
+        if (restartPrompt) return false
+        if (needsTextureReview) {
+            saveFailed = false
+            feedback = qsTr("Potato graphic is not saved yet. Confirm the driver review beside its switch, then Save changes. No driver profile is reset.")
+            reveal(potatoReview)
+            return false
+        }
+        if (resolutionDraftChanged && !keepCurrentDisplay) {
+            if (!resolutionPreview.ok || Engine.display.nativeUnsaved) {
+                saveFailed = true
+                feedback = Engine.display.nativeUnsaved
+                    ? qsTr("Save or Discard the player's other unsaved settings first. Shaders will not commit or discard them.") : resolutionPreview.msg
+                reveal(resolutionSelector)
+                return false
+            }
+            // Match Graphics/Display: the stock Restart Now / Discard Changes
+            // dialog precedes the write. Closing keeps the draft; Discard only
+            // drops this page's draft, never the player's unrelated settings.
+            if (resolutionPreview.displayChanged) return showRestartPrompt(true)
+            // Even a no-op must remain a no-op if native state changes between
+            // preview and Save. The C++ writer rechecks its exact review stamp.
+            return !!commitDraft(resolutionPreview.reviewKey).ok
+        }
+        return !!commitDraft().ok
+    }
+
+    Component {
+        id: stockRestartPrompt
+        Native.UiMessageDialog {
+            id: prompt
+            objectName: "shaderRestartPrompt"
+            property bool staged: false
+            property bool automaticRestart: true
+            property string expectedDisplay: ""
+            property string expectedDraft: ""
+            property bool expectedKeep: false
+            property string expectedReviewKey: ""
+            title: qsTranslate("QObject", "Restart %1").arg(page.playerName)
+            pDescription: qsTranslate("QObject", "Some of the changes need %1 to restart. Do you want to restart now?").arg(page.playerName)
+            pNotice: automaticRestart ? "" : qsTr("Automatic restart is unavailable on this player. Save changes, then restart it manually.")
+            pDialogType: UiDialogWindow.Simple
+            pButtonsList: DialogButtonModelList {
+                pButtons: [
+                    DialogButtonModel {
+                        pColor: page.bsiTheme.buttons.colors.accent
+                        pText: prompt.automaticRestart ? qsTranslate("QObject", "Restart Now") : qsTranslate("QObject", "Save changes")
+                        onClicked: page.confirmRestart(prompt)
+                    },
+                    DialogButtonModel {
+                        pColor: page.bsiTheme.buttons.colors.secondary
+                        // Once saved, "Discard Changes" would be a lie. The
+                        // retry prompt uses the same native shell with Later.
+                        pText: prompt.staged ? qsTranslate("QObject", "Discard Changes") : qsTr("Later")
+                        onClicked: {
+                            var discard = prompt.staged
+                            page.closeRestartPrompt()
+                            if (discard) page.fDiscardChanges()
+                        }
+                    }
+                ]
+            }
+        }
+    }
+    Connections {
+        target: page.restartPrompt
+        function onClosed() { page.restartPrompt = null }
     }
 
     Native.UiColumnLayout {
@@ -270,32 +457,39 @@ Rectangle {
                         Layout.fillWidth: true
                         text: qsTr("Potato graphic")
                         checked: !!page.draft.potatoGraphic
-                        onToggled: page.setValue("potatoGraphic", checked)
-                    }
-                    Text {
-                        Layout.fillWidth: true; wrapMode: Text.Wrap
-                        text: qsTr("Experimental texture-detail reduction, independent of visual effects and resolution. Uses private coarser-mip samplers on qualified GL 3.3 / GLES 3.1 game scene draws; restores the original sampler after each draw. DirectX/Vulkan texture interception, protected/unknown resources, blended UI draws and existing LOD/anisotropic overrides are not modified. No FPS gain is promised.")
-                        color: page.bsiTheme.colors.primary30; font: page.bsiTheme.fonts.bodySmall
+                        onToggled: {
+                            page.setValue("potatoGraphic", checked)
+                            if (checked && page.needsTextureReview) page.reveal(potatoReview)
+                        }
                     }
                     Native.UiCheckBox {
+                        id: potatoReview
                         objectName: "shaderPotatoReview"
                         visible: !!page.draft.potatoGraphic
                         pSize: page.bsiTheme.checkBoxes.sizes.medium
                         Layout.fillWidth: true
-                        text: qsTr("I reviewed existing driver LOD / AA overrides")
+                        text: qsTr("I reviewed driver LOD / AA overrides")
                         checked: !!page.draft.textureOverridesReviewed
-                        onToggled: page.setValue("textureOverridesReviewed", checked)
-                        Accessible.description: qsTr("No NVIDIA, AMD or Intel driver profile is reset. Conflicting external overrides can prevent the intended effect; this acknowledgement is not hardware certification.")
+                        onToggled: {
+                            page.setValue("textureOverridesReviewed", checked)
+                            page.feedback = ""; page.saveFailed = false
+                        }
+                        Accessible.description: qsTr("Before saving Potato graphic, review existing NVIDIA, AMD or Intel driver LOD and anti-aliasing overrides. No profile is reset. Conflicting overrides can prevent the effect; this is not hardware certification.")
+                    }
+                    Text {
+                        Layout.fillWidth: true; wrapMode: Text.Wrap
+                        text: qsTr("Experimental coarser texture sampling on qualified OpenGL / GLES game draws only. Independent of visual effects and resolution. DirectX/Vulkan textures, protected resources, UI and existing LOD/anisotropic overrides stay untouched. No driver profile is reset or FPS gain promised.")
+                        color: page.bsiTheme.colors.primary30; font: page.bsiTheme.fonts.bodySmall
                     }
                     Text {
                         objectName: "shaderPotatoTextureStatus"
-                        visible: !!page.draft.potatoGraphic || !!Engine.metrics.potatoGraphicEnabled
+                        visible: !!page.draft.potatoGraphic || !!Engine.metrics.potatoGraphicEnabled || page.textureDraftChanged
                         Layout.fillWidth: true; wrapMode: Text.Wrap
-                        text: (Engine.metrics.textureStatus || qsTr("Save to arm texture sampling; no reduction has been confirmed."))
-                            + "\n" + qsTr("Prepared sampler draws: ") + (Engine.metrics.textureDraws || 0)
-                            + qsTr(" · Bindings: ") + (Engine.metrics.textureBindings || 0)
-                            + qsTr(" (not measured game pixels or FPS)")
-                        color: page.bsiTheme.colors.primary30; font: page.bsiTheme.fonts.bodySmall
+                        text: page.potatoStatus()
+                            + (Engine.metrics.potatoGraphicEnabled ? "\n" + qsTr("Runtime prepared draws: ") + (Engine.metrics.textureDraws || 0)
+                                + qsTr(" · Bindings: ") + (Engine.metrics.textureBindings || 0) + qsTr(" (not measured game pixels or FPS)") : "")
+                        color: page.needsTextureReview ? page.bsiTheme.colors.primary20 : page.bsiTheme.colors.primary30
+                        font: page.bsiTheme.fonts.bodySmall
                     }
                     Rectangle { Layout.fillWidth: true; height: 1; color: page.bsiTheme.colors.seperator }
                     Text {
@@ -314,14 +508,20 @@ Rectangle {
                     Native.UiRowLayout {
                         Layout.fillWidth: true; spacing: 12
                         Native.UiComboBox {
+                            id: resolutionSelector
                             objectName: "shaderPotatoModes"
                             pSize: page.bsiTheme.comboBoxes.sizes.medium
                             Layout.preferredWidth: 270; Layout.fillWidth: true
-                            model: [qsTr("Native / restore original"), qsTr("Light · 720 px short edge"), qsTr("Strong · 540 px short edge")]
-                            currentIndex: Number(page.draft.potatoMode || 0)
+                            textRole: "text"
+                            model: page.resolutionOptions
+                            currentIndex: page.resolutionIndex()
                             enabled: Engine.display.available && !Engine.display.pending && !Engine.display.conflict
-                            Accessible.description: qsTr("Change actual native Display framebuffer size. Only Save writes it, and a full player restart is required. This does not change texture LOD or FPS caps.")
-                            onActivated: { page.keepCurrentDisplay = false; page.setValue("potatoMode", currentIndex) }
+                            Accessible.description: qsTr("Available native Display reduction profiles only; already-configured sizes are marked current and need no Display write or restart. Other size changes use the stock restart prompt. Texture LOD and FPS caps are independent.")
+                            onActivated: {
+                                if (currentIndex < 0 || currentIndex >= page.resolutionOptions.length) return
+                                page.keepCurrentDisplay = false
+                                page.setValue("potatoMode", page.resolutionOptions[currentIndex].mode)
+                            }
                         }
                         Native.UiButton {
                             objectName: "shaderPotatoKeep"
@@ -336,8 +536,24 @@ Rectangle {
                         objectName: "shaderPotatoPreview"
                         Layout.fillWidth: true; wrapMode: Text.Wrap
                         text: page.keepCurrentDisplay ? qsTr("Save to keep the current native Display size and forget the previous restore snapshot. No display value will be written.")
-                            : Engine.display.available ? Engine.previewPotato(Number(page.draft.potatoMode || 0)).msg : Engine.display.detail
+                            : Engine.display.available ? page.resolutionPreview.msg : Engine.display.detail
                         color: page.bsiTheme.colors.primary20; font: page.bsiTheme.fonts.bodySmall
+                    }
+                    Text {
+                        objectName: "shaderResolutionAvailability"
+                        visible: !!page.resolutionAvailability
+                        Layout.fillWidth: true; wrapMode: Text.Wrap
+                        text: page.resolutionAvailability
+                        color: page.bsiTheme.colors.primary30; font: page.bsiTheme.fonts.bodySmall
+                    }
+                    Native.UiButton {
+                        objectName: "shaderResolutionKeepSaved"
+                        visible: page.resolutionDraftChanged && !page.keepCurrentDisplay && !page.resolutionPreview.ok
+                        pSize: page.bsiTheme.buttons.sizes.medium
+                        pColor: page.bsiTheme.buttons.colors.secondary
+                        text: qsTr("Keep saved resolution")
+                        Accessible.description: qsTr("Drop only the unsaved resolution selection, keeping all visual-effect and Potato graphic drafts so they can be saved independently.")
+                        onClicked: { page.setValue("potatoMode", Number(Engine.saved.potatoMode || 0)); page.feedback = ""; page.saveFailed = false }
                     }
                     Text {
                         objectName: "shaderPotatoStatus"
@@ -353,32 +569,13 @@ Rectangle {
                             objectName: "shaderResolutionRestart"
                             pSize: page.bsiTheme.buttons.sizes.medium
                             pColor: page.bsiTheme.buttons.colors.secondary
-                            text: page.restartConfirmation ? qsTr("Restart now") : qsTr("Restart player…")
+                            text: qsTr("Restart player…")
                             enabled: !!Engine.display.canRestart && !page.pEnableSave
-                            onClicked: {
-                                if (!page.restartConfirmation) { page.restartConfirmation = true; return }
-                                var response = Engine.restartPlayer()
-                                page.saveFailed = !response.ok; page.feedback = response.msg
-                                page.restartConfirmation = false
-                                if (response.ok) {
-                                    var window = page.Window.window
-                                    if (window && typeof window.showRestartLoader === "function") window.showRestartLoader()
-                                    if (window) window.hide()
-                                }
-                            }
-                        }
-                        Native.UiButton {
-                            objectName: "shaderResolutionLater"
-                            visible: page.restartConfirmation
-                            pSize: page.bsiTheme.buttons.sizes.medium
-                            pColor: page.bsiTheme.buttons.colors.secondary
-                            text: qsTr("Later")
-                            onClicked: page.restartConfirmation = false
+                            onClicked: page.showRestartPrompt(false)
                         }
                         Text {
                             Layout.fillWidth: true; wrapMode: Text.Wrap
-                            text: page.restartConfirmation ? qsTr("Restart the player now? Running games/apps may close. Your resolution was already saved.")
-                                : Engine.display.canRestart ? qsTr("Saved, not failed. A restart is required to recreate the native game framebuffer.")
+                            text: Engine.display.canRestart ? qsTr("Resolution is saved. Restart to recreate the native game framebuffer.")
                                 : qsTr("Resolution is saved. Restart manually on this player, or finish other unsaved native settings first.")
                             color: page.bsiTheme.colors.primary30; font: page.bsiTheme.fonts.bodySmall
                         }
@@ -503,8 +700,9 @@ Rectangle {
             }
             Text {
                 Layout.fillWidth: true; elide: Text.ElideRight
-                text: Number(page.draft.potatoMode || 0) !== Number(Engine.saved.potatoMode || 0)
-                    ? qsTr("Render size needs a player restart") : qsTr("Effects apply after saving")
+                text: page.needsTextureReview ? qsTr("Confirm the Potato driver review before saving")
+                    : page.resolutionDraftChanged && !page.keepCurrentDisplay && page.resolutionPreview.ok && page.resolutionPreview.displayChanged
+                        ? qsTr("Save changes to review the restart prompt") : qsTr("Effects apply after saving")
                 color: page.bsiTheme.colors.primary20; font: page.bsiTheme.fonts.bodySmall
             }
             Native.UiButton {

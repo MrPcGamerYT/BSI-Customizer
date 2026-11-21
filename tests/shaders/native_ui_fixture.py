@@ -49,10 +49,11 @@ def assert_component(item, kind):
 
 
 _service_types = []
+_shortcut_service_types = []
 _service_objects = {}
 
 
-def register_tooltip_service():
+def register_tooltip_service(shortcut=False):
     """Nonpainting attached-property double, independent of OEM/player code."""
     if os.environ.get("BSI_TEST_QT_API") == "PyQt5":
         from PyQt5.QtCore import QObject, pyqtProperty as Property
@@ -60,7 +61,9 @@ def register_tooltip_service():
     else:
         from PySide6.QtCore import QObject, Property
         from PySide6.QtQml import QmlAttached, qmlRegisterType
-    assert not _service_types, "run each native resource family in its own process"
+    types = _shortcut_service_types if shortcut else _service_types
+    uri, name = ("UiShortcutToolTip", "UiShortcutToolTip") if shortcut else ("UiToolTipControl", "UiToolTip")
+    assert not types, "run each native resource family in its own process"
 
     class TipProperties(QObject):
         def __init__(self, parent=None):
@@ -92,19 +95,20 @@ def register_tooltip_service():
             return TipProperties(obj)
 
     if os.environ.get("BSI_TEST_QT_API") == "PyQt5":
-        qmlRegisterType(Tip, "UiToolTipControl", 1, 0, "UiToolTip", attachedProperties=TipProperties)
+        qmlRegisterType(Tip, uri, 1, 0, name, attachedProperties=TipProperties)
     else:
         Tip = QmlAttached(TipProperties)(Tip)
-        qmlRegisterType(Tip, "UiToolTipControl", 1, 0, "UiToolTip")
-    _service_types.extend((TipProperties, Tip))
+        qmlRegisterType(Tip, uri, 1, 0, name)
+    types.extend((TipProperties, Tip))
 
 
 def install_player_resources(engine, directory, reference):
     """Use unmodified, hash-checked extracted QML/assets, never OEM binaries.
 
-    The tooltip C++ service is a nonpainting attached-property double. Actual
-    button/checkbox/combo/textfield/slider/layout/scroll/image/theme code is
-    native, NOT rewritten to make it load. This is still not a running player.
+    Tooltip attachments and dialog-window/button-model C++ services are authored
+    nonpainting doubles. Actual button/checkbox/combo/textfield/slider/layout/
+    scroll/image/dialog/theme QML is native, NOT rewritten to make it load.
+    This is still not a running player.
     """
     if os.environ.get("BSI_TEST_QT_API") == "PyQt5":
         from PyQt5.QtCore import QResource, QUrl
@@ -120,6 +124,11 @@ def install_player_resources(engine, directory, reference):
         assert len(payload) == entry["bytes"] and hashlib.sha256(payload).hexdigest() == entry["sha256"], entry["path"]
     assert "UiThemeObject.qml" in {e["path"] for e in metadata["resources"]}
     register_tooltip_service()
+    if b"import UiShortcutToolTip 1.0" in (reference / "UiImageButton.qml").read_bytes():
+        # Newer native close buttons import this separate attached service even
+        # when their default pUseShortcutTooltip is false. No tooltip is painted
+        # or shortcut registry imitated by either explicit service double.
+        register_tooltip_service(shortcut=True)
     binary = Path(directory) / "player-native.rcc"
     compile_resources(reference / "native.qrc", binary)
     assert QResource.registerResource(str(binary))
@@ -255,6 +264,8 @@ QtObject {
 
 def install(engine, directory, theme=None):
     """Register root native QML contracts; caller retains engine and cleanup."""
+    from .native_dialog_fixture import register as register_dialog_services, message_source
+    register_dialog_services(directory)
     if os.environ.get("BSI_SHADERS_NATIVE_UI_DIR"):
         assert theme is None, "real-resource mode must use the player's real theme, not the authored singleton"
         return install_player_resources(engine, directory, Path(os.environ["BSI_SHADERS_NATIVE_UI_DIR"]))
@@ -266,7 +277,7 @@ def install(engine, directory, theme=None):
         from PySide6.QtQml import QQmlComponent
     root = Path(directory) / "native-ui-contracts"
     root.mkdir()
-    sources = {"NativeTheme.qml": theme_source()}
+    sources = {"NativeTheme.qml": theme_source(), "UiMessageDialog.qml": message_source()}
     # Generic Qt Controls with native public property names; distinctive kind
     # markers make any accidental use of the old Shader* lookalikes fail.
     sources["UiButton.qml"] = '''import QtQuick 2.15

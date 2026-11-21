@@ -93,8 +93,15 @@ not certify those lifetimes.
 
 - Both texture flags default off. Selecting the switch/review checkbox is only
   a draft; existing native Save/Discard/navigation semantics are retained.
-- Enabling without review is refused. Presets, Enhance and Reset visuals preserve
-  the texture flags and independent native-resolution mode.
+- The required driver-review checkbox is directly beside/below the switch,
+  before the explanation, and is revealed/focused when needed. Save guides the
+  user to that checkbox instead of submitting an unreviewed draft to a remote
+  red error. No review is auto-checked; the C++ validator still refuses a bypass.
+- Status explicitly separates **Not saved / current saved On or Off** from
+  **Saved setting / runtime draw evidence**. A checked draft cannot imply an
+  armed runtime, and a saved toggle cannot imply successful game texture draws.
+  Presets, Enhance and Reset visuals preserve the texture flags and independent
+  native-resolution mode. Texture-only Save does not open a restart dialog.
 - `bsi.shaders.v3` stores 14 values: ten visual steps, visual enable, resolution
   mode, texture enable and external-override review. Released v1/v2 profiles are
   read without writes and migrate on Save, retaining resolution recovery data.

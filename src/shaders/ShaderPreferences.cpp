@@ -1,5 +1,6 @@
 #include "ShaderPreferences.h"
 #include <QDir>
+#include <QCryptographicHash>
 #include <QFile>
 #include <QFileInfo>
 #include <QJsonDocument>
@@ -82,6 +83,16 @@ QJsonObject configJson(const ShaderSavedConfiguration &c){
     return {{QStringLiteral("schema"),QStringLiteral("bsi.shaders.v3")},
         {QStringLiteral("values"),QJsonObject::fromVariantMap(configValues(c))},{QStringLiteral("display"),display}};
 }
+QString displayReviewKey(PotatoMode mode,const DisplayResolution &before,const DisplayResolution &target,const ShaderSavedConfiguration &saved){
+    // A concurrency stamp, NOT an authorization token or hardware attestation.
+    // A modal may remain open while an external tool changes native Display.
+    // Hash the exact reviewed sizes/flags AND saved configuration so confirmation
+    // cannot silently replan another target or overwrite a newer shader save.
+    const auto bytes=QJsonDocument(QJsonObject{{QStringLiteral("mode"),int(mode)},
+        {QStringLiteral("before"),resolutionJson(before)},{QStringLiteral("target"),resolutionJson(target)},
+        {QStringLiteral("saved"),configJson(saved)}}).toJson(QJsonDocument::Compact);
+    return QString::fromLatin1(QCryptographicHash::hash(bytes,QCryptographicHash::Sha256).toHex());
+}
 bool decodeConfig(const QJsonObject &root,ShaderSavedConfiguration *c,ShaderDisplayPending *pending,QString *error){
     const auto schema=root.value(QStringLiteral("schema")).toString();
     const bool legacy=schema==QLatin1String("bsi.shaders.v1");
@@ -101,7 +112,7 @@ bool decodeConfig(const QJsonObject &root,ShaderSavedConfiguration *c,ShaderDisp
                ||!decodeResolution(display.value(QStringLiteral("target")),&c->target))
                 return refuse(error,QStringLiteral("The saved original/target display sizes are invalid; automatic restoration is refused."));
             const auto plan=planPotatoResolution(c->potato,c->original);
-            if(!plan.reduced||plan.target!=c->target)return refuse(error,QStringLiteral("The saved render-resolution target does not match its bounded plan."));
+            if(!plan.supported||plan.target!=c->target)return refuse(error,QStringLiteral("The saved render-resolution target does not match its bounded plan."));
         }
     }
     if(journal){
@@ -208,12 +219,15 @@ QVariantMap ShaderPreferences::displayStatus()const{
         else if(pending.active)detail=QStringLiteral("Pending native Display save needs reconciliation. No live rendering result or successful restore is claimed.");
         else if(conflict)detail=QStringLiteral("Display changed outside this profile. Keep the current display explicitly before replacing/forgetting its old restore snapshot; newer settings will not be overwritten.");
         else if(restartRequired)detail=QStringLiteral("Native render size saved. Fully restart the player to use it; the current running game's size has not been measured.");
-        else if(saved.potato!=PotatoMode::Native)detail=QStringLiteral("Native reduction is configured. Actual guest/game resolution and FPS must be checked after restart; this is not a texture-only shader.");
-        else detail=QStringLiteral("Changes the player's real Display render resolution, not a blur filter. Only Save writes it; a full player restart is required.");
+        else if(saved.potato!=PotatoMode::Native)detail=saved.original==saved.target
+            ?QStringLiteral("The selected profile matches the captured original Display size; no reduction from that original is configured. The running game's size has not been measured.")
+            :QStringLiteral("A native Display size is configured. Actual guest/game resolution must be checked after restart; this is not texture-detail reduction.");
+        else detail=QStringLiteral("Optional native Display size, separate from texture sampling. A changed size needs Save and a player restart; an already-configured size needs neither Display write nor restart.");
     }
     return {{"available",available},{"width",current.width},{"height",current.height},{"custom",current.custom},
         {"nativeUnsaved",modified},{"mode",int(saved.potato)},{"pending",pending.active},{"conflict",conflict},
-        {"restartRequired",restartRequired},{"canRestart",available&&restartRequired&&current==restartTarget&&nativeDisplay.canRestart()&&!pending.active&&!modified},{"originalWidth",saved.original.width},{"originalHeight",saved.original.height},
+        {"restartRequired",restartRequired},{"restartAvailable",available&&nativeDisplay.canRestart()},
+        {"canRestart",available&&restartRequired&&current==restartTarget&&nativeDisplay.canRestart()&&!pending.active&&!modified},{"originalWidth",saved.original.width},{"originalHeight",saved.original.height},
         {"targetWidth",saved.target.width},{"targetHeight",saved.target.height},{"detail",detail}};
 }
 QVariantMap ShaderPreferences::previewPotato(int mode)const{
@@ -226,14 +240,22 @@ QVariantMap ShaderPreferences::previewPotato(int mode)const{
     if(saved.potato!=PotatoMode::Native&&current!=saved.target)return fail(QStringLiteral("Display was changed elsewhere. Keep current display, then Save, before choosing another reduction."));
     const auto original=saved.potato==PotatoMode::Native?current:saved.original;
     const auto plan=planPotatoResolution(PotatoMode(mode),original);
-    if(mode&&!plan.reduced)return fail(QString::fromLatin1(plan.diagnostic));
-    const auto target=mode?plan.target:original;
-    const auto fewer=100-int(std::int64_t(target.width)*target.height*100/(std::int64_t(original.width)*original.height));
-    return {{"ok",true},{"width",target.width},{"height",target.height},
-        {"msg",mode?QStringLiteral("%1 → %2 (about %3% fewer native pixels). Save, then fully restart. DPI/API/FPS caps are unchanged; no FPS gain is guaranteed.").arg(dimensions(original),dimensions(target)).arg(fewer)
-                   :QStringLiteral("Native/original resolution: %1. Saving Native restores only this profile's unchanged target; later Display edits are preserved.").arg(dimensions(target))}};
+    if(!plan.supported)return fail(QString::fromLatin1(plan.diagnostic));
+    const auto target=plan.target;
+    const bool changes=current!=target;
+    QString message;
+    if(!changes)message=QStringLiteral("Display is already %1. This selection needs no Display write or restart; other shader changes can still be saved.").arg(dimensions(target));
+    else if(!mode)message=QStringLiteral("Restore original Display: %1 → %2. Save, then restart. Later external Display edits are preserved.").arg(dimensions(current),dimensions(target));
+    else {
+        const auto difference=int(std::int64_t(target.width)*target.height*100/(std::int64_t(current.width)*current.height))-100;
+        message=QStringLiteral("%1 → %2 (about %3% %4 configured pixels). Save, then restart. DPI/FPS caps are unchanged; game resolution and FPS are not measured.")
+            .arg(dimensions(current),dimensions(target)).arg(std::abs(difference))
+            .arg(difference>0?QStringLiteral("more"):QStringLiteral("fewer"));
+    }
+    return {{"ok",true},{"width",target.width},{"height",target.height},{"custom",target.custom},
+        {"displayChanged",changes},{"reviewKey",displayReviewKey(PotatoMode(mode),current,target,saved)},{"msg",message}};
 }
-QVariantMap ShaderPreferences::apply(const QVariantMap &input,bool keepCurrentDisplay){
+QVariantMap ShaderPreferences::apply(const QVariantMap &input,bool keepCurrentDisplay,const QString &reviewKey){
     const auto fail=[&](const QString &message){lastError=message;return QVariantMap{{"ok",false},{"msg",message}};};
     ShaderSavedConfiguration requested;QString error;
     if(file.isEmpty())return fail(QStringLiteral("No native player instance is attached."));
@@ -243,7 +265,11 @@ QVariantMap ShaderPreferences::apply(const QVariantMap &input,bool keepCurrentDi
         return fail(QStringLiteral("Cannot create a safe shader settings/lock directory."));
     QLockFile lock(file+QStringLiteral(".lock"));
     if(!lock.tryLock(0))return fail(QStringLiteral("Another shader-settings writer is active; nothing was changed."));
+    if(!reviewKey.isEmpty()&&pending.active)
+        return fail(QStringLiteral("A Display recovery transaction appeared after preview. Resolve it and review the size again; nothing was saved or restarted."));
     if(pending.active&&!keepCurrentDisplay&&!reconcile(&error))return fail(error);
+    if(!reviewKey.isEmpty()&&(keepCurrentDisplay||requested.potato==saved.potato))
+        return fail(QStringLiteral("The reviewed Display selection is stale. Review the current size and Save again; nothing was changed."));
     ShaderSavedConfiguration next=saved;next.visual=requested.visual;next.texture=requested.texture;next.potato=requested.potato;
     DisplayResolution before,target;bool nativeChange=false;
     if(keepCurrentDisplay||next.potato!=saved.potato){
@@ -258,16 +284,22 @@ QVariantMap ShaderPreferences::apply(const QVariantMap &input,bool keepCurrentDi
             else {
                 const auto original=saved.potato==PotatoMode::Native?before:saved.original;
                 const auto plan=planPotatoResolution(next.potato,original);
-                if(!plan.reduced)return fail(QString::fromLatin1(plan.diagnostic));
+                if(!plan.supported)return fail(QString::fromLatin1(plan.diagnostic));
                 target=plan.target;next.original=original;next.target=target;
             }
             nativeChange=before!=target;
         }
     }
+    if(!reviewKey.isEmpty()&&reviewKey!=displayReviewKey(next.potato,before,target,saved))
+        return fail(QStringLiteral("Display or saved shader settings changed after the restart preview. Review the current size and Save again; nothing was saved or restarted."));
     if(!nativeChange){
+        const bool unchangedSelection=!keepCurrentDisplay&&next.potato!=saved.potato;
         if(!persist(next,{},&error))return fail(error);
         saved=next;pending={};lastError.clear();displayDetail.clear();
-        return {{"ok",true},{"msg",keepCurrentDisplay?QStringLiteral("Current native display kept; the old resolution restore snapshot was cleared. No display setting was written."):QStringLiteral("Shader settings saved.")}};
+        return {{"ok",true},{"displayChanged",false},{"resolutionUnchanged",unchangedSelection},
+            {"msg",keepCurrentDisplay?QStringLiteral("Current native display kept; the old resolution restore snapshot was cleared. No display setting was written.")
+                :unchangedSelection?QStringLiteral("Display is already %1. Shader settings saved; this selection made no Display write and needs no additional restart.").arg(dimensions(before))
+                :QStringLiteral("Shader settings saved.")}};
     }
     ShaderDisplayPending transaction;transaction.active=true;transaction.before=before;transaction.target=target;transaction.next=next;
     // The old preferences plus BOTH native sizes are durable application-level
@@ -291,6 +323,7 @@ QVariantMap ShaderPreferences::apply(const QVariantMap &input,bool keepCurrentDi
     restartRequired=true;restartTarget=target;
     if(!persist(next,{},&error))return fail(QStringLiteral("Native render size was submitted successfully; restart is required, but preference finalization failed. Recovery is retained. ")+error);
     saved=next;pending={};lastError.clear();displayDetail.clear();
-    return {{"ok",true},{"displayChanged",true},{"msg",QStringLiteral("Native render size saved: %1. Fully restart the player to apply it. Save succeeded. Use Restart player to request the supported native restart, or restart manually. No hot resize, DPI change or FPS gain is claimed.").arg(dimensions(target))}};
+    return {{"ok",true},{"displayChanged",true},{"restartRequired",true},
+        {"msg",QStringLiteral("Native Display size saved: %1. Restart the player to apply it. DPI, render API and FPS caps were not changed; actual game resolution and FPS are not measured.").arg(dimensions(target))}};
 }
 } // namespace BsiShaders

@@ -12,7 +12,7 @@ pointer/wheel/key input and receives rendered Qt frames (not an HTML remake).
 import argparse
 import atexit
 import hashlib
-import importlib.util
+import sys
 import uuid
 import http.server
 import json
@@ -146,9 +146,9 @@ class SettingsPreview:
             # controls/full live theme. This preview has no player resources:
             # use the same explicitly authored contracts as standalone tests,
             # never resurrect the removed Shader* lookalikes or export OEM QML.
-            spec = importlib.util.spec_from_file_location("preview_native_ui", REPO / "tests/shaders/native_ui_fixture.py")
-            native_ui = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(native_ui)
+            if str(REPO / "tests") not in sys.path:
+                sys.path.insert(0, str(REPO / "tests"))
+            from shaders import native_ui_fixture as native_ui
             theme_source = native_ui.theme_source(singleton=True)
         else:
             theme_source = THEME

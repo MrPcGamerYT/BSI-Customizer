@@ -1,8 +1,42 @@
 # Free Fire: configured Vulkan is not a captured game renderer
 
-## Evidence from the reported session
+## Later user report: working host OpenGL presentation under a Vulkan hint
 
-The user supplied this diagnostic, not a successful shader result:
+The user subsequently reported that the effects now work with Vulkan selected
+and supplied these runtime facts:
+
+```text
+Requested API: Automatic
+Configured emulator renderer (hint only): Vulkan
+Observed game API: OpenGL
+Processed game frames: 3704
+Game surface observed: yes; processing active: yes
+loaders=1; instances=1; devices=1; Win32 surfaces=0;
+swapchains=0; presents=0; missing queues=0; excluded windows=0
+Last hooked loader: vulkan-1.dll
+Qt bridge: 5.15.2; host: 5.15.4
+```
+
+This is **user-reported owned GL/GLES presentation processing**, despite the
+Vulkan configuration hint. Keep the actual API label: it is not a captured
+Vulkan WSI path, identification of the Android guest API, Vulkan texture
+processing, a measured FPS gain or universal player/GPU acceptance. It does
+supersede the zero-frame symptom for that later session; do not keep claiming
+that the user has no working effect/capture evidence.
+
+The accompanying checked-Potato screenshot showed a required driver-review
+validation refusal and **saved/runtime off**. Zero prepared draws while disabled
+cannot diagnose sampler incompatibility. The UI repair reveals the explicit
+review beside the toggle and distinguishes unsaved draft from saved/runtime
+state; it does not auto-acknowledge the review or invent successful draws.
+The separate resolution error said the selected profile was already at/below
+its cap. Actual native dimensions were **not** supplied, so they are not inferred
+from that message. Current-size no-ops and eligible-mode filtering address that
+flow without forcing upscaling or unsupported sub-540 sizes.
+
+## Earlier zero-frame report (historical, not the later result)
+
+The earlier diagnostic was not a successful shader result:
 
 ```text
 Requested API: Vulkan
@@ -89,8 +123,10 @@ API**, **offscreen/interop presentation**, and **a missed surface/provider/proce
 lifecycle**. These remain hypotheses for the reported session. The automatic
 routing change removes the configuration gate without changing the emulator's
 renderer or adopting UI/offscreen images. Authored Windows loader/lifecycle tests
-and software pipelines do not establish that the affected player is now captured.
-Record the actual observed API; do not count another API as Vulkan acceptance.
+and software pipelines alone are not affected-player evidence; the later report
+above separately supplies working GL presentation counters. It does not explain
+or retroactively turn the historical zero-frame run into a success. Record the
+actual observed API; do not count another API as Vulkan acceptance.
 
 ## Smallest useful next evidence
 
@@ -115,8 +151,10 @@ Record the actual observed API; do not count another API as Vulkan acceptance.
    Do not attach intrusive tools to a protected online match or disable anti-cheat.
    No RenderDoc/ANGLE forcing, APK modification or game injection was performed.
 
-An optional user-chosen OpenGL run through the **native** graphics menu and a
-full restart could be a comparison, not a repair or acceptance of the requested
-Vulkan path. Even if that run worked, it must be reported as OpenGL, not Vulkan.
-There is no evidence yet that shaders or texture Potato work in the reported
-Free Fire session, nor any measured FPS improvement.
+The later session needs no forced renderer change merely to relabel its
+working host GL path. If the user elects to compare another native renderer,
+record it as a separate run, not a Vulkan acceptance shortcut. The next Potato
+check is explicit driver review → Save → the same qualified game scene, with
+actual prepared-draw/binding evidence and off/on images. Current native Display
+dimensions and exact resolution preview belong in the separate size test.
+Texture appearance, real Vulkan presentation and FPS gains remain unconfirmed.

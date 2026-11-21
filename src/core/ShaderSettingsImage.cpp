@@ -151,7 +151,9 @@ Plan prepare(const QByteArray &image, bool enabled)
             QStringLiteral("UiCheckBox.qml"), QStringLiteral("UiComboBox.qml"),
             QStringLiteral("UiSlider.qml"), QStringLiteral("UiScrollView.qml"),
             QStringLiteral("UiScrollBar.qml"), QStringLiteral("UiImage.qml"),
-            QStringLiteral("UiTextField.qml")
+            QStringLiteral("UiTextField.qml"), QStringLiteral("UiMessageDialog.qml"),
+            QStringLiteral("UiDialog.qml"), QStringLiteral("UiShadowContainer.qml"),
+            QStringLiteral("UiDropShadowEffect.qml"), QStringLiteral("UiImageButton.qml")
         };
         for (const auto &name : nativeControls) {
             QList<QtResources::File> matches;

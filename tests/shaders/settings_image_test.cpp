@@ -98,6 +98,17 @@ int main(int argc, char **argv)
                     QStringLiteral("exact removal remains available on older Settings designs: ") + removed.error);
         }
     }
+    for (const auto &control : {QStringLiteral("UiMessageDialog.qml"), QStringLiteral("UiDialog.qml"),
+                                 QStringLiteral("UiShadowContainer.qml"), QStringLiteral("UiDropShadowEffect.qml"),
+                                 QStringLiteral("UiImageButton.qml")}) {
+        const auto missingDialog = fixture(false, true, control);
+        const auto blocked = ShaderSettingsImage::prepare(missingDialog, true);
+        require(!blocked.ok && blocked.output.isEmpty() && blocked.error.contains(QStringLiteral("qrc:/") + control),
+                QStringLiteral("missing stock restart-dialog dependency is refused before any installation, never substituted: ") + blocked.error);
+        const auto removal = ShaderSettingsImage::prepare(missingDialog, false);
+        require(removal.ok && removal.output == missingDialog && !removal.changed,
+                QStringLiteral("a missing stock dialog must not block safe no-op removal"));
+    }
     const auto absent = ShaderSettingsImage::prepare(base, false);
     require(absent.ok && !absent.changed && !absent.installed && absent.output == base && absent.sources.isEmpty(),
             QStringLiteral("removing absent shaders is a pure no-op, not a native source/cache rewrite: ") + absent.error);

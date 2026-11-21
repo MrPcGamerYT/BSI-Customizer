@@ -79,7 +79,9 @@ inline int exportReadOnly(const QString &reference, const QString &destination)
                                 QStringLiteral("UiCheckBox.qml"), QStringLiteral("UiComboBox.qml"),
                                 QStringLiteral("UiSlider.qml"), QStringLiteral("UiScrollView.qml"),
                                 QStringLiteral("UiScrollBar.qml"), QStringLiteral("UiImage.qml"),
-                                QStringLiteral("UiTextField.qml")})
+                                QStringLiteral("UiTextField.qml"), QStringLiteral("UiMessageDialog.qml"),
+                                QStringLiteral("UiDialog.qml"), QStringLiteral("UiShadowContainer.qml"),
+                                QStringLiteral("UiDropShadowEffect.qml"), QStringLiteral("UiImageButton.qml")})
         if (!paths.contains(required)) return fail("required stock control is absent from qrc root");
     QFile qrcFile(directory.filePath(QStringLiteral("native.qrc")));
     if (!qrcFile.open(QIODevice::WriteOnly | QIODevice::NewOnly) || qrcFile.write(qrc) != qrc.size())

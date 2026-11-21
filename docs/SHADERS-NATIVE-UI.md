@@ -1,11 +1,13 @@
 # Shaders uses stock Settings controls, not a painted approximation
 
-**UI implementation and bounded Qt tests, not installed-player acceptance.**
-The user confirmed the newer screenshot was no longer transparent, but its
-lighter outer frame still mismatched the native page. The v21 uniform-theme
-correction and reported stretched polygons/Vulkan “Not detected” still need
-installed-player verification. This change does not implement the requested
-video-like texture-detail Potato effect. Optional resolution scaling is separate.
+**UI implementation and bounded Qt tests, not universal player/GPU acceptance.**
+Preserve the approved v21 flat native shell, selected-tab-only glass and native
+controls. A later user report confirms processed **OpenGL/GLES** presentation
+with Vulkan configured; it is not Vulkan texture processing. The current UI
+repair makes Potato review/draft state clear, handles eligible/current-size
+resolution choices and uses the actual stock Graphics-style restart dialog.
+The GL/GLES texture experiment remains bounded; optional Display scaling is
+separate and is not a substitute for texture detail.
 
 ## Native analysis before implementation
 
@@ -23,6 +25,7 @@ Display/Graphics/Performance footers agree on these public contracts:
 | `UiColumnLayout` / `UiRowLayout` | Transparent Rectangle wrappers whose default children belong to an internal real layout, not aliases for the Qt layout type |
 | `UiScrollView` | Native scrollbars, including `uiBackend.pFlickableMoving` and its native notify signal |
 | `UiImage` | Native MenuInfo artwork; use an absolute player-QRC source from the module's different resource directory |
+| `UiMessageDialog` / `UiDialogWindow.Simple` | Actual Graphics/Display restart shell, native dialog-button models, live theme, localized product title/description and modal/transient ownership |
 | Full `UiTheme` | The same live context object the native components use, not a palette/body-font snapshot or replacement singleton |
 
 All these controls and `UiThemeObject.qml` are registered at QRC root in the four
@@ -50,6 +53,27 @@ the navigation tabs**, not to a custom-rounded Save button.
 The native Settings tab/close No/Discard callbacks are retained. There is no
 second permanent Discard button. All ten visual sliders and individual Reset
 controls remain; the independent resolution draft/recovery is also retained.
+
+### Stock restart and understandable drafts
+
+A changed resolution's Save opens `Native.UiMessageDialog` **before** any native
+write, with the exact stock **Restart Now / Discard Changes** roles. Closing
+keeps the shader draft; Discard clears only that page's draft. Confirmation
+revalidates the C++ preview stamp, commits/finalizes, then requests the typed
+native restart. Acceptance uses the existing Settings restart-loader signal;
+refusal keeps Settings visible and the saved target intact. A saved retry uses
+**Later**, not a misleading Discard of already-saved values. An unavailable
+restart contract has a manual notice and a correctly labeled Save action.
+The previous custom inline two-click confirmation has been removed.
+
+The Potato review checkbox is now immediately below its switch and is revealed
+when needed; it is never silently acknowledged. Draft status explicitly says
+**Not saved / current saved On or Off**, distinct from runtime sampler evidence.
+A resolution choice already at the exact native size reports a no-op with no
+Display write or restart. Profiles that would upscale a smaller original or
+violate native bounds are omitted, with the reason shown; stale size drafts
+can be dropped independently of visual/texture edits. These remain the same
+native checkboxes, combo, text roles and buttons, not a redesigned form.
 
 ## Page/material isolation and update safety
 
@@ -85,17 +109,27 @@ the production `shader-settings-image-test` exporter. Per matching Qt family it:
    Extracted sources/artwork are temporary only and are not uploaded as artifacts.
 3. Loads the actual native controls and **actual native theme**, plus the real
    BSI C++ plugin/page and the unmodified generated About material. Native C++
-   tooltip attachment is an explicit nonpainting service double; Display is a
-   typed contract endpoint, not an emulator backend.
+   tooltip attachment and dialog C++ window/model services are explicit
+   authored doubles; Display is a typed endpoint, not an emulator backend.
+   `UiMessageDialog.qml`, `UiDialog.qml` and their painting/theme dependencies
+   remain unmodified native resources, never copied into the deliverable.
 4. Compares Save pixel-for-pixel against a separate native button using the same
    live theme at identical coordinates in clean, enabled, hover and pressed
-   states. The reference is outside the shell decorator's scope.
+   states. The reference is outside the shell decorator's scope. Also compares
+   the restart dialog pixel-for-pixel against a separate stock factory with the
+   same theme/product strings; changing the reference's painted title must
+   fail image equality (readable-font runs only).
 5. Physically exercises the checkbox, combos, slider, Save, Enhance and all ten
    right-aligned, fully visible Reset buttons at 750/420 px. Includes empty-font
    layout stress with no repeated reveal, click retry or property-only fallback.
 6. Samples page and footer over two contrasting host colors and a live theme
    change, checks that native slider/Save materials survive decoration, and
    physically tests the long Keep-current-display recovery action at 420 px.
+   Exercises visible Potato review/unsaved status, 720/540 current-size no-op
+   saves and eligible-mode mapping, pre-commit stock modal close/Discard, stale
+   native drafts/newer Saves with refreshed retry previews, restart refusal/
+   retry/Later/acceptance and manual fallback. No global Discard, extra native
+   commits or pretend game counters.
 7. Requires separate transparent-page and altered-Save-material negative runs
    to fail the same unchanged pixel assertions. Neither is accepted as a pass.
 8. Checks both temporary and original reference bytes remain unchanged.
@@ -113,10 +147,11 @@ the production plugin/page. Its authored preview prompt is not the player's
 native dialog. Existing strict glass paint/contrast, DPI, callback, persistence,
 bounded compression and recovery tests stay required.
 
-`shaders_native_service_test.py` isolates the nonpainting tooltip adapter,
-without a shader plugin or OEM resources. Bound bool/text attached properties
-must survive Python collection, remain independent per owner, and release all
-retained wrappers when owners are destroyed across three cycles. PyQt 5's
+`shaders_native_service_test.py` isolates the nonpainting normal/shortcut
+tooltip adapters, without a shader plugin or OEM resources. Bound bool/text
+attached properties must survive Python collection, remain independent per
+owner and service, and release all retained wrappers when owners are destroyed
+across three cycles. PyQt 5's
 attached-object factory otherwise lets the wrapper disappear before a later
 QML binding write; this was reproduced with a tiny authored Item and one
 unmodified native button, without loading the shader plugin. Explicit wrapper

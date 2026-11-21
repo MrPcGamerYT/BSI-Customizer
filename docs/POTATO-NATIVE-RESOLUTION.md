@@ -44,10 +44,24 @@ render size and performance must be measured after restart.
 | Strong · 540 px short edge | 960×540 | 75% fewer configured native pixels |
 
 The original aspect/orientation is preserved to the nearest **two pixels**.
-Targets must keep **both** dimensions in the native custom editor's 540–3840
-range. Do not force unsupported 360p/270p sizes. If the original short edge is
-already at/below the selected cap, Save refuses the mode rather than recording
-a pretend performance change. Extreme aspect ratios that do not fit are refused.
+Newly generated custom targets must keep **both** dimensions in the native
+editor's 540–3840 range. Do not force unsupported 360p/270p sizes. The menu now shows only
+eligible profiles. A profile above the **original** short edge is unavailable;
+selecting a reduction never silently upscales a smaller original. Extreme aspect
+ratios that do not fit are also unavailable, with the reason shown beside the
+selector. The actual configured dimensions and proposed target are displayed.
+
+When the proposed target **exactly matches the currently configured Display**,
+the choice is marked **(current)** and Save succeeds as an explicitly reported
+**no-op**: no Display write, native commit or additional restart, and no claim
+of fewer pixels or better performance. Both original dimensions (even an
+existing odd dimension) and the custom/predefined flag remain exact. Independent
+visual/texture edits can Save at the same time. Switching from Strong back to a
+720 px captured original is **not** a no-op if Display is currently 540 px: it
+explicitly restores that original with Save/restart, never beyond the original.
+If a draft becomes ineligible after an external edit, **Keep saved resolution**
+drops only that unsaved selection, preserving the other shader drafts. This is
+different from the existing **Keep current display** recovery action.
 
 The exact original is captured once when enabling a reduction. Strength changes
 always plan from that original, not from an already reduced target. Restoration
@@ -65,18 +79,33 @@ favorites list is changed. Visual effects can add work independently.
 - Selecting a mode edits the **draft only**. It participates in the existing
   native tab/close **No / Discard Changes** prompt. Neither preview, presets,
   opening the page nor Discard writes a new native resolution.
-- **Save changes** is the only operation that stages the framebuffer size through
-  native Display and requests its native commit. The stationary footer and
-  approved Settings geometry remain. A successful config read-back is not a
-  measurement of the still-running game.
-- A successful queued native config Save is reported as **saved, restart
-  required**, not as a failed hot resize. There is no silent restart or claim of
-  a live resolution switch. The page retains a notice after this session saves.
-- Where the existing player exposes the exact public `restartPlayer()` method,
-  **Restart player…** first asks for confirmation; **Restart now** invokes it.
-  **Later** leaves the saved configuration alone. Unsupported/refused methods
-  retain the manual-restart requirement. An accepted invocation is not proof
-  that the player restarted or that the running game's dimensions changed.
+- For a changed size, **Save changes opens the player's actual stock
+  `qrc:/UiMessageDialog.qml`**, using its `UiDialogWindow.Simple`, native
+  `DialogButtonModel` / `DialogButtonModelList`, live theme, localized product
+  restart title/description, accent **Restart Now** and secondary **Discard
+  Changes**—the same component contract as native Graphics/Display.
+  Opening it writes nothing. Closing it keeps the draft; **Discard Changes**
+  discards only this shader page's draft, never unrelated native drafts.
+- **Restart Now** first submits the reviewed native size through the durable
+  journal, commit and exact read-back, finalizes preferences, then requests the
+  supported native restart. Only acceptance invokes Settings' restart loader
+  and hides the Settings window. The stationary footer/approved shell remain.
+- A native restart refusal is not a failed config Save: the exact saved size
+  remains configured, Settings stays visible, and a retry/manual notice remains.
+  **Restart player…** reopens the same stock dialog with **Later**, not a fake
+  Discard of changes already saved. Later does not undo or recommit anything.
+  If the public restart method is unavailable, the stock shell has an honest
+  manual-restart notice and **Save changes / Discard Changes** before commit.
+- An exact-current-size choice saves without a restart dialog or Display write.
+  An accepted restart call is not proof of a completed restart, changed guest
+  dimensions or a measured running-game result. No live resize is attempted.
+- Confirmation is bound to the preview's exact source/target dimensions and
+  custom flags plus the saved shader configuration by a C++ concurrency stamp.
+  `applyReviewed()` rechecks it under the preference writer lock **before any
+  native write**, independently of QML's polling timer. A late external edit,
+  newer shader Save or replay cannot silently replan a different size; even a
+  reviewed no-op cannot become an unconfirmed native write. This stamp is not
+  an authorization token, signature or hardware attestation.
 - Restart is allowed only for a finalized change from this session, with an
   unchanged exact target, a live GUI-thread backend and no native unsaved draft
   or pending recovery. Shaders never kills a process, guesses a CLI, commits
@@ -172,8 +201,15 @@ Implemented automated coverage includes:
   wrong-thread backend rejection; exact restart acceptance/refusal, stale-target,
   missing/destroyed restart method and unrelated-native-draft guards;
 - actual C++ plugin import and physical QML mode-popup/Save/Discard/restoration,
-  with visual effects off, plus complete native-shell No/Discard/close callbacks,
-  stationary Save, preset/reset independence and clean bindings;
+  with visual effects off; current-size 720/540 combined saves, unavailable-mode
+  filtering/index mapping, an open popup surviving status polling, and dropping
+  only a stale resolution draft while retaining visual edits;
+- stock restart-dialog resource/model/theme/transient/modal identity and exact
+  pixels against a separate native factory, with a changed-painted-title
+  negative control; pre-commit Discard/close, stale-native-draft refusal,
+  restart refusal/retry/Later/acceptance/manual fallback, accepted-only native
+  loader, no extra commits and no global discard; plus complete native-shell
+  No/Discard/close callbacks, stationary Save and preset/reset independence;
 - every visual Reset at 750/420 px with full-control clipping checks, form/row
   width assertions and a single reveal followed by actual pointer input. An
   isolated empty-font search also exercises wide fallback metrics: section

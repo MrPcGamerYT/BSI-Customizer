@@ -424,7 +424,24 @@ def main():
                 QTest.qWait(30)
                 assert evaluate(page, "draft.potatoMode") == index
 
+            def shader_restart_choice(index):
+                prompts = [candidate for candidate in QGuiApplication.allWindows()
+                           if candidate.objectName() == "shaderRestartPrompt" and candidate.isVisible()]
+                assert len(prompts) == 1 and prompts[0].property("bsiFixtureKind") == "UiMessageDialog"
+                assert evaluate(page, "restartPrompt.transientParent === page.Window.window")
+                prompt = prompts[0]
+                assert prompt.modality() == Qt.WindowModality.ApplicationModal
+                label = evaluate(prompt, "pButtonsList.pButtons[" + str(index) + "].pText")
+                assert label == ("Restart Now" if index == 0 else "Discard Changes")
+                button = named(prompt.contentItem(), "nativeDialogButton" + str(index))
+                assert button.property("bsiFixtureKind") == "UiButton"
+                click(prompt, button)
+                assert not evaluate(page, "!!restartPrompt")
+
             original_display = dict(backend.committed)
+            # A refused native restart leaves this authored fixture available
+            # for navigation/reopen assertions. It is not a guest restart.
+            backend.reject_restart = True
             select_potato(2)
             assert window.property("bsiShaderDirty2") and not backend.writes and backend.commits == 0
             tab(window, 0)
@@ -437,12 +454,22 @@ def main():
             tab(window, 12)
             select_potato(2)
             click(window, named(page, "shaderSave"))
+            assert not backend.writes and backend.commits == 0 and window.property("bsiShaderDirty2")
+            assert evaluate(page, "Engine.saved.potatoMode") == 0
+            shader_restart_choice(1)
+            assert not backend.writes and backend.commits == 0 and not window.property("bsiShaderDirty2")
+            select_potato(2)
+            click(window, named(page, "shaderSave"))
+            shader_restart_choice(0)
+            assert window.isVisible() and backend.restarts == 1 and page.property("saveFailed"), "refused native restart must retain the saved state and visible Settings"
             assert backend.committed["fb_width"] == 960 and backend.committed["fb_height"] == 540 and backend.commits == 1
             assert evaluate(page, "Engine.saved.potatoMode") == 2 and not evaluate(page, "Engine.saved.enabled")
             assert not window.property("bsiShaderDirty2") and not backend.confIsModified()
             assert "restart" in named(page, "shaderPotatoStatus").property("text").lower()
             select_potato(0)
             click(window, named(page, "shaderSave"))
+            assert backend.commits == 1, "Native restoration also waits for the stock confirmation"
+            shader_restart_choice(0)
             assert backend.committed == original_display and backend.commits == 2 and backend.discards == 0
             assert evaluate(page, "JSON.stringify(Engine.saved)") == initial
             click(window, named(page, "shaderEnabled"))

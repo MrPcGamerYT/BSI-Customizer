@@ -161,8 +161,11 @@ or `vulkan-1.dll`. The existing arbitrary startup-DLL feature remains separate.
   dependent overlay is removed. A synthetic registered-PE regression exercises
   Update, idempotence, shader removal and exact original Settings-source Restore.
 
-**There is still no verified working installation in a real player.** The test
-implementation now includes:
+**A later user report confirms working effects and 3704 processed host
+OpenGL/GLES game frames with Vulkan configured.** That is affected-session
+presentation evidence, not real Vulkan texture processing or universal
+player/GPU/FPS certification. Independent game-resource/driver acceptance
+remains required. The test implementation includes:
 
 - **PATCHER → Player interface → Shaders** in the native Customizer, with explicit
   read-only inspection, closed-player/capacity/dependency checks, displayed
@@ -215,7 +218,21 @@ Do not infer game ownership or shader success from lifecycle counters.
 The reported device-without-surface run does not establish that Free Fire lacks
 Vulkan support or that its final host presentation is Vulkan. See the
 [source-backed renderer-layer analysis](FREE-FIRE-RENDERER-ANALYSIS.md); there is
-no automatic GL/Qt fallback or claimed game-frame fix.
+no Qt/UI fallback or relabeling another host API as Vulkan. The later user
+report records actual OpenGL/GLES presentation under the Vulkan hint; it does
+not retroactively certify the earlier zero-frame session.
+
+The latest Shaders flow keeps every control resource-backed, moves/reveals the
+required Potato driver-review checkbox beside its switch, and explicitly
+separates unsaved drafts from saved/runtime texture evidence. Current-size
+720/540 selections are honest no-ops; profiles above the original size or
+outside native bounds are omitted rather than failing combined shader Saves.
+A changed size opens the **actual stock Graphics-style restart dialog before
+commit**, with native models/theme/modal ownership and Restart Now / Discard
+Changes. A C++ preview stamp prevents a stale modal from silently replanning a
+different size. Saved retries use Later; native refusal/manual fallback remain
+truthful, without global discard, extra commit or forced restart. See the
+[resolution flow and tests](POTATO-NATIVE-RESOLUTION.md).
 
 At `250e98f`, [shader CI 44860490109](https://github.com/dsajgddghdsaakovvgheww/BSI-Customizer/actions/runs/44860490109)
 passes all six jobs, including Windows Qt 5.15.2 / 6.2.4 bridges, two distinct
@@ -368,18 +385,19 @@ was executed or written. Current-head Windows/full-app checks remain required.
   Tests fail, rather than skip-pass, when their required APIs are unavailable.
 - Existing icon/style and complete Settings/About resource budgets still pass.
 
-WGL/EGL and Win32 Vulkan presentation, actual-player Qt package compatibility
-and deployment recovery, real-player navigation/game frames and the physical
-GPU matrix have not passed their required checks. Package/recovery fixtures
-and source-capacity success above do not resolve those installed-player gates. Historical regular-DLL loading,
-Qt fixture navigation, prior PR CI and software pixels do not certify a working
-installation of this feature.
+The later user report provides affected-session OpenGL/GLES presentation
+evidence, not universal installed-player acceptance. Broader WGL/EGL and Win32
+Vulkan presentation, actual-player Qt package/deployment recovery, all-tab
+navigation, real texture off/on/restoration and the physical GPU matrix remain
+acceptance gates. Package/recovery fixtures, source-capacity success, historical
+regular-DLL loading, Qt navigation and software pixels do not independently
+certify those installed-player results.
 
 ## Mandatory backend and hardware matrix
 
 | Native game API | Current adapter | Intel | AMD | NVIDIA |
 | --- | --- | --- | --- | --- |
-| OpenGL / GLES | Pipeline prototype; Windows integration unverified | Pending | Pending | Pending |
+| OpenGL / GLES | User-reported owned presentation frames; broader player/texture acceptance pending | Pending | Pending | Pending |
 | DirectX 11 | WARP pixels + DXGI fixture pass; game presentation unverified | Pending | Pending | Pending |
 | DirectX 12 | Actual-queue On12 WARP pixels pass; game presentation unverified | Pending | Pending | Pending |
 | Vulkan | Native pipeline pixel tests pass locally; Win32 WSI unverified | Pending | Pending | Pending |

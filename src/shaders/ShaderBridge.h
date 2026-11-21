@@ -27,12 +27,15 @@ public:
     Q_INVOKABLE QVariantMap restartPlayer();
     Q_INVOKABLE QVariantMap previewPotato(int mode) const;
     Q_INVOKABLE QVariantMap apply(const QVariantMap &values,bool keepCurrentDisplay=false);
+    Q_INVOKABLE QVariantMap applyReviewed(const QVariantMap &values,const QString &displayReviewKey);
     Q_INVOKABLE QString diagnostics() const;
     Q_INVOKABLE void copyDiagnostics() const;
     static void attach(QObject *window,const QString &instance,const QString &graphicsRenderer);
 signals:
     void settingsChanged();
     void metricsChanged();
+private:
+    QVariantMap applyConfiguration(const QVariantMap &values,bool keepCurrentDisplay,const QString &displayReviewKey);
 };
 // qmlRegisterType wraps creatable types in a QQmlElement subclass.
 class ShaderBootstrap : public QObject, public QQmlParserStatus {

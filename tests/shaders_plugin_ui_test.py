@@ -32,14 +32,14 @@ if os.environ.get("BSI_TEST_QT_API") == "PyQt5":
     from PyQt5.QtCore import QCoreApplication, QFileInfo, QLibraryInfo, QObject, QPointF, QRectF, QStandardPaths, Qt, QUrl, qVersion
     from PyQt5.QtGui import QGuiApplication
     from PyQt5.QtQml import QQmlComponent, QQmlEngine, QQmlExpression
-    from PyQt5.QtQuick import QQuickItem
+    from PyQt5.QtQuick import QQuickItem, QQuickWindow
     from PyQt5.QtTest import QTest
 else:
     from PySide6.QtCore import Property, Signal, Slot
     from PySide6.QtCore import QCoreApplication, QFileInfo, QLibraryInfo, QObject, QPointF, QRectF, QStandardPaths, Qt, QUrl, qVersion
     from PySide6.QtGui import QGuiApplication
     from PySide6.QtQml import QQmlComponent, QQmlEngine, QQmlExpression
-    from PySide6.QtQuick import QQuickItem
+    from PySide6.QtQuick import QQuickItem, QQuickWindow
     from PySide6.QtTest import QTest
 
 
@@ -51,10 +51,23 @@ class NativeDisplayFixture(QObject):
     """
     flickableMovingChanged = Signal()
     pIsEditingTextfieldChanged = Signal()
+    shortcutsChanged = Signal()
+
+    @Property(str, constant=True)
+    def productName(self): return "Native contract player"
+
+    @Property(bool, notify=shortcutsChanged)
+    def pIsShortcutsEnabled(self): return self._shortcuts
+
+    @pIsShortcutsEnabled.setter
+    def pIsShortcutsEnabled(self, value):
+        if self._shortcuts != value:
+            self._shortcuts = value
+            self.shortcutsChanged.emit()
 
     def __init__(self):
         super().__init__()
-        self._moving, self._editing = False, False
+        self._moving, self._editing, self._shortcuts = False, False, True
         self.committed = {"fb_width": 1920, "fb_height": 1080, "custom_resolution_selected": False,
                           "dpi": 320, "fps": 90, "renderer": "vlcn", "unrelated": 42}
         self.draft = dict(self.committed)
@@ -215,6 +228,9 @@ def main():
         app.processEvents()
         qml = b'''import QtQuick 2.15
 import QtQuick.Window 2.15
+import DialogButtonModel 1.0
+import DialogButtonModelList 1.0
+import UiDialogWindow 1.0
 import BSIShaders 1.0
 import "qrc:/" as Native
 Window {
@@ -224,6 +240,25 @@ Window {
     property alias shaderPage: shaderLoader.item
     property int pCurrentTabIndex: 0
     property bool bsiShaderDirty: false
+    property int restartLoaderCount: 0
+    function showRestartLoader() { ++restartLoaderCount }
+    Component {
+        id: stockRestartReference
+        Native.UiMessageDialog {
+            id: reference
+            objectName: "stockRestartReference"
+            title: qsTranslate("QObject", "Restart %1").arg(uiBackend.productName)
+            pDescription: qsTranslate("QObject", "Some of the changes need %1 to restart. Do you want to restart now?").arg(uiBackend.productName)
+            pDialogType: UiDialogWindow.Simple
+            pButtonsList: DialogButtonModelList {
+                pButtons: [
+                    DialogButtonModel { pText: "Restart Now"; pColor: UiTheme.buttons.colors.accent; onClicked: reference.close() },
+                    DialogButtonModel { pText: "Discard Changes"; pColor: UiTheme.buttons.colors.secondary; onClicked: reference.close() }
+                ]
+            }
+        }
+    }
+    function openRestartReference() { stockRestartReference.createObject(host, {transientParent: host}).show() }
     // Same native factory/roles as Display/Graphics, not the shader page's
     // implementation. A custom-looking replacement cannot satisfy identity.
     Native.UiButton {
@@ -265,6 +300,10 @@ Window {
         assert component.status() == QQmlComponent.Status.Ready, [e.toString() for e in component.errors()]
         window = component.create()
         assert window, [e.toString() for e in component.errors()]
+        # The fixture explicitly owns/deletes its host, rather than inferring
+        # lifetime from temporary QML/Python wrappers of JS-owned dialogs.
+        QQmlEngine.setObjectOwnership(window, QQmlEngine.ObjectOwnership.CppOwnership)
+        QObject.setParent(window, engine)
         QTest.qWait(220)  # include a full production About-material timer pass
         page = window.property("shaderPage")
         assert page, warnings
@@ -281,9 +320,9 @@ Window {
         def settings():
             return json.loads(evaluate("savedSettings()", window))
 
-        def all_items():
+        def all_items(root=None):
             # Repeater delegates follow the visual, not QObject ownership tree.
-            pending = [page]
+            pending = [root or page]
             while pending:
                 child = pending.pop()
                 yield child
@@ -298,7 +337,8 @@ Window {
                     and bounds.right() <= ancestor.width() + .5
                     and bounds.bottom() <= ancestor.height() + .5)
 
-        def click(control, x_ratio=.5):
+        def click(control, x_ratio=.5, target_window=None):
+            target_window = target_window or window
             # Settle the preceding layout/focus change, reveal the target ONCE,
             # then require the entire control to fit before a real pointer hit.
             # Vertical scrolling cannot repair an oversized horizontal layout.
@@ -322,8 +362,8 @@ Window {
                 ancestor = ancestor.parentItem()
             point = control.mapToScene(QPointF(control.width() * x_ratio, control.height() / 2)).toPoint()
             assert control.isVisible() and control.isEnabled(), "physical test target is not visible/enabled"
-            assert 0 <= point.x() < window.width() and 0 <= point.y() < window.height(), "physical test target is offscreen"
-            QTest.mouseClick(window, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, point)
+            assert 0 <= point.x() < target_window.width() and 0 <= point.y() < target_window.height(), "physical test target is offscreen"
+            QTest.mouseClick(target_window, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, point)
             QTest.qWait(25)
 
         info = json.loads(evaluate("JSON.stringify(Engine.bridgeInfo)", window))
@@ -476,30 +516,84 @@ Window {
         evaluate("reset()")
         assert not page.property("pEnableSave"), "map insertion order must not create false unsaved changes"
         # Real popup/keyboard selection, real Save button and actual C++ native
-        # adapter. The config endpoint is an authored double, not a guest/FPS
-        # claim. Mode drafts/Discard must never touch it before Save.
-        def select_potato(index):
+        # adapter. Eligibility can remove a mode, so a visual row is NOT its
+        # persisted mode number. Nothing is written before modal confirmation.
+        def options():
+            return json.loads(evaluate("JSON.stringify(resolutionOptions)"))
+
+        def select_potato(mode, wait_poll=False):
+            rows = options()
+            index = next(index for index, row in enumerate(rows) if row["mode"] == mode)
             combo = item("shaderPotatoModes")
             assert combo.isEnabled()
             click(combo)
             assert evaluate("popup.visible", combo), "physical click did not open the native-style mode popup"
+            if wait_poll:
+                QTest.qWait(1150)
+                assert evaluate("popup.visible", combo), "unchanged status polling rebuilt/closed the user's open combo"
             QTest.keyClick(window, Qt.Key.Key_Home)
             for _ in range(index):
                 QTest.keyClick(window, Qt.Key.Key_Down)
             QTest.keyClick(window, Qt.Key.Key_Return)
             QTest.qWait(30)
-            assert evaluate("draft.potatoMode") == index
+            assert evaluate("draft.potatoMode") == mode
+
+        def restart_dialog(staged):
+            dialogs = [candidate for candidate in QGuiApplication.allWindows()
+                       if candidate.objectName() == "shaderRestartPrompt" and candidate.isVisible()]
+            assert len(dialogs) == 1, ("stock restart dialog missing/duplicated", warnings)
+            dialog = dialogs[0]
+            assert_component(dialog, "UiMessageDialog")
+            # PySide's transientParent() pointer-return ownership heuristic can
+            # wrongly invalidate the host wrapper when the JS-owned dialog dies.
+            # Compare the very same live QWindow identities inside QML instead.
+            assert evaluate("restartPrompt.transientParent === page.Window.window")
+            assert dialog.modality() == Qt.WindowModality.ApplicationModal
+            assert dialog.title() == "Restart " + native_display.productName
+            assert dialog.property("pDescription") == "Some of the changes need " + native_display.productName + " to restart. Do you want to restart now?"
+            assert dialog.property("staged") is staged and not native_display.pIsShortcutsEnabled
+            assert evaluate("pButtonsList.pButtons.length", dialog) == 2
+            assert evaluate("pButtonsList.pButtons[0].pColor === UiTheme.buttons.colors.accent", dialog)
+            assert evaluate("pButtonsList.pButtons[1].pColor === UiTheme.buttons.colors.secondary", dialog)
+            return dialog
+
+        def dialog_button(dialog, index):
+            label = evaluate("pButtonsList.pButtons[" + str(index) + "].pText", dialog)
+            for control in all_items(dialog.contentItem()):
+                if control.metaObject().indexOfProperty("text") >= 0 and control.property("text") == label:
+                    if control.metaObject().className().startswith("UiButton_") or control.property("bsiFixtureKind") == "UiButton":
+                        assert_component(control, "UiButton")
+                        return control
+            raise AssertionError("No physical native dialog button: " + label)
+
+        def confirm_size():
+            dialog = restart_dialog(True)
+            assert dialog_button(dialog, 0).property("text") == "Restart Now"
+            assert dialog_button(dialog, 1).property("text") == "Discard Changes"
+            click(dialog_button(dialog, 0), target_window=dialog)
+            assert native_display.pIsShortcutsEnabled and not evaluate("!!restartPrompt")
 
         # A genuine texture switch has its own persisted draft/acknowledgement,
         # never silently substitutes a resolution change or a final-image blur.
         click(item("shaderPotatoGraphic"))
         assert evaluate("draft.potatoGraphic") and not settings()["potatoGraphic"]
+        review = item("shaderPotatoReview")
+        assert inside_clip(review, item("shaderViewport")), "the required review must be revealed beside the toggle, not buried after a long paragraph"
+        assert "Not saved" in item("shaderPotatoTextureStatus").property("text")
+        assert "Current saved setting: Off" in item("shaderPotatoTextureStatus").property("text")
         click(save_button)
-        assert page.property("saveFailed") and not settings()["potatoGraphic"] and not native_display.writes
-        click(item("shaderPotatoReview"))
+        assert not page.property("saveFailed") and "not saved yet" in page.property("feedback")
+        assert evaluate("needsTextureReview") and not settings()["potatoGraphic"] and not native_display.writes
+        assert inside_clip(review, item("shaderViewport")) and evaluate("activeFocus", review)
+        # The C++ safety validation remains strict even if QML is bypassed.
+        refused = json.loads(evaluate("JSON.stringify(Engine.apply(draft))"))
+        assert not refused["ok"] and not settings()["potatoGraphic"] and not native_display.writes
+        click(review)
+        assert "Not saved" in item("shaderPotatoTextureStatus").property("text") and not page.property("feedback")
         click(save_button)
         assert settings()["potatoGraphic"] and settings()["textureOverridesReviewed"] and not settings()["enabled"]
-        assert native_display.commits == 0 and not native_display.writes
+        assert native_display.commits == 0 and not native_display.writes and not evaluate("!!restartPrompt")
+        assert "Saved setting: On" in item("shaderPotatoTextureStatus").property("text")
         assert evaluate("Engine.metrics.textureDraws") == 0, "a saved switch without an observed game draw is not a successful sampler pass"
         click(item("shaderEnhance")); click(item("shaderReset"))
         assert evaluate("draft.potatoGraphic") and not page.property("pEnableSave"), "visual presets/reset must preserve texture choice"
@@ -507,14 +601,99 @@ Window {
         assert settings() == initial and not native_display.writes
 
         original_display = dict(native_display.committed)
+
+        def external_size(width, height, custom=False):
+            native_display.committed = dict(original_display, fb_width=width, fb_height=height, custom_resolution_selected=custom)
+            native_display.draft = dict(native_display.committed)
+            assert evaluate("Engine.bindNativeDisplay(uiBackend)")
+            QTest.qWait(40)
+
+        # The user's at/below-profile failure: current-size choices are honest
+        # no-ops, ineligible upscaling choices are absent, and effects still Save.
+        for width, height, mode, expected_modes in ((1280, 720, 1, [0, 1, 2]), (960, 540, 2, [0, 2])):
+            external_size(width, height)
+            assert [row["mode"] for row in options()] == expected_modes, options()
+            assert any(row["mode"] == mode and "current" in row["text"] for row in options())
+            select_potato(mode, wait_poll=True)
+            click(item("shaderEnhance"))
+            click(save_button)
+            assert settings()["potatoMode"] == mode and settings()["enabled"]
+            assert native_display.commits == 0 and not native_display.writes and native_display.restarts == 0
+            assert not evaluate("!!restartPrompt") and not evaluate("Engine.display.restartRequired")
+            assert "already" in page.property("feedback").lower() and "no Display write" in page.property("feedback")
+            assert "no Display write or restart" in item("shaderPotatoPreview").property("text")
+            select_potato(0); click(item("shaderReset")); click(save_button)
+            assert settings() == initial and not native_display.writes
+
+        # A previously valid unsaved choice can become ineligible externally.
+        # Preserve all other drafts; offer a stock action to drop ONLY that size.
+        external_size(1280, 720)
+        select_potato(1)
+        click(item("shaderEnhance"))
+        external_size(960, 540)
+        assert [row["mode"] for row in options()] == [0, 2]
+        click(save_button)
+        assert page.property("saveFailed") and not evaluate("!!restartPrompt") and not native_display.writes
+        click(item("shaderResolutionKeepSaved"))
+        assert evaluate("draft.enabled && draft.sharpen > 0 && draft.potatoMode === 0")
+        click(save_button)
+        assert settings()["enabled"] and not native_display.writes
+        click(item("shaderReset")); click(save_button)
+        external_size(original_display["fb_width"], original_display["fb_height"], original_display["custom_resolution_selected"])
+        assert settings() == initial
+
         select_potato(2)
         assert page.property("pEnableSave") and window.property("bsiShaderDirty")
         assert settings() == initial and native_display.commits == 0 and not native_display.writes
         assert "960" in item("shaderPotatoPreview").property("text")
         evaluate("fDiscardChanges()")
         assert not page.property("pEnableSave") and evaluate("draft.potatoMode") == 0 and not native_display.writes
+        # A separate native factory, not a golden screenshot or our component,
+        # is the pixel oracle for the requested stock Graphics restart style.
+        evaluate("openRestartReference()", window)
+        reference_dialog = next(candidate for candidate in QGuiApplication.allWindows()
+                                if candidate.objectName() == "stockRestartReference" and candidate.isVisible())
+        assert_component(reference_dialog, "UiMessageDialog")
+        QTest.mouseMove(reference_dialog, QPointF(10, reference_dialog.height() - 10).toPoint())
+        expected_restart_pixels = capture_window(reference_dialog)
+        if os.environ.get("BSI_SHADERS_TEST_FONTLESS") != "1":
+            reference_dialog.setTitle("Different restart title")
+            changed_restart_pixels = capture_window(reference_dialog)
+            assert changed_restart_pixels.size() == expected_restart_pixels.size() and changed_restart_pixels != expected_restart_pixels, "restart pixel oracle did not detect changed painted text"
+        click(dialog_button(reference_dialog, 1), target_window=reference_dialog)
         select_potato(2)
+        before_prompt = profile.read_bytes()
         click(save_button)
+        dialog = restart_dialog(True)
+        QTest.mouseMove(dialog, QPointF(10, dialog.height() - 10).toPoint())
+        actual_restart_pixels = capture_window(dialog)
+        assert actual_restart_pixels == expected_restart_pixels, ("restart dialog differs from the stock UiMessageDialog factory", actual_restart_pixels.size(), expected_restart_pixels.size())
+        print("PASS: restart dialog matches a separate stock UiMessageDialog pixel-for-pixel; changed painted-title negative control" if os.environ.get("BSI_SHADERS_TEST_FONTLESS") != "1" else "PASS: restart resource geometry/material matches with isolated missing-font metrics (not painted-text certification)", flush=True)
+        assert settings() == initial and native_display.commits == 0 and not native_display.writes
+        assert len(dialog.property("expectedReviewKey")) == 64
+        refused = json.loads(evaluate("JSON.stringify(Engine.applyReviewed(draft, ''))"))
+        assert not refused["ok"] and not native_display.writes, "missing review stamp must never fall back to an unreviewed native write"
+        assert profile.read_bytes() == before_prompt and page.property("pEnableSave"), "opening a stock restart prompt must not save first"
+        # A real modal blocks underlying Settings input; Discard means there is
+        # genuinely nothing to undo on disk or in the native backend.
+        point = save_button.mapToScene(QPointF(save_button.width() / 2, save_button.height() / 2)).toPoint()
+        QTest.mouseClick(window, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, point)
+        QTest.qWait(30)
+        assert len([candidate for candidate in QGuiApplication.allWindows() if candidate.objectName() == "shaderRestartPrompt" and candidate.isVisible()]) == 1
+        click(dialog_button(dialog, 1), target_window=dialog)
+        assert settings() == initial and not page.property("pEnableSave") and not native_display.writes
+        assert profile.read_bytes() == before_prompt and native_display.pIsShortcutsEnabled
+        select_potato(2); click(save_button)
+        dialog = restart_dialog(True)
+        close = next(control for control in all_items(dialog.contentItem())
+                     if control.isVisible() and control.isEnabled() and (control.objectName() == "nativeDialogClose"
+                         or (control.metaObject().indexOfProperty("asset") >= 0 and control.property("asset") == "CloseIcon")))
+        click(close, target_window=dialog)
+        assert not evaluate("!!restartPrompt") and page.property("pEnableSave") and not native_display.writes, "closing the stock prompt must keep the unsaved draft"
+        assert native_display.pIsShortcutsEnabled
+        # Rejected restarts keep this authored host alive for subsequent checks.
+        native_display.reject_restart = True
+        click(save_button); confirm_size()
         assert settings()["potatoMode"] == 2 and settings()["enabled"] is False, "real native workload reduction must be independent of the postprocess enable flag"
         assert native_display.committed["fb_width"] == 960 and native_display.committed["fb_height"] == 540
         assert native_display.committed["custom_resolution_selected"] is True and native_display.commits == 1
@@ -528,7 +707,7 @@ Window {
         click(item("shaderReset"))
         assert evaluate("draft.potatoMode") == 2 and not page.property("pEnableSave"), "Reset visuals must not silently disable Potato"
         select_potato(0)
-        click(save_button)
+        click(save_button); confirm_size()
         assert settings() == initial and native_display.committed == original_display and native_display.commits == 2
         assert native_display.discards == 0, "shader Discard must not globally discard native settings"
         assert all(key in ("fb_width", "fb_height", "custom_resolution_selected") for key, _ in native_display.writes)
@@ -551,7 +730,7 @@ Window {
         # including with actual player controls and missing-font metrics.
         assert evaluate("Engine.bindNativeDisplay(uiBackend)")
         select_potato(2)
-        click(save_button)
+        click(save_button); confirm_size()
         external = dict(native_display.committed, fb_width=1600, fb_height=900, custom_resolution_selected=True)
         native_display.committed = dict(external)
         native_display.draft = dict(external)
@@ -571,35 +750,95 @@ Window {
         stored = json.loads(profile.read_text())
         assert stored["display"] == {} and "pendingDisplay" not in stored
         assert not evaluate("Engine.display.conflict") and not keep.isVisible()
-        # The save/restart distinction is visible and the actual typed native
-        # restart method is only invoked AFTER two explicit clicks. A failed
-        # request neither hides the player nor loses the successful save.
+        # A newer same-engine visual Save changes no eligibility/display facts,
+        # but still invalidates the modal's captured stamp. Retry must capture
+        # the refreshed preview instead of remaining stuck on the stale key.
         window.setWidth(750)
         select_potato(2); click(save_button)
+        dialog = restart_dialog(True)
+        stale_review_key = dialog.property("expectedReviewKey")
+        commits, writes, restarts = native_display.commits, list(native_display.writes), native_display.restarts
+        updated = json.loads(evaluate("JSON.stringify(Engine.apply(Object.assign({}, Engine.saved, {contrast:14})))"))
+        assert updated["ok"] and settings()["contrast"] == 14 and settings()["potatoMode"] == 0
+        newer_profile = profile.read_bytes()
+        click(dialog_button(dialog, 0), target_window=dialog)
+        assert page.property("saveFailed") and "changed" in page.property("feedback")
+        assert profile.read_bytes() == newer_profile and settings()["contrast"] == 14
+        assert native_display.commits == commits and native_display.writes == writes and native_display.restarts == restarts
+        click(save_button)
+        dialog = restart_dialog(True)
+        assert dialog.property("expectedReviewKey") != stale_review_key, "retry retained an invalidated preview after the newer shader Save"
+        click(dialog_button(dialog, 1), target_window=dialog)
+        assert not page.property("pEnableSave") and evaluate("draft.contrast") == 14 and profile.read_bytes() == newer_profile
+        click(item("shaderReset")); click(save_button)
+        assert settings() == initial and native_display.commits == commits and native_display.writes == writes
+        # Revalidate after the stock modal opens: a late unrelated native draft
+        # must not be globally committed/discarded, or change the reviewed size.
+        window.setWidth(750)
+        select_potato(2); click(save_button)
+        dialog = restart_dialog(True)
+        commits, writes, restarts = native_display.commits, list(native_display.writes), native_display.restarts
+        native_display.draft["unrelated"] = 99
+        assert evaluate("Engine.bindNativeDisplay(uiBackend)")
+        click(dialog_button(dialog, 0), target_window=dialog)
+        assert page.property("saveFailed") and "changed" in page.property("feedback")
+        assert native_display.commits == commits and native_display.writes == writes and native_display.restarts == restarts
+        assert native_display.draft["unrelated"] == 99 and native_display.discards == 0
+        assert settings() == initial and page.property("pEnableSave")
+        native_display.draft = dict(native_display.committed)
+        assert evaluate("Engine.bindNativeDisplay(uiBackend)")
+        click(save_button); confirm_size()
         assert evaluate("Engine.display.restartRequired && Engine.display.canRestart")
-        assert not page.property("saveFailed") and "Save succeeded" in page.property("feedback")
-        commits, writes = native_display.commits, list(native_display.writes)
+        assert page.property("saveFailed") and "saved resolution" in page.property("feedback") and window.isVisible()
+        commits, writes, restarts = native_display.commits, list(native_display.writes), native_display.restarts
         restart = item("shaderResolutionRestart")
         click(restart)
-        assert page.property("restartConfirmation") and native_display.restarts == 0
-        click(item("shaderResolutionLater"))
-        assert not page.property("restartConfirmation") and native_display.restarts == 0 and window.isVisible()
-        native_display.reject_restart = True
-        click(restart); click(restart)
-        assert page.property("saveFailed") and native_display.restarts == 1 and window.isVisible()
+        dialog = restart_dialog(False)
+        assert dialog_button(dialog, 1).property("text") == "Later", "already-saved changes must not offer a fake Discard"
+        click(dialog_button(dialog, 1), target_window=dialog)
+        assert not evaluate("!!restartPrompt") and native_display.restarts == restarts and window.isVisible()
+        assert native_display.commits == commits and native_display.writes == writes
+        click(restart)
+        dialog = restart_dialog(False)
+        click(dialog_button(dialog, 0), target_window=dialog)
+        assert page.property("saveFailed") and native_display.restarts == restarts + 1 and window.isVisible()
         assert evaluate("Engine.display.restartRequired"), "a refused restart must retain the saved/manual-restart requirement"
         native_display.reject_restart = False
-        click(restart); click(restart)
-        assert native_display.restarts == 2 and not window.isVisible()
+        click(restart)
+        dialog = restart_dialog(False)
+        click(dialog_button(dialog, 0), target_window=dialog)
+        assert native_display.restarts == restarts + 2 and not window.isVisible()
+        assert window.property("restartLoaderCount") == 1, "only an accepted native restart should show the Settings restart loader"
         assert native_display.commits == commits and native_display.writes == writes, "restart must never commit again or write other config"
         assert not evaluate("Engine.display.restartRequired"), "accepted request must not be issued twice from a stale button"
+        # Missing public restartPlayer must not lose the available resolution
+        # setting or label Save as an automatic restart. Same stock shell, honest
+        # manual notice, and no fake Discard after the configuration is saved.
+        window.show()
+        assert not evaluate("Engine.bindNativePlayer(null)")
+        assert not evaluate("Engine.display.restartAvailable")
+        select_potato(0); click(save_button)
+        dialog = restart_dialog(True)
+        assert not dialog.property("automaticRestart") and "manually" in dialog.property("pNotice")
+        assert dialog_button(dialog, 0).property("text") == "Save changes"
+        click(dialog_button(dialog, 0), target_window=dialog)
+        assert settings() == initial and window.isVisible() and not page.property("saveFailed")
+        assert native_display.commits == commits + 1 and native_display.restarts == restarts + 2
+        assert evaluate("Engine.display.restartRequired && !Engine.display.canRestart")
+        assert "Restart the player" in page.property("feedback")
+        commits, writes = native_display.commits, list(native_display.writes)
+        select_potato(2); click(save_button)
+        dialog = restart_dialog(True)
+        click(dialog_button(dialog, 1), target_window=dialog)
+        assert not page.property("pEnableSave") and settings() == initial
+        assert native_display.commits == commits and native_display.writes == writes and native_display.discards == 0
         assert not warnings, "QML runtime warnings:\n" + "\n".join(warnings)
         window.setVisible(False)
         window.deleteLater()
         QTest.qWait(20)
         engine.deleteLater()
         app.processEvents()
-    print("PASS: real C++ regular-plugin auto-hint diagnostics, independent physical texture toggle/review/Save/reset with no fake game success, native resolution save and two-click restart/Later/refusal/acceptance without extra commits; regular-plugin import, single native-style Save footer/clean opacity, physical enable/slider/Save/Enhance and all ten fully visible right-aligned Reset buttons at two widths, native discard callback, preset/reset, atomic isolated persistence, physical native-size Potato Save/Discard/restore independent of visual effects, and clean QML bindings")
+    print("PASS: real C++ plugin; visible physical Potato review/unsaved-vs-runtime feedback and strict backend guard; 720/540 current-size no-op saves, no upscaling, eligible-mode mapping/popup survives status polling, stale resolution-only draft reset preserves effects; stock modal restart resource/model/theme/transient identity, pre-commit Discard/close/modal/stale-native-draft/newer-save gates with refreshed retry preview, native restart refusal/retry/Later/acceptance/manual fallback, no extra commits/global discard and accepted-only restart loader; exact native Save pixels/fixed footer, physical effects and ten Reset rows at two widths, isolated persistence and clean QML bindings")
     print("LIMIT: fixture window only; native player installation and category navigation, Windows hooks, DirectX/Vulkan and hardware GPU coverage are not certified")
 
 

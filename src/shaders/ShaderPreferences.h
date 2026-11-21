@@ -32,7 +32,7 @@ public:
     QVariantMap requestRestart();
     QVariantMap displayStatus()const;
     QVariantMap previewPotato(int mode)const;
-    QVariantMap apply(const QVariantMap &values,bool keepCurrentDisplay=false);
+    QVariantMap apply(const QVariantMap &values,bool keepCurrentDisplay=false,const QString &displayReviewKey={});
 private:
     bool persist(const ShaderSavedConfiguration &configuration,const ShaderDisplayPending &transaction,QString *error);
     bool reconcile(QString *error);

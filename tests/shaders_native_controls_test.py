@@ -1,9 +1,10 @@
 """Real native controls/theme from pinned read-only player resources.
 
 Never executes/loads player EXEs or proprietary DLLs, nor changes OEM QML or
-ships extracted sources/artwork. The only native C++ service substitution is an
-explicit nonpainting tooltip-attached-property double; Display remains a typed
-contract endpoint. UI pixels/input are real Qt, not game/installed-player proof.
+ships extracted sources/artwork. Native C++ tooltip attachments and dialog
+window/button-model services are authored doubles; Display remains a typed
+contract endpoint. Painting/theming QML is unmodified native code. UI pixels
+and input are real Qt, not game/installed-player proof.
 """
 import hashlib
 import json
@@ -78,8 +79,8 @@ def main():
                 assert copy.read_bytes() == payload, "temporary reference changed"
         finally:
             assert path.read_bytes() == original, "original reference was modified"
-    print("PASS: two hash-pinned native resource families, real components/live theme, exact native Save pixels in four states, all ten physical Reset hits at 750/420 px and empty-font metrics, opaque page/footer plus strict negative controls", flush=True)
-    print("LIMIT: read-only resource/Qt fixture, not a player process, external tooltip service, game texture LOD, Vulkan detection or GPU/driver certification", flush=True)
+    print("PASS: two hash-pinned native resource families, real components/live theme, exact Save pixels in four states and stock restart-dialog pixels/changed-title negative, physical Potato review and eligible/current-size choices, pre-commit modal Discard/close/restart/refusal/Later/manual semantics, all ten physical Reset hits at 750/420 px and empty-font metrics, opaque page/footer plus strict negative controls", flush=True)
+    print("LIMIT: read-only resource/Qt fixture with authored nonpainting tooltip/dialog services, not a player process, real restart, game texture LOD, Vulkan detection or GPU/driver certification", flush=True)
 
 
 if __name__ == "__main__":

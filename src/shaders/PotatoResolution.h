@@ -24,17 +24,22 @@ struct DisplayResolution {
 };
 struct PotatoResolutionPlan {
     DisplayResolution target;
-    bool reduced=false;
+    bool supported=false,reduced=false;
     const char *diagnostic="Native display resolution retained.";
 };
 inline PotatoResolutionPlan planPotatoResolution(PotatoMode mode,const DisplayResolution &original){
-    PotatoResolutionPlan plan{original,false,"Native display resolution retained."};
+    PotatoResolutionPlan plan;plan.target=original;
     if(!original.valid()){plan.diagnostic="The native framebuffer size is outside the supported capture bounds; no display change is allowed.";return plan;}
-    if(mode==PotatoMode::Native)return plan;
+    if(mode==PotatoMode::Native){plan.supported=true;return plan;}
     if(mode!=PotatoMode::Light&&mode!=PotatoMode::Strong){plan.diagnostic="Unknown resolution mode; native resolution retained.";return plan;}
     const int cap=mode==PotatoMode::Light?720:540;
     const int shorter=(std::min)(original.width,original.height);
-    if(shorter<=cap){plan.diagnostic="Already at or below this profile's resolution. No reduction is available; the mode will not be saved as a pretend performance change.";return plan;}
+    // An exact-original profile is supported, not a performance claim. Preserve
+    // both original dimensions/flag; the caller compares CURRENT to detect a no-op.
+    if(shorter==cap){plan.supported=true;plan.diagnostic="This profile matches the captured original size without reducing it. A different currently configured size still needs Save and restart.";return plan;}
+    // These remain optional REDUCTION profiles. Never upscale a smaller native
+    // framebuffer merely to make a previously rejected selection appear to work.
+    if(shorter<cap){plan.diagnostic="This profile would increase the original Display size. Choose a smaller available profile or keep the current size; no upscaling is performed.";return plan;}
     // Preserve orientation/aspect to the nearest TWO pixels. Both dimensions
     // must be legal in the native custom-resolution editor; never force an
     // unsupported 360p/270p framebuffer or silently change DPI/guest density.
@@ -43,8 +48,9 @@ inline PotatoResolutionPlan planPotatoResolution(PotatoMode mode,const DisplayRe
     if(target.width<540||target.height<540||target.width>3840||target.height>3840){
         plan.diagnostic="The aspect-preserving target does not fit the native 540-3840 pixel custom-resolution limits; original resolution retained.";return plan;
     }
-    plan.target=target;plan.reduced=true;
-    plan.diagnostic="Actual native framebuffer reduction; save and fully restart the player to render at this size. No texture-only LOD effect or FPS gain is claimed.";
+    plan.target=target;plan.supported=true;
+    plan.reduced=std::int64_t(target.width)*target.height<std::int64_t(original.width)*original.height;
+    plan.diagnostic="Native Display size selected; save and restart the player to apply it. This is not texture LOD or a measured game-resolution/FPS change.";
     return plan;
 }
 } // namespace BsiShaders

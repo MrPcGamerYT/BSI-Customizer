@@ -129,7 +129,12 @@ a GL 3.3/GLES 3.1 draw-time path only. No supplied DLL is installed. See
    hint; Automatic may legitimately observe another host API, never the Qt UI.
 2. Switch **Potato graphic** on without Save, navigate away and exercise native
    No/Discard. The draft must not arm sampler overrides or change Display.
-3. After reviewing existing overrides, Save with visual effects off. On a
+3. Check that the driver-review checkbox is immediately below the switch and
+   revealed when needed. An unchecked review must show **Not saved / current
+   saved Off**, not imply runtime activity. Save must guide/focus that review
+   without writing preferences or Display; it must not auto-acknowledge it.
+   After actually reviewing existing overrides, confirm the checkbox and Save
+   with visual effects off. Texture-only Save needs no restart dialog. On a
    qualified GL/GLES path compare the same game textures, not just status or
    counters; record the result. Depth/UI/data/shared-resource behavior must also
    be checked. Prepared binding counts are not proof of changed game pixels.
@@ -154,20 +159,32 @@ See [exact limits and recovery](POTATO-NATIVE-RESOLUTION.md).
 1. Record the original native Display size/custom flag. In Shaders, choose
    **Light · 720 px short edge** or **Strong · 540 px short edge**. At 1920×1080,
    the previews must be 1280×720 / 960×540 respectively. Portrait/ultrawide aspect
-   ratios must be preserved; unsupported/already-small sizes are refused.
+   ratios must be preserved. Unsupported profiles and profiles above the original
+   short edge must be absent, with a reason shown; never force upscaling or a
+   below-540 target. At exactly 720/540, the matching choice is **(current)**:
+   combine it with visual/texture edits and Save. It must report already
+   configured, with no Display write/commit/restart or pretend pixel reduction.
+   If an external edit invalidates a draft, **Keep saved resolution** must drop
+   only that draft, retaining the visual/texture edits for independent Save.
 2. Before saving, leave the tab. Native **No** must keep the draft and **Discard
    Changes** must revert it, without changing native Display. There is still one
    stationary Save footer, no second selector in Display or separate overlay.
-3. Select again and **Save changes**. Verify the configured native size and
-   **saved, restart required** notice, not a failed-save message. The running
-   game's size is not proven changed by this notice. If supported, **Restart
-   player…** must ask first; **Later** must not restart, and **Restart now** may
-   invoke only the player's native method. Refusal/unsupported contracts retain
-   the successful Save and manual instructions. An accepted call is not proof
-   of completed restart. Fully restart, then verify actual guest/game dimensions
-   and the same scene. Measure frame times; fewer configured pixels do not
-   guarantee an FPS gain. A later native Display change or any unsaved draft
-   must prevent stale-target restart without committing/discarding that draft.
+3. Select a genuinely changed size and **Save changes**. Before any write,
+   require the **same stock restart dialog as Graphics renderer changes**:
+   product-name title/description, live native theme, accent **Restart Now** and
+   secondary **Discard Changes**, modal/transient to Settings. Closing keeps
+   the draft; Discard drops only this page's draft without changing files or
+   native settings. Confirm Restart Now: only then commit the exact reviewed
+   target, finalize preferences and request the native restart. A late external
+   size/flag edit, newer shader Save or unrelated native draft must refuse
+   without silently replanning or committing/discarding that draft.
+   A refused restart must leave the successfully saved size and Settings visible;
+   the retry stock dialog uses **Later**, not a fake Discard. Unsupported restart
+   methods must show manual instructions and **Save changes**, never claim an
+   automatic restart. Acceptance uses the native loader but does not prove the
+   restart completed. Verify actual guest/game dimensions and the same scene
+   after a full restart. Measure frame times; fewer configured pixels do not
+   guarantee an FPS gain. A later Display edit must prevent stale-target restart.
 4. Test with visual effects off. Enhance/presets/**Reset visuals** must not alter
    the native mode. Reopen and check saved mode/size, including another instance
    retaining its separate configuration.

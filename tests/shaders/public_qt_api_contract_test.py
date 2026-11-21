@@ -19,7 +19,7 @@ PUBLIC = {
     "NativeDisplayBinding.h": {"QObject", "QPointer", "QString"},
     "NativeDisplayBinding.cpp": {"QCoreApplication", "QMetaMethod", "QMetaType", "QThread"},
     "ShaderPreferences.h": {"QByteArray", "QString", "QVariantMap"},
-    "ShaderPreferences.cpp": {"QDir", "QFile", "QFileInfo", "QJsonDocument", "QJsonObject", "QLockFile", "QMetaType", "QSaveFile"},
+    "ShaderPreferences.cpp": {"QDir", "QCryptographicHash", "QFile", "QFileInfo", "QJsonDocument", "QJsonObject", "QLockFile", "QMetaType", "QSaveFile"},
 }
 for path in sorted((*SHADERS.glob("*.cpp"), *SHADERS.glob("*.h"))):
     source = path.read_text()

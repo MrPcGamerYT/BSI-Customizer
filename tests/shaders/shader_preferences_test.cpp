@@ -87,7 +87,101 @@ int main(int argc,char **argv){
     }
     for(const auto resolution:{DisplayResolution{960,540,true},{1280,539,false},{8192,8192,false},{5120,2160,true}})
         require(!planPotatoResolution(PotatoMode::Strong,resolution).reduced,QStringLiteral("No pretend/invalid reduction or unsupported custom size"));
-    require(!planPotatoResolution(PotatoMode(3),original).reduced,QStringLiteral("Unknown mode cannot activate"));
+    require(!planPotatoResolution(PotatoMode(3),original).supported,QStringLiteral("Unknown mode cannot activate"));
+    for(const auto current:{DisplayResolution{1280,720,false},{720,1280,true},{960,540,false},{540,960,true},{721,720,false}}){
+        const auto profile=(std::min)(current.width,current.height)==720?PotatoMode::Light:PotatoMode::Strong;
+        const auto plan=planPotatoResolution(profile,current);
+        require(plan.supported&&!plan.reduced&&plan.target==current,QStringLiteral("An exact short-edge selection is an honest no-op, preserving both dimensions and custom/predefined flag"));
+    }
+    for(const auto current:{DisplayResolution{960,540,false},{1066,600,true},{540,960,false}})
+        require(!planPotatoResolution(PotatoMode::Light,current).supported,QStringLiteral("A reduction profile never upscales a smaller original framebuffer"));
+    {
+        Fixture f;
+        require(f.preferences.displayStatus().value(QStringLiteral("restartAvailable")).toBool()
+                &&!f.preferences.displayStatus().value(QStringLiteral("canRestart")).toBool(),
+                QStringLiteral("Pre-save restart capability is separate from permission to restart a finalized exact target"));
+    }
+    {
+        Fixture f;auto values=mode(f.preferences,2);
+        const auto reviewed=f.preferences.previewPotato(2).value(QStringLiteral("reviewKey")).toString();
+        require(reviewed.size()==64&&!QFile::exists(f.path)&&f.backend.writes==0,QStringLiteral("Read-only preview issues an exact-size concurrency stamp before any dialog/write"));
+        f.backend.external({1600,900,false}); // same target, different unreviewed source size
+        require(!success(f.preferences.apply(values,false,reviewed))&&f.backend.writes==0&&f.backend.commits==0&&!QFile::exists(f.path),
+                QStringLiteral("Restart confirmation cannot silently replan an externally changed source, even when its eventual target is the same"));
+        const auto fresh=f.preferences.previewPotato(2).value(QStringLiteral("reviewKey")).toString();
+        require(fresh!=reviewed,QStringLiteral("A new source/restore snapshot needs a fresh review"));
+        require(success(f.preferences.apply(values,false,fresh))&&f.backend.configured==DisplayResolution{960,540,true}&&f.backend.commits==1,
+                QStringLiteral("The exact reviewed target commits through the existing durable journal and read-back"));
+        const auto saved=bytes(f.path);const int writes=f.backend.writes;
+        require(!success(f.preferences.apply(values,false,fresh))&&bytes(f.path)==saved&&f.backend.writes==writes&&f.backend.commits==1,
+                QStringLiteral("A confirmed/replayed review cannot write or commit a second time"));
+        f.untouched();
+    }
+    {
+        Fixture f;const auto reviewed=f.preferences.previewPotato(2).value(QStringLiteral("reviewKey")).toString();
+        f.backend.external({1920,1080,true});
+        require(!success(f.preferences.apply(mode(f.preferences,2),false,reviewed))&&f.backend.writes==0&&!QFile::exists(f.path),
+                QStringLiteral("The reviewed custom/predefined flag is checked as well as dimensions"));
+    }
+    {
+        Fixture f;const auto reviewed=f.preferences.previewPotato(2).value(QStringLiteral("reviewKey")).toString();
+        auto visual=f.preferences.values();visual[QStringLiteral("enabled")]=true;visual[QStringLiteral("contrast")]=29;applied(f.preferences,visual);
+        const auto saved=bytes(f.path);
+        require(!success(f.preferences.apply(mode(f.preferences,2),false,reviewed))&&f.preferences.parameters().values[1]==29
+                &&bytes(f.path)==saved&&f.backend.writes==0,QStringLiteral("A modal review cannot overwrite a newer shader Save even if native size stayed unchanged"));
+    }
+    {
+        Fixture f;f.backend.external({960,540,false});
+        const auto reviewed=f.preferences.previewPotato(2).value(QStringLiteral("reviewKey")).toString();
+        f.backend.external(original);
+        require(!success(f.preferences.apply(mode(f.preferences,2),false,reviewed))&&f.backend.writes==0&&!QFile::exists(f.path),
+                QStringLiteral("A reviewed no-op must not become a native write/restart because current size changed before Save"));
+    }
+    for(const auto current:{DisplayResolution{1280,720,false},{720,1280,true},{960,540,false},{540,960,true},{721,720,false}}){
+        Fixture f;f.backend.external(current);
+        const int profile=(std::min)(current.width,current.height)==720?1:2;
+        const auto preview=f.preferences.previewPotato(profile);
+        require(success(preview)&&!preview.value(QStringLiteral("displayChanged")).toBool()
+                &&preview.value(QStringLiteral("width")).toInt()==current.width
+                &&preview.value(QStringLiteral("height")).toInt()==current.height
+                &&preview.value(QStringLiteral("custom")).toBool()==current.custom&&f.backend.writes==0&&!QFile::exists(f.path),
+                QStringLiteral("Current-size preview is read-only and reports no Display change or restart"));
+        auto values=mode(f.preferences,profile);values[QStringLiteral("enabled")]=true;values[QStringLiteral("contrast")]=27;
+        values[QStringLiteral("potatoGraphic")]=true;values[QStringLiteral("textureOverridesReviewed")]=true;
+        const auto response=f.preferences.apply(values,false,preview.value(QStringLiteral("reviewKey")).toString());
+        require(success(response)&&response.value(QStringLiteral("resolutionUnchanged")).toBool()
+                &&!response.value(QStringLiteral("displayChanged")).toBool()&&f.preferences.parameters().enabled&&f.preferences.texture().enabled
+                &&f.backend.configured==current&&f.backend.writes==0&&f.backend.commits==0&&f.backend.restarts==0
+                &&!f.preferences.displayStatus().value(QStringLiteral("restartRequired")).toBool(),
+                QStringLiteral("An already-configured size never blocks independent visual/texture Save, writes native fields, commits, restarts or pretends to reduce pixels"));
+        ShaderPreferences reopened;reopened.load(f.path);require(reopened.bindDisplay(&f.backend)&&reopened.error().isEmpty()
+                &&reopened.values()==values,QStringLiteral("Honest current-size selection and its exact original survive reopen"));
+        applied(reopened,mode(reopened,0));require(f.backend.configured==current&&f.backend.writes==0&&f.backend.commits==0,
+                QStringLiteral("Restoring a no-op selection clears only metadata, preserving an odd/predefined/custom original exactly"));
+        f.untouched();
+    }
+    {
+        Fixture f;const DisplayResolution original720{1280,720,false};f.backend.external(original720);
+        applied(f.preferences,mode(f.preferences,2));
+        const auto preview=f.preferences.previewPotato(1);
+        require(success(preview)&&preview.value(QStringLiteral("displayChanged")).toBool()
+                &&preview.value(QStringLiteral("width")).toInt()==1280&&!preview.value(QStringLiteral("custom")).toBool(),
+                QStringLiteral("Changing an existing 540 reduction to Light can explicitly restore the captured 720 predefined original, never upscale beyond it"));
+        require(success(f.preferences.apply(mode(f.preferences,1),false,preview.value(QStringLiteral("reviewKey")).toString()))
+                &&f.backend.configured==original720&&f.backend.commits==2&&f.preferences.displayStatus().value(QStringLiteral("restartRequired")).toBool(),
+                QStringLiteral("A profile equal to the ORIGINAL is not a no-op if CURRENT is the reduced size; it still writes exact fields and requires restart"));
+        ShaderPreferences reopened;reopened.load(f.path);require(reopened.bindDisplay(&f.backend)&&reopened.error().isEmpty(),
+                QStringLiteral("An exact-original target remains valid recovery metadata on reopen"));
+        const int writes=f.backend.writes;applied(reopened,mode(reopened,0));
+        require(f.backend.configured==original720&&f.backend.writes==writes&&f.backend.commits==2,QStringLiteral("Native after explicit original-size restoration only clears metadata"));
+    }
+    {
+        Fixture f;f.backend.external({960,540,false});
+        require(!success(f.preferences.previewPotato(1)),QStringLiteral("Unavailable upscaling profile is refused by the shared preview"));
+        const auto values=mode(f.preferences,1);
+        require(!success(f.preferences.apply(values))&&f.backend.writes==0&&f.backend.commits==0&&!QFile::exists(f.path),
+                QStringLiteral("Bypassing the filtered UI cannot force upscaling or a fake reduction"));
+    }
     {
         QTemporaryDir dir;ShaderPreferences p;p.load(dir.filePath(QStringLiteral("p.json")));
         require(p.values().size()==14&&p.parameters().neutral(),QStringLiteral("Neutral v3 defaults with independent native-resolution/texture modes"));
@@ -265,7 +359,7 @@ int main(int argc,char **argv){
         require(!binding.bind(other,&error),QStringLiteral("Never invoke native Display methods across threads"));
         worker.quit();require(worker.wait(5000)&&tracked.isNull(),QStringLiteral("The wrong-thread fixture must be destroyed on its owning thread"));
     }
-    std::cout<<"PASS: independent texture-toggle v3 preferences, v1/v2 read-only migration, explicit native restart acceptance/refusal/unsaved/changed-target/destruction gates, real native-resolution planning, public typed method adapter, independent visual/Potato saves, v1 migration, exact restore/conflict handling, no unrelated commits/discards, locking, malformed input, native write/commit and finalization failures, interruption recovery\n";
+    std::cout<<"PASS: current-size 720/540 honest no-op preview/combined visual+texture Save/reopen/exact flag and odd-dimension preservation/no native write or restart; no upscaling via UI-bypass API; exact reviewed-source/target/custom flag and saved-configuration stamps, stale/no-op-to-write/replay rejection before writes; independent texture-toggle v3 preferences, v1/v2 read-only migration, pre-save restart capability vs finalized-target permission, explicit restart acceptance/refusal/unsaved/changed-target/destruction gates, public typed native resolution adapter, exact restore/conflict handling, no unrelated commits/discards, locking, malformed input, native write/commit/finalization failure and interruption recovery\n";
     std::cout<<"LIMIT: authored native-config contract only; no installed player, restart, game texture LOD, FPS or physical GPU certification\n";
 }
 #include "shader_preferences_test.moc"
